@@ -53,6 +53,8 @@ export default defineConfig({
     "typescript/restrict-template-expressions": "error",
     "import/no-cycle": "error",
     "import/no-unassigned-import": ["error", { allow: ["**/*.css"] }],
+    // Convex system fields are named by the framework.
+    "eslint/no-underscore-dangle": ["error", { allow: ["_id", "_creationTime"] }],
 
     "oxc/no-accumulating-spread": "error",
     "anti-slop/no-array-filter-map": "error",

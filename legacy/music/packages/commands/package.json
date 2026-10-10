@@ -2,9 +2,24 @@
   "name": "@music/commands",
   "version": "0.0.0",
   "private": true,
-  "description": "Command registry: every user action as an Effect Schema. Built in milestone 2.",
+  "description": "Command registry: every user action as an Effect Schema.",
   "type": "module",
+  "exports": {
+    "./ids": "./src/ids.ts",
+    "./models": "./src/models.ts",
+    "./command": "./src/command.ts",
+    "./registry": "./src/registry.ts",
+    "./codec": "./src/codec.ts",
+    "./signed-url": "./src/signed-url.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@music/config": "workspace:*",
+    "typescript": "catalog:"
   }
 }

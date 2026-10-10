@@ -6,14 +6,20 @@
   "scripts": {
     "dev": "convex dev",
     "dev:setup": "convex dev --configure --until-success",
-    "typecheck": "tsc --noEmit -p convex"
+    "typecheck": "tsc --noEmit -p convex && tsc --noEmit -p scripts",
+    "configure": "node scripts/configure.ts"
   },
   "dependencies": {
-    "convex": "catalog:"
+    "@auth/core": "^0.41.3",
+    "@convex-dev/auth": "^0.0.96",
+    "@music/commands": "workspace:*",
+    "convex": "catalog:",
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@music/config": "workspace:*",
     "@types/node": "catalog:",
+    "jose": "^6.2.12",
     "typescript": "catalog:"
   }
 }

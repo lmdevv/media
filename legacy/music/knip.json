@@ -8,13 +8,12 @@
     },
     "apps/web": {},
     "packages/backend": {
+      "entry": ["convex/*.ts", "scripts/*.ts"],
       "typescript": {
         "config": ["convex/tsconfig.json"]
       }
     },
     "packages/ui": {},
-    "packages/commands": {
-      "ignoreDependencies": ["effect"]
-    }
+    "packages/commands": {}
   }
 }

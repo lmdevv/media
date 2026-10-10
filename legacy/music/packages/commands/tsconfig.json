@@ -1,0 +1,4 @@
+{
+  "extends": "@music/config/tsconfig.base.json",
+  "include": ["src"]
+}

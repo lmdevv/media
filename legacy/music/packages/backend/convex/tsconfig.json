@@ -1,11 +1,15 @@
 {
-  /* Convex requires target ESNext, lib ES2021 + dom, module ESNext, isolatedModules, and noEmit. */
+  /* Convex requires target ESNext, lib ES2021 + dom, module ESNext, isolatedModules, and noEmit.
+     exactOptionalPropertyTypes is off here only: Convex removes a field by patching it to
+     `undefined`, and its generated document types are not assignable to `GenericDocument` under
+     the flag (TS2344 on DataModel, TS2379 on every optional insert). */
   "extends": "@music/config/tsconfig.base.json",
   "compilerOptions": {
     "allowJs": true,
     "jsx": "react-jsx",
-    "lib": ["ES2021", "dom"],
-    "types": ["node"]
+    "lib": ["ES2023", "dom"],
+    "types": ["node"],
+    "exactOptionalPropertyTypes": false
   },
   "include": ["./**/*"],
   "exclude": ["./_generated"]

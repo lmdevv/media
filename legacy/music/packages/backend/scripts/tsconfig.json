@@ -1,0 +1,5 @@
+{
+  "extends": "@music/config/tsconfig.base.json",
+  "compilerOptions": { "allowImportingTsExtensions": true },
+  "include": ["./*.ts"]
+}

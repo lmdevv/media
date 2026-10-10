@@ -1,0 +1,250 @@
+import { internal } from "../_generated/api";
+import type { Doc, Id } from "../_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { randomToken, sha256Hex } from "../lib/crypto";
+import { fail } from "../lib/errors";
+import { tableId } from "../lib/ids";
+import { presentJob, presentLibrary } from "../lib/present";
+import { canRead } from "../lib/viewer";
+import type { MutationHandlers, QueryHandlers } from "./types";
+import { ok } from "./types";
+
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+const RECENT_JOBS = 30;
+
+const presentApiKey = (doc: Doc<"apiKeys">) => ({
+  id: doc._id,
+  name: doc.name,
+  prefix: doc.prefix,
+  createdAt: doc._creationTime,
+  lastUsedAt: doc.lastUsedAt ?? null,
+});
+
+const presentUser = (doc: Doc<"users">) => ({
+  id: doc._id,
+  email: doc.email ?? "",
+  name: doc.name ?? null,
+  role: doc.role ?? "member",
+});
+
+const presentInvite = (doc: Doc<"invites">) => ({
+  id: doc._id,
+  code: doc.code,
+  email: doc.email ?? null,
+  role: doc.role,
+  createdAt: doc._creationTime,
+  expiresAt: doc.expiresAt,
+  acceptedAt: doc.acceptedAt ?? null,
+});
+
+const activeJob = async (ctx: QueryCtx, libraryId: Id<"libraries">): Promise<Doc<"jobs"> | null> =>
+  (await ctx.db
+    .query("jobs")
+    .withIndex("by_library_status", (q) => q.eq("libraryId", libraryId).eq("status", "running"))
+    .first()) ??
+  (await ctx.db
+    .query("jobs")
+    .withIndex("by_library_status", (q) => q.eq("libraryId", libraryId).eq("status", "pending"))
+    .first());
+
+const enqueueScan = async (
+  ctx: MutationCtx,
+  libraryId: Id<"libraries">,
+  createdBy: Id<"users">,
+): Promise<Id<"jobs">> => {
+  const existing = await activeJob(ctx, libraryId);
+
+  if (existing !== null) return existing._id;
+
+  return ctx.db.insert("jobs", { kind: "scan", status: "pending", libraryId, createdBy, done: 0 });
+};
+
+export const adminQueries = {
+  "libraries.list": async (ctx, viewer) =>
+    Promise.all(
+      viewer.libraries.map(async (library) =>
+        presentLibrary(library, (await activeJob(ctx, library._id)) !== null),
+      ),
+    ),
+
+  "jobs.list": async (ctx, viewer) => {
+    const jobs = await ctx.db.query("jobs").order("desc").take(RECENT_JOBS);
+    const visible = jobs.filter((job) => viewer.role === "admin" || canRead(viewer, job.libraryId));
+
+    return Promise.all(
+      visible.map(async (job) => presentJob(job, await ctx.db.get(job.libraryId))),
+    );
+  },
+
+  "jobs.get": async (ctx, viewer, args) => {
+    const job = await ctx.db.get(tableId(ctx, "jobs", args.jobId));
+
+    if (job === null || (viewer.role !== "admin" && !canRead(viewer, job.libraryId))) {
+      return fail("not_found", "Job not found");
+    }
+
+    return presentJob(job, await ctx.db.get(job.libraryId));
+  },
+
+  "account.me": async (_ctx, viewer) => presentUser(viewer.user),
+
+  "keys.list": async (ctx, viewer) => {
+    const keys = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_user", (q) => q.eq("userId", viewer.id))
+      .collect();
+
+    return keys.filter((key) => key.revokedAt === undefined).map(presentApiKey);
+  },
+
+  "people.list": async (ctx) => {
+    const users = await ctx.db.query("users").collect();
+
+    return users.map(presentUser);
+  },
+
+  "invites.list": async (ctx) => {
+    const invites = await ctx.db.query("invites").order("desc").take(100);
+
+    return invites
+      .filter((invite) => !invite.revoked && invite.acceptedBy === undefined)
+      .map(presentInvite);
+  },
+} satisfies Partial<QueryHandlers>;
+
+export const adminMutations = {
+  "libraries.create": async (ctx, viewer, args) => {
+    const path = args.path.replace(/\/+$/, "") || "/";
+
+    const existing = await ctx.db
+      .query("libraries")
+      .withIndex("by_path", (q) => q.eq("path", path))
+      .unique();
+
+    if (existing !== null) return fail("conflict", `${path} is already a library`);
+
+    const libraryId = await ctx.db.insert("libraries", {
+      name: args.name,
+      path,
+      visibility: args.visibility ?? "shared",
+      ownerId: viewer.id,
+      trackCount: 0,
+      albumCount: 0,
+      artistCount: 0,
+      durationMs: 0,
+    });
+
+    const jobId = await enqueueScan(ctx, libraryId, viewer.id);
+
+    return { libraryId, jobId };
+  },
+
+  "libraries.scan": async (ctx, viewer, args) => {
+    const library = await ctx.db.get(tableId(ctx, "libraries", args.libraryId));
+
+    if (library === null) return fail("not_found", "Library not found");
+
+    return { jobId: await enqueueScan(ctx, library._id, viewer.id) };
+  },
+
+  "libraries.delete": async (ctx, _viewer, args) => {
+    const library = await ctx.db.get(tableId(ctx, "libraries", args.libraryId));
+
+    if (library === null) return fail("not_found", "Library not found");
+    await ctx.db.delete(library._id);
+
+    const open = await Promise.all(
+      (["pending", "running"] as const).map((status) =>
+        ctx.db
+          .query("jobs")
+          .withIndex("by_library_status", (q) =>
+            q.eq("libraryId", library._id).eq("status", status),
+          )
+          .collect(),
+      ),
+    );
+
+    await Promise.all(
+      open
+        .flat()
+        .map((job) => ctx.db.patch(job._id, { status: "cancelled", finishedAt: Date.now() })),
+    );
+
+    await ctx.scheduler.runAfter(0, internal.maintenance.purgeLibrary, {
+      libraryId: library._id,
+    });
+
+    return ok;
+  },
+
+  "jobs.cancel": async (ctx, _viewer, args) => {
+    const job = await ctx.db.get(tableId(ctx, "jobs", args.jobId));
+
+    if (job === null) return fail("not_found", "Job not found");
+
+    if (job.status === "pending" || job.status === "running") {
+      await ctx.db.patch(job._id, { status: "cancelled", finishedAt: Date.now() });
+    }
+
+    return ok;
+  },
+
+  "account.rename": async (ctx, viewer, args) => {
+    await ctx.db.patch(viewer.id, { name: args.name });
+
+    return ok;
+  },
+
+  "keys.create": async (ctx, viewer, args) => {
+    const key = `mk_${randomToken(40)}`;
+
+    const id = await ctx.db.insert("apiKeys", {
+      userId: viewer.id,
+      name: args.name,
+      prefix: key.slice(0, 10),
+      hash: await sha256Hex(key),
+    });
+
+    const doc = await ctx.db.get(id);
+
+    if (doc === null) return fail("internal", "The key was not saved");
+
+    return { key, apiKey: presentApiKey(doc) };
+  },
+
+  "keys.revoke": async (ctx, viewer, args) => {
+    const key = await ctx.db.get(tableId(ctx, "apiKeys", args.apiKeyId));
+
+    if (key === null || key.userId !== viewer.id) return fail("not_found", "Key not found");
+    await ctx.db.patch(key._id, { revokedAt: Date.now() });
+
+    return ok;
+  },
+
+  "invites.create": async (ctx, viewer, args) => {
+    const id = await ctx.db.insert("invites", {
+      code: randomToken(10),
+      email: args.email?.toLowerCase(),
+      role: args.role ?? "member",
+      createdBy: viewer.id,
+      expiresAt: Date.now() + INVITE_TTL_MS,
+      revoked: false,
+    });
+
+    const invite = await ctx.db.get(id);
+
+    if (invite === null) return fail("internal", "The invite was not saved");
+
+    return presentInvite(invite);
+  },
+
+  "invites.revoke": async (ctx, _viewer, args) => {
+    const invite = await ctx.db.get(tableId(ctx, "invites", args.inviteId));
+
+    if (invite === null) return fail("not_found", "Invite not found");
+    await ctx.db.patch(invite._id, { revoked: true });
+
+    return ok;
+  },
+} satisfies Partial<MutationHandlers>;
