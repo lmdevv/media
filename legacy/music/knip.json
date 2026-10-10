@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": [".agents/**", "tools/oxlint/**"],
+  "ignoreDependencies": ["@effect/language-service"],
+  "workspaces": {
+    ".": {},
+    "apps/web": {},
+    "packages/backend": {
+      "typescript": { "config": ["convex/tsconfig.json"] }
+    },
+    "packages/ui": {}
+  }
+}

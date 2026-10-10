@@ -1,0 +1,12 @@
+{
+  /* Convex requires target ESNext, lib ES2021 + dom, module ESNext, isolatedModules, and noEmit. */
+  "extends": "@music/config/tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2021", "dom"],
+    "types": ["node"]
+  },
+  "include": ["./**/*"],
+  "exclude": ["./_generated"]
+}

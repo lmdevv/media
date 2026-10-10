@@ -1,0 +1,7 @@
+{
+  "name": "@music/player",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PlayerEngine interface with the MSE gapless engine and the Web Audio fallback. Built in milestone 4.",
+  "type": "module"
+}
