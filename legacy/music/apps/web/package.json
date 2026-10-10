@@ -12,7 +12,6 @@
     "test:e2e": "playwright test --pass-with-no-tests"
   },
   "dependencies": {
-    "@music/backend": "workspace:*",
     "@music/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-router": "^1.170.32",

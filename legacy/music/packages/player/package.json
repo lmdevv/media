@@ -2,6 +2,26 @@
   "name": "@music/player",
   "version": "0.0.0",
   "private": true,
-  "description": "PlayerEngine interface with the MSE gapless engine and the Web Audio fallback. Built in milestone 4.",
-  "type": "module"
+  "description": "PlayerEngine (MSE gapless with an HTML audio fallback) and the React player provider.",
+  "type": "module",
+  "exports": {
+    "./engine": "./src/engine.ts",
+    "./react": "./src/react.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@music/commands": "workspace:*",
+    "@music/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@music/config": "workspace:*",
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
+  }
 }
