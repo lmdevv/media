@@ -3,11 +3,18 @@
   "ignore": [".agents/**", "tools/oxlint/**"],
   "ignoreDependencies": ["@effect/language-service"],
   "workspaces": {
-    ".": {},
+    ".": {
+      "ignoreDependencies": ["@effect/vitest", "effect"]
+    },
     "apps/web": {},
     "packages/backend": {
-      "typescript": { "config": ["convex/tsconfig.json"] }
+      "typescript": {
+        "config": ["convex/tsconfig.json"]
+      }
     },
-    "packages/ui": {}
+    "packages/ui": {},
+    "packages/commands": {
+      "ignoreDependencies": ["effect"]
+    }
   }
 }

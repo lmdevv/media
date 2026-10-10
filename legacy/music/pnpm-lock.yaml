@@ -151,6 +151,9 @@ importers:
       '@effect/tsgo':
         specifier: 0.51.1
         version: 0.51.1
+      '@effect/vitest':
+        specifier: 4.0.3
+        version: 4.0.3(effect@4.0.2)(vitest@5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(yaml@2.9.1)))
       '@music/config':
         specifier: workspace:*
         version: link:packages/config
@@ -160,6 +163,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.5
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.2
       knip:
         specifier: 6.41.0
         version: 6.41.0
@@ -269,7 +275,11 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
-  packages/commands: {}
+  packages/commands:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.2
 
   packages/config: {}
 
@@ -539,6 +549,12 @@ packages:
   '@effect/tsgo@0.51.1':
     resolution: {integrity: sha512-i6mA6cNah+0mkPdu8qZILCO3Pnd9kWo03/s82Ju+1DFhdL28HFagi+1PRGxqgq1uMaHziWQ+ciKvOmIoks2RdA==}
     hasBin: true
+
+  '@effect/vitest@4.0.3':
+    resolution: {integrity: sha512-jsIkpssf0CFuOeycW2sQZkWx0qzlsRv+JIkzd9qQpoFDcHC9JZFSdIjEBAhsdp20pDy4Y/b2vT/ew7wXZxvEig==}
+    peerDependencies:
+      effect: ^4.0.3
+      vitest: '>=5.0.0 <6.0.0'
 
   '@emnapi/core@1.11.2':
     resolution: {integrity: sha512-TC8MkTuZUtcTSiFeuC0ksCh9QIJ5+F21MvZ4Wn4ORfYaFJ/0dsiudv5tVkejgwZlwQ39jL9WWDe2lz8x0WglOA==}
@@ -3712,6 +3728,11 @@ snapshots:
       '@effect/tsgo-linux-x64': 0.51.1
       '@effect/tsgo-win32-arm64': 0.51.1
       '@effect/tsgo-win32-x64': 0.51.1
+
+  '@effect/vitest@4.0.3(effect@4.0.2)(vitest@5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(yaml@2.9.1)))':
+    dependencies:
+      effect: 4.0.2
+      vitest: 5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(yaml@2.9.1))
 
   '@emnapi/core@1.11.2':
     dependencies:
