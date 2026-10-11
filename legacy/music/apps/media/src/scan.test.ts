@@ -16,6 +16,7 @@ import {
   testConfig,
 } from "./testing/fixtures.ts";
 import { layerMemory, MemoryMediaBackendControl } from "./testing/memory-media-backend.ts";
+import { makeReadable, makeUnreadable, runsAsRoot } from "./testing/permissions.ts";
 import { runScoped } from "./testing/run.ts";
 
 const setup = Effect.gen(function* () {
@@ -231,6 +232,43 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         );
       }),
     ));
+
+  it.skipIf(runsAsRoot())(
+    "fails instead of marking songs missing when a folder becomes unreadable",
+    () =>
+      runScoped(
+        Effect.gen(function* () {
+          const { root, scan, trackAt } = yield* setup;
+          const folder = join(root, "Aurora Tones", "Night Drive");
+          const path = "Aurora Tones/Night Drive/02 Overpass.mp3";
+
+          yield* scan;
+          yield* Effect.promise(() => makeUnreadable(folder));
+          yield* Effect.addFinalizer(() => Effect.promise(() => makeReadable(folder)));
+
+          const error = yield* Effect.flip(scan);
+
+          expect(error).toBeInstanceOf(LibraryUnavailable);
+          expect(error.message).toContain(`Can't read ${folder}: permission denied`);
+          expect((yield* trackAt(path))?.missing).toBe(false);
+        }),
+      ),
+  );
+
+  it.skipIf(runsAsRoot())("skips an unreadable lost+found folder at the library root", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, scan } = yield* setup;
+        const lostAndFound = join(root, "lost+found");
+
+        yield* Files.makeDirectory(lostAndFound);
+        yield* Effect.promise(() => makeUnreadable(lostAndFound));
+        yield* Effect.addFinalizer(() => Effect.promise(() => makeReadable(lostAndFound)));
+
+        expect(yield* scan).toMatchObject({ missing: 0, failed: 0 });
+      }),
+    ),
+  );
 
   it("fails with LibraryUnavailable when the folder is missing", () =>
     runScoped(

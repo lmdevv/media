@@ -6,7 +6,9 @@
     ".": {
       "ignoreDependencies": ["@effect/vitest", "effect"]
     },
-    "apps/web": {},
+    "apps/web": {
+      "entry": ["e2e-stack/first-audio.ts"]
+    },
     "apps/cli": {
       "entry": ["src/main.ts", "scripts/*.ts"]
     },

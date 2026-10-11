@@ -10,6 +10,7 @@ import * as Files from "./files.ts";
 import { declaredLength, measureTiming } from "./sample-timing.ts";
 import { MEDIA_TEST_TIMEOUT, temporaryDirectory, testConfig } from "./testing/fixtures.ts";
 import { runScoped } from "./testing/run.ts";
+import { topLevelBoxes } from "./testing/mp4-boxes.ts";
 import { decodeMono, sineSegment } from "./testing/sine.ts";
 import * as Transcoder from "./transcoder.ts";
 
@@ -53,21 +54,6 @@ const bestOffset = (
   return best;
 };
 
-const boxNames = (bytes: Uint8Array): ReadonlyArray<string> => {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const names: Array<string> = [];
-
-  for (let offset = 0; offset + 8 <= bytes.length;) {
-    const size = view.getUint32(offset);
-    names.push(String.fromCodePoint(...bytes.subarray(offset + 4, offset + 8)));
-
-    if (size < 8) break;
-    offset += size;
-  }
-
-  return names;
-};
-
 describe("gapless transcodes", { timeout: MEDIA_TEST_TIMEOUT }, () => {
   for (const [extension, profile, priming] of [
     ["flac", "fmp4-flac", 0],
@@ -105,7 +91,7 @@ describe("gapless transcodes", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           // Fragmented, with an empty moov, a fragment index for seeking, and no edit list for
           // browsers to apply on their own.
           const bytes = yield* Files.readWholeFile(output.path);
-          const boxes = boxNames(bytes);
+          const boxes = topLevelBoxes(bytes).map((box) => box.type);
 
           expect(boxes.slice(0, 4)).toEqual(["ftyp", "moov", "sidx", "moof"]);
           expect(Buffer.from(bytes).includes("elst")).toBe(false);

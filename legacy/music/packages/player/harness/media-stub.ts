@@ -11,13 +11,16 @@
  * - `POST /control/down` and `POST /control/up`: simulate an outage.
  * - `POST /control/fail-fmp4` and `POST /control/pass-fmp4`: answer 502 to fragmented profiles,
  *   like a failed transcode, so the player's fallback to HTML audio can be tested.
+ * - `POST /control/cold`: forget the transcodes so far, so the next request for each file is a
+ *   first play that streams while ffmpeg writes it.
  *
  *   node harness/media-stub.ts
  */
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import type { ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { basename, extname, join } from "node:path";
+import { Readable } from "node:stream";
 
 import { StreamTimingHeader } from "@music/commands/models";
 import { verifyResource } from "@music/commands/signed-url";
@@ -26,8 +29,7 @@ import { makeFunctionReference } from "convex/server";
 
 import { backend, fixturesDir, mediaPort } from "./config.ts";
 import { generateFixtures } from "./fixtures.ts";
-import { transcode } from "./transcode.ts";
-import type { TranscodedFile } from "./transcode.ts";
+import { cacheTime, coldCache, transcodedStream } from "./transcode.ts";
 
 const trackSource = makeFunctionReference<
   "query",
@@ -63,11 +65,12 @@ const contentTypes = new Map([
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Range",
+  "Access-Control-Allow-Headers": "Range, If-Range, If-None-Match",
   "Access-Control-Expose-Headers": [
     "Content-Range",
     "Accept-Ranges",
     "Content-Length",
+    "ETag",
     ...Object.values(StreamTimingHeader),
   ].join(", "),
 };
@@ -122,33 +125,50 @@ const sendFile = (
   createReadStream(file, { start, end }).pipe(response);
 };
 
-/** Transcodes `file` and sends the output with its timing headers. */
+/** The request headers a transcoded response depends on. */
+const forwardedHeaders = ["range", "if-range", "if-none-match"] as const;
+
+/** Sends `file` transcoded to `profile` through the media service's own response code. */
 const sendTranscoded = async (
   key: string,
   file: string,
   profile: TranscodeProfile,
   codec: string,
-  range: string | undefined,
+  incoming: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> => {
-  const output: TranscodedFile = await transcode(key, file, profile, codec, statSync(file).mtimeMs);
-  const timing = output.timing;
+  const headers = new Headers();
 
-  sendFile(
-    output.path,
-    range,
-    response,
-    timing === null
-      ? {}
-      : {
-          [StreamTimingHeader.priming]: String(timing.priming),
-          [StreamTimingHeader.duration]: String(timing.duration),
-          [StreamTimingHeader.sampleRate]: String(timing.sampleRate),
-        },
+  for (const name of forwardedHeaders) {
+    const value = incoming.headers[name];
+
+    if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+  }
+
+  const transcoded = await transcodedStream(
+    new Request(`http://stub${incoming.url ?? "/"}`, { method: incoming.method ?? "GET", headers }),
+    key,
+    file,
+    profile,
+    codec,
+    cacheTime(statSync(file).mtimeMs),
   );
+
+  response.writeHead(transcoded.status, { ...cors, ...Object.fromEntries(transcoded.headers) });
+
+  if (transcoded.body === null) {
+    response.end();
+
+    return;
+  }
+
+  // A live transcode that fails midway errors the body; the client sees the connection drop.
+  Readable.from(transcoded.body)
+    .on("error", () => response.destroy())
+    .pipe(response);
 };
 
-const streamTrack = async (url: URL, range: string | undefined, response: ServerResponse) => {
+const streamTrack = async (url: URL, incoming: IncomingMessage, response: ServerResponse) => {
   const trackId = decodeURIComponent(url.pathname.slice("/media/stream/".length));
   const profile = url.searchParams.get("p") ?? "";
   const expiresAt = Number(url.searchParams.get("exp"));
@@ -191,8 +211,8 @@ const streamTrack = async (url: URL, range: string | undefined, response: Server
     return;
   }
 
-  if (transcoded === null) sendFile(file, range, response);
-  else await sendTranscoded(trackId, file, transcoded, source.codec, range, response);
+  if (transcoded === null) sendFile(file, incoming.headers.range, response);
+  else await sendTranscoded(trackId, file, transcoded, source.codec, incoming, response);
 };
 
 generateFixtures();
@@ -211,6 +231,7 @@ const server = createServer((request, response) => {
     const action = url.pathname.slice("/control/".length);
 
     if (action === "fail-fmp4" || action === "pass-fmp4") failFragmented = action === "fail-fmp4";
+    else if (action === "cold") coldCache();
     else down = action === "down";
     response.writeHead(200, cors).end(action);
 
@@ -232,7 +253,7 @@ const server = createServer((request, response) => {
   }
 
   if (url.pathname.startsWith("/media/stream/")) {
-    streamTrack(url, range, response).catch((error: Error) => {
+    streamTrack(url, request, response).catch((error: Error) => {
       response.writeHead(500, cors).end(error.message);
     });
 
@@ -258,7 +279,7 @@ const server = createServer((request, response) => {
 
     const codec = fixtureCodecs.get(extname(file)) ?? "unknown";
 
-    sendTranscoded(name.replaceAll(".", "-"), file, profile, codec, range, response).catch(
+    sendTranscoded(name.replaceAll(".", "-"), file, profile, codec, request, response).catch(
       (error: Error) => {
         response.writeHead(502, cors).end(error.message);
       },

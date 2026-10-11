@@ -19,6 +19,8 @@ import {
   testConfig,
 } from "./testing/fixtures.ts";
 import { layerMemory, MemoryMediaBackendControl } from "./testing/memory-media-backend.ts";
+import { withoutIndex } from "./testing/mp4-boxes.ts";
+import { sineSegment } from "./testing/sine.ts";
 import * as Transcoder from "./transcoder.ts";
 import { runScoped } from "./testing/run.ts";
 
@@ -274,6 +276,55 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         expect(ranged.status).toBe(206);
         expect(ranged.headers.get("X-Music-Priming-Samples")).toBe("1024");
+      }),
+    ));
+
+  it("streams a fragmented transcode as it is written, then serves the exact timing", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, dataDir, scan, findTrackId, request } = yield* setup;
+
+        // Two minutes of tone: ffmpeg is still encoding when the response starts.
+        yield* sineSegment(root, "long", "mp3", 0, 48_000 * 120);
+        yield* scan;
+        const url = yield* streamUrl(yield* findTrackId("long.mp3"), "fmp4-aac");
+        const live = yield* request(url, { headers: { Origin: "http://localhost:3001" } });
+
+        expect(live.status).toBe(200);
+        expect(live.headers.get("Content-Type")).toBe("audio/mp4");
+        expect(live.headers.get("Cache-Control")).toBe("no-store");
+        expect(live.headers.get("ETag")).toBeNull();
+        expect(live.headers.get("X-Music-Duration-Estimated")).toBe("1");
+        expect(live.headers.get("X-Music-Priming-Samples")).toBe("1024");
+        expect(live.headers.get("X-Music-Sample-Rate")).toBe("48000");
+        expect(live.headers.get("Access-Control-Expose-Headers")).toContain(
+          "X-Music-Duration-Estimated",
+        );
+
+        const estimate = Number(live.headers.get("X-Music-Duration-Samples"));
+
+        expect(Math.abs(estimate - 48_000 * 120)).toBeLessThan(4800);
+        const streamed = yield* bytes(live);
+
+        // Once the body ends, the finished file answers with the exact length.
+        const head = yield* request(url, { method: "HEAD" });
+
+        expect(head.status).toBe(200);
+        expect(head.headers.get("X-Music-Duration-Estimated")).toBeNull();
+        expect(head.headers.get("X-Music-Duration-Samples")).toBe(String(48_000 * 120));
+        expect(head.headers.get("X-Music-Priming-Samples")).toBe("1024");
+        expect(head.headers.get("ETag")).not.toBeNull();
+
+        const finished = yield* request(url);
+        const file = yield* bytes(finished);
+
+        expect(finished.headers.get("X-Music-Duration-Estimated")).toBeNull();
+        expect(finished.headers.get("Content-Length")).toBe(String(file.length));
+        expect(Buffer.from(streamed).equals(withoutIndex(file))).toBe(true);
+
+        const cached = yield* Files.listNames(join(dataDir, "cache", "fmp4-aac"));
+
+        expect(cached.filter((name) => name.endsWith(".part"))).toEqual([]);
       }),
     ));
 

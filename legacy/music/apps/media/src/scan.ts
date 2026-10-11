@@ -33,6 +33,15 @@ const FOLDER_ART = /^(cover|folder|front)\.(jpe?g|png|webp)$/i;
 
 const FOLDER_ART_ORDER = ["cover", "folder", "front"];
 
+/** The message of an unreadable folder somewhere in an error's cause chain, if any. */
+const unreadableReason = (cause: Error | undefined, depth = 0): string | null => {
+  if (cause === undefined || depth > 4) return null;
+
+  if (cause.name === "UnreadableFolder") return cause.message;
+
+  return unreadableReason(cause.cause instanceof Error ? cause.cause : undefined, depth + 1);
+};
+
 /** The library folder is missing or is not a readable directory. */
 export class LibraryUnavailable extends Schema.TaggedError<LibraryUnavailable>()(
   "LibraryUnavailable",
@@ -43,7 +52,9 @@ export class LibraryUnavailable extends Schema.TaggedError<LibraryUnavailable>()
   },
 ) {
   override get message(): string {
-    return `Library folder unavailable: ${this.path}`;
+    const cause = this.cause instanceof Error ? this.cause : undefined;
+
+    return unreadableReason(cause) ?? `Library folder unavailable: ${this.path}`;
   }
 }
 

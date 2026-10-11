@@ -42,11 +42,16 @@ export type StreamProfile = typeof StreamProfile.Type;
  * Response headers of the `fmp4-*` stream profiles, all whole numbers. The fragmented file's
  * timeline starts with `priming` samples of encoder delay, then holds `duration` real samples at
  * `sampleRate` Hz; anything after them is encoder padding.
+ *
+ * `estimated` is `1` on a stream sent while it is still being transcoded: `duration` is then only
+ * the source's declared length, and the stream has no `sidx` index, no `ETag`, and no byte
+ * ranges. Once the response ends, a `HEAD` request for the same URL returns the exact timing.
  */
 export const StreamTimingHeader = {
   priming: "X-Music-Priming-Samples",
   duration: "X-Music-Duration-Samples",
   sampleRate: "X-Music-Sample-Rate",
+  estimated: "X-Music-Duration-Estimated",
 } as const;
 
 export const Role = Schema.Literals(["admin", "member"]);

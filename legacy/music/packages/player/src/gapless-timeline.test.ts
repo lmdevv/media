@@ -15,6 +15,7 @@ const timingArbitrary: fc.Arbitrary<StreamTiming> = fc.record({
   primingSamples: fc.constantFrom(0, 1024, 2112),
   durationSamples: fc.integer({ min: 1, max: 48_000 * 900 }),
   sampleRate: fc.constantFrom(22_050, 44_100, 48_000, 88_200, 96_000, 192_000),
+  estimated: fc.boolean(),
 });
 
 const headers =
@@ -32,7 +33,27 @@ describe("parseStreamTiming", () => {
           "X-Music-Sample-Rate": "48000",
         }),
       ),
-    ).toEqual({ primingSamples: 1024, durationSamples: 150_001, sampleRate: 48_000 });
+    ).toEqual({
+      primingSamples: 1024,
+      durationSamples: 150_001,
+      sampleRate: 48_000,
+      estimated: false,
+    });
+  });
+
+  it("marks the length of a stream that is still being transcoded as estimated", () => {
+    const live = {
+      "X-Music-Priming-Samples": "1024",
+      "X-Music-Duration-Samples": "150001",
+      "X-Music-Sample-Rate": "48000",
+    };
+
+    expect(
+      parseStreamTiming(headers({ ...live, "X-Music-Duration-Estimated": "1" }))?.estimated,
+    ).toBe(true);
+    expect(
+      parseStreamTiming(headers({ ...live, "X-Music-Duration-Estimated": "0" }))?.estimated,
+    ).toBe(false);
   });
 
   it("rejects missing, empty, fractional, negative, and zero values", () => {
@@ -134,6 +155,7 @@ describe("fragmentAt", () => {
             primingSamples,
             durationSamples: total - primingSamples,
             sampleRate: 48_000,
+            estimated: false,
           };
 
           if (timing.durationSamples <= 0) return;
@@ -155,7 +177,12 @@ describe("fragmentAt", () => {
   it("clamps positions before the start to the first fragment", () => {
     fc.assert(
       fc.property(indexArbitrary, (index) => {
-        const timing = { primingSamples: 0, durationSamples: 1, sampleRate: 48_000 };
+        const timing = {
+          primingSamples: 0,
+          durationSamples: 1,
+          sampleRate: 48_000,
+          estimated: false,
+        };
 
         expect(fragmentAt(index, timing, -5)).toEqual(index.fragments[0]);
       }),

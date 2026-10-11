@@ -41,6 +41,18 @@ export const statPath = (
 export const readHead = (path: string, length: number): Effect.Effect<Uint8Array, FileError> =>
   attempt("readHead", path, () => NodeFiles.readHead(path, length));
 
+/** Reads up to `length` bytes of a file starting at byte `position`. */
+export const readAt = (
+  path: string,
+  position: number,
+  length: number,
+): Effect.Effect<Uint8Array, FileError> =>
+  attempt("read", path, () => NodeFiles.readAt(path, position, length));
+
+/** Appends bytes to a file, creating it when missing. */
+export const appendToFile = (path: string, data: Uint8Array): Effect.Effect<void, FileError> =>
+  attempt("append", path, () => NodeFiles.appendToFile(path, data));
+
 /** Reads a whole file. */
 export const readWholeFile = (path: string): Effect.Effect<Uint8Array, FileError> =>
   attempt("read", path, () => NodeFiles.readWholeFile(path));

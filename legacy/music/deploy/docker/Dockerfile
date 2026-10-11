@@ -33,6 +33,12 @@ ARG S6_OVERLAY_VERSION=3.2.1.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg ca-certificates xz-utils curl \
  && rm -rf /var/lib/apt/lists/*
+# The media service, which parses every file in the library with ffmpeg, runs as this user
+# instead of root. Init moves it to PUID/PGID at boot. The base image's `node` user held uid 1000.
+RUN userdel --remove node \
+ && groupadd --gid 1000 music \
+ && useradd --uid 1000 --gid music --no-create-home --home-dir /nonexistent \
+      --shell /usr/sbin/nologin music
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in amd64) s6arch=x86_64 ;; arm64) s6arch=aarch64 ;; *) echo "unsupported arch ${TARGETARCH}"; exit 1 ;; esac; \
     base="https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}"; \
@@ -48,6 +54,8 @@ COPY deploy/docker/rootfs/ /
 
 ENV PUBLIC_URL=http://localhost:8080 \
     MUSIC_DATA=/data \
+    PUID=1000 \
+    PGID=1000 \
     S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0 \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
     S6_VERBOSITY=1

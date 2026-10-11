@@ -5,7 +5,7 @@
  * exactly what production sends. Runs in Chromium, Firefox, and WebKit (`gapless-*` projects).
  */
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 
 import { mediaPort } from "../harness/config.ts";
 import {
@@ -40,6 +40,24 @@ const lastPosition = async (page: Page): Promise<number> => {
 
 const keysOf = (list: ReadonlyArray<TimedEvent>): ReadonlyArray<string> =>
   list.map((event) => (event.type === "advanced" ? event.key : ""));
+
+const media = `http://127.0.0.1:${mediaPort}`;
+
+/** Makes the stub forget its transcodes: every song's next request is a live first play. */
+const coldCache = async (request: APIRequestContext): Promise<void> => {
+  expect((await request.post(`${media}/control/cold`)).ok()).toBe(true);
+};
+
+/** Fetches each song in full, so the next requests are served from finished transcodes. */
+const warmCache = (request: APIRequestContext, files: ReadonlyArray<string>) =>
+  Promise.all(
+    files.map(async (file) => {
+      const response = await request.get(`${media}/fixtures/${file}`);
+
+      expect(response.ok()).toBe(true);
+      await response.body();
+    }),
+  );
 
 const open = async (page: Page, engine: "mse" | "html"): Promise<void> => {
   await page.goto(`/engine.html?media=${mediaPort}&engine=${engine}`);
@@ -149,33 +167,54 @@ const sequences: ReadonlyArray<{
 const fileFor = ([source, profile]: readonly [GaplessSource, Profile], part: number): string =>
   `${gaplessFile(source, part)}?p=${profile}`;
 
+/**
+ * Each sequence plays as a first play, streamed while the media service transcodes it (estimated
+ * length, held-back end, exact timing fetched at the end), and again from finished transcodes.
+ */
+const deliveries = ["first play", "cached"] as const;
+
 test.describe("gapless playback", () => {
   for (const sequence of sequences) {
-    test(sequence.name, async ({ page, browserName }) => {
-      test.fail(browserName === "webkit", LOSSY_CAPTURE);
-      await open(page, "mse");
-      const files = sequence.parts.map((part, index) => fileFor(part, index + 1));
-      const analysis = await playSequence(page, files);
+    for (const delivery of deliveries) {
+      const name = `${sequence.name} (${delivery})`;
 
-      report(sequence.name, analysis);
-      expect(await ofType(page, "error")).toEqual([]);
-      expect(keysOf(await ofType(page, "advanced"))).toEqual(files.slice(1));
-      expect(await ofType(page, "ended")).toHaveLength(1);
-      expect(Math.abs(analysis.sampleError)).toBeLessThanOrEqual(TOLERANCE_SAMPLES);
-      expect(analysis.longestSilence).toBeLessThanOrEqual(1);
+      test(name, async ({ page, request, browserName }) => {
+        test.fail(browserName === "webkit", LOSSY_CAPTURE);
+        const files = sequence.parts.map((part, index) => fileFor(part, index + 1));
 
-      for (const boundary of analysis.boundaries) {
-        expect(Math.abs(boundary.offsetSamples)).toBeLessThanOrEqual(TOLERANCE_SAMPLES);
-      }
+        if (delivery === "first play") await coldCache(request);
+        else await warmCache(request, files);
+        const exactTimings: Array<string> = [];
 
-      // Lossless joins are clean to the noise floor; AAC adds a coding transient at each cut,
-      // which ffmpeg's own decode of the same files shows too.
-      if (sequence.parts.every(([, profile]) => profile === "fmp4-flac")) {
+        page.on("request", (sent) => {
+          if (sent.method() === "HEAD") exactTimings.push(sent.url());
+        });
+
+        await open(page, "mse");
+        const analysis = await playSequence(page, files);
+
+        report(name, analysis);
+        // A first play streams each song live and asks for its exact length at the end.
+        expect(exactTimings).toHaveLength(delivery === "first play" ? files.length : 0);
+        expect(await ofType(page, "error")).toEqual([]);
+        expect(keysOf(await ofType(page, "advanced"))).toEqual(files.slice(1));
+        expect(await ofType(page, "ended")).toHaveLength(1);
+        expect(Math.abs(analysis.sampleError)).toBeLessThanOrEqual(TOLERANCE_SAMPLES);
+        expect(analysis.longestSilence).toBeLessThanOrEqual(1);
+
         for (const boundary of analysis.boundaries) {
-          expect(boundary.residual).toBeLessThanOrEqual(analysis.noiseFloor * 4);
+          expect(Math.abs(boundary.offsetSamples)).toBeLessThanOrEqual(TOLERANCE_SAMPLES);
         }
-      }
-    });
+
+        // Lossless joins are clean to the noise floor; AAC adds a coding transient at each cut,
+        // which ffmpeg's own decode of the same files shows too.
+        if (sequence.parts.every(([, profile]) => profile === "fmp4-flac")) {
+          for (const boundary of analysis.boundaries) {
+            expect(boundary.residual).toBeLessThanOrEqual(analysis.noiseFloor * 4);
+          }
+        }
+      });
+    }
   }
 
   test("switches between FLAC and AAC mid-queue", async ({ page }) => {
@@ -265,6 +304,47 @@ test.describe("MseEngine", () => {
 
       expect(gap?.soundMs ?? 0).toBeGreaterThan(1000);
     }
+  });
+
+  test("seeks behind and ahead of a song that is still being transcoded", async ({
+    page,
+    request,
+  }) => {
+    // Ninety seconds of MP3 to AAC: the transcode runs for about a second.
+    const song = "song-2.mp3?p=fmp4-aac";
+
+    const live: Array<boolean> = [];
+
+    page.on("response", (response) => {
+      if (response.request().method() === "GET" && response.url().includes("song-2.mp3")) {
+        live.push(response.headers()["x-music-duration-estimated"] === "1");
+      }
+    });
+
+    await coldCache(request);
+    // Past the engine's 30-second look-ahead, with no index to jump there.
+    await page.evaluate((file) => window.harness?.load(file, 45_000, true), song);
+    await waitForEvent(page, "playing");
+    expect(live[0]).toBe(true);
+    await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(45_200);
+
+    // Behind the start: the song is fetched again from the start (live or finished).
+    await page.evaluate(() => {
+      window.harness?.engine.seek(5000);
+    });
+
+    await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(5200);
+    expect(await lastPosition(page)).toBeLessThan(9000);
+
+    // Far ahead, into what the first stream may not have reached.
+    await page.evaluate(() => {
+      window.harness?.engine.seek(80_000);
+    });
+
+    await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(80_200);
+    expect(await ofType(page, "error")).toEqual([]);
+    await waitForEvent(page, "ended", 1, 20_000);
+    expect(await ofType(page, "error")).toEqual([]);
   });
 
   test("keeps playing a hi-res stream larger than the buffer quota", async ({ page }) => {

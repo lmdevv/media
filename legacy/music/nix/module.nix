@@ -49,7 +49,27 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       example = [ "/srv/music" ];
-      description = "Host folders mounted read-only at /music/<folder name>.";
+      description = ''
+        Host folders mounted read-only at /music/<folder name>. The media service reads them as
+        `uid`/`gid`, so their files must be readable by that user (world-readable 644 files and
+        755 folders are).
+      '';
+    };
+
+    uid = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 1000;
+      description = ''
+        User ID the media service runs as inside the container (PUID). It reads the music folders
+        and owns the transcode cache and artwork in dataDir/media; it cannot read the secrets or
+        the database.
+      '';
+    };
+
+    gid = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 1000;
+      description = "Group ID the media service runs as inside the container (PGID).";
     };
 
     openFirewall = lib.mkOption {
@@ -71,12 +91,18 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    systemd.tmpfiles.rules = [ "d ${cfg.dataDir} 0750 root root -" ];
+    # Traversable, not listable: the media user reaches dataDir/media; everything else in
+    # dataDir is root's alone.
+    systemd.tmpfiles.rules = [ "d ${cfg.dataDir} 0711 root root -" ];
 
     virtualisation.oci-containers.containers.music = {
       inherit (cfg) image;
       ports = [ "${cfg.listenAddress}:${toString cfg.port}:8080" ];
-      environment.PUBLIC_URL = cfg.publicUrl;
+      environment = {
+        PUBLIC_URL = cfg.publicUrl;
+        PUID = toString cfg.uid;
+        PGID = toString cfg.gid;
+      };
       volumes = [
         "${cfg.dataDir}:/data"
       ]

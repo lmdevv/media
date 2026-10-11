@@ -10,12 +10,29 @@ data="${MUSIC_DATA:-/data}"
 secrets="$data/secrets"
 public="${PUBLIC_URL%/}"
 version="$(node -p 'require("/app/backend/package.json").version')"
-mkdir -p "$secrets" "$data/media" "$data/backups" /run/music
+mkdir -p "$secrets" "$data/media" "$data/backups"
 # Installs from before the umask kept group- and world-readable secrets and backups.
 chmod 700 "$secrets" "$data/backups"
 find "$secrets" "$data/backups" -type f -exec chmod 600 {} +
 
 log() { echo "[init] $*"; }
+
+# The media service runs as the `music` user with the PUID/PGID the container was given. It
+# reads the library, owns /data/media, and cannot read the secrets or the database (700, root).
+puid="${PUID:-1000}"
+pgid="${PGID:-1000}"
+if ! [[ "$puid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ ]] || [ "$puid" = 0 ] || [ "$pgid" = 0 ]; then
+  log "PUID and PGID must be numeric and not 0 (root); got PUID=$puid PGID=$pgid"
+  exit 1
+fi
+[ "$(id -g music)" = "$pgid" ] || groupmod --non-unique --gid "$pgid" music
+[ "$(id -u music)" = "$puid" ] || usermod --non-unique --uid "$puid" --gid "$pgid" music
+# The media user passes through /data (without listing it) to reach /data/media.
+chmod o+x "$data"
+chmod 750 "$data/media"
+# Installs from before ran the media service as root, and PUID may have changed since.
+find "$data/media" \( \! -user music -o \! -group music \) -exec chown -h music:music {} +
+install -d -m 750 -o root -g music /run/music
 
 random() { node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("base64url"))'; }
 
@@ -53,6 +70,8 @@ node scripts/configure.ts "--site-url=$public" --media-url=/media \
   "--media-secret=$(cat "$secrets/media_secret")"
 
 signing="$(convex env get STREAM_SIGNING_KEY)"
+# Readable by the media user only (and root): it holds the service secret and signing key.
+install -m 600 -o music -g music /dev/null /run/music/media.env
 cat > /run/music/media.env <<ENV
 CONVEX_URL=http://127.0.0.1:3210
 MEDIA_SERVICE_SECRET=$(cat "$secrets/media_secret")

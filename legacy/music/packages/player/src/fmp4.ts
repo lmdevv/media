@@ -68,6 +68,15 @@ interface Box {
   readonly end: number;
 }
 
+/** The bytes of `head` followed by those of `tail`, in a new buffer. */
+export const concatBytes = (head: Uint8Array, tail: Uint8Array): Uint8Array<ArrayBuffer> => {
+  const bytes = new Uint8Array(head.length + tail.length);
+  bytes.set(head);
+  bytes.set(tail, head.length);
+
+  return bytes;
+};
+
 const view = (bytes: Uint8Array): DataView =>
   new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 

@@ -1,8 +1,6 @@
 #!/command/with-contenv sh
-# Media service. /run/music/media.env is written by the init oneshot.
+# Media service, as the unprivileged `music` user (see init): it reads its env from
+# /run/music/media.env, which init writes for that user only.
 set -e
-set -a
-. /run/music/media.env
-set +a
 cd /app/media
-exec node dist/main.js
+exec s6-setuidgid music sh -c 'set -a; . /run/music/media.env; set +a; exec node dist/main.js'

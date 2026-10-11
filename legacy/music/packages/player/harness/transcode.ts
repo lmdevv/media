@@ -1,25 +1,20 @@
 /**
- * The media service's real transcoder, for the media stub: fragmented profiles come out of the
- * exact ffmpeg pipeline and timing measurement production uses, cached under the fixtures folder.
+ * The media service's real transcoder and stream responses, for the media stub: transcoded
+ * profiles come out of the exact ffmpeg pipeline, timing measurement, and live streaming
+ * production uses, cached under the fixtures folder.
  */
 import { join } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
 import { MediaConfig } from "@music/media/media-config";
+import { transcodedResponse } from "@music/media/transcoded-response";
 import * as Transcoder from "@music/media/transcoder";
-import { Duration, Effect, Layer, ManagedRuntime, Option, Redacted } from "effect";
+import { Duration, Layer, ManagedRuntime, Redacted } from "effect";
 
 import { fixturesDir } from "./config.ts";
 
-/** A finished transcode and the timing headers to send with it. */
-export interface TranscodedFile {
-  readonly path: string;
-  readonly timing: {
-    readonly priming: number;
-    readonly duration: number;
-    readonly sampleRate: number;
-  } | null;
-}
+/** Where the stub's transcodes go. */
+const dataDir = join(fixturesDir, ".media-data");
 
 const config = Layer.succeed(
   MediaConfig,
@@ -27,7 +22,7 @@ const config = Layer.succeed(
     convexUrl: "http://127.0.0.1:9",
     serviceSecret: Redacted.make("unused"),
     signingKey: Redacted.make("unused"),
-    dataDir: join(fixturesDir, ".media-data"),
+    dataDir,
     port: 0,
     cacheMaxBytes: 1024 * 1024 * 1024,
     rescanInterval: Duration.hours(1),
@@ -38,31 +33,35 @@ const config = Layer.succeed(
 
 const runtime = ManagedRuntime.make(Transcoder.layer.pipe(Layer.provide(config)));
 
-/** Transcodes `source` (identified by `key`) to `profile`, reusing earlier output. */
-export const transcode = (
+/**
+ * Answers `request` with `source` (identified by `key`) transcoded to `profile`, exactly as the
+ * media service does: from the cache, or live while a fragmented transcode is being written.
+ * Rejects when the transcode fails before its first byte.
+ */
+export const transcodedStream = (
+  request: Request,
   key: string,
   source: string,
   profile: "aac-320" | "aac-128" | "fmp4-flac" | "fmp4-aac",
   codec: string,
   mtimeMs: number,
-): Promise<TranscodedFile> =>
+): Promise<Response> =>
   runtime.runPromise(
-    Effect.gen(function* () {
-      const transcoder = yield* Transcoder.Transcoder;
-      // The transcoder only uses the ID in cache file names and logs.
-      const trackId = TrackId.make(key);
-      const output = yield* transcoder.transcode({ trackId, profile, source, mtimeMs, codec });
-
-      return {
-        path: output.path,
-        timing: Option.match(output.timing, {
-          onNone: () => null,
-          onSome: (timing) => ({
-            priming: timing.primingSamples,
-            duration: timing.durationSamples,
-            sampleRate: timing.sampleRate,
-          }),
-        }),
-      };
-    }),
+    // The transcoder only uses the ID in cache file names and logs.
+    transcodedResponse(request, { trackId: TrackId.make(key), profile, source, mtimeMs, codec }),
   );
+
+/**
+ * Added to every source's modification time in cache keys. `POST /control/cold` moves it to a
+ * value no earlier transcode used, in this run or a previous one, so the next request for each
+ * source misses the cache and streams live.
+ */
+let generation = 0;
+
+/** Makes every later request miss the transcodes cached so far. */
+export const coldCache = (): void => {
+  generation = Date.now();
+};
+
+/** The modification time to key `mtimeMs` by in the cache, after `coldCache` calls. */
+export const cacheTime = (mtimeMs: number): number => Math.trunc(mtimeMs) + generation;

@@ -10,6 +10,9 @@ services:
     environment:
       # The URL people use to reach the server. Set it when using a domain or reverse proxy.
       PUBLIC_URL: http://localhost:8080
+      # User and group the media service runs as. Your music must be readable by them.
+      PUID: "1000"
+      PGID: "1000"
     volumes:
       - music-data:/data
       - ${MUSIC_DIR:-./music}:/music:ro

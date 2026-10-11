@@ -11,14 +11,23 @@
  * outside the buffer drops everything and restarts the song from the fragment the `sidx` points
  * at with a range request.
  *
+ * A song the media service is still transcoding arrives as it is encoded, with an estimated
+ * length and no `sidx` (see `StreamTimingHeader.estimated`). The engine appends it as it comes
+ * but holds back its last two fragments (`held-tail.ts`); when the stream ends it asks for the
+ * exact length, narrows the append window, and only then appends the end. Seeking outside the
+ * buffer of such a song fetches it again from the start: the answer is either the finished file,
+ * with a `sidx` to jump with, or the live stream again, which the playhead waits for.
+ *
  * A codec change between songs (FLAC to AAC) uses `SourceBuffer.changeType`. Browsers without it
  * finish the current song and reset the `MediaSource` for the next one, with a short gap.
  */
 import type { EngineErrorReason, EngineEvent, EngineSource, PlayerEngine } from "./engine";
-import { codecMimeType, HeaderRead, readHeader } from "./fmp4";
+import { codecMimeType, concatBytes, HeaderRead, readHeader } from "./fmp4";
 import type { AudioCodec, StreamHeader } from "./fmp4";
 import { evictionEnd, fragmentAt, parseStreamTiming, placeTrack } from "./gapless-timeline";
 import type { Placement, StreamTiming } from "./gapless-timeline";
+import { addToTail, holdTail, releaseAll, TailStep } from "./held-tail";
+import type { HeldTail, Piece } from "./held-tail";
 import { primeInGesture } from "./prime-audio";
 import type { MseSupport } from "./stream-quality";
 
@@ -51,17 +60,14 @@ const IDLE_MS = 250;
 /** Fewer seconds than this left in a buffered range means the playhead needs new data. */
 const BUFFERED_MARGIN = 0.05;
 
-/** Bytes of a stream and the file offset of their first byte. */
-interface Piece {
-  readonly offset: number;
-  readonly bytes: Uint8Array<ArrayBuffer>;
-}
-
 /** One song on the timeline and how far its stream has been appended. */
 interface Song {
   readonly source: EngineSource;
-  /** Where playback should begin inside the song, in seconds; only the first song uses it. */
-  readonly startSeconds: number;
+  /**
+   * Where playback should begin inside the song, in seconds, when its header is next read: the
+   * load position for the first song, or a seek target when a live stream is fetched again.
+   */
+  startSeconds: number;
   /** Aborts the song's current fetch; replaced on every restart. */
   abort: AbortController;
   timing: StreamTiming | null;
@@ -78,6 +84,8 @@ interface Song {
   resumeFrom: number;
   /** Bytes read but not appended yet (header bytes, or a chunk the quota refused). */
   pending: Piece | null;
+  /** The held end of a stream that is still being transcoded, or null for a finished file. */
+  tail: HeldTail | null;
   /** Some media bytes were appended since the stream (re)started. */
   appended: boolean;
   /** True once every fragment is appended. */
@@ -117,14 +125,6 @@ const mediaSourceClass = (): typeof MediaSource | null => {
   if ("MediaSource" in globalThis) return MediaSource;
 
   return globalThis.ManagedMediaSource ?? null;
-};
-
-const concat = (head: Uint8Array, tail: Uint8Array): Uint8Array<ArrayBuffer> => {
-  const bytes = new Uint8Array(head.length + tail.length);
-  bytes.set(head);
-  bytes.set(tail, head.length);
-
-  return bytes;
 };
 
 /** Reads a session's flag after an await; TypeScript would keep a narrowing from before it. */
@@ -268,9 +268,9 @@ export class MseEngine implements PlayerEngine {
     const song = session?.songs[0];
 
     if (session === null || song === undefined) return;
-    const { placement, timing, header } = song;
+    const { placement } = song;
 
-    if (placement === null || timing === null || header === null) return;
+    if (placement === null) return;
 
     const target = Math.min(
       placement.start + Math.max(0, positionMs) / 1000,
@@ -286,11 +286,8 @@ export class MseEngine implements PlayerEngine {
     }
 
     // Start over from the fragment that holds the target; every later song follows again.
-    const fragment =
-      header.index === null ? null : fragmentAt(header.index, timing, target - placement.start);
-
-    for (const later of session.songs.slice(1)) this.#rewind(later, later.header?.length ?? 0);
-    this.#rewind(song, fragment?.offset ?? header.length);
+    for (const later of session.songs.slice(1)) this.#restartAt(later, 0);
+    this.#restartAt(song, target - placement.start);
     session.removeFrom = 0;
     session.configuredFor = null;
     this.#element.currentTime = target;
@@ -340,6 +337,7 @@ export class MseEngine implements PlayerEngine {
       readOffset: 0,
       resumeFrom: 0,
       pending: null,
+      tail: null,
       appended: false,
       complete: false,
       needsReset: false,
@@ -404,9 +402,30 @@ export class MseEngine implements PlayerEngine {
     song.abort = new AbortController();
     song.reader = null;
     song.pending = null;
+    song.tail = null;
     song.appended = false;
     song.resumeFrom = offset;
     song.complete = false;
+  }
+
+  /**
+   * Makes `song` append again from `seconds` into it: from the fragment its index points at, or,
+   * for a live stream without an index, from a fresh request whose header decides.
+   */
+  #restartAt(song: Song, seconds: number): void {
+    const { header, timing } = song;
+    const index = header?.index ?? null;
+
+    if (header !== null && index !== null && timing !== null) {
+      this.#rewind(song, fragmentAt(index, timing, seconds)?.offset ?? header.length);
+
+      return;
+    }
+
+    this.#rewind(song, 0);
+    song.header = null;
+    song.etag = null;
+    song.startSeconds = seconds;
   }
 
   /** Drops a queued song: stops its stream and removes whatever of it was buffered. */
@@ -772,7 +791,9 @@ export class MseEngine implements PlayerEngine {
       throw new EngineFailure("unsupported", "The stream has no sample timing headers");
     }
 
-    song.timing ??= timing;
+    // A live stream's estimate gives way to whatever comes next: the exact timing of the
+    // finished file, or of the `HEAD` request at the end of the stream.
+    if (song.timing === null || song.timing.estimated) song.timing = timing;
     song.etag = response.headers.get("ETag");
     song.reader = response.body.getReader();
     // A 200 answer to a range request starts at byte 0; the extra bytes are skipped on read.
@@ -819,7 +840,10 @@ export class MseEngine implements PlayerEngine {
     if (piece === "stale") return;
 
     if (piece === null) throw new EngineFailure("unsupported", "The stream ended early");
-    const bytes = song.pending === null ? piece.bytes : concat(song.pending.bytes, piece.bytes);
+
+    const bytes =
+      song.pending === null ? piece.bytes : concatBytes(song.pending.bytes, piece.bytes);
+
     const read = readHeader(bytes);
 
     if (HeaderRead.$is("Invalid")(read)) throw new EngineFailure("unsupported", read.reason);
@@ -836,7 +860,8 @@ export class MseEngine implements PlayerEngine {
     if (timing === null) return;
     const previous = session.songs[session.songs.indexOf(song) - 1];
     song.header = header;
-    song.placement = placeTrack(timing, previous?.placement?.end ?? 0);
+    // A song fetched again keeps its place on the timeline.
+    song.placement = placeTrack(timing, song.placement?.start ?? previous?.placement?.end ?? 0);
 
     const fragment =
       song.startSeconds > 0 && header.index !== null
@@ -850,8 +875,35 @@ export class MseEngine implements PlayerEngine {
       return;
     }
 
+    // Without an index the stream plays in from its start, so the playhead waits at the position
+    // meanwhile: the look-ahead then counts from there instead of stopping short of it.
+    if (header.index === null && song.startSeconds > 0 && session.songs[0] === song) {
+      this.#element.currentTime = song.placement.start + song.startSeconds;
+    }
+
     song.resumeFrom = header.length;
-    song.pending = { offset: header.length, bytes: bytes.subarray(header.length) };
+
+    if (!timing.estimated) {
+      song.pending = { offset: header.length, bytes: bytes.subarray(header.length) };
+
+      return;
+    }
+
+    const { tail, release } = this.#hold(holdTail(header.length), bytes.subarray(header.length));
+    song.tail = tail;
+    song.pending = release;
+  }
+
+  /** Adds bytes to a held tail; the release goes to `pending`, ahead of anything read later. */
+  #hold(
+    tail: HeldTail,
+    bytes: Uint8Array,
+  ): { readonly tail: HeldTail; readonly release: Piece | null } {
+    const step = addToTail(tail, bytes);
+
+    if (TailStep.$is("Invalid")(step)) throw new EngineFailure("unsupported", step.reason);
+
+    return step;
   }
 
   /** Points the buffer at `song`: codec, append window, offset, and init segment. */
@@ -891,7 +943,8 @@ export class MseEngine implements PlayerEngine {
     // Widen first: the window must stay valid (start < end) after every assignment.
     buffer.appendWindowEnd = Infinity;
     buffer.appendWindowStart = placement.start;
-    buffer.appendWindowEnd = placement.end;
+    // A live stream's end is cut once its exact length is known (`#finishLive`).
+    buffer.appendWindowEnd = song.timing?.estimated === true ? Infinity : placement.end;
     buffer.timestampOffset = placement.timestampOffset;
     await this.#operate(session, (target) => {
       target.appendBuffer(header.init);
@@ -899,11 +952,75 @@ export class MseEngine implements PlayerEngine {
     session.configuredFor = song;
   }
 
+  /**
+   * The next media bytes to append: what the stream yields, or for a live stream what its held
+   * tail releases. At the end of a live stream, the exact timing first, then the held rest.
+   */
+  async #nextMedia(session: Session, song: Song): Promise<Piece | null | "stale"> {
+    const tail = song.tail;
+    const piece = await this.#read(song);
+
+    if (tail === null || piece === "stale") return piece;
+
+    if (piece === null) return this.#finishLive(session, song, tail);
+    const { tail: held, release } = this.#hold(tail, piece.bytes);
+    song.tail = held;
+
+    return release ?? this.#nextMedia(session, song);
+  }
+
+  /**
+   * A live stream ended, so its transcode is in the media service's cache: reads the exact timing
+   * with a `HEAD` request, cuts the append window at the real end, and releases the held tail.
+   */
+  async #finishLive(session: Session, song: Song, tail: HeldTail): Promise<Piece | null | "stale"> {
+    const epoch = song.epoch;
+    let response: Response;
+
+    try {
+      response = await fetch(song.source.url, { method: "HEAD", signal: song.abort.signal });
+    } catch (error) {
+      if (song.epoch !== epoch) return "stale";
+
+      throw new EngineFailure("network", error instanceof Error ? error.message : String(error));
+    }
+
+    if (song.epoch !== epoch) return "stale";
+    const exact = parseStreamTiming((name) => response.headers.get(name));
+    const { timing, placement } = song;
+
+    if (!response.ok || exact === null || exact.estimated) {
+      throw new EngineFailure("unsupported", `The finished stream answered ${response.status}`);
+    }
+
+    // What is appended already was placed with the expected priming and rate.
+    if (
+      timing === null ||
+      placement === null ||
+      exact.primingSamples !== timing.primingSamples ||
+      exact.sampleRate !== timing.sampleRate
+    ) {
+      throw new EngineFailure("decode", "The finished stream's timing differs from its estimate");
+    }
+
+    song.timing = exact;
+    song.placement = placeTrack(exact, placement.start);
+    song.tail = null;
+
+    if (session.configuredFor === song && session.buffer !== null) {
+      session.buffer.appendWindowEnd = song.placement.end;
+    }
+
+    return releaseAll(tail);
+  }
+
   /** Appends the next chunk of `song`, and marks it complete after its last fragment. */
   async #appendNext(session: Session, song: Song): Promise<void> {
     const pending = song.pending;
     song.pending = null;
-    const piece = pending !== null && pending.bytes.length > 0 ? pending : await this.#read(song);
+
+    const piece =
+      pending !== null && pending.bytes.length > 0 ? pending : await this.#nextMedia(session, song);
 
     if (piece === "stale") return;
 

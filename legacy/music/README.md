@@ -56,6 +56,10 @@ scan starts at once; albums appear while it runs.
 - **Images:** `linux/amd64` and `linux/arm64`.
 - **Data:** everything lives in `/data`: the database, artwork, the transcode cache, generated
   secrets, and a backup taken before every upgrade.
+- **Permissions:** the media service, which reads your music with ffmpeg, runs as an unprivileged
+  user, uid and gid 1000 unless you set `PUID` and `PGID` (the NixOS module's `uid` and `gid`).
+  Your music must be readable by that user; ordinary `644` files in `755` folders are. It owns
+  `/data/media` (fixed on every start) and cannot read the secrets or the database.
 - **Try it with free music:** [`docs/demo-music.md`](docs/demo-music.md) downloads five Creative
   Commons albums.
 

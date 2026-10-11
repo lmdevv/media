@@ -13,3 +13,7 @@ IMAGE=ghcr.io/lmdevv/music:main scripts/stack-e2e.sh
 
 The suite expects a fresh container: the first test creates the admin account. On NixOS, set
 `CHROMIUM_PATH=$(which chromium)`. CI runs it on every push (`.github/workflows/ci.yml`).
+
+`first-audio.ts` is not part of the suite: it measures time to first audio, from tapping a song's
+play button to its audio advancing, for every song of one album. Run it on a fresh container so
+each play is a first play; the comment at its top has the commands.

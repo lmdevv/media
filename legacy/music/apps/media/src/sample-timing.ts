@@ -87,9 +87,39 @@ export const declaredLength = (
   return denominator === 0 ? null : Math.round((durationTs * numerator * outputRate) / denominator);
 };
 
+/**
+ * The source's length in output samples as it declares it, for a stream whose exact length is
+ * not measured yet: the stream's `duration_ts` in `time_base` units, else the container's
+ * duration in seconds, else one sample. An estimate: MP3 and Ogg containers only approximate it.
+ */
+export const estimatedLength = (
+  durationTs: number | undefined,
+  timeBase: string,
+  formatSeconds: number | undefined,
+  outputRate: number,
+): number => {
+  const base = TIME_BASE.exec(timeBase);
+  const denominator = Number(base?.[2] ?? 0);
+
+  const seconds =
+    durationTs !== undefined && denominator > 0
+      ? (durationTs * Number(base?.[1] ?? 0)) / denominator
+      : (formatSeconds ?? 0);
+
+  return Math.max(1, Math.round(seconds * outputRate));
+};
+
 /** The response headers that carry `timing`. */
 export const timingHeaders = (timing: SampleTiming): ReadonlyArray<readonly [string, string]> => [
   [StreamTimingHeader.priming, String(timing.primingSamples)],
   [StreamTimingHeader.duration, String(timing.durationSamples)],
   [StreamTimingHeader.sampleRate, String(timing.sampleRate)],
+];
+
+/** The response headers of a stream sent while it is transcoded, whose length is estimated. */
+export const estimatedTimingHeaders = (
+  timing: SampleTiming,
+): ReadonlyArray<readonly [string, string]> => [
+  ...timingHeaders(timing),
+  [StreamTimingHeader.estimated, "1"],
 ];

@@ -15,6 +15,11 @@ export interface StreamTiming {
   /** Real samples after the priming; anything later is encoder padding. */
   readonly durationSamples: number;
   readonly sampleRate: number;
+  /**
+   * True while the stream is still being transcoded: `durationSamples` is only the source's
+   * declared length, and the exact one comes from a `HEAD` request once the stream has ended.
+   */
+  readonly estimated: boolean;
 }
 
 /** How one song is placed on the timeline, in seconds. */
@@ -32,7 +37,10 @@ const WHOLE = /^\d{1,15}$/u;
 const whole = (value: string | null): number | null =>
   value !== null && WHOLE.test(value) ? Number(value) : null;
 
-/** Reads the timing headers. Returns null when any is missing or not a whole number. */
+/**
+ * Reads the timing headers. Returns null when any of the three numbers is missing or not a whole
+ * number.
+ */
 export const parseStreamTiming = (header: (name: string) => string | null): StreamTiming | null => {
   const primingSamples = whole(header(StreamTimingHeader.priming));
   const durationSamples = whole(header(StreamTimingHeader.duration));
@@ -41,8 +49,9 @@ export const parseStreamTiming = (header: (name: string) => string | null): Stre
   if (primingSamples === null || durationSamples === null || sampleRate === null) return null;
 
   if (durationSamples === 0 || sampleRate === 0) return null;
+  const estimated = header(StreamTimingHeader.estimated) === "1";
 
-  return { primingSamples, durationSamples, sampleRate };
+  return { primingSamples, durationSamples, sampleRate, estimated };
 };
 
 /** Places a song whose first real sample plays at `start` seconds. */

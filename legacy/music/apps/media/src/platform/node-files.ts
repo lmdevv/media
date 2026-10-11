@@ -8,6 +8,7 @@
  */
 import { createReadStream } from "node:fs";
 import {
+  appendFile,
   cp,
   mkdir,
   open,
@@ -50,19 +51,27 @@ export const readRange = (path: string, start: number, end: number): ReadableStr
   // `encoding` option emits only `Buffer` chunks, and `Buffer` is a `Uint8Array`.
   Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream<Uint8Array>;
 
-/** Reads up to `length` bytes from the start of a file. */
-export const readHead = async (path: string, length: number): Promise<Uint8Array> => {
+/** Reads up to `length` bytes of a file starting at byte `position`. */
+export const readAt = async (
+  path: string,
+  position: number,
+  length: number,
+): Promise<Uint8Array> => {
   const handle = await open(path, "r");
 
   try {
     const buffer = new Uint8Array(length);
-    const { bytesRead } = await handle.read(buffer, 0, length, 0);
+    const { bytesRead } = await handle.read(buffer, 0, length, position);
 
     return buffer.subarray(0, bytesRead);
   } finally {
     await handle.close();
   }
 };
+
+/** Reads up to `length` bytes from the start of a file. */
+export const readHead = (path: string, length: number): Promise<Uint8Array> =>
+  readAt(path, 0, length);
 
 /** Reads a whole file. */
 export const readWholeFile = (path: string): Promise<Uint8Array> => readFile(path);
@@ -143,11 +152,16 @@ export interface WalkedFile extends FileStat {
 export const isWithin = (root: string, path: string): boolean =>
   path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 
+/** Folders a filesystem creates for itself. They are unreadable to non-root users and never hold music. */
+const systemFolders: ReadonlySet<string> = new Set(["lost+found"]);
+
 /**
  * Recursively lists regular files under `root` whose names pass `include`, skipping entries
- * whose names start with a dot. A symlink to a file counts only when its target resolves inside
+ * whose names start with a dot and filesystem folders such as `lost+found`. A symlink to a file counts only when its target resolves inside
  * `root`, so a link cannot pull outside files into the library; symlinks to directories are never
- * followed, which also rules out loops. Unreadable entries are skipped.
+ * followed, which also rules out loops. A folder that cannot be read fails the walk instead of
+ * being skipped: skipping it would make every song under it look deleted. A folder that vanishes
+ * mid-walk is skipped.
  */
 export const walkTree = async (
   root: string,
@@ -168,7 +182,11 @@ export const walkTree = async (
   };
 
   const visit = async (directory: string, prefix: string): Promise<void> => {
-    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    const entries = await readdir(directory, { withFileTypes: true }).catch((cause: unknown) => {
+      if (directory !== root && isMissing(cause)) return [];
+
+      throw new UnreadableFolder(directory, cause);
+    });
 
     await Promise.all(
       entries.map(async (entry) => {
@@ -177,6 +195,7 @@ export const walkTree = async (
         const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
 
         if (entry.isDirectory()) {
+          if (systemFolders.has(entry.name)) return;
           await visit(absolute, relative);
 
           return;
@@ -200,8 +219,31 @@ export const walkTree = async (
   return found;
 };
 
+/** A folder in a library that the media service is not allowed to read. */
+class UnreadableFolder extends Error {
+  override readonly name = "UnreadableFolder";
+
+  readonly path: string;
+
+  constructor(path: string, cause: unknown) {
+    const code = cause instanceof Error && "code" in cause ? String(cause.code) : "error";
+
+    const reason =
+      code === "EACCES" || code === "EPERM"
+        ? `permission denied for the media service (uid ${process.getuid?.() ?? "unknown"})`
+        : code;
+
+    super(`Can't read ${path}: ${reason}`, { cause });
+    this.path = path;
+  }
+}
+
 /** True when a Node error means the path does not exist. */
 export const isMissing = (cause: unknown): boolean =>
   cause instanceof Error &&
   "code" in cause &&
   (cause.code === "ENOENT" || cause.code === "ENOTDIR");
+
+/** Appends bytes to a file, creating it when missing. */
+export const appendToFile = (path: string, data: Uint8Array): Promise<void> =>
+  appendFile(path, data);

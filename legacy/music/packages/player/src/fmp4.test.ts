@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -182,12 +182,20 @@ describe("readHeader on the media service's real output", () => {
         "flac",
         source,
       ]);
-      execFileSync("ffmpeg", fragmentedArgs(source, output, profile, "flac", 48_000), {
-        stdio: ["ignore", "ignore", "inherit"],
+
+      // File descriptor 3 receives the live copy: the same stream without an index.
+      const run = spawnSync("ffmpeg", fragmentedArgs(source, output, profile, "flac", 48_000), {
+        stdio: ["ignore", "ignore", "inherit", "pipe"],
       });
 
+      expect(run.status).toBe(0);
       const bytes = new Uint8Array(readFileSync(output));
       const header = complete(readHeader(bytes));
+      const live = complete(readHeader(new Uint8Array(run.output[3] ?? [])));
+
+      expect(live?.index).toBeNull();
+      expect(live?.codec).toBe(header?.codec);
+      expect(live?.init).toEqual(header?.init);
       const fragments = header?.index?.fragments ?? [];
       const last = fragments.at(-1);
 

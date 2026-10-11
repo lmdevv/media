@@ -23,7 +23,10 @@ const openFirstAlbum = async (page: Page): Promise<string> => {
   const name = (await card.getAttribute("aria-label")) ?? (await card.textContent()) ?? "";
   await card.click();
   await expect(page).toHaveURL(/\/albums\/[^/]+$/);
-  const title = (await page.getByRole("heading", { level: 1 }).first().textContent()) ?? name;
+  // The URL changes before the album page renders, so wait for its heading to replace the list's.
+  const heading = page.getByRole("heading", { level: 1 }).first();
+  await expect(heading).not.toHaveText("Albums");
+  const title = (await heading.textContent()) ?? name;
   expect(title.length).toBeGreaterThan(0);
 
   return title;

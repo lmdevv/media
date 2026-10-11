@@ -14,15 +14,13 @@ import packageJson from "../package.json" with { type: "json" };
 import { artPath, imageContentType, isArtHash } from "./art-store.ts";
 import { contentTypeFor, isBrowserPlayable } from "./audio-format.ts";
 import { isFragmentedProfile } from "./ffmpeg.ts";
-import { fileResponse } from "./file-response.ts";
+import { fileResponse, STREAM_CACHE_CONTROL } from "./file-response.ts";
 import * as Files from "./files.ts";
 import { MediaBackend, type TrackSource } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
-import { timingHeaders } from "./sample-timing.ts";
 import { isSignedRequestValid } from "./signed-request.ts";
+import { transcodedResponse } from "./transcoded-response.ts";
 import { Transcoder } from "./transcoder.ts";
-
-const STREAM_CACHE_CONTROL = "private, max-age=3600";
 
 const ART_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
@@ -102,32 +100,23 @@ export const makeHttpApp = Effect.gen(function* () {
       if (profile.value === "original") return yield* original;
       const transcodeProfile = profile.value;
 
-      const response = yield* transcoder
-        .transcode({
-          trackId: trackId.value,
-          profile: transcodeProfile,
-          source: absolute.value,
-          mtimeMs: source.mtimeMs,
-          codec: source.codec,
-        })
-        .pipe(
-          Effect.flatMap(({ path, timing }) =>
-            fileResponse(request, path, {
-              contentType: "audio/mp4",
-              cacheControl: STREAM_CACHE_CONTROL,
-              headers: Option.match(timing, { onNone: () => [], onSome: timingHeaders }),
-            }),
-          ),
-          Effect.catchTag("TranscodeError", (error) =>
-            // The gapless engine cannot append original bytes, so fragmented profiles never fall
-            // back; the player switches to HTML audio on the error instead.
-            !isFragmentedProfile(transcodeProfile) && isBrowserPlayable(source.codec, source.path)
-              ? Effect.logWarning("Http.transcode_fallback", error).pipe(Effect.andThen(original))
-              : Effect.logError("Http.transcode_failed", error).pipe(
-                  Effect.as(text(502, "Transcode failed")),
-                ),
-          ),
-        );
+      const response = yield* transcodedResponse(request, {
+        trackId: trackId.value,
+        profile: transcodeProfile,
+        source: absolute.value,
+        mtimeMs: source.mtimeMs,
+        codec: source.codec,
+      }).pipe(
+        Effect.catchTag("TranscodeError", (error) =>
+          // The gapless engine cannot append original bytes, so fragmented profiles never fall
+          // back; the player switches to HTML audio on the error instead.
+          !isFragmentedProfile(transcodeProfile) && isBrowserPlayable(source.codec, source.path)
+            ? Effect.logWarning("Http.transcode_fallback", error).pipe(Effect.andThen(original))
+            : Effect.logError("Http.transcode_failed", error).pipe(
+                Effect.as(text(502, "Transcode failed")),
+              ),
+        ),
+      );
 
       return response;
     },

@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Stream } from "effect";
 
 import * as Files from "./files.ts";
 import {
@@ -13,7 +13,9 @@ import {
   testConfig,
 } from "./testing/fixtures.ts";
 import * as Transcoder from "./transcoder.ts";
+import { withoutIndex } from "./testing/mp4-boxes.ts";
 import { runScoped } from "./testing/run.ts";
+import { sineSegment } from "./testing/sine.ts";
 
 const indexOfAtom = (bytes: Uint8Array, name: string): number =>
   Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).indexOf(name, 0, "latin1");
@@ -22,6 +24,9 @@ const transcoderWith = (dataDir: string, cacheMaxBytes: number) =>
   Layer.build(Transcoder.layer.pipe(Layer.provide(testConfig(dataDir, cacheMaxBytes)))).pipe(
     Effect.flatMap((context) => Transcoder.Transcoder.pipe(Effect.provideContext(context))),
   );
+
+const collect = (bytes: Stream.Stream<Uint8Array, Transcoder.TranscodeError>) =>
+  Stream.runCollect(bytes).pipe(Effect.map((chunks) => Buffer.concat(chunks)));
 
 describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
   it("writes fast-start AAC that ffprobe can read and reuses it", () =>
@@ -113,6 +118,131 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect((yield* Files.listNames(join(dataDir, "cache", "aac-320"))).toSorted()).toEqual([
           "a-1.m4a",
           "c-1.m4a",
+        ]);
+      }),
+    ));
+
+  it("streams a fragmented transcode while ffmpeg writes it and shares it between readers", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const scratch = yield* temporaryDirectory("sine");
+        // Four minutes: long enough that ffmpeg is still busy when the first bytes are out.
+        const source = yield* sineSegment(scratch, "long", "mp3", 0, 48_000 * 240);
+        const dataDir = yield* temporaryDirectory("data");
+        const transcoder = yield* transcoderWith(dataDir, 512 * 1024 * 1024);
+        const cacheDir = join(dataDir, "cache", "fmp4-aac");
+
+        const input = {
+          trackId: TrackId.make("long"),
+          profile: "fmp4-aac" as const,
+          source,
+          mtimeMs: 1,
+          codec: "mp3",
+        };
+
+        const [live, finished] = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const [first, second] = yield* Effect.all(
+              [transcoder.open(input), transcoder.open(input)],
+              { concurrency: 2 },
+            );
+
+            if (!Transcoder.Opened.$is("Live")(first) || !Transcoder.Opened.$is("Live")(second)) {
+              throw new Error("Expected live transcodes");
+            }
+
+            expect(
+              Option.isNone(yield* Effect.option(Files.statPath(join(cacheDir, "long-1.m4a")))),
+            ).toBe(true);
+
+            const [one, two] = yield* Effect.all([collect(first.bytes), collect(second.bytes)], {
+              concurrency: 2,
+            });
+
+            // `equals`, because `toEqual` diffs megabytes byte by byte.
+            expect(two.equals(one)).toBe(true);
+
+            return [{ bytes: one, timing: first.timing }, yield* first.finished] as const;
+          }),
+        );
+
+        // The stream is the finished file without its index, byte for byte.
+        expect(live.bytes.equals(withoutIndex(yield* Files.readWholeFile(finished.path)))).toBe(
+          true,
+        );
+
+        // Priming and rate are exact up front; the length is the source's estimate.
+        const measured = Option.getOrThrow(finished.timing);
+
+        expect(live.timing.primingSamples).toBe(measured.primingSamples);
+        expect(live.timing.sampleRate).toBe(measured.sampleRate);
+        expect(Math.abs(live.timing.durationSamples - measured.durationSamples)).toBeLessThan(
+          measured.sampleRate / 10,
+        );
+
+        // Once its readers are done, the live copy is gone and a new request finds the file.
+        expect((yield* Files.listNames(cacheDir)).toSorted()).toEqual([
+          "long-1.m4a",
+          "long-1.m4a.json",
+        ]);
+
+        const again = yield* Effect.scoped(transcoder.open(input));
+
+        expect(Transcoder.Opened.$is("Finished")(again)).toBe(true);
+      }),
+    ));
+
+  it("stops a transcode a second after its last reader leaves, and starts over later", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const scratch = yield* temporaryDirectory("sine");
+        const source = yield* sineSegment(scratch, "long", "mp3", 0, 48_000 * 240);
+        const dataDir = yield* temporaryDirectory("data");
+        const transcoder = yield* transcoderWith(dataDir, 512 * 1024 * 1024);
+        const cacheDir = join(dataDir, "cache", "fmp4-aac");
+
+        const input = {
+          trackId: TrackId.make("left"),
+          profile: "fmp4-aac" as const,
+          source,
+          mtimeMs: 1,
+          codec: "mp3",
+        };
+
+        const firstChunk = Effect.scoped(
+          transcoder
+            .open(input)
+            .pipe(
+              Effect.flatMap((opened) =>
+                Transcoder.Opened.$is("Live")(opened)
+                  ? Stream.runCollect(Stream.take(opened.bytes, 1))
+                  : Effect.succeed([]),
+              ),
+            ),
+        );
+
+        const liveFiles = Files.listNames(cacheDir).pipe(
+          Effect.map((names) => names.filter((name) => name.endsWith(".live.part"))),
+        );
+
+        expect(yield* firstChunk).toHaveLength(1);
+        const running = yield* liveFiles;
+
+        // Back within the grace period: the same run (with the same live file) goes on.
+        expect(running).toHaveLength(1);
+        expect(yield* firstChunk).toHaveLength(1);
+        expect(yield* liveFiles).toEqual(running);
+
+        // Gone for longer: ffmpeg stops and leaves nothing behind.
+        yield* Effect.sleep("1500 millis");
+        expect(yield* Files.listNames(cacheDir)).toEqual([]);
+
+        const finished = yield* transcoder.transcode(input);
+
+        expect(Option.isSome(finished.timing)).toBe(true);
+        expect((yield* Files.listNames(cacheDir)).toSorted()).toEqual([
+          "left-1.m4a",
+          "left-1.m4a.json",
         ]);
       }),
     ));

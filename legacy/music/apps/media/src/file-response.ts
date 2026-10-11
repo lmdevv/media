@@ -7,6 +7,9 @@ import { Effect } from "effect";
 import { ByteRange, parseByteRange } from "./byte-range.ts";
 import * as Files from "./files.ts";
 
+/** `Cache-Control` for audio streams: private to the listener, reusable for an hour. */
+export const STREAM_CACHE_CONTROL = "private, max-age=3600";
+
 /** How a file response describes its body. */
 export interface FileResponseOptions {
   readonly contentType: string;
