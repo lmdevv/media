@@ -55,7 +55,18 @@ in
     openFirewall = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Open the port in the firewall.";
+      description = "Open the port in the firewall and listen on all interfaces.";
+    };
+
+    listenAddress = lib.mkOption {
+      type = lib.types.str;
+      default = if cfg.openFirewall then "0.0.0.0" else "127.0.0.1";
+      defaultText = lib.literalExpression ''if config.services.music.openFirewall then "0.0.0.0" else "127.0.0.1"'';
+      description = ''
+        Host address the port is published on. Container port publishing bypasses the NixOS
+        firewall, so this, not the firewall, decides who can connect. The default keeps the
+        server local (for a reverse proxy or Tailscale serve) unless openFirewall is set.
+      '';
     };
   };
 
@@ -64,7 +75,7 @@ in
 
     virtualisation.oci-containers.containers.music = {
       inherit (cfg) image;
-      ports = [ "${toString cfg.port}:8080" ];
+      ports = [ "${cfg.listenAddress}:${toString cfg.port}:8080" ];
       environment.PUBLIC_URL = cfg.publicUrl;
       volumes = [
         "${cfg.dataDir}:/data"
