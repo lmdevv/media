@@ -27,13 +27,17 @@ web_port="${WEB_PORT:-3001}"
 container="music-convex-${name}"
 
 if ! docker inspect "$container" >/dev/null 2>&1; then
+  # The backend fetches its own OIDC discovery document from CONVEX_SITE_ORIGIN to verify auth
+  # tokens, so it must listen inside the container on the same ports the host uses.
   docker run -d --name "$container" \
-    -p "127.0.0.1:${port}:3210" -p "127.0.0.1:${site_port}:3211" \
+    -p "127.0.0.1:${port}:${port}" -p "127.0.0.1:${site_port}:${site_port}" \
     -v "${container}-data:/convex/data" \
     -e CONVEX_CLOUD_ORIGIN="http://127.0.0.1:${port}" \
     -e CONVEX_SITE_ORIGIN="http://127.0.0.1:${site_port}" \
     -e DISABLE_BEACON=1 \
-    "$image" >/dev/null
+    --entrypoint bash "$image" -c \
+    "sed -e 's/--port 3210/--port ${port}/' -e 's/--site-proxy-port 3211/--site-proxy-port ${site_port}/' run_backend.sh >/tmp/run_backend.sh && exec bash /tmp/run_backend.sh" \
+    >/dev/null
 elif [[ "$(docker inspect -f '{{.State.Running}}' "$container")" != "true" ]]; then
   docker start "$container" >/dev/null
 fi

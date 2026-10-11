@@ -7,6 +7,9 @@
       "ignoreDependencies": ["@effect/vitest", "effect"]
     },
     "apps/web": {},
+    "apps/cli": {
+      "entry": ["src/main.ts", "scripts/*.ts"]
+    },
     "packages/backend": {
       "entry": ["convex/*.ts", "scripts/*.ts"],
       "typescript": {

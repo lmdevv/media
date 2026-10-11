@@ -2,6 +2,35 @@
   "name": "@music/cli",
   "version": "0.0.0",
   "private": true,
-  "description": "CLI that exposes every command as JSON for users and agents. Built in milestone 6.",
-  "type": "module"
+  "description": "The music command: every registry command for people and agents.",
+  "license": "MIT",
+  "bin": {
+    "music": "dist/music.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.ts",
+    "dev": "node scripts/build.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root ../.. apps/cli",
+    "skill:reference": "node scripts/skill-reference.ts"
+  },
+  "devDependencies": {
+    "@music/commands": "workspace:*",
+    "@music/config": "workspace:*",
+    "@music/sdk": "workspace:*",
+    "@types/node": "catalog:",
+    "convex": "catalog:",
+    "effect": "catalog:",
+    "esbuild": "0.27.0",
+    "fast-check": "4.10.2",
+    "typescript": "catalog:",
+    "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }
