@@ -1,7 +1,17 @@
 /**
  * The audio output seam. The provider decides what plays; an engine only turns URLs into sound.
- * Engines: MSE gapless (fragmented MP4 appended into one SourceBuffer) and an HTML audio
- * fallback for browsers that fail the MSE checks.
+ *
+ * Engines:
+ * - `HtmlAudioEngine` (`html-audio-engine.ts`): two `HTMLAudioElement`s, the next one preloaded and
+ *   started from the `ended` event. Works everywhere; leaves a small gap between songs.
+ * - Planned `MseEngine`: fragmented MP4 appended into one `SourceBuffer` with `timestampOffset`
+ *   and encoder-delay trimming for sample-accurate gapless playback. It slots in behind this same
+ *   interface: `load` resets the `MediaSource`, `preload` appends the next song's fragments after
+ *   the current one, and the engine emits `advanced` when `currentTime` crosses the boundary. The
+ *   provider picks an engine once at mount, so adding it touches only engine selection.
+ *
+ * Engines never reject or throw for expected failures (network, decoding, autoplay policy); they
+ * emit an `error` event with a `reason` and resolve.
  */
 
 /** One playable source: a signed stream URL plus what the engine needs to schedule it. */
@@ -10,6 +20,16 @@ export interface EngineSource {
   readonly url: string;
   readonly durationMs: number;
 }
+
+/**
+ * Why an engine failed:
+ * - `network`: the stream could not be fetched (offline, HTTP error, media service down).
+ * - `decode`: the bytes arrived but could not be decoded.
+ * - `unsupported`: the browser rejected the source; it may be an HTTP error page or an
+ *   unplayable format, so check the media service before blaming the format.
+ * - `autoplay-blocked`: the browser refused to start audio without a user gesture.
+ */
+export type EngineErrorReason = "network" | "decode" | "unsupported" | "autoplay-blocked";
 
 export type EngineEvent =
   | { readonly type: "playing" }
@@ -20,7 +40,7 @@ export type EngineEvent =
   | { readonly type: "advanced"; readonly key: string }
   /** The current source finished and nothing was preloaded. */
   | { readonly type: "ended" }
-  | { readonly type: "error"; readonly message: string };
+  | { readonly type: "error"; readonly message: string; readonly reason: EngineErrorReason };
 
 export interface PlayerEngine {
   /** Replaces whatever is loaded and starts at `startMs`. Resolves once playback can begin. */

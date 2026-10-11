@@ -6,20 +6,33 @@
   "type": "module",
   "exports": {
     "./engine": "./src/engine.ts",
-    "./react": "./src/react.tsx"
+    "./react": "./src/react.tsx",
+    "./stream-quality": "./src/stream-quality.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p harness",
+    "test:browser": "playwright test",
+    "harness": "node harness/media-stub.ts & vite --config harness/vite.config.ts"
   },
   "dependencies": {
     "@music/commands": "workspace:*",
-    "@music/sdk": "workspace:*"
+    "@music/sdk": "workspace:*",
+    "convex": "catalog:",
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@music/config": "workspace:*",
+    "@playwright/test": "1.64.0",
+    "@types/node": "catalog:",
     "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "^6.1.2",
+    "fast-check": "^4.10.2",
     "react": "catalog:",
-    "typescript": "catalog:"
+    "react-dom": "catalog:",
+    "typescript": "catalog:",
+    "vite": "^8.3.4",
+    "vitest": "5.0.3"
   },
   "peerDependencies": {
     "react": "catalog:"

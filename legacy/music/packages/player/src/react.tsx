@@ -1,16 +1,33 @@
 /**
  * The player contract the web app builds on. `PlayerProvider` mirrors the user's Convex playback
  * session, plays audio when this browser is the active device, and reports position back.
- *
- * This file currently holds a remote-control-only implementation: it reads and changes the
- * session but produces no sound. The audio implementation replaces the internals and keeps
- * this contract.
  */
 import type { DeviceId, TrackId } from "@music/commands/ids";
 import type { Device, RepeatMode, Track } from "@music/commands/models";
-import { useRead, useRun } from "@music/sdk/react";
-import { createContext, useContext, useMemo } from "react";
+import { makeMusicClient } from "@music/sdk/client";
+import { useRead } from "@music/sdk/react";
+import { useConvex } from "convex/react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { ReactNode } from "react";
+
+import { describeDevice, loadDeviceId, readItem, writeItem } from "./device-identity";
+import type { PlayerEngine } from "./engine";
+import { HtmlAudioEngine } from "./html-audio-engine";
+import { PlaybackController } from "./playback-controller";
+import { parseStreamQuality } from "./stream-quality";
+import type { StreamQuality } from "./stream-quality";
+
+/** How often `usePlayerPosition` updates. */
+const POSITION_INTERVAL_MS = 250;
+
+const QUALITY_KEY = "music.streamQuality";
 
 export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "buffering" | "error";
 
@@ -32,9 +49,18 @@ export interface PlayerState {
   /** False when the media service cannot be reached; browsing still works. */
   readonly mediaOnline: boolean;
   readonly error: string | null;
+  /** The streaming quality setting, saved per browser. */
+  readonly quality: StreamQuality;
+  /**
+   * True when the browser refused to start audio without a tap, usually right after playback
+   * moved here from another device. `error` then reads "Tap play to start here"; `togglePlay`
+   * starts it.
+   */
+  readonly autoplayBlocked: boolean;
 }
 
 export interface PlayerActions {
+  /** Replaces the queue and plays it on this browser. */
   readonly playTracks: (trackIds: ReadonlyArray<TrackId>, index?: number) => Promise<void>;
   readonly togglePlay: () => Promise<void>;
   readonly next: () => Promise<void>;
@@ -49,6 +75,8 @@ export interface PlayerActions {
   /** Moves playback to this browser. */
   readonly playHere: () => Promise<void>;
   readonly transferTo: (deviceId: DeviceId) => Promise<void>;
+  /** Changes the streaming quality. It applies from the next song. */
+  readonly setQuality: (quality: StreamQuality) => void;
 }
 
 export type Player = PlayerState & PlayerActions;
@@ -57,7 +85,10 @@ const PlayerContext = createContext<Player | null>(null);
 
 const PositionContext = createContext<number>(0);
 
-/** The player state and actions. Must be inside `PlayerProvider`. */
+/**
+ * The player state and actions. Must be inside `PlayerProvider`. Actions never reject: server
+ * failures show up in `error`.
+ */
 export const usePlayer = (): Player => {
   const player = useContext(PlayerContext);
 
@@ -69,82 +100,146 @@ export const usePlayer = (): Player => {
 /** The live position in milliseconds. Separate from `usePlayer` because it changes often. */
 export const usePlayerPosition = (): number => useContext(PositionContext);
 
-export function PlayerProvider({ children }: { readonly children: ReactNode }) {
+const defaultEngine = (): PlayerEngine => new HtmlAudioEngine();
+
+/** Builds the controller from browser globals. Runs once per provider mount. */
+const createController = (
+  convex: ReturnType<typeof useConvex>,
+  engine: () => PlayerEngine,
+): PlaybackController => {
+  const storage = "localStorage" in globalThis ? localStorage : null;
+  const probe = document.createElement("audio");
+
+  return new PlaybackController(makeMusicClient(convex), engine(), {
+    deviceId: loadDeviceId(storage, () => crypto.randomUUID()),
+    device: describeDevice(navigator.userAgent, navigator.maxTouchPoints),
+    canPlay: (mimeType) => probe.canPlayType(mimeType) !== "",
+    now: Date.now,
+    quality: parseStreamQuality(readItem(storage, QUALITY_KEY)),
+    saveQuality: (quality) => {
+      writeItem(storage, QUALITY_KEY, quality);
+    },
+  });
+};
+
+/** Re-renders only its position consumers, about four times a second. */
+function PositionTicker({
+  controller,
+  children,
+}: {
+  readonly controller: PlaybackController;
+  readonly children: ReactNode;
+}) {
+  const [position, setPosition] = useState(() => Math.round(controller.positionMs()));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setPosition(Math.round(controller.positionMs()));
+    }, POSITION_INTERVAL_MS);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [controller]);
+
+  return <PositionContext.Provider value={position}>{children}</PositionContext.Provider>;
+}
+
+/**
+ * Provides `usePlayer` and `usePlayerPosition`. Place it inside the Convex provider of a signed-in
+ * user. It registers this browser as a device, plays audio while this browser is the session's
+ * active device, and stops the moment another device takes over.
+ */
+export function PlayerProvider({
+  children,
+  engine = defaultEngine,
+}: {
+  readonly children: ReactNode;
+  /**
+   * Builds the audio engine once per mount. Defaults to `HtmlAudioEngine`; this is where an MSE
+   * gapless engine plugs in. Pass a stable function.
+   */
+  readonly engine?: () => PlayerEngine;
+}) {
+  const convex = useConvex();
+  const controller = useMemo(() => createController(convex, engine), [convex, engine]);
   const state = useRead("playback.state", {});
-  const play = useRun("playback.play");
-  const pause = useRun("playback.pause");
-  const resume = useRun("playback.resume");
-  const next = useRun("playback.next");
-  const previous = useRun("playback.previous");
-  const seek = useRun("playback.seek");
-  const jump = useRun("playback.jump");
-  const shuffle = useRun("playback.shuffle");
-  const repeat = useRun("playback.repeat");
-  const volume = useRun("playback.volume");
-  const queueAdd = useRun("queue.add");
-  const queueRemove = useRun("queue.remove");
-  const transfer = useRun("playback.transfer");
+  const local = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+
+  useEffect(() => controller.start(), [controller]);
+
+  useEffect(() => {
+    if (state !== undefined) controller.sync(state);
+  }, [controller, state]);
 
   const player = useMemo((): Player => {
     const track = state?.queue[state.index] ?? null;
+    const isThisDevice = state?.activeDevice?.id === controller.deviceId;
+    const playing = local.pendingPlaying ?? state?.playing ?? false;
+    const client = makeMusicClient(convex);
 
-    const done = async (promise: Promise<unknown>): Promise<void> => {
-      await promise;
+    const localStatus = (): PlayerStatus => {
+      if (track === null) return "idle";
+
+      return local.engineStatus === "idle" ? "loading" : local.engineStatus;
+    };
+
+    const remoteStatus = (): PlayerStatus => {
+      if (track === null) return "idle";
+
+      return playing ? "playing" : "paused";
+    };
+
+    const status = (): PlayerStatus => {
+      if (state === undefined) return "loading";
+
+      return isThisDevice ? localStatus() : remoteStatus();
     };
 
     return {
-      status:
-        state === undefined ? "loading" : state.playing ? "playing" : track ? "paused" : "idle",
+      status: status(),
       track,
       queue: state?.queue ?? [],
       index: state?.index ?? 0,
       durationMs: track?.durationMs ?? 0,
       shuffle: state?.shuffle ?? false,
       repeat: state?.repeat ?? "off",
-      volume: state?.volume ?? 1,
-      deviceId: null,
+      volume: local.pendingVolume ?? state?.volume ?? 1,
+      deviceId: controller.deviceId,
       activeDevice: state?.activeDevice ?? null,
-      isThisDevice: false,
-      mediaOnline: true,
-      error: null,
-      playTracks: (ids, index) =>
-        done(play(index === undefined ? { trackIds: ids } : { trackIds: ids, index })),
-      togglePlay: () => done(state?.playing === true ? pause({}) : resume({})),
-      next: () => done(next({})),
-      previous: () => done(previous({})),
-      seek: (positionMs) => done(seek({ positionMs })),
-      jump: (index) => done(jump({ index })),
-      setShuffle: (on) => done(shuffle({ on })),
-      setRepeat: (mode) => done(repeat({ mode })),
-      setVolume: (value) => done(volume({ volume: value })),
+      isThisDevice,
+      mediaOnline: local.mediaOnline,
+      error: local.error,
+      quality: local.quality,
+      autoplayBlocked: local.autoplayBlocked,
+      playTracks: (ids, index) => controller.playTracks(ids, index),
+      togglePlay: () => controller.togglePlay(),
+      next: () => controller.capture(client.run("playback.next", {})),
+      previous: () => controller.capture(client.run("playback.previous", {})),
+      seek: (positionMs) => controller.seek(positionMs),
+      jump: (index) => controller.capture(client.run("playback.jump", { index })),
+      setShuffle: (on) => controller.capture(client.run("playback.shuffle", { on })),
+      setRepeat: (mode) => controller.capture(client.run("playback.repeat", { mode })),
+      setVolume: (volume) => controller.setVolume(volume),
       addToQueue: (ids, toFront) =>
-        done(
-          queueAdd(toFront === undefined ? { trackIds: ids } : { trackIds: ids, next: toFront }),
+        controller.capture(
+          client.run(
+            "queue.add",
+            toFront === undefined ? { trackIds: ids } : { trackIds: ids, next: toFront },
+          ),
         ),
-      removeFromQueue: (index) => done(queueRemove({ index })),
-      playHere: async () => {},
-      transferTo: (deviceId) => done(transfer({ deviceId })),
+      removeFromQueue: (index) => controller.capture(client.run("queue.remove", { index })),
+      playHere: () => controller.playHere(),
+      transferTo: (deviceId) => controller.transferTo(deviceId),
+      setQuality: (quality) => {
+        controller.setQuality(quality);
+      },
     };
-  }, [
-    state,
-    play,
-    pause,
-    resume,
-    next,
-    previous,
-    seek,
-    jump,
-    shuffle,
-    repeat,
-    volume,
-    queueAdd,
-    queueRemove,
-    transfer,
-  ]);
+  }, [state, local, controller, convex]);
 
   return (
     <PlayerContext.Provider value={player}>
-      <PositionContext.Provider value={state?.positionMs ?? 0}>{children}</PositionContext.Provider>
+      <PositionTicker controller={controller}>{children}</PositionTicker>
     </PlayerContext.Provider>
   );
 }

@@ -341,19 +341,49 @@ importers:
       '@music/sdk':
         specifier: workspace:*
         version: link:../sdk
+      convex:
+        specifier: 'catalog:'
+        version: 1.46.0(react@19.3.0)
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.2
     devDependencies:
       '@music/config':
         specifier: workspace:*
         version: link:../config
+      '@playwright/test':
+        specifier: 1.64.0
+        version: 1.64.0
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.5
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.3.0(@types/react@19.3.0)
+      '@vitejs/plugin-react':
+        specifier: ^6.1.2
+        version: 6.1.2(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(yaml@2.9.1))
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
       react:
         specifier: 'catalog:'
         version: 19.3.0
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.0(react@19.3.0)
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
+      vite:
+        specifier: ^8.3.4
+        version: 8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(yaml@2.9.1)
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(yaml@2.9.1))
 
   packages/sdk:
     dependencies:

@@ -19,6 +19,9 @@
     "packages/ui": {},
     "packages/commands": {},
     "packages/sdk": {},
-    "packages/player": {}
+    "packages/player": {
+      "entry": ["harness/*.{ts,tsx}", "browser/*.spec.ts"],
+      "ignoreBinaries": ["ffmpeg"]
+    }
   }
 }
