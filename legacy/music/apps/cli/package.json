@@ -1,6 +1,6 @@
 {
   "name": "@music/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "The music command: every registry command for people and agents.",
   "license": "MIT",

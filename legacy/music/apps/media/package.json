@@ -1,6 +1,6 @@
 {
   "name": "@music/media",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Media service: scan, watch, stream, and transcode the on-disk library.",
   "type": "module",

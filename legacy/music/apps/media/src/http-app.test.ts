@@ -5,6 +5,7 @@ import { signResource } from "@music/commands/signed-url";
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Ref } from "effect";
 
+import packageJson from "../package.json" with { type: "json" };
 import * as Files from "./files.ts";
 import { makeHttpApp } from "./http-app.ts";
 import { MediaBackend, type JobProgress, type ScannedTrack } from "./media-backend.ts";
@@ -117,7 +118,7 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           ok: true,
           convex: true,
           ffmpeg: true,
-          version: "0.0.0",
+          version: packageJson.version,
         });
       }),
     ));
