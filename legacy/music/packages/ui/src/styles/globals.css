@@ -34,8 +34,8 @@
   --color-dark-danger: #ff6369;
   --color-dark-art: #3a2a24;
   --color-dark-canvas: #000000;
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, monospace;
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
   --text-xs: 12px;
   --text-sm: 13px;
   --text-base: 14px;
@@ -126,10 +126,19 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply font-sans bg-background text-foreground;
-  }
   html {
-    @apply font-sans;
+    @apply font-sans antialiased;
+    font-synthesis: none;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  /* Lucide icons draw at the Paper stroke weight; transport glyphs set their own fill. */
+  .lucide {
+    stroke-width: 1.75;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
   }
 }

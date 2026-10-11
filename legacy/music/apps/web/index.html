@@ -2,8 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
     <title>[music]</title>
+    <script src="/config.js"></script>
+    <script>
+      // Apply the saved or system theme before first paint, so dark mode never flashes light.
+      try {
+        const saved = localStorage.getItem("music-theme");
+        const dark =
+          saved === "dark" ||
+          ((saved === null || saved === "system") &&
+            matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.add(dark ? "dark" : "light");
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+      } catch {}
+    </script>
   </head>
 
   <body>

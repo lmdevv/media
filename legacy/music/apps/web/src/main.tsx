@@ -1,22 +1,34 @@
-import { RouterProvider, createRouter } from "@tanstack/react-router";
-import { ConvexReactClient } from "convex/react";
-import { ConvexProvider } from "convex/react";
-import ReactDOM from "react-dom/client";
+import "@fontsource-variable/inter/index.css";
+import "@fontsource-variable/geist-mono/index.css";
 
-import Loader from "./components/loader";
-import { ENV } from "./env";
+import { ConvexAuthProvider } from "@convex-dev/auth/react";
+import {
+  RouterProvider,
+  createRouter,
+  parseSearchWith,
+  stringifySearchWith,
+} from "@tanstack/react-router";
+import { ConvexReactClient } from "convex/react";
+import { StrictMode } from "react";
+import type { ReactNode } from "react";
+import { createRoot } from "react-dom/client";
+
+import { resolveConvexUrl } from "./config";
 import { routeTree } from "./routeTree.gen";
 
-const convex = new ConvexReactClient(ENV.VITE_CONVEX_URL);
+const convex = new ConvexReactClient(resolveConvexUrl());
+
+const keepString = (value: string): string => value;
 
 const router = createRouter({
   routeTree,
   defaultPreload: "intent",
   scrollRestoration: true,
-  defaultPendingComponent: () => <Loader />,
-  context: {},
-  Wrap: function WrapComponent({ children }: { children: React.ReactNode }) {
-    return <ConvexProvider client={convex}>{children}</ConvexProvider>;
+  // Search values stay plain strings; each route parses its own with a schema.
+  parseSearch: parseSearchWith(keepString),
+  stringifySearch: stringifySearchWith(keepString),
+  Wrap: function Providers({ children }: { readonly children: ReactNode }) {
+    return <ConvexAuthProvider client={convex}>{children}</ConvexAuthProvider>;
   },
 });
 
@@ -28,11 +40,10 @@ declare module "@tanstack/react-router" {
 
 const rootElement = document.getElementById("app");
 
-if (!rootElement) {
-  throw new Error("Root element not found");
-}
+if (rootElement === null) throw new Error("The #app element is missing from index.html");
 
-if (!rootElement.innerHTML) {
-  const root = ReactDOM.createRoot(rootElement);
-  root.render(<RouterProvider router={router} />);
-}
+createRoot(rootElement).render(
+  <StrictMode>
+    <RouterProvider router={router} />
+  </StrictMode>,
+);

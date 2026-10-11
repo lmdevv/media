@@ -10,4 +10,10 @@ crons.interval(
   internal.maintenance.releaseExpiredLeases,
 );
 
+crons.interval(
+  "pause sessions on offline devices",
+  { minutes: 1 },
+  internal.maintenance.pauseOrphanedSessions,
+);
+
 export default crons;

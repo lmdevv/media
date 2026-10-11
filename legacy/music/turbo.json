@@ -19,7 +19,8 @@
       "dependsOn": ["^typecheck"]
     },
     "test:e2e": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": ["E2E_CONVEX_URL", "E2E_PORT", "PLAYWRIGHT_*"]
     }
   },
   "globalEnv": ["CI", "NODE_ENV", "VITE_CONVEX_URL"],

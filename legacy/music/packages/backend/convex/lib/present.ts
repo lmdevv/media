@@ -21,7 +21,8 @@ type ArtistOut = (typeof ArtistCard)["Encoded"];
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-const DEVICE_ONLINE_MS = 75_000;
+/** A device that has not sent a heartbeat for this long is offline. */
+export const DEVICE_ONLINE_MS = 75_000;
 
 /**
  * Artwork URLs expire on weekly boundaries so the same cover keeps the same URL for a week and

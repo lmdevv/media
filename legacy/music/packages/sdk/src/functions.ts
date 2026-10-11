@@ -29,3 +29,21 @@ export const setupStatus = makeFunctionReference<
   Record<string, never>,
   { hasUsers: boolean; hasLibraries: boolean }
 >("setup:status");
+
+/** Details an invite link reveals before sign-up. Times are milliseconds since the epoch. */
+export interface InviteDetails {
+  readonly email: string | null;
+  readonly inviterName: string | null;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+}
+
+/** What an invite code currently allows: `open` can sign up; the others explain why not. */
+export type InviteLookup =
+  | { readonly state: "invalid" }
+  | ({ readonly state: "open" | "expired" | "used" } & InviteDetails);
+
+/** `setup:invite`: public lookup of an invite code for the accept-invite screen. */
+export const inviteLookup = makeFunctionReference<"query", { code: string }, InviteLookup>(
+  "setup:invite",
+);

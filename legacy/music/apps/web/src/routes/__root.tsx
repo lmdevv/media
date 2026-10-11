@@ -1,52 +1,38 @@
 import { Toaster } from "@music/ui/components/sonner";
-import { HeadContent, Outlet, createRootRouteWithContext } from "@tanstack/react-router";
-import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
+import { TooltipProvider } from "@music/ui/components/tooltip";
+import { HeadContent, Outlet, createRootRoute } from "@tanstack/react-router";
+import { ThemeProvider } from "next-themes";
 
-import Header from "@/components/header";
-import { ThemeProvider } from "@/components/theme-provider";
+import { RouteError } from "@/components/route-error";
 
 import "../index.css";
 
-export interface RouterAppContext {}
-
-export const Route = createRootRouteWithContext<RouterAppContext>()({
+export const Route = createRootRoute({
   component: RootComponent,
+  errorComponent: RouteError,
   head: () => ({
     meta: [
-      {
-        title: "[music]",
-      },
-      {
-        name: "description",
-        content: "Self-hosted music for people and agents",
-      },
-    ],
-    links: [
-      {
-        rel: "icon",
-        href: "/favicon.ico",
-      },
+      { title: "[music]" },
+      { name: "description", content: "Your own music library, streamed from your server" },
     ],
   }),
 });
 
 function RootComponent() {
   return (
-    <>
-      <HeadContent />
-      <ThemeProvider
-        attribute="class"
-        defaultTheme="dark"
-        disableTransitionOnChange
-        storageKey="vite-ui-theme"
-      >
-        <div className="grid grid-rows-[auto_1fr] h-svh">
-          <Header />
-          <Outlet />
-        </div>
-        <Toaster richColors />
-      </ThemeProvider>
-      <TanStackRouterDevtools position="bottom-left" />
-    </>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      storageKey="music-theme"
+      // React never runs scripts it renders on the client; index.html sets the theme before paint.
+      scriptProps={{ type: "application/json" }}
+    >
+      <TooltipProvider>
+        <HeadContent />
+        <Outlet />
+        <Toaster />
+      </TooltipProvider>
+    </ThemeProvider>
   );
 }

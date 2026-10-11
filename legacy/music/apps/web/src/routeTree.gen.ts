@@ -9,50 +9,527 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as SetupRouteImport } from './routes/setup'
+import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppLibraryRouteImport } from './routes/_app/library'
+import { Route as AppLikedRouteImport } from './routes/_app/liked'
+import { Route as AppSearchRouteImport } from './routes/_app/search'
+import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppSongsRouteImport } from './routes/_app/songs'
+import { Route as InviteCodeRouteImport } from './routes/invite.$code'
+import { Route as AppAlbumsIndexRouteImport } from './routes/_app/albums.index'
+import { Route as AppAlbumsAlbumIdRouteImport } from './routes/_app/albums.$albumId'
+import { Route as AppArtistsIndexRouteImport } from './routes/_app/artists.index'
+import { Route as AppArtistsArtistIdRouteImport } from './routes/_app/artists.$artistId'
+import { Route as AppPlaylistsIndexRouteImport } from './routes/_app/playlists.index'
+import { Route as AppPlaylistsPlaylistIdRouteImport } from './routes/_app/playlists.$playlistId'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings.index'
+import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings.account'
+import { Route as AppSettingsJobsRouteImport } from './routes/_app/settings.jobs'
+import { Route as AppSettingsKeysRouteImport } from './routes/_app/settings.keys'
+import { Route as AppSettingsLibrariesRouteImport } from './routes/_app/settings.libraries'
+import { Route as AppSettingsPeopleRouteImport } from './routes/_app/settings.people'
+import { Route as AppSettingsPlaybackRouteImport } from './routes/_app/settings.playback'
 
-const IndexRoute = IndexRouteImport.update({
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLibraryRoute = AppLibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLikedRoute = AppLikedRouteImport.update({
+  id: '/liked',
+  path: '/liked',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSearchRoute = AppSearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSongsRoute = AppSongsRouteImport.update({
+  id: '/songs',
+  path: '/songs',
+  getParentRoute: () => AppRoute,
+} as any)
+const InviteCodeRoute = InviteCodeRouteImport.update({
+  id: '/invite/$code',
+  path: '/invite/$code',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppAlbumsIndexRoute = AppAlbumsIndexRouteImport.update({
+  id: '/albums/',
+  path: '/albums/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAlbumsAlbumIdRoute = AppAlbumsAlbumIdRouteImport.update({
+  id: '/albums/$albumId',
+  path: '/albums/$albumId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppArtistsIndexRoute = AppArtistsIndexRouteImport.update({
+  id: '/artists/',
+  path: '/artists/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppArtistsArtistIdRoute = AppArtistsArtistIdRouteImport.update({
+  id: '/artists/$artistId',
+  path: '/artists/$artistId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPlaylistsIndexRoute = AppPlaylistsIndexRouteImport.update({
+  id: '/playlists/',
+  path: '/playlists/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPlaylistsPlaylistIdRoute = AppPlaylistsPlaylistIdRouteImport.update({
+  id: '/playlists/$playlistId',
+  path: '/playlists/$playlistId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsAccountRoute = AppSettingsAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsJobsRoute = AppSettingsJobsRouteImport.update({
+  id: '/jobs',
+  path: '/jobs',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsKeysRoute = AppSettingsKeysRouteImport.update({
+  id: '/keys',
+  path: '/keys',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsLibrariesRoute = AppSettingsLibrariesRouteImport.update({
+  id: '/libraries',
+  path: '/libraries',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsPeopleRoute = AppSettingsPeopleRouteImport.update({
+  id: '/people',
+  path: '/people',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsPlaybackRoute = AppSettingsPlaybackRouteImport.update({
+  id: '/playback',
+  path: '/playback',
+  getParentRoute: () => AppSettingsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
+  '/': typeof AppIndexRoute
+  '/setup': typeof SetupRoute
+  '/sign-in': typeof SignInRoute
+  '/library': typeof AppLibraryRoute
+  '/liked': typeof AppLikedRoute
+  '/search': typeof AppSearchRoute
+  '/settings': typeof AppSettingsRouteWithChildren
+  '/songs': typeof AppSongsRoute
+  '/invite/$code': typeof InviteCodeRoute
+  '/albums/$albumId': typeof AppAlbumsAlbumIdRoute
+  '/artists/$artistId': typeof AppArtistsArtistIdRoute
+  '/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
+  '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/jobs': typeof AppSettingsJobsRoute
+  '/settings/keys': typeof AppSettingsKeysRoute
+  '/settings/libraries': typeof AppSettingsLibrariesRoute
+  '/settings/people': typeof AppSettingsPeopleRoute
+  '/settings/playback': typeof AppSettingsPlaybackRoute
+  '/albums/': typeof AppAlbumsIndexRoute
+  '/artists/': typeof AppArtistsIndexRoute
+  '/playlists/': typeof AppPlaylistsIndexRoute
+  '/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
+  '/setup': typeof SetupRoute
+  '/sign-in': typeof SignInRoute
+  '/library': typeof AppLibraryRoute
+  '/liked': typeof AppLikedRoute
+  '/search': typeof AppSearchRoute
+  '/songs': typeof AppSongsRoute
+  '/invite/$code': typeof InviteCodeRoute
+  '/': typeof AppIndexRoute
+  '/albums/$albumId': typeof AppAlbumsAlbumIdRoute
+  '/artists/$artistId': typeof AppArtistsArtistIdRoute
+  '/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
+  '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/jobs': typeof AppSettingsJobsRoute
+  '/settings/keys': typeof AppSettingsKeysRoute
+  '/settings/libraries': typeof AppSettingsLibrariesRoute
+  '/settings/people': typeof AppSettingsPeopleRoute
+  '/settings/playback': typeof AppSettingsPlaybackRoute
+  '/albums': typeof AppAlbumsIndexRoute
+  '/artists': typeof AppArtistsIndexRoute
+  '/playlists': typeof AppPlaylistsIndexRoute
+  '/settings': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/setup': typeof SetupRoute
+  '/sign-in': typeof SignInRoute
+  '/_app/library': typeof AppLibraryRoute
+  '/_app/liked': typeof AppLikedRoute
+  '/_app/search': typeof AppSearchRoute
+  '/_app/settings': typeof AppSettingsRouteWithChildren
+  '/_app/songs': typeof AppSongsRoute
+  '/invite/$code': typeof InviteCodeRoute
+  '/_app/': typeof AppIndexRoute
+  '/_app/albums/$albumId': typeof AppAlbumsAlbumIdRoute
+  '/_app/artists/$artistId': typeof AppArtistsArtistIdRoute
+  '/_app/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
+  '/_app/settings/account': typeof AppSettingsAccountRoute
+  '/_app/settings/jobs': typeof AppSettingsJobsRoute
+  '/_app/settings/keys': typeof AppSettingsKeysRoute
+  '/_app/settings/libraries': typeof AppSettingsLibrariesRoute
+  '/_app/settings/people': typeof AppSettingsPeopleRoute
+  '/_app/settings/playback': typeof AppSettingsPlaybackRoute
+  '/_app/albums/': typeof AppAlbumsIndexRoute
+  '/_app/artists/': typeof AppArtistsIndexRoute
+  '/_app/playlists/': typeof AppPlaylistsIndexRoute
+  '/_app/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/setup'
+    | '/sign-in'
+    | '/library'
+    | '/liked'
+    | '/search'
+    | '/settings'
+    | '/songs'
+    | '/invite/$code'
+    | '/albums/$albumId'
+    | '/artists/$artistId'
+    | '/playlists/$playlistId'
+    | '/settings/account'
+    | '/settings/jobs'
+    | '/settings/keys'
+    | '/settings/libraries'
+    | '/settings/people'
+    | '/settings/playback'
+    | '/albums/'
+    | '/artists/'
+    | '/playlists/'
+    | '/settings/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/setup'
+    | '/sign-in'
+    | '/library'
+    | '/liked'
+    | '/search'
+    | '/songs'
+    | '/invite/$code'
+    | '/'
+    | '/albums/$albumId'
+    | '/artists/$artistId'
+    | '/playlists/$playlistId'
+    | '/settings/account'
+    | '/settings/jobs'
+    | '/settings/keys'
+    | '/settings/libraries'
+    | '/settings/people'
+    | '/settings/playback'
+    | '/albums'
+    | '/artists'
+    | '/playlists'
+    | '/settings'
+  id:
+    | '__root__'
+    | '/_app'
+    | '/setup'
+    | '/sign-in'
+    | '/_app/library'
+    | '/_app/liked'
+    | '/_app/search'
+    | '/_app/settings'
+    | '/_app/songs'
+    | '/invite/$code'
+    | '/_app/'
+    | '/_app/albums/$albumId'
+    | '/_app/artists/$artistId'
+    | '/_app/playlists/$playlistId'
+    | '/_app/settings/account'
+    | '/_app/settings/jobs'
+    | '/_app/settings/keys'
+    | '/_app/settings/libraries'
+    | '/_app/settings/people'
+    | '/_app/settings/playback'
+    | '/_app/albums/'
+    | '/_app/artists/'
+    | '/_app/playlists/'
+    | '/_app/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
+  SetupRoute: typeof SetupRoute
+  SignInRoute: typeof SignInRoute
+  InviteCodeRoute: typeof InviteCodeRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/': {
+      id: '/_app/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/library': {
+      id: '/_app/library'
+      path: '/library'
+      fullPath: '/library'
+      preLoaderRoute: typeof AppLibraryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/liked': {
+      id: '/_app/liked'
+      path: '/liked'
+      fullPath: '/liked'
+      preLoaderRoute: typeof AppLikedRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/search': {
+      id: '/_app/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof AppSearchRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/songs': {
+      id: '/_app/songs'
+      path: '/songs'
+      fullPath: '/songs'
+      preLoaderRoute: typeof AppSongsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/invite/$code': {
+      id: '/invite/$code'
+      path: '/invite/$code'
+      fullPath: '/invite/$code'
+      preLoaderRoute: typeof InviteCodeRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/albums/': {
+      id: '/_app/albums/'
+      path: '/albums'
+      fullPath: '/albums/'
+      preLoaderRoute: typeof AppAlbumsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/albums/$albumId': {
+      id: '/_app/albums/$albumId'
+      path: '/albums/$albumId'
+      fullPath: '/albums/$albumId'
+      preLoaderRoute: typeof AppAlbumsAlbumIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/artists/': {
+      id: '/_app/artists/'
+      path: '/artists'
+      fullPath: '/artists/'
+      preLoaderRoute: typeof AppArtistsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/artists/$artistId': {
+      id: '/_app/artists/$artistId'
+      path: '/artists/$artistId'
+      fullPath: '/artists/$artistId'
+      preLoaderRoute: typeof AppArtistsArtistIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/playlists/': {
+      id: '/_app/playlists/'
+      path: '/playlists'
+      fullPath: '/playlists/'
+      preLoaderRoute: typeof AppPlaylistsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/playlists/$playlistId': {
+      id: '/_app/playlists/$playlistId'
+      path: '/playlists/$playlistId'
+      fullPath: '/playlists/$playlistId'
+      preLoaderRoute: typeof AppPlaylistsPlaylistIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings/': {
+      id: '/_app/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/account': {
+      id: '/_app/settings/account'
+      path: '/account'
+      fullPath: '/settings/account'
+      preLoaderRoute: typeof AppSettingsAccountRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/jobs': {
+      id: '/_app/settings/jobs'
+      path: '/jobs'
+      fullPath: '/settings/jobs'
+      preLoaderRoute: typeof AppSettingsJobsRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/keys': {
+      id: '/_app/settings/keys'
+      path: '/keys'
+      fullPath: '/settings/keys'
+      preLoaderRoute: typeof AppSettingsKeysRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/libraries': {
+      id: '/_app/settings/libraries'
+      path: '/libraries'
+      fullPath: '/settings/libraries'
+      preLoaderRoute: typeof AppSettingsLibrariesRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/people': {
+      id: '/_app/settings/people'
+      path: '/people'
+      fullPath: '/settings/people'
+      preLoaderRoute: typeof AppSettingsPeopleRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/playback': {
+      id: '/_app/settings/playback'
+      path: '/playback'
+      fullPath: '/settings/playback'
+      preLoaderRoute: typeof AppSettingsPlaybackRouteImport
+      parentRoute: typeof AppSettingsRoute
     }
   }
 }
 
+interface AppSettingsRouteChildren {
+  AppSettingsAccountRoute: typeof AppSettingsAccountRoute
+  AppSettingsJobsRoute: typeof AppSettingsJobsRoute
+  AppSettingsKeysRoute: typeof AppSettingsKeysRoute
+  AppSettingsLibrariesRoute: typeof AppSettingsLibrariesRoute
+  AppSettingsPeopleRoute: typeof AppSettingsPeopleRoute
+  AppSettingsPlaybackRoute: typeof AppSettingsPlaybackRoute
+  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
+}
+
+const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsAccountRoute: AppSettingsAccountRoute,
+  AppSettingsJobsRoute: AppSettingsJobsRoute,
+  AppSettingsKeysRoute: AppSettingsKeysRoute,
+  AppSettingsLibrariesRoute: AppSettingsLibrariesRoute,
+  AppSettingsPeopleRoute: AppSettingsPeopleRoute,
+  AppSettingsPlaybackRoute: AppSettingsPlaybackRoute,
+  AppSettingsIndexRoute: AppSettingsIndexRoute,
+}
+
+const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
+  AppSettingsRouteChildren,
+)
+
+interface AppRouteChildren {
+  AppLibraryRoute: typeof AppLibraryRoute
+  AppLikedRoute: typeof AppLikedRoute
+  AppSearchRoute: typeof AppSearchRoute
+  AppSettingsRoute: typeof AppSettingsRouteWithChildren
+  AppSongsRoute: typeof AppSongsRoute
+  AppIndexRoute: typeof AppIndexRoute
+  AppAlbumsAlbumIdRoute: typeof AppAlbumsAlbumIdRoute
+  AppArtistsArtistIdRoute: typeof AppArtistsArtistIdRoute
+  AppPlaylistsPlaylistIdRoute: typeof AppPlaylistsPlaylistIdRoute
+  AppAlbumsIndexRoute: typeof AppAlbumsIndexRoute
+  AppArtistsIndexRoute: typeof AppArtistsIndexRoute
+  AppPlaylistsIndexRoute: typeof AppPlaylistsIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppLibraryRoute: AppLibraryRoute,
+  AppLikedRoute: AppLikedRoute,
+  AppSearchRoute: AppSearchRoute,
+  AppSettingsRoute: AppSettingsRouteWithChildren,
+  AppSongsRoute: AppSongsRoute,
+  AppIndexRoute: AppIndexRoute,
+  AppAlbumsAlbumIdRoute: AppAlbumsAlbumIdRoute,
+  AppArtistsArtistIdRoute: AppArtistsArtistIdRoute,
+  AppPlaylistsPlaylistIdRoute: AppPlaylistsPlaylistIdRoute,
+  AppAlbumsIndexRoute: AppAlbumsIndexRoute,
+  AppArtistsIndexRoute: AppArtistsIndexRoute,
+  AppPlaylistsIndexRoute: AppPlaylistsIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
+  SetupRoute: SetupRoute,
+  SignInRoute: SignInRoute,
+  InviteCodeRoute: InviteCodeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,40 +1,36 @@
-"use client";
-
-import {
-  CircleCheckIcon,
-  InfoIcon,
-  Loader2Icon,
-  OctagonXIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
 import { useTheme } from "next-themes";
-import { Toaster as Sonner, type ToasterProps } from "sonner";
+import { Toaster as Sonner } from "sonner";
 
-const toasterTheme = (theme: string): "light" | "dark" | "system" =>
+const toasterTheme = (theme: string | undefined): "light" | "dark" | "system" =>
   theme === "light" || theme === "dark" ? theme : "system";
 
-const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme();
+/**
+ * Toasts in the Paper style: a dark pill with inverse text and an accent action ("Undo"). Errors
+ * carry a danger dot and their message, so they never rely on color alone.
+ */
+export function Toaster() {
+  const { theme } = useTheme();
 
   return (
     <Sonner
       theme={toasterTheme(theme)}
-      className="toaster group [--border-radius:var(--radius)] [--normal-bg:var(--popover)] [--normal-border:var(--border)] [--normal-text:var(--popover-foreground)]"
-      icons={{
-        success: <CircleCheckIcon className="size-4" />,
-        info: <InfoIcon className="size-4" />,
-        warning: <TriangleAlertIcon className="size-4" />,
-        error: <OctagonXIcon className="size-4" />,
-        loading: <Loader2Icon className="size-4 animate-spin" />,
-      }}
+      position="bottom-center"
+      offset={112}
+      mobileOffset={{ bottom: 168 }}
       toastOptions={{
+        unstyled: true,
         classNames: {
-          toast: "cn-toast",
+          toast:
+            "flex w-[360px] max-w-[calc(100vw-2rem)] items-center gap-3 rounded-lg bg-text px-4 py-3 font-sans text-base/sm text-text-inverse shadow-[0_12px_32px_color-mix(in_oklab,var(--color-text)_24%,transparent)]",
+          title: "grow",
+          description: "text-sm/xs text-text-inverse/(--opacity-muted)",
+          actionButton: "shrink-0 cursor-pointer font-semibold text-accent",
+          cancelButton: "shrink-0 cursor-pointer text-text-inverse/(--opacity-muted)",
+          icon: "shrink-0 [&_svg]:size-4",
+          error: "[&_[data-icon]]:text-danger",
+          success: "[&_[data-icon]]:text-success",
         },
       }}
-      {...props}
     />
   );
-};
-
-export { Toaster };
+}

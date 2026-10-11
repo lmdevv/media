@@ -3,7 +3,7 @@ import type { MutationCtx } from "../_generated/server";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { MAX_QUEUE, ensureSession, findSession, livePosition, shuffled } from "../lib/playback";
-import { makePresenter, presentDevice } from "../lib/present";
+import { DEVICE_ONLINE_MS, makePresenter, presentDevice } from "../lib/present";
 import { canRead } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
@@ -38,18 +38,25 @@ const defaultDevice = async (
   viewer: Viewer,
   session: Doc<"playbackSessions">,
 ): Promise<string | undefined> => {
-  if (session.activeDeviceId !== undefined) return session.activeDeviceId;
-
   const devices = await ctx.db
     .query("devices")
     .withIndex("by_user_device", (q) => q.eq("userId", viewer.id))
     .collect();
 
-  const players = devices
+  const now = Date.now();
+  const online = devices.filter((device) => now - device.lastSeenAt < DEVICE_ONLINE_MS);
+
+  // Keep the active device while it is online; otherwise hand playback to the player that was
+  // seen most recently, so a closed tab does not keep "playing" with nobody listening.
+  if (online.some((device) => device.deviceId === session.activeDeviceId)) {
+    return session.activeDeviceId;
+  }
+
+  const players = online
     .filter((device) => device.kind !== "cli")
     .toSorted((left, right) => right.lastSeenAt - left.lastSeenAt);
 
-  return players[0]?.deviceId;
+  return players[0]?.deviceId ?? session.activeDeviceId;
 };
 
 export const playbackQueries = {

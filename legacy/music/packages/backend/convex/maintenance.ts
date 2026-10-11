@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
+import { DEVICE_ONLINE_MS } from "./lib/present";
 
 const PURGE_BATCH = 200;
 
@@ -58,6 +59,50 @@ export const releaseExpiredLeases = internalMutation({
           workerId: undefined,
           leaseUntil: undefined,
           message: "Worker stopped responding; retrying",
+        }),
+      ),
+    );
+  },
+});
+
+/**
+ * Pauses sessions whose active device stopped sending heartbeats, at the position it last
+ * reported, so every client stops showing music playing on a device that went away.
+ */
+export const pauseOrphanedSessions = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const sessions = await ctx.db.query("playbackSessions").collect();
+    const playing = sessions.filter((session) => session.playing);
+
+    const lastSeen = await Promise.all(
+      playing.map(async (session) => {
+        const device = await ctx.db
+          .query("devices")
+          .withIndex("by_user_device", (q) =>
+            q.eq("userId", session.userId).eq("deviceId", session.activeDeviceId ?? ""),
+          )
+          .unique();
+
+        return device?.lastSeenAt ?? null;
+      }),
+    );
+
+    const orphaned = playing.flatMap((session, index) => {
+      const seenAt = lastSeen[index] ?? null;
+
+      return seenAt !== null && now - seenAt < DEVICE_ONLINE_MS
+        ? []
+        : [{ session, silentSince: seenAt ?? session.updatedAt }];
+    });
+
+    await Promise.all(
+      orphaned.map(({ session, silentSince }) =>
+        ctx.db.patch(session._id, {
+          playing: false,
+          positionMs: session.positionMs + Math.max(0, silentSince - session.updatedAt),
+          updatedAt: now,
         }),
       ),
     );

@@ -21,3 +21,23 @@ jobs:
       - run: pnpm fmt:check
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pnpm test
+      - run: pnpm knip
+
+  stack-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pnpm --filter web exec playwright install --with-deps chromium
+      - run: scripts/stack-e2e.sh
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: stack-e2e-results
+          path: apps/web/test-results/stack

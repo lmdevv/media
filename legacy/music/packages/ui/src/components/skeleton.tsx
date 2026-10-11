@@ -1,13 +1,14 @@
 import { cn } from "@music/ui/lib/utils";
+import type { ComponentProps } from "react";
 
-function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
+/** A placeholder block drawn in the surface color while content loads. */
+export function Skeleton({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="skeleton"
-      className={cn("animate-pulse rounded-none bg-muted", className)}
+      aria-hidden
+      className={cn("animate-pulse rounded-[3px] bg-surface", className)}
       {...props}
     />
   );
 }
-
-export { Skeleton };
