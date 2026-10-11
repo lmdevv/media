@@ -1,0 +1,8 @@
+#!/command/with-contenv sh
+# Media service. /run/music/media.env is written by the init oneshot.
+set -e
+set -a
+. /run/music/media.env
+set +a
+cd /app/media
+exec node dist/main.js

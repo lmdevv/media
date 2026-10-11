@@ -1,0 +1,26 @@
+#!/command/with-contenv sh
+# Self-hosted Convex backend. The instance secret is generated on first boot into /data.
+# HTTP actions stay internal: Convex Auth signs tokens with the site URL as issuer and the backend
+# fetches its JWKS from that URL, so it must be reachable from inside the container. Clients only
+# use the /convex API origin.
+set -e
+data="${MUSIC_DATA:-/data}"
+mkdir -p "$data/convex/storage" "$data/convex/tmp" "$data/secrets"
+if [ ! -s "$data/secrets/instance_secret" ]; then
+  node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' > "$data/secrets/instance_secret"
+  chmod 600 "$data/secrets/instance_secret"
+fi
+public="${PUBLIC_URL%/}"
+export TMPDIR="$data/convex/tmp"
+exec /app/convex/convex-local-backend \
+  --instance-name music \
+  --instance-secret "$(cat "$data/secrets/instance_secret")" \
+  --port 3210 \
+  --site-proxy-port 3211 \
+  --interface 127.0.0.1 \
+  --convex-origin "$public/convex" \
+  --convex-site http://127.0.0.1:3211 \
+  --beacon-tag music-self-hosted \
+  --disable-beacon \
+  --local-storage "$data/convex/storage" \
+  "$data/convex/db.sqlite3"

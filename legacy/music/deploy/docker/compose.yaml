@@ -1,0 +1,18 @@
+# Run [music] with Docker Compose:
+#   MUSIC_DIR=/path/to/your/music docker compose -f deploy/docker/compose.yaml up -d
+# Then open http://localhost:8080, create the admin account, and add /music as a library.
+services:
+  music:
+    image: ghcr.io/lmdevv/music:main
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # The URL people use to reach the server. Set it when using a domain or reverse proxy.
+      PUBLIC_URL: http://localhost:8080
+    volumes:
+      - music-data:/data
+      - ${MUSIC_DIR:-./music}:/music:ro
+
+volumes:
+  music-data:

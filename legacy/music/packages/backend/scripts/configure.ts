@@ -4,10 +4,12 @@
  *
  *   node scripts/configure.ts [--site-url http://localhost:3001] [--media-url /media]
  *
- * It shells out to `convex env`, so it works against whichever deployment the CLI targets.
+ * It runs the package's `convex env`, so it works against whichever deployment the CLI targets
+ * (`.env.local` in development, `CONVEX_SELF_HOSTED_*` variables in the container).
  */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { exportJWK, exportPKCS8, generateKeyPair } from "jose";
@@ -20,8 +22,10 @@ const { values } = parseArgs({
   },
 });
 
+const convexBin = fileURLToPath(new URL("../node_modules/.bin/convex", import.meta.url));
+
 const convex = (args: ReadonlyArray<string>): string =>
-  execFileSync("pnpm", ["exec", "convex", ...args], { encoding: "utf8" }).trim();
+  execFileSync(convexBin, args, { encoding: "utf8" }).trim();
 
 const existing = new Set(
   convex(["env", "list"])

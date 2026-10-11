@@ -345,6 +345,9 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.2
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.12
     devDependencies:
       '@music/config':
         specifier: workspace:*
@@ -352,9 +355,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.5
-      jose:
-        specifier: ^6.2.12
-        version: 6.2.12
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

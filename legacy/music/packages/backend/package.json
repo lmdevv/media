@@ -14,12 +14,12 @@
     "@convex-dev/auth": "^0.0.96",
     "@music/commands": "workspace:*",
     "convex": "catalog:",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "jose": "^6.2.12"
   },
   "devDependencies": {
     "@music/config": "workspace:*",
     "@types/node": "catalog:",
-    "jose": "^6.2.12",
     "typescript": "catalog:"
   }
 }
