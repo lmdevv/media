@@ -23,20 +23,20 @@ included; the repo and packages use `music`.
 
 ## Layout
 
-| Path                | Role                                                   | Milestone |
-| ------------------- | ------------------------------------------------------ | --------- |
-| `apps/web`          | Vite + React + TanStack Router client app              | 4         |
-| `apps/media`        | Node + Hono + Effect media service                     | 3         |
-| `apps/cli`          | Effect CLI generated from the command registry         | 6         |
-| `packages/backend`  | Convex functions, schema, and auth                     | 2         |
-| `packages/commands` | Every user action as an Effect Schema                  | 2         |
-| `packages/sdk`      | Typed client shared by all clients                     | 2 to 6    |
-| `packages/player`   | `PlayerEngine`, MSE gapless engine, Web Audio fallback | 4         |
-| `packages/ui`       | shadcn components restyled through Paper tokens        | 4         |
-| `packages/config`   | Shared strict `tsconfig`                               | done      |
-| `skills/music`      | Agent skill for the CLI                                | 6         |
-| `deploy/docker`     | Multi-arch image with Caddy and s6                     | 7         |
-| `nix/`              | NixOS module and the packaged Convex binary            | 7         |
+| Path                | Role                                                       |
+| ------------------- | ---------------------------------------------------------- |
+| `apps/web`          | Vite + React + TanStack Router client app                  |
+| `apps/media`        | Node + Hono + Effect media service                         |
+| `apps/cli`          | CLI generated from the command registry                    |
+| `packages/backend`  | Convex functions, schema, and auth                         |
+| `packages/commands` | Every user action as an Effect Schema                      |
+| `packages/sdk`      | Typed client shared by all clients                         |
+| `packages/player`   | `PlayerEngine`: MSE gapless engine and HTML audio fallback |
+| `packages/ui`       | shadcn components restyled through Paper tokens            |
+| `packages/config`   | Shared strict `tsconfig`                                   |
+| `skills/music`      | Agent skill for the CLI                                    |
+| `deploy/docker`     | Multi-arch image with Convex, Caddy, and s6                |
+| `nix/`              | NixOS module (runs the image; native units are planned)    |
 
 Ownership: Convex is the only source of truth for product state. The media service is the only
 process that touches files, and it never decides access. Convex never calls the media service; the
@@ -47,20 +47,22 @@ media service subscribes to the `jobs` table.
 ```sh
 nix develop          # Node 24, pnpm, ffmpeg, Caddy
 pnpm install         # also patches tsc and Oxlint with Effect diagnostics, installs lefthook
-pnpm dev             # web on :3001 and Convex dev
+scripts/dev-backend.sh [name] [port]  # self-hosted Convex in Docker, deployed and configured
+pnpm dev             # web on :3001, media service, and Convex dev
 pnpm typecheck       # tsc 7 with the Effect language service
 pnpm lint            # Oxlint, type-aware, anti-slop and Effect rules
 pnpm fmt:check       # Oxfmt
 pnpm test            # Vitest
 pnpm test:e2e        # Playwright
 pnpm knip            # unused files, exports, and dependencies
+scripts/stack-e2e.sh # build the image and run the real-stack E2E suite against it
 ```
 
 `typecheck`, `lint`, `fmt:check`, and `test` run in the lefthook pre-commit hook and in CI. All
 four must pass before every commit.
 
-For local Convex without an account: `CONVEX_AGENT_MODE=anonymous pnpm exec convex dev` in
-`packages/backend`. Commit the regenerated `convex/_generated/`.
+Use `scripts/dev-backend.sh` for a local self-hosted Convex; pick a different name and port per
+worktree. Commit the regenerated `convex/_generated/`.
 
 ## Design
 
