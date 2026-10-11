@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit reviews every pull request against the repo's own rules.
+language: en-US
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  sequence_diagrams: true
+  auto_review:
+    enabled: true
+    drafts: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    base_branches: [".*"]
+  path_filters:
+    - "!**/_generated/**"
+    - "!pnpm-lock.yaml"
+    - "!apps/web/src/routeTree.gen.ts"
+    - "!tools/oxlint/**"
+    - "!docs/screenshots/**"
+  path_instructions:
+    - path: "**/*.{ts,tsx}"
+      instructions: >-
+        Review against AGENTS.md and .agents/skills/coding-standards. Flag casts other than
+        `as const` without a `// SAFETY:` comment, `any`, lint suppressions, weakened lint
+        rules, module mocks (`vi.mock`), unparsed external data (parse at the boundary with
+        Effect Schema), thrown expected failures inside Effect code, and broad or unknown types
+        where an owner type exists. Effect is pinned at 4.0.2; check APIs against that version.
+    - path: "packages/backend/convex/**"
+      instructions: >-
+        Convex is the only source of truth. Every query and mutation must load the viewer and
+        check library access (private libraries of other users must stay invisible), ownership,
+        and the admin role where the command registry says `access: "admin"`. Media service
+        functions must check MEDIA_SERVICE_SECRET. Flag unbounded reads (`collect()` on large
+        tables), read-modify-write races in a mutation, and IDs not normalized per table.
+    - path: "packages/commands/**"
+      instructions: >-
+        This registry is a shared contract for the web app, CLI, and agent skill. Changes must be
+        additive; flag removed or renamed commands, fields, or narrowed types.
+    - path: "apps/media/**"
+      instructions: >-
+        The media service is the only process that touches files and never decides access. Check
+        signature verification, path traversal and symlink escapes outside the library, Range
+        handling, ffmpeg argument safety, transcode limits, and that no secret or signed URL is
+        logged.
+    - path: "packages/player/**"
+      instructions: >-
+        Check gapless timing math (timestampOffset, priming and padding trims), buffer bounds,
+        race conditions between server state and local playback, and that only the active device
+        outputs audio.
+    - path: "deploy/**"
+      instructions: >-
+        Check secret handling and file permissions under /data, what Caddy exposes, s6 service
+        ordering, and that the media service stays unprivileged.
+  tools:
+    shellcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - ".agents/skills/coding-standards/**/*.md"
+chat:
+  auto_reply: true
