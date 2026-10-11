@@ -21,7 +21,7 @@
     "packages/sdk": {},
     "packages/player": {
       "entry": ["harness/*.{ts,tsx}", "browser/*.spec.ts"],
-      "ignoreBinaries": ["ffmpeg"]
+      "ignoreBinaries": ["ffmpeg", "ffprobe"]
     },
     "apps/media": {
       "entry": ["src/main.ts", "scripts/*.ts"]

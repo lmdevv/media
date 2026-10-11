@@ -4,6 +4,11 @@
   "private": true,
   "description": "Media service: scan, watch, stream, and transcode the on-disk library.",
   "type": "module",
+  "exports": {
+    "./ffmpeg": "./src/ffmpeg.ts",
+    "./media-config": "./src/media-config.ts",
+    "./transcoder": "./src/transcoder.ts"
+  },
   "scripts": {
     "dev": "node scripts/build.ts --watch",
     "build": "node scripts/build.ts",

@@ -11,6 +11,8 @@ import * as Files from "./files.ts";
 export interface FileResponseOptions {
   readonly contentType: string;
   readonly cacheControl: string;
+  /** Extra headers sent with every status, such as stream timing. */
+  readonly headers?: ReadonlyArray<readonly [string, string]>;
 }
 
 const etagOf = (size: number, mtimeMs: number): string =>
@@ -46,6 +48,8 @@ export const fileResponse = Effect.fn("FileResponse.make")(function* (
     ETag: etag,
     "Last-Modified": lastModified,
   });
+
+  for (const [name, value] of options.headers ?? []) headers.set(name, value);
 
   const ifNoneMatch = request.headers.get("If-None-Match");
 

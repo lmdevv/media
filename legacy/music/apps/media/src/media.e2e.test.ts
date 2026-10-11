@@ -62,7 +62,15 @@ const signedInClient = Effect.fn("E2E.signIn")(function* (url: string) {
   return makeMusicClient(http);
 });
 
-const PROFILES = ["original", "aac-320", "aac-128"] as const;
+const PROFILES = ["original", "aac-320", "aac-128", "fmp4-flac", "fmp4-aac"] as const;
+
+/** The codec each transcoding profile delivers. */
+const PROFILE_CODECS = {
+  "aac-320": "aac",
+  "aac-128": "aac",
+  "fmp4-flac": "flac",
+  "fmp4-aac": "aac",
+} as const;
 
 const call = <A>(run: () => Promise<A>): Effect.Effect<A> => Effect.promise(run);
 
@@ -168,7 +176,16 @@ describe.skipIf(convexUrl === undefined || serviceSecret === undefined || signin
                 probed.streams.some((probedStream) => probedStream.codec_type === "audio"),
               ).toBe(true);
 
-              if (profile !== "original") expect(probed.streams[0]?.codec_name).toBe("aac");
+              if (profile !== "original") {
+                expect(probed.streams[0]?.codec_name).toBe(PROFILE_CODECS[profile]);
+              }
+
+              if (profile === "fmp4-flac" || profile === "fmp4-aac") {
+                expect(Number(response.headers.get("X-Music-Duration-Samples"))).toBeGreaterThan(0);
+                expect(response.headers.get("X-Music-Priming-Samples")).toBe(
+                  profile === "fmp4-flac" ? "0" : "1024",
+                );
+              }
             }
           }
         }),

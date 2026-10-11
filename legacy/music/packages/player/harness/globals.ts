@@ -1,6 +1,7 @@
 /** Globals the harness pages expose to Playwright. */
 import type { EngineEvent, PlayerEngine } from "../src/engine";
 import type { Player } from "../src/react";
+import type { GapAnalysis } from "../src/testing/gap-analysis";
 
 /** An engine event and when the page saw it (`performance.now()`). */
 export type TimedEvent = EngineEvent & { readonly at: number };
@@ -23,6 +24,14 @@ interface EngineHarness {
   readonly preload: (file: string | null) => void;
   readonly gap: () => Promise<GapMeasurement>;
   readonly resetGap: () => void;
+  /** Starts recording the first output channel, dropping any earlier recording. */
+  readonly record: () => void;
+  /** Stops recording and analyzes it as the gapless tone cut at `cuts` (see `analyzeTone`). */
+  readonly analyze: (
+    cuts: ReadonlyArray<number>,
+    frequency: number,
+    sourceRate: number,
+  ) => Promise<GapAnalysis>;
 }
 
 declare global {

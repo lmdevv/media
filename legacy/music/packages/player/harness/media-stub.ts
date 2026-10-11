@@ -3,10 +3,14 @@
  *
  * - `GET /media/health`: 200, or 503 while "down".
  * - `GET /media/stream/:trackId?p&exp&sig`: verifies the signed URL exactly like the media
- *   service, resolves the file with `media:trackSource`, and serves it with byte ranges. It does
- *   not transcode: every profile gets the original bytes.
- * - `GET /fixtures/:file`: generated test files, for engine tests that need no backend.
+ *   service, resolves the file with `media:trackSource`, and serves it with byte ranges. Other
+ *   profiles than `original` go through the media service's real transcoder, so fragmented
+ *   profiles carry their measured `X-Music-*` timing headers.
+ * - `GET /fixtures/:file[?p=<profile>]`: generated test files, for engine tests that need no
+ *   backend, optionally transcoded the same way.
  * - `POST /control/down` and `POST /control/up`: simulate an outage.
+ * - `POST /control/fail-fmp4` and `POST /control/pass-fmp4`: answer 502 to fragmented profiles,
+ *   like a failed transcode, so the player's fallback to HTML audio can be tested.
  *
  *   node harness/media-stub.ts
  */
@@ -15,18 +19,37 @@ import { createServer } from "node:http";
 import type { ServerResponse } from "node:http";
 import { basename, extname, join } from "node:path";
 
+import { StreamTimingHeader } from "@music/commands/models";
 import { verifyResource } from "@music/commands/signed-url";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 
 import { backend, fixturesDir, mediaPort } from "./config.ts";
 import { generateFixtures } from "./fixtures.ts";
+import { transcode } from "./transcode.ts";
+import type { TranscodedFile } from "./transcode.ts";
 
 const trackSource = makeFunctionReference<
   "query",
   { secret: string; trackId: string },
-  { path: string; libraryPath: string } | null
+  { path: string; libraryPath: string; codec: string } | null
 >("media:trackSource");
+
+const transcodeProfiles = ["aac-320", "aac-128", "fmp4-flac", "fmp4-aac"] as const;
+
+type TranscodeProfile = (typeof transcodeProfiles)[number];
+
+const transcodeProfile = (value: string | null): TranscodeProfile | null =>
+  transcodeProfiles.find((profile) => profile === value) ?? null;
+
+/** The scanner's codec name for a fixture, from its extension. */
+const fixtureCodecs = new Map([
+  [".flac", "flac"],
+  [".mp3", "mp3"],
+  [".m4a", "aac"],
+  [".opus", "opus"],
+  [".wav", "pcm"],
+]);
 
 const contentTypes = new Map([
   [".flac", "audio/flac"],
@@ -41,19 +64,32 @@ const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Range",
-  "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length",
+  "Access-Control-Expose-Headers": [
+    "Content-Range",
+    "Accept-Ranges",
+    "Content-Length",
+    ...Object.values(StreamTimingHeader),
+  ].join(", "),
 };
 
 const convex = backend === null ? null : new ConvexHttpClient(backend.convexUrl);
 
 let down = false;
 
+let failFragmented = false;
+
 /** Sends `file` honouring a single `Range: bytes=start-end` request header. */
-const sendFile = (file: string, range: string | undefined, response: ServerResponse): void => {
+const sendFile = (
+  file: string,
+  range: string | undefined,
+  response: ServerResponse,
+  extra: Readonly<Record<string, string>> = {},
+): void => {
   const size = statSync(file).size;
 
   const headers = {
     ...cors,
+    ...extra,
     "Accept-Ranges": "bytes",
     "Content-Type": contentTypes.get(extname(file)) ?? "application/octet-stream",
   };
@@ -86,6 +122,32 @@ const sendFile = (file: string, range: string | undefined, response: ServerRespo
   createReadStream(file, { start, end }).pipe(response);
 };
 
+/** Transcodes `file` and sends the output with its timing headers. */
+const sendTranscoded = async (
+  key: string,
+  file: string,
+  profile: TranscodeProfile,
+  codec: string,
+  range: string | undefined,
+  response: ServerResponse,
+): Promise<void> => {
+  const output: TranscodedFile = await transcode(key, file, profile, codec, statSync(file).mtimeMs);
+  const timing = output.timing;
+
+  sendFile(
+    output.path,
+    range,
+    response,
+    timing === null
+      ? {}
+      : {
+          [StreamTimingHeader.priming]: String(timing.priming),
+          [StreamTimingHeader.duration]: String(timing.duration),
+          [StreamTimingHeader.sampleRate]: String(timing.sampleRate),
+        },
+  );
+};
+
 const streamTrack = async (url: URL, range: string | undefined, response: ServerResponse) => {
   const trackId = decodeURIComponent(url.pathname.slice("/media/stream/".length));
   const profile = url.searchParams.get("p") ?? "";
@@ -115,13 +177,22 @@ const streamTrack = async (url: URL, range: string | undefined, response: Server
   const source = await convex.query(trackSource, { secret: backend.mediaSecret, trackId });
   const file = source === null ? null : join(source.libraryPath, source.path);
 
-  if (file === null || !existsSync(file)) {
+  if (source === null || file === null || !existsSync(file)) {
     response.writeHead(404, cors).end("Not found");
 
     return;
   }
 
-  sendFile(file, range, response);
+  const transcoded = transcodeProfile(profile);
+
+  if (failFragmented && (transcoded === "fmp4-flac" || transcoded === "fmp4-aac")) {
+    response.writeHead(502, cors).end("Transcode failed");
+
+    return;
+  }
+
+  if (transcoded === null) sendFile(file, range, response);
+  else await sendTranscoded(trackId, file, transcoded, source.codec, range, response);
 };
 
 generateFixtures();
@@ -137,8 +208,11 @@ const server = createServer((request, response) => {
   }
 
   if (request.method === "POST" && url.pathname.startsWith("/control/")) {
-    down = url.pathname === "/control/down";
-    response.writeHead(200, cors).end(down ? "down" : "up");
+    const action = url.pathname.slice("/control/".length);
+
+    if (action === "fail-fmp4" || action === "pass-fmp4") failFragmented = action === "fail-fmp4";
+    else down = action === "down";
+    response.writeHead(200, cors).end(action);
 
     return;
   }
@@ -166,10 +240,29 @@ const server = createServer((request, response) => {
   }
 
   if (url.pathname.startsWith("/fixtures/")) {
-    const file = join(fixturesDir, basename(url.pathname));
+    const name = basename(url.pathname);
+    const file = join(fixturesDir, name);
+    const profile = transcodeProfile(url.searchParams.get("p"));
 
-    if (existsSync(file)) sendFile(file, range, response);
-    else response.writeHead(404, cors).end("Not found");
+    if (!existsSync(file)) {
+      response.writeHead(404, cors).end("Not found");
+
+      return;
+    }
+
+    if (profile === null) {
+      sendFile(file, range, response);
+
+      return;
+    }
+
+    const codec = fixtureCodecs.get(extname(file)) ?? "unknown";
+
+    sendTranscoded(name.replaceAll(".", "-"), file, profile, codec, range, response).catch(
+      (error: Error) => {
+        response.writeHead(502, cors).end(error.message);
+      },
+    );
 
     return;
   }

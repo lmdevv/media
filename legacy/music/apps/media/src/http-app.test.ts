@@ -238,6 +238,68 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
+  it("serves fragmented profiles with sample timing headers that CORS exposes", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { trackId, request } = yield* setup;
+        const flacUrl = yield* streamUrl(trackId(DAWN), "fmp4-flac");
+        const flac = yield* request(flacUrl, { headers: { Origin: "http://localhost:3001" } });
+
+        expect(flac.status).toBe(200);
+        expect(flac.headers.get("Content-Type")).toBe("audio/mp4");
+        expect(flac.headers.get("X-Music-Priming-Samples")).toBe("0");
+        expect(Number(flac.headers.get("X-Music-Duration-Samples"))).toBeGreaterThan(0);
+        expect(flac.headers.get("X-Music-Sample-Rate")).toBe("44100");
+
+        const exposed = flac.headers.get("Access-Control-Expose-Headers") ?? "";
+
+        for (const name of [
+          "X-Music-Priming-Samples",
+          "X-Music-Duration-Samples",
+          "X-Music-Sample-Rate",
+        ]) {
+          expect(exposed).toContain(name);
+        }
+
+        // Ranged requests carry the timing too, so a seek can re-read it.
+        const ranged = yield* request(yield* streamUrl(trackId(NEON), "fmp4-aac"), {
+          headers: { Range: "bytes=0-99" },
+        });
+
+        expect(ranged.status).toBe(206);
+        expect(ranged.headers.get("X-Music-Priming-Samples")).toBe("1024");
+      }),
+    ));
+
+  it("answers 502 instead of the original when a fragmented transcode fails", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, libraryId, backend, findTrackId, request } = yield* setup;
+        const junk = new TextEncoder().encode("this is not really an audio file");
+
+        yield* Files.writeFileAtomic(join(root, "junk.flac"), junk, "a");
+        yield* backend.upsertTracks(libraryId, [
+          {
+            path: "junk.flac",
+            size: junk.length,
+            mtimeMs: 1,
+            title: "junk",
+            artist: "Nobody",
+            album: "Junk",
+            durationMs: 1000,
+            codec: "flac",
+            lossless: true,
+          },
+        ]);
+
+        const response = yield* request(
+          yield* streamUrl(yield* findTrackId("junk.flac"), "fmp4-flac"),
+        );
+
+        expect(response.status).toBe(502);
+      }),
+    ));
+
   it("falls back to the original when a browser-playable file cannot be transcoded", () =>
     runScoped(
       Effect.gen(function* () {

@@ -8,8 +8,6 @@ import { Schema } from "effect";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import type { PlayerEngine } from "../src/engine";
-import { HtmlAudioEngine } from "../src/html-audio-engine";
 import { PlayerProvider, usePlayer, usePlayerPosition } from "../src/react";
 import { harnessAccount, signIn } from "./auth";
 
@@ -44,6 +42,7 @@ function Debug() {
     ["position", String(position)],
     ["media-online", String(player.mediaOnline)],
     ["autoplay-blocked", String(player.autoplayBlocked)],
+    ["engine", player.engine],
     ["error", player.error ?? "none"],
   ] as const;
 
@@ -95,23 +94,22 @@ convex.setAuth(() => Promise.resolve(token));
 
 const root = document.querySelector("#root");
 
-/** Records every audio element the engine makes, so tests can see which device outputs sound. */
+/** Records every audio element the engines make, so tests can see which device outputs sound. */
 const audioElements = new Set<HTMLMediaElement>();
 
 window.audioElements = audioElements;
 
-const recordedEngine = (): PlayerEngine =>
-  new HtmlAudioEngine(() => {
-    const element = new Audio();
-    audioElements.add(element);
+const recordedElement = (): HTMLAudioElement => {
+  const element = new Audio();
+  audioElements.add(element);
 
-    return element;
-  });
+  return element;
+};
 
 if (root !== null) {
   createRoot(root).render(
     <ConvexProvider client={convex}>
-      <PlayerProvider engine={recordedEngine}>
+      <PlayerProvider audioElement={recordedElement}>
         <Debug />
       </PlayerProvider>
     </ConvexProvider>,

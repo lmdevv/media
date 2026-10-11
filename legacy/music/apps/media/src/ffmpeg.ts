@@ -41,10 +41,20 @@ export const runTool = (
     ),
   );
 
-/** Transcode profiles, by AAC bitrate. */
+/** Stream profiles the transcoder produces. */
 export type TranscodeProfile = Exclude<StreamProfile, "original">;
 
-const BITRATES: Record<TranscodeProfile, string> = { "aac-320": "320k", "aac-128": "128k" };
+/** Profiles written as fragmented MP4 for the gapless MSE engine. */
+export type FragmentedProfile = Extract<TranscodeProfile, "fmp4-flac" | "fmp4-aac">;
+
+/** True for the fragmented MP4 profiles, which carry sample timing. */
+export const isFragmentedProfile = (profile: TranscodeProfile): profile is FragmentedProfile =>
+  profile === "fmp4-flac" || profile === "fmp4-aac";
+
+const BITRATES: Record<Exclude<TranscodeProfile, FragmentedProfile>, string> = {
+  "aac-320": "320k",
+  "aac-128": "128k",
+};
 
 /**
  * ffmpeg arguments that transcode the first audio stream of `source` to stereo 44.1 kHz AAC in a
@@ -53,7 +63,7 @@ const BITRATES: Record<TranscodeProfile, string> = { "aac-320": "320k", "aac-128
 export const transcodeArgs = (
   source: string,
   destination: string,
-  profile: TranscodeProfile,
+  profile: Exclude<TranscodeProfile, FragmentedProfile>,
 ): ReadonlyArray<string> => [
   "-hide_banner",
   "-nostdin",
@@ -79,4 +89,143 @@ export const transcodeArgs = (
   "-f",
   "mp4",
   destination,
+];
+
+/**
+ * Digital silence appended to the input before AAC encoding. ffmpeg shortens the duration of the
+ * last AAC frame in the container to the real samples, but decoders still output the whole
+ * 1024-sample frame, and Chrome then plays the encoder's padding at a track boundary. With this
+ * tail the last real sample sits inside a full-length frame, which the player's append window
+ * cuts exactly; the silent frames after it are dropped whole.
+ */
+export const AAC_TAIL_PADDING = 2048;
+
+/** Sample rates AAC LC supports up to 48 kHz; the gapless profile keeps these. */
+const AAC_SAMPLE_RATES: ReadonlySet<number> = new Set([
+  48_000, 44_100, 32_000, 24_000, 22_050, 16_000, 12_000, 11_025, 8000,
+]);
+
+/**
+ * The output sample rate for `fmp4-aac`: the source's when AAC supports it, 44.1 kHz for higher
+ * rates in that family (88.2, 176.4 kHz), and 48 kHz for everything else.
+ */
+export const aacSampleRate = (sourceRate: number): number => {
+  if (AAC_SAMPLE_RATES.has(sourceRate)) return sourceRate;
+
+  return sourceRate > 48_000 && sourceRate % 44_100 === 0 ? 44_100 : 48_000;
+};
+
+/** Fragment length: playback can start once the first second of audio has arrived. */
+const FRAGMENT_MICROSECONDS = "1000000";
+
+const FRAGMENTED_MP4 = [
+  "-movflags",
+  "+frag_keyframe+empty_moov+default_base_moof+global_sidx",
+  "-frag_duration",
+  FRAGMENT_MICROSECONDS,
+  "-f",
+  "mp4",
+];
+
+/** Writes every decoded frame's sample count to standard output, one line per frame. */
+const COUNT_OUTPUT = ["-c:a", "pcm_s32le", "-f", "framecrc", "-"];
+
+/**
+ * ffmpeg arguments for a fragmented MP4 profile. Besides the file at `destination`, the run
+ * prints a `framecrc` listing of the decoded source (after the same resampling) to standard
+ * output; `countFrameSamples` turns it into the exact number of real samples.
+ *
+ * - `fmp4-flac`: FLAC sources are remuxed untouched; other sources are encoded to FLAC.
+ * - `fmp4-aac`: stereo AAC at 256 kbps and `aacRate` Hz (see `aacSampleRate`), with
+ *   `AAC_TAIL_PADDING` samples of silence appended. The count output sees the same resampling.
+ *
+ * The file starts with `ftyp`, `moov`, and a global `sidx` indexing every fragment, so a player
+ * can seek with one range request. No edit list is written (fragmented output never has one), so
+ * the timeline starts with the encoder's priming samples; the player trims them using the
+ * measured timing instead.
+ */
+export const fragmentedArgs = (
+  source: string,
+  destination: string,
+  profile: FragmentedProfile,
+  sourceCodec: string,
+  aacRate: number,
+): ReadonlyArray<string> => {
+  const input = ["-hide_banner", "-nostdin", "-v", "error", "-y", "-i", source];
+
+  if (profile === "fmp4-flac") {
+    return [
+      ...input,
+      "-map",
+      "0:a:0",
+      "-c:a",
+      sourceCodec === "flac" ? "copy" : "flac",
+      "-map_metadata",
+      "0",
+      ...FRAGMENTED_MP4,
+      destination,
+      "-map",
+      "0:a:0",
+      ...COUNT_OUTPUT,
+    ];
+  }
+
+  return [
+    ...input,
+    "-filter_complex",
+    `[0:a:0]aresample=${aacRate},aformat=channel_layouts=stereo,asplit=2[count][encode];` +
+      `[encode]apad=pad_len=${AAC_TAIL_PADDING}[padded]`,
+    "-map",
+    "[padded]",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "256k",
+    "-map_metadata",
+    "0",
+    ...FRAGMENTED_MP4,
+    destination,
+    "-map",
+    "[count]",
+    ...COUNT_OUTPUT,
+  ];
+};
+
+/**
+ * Sums the frame durations of a `framecrc` listing of decoded PCM: the exact number of samples
+ * per channel. Lines look like `0, 0, 0, 4096, 32768, 0x1234abcd`; `#` lines are headers.
+ */
+export const countFrameSamples = (listing: string): number =>
+  listing
+    .split("\n")
+    .filter((line) => line.length > 0 && !line.startsWith("#"))
+    .reduce((total, line) => total + Number(line.split(",")[3]?.trim() ?? Number.NaN), 0);
+
+/**
+ * ffprobe arguments that print the container format and the first audio stream's sample rate and
+ * declared length (`duration_ts` in `time_base` units) of a source file.
+ */
+export const sourceProbeArgs = (path: string): ReadonlyArray<string> => [
+  "-v",
+  "error",
+  "-select_streams",
+  "a:0",
+  "-show_entries",
+  "stream=duration_ts,time_base,sample_rate:format=format_name",
+  "-of",
+  "json",
+  path,
+];
+
+/** ffprobe arguments that print the first audio stream's timeline length and sample rate. */
+export const timelineProbeArgs = (path: string): ReadonlyArray<string> => [
+  "-v",
+  "error",
+  "-select_streams",
+  "a:0",
+  "-show_entries",
+  "stream=duration_ts,sample_rate",
+  "-of",
+  "json",
+  path,
 ];

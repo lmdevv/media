@@ -22,10 +22,32 @@ export const Millis = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-/** Delivery tier requested from the media service. `original` is direct play. */
-export const StreamProfile = Schema.Literals(["original", "aac-320", "aac-128"]);
+/**
+ * Delivery tier requested from the media service. `original` is direct play; `aac-320` and
+ * `aac-128` are fast-start MP4 for `<audio>`. `fmp4-flac` and `fmp4-aac` (AAC 256 kbps) are
+ * fragmented MP4 for the gapless MSE engine; their responses carry the sample counts it needs to
+ * trim encoder delay (`X-Music-Priming-Samples`, `X-Music-Duration-Samples`, `X-Music-Sample-Rate`).
+ */
+export const StreamProfile = Schema.Literals([
+  "original",
+  "aac-320",
+  "aac-128",
+  "fmp4-flac",
+  "fmp4-aac",
+]);
 
 export type StreamProfile = typeof StreamProfile.Type;
+
+/**
+ * Response headers of the `fmp4-*` stream profiles, all whole numbers. The fragmented file's
+ * timeline starts with `priming` samples of encoder delay, then holds `duration` real samples at
+ * `sampleRate` Hz; anything after them is encoder padding.
+ */
+export const StreamTimingHeader = {
+  priming: "X-Music-Priming-Samples",
+  duration: "X-Music-Duration-Samples",
+  sampleRate: "X-Music-Sample-Rate",
+} as const;
 
 export const Role = Schema.Literals(["admin", "member"]);
 

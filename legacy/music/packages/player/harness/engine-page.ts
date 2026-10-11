@@ -1,11 +1,14 @@
 /**
- * Engine harness page. Routes both audio elements through Web Audio into a worklet that measures
- * silence between sounds, so tests can read the real gap between songs.
+ * Engine harness page. Routes the engine's audio elements through Web Audio into a worklet that
+ * measures silence between sounds and can record the output, so tests can read the real gap
+ * between songs. `?engine=mse` drives `MseEngine` instead of `HtmlAudioEngine`.
  */
 import { Schema } from "effect";
 
-import type { EngineSource } from "../src/engine";
+import type { EngineSource, PlayerEngine } from "../src/engine";
 import { HtmlAudioEngine } from "../src/html-audio-engine";
+import { MseEngine } from "../src/mse-engine";
+import { analyzeTone } from "../src/testing/gap-analysis";
 import type { TimedEvent } from "./globals";
 
 /** Silence threshold. The fixture tones peak at 0.125; one sample near a zero crossing is ~0.007. */
@@ -19,8 +22,11 @@ class GapMeter extends AudioWorkletProcessor {
     this.run = 0;
     this.longest = 0;
     this.sound = 0;
+    this.recording = false;
     this.port.onmessage = (event) => {
       if (event.data === "reset") { this.heard = false; this.run = 0; this.longest = 0; this.sound = 0; }
+      else if (event.data === "record") this.recording = true;
+      else if (event.data === "stop") { this.recording = false; this.port.postMessage("stopped"); }
       else this.port.postMessage({ longest: this.longest, sound: this.sound });
     };
   }
@@ -41,13 +47,21 @@ class GapMeter extends AudioWorkletProcessor {
       }
     }
     if (input) input.forEach((channel, index) => output[index] && output[index].set(channel));
+    if (this.recording && input && input[0]) this.port.postMessage(input[0].slice());
     return true;
   }
 }
 registerProcessor("gap-meter", GapMeter);
 `;
 
+const params = new URLSearchParams(location.search);
+
 const context = new AudioContext();
+
+// WebKit keeps the context suspended until a user gesture; tests click the page first.
+document.addEventListener("click", () => {
+  void context.resume();
+});
 
 const moduleUrl = URL.createObjectURL(new Blob([worklet], { type: "text/javascript" }));
 
@@ -57,12 +71,12 @@ const meter = new AudioWorkletNode(context, "gap-meter", { outputChannelCount: [
 
 meter.connect(context.destination);
 
-const mediaBase = `http://127.0.0.1:${new URLSearchParams(location.search).get("media") ?? "4300"}`;
+const mediaBase = `http://127.0.0.1:${params.get("media") ?? "4300"}`;
 
 /** `?capture=0` leaves the elements on their default output, as in production. */
-const capture = new URLSearchParams(location.search).get("capture") !== "0";
+const capture = params.get("capture") !== "0";
 
-const engine = new HtmlAudioEngine(() => {
+const audioElement = (): HTMLAudioElement => {
   const element = new Audio();
 
   if (capture) {
@@ -71,7 +85,23 @@ const engine = new HtmlAudioEngine(() => {
   }
 
   return element;
+};
+
+const engine: PlayerEngine =
+  params.get("engine") === "mse"
+    ? new MseEngine(audioElement())
+    : new HtmlAudioEngine(audioElement);
+
+/** Chunks of the first output channel while recording. */
+const recorded: Array<Float32Array> = [];
+
+meter.port.addEventListener("message", (event: MessageEvent) => {
+  const data: unknown = event.data;
+
+  if (data instanceof Float32Array) recorded.push(data);
 });
+
+meter.port.start();
 
 const events: Array<TimedEvent> = [];
 
@@ -81,8 +111,7 @@ engine.subscribe((event) => {
 
 const MeterReading = Schema.Struct({ longest: Schema.Finite, sound: Schema.Finite });
 
-const decodeReading = Schema.decodeUnknownSync(MeterReading);
-
+/** A fixture source; `file` may carry a profile query (`gapless-flac-1.flac?p=fmp4-flac`). */
 const fixture = (file: string): EngineSource => ({
   key: file,
   url: `${mediaBase}/fixtures/${file}`,
@@ -91,32 +120,63 @@ const fixture = (file: string): EngineSource => ({
 
 const toMs = (frames: number): number => (frames / context.sampleRate) * 1000;
 
+const isReading = Schema.is(MeterReading);
+
+/** Resolves with the next worklet message that passes `accept`. */
+const nextMessage = <A>(accept: (data: unknown) => data is A): Promise<A> =>
+  new Promise((resolve) => {
+    const listener = (event: MessageEvent): void => {
+      const data: unknown = event.data;
+
+      if (!accept(data)) return;
+      meter.port.removeEventListener("message", listener);
+      resolve(data);
+    };
+
+    meter.port.addEventListener("message", listener);
+  });
+
+const isStopped = (data: unknown): data is "stopped" => data === "stopped";
+
 window.harness = {
   engine,
   events,
-  load: (file, startMs, autoplay) => engine.load(fixture(file), startMs, autoplay),
+  load: async (file, startMs, autoplay) => {
+    await context.resume();
+    await engine.load(fixture(file), startMs, autoplay);
+  },
   preload: (file) => {
     engine.preload(file === null ? null : fixture(file));
   },
   resetGap: () => {
     meter.port.postMessage("reset", []);
   },
-  gap: () =>
-    new Promise((resolve) => {
-      meter.port.addEventListener(
-        "message",
-        (event) => {
-          const reading = decodeReading(event.data);
-          resolve({ longestGapMs: toMs(reading.longest), soundMs: toMs(reading.sound) });
-        },
-        { once: true },
-      );
+  gap: async () => {
+    const reading = nextMessage(isReading);
+    meter.port.postMessage("read", []);
+    const { longest, sound } = await reading;
 
-      meter.port.start();
-      meter.port.postMessage("read", []);
-    }),
+    return { longestGapMs: toMs(longest), soundMs: toMs(sound) };
+  },
+  record: () => {
+    recorded.length = 0;
+    meter.port.postMessage("record", []);
+  },
+  analyze: async (cuts, frequency, sourceRate) => {
+    const stopped = nextMessage(isStopped);
+    meter.port.postMessage("stop", []);
+    await stopped;
+    const length = recorded.reduce((sum, chunk) => sum + chunk.length, 0);
+    const samples = new Float32Array(length);
+    let at = 0;
+
+    for (const chunk of recorded) {
+      samples.set(chunk, at);
+      at += chunk.length;
+    }
+
+    return analyzeTone(samples, context.sampleRate, frequency, cuts, sourceRate);
+  },
 };
-
-await context.resume();
 
 document.body.dataset["ready"] = "true";

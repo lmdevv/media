@@ -10,14 +10,24 @@ const autoplay = ["--autoplay-policy=no-user-gesture-required"];
 /** Desktop Chrome's real policy; headless Chromium otherwise allows audio without a gesture. */
 const desktopAutoplay = ["--autoplay-policy=document-user-activation-required"];
 
+/** Firefox's equivalent of `autoplay`, for the gapless tests. */
+const firefoxAutoplay = {
+  "media.autoplay.default": 0,
+  "media.autoplay.block-webaudio": false,
+};
+
 const launch = (args: ReadonlyArray<string>) =>
   chromiumPath === undefined
     ? { args: [...args] }
     : { args: [...args], executablePath: chromiumPath };
 
 /**
- * Browser tests for the player. `engine` needs only the media stub; `session` also needs the dev
- * backend from `scripts/dev-backend.sh`. Set CHROMIUM_PATH to use a system Chromium (NixOS).
+ * Browser tests for the player. `engine` and the `gapless-*` projects need only the media stub
+ * (and ffmpeg); `session` also needs the dev backend from `scripts/dev-backend.sh`. The gapless
+ * tests run in Chromium, Firefox, and WebKit: install the latter with
+ * `pnpm exec playwright install firefox webkit`. Set CHROMIUM_PATH to use a system Chromium; on
+ * NixOS run through `scripts/nixos-browsers.sh` so Playwright's Firefox and WebKit find their
+ * libraries.
  */
 export default defineConfig({
   testDir: "./browser",
@@ -30,6 +40,21 @@ export default defineConfig({
       name: "engine",
       testMatch: "engine.spec.ts",
       use: { ...devices["Desktop Chrome"], launchOptions: launch(autoplay) },
+    },
+    {
+      name: "gapless-chromium",
+      testMatch: "gapless.spec.ts",
+      use: { ...devices["Desktop Chrome"], launchOptions: launch(autoplay) },
+    },
+    {
+      name: "gapless-firefox",
+      testMatch: "gapless.spec.ts",
+      use: { ...devices["Desktop Firefox"], launchOptions: { firefoxUserPrefs: firefoxAutoplay } },
+    },
+    {
+      name: "gapless-webkit",
+      testMatch: "gapless.spec.ts",
+      use: { ...devices["Desktop Safari"] },
     },
     {
       name: "session",
@@ -45,7 +70,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "node harness/media-stub.ts",
+      command: "node --import ./harness/resolve-ts.ts harness/media-stub.ts",
       url: `http://127.0.0.1:${mediaPort}/media/health`,
       reuseExistingServer: false,
     },

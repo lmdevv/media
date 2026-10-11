@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p harness",
     "test:browser": "playwright test",
-    "harness": "node harness/media-stub.ts & vite --config harness/vite.config.ts"
+    "harness": "node --import ./harness/resolve-ts.ts harness/media-stub.ts & vite --config harness/vite.config.ts"
   },
   "dependencies": {
     "@music/commands": "workspace:*",
@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@music/config": "workspace:*",
+    "@music/media": "workspace:*",
     "@playwright/test": "1.64.0",
     "@types/node": "catalog:",
     "@types/react": "catalog:",

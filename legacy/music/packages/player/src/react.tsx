@@ -18,9 +18,11 @@ import {
 import type { ReactNode } from "react";
 
 import { describeDevice, loadDeviceId, readItem, writeItem } from "./device-identity";
-import type { PlayerEngine } from "./engine";
+import type { EngineKind, PlayerEngine } from "./engine";
 import { HtmlAudioEngine } from "./html-audio-engine";
+import { MseEngine } from "./mse-engine";
 import { PlaybackController } from "./playback-controller";
+import type { EngineFactory } from "./playback-controller";
 import { parseStreamQuality } from "./stream-quality";
 import type { StreamQuality } from "./stream-quality";
 
@@ -57,6 +59,12 @@ export interface PlayerState {
    * starts it.
    */
   readonly autoplayBlocked: boolean;
+  /**
+   * The engine that plays here, for diagnostics: `mse` is the sample-accurate gapless engine,
+   * `html` the HTML audio fallback (data saver, browsers without MSE, or after the MSE engine
+   * failed on a song this session).
+   */
+  readonly engine: EngineKind;
 }
 
 export interface PlayerActions {
@@ -100,17 +108,34 @@ export const usePlayer = (): Player => {
 /** The live position in milliseconds. Separate from `usePlayer` because it changes often. */
 export const usePlayerPosition = (): number => useContext(PositionContext);
 
-const defaultEngine = (): PlayerEngine => new HtmlAudioEngine();
+/**
+ * The engines the provider switches between. A fixed `engine` disables the switching (and is
+ * reported as `html`); otherwise the gapless MSE engine plays where the browser supports it.
+ */
+const engineFactory = (
+  engine: (() => PlayerEngine) | undefined,
+  audioElement: (() => HTMLAudioElement) | undefined,
+): EngineFactory => {
+  if (engine !== undefined) return { mse: null, create: engine };
+
+  return {
+    mse: MseEngine.detectSupport(),
+    create: (kind) =>
+      kind === "mse"
+        ? new MseEngine(audioElement?.() ?? new Audio())
+        : new HtmlAudioEngine(audioElement),
+  };
+};
 
 /** Builds the controller from browser globals. Runs once per provider mount. */
 const createController = (
   convex: ReturnType<typeof useConvex>,
-  engine: () => PlayerEngine,
+  engines: EngineFactory,
 ): PlaybackController => {
   const storage = "localStorage" in globalThis ? localStorage : null;
   const probe = document.createElement("audio");
 
-  return new PlaybackController(makeMusicClient(convex), engine(), {
+  return new PlaybackController(makeMusicClient(convex), engines, {
     deviceId: loadDeviceId(storage, () => crypto.randomUUID()),
     device: describeDevice(navigator.userAgent, navigator.maxTouchPoints),
     canPlay: (mimeType) => probe.canPlayType(mimeType) !== "",
@@ -152,17 +177,28 @@ function PositionTicker({
  */
 export function PlayerProvider({
   children,
-  engine = defaultEngine,
+  engine,
+  audioElement,
 }: {
   readonly children: ReactNode;
   /**
-   * Builds the audio engine once per mount. Defaults to `HtmlAudioEngine`; this is where an MSE
-   * gapless engine plugs in. Pass a stable function.
+   * Builds a fixed audio engine once per mount, replacing the automatic choice between the
+   * gapless MSE engine and HTML audio. Pass a stable function.
    */
   readonly engine?: () => PlayerEngine;
+  /**
+   * Makes the audio elements the built-in engines play through, for example to route output
+   * through Web Audio. Pass a stable function.
+   */
+  readonly audioElement?: () => HTMLAudioElement;
 }) {
   const convex = useConvex();
-  const controller = useMemo(() => createController(convex, engine), [convex, engine]);
+
+  const controller = useMemo(
+    () => createController(convex, engineFactory(engine, audioElement)),
+    [convex, engine, audioElement],
+  );
+
   const state = useRead("playback.state", {});
   const local = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
 
@@ -212,6 +248,7 @@ export function PlayerProvider({
       error: local.error,
       quality: local.quality,
       autoplayBlocked: local.autoplayBlocked,
+      engine: local.engine,
       playTracks: (ids, index) => controller.playTracks(ids, index),
       togglePlay: () => controller.togglePlay(),
       next: () => controller.capture(client.run("playback.next", {})),

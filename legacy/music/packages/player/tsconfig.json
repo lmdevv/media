@@ -1,5 +1,9 @@
 {
   "extends": "@music/config/tsconfig.base.json",
-  "compilerOptions": { "lib": ["ESNext", "DOM", "DOM.Iterable"], "jsx": "react-jsx" },
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true
+  },
   "include": ["src"]
 }

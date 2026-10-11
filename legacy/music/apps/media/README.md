@@ -33,10 +33,24 @@ includes every dependency, `music-metadata` too; `dist/` needs nothing else at r
 ## HTTP
 
 - `GET /media/health`: `{ ok, convex, ffmpeg, version }`, 503 when not `ok`.
-- `GET|HEAD /media/stream/:trackId?p=<original|aac-320|aac-128>&exp=&sig=`: `original` plays the
-  file bytes; the AAC profiles transcode once into the cache (at most two ffmpeg runs at a time,
-  concurrent requests share one run) and fall back to the original when ffmpeg fails on a
-  browser-playable file. Single byte ranges, `ETag`, `If-None-Match`, and `If-Range` work on both.
+- `GET|HEAD /media/stream/:trackId?p=<profile>&exp=&sig=`: `original` plays the file bytes; the
+  other profiles transcode once into the cache (at most two ffmpeg runs at a time, concurrent
+  requests share one run). Single byte ranges, `ETag`, `If-None-Match`, and `If-Range` work on all
+  of them.
+  - `aac-320`, `aac-128`: fast-start AAC MP4 for `<audio>`. When ffmpeg fails on a
+    browser-playable file they fall back to the original.
+  - `fmp4-flac`, `fmp4-aac`: fragmented MP4 for the gapless MSE engine: one-second fragments,
+    an empty `moov`, a global `sidx` index for seeking, and no edit list. FLAC sources are
+    remuxed into `fmp4-flac`, other sources are encoded. `fmp4-aac` is stereo AAC at 256 kbps,
+    at the source rate when AAC supports it (else 44.1 or 48 kHz). Responses carry
+    `X-Music-Priming-Samples`, `X-Music-Duration-Samples`, and `X-Music-Sample-Rate`: the
+    timeline starts with that many encoder priming samples, then holds exactly that many real
+    samples. Both are measured on every transcode: priming is the output's `duration_ts` (ffprobe)
+    minus the decoded source length (a `framecrc` second output), and for MP4 sources the real
+    length is capped at the edit list length, because ffmpeg 6 decodes AAC with its end padding.
+    The numbers live in a `.json` sidecar. AAC gets 2048 samples of silence appended so the last
+    real sample sits in a full-length frame the player can cut exactly. These profiles never fall
+    back to the original (502 instead): MSE cannot append it.
 - `GET|HEAD /media/art/:hash?exp=&sig=`: content-addressed artwork, cached as immutable.
 
 Bad or expired signatures get 403. Logs are JSON on stdout and never include query strings.

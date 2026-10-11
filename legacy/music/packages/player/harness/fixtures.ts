@@ -3,7 +3,7 @@
  * any silence in the captured output is a gap the player introduced.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { fixturesDir } from "./config.ts";
@@ -97,9 +97,145 @@ export const sessionFixtures: ReadonlyArray<Fixture> = [
   },
 ];
 
+/** Sample rate of the gapless tone. */
+export const GAPLESS_RATE = 48_000;
+
+/** Frequency of the gapless tone, in Hz. */
+export const GAPLESS_FREQUENCY = 110;
+
+/**
+ * Where the continuous gapless tone is cut into three songs, in samples. The cuts sit off every
+ * codec's frame grid (1024, 1152, 4096), so only exact priming and padding trims rebuild it.
+ */
+export const GAPLESS_CUTS: ReadonlyArray<number> = [0, 150_001, 306_337, 432_000];
+
+/** Source codecs the gapless tone is encoded in. */
+export type GaplessSource = "flac" | "mp3" | "m4a";
+
+/** File name of one part (1 to 3) of the gapless tone in one source codec. */
+export const gaplessFile = (source: GaplessSource, part: number): string =>
+  `gapless-${source}-${part}.${source}`;
+
+const gaplessEncoders: Readonly<Record<GaplessSource, ReadonlyArray<string>>> = {
+  flac: ["-c:a", "flac"],
+  mp3: ["-c:a", "libmp3lame", "-b:a", "192k"],
+  m4a: ["-c:a", "aac", "-b:a", "192k"],
+};
+
+/**
+ * Real length of the first audio stream of `path`, in samples: ffmpeg's decoded frame count, or
+ * for an `.m4a` its edit list length (ffmpeg 6 decodes AAC in MP4 with its end padding).
+ */
+const realSamples = (path: string): number => {
+  if (path.endsWith(".m4a")) {
+    return Number(
+      execFileSync(
+        "ffprobe",
+        [
+          "-v",
+          "error",
+          "-select_streams",
+          "a:0",
+          "-show_entries",
+          "stream=duration_ts",
+          "-of",
+          "csv=p=0",
+          path,
+        ],
+        { encoding: "utf8" },
+      ).trim(),
+    );
+  }
+
+  return execFileSync(
+    "ffmpeg",
+    ["-v", "error", "-i", path, "-map", "0:a:0", "-f", "framecrc", "-"],
+    { encoding: "utf8" },
+  )
+    .split("\n")
+    .filter((line) => line.length > 0 && !line.startsWith("#"))
+    .reduce((total, line) => total + Number(line.split(",")[3]), 0);
+};
+
+/**
+ * Cuts one continuous sine into three parts per source codec. Each part must decode to exactly
+ * its length, or measurements would blame the player for an encoder's padding: ffmpeg's MP3
+ * muxer writes a wrong LAME padding value for some lengths (144017 samples decodes to 144047),
+ * and the cuts above avoid them.
+ */
+const generateGapless = (): void => {
+  for (const source of ["flac", "mp3", "m4a"] as const) {
+    for (let part = 1; part < GAPLESS_CUTS.length; part += 1) {
+      const target = join(fixturesDir, gaplessFile(source, part));
+
+      if (existsSync(target)) continue;
+      const start = GAPLESS_CUTS[part - 1] ?? 0;
+      const end = GAPLESS_CUTS[part] ?? 0;
+      const tone = `0.5*sin(2*PI*${GAPLESS_FREQUENCY}*t)`;
+
+      execFileSync("ffmpeg", [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        `aevalsrc=${tone}|${tone}:s=${GAPLESS_RATE}:d=10`,
+        "-af",
+        `atrim=start_sample=${start}:end_sample=${end},asetpts=N/SR/TB`,
+        ...gaplessEncoders[source],
+        target,
+      ]);
+
+      const length = realSamples(target);
+
+      if (length !== end - start) {
+        rmSync(target);
+
+        throw new Error(`${target} decodes to ${length} samples, not ${end - start}`);
+      }
+    }
+  }
+};
+
+/**
+ * One minute of 24-bit 96 kHz stereo noise, which FLAC cannot compress (about 4.6 Mbit/s): more
+ * than the buffer quota of some browsers holds in the engine's look-ahead.
+ */
+export const HIRES_FIXTURE = "hires-noise.flac";
+
+const generateHires = (): void => {
+  const target = join(fixturesDir, HIRES_FIXTURE);
+
+  if (existsSync(target)) return;
+
+  execFileSync("ffmpeg", [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "anoisesrc=color=white:amplitude=0.3:sample_rate=96000:duration=60",
+    "-ac",
+    "2",
+    "-c:a",
+    "flac",
+    "-sample_fmt",
+    "s32",
+    "-bits_per_raw_sample",
+    "24",
+    target,
+  ]);
+};
+
 /** Writes every fixture that does not exist yet. Needs `ffmpeg` on PATH. */
 export const generateFixtures = (): void => {
   mkdirSync(fixturesDir, { recursive: true });
+  generateGapless();
+  generateHires();
 
   for (const fixture of [...engineFixtures, ...sessionFixtures]) {
     const target = join(fixturesDir, fixture.file);

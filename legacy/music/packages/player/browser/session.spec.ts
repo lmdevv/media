@@ -184,7 +184,10 @@ test("preloads the next song, advances without reloading, and reports it", async
   // The second song was fetched ahead of time, not after the first one ended.
   expect(second).toBeDefined();
   expect(changedAt - (second?.at ?? changedAt)).toBeGreaterThan(2000);
-  expect(await a.evaluate(() => window.audioElements?.size)).toBe(2);
+  // The gapless engine plays through one element; HTML audio alternates between two.
+  const engine = await field(a, "engine").textContent();
+
+  expect(await a.evaluate(() => window.audioElements?.size)).toBe(engine === "mse" ? 1 : 2);
 
   await a.context().close();
 });
@@ -221,4 +224,47 @@ test("marks the media service offline and recovers when it returns", async ({ br
   await expect.poll(() => outputsAudio(a)).toBe(true);
 
   await a.context().close();
+});
+
+test("plays through the gapless MSE engine and switches to HTML audio for data saver", async ({
+  browser,
+}) => {
+  const a = await openDevice(browser, tracks);
+
+  await playAllHere(a);
+  await expect(field(a, "engine")).toHaveText("mse");
+  await expect.poll(() => outputsAudio(a)).toBe(true);
+
+  // Quality changes apply from the next song, which then plays through HTML audio.
+  await a.evaluate(() => {
+    window.player?.setQuality("data-saver");
+  });
+  await expect(field(a, "engine")).toHaveText("mse");
+  await a.evaluate(() => window.player?.next());
+  await expect(field(a, "track")).toHaveText("Song Two");
+  await expect(field(a, "engine")).toHaveText("html");
+  await expect(field(a, "status")).toHaveText("playing");
+  await expect.poll(() => outputsAudio(a)).toBe(true);
+
+  await a.evaluate(() => {
+    window.player?.setQuality("lossless");
+  });
+  await a.context().close();
+});
+
+test("falls back to HTML audio when the gapless stream fails", async ({ browser, request }) => {
+  await request.post(`http://127.0.0.1:${mediaPort}/control/fail-fmp4`);
+
+  try {
+    const a = await openDevice(browser, tracks);
+
+    await playAllHere(a);
+    await expect(field(a, "engine")).toHaveText("html", { timeout: 15_000 });
+    await expect(field(a, "status")).toHaveText("playing");
+    await expect(field(a, "error")).toHaveText("none");
+    await expect.poll(() => outputsAudio(a)).toBe(true);
+    await a.context().close();
+  } finally {
+    await request.post(`http://127.0.0.1:${mediaPort}/control/pass-fmp4`);
+  }
 });

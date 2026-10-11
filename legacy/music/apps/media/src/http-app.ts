@@ -5,7 +5,7 @@
 import { resolve, sep } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
-import { StreamProfile } from "@music/commands/models";
+import { StreamProfile, StreamTimingHeader } from "@music/commands/models";
 import { Cache, Clock, Duration, Effect, Exit, Option, Schema } from "effect";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -13,10 +13,12 @@ import { cors } from "hono/cors";
 import packageJson from "../package.json" with { type: "json" };
 import { artPath, imageContentType, isArtHash } from "./art-store.ts";
 import { contentTypeFor, isBrowserPlayable } from "./audio-format.ts";
+import { isFragmentedProfile } from "./ffmpeg.ts";
 import { fileResponse } from "./file-response.ts";
 import * as Files from "./files.ts";
 import { MediaBackend, type TrackSource } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
+import { timingHeaders } from "./sample-timing.ts";
 import { isSignedRequestValid } from "./signed-request.ts";
 import { Transcoder } from "./transcoder.ts";
 
@@ -92,33 +94,35 @@ export const makeHttpApp = Effect.gen(function* () {
 
       const original = serveOriginal(request, absolute.value, source);
 
-      const response =
-        profile.value === "original"
-          ? yield* original
-          : yield* transcoder
-              .transcode({
-                trackId: trackId.value,
-                profile: profile.value,
-                source: absolute.value,
-                mtimeMs: source.mtimeMs,
-              })
-              .pipe(
-                Effect.flatMap((output) =>
-                  fileResponse(request, output, {
-                    contentType: "audio/mp4",
-                    cacheControl: STREAM_CACHE_CONTROL,
-                  }),
+      if (profile.value === "original") return yield* original;
+      const transcodeProfile = profile.value;
+
+      const response = yield* transcoder
+        .transcode({
+          trackId: trackId.value,
+          profile: transcodeProfile,
+          source: absolute.value,
+          mtimeMs: source.mtimeMs,
+          codec: source.codec,
+        })
+        .pipe(
+          Effect.flatMap(({ path, timing }) =>
+            fileResponse(request, path, {
+              contentType: "audio/mp4",
+              cacheControl: STREAM_CACHE_CONTROL,
+              headers: Option.match(timing, { onNone: () => [], onSome: timingHeaders }),
+            }),
+          ),
+          Effect.catchTag("TranscodeError", (error) =>
+            // The gapless engine cannot append original bytes, so fragmented profiles never fall
+            // back; the player switches to HTML audio on the error instead.
+            !isFragmentedProfile(transcodeProfile) && isBrowserPlayable(source.codec, source.path)
+              ? Effect.logWarning("Http.transcode_fallback", error).pipe(Effect.andThen(original))
+              : Effect.logError("Http.transcode_failed", error).pipe(
+                  Effect.as(text(502, "Transcode failed")),
                 ),
-                Effect.catchTag("TranscodeError", (error) =>
-                  isBrowserPlayable(source.codec, source.path)
-                    ? Effect.logWarning("Http.transcode_fallback", error).pipe(
-                        Effect.andThen(original),
-                      )
-                    : Effect.logError("Http.transcode_failed", error).pipe(
-                        Effect.as(text(502, "Transcode failed")),
-                      ),
-                ),
-              );
+          ),
+        );
 
       return response;
     },
@@ -210,7 +214,13 @@ export const makeHttpApp = Effect.gen(function* () {
       origin: "*",
       allowMethods: ["GET", "HEAD", "OPTIONS"],
       allowHeaders: ["Range", "If-Range", "If-None-Match"],
-      exposeHeaders: ["Content-Range", "Accept-Ranges", "Content-Length", "ETag"],
+      exposeHeaders: [
+        "Content-Range",
+        "Accept-Ranges",
+        "Content-Length",
+        "ETag",
+        ...Object.values(StreamTimingHeader),
+      ],
       maxAge: 86_400,
     }),
   );

@@ -1,7 +1,14 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { chooseStreamProfile, codecMimeType, parseStreamQuality } from "./stream-quality";
+import {
+  chooseEngine,
+  chooseGaplessProfile,
+  chooseStreamProfile,
+  codecMimeType,
+  parseStreamQuality,
+  streamQualities,
+} from "./stream-quality";
 
 const everything = (): boolean => true;
 
@@ -65,5 +72,73 @@ describe("parseStreamQuality", () => {
     expect(parseStreamQuality("high")).toBe("high");
     expect(parseStreamQuality(null)).toBe("lossless");
     expect(parseStreamQuality("ultra")).toBe("lossless");
+  });
+});
+
+const supportArbitrary = fc.record({ flac: fc.boolean(), changeType: fc.boolean() });
+
+describe("chooseEngine", () => {
+  it("uses MSE where it is supported, except for data saver and after a failure", () => {
+    const support = { flac: true, changeType: true };
+
+    expect(chooseEngine("lossless", support, false)).toBe("mse");
+    expect(chooseEngine("high", support, false)).toBe("mse");
+    expect(chooseEngine("data-saver", support, false)).toBe("html");
+    expect(chooseEngine("lossless", support, true)).toBe("html");
+    expect(chooseEngine("lossless", null, false)).toBe("html");
+  });
+
+  it("never picks MSE without support", () => {
+    fc.assert(
+      fc.property(fc.constantFrom(...streamQualities), fc.boolean(), (quality, failed) => {
+        expect(chooseEngine(quality, null, failed)).toBe("html");
+      }),
+    );
+  });
+});
+
+describe("chooseGaplessProfile", () => {
+  it("streams lossless sources as FLAC at lossless quality and AAC otherwise", () => {
+    const support = { flac: true, changeType: true };
+
+    expect(chooseGaplessProfile("lossless", true, support)).toBe("fmp4-flac");
+    expect(chooseGaplessProfile("lossless", false, support)).toBe("fmp4-aac");
+    expect(chooseGaplessProfile("high", true, support)).toBe("fmp4-aac");
+  });
+
+  it("falls back to AAC when the browser has no FLAC in MP4", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...streamQualities),
+        fc.boolean(),
+        fc.boolean(),
+        (quality, lossless, changeType) => {
+          expect(chooseGaplessProfile(quality, lossless, { flac: false, changeType })).toBe(
+            "fmp4-aac",
+          );
+        },
+      ),
+    );
+  });
+
+  it("keeps one codec for a whole lossless queue when the browser cannot change codecs", () => {
+    fc.assert(
+      fc.property(fc.array(fc.boolean(), { minLength: 1 }), supportArbitrary, (queue, support) => {
+        const profiles = new Set(
+          queue.map((lossless) => chooseGaplessProfile("lossless", lossless, support)),
+        );
+
+        if (!support.changeType) expect(profiles.size).toBe(1);
+      }),
+    );
+  });
+
+  it("never asks for FLAC below lossless quality", () => {
+    fc.assert(
+      fc.property(fc.boolean(), supportArbitrary, (lossless, support) => {
+        expect(chooseGaplessProfile("high", lossless, support)).toBe("fmp4-aac");
+        expect(chooseGaplessProfile("data-saver", lossless, support)).toBe("fmp4-aac");
+      }),
+    );
   });
 });

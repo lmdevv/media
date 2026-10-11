@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 
 import * as Files from "./files.ts";
 import {
@@ -36,10 +36,12 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           profile: "aac-128" as const,
           source: join(root, "The Sine Waves/Harmonics/01 Fundamental.flac"),
           mtimeMs: 1234.5,
+          codec: "flac",
         };
 
-        const output = yield* transcoder.transcode(input);
+        const { path: output, timing } = yield* transcoder.transcode(input);
 
+        expect(Option.isNone(timing)).toBe(true);
         expect(output).toBe(join(dataDir, "cache", "aac-128", "track1-1234.m4a"));
         const probed = yield* probe(output);
 
@@ -52,7 +54,7 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         const before = yield* Files.statPath(output);
 
-        expect(yield* transcoder.transcode(input)).toBe(output);
+        expect((yield* transcoder.transcode(input)).path).toBe(output);
         expect((yield* Files.statPath(output)).size).toBe(before.size);
         expect(yield* transcoder.ffmpegAvailable).toBe(true);
       }),
@@ -78,6 +80,7 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             profile: "aac-320",
             source: sources[id],
             mtimeMs: 1,
+            codec: "flac",
           });
 
         // Measure the three outputs, then size the cache so any two fit and three do not.
@@ -88,7 +91,7 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         const sizes = yield* Effect.forEach(["a", "b", "c"] as const, (id) =>
           transcodeWith(measuring, id).pipe(
-            Effect.flatMap(Files.statPath),
+            Effect.flatMap(({ path }) => Files.statPath(path)),
             Effect.map((info) => info.size),
           ),
         );

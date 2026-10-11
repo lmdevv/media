@@ -11,14 +11,20 @@ import { errorMessage } from "@music/sdk/errors";
 import { Effect, Exit, Fiber } from "effect";
 
 import type { DeviceDescription } from "./device-identity";
-import type { EngineErrorReason, EngineEvent, EngineSource, PlayerEngine } from "./engine";
+import type {
+  EngineErrorReason,
+  EngineEvent,
+  EngineKind,
+  EngineSource,
+  PlayerEngine,
+} from "./engine";
 import { EngineCommand, followingIndex, planEngine, sessionView } from "./engine-plan";
 import type { SessionView } from "./engine-plan";
 import { livePosition } from "./live-position";
 import { mediaBaseUrl, probeMediaHealth, waitForMedia } from "./media-health";
 import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
-import { chooseStreamProfile } from "./stream-quality";
-import type { StreamQuality } from "./stream-quality";
+import { chooseEngine, chooseGaplessProfile, chooseStreamProfile } from "./stream-quality";
+import type { MseSupport, StreamQuality } from "./stream-quality";
 
 /** Heartbeat cadence; the server shows a device online for a while after each one. */
 const HEARTBEAT_MS = 30_000;
@@ -48,6 +54,15 @@ export interface ControllerSnapshot {
   readonly pendingPlaying: boolean | null;
   /** A volume sent to the server and not yet confirmed by a new session snapshot. */
   readonly pendingVolume: number | null;
+  /** The engine that plays (or will play) the audio here. */
+  readonly engine: EngineKind;
+}
+
+/** Builds the audio engines; the controller switches between them as quality and support allow. */
+export interface EngineFactory {
+  /** What the gapless MSE engine can play here, or null when it cannot run (HTML audio only). */
+  readonly mse: MseSupport | null;
+  readonly create: (kind: EngineKind) => PlayerEngine;
 }
 
 /** What the controller needs from its host besides the server and the engine. */
@@ -92,7 +107,8 @@ interface ResolvedSource {
 export class PlaybackController {
   readonly deviceId: DeviceId;
   readonly #client: MusicClient;
-  readonly #engine: PlayerEngine;
+  readonly #engines: EngineFactory;
+  #engine: PlayerEngine;
   readonly #env: ControllerEnvironment;
   readonly #listeners = new Set<() => void>();
   #snapshot: ControllerSnapshot;
@@ -110,15 +126,22 @@ export class PlaybackController {
   #reportedMs: number | null = null;
   /** Tracks whose original stream failed to play; they fall back to AAC 320. */
   readonly #transcode = new Set<TrackId>();
+  /** The MSE engine failed to play a song; HTML audio plays for the rest of the session. */
+  #mseFailed = false;
+  /** The volume last given to the engine, reapplied when the engine is replaced. */
+  #volume = 1;
+  #unsubscribeEngine: (() => void) | null = null;
   #registered: Promise<void> = Promise.resolve();
   #healthFiber: Fiber.Fiber<void, unknown> | null = null;
   #stop: (() => void) | null = null;
 
-  constructor(client: MusicClient, engine: PlayerEngine, env: ControllerEnvironment) {
+  constructor(client: MusicClient, engines: EngineFactory, env: ControllerEnvironment) {
     this.deviceId = env.deviceId;
     this.#client = client;
-    this.#engine = engine;
+    this.#engines = engines;
     this.#env = env;
+    const engine = chooseEngine(env.quality, engines.mse, false);
+    this.#engine = engines.create(engine);
 
     this.#snapshot = {
       engineStatus: "idle",
@@ -128,6 +151,7 @@ export class PlaybackController {
       autoplayBlocked: false,
       pendingPlaying: null,
       pendingVolume: null,
+      engine,
     };
   }
 
@@ -149,7 +173,7 @@ export class PlaybackController {
    */
   start(): () => void {
     this.#stop?.();
-    const unsubscribe = this.#engine.subscribe(this.#onEngineEvent);
+    this.#unsubscribeEngine = this.#engine.subscribe(this.#onEngineEvent);
     this.#registered = this.#heartbeat();
 
     const heartbeats = setInterval(() => {
@@ -185,7 +209,8 @@ export class PlaybackController {
     });
 
     const stop = (): void => {
-      unsubscribe();
+      this.#unsubscribeEngine?.();
+      this.#unsubscribeEngine = null;
       clearInterval(heartbeats);
       clearInterval(reports);
       document.removeEventListener("visibilitychange", onVisibility);
@@ -303,7 +328,7 @@ export class PlaybackController {
   async setVolume(volume: number): Promise<void> {
     const value = Math.min(1, Math.max(0, volume));
 
-    if (this.#view?.active === true) this.#engine.setVolume(value);
+    if (this.#view?.active === true) this.#setEngineVolume(value);
     this.#update({ pendingVolume: value });
     await this.capture(this.#client.run("playback.volume", { volume: value }));
   }
@@ -339,7 +364,8 @@ export class PlaybackController {
       next.quality === current.quality &&
       next.autoplayBlocked === current.autoplayBlocked &&
       next.pendingPlaying === current.pendingPlaying &&
-      next.pendingVolume === current.pendingVolume;
+      next.pendingVolume === current.pendingVolume &&
+      next.engine === current.engine;
 
     if (unchanged) return;
     this.#snapshot = next;
@@ -429,9 +455,32 @@ export class PlaybackController {
         this.#positionMs = positionMs;
       },
       SetVolume: ({ volume }) => {
-        this.#engine.setVolume(volume);
+        this.#setEngineVolume(volume);
       },
     });
+  }
+
+  #setEngineVolume(volume: number): void {
+    this.#volume = volume;
+    this.#engine.setVolume(volume);
+  }
+
+  /** The engine the current quality and browser support call for. */
+  #wantedEngine(): EngineKind {
+    return chooseEngine(this.#snapshot.quality, this.#engines.mse, this.#mseFailed);
+  }
+
+  /** Replaces the engine when `kind` differs from the one in use. */
+  #useEngine(kind: EngineKind): void {
+    if (kind === this.#snapshot.engine) return;
+    this.#engine.unload();
+    const listening = this.#unsubscribeEngine !== null;
+    this.#unsubscribeEngine?.();
+    this.#engine = this.#engines.create(kind);
+    this.#unsubscribeEngine = listening ? this.#engine.subscribe(this.#onEngineEvent) : null;
+    this.#engine.setVolume(this.#volume);
+    this.#preloaded = null;
+    this.#update({ engine: kind });
   }
 
   #unload(): void {
@@ -456,7 +505,11 @@ export class PlaybackController {
 
     if (!this.#snapshot.mediaOnline) return;
     this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false });
-    const resolved = preloaded ?? (await this.#resolveSource(track));
+    const engine = this.#wantedEngine();
+    // A preloaded URL was signed for the other engine's profile.
+    const reusable = preloaded !== null && engine === this.#snapshot.engine ? preloaded : null;
+    this.#useEngine(engine);
+    const resolved = reusable ?? (await this.#resolveSource(track));
 
     if (generation !== this.#generation || resolved === null) return;
     this.#loaded = { track, index, profile: resolved.profile, url: resolved.source.url };
@@ -468,11 +521,22 @@ export class PlaybackController {
     await this.#engine.load(resolved.source, start, autoplay);
   }
 
-  /** Picks the profile and asks the server for a signed stream URL. */
-  async #resolveSource(track: Track): Promise<ResolvedSource | null> {
-    const profile = this.#transcode.has(track.id)
+  /** The stream profile the engine in use plays for `track`. */
+  #profileFor(track: Track): StreamProfile {
+    const support = this.#engines.mse;
+
+    if (this.#snapshot.engine === "mse" && support !== null) {
+      return chooseGaplessProfile(this.#snapshot.quality, track.lossless, support);
+    }
+
+    return this.#transcode.has(track.id)
       ? "aac-320"
       : chooseStreamProfile(this.#snapshot.quality, track.codec, this.#env.canPlay);
+  }
+
+  /** Picks the profile and asks the server for a signed stream URL. */
+  async #resolveSource(track: Track): Promise<ResolvedSource | null> {
+    const profile = this.#profileFor(track);
 
     try {
       const stream = await this.#client.read("stream.url", { trackId: track.id, profile });
@@ -501,6 +565,9 @@ export class PlaybackController {
     if (this.#view?.active !== true || !this.#snapshot.mediaOnline) return;
 
     if (loaded.track.durationMs - this.#positionMs > PRELOAD_LEAD_MS) return;
+
+    // A quality change switches engines at the next song, which then loads instead of preloading.
+    if (this.#wantedEngine() !== this.#snapshot.engine) return;
 
     const index = followingIndex(loaded.index, state.queue.length, state.repeat);
     const track = index === null ? undefined : state.queue[index];
@@ -633,6 +700,14 @@ export class PlaybackController {
 
     if (Exit.isFailure(health)) {
       this.#goOffline(baseUrl);
+
+      return;
+    }
+
+    // The service is up, so the gapless engine could not play this stream: use HTML audio.
+    if (this.#snapshot.engine === "mse" && reason !== "network") {
+      this.#mseFailed = true;
+      void this.#load(loaded.track, loaded.index, this.#positionMs, this.#view?.playing ?? false);
 
       return;
     }

@@ -2,17 +2,23 @@
  * The audio output seam. The provider decides what plays; an engine only turns URLs into sound.
  *
  * Engines:
+ * - `MseEngine` (`mse-engine.ts`): fragmented MP4 (`fmp4-flac` / `fmp4-aac`) appended into one
+ *   `SourceBuffer` with `timestampOffset` and encoder-delay trimming, for sample-accurate gapless
+ *   playback. `load` resets the `MediaSource`, `preload` appends the next song's fragments after
+ *   the current one, and the engine emits `advanced` when `currentTime` crosses the boundary.
  * - `HtmlAudioEngine` (`html-audio-engine.ts`): two `HTMLAudioElement`s, the next one preloaded and
  *   started from the `ended` event. Works everywhere; leaves a small gap between songs.
- * - Planned `MseEngine`: fragmented MP4 appended into one `SourceBuffer` with `timestampOffset`
- *   and encoder-delay trimming for sample-accurate gapless playback. It slots in behind this same
- *   interface: `load` resets the `MediaSource`, `preload` appends the next song's fragments after
- *   the current one, and the engine emits `advanced` when `currentTime` crosses the boundary. The
- *   provider picks an engine once at mount, so adding it touches only engine selection.
+ *
+ * The provider prefers `MseEngine` where MSE plays AAC in MP4 and falls back to HTML audio for
+ * data saver, for browsers without MSE, and for the rest of the session after the MSE engine
+ * fails to play a song.
  *
  * Engines never reject or throw for expected failures (network, decoding, autoplay policy); they
  * emit an `error` event with a `reason` and resolve.
  */
+
+/** Which engine implementation plays the audio. */
+export type EngineKind = "mse" | "html";
 
 /** One playable source: a signed stream URL plus what the engine needs to schedule it. */
 export interface EngineSource {
