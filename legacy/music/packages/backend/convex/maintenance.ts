@@ -67,7 +67,7 @@ export const releaseExpiredLeases = internalMutation({
 
 /**
  * Pauses sessions whose active device stopped sending heartbeats, at the position it last
- * reported, so every client stops showing music playing on a device that went away.
+ * reported, and clears that device, so no client shows music playing on a device that went away.
  */
 export const pauseOrphanedSessions = internalMutation({
   args: {},
@@ -103,6 +103,9 @@ export const pauseOrphanedSessions = internalMutation({
           playing: false,
           positionMs: session.positionMs + Math.max(0, silentSince - session.updatedAt),
           updatedAt: now,
+          // Clear the gone device so clients stop showing "Playing on" it; the next play picks
+          // an online player.
+          activeDeviceId: undefined,
         }),
       ),
     );

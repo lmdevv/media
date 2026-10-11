@@ -147,6 +147,8 @@ export const LibraryStats = Schema.Struct({
 export const Home = Schema.Struct({
   recentlyAdded: Schema.Array(AlbumCard),
   recentlyPlayed: Schema.Array(AlbumCard),
+  /** Artists of the recently played albums, most recent first, with their art. */
+  recentlyPlayedArtists: Schema.Array(ArtistCard),
   stats: LibraryStats,
 });
 

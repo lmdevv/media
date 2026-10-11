@@ -405,7 +405,11 @@ function PhoneNowPlaying({ track, view, onView }: ViewProps) {
 
   return (
     <div
-      className="flex min-h-full flex-col px-5 pt-[max(12px,env(safe-area-inset-top))] pb-[max(30px,env(safe-area-inset-bottom))]"
+      className={cn(
+        "flex flex-col px-5 pt-[max(12px,env(safe-area-inset-top))] pb-[max(30px,env(safe-area-inset-bottom))]",
+        // The queue scrolls inside the screen so the transport stays pinned at the bottom (05 · 04c).
+        queue ? "h-full" : "min-h-full",
+      )}
       style={background}
     >
       <DialogClose
@@ -696,7 +700,7 @@ function PhoneUpNext() {
   const { next, source } = useUpNext();
 
   return (
-    <div className="flex grow flex-col pt-[22px]">
+    <div className="flex min-h-0 grow flex-col pt-[22px]">
       <div className="flex flex-col px-2 pb-2">
         <span className="font-sans text-[17px] leading-[22px] font-semibold text-text">
           Continue Playing
@@ -708,14 +712,16 @@ function PhoneUpNext() {
       {next.length === 0 ? (
         <p className="px-2 font-sans text-sm/sm text-text/60">Nothing after this song.</p>
       ) : (
-        next.map((entry) => (
-          <QueueRow
-            key={`${entry.index}-${entry.track.id}`}
-            track={entry.track}
-            index={entry.index}
-            tone="glass"
-          />
-        ))
+        <div className="min-h-0 grow overflow-y-auto overscroll-contain">
+          {next.map((entry) => (
+            <QueueRow
+              key={`${entry.index}-${entry.track.id}`}
+              track={entry.track}
+              index={entry.index}
+              tone="glass"
+            />
+          ))}
+        </div>
       )}
     </div>
   );

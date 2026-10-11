@@ -302,9 +302,10 @@ function DeleteDialog({
 
   const [submit, pending] = useAction(
     async () => {
-      await remove({ playlistId: playlist.id });
       onOpenChange(false);
+      // Leave first: this page's live query fails with "not found" once the playlist is gone.
       await navigate({ to: "/playlists" });
+      await remove({ playlistId: playlist.id });
     },
     { success: () => `Deleted ${playlist.name}` },
   );

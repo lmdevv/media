@@ -19,6 +19,7 @@ import { codecMimeType, HeaderRead, readHeader } from "./fmp4";
 import type { AudioCodec, StreamHeader } from "./fmp4";
 import { evictionEnd, fragmentAt, parseStreamTiming, placeTrack } from "./gapless-timeline";
 import type { Placement, StreamTiming } from "./gapless-timeline";
+import { primeInGesture } from "./prime-audio";
 import type { MseSupport } from "./stream-quality";
 
 declare global {
@@ -255,6 +256,10 @@ export class MseEngine implements PlayerEngine {
 
   pause(): void {
     this.#element.pause();
+  }
+
+  unlock(): void {
+    if (this.#session === null && this.#element.paused) primeInGesture(this.#element);
   }
 
   /** Seeks inside the current song; outside the buffer, refetches from the right fragment. */

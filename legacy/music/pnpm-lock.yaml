@@ -339,6 +339,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.1.1
         version: 6.1.2(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(yaml@2.9.1))
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

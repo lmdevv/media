@@ -167,3 +167,30 @@ test("unload stops the output", async ({ page }) => {
   expect(after?.soundMs ?? 0).toBeLessThan((before?.soundMs ?? 0) + 30);
   expect((await events(page)).length).toBe(eventCount);
 });
+
+test("unlock keeps idle output silent and a later load still plays", async ({ page }) => {
+  await page.evaluate(() => {
+    window.harness?.engine.unlock?.();
+  });
+  await page.waitForTimeout(300);
+  expect(await events(page)).toEqual([]);
+  expect((await page.evaluate(() => window.harness?.gap()))?.soundMs ?? 0).toBe(0);
+
+  await page.evaluate(() => window.harness?.load("tone-c.flac", 0, true));
+  await waitForEvent(page, "playing");
+  expect(await ofType(page, "error")).toEqual([]);
+});
+
+test("unlock leaves playing output alone", async ({ page }) => {
+  await page.evaluate(() => window.harness?.load("tone-a.wav", 0, true));
+  await waitForEvent(page, "playing");
+  await page.evaluate(() => {
+    window.harness?.engine.unlock?.();
+  });
+
+  const before = await lastPosition(page);
+
+  await page.waitForTimeout(500);
+  expect(await ofType(page, "paused")).toEqual([]);
+  expect(await lastPosition(page)).toBeGreaterThan(before);
+});

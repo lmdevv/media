@@ -4,6 +4,7 @@ import { useRun } from "@music/sdk/react";
 import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
 import { XIcon } from "lucide-react";
+import { useEffect } from "react";
 
 import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
@@ -135,6 +136,21 @@ export function QueuePanel() {
   const { setQueueOpen } = useUi();
   const { current, next, source } = useUpNext();
   const [clear, clearing] = useClearQueue();
+
+  // Esc closes the panel, unless a dialog or menu above it already handled the key.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+
+      if (document.querySelector("[role=dialog], [role=menu], [role=listbox]") !== null) return;
+
+      setQueueOpen(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [setQueueOpen]);
 
   return (
     <aside

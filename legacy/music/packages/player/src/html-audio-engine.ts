@@ -1,4 +1,5 @@
 import type { EngineErrorReason, EngineEvent, EngineSource, PlayerEngine } from "./engine";
+import { primeInGesture } from "./prime-audio";
 
 /** How often the engine emits `time` while playing (5 Hz; the contract asks for at least 4). */
 const TIME_INTERVAL_MS = 200;
@@ -119,6 +120,12 @@ export class HtmlAudioEngine implements PlayerEngine {
     this.#volume = Math.min(1, Math.max(0, volume));
 
     for (const slot of this.#slots) slot.element.volume = this.#volume;
+  }
+
+  unlock(): void {
+    for (const slot of this.#slots) {
+      if (slot.source === null && slot.element.paused) primeInGesture(slot.element);
+    }
   }
 
   unload(): void {

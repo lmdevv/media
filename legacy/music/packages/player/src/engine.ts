@@ -59,5 +59,11 @@ export interface PlayerEngine {
   setVolume(volume: number): void;
   /** Stops output and releases the audio element and buffers. */
   unload(): void;
+  /**
+   * Primes idle audio output from inside a user gesture (a tap or click), so a `play()` that
+   * follows later without one is allowed. iOS Safari only lets an audio element start on its own
+   * after it was started inside a gesture once. Does nothing to output that is loaded or playing.
+   */
+  unlock?(): void;
   subscribe(listener: (event: EngineEvent) => void): () => void;
 }

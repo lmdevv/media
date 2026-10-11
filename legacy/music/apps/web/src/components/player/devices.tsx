@@ -32,6 +32,8 @@ const idleLabel = (device: Device, now: number): string => {
 export interface DevicesState {
   /** Devices other than this browser, most recently seen first. */
   readonly others: ReadonlyArray<Device>;
+  /** This browser's own entry, once the server lists it. */
+  readonly self: Device | null;
   readonly onlineCount: number;
   /** The device a transfer is waiting on; `here` is this browser. */
   readonly pending: DeviceId | "here" | null;
@@ -77,6 +79,7 @@ export const useDevices = (): DevicesState => {
 
   return {
     others,
+    self: (devices ?? []).find((device) => device.id === player.deviceId) ?? null,
     onlineCount: (devices ?? []).filter((device) => device.online).length,
     pending,
     transfer,
@@ -90,7 +93,7 @@ export const useDevices = (): DevicesState => {
 export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
   const player = usePlayer();
   const position = usePlayerPosition();
-  const { others, pending, transfer } = useDevices();
+  const { others, self, pending, transfer } = useDevices();
   const now = Date.now();
   const activeId = player.activeDevice?.id ?? null;
   const playing = player.status === "playing";
@@ -152,7 +155,12 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
   );
 
   return (
-    <div role="menu" aria-label="Play on" className="flex flex-col gap-0.5">
+    // Old browsers stay listed as idle, so the list scrolls instead of outgrowing the screen.
+    <div
+      role="menu"
+      aria-label="Play on"
+      className="flex max-h-[min(440px,60dvh)] flex-col gap-0.5 overflow-y-auto overscroll-contain"
+    >
       {row("here", {
         name: "This browser",
         detail: player.isThisDevice
@@ -164,7 +172,7 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
           : pending === "here"
             ? `Starting at ${formatDuration(position)}…`
             : "Play here",
-        Icon: deviceIcon("web"),
+        Icon: deviceIcon(self?.kind ?? "web"),
         active: player.isThisDevice,
         isPending: pending === "here",
         onSelect: () => transfer("here"),

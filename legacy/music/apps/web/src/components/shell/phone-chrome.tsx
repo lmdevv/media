@@ -6,7 +6,7 @@ import { ListMusicIcon, SearchIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
-import { perform } from "@/components/player/controls";
+import { deviceIcon, perform, useIsRemote } from "@/components/player/controls";
 
 import { useUi } from "./ui-state";
 
@@ -93,12 +93,19 @@ export function PhoneSkipGlyph({
 
 function MiniPlayer() {
   const player = usePlayer();
+  const remote = useIsRemote();
   const { setNowPlaying } = useUi();
   const track = player.track;
 
   if (track === null) return null;
 
   const playing = player.status === "playing";
+
+  // Another device plays: say where, in the accent like the desktop remote banner.
+  const device =
+    remote && player.activeDevice !== null
+      ? { name: player.activeDevice.name, Icon: deviceIcon(player.activeDevice.kind) }
+      : null;
 
   return (
     <div
@@ -110,17 +117,31 @@ function MiniPlayer() {
       <button
         type="button"
         onClick={() => setNowPlaying("player")}
-        aria-label={`Open Now Playing: ${track.title}`}
+        aria-label={
+          device === null
+            ? `Open Now Playing: ${track.title}`
+            : `Open Now Playing: ${track.title}, playing on ${device.name}`
+        }
         className="flex min-w-0 grow items-center gap-3 text-left outline-none"
       >
         <Artwork url={track.artUrl} seed={track.albumId} className="size-row rounded-md" />
         <span className="flex min-w-0 grow flex-col">
           <span className="truncate font-sans text-[15px] leading-5 font-medium text-text">
             {track.title}
+            {device === null ? null : (
+              <span className="font-normal text-text-muted"> · {track.artist}</span>
+            )}
           </span>
-          <span className="truncate font-sans text-sm leading-[17px] text-text-muted">
-            {track.artist}
-          </span>
+          {device === null ? (
+            <span className="truncate font-sans text-sm leading-[17px] text-text-muted">
+              {track.artist}
+            </span>
+          ) : (
+            <span className="flex min-w-0 items-center gap-1 font-sans text-sm leading-[17px] font-medium text-accent">
+              <device.Icon aria-hidden className="size-3.5 shrink-0" />
+              <span className="truncate">Playing on {device.name}</span>
+            </span>
+          )}
         </span>
       </button>
       <button

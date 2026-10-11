@@ -73,10 +73,7 @@ function HomePage() {
     .filter((tile, index, all) => all.findIndex((other) => other.key === tile.key) === index)
     .slice(0, 6);
 
-  const artists = home.recentlyPlayed
-    .map((album) => ({ id: album.artistId, name: album.artist, artUrl: null }))
-    .filter((artist, index, all) => all.findIndex((other) => other.id === artist.id) === index)
-    .slice(0, 6);
+  const artists = home.recentlyPlayedArtists.slice(0, 6);
 
   const scanning = scan !== undefined;
 
@@ -283,6 +280,12 @@ function PhoneHome({
                   seed={album.id}
                   className="flex h-[320px] w-[250px] flex-col justify-end rounded-[14px] p-4"
                 >
+                  {/* Paper's placeholder art is dark; real covers can be light, so the white
+                      title gets a scrim to stay readable. */}
+                  <span
+                    aria-hidden
+                    className="absolute inset-x-0 bottom-0 h-1/2 bg-linear-to-t from-dark-canvas/65 to-transparent"
+                  />
                   <span className="relative font-sans text-[24px] leading-lg font-heavy tracking-[-0.01em] text-white drop-shadow-sm">
                     {album.title}
                   </span>

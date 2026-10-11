@@ -11,6 +11,7 @@ import { signResource } from "@music/commands/signed-url";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import { mediaBaseUrl, requireEnv } from "./env";
+import { canRead } from "./viewer";
 import type { ReadCtx, Viewer } from "./viewer";
 
 type TrackOut = (typeof Track)["Encoded"];
@@ -69,6 +70,25 @@ export const makePresenter = (ctx: ReadCtx, viewer: Viewer): Presenter => {
     return like !== null;
   };
 
+  /** The cover of the artist's newest readable album that has one, for artists without art. */
+  const newestAlbumArt = async (artistId: Id<"artists">): Promise<string | undefined> => {
+    const albums = await ctx.db
+      .query("albums")
+      .withIndex("by_artist", (q) => q.eq("artistId", artistId))
+      .collect();
+
+    const [newest] = albums
+      .filter(
+        (album) =>
+          album.artHash !== undefined && album.trackCount > 0 && canRead(viewer, album.libraryId),
+      )
+      .toSorted(
+        (left, right) => (right.year ?? 0) - (left.year ?? 0) || right.addedAt - left.addedAt,
+      );
+
+    return newest?.artHash;
+  };
+
   const track = async (doc: Doc<"tracks">): Promise<TrackOut> => ({
     id: doc._id,
     title: doc.title,
@@ -105,7 +125,7 @@ export const makePresenter = (ctx: ReadCtx, viewer: Viewer): Presenter => {
       id: doc._id,
       name: doc.name,
       albumCount: doc.albumCount,
-      artUrl: await artUrl(doc.artHash),
+      artUrl: await artUrl(doc.artHash ?? (await newestAlbumArt(doc._id))),
     }),
   };
 };

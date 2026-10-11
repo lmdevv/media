@@ -268,6 +268,7 @@ export class PlaybackController {
 
   /** Replaces the queue and plays it on this browser. */
   async playTracks(trackIds: ReadonlyArray<TrackId>, index?: number): Promise<void> {
+    this.#unlockOutput();
     await this.#registered;
 
     await this.capture(
@@ -335,6 +336,7 @@ export class PlaybackController {
 
   /** Moves playback to this browser. */
   async playHere(): Promise<void> {
+    this.#unlockOutput();
     await this.#registered;
     await this.capture(this.#client.run("playback.transfer", { deviceId: this.deviceId }));
   }
@@ -351,6 +353,18 @@ export class PlaybackController {
     this.#update({ quality });
     this.#engine.preload(null);
     this.#preloaded = null;
+  }
+
+  /**
+   * Runs synchronously at the start of the tap handlers that move playback to this browser, before
+   * any await: it switches to the engine that will play and primes its audio element, so the
+   * `play()` that follows the session update is allowed on iOS Safari. Output that already plays
+   * here needs nothing.
+   */
+  #unlockOutput(): void {
+    if (this.#view?.active === true) return;
+    this.#useEngine(this.#wantedEngine());
+    this.#engine.unlock?.();
   }
 
   #update(patch: Partial<ControllerSnapshot>): void {

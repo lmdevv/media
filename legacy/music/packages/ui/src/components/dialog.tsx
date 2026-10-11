@@ -50,27 +50,26 @@ export function DialogContent({
         )}
         {...props}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <DialogPrimitive.Title className="font-sans text-xl/xl font-heavy tracking-tight text-text">
-              {title}
-            </DialogPrimitive.Title>
-            {description === undefined ? null : (
-              <DialogPrimitive.Description className="font-sans text-base/base text-text-muted">
-                {description}
-              </DialogPrimitive.Description>
-            )}
-          </div>
-          {showClose ? (
-            <DialogPrimitive.Close
-              aria-label="Close"
-              className="-mt-1 -mr-1 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-text-muted hover:bg-surface hover:text-text"
-            >
-              <XIcon className="size-5" />
-            </DialogPrimitive.Close>
-          ) : null}
+        <div className={cn("flex flex-col gap-1", showClose && "pr-10")}>
+          <DialogPrimitive.Title className="font-sans text-xl/xl font-heavy tracking-tight text-text">
+            {title}
+          </DialogPrimitive.Title>
+          {description === undefined ? null : (
+            <DialogPrimitive.Description className="font-sans text-base/base text-text-muted">
+              {description}
+            </DialogPrimitive.Description>
+          )}
         </div>
         {children}
+        {/* Last in the DOM so opening the dialog focuses its first field or action, not Close. */}
+        {showClose ? (
+          <DialogPrimitive.Close
+            aria-label="Close"
+            className="absolute top-6 right-6 flex size-8 cursor-pointer items-center justify-center rounded-full text-text-muted hover:bg-surface hover:text-text"
+          >
+            <XIcon className="size-5" />
+          </DialogPrimitive.Close>
+        ) : null}
       </DialogPrimitive.Popup>
     </DialogPrimitive.Portal>
   );

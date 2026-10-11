@@ -18,13 +18,14 @@ import { cn } from "@music/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { MoreHorizontalIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useState } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Artwork } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
 import { formatCount, formatDuration, formatQuality } from "@/lib/format";
+import { isTyping } from "@/lib/keys";
 import { useLike } from "@/lib/use-like";
 
 /** Queue actions that report their result as a toast. */
@@ -213,10 +214,34 @@ export function TrackMenu({
   const { playNext, addToQueue } = useQueueActions();
   const { liked, toggle } = useLike(track);
   const [info, setInfo] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  // The keys the menu shows: ⇧↵ play next, Q add to queue, L like. Captured before the menu's own
+  // handlers so Shift+Enter does not also activate the highlighted item.
+  const onShortcut = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.metaKey || event.ctrlKey || event.altKey || isTyping(event.nativeEvent)) return;
+
+    const key = event.key.toLowerCase();
+
+    const action =
+      key === "enter" && event.shiftKey
+        ? () => playNext([track])
+        : key === "q"
+          ? () => addToQueue([track])
+          : key === "l"
+            ? () => void toggle()
+            : null;
+
+    if (action === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setOpen(false);
+    action();
+  };
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger
           aria-label={`More actions for ${track.title}`}
           onClick={(event) => event.stopPropagation()}
@@ -227,7 +252,7 @@ export function TrackMenu({
         >
           {trigger ?? <MoreHorizontalIcon className="size-5" />}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align={align}>
+        <DropdownMenuContent align={align} onKeyDownCapture={onShortcut}>
           <DropdownMenuItem shortcut="⇧ ↵" onClick={() => playNext([track])}>
             Play next
           </DropdownMenuItem>

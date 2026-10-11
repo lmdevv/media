@@ -47,6 +47,12 @@ export const libraryQueries = {
       await Promise.all(playedAlbumIds.map((id) => ctx.db.get(id))),
     );
 
+    const playedArtistIds = [...new Set(played.map((album) => album.artistId))].slice(0, 12);
+
+    const playedArtists = (await Promise.all(playedArtistIds.map((id) => ctx.db.get(id)))).filter(
+      (artist): artist is Doc<"artists"> => artist !== null,
+    );
+
     let tracks = 0;
     let albums = 0;
     let artists = 0;
@@ -62,6 +68,7 @@ export const libraryQueries = {
     return {
       recentlyAdded: await Promise.all(recentlyAdded.map(present.album)),
       recentlyPlayed: await Promise.all(played.map(present.album)),
+      recentlyPlayedArtists: await Promise.all(playedArtists.map(present.artist)),
       stats: { tracks, albums, artists, durationMs },
     };
   },

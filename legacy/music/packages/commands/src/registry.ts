@@ -59,7 +59,8 @@ const QueueIndex = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 export const commands = {
   // Library
   "library.home": command({
-    summary: "Recently added and recently played albums, with library totals",
+    summary:
+      "Recently added and recently played albums, recently played artists, and library totals",
     group: "library",
     kind: "query",
     access: "user",
