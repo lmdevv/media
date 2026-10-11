@@ -5,6 +5,7 @@
 import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
+import { enqueueScan } from "./handlers/admin";
 import { markTrackMissing, upsertScannedTrack } from "./lib/catalog";
 import { inOrder } from "./lib/sequence";
 import { requireService } from "./lib/service";
@@ -222,5 +223,32 @@ export const trackSource = query({
       mtimeMs: track.mtimeMs,
       durationMs: track.durationMs,
     };
+  },
+});
+
+/** Every library folder, so the service can watch them. Updates live as libraries change. */
+export const libraries = query({
+  args: { secret: v.string() },
+  handler: async (ctx, { secret }) => {
+    requireService(secret);
+    const all = await ctx.db.query("libraries").collect();
+
+    return all.map((library) => ({ id: library._id, path: library.path }));
+  },
+});
+
+/**
+ * Enqueues a scan after the service saw files change. Returns the existing pending or running
+ * job instead of adding another one, so repeated requests are safe.
+ */
+export const requestScan = mutation({
+  args: { secret: v.string(), libraryId: v.id("libraries") },
+  handler: async (ctx, { secret, libraryId }) => {
+    requireService(secret);
+    const library = await ctx.db.get(libraryId);
+
+    if (library === null) return null;
+
+    return { jobId: await enqueueScan(ctx, library._id, library.ownerId) };
   },
 });

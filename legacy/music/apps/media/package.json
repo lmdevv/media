@@ -2,6 +2,31 @@
   "name": "@music/media",
   "version": "0.0.0",
   "private": true,
-  "description": "Media service: scan, watch, stream, remux, transcode, and file jobs. Built in milestone 3.",
-  "type": "module"
+  "description": "Media service: scan, watch, stream, and transcode the on-disk library.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/build.ts --watch",
+    "build": "node scripts/build.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root ../.. apps/media",
+    "fixtures": "node scripts/generate-fixtures.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.4",
+    "@music/commands": "workspace:*",
+    "convex": "catalog:",
+    "effect": "catalog:",
+    "hono": "^4.13.13",
+    "music-metadata": "^12.1.0"
+  },
+  "devDependencies": {
+    "@music/config": "workspace:*",
+    "@music/sdk": "workspace:*",
+    "@types/node": "catalog:",
+    "esbuild": "0.27.0",
+    "fast-check": "^4.10.2",
+    "typescript": "catalog:",
+    "vitest": "5.0.3"
+  }
 }

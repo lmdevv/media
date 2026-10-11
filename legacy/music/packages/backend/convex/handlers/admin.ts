@@ -48,7 +48,8 @@ const activeJob = async (ctx: QueryCtx, libraryId: Id<"libraries">): Promise<Doc
     .withIndex("by_library_status", (q) => q.eq("libraryId", libraryId).eq("status", "pending"))
     .first());
 
-const enqueueScan = async (
+/** Enqueues a scan unless the library already has a pending or running job, which it returns. */
+export const enqueueScan = async (
   ctx: MutationCtx,
   libraryId: Id<"libraries">,
   createdBy: Id<"users">,
