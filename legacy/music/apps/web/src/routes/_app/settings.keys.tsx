@@ -242,6 +242,7 @@ function NewKeyDialog({
           title="Copy your new key"
           description="This is the only time it's shown. Store it in your agent's secrets or a password manager."
           showClose={false}
+          className="shadow-none"
         >
           <div className="flex flex-col gap-1.5">
             <span className="font-sans text-sm/xs font-medium text-text">{created.name}</span>
@@ -262,12 +263,6 @@ function NewKeyDialog({
                 {copied ? "Copied" : "Copy"}
               </Button>
             </div>
-          </div>
-          <div className="flex flex-col gap-2 rounded-md border border-border px-3.5 py-3">
-            <span className="font-mono text-xs/xs tracking-mono text-text-muted">TRY IT</span>
-            <code className="font-mono text-sm/base break-all text-text">
-              MUSIC_API_KEY={created.key.slice(0, 8)}… music playlists list --json
-            </code>
           </div>
           <DialogFooter>
             <Button variant="solid" onClick={() => close(false)}>

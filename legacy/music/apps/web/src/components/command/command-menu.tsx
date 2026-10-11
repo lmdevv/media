@@ -575,10 +575,13 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   const [runPrimary, setRunPrimary] = useState<(() => void) | null>(null);
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "ArrowDown") {
+    // Ctrl+N and Ctrl+P move like the arrows, as in Emacs, fzf, and most terminal pickers.
+    const ctrl = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
+
+    if (event.key === "ArrowDown" || (ctrl && event.key === "n")) {
       event.preventDefault();
       select(Math.min(active + 1, items.length - 1));
-    } else if (event.key === "ArrowUp") {
+    } else if (event.key === "ArrowUp" || (ctrl && event.key === "p")) {
       event.preventDefault();
       select(Math.max(active - 1, 0));
     } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {

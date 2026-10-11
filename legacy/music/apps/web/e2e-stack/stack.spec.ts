@@ -75,6 +75,20 @@ test("an album plays real audio, pauses, and skips", async ({ page }) => {
   await expectAudioPast(page, 1);
 });
 
+test("Ctrl+N and Ctrl+P move through the command menu", async ({ page }) => {
+  await signIn(page);
+  await page.keyboard.press("ControlOrMeta+k");
+  const options = page.getByRole("dialog", { name: "Command menu" }).getByRole("option");
+  await expect(options.first()).toHaveAttribute("aria-selected", "true");
+
+  await page.keyboard.press("Control+n");
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Control+n");
+  await expect(options.nth(2)).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Control+p");
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
+});
+
 test("search finds songs from the scanned library", async ({ page }) => {
   await signIn(page);
   const album = await openFirstAlbum(page);
