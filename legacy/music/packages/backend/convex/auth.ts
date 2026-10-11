@@ -58,9 +58,8 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
 
         if (Result.isFailure(parsed)) return null;
         const hash = await sha256Hex(parsed.success.key);
-        const userId = await ctx.runMutation(internal.apiKeys.redeem, { hash });
 
-        return userId === null ? null : { userId };
+        return ctx.runMutation(internal.apiKeys.redeem, { hash });
       },
     }),
   ],

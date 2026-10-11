@@ -6,6 +6,15 @@
 :8080 {
 	encode zstd gzip
 
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Frame-Options DENY
+		Cross-Origin-Opener-Policy same-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		-Server
+	}
+
 	handle /healthz {
 		respond "ok" 200
 	}
@@ -22,6 +31,9 @@
 
 	handle {
 		root * /app/web
+		# Same-origin scripts only. Styles allow inline because components inject <style> tags.
+		# The Convex client connects by WebSocket to /convex on this host.
+		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' ws://{hostport} wss://{hostport}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		@assets path /assets/*
 		header @assets Cache-Control "public, max-age=31536000, immutable"
 		header /index.html Cache-Control "no-cache"

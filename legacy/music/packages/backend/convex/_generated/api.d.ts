@@ -27,6 +27,7 @@ import type * as lib_playback from "../lib/playback.js";
 import type * as lib_present from "../lib/present.js";
 import type * as lib_sequence from "../lib/sequence.js";
 import type * as lib_service from "../lib/service.js";
+import type * as lib_sessions from "../lib/sessions.js";
 import type * as lib_viewer from "../lib/viewer.js";
 import type * as maintenance from "../maintenance.js";
 import type * as media from "../media.js";
@@ -59,6 +60,7 @@ declare const fullApi: ApiFromModules<{
   "lib/present": typeof lib_present;
   "lib/sequence": typeof lib_sequence;
   "lib/service": typeof lib_service;
+  "lib/sessions": typeof lib_sessions;
   "lib/viewer": typeof lib_viewer;
   maintenance: typeof maintenance;
   media: typeof media;

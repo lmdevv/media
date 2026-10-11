@@ -2,7 +2,7 @@
  * Effect operations over the file system for the media service, with typed failures. The Node
  * calls live in `platform/node-files.ts`; this module translates their rejections.
  */
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 
 import * as NodeFiles from "./platform/node-files.ts";
 
@@ -61,6 +61,10 @@ export const renameFile = (from: string, to: string): Effect.Effect<void, FileEr
 export const makeDirectory = (path: string): Effect.Effect<void, FileError> =>
   attempt("mkdir", path, () => NodeFiles.makeDirectory(path));
 
+/** Creates a symbolic link at `path` pointing to `target`. */
+export const makeSymlink = (target: string, path: string): Effect.Effect<void, FileError> =>
+  attempt("symlink", path, () => NodeFiles.makeSymlink(target, path));
+
 /** Removes a file or directory tree; a missing path succeeds. */
 export const removePath = (path: string): Effect.Effect<void, FileError> =>
   attempt("remove", path, () => NodeFiles.removePath(path));
@@ -85,6 +89,23 @@ export const walkTree = (
   include: (name: string) => boolean,
 ): Effect.Effect<ReadonlyArray<NodeFiles.WalkedFile>, FileError> =>
   attempt("walk", root, () => NodeFiles.walkTree(root, include));
+
+/**
+ * The canonical path of `path` when it resolves, through any symlinks, to somewhere inside the
+ * canonical `root`; `None` when it escapes. Fails with `FileError` when either does not exist.
+ */
+export const resolveWithin = (
+  root: string,
+  path: string,
+): Effect.Effect<Option.Option<string>, FileError> =>
+  Effect.all([
+    attempt("realpath", root, () => NodeFiles.realPath(root)),
+    attempt("realpath", path, () => NodeFiles.realPath(path)),
+  ]).pipe(
+    Effect.map(([base, target]) =>
+      NodeFiles.isWithin(base, target) ? Option.some(target) : Option.none(),
+    ),
+  );
 
 /** Streams the inclusive byte range of a file. Read errors surface through the stream itself. */
 export const readRange = NodeFiles.readRange;

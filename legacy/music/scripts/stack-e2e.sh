@@ -5,17 +5,17 @@
 #   scripts/stack-e2e.sh                 # generated fixture library
 #   MUSIC_DIR=~/music scripts/stack-e2e.sh
 #
-# Env: IMAGE (skip the build and use this image), PORT (default 8090), CHROMIUM_PATH, KEEP=1 to
-# leave the container running afterwards.
+# Env: IMAGE (skip the build and use this image), PORT (default 8090), NAME (container name,
+# default music-stack-e2e), CHROMIUM_PATH, KEEP=1 to leave the container running afterwards.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 port="${PORT:-8090}"
-name="music-stack-e2e"
+name="${NAME:-music-stack-e2e}"
 image="${IMAGE:-}"
 
 if [[ -z "$image" ]]; then
-  image="music:stack-e2e"
+  image="music:${name#music-}"
   docker build -f "$root/deploy/docker/Dockerfile" -t "$image" "$root"
 fi
 
@@ -48,5 +48,25 @@ curl -fsS "http://localhost:${port}/media/health" >/dev/null || {
   docker logs "$name" | tail -50
   exit 1
 }
+
+# Secrets, the database, and backups are private to root inside the container.
+modes="$(docker exec "$name" stat -c '%a %n' /data/secrets /data/secrets/instance_secret \
+  /data/secrets/admin_key /data/secrets/media_secret /data/convex /data/backups)"
+echo "$modes"
+if grep -Ev '^(700|600) ' <<<"$modes"; then
+  echo "secrets or data are readable beyond root" >&2
+  exit 1
+fi
+
+# The admin key never reaches the web app, and the Convex admin API refuses callers without it.
+if docker exec "$name" sh -c 'grep -rlF "$(cat /data/secrets/admin_key)" /app/web'; then
+  echo "the admin key is in the web app" >&2
+  exit 1
+fi
+admin_status="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${port}/convex/api/check_admin_key")"
+if [[ "$admin_status" != "403" ]]; then
+  echo "the Convex admin API answered $admin_status without a key" >&2
+  exit 1
+fi
 
 MUSIC_URL="http://localhost:${port}" pnpm --dir "$root" --filter web test:stack

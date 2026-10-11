@@ -5,7 +5,9 @@ import { randomToken, sha256Hex } from "../lib/crypto";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { presentJob, presentLibrary } from "../lib/present";
+import { endSession } from "../lib/sessions";
 import { canRead } from "../lib/viewer";
+import type { Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
 
@@ -48,6 +50,32 @@ const activeJob = async (ctx: QueryCtx, libraryId: Id<"libraries">): Promise<Doc
     .withIndex("by_library_status", (q) => q.eq("libraryId", libraryId).eq("status", "pending"))
     .first());
 
+/**
+ * A library the viewer can see. Admin rights cover shared libraries and the admin's own private
+ * ones; another user's private library stays invisible, so it is `not_found` like any other ID.
+ */
+const visibleLibrary = async (
+  ctx: QueryCtx,
+  viewer: Viewer,
+  id: string,
+): Promise<Doc<"libraries">> => {
+  const library = await ctx.db.get(tableId(ctx, "libraries", id));
+
+  if (library === null || !canRead(viewer, library._id))
+    return fail("not_found", "Library not found");
+
+  return library;
+};
+
+/** A job on a library the viewer can see. */
+const visibleJob = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise<Doc<"jobs">> => {
+  const job = await ctx.db.get(tableId(ctx, "jobs", id));
+
+  if (job === null || !canRead(viewer, job.libraryId)) return fail("not_found", "Job not found");
+
+  return job;
+};
+
 /** Enqueues a scan unless the library already has a pending or running job, which it returns. */
 export const enqueueScan = async (
   ctx: MutationCtx,
@@ -71,7 +99,7 @@ export const adminQueries = {
 
   "jobs.list": async (ctx, viewer) => {
     const jobs = await ctx.db.query("jobs").order("desc").take(RECENT_JOBS);
-    const visible = jobs.filter((job) => viewer.role === "admin" || canRead(viewer, job.libraryId));
+    const visible = jobs.filter((job) => canRead(viewer, job.libraryId));
 
     return Promise.all(
       visible.map(async (job) => presentJob(job, await ctx.db.get(job.libraryId))),
@@ -79,11 +107,7 @@ export const adminQueries = {
   },
 
   "jobs.get": async (ctx, viewer, args) => {
-    const job = await ctx.db.get(tableId(ctx, "jobs", args.jobId));
-
-    if (job === null || (viewer.role !== "admin" && !canRead(viewer, job.libraryId))) {
-      return fail("not_found", "Job not found");
-    }
+    const job = await visibleJob(ctx, viewer, args.jobId);
 
     return presentJob(job, await ctx.db.get(job.libraryId));
   },
@@ -142,17 +166,13 @@ export const adminMutations = {
   },
 
   "libraries.scan": async (ctx, viewer, args) => {
-    const library = await ctx.db.get(tableId(ctx, "libraries", args.libraryId));
-
-    if (library === null) return fail("not_found", "Library not found");
+    const library = await visibleLibrary(ctx, viewer, args.libraryId);
 
     return { jobId: await enqueueScan(ctx, library._id, viewer.id) };
   },
 
-  "libraries.delete": async (ctx, _viewer, args) => {
-    const library = await ctx.db.get(tableId(ctx, "libraries", args.libraryId));
-
-    if (library === null) return fail("not_found", "Library not found");
+  "libraries.delete": async (ctx, viewer, args) => {
+    const library = await visibleLibrary(ctx, viewer, args.libraryId);
     await ctx.db.delete(library._id);
 
     const open = await Promise.all(
@@ -179,10 +199,8 @@ export const adminMutations = {
     return ok;
   },
 
-  "jobs.cancel": async (ctx, _viewer, args) => {
-    const job = await ctx.db.get(tableId(ctx, "jobs", args.jobId));
-
-    if (job === null) return fail("not_found", "Job not found");
+  "jobs.cancel": async (ctx, viewer, args) => {
+    const job = await visibleJob(ctx, viewer, args.jobId);
 
     if (job.status === "pending" || job.status === "running") {
       await ctx.db.patch(job._id, { status: "cancelled", finishedAt: Date.now() });
@@ -218,7 +236,9 @@ export const adminMutations = {
     const key = await ctx.db.get(tableId(ctx, "apiKeys", args.apiKeyId));
 
     if (key === null || key.userId !== viewer.id) return fail("not_found", "Key not found");
-    await ctx.db.patch(key._id, { revokedAt: Date.now() });
+    await ctx.db.patch(key._id, { revokedAt: Date.now(), sessionId: undefined });
+
+    if (key.sessionId !== undefined) await endSession(ctx, key.sessionId);
 
     return ok;
   },

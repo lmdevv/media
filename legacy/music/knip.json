@@ -11,7 +11,7 @@
       "entry": ["src/main.ts", "scripts/*.ts"]
     },
     "packages/backend": {
-      "entry": ["convex/*.ts", "scripts/*.ts"],
+      "entry": ["convex/*.ts", "scripts/*.ts", "test/*.test.ts"],
       "typescript": {
         "config": ["convex/tsconfig.json"]
       }

@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { Schema } from "effect";
 
-import { ADMIN, cli, expectAudioPast, isPlayingAudio, signIn } from "./support";
+import { ADMIN, cli, cspViolations, expectAudioPast, isPlayingAudio, signIn } from "./support";
 
 test.describe.configure({ mode: "serial" });
 
@@ -130,4 +130,24 @@ test("playback moves to a second browser and the first one stops", async ({ page
   await expectAudioPast(phone, 1);
   await expect(page.getByText(/Playing on /).first()).toBeVisible();
   await other.close();
+});
+
+test("the app runs under its Content-Security-Policy and security headers", async ({ page }) => {
+  const response = await page.request.get("/");
+  const headers = response.headers();
+
+  expect(headers["content-security-policy"]).toContain("script-src 'self';");
+  expect(headers["x-content-type-options"]).toBe("nosniff");
+  expect(headers["x-frame-options"]).toBe("DENY");
+
+  await signIn(page);
+  await expect(page.locator("main img").first()).toBeVisible();
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 1);
+  await page.keyboard.press("/");
+  await page.locator("#search-input").fill("a");
+  await expect(page.getByText("Top result")).toBeVisible();
+
+  expect(await cspViolations(page)).toEqual([]);
 });

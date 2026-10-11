@@ -4,11 +4,13 @@
 # fetches its JWKS from that URL, so it must be reachable from inside the container. Clients only
 # use the /convex API origin.
 set -e
+# The instance secret, the database, and file storage are readable by root only.
+umask 077
 data="${MUSIC_DATA:-/data}"
 mkdir -p "$data/convex/storage" "$data/convex/tmp" "$data/secrets"
+chmod 700 "$data/secrets" "$data/convex"
 if [ ! -s "$data/secrets/instance_secret" ]; then
   node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' > "$data/secrets/instance_secret"
-  chmod 600 "$data/secrets/instance_secret"
 fi
 public="${PUBLIC_URL%/}"
 export TMPDIR="$data/convex/tmp"

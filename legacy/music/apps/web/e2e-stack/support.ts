@@ -14,6 +14,8 @@ declare global {
   interface Window {
     /** Media elements the page started, recorded by the init script. */
     musicTestMedia?: Set<HTMLMediaElement>;
+    /** Content-Security-Policy violations the page reported, recorded by the init script. */
+    musicCspViolations?: Array<string>;
   }
 }
 
@@ -28,6 +30,10 @@ const trackMediaElements = async (page: Page): Promise<void> => {
   await page.addInitScript({
     content: `
       window.musicTestMedia = new Set();
+      window.musicCspViolations = [];
+      document.addEventListener("securitypolicyviolation", (event) => {
+        window.musicCspViolations.push(event.violatedDirective + " " + event.blockedURI);
+      });
       const play = HTMLMediaElement.prototype.play;
       HTMLMediaElement.prototype.play = function () {
         window.musicTestMedia.add(this);
@@ -67,6 +73,10 @@ const playedSeconds = (page: Page): Promise<number> =>
 export const expectAudioPast = async (page: Page, seconds: number): Promise<void> => {
   await expect.poll(() => playedSeconds(page), { timeout: 30_000 }).toBeGreaterThan(seconds);
 };
+
+/** Content-Security-Policy violations the page has reported since it loaded. */
+export const cspViolations = (page: Page): Promise<ReadonlyArray<string>> =>
+  page.evaluate(() => window.musicCspViolations ?? []);
 
 /** Whether any media element on the page is playing. */
 export const isPlayingAudio = (page: Page): Promise<boolean> =>

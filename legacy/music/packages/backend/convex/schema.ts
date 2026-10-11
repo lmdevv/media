@@ -53,6 +53,8 @@ export default defineSchema({
     hash: v.string(),
     lastUsedAt: v.optional(v.number()),
     revokedAt: v.optional(v.number()),
+    /** The auth session every sign-in with this key shares; revoking the key deletes it. */
+    sessionId: v.optional(v.id("authSessions")),
   })
     .index("by_hash", ["hash"])
     .index("by_user", ["userId"]),

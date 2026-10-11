@@ -3,12 +3,17 @@
 # service. Generates secrets into /data, backs up before an upgrade, deploys the bundled Convex
 # functions, sets the deployment environment, and writes the media service env.
 set -euo pipefail
+# Secrets, backups, and the database export are readable by root only.
+umask 077
 
 data="${MUSIC_DATA:-/data}"
 secrets="$data/secrets"
 public="${PUBLIC_URL%/}"
 version="$(node -p 'require("/app/backend/package.json").version')"
 mkdir -p "$secrets" "$data/media" "$data/backups" /run/music
+# Installs from before the umask kept group- and world-readable secrets and backups.
+chmod 700 "$secrets" "$data/backups"
+find "$secrets" "$data/backups" -type f -exec chmod 600 {} +
 
 log() { echo "[init] $*"; }
 
@@ -25,11 +30,9 @@ admin_key="$(/app/convex/generate_key music "$(cat "$secrets/instance_secret")" 
 export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210
 export CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
 printf '%s\n' "$admin_key" > "$secrets/admin_key"
-chmod 600 "$secrets/admin_key"
 
 if [ ! -s "$secrets/media_secret" ]; then
   random > "$secrets/media_secret"
-  chmod 600 "$secrets/media_secret"
 fi
 
 cd /app/backend
@@ -50,7 +53,6 @@ node scripts/configure.ts "--site-url=$public" --media-url=/media \
   "--media-secret=$(cat "$secrets/media_secret")"
 
 signing="$(convex env get STREAM_SIGNING_KEY)"
-umask 077
 cat > /run/music/media.env <<ENV
 CONVEX_URL=http://127.0.0.1:3210
 MEDIA_SERVICE_SECRET=$(cat "$secrets/media_secret")

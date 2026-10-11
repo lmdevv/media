@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "convex dev",
     "dev:setup": "convex dev --configure --until-success",
-    "typecheck": "tsc --noEmit -p convex && tsc --noEmit -p scripts",
+    "typecheck": "tsc --noEmit -p convex && tsc --noEmit -p scripts && tsc --noEmit -p test",
     "configure": "node scripts/configure.ts"
   },
   "dependencies": {
@@ -19,7 +19,9 @@
   },
   "devDependencies": {
     "@music/config": "workspace:*",
+    "@music/sdk": "workspace:*",
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "5.0.3"
   }
 }

@@ -1,4 +1,4 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
@@ -20,6 +20,15 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
   const userId = await getAuthUserId(ctx);
 
   if (userId === null) return fail("unauthenticated", "Sign in first");
+  // A token outlives sign-out and key revocation by up to its one-hour lifetime unless the
+  // session it names is checked here; ending a session must end its tokens at once.
+  const sessionId = ctx.db.normalizeId("authSessions", (await getAuthSessionId(ctx)) ?? "");
+  const session = sessionId === null ? null : await ctx.db.get(sessionId);
+
+  if (session === null || session.userId !== userId) {
+    return fail("unauthenticated", "This session has ended; sign in again");
+  }
+
   const user = await ctx.db.get(userId);
 
   if (user === null) return fail("unauthenticated", "This account no longer exists");

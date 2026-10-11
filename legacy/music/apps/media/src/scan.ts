@@ -143,9 +143,13 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
           .toSorted((a, b) => folderArtRank(a) - folderArtRank(b));
 
         if (best === undefined) return undefined;
-        const bytes = yield* Files.readWholeFile(join(directory, best));
+        const inside = yield* Files.resolveWithin(library.path, join(directory, best));
 
-        return yield* saveArt(dataDir, bytes);
+        // A cover that links out of the library would publish an outside file as artwork.
+        if (Option.isNone(inside)) return undefined;
+        const bytes = yield* Files.readWholeFile(inside.value);
+
+        return Option.getOrUndefined(yield* saveArt(dataDir, bytes));
       }),
   });
 
@@ -157,7 +161,7 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
       const artHash =
         tags.picture === undefined
           ? yield* Cache.get(folderArt, dirname(absolute))
-          : yield* saveArt(dataDir, tags.picture);
+          : Option.getOrUndefined(yield* saveArt(dataDir, tags.picture));
 
       const folder = dirname(file.relativePath);
       const fileName = basename(file.relativePath);

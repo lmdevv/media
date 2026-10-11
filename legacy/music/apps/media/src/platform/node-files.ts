@@ -7,8 +7,20 @@
  * only caller and translates each rejection into a typed error.
  */
 import { createReadStream } from "node:fs";
-import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  cp,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { join, sep } from "node:path";
 import { Readable } from "node:stream";
 
 /** Size and modification time of one regular file. */
@@ -77,6 +89,12 @@ export const makeDirectory = async (path: string): Promise<void> => {
   await mkdir(path, { recursive: true });
 };
 
+/** Creates a symbolic link at `path` pointing to `target`. */
+export const makeSymlink = (target: string, path: string): Promise<void> => symlink(target, path);
+
+/** The canonical absolute path of an existing file or directory, with every symlink resolved. */
+export const realPath = (path: string): Promise<string> => realpath(path);
+
 /** Removes a file or directory tree; a missing path is not an error. */
 export const removePath = (path: string): Promise<void> =>
   rm(path, { recursive: true, force: true });
@@ -121,15 +139,33 @@ export interface WalkedFile extends FileStat {
   readonly relativePath: string;
 }
 
+/** True when the canonical `path` is the canonical `root` or lies under it. */
+export const isWithin = (root: string, path: string): boolean =>
+  path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+
 /**
  * Recursively lists regular files under `root` whose names pass `include`, skipping entries
- * whose names start with a dot. Symlinks are followed once; unreadable entries are skipped.
+ * whose names start with a dot. A symlink to a file counts only when its target resolves inside
+ * `root`, so a link cannot pull outside files into the library; symlinks to directories are never
+ * followed, which also rules out loops. Unreadable entries are skipped.
  */
 export const walkTree = async (
   root: string,
   include: (name: string) => boolean,
 ): Promise<ReadonlyArray<WalkedFile>> => {
   const found: Array<WalkedFile> = [];
+
+  // The root itself must exist; a missing root is an error the caller reports.
+  const rootInfo = await stat(root);
+
+  if (!rootInfo.isDirectory()) throw new Error(`Not a directory: ${root}`);
+  const base = await realpath(root);
+
+  const linkedFileInside = async (path: string): Promise<boolean> => {
+    const target = await realpath(path).catch(() => null);
+
+    return target !== null && isWithin(base, target);
+  };
 
   const visit = async (directory: string, prefix: string): Promise<void> => {
     const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
@@ -140,30 +176,25 @@ export const walkTree = async (
         const absolute = join(directory, entry.name);
         const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
 
-        const info =
-          entry.isSymbolicLink() || entry.isFile() || entry.isDirectory()
-            ? await stat(absolute).catch(() => null)
-            : null;
-
-        if (info === null) return;
-
-        if (info.isDirectory()) {
+        if (entry.isDirectory()) {
           await visit(absolute, relative);
 
           return;
         }
 
-        if (info.isFile() && include(entry.name)) {
+        const candidate =
+          entry.isFile() || (entry.isSymbolicLink() && (await linkedFileInside(absolute)));
+
+        if (!candidate || !include(entry.name)) return;
+        const info = await stat(absolute).catch(() => null);
+
+        if (info?.isFile() === true) {
           found.push({ relativePath: relative, size: info.size, mtimeMs: info.mtimeMs });
         }
       }),
     );
   };
 
-  // The root itself must exist; a missing root is an error the caller reports.
-  const rootInfo = await stat(root);
-
-  if (!rootInfo.isDirectory()) throw new Error(`Not a directory: ${root}`);
   await visit(root, "");
 
   return found;

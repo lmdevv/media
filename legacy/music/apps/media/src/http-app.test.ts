@@ -65,7 +65,11 @@ const setup = Effect.gen(function* () {
   const libraryId = yield* control.addLibrary(root);
   const progress = yield* Ref.make<JobProgress>({ done: 0 });
 
-  yield* scanLibrary({ id: libraryId, path: root }, progress).pipe(Effect.provideContext(context));
+  const scan = scanLibrary({ id: libraryId, path: root }, progress).pipe(
+    Effect.provideContext(context),
+  );
+
+  yield* scan;
   const app = yield* makeHttpApp.pipe(Effect.provideContext(context));
   const tracks = yield* control.tracks;
 
@@ -91,6 +95,7 @@ const setup = Effect.gen(function* () {
   return {
     root,
     dataDir,
+    scan,
     libraryId,
     backend,
     trackId,
@@ -346,6 +351,44 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         yield* Files.removePath(join(root, NEON));
         expect((yield* request(url)).status).toBe(404);
+      }),
+    ));
+
+  it("refuses to serve a catalogued file that became a symlink out of the library", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, trackId, request } = yield* setup;
+        const outside = yield* temporaryDirectory("outside");
+        const secret = join(outside, "secret.mp3");
+        const original = yield* streamUrl(trackId(NEON), "original");
+        const transcoded = yield* streamUrl(trackId(NEON), "aac-128");
+
+        yield* Files.copyTree(join(root, NEON), secret);
+        yield* Files.removePath(join(root, NEON));
+        yield* Files.makeSymlink(secret, join(root, NEON));
+
+        expect((yield* request(original)).status).toBe(404);
+        expect((yield* request(transcoded)).status).toBe(404);
+      }),
+    ));
+
+  it("treats file names as names, never as ffmpeg options or protocols", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, scan, findTrackId, request } = yield* setup;
+        const hostile = "-y -f lavfi -i concat:a.mp3|file:b.mp3";
+
+        yield* Files.copyTree(join(root, NEON), join(root, hostile));
+        yield* scan;
+
+        const id = yield* findTrackId(hostile);
+
+        for (const profile of ["aac-128", "fmp4-aac"]) {
+          const response = yield* request(yield* streamUrl(id, profile));
+
+          expect(response.status).toBe(200);
+          expect((yield* bytes(response)).length).toBeGreaterThan(1000);
+        }
       }),
     ));
 

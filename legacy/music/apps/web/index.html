@@ -6,18 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>[music]</title>
     <script src="/config.js"></script>
-    <script>
-      // Apply the saved or system theme before first paint, so dark mode never flashes light.
-      try {
-        const saved = localStorage.getItem("music-theme");
-        const dark =
-          saved === "dark" ||
-          ((saved === null || saved === "system") &&
-            matchMedia("(prefers-color-scheme: dark)").matches);
-        document.documentElement.classList.add(dark ? "dark" : "light");
-        document.documentElement.style.colorScheme = dark ? "dark" : "light";
-      } catch {}
-    </script>
+    <script src="/theme.js"></script>
   </head>
 
   <body>

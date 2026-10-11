@@ -11,14 +11,20 @@ import * as Files from "./files.ts";
 
 const HASH = /^[0-9a-f]{64}$/;
 
+const UNKNOWN_TYPE = "application/octet-stream";
+
 /** True when `hash` has the shape of an artwork hash, which also rules out path tricks. */
 export const isArtHash = (hash: string): boolean => HASH.test(hash);
 
 /** Absolute path of the artwork with `hash`. */
 export const artPath = (dataDir: string, hash: string): string => join(dataDir, "art", hash);
 
-/** Stores image bytes once and returns their SHA-256 hex hash. */
+/**
+ * Stores image bytes once and returns their SHA-256 hex hash. Bytes that are not a PNG, JPEG, GIF,
+ * or WebP image are not stored, so the art route never serves anything but images.
+ */
 export const saveArt = Effect.fn("ArtStore.save")(function* (dataDir: string, bytes: Uint8Array) {
+  if (imageContentType(bytes) === UNKNOWN_TYPE) return Option.none<string>();
   const hash = createHash("sha256").update(bytes).digest("hex");
   const path = artPath(dataDir, hash);
   const existing = yield* Files.statPath(path).pipe(Effect.option);
@@ -28,7 +34,7 @@ export const saveArt = Effect.fn("ArtStore.save")(function* (dataDir: string, by
     yield* Files.writeFileAtomic(path, bytes, randomUUID());
   }
 
-  return hash;
+  return Option.some(hash);
 });
 
 /** The image `Content-Type` from the first bytes of a file. */
@@ -43,5 +49,5 @@ export const imageContentType = (head: Uint8Array): string => {
 
   if (text.startsWith("RIFF") && text.slice(8, 12) === "WEBP") return "image/webp";
 
-  return "application/octet-stream";
+  return UNKNOWN_TYPE;
 };

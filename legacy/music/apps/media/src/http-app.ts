@@ -88,7 +88,12 @@ export const makeHttpApp = Effect.gen(function* () {
 
       if (Option.isNone(found)) return text(404, "Track not found");
       const source = found.value;
-      const absolute = resolveInside(source.libraryPath, source.path);
+      const lexical = resolveInside(source.libraryPath, source.path);
+
+      if (Option.isNone(lexical)) return text(404, "Track not found");
+      // The file may have become a symlink since the scan; serve only what still resolves inside
+      // the library, and open the resolved path.
+      const absolute = yield* Files.resolveWithin(source.libraryPath, lexical.value);
 
       if (Option.isNone(absolute)) return text(404, "Track not found");
 
