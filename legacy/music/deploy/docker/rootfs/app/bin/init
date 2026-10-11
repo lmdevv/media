@@ -45,8 +45,9 @@ log "deploying functions"
 convex deploy --yes --codegen disable --typecheck disable
 
 log "configuring deployment"
-node scripts/configure.ts --site-url "$public" --media-url /media \
-  --media-secret "$(cat "$secrets/media_secret")"
+# `--name=value` so a secret that starts with "-" is not read as an option.
+node scripts/configure.ts "--site-url=$public" --media-url=/media \
+  "--media-secret=$(cat "$secrets/media_secret")"
 
 signing="$(convex env get STREAM_SIGNING_KEY)"
 umask 077
