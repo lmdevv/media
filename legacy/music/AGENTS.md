@@ -14,7 +14,9 @@ included; the repo and packages use `music`.
   ideas and edge cases. Never copy, port, or translate their code into this repo. Effect, OpenCode,
   and Pi are MIT and safe to reference.
 - **Load the `coding-standards` skill** before writing, reviewing, or refactoring TypeScript. It is
-  in `.agents/skills/coding-standards/`.
+  in `.agents/skills/coding-standards/`, copied from `dmmulroy/.dotfiles` at `574e1f2`; Dillon has
+  since removed it, so don't `skills update` it. Where any skill conflicts with this file, this file
+  wins: no lint suppressions or disabled rules, even where a skill shows them.
 - **No MCP server.** Agents use the CLI and `skills/music/SKILL.md`.
 - **Never commit secret values.** `.env.example` lists configuration names only.
 - **Never weaken a lint rule, add a cast, or add a suppression to pass checks.** Fix the code or
@@ -63,6 +65,29 @@ four must pass before every commit.
 
 Use `scripts/dev-backend.sh` for a local self-hosted Convex; pick a different name and port per
 worktree. Commit the regenerated `convex/_generated/`.
+
+## Verify and review
+
+- Ports: web dev on 3001, Playwright on `E2E_PORT` (3002), Convex on 3210 and 3211, media service
+  on 4100, stack image on `PORT` (8090). `scripts/dev-backend.sh <name> <port>` moves a worktree's
+  backend off the defaults.
+- `pnpm test:e2e` needs a backend first: `WEB_PORT=3002 scripts/dev-backend.sh web 3510`. See
+  `apps/web/e2e/README.md`.
+- `scripts/stack-e2e.sh` needs Docker. `MUSIC_VIDEO=1` records video; results land in
+  `apps/web/test-results/stack`. On NixOS, set `CHROMIUM_PATH=$(which chromium)`.
+- Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, `pnpm test --repeats=20`.
+- Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `before-and-after` attaches UI
+  captures to a PR with `.agents/skills/before-and-after/scripts/format.mjs` and Vercel's
+  `agent-browser` CLI (`npm i -g agent-browser && agent-browser install`), plus `react-doctor`,
+  `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked.
+- `main` requires the `check` and `stack-e2e` CI jobs. PRs matching the `paths` in
+  `.github/workflows/image.yml` also run the `Image` workflow; check it too. Never merge with admin
+  bypass.
+- Every PR gets CodeRabbit (`.coderabbit.yaml`), Codex automatic review, and Claude's
+  `/code-review`. Don't add a project skill named `code-review`; it shadows Claude's.
+- Cloud environments: none yet. Pin the Claude one in `.claude/settings.json`
+  (`remote.defaultEnvironmentId`) and write the Codex ID here for `codex cloud exec --env`. Docker
+  suites run in Claude cloud only.
 
 ## Design
 

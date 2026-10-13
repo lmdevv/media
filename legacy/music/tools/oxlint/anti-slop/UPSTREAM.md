@@ -6,3 +6,5 @@
 - **Path:** `skills/install-anti-slop/assets/anti-slop/` copied to `tools/oxlint/anti-slop/`
 - **Verified:** the copy is byte-identical to that commit.
 - **Deviations:** none. `vendor/eslint-stylistic/` keeps its own license and provenance.
+- **Updating:** run the global `install-anti-slop` skill; it merges upstream changes and keeps
+  local edits.

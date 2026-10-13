@@ -1,10 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": [".agents/**", "tools/oxlint/**"],
+  "ignore": ["tools/oxlint/**"],
   "ignoreDependencies": ["@effect/language-service"],
   "workspaces": {
     ".": {
-      "ignoreDependencies": ["@effect/vitest", "effect"]
+      "ignoreDependencies": ["@effect/vitest", "effect"],
+      "entry": [".agents/skills/*/scripts/*.mjs"]
     },
     "apps/web": {
       "entry": ["e2e-stack/first-audio.ts"]

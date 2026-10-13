@@ -58,3 +58,6 @@ temp
 # Claude Code (per-user)
 .claude/settings.local.json
 .claude/worktrees/
+
+# before-and-after skill captures
+/captures/
