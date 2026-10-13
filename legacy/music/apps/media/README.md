@@ -65,12 +65,36 @@ includes every dependency, `music-metadata` too; `dist/` needs nothing else at r
       byte ranges with a known length; ADTS is the self-framing stream it plays from a `200` of
       unknown length, as it does internet radio. Browsers report such a stream's duration as
       infinite and cannot seek in it, so the player shows the song's duration from the catalog
-      and seeks by waiting for the finished file (a `HEAD` waits for it) and opening that.
+      and seeks by opening the stream again from an offset (see Offsets below). A stream that
+      stops before the song does (a proxy closing an unread connection, ffmpeg dying) is
+      reopened the same way where it stopped.
 
     A plain `GET` or a media element's opening range (`bytes=0-`, or Safari's `bytes=0-1`) can
     be answered live. Other ranges, `HEAD`, `If-Range`, and `If-None-Match` wait for the cached
     file instead, whose bytes differ. A transcode that nobody reads or waits for any more stops
-    after a second, freeing its ffmpeg slot for the next song.
+    after a second, freeing its ffmpeg slot for the next song. ffmpeg writes the live file at
+    its own pace: a client that stops reading (a paused or fully buffered media element) holds
+    the run open but never slows it down.
+
+  - Offsets: `&start=<ms>` (whole milliseconds; not covered by the signature, which still binds
+    the track, profile, and expiry) on a transcoded profile answers at once with a fresh encode
+    from that point, whatever the cache holds, for a player that seeks ahead of a live
+    transcode. ffmpeg seeks half a second early and trims by timestamp, so the stream starts on
+    the exact source sample (seeking alone lands off by a frame or more on MP3 and `.m4a`
+    sources). The response streams like a live transcode (`200`, `no-store`, no ranges) and is
+    not cached; ffmpeg runs only while the client reads and is killed when it leaves. Headers:
+    `X-Music-Start-Samples` (the song sample the stream starts at), `X-Music-Priming-Samples`,
+    `X-Music-Sample-Rate`, and for `fmp4-*` an estimated `X-Music-Duration-Samples`.
+    - `aac-*`: ADTS, which has no timestamps: the audio is 1024 priming samples, then the song
+      from the offset, so element time `t` is song time `start / rate + t - 1024 / rate`.
+    - `fmp4-*`: `ftyp`, `moov`, then fragments without `sidx` or `mfra`, on the song's own
+      timeline: the first `tfdt` is `X-Music-Start-Samples` (the service rewrites ffmpeg's
+      zero-based decode times), so song sample `s` sits at timeline position `s + priming`,
+      exactly where the full stream has it. Append the stream's own `moov` first: the encode
+      differs (`fmp4-flac` is re-encoded, so its FLAC stream info may differ).
+
+    `start=0` is the plain request, `original` with an offset is a 400, and a failure before the
+    first byte is a 502 (there is no original to fall back to mid-song).
 - `GET|HEAD /media/art/:hash?exp=&sig=`: content-addressed artwork, cached as immutable.
 
 Bad or expired signatures get 403. Logs are JSON on stdout and never include query strings.

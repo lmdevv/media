@@ -18,8 +18,13 @@ interface GapMeasurement {
 interface EngineHarness {
   readonly engine: PlayerEngine;
   readonly events: Array<TimedEvent>;
-  /** Loads a generated fixture (3 s tones) into the engine. */
-  readonly load: (file: string, startMs: number, autoplay: boolean) => Promise<void>;
+  /** Loads a generated fixture into the engine; `durationMs` defaults to the tones' 3 s. */
+  readonly load: (
+    file: string,
+    startMs: number,
+    autoplay: boolean,
+    durationMs?: number,
+  ) => Promise<void>;
   /** Preloads a generated fixture, or clears the preload. */
   readonly preload: (file: string | null) => void;
   readonly gap: () => Promise<GapMeasurement>;

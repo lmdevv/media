@@ -7,7 +7,7 @@ import { fragmentedArgs } from "@music/media/ffmpeg";
 import * as fc from "fast-check";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { HeaderRead, readHeader } from "./fmp4";
+import { codecMimeType, HeaderRead, readHeader } from "./fmp4";
 import type { StreamHeader } from "./fmp4";
 
 const encoder = new TextEncoder();
@@ -214,4 +214,12 @@ describe("readHeader on the media service's real output", () => {
       expect(fragments[0]?.offset).toBe(header?.length);
     });
   }
+});
+
+describe("codecMimeType", () => {
+  // Safari's MediaSource accepts only the sample entry type; Chromium and Firefox accept both.
+  it("names FLAC by its sample entry type, which Safari requires", () => {
+    expect(codecMimeType("flac")).toBe('audio/mp4; codecs="fLaC"');
+    expect(codecMimeType("aac")).toBe('audio/mp4; codecs="mp4a.40.2"');
+  });
 });

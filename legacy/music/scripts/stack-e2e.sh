@@ -72,6 +72,22 @@ if [[ "$admin_status" != "403" ]]; then
   exit 1
 fi
 
+# Caddy must not cut a media stream the browser has stopped reading (buffered far enough ahead,
+# or paused): its server-wide write_idle (1m by default) is off, streams get an hour per stalled
+# write, and every other route keeps one minute. Checked on the adapted config, since a real
+# stall needs a response larger than the socket buffers and a minute of waiting.
+docker exec "$name" caddy adapt --config /etc/caddy/Caddyfile 2>/dev/null | node -e '
+  const server = JSON.parse(require("node:fs").readFileSync(0, "utf8")).apps.http.servers.srv0;
+  const limits = new Map(server.routes.flatMap((route) =>
+    (route.handle ?? []).filter((h) => h.handler === "timeouts")
+      .map((h) => [JSON.stringify(route.match), h.write_timeout])));
+  const hour = 3600e9, minute = 60e9;
+  const ok = server.write_idle_timeout < 0 &&
+    limits.get(JSON.stringify([{ path: ["/media/stream/*"] }])) === hour &&
+    limits.get(JSON.stringify([{ not: [{ path: ["/media/stream/*"] }] }])) === minute;
+  if (!ok) { console.error("Caddy write timeouts are not as expected", server.write_idle_timeout, [...limits]); process.exit(1); }
+'
+
 wait_healthy() {
   for _ in $(seq 1 120); do
     curl -fsS "http://localhost:${port}/media/health" >/dev/null 2>&1 && return 0

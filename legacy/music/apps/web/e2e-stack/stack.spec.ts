@@ -705,13 +705,21 @@ test("data saver plays through HTML audio, starts a first play at once, and seek
   await expect(dataSaver).toHaveAttribute("aria-checked", "true");
   await openFirstAlbum(page);
 
-  /** Where the playing data saver stream is, in seconds, or -1 while none plays. */
+  /**
+   * Where in the song the playing data saver stream is, in seconds, or -1 while none plays. A
+   * stream opened part-way (`&start=<ms>`) starts its own time at that offset.
+   */
   const dataSaverAt = (): Promise<number> =>
     page.evaluate(() =>
       Math.max(
         -1,
         ...[...(window.musicTestMedia ?? [])].flatMap((element) =>
-          !element.paused && element.src.includes("p=aac-128") ? [element.currentTime] : [],
+          !element.paused && element.src.includes("p=aac-128")
+            ? [
+                element.currentTime +
+                  Number(new URL(element.src).searchParams.get("start") ?? "0") / 1000,
+              ]
+            : [],
         ),
       ),
     );

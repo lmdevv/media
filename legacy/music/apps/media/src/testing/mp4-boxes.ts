@@ -38,6 +38,34 @@ export const withoutIndex = (bytes: Uint8Array): Buffer =>
       .map((box) => bytes.subarray(box.start, box.end)),
   );
 
+/** The decode time (`tfdt`) of every fragment of a fragmented MP4, in order. */
+export const fragmentDecodeTimes = (bytes: Uint8Array): ReadonlyArray<bigint> => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const times: Array<bigint> = [];
+
+  const walk = (start: number, end: number): void => {
+    for (let at = start; at + 8 <= end;) {
+      const size = view.getUint32(at);
+      const type = String.fromCodePoint(...bytes.subarray(at + 4, at + 8));
+
+      if (size < 8) return;
+
+      if (type === "moof" || type === "traf") walk(at + 8, at + size);
+      else if (type === "tfdt") {
+        times.push(
+          bytes[at + 8] === 1 ? view.getBigUint64(at + 12) : BigInt(view.getUint32(at + 12)),
+        );
+      }
+
+      at += size;
+    }
+  };
+
+  walk(0, bytes.length);
+
+  return times;
+};
+
 /** What the file's `mdat` boxes hold, without their headers: the encoded frames, in order. */
 export const mediaData = (bytes: Uint8Array): Buffer =>
   Buffer.concat(

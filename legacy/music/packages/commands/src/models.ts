@@ -46,12 +46,20 @@ export type StreamProfile = typeof StreamProfile.Type;
  * `estimated` is `1` on a stream sent while it is still being transcoded: `duration` is then only
  * the source's declared length, and the stream has no `sidx` index, no `ETag`, and no byte
  * ranges. Once the response ends, a `HEAD` request for the same URL returns the exact timing.
+ *
+ * `start` is on a stream requested from an offset (`&start=<ms>` on a transcoded profile): the
+ * song sample the stream begins at. Such a stream also carries `priming` and `sampleRate` for
+ * every transcoded profile (ADTS too), and an estimated `duration` for the `fmp4-*` profiles. Its
+ * fragments sit on the song's own timeline: the first `tfdt` is `start`, and song sample `s` is at
+ * `s + priming`, as in the full stream. ADTS has no timestamps: its audio begins with `priming`
+ * samples of encoder delay, then song sample `start`.
  */
 export const StreamTimingHeader = {
   priming: "X-Music-Priming-Samples",
   duration: "X-Music-Duration-Samples",
   sampleRate: "X-Music-Sample-Rate",
   estimated: "X-Music-Duration-Estimated",
+  start: "X-Music-Start-Samples",
 } as const;
 
 export const Role = Schema.Literals(["admin", "member"]);

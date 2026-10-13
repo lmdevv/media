@@ -10,6 +10,9 @@
  * Concurrent requests for the same output share one ffmpeg run, at most two ffmpeg runs happen at
  * once, a run that nobody waits for any more stops, and the least recently served files are
  * evicted when the cache grows past its limit.
+ *
+ * A seek ahead of a running transcode gets its own ffmpeg run from that point (`openAt`), which
+ * streams straight to the one listener and is never cached.
  */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -32,20 +35,25 @@ import {
   Schema,
   type Scope,
   Semaphore,
+  Sink,
   Stream,
   SubscriptionRef,
 } from "effect";
 
 import {
+  AAC_PRIMING,
+  AAC_PROFILE_RATE,
   AAC_TAIL_PADDING,
   aacSampleRate,
   countFrameSamples,
   FRAGMENTED_PRIMING,
   fragmentedArgs,
   isFragmentedProfile,
+  offsetArgs,
   runTool,
   runToolPiped,
   sourceProbeArgs,
+  streamTool,
   timelineProbeArgs,
   transcodeArgs,
   type FragmentedProfile,
@@ -53,10 +61,17 @@ import {
   type TranscodeProfile,
 } from "./ffmpeg.ts";
 import * as Files from "./files.ts";
+import { type FragmentTimelineError, shiftTimeline, timelineStart } from "./fragment-timeline.ts";
 import { MediaConfig } from "./media-config.ts";
 import { declaredLength, estimatedLength, measureTiming, SampleTiming } from "./sample-timing.ts";
 
 const MAX_CONCURRENT_TRANSCODES = 2;
+
+/**
+ * Offset runs (`openAt`) skip the cached transcodes' queue so a seek never waits behind other
+ * songs; this caps them on their own. A player needs one at a time per playing device.
+ */
+export const MAX_CONCURRENT_OFFSET_RUNS = 8;
 
 const TRANSCODE_TIMEOUT = Duration.minutes(10);
 
@@ -138,6 +153,7 @@ export class TranscodeError extends Data.TaggedError("TranscodeError")<{
    */
   readonly cause:
     | ProcessError
+    | FragmentTimelineError
     | Files.FileError
     | Schema.SchemaError
     | "timeout"
@@ -146,6 +162,13 @@ export class TranscodeError extends Data.TaggedError("TranscodeError")<{
 }> {
   override get message(): string {
     return `Transcode failed: track ${this.trackId} to ${this.profile}`;
+  }
+}
+
+/** Every offset run is taken; the request fails at once rather than queueing behind streams. */
+export class OffsetRunsBusy extends Data.TaggedError("OffsetRunsBusy")<{}> {
+  override get message(): string {
+    return "Too many offset transcodes are running";
   }
 }
 
@@ -174,6 +197,34 @@ export type Opened = Data.TaggedEnum<{
 /** Constructors and matchers for `Opened`. */
 export const Opened = Data.taggedEnum<Opened>();
 
+/**
+ * A transcode that starts part-way into the song, encoded for one listener and never cached.
+ *
+ * Timeline: the stream begins at song sample `startSamples` (at `sampleRate`), preceded by
+ * `primingSamples` of encoder delay.
+ *
+ * - AAC profiles: ADTS, which carries no timestamps; the decoded audio starts with the priming,
+ *   so playback position `t` seconds in the stream is song sample
+ *   `startSamples - primingSamples + t * sampleRate`.
+ * - Fragmented profiles: `ftyp`, `moov`, then fragments (no `sidx`, no `mfra`) on the song's own
+ *   timeline, as in the full stream: the first fragment's decode time (`tfdt`) is
+ *   `startSamples`, so song sample `s` sits at timeline position `s + primingSamples` exactly
+ *   where the full transcode has it. The `moov` describes this encode (for `fmp4-flac` its FLAC
+ *   stream info may differ from the full stream's), so a player appends it before the fragments.
+ */
+export interface FromOffset {
+  readonly startSamples: number;
+  readonly primingSamples: number;
+  readonly sampleRate: number;
+  /** The song's estimated length in samples, from the source probe (fragmented profiles only). */
+  readonly durationSamples: Option.Option<number>;
+  /**
+   * The stream from its first byte. ffmpeg runs only while it is read and stops when the scope
+   * closes; it fails when ffmpeg fails.
+   */
+  readonly bytes: Stream.Stream<Uint8Array, TranscodeError>;
+}
+
 /** Transcoded files on demand. */
 export interface Interface {
   /** Returns the cached transcode, creating it first when needed. */
@@ -185,6 +236,18 @@ export interface Interface {
    * scope closes; once every scope holding a transcode has closed, it stops after a second.
    */
   readonly open: (input: TranscodeInput) => Effect.Effect<Opened, TranscodeError, Scope.Scope>;
+  /**
+   * Starts a transcode of `input` from `startMs` into the song, for a listener who seeks ahead of
+   * the shared transcode, and returns once ffmpeg has written its first bytes (the stream is
+   * empty when the offset is past the end). Not cached, not shared, and outside the limit on
+   * concurrent cached transcodes, so a seek never queues behind other songs; offset runs have
+   * their own limit, held until `Scope` closes. Fails when ffmpeg fails before its first byte,
+   * and with `OffsetRunsBusy` when every offset run is taken.
+   */
+  readonly openAt: (
+    input: TranscodeInput,
+    startMs: number,
+  ) => Effect.Effect<FromOffset, TranscodeError | OffsetRunsBusy, Scope.Scope>;
   /** True when ffmpeg runs. Cached for a minute. */
   readonly ffmpegAvailable: Effect.Effect<boolean>;
 }
@@ -318,6 +381,7 @@ const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;
   const cacheDir = join(config.dataDir, "cache");
   const permits = yield* Semaphore.make(MAX_CONCURRENT_TRANSCODES);
+  const offsetRuns = yield* Semaphore.make(MAX_CONCURRENT_OFFSET_RUNS);
   const lastUsed = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
   /** Running jobs by output path. Changes, and holds taken on a job, happen under `registry`. */
   const jobs = yield* Ref.make<ReadonlyMap<string, Job>>(new Map());
@@ -724,6 +788,94 @@ const make = Effect.gen(function* () {
     );
   });
 
+  /** The rates and expected length an offset transcode of `input` has. */
+  const offsetTiming = Effect.fn("Transcoder.offsetTiming")(function* (input: TranscodeInput) {
+    if (!isFragmentedProfile(input.profile)) {
+      return {
+        sampleRate: AAC_PROFILE_RATE,
+        aacRate: AAC_PROFILE_RATE,
+        primingSamples: AAC_PRIMING,
+        durationSamples: Option.none<number>(),
+      };
+    }
+
+    const probed = yield* runTool(config.ffprobePath, sourceProbeArgs(input.source));
+
+    const {
+      streams: [sourceStream],
+      format,
+    } = yield* decodeSourceProbe(probed.stdout);
+
+    const aacRate = aacSampleRate(sourceStream.sample_rate);
+    const sampleRate = input.profile === "fmp4-aac" ? aacRate : sourceStream.sample_rate;
+
+    return {
+      sampleRate,
+      aacRate,
+      primingSamples: FRAGMENTED_PRIMING[input.profile],
+      durationSamples: Option.some(
+        estimatedLength(
+          sourceStream.duration_ts,
+          sourceStream.time_base,
+          format.duration,
+          sampleRate,
+        ),
+      ),
+    };
+  });
+
+  const openAt = Effect.fn("Transcoder.openAt")(function* (input: TranscodeInput, startMs: number) {
+    // One step: a client that leaves (which interrupts this) between taking the permit and
+    // registering its release would otherwise lose the permit for good.
+    const admitted = yield* Effect.uninterruptible(
+      Semaphore.takeIfAvailable(offsetRuns, 1).pipe(
+        Effect.tap((taken) =>
+          taken ? Effect.addFinalizer(() => Semaphore.release(offsetRuns, 1)) : Effect.void,
+        ),
+      ),
+    );
+
+    if (!admitted) return yield* new OffsetRunsBusy();
+
+    const { sampleRate, aacRate, primingSamples, durationSamples } = yield* offsetTiming(
+      input,
+    ).pipe(Effect.mapError(failure(input)));
+
+    // A whole sample, so the seek and the timeline agree exactly.
+    const startSamples = Math.round((startMs * sampleRate) / 1000);
+
+    const encoded = streamTool(
+      config.ffmpegPath,
+      offsetArgs(input.source, input.profile, startSamples / sampleRate, aacRate),
+    );
+
+    const bytes: Stream.Stream<Uint8Array, TranscodeError> = (
+      isFragmentedProfile(input.profile)
+        ? encoded.pipe(
+            Stream.mapAccumEffect(
+              () => timelineStart,
+              (state, chunk) =>
+                Effect.fromResult(shiftTimeline(BigInt(startSamples))(state, chunk)),
+            ),
+          )
+        : encoded
+    ).pipe(Stream.mapError(failure(input)));
+
+    // The first bytes come before the response, so a run that fails at once is an error status.
+    const [first, rest] = yield* Stream.peel(bytes, Sink.head());
+
+    return {
+      startSamples,
+      primingSamples,
+      sampleRate,
+      durationSamples,
+      bytes: Option.match(first, {
+        onNone: () => Stream.empty,
+        onSome: (chunk) => Stream.concat(Stream.make(chunk), rest),
+      }),
+    };
+  });
+
   const ffmpegAvailable = yield* Effect.cachedWithTTL(
     runTool(config.ffmpegPath, ["-hide_banner", "-version"]).pipe(
       Effect.as(true),
@@ -744,6 +896,7 @@ const make = Effect.gen(function* () {
         Effect.scoped,
       ),
     open,
+    openAt,
     ffmpegAvailable,
   });
 });

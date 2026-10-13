@@ -111,11 +111,14 @@ engine.subscribe((event) => {
 
 const MeterReading = Schema.Struct({ longest: Schema.Finite, sound: Schema.Finite });
 
-/** A fixture source; `file` may carry a profile query (`gapless-flac-1.flac?p=fmp4-flac`). */
-const fixture = (file: string): EngineSource => ({
+/**
+ * A fixture source; `file` may carry a profile query (`gapless-flac-1.flac?p=fmp4-flac`). Most
+ * fixtures are three-second tones; pass the length of a longer one.
+ */
+const fixture = (file: string, durationMs = 3000): EngineSource => ({
   key: file,
   url: `${mediaBase}/fixtures/${file}`,
-  durationMs: 3000,
+  durationMs,
 });
 
 const toMs = (frames: number): number => (frames / context.sampleRate) * 1000;
@@ -141,9 +144,9 @@ const isStopped = (data: unknown): data is "stopped" => data === "stopped";
 window.harness = {
   engine,
   events,
-  load: async (file, startMs, autoplay) => {
+  load: async (file, startMs, autoplay, durationMs) => {
     await context.resume();
-    await engine.load(fixture(file), startMs, autoplay);
+    await engine.load(fixture(file, durationMs), startMs, autoplay);
   },
   preload: (file) => {
     engine.preload(file === null ? null : fixture(file));

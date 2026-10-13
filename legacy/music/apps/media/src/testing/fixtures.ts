@@ -82,10 +82,11 @@ export const fixtureLibraryWith = (
 /** The generated fixture library with its plain album titles. */
 export const fixtureLibrary = fixtureLibraryWith("");
 
-/** `MediaConfig` for tests, rooted at `dataDir`. */
+/** `MediaConfig` for tests, rooted at `dataDir`; `ffmpegPath` may name a stand-in. */
 export const testConfig = (
   dataDir: string,
   cacheMaxBytes = 512 * 1024 * 1024,
+  ffmpegPath = "ffmpeg",
 ): Layer.Layer<MediaConfig> =>
   Layer.succeed(
     MediaConfig,
@@ -97,7 +98,7 @@ export const testConfig = (
       port: 0,
       cacheMaxBytes,
       rescanInterval: Duration.hours(1),
-      ffmpegPath: "ffmpeg",
+      ffmpegPath,
       ffprobePath: "ffprobe",
     }),
   );

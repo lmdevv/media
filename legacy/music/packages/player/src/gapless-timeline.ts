@@ -54,6 +54,13 @@ export const parseStreamTiming = (header: (name: string) => string | null): Stre
   return { primingSamples, durationSamples, sampleRate, estimated };
 };
 
+/**
+ * The song sample a stream from an offset starts at (`StreamTimingHeader.start`), or null for a
+ * stream of the whole song.
+ */
+export const parseStreamStart = (header: (name: string) => string | null): number | null =>
+  whole(header(StreamTimingHeader.start));
+
 /** Places a song whose first real sample plays at `start` seconds. */
 export const placeTrack = (timing: StreamTiming, start: number): Placement => ({
   start,

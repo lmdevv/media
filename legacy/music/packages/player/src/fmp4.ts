@@ -54,9 +54,13 @@ const SAMPLE_ENTRIES: ReadonlyMap<string, AudioCodec> = new Map([
   ["mp4a", "aac"],
 ]);
 
-/** MIME type with codecs for `MediaSource.isTypeSupported`, `addSourceBuffer`, and `changeType`. */
+/**
+ * MIME type with codecs for `MediaSource.isTypeSupported`, `addSourceBuffer`, and `changeType`.
+ * FLAC uses its sample entry type, `fLaC`: Safari rejects the lowercase `flac` that Chromium and
+ * Firefox also accept, and would otherwise never get lossless gapless playback.
+ */
 export const codecMimeType = (codec: AudioCodec): string =>
-  codec === "flac" ? 'audio/mp4; codecs="flac"' : 'audio/mp4; codecs="mp4a.40.2"';
+  codec === "flac" ? 'audio/mp4; codecs="fLaC"' : 'audio/mp4; codecs="mp4a.40.2"';
 
 interface Box {
   readonly type: string;

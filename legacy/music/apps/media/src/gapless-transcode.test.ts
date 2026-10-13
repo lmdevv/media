@@ -3,14 +3,15 @@ import { join } from "node:path";
 import { TrackId } from "@music/commands/ids";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Stream } from "effect";
 
 import { AAC_TAIL_PADDING, aacSampleRate, countFrameSamples, runTool } from "./ffmpeg.ts";
 import * as Files from "./files.ts";
 import { declaredLength, measureTiming } from "./sample-timing.ts";
 import { MEDIA_TEST_TIMEOUT, temporaryDirectory, testConfig } from "./testing/fixtures.ts";
 import { runScoped } from "./testing/run.ts";
-import { topLevelBoxes } from "./testing/mp4-boxes.ts";
+import { adtsPayload } from "./testing/adts.ts";
+import { fragmentDecodeTimes, topLevelBoxes } from "./testing/mp4-boxes.ts";
 import { decodeMono, sineSegment } from "./testing/sine.ts";
 import * as Transcoder from "./transcoder.ts";
 
@@ -186,6 +187,158 @@ describe("gapless transcodes", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         expect(second.timing).toEqual(first.timing);
         expect(yield* Files.statPath(`${first.path}.json`)).toMatchObject({ kind: "file" });
+      }),
+    ));
+});
+
+/** Collects a stream and writes it to `path` too, for ffmpeg to decode. */
+const collectTo = (path: string, bytes: Stream.Stream<Uint8Array, Transcoder.TranscodeError>) =>
+  Stream.runCollect(bytes).pipe(
+    Effect.map((chunks) => Buffer.concat(chunks)),
+    Effect.tap((all) => Files.writeFileAtomic(path, all, "offset")),
+  );
+
+describe("transcodes from an offset", { timeout: MEDIA_TEST_TIMEOUT }, () => {
+  /** Twenty seconds of tone, and a seek target off every frame grid and millisecond. */
+  const SONG_END = 48_000 * 20;
+
+  const START_MS = 7311;
+
+  for (const [extension, profile, priming] of [
+    ["flac", "fmp4-flac", 0],
+    ["mp3", "fmp4-flac", 0],
+    ["m4a", "fmp4-flac", 0],
+    ["flac", "fmp4-aac", 1024],
+    ["mp3", "fmp4-aac", 1024],
+    ["m4a", "fmp4-aac", 1024],
+  ] as const) {
+    it(`${extension} to ${profile}: fragments land on the song's own timeline`, () =>
+      runScoped(
+        Effect.gen(function* () {
+          const scratch = yield* temporaryDirectory("sine");
+          const source = yield* sineSegment(scratch, "song", extension, 0, SONG_END);
+          const transcoder = yield* transcoderAt(yield* temporaryDirectory("data"));
+          const startSamples = Math.round((START_MS * 48_000) / 1000);
+
+          const opened = yield* transcoder.openAt(
+            {
+              trackId: TrackId.make("sine"),
+              profile,
+              source,
+              mtimeMs: 1,
+              codec: extension === "m4a" ? "aac" : extension,
+            },
+            START_MS,
+          );
+
+          expect(opened.startSamples).toBe(startSamples);
+          expect(opened.primingSamples).toBe(priming);
+          expect(opened.sampleRate).toBe(48_000);
+          expect(Math.abs(Option.getOrThrow(opened.durationSamples) - SONG_END)).toBeLessThan(4800);
+
+          const output = join(scratch, "offset.mp4");
+          const bytes = yield* collectTo(output, opened.bytes);
+
+          // An init segment, then fragments a second long, none indexed, the first at the offset.
+          expect(
+            topLevelBoxes(bytes)
+              .map((box) => box.type)
+              .slice(0, 3),
+          ).toEqual(["ftyp", "moov", "moof"]);
+          expect(bytes.includes("sidx")).toBe(false);
+          const times = fragmentDecodeTimes(bytes);
+
+          expect(times[0]).toBe(BigInt(startSamples));
+          expect(Number((times[1] ?? 0n) - (times[0] ?? 0n))).toBeGreaterThan(40_000);
+
+          // Timeline position `startSamples + priming + k` holds song sample `startSamples + k`,
+          // which is where the full stream has it.
+          const song = yield* decodeMono(source, scratch);
+          const expected = song.subarray(startSamples, startSamples + 48_000);
+          const decoded = yield* decodeMono(output, scratch);
+
+          if (profile === "fmp4-flac") {
+            expect(rmsAt(decoded, expected, priming)).toBeLessThan(1e-6);
+          } else {
+            expect(bestOffset(decoded, expected, priming, 48)).toBe(priming);
+            // The encoder starts cold on a tone at full level; its first frame rings a little.
+            expect(rmsAt(decoded, expected.subarray(1024), priming + 1024)).toBeLessThan(0.01);
+          }
+
+          // The rest of the song follows, through the appended tail.
+          expect(decoded.length).toBeGreaterThanOrEqual(
+            priming + SONG_END - startSamples + (profile === "fmp4-aac" ? AAC_TAIL_PADDING : 0),
+          );
+        }),
+      ));
+  }
+
+  it("ADTS: the audio starts with the priming, then the song at the offset", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const scratch = yield* temporaryDirectory("sine");
+        const source = yield* sineSegment(scratch, "song", "flac", 0, SONG_END);
+        const transcoder = yield* transcoderAt(yield* temporaryDirectory("data"));
+
+        const input = {
+          trackId: TrackId.make("sine"),
+          profile: "aac-320" as const,
+          source,
+          mtimeMs: 1,
+          codec: "flac",
+        };
+
+        const opened = yield* transcoder.openAt(input, START_MS);
+        const startSamples = Math.round((START_MS * 44_100) / 1000);
+
+        expect(opened).toMatchObject({ startSamples, primingSamples: 1024, sampleRate: 44_100 });
+        expect(Option.isNone(opened.durationSamples)).toBe(true);
+        const output = join(scratch, "offset.aac");
+        const bytes = yield* collectTo(output, opened.bytes);
+
+        expect(adtsPayload(bytes)).not.toBeNull();
+
+        // The finished transcode, decoded with its edit list, is the song at 44.1 kHz.
+        const full = yield* decodeMono((yield* transcoder.transcode(input)).path, scratch);
+        const expected = full.subarray(startSamples, startSamples + 44_100);
+        const decoded = yield* decodeMono(output, scratch);
+
+        expect(bestOffset(decoded, expected, 1024, 48)).toBe(1024);
+        expect(rmsAt(decoded, expected, 1024)).toBeLessThan(0.02);
+      }),
+    ));
+
+  it("streams nothing past the end, and fails when ffmpeg cannot read the source", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const scratch = yield* temporaryDirectory("sine");
+        const source = yield* sineSegment(scratch, "song", "flac", 0, 48_000);
+        const junk = join(scratch, "junk.flac");
+        const transcoder = yield* transcoderAt(yield* temporaryDirectory("data"));
+
+        yield* Files.writeFileAtomic(junk, new TextEncoder().encode("not audio"), "junk");
+
+        const input = {
+          trackId: TrackId.make("sine"),
+          profile: "aac-128" as const,
+          source,
+          mtimeMs: 1,
+          codec: "flac",
+        };
+
+        const past = yield* transcoder.openAt(input, 5000);
+
+        expect(yield* Stream.runCollect(past.bytes)).toEqual([]);
+
+        const failed = yield* Effect.flip(transcoder.openAt({ ...input, source: junk }, 500));
+
+        expect(failed).toBeInstanceOf(Transcoder.TranscodeError);
+
+        const failedFragmented = yield* Effect.flip(
+          transcoder.openAt({ ...input, profile: "fmp4-aac", source: junk }, 500),
+        );
+
+        expect(failedFragmented).toBeInstanceOf(Transcoder.TranscodeError);
       }),
     ));
 });

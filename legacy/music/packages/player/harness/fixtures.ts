@@ -3,7 +3,7 @@
  * any silence in the captured output is a gap the player introduced.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { fixturesDir } from "./config.ts";
@@ -231,11 +231,55 @@ const generateHires = (): void => {
   ]);
 };
 
+/**
+ * An MP3 cut off half-way through: its header still declares two minutes, which the media service
+ * takes as the estimated length of a live transcode, but only one minute of audio decodes.
+ */
+export const TRUNCATED_FIXTURE = "truncated.mp3";
+
+/** The length `TRUNCATED_FIXTURE` declares. */
+export const TRUNCATED_DECLARED_MS = 120_000;
+
+/** The length of the audio in `TRUNCATED_FIXTURE`, give or take a frame. */
+export const TRUNCATED_REAL_MS = 60_000;
+
+const generateTruncated = (): void => {
+  const target = join(fixturesDir, TRUNCATED_FIXTURE);
+
+  if (existsSync(target)) return;
+  const whole = `${target}.whole.mp3`;
+
+  execFileSync("ffmpeg", [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    `sine=frequency=440:sample_rate=48000:duration=${TRUNCATED_DECLARED_MS / 1000}`,
+    "-ac",
+    "2",
+    ...(encoders.get("mp3") ?? []),
+    whole,
+  ]);
+
+  // A constant bitrate: half the bytes hold half the audio. The Xing header still counts all of it.
+  const bytes = readFileSync(whole);
+
+  writeFileSync(
+    target,
+    bytes.subarray(0, Math.round((bytes.length * TRUNCATED_REAL_MS) / TRUNCATED_DECLARED_MS)),
+  );
+  rmSync(whole);
+};
+
 /** Writes every fixture that does not exist yet. Needs `ffmpeg` on PATH. */
 export const generateFixtures = (): void => {
   mkdirSync(fixturesDir, { recursive: true });
   generateGapless();
   generateHires();
+  generateTruncated();
 
   for (const fixture of [...engineFixtures, ...sessionFixtures]) {
     const target = join(fixturesDir, fixture.file);

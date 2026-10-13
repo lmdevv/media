@@ -1,6 +1,6 @@
 /** Runs ffmpeg and ffprobe. Process spawning lives in `platform/node-process.ts`. */
 import type { StreamProfile } from "@music/commands/models";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Result, Schema, Stream } from "effect";
 
 import { type ProcessResult, runProcess, spawnPiped } from "./platform/node-process.ts";
 
@@ -91,6 +91,63 @@ export const runToolPiped = <E, R>(
           ),
     ),
     Effect.scoped,
+  );
+
+/**
+ * Runs a tool and streams what it writes to file descriptor 3 (`pipe:3`). The tool waits while
+ * nobody pulls, and stops (killed) when the stream is no longer consumed. Fails with
+ * `ProcessError` when it cannot start or exits with a non-zero code after its last byte.
+ */
+export const streamTool = (
+  command: string,
+  args: ReadonlyArray<string>,
+): Stream.Stream<Uint8Array, ProcessError> =>
+  Stream.unwrap(
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        const controller = new AbortController();
+        const child = spawnPiped(command, args, controller.signal);
+
+        // Settled into a value at once: the output may end (or fail) before anyone awaits the
+        // exit, and a rejection nobody handles yet would take the process down.
+        const exit = child.exit.then(
+          (result) => Result.succeed(result),
+          (cause: unknown) =>
+            Result.fail(new ProcessError({ command, exitCode: null, stderr: "", cause })),
+        );
+
+        return { controller, output: child.output, exit };
+      }),
+      ({ controller }) =>
+        Effect.sync(() => {
+          controller.abort();
+        }),
+    ).pipe(
+      Effect.map(({ output, exit }) =>
+        Stream.fromAsyncIterable(
+          output,
+          (cause) => new ProcessError({ command, exitCode: null, stderr: "", cause }),
+        ).pipe(
+          Stream.concat(
+            Stream.fromEffectDrain(
+              Effect.promise(() => exit).pipe(
+                Effect.flatMap(Effect.fromResult),
+                Effect.filterOrFail(
+                  (result) => result.exitCode === 0,
+                  (result) =>
+                    new ProcessError({
+                      command,
+                      exitCode: result.exitCode,
+                      stderr: result.stderr,
+                      cause: null,
+                    }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
 /** Stream profiles the transcoder produces. */
@@ -263,6 +320,118 @@ export const fragmentedArgs = (
     "-map",
     "[count]",
     ...COUNT_OUTPUT,
+  ];
+};
+
+/** Samples of encoder delay ffmpeg's AAC encoder starts every stream with. */
+export const AAC_PRIMING = 1024;
+
+/** The sample rate of the `aac-*` profiles. */
+export const AAC_PROFILE_RATE = 44_100;
+
+/**
+ * How far before an offset ffmpeg starts decoding. MP3 frames lean on the frames before them (and
+ * AAC and Opus frames overlap), so audio decoded right from a seek point starts with a glitch;
+ * decoding from a little earlier and trimming by timestamp lands on the exact sample. Plain input
+ * seeking alone is also off by hundreds of samples on AAC `.m4a` sources (ffmpeg 9).
+ */
+const OFFSET_PREROLL_SECONDS = 0.5;
+
+/** Seconds as ffmpeg reads them: microseconds are its finest unit. */
+const ffmpegSeconds = (seconds: number): string => seconds.toFixed(6);
+
+/**
+ * ffmpeg arguments that encode `source` from `startSeconds` into it and write a stream to file
+ * descriptor 3 (`pipe:3`), for a listener who seeks ahead of the cached transcode. Nothing is
+ * written to a file. The stream starts at the exact source sample wherever the source's
+ * timestamps are exact (FLAC, WAV, MP3 with its gapless header, MP4).
+ *
+ * - `aac-320`, `aac-128`: ADTS, as the profiles' live stream; it starts with `AAC_PRIMING`
+ *   samples of encoder delay.
+ * - `fmp4-flac`: fragmented MP4 holding FLAC at the source rate (re-encoded even from FLAC, so the
+ *   first frame starts exactly at the offset).
+ * - `fmp4-aac`: fragmented MP4 holding AAC as `fragmentedArgs` encodes it, with the same tail
+ *   padding; it starts with `AAC_PRIMING` samples of encoder delay.
+ *
+ * The fragmented streams have no index and no trailer; ffmpeg starts their decode times at zero.
+ */
+export const offsetArgs = (
+  source: string,
+  profile: TranscodeProfile,
+  startSeconds: number,
+  aacRate: number,
+): ReadonlyArray<string> => {
+  const preroll = Math.min(OFFSET_PREROLL_SECONDS, startSeconds);
+
+  const input = [
+    "-hide_banner",
+    "-nostdin",
+    "-v",
+    "error",
+    "-ss",
+    ffmpegSeconds(startSeconds - preroll),
+    "-i",
+    source,
+  ];
+
+  const trim = `[0:a:0]atrim=start=${ffmpegSeconds(preroll)},asetpts=PTS-STARTPTS`;
+
+  const fragmented = [
+    "-f",
+    "mp4",
+    "-movflags",
+    `${FRAGMENT_FLAGS}+skip_trailer`,
+    "-frag_duration",
+    FRAGMENT_MICROSECONDS,
+    "pipe:3",
+  ];
+
+  if (profile === "fmp4-flac") {
+    return [
+      ...input,
+      "-filter_complex",
+      `${trim}[encode]`,
+      "-map",
+      "[encode]",
+      "-c:a",
+      "flac",
+      ...fragmented,
+    ];
+  }
+
+  if (profile === "fmp4-aac") {
+    return [
+      ...input,
+      "-filter_complex",
+      `${trim},aresample=${aacRate},aformat=channel_layouts=stereo,` +
+        `apad=pad_len=${AAC_TAIL_PADDING}[encode]`,
+      "-map",
+      "[encode]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "256k",
+      ...fragmented,
+    ];
+  }
+
+  return [
+    ...input,
+    "-filter_complex",
+    `${trim}[encode]`,
+    "-map",
+    "[encode]",
+    "-c:a",
+    "aac",
+    "-b:a",
+    BITRATES[profile],
+    "-ar",
+    String(AAC_PROFILE_RATE),
+    "-ac",
+    "2",
+    "-f",
+    "adts",
+    "pipe:3",
   ];
 };
 

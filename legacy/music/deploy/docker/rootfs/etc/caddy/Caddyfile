@@ -1,10 +1,30 @@
 {
 	admin off
 	auto_https off
+	# Caddy aborts a response whose write stalls for `write_idle` (1m by default). Media elements
+	# stop reading a stream once they have buffered far enough ahead, and while paused, so that
+	# default cut songs off mid-way. The server-wide timeout is applied after the per-route
+	# `timeouts` below and would override them, so it is off here and they set it per route.
+	servers {
+		timeouts {
+			write_idle -1s
+		}
+	}
 }
 
 :8080 {
 	encode zstd gzip
+
+	# A media stream may sit unread for as long as a listener pauses; an hour bounds what a client
+	# that never reads again can hold. Everything else keeps Caddy's default one-minute limit.
+	@stream path /media/stream/*
+	timeouts @stream {
+		write_timeout 1h
+	}
+	@other not path /media/stream/*
+	timeouts @other {
+		write_timeout 1m
+	}
 
 	header {
 		X-Content-Type-Options nosniff

@@ -69,7 +69,7 @@ export const chooseStreamProfile = (
 
 /** What this browser's Media Source Extensions can play in fragmented MP4. AAC is required. */
 export interface MseSupport {
-  /** FLAC in MP4 (`audio/mp4; codecs="flac"`). */
+  /** FLAC in MP4 (`audio/mp4; codecs="fLaC"`). */
   readonly flac: boolean;
   /** `SourceBuffer.changeType`: switch between FLAC and AAC without resetting playback. */
   readonly changeType: boolean;

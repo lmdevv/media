@@ -3,6 +3,7 @@
  * streams while ffmpeg writes it: playback starts after the first frames instead of after the
  * whole encode. Everything else is served from the finished file, with byte ranges.
  */
+import { StreamTimingHeader } from "@music/commands/models";
 import { type Context, Effect, Exit, Option, Scope, Stream } from "effect";
 
 import { isFragmentedProfile } from "./ffmpeg.ts";
@@ -125,7 +126,12 @@ const streamedResponse = (
   closeWhenAborted(request.signal, scope).pipe(
     Effect.map(() => {
       const body = bytes.pipe(
-        Stream.tapError((error) => Effect.logError("TranscodedResponse.live_failed", error)),
+        // Once the client has gone, closing the scope may stop ffmpeg under a read: not a failure.
+        Stream.tapError((error) =>
+          request.signal.aborted
+            ? Effect.void
+            : Effect.logError("TranscodedResponse.live_failed", error),
+        ),
         Stream.ensuring(Scope.close(scope, Exit.void)),
         Stream.toReadableStreamWith(context),
       );
@@ -140,3 +146,45 @@ const streamedResponse = (
       return new Response(body, { status: 200, headers });
     }),
   );
+
+/**
+ * Answers a request for the transcode of `input` from `startMs` into the song (`&start=` on a
+ * transcoded profile) with a fresh encode from that point, whatever the cache holds: a `200`
+ * streamed like a live transcode (see `transcodedResponse`), with `X-Music-Start-Samples`,
+ * `X-Music-Priming-Samples`, and `X-Music-Sample-Rate`, plus an estimated
+ * `X-Music-Duration-Samples` for the fragmented profiles (see `FromOffset` for the timeline).
+ * Ranges and validators do not apply. ffmpeg stops when the client goes away.
+ *
+ * @returns The response, or `TranscodeError` when ffmpeg fails before its first byte.
+ */
+export const offsetResponse = Effect.fn("TranscodedResponse.offset")(function* (
+  request: Request,
+  input: TranscodeInput,
+  startMs: number,
+) {
+  const transcoder = yield* Transcoder;
+  const context = yield* Effect.context();
+  // Holds the ffmpeg run for as long as the response body streams it.
+  const scope = yield* Scope.make();
+
+  // Until the response owns the scope, a failure or an interruption (the client went away)
+  // closes it here.
+  return yield* transcoder.openAt(input, startMs).pipe(
+    Scope.provide(scope),
+    Effect.flatMap((opened) =>
+      streamedResponse(request, input, opened.bytes, scope, context, [
+        [StreamTimingHeader.start, String(opened.startSamples)],
+        [StreamTimingHeader.priming, String(opened.primingSamples)],
+        [StreamTimingHeader.sampleRate, String(opened.sampleRate)],
+        ...Option.match(opened.durationSamples, {
+          onNone: () => [],
+          onSome: (samples) => [
+            [StreamTimingHeader.duration, String(samples)] as const,
+            [StreamTimingHeader.estimated, "1"] as const,
+          ],
+        }),
+      ]),
+    ),
+    Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
+  );
+});
