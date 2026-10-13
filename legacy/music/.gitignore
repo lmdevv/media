@@ -54,3 +54,7 @@ coverage
 .cache
 tmp
 temp
+
+# Claude Code (per-user)
+.claude/settings.local.json
+.claude/worktrees/
