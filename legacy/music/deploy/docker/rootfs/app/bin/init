@@ -1,7 +1,8 @@
 #!/command/with-contenv bash
 # First-boot and upgrade oneshot. Runs after the Convex backend starts and before the media
 # service. Generates secrets into /data, backs up before an upgrade, deploys the bundled Convex
-# functions, sets the deployment environment, and writes the media service env.
+# functions, starts data migrations, sets the deployment environment, and writes the media
+# service env.
 set -euo pipefail
 # Secrets, backups, and the database export are readable by root only.
 umask 077
@@ -63,6 +64,11 @@ fi
 
 log "deploying functions"
 convex deploy --yes --codegen disable --typecheck disable
+
+# Rewrites rows a new version stores differently. It only schedules batches, which continue in the
+# background and resume from their saved cursor if the container restarts; finished ones no-op.
+log "starting data migrations"
+convex run migrations:run
 
 log "configuring deployment"
 # `--name=value` so a secret that starts with "-" is not read as an option.

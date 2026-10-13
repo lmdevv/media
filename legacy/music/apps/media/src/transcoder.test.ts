@@ -13,7 +13,8 @@ import {
   testConfig,
 } from "./testing/fixtures.ts";
 import * as Transcoder from "./transcoder.ts";
-import { withoutIndex } from "./testing/mp4-boxes.ts";
+import { adtsPayload } from "./testing/adts.ts";
+import { mediaData, withoutIndex } from "./testing/mp4-boxes.ts";
 import { runScoped } from "./testing/run.ts";
 import { sineSegment } from "./testing/sine.ts";
 
@@ -173,10 +174,11 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         // Priming and rate are exact up front; the length is the source's estimate.
         const measured = Option.getOrThrow(finished.timing);
+        const expected = Option.getOrThrow(live.timing);
 
-        expect(live.timing.primingSamples).toBe(measured.primingSamples);
-        expect(live.timing.sampleRate).toBe(measured.sampleRate);
-        expect(Math.abs(live.timing.durationSamples - measured.durationSamples)).toBeLessThan(
+        expect(expected.primingSamples).toBe(measured.primingSamples);
+        expect(expected.sampleRate).toBe(measured.sampleRate);
+        expect(Math.abs(expected.durationSamples - measured.durationSamples)).toBeLessThan(
           measured.sampleRate / 10,
         );
 
@@ -189,6 +191,62 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const again = yield* Effect.scoped(transcoder.open(input));
 
         expect(Transcoder.Opened.$is("Finished")(again)).toBe(true);
+      }),
+    ));
+
+  it("streams an AAC transcode as ADTS while ffmpeg writes the fast-start file", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const scratch = yield* temporaryDirectory("sine");
+        const source = yield* sineSegment(scratch, "long", "mp3", 0, 48_000 * 240);
+        const dataDir = yield* temporaryDirectory("data");
+        const transcoder = yield* transcoderWith(dataDir, 512 * 1024 * 1024);
+        const cacheDir = join(dataDir, "cache", "aac-320");
+
+        const input = {
+          trackId: TrackId.make("long"),
+          profile: "aac-320" as const,
+          source,
+          mtimeMs: 1,
+          codec: "mp3",
+        };
+
+        const [streamed, finished] = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const opened = yield* transcoder.open(input);
+
+            if (!Transcoder.Opened.$is("Live")(opened))
+              throw new Error("Expected a live transcode");
+
+            expect(Option.isNone(opened.timing)).toBe(true);
+            expect(
+              Option.isNone(yield* Effect.option(Files.statPath(join(cacheDir, "long-1.m4a")))),
+            ).toBe(true);
+
+            return [yield* collect(opened.bytes), yield* opened.finished] as const;
+          }),
+        );
+
+        // The stream carries exactly the finished file's frames, each behind an ADTS header.
+        const file = yield* Files.readWholeFile(finished.path);
+
+        expect(indexOfAtom(file, "moov")).toBeLessThan(indexOfAtom(file, "mdat"));
+        expect(adtsPayload(streamed)?.equals(mediaData(file))).toBe(true);
+
+        const copy = join(scratch, "streamed.aac");
+
+        yield* Files.writeFileAtomic(copy, streamed, "copy");
+        const probed = yield* probe(copy);
+
+        expect(probed.format.format_name).toBe("aac");
+        expect(probed.streams).toMatchObject([
+          { codec_name: "aac", sample_rate: "44100", channels: 2 },
+        ]);
+
+        expect(yield* Files.listNames(cacheDir)).toEqual(["long-1.m4a"]);
+        expect(
+          Transcoder.Opened.$is("Finished")(yield* Effect.scoped(transcoder.open(input))),
+        ).toBe(true);
       }),
     ));
 

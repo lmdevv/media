@@ -10,7 +10,8 @@
     "./command": "./src/command.ts",
     "./registry": "./src/registry.ts",
     "./codec": "./src/codec.ts",
-    "./signed-url": "./src/signed-url.ts"
+    "./signed-url": "./src/signed-url.ts",
+    "./search-text": "./src/search-text.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@music/config": "workspace:*",
+    "fast-check": "4.10.2",
     "typescript": "catalog:"
   }
 }

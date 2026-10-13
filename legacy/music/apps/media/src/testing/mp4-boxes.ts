@@ -37,3 +37,11 @@ export const withoutIndex = (bytes: Uint8Array): Buffer =>
       .filter((box) => box.type !== "sidx" && box.type !== "mfra")
       .map((box) => bytes.subarray(box.start, box.end)),
   );
+
+/** What the file's `mdat` boxes hold, without their headers: the encoded frames, in order. */
+export const mediaData = (bytes: Uint8Array): Buffer =>
+  Buffer.concat(
+    topLevelBoxes(bytes)
+      .filter((box) => box.type === "mdat")
+      .map((box) => bytes.subarray(box.start + 8, box.end)),
+  );

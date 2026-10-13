@@ -95,3 +95,33 @@ export const cli = (key: string, args: ReadonlyArray<string>): string =>
       XDG_CONFIG_HOME: "/tmp/music-stack-cli",
     },
   });
+
+/** The container `scripts/stack-e2e.sh` started; empty when the suite runs against another server. */
+export const container = (): string => process.env["MUSIC_CONTAINER"] ?? "";
+
+/** Runs the container's own Convex CLI with the admin key, as `/app/bin/init` does. */
+const CONVEX = `cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \\
+  CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" ./node_modules/.bin/convex`;
+
+/** Runs `script` in the container's shell with `args` as its positional parameters. */
+const inContainer = (script: string, args: ReadonlyArray<string>, input = ""): string =>
+  execFileSync("docker", ["exec", "-i", container(), "sh", "-c", script, "convex", ...args], {
+    encoding: "utf8",
+    input,
+  });
+
+/**
+ * Runs `convex <args>` against the container's backend with its admin key, as an operator would,
+ * for example to run a cron's function now or read a table.
+ */
+export const convexAdmin = (args: ReadonlyArray<string>): string =>
+  inContainer(`${CONVEX} "$@"`, args);
+
+/** Appends rows the app cannot create, such as a device last seen weeks ago, to `table`. */
+export const convexImport = (table: string, docs: ReadonlyArray<object>): void => {
+  inContainer(
+    `file="$(mktemp)" && cat > "$file" && ${CONVEX} import --format jsonLines --table "$1" --append -y "$file"`,
+    [table],
+    docs.map((doc) => JSON.stringify(doc)).join("\n"),
+  );
+};

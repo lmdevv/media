@@ -4,6 +4,7 @@ import type {
   SearchResults,
   Track,
 } from "@music/commands/models";
+import { foldSearchText } from "@music/commands/search-text";
 import { usePlayer } from "@music/player/react";
 import { useRead } from "@music/sdk/react";
 import { Chip } from "@music/ui/components/chip";
@@ -169,14 +170,16 @@ type TopResult =
   | { readonly kind: "album"; readonly album: Album }
   | { readonly kind: "track"; readonly track: Track };
 
-/** How many of the query's words a name contains; ties keep artist, album, song order. */
+/**
+ * How many of the query's words a name contains, ignoring case and accents as the server's search
+ * does; ties keep artist, album, song order.
+ */
 const overlap = (name: string, query: string): number => {
-  const lower = name.toLowerCase();
+  const folded = foldSearchText(name);
 
-  return query
-    .toLowerCase()
+  return foldSearchText(query)
     .split(/\s+/)
-    .filter((word) => word.length > 0 && lower.includes(word)).length;
+    .filter((word) => word.length > 0 && folded.includes(word)).length;
 };
 
 const topResult = (results: SearchResults, query: string): TopResult | null => {

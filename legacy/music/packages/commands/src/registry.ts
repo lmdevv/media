@@ -287,12 +287,15 @@ export const commands = {
 
   // Devices
   "devices.list": command({
-    summary: "List your devices",
+    summary: "List devices seen in the last day and the one playing",
     group: "devices",
     kind: "query",
     access: "user",
     job: false,
-    args: NoArgs,
+    args: Schema.Struct({
+      /** The caller's own device, listed even when it has been silent for longer. */
+      deviceId: Schema.optionalKey(DeviceId),
+    }),
     result: Schema.Array(Device),
   }),
   "devices.heartbeat": command({

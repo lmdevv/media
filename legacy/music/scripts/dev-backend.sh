@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Starts a self-hosted Convex backend in Docker for local development, deploys the functions,
-# sets the deployment environment, and writes the .env.local files the apps read.
+# starts data migrations, sets the deployment environment, and writes the .env.local files the
+# apps read.
 #
 #   scripts/dev-backend.sh [name] [port]     # defaults: main 3210
 #   scripts/dev-backend.sh stop [name]
@@ -56,6 +57,7 @@ ENV
 
 cd "${root}/packages/backend"
 pnpm exec convex deploy --yes >/dev/null
+pnpm exec convex run migrations:run >/dev/null
 node scripts/configure.ts --site-url "http://localhost:${web_port}" \
   --media-url "http://127.0.0.1:${media_port}/media" >/dev/null
 

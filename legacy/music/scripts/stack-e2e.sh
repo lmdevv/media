@@ -119,7 +119,9 @@ docker restart "$name" >/dev/null
 wait_healthy
 media_check
 
-MUSIC_URL="http://localhost:${port}" pnpm --dir "$root" --filter web test:stack
+# The suite runs the container's Convex CLI to import rows the app cannot create, such as a device
+# last seen weeks ago, and to run cron functions on demand.
+MUSIC_URL="http://localhost:${port}" MUSIC_CONTAINER="$name" pnpm --dir "$root" --filter web test:stack
 
 # Scanning and streaming ran as the media user too: art and transcodes are its own.
 media_check

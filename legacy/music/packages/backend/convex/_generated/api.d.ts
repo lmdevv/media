@@ -20,6 +20,7 @@ import type * as handlers_types from "../handlers/types.js";
 import type * as http from "../http.js";
 import type * as lib_catalog from "../lib/catalog.js";
 import type * as lib_crypto from "../lib/crypto.js";
+import type * as lib_devices from "../lib/devices.js";
 import type * as lib_env from "../lib/env.js";
 import type * as lib_errors from "../lib/errors.js";
 import type * as lib_ids from "../lib/ids.js";
@@ -31,6 +32,7 @@ import type * as lib_sessions from "../lib/sessions.js";
 import type * as lib_viewer from "../lib/viewer.js";
 import type * as maintenance from "../maintenance.js";
 import type * as media from "../media.js";
+import type * as migrations from "../migrations.js";
 import type * as setup from "../setup.js";
 import type * as users from "../users.js";
 
@@ -53,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   "lib/catalog": typeof lib_catalog;
   "lib/crypto": typeof lib_crypto;
+  "lib/devices": typeof lib_devices;
   "lib/env": typeof lib_env;
   "lib/errors": typeof lib_errors;
   "lib/ids": typeof lib_ids;
@@ -64,6 +67,7 @@ declare const fullApi: ApiFromModules<{
   "lib/viewer": typeof lib_viewer;
   maintenance: typeof maintenance;
   media: typeof media;
+  migrations: typeof migrations;
   setup: typeof setup;
   users: typeof users;
 }>;

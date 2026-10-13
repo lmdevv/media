@@ -78,10 +78,16 @@ export default defineSchema({
     key: v.string(),
     albumCount: v.number(),
     artHash: v.optional(v.string()),
+    /**
+     * The name folded for accent-insensitive search. Every write sets it; it is optional only so
+     * artists stored before it existed still deploy, and the `foldArtistSearchText` migration
+     * fills them in.
+     */
+    searchText: v.optional(v.string()),
   })
     .index("by_library_key", ["libraryId", "key"])
     .index("by_key", ["key"])
-    .searchIndex("search_name", { searchField: "name", filterFields: ["libraryId"] }),
+    .searchIndex("search_text", { searchField: "searchText", filterFields: ["libraryId"] }),
 
   albums: defineTable({
     libraryId: v.id("libraries"),
@@ -96,6 +102,7 @@ export default defineSchema({
     durationMs: v.number(),
     format: v.string(),
     addedAt: v.number(),
+    /** Title and artist, folded for accent-insensitive search. */
     searchText: v.string(),
   })
     .index("by_library_artist_key", ["libraryId", "artistId", "key"])
@@ -125,6 +132,7 @@ export default defineSchema({
     bitDepth: v.optional(v.number()),
     artHash: v.optional(v.string()),
     missing: v.boolean(),
+    /** Title, artist, and album, folded for accent-insensitive search. */
     searchText: v.string(),
   })
     .index("by_library_path", ["libraryId", "path"])
@@ -171,7 +179,10 @@ export default defineSchema({
     name: v.string(),
     kind: deviceKind,
     lastSeenAt: v.number(),
-  }).index("by_user_device", ["userId", "deviceId"]),
+  })
+    .index("by_user_device", ["userId", "deviceId"])
+    .index("by_user_last_seen", ["userId", "lastSeenAt"])
+    .index("by_last_seen", ["lastSeenAt"]),
 
   playbackSessions: defineTable({
     userId: v.id("users"),
@@ -205,4 +216,12 @@ export default defineSchema({
   })
     .index("by_status", ["status"])
     .index("by_library_status", ["libraryId", "status"]),
+
+  /** Progress of each data migration in `migrations.ts`, so an interrupted one resumes. */
+  migrations: defineTable({
+    name: v.string(),
+    /** Where the next batch starts; null before the first batch. */
+    cursor: v.union(v.string(), v.null()),
+    done: v.boolean(),
+  }).index("by_name", ["name"]),
 });

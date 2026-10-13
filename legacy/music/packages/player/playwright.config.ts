@@ -10,7 +10,7 @@ const autoplay = ["--autoplay-policy=no-user-gesture-required"];
 /** Desktop Chrome's real policy; headless Chromium otherwise allows audio without a gesture. */
 const desktopAutoplay = ["--autoplay-policy=document-user-activation-required"];
 
-/** Firefox's equivalent of `autoplay`, for the gapless tests. */
+/** Firefox's equivalent of `autoplay`, for the gapless and transcoded tests. */
 const firefoxAutoplay = {
   "media.autoplay.default": 0,
   "media.autoplay.block-webaudio": false,
@@ -22,9 +22,9 @@ const launch = (args: ReadonlyArray<string>) =>
     : { args: [...args], executablePath: chromiumPath };
 
 /**
- * Browser tests for the player. `engine` and the `gapless-*` projects need only the media stub
- * (and ffmpeg); `session` also needs the dev backend from `scripts/dev-backend.sh`. The gapless
- * tests run in Chromium, Firefox, and WebKit: install the latter with
+ * Browser tests for the player. `engine` and the `gapless-*` and `transcoded-*` projects need only
+ * the media stub (and ffmpeg); `session` also needs the dev backend from `scripts/dev-backend.sh`.
+ * The gapless and transcoded tests run in Chromium, Firefox, and WebKit: install the latter with
  * `pnpm exec playwright install firefox webkit`. Set CHROMIUM_PATH to use a system Chromium; on
  * NixOS run through `scripts/nixos-browsers.sh` so Playwright's Firefox and WebKit find their
  * libraries.
@@ -54,6 +54,21 @@ export default defineConfig({
     {
       name: "gapless-webkit",
       testMatch: "gapless.spec.ts",
+      use: { ...devices["Desktop Safari"] },
+    },
+    {
+      name: "transcoded-chromium",
+      testMatch: "transcoded.spec.ts",
+      use: { ...devices["Desktop Chrome"], launchOptions: launch(autoplay) },
+    },
+    {
+      name: "transcoded-firefox",
+      testMatch: "transcoded.spec.ts",
+      use: { ...devices["Desktop Firefox"], launchOptions: { firefoxUserPrefs: firefoxAutoplay } },
+    },
+    {
+      name: "transcoded-webkit",
+      testMatch: "transcoded.spec.ts",
       use: { ...devices["Desktop Safari"] },
     },
     {

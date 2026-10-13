@@ -6,6 +6,8 @@
  *   NAME=music-measure PORT=8098 MUSIC_DIR=~/music-demo/demo-music KEEP=1 scripts/stack-e2e.sh
  *   MUSIC_URL=http://localhost:8098 ALBUM="Vienna Blue" node apps/web/e2e-stack/first-audio.ts
  *
+ * Set QUALITY to a streaming quality setting's label to pick it first, for example
+ * `QUALITY="Data saver"` to measure the AAC profile over HTML audio instead of the gapless engine.
  * Signs in as the stack suite's admin, creating it and the `/music` library on a fresh container.
  * Prints one line per song and the median. Set CHROMIUM_PATH to use a system Chromium.
  */
@@ -17,6 +19,8 @@ import { ADMIN } from "./support.ts";
 const baseUrl = process.env["MUSIC_URL"] ?? "http://localhost:8090";
 
 const album = process.env["ALBUM"] ?? "Vienna Blue";
+
+const quality = process.env["QUALITY"];
 
 const launchOptions: LaunchOptions = { args: ["--autoplay-policy=no-user-gesture-required"] };
 
@@ -91,6 +95,14 @@ if (page.url().includes("/setup")) {
   await page.getByLabel("Email").fill(ADMIN.email);
   await page.getByLabel("Password").fill(ADMIN.password);
   await page.getByRole("button", { name: "Sign in" }).click();
+}
+
+if (quality !== undefined) {
+  await page.goto("/settings/playback");
+  await page
+    .getByRole("radiogroup", { name: "Streaming quality" })
+    .getByRole("radio", { name: quality, exact: true })
+    .click();
 }
 
 const library = page.getByRole("navigation", { name: "Library" });

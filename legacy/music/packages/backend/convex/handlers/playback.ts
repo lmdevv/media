@@ -1,5 +1,6 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { DEVICE_LISTED_MS, DEVICE_LIST_LIMIT, listedDevices } from "../lib/devices";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { MAX_QUEUE, ensureSession, findSession, livePosition, shuffled } from "../lib/playback";
@@ -111,15 +112,43 @@ export const playbackQueries = {
     };
   },
 
-  "devices.list": async (ctx, viewer) => {
-    const devices = await ctx.db
-      .query("devices")
-      .withIndex("by_user_device", (q) => q.eq("userId", viewer.id))
-      .collect();
-
+  "devices.list": async (ctx, viewer, args) => {
+    const session = await findSession(ctx, viewer.id);
     const now = Date.now();
 
-    return devices
+    // Long-silent devices drop out, but never the one playing the session or the one asking: a
+    // browser waking after a day lists itself before its first heartbeat lands.
+    const keep = new Set(
+      [session?.activeDeviceId, args.deviceId].filter((id): id is string => id !== undefined),
+    );
+
+    // Only the listed range is read, so a long device history costs the list nothing; the kept
+    // devices are looked up on their own.
+    const recent = await ctx.db
+      .query("devices")
+      .withIndex("by_user_last_seen", (q) =>
+        q.eq("userId", viewer.id).gt("lastSeenAt", now - DEVICE_LISTED_MS),
+      )
+      .order("desc")
+      .take(DEVICE_LIST_LIMIT);
+
+    const kept = await Promise.all(
+      [...keep].map((deviceId) =>
+        ctx.db
+          .query("devices")
+          .withIndex("by_user_device", (q) => q.eq("userId", viewer.id).eq("deviceId", deviceId))
+          .unique(),
+      ),
+    );
+
+    const devices = new Map(
+      [...recent, ...kept.filter((device) => device !== null)].map((device) => [
+        device.deviceId,
+        device,
+      ]),
+    );
+
+    return listedDevices([...devices.values()], now, keep)
       .toSorted((left, right) => right.lastSeenAt - left.lastSeenAt)
       .map((device) => presentDevice(device, now));
   },

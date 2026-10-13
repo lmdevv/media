@@ -35,10 +35,10 @@ includes every dependency, `music-metadata` too; `dist/` needs nothing else at r
 - `GET /media/health`: `{ ok, convex, ffmpeg, version }`, 503 when not `ok`.
 - `GET|HEAD /media/stream/:trackId?p=<profile>&exp=&sig=`: `original` plays the file bytes; the
   other profiles transcode once into the cache (at most two ffmpeg runs at a time, concurrent
-  requests share one run). Single byte ranges, `ETag`, `If-None-Match`, and `If-Range` work on all
-  of them.
-  - `aac-320`, `aac-128`: fast-start AAC MP4 for `<audio>`. When ffmpeg fails on a
-    browser-playable file they fall back to the original.
+  requests share one run). Once a transcode is cached, single byte ranges, `ETag`,
+  `If-None-Match`, and `If-Range` work on all of them.
+  - `aac-320`, `aac-128`: fast-start AAC MP4 for `<audio>`, stereo 44.1 kHz. When ffmpeg fails
+    on a browser-playable file before its first byte, they fall back to the original.
   - `fmp4-flac`, `fmp4-aac`: fragmented MP4 for the gapless MSE engine: one-second fragments,
     an empty `moov`, a global `sidx` index for seeking, and no edit list. FLAC sources are
     remuxed into `fmp4-flac`, other sources are encoded. `fmp4-aac` is stereo AAC at 256 kbps,
@@ -51,16 +51,26 @@ includes every dependency, `music-metadata` too; `dist/` needs nothing else at r
     The numbers live in a `.json` sidecar. AAC gets 2048 samples of silence appended so the last
     real sample sits in a full-length frame the player can cut exactly. These profiles never fall
     back to the original (502 instead): MSE cannot append it.
-  - Live transcodes: a plain `GET` for a fragmented profile that is not cached yet does not wait
-    for ffmpeg. ffmpeg's tee muxer writes the cached file and, through `pipe:3`, the same stream
-    without `sidx` or `mfra`, which the service copies to a `.live.part` file that every reader
-    of that transcode follows as it grows. The response is a `200` with `Cache-Control:
-    no-store`, no `ETag`, the exact priming and rate, an estimated `X-Music-Duration-Samples`
-    (the source's declared length), and `X-Music-Duration-Estimated: 1`. It ends once the cached
-    file and its sidecar exist, so a `HEAD` afterwards returns the exact length; a failure after
-    the first byte aborts the response. `HEAD`, `Range`, `If-Range`, and `If-None-Match` requests
-    wait for the cached file instead, whose byte offsets differ. A transcode that nobody reads
-    or waits for any more stops after a second, freeing its ffmpeg slot for the next song.
+  - Live transcodes: a `GET` for a profile that is not cached yet does not wait for ffmpeg.
+    ffmpeg's tee muxer writes the cached file and, through `pipe:3`, a copy that is final as it
+    is written, which the service copies to a `.live.part` file that every reader of that
+    transcode follows as it grows. The response is a `200` with `Cache-Control: no-store` and no
+    `ETag`, `Content-Length`, or `Accept-Ranges`; it ends once the cached file (and sidecar)
+    exist, and a failure after the first byte aborts it.
+    - Fragmented profiles stream the same fMP4 without `sidx` or `mfra`, with the exact priming
+      and rate, an estimated `X-Music-Duration-Samples` (the source's declared length), and
+      `X-Music-Duration-Estimated: 1`. A `HEAD` afterwards returns the exact length.
+    - AAC profiles stream the same AAC frames as ADTS (`audio/aac`). An MP4 cannot be played
+      before its `moov` is written, and WebKit (Safari, iOS) only plays an MP4 it can fetch by
+      byte ranges with a known length; ADTS is the self-framing stream it plays from a `200` of
+      unknown length, as it does internet radio. Browsers report such a stream's duration as
+      infinite and cannot seek in it, so the player shows the song's duration from the catalog
+      and seeks by waiting for the finished file (a `HEAD` waits for it) and opening that.
+
+    A plain `GET` or a media element's opening range (`bytes=0-`, or Safari's `bytes=0-1`) can
+    be answered live. Other ranges, `HEAD`, `If-Range`, and `If-None-Match` wait for the cached
+    file instead, whose bytes differ. A transcode that nobody reads or waits for any more stops
+    after a second, freeing its ffmpeg slot for the next song.
 - `GET|HEAD /media/art/:hash?exp=&sig=`: content-addressed artwork, cached as immutable.
 
 Bad or expired signatures get 403. Logs are JSON on stdout and never include query strings.

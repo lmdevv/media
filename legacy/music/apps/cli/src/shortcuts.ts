@@ -2,6 +2,7 @@
  * Shortcuts people and agents reach for most, built only from registry commands.
  */
 import type { DeviceId, TrackId } from "@music/commands/ids";
+import { foldSearchText } from "@music/commands/search-text";
 import type {
   AlbumCard,
   ArtistCard,
@@ -24,12 +25,12 @@ export type PlayChoice = Data.TaggedEnum<{
 
 export const PlayChoice = Data.taggedEnum<PlayChoice>();
 
-/** Lowercase, accents stripped, punctuation folded to spaces. */
+/**
+ * Folded the way the server folds search text (so "strasse" ranks "Straße" as the server matched
+ * it), compatibility characters such as ligatures included, and punctuation folded to spaces.
+ */
 const normalize = (text: string): string =>
-  text
-    .normalize("NFKD")
-    .replaceAll(/\p{Diacritic}/gu, "")
-    .toLowerCase()
+  foldSearchText(text.normalize("NFKC"))
     .replaceAll(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 

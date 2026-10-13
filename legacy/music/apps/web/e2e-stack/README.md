@@ -11,7 +11,10 @@ MUSIC_DIR=~/music scripts/stack-e2e.sh     # your own library
 IMAGE=ghcr.io/lmdevv/music:main scripts/stack-e2e.sh
 ```
 
-The suite expects a fresh container: the first test creates the admin account. On NixOS, set
+The suite expects a fresh container: the first test creates the admin account. The script also
+passes the container name as `MUSIC_CONTAINER`; the device-pruning test runs the container's Convex
+CLI through `docker exec` to import long-silent devices and run the prune, and is skipped without
+it. On NixOS, set
 `CHROMIUM_PATH=$(which chromium)`. CI runs it on every push (`.github/workflows/ci.yml`).
 
 `first-audio.ts` is not part of the suite: it measures time to first audio, from tapping a song's

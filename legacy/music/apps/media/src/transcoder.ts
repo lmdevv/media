@@ -4,11 +4,12 @@
  * a `.json` sidecar with its measured sample timing, written before the media file appears and
  * evicted with it.
  *
- * A fragmented transcode can be read while ffmpeg writes it: ffmpeg also writes the stream,
- * without its index, to a pipe the transcoder copies into a "live" file beside the output, and
- * readers follow that file as it grows. Concurrent requests for the same output share one ffmpeg
- * run, at most two ffmpeg runs happen at once, a run that nobody waits for any more stops, and
- * the least recently served files are evicted when the cache grows past its limit.
+ * A transcode can be read while ffmpeg writes it: ffmpeg also writes a streamable copy (the
+ * fragmented stream without its index, or ADTS for the AAC profiles) to a pipe the transcoder
+ * copies into a "live" file beside the output, and readers follow that file as it grows.
+ * Concurrent requests for the same output share one ffmpeg run, at most two ffmpeg runs happen at
+ * once, a run that nobody waits for any more stops, and the least recently served files are
+ * evicted when the cache grows past its limit.
  */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -148,19 +149,21 @@ export class TranscodeError extends Data.TaggedError("TranscodeError")<{
   }
 }
 
-/** What `open` found: a finished file, or a fragmented transcode ffmpeg is still writing. */
+/** What `open` found: a finished file, or a transcode ffmpeg is still writing. */
 export type Opened = Data.TaggedEnum<{
   Finished: { readonly transcoded: Transcoded };
   Live: {
     /**
-     * Timing known before encoding: the exact priming and sample rate, and a `durationSamples`
-     * estimated from the source's declared length. The finished file carries the measured one.
+     * Present exactly for the fragmented profiles: timing known before encoding, with the exact
+     * priming and sample rate and a `durationSamples` estimated from the source's declared
+     * length. The finished file carries the measured one.
      */
-    readonly timing: SampleTiming;
+    readonly timing: Option.Option<SampleTiming>;
     /**
-     * The stream from its first byte as ffmpeg writes it: `ftyp`, `moov`, then fragments, with
-     * no `sidx` and no `mfra` (the finished file has both, so its byte offsets differ). Ends once
-     * the finished file is in the cache; fails when the transcode fails.
+     * The stream from its first byte as ffmpeg writes it. Fragmented profiles: `ftyp`, `moov`,
+     * then fragments, with no `sidx` and no `mfra` (the finished file has both, so its byte
+     * offsets differ). AAC profiles: ADTS, while the finished file is an MP4. Ends once the
+     * finished file is in the cache; fails when the transcode fails.
      */
     readonly bytes: Stream.Stream<Uint8Array, TranscodeError>;
     /** Waits for the finished transcode. */
@@ -177,8 +180,8 @@ export interface Interface {
   readonly transcode: (input: TranscodeInput) => Effect.Effect<Transcoded, TranscodeError>;
   /**
    * Starts or joins the transcode of `input` and returns as soon as it can be read: the cached
-   * file, or, for a fragmented profile, the live transcode once ffmpeg has written its first
-   * bytes. Fails when the transcode fails before that. A live transcode stays readable until the
+   * file, or the live transcode once ffmpeg has written its first bytes. Fails when the
+   * transcode fails before that. A live transcode stays readable until the
    * scope closes; once every scope holding a transcode has closed, it stops after a second.
    */
   readonly open: (input: TranscodeInput) => Effect.Effect<Opened, TranscodeError, Scope.Scope>;
@@ -199,8 +202,11 @@ const failure = (input: TranscodeInput) => (cause: TranscodeError["cause"]) =>
 type Progress = Data.TaggedEnum<{
   /** Waiting for a transcode slot, or probing the source. */
   Queued: {};
-  /** ffmpeg is running; the first `written` bytes of the live file are final. */
-  Writing: { readonly timing: SampleTiming; readonly written: number };
+  /**
+   * ffmpeg is running; the first `written` bytes of the live file are final. `timing` is the
+   * expected timing of a fragmented profile.
+   */
+  Writing: { readonly timing: Option.Option<SampleTiming>; readonly written: number };
   /** The output is in the cache; the live file holds `written` bytes (0 without one). */
   Finished: { readonly transcoded: Transcoded; readonly written: number };
   Failed: { readonly error: TranscodeError };
@@ -211,7 +217,7 @@ const Progress = Data.taggedEnum<Progress>();
 /** One running transcode. */
 interface Job {
   readonly output: string;
-  /** Where a fragmented transcode's live copy goes; other profiles never create it. */
+  /** Where the live copy goes. */
   readonly live: string;
   readonly progress: SubscriptionRef.SubscriptionRef<Progress>;
   /**
@@ -356,6 +362,12 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /** Creates the live file and lets readers follow it from now on. */
+  const startLive = (job: Job, timing: Option.Option<SampleTiming>) =>
+    Files.appendToFile(job.live, new Uint8Array()).pipe(
+      Effect.andThen(SubscriptionRef.set(job.progress, Progress.Writing({ timing, written: 0 }))),
+    );
+
   /**
    * Writes a fragmented transcode to `temporary` (and its live copy) and measures its timing.
    * Readers can follow the live copy from the moment the source probe gives its expected timing.
@@ -387,8 +399,7 @@ const make = Effect.gen(function* () {
       sampleRate: outputRate,
     };
 
-    yield* Files.appendToFile(job.live, new Uint8Array());
-    yield* SubscriptionRef.set(job.progress, Progress.Writing({ timing: expected, written: 0 }));
+    yield* startLive(job, Option.some(expected));
 
     const encoded = yield* runToolPiped(
       config.ffmpegPath,
@@ -453,7 +464,13 @@ const make = Effect.gen(function* () {
 
         timing = Option.some(measured);
       } else {
-        yield* runTool(config.ffmpegPath, transcodeArgs(input.source, temporary, profile));
+        // Nothing to probe first: readers can follow the ADTS copy at once.
+        yield* startLive(job, Option.none());
+        yield* runToolPiped(
+          config.ffmpegPath,
+          transcodeArgs(input.source, temporary, profile),
+          (chunk) => appendLive(job, chunk),
+        );
       }
 
       yield* Files.renameFile(temporary, job.output);

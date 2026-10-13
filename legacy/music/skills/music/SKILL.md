@@ -69,7 +69,8 @@ id=$(music now --json | jq -r '.queue[.index].id')
 music likes set "$id" --liked
 ```
 
-Move playback to another device:
+Move playback to another device. The list leaves out devices silent for over a day, except the
+one playing:
 
 ```sh
 music devices list               # find the device ID; online devices can play
@@ -150,7 +151,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 ### devices
 
 - `music playback transfer <device-id>`: Move playback to another device.
-- `music devices list`: List your devices.
+- `music devices list [--device-id <id>]`: List devices seen in the last day and the one playing.
 - `music devices heartbeat --device-id <id> --name <text> --kind <web|phone|cli>`: Mark a device as online (sent by players).
 
 ### queue

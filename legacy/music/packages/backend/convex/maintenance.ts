@@ -1,10 +1,15 @@
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { internalMutation } from "./_generated/server";
+import { DEVICE_RETAINED_MS } from "./lib/devices";
+import { findSession } from "./lib/playback";
 import { DEVICE_ONLINE_MS } from "./lib/present";
 
 const PURGE_BATCH = 200;
+
+const PRUNE_BATCH = 200;
 
 /** Deletes a removed library's index in batches, rescheduling until it is gone. */
 export const purgeLibrary = internalMutation({
@@ -109,5 +114,43 @@ export const pauseOrphanedSessions = internalMutation({
         }),
       ),
     );
+  },
+});
+
+/**
+ * Deletes devices silent for longer than `DEVICE_RETAINED_MS`, one batch per run, rescheduling
+ * with the batch's cursor until the whole range is read. A session's active device is kept
+ * however old, so no session points at a deleted device.
+ */
+export const pruneStaleDevices = internalMutation({
+  args: { cutoff: v.optional(v.number()), cursor: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    // Continuations reuse the first run's cutoff: the cursor belongs to that query's range.
+    const cutoff = args.cutoff ?? Date.now() - DEVICE_RETAINED_MS;
+
+    const batch = await ctx.db
+      .query("devices")
+      .withIndex("by_last_seen", (q) => q.lt("lastSeenAt", cutoff))
+      .paginate({ cursor: args.cursor ?? null, numItems: PRUNE_BATCH });
+
+    const userIds = [...new Set(batch.page.map((device) => device.userId))];
+    const sessions = await Promise.all(userIds.map((userId) => findSession(ctx, userId)));
+
+    const active = new Map<Id<"users">, string | undefined>(
+      userIds.map((userId, index) => [userId, sessions[index]?.activeDeviceId]),
+    );
+
+    await Promise.all(
+      batch.page
+        .filter((device) => active.get(device.userId) !== device.deviceId)
+        .map((device) => ctx.db.delete(device._id)),
+    );
+
+    if (!batch.isDone) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.pruneStaleDevices, {
+        cutoff,
+        cursor: batch.continueCursor,
+      });
+    }
   },
 });

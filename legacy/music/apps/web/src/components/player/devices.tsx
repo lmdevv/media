@@ -43,7 +43,13 @@ export interface DevicesState {
 /** The devices you can play on, which one plays, and a transfer in progress. */
 export const useDevices = (): DevicesState => {
   const player = usePlayer();
-  const devices = useRead("devices.list", {});
+
+  // Naming this browser keeps it listed even before its first heartbeat after a long sleep.
+  const devices = useRead(
+    "devices.list",
+    player.deviceId === null ? {} : { deviceId: player.deviceId },
+  );
+
   const [pending, setPending] = useState<DeviceId | "here" | null>(null);
   const others = (devices ?? []).filter((device) => device.id !== player.deviceId);
   const activeId = player.activeDevice?.id ?? null;
@@ -155,7 +161,8 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
   );
 
   return (
-    // Old browsers stay listed as idle, so the list scrolls instead of outgrowing the screen.
+    // Closed browsers stay listed as idle for a day, so the list scrolls instead of outgrowing
+    // the screen.
     <div
       role="menu"
       aria-label="Play on"

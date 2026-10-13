@@ -1,3 +1,5 @@
+import { foldSearchText } from "@music/commands/search-text";
+
 import type { Doc, Id } from "../_generated/dataModel";
 import { canRead } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
@@ -194,7 +196,8 @@ export const libraryQueries = {
   },
 
   search: async (ctx, viewer, args) => {
-    const text = args.query.trim();
+    // Stored search text is folded, so the query must be too: "doppelganger" finds "Doppelgänger".
+    const text = foldSearchText(args.query).trim();
 
     if (text.length === 0) return { tracks: [], albums: [], artists: [] };
     const limit = args.limit ?? 20;
@@ -217,7 +220,9 @@ export const libraryQueries = {
           .take(limit),
         artists: await ctx.db
           .query("artists")
-          .withSearchIndex("search_name", (q) => q.search("name", text).eq("libraryId", libraryId))
+          .withSearchIndex("search_text", (q) =>
+            q.search("searchText", text).eq("libraryId", libraryId),
+          )
           .take(limit),
       })),
     );

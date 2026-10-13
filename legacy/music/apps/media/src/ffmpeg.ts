@@ -108,9 +108,16 @@ const BITRATES: Record<Exclude<TranscodeProfile, FragmentedProfile>, string> = {
   "aac-128": "128k",
 };
 
+/** Backslash-escapes what the tee muxer would read as syntax in an output name. */
+const teeEscape = (name: string): string => name.replaceAll(/[\\'|[\]]/gu, String.raw`\$&`);
+
 /**
- * ffmpeg arguments that transcode the first audio stream of `source` to stereo 44.1 kHz AAC in a
- * fast-start MP4 (`.m4a`) at `destination`, keeping tags and dropping cover art streams.
+ * ffmpeg arguments that transcode the first audio stream of `source` to stereo 44.1 kHz AAC,
+ * keeping tags and dropping cover art streams. The tee muxer writes the encoded stream twice: to
+ * a fast-start MP4 (`.m4a`) at `destination`, whose `moov` ffmpeg moves to the front once the
+ * file is complete, and as ADTS (`audio/aac`) to file descriptor 3 (`pipe:3`). ADTS frames carry
+ * their own headers, so every byte of it is final the moment it is written and a player can
+ * start on the first frame.
  */
 export const transcodeArgs = (
   source: string,
@@ -136,11 +143,9 @@ export const transcodeArgs = (
   "2",
   "-map_metadata",
   "0",
-  "-movflags",
-  "+faststart",
   "-f",
-  "mp4",
-  destination,
+  "tee",
+  `[f=mp4:movflags=+faststart]${teeEscape(destination)}|[f=adts]pipe:3`,
 ];
 
 /**
@@ -182,9 +187,6 @@ export const FRAGMENTED_PRIMING: Readonly<Record<FragmentedProfile, number>> = {
 const FRAGMENT_MICROSECONDS = "1000000";
 
 const FRAGMENT_FLAGS = "+frag_keyframe+empty_moov+default_base_moof";
-
-/** Backslash-escapes what the tee muxer would read as syntax in an output name. */
-const teeEscape = (name: string): string => name.replaceAll(/[\\'|[\]]/gu, String.raw`\$&`);
 
 /**
  * The tee muxer writes the encoded stream twice. The file at `destination` gets a global `sidx`,

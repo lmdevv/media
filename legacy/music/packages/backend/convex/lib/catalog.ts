@@ -1,3 +1,5 @@
+import { foldSearchText } from "@music/commands/search-text";
+
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 
@@ -24,6 +26,19 @@ export interface ScannedTrack {
 }
 
 const keyOf = (value: string): string => value.trim().toLowerCase();
+
+/** What the artist search index matches: the name, folded. */
+export const artistSearchText = (artist: Pick<Doc<"artists">, "name">): string =>
+  foldSearchText(artist.name);
+
+/** What the album search index matches: title and album artist, folded. */
+export const albumSearchText = (album: Pick<Doc<"albums">, "title" | "artistName">): string =>
+  foldSearchText(`${album.title} ${album.artistName}`);
+
+/** What the track search index matches: title, artist, and album, folded. */
+export const trackSearchText = (
+  track: Pick<Doc<"tracks">, "title" | "artistName" | "albumTitle">,
+): string => foldSearchText(`${track.title} ${track.artistName} ${track.albumTitle}`);
 
 /** A short format label such as `FLAC 24/96` or `MP3 320`. */
 export const formatLabel = (track: ScannedTrack): string => {
@@ -115,7 +130,15 @@ const findOrCreateArtist = async (
     return existing;
   }
 
-  const id = await ctx.db.insert("artists", { libraryId, name, key, albumCount: 0, artHash });
+  const id = await ctx.db.insert("artists", {
+    libraryId,
+    name,
+    key,
+    albumCount: 0,
+    artHash,
+    searchText: artistSearchText({ name }),
+  });
+
   const created = await ctx.db.get(id);
 
   if (created === null) throw new Error("Artist vanished right after insert");
@@ -167,7 +190,7 @@ const findOrCreateAlbum = async (
     durationMs: 0,
     format: formatLabel(track),
     addedAt: Date.now(),
-    searchText: `${track.album} ${artist.name}`,
+    searchText: albumSearchText({ title: track.album, artistName: artist.name }),
   });
 
   const created = await ctx.db.get(id);
@@ -213,7 +236,11 @@ export const upsertScannedTrack = async (
     bitDepth: scanned.bitDepth,
     artHash: scanned.artHash,
     missing: false,
-    searchText: `${scanned.title} ${scanned.artist} ${scanned.album}`,
+    searchText: trackSearchText({
+      title: scanned.title,
+      artistName: scanned.artist,
+      albumTitle: scanned.album,
+    }),
   };
 
   const existing = await ctx.db

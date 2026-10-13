@@ -79,6 +79,10 @@ const findTrack = async (session: Session, title: string): Promise<Track> => {
   return track;
 };
 
+/** The names that carry an accent or ß, such as the accented catalog one test adds. */
+const accentedOnly = (names: ReadonlyArray<string>): ReadonlyArray<string> =>
+  names.filter((name) => /[äöüß]/u.test(name));
+
 /** Every page of a paginated list command, flattened. */
 const allPages = async <Item>(
   read: (cursor: string | undefined) => Promise<{
@@ -316,6 +320,46 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     const own = await adminA.music.read("libraries.list", {});
 
     expect(own.map((library) => library.id)).toContain(alpha.libraryId);
+  });
+
+  it("finds accented names typed without accents, only in libraries the viewer can read", async () => {
+    const { adminA, member, shared, alpha } = fixture;
+
+    const accented = (folder: string) => ({
+      path: `${folder}/doppelganger.flac`,
+      title: `Doppelgänger ${TOKEN}`,
+      artist: `Mötley Crüe ${TOKEN}`,
+      album: `Straße ${TOKEN}`,
+      artHash: "4".repeat(64),
+    });
+
+    await upsertTracks(server, mediaSecret, shared.libraryId, [accented("Open")]);
+    await upsertTracks(server, mediaSecret, alpha.libraryId, [accented("Alpha")]);
+
+    // Search matches any word, so the run's other names come back too; keep the accented ones.
+    const search = async (session: Session, query: string) => {
+      const results = await session.music.read("search", { query: `${query} ${TOKEN}`, limit: 50 });
+
+      return {
+        tracks: accentedOnly(results.tracks.map((track) => track.title)),
+        albums: accentedOnly(results.albums.map((album) => album.title)),
+        artists: accentedOnly(results.artists.map((artist) => artist.name)),
+      };
+    };
+
+    const own = await search(adminA, "doppelganger");
+
+    expect(own.tracks).toEqual([`Doppelgänger ${TOKEN}`, `Doppelgänger ${TOKEN}`]);
+    expect((await search(adminA, "STRASSE")).albums).toEqual([
+      `Straße ${TOKEN}`,
+      `Straße ${TOKEN}`,
+    ]);
+
+    expect(await search(member, "motley crue")).toEqual({
+      tracks: [`Doppelgänger ${TOKEN}`],
+      albums: [`Straße ${TOKEN}`],
+      artists: [`Mötley Crüe ${TOKEN}`],
+    });
   });
 
   it("refuses IDs from one table where another table's ID belongs", async () => {

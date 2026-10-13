@@ -4,7 +4,17 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { Schema } from "effect";
 
-import { ADMIN, cli, cspViolations, expectAudioPast, isPlayingAudio, signIn } from "./support";
+import {
+  ADMIN,
+  cli,
+  container,
+  convexAdmin,
+  convexImport,
+  cspViolations,
+  expectAudioPast,
+  isPlayingAudio,
+  signIn,
+} from "./support";
 
 test.describe.configure({ mode: "serial" });
 
@@ -15,6 +25,28 @@ const decodeDevices = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Arra
 const decodeState = Schema.decodeUnknownSync(Schema.fromJsonString(PlaybackState));
 
 const decodeJob = Schema.decodeUnknownSync(Schema.fromJsonString(Job));
+
+/** A row of `convex data users --format jsonl`. */
+const decodeUserRow = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ _id: Schema.String, email: Schema.optionalKey(Schema.String) }),
+  ),
+);
+
+/** A row of `convex data devices --format jsonl`. */
+const decodeDeviceRow = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ deviceId: Schema.String })),
+);
+
+/** The time `days` days ago, in epoch milliseconds. */
+const daysAgo = (days: number): number => Date.now() - days * 24 * 60 * 60 * 1000;
+
+/** The JSON rows of `convex data` output. */
+const rows = <Row>(decode: (line: string) => Row, output: string): ReadonlyArray<Row> =>
+  output
+    .split("\n")
+    .filter((line) => line.startsWith("{"))
+    .map(decode);
 
 const decodeCreated = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ libraryId: LibraryId, jobId: JobId })),
@@ -89,16 +121,29 @@ test("Ctrl+N and Ctrl+P move through the command menu", async ({ page }) => {
   // With no query, a "Now playing" row can arrive after the first row was selected, and the
   // selection stays put. A query selects its first result once the search settles; wait for that
   // result, or Ctrl+N can land on the list from before the query.
-  await menu.getByRole("combobox").fill("queue");
   const options = menu.getByRole("option");
+  const third = await options.nth(2).boundingBox();
+
+  if (third === null) throw new Error("The command menu has fewer than three rows");
+  const rest = { x: third.x + third.width / 2, y: third.y + third.height / 2 };
+  // The mouse rests over the list. Chromium reports rows moving under a resting pointer as a
+  // move to the same spot, which must not take the row the keyboard picked.
+  await page.mouse.move(rest.x, rest.y);
+
+  const press = async (key: string): Promise<void> => {
+    await page.keyboard.press(key);
+    await page.mouse.move(rest.x, rest.y);
+  };
+
+  await menu.getByRole("combobox").fill("queue");
   await expect(options.first()).toHaveId("command-open-queue");
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
 
-  await page.keyboard.press("Control+n");
+  await press("Control+n");
   await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("Control+n");
+  await press("Control+n");
   await expect(options.nth(2)).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("Control+p");
+  await press("Control+p");
   await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
 });
 
@@ -110,6 +155,14 @@ test("search finds songs from the scanned library", async ({ page }) => {
   const word = album.split(" ")[0] ?? album;
   await page.locator("#search-input").fill(word);
   await expect(page.getByText("Top result")).toBeVisible();
+});
+
+test("search ignores accents and shows the original title", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/search");
+  await page.locator("#search-input").fill("doppelganger");
+  const top = page.locator("section", { has: page.getByRole("heading", { name: "Top result" }) });
+  await expect(top.getByText("Doppelgänger", { exact: true })).toBeVisible();
 });
 
 test("an API key drives the CLI, and the CLI controls the browser's playback", async ({ page }) => {
@@ -579,4 +632,108 @@ test("phone forms keep their buttons on screen", async ({ browser }) => {
   await phone.goto("/settings/account");
   await expect.poll(() => onScreen("Save")).toBe(true);
   await context.close();
+});
+
+test("devices silent for a day leave Play on, and the daily prune deletes old ones", async ({
+  page,
+}) => {
+  test.skip(container() === "", "needs MUSIC_CONTAINER, which scripts/stack-e2e.sh sets");
+
+  const admin = rows(decodeUserRow, convexAdmin(["data", "users", "--format", "jsonl"])).find(
+    (user) => user.email === ADMIN.email,
+  );
+
+  if (admin === undefined) throw new Error(`No user row for ${ADMIN.email}`);
+
+  const closed = { deviceId: "00000000-0000-4000-9000-000000000001", name: "Closed tab" };
+  const ancient = { deviceId: "00000000-0000-4000-9000-000000000002", name: "Ancient laptop" };
+  const speaker = { deviceId: "00000000-0000-4000-9000-000000000003", name: "Paused speaker" };
+
+  // Heartbeats always record the current time, so the long-silent devices are imported.
+  convexImport("devices", [
+    { ...closed, userId: admin._id, kind: "web", lastSeenAt: daysAgo(2) },
+    { ...ancient, userId: admin._id, kind: "web", lastSeenAt: daysAgo(40) },
+    { ...speaker, userId: admin._id, kind: "web", lastSeenAt: daysAgo(40) },
+  ]);
+
+  // A paused session stays on the speaker, which keeps it listed and kept however old it is.
+  cli(apiKey, ["playback", "pause"]);
+  cli(apiKey, ["playback", "transfer", speaker.deviceId]);
+
+  const names = (args: ReadonlyArray<string> = []): ReadonlyArray<string> =>
+    decodeDevices(cli(apiKey, ["devices", "list", ...args, "--json"])).map((device) => device.name);
+
+  expect(names()).toContain(speaker.name);
+  expect(names()).not.toContain(closed.name);
+  expect(names()).not.toContain(ancient.name);
+  // The device asking is listed however long it was silent.
+  expect(names(["--device-id", closed.deviceId])).toContain(closed.name);
+
+  await signIn(page);
+  await page.getByRole("button", { name: /Play on another device/ }).click();
+
+  const list = page.getByRole("menu", { name: "Play on" });
+
+  await expect(list.getByRole("menuitemradio", { name: /Paused speaker/ })).toBeVisible();
+  await expect(list.getByRole("menuitemradio", { name: /Closed tab|Ancient laptop/ })).toHaveCount(
+    0,
+  );
+
+  convexAdmin(["run", "maintenance:pruneStaleDevices", "{}"]);
+
+  const kept = rows(
+    decodeDeviceRow,
+    convexAdmin(["data", "devices", "--format", "jsonl", "--limit", "1000"]),
+  ).map((device) => device.deviceId);
+
+  expect(kept).toContain(speaker.deviceId);
+  expect(kept).toContain(closed.deviceId);
+  expect(kept).not.toContain(ancient.deviceId);
+});
+
+test("data saver plays through HTML audio, starts a first play at once, and seeks", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/settings/playback");
+
+  const dataSaver = page
+    .getByRole("radiogroup", { name: "Streaming quality" })
+    .getByRole("radio", { name: "Data saver" });
+
+  await dataSaver.click();
+  await expect(dataSaver).toHaveAttribute("aria-checked", "true");
+  await openFirstAlbum(page);
+
+  /** Where the playing data saver stream is, in seconds, or -1 while none plays. */
+  const dataSaverAt = (): Promise<number> =>
+    page.evaluate(() =>
+      Math.max(
+        -1,
+        ...[...(window.musicTestMedia ?? [])].flatMap((element) =>
+          !element.paused && element.src.includes("p=aac-128") ? [element.currentTime] : [],
+        ),
+      ),
+    );
+
+  // No song has played at 128 kbps yet, so this one is transcoded as it plays.
+  const tappedAt = Date.now();
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expect.poll(dataSaverAt, { intervals: [50] }).toBeGreaterThan(0.02);
+  const firstAudioMs = Date.now() - tappedAt;
+
+  console.log(`data saver first play: audio after ${firstAudioMs} ms`);
+  expect(firstAudioMs).toBeLessThan(3000);
+
+  const bar = page.getByRole("region", { name: "Player" });
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect.poll(() => isPlayingAudio(page)).toBe(false);
+  cli(apiKey, ["playback", "seek", "--position-ms", "3000"]);
+  await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).positionMs).toBe(3000);
+
+  // Playing on from where it paused would take more than two seconds to get there.
+  const resumedAt = Date.now();
+  await bar.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(dataSaverAt, { intervals: [50] }).toBeGreaterThanOrEqual(3);
+  expect(Date.now() - resumedAt).toBeLessThan(2000);
 });

@@ -16,4 +16,11 @@ crons.interval(
   internal.maintenance.pauseOrphanedSessions,
 );
 
+crons.daily(
+  "prune long-silent devices",
+  { hourUTC: 4, minuteUTC: 0 },
+  internal.maintenance.pruneStaleDevices,
+  {},
+);
+
 export default crons;

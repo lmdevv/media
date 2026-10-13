@@ -395,6 +395,9 @@ importers:
       '@music/config':
         specifier: workspace:*
         version: link:../config
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

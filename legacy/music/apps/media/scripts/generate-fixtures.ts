@@ -5,7 +5,8 @@
  *
  * Two artists and four albums mix FLAC 16/44.1, FLAC 24/96, MP3 320, and AAC in M4A, with full
  * tags, short chords, and embedded cover art, except one album that ships a `cover.jpg` file.
- * A hidden folder and a text file check that scans skip what is not music.
+ * One accented title checks that search ignores accents. A hidden folder and a text file check
+ * that scans skip what is not music.
  */
 import { execFile } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -66,7 +67,7 @@ const PLANS: ReadonlyArray<AlbumPlan> = [
     format: "mp3",
     art: "embedded",
     color: "0x2e86ab",
-    titles: ["Neon", "Overpass", "Last Exit"],
+    titles: ["Neon", "Overpass", "Doppelgänger"],
   },
   {
     artist: "The Sine Waves",
