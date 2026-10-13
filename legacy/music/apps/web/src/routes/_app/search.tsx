@@ -301,8 +301,10 @@ function SongRow({
           aria-label={`Play ${track.title}`}
           onClick={() => void play(tracks, { index })}
           className={cn(
-            "absolute inset-0 items-center justify-center bg-black/30 text-white outline-none group-hover/row:flex focus-visible:flex",
-            current ? "flex bg-black/35" : "hidden",
+            "absolute inset-0 flex items-center justify-center bg-black/30 text-white outline-none",
+            current
+              ? "bg-black/35"
+              : "pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100",
           )}
         >
           {current ? (

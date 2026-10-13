@@ -193,3 +193,22 @@ export const rawArgs = (fields: ReadonlyArray<FieldSpec>, values: FormValues) =>
       return [[spec.name, numeric ? Number(value) : value] as const];
     }),
   );
+
+/**
+ * The required fields that have no value yet: never set, blank text, or an empty selection. The
+ * form names them instead of showing the schema decoder's message.
+ */
+export const missingFields = (
+  fields: ReadonlyArray<FieldSpec>,
+  values: FormValues,
+): ReadonlyArray<FieldSpec> =>
+  fields.filter((spec) => {
+    if (spec.optional) return false;
+    const value = values[spec.name];
+
+    if (value === undefined) return true;
+
+    if (value === true || value === false) return false;
+
+    return Array.isArray(value) ? value.length === 0 : String(value).trim() === "";
+  });

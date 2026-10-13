@@ -80,11 +80,8 @@ function Libraries() {
             <LibraryCard
               key={library.id}
               library={library}
-              job={(jobs ?? []).find(
-                (job) =>
-                  job.libraryId === library.id &&
-                  (job.status === "running" || job.status === "pending"),
-              )}
+              // Jobs come newest first, so this is the folder's latest scan.
+              latest={(jobs ?? []).find((job) => job.libraryId === library.id)}
             />
           ))}
         </div>
@@ -98,6 +95,8 @@ function Libraries() {
   );
 }
 
+const DOT_COLOR = { accent: "bg-accent", success: "bg-success", danger: "bg-danger" } as const;
+
 function Stat({
   value,
   label,
@@ -105,16 +104,13 @@ function Stat({
 }: {
   readonly value: ReactNode;
   readonly label: string;
-  readonly dot?: "accent" | "success";
+  readonly dot?: keyof typeof DOT_COLOR;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="flex items-center gap-1.5 font-mono text-md/base text-text">
         {dot === undefined ? null : (
-          <span
-            aria-hidden
-            className={cn("size-1.5 rounded-full", dot === "accent" ? "bg-accent" : "bg-success")}
-          />
+          <span aria-hidden className={cn("size-1.5 rounded-full", DOT_COLOR[dot])} />
         )}
         {value}
       </span>
@@ -125,11 +121,14 @@ function Stat({
 
 function LibraryCard({
   library,
-  job,
+  latest,
 }: {
   readonly library: Library;
-  readonly job: Job | undefined;
+  /** The folder's most recent scan job, if any. */
+  readonly latest: Job | undefined;
 }) {
+  const job = latest?.status === "running" || latest?.status === "pending" ? latest : undefined;
+  const failed = latest?.status === "failed" ? latest : undefined;
   const scan = useRun("libraries.scan");
   const remove = useRun("libraries.delete");
   const [confirming, setConfirming] = useState(false);
@@ -207,8 +206,14 @@ function LibraryCard({
             label={job?.status === "pending" ? "waiting for the scanner" : "scanning now"}
             dot="accent"
           />
-        ) : (
+        ) : failed === undefined ? (
           <Stat value="Ready" label="up to date with the last scan" dot="success" />
+        ) : (
+          <Stat
+            value="Scan failed"
+            label={failed.error ?? "The last scan didn't finish"}
+            dot="danger"
+          />
         )}
       </div>
       {percent === null ? null : (

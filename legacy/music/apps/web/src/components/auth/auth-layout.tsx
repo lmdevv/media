@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { placeholderAt } from "@/lib/art";
 
-import packageJson from "../../../package.json";
+import { version } from "../../../package.json";
 
 const host = window.location.host.toUpperCase();
 
@@ -27,7 +27,7 @@ export function AuthLayout({
         </div>
         <main className="flex flex-col gap-7">{children}</main>
         <span className="font-mono text-xs/xs tracking-mono text-text-muted">
-          {host} · V{packageJson.version}
+          {host} · V{version}
         </span>
       </div>
       <div

@@ -16,6 +16,18 @@ const byDiscAndNumber = (left: Doc<"tracks">, right: Doc<"tracks">): number =>
   (left.trackNumber ?? 0) - (right.trackNumber ?? 0) ||
   left.title.localeCompare(right.title);
 
+/**
+ * Keeps the rows of one page that the viewer may read. Paginated queries filter by library here,
+ * after `paginate`, rather than in the database query: Convex re-runs a subscribed page from its
+ * recorded cursors, and a query whose filter lists the viewer's libraries changes shape whenever a
+ * library is added or removed, which fails every open page with `InvalidCursor`. A page can come
+ * back short or empty while `done` is false; clients keep loading until `done`.
+ */
+const readable = <Row extends { readonly libraryId: Id<"libraries"> }>(
+  viewer: Viewer,
+  rows: ReadonlyArray<Row>,
+): Array<Row> => rows.filter((row) => canRead(viewer, row.libraryId));
+
 const readableAlbums = (viewer: Viewer, albums: ReadonlyArray<Doc<"albums"> | null>) =>
   albums.filter(
     (album): album is Doc<"albums"> =>
@@ -75,23 +87,17 @@ export const libraryQueries = {
 
   "albums.list": async (ctx, viewer, args) => {
     if (viewer.libraryIds.size === 0) return emptyPage;
-    const libraryIds = [...viewer.libraryIds];
     const present = makePresenter(ctx, viewer);
 
     const page = await ctx.db
       .query("albums")
       .withIndex("by_added")
       .order("desc")
-      .filter((q) =>
-        q.and(
-          q.gt(q.field("trackCount"), 0),
-          q.or(...libraryIds.map((id) => q.eq(q.field("libraryId"), id))),
-        ),
-      )
+      .filter((q) => q.gt(q.field("trackCount"), 0))
       .paginate({ cursor: args.cursor ?? null, numItems: args.limit ?? DEFAULT_PAGE });
 
     return {
-      items: await Promise.all(page.page.map(present.album)),
+      items: await Promise.all(readable(viewer, page.page).map(present.album)),
       cursor: page.continueCursor,
       done: page.isDone,
     };
@@ -124,22 +130,16 @@ export const libraryQueries = {
 
   "artists.list": async (ctx, viewer, args) => {
     if (viewer.libraryIds.size === 0) return emptyPage;
-    const libraryIds = [...viewer.libraryIds];
     const present = makePresenter(ctx, viewer);
 
     const page = await ctx.db
       .query("artists")
       .withIndex("by_key")
-      .filter((q) =>
-        q.and(
-          q.gt(q.field("albumCount"), 0),
-          q.or(...libraryIds.map((id) => q.eq(q.field("libraryId"), id))),
-        ),
-      )
+      .filter((q) => q.gt(q.field("albumCount"), 0))
       .paginate({ cursor: args.cursor ?? null, numItems: args.limit ?? DEFAULT_PAGE });
 
     return {
-      items: await Promise.all(page.page.map(present.artist)),
+      items: await Promise.all(readable(viewer, page.page).map(present.artist)),
       cursor: page.continueCursor,
       done: page.isDone,
     };
@@ -179,17 +179,15 @@ export const libraryQueries = {
 
   "tracks.list": async (ctx, viewer, args) => {
     if (viewer.libraryIds.size === 0) return emptyPage;
-    const libraryIds = [...viewer.libraryIds];
     const present = makePresenter(ctx, viewer);
 
     const page = await ctx.db
       .query("tracks")
       .withIndex("by_title", (q) => q.eq("missing", false))
-      .filter((q) => q.or(...libraryIds.map((id) => q.eq(q.field("libraryId"), id))))
       .paginate({ cursor: args.cursor ?? null, numItems: args.limit ?? DEFAULT_PAGE });
 
     return {
-      items: await present.tracks(page.page),
+      items: await present.tracks(readable(viewer, page.page)),
       cursor: page.continueCursor,
       done: page.isDone,
     };

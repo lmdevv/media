@@ -11,8 +11,12 @@ import type { FormEvent } from "react";
 import { toast } from "sonner";
 
 import { SettingsHeader, TerminalHint } from "@/components/settings/settings-ui";
+import { resolveConvexUrl } from "@/config";
 import { useAction } from "@/lib/action";
 import { formatAgo, formatDate } from "@/lib/format";
+
+/** The URL the CLI signs in to: the Convex URL, not the web app's address. */
+const serverUrl = resolveConvexUrl();
 
 export const Route = createFileRoute("/_app/settings/keys")({ component: KeysSettings });
 
@@ -81,7 +85,7 @@ function KeysSettings() {
           ))}
         </div>
       )}
-      <TerminalHint label="Use a key" command="export MUSIC_API_KEY=mk_… && music whoami" />
+      <TerminalHint label="Use a key" command={`music login --server ${serverUrl} --key mk_…`} />
       <NewKeyDialog open={creating} onOpenChange={setCreating} />
     </div>
   );

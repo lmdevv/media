@@ -6,7 +6,9 @@ import { placeholderGradient } from "@/lib/art";
 
 /**
  * A cover or artist image. Without a URL, or when the image fails, it draws the deterministic
- * placeholder gradient for `seed`, so the same album looks the same everywhere.
+ * placeholder gradient for `seed`, so the same album looks the same everywhere. The image is
+ * decorative (`alt=""`), but `children`, such as a play button on the cover, stay in the
+ * accessibility tree, so the frame itself is not `aria-hidden`.
  */
 export function Artwork({
   url,
@@ -28,7 +30,6 @@ export function Artwork({
 
   return (
     <div
-      aria-hidden
       className={cn(
         "relative shrink-0 overflow-hidden",
         round ? "rounded-full" : "rounded-md",

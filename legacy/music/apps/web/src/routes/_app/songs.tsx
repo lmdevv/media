@@ -7,6 +7,7 @@ import { SearchIcon, ShuffleIcon } from "lucide-react";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 
 import { PageHeader, usePlayTracks } from "@/components/library/cards";
+import { usePageChain, useReportPage } from "@/components/library/paged";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { toastFailure } from "@/lib/action";
 import { formatTotal, plural } from "@/lib/format";
@@ -68,7 +69,7 @@ function SongsPage() {
               placeholder="Filter songs"
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
-              fieldClassName="h-9 grow rounded-sm lg:w-sidebar lg:grow-0"
+              fieldClassName="h-9 min-w-0 shrink grow rounded-sm lg:w-sidebar lg:grow-0"
               start={<SearchIcon aria-hidden />}
             />
             <Button
@@ -113,35 +114,45 @@ function FilteredSongs({ query }: { readonly query: string }) {
 }
 
 function AllSongs() {
-  const [cursors, setCursors] = useState<ReadonlyArray<string | null>>([null]);
+  const chain = usePageChain();
 
   return (
     <div className="flex flex-col">
-      {cursors.map((cursor, index) => (
+      {chain.cursors.map((cursor, index) => (
         <SongPage
           key={cursor ?? "first"}
           cursor={cursor}
-          first={index === 0}
-          last={index === cursors.length - 1}
-          onMore={(next) => setCursors((list) => (list.includes(next) ? list : [...list, next]))}
+          header={index === chain.firstFilled}
+          last={index === chain.cursors.length - 1}
+          onMore={chain.more}
+          onReport={chain.report}
         />
       ))}
+      {chain.empty ? (
+        <p className="font-sans text-md/md text-text-muted">
+          No songs yet. They appear here as your library is scanned.
+        </p>
+      ) : null}
     </div>
   );
 }
 
 function SongPage({
   cursor,
-  first,
+  header,
   last,
   onMore,
+  onReport,
 }: {
   readonly cursor: string | null;
-  readonly first: boolean;
+  /** The first page that shows songs carries the list's column header. */
+  readonly header: boolean;
   readonly last: boolean;
   readonly onMore: (cursor: string) => void;
+  readonly onReport: (cursor: string | null, items: number, done: boolean) => void;
 }) {
   const page = useRead("tracks.list", { cursor, limit: PAGE_SIZE });
+  useReportPage(cursor, page, onReport);
   const sentinel = useRef<HTMLDivElement>(null);
   const more = page !== undefined && !page.done && last ? page.cursor : null;
 
@@ -164,17 +175,12 @@ function SongPage({
 
   if (page === undefined) return <TrackListSkeleton />;
 
-  if (first && page.items.length === 0) {
-    return (
-      <p className="font-sans text-md/md text-text-muted">
-        No songs yet. They appear here as your library is scanned.
-      </p>
-    );
-  }
-
+  // An empty page renders only its sentinel, which stays in view and loads the next one.
   return (
     <>
-      <TrackList tracks={page.items} variant="list" label="Songs" header={first} />
+      {page.items.length === 0 ? null : (
+        <TrackList tracks={page.items} variant="list" label="Songs" header={header} />
+      )}
       {more === null ? null : <div ref={sentinel} aria-hidden className="h-px" />}
     </>
   );

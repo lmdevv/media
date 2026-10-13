@@ -130,6 +130,8 @@ export class PlaybackController {
   #mseFailed = false;
   /** The volume last given to the engine, reapplied when the engine is replaced. */
   #volume = 1;
+  /** A session snapshot paused the engine; that pause is already on the server. */
+  #sessionPaused = false;
   #unsubscribeEngine: (() => void) | null = null;
   #registered: Promise<void> = Promise.resolve();
   #healthFiber: Fiber.Fiber<void, unknown> | null = null;
@@ -462,6 +464,8 @@ export class PlaybackController {
         void this.#engine.play();
       },
       Pause: () => {
+        // An engine that is already silent emits no `paused` to consume the mark.
+        this.#sessionPaused = this.#isAudible();
         this.#engine.pause();
       },
       Seek: ({ positionMs }) => {
@@ -620,6 +624,7 @@ export class PlaybackController {
       }
 
       case "playing": {
+        this.#sessionPaused = false;
         this.#update({ engineStatus: "playing", error: null, autoplayBlocked: false });
         this.#showNowPlaying();
         void this.#report(true);
@@ -627,9 +632,15 @@ export class PlaybackController {
       }
 
       case "paused": {
+        const ordered = this.#sessionPaused;
+        this.#sessionPaused = false;
         this.#update({ engineStatus: "paused" });
         this.#showNowPlaying();
-        void this.#report(false);
+
+        // A pause the session ordered is already on the server. Reporting it back could land
+        // after a Play pressed meanwhile and overwrite it, when the snapshot that ordered the
+        // pause was stale.
+        if (!ordered) void this.#report(false);
         break;
       }
 
@@ -681,6 +692,10 @@ export class PlaybackController {
       return;
     }
 
+    // The engine stopped at the end of the song, and engines don't report that stop as a pause.
+    // Mark it, or the periodic report would tell the server this device is still playing and
+    // restart the last song after `playback.next` stopped at the end of the queue.
+    this.#update({ engineStatus: "paused" });
     void this.capture(this.#client.run("playback.next", {}));
   }
 

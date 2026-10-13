@@ -58,7 +58,7 @@ function AccountSettings() {
               autoComplete="name"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              fieldClassName="max-w-[360px]"
+              fieldClassName="max-w-[360px] min-w-0 shrink"
             />
             <Button type="submit" variant="solid" disabled={!changed} pending={saving}>
               Save

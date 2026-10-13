@@ -166,7 +166,7 @@ function TopSongRow({ track, onPlay }: { readonly track: Track; readonly onPlay:
             type="button"
             aria-label={`Play ${track.title}`}
             onClick={onPlay}
-            className="absolute inset-0 hidden items-center justify-center bg-black/30 text-white outline-none group-hover/row:flex focus-visible:flex"
+            className="absolute inset-0 flex items-center justify-center bg-black/30 text-white outline-none pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
           >
             <PlayIcon className="size-4" fill="currentColor" strokeWidth={0} />
           </button>

@@ -3,7 +3,7 @@ import { commands, isCommandName } from "@music/commands/registry";
 import { Result } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { fieldsOf, rawArgs } from "./fields";
+import { fieldsOf, missingFields, rawArgs } from "./fields";
 
 describe("fieldsOf", () => {
   it("reads literal unions as choices", () => {
@@ -82,5 +82,24 @@ describe("rawArgs", () => {
         argsDecoder("playback.volume")(rawArgs(fieldsOf("playback.volume") ?? [], { volume: "2" })),
       ),
     ).toBe(true);
+  });
+});
+
+describe("missingFields", () => {
+  const fields = fieldsOf("libraries.create") ?? [];
+
+  it("names required fields that are unset or blank, and skips optional ones", () => {
+    expect(missingFields(fields, { name: "  " }).map((field) => field.name)).toEqual([
+      "name",
+      "path",
+    ]);
+    expect(missingFields(fields, { name: "Music", path: "/music" })).toEqual([]);
+  });
+
+  it("counts an empty selection as missing", () => {
+    const ids = fieldsOf("queue.add") ?? [];
+
+    expect(missingFields(ids, { trackIds: [] }).map((field) => field.name)).toEqual(["trackIds"]);
+    expect(missingFields(ids, { trackIds: ["t1"] })).toEqual([]);
   });
 });

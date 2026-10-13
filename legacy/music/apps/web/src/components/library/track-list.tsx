@@ -131,7 +131,9 @@ function TrackRow({
         event.stopPropagation();
         onPlay();
       }}
-      className="absolute inset-0 hidden items-center justify-center rounded-[4px] outline-none group-hover/row:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring/50"
+      // Transparent until hovered or focused, never display:none, so keyboards and screen readers
+      // reach it.
+      className="absolute inset-0 flex items-center justify-center rounded-[4px] outline-none pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       <PlayIcon className="size-3.5 text-text" fill="currentColor" strokeWidth={0} />
     </button>
@@ -166,7 +168,7 @@ function TrackRow({
           ) : (
             <span
               className={cn(
-                "font-sans text-md/base text-text-muted lg:font-mono lg:text-sm/xs lg:group-hover/row:invisible",
+                "font-sans text-md/base text-text-muted lg:font-mono lg:text-sm/xs lg:group-hover/row:invisible lg:group-has-[:focus-visible]/row:invisible",
                 current && "text-accent lg:text-text-muted",
               )}
             >

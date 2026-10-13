@@ -62,8 +62,10 @@ import { formatCount, formatDuration, formatTotal, plural } from "@/lib/format";
 
 import { ArgsForm } from "./args-form";
 import type { MenuContext } from "./args-form";
-import { fieldsOf, rawArgs } from "./fields";
+import { fieldsOf, missingFields, rawArgs } from "./fields";
 import type { FieldSpec, FormValues } from "./fields";
+
+const listFormat = new Intl.ListFormat("en", { type: "conjunction" });
 
 /** Commands that only players send; people never run them by hand. */
 const INTERNAL: ReadonlySet<CommandName> = new Set([
@@ -264,6 +266,7 @@ const useDefaults = (): ((name: MutationName, fields: ReadonlyArray<FieldSpec>) 
   const player = usePlayer();
   const position = usePlayerPosition();
   const me = useRead("account.me", {});
+  const libraries = useRead("libraries.list", {});
 
   return (name, fields) => {
     const values: Record<string, FormValues[string]> = {};
@@ -284,6 +287,10 @@ const useDefaults = (): ((name: MutationName, fields: ReadonlyArray<FieldSpec>) 
       Match.when("playback.seek", () => ({ positionMs: String(Math.round(position)) })),
       Match.when("playback.jump", () => ({ index: String(player.index) })),
       Match.when("account.rename", () => ({ name: me?.name ?? undefined })),
+      // With one folder there is nothing to choose; removing one is left to an explicit pick.
+      Match.when("libraries.scan", () =>
+        libraries?.length === 1 && libraries[0] !== undefined ? { libraryId: libraries[0].id } : {},
+      ),
       Match.whenOr("queue.add", "playback.play", "playlists.add", () =>
         track === null ? {} : { trackIds: [track.id] },
       ),
@@ -1339,6 +1346,15 @@ function CommandPreview({
   const command = commands[name];
 
   const run = async () => {
+    const missing = missingFields(fields, values);
+
+    if (missing.length > 0) {
+      const names = listFormat.format(missing.map((field) => field.label));
+      setError(`${names} ${missing.length === 1 ? "is" : "are"} required.`);
+
+      return;
+    }
+
     const decoded = argsDecoder(name)(rawArgs(fields, values));
 
     if (Result.isFailure(decoded)) {
@@ -1503,7 +1519,8 @@ function OutcomePreview({
 }
 
 const jobMeta = (job: Job | undefined): string => {
-  if (job?.status === "done") return "Finished.";
+  // The scanner's summary, such as "28 files, 0 updated, 0 missing".
+  if (job?.status === "done") return job.message ?? "Finished.";
 
   if (job?.status === "failed") return job.error ?? "The job failed.";
 
@@ -1538,7 +1555,7 @@ function JobOutcome({
             {percent}%
           </span>
           <span className="font-mono text-xs/xs text-text-muted">
-            {job === undefined || job.total === null
+            {job === undefined || job.total === null || (job.status === "done" && job.total === 0)
               ? job?.status === "pending"
                 ? "WAITING"
                 : ""

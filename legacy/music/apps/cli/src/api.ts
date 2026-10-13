@@ -85,6 +85,19 @@ const classify = (server: string, cause: unknown): AuthError | CommandFailed | S
 
   if (Option.isSome(http)) return new ServerError({ server, message: http.value.message, cause });
 
+  // Something answered with an empty error body. Without /convex that is usually the web app's
+  // address, whose proxy refuses Convex API calls; with it, the proxy is up but Convex behind it
+  // is not (starting, or down), and the URL is right.
+  if (cause.message.trim() === "") {
+    return new ServerError({
+      server,
+      message: /\/convex\/?$/u.test(server)
+        ? `${server} answered with an empty error: the [music] server may still be starting or be down. Try again shortly`
+        : `${server} answered, but not as a [music] server. Use its Convex URL, which ends in /convex on the container install`,
+      cause,
+    });
+  }
+
   return new ServerError({
     server,
     message: `Could not reach ${server}: ${cause.message}`,

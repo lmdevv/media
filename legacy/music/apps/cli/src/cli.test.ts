@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { join } from "node:path";
 
 import { commands } from "@music/commands/registry";
@@ -39,6 +40,8 @@ const ErrorOutput = Schema.fromJsonString(
 );
 
 const decodeError = Schema.decodeSync(ErrorOutput);
+
+const decodeAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }));
 
 describe("music (in-process)", () => {
   let home = "";
@@ -111,6 +114,51 @@ describe("music (in-process)", () => {
     expect((await run("login", "--server", "music.example.com", "--key", "k")).stderr).toContain(
       "--server must be an http(s) URL",
     );
+  });
+
+  it("explains a server URL that is not the Convex URL", async () => {
+    // The web app's address: its proxy answers Convex API calls with an empty 405.
+    const server = createServer((_request, response) => {
+      response.writeHead(405).end();
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const { port } = decodeAddress(server.address());
+    const url = `http://127.0.0.1:${port}`;
+
+    try {
+      const result = await run("login", "--server", url, "--key", "mk_test");
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(
+        `${url} answered, but not as a [music] server. Use its Convex URL, which ends in /convex`,
+      );
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("doesn't blame a /convex URL when the server behind it answers with an empty error", async () => {
+    // Caddy answers 502 with an empty body while Convex starts or after it crashed.
+    const server = createServer((_request, response) => {
+      response.writeHead(502).end();
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const { port } = decodeAddress(server.address());
+    const url = `http://127.0.0.1:${port}/convex`;
+
+    try {
+      const result = await run("login", "--server", url, "--key", "mk_test");
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("may still be starting or be down");
+      expect(result.stderr).not.toContain("Use its Convex URL");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   it("lists every registry command with its argument schema", async () => {
