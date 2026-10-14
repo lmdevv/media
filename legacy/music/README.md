@@ -42,16 +42,19 @@ docker run -d --name music -p 8080:8080 \
   -v music-data:/data \
   -v /path/to/your/music:/music:ro \
   -e PUBLIC_URL=http://localhost:8080 \
-  ghcr.io/lmdevv/music:main
+  ghcr.io/lmdevv/music:latest
 ```
 
 Open <http://localhost:8080>, create the admin account, and add `/music` as a library. The first
 scan starts at once; albums appear while it runs.
 
+- **Homelab guide:** [`docs/homelab.md`](docs/homelab.md) covers Compose, reverse proxies
+  (Caddy, Traefik, Nginx Proxy Manager), Tailscale, NixOS, upgrades, and troubleshooting.
 - **Compose:** [`deploy/docker/compose.yaml`](deploy/docker/compose.yaml).
 - **NixOS:** import the flake's `nixosModules.default` and set
   `services.music = { enable = true; musicDirs = [ "/srv/music" ]; };`. It listens on
   localhost unless you set `openFirewall = true` (container ports bypass the NixOS firewall).
+  The CLI is `nix run github:lmdevv/music#cli`.
 - **Remote access:** put it behind your own reverse proxy or Tailscale and set `PUBLIC_URL`.
 - **Images:** `linux/amd64` and `linux/arm64`.
 - **Data:** everything lives in `/data`: the database, artwork, the transcode cache, generated

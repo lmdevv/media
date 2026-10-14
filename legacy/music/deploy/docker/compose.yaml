@@ -1,21 +1,79 @@
-# Run [music] with Docker Compose:
-#   MUSIC_DIR=/path/to/your/music docker compose -f deploy/docker/compose.yaml up -d
-# Then open http://localhost:8080, create the admin account, and add /music as a library.
+# [music] with Docker Compose. Copy this file to a folder of its own, then:
+#
+#   MUSIC_DIR=/path/to/your/music docker compose up -d
+#
+# Open http://localhost:8080 (or your PUBLIC_URL), create the admin account, and add /music as a
+# library. Everything the server stores lives in the `music-data` volume; your music is mounted
+# read-only and never written to. Upgrading, backups, and restores: docs/operations.md and
+# docs/homelab.md in the repository.
+name: music
 services:
   music:
-    image: ghcr.io/lmdevv/music:main
+    # Pin a release and change the tag to upgrade; every new build backs up the database before
+    # it changes anything. `latest` is the newest release, `main` the newest commit.
+    image: ghcr.io/lmdevv/music:${MUSIC_VERSION:-latest}
+    container_name: music
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      # Reachable from your network on port 8080. Behind a reverse proxy on this machine, use
+      # "127.0.0.1:8080:8080" so only the proxy can connect (see the end of this file).
+      - "${MUSIC_PORT:-8080}:8080"
     environment:
-      # The URL people use to reach the server. Set it when using a domain or reverse proxy.
-      PUBLIC_URL: http://localhost:8080
-      # User and group the media service runs as. Your music must be readable by them.
-      PUID: "1000"
-      PGID: "1000"
+      # The URL people use to reach the server, with https:// when a proxy terminates TLS. Sign-in
+      # tokens are issued for this URL, so it must match what the browser shows.
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      # The user and group that read your music (`id -u` and `id -g` of its owner). Your files
+      # must be readable by them; 644 files in 755 folders are. Not 0, 901, or 902.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      # Time zone for the web server's log timestamps, for example Europe/Berlin. Convex and the
+      # media service always log in UTC.
+      TZ: ${TZ:-UTC}
+      # Pre-upgrade backups to keep in /data/backups (0 keeps all).
+      BACKUP_KEEP: ${BACKUP_KEEP:-5}
     volumes:
       - music-data:/data
       - ${MUSIC_DIR:-./music}:/music:ro
+    # The image's own health check, spelled out: /healthz answers 200 only while the web server,
+    # the media service, and the database all work. An upgrade backs up and migrates before it
+    # turns healthy, which can take minutes on a large library. These are the image's values
+    # except its 5-second `start_interval`, which needs Docker Engine 25 or newer (Debian 12 ships
+    # 20.10), so here `healthy` shows up within 30 seconds of the server being up. Delete this
+    # block to use the image's own check, which follows future images.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10m
+    # Time to stop cleanly before Docker kills it; it normally takes a few seconds.
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
 
 volumes:
   music-data:
+# Reverse proxy. Keep the port bound to 127.0.0.1 (or drop `ports` when the proxy shares a
+# Docker network with this service), set PUBLIC_URL to the public https:// URL, and proxy
+# everything, WebSockets included, to port 8080. Streams can sit idle while a listener pauses, so
+# don't set a short read timeout on /media/.
+#
+# Caddy (Caddyfile on the host):
+#
+#   music.example.com {
+#     reverse_proxy 127.0.0.1:8080
+#   }
+#
+# Traefik (labels on the `music` service, with Traefik on the same Docker network):
+#
+#   labels:
+#     - traefik.enable=true
+#     - traefik.http.routers.music.rule=Host(`music.example.com`)
+#     - traefik.http.routers.music.entrypoints=websecure
+#     - traefik.http.routers.music.tls.certresolver=letsencrypt
+#     - traefik.http.services.music.loadbalancer.server.port=8080
+#
+# Tailscale: `tailscale serve --bg 8080` on the host, then PUBLIC_URL=https://<host>.<tailnet>.ts.net.

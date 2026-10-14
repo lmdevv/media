@@ -1,5 +1,6 @@
 {
   "name": "music",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "workspaces": [

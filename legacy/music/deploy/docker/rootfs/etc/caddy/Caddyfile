@@ -1,6 +1,13 @@
 {
 	admin off
 	auto_https off
+	# One readable line per event in `docker logs`, like the other services, rather than JSON.
+	log {
+		format console {
+			level_format upper
+			time_local
+		}
+	}
 	# Caddy aborts a response whose write stalls for `write_idle` (1m by default). Media elements
 	# stop reading a stream once they have buffered far enough ahead, and while paused, so that
 	# default cut songs off mid-way. The server-wide timeout is applied after the per-route

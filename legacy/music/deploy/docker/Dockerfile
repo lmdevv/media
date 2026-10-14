@@ -74,8 +74,9 @@ ARG S6_OVERLAY_VERSION=3.2.1.0
 ARG S6_OVERLAY_NOARCH_SHA256=42e038a9a00fc0fef70bf0bc42f625a9c14f8ecdfe77d4ad93281edf717e10c5
 ARG S6_OVERLAY_X86_64_SHA256=8bcbc2cada58426f976b159dcc4e06cbb1454d5f39252b3bb0c778ccf71c9435
 ARG S6_OVERLAY_AARCH64_SHA256=c8fd6b1f0380d399422fc986a1e6799f6a287e2cfa24813ad0b6a4fb4fa755cc
+# tzdata so that TZ sets the local time in logs.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg ca-certificates xz-utils curl \
+ && apt-get install -y --no-install-recommends ffmpeg ca-certificates xz-utils curl tzdata \
  && rm -rf /var/lib/apt/lists/*
 # Every service runs as its own unprivileged user. The media service, which parses every file in
 # the library with ffmpeg, runs as `music`; init moves it to PUID/PGID at boot. The base image's
@@ -123,7 +124,12 @@ ENV PUBLIC_URL=http://localhost:8080 \
     BACKUP_KEEP=5 \
     S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0 \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
-    S6_VERBOSITY=1
+    S6_VERBOSITY=1 \
+    S6_SERVICES_GRACETIME=6000 \
+    S6_KILL_GRACETIME=2000
+# On `docker stop`, s6 stops the media service, then Convex (with SIGINT, which shuts its
+# database down cleanly) and Caddy, waiting up to 6 seconds for them, then 2 more before killing
+# what is left: 8 seconds in all, inside Docker's default 10-second stop timeout.
 
 VOLUME ["/data"]
 EXPOSE 8080

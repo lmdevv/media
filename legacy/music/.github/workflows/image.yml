@@ -1,8 +1,10 @@
 name: Image
 
-# Builds the image for both platforms on pull requests that can change it, so an arm64-only
-# break shows up before merge. Nothing is pushed here: CI's `publish` job pushes the image once
-# every check has passed on main or a release tag.
+# On pull requests that can change the image: builds it for amd64, and builds and boots it for
+# arm64 natively on an arm64 runner, so an arm64-only break shows up before merge. Each platform
+# is built once, with its own cache scope (`amd64`, shared with CI's stack-e2e, and `arm64`).
+# Nothing is pushed here: CI's `publish` job builds both platforms and pushes once every check
+# has passed on main or a release tag.
 on:
   pull_request:
     paths:
@@ -26,15 +28,42 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/docker/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: false
-          cache-from: |
-            type=gha,scope=amd64
-            type=gha,scope=multiarch
-          cache-to: type=gha,scope=multiarch,mode=max
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,scope=amd64,mode=max
+
+  # Building is not running: boot the arm64 image on an arm64 runner until it reports healthy.
+  # Under QEMU on x86 the first start's function deploy alone outlasts 15 minutes.
+  arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/arm64
+          load: true
+          tags: music:arm64
+          cache-from: type=gha,scope=arm64
+          cache-to: type=gha,scope=arm64,mode=max
+      - name: Boot the arm64 image
+        run: |
+          docker run -d --name music-arm64 -p 127.0.0.1:8090:8080 -e TZ=Europe/Berlin music:arm64
+          for _ in $(seq 1 120); do
+            curl -fsS http://127.0.0.1:8090/healthz && break
+            sleep 5
+          done
+          curl -fsS http://127.0.0.1:8090/healthz || { docker logs music-arm64 | tail -80; exit 1; }
+          test "$(docker exec music-arm64 uname -m)" = aarch64
+          curl -fsS http://127.0.0.1:8090/ | grep -q '<title>\[music\]</title>'
+          docker stop music-arm64

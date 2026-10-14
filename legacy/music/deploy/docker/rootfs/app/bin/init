@@ -21,6 +21,22 @@ find "$secrets" "$backups" -type f -exec chmod 600 {} +
 
 log() { echo "[init] $*"; }
 
+# Refuse to run older code over data a newer version has already migrated: its functions and
+# schema would be deployed over rows they don't understand. /data/version is the version that
+# last started here (or, after /app/bin/restore, the version that wrote the restored backup).
+# Nothing has been exported, deployed, or changed when this stops the start.
+newer_than() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]; }
+if [ -s "$data/version" ]; then
+  data_version="$(head -n 1 "$data/version")"
+  if newer_than "$data_version" "$version"; then
+    log "refusing to start: the data in $data was last used by version $data_version, and this image is the older $version."
+    log "Run version $data_version or newer instead. To go back to $version, restore the backup taken before the upgrade, while the newer image runs:"
+    log "  docker exec <container> /app/bin/restore /data/backups/pre-$data_version-<build>-from-$version-<time>.zip"
+    log "then start $version again. See docs/operations.md#restore."
+    exit 1
+  fi
+fi
+
 keep="${BACKUP_KEEP:-5}"
 if ! [[ "$keep" =~ ^[0-9]+$ ]]; then
   log "BACKUP_KEEP must be a whole number (0 keeps every backup); got BACKUP_KEEP=$keep"
@@ -90,15 +106,20 @@ fi
 
 # An upgrade whose boot fails after the export retries on the next boot (and a restart policy may
 # retry it many times). The first export is the one taken before anything changed, so the retries
-# reuse it instead of exporting again and pruning it away, as long as it is still there.
+# reuse it instead of exporting again and pruning it away, as long as it is still there and no
+# older image has run since (it would rewrite /data/version, and the data would have moved on).
 pending="$backups/.pending"
 upgrade="$previous -> $build"
 
 if [ -n "$previous" ] && [ "$previous" != "$build" ] && [ -s "$pending" ] \
-  && [ "$(head -n 1 "$pending")" = "$upgrade" ] && [ -s "$(tail -n 1 "$pending")" ]; then
+  && [ "$(head -n 1 "$pending")" = "$upgrade" ] && [ -s "$(tail -n 1 "$pending")" ] \
+  && ! [ "$data/version" -nt "$pending" ]; then
   log "upgrading from $previous to $version ($build); already backed up to $(tail -n 1 "$pending")"
 elif [ -n "$previous" ] && [ "$previous" != "$build" ]; then
-  backup="$backups/pre-$version-$build-$(date -u +%Y%m%d%H%M%S).zip"
+  # The name records the version whose data this is (`from-`), which /app/bin/restore writes
+  # back to /data/version so that version may start on the restored data.
+  from="$(head -n 1 "$data/version" 2>/dev/null || true)"
+  backup="$backups/pre-$version-$build-from-${from:-unknown}-$(date -u +%Y%m%d%H%M%S).zip"
   log "upgrading from $previous to $version ($build); exporting to $backup"
   # A failed export stops the boot before anything is deployed.
   convex export --path "$backup"

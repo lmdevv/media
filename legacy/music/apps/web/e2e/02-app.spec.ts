@@ -78,7 +78,8 @@ test("create a playlist and add a song to it", async ({ page }) => {
   await page.getByRole("button", { name: "More actions for Glory Box" }).last().click();
   await page.getByRole("menuitem", { name: "Add to playlist" }).hover();
   await page.getByRole("menuitem", { name }).click();
-  await expect(page.getByText(`Added to ${name}`)).toBeVisible();
+  // The toast from the first add can still be on screen with the same text, so take the newest.
+  await expect(page.getByText(`Added to ${name}`).last()).toBeVisible();
 
   await page.getByRole("navigation", { name: "Library" }).getByRole("link", { name }).click();
   await expect(page.getByRole("table", { name: `Songs in ${name}` })).toContainText("Glory Box");

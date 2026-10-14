@@ -21,6 +21,12 @@ install -d -m 700 -o convex -g convex /run/convex
 install -m 400 -o convex -g convex "$data/secrets/instance_secret" /run/convex/instance_secret
 public="${PUBLIC_URL%/}"
 export TMPDIR="$data/convex/tmp"
+# Plain text logs: `docker logs` is not a terminal. The backend stops on SIGINT, which drains
+# requests and shuts the database down cleanly (SIGTERM kills it at once), so `down-signal` here
+# makes s6 stop it that way.
+export NO_COLOR=1
+# Convex refuses to start with TZ set ("Convex requires UTC"); TZ only localizes the other logs.
+unset TZ
 # The backend takes its secret only as an argument, and every process can read every other's
 # arguments in /proc/<pid>/cmdline. The argv-secret shim swaps the placeholder for the file's
 # contents inside the process, so the command line only ever shows the placeholder.

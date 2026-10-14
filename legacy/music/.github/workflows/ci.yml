@@ -6,10 +6,10 @@ on:
     tags: ["v*"]
   pull_request:
 
-# A newer push to a pull request cancels its older run. Runs on main and on tags finish, since
-# they publish the image; a newer one waits for them.
+# A newer push to a pull request cancels its older run. Every push to main or a tag gets a run of
+# its own (one group per commit), so every commit is checked.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -63,6 +63,10 @@ jobs:
       - run: scripts/stack-e2e.sh
         env:
           IMAGE: music:stack-e2e
+      # The released 0.1.0 image, upgraded in place to this image, then rolled back.
+      - run: scripts/upgrade-e2e.sh
+        env:
+          IMAGE: music:stack-e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -92,7 +96,8 @@ jobs:
           name: backend-e2e-results
           path: apps/web/test-results
 
-  # Evaluates the NixOS module, including its musicDirs assertions, for both Linux systems.
+  # Evaluates the flake for every system, including the NixOS module's checks, and builds the
+  # module check and the CLI package (a stale pnpm dependency hash fails here).
   nix:
     runs-on: ubuntu-latest
     steps:
@@ -100,14 +105,41 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@v31
-      - run: nix flake check --all-systems
+      - run: nix flake check --all-systems --no-build
+      - run: nix build -L .#checks.x86_64-linux.module .#checks.x86_64-linux.cli
+      - run: nix run .#cli -- --version
 
-  # Publishes the image only after every check above passed for this commit: `main` and the
-  # commit's sha from main, and the version, major.minor, and `latest` from a release tag.
+  # Boots the NixOS module in a VM with a real image (nix/vm-test.nix). The runners have KVM;
+  # the udev rule lets the nix build user open it.
+  nixos-vm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: system-features = nixos-test benchmark big-parallel kvm
+      - run: nix build -L .#checks.x86_64-linux.vm
+
+  # Publishes the image only after every check above passed for this commit. The immutable tags
+  # (`sha-<commit>`, and the version from a release tag) are always pushed. The moving ones only
+  # move forwards: `main` if this commit is still the branch's head, `latest` and `major.minor` if
+  # this release is the highest version (in its minor series, for `major.minor`).
   publish:
-    needs: [check, stack-e2e, backend-e2e, nix]
+    needs: [check, stack-e2e, backend-e2e, nix, nixos-vm]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # One publish at a time per ref; the head and version checks below keep the moving tags from
+    # going backwards when runs for different commits or tags finish out of order.
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -129,10 +161,7 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
             type=sha
       - uses: docker/build-push-action@v6
         with:
@@ -144,5 +173,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
             type=gha,scope=amd64
+            type=gha,scope=arm64
             type=gha,scope=multiarch
           cache-to: type=gha,scope=multiarch,mode=max
+      # Checked after the build, right before tagging, against the repository as it is now.
+      - name: Move the moving tags forward only
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          REMOTE: https://github.com/${{ github.repository }}
+        run: scripts/publish-moving-tags.sh

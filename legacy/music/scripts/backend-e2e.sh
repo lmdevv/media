@@ -121,7 +121,12 @@ done
 failed=()
 for suite in "${suites[@]}"; do
   echo "::group::$suite"
-  fresh_backend "$suite" "$((base + ports[$suite]))"
+  # A backend that fails to start fails its suite, not the run.
+  if ! fresh_backend "$suite" "$((base + ports[$suite]))"; then
+    failed+=("$suite")
+    echo "::endgroup::"
+    continue
+  fi
   set +e
   (set -e && run_suite "$suite")
   status=$?

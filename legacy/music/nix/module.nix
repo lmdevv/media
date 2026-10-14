@@ -1,4 +1,6 @@
-# NixOS module for [music]. Runs the all-in-one image with the host's container runtime.
+# NixOS module for [music]. Runs the all-in-one image with the host's container runtime
+# (Podman or Docker). By default it runs the release this flake revision was cut for, so updating
+# the flake input is how you upgrade; every new build backs up the database before it changes it.
 #
 #   services.music = {
 #     enable = true;
@@ -17,6 +19,16 @@
 }:
 let
   cfg = config.services.music;
+
+  # The release version, which is also the image tag CI publishes for it (without a "v").
+  inherit (lib.importJSON ../package.json) version;
+
+  defaultImage = "ghcr.io/lmdevv/music:${version}";
+
+  serviceName = config.virtualisation.oci-containers.containers.music.serviceName;
+
+  # The runtime in use: `backend`, or the host's oci-containers backend when that is unset.
+  runtime = config.virtualisation.oci-containers.backend;
 
   # { name, path } for each folder: the list form names a mount after the folder, which is how
   # every install before the attrset form named them, so existing libraries keep their paths.
@@ -65,8 +77,48 @@ in
 
     image = lib.mkOption {
       type = lib.types.str;
-      default = "ghcr.io/lmdevv/music:main";
-      description = "Container image to run.";
+      default = defaultImage;
+      defaultText = lib.literalExpression ''"ghcr.io/lmdevv/music:<version in this flake's package.json>"'';
+      example = "ghcr.io/lmdevv/music:latest";
+      description = ''
+        Container image to run. The default is the release this flake revision belongs to, so
+        updating the flake input upgrades it. A moving tag (`latest`, `main`) only updates with
+        `pull` or `autoUpdate`.
+      '';
+    };
+
+    imageFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = null;
+      example = lib.literalExpression ''
+        pkgs.dockerTools.pullImage {
+          imageName = "ghcr.io/lmdevv/music";
+          imageDigest = "sha256:...";
+          hash = "sha256-...";
+          finalImageName = "ghcr.io/lmdevv/music";
+          finalImageTag = "0.2.0";
+        }
+      '';
+      description = ''
+        An image archive in the Nix store to load instead of pulling, for hosts without registry
+        access or to pin by digest. Its name and tag must equal `image`.
+      '';
+    };
+
+    backend = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.enum [
+          "podman"
+          "docker"
+        ]
+      );
+      default = null;
+      example = "docker";
+      description = ''
+        Container runtime. Unset, the host's `virtualisation.oci-containers.backend` is used
+        (Podman on current NixOS); set, it sets that option, which every oci-container on the host
+        shares. The service is `podman-music` or `docker-music`.
+      '';
     };
 
     pull = lib.mkOption {
@@ -82,6 +134,33 @@ in
         pulls it once and then keeps running that copy, so a mutable tag such as `main` or
         `latest` never updates on its own. Pin a version tag and change it to upgrade, or set
         `newer` (or `always`) to fetch the tag's current image on every service start.
+      '';
+    };
+
+    autoUpdate = {
+      enable = lib.mkEnableOption ''
+        a timer that pulls `image` and restarts the service when the registry has a newer one,
+        for moving tags such as `latest`. The restart backs up the database first
+      '';
+
+      dates = lib.mkOption {
+        type = lib.types.str;
+        default = "daily";
+        example = "Sun 04:00";
+        description = "When to check, as a systemd calendar expression (systemd.time(7)).";
+      };
+    };
+
+    extraEnvironment = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      example = {
+        TZ = "Europe/Berlin";
+        BACKUP_KEEP = "10";
+      };
+      description = ''
+        More environment variables for the container, such as `TZ` (log timestamps) or
+        `BACKUP_KEEP` (pre-upgrade backups to keep, default 5). The module's own settings win.
       '';
     };
 
@@ -177,20 +256,27 @@ in
         } must be absolute paths without a colon.";
       }
       {
+        assertion = !(cfg.autoUpdate.enable && cfg.imageFile != null);
+        message = "services.music.autoUpdate pulls from the registry, so it cannot be used with imageFile.";
+      }
+      {
         # The container's init refuses these at start, which would crash-loop the service.
         assertion = !(builtins.elem cfg.uid reservedIds || builtins.elem cfg.gid reservedIds);
         message = "services.music.uid and gid cannot be 901 or 902 (got uid ${toString cfg.uid}, gid ${toString cfg.gid}): the container's Convex and Caddy users have those ids, and sharing one would let the media service read the database.";
       }
     ];
 
+    # A host-wide setting: a different explicit value elsewhere is reported as a conflict.
+    virtualisation.oci-containers.backend = lib.mkIf (cfg.backend != null) cfg.backend;
+
     # Traversable, not listable: the media user reaches dataDir/media; everything else in
     # dataDir is root's alone.
     systemd.tmpfiles.rules = [ "d ${cfg.dataDir} 0711 root root -" ];
 
     virtualisation.oci-containers.containers.music = {
-      inherit (cfg) image pull;
+      inherit (cfg) image imageFile pull;
       ports = [ "${cfg.listenAddress}:${toString cfg.port}:8080" ];
-      environment = {
+      environment = cfg.extraEnvironment // {
         PUBLIC_URL = cfg.publicUrl;
         PUID = toString cfg.uid;
         PGID = toString cfg.gid;
@@ -202,5 +288,33 @@ in
     };
 
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
+
+    # Pulls the tag and restarts the container only when that brought a different image, so a
+    # check without an update costs no downtime.
+    systemd.services.music-update = lib.mkIf cfg.autoUpdate.enable {
+      description = "Update the [music] container image";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      path = [ config.virtualisation.${runtime}.package ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        before="$(${runtime} image inspect --format '{{.Id}}' ${lib.escapeShellArg cfg.image} 2>/dev/null || true)"
+        ${runtime} pull ${lib.escapeShellArg cfg.image}
+        after="$(${runtime} image inspect --format '{{.Id}}' ${lib.escapeShellArg cfg.image})"
+        if [ "$before" != "$after" ]; then
+          echo "new image $after; restarting ${serviceName} if it is running"
+          systemctl try-restart ${serviceName}.service
+        fi
+      '';
+    };
+
+    systemd.timers.music-update = lib.mkIf cfg.autoUpdate.enable {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = cfg.autoUpdate.dates;
+        Persistent = true;
+        RandomizedDelaySec = "1h";
+      };
+    };
   };
 }
