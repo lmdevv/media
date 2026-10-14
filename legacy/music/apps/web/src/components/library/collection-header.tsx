@@ -102,7 +102,7 @@ export function CollectionHeader({
               glassClassName,
             )}
           >
-            <ChevronLeftIcon className="size-[22px]" strokeWidth={2.2} />
+            <ChevronLeftIcon className="size-5.5" strokeWidth={2.2} />
           </button>
           <div className="flex gap-2.5">
             <button
@@ -121,16 +121,16 @@ export function CollectionHeader({
               tracks={tracks}
               label={title}
               extra={menuExtra}
-              className={cn("size-11 border-[0.5px]", glassClassName)}
+              className={cn("size-11 border-hairline", glassClassName)}
             />
           </div>
         </div>
         <div className="mt-3.5">{phoneCover}</div>
         <div className="flex flex-col items-center gap-0.5 px-6 pt-5 text-center">
-          <h1 className="font-sans text-[22px] leading-lg font-bold tracking-[-0.01em] text-text">
+          <h1 className="font-sans text-phone-title leading-lg font-bold tracking-snug text-text">
             {title}
           </h1>
-          <div className="font-sans text-[22px] leading-lg text-accent">
+          <div className="font-sans text-phone-title leading-lg text-accent">
             {phoneSubtitle ?? subtitle}
           </div>
           {phoneMeta === undefined ? null : (
@@ -139,7 +139,7 @@ export function CollectionHeader({
             </span>
           )}
         </div>
-        <div className="flex gap-3.5 self-stretch pt-[18px]">
+        <div className="flex gap-3.5 self-stretch pt-4.5">
           <button
             type="button"
             disabled={empty}
@@ -155,7 +155,7 @@ export function CollectionHeader({
             onClick={() => void start(true)}
             className="flex h-12 grow basis-0 items-center justify-center gap-2 rounded-3xl bg-surface font-sans text-md/base font-semibold text-accent disabled:opacity-(--opacity-disabled)"
           >
-            <ShuffleIcon className="size-[18px]" strokeWidth={2.2} />
+            <ShuffleIcon className="size-4.5" strokeWidth={2.2} />
             Shuffle
           </button>
         </div>

@@ -44,7 +44,7 @@ export function AdminOnly() {
       <span className="font-sans text-md/base font-semibold text-text">
         Only admins can see this
       </span>
-      <span className="max-w-[520px] font-sans text-base/base text-text-muted">
+      <span className="max-w-130 font-sans text-base/base text-text-muted">
         Ask an admin on this server if you need a change here.
       </span>
     </div>

@@ -177,18 +177,18 @@ function ScanBanner({ job }: { readonly job: Job }) {
           </span>
         )}
       </div>
-      <ProgressBar percent={percent} className="h-[3px]" label={`Scanning ${path}`} />
+      <ProgressBar percent={percent} className="h-0.75" label={`Scanning ${path}`} />
     </div>
   );
 }
 
 function EmptyLibrary({ admin }: { readonly admin: boolean }) {
   return (
-    <div className="flex min-h-full flex-col items-center justify-center gap-8 px-6 py-12 text-center lg:min-h-[calc(100dvh-16px)]">
+    <div className="flex min-h-full flex-col items-center justify-center gap-8 px-6 py-12 text-center lg:min-h-dvh-inset-sm">
       <div className="flex size-24 shrink-0 items-center justify-center rounded-full bg-surface">
         <DiscIcon aria-hidden className="size-10 text-text-muted" strokeWidth={1.25} />
       </div>
-      <div className="flex max-w-[480px] flex-col items-center gap-2.5">
+      <div className="flex max-w-120 flex-col items-center gap-2.5">
         <h1 className="font-sans text-xl/xl font-heavy tracking-tight text-text">
           Nothing to play yet
         </h1>
@@ -225,7 +225,7 @@ function EmptyLibrary({ admin }: { readonly admin: boolean }) {
 function HomeSkeleton() {
   return (
     <div className="flex flex-col gap-row px-5 pt-row lg:px-12">
-      <div className="h-[70px]" />
+      <div className="h-17.5" />
       <AlbumRowSkeleton title={false} />
       <AlbumRowSkeleton />
     </div>
@@ -246,15 +246,15 @@ function PhoneHome({
   readonly scan: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-[30px] pt-[max(16px,env(safe-area-inset-top))] lg:hidden">
+    <div className="flex flex-col gap-7.5 pt-safe-top lg:hidden">
       <div className="flex items-end justify-between px-5">
-        <h1 className="font-sans text-[34px] leading-[41px] font-heavy tracking-[-0.02em] text-text">
+        <h1 className="font-sans text-phone-large-title leading-10.25 font-heavy tracking-tighter text-text">
           Home
         </h1>
         <Link
           to="/settings"
           aria-label="Settings"
-          className="mb-1 flex size-[34px] items-center justify-center rounded-full font-sans text-base/sm font-semibold text-text-inverse dark:text-text"
+          className="mb-1 flex size-8.5 items-center justify-center rounded-full font-sans text-base/sm font-semibold text-text-inverse dark:text-text"
           style={{ backgroundImage: placeholderAt(1) }}
         >
           {initial(name)}
@@ -270,7 +270,7 @@ function PhoneHome({
                 key={album.id}
                 to="/albums/$albumId"
                 params={{ albumId: album.id }}
-                className="flex w-[250px] shrink-0 snap-start flex-col gap-2"
+                className="flex w-62.5 shrink-0 snap-start flex-col gap-2"
               >
                 <span className="font-sans text-sm/xs text-text-muted">
                   {index === 0 ? picksLabel : album.artist}
@@ -278,7 +278,7 @@ function PhoneHome({
                 <Artwork
                   url={album.artUrl}
                   seed={album.id}
-                  className="flex h-[320px] w-[250px] flex-col justify-end rounded-[14px] p-4"
+                  className="flex h-80 w-62.5 flex-col justify-end rounded-phone-card p-4"
                 >
                   {/* Paper's placeholder art is dark; real covers can be light, so the white
                       title gets a scrim to stay readable. */}
@@ -286,10 +286,10 @@ function PhoneHome({
                     aria-hidden
                     className="absolute inset-x-0 bottom-0 h-1/2 bg-linear-to-t from-dark-canvas/65 to-transparent"
                   />
-                  <span className="relative font-sans text-[24px] leading-lg font-heavy tracking-[-0.01em] text-white drop-shadow-sm">
+                  <span className="relative font-sans text-phone-card leading-lg font-heavy tracking-snug text-dark-text drop-shadow-sm">
                     {album.title}
                   </span>
-                  <span className="relative pt-1 font-sans text-sm/sm text-white/75">
+                  <span className="relative pt-1 font-sans text-sm/sm text-dark-text/75">
                     {album.artist}
                   </span>
                 </Artwork>
@@ -307,12 +307,12 @@ function PhoneHome({
                 key={album.id}
                 to="/albums/$albumId"
                 params={{ albumId: album.id }}
-                className="flex w-[170px] shrink-0 snap-start flex-col gap-1.5"
+                className="flex w-42.5 shrink-0 snap-start flex-col gap-1.5"
               >
                 <Artwork
                   url={album.artUrl}
                   seed={album.id}
-                  className="size-[170px] rounded-[10px]"
+                  className="size-42.5 rounded-phone-art"
                 />
                 <span className="flex flex-col">
                   <span className="truncate font-sans text-sm/sm text-text">{album.title}</span>

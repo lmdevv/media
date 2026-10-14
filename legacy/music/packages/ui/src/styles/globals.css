@@ -83,7 +83,66 @@
   --radius-full: 9999px;
 }
 
-/* Dark mode: each dark token replaces its light role. --color-dark-canvas has no light role. */
+/* Tokens the code needed that the Paper file doesn't name yet. They keep Paper's naming (a light
+   role, plus a `dark-` twin where dark mode differs) so the owner can add them to Paper as-is. */
+@theme {
+  --color-shadow: #1d1d1f;
+  --color-shadow-cover: color-mix(in oklab, #1d1d1f 22%, transparent);
+  --color-shadow-glass: rgb(0 0 0 / 12%);
+  --color-dark-shadow: #000000;
+  --color-dark-shadow-cover: rgb(0 0 0 / 50%);
+  --color-dark-shadow-glass: rgb(0 0 0 / 50%);
+  --color-dark-hero-start: oklab(34.8% 0 0);
+  --color-dark-hero-end: oklab(19.6% 0 0);
+  --color-dark-hero-scrim: oklab(14.5% 0 0);
+  --text-3xs: 10px;
+  --text-2xs: 11px;
+  --text-phone-subhead: 15px;
+  --text-phone-body: 17px;
+  --text-phone-title: 22px;
+  --text-phone-card: 24px;
+  --text-phone-large-title: 34px;
+  --tracking-snug: -0.01em;
+  --tracking-tighter: -0.02em;
+  --radius-3xs: 1px;
+  --radius-2xs: 3px;
+  --radius-xs: 4px;
+  --radius-phone-art: 10px;
+  --radius-phone-card: 14px;
+  --radius-sheet: 20px;
+  --border-width-hairline: 0.5px;
+  --border-width-field: 1.5px;
+  --blur-scrim: 2px;
+  --spacing-safe-top: max(16px, env(safe-area-inset-top));
+  --spacing-safe-top-sm: max(12px, env(safe-area-inset-top));
+  --spacing-safe-bottom: max(26px, env(safe-area-inset-bottom));
+  --spacing-safe-bottom-lg: max(30px, env(safe-area-inset-bottom));
+  --spacing-dvh-inset: calc(100dvh - 2rem);
+  --spacing-dvh-inset-sm: calc(100dvh - 1rem);
+  --spacing-dvh-sheet: 85dvh;
+  --spacing-dvh-message: 60dvh;
+  --spacing-dvh-device-list: min(440px, 60dvh);
+  --spacing-now-playing-cover: min(560px, 58vh);
+  --spacing-now-playing-art: min(520px, 42vw, 62vh);
+  --container-vw-inset: calc(100vw - 2rem);
+  --shadow-dialog: 0 32px 80px color-mix(in oklab, var(--color-shadow) 24%, transparent);
+  --shadow-popover: 0 24px 64px color-mix(in oklab, var(--color-shadow) 16%, transparent);
+  --shadow-menu: 0 20px 48px color-mix(in oklab, var(--color-shadow) 16%, transparent);
+  --shadow-toast: 0 12px 32px color-mix(in oklab, var(--color-shadow) 24%, transparent);
+  --shadow-segment: 0 1px 3px color-mix(in oklab, var(--color-shadow) 12%, transparent);
+  --shadow-cover: 0 20px 48px var(--color-shadow-cover);
+  --shadow-cover-phone: 0 18px 40px rgb(0 0 0 / 22%);
+  --shadow-glass: 0 8px 28px var(--color-shadow-glass);
+  --shadow-command: 0 1px 2px rgb(0 0 0 / 4%), 0 24px 64px rgb(0 0 0 / 16%);
+  --shadow-art-preview: 0 12px 32px rgb(0 0 0 / 22%);
+  --shadow-now-playing-art: 0 40px 80px rgb(0 0 0 / 45%);
+  --shadow-now-playing-art-sm: 0 32px 64px rgb(0 0 0 / 45%);
+  --shadow-now-playing-art-phone: 0 24px 48px rgb(0 0 0 / 40%);
+  --shadow-now-playing-thumb: 0 6px 14px rgb(0 0 0 / 35%);
+}
+
+/* Dark mode: each dark token replaces its light role. --color-dark-canvas and the
+   --color-dark-hero-* stops have no light role. */
 .dark {
   --color-bg: var(--color-dark-bg);
   --color-surface: var(--color-dark-surface);
@@ -97,6 +156,9 @@
   --color-success: var(--color-dark-success);
   --color-danger: var(--color-dark-danger);
   --color-art: var(--color-dark-art);
+  --color-shadow: var(--color-dark-shadow);
+  --color-shadow-cover: var(--color-dark-shadow-cover);
+  --color-shadow-glass: var(--color-dark-shadow-glass);
 }
 
 /* shadcn's semantic names resolve to Paper roles, so components follow the tokens. */
@@ -140,5 +202,19 @@
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]) {
     cursor: pointer;
+  }
+}
+
+/* Reduced motion: overlays, sheets, and hover effects appear and change at once instead of
+   sliding, zooming, or fading, and skeletons stop pulsing. Spinners keep turning, since they are
+   the only sign that work is still going on. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

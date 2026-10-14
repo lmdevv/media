@@ -49,7 +49,7 @@ function PlaybackSettings() {
   const { quality, setQuality, engine } = usePlayer();
 
   return (
-    <div className="flex max-w-[720px] flex-col gap-7">
+    <div className="flex max-w-180 flex-col gap-7">
       <SettingsHeader
         title="Playback"
         lead="Applies to this browser. Each device remembers its own choice."

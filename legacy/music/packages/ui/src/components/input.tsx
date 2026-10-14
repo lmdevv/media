@@ -9,7 +9,7 @@ import type { ComponentProps, ReactNode } from "react";
  * accent (focus) or danger (`aria-invalid`) ring. `lg` is the 44px form field; `md` the 40px one.
  */
 const fieldVariants = cva(
-  "flex w-full shrink-0 items-center gap-2.5 rounded-sm border-[1.5px] border-transparent bg-surface text-text transition-colors has-[input:focus-visible]:border-accent has-[input:focus-visible]:bg-bg has-[input[aria-invalid=true]]:border-danger has-[input[aria-invalid=true]]:bg-bg has-[input:disabled]:opacity-(--opacity-disabled) [&_svg]:shrink-0 [&_svg]:text-text-muted",
+  "flex w-full shrink-0 items-center gap-2.5 rounded-sm border-field border-transparent bg-surface text-text transition-colors has-[input:focus-visible]:border-accent has-[input:focus-visible]:bg-bg has-[input[aria-invalid=true]]:border-danger has-[input[aria-invalid=true]]:bg-bg has-[input:disabled]:opacity-(--opacity-disabled) [&_svg]:shrink-0 [&_svg]:text-text-muted",
   {
     variants: {
       size: {

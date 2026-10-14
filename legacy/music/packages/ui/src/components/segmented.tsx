@@ -27,7 +27,7 @@ export function Segmented<Value extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className={cn("flex rounded-full bg-surface p-[3px]", className)}
+      className={cn("flex rounded-full bg-surface p-0.75", className)}
     >
       {options.map((option) => {
         const selected = option.value === value;
@@ -40,9 +40,9 @@ export function Segmented<Value extends string>({
             aria-checked={selected}
             onClick={() => onChange(option.value)}
             className={cn(
-              "flex h-[30px] cursor-pointer items-center rounded-full px-3.5 font-sans text-sm/xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              "flex h-7.5 cursor-pointer items-center rounded-full px-3.5 font-sans text-sm/xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
               selected
-                ? "bg-bg font-semibold text-text shadow-[0_1px_3px_color-mix(in_oklab,var(--color-text)_12%,transparent)]"
+                ? "bg-bg font-semibold text-text shadow-segment"
                 : "font-medium text-text-muted hover:text-text",
             )}
           >

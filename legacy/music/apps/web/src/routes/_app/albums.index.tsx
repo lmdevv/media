@@ -27,7 +27,7 @@ function AlbumsPage() {
   const home = useRead("library.home", {});
 
   return (
-    <div className="flex flex-col gap-7 px-5 pt-[max(16px,env(safe-area-inset-top))] lg:px-12 lg:pt-row">
+    <div className="flex flex-col gap-7 px-5 pt-safe-top lg:px-12 lg:pt-row">
       <PageHeader
         eyebrow={home === undefined ? undefined : plural(home.stats.albums, "album")}
         title="Albums"

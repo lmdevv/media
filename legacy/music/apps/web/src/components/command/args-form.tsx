@@ -272,7 +272,7 @@ function IdField({
         <div
           role="listbox"
           aria-label={spec.label}
-          className="flex max-h-[148px] flex-col gap-0.5 overflow-y-auto"
+          className="flex max-h-37 flex-col gap-0.5 overflow-y-auto"
         >
           {options.map((option) => {
             const chosen = option === selected;

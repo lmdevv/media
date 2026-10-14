@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppSplatRouteImport } from './routes/_app/$'
 import { Route as AppLibraryRouteImport } from './routes/_app/library'
 import { Route as AppLikedRouteImport } from './routes/_app/liked'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
@@ -50,6 +51,11 @@ const SignInRoute = SignInRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSplatRoute = AppSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
   getParentRoute: () => AppRoute,
 } as any)
 const AppLibraryRoute = AppLibraryRouteImport.update({
@@ -152,6 +158,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
+  '/$': typeof AppSplatRoute
   '/library': typeof AppLibraryRoute
   '/liked': typeof AppLikedRoute
   '/search': typeof AppSearchRoute
@@ -175,6 +182,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
+  '/$': typeof AppSplatRoute
   '/library': typeof AppLibraryRoute
   '/liked': typeof AppLikedRoute
   '/search': typeof AppSearchRoute
@@ -200,6 +208,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
+  '/_app/$': typeof AppSplatRoute
   '/_app/library': typeof AppLibraryRoute
   '/_app/liked': typeof AppLikedRoute
   '/_app/search': typeof AppSearchRoute
@@ -227,6 +236,7 @@ export interface FileRouteTypes {
     | '/'
     | '/setup'
     | '/sign-in'
+    | '/$'
     | '/library'
     | '/liked'
     | '/search'
@@ -250,6 +260,7 @@ export interface FileRouteTypes {
   to:
     | '/setup'
     | '/sign-in'
+    | '/$'
     | '/library'
     | '/liked'
     | '/search'
@@ -274,6 +285,7 @@ export interface FileRouteTypes {
     | '/_app'
     | '/setup'
     | '/sign-in'
+    | '/_app/$'
     | '/_app/library'
     | '/_app/liked'
     | '/_app/search'
@@ -331,6 +343,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/$': {
+      id: '/_app/$'
+      path: '/$'
+      fullPath: '/$'
+      preLoaderRoute: typeof AppSplatRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/library': {
@@ -494,6 +513,7 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 )
 
 interface AppRouteChildren {
+  AppSplatRoute: typeof AppSplatRoute
   AppLibraryRoute: typeof AppLibraryRoute
   AppLikedRoute: typeof AppLikedRoute
   AppSearchRoute: typeof AppSearchRoute
@@ -509,6 +529,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppSplatRoute: AppSplatRoute,
   AppLibraryRoute: AppLibraryRoute,
   AppLikedRoute: AppLikedRoute,
   AppSearchRoute: AppSearchRoute,

@@ -8,12 +8,15 @@ import { FieldLabel, Input } from "@music/ui/components/input";
 import { Skeleton } from "@music/ui/components/skeleton";
 import { cn } from "@music/ui/lib/utils";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { PlusIcon, SearchIcon } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 
+import { DetailError } from "@/components/route-error";
+import type { MissingCopy } from "@/components/route-error";
 import { Artwork } from "@/components/library/artwork";
 import { CollectionHeader } from "@/components/library/collection-header";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
@@ -23,12 +26,20 @@ import { formatAgo, formatDuration, formatTotal, plural } from "@/lib/format";
 
 const decodePlaylistId = Schema.decodeUnknownSync(PlaylistId);
 
+const MISSING: MissingCopy = {
+  title: "This playlist was deleted",
+  description:
+    "It may have been deleted on another device, or the link is wrong. Your songs are still in your library.",
+  back: { to: "/playlists", label: "Back to playlists" },
+};
+
 export const Route = createFileRoute("/_app/playlists/$playlistId")({
   params: {
     parse: (params) => ({ playlistId: decodePlaylistId(params.playlistId) }),
     stringify: (params) => ({ playlistId: params.playlistId }),
   },
   component: PlaylistPage,
+  errorComponent: PlaylistError,
 });
 
 /** A 2×2 mosaic of the first covers, one cover, or the empty surface tile. */
@@ -76,7 +87,7 @@ function PlaylistPage() {
     return (
       <div className="flex flex-col gap-8 px-5 pt-row lg:px-12">
         <div className="flex items-end gap-8">
-          <Skeleton className="size-[232px] rounded-md" />
+          <Skeleton className="size-58 rounded-md" />
           <div className="flex grow flex-col gap-3">
             <Skeleton className="h-3 w-48" />
             <Skeleton className="h-12 w-96 max-w-full" />
@@ -101,15 +112,10 @@ function PlaylistPage() {
     .join(" · ");
 
   return (
-    <div className="flex flex-col gap-8 px-5 pt-[max(12px,env(safe-area-inset-top))] lg:px-12 lg:pt-row">
+    <div className="flex flex-col gap-8 px-5 pt-safe-top-sm lg:px-12 lg:pt-row">
       <CollectionHeader
-        cover={
-          <PlaylistCover
-            playlist={playlist}
-            className="size-[232px] shadow-[0_20px_48px_color-mix(in_oklab,var(--color-text)_18%,transparent)]"
-          />
-        }
-        phoneCover={<PlaylistCover playlist={playlist} className="size-[270px] rounded-lg" />}
+        cover={<PlaylistCover playlist={playlist} className="size-58 shadow-cover" />}
+        phoneCover={<PlaylistCover playlist={playlist} className="size-67.5 rounded-lg" />}
         eyebrow={eyebrow}
         title={playlist.name}
         subtitle={
@@ -180,7 +186,7 @@ function EmptyPlaylist({ playlist }: { readonly playlist: Playlist }) {
         placeholder="Search your library to add songs"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        fieldClassName="max-w-[480px]"
+        fieldClassName="max-w-120"
         start={<SearchIcon aria-hidden />}
       />
       {deferred.length > 0 ? <AddResults playlist={playlist} query={deferred} /> : null}
@@ -203,13 +209,13 @@ function AddResults({ playlist, query }: { readonly playlist: Playlist; readonly
   }
 
   return (
-    <div className="flex max-w-[640px] flex-col">
+    <div className="flex max-w-160 flex-col">
       {results.tracks.map((track) => (
         <div
           key={track.id}
-          className="flex h-[52px] items-center gap-3 rounded-sm px-2 hover:bg-surface"
+          className="flex h-13 items-center gap-3 rounded-sm px-2 hover:bg-surface"
         >
-          <Artwork url={track.artUrl} seed={track.albumId} className="size-row rounded-[4px]" />
+          <Artwork url={track.artUrl} seed={track.albumId} className="size-row rounded-xs" />
           <span className="flex min-w-0 grow flex-col gap-px">
             <span className="truncate font-sans text-base/sm text-text">{track.title}</span>
             <span className="truncate font-sans text-sm/xs text-text-muted">
@@ -327,4 +333,8 @@ function DeleteDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function PlaylistError(props: ErrorComponentProps) {
+  return <DetailError {...props} copy={MISSING} />;
 }

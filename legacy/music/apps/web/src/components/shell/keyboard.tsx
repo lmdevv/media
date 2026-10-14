@@ -105,7 +105,8 @@ export function KeyboardShortcuts() {
 
         case "d":
         case "D": {
-          state.setDevicesOpen(!state.devicesOpen);
+          if (state.playOn === null) state.openPlayOn();
+          else state.closePlayOn();
 
           return;
         }

@@ -6,11 +6,13 @@ import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { ListMusicIcon, SpeakerIcon } from "lucide-react";
+import { useEffect } from "react";
 
 import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
 import { useUi } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
+import { useIsDesktop } from "@/lib/use-media";
 
 import {
   PlayPauseButton,
@@ -23,7 +25,9 @@ import {
   perform,
   useIsRemote,
 } from "./controls";
+import { barTools } from "./bar-tools";
 import { DeviceList, useDevices } from "./devices";
+import { shownSurface } from "./play-on";
 
 /**
  * The desktop player bar from Paper: the song on the left, transport and progress in the middle,
@@ -38,9 +42,10 @@ export function PlayerBar() {
 
   if (track === null) return null;
 
-  const offline = !player.mediaOnline && !remote;
-  const failed = player.status === "error" && !offline;
-  const buffering = player.status === "buffering" || player.status === "loading";
+  const tools = barTools({ status: player.status, mediaOnline: player.mediaOnline, remote });
+  const offline = tools === "offline";
+  const failed = tools === "error";
+  const buffering = tools === "buffering";
 
   return (
     <div className="hidden shrink-0 flex-col lg:flex">
@@ -50,7 +55,7 @@ export function PlayerBar() {
       >
         <div
           className={cn(
-            "flex w-[320px] shrink-0 items-center gap-3",
+            "flex w-80 shrink-0 items-center gap-3",
             offline && "opacity-(--opacity-disabled)",
           )}
         >
@@ -116,11 +121,11 @@ export function PlayerBar() {
               <SkipButton direction="next" />
               <RepeatButton />
             </div>
-            <Progress className="max-w-[520px]" />
+            <Progress className="max-w-130" />
           </div>
         )}
 
-        <div className="flex w-[320px] shrink-0 items-center justify-end gap-4">
+        <div className="flex w-80 shrink-0 items-center justify-end gap-4">
           {failed ? (
             <span className="truncate font-mono text-xs/xs tracking-mono text-text-muted">
               {player.error}
@@ -150,10 +155,12 @@ export function PlayerBar() {
                   <ListMusicIcon className="size-5" />
                 </button>
               </Tooltip>
-              <DevicePickerButton />
-              <Volume />
             </>
           )}
+          {/* In every state, and in the same place so it stays mounted: moving playback to
+              another device matters most when this browser can't play. */}
+          <DevicePickerButton />
+          {tools === "tools" ? <Volume /> : null}
         </div>
       </section>
       <RemoteBand />
@@ -161,13 +168,29 @@ export function PlayerBar() {
   );
 }
 
-/** The speaker button that opens the "Play on" popover. */
+/**
+ * The speaker button and its "Play on" popover. Below the desktop width the player bar is hidden
+ * and `DeviceSheet` shows "Play on" instead (ADS-106). While mounted it lets "Play on" open here;
+ * when it goes away (the queue empties) an open popover closes, so nothing reopens by itself.
+ */
 function DevicePickerButton() {
-  const { devicesOpen, setDevicesOpen } = useUi();
+  const { playOn, openPlayOn, closePlayOn, setPlayOnPopoverMounted } = useUi();
+
   const { onlineCount } = useDevices();
+  const desktop = useIsDesktop();
+  const shown = shownSurface(playOn, desktop);
+
+  useEffect(() => {
+    setPlayOnPopoverMounted(true);
+
+    return () => setPlayOnPopoverMounted(false);
+  }, [setPlayOnPopoverMounted]);
 
   return (
-    <Popover open={devicesOpen} onOpenChange={setDevicesOpen}>
+    <Popover
+      open={shown === "popover"}
+      onOpenChange={(open) => (open ? openPlayOn() : closePlayOn())}
+    >
       <Tooltip label="Play on another device" shortcut="D">
         <PopoverTrigger
           aria-label="Play on another device"
@@ -176,7 +199,7 @@ function DevicePickerButton() {
           <SpeakerIcon className="size-5" />
         </PopoverTrigger>
       </Tooltip>
-      <PopoverContent className="w-[380px] gap-0.5 p-2">
+      <PopoverContent className="w-95 gap-0.5 p-2">
         <div className="flex items-center justify-between px-3 pt-2.5 pb-2">
           <span className="font-sans text-md/base font-semibold text-text">Play on</span>
           <span className="font-mono text-xs/xs tracking-mono text-text-muted">

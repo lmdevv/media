@@ -52,6 +52,10 @@ const decodeCreated = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ libraryId: LibraryId, jobId: JobId })),
 );
 
+const decodeCreatedPlaylist = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ playlistId: Schema.String })),
+);
+
 const openFirstAlbum = async (page: Page): Promise<string> => {
   await page
     .getByRole("navigation", { name: "Library" })
@@ -114,13 +118,13 @@ test("an album plays real audio, pauses, and skips", async ({ page }) => {
   await expectAudioPast(page, 1);
 });
 
-test("Ctrl+N and Ctrl+P move through the command menu", async ({ page }) => {
+test("Ctrl+J and Ctrl+P move through the command menu", async ({ page }) => {
   await signIn(page);
   await page.keyboard.press("ControlOrMeta+k");
   const menu = page.getByRole("dialog", { name: "Command menu" });
   // With no query, a "Now playing" row can arrive after the first row was selected, and the
   // selection stays put. A query selects its first result once the search settles; wait for that
-  // result, or Ctrl+N can land on the list from before the query.
+  // result, or Ctrl+J can land on the list from before the query.
   const options = menu.getByRole("option");
   const third = await options.nth(2).boundingBox();
 
@@ -139,9 +143,9 @@ test("Ctrl+N and Ctrl+P move through the command menu", async ({ page }) => {
   await expect(options.first()).toHaveId("command-open-queue");
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
 
-  await press("Control+n");
+  await press("Control+j");
   await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
-  await press("Control+n");
+  await press("Control+j");
   await expect(options.nth(2)).toHaveAttribute("aria-selected", "true");
   await press("Control+p");
   await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
@@ -189,6 +193,40 @@ test("an API key drives the CLI, and the CLI controls the browser's playback", a
   cli(apiKey, ["resume"]);
   await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   await expectAudioPast(page, 1);
+});
+
+test("a playlist deleted from the CLI while open shows its deleted state and the audio plays on", async ({
+  page,
+}) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 1);
+
+  const created = decodeCreatedPlaylist(cli(apiKey, ["playlists", "create", "Doomed", "--json"]));
+  // Navigate inside the app: a page load would stop the audio this test is about.
+  await page
+    .getByRole("navigation", { name: "Library" })
+    .getByRole("link", { name: /Doomed/ })
+    .click();
+  await expect(page.getByRole("heading", { level: 1, name: "Doomed" })).toBeVisible();
+
+  cli(apiKey, ["playlists", "delete", created.playlistId]);
+
+  await expect(page.getByRole("heading", { name: "This playlist was deleted" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
+  const bar = page.getByRole("region", { name: "Player" });
+  await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+
+  const before = await page.evaluate(() =>
+    Math.max(0, ...[...(window.musicTestMedia ?? [])].map((element) => element.currentTime)),
+  );
+
+  await expectAudioPast(page, before + 1);
+
+  await page.getByRole("link", { name: "Back to playlists" }).click();
+  await expect(page).toHaveURL(/\/playlists$/);
+  await expect(page.getByRole("link", { name: /Doomed/ })).toHaveCount(0);
 });
 
 test("playback moves to a second browser and the first one stops", async ({ page, browser }) => {
@@ -496,10 +534,18 @@ test("album cards and song rows expose their play buttons", async ({ page }) => 
 
   await page.goto("/songs");
 
+  // The playing song shows its bars instead of a play button, and the album just played can hold
+  // the first song by title, so pick the first song that isn't playing.
+  const menu = page
+    .locator("main [role=row]:not([aria-current=true])")
+    .getByRole("button", { name: /^More actions for / })
+    .first();
+
+  const menuLabel = (await menu.getAttribute("aria-label")) ?? "";
+
   const row = page
     .locator("main [role=row]")
-    .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
-    .first();
+    .filter({ has: page.getByRole("button", { name: menuLabel, exact: true }) });
 
   // No hover: role queries skip display:none, so finding it proves screen readers can, and
   // focusing it and pressing Enter is how a keyboard plays the song.
@@ -568,10 +614,13 @@ test("the last song in the queue stops at its end instead of starting over", asy
 test("the command menu rescans the only library folder with Enter", async ({ page }) => {
   await signIn(page);
   await page.keyboard.press("Control+k");
-  await page.getByRole("combobox").fill("Rescan a library folder");
+  // A query no song, album, or artist matches, so the command is the top row once results settle.
+  await page.getByRole("combobox").fill("Rescan");
 
   const menu = page.getByRole("dialog");
 
+  // Enter waits while results load (the rows would still be the previous query's).
+  await expect(menu.getByRole("img", { name: "Searching" })).toHaveCount(0);
   // The only folder is already picked, so Enter runs the command.
   await expect(
     menu.getByRole("option", { name: /^Rescan a library folder/, selected: true }),

@@ -5,11 +5,13 @@ import { Button } from "@music/ui/components/button";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
 import { createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth, useQuery } from "convex/react";
-import { Schema } from "effect";
+import { Match, Schema } from "effect";
 import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { AuthHeading, AuthLayout, Field } from "@/components/auth/auth-layout";
+import { signInFailure } from "@/lib/sign-in-failure";
+import type { SignInFailure } from "@/lib/sign-in-failure";
 
 const SignInSearch = Schema.Struct({ redirect: Schema.optionalKey(Schema.String) });
 
@@ -43,17 +45,17 @@ function SignInForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<SignInFailure | null>(null);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setPending(true);
-    setFailed(false);
+    setFailed(null);
 
     try {
       await signIn("password", { email, password, flow: "signIn" });
-    } catch {
-      setFailed(true);
+    } catch (cause) {
+      setFailed(cause instanceof Error ? signInFailure(cause) : "server");
     } finally {
       setPending(false);
     }
@@ -82,19 +84,27 @@ function SignInForm() {
               type="password"
               autoComplete="current-password"
               required
-              aria-invalid={failed}
-              aria-describedby={failed ? "sign-in-error" : undefined}
+              aria-invalid={failed === "credentials"}
+              aria-describedby={failed === null ? undefined : "sign-in-error"}
               value={password}
               onChange={(event) => {
                 setPassword(event.target.value);
-                setFailed(false);
+                setFailed(null);
               }}
             />
-            {failed ? (
+            {failed === null ? null : (
               <FieldHint id="sign-in-error" tone="danger" role="alert">
-                That email and password don't match.
+                {Match.value(failed).pipe(
+                  Match.when("credentials", () => "That email and password don't match."),
+                  Match.when(
+                    "rate-limited",
+                    () => "Too many attempts. Wait a minute and try again.",
+                  ),
+                  Match.when("server", () => "Couldn't sign in. The server reported an error."),
+                  Match.exhaustive,
+                )}
               </FieldHint>
-            ) : null}
+            )}
           </Field>
         </div>
         <Button type="submit" variant="solid" size="lg" pending={pending}>

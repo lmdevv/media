@@ -32,10 +32,10 @@ function LikedPage() {
       : `${formatCount(liked.tracks.length)}+ songs`;
 
   return (
-    <div className="flex flex-col gap-8 px-5 pt-[max(12px,env(safe-area-inset-top))] lg:px-12 lg:pt-row">
+    <div className="flex flex-col gap-8 px-5 pt-safe-top-sm lg:px-12 lg:pt-row">
       <CollectionHeader
-        cover={<LikedCover size="size-[232px]" />}
-        phoneCover={<LikedCover size="size-[270px] rounded-lg" />}
+        cover={<LikedCover size="size-58" />}
+        phoneCover={<LikedCover size="size-67.5 rounded-lg" />}
         eyebrow={
           tracks === undefined
             ? "Liked songs"

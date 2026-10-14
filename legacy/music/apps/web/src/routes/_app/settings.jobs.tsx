@@ -110,11 +110,7 @@ function JobRow({ job, admin }: { readonly job: Job; readonly admin: boolean }) 
           <span className="font-sans text-sm/xs text-text-muted">{status.label}</span>
         </div>
         {active && percent !== null ? (
-          <ProgressBar
-            percent={percent}
-            className="h-[3px] w-full max-w-[420px]"
-            label={job.label}
-          />
+          <ProgressBar percent={percent} className="h-0.75 w-full max-w-105" label={job.label} />
         ) : null}
         {job.error === null ? null : (
           <span className="font-mono text-xs/xs break-all text-danger">{job.error}</span>
@@ -123,12 +119,12 @@ function JobRow({ job, admin }: { readonly job: Job; readonly admin: boolean }) 
           <span className="truncate font-mono text-xs/xs text-text-muted">{job.message}</span>
         ) : null}
       </div>
-      <span className="w-[120px] shrink-0 font-mono text-xs/xs text-text-muted">
+      <span className="w-30 shrink-0 font-mono text-xs/xs text-text-muted">
         {active && job.total !== null
           ? `${formatCount(job.done)} / ${formatCount(job.total)}`
           : formatAgo(when)}
       </span>
-      <span className="flex w-[80px] shrink-0 justify-end">
+      <span className="flex w-20 shrink-0 justify-end">
         {admin && active ? (
           <button
             type="button"

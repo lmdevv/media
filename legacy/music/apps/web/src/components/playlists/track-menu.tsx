@@ -118,7 +118,7 @@ function PlaylistSubmenu({ tracks }: { readonly tracks: ReadonlyArray<Track> }) 
             <Artwork
               url={playlist.artUrls[0] ?? null}
               seed={playlist.id}
-              className="size-6 rounded-[3px]"
+              className="size-6 rounded-2xs"
             />
             <span className="grow truncate">{playlist.name}</span>
           </DropdownMenuItem>
@@ -174,7 +174,7 @@ function FileInfoDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent title="File info" description={`${track.title} · ${track.artist}`}>
-        <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2">
+        <dl className="grid grid-cols-[--spacing(30)_1fr] gap-x-4 gap-y-2">
           {rows.map(([label, value]) => (
             <div key={label} className="contents">
               <dt className="font-mono text-xs/sm tracking-mono text-text-muted uppercase">

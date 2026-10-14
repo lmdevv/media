@@ -21,7 +21,7 @@ export function Toaster() {
         unstyled: true,
         classNames: {
           toast:
-            "flex w-[360px] max-w-[calc(100vw-2rem)] items-center gap-3 rounded-lg bg-text px-4 py-3 font-sans text-base/sm text-text-inverse shadow-[0_12px_32px_color-mix(in_oklab,var(--color-text)_24%,transparent)]",
+            "flex w-90 max-w-vw-inset items-center gap-3 rounded-lg bg-text px-4 py-3 font-sans text-base/sm text-text-inverse shadow-toast",
           title: "grow",
           description: "text-sm/xs text-text-inverse/(--opacity-muted)",
           actionButton: "shrink-0 cursor-pointer font-semibold text-accent",

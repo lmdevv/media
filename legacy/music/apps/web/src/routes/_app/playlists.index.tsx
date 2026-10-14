@@ -12,14 +12,14 @@ import { formatAgo, plural } from "@/lib/format";
 export const Route = createFileRoute("/_app/playlists/")({ component: PlaylistsPage });
 
 const rowClassName =
-  "flex h-[72px] shrink-0 items-center gap-3.5 border-b-[0.5px] border-border pr-1 outline-none focus-visible:bg-surface lg:h-16 lg:rounded-sm lg:border-b-0 lg:px-2 lg:hover:bg-surface";
+  "flex h-18 shrink-0 items-center gap-3.5 border-b-hairline border-border pr-1 outline-none focus-visible:bg-surface lg:h-16 lg:rounded-sm lg:border-b-0 lg:px-2 lg:hover:bg-surface";
 
 function PlaylistsPage() {
   const playlists = useRead("playlists.list", {});
   const { openNewPlaylist } = useUi();
 
   return (
-    <div className="flex flex-col gap-6 px-5 pt-[max(16px,env(safe-area-inset-top))] lg:px-12 lg:pt-row">
+    <div className="flex flex-col gap-6 px-5 pt-safe-top lg:px-12 lg:pt-row">
       <PageHeader
         title="Playlists"
         eyebrow={playlists === undefined ? undefined : plural(playlists.length, "playlist")}

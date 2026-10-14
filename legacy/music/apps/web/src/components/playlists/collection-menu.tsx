@@ -52,7 +52,7 @@ export function CollectionMenu({
           className,
         )}
       >
-        {trigger ?? <MoreHorizontalIcon className="size-[18px]" />}
+        {trigger ?? <MoreHorizontalIcon className="size-4.5" />}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         <DropdownMenuItem disabled={empty} onClick={() => playNext(tracks)}>
@@ -79,7 +79,7 @@ export function CollectionMenu({
                 <Artwork
                   url={playlist.artUrls[0] ?? null}
                   seed={playlist.id}
-                  className="size-6 rounded-[3px]"
+                  className="size-6 rounded-2xs"
                 />
                 <span className="grow truncate">{playlist.name}</span>
               </DropdownMenuItem>

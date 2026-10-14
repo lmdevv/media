@@ -1,10 +1,14 @@
-import { errorMessage } from "@music/sdk/errors";
+import { commandFailure, errorMessage } from "@music/sdk/errors";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 
 /** The message to show for any thrown value; server failures carry their own wording. */
 export const describeFailure = (cause: unknown): string =>
   cause instanceof Error ? errorMessage(cause) : "Something went wrong. Try again.";
+
+/** Whether `error` is the server saying the item a screen shows doesn't exist (any more). */
+export const isNotFoundFailure = (error: Error): boolean =>
+  commandFailure(error)?.code === "not_found";
 
 /** Shows a failure as an error toast. */
 export const toastFailure = (cause: unknown): void => {

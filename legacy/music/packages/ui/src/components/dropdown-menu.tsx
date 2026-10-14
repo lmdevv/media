@@ -13,7 +13,7 @@ export const DropdownMenuTrigger = MenuPrimitive.Trigger;
 export const DropdownMenuSub = MenuPrimitive.SubmenuRoot;
 
 const popupClassName =
-  "flex max-h-(--available-height) min-w-[248px] origin-(--transform-origin) flex-col overflow-y-auto rounded-md border border-border bg-surface-raised p-1.5 text-text shadow-[0_20px_48px_color-mix(in_oklab,var(--color-text)_16%,transparent)] outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
+  "flex max-h-(--available-height) min-w-62 origin-(--transform-origin) flex-col overflow-y-auto rounded-md border border-border bg-surface-raised p-1.5 text-text shadow-menu outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
 
 /** The Paper menu panel: 8px radius, hairline border, 6px padding. */
 export function DropdownMenuContent({
@@ -41,7 +41,7 @@ export function DropdownMenuContent({
 }
 
 const itemClassName =
-  "flex h-[34px] shrink-0 cursor-pointer items-center gap-2.5 rounded-sm px-2.5 font-sans text-base/sm text-text outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-(--opacity-disabled) data-highlighted:bg-surface [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
+  "flex h-8.5 shrink-0 cursor-pointer items-center gap-2.5 rounded-sm px-2.5 font-sans text-base/sm text-text outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-(--opacity-disabled) data-highlighted:bg-surface [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
 
 /** One action in a menu. `shortcut` shows its key on the right, in mono. */
 export function DropdownMenuItem({
@@ -95,7 +95,7 @@ export function DropdownMenuSubContent({ className, ...props }: MenuPrimitive.Po
         alignOffset={-6}
       >
         <MenuPrimitive.Popup
-          className={cn(popupClassName, "min-w-[280px] gap-0.5", className)}
+          className={cn(popupClassName, "min-w-70 gap-0.5", className)}
           {...props}
         />
       </MenuPrimitive.Positioner>

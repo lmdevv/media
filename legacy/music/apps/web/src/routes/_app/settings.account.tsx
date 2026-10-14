@@ -33,7 +33,7 @@ function AccountSettings() {
     await navigate({ to: "/sign-in" });
   });
 
-  if (me === undefined) return <Skeleton className="h-40 w-full max-w-[720px] rounded-lg" />;
+  if (me === undefined) return <Skeleton className="h-40 w-full max-w-180 rounded-lg" />;
 
   const changed = name.trim() !== (me.name ?? "") && name.trim().length > 0;
 
@@ -44,7 +44,7 @@ function AccountSettings() {
   };
 
   return (
-    <div className="flex max-w-[720px] flex-col gap-7">
+    <div className="flex max-w-180 flex-col gap-7">
       <SettingsHeader title="Account" lead="How you appear to other people on this server." />
       <form onSubmit={submit} className="flex flex-col gap-4 border-b border-border pb-6">
         <div className="flex flex-col gap-1.5">
@@ -58,7 +58,7 @@ function AccountSettings() {
               autoComplete="name"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              fieldClassName="max-w-[360px] min-w-0 shrink"
+              fieldClassName="max-w-90 min-w-0 shrink"
             />
             <Button type="submit" variant="solid" disabled={!changed} pending={saving}>
               Save

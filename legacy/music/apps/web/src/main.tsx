@@ -8,15 +8,21 @@ import { StrictMode } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { PageNotFound, RouteError } from "./components/route-error";
 import { resolveConvexUrl } from "./config";
+import { convexLogger } from "./lib/convex-logger";
 import { parseSearch, stringifySearch } from "./lib/search-params";
 import { routeTree } from "./routeTree.gen";
 
-const convex = new ConvexReactClient(resolveConvexUrl());
+const convex = new ConvexReactClient(resolveConvexUrl(), { logger: convexLogger(console) });
 
 const router = createRouter({
   routeTree,
   defaultPreload: "intent",
+  // Every route gets its own boundaries, so a failing or missing screen under `/_app` renders inside
+  // the shell and leaves the player (and its audio) mounted.
+  defaultErrorComponent: RouteError,
+  defaultNotFoundComponent: PageNotFound,
   scrollRestoration: true,
   // Search values stay plain strings; each route parses its own with a schema.
   parseSearch,

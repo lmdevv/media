@@ -90,7 +90,7 @@ export function PageHeader({
             {eyebrow}
           </span>
         )}
-        <h1 className="font-sans text-[34px] leading-[41px] font-heavy tracking-[-0.02em] text-text lg:text-2xl/2xl lg:tracking-display">
+        <h1 className="font-sans text-phone-large-title leading-10.25 font-heavy tracking-tighter text-text lg:text-2xl/2xl lg:tracking-display">
           {title}
         </h1>
       </div>
@@ -112,17 +112,17 @@ export function SectionHeader({
   return (
     <div className={cn("flex items-baseline justify-between gap-4", className)}>
       {to === undefined ? (
-        <h2 className="font-sans text-[22px] leading-lg font-bold tracking-[-0.01em] text-text lg:text-lg/lg lg:font-semibold lg:tracking-tight">
+        <h2 className="font-sans text-phone-title leading-lg font-bold tracking-snug text-text lg:text-lg/lg lg:font-semibold lg:tracking-tight">
           {title}
         </h2>
       ) : (
         <Link to={to} className="group flex items-center gap-1 lg:pointer-events-none">
-          <h2 className="font-sans text-[22px] leading-lg font-bold tracking-[-0.01em] text-text lg:text-lg/lg lg:font-semibold lg:tracking-tight">
+          <h2 className="font-sans text-phone-title leading-lg font-bold tracking-snug text-text lg:text-lg/lg lg:font-semibold lg:tracking-tight">
             {title}
           </h2>
           <ChevronRightIcon
             aria-hidden
-            className="size-[18px] text-text-muted lg:hidden"
+            className="size-4.5 text-text-muted lg:hidden"
             strokeWidth={2.5}
           />
         </Link>
@@ -238,7 +238,7 @@ export function AlbumRowSkeleton({
 
   return (
     <div className="flex flex-col gap-4">
-      {title ? <Skeleton className="h-3.5 w-[180px] rounded-[4px]" /> : null}
+      {title ? <Skeleton className="h-3.5 w-45 rounded-xs" /> : null}
       <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 xl:grid-cols-6">
         {Array.from({ length: count }, (_, index) => (
           <div key={index} className="flex flex-col gap-2.5">

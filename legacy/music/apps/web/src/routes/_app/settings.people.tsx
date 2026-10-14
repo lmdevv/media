@@ -51,7 +51,7 @@ function People({ myId }: { readonly myId: string }) {
         title="People"
         lead="Everyone gets their own playlists, likes, history and devices."
         action={
-          <Button variant="solid" className="pr-[18px] pl-3.5" onClick={() => setInviting(true)}>
+          <Button variant="solid" className="pr-4.5 pl-3.5" onClick={() => setInviting(true)}>
             <PlusIcon strokeWidth={2} />
             Invite
           </Button>
@@ -83,11 +83,11 @@ function People({ myId }: { readonly myId: string }) {
                     {person.email}
                   </span>
                 </span>
-                <span className="w-[120px] shrink-0 font-mono text-xs/xs tracking-mono text-text-muted uppercase">
+                <span className="w-30 shrink-0 font-mono text-xs/xs tracking-mono text-text-muted uppercase">
                   {person.role}
                 </span>
-                <span className="hidden w-[140px] shrink-0 md:block" />
-                <span className="w-[60px] shrink-0" />
+                <span className="hidden w-35 shrink-0 md:block" />
+                <span className="w-15 shrink-0" />
               </div>
             );
           })}
@@ -120,7 +120,7 @@ function InviteRow({ invite }: { readonly invite: Invite }) {
     <div role="listitem" className={rowClassName}>
       <span
         aria-hidden
-        className="size-9 shrink-0 rounded-full border-[1.5px] border-dashed border-border"
+        className="size-9 shrink-0 rounded-full border-field border-dashed border-border"
       />
       <span className="flex min-w-0 grow flex-col gap-px">
         <span className="truncate font-sans text-base/sm font-medium text-text">
@@ -130,10 +130,10 @@ function InviteRow({ invite }: { readonly invite: Invite }) {
           Invite sent {formatAgo(invite.createdAt)} · expires {formatUntil(invite.expiresAt)}
         </span>
       </span>
-      <span className="w-[120px] shrink-0 font-mono text-xs/xs tracking-mono text-text-muted">
+      <span className="w-30 shrink-0 font-mono text-xs/xs tracking-mono text-text-muted">
         PENDING
       </span>
-      <span className="hidden w-[140px] shrink-0 md:block">
+      <span className="hidden w-35 shrink-0 md:block">
         <button
           type="button"
           onClick={() => copyLink(invite.code)}
@@ -142,7 +142,7 @@ function InviteRow({ invite }: { readonly invite: Invite }) {
           Copy link
         </button>
       </span>
-      <span className="flex w-[60px] shrink-0 justify-end">
+      <span className="flex w-15 shrink-0 justify-end">
         <button
           type="button"
           disabled={pending}

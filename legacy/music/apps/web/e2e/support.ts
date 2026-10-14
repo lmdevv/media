@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { setupStatus } from "@music/sdk/functions";
 import { expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Browser, Page } from "@playwright/test";
 import { ConvexHttpClient } from "convex/browser";
 
 import { e2eConvexUrl } from "./env";
@@ -48,6 +48,33 @@ export const signIn = async (
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
+};
+
+/**
+ * Signs in as the admin on `admin`, creates an invite, and joins with it as a new member in a
+ * fresh browser context. Returns the member's page, at Home; close its context when done.
+ */
+export const joinAsNewMember = async (admin: Page, browser: Browser): Promise<Page> => {
+  await signIn(admin);
+  await admin.goto("/settings/people");
+  await admin.getByRole("button", { name: "Invite" }).click();
+  await admin.getByRole("button", { name: "Create invite" }).click();
+
+  const link = (await admin.getByTestId("invite-link").textContent()) ?? "";
+
+  expect(link).toContain("/invite/");
+
+  const member = await (await browser.newContext()).newPage();
+
+  await member.goto(link);
+  await expect(member.getByRole("heading", { name: /invited you/ })).toBeVisible();
+  await member.getByLabel("Email").fill(`${unique("guest").replace(" ", "-")}@music.local`);
+  await member.getByLabel("Your name").fill("Mateo");
+  await member.getByLabel("Choose a password").fill("password123");
+  await member.getByRole("button", { name: "Join" }).click();
+  await expect(member.getByRole("navigation", { name: "Library" })).toBeVisible();
+
+  return member;
 };
 
 /** A name no earlier run used, for things tests create. */

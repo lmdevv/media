@@ -12,11 +12,14 @@ import { toast } from "sonner";
 
 import { SettingsHeader, TerminalHint } from "@/components/settings/settings-ui";
 import { resolveConvexUrl } from "@/config";
+import { cliLoginBase, cliLoginCommand, needsInsecure } from "@/lib/cli-login";
 import { useAction } from "@/lib/action";
 import { formatAgo, formatDate } from "@/lib/format";
 
 /** The URL the CLI signs in to: the Convex URL, not the web app's address. */
 const serverUrl = resolveConvexUrl();
+
+const insecure = needsInsecure(serverUrl);
 
 export const Route = createFileRoute("/_app/settings/keys")({ component: KeysSettings });
 
@@ -32,7 +35,7 @@ function KeysSettings() {
         title="API keys"
         lead="Keys let the CLI and agents act as you: play, search, build playlists, organize files. Revoke any key at any time."
         action={
-          <Button variant="solid" className="pr-[18px] pl-3.5" onClick={() => setCreating(true)}>
+          <Button variant="solid" className="pr-4.5 pl-3.5" onClick={() => setCreating(true)}>
             <PlusIcon strokeWidth={2} />
             New key
           </Button>
@@ -43,7 +46,7 @@ function KeysSettings() {
       ) : keys.length === 0 ? (
         <div className="flex flex-col items-start gap-2.5 rounded-lg border border-dashed border-border p-8">
           <span className="font-sans text-md/base font-semibold text-text">No keys yet</span>
-          <span className="max-w-[520px] font-sans text-base/base text-text-muted">
+          <span className="max-w-130 font-sans text-base/base text-text-muted">
             Create one for each agent or machine, so you can see what used it and revoke just that
             one.
           </span>
@@ -62,30 +65,48 @@ function KeysSettings() {
             </span>
             <span
               role="columnheader"
-              className="w-[120px] shrink-0 font-mono text-xs/xs tracking-mono text-text-muted"
+              className="w-30 shrink-0 font-mono text-xs/xs tracking-mono text-text-muted"
             >
               KEY
             </span>
             <span
               role="columnheader"
-              className="hidden w-[120px] shrink-0 font-mono text-xs/xs tracking-mono text-text-muted md:block"
+              className="hidden w-30 shrink-0 font-mono text-xs/xs tracking-mono text-text-muted md:block"
             >
               CREATED
             </span>
             <span
               role="columnheader"
-              className="hidden w-[140px] shrink-0 font-mono text-xs/xs tracking-mono text-text-muted md:block"
+              className="hidden w-35 shrink-0 font-mono text-xs/xs tracking-mono text-text-muted md:block"
             >
               LAST USED
             </span>
-            <span aria-hidden className="w-[72px] shrink-0" />
+            <span aria-hidden className="w-18 shrink-0" />
           </div>
           {keys.map((key) => (
             <KeyRow key={key.id} apiKey={key} />
           ))}
         </div>
       )}
-      <TerminalHint label="Use a key" command={`music login --server ${serverUrl} --key mk_…`} />
+      <div className="flex flex-col items-start gap-2">
+        <TerminalHint label="Use a key" command={cliLoginCommand(serverUrl)} />
+        <p className="max-w-130 font-sans text-sm/sm text-text-muted">
+          Keep keys off the command line. Pipe the key in as above, set{" "}
+          <code className="font-mono text-text">MUSIC_SERVER</code> and{" "}
+          <code className="font-mono text-text">MUSIC_API_KEY</code>
+          {insecure ? (
+            <>
+              {" "}
+              (with <code className="font-mono text-text">MUSIC_INSECURE=1</code>)
+            </>
+          ) : null}
+          , or run <code className="font-mono text-text">{cliLoginBase(serverUrl)}</code> and paste
+          it at the hidden prompt.
+          {insecure
+            ? " This server is plain http:// on another machine, so the key travels unencrypted; the CLI asks you to confirm that with --insecure."
+            : ""}
+        </p>
+      </div>
       <NewKeyDialog open={creating} onOpenChange={setCreating} />
     </div>
   );
@@ -110,22 +131,19 @@ function KeyRow({ apiKey }: { readonly apiKey: ApiKey }) {
       className="flex h-row-touch shrink-0 items-center gap-4 border-b border-border px-3"
     >
       <span role="cell" className="flex min-w-40 grow basis-0 items-center gap-2.5">
-        <KeyRoundIcon aria-hidden className="size-[18px] shrink-0 text-text" />
+        <KeyRoundIcon aria-hidden className="size-4.5 shrink-0 text-text" />
         <span className="truncate font-sans text-base/sm font-medium text-text">{apiKey.name}</span>
       </span>
-      <span
-        role="cell"
-        className="w-[120px] shrink-0 truncate font-mono text-sm/xs text-text-muted"
-      >
+      <span role="cell" className="w-30 shrink-0 truncate font-mono text-sm/xs text-text-muted">
         {apiKey.prefix}…
       </span>
       <span
         role="cell"
-        className="hidden w-[120px] shrink-0 font-sans text-sm/xs text-text-muted md:block"
+        className="hidden w-30 shrink-0 font-sans text-sm/xs text-text-muted md:block"
       >
         {formatDate(apiKey.createdAt)}
       </span>
-      <span role="cell" className="hidden w-[140px] shrink-0 items-center gap-1.5 md:flex">
+      <span role="cell" className="hidden w-35 shrink-0 items-center gap-1.5 md:flex">
         {recent ? <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-success" /> : null}
         <span
           className={
@@ -135,7 +153,7 @@ function KeyRow({ apiKey }: { readonly apiKey: ApiKey }) {
           {apiKey.lastUsedAt === null ? "Never" : formatAgo(apiKey.lastUsedAt)}
         </span>
       </span>
-      <span role="cell" className="flex w-[72px] shrink-0 justify-end">
+      <span role="cell" className="flex w-18 shrink-0 justify-end">
         <button
           type="button"
           onClick={() => setConfirming(true)}

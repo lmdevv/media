@@ -4,13 +4,13 @@ import type { VariantProps } from "class-variance-authority";
 import type { ComponentProps } from "react";
 
 const badgeVariants = cva(
-  "inline-flex shrink-0 items-center rounded-[4px] px-1.5 font-mono text-xs/xs tracking-mono whitespace-nowrap uppercase",
+  "inline-flex shrink-0 items-center rounded-xs px-1.5 font-mono text-xs/xs tracking-mono whitespace-nowrap uppercase",
   {
     variants: {
       tone: {
-        accent: "bg-accent py-[3px] text-on-accent",
+        accent: "bg-accent py-0.75 text-on-accent",
         outline: "border border-border py-0.5 text-text-muted",
-        surface: "bg-surface py-[3px] text-text-muted",
+        surface: "bg-surface py-0.75 text-text-muted",
       },
     },
     defaultVariants: { tone: "outline" },

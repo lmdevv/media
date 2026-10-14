@@ -20,7 +20,7 @@ export function AuthLayout({
 }) {
   return (
     <div className="flex min-h-dvh bg-bg">
-      <div className="flex w-full shrink-0 flex-col justify-between gap-12 px-6 py-8 lg:w-[600px] lg:px-[72px] lg:py-12">
+      <div className="flex w-full shrink-0 flex-col justify-between gap-12 px-6 py-8 lg:w-150 lg:px-18 lg:py-12">
         <div className="flex items-center justify-between">
           <span className="font-mono text-md/base font-semibold text-text">[music]</span>
           <span className="font-mono text-xs/xs tracking-mono text-text-muted">{eyebrow}</span>

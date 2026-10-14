@@ -5,6 +5,7 @@ import { useRead } from "@music/sdk/react";
 import { Skeleton } from "@music/ui/components/skeleton";
 import { cn } from "@music/ui/lib/utils";
 import { Link, createFileRoute } from "@tanstack/react-router";
+import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { PlayIcon } from "lucide-react";
 
@@ -12,10 +13,19 @@ import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { AlbumCard, SectionHeader, usePlayTracks } from "@/components/library/cards";
 import { LikeButton } from "@/components/library/like-button";
 import { TrackMenu } from "@/components/playlists/track-menu";
+import { DetailError } from "@/components/route-error";
+import type { MissingCopy } from "@/components/route-error";
 import { placeholderColors } from "@/lib/art";
 import { formatDuration, plural } from "@/lib/format";
 
 const decodeArtistId = Schema.decodeUnknownSync(ArtistId);
+
+const MISSING: MissingCopy = {
+  title: "This artist isn't in your library anymore",
+  description:
+    "A rescan may have removed their songs, their folder was removed from [music], or the link is wrong.",
+  back: { to: "/artists", label: "Back to artists" },
+};
 
 export const Route = createFileRoute("/_app/artists/$artistId")({
   params: {
@@ -23,6 +33,7 @@ export const Route = createFileRoute("/_app/artists/$artistId")({
     stringify: (params) => ({ artistId: params.artistId }),
   },
   component: ArtistPage,
+  errorComponent: ArtistError,
 });
 
 function ArtistPage() {
@@ -33,7 +44,7 @@ function ArtistPage() {
   if (detail === undefined) {
     return (
       <div className="flex flex-col gap-8">
-        <Skeleton className="h-[300px] w-full rounded-none" />
+        <Skeleton className="h-75 w-full rounded-none" />
         <div className="px-12">
           <Skeleton className="h-4 w-48" />
         </div>
@@ -49,9 +60,9 @@ function ArtistPage() {
   return (
     <div className="flex flex-col gap-8 pb-12">
       <header
-        className="relative flex h-[260px] shrink-0 flex-col justify-end gap-3.5 overflow-hidden px-5 pb-7 lg:h-[300px] lg:px-12"
+        className="relative flex h-65 shrink-0 flex-col justify-end gap-3.5 overflow-hidden px-5 pb-7 lg:h-75 lg:px-12"
         style={{
-          backgroundImage: `linear-gradient(in oklab 180deg, oklab(14.5% 0 0 / 0%) 30%, oklab(14.5% 0 0 / 55%) 100%), linear-gradient(in oklab 120deg, oklab(34.8% 0 0) 0%, oklab(19.6% 0 0) 60%, ${from} 100%)`,
+          backgroundImage: `linear-gradient(in oklab 180deg, transparent 30%, color-mix(in oklab, var(--color-dark-hero-scrim) 55%, transparent) 100%), linear-gradient(in oklab 120deg, var(--color-dark-hero-start) 0%, var(--color-dark-hero-end) 60%, ${from} 100%)`,
         }}
       >
         {artist.artUrl === null ? null : (
@@ -61,7 +72,7 @@ function ArtistPage() {
             className="absolute inset-0 size-full object-cover opacity-60"
           />
         )}
-        <span className="relative font-mono text-xs/xs tracking-mono text-white/75 uppercase">
+        <span className="relative font-mono text-xs/xs tracking-mono text-dark-text/75 uppercase">
           Artist · {plural(albums.length, "album")} · {plural(songCount, "song")} in your library
         </span>
         <div className="relative flex items-center gap-4">
@@ -70,11 +81,11 @@ function ArtistPage() {
             aria-label={`Play ${artist.name}`}
             disabled={topTracks.length === 0}
             onClick={() => void play(topTracks)}
-            className="flex size-[52px] shrink-0 items-center justify-center rounded-full bg-accent text-on-accent outline-none hover:scale-105 focus-visible:ring-2 focus-visible:ring-white/60"
+            className="flex size-13 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent outline-none hover:scale-105 focus-visible:ring-2 focus-visible:ring-dark-text/60"
           >
             <PlayIcon className="size-5 translate-x-px" fill="currentColor" strokeWidth={0} />
           </button>
-          <h1 className="font-sans text-[34px] leading-[41px] font-heavy tracking-[-0.02em] text-white lg:text-display/display lg:tracking-display">
+          <h1 className="font-sans text-phone-large-title leading-10.25 font-heavy tracking-tighter text-dark-text lg:text-display/display lg:tracking-display">
             {artist.name}
           </h1>
         </div>
@@ -147,7 +158,7 @@ function TopSongRow({ track, onPlay }: { readonly track: Track; readonly onPlay:
 
   return (
     <div
-      className="group/row relative flex h-[52px] shrink-0 items-center gap-3 rounded-sm px-2 hover:bg-surface"
+      className="group/row relative flex h-13 shrink-0 items-center gap-3 rounded-sm px-2 hover:bg-surface"
       onDoubleClick={onPlay}
     >
       <button
@@ -156,7 +167,7 @@ function TopSongRow({ track, onPlay }: { readonly track: Track; readonly onPlay:
         onClick={onPlay}
         className="absolute inset-0 lg:hidden"
       />
-      <Artwork url={track.artUrl} seed={track.albumId} className="size-row rounded-[4px]">
+      <Artwork url={track.artUrl} seed={track.albumId} className="size-row rounded-xs">
         {current ? (
           <span className="absolute inset-0 flex items-end justify-center pb-2.5">
             <PlayingBars />
@@ -166,7 +177,7 @@ function TopSongRow({ track, onPlay }: { readonly track: Track; readonly onPlay:
             type="button"
             aria-label={`Play ${track.title}`}
             onClick={onPlay}
-            className="absolute inset-0 flex items-center justify-center bg-black/30 text-white outline-none pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+            className="absolute inset-0 flex items-center justify-center bg-dark-canvas/30 text-dark-text outline-none pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
           >
             <PlayIcon className="size-4" fill="currentColor" strokeWidth={0} />
           </button>
@@ -186,7 +197,7 @@ function TopSongRow({ track, onPlay }: { readonly track: Track; readonly onPlay:
           "relative hidden size-9 opacity-0 group-hover/row:opacity-100 lg:flex",
           track.liked && "opacity-100",
         )}
-        iconClassName="size-[18px]"
+        iconClassName="size-4.5"
       />
       <span className="hidden w-12 shrink-0 text-right font-mono text-sm/xs text-text-muted lg:block">
         {formatDuration(track.durationMs)}
@@ -197,4 +208,8 @@ function TopSongRow({ track, onPlay }: { readonly track: Track; readonly onPlay:
       />
     </div>
   );
+}
+
+function ArtistError(props: ErrorComponentProps) {
+  return <DetailError {...props} copy={MISSING} />;
 }

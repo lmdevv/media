@@ -56,7 +56,7 @@ function Libraries() {
         title="Libraries"
         lead="Folders [music] reads from. Files are never changed unless you or an agent run a file command."
         action={
-          <Button variant="solid" className="pr-[18px] pl-3.5" onClick={() => setAdding(true)}>
+          <Button variant="solid" className="pr-4.5 pl-3.5" onClick={() => setAdding(true)}>
             <PlusIcon strokeWidth={2} />
             Add folder
           </Button>
@@ -69,7 +69,7 @@ function Libraries() {
           <span className="font-sans text-md/base font-semibold text-text">
             No library folders yet
           </span>
-          <span className="max-w-[520px] font-sans text-base/base text-text-muted">
+          <span className="max-w-130 font-sans text-base/base text-text-muted">
             Add the folder where your music lives, such as a NAS mount. The first scan starts right
             away.
           </span>
@@ -217,11 +217,7 @@ function LibraryCard({
         )}
       </div>
       {percent === null ? null : (
-        <ProgressBar
-          percent={percent}
-          className="ml-8 h-[3px]"
-          label={`Scanning ${library.path}`}
-        />
+        <ProgressBar percent={percent} className="ml-8 h-0.75" label={`Scanning ${library.path}`} />
       )}
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent

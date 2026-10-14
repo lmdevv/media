@@ -45,7 +45,7 @@ function Frame({ children }: { readonly children: ReactNode }) {
           <ConnectionBanners />
           <main
             id="main"
-            className={`relative min-h-0 grow overflow-y-auto overscroll-contain ${hasTrack ? "pb-[200px]" : "pb-[140px]"} lg:pb-0`}
+            className={`relative min-h-0 grow overflow-y-auto overscroll-contain ${hasTrack ? "pb-50" : "pb-35"} lg:pb-0`}
           >
             {children}
           </main>

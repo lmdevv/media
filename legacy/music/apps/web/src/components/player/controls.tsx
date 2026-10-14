@@ -131,7 +131,7 @@ export function SkipButton({
 /** Shuffle toggle; accent when on. */
 export function ShuffleButton({
   className,
-  iconClassName = "size-[18px]",
+  iconClassName = "size-4.5",
 }: {
   readonly className?: string;
   readonly iconClassName?: string;
@@ -165,7 +165,7 @@ const REPEAT_LABEL = { off: "Repeat", all: "Repeat all", one: "Repeat one" } as 
 /** Repeat cycles off → all → one; accent when on, with the 1 glyph for repeat one. */
 export function RepeatButton({
   className,
-  iconClassName = "size-[18px]",
+  iconClassName = "size-4.5",
 }: {
   readonly className?: string;
   readonly iconClassName?: string;
@@ -266,7 +266,7 @@ export function Progress({
 /** Volume icon and slider; the icon mutes and unmutes. */
 export function Volume({
   className,
-  sliderClassName = "w-[88px]",
+  sliderClassName = "w-22",
   fillClassName = "bg-text",
 }: {
   readonly className?: string;

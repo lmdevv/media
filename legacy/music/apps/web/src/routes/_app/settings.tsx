@@ -11,10 +11,10 @@ function SettingsLayout() {
   const index = location.pathname.replace(/\/$/, "") === "/settings";
 
   return (
-    <div className="flex flex-col gap-7 px-5 pt-[max(16px,env(safe-area-inset-top))] pb-12 lg:px-12 lg:pt-row">
+    <div className="flex flex-col gap-7 px-5 pt-safe-top pb-12 lg:px-12 lg:pt-row">
       <PageHeader title="Settings" />
       <div className="flex gap-12">
-        <SettingsNav className="hidden w-[200px] shrink-0 lg:flex" />
+        <SettingsNav className="hidden w-50 shrink-0 lg:flex" />
         <div className={cn("flex min-w-0 grow flex-col gap-6", index && "lg:hidden")}>
           <Outlet />
         </div>

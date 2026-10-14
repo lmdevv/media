@@ -92,9 +92,9 @@ function SearchPage() {
     void navigate({ to: "/search", search: { q: value }, replace: true });
 
   return (
-    <div className="flex flex-col gap-5 px-5 pt-[max(16px,env(safe-area-inset-top))] lg:gap-8 lg:px-12 lg:pt-8">
-      <label className="hidden h-row-touch shrink-0 items-center gap-3.5 rounded-md border-[1.5px] border-transparent bg-surface px-[18px] has-focus-visible:border-accent lg:flex">
-        <SearchIcon aria-hidden className="size-[22px] text-text" />
+    <div className="flex flex-col gap-5 px-5 pt-safe-top lg:gap-8 lg:px-12 lg:pt-8">
+      <label className="hidden h-row-touch shrink-0 items-center gap-3.5 rounded-md border-field border-transparent bg-surface px-4.5 has-focus-visible:border-accent lg:flex">
+        <SearchIcon aria-hidden className="size-5.5 text-text" />
         <input
           id={SEARCH_INPUT_ID}
           ref={focusOnMount}
@@ -114,7 +114,7 @@ function SearchPage() {
           </span>
         )}
       </label>
-      <h1 className="font-sans text-[34px] leading-[41px] font-heavy tracking-[-0.02em] text-text lg:hidden">
+      <h1 className="font-sans text-phone-large-title leading-10.25 font-heavy tracking-tighter text-text lg:hidden">
         Search
       </h1>
 
@@ -257,12 +257,12 @@ function TopResultCard({
   );
 
   return (
-    <div className="relative flex h-[220px] flex-col justify-end gap-4 rounded-lg bg-surface p-5 hover:bg-border/60 dark:hover:bg-surface-raised">
+    <div className="relative flex h-55 flex-col justify-end gap-4 rounded-lg bg-surface p-5 hover:bg-border/60 dark:hover:bg-surface-raised">
       {card.link}
       {card.art}
       <div className="flex items-end justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate font-sans text-xl leading-[34px] font-heavy tracking-tight text-text">
+          <span className="truncate font-sans text-xl leading-8.5 font-heavy tracking-tight text-text">
             {card.title}
           </span>
           <span className="truncate font-sans text-sm/xs text-text-muted">{card.meta}</span>
@@ -273,7 +273,7 @@ function TopResultCard({
           onClick={card.play}
           className="relative flex size-11 shrink-0 items-center justify-center rounded-full bg-text text-text-inverse outline-none hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring/50"
         >
-          <PlayIcon className="size-[18px] translate-x-px" fill="currentColor" strokeWidth={0} />
+          <PlayIcon className="size-4.5 translate-x-px" fill="currentColor" strokeWidth={0} />
         </button>
       </div>
     </div>
@@ -295,18 +295,18 @@ function SongRow({
 
   return (
     <div
-      className="group/row relative flex h-[52px] shrink-0 items-center gap-3 rounded-sm px-2 hover:bg-surface"
+      className="group/row relative flex h-13 shrink-0 items-center gap-3 rounded-sm px-2 hover:bg-surface"
       onDoubleClick={() => void play(tracks, { index })}
     >
-      <Artwork url={track.artUrl} seed={track.albumId} className="size-row rounded-[4px]">
+      <Artwork url={track.artUrl} seed={track.albumId} className="size-row rounded-xs">
         <button
           type="button"
           aria-label={`Play ${track.title}`}
           onClick={() => void play(tracks, { index })}
           className={cn(
-            "absolute inset-0 flex items-center justify-center bg-black/30 text-white outline-none",
+            "absolute inset-0 flex items-center justify-center bg-dark-canvas/30 text-dark-text outline-none",
             current
-              ? "bg-black/35"
+              ? "bg-dark-canvas/35"
               : "pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100",
           )}
         >
@@ -348,7 +348,7 @@ function DesktopResults({
     <div className="hidden flex-col gap-8 lg:flex">
       <div className="flex gap-8">
         {top === null ? null : (
-          <section className="flex w-[380px] shrink-0 flex-col gap-3.5">
+          <section className="flex w-95 shrink-0 flex-col gap-3.5">
             <h2 className="font-sans text-lg/md font-semibold tracking-tight text-text">
               Top result
             </h2>
@@ -375,9 +375,9 @@ function DesktopResults({
                 key={album.id}
                 to="/albums/$albumId"
                 params={{ albumId: album.id }}
-                className="flex w-[168px] shrink-0 flex-col gap-2.5"
+                className="flex w-42 shrink-0 flex-col gap-2.5"
               >
-                <Artwork url={album.artUrl} seed={album.id} className="size-[168px] rounded-md" />
+                <Artwork url={album.artUrl} seed={album.id} className="size-42 rounded-md" />
                 <span className="flex flex-col gap-0.5">
                   <span className="truncate font-sans text-base/sm font-medium text-text">
                     {album.title}
@@ -400,9 +400,9 @@ function DesktopResults({
                 key={artist.id}
                 to="/artists/$artistId"
                 params={{ artistId: artist.id }}
-                className="flex w-[140px] shrink-0 flex-col items-center gap-2.5"
+                className="flex w-35 shrink-0 flex-col items-center gap-2.5"
               >
-                <Artwork url={artist.artUrl} seed={artist.id} round className="size-[140px]" />
+                <Artwork url={artist.artUrl} seed={artist.id} round className="size-35" />
                 <span className="max-w-full truncate font-sans text-base/sm font-medium text-text">
                   {artist.name}
                 </span>
@@ -459,7 +459,7 @@ function PhoneResults({ results }: { readonly results: SearchResults }) {
               onClick={() => void play(results.tracks, { index })}
               className="flex h-row-touch w-full items-center gap-3 text-left"
             >
-              <Artwork url={track.artUrl} seed={track.albumId} className="size-11 rounded-[4px]" />
+              <Artwork url={track.artUrl} seed={track.albumId} className="size-11 rounded-xs" />
               <span className="flex min-w-0 flex-col gap-px">
                 <span className="truncate font-sans text-md/base text-text">{track.title}</span>
                 <span className="truncate font-sans text-sm/xs text-text-muted">
@@ -479,7 +479,7 @@ function PhoneResults({ results }: { readonly results: SearchResults }) {
               params={{ albumId: album.id }}
               className="flex h-row-touch items-center gap-3"
             >
-              <Artwork url={album.artUrl} seed={album.id} className="size-11 rounded-[4px]" />
+              <Artwork url={album.artUrl} seed={album.id} className="size-11 rounded-xs" />
               <span className="flex min-w-0 flex-col gap-px">
                 <span className="truncate font-sans text-md/base text-text">{album.title}</span>
                 <span className="truncate font-sans text-sm/xs text-text-muted">

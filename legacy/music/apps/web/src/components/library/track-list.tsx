@@ -25,19 +25,19 @@ const headerCell = "font-mono text-xs/xs tracking-mono text-text-muted";
 const rowClassName = (variant: TrackListVariant): string =>
   cn(
     "group/row relative flex shrink-0 items-center rounded-sm select-none",
-    "h-12 border-t-[0.5px] border-border pr-1 lg:gap-3 lg:border-t-0 lg:px-2",
-    variant === "album" ? "lg:h-row" : "gap-3 lg:h-[52px]",
+    "h-12 border-t-hairline border-border pr-1 lg:gap-3 lg:border-t-0 lg:px-2",
+    variant === "album" ? "lg:h-row" : "gap-3 lg:h-13",
     "hover:bg-surface has-[[data-popup-open]]:bg-surface",
   );
 
 /** The track number column of the album variant. */
-const numberCell = "w-[30px] shrink-0 lg:w-7";
+const numberCell = "w-7.5 shrink-0 lg:w-7";
 
 /** A song's cover in the list variant. */
-const coverClassName = "size-11 rounded-[4px] lg:size-row";
+const coverClassName = "size-11 rounded-xs lg:size-row";
 
 /** The format column of the list variant. */
-const formatCell = "hidden w-[110px] shrink-0 font-mono text-xs/xs text-text-muted lg:block";
+const formatCell = "hidden w-27.5 shrink-0 font-mono text-xs/xs text-text-muted lg:block";
 
 /**
  * Plays a song from a list on double click (desktop) or tap (phone), queueing the list's songs
@@ -118,7 +118,7 @@ export function TrackList({
             <span role="columnheader" className={cn(headerCell, "grow-[1.4] basis-0")}>
               ALBUM
             </span>
-            <span role="columnheader" className={cn(headerCell, "w-[110px] shrink-0")}>
+            <span role="columnheader" className={cn(headerCell, "w-27.5 shrink-0")}>
               FORMAT
             </span>
           </>
@@ -181,7 +181,7 @@ function TrackRow({
       }}
       // Transparent until hovered or focused, never display:none, so keyboards and screen readers
       // reach it.
-      className="absolute inset-0 flex items-center justify-center rounded-[4px] outline-none pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="absolute inset-0 flex items-center justify-center rounded-xs outline-none pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       <PlayIcon className="size-3.5 text-text" fill="currentColor" strokeWidth={0} />
     </button>
@@ -194,13 +194,6 @@ function TrackRow({
       onDoubleClick={onPlay}
       className={rowClassName(variant)}
     >
-      {/* Phones tap anywhere on the row to play. */}
-      <button
-        type="button"
-        aria-label={`Play ${track.title}`}
-        onClick={onPlay}
-        className="absolute inset-0 lg:hidden"
-      />
       {variant === "album" ? (
         <span
           role="cell"
@@ -224,7 +217,7 @@ function TrackRow({
         <span role="cell" className="relative shrink-0">
           <Artwork url={track.artUrl} seed={track.albumId} className={coverClassName}>
             {playing ? (
-              <span className="absolute inset-0 flex items-end justify-center bg-black/35 pb-2.5">
+              <span className="absolute inset-0 flex items-end justify-center bg-dark-canvas/35 pb-2.5">
                 <PlayingBars />
               </span>
             ) : (
@@ -241,6 +234,14 @@ function TrackRow({
           variant === "album" ? "grow" : "grow lg:grow-2 lg:basis-0",
         )}
       >
+        {/* Phones tap anywhere on the row to play. The cell isn't positioned, so the button covers
+            the row while staying inside a cell, as the table role requires. */}
+        <button
+          type="button"
+          aria-label={`Play ${track.title}`}
+          onClick={onPlay}
+          className="absolute inset-0 lg:hidden"
+        />
         <span
           className={cn(
             "truncate font-sans text-text",
@@ -279,7 +280,7 @@ function TrackRow({
             "size-9 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100",
             track.liked && "opacity-100",
           )}
-          iconClassName="size-[18px]"
+          iconClassName="size-4.5"
         />
       </span>
       <span
@@ -379,10 +380,10 @@ export function TrackListSkeleton({ rows = 8 }: { readonly rows?: number }) {
             <Skeleton className="h-2.5 w-3" />
           </span>
           <span className="grow-2 basis-0">
-            <Skeleton className="h-2.5 w-[180px] max-w-full" />
+            <Skeleton className="h-2.5 w-45 max-w-full" />
           </span>
           <span className="hidden grow-[1.4] basis-0 lg:block">
-            <Skeleton className="h-2.5 w-[110px]" />
+            <Skeleton className="h-2.5 w-27.5" />
           </span>
           <span className="flex w-row-touch shrink-0 justify-end">
             <Skeleton className="h-2.5 w-8" />

@@ -79,7 +79,8 @@ export interface PlayerActions {
   readonly setRepeat: (mode: RepeatMode) => Promise<void>;
   readonly setVolume: (volume: number) => Promise<void>;
   readonly addToQueue: (trackIds: ReadonlyArray<TrackId>, next?: boolean) => Promise<void>;
-  readonly removeFromQueue: (index: number) => Promise<void>;
+  /** Removes the song at `index`; resolves whether the removal landed (a failure sets `error`). */
+  readonly removeFromQueue: (index: number) => Promise<boolean>;
   /** Moves playback to this browser. */
   readonly playHere: () => Promise<void>;
   readonly transferTo: (deviceId: DeviceId) => Promise<void>;
@@ -275,7 +276,7 @@ export function PlayerProvider({
             toFront === undefined ? { trackIds: ids } : { trackIds: ids, next: toFront },
           ),
         ),
-      removeFromQueue: (index) => controller.capture(client.run("queue.remove", { index })),
+      removeFromQueue: (index) => controller.attempt(client.run("queue.remove", { index })),
       playHere: () => controller.playHere(),
       transferTo: (deviceId) => controller.transferTo(deviceId),
       setQuality: (quality) => {

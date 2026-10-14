@@ -129,7 +129,7 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
       disabled={props.disabled}
       onClick={props.onSelect}
       className={cn(
-        "flex w-full shrink-0 items-center gap-3 rounded-md border-[1.5px] border-transparent px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-(--opacity-disabled)",
+        "flex w-full shrink-0 items-center gap-3 rounded-md border-field border-transparent px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-(--opacity-disabled)",
         touch ? "h-16 gap-3.5 px-3.5" : "h-row-touch",
         props.active && "bg-surface",
         props.isPending && "border-accent",
@@ -139,7 +139,7 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
       <props.Icon
         className={cn(
           "shrink-0",
-          touch ? "size-6" : "size-[22px]",
+          touch ? "size-6" : "size-5.5",
           props.active ? "text-text" : "text-text-muted",
         )}
       />
@@ -166,7 +166,7 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
     <div
       role="menu"
       aria-label="Play on"
-      className="flex max-h-[min(440px,60dvh)] flex-col gap-0.5 overflow-y-auto overscroll-contain"
+      className="flex max-h-dvh-device-list flex-col gap-0.5 overflow-y-auto overscroll-contain"
     >
       {row("here", {
         name: "This browser",

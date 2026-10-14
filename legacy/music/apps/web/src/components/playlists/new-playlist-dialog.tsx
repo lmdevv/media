@@ -13,10 +13,11 @@ import type { FormEvent } from "react";
 
 import { useUi } from "@/components/shell/ui-state";
 import { useAction } from "@/lib/action";
-import { formatCount, plural } from "@/lib/format";
+import { formatCount } from "@/lib/format";
 import { readPages } from "@/lib/read-pages";
 
-type StartWith = "nothing" | "selection" | "queue" | "liked";
+import { startsWith } from "./start-with";
+import type { StartWith } from "./start-with";
 
 /** The New playlist dialog from Paper (06 · 02): a name and what the playlist starts with. */
 export function NewPlaylistDialog() {
@@ -137,7 +138,9 @@ function NewPlaylistForm({
             </span>
           </Button>
         </DialogFooter>
-        <span className="sr-only">{plural(seed.length, "song")} selected</span>
+        <span role="status" className="sr-only">
+          {startsWith(startWith, seed.length, player.queue.length)}
+        </span>
       </form>
     </DialogContent>
   );

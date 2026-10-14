@@ -248,6 +248,19 @@ describe("PlaybackController", () => {
     vi.unstubAllGlobals();
   });
 
+  it("tells attempt's caller whether a server call landed, and shows a failure as the error", async () => {
+    const { controller, stop } = await setup({ gapless: false });
+
+    await expect(controller.attempt(Promise.resolve({ ok: true }))).resolves.toBe(true);
+    expect(controller.getSnapshot().error).toBeNull();
+
+    await expect(
+      controller.attempt(Promise.reject(new Error("queue.remove failed"))),
+    ).resolves.toBe(false);
+    expect(controller.getSnapshot().error).not.toBeNull();
+    stop();
+  });
+
   it("does not report a pause that a session snapshot ordered", async () => {
     const { controller, mutations, stop } = await setup({ gapless: false });
     controller.sync(session(true, 1));

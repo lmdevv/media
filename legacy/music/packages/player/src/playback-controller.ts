@@ -419,10 +419,22 @@ export class PlaybackController {
    * handlers can fire and forget.
    */
   async capture(call: Promise<unknown>): Promise<void> {
+    await this.attempt(call);
+  }
+
+  /**
+   * Like {@link capture}, for callers that act on the outcome: resolves `true` once the call
+   * landed, or `false` after a failure, which still becomes the player `error`.
+   */
+  async attempt(call: Promise<unknown>): Promise<boolean> {
     try {
       await call;
+
+      return true;
     } catch (error) {
       this.#update({ error: error instanceof Error ? errorMessage(error) : String(error) });
+
+      return false;
     }
   }
 

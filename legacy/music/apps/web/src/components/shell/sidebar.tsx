@@ -56,7 +56,7 @@ export function Sidebar() {
       className="mb-2 hidden w-sidebar shrink-0 flex-col gap-6 rounded-lg border border-border bg-surface px-3 pt-5 pb-4 lg:flex dark:mb-0 dark:rounded-md dark:border-transparent dark:bg-bg"
     >
       <div className="flex h-7 shrink-0 items-center justify-between px-2.5">
-        <Link to="/" className="font-mono text-md/base font-semibold tracking-[-0.01em] text-text">
+        <Link to="/" className="font-mono text-md/base font-semibold tracking-snug text-text">
           [music]
         </Link>
         <Tooltip label="Search and commands" shortcut={`${MOD}K`} side="right">
@@ -114,7 +114,7 @@ export function Sidebar() {
                 <Artwork
                   url={playlist.artUrls[0] ?? null}
                   seed={playlist.id}
-                  className="size-8 rounded-[4px]"
+                  className="size-8 rounded-xs"
                 />
                 <span className="flex min-w-0 flex-col gap-px">
                   <span className="truncate font-sans text-base/sm text-text">{playlist.name}</span>
@@ -136,10 +136,7 @@ export function Sidebar() {
           {initial(name)}
         </span>
         <span className="grow truncate font-sans text-base/sm text-text">{name}</span>
-        <SlidersHorizontalIcon
-          aria-label="Settings"
-          className={cn("size-[18px] text-text-muted")}
-        />
+        <SlidersHorizontalIcon aria-label="Settings" className={cn("size-4.5 text-text-muted")} />
       </Link>
     </nav>
   );

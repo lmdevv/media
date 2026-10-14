@@ -27,7 +27,7 @@ export function PopoverContent({
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(
-            "flex origin-(--transform-origin) flex-col rounded-lg border border-border bg-surface-raised text-text shadow-[0_24px_64px_color-mix(in_oklab,var(--color-text)_16%,transparent)] outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95",
+            "flex origin-(--transform-origin) flex-col rounded-lg border border-border bg-surface-raised text-text shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95",
             className,
           )}
           {...props}

@@ -12,7 +12,7 @@ import { useUi } from "./ui-state";
 
 /** The frosted capsule surface Paper draws for phone bars; code adds the blur. */
 export const glassClassName =
-  "border-[0.5px] border-text/10 bg-surface-raised/78 shadow-[0_8px_28px_rgb(0_0_0/12%)] backdrop-blur-xl backdrop-saturate-150 dark:shadow-[0_8px_28px_rgb(0_0_0/50%)]";
+  "border-hairline border-text/10 bg-surface-raised/78 shadow-glass backdrop-blur-xl backdrop-saturate-150";
 
 function HomeGlyph({ filled }: { readonly filled: boolean }) {
   return (
@@ -110,7 +110,7 @@ function MiniPlayer() {
   return (
     <div
       className={cn(
-        "flex h-row-touch shrink-0 items-center gap-3 rounded-[28px] pr-[18px] pl-2",
+        "flex h-row-touch shrink-0 items-center gap-3 rounded-full pr-4.5 pl-2",
         glassClassName,
       )}
     >
@@ -126,18 +126,18 @@ function MiniPlayer() {
       >
         <Artwork url={track.artUrl} seed={track.albumId} className="size-row rounded-md" />
         <span className="flex min-w-0 grow flex-col">
-          <span className="truncate font-sans text-[15px] leading-5 font-medium text-text">
+          <span className="truncate font-sans text-phone-subhead leading-5 font-medium text-text">
             {track.title}
             {device === null ? null : (
               <span className="font-normal text-text-muted"> · {track.artist}</span>
             )}
           </span>
           {device === null ? (
-            <span className="truncate font-sans text-sm leading-[17px] text-text-muted">
+            <span className="truncate font-sans text-sm leading-4.25 text-text-muted">
               {track.artist}
             </span>
           ) : (
-            <span className="flex min-w-0 items-center gap-1 font-sans text-sm leading-[17px] font-medium text-accent">
+            <span className="flex min-w-0 items-center gap-1 font-sans text-sm leading-4.25 font-medium text-accent">
               <device.Icon aria-hidden className="size-3.5 shrink-0" />
               <span className="truncate">Playing on {device.name}</span>
             </span>
@@ -151,9 +151,9 @@ function MiniPlayer() {
         className="flex size-9 items-center justify-center text-text"
       >
         {playing ? (
-          <PhonePauseGlyph className="h-[22px] w-5" />
+          <PhonePauseGlyph className="h-5.5 w-5" />
         ) : (
-          <PhonePlayGlyph className="h-[22px] w-5" />
+          <PhonePlayGlyph className="h-5.5 w-5" />
         )}
       </button>
       <button
@@ -162,7 +162,7 @@ function MiniPlayer() {
         onClick={() => perform(player.next())}
         className="flex size-9 items-center justify-center text-text"
       >
-        <PhoneSkipGlyph direction="next" className="h-[18px] w-[26px]" />
+        <PhoneSkipGlyph direction="next" className="h-4.5 w-6.5" />
       </button>
     </div>
   );
@@ -184,13 +184,13 @@ function Tab({
       to={to}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex h-[54px] grow basis-0 flex-col items-center justify-center gap-0.5 rounded-[27px] outline-none",
+        "flex h-13.5 grow basis-0 flex-col items-center justify-center gap-0.5 rounded-full outline-none",
         active ? "bg-text/8 text-accent" : "text-text",
       )}
     >
       {icon}
       <span
-        className={cn("font-sans text-[10px] leading-3", active ? "font-semibold" : "font-medium")}
+        className={cn("font-sans text-3xs leading-3", active ? "font-semibold" : "font-medium")}
       >
         {label}
       </span>
@@ -211,7 +211,7 @@ function PhoneSearchField() {
   return (
     <label
       className={cn(
-        "flex h-[62px] min-w-0 grow items-center gap-2.5 rounded-[31px] px-[18px]",
+        "flex h-15.5 min-w-0 grow items-center gap-2.5 rounded-full px-4.5",
         glassClassName,
       )}
     >
@@ -225,7 +225,7 @@ function PhoneSearchField() {
         onChange={(event) =>
           void navigate({ to: "/search", search: { q: event.target.value }, replace: true })
         }
-        className="h-full min-w-0 grow bg-transparent font-sans text-[17px] leading-[22px] text-text outline-none placeholder:text-text-muted [&::-webkit-search-cancel-button]:hidden"
+        className="h-full min-w-0 grow bg-transparent font-sans text-phone-body leading-5.5 text-text outline-none placeholder:text-text-muted [&::-webkit-search-cancel-button]:hidden"
       />
       {query.length > 0 ? (
         <button
@@ -259,7 +259,7 @@ export function PhoneChrome() {
   const home = !onSearch && !playlists && !library && !path.startsWith("/settings");
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-col gap-2.5 bg-linear-to-b from-bg/0 via-bg/85 via-45% to-bg px-4 pt-row pb-[max(26px,env(safe-area-inset-bottom))] lg:hidden [&>*]:pointer-events-auto">
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-col gap-2.5 bg-linear-to-b from-bg/0 via-bg/85 via-45% to-bg px-4 pt-row pb-safe-bottom lg:hidden [&>*]:pointer-events-auto">
       <MiniPlayer />
       <nav aria-label="Main" className="flex items-center gap-2.5">
         {onSearch ? (
@@ -268,7 +268,7 @@ export function PhoneChrome() {
               to="/"
               aria-label="Home"
               className={cn(
-                "flex size-[62px] shrink-0 items-center justify-center rounded-[31px] text-text",
+                "flex size-15.5 shrink-0 items-center justify-center rounded-full text-text",
                 glassClassName,
               )}
             >
@@ -278,9 +278,7 @@ export function PhoneChrome() {
           </>
         ) : (
           <>
-            <div
-              className={cn("flex h-[62px] grow items-center rounded-[31px] p-1", glassClassName)}
-            >
+            <div className={cn("flex h-15.5 grow items-center rounded-full p-1", glassClassName)}>
               <Tab to="/" label="Home" icon={<HomeGlyph filled={home} />} active={home} />
               <Tab
                 to="/playlists"
@@ -294,7 +292,7 @@ export function PhoneChrome() {
               to="/search"
               aria-label="Search"
               className={cn(
-                "flex size-[62px] shrink-0 items-center justify-center rounded-[31px] text-text",
+                "flex size-15.5 shrink-0 items-center justify-center rounded-full text-text",
                 glassClassName,
               )}
             >
