@@ -12,8 +12,8 @@ export const Route = createFileRoute("/_app/albums/")({ component: AlbumsPage })
 
 const PAGE_SIZE = 48;
 
-const useAlbumPage = (cursor: string | null): PageResult<Album> | undefined =>
-  useRead("albums.list", { cursor, limit: PAGE_SIZE });
+const useAlbumPage = (cursor: string | null, end: string | null): PageResult<Album> | undefined =>
+  useRead("albums.list", { cursor, end, limit: PAGE_SIZE });
 
 const skeleton = Array.from({ length: 12 }, (_, index) => (
   <div key={`skeleton-${index}`} className="flex flex-col gap-2.5">

@@ -83,12 +83,17 @@ const useEntityOptions = (
         });
       }
 
-      if (many && playlist !== undefined && playlist.items.length > 0) {
+      // Songs whose file is gone can't play, so the option leaves them out.
+      const playable = (playlist?.items ?? []).flatMap((item) =>
+        item.available ? [item.track.id] : [],
+      );
+
+      if (many && playlist !== undefined && playable.length > 0) {
         options.push({
           key: "playlist",
-          value: playlist.items.map((item) => item.track.id),
+          value: playable,
           label: playlist.playlist.name,
-          detail: `Playlist in view · ${playlist.items.length} songs`,
+          detail: `Playlist in view · ${playable.length} songs`,
         });
       }
 

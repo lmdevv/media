@@ -21,6 +21,8 @@
     "@music/config": "workspace:*",
     "@music/sdk": "workspace:*",
     "@types/node": "catalog:",
+    "convex-test": "0.0.61",
+    "fast-check": "^4.10.2",
     "typescript": "catalog:",
     "vitest": "5.0.3"
   }

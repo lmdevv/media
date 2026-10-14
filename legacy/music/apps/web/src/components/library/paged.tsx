@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { splitChain } from "./split-chain";
+
 /** One page from a cursor-paginated command. */
 export interface PageResult<Item> {
   readonly items: ReadonlyArray<Item>;
@@ -39,7 +41,11 @@ export const usePageChain = () => {
     setCursors((list) => (list.includes(next) ? list : [...list, next]));
   }, []);
 
-  const report = useCallback((cursor: string | null, items: number, done: boolean) => {
+  const report = useCallback((cursor: string | null, page: PageResult<unknown>) => {
+    const { items: shown, done, cursor: next } = page;
+    const items = shown.length;
+
+    setCursors((list) => splitChain(list, cursor, next));
     setReports((current) => {
       const previous = current.get(keyOf(cursor));
 
@@ -57,18 +63,30 @@ export const usePageChain = () => {
   };
 };
 
-/** Tells the chain what `page` shows once it loads or changes. */
+/**
+ * The page at `cursor`, kept on screen while it re-subscribes. A page gets `end` once the page
+ * after it loads, so it keeps covering the same range as rows are added; changing it starts a new
+ * subscription, and showing the previous result meanwhile keeps the list from flashing.
+ */
+export const useHeldPage = <Page,>(page: Page | undefined): Page | undefined => {
+  const [held, setHeld] = useState(page);
+
+  // Updating state while rendering, as React documents for values that follow a prop: the render
+  // restarts at once, with no effect and no extra frame.
+  if (page !== undefined && page !== held) setHeld(page);
+
+  return page ?? held;
+};
+
+/** Tells the chain what `page` shows, and where it ends, once it loads or changes. */
 export const useReportPage = (
   cursor: string | null,
   page: PageResult<unknown> | undefined,
-  report: (cursor: string | null, items: number, done: boolean) => void,
+  report: (cursor: string | null, page: PageResult<unknown>) => void,
 ): void => {
-  const items = page?.items.length;
-  const done = page?.done;
-
   useEffect(() => {
-    if (items !== undefined && done !== undefined) report(cursor, items, done);
-  }, [cursor, items, done, report]);
+    if (page !== undefined) report(cursor, page);
+  }, [cursor, page, report]);
 };
 
 /**
@@ -82,7 +100,7 @@ export function Paged<Item>({
   skeleton,
   empty,
 }: {
-  readonly usePage: (cursor: string | null) => PageResult<Item> | undefined;
+  readonly usePage: (cursor: string | null, end: string | null) => PageResult<Item> | undefined;
   readonly renderItem: (item: Item) => ReactNode;
   readonly skeleton: ReactNode;
   readonly empty?: ReactNode;
@@ -95,6 +113,7 @@ export function Paged<Item>({
         <Page
           key={keyOf(cursor)}
           cursor={cursor}
+          end={chain.cursors[index + 1] ?? null}
           last={index === chain.cursors.length - 1}
           usePage={usePage}
           renderItem={renderItem}
@@ -110,6 +129,7 @@ export function Paged<Item>({
 
 function Page<Item>({
   cursor,
+  end,
   last,
   usePage,
   renderItem,
@@ -118,14 +138,16 @@ function Page<Item>({
   onReport,
 }: {
   readonly cursor: string | null;
+  /** Where the next page starts, once it exists. */
+  readonly end: string | null;
   readonly last: boolean;
-  readonly usePage: (cursor: string | null) => PageResult<Item> | undefined;
+  readonly usePage: (cursor: string | null, end: string | null) => PageResult<Item> | undefined;
   readonly renderItem: (item: Item) => ReactNode;
   readonly skeleton: ReactNode;
   readonly onMore: (cursor: string) => void;
-  readonly onReport: (cursor: string | null, items: number, done: boolean) => void;
+  readonly onReport: (cursor: string | null, page: PageResult<unknown>) => void;
 }) {
-  const page = usePage(cursor);
+  const page = useHeldPage(usePage(cursor, end));
   useReportPage(cursor, page, onReport);
   const sentinel = useRef<HTMLDivElement>(null);
   const more = page !== undefined && !page.done && last ? page.cursor : null;

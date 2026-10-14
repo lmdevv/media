@@ -43,7 +43,10 @@ export default defineSchema({
     acceptedBy: v.optional(v.id("users")),
     acceptedAt: v.optional(v.number()),
     revoked: v.boolean(),
-  }).index("by_code", ["code"]),
+  })
+    .index("by_code", ["code"])
+    .index("by_expires", ["expiresAt"])
+    .index("by_accepted", ["acceptedAt"]),
 
   apiKeys: defineTable({
     userId: v.id("users"),
@@ -57,7 +60,8 @@ export default defineSchema({
     sessionId: v.optional(v.id("authSessions")),
   })
     .index("by_hash", ["hash"])
-    .index("by_user", ["userId"]),
+    .index("by_user", ["userId"])
+    .index("by_revoked", ["revokedAt"]),
 
   libraries: defineTable({
     name: v.string(),
@@ -108,7 +112,7 @@ export default defineSchema({
     .index("by_library_artist_key", ["libraryId", "artistId", "key"])
     .index("by_artist", ["artistId"])
     .index("by_added", ["addedAt"])
-    .index("by_key", ["key"])
+    .index("by_library_added", ["libraryId", "addedAt"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["libraryId"] }),
 
   tracks: defineTable({
@@ -139,6 +143,7 @@ export default defineSchema({
     .index("by_album", ["albumId", "discNumber", "trackNumber"])
     .index("by_artist", ["artistId"])
     .index("by_title", ["missing", "titleKey"])
+    .index("by_library_title", ["libraryId", "missing", "titleKey"])
     .searchIndex("search_text", {
       searchField: "searchText",
       filterFields: ["libraryId", "missing"],
@@ -157,21 +162,26 @@ export default defineSchema({
     playlistId: v.id("playlists"),
     trackId: v.id("tracks"),
     position: v.number(),
-  }).index("by_playlist", ["playlistId", "position"]),
+  })
+    .index("by_playlist", ["playlistId", "position"])
+    .index("by_track", ["trackId"]),
 
   likes: defineTable({
     userId: v.id("users"),
     trackId: v.id("tracks"),
   })
     .index("by_user_track", ["userId", "trackId"])
-    .index("by_user", ["userId"]),
+    .index("by_user", ["userId"])
+    .index("by_track", ["trackId"]),
 
   history: defineTable({
     userId: v.id("users"),
     trackId: v.id("tracks"),
     albumId: v.id("albums"),
     deviceId: v.string(),
-  }).index("by_user", ["userId"]),
+  })
+    .index("by_user", ["userId"])
+    .index("by_track", ["trackId"]),
 
   devices: defineTable({
     userId: v.id("users"),
@@ -184,19 +194,44 @@ export default defineSchema({
     .index("by_user_last_seen", ["userId", "lastSeenAt"])
     .index("by_last_seen", ["lastSeenAt"]),
 
+  /**
+   * Where a user's playback is: the device, the position, and the volume. Players report the
+   * position every few seconds, so these fields live apart from the queue: a report rewrites only
+   * this row, and nothing that reads the queue runs again.
+   */
   playbackSessions: defineTable({
     userId: v.id("users"),
     activeDeviceId: v.optional(v.string()),
+    positionMs: v.number(),
+    playing: v.boolean(),
+    updatedAt: v.number(),
+    volume: v.number(),
+    /** When a command last moved playback to another song (play, skip, jump, remove). */
+    movedAt: v.optional(v.number()),
+    /**
+     * Queue fields from before the queue had its own row (`playbackQueues`). The next write to a
+     * user's queue, or the `splitPlaybackQueues` migration, moves them there and clears them.
+     */
+    queue: v.optional(v.array(v.id("tracks"))),
+    unshuffled: v.optional(v.array(v.id("tracks"))),
+    index: v.optional(v.number()),
+    shuffle: v.optional(v.boolean()),
+    repeat: v.optional(repeatMode),
+    reportedTrackId: v.optional(v.id("tracks")),
+  })
+    .index("by_user", ["userId"])
+    .index("by_playing", ["playing"]),
+
+  /** A user's queue and play order. It changes when the song changes, not with the position. */
+  playbackQueues: defineTable({
+    userId: v.id("users"),
     queue: v.array(v.id("tracks")),
     /** The queue before shuffle, restored when shuffle turns off. */
     unshuffled: v.optional(v.array(v.id("tracks"))),
     index: v.number(),
-    positionMs: v.number(),
-    playing: v.boolean(),
-    updatedAt: v.number(),
     shuffle: v.boolean(),
     repeat: repeatMode,
-    volume: v.number(),
+    /** The song whose play history last recorded; cleared when a song starts again. */
     reportedTrackId: v.optional(v.id("tracks")),
   }).index("by_user", ["userId"]),
 
@@ -213,8 +248,16 @@ export default defineSchema({
     leaseUntil: v.optional(v.number()),
     startedAt: v.optional(v.number()),
     finishedAt: v.optional(v.number()),
+    /**
+     * How many leases in a row expired before the worker saved a single batch (`done` is 0 when a
+     * lease ends, since claiming resets it and it counts saved files). A file that crashes the
+     * scanner stops it before its batch saves every time, so the job fails after a few; a scan
+     * that restarts for other reasons (a deploy) still saves batches and keeps retrying.
+     */
+    stalls: v.optional(v.number()),
   })
     .index("by_status", ["status"])
+    .index("by_status_finished", ["status", "finishedAt"])
     .index("by_library_status", ["libraryId", "status"]),
 
   /** Progress of each data migration in `migrations.ts`, so an interrupted one resumes. */

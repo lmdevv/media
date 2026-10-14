@@ -102,6 +102,12 @@ const liked: Column = {
   cell: (row) => (row["liked"] === true ? "♥" : ""),
 };
 
+/** Marks a playlist entry whose file is gone; it stays listed so it can be removed. */
+const unavailable: Column = {
+  header: "STATUS",
+  cell: (row) => (row["available"] === false ? "unavailable" : ""),
+};
+
 const progress: Column = {
   header: "PROGRESS",
   cell: (row) => {
@@ -167,6 +173,7 @@ const presets = new Map<SchemaAST.AST, ReadonlyArray<Column>>([
       field("TITLE", "track", "title"),
       field("ARTIST", "track", "artist"),
       field("TIME", "track", "durationMs"),
+      unavailable,
     ],
   ],
   [

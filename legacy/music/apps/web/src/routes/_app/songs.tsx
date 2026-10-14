@@ -1,4 +1,3 @@
-import type { Track } from "@music/commands/models";
 import { useRead, useReadOnce } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
 import { Input } from "@music/ui/components/input";
@@ -7,10 +6,12 @@ import { SearchIcon, ShuffleIcon } from "lucide-react";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 
 import { PageHeader, usePlayTracks } from "@/components/library/cards";
-import { usePageChain, useReportPage } from "@/components/library/paged";
+import { useHeldPage, usePageChain, useReportPage } from "@/components/library/paged";
+import type { PageResult } from "@/components/library/paged";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { toastFailure } from "@/lib/action";
 import { formatTotal, plural } from "@/lib/format";
+import { readPages } from "@/lib/read-pages";
 
 export const Route = createFileRoute("/_app/songs")({ component: SongsPage });
 
@@ -30,18 +31,7 @@ function SongsPage() {
     setShuffling(true);
 
     try {
-      // Each page request needs the previous page's cursor, so pages load one after another.
-      const collect = async (
-        cursor: string | null,
-        loaded: ReadonlyArray<Track>,
-      ): Promise<ReadonlyArray<Track>> => {
-        const page = await readPage({ cursor, limit: 200 });
-        const tracks = [...loaded, ...page.items];
-
-        return page.done || tracks.length >= SHUFFLE_LIMIT ? tracks : collect(page.cursor, tracks);
-      };
-
-      const tracks = await collect(null, []);
+      const tracks = await readPages((cursor) => readPage({ cursor, limit: 200 }), SHUFFLE_LIMIT);
 
       await play(tracks, { shuffle: true });
     } catch (cause) {
@@ -122,6 +112,7 @@ function AllSongs() {
         <SongPage
           key={cursor ?? "first"}
           cursor={cursor}
+          end={chain.cursors[index + 1] ?? null}
           header={index === chain.firstFilled}
           last={index === chain.cursors.length - 1}
           onMore={chain.more}
@@ -139,19 +130,22 @@ function AllSongs() {
 
 function SongPage({
   cursor,
+  end,
   header,
   last,
   onMore,
   onReport,
 }: {
   readonly cursor: string | null;
+  /** Where the next page starts, once it exists. */
+  readonly end: string | null;
   /** The first page that shows songs carries the list's column header. */
   readonly header: boolean;
   readonly last: boolean;
   readonly onMore: (cursor: string) => void;
-  readonly onReport: (cursor: string | null, items: number, done: boolean) => void;
+  readonly onReport: (cursor: string | null, page: PageResult<unknown>) => void;
 }) {
-  const page = useRead("tracks.list", { cursor, limit: PAGE_SIZE });
+  const page = useHeldPage(useRead("tracks.list", { cursor, end, limit: PAGE_SIZE }));
   useReportPage(cursor, page, onReport);
   const sentinel = useRef<HTMLDivElement>(null);
   const more = page !== undefined && !page.done && last ? page.cursor : null;

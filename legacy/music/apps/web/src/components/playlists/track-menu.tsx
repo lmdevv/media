@@ -203,12 +203,15 @@ export function TrackMenu({
   extra,
   align = "end",
   className,
+  playable = true,
 }: {
   readonly track: Track;
   readonly trigger?: ReactNode;
   readonly extra?: ReactNode;
   readonly align?: "start" | "end";
   readonly className?: string;
+  /** False for a song whose file is gone: the menu leaves out the queue actions. */
+  readonly playable?: boolean;
 }) {
   const navigate = useNavigate();
   const { playNext, addToQueue } = useQueueActions();
@@ -224,9 +227,9 @@ export function TrackMenu({
     const key = event.key.toLowerCase();
 
     const action =
-      key === "enter" && event.shiftKey
+      playable && key === "enter" && event.shiftKey
         ? () => playNext([track])
-        : key === "q"
+        : playable && key === "q"
           ? () => addToQueue([track])
           : key === "l"
             ? () => void toggle()
@@ -253,13 +256,17 @@ export function TrackMenu({
           {trigger ?? <MoreHorizontalIcon className="size-5" />}
         </DropdownMenuTrigger>
         <DropdownMenuContent align={align} onKeyDownCapture={onShortcut}>
-          <DropdownMenuItem shortcut="⇧ ↵" onClick={() => playNext([track])}>
-            Play next
-          </DropdownMenuItem>
-          <DropdownMenuItem shortcut="Q" onClick={() => addToQueue([track])}>
-            Add to queue
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
+          {playable ? (
+            <>
+              <DropdownMenuItem shortcut="⇧ ↵" onClick={() => playNext([track])}>
+                Play next
+              </DropdownMenuItem>
+              <DropdownMenuItem shortcut="Q" onClick={() => addToQueue([track])}>
+                Add to queue
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
           <PlaylistSubmenu tracks={[track]} />
           <DropdownMenuItem shortcut="L" onClick={() => void toggle()}>
             {liked ? "Unlike" : "Like"}

@@ -1,3 +1,5 @@
+import type { PlaybackPosition, PlaybackQueue } from "@music/commands/models";
+
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { DEVICE_LISTED_MS, DEVICE_LIST_LIMIT, listedDevices } from "../lib/devices";
@@ -5,32 +7,117 @@ import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { MAX_QUEUE, ensureSession, findSession, livePosition, shuffled } from "../lib/playback";
 import { DEVICE_ONLINE_MS, makePresenter, presentDevice } from "../lib/present";
+import { loadQueue, normaliseStored, restrictTo, saveQueue, storedQueue } from "../lib/queue";
+import type { StoredQueue } from "../lib/queue";
 import { canRead } from "../lib/viewer";
-import type { Viewer } from "../lib/viewer";
+import type { ReadCtx, Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
 
 const RESTART_THRESHOLD_MS = 3000;
 
-const findDevice = (ctx: MutationCtx, userId: Id<"users">, deviceId: string) =>
+/**
+ * A report this close to the start of the song history last recorded, after the session had
+ * played this much further, is the same song starting again (repeat one, or a seek back to the
+ * start), so it counts as another play.
+ */
+const REPLAY_GAP_MS = 10_000;
+
+/** How long after a command moves the queue a report naming another song counts as stale. */
+const MOVE_GRACE_MS = 3000;
+
+const findDevice = (ctx: ReadCtx, userId: Id<"users">, deviceId: string) =>
   ctx.db
     .query("devices")
     .withIndex("by_user_device", (q) => q.eq("userId", userId).eq("deviceId", deviceId))
     .unique();
 
-/** Parses track IDs the viewer may play, keeping their order. */
+/**
+ * Parses track IDs the viewer may read, keeping their order, and leaves out songs whose file is
+ * gone (a playlist can still list them). `index` moves to the same song, or to the next one kept.
+ * Fails when nothing is left to play.
+ */
 const playableTracks = async (
   ctx: MutationCtx,
   viewer: Viewer,
   ids: ReadonlyArray<string>,
-): Promise<Array<Id<"tracks">>> => {
+  index = 0,
+): Promise<{ readonly ids: Array<Id<"tracks">>; readonly index: number }> => {
   const tracks = await Promise.all(ids.map((id) => ctx.db.get(tableId(ctx, "tracks", id))));
 
-  return tracks.map((track, index) =>
+  const readable = tracks.map((track, position) =>
     track === null || !canRead(viewer, track.libraryId)
-      ? fail("not_found", `Track ${ids[index] ?? ""} not found`)
-      : track._id,
+      ? fail("not_found", `Track ${ids[position] ?? ""} not found`)
+      : track,
   );
+
+  const kept = readable.flatMap((track) => (track.missing ? [] : [track._id]));
+
+  if (kept.length === 0) {
+    return fail("not_found", "None of those songs can play: their files are missing");
+  }
+
+  const before = readable.slice(0, index).filter((track) => !track.missing).length;
+
+  return { ids: kept, index: Math.min(before, kept.length - 1) };
+};
+
+/**
+ * Where a reported song is in the queue. A player sends the index it was shown; when the queue
+ * shifted before it saw the change (a song went missing or was removed), the song it names is at
+ * another index, so the occurrence nearest the reported one wins. Null when the song is gone.
+ */
+const reportedIndex = (
+  queue: ReadonlyArray<Id<"tracks">>,
+  index: number,
+  trackId: string | undefined,
+): number | null => {
+  if (trackId === undefined) return index < queue.length ? index : null;
+
+  if (queue[index] === trackId) return index;
+
+  const positions = queue.flatMap((id, position) => (id === trackId ? [position] : []));
+
+  const [nearest] = positions.toSorted(
+    (left, right) => Math.abs(left - index) - Math.abs(right - index),
+  );
+
+  return nearest ?? null;
+};
+
+/**
+ * The queue, and the index and song a position report names. Reports arrive every few seconds,
+ * so when the stored queue holds the named song at the reported index (every write saves the
+ * queue as the viewer sees it, so this is the usual case) only that song is read. Otherwise, as
+ * after a library was deleted, the whole queue is loaded and normalised, and the index is the one
+ * the client was shown.
+ */
+const locateReport = async (
+  ctx: MutationCtx,
+  viewer: Viewer,
+  reported: number,
+  trackId: string | undefined,
+): Promise<{
+  readonly queue: StoredQueue;
+  readonly index: number;
+  readonly track: Doc<"tracks">;
+} | null> => {
+  const stored = await storedQueue(ctx, viewer.id);
+  const storedId = stored.queue[reported];
+
+  if (trackId !== undefined && storedId === trackId) {
+    const track = await ctx.db.get(storedId);
+
+    if (track !== null && canRead(viewer, track.libraryId)) {
+      return { queue: stored, index: reported, track };
+    }
+  }
+
+  const queue = await normaliseStored(ctx, stored, (track) => canRead(viewer, track.libraryId));
+  const index = reportedIndex(queue.queue, reported, trackId);
+  const track = index === null ? undefined : queue.tracks[index];
+
+  return index === null || track === undefined ? null : { queue, index, track };
 };
 
 /** Picks the device that should play when the caller did not name one. */
@@ -60,57 +147,56 @@ const defaultDevice = async (
   return players[0]?.deviceId ?? session.activeDeviceId;
 };
 
+/** The session's device, position, and volume. Reads only the session and its device. */
+const positionOf = async (
+  ctx: ReadCtx,
+  viewer: Viewer,
+): Promise<(typeof PlaybackPosition)["Encoded"]> => {
+  const session = await findSession(ctx, viewer.id);
+
+  if (session === null) {
+    return { activeDevice: null, positionMs: 0, playing: false, updatedAt: 0, volume: 1 };
+  }
+
+  const device =
+    session.activeDeviceId === undefined
+      ? null
+      : await findDevice(ctx, viewer.id, session.activeDeviceId);
+
+  return {
+    activeDevice: device === null ? null : presentDevice(device, Date.now()),
+    positionMs: session.positionMs,
+    playing: session.playing,
+    updatedAt: session.updatedAt,
+    volume: session.volume,
+  };
+};
+
+/** The queue the viewer may play. Reads neither the session nor its device. */
+const queueOf = async (
+  ctx: ReadCtx,
+  viewer: Viewer,
+): Promise<(typeof PlaybackQueue)["Encoded"]> => {
+  const queue = await loadQueue(ctx, viewer);
+
+  return {
+    queue: await makePresenter(ctx, viewer).tracks(queue.tracks),
+    index: queue.index,
+    shuffle: queue.shuffle,
+    repeat: queue.repeat,
+  };
+};
+
 export const playbackQueries = {
   "playback.state": async (ctx, viewer) => {
-    const session = await findSession(ctx, viewer.id);
+    const [position, queue] = await Promise.all([positionOf(ctx, viewer), queueOf(ctx, viewer)]);
 
-    if (session === null) {
-      return {
-        activeDevice: null,
-        queue: [],
-        index: 0,
-        positionMs: 0,
-        playing: false,
-        updatedAt: 0,
-        shuffle: false,
-        repeat: "off",
-        volume: 1,
-      } as const;
-    }
-
-    const present = makePresenter(ctx, viewer);
-    const loaded = await Promise.all(session.queue.map((id) => ctx.db.get(id)));
-
-    const visible = loaded.map((track) => track !== null && canRead(viewer, track.libraryId));
-
-    const docs = loaded.filter(
-      (track): track is Doc<"tracks"> => track !== null && canRead(viewer, track.libraryId),
-    );
-
-    const index = visible.slice(0, session.index).filter(Boolean).length;
-
-    const device =
-      session.activeDeviceId === undefined
-        ? null
-        : await ctx.db
-            .query("devices")
-            .withIndex("by_user_device", (q) =>
-              q.eq("userId", viewer.id).eq("deviceId", session.activeDeviceId ?? ""),
-            )
-            .unique();
-
-    return {
-      activeDevice: device === null ? null : presentDevice(device, Date.now()),
-      queue: await present.tracks(docs),
-      index: Math.min(index, Math.max(0, docs.length - 1)),
-      positionMs: session.positionMs,
-      playing: session.playing,
-      updatedAt: session.updatedAt,
-      shuffle: session.shuffle,
-      repeat: session.repeat,
-      volume: session.volume,
-    };
+    return { ...position, ...queue };
   },
+
+  "playback.position": positionOf,
+
+  "queue.list": queueOf,
 
   "devices.list": async (ctx, viewer, args) => {
     const session = await findSession(ctx, viewer.id);
@@ -133,12 +219,7 @@ export const playbackQueries = {
       .take(DEVICE_LIST_LIMIT);
 
     const kept = await Promise.all(
-      [...keep].map((deviceId) =>
-        ctx.db
-          .query("devices")
-          .withIndex("by_user_device", (q) => q.eq("userId", viewer.id).eq("deviceId", deviceId))
-          .unique(),
-      ),
+      [...keep].map((deviceId) => findDevice(ctx, viewer.id, deviceId)),
     );
 
     const devices = new Map(
@@ -156,31 +237,44 @@ export const playbackQueries = {
 
 export const playbackMutations = {
   "playback.play": async (ctx, viewer, args) => {
-    const session = await ensureSession(ctx, viewer.id);
-    let queue = await playableTracks(ctx, viewer, args.trackIds);
-    let index = Math.min(args.index ?? 0, queue.length - 1);
+    if (args.deviceId !== undefined && (await findDevice(ctx, viewer.id, args.deviceId)) === null) {
+      return fail("not_found", "That device is not registered");
+    }
 
-    if (queue.length > MAX_QUEUE) {
+    const session = await ensureSession(ctx, viewer.id);
+    const stored = await storedQueue(ctx, viewer.id);
+    const playable = await playableTracks(ctx, viewer, args.trackIds, args.index);
+    let queue = playable.ids;
+    let { index } = playable;
+    let unshuffled: Array<Id<"tracks">> | undefined;
+
+    if (stored.shuffle) {
+      // Shuffle the whole list, then keep `MAX_QUEUE` of it: a long list shuffled from a random
+      // song near its end still fills the queue.
+      const current = queue[index];
+      const rest = shuffled(queue.filter((_, position) => position !== index));
+      const order = current === undefined ? rest : [current, ...rest];
+      const kept = order.slice(0, MAX_QUEUE);
+      unshuffled = restrictTo(queue, kept);
+      queue = kept;
+      index = 0;
+    } else if (queue.length > MAX_QUEUE) {
       queue = queue.slice(index, index + MAX_QUEUE);
       index = 0;
     }
 
-    let unshuffled: Array<Id<"tracks">> | undefined;
-
-    if (session.shuffle) {
-      const current = queue[index];
-      unshuffled = queue;
-      const rest = shuffled(queue.filter((_, position) => position !== index));
-      queue = current === undefined ? rest : [current, ...rest];
-      index = 0;
-    }
-
-    const activeDeviceId = args.deviceId ?? (await defaultDevice(ctx, viewer, session));
-    await ctx.db.patch(session._id, {
+    await saveQueue(ctx, viewer.id, {
+      ...stored,
       queue,
       unshuffled,
       index,
+      reportedTrackId: undefined,
+    });
+
+    const activeDeviceId = args.deviceId ?? (await defaultDevice(ctx, viewer, session));
+    await ctx.db.patch(session._id, {
       positionMs: 0,
+      movedAt: Date.now(),
       playing: true,
       updatedAt: Date.now(),
       activeDeviceId,
@@ -203,8 +297,10 @@ export const playbackMutations = {
 
   "playback.resume": async (ctx, viewer) => {
     const session = await ensureSession(ctx, viewer.id);
+    const queue = await loadQueue(ctx, viewer);
 
-    if (session.queue.length === 0) return fail("conflict", "The queue is empty");
+    if (queue.tracks.length === 0) return fail("conflict", "The queue is empty");
+    await saveQueue(ctx, viewer.id, queue);
     const activeDeviceId = await defaultDevice(ctx, viewer, session);
     await ctx.db.patch(session._id, { playing: true, updatedAt: Date.now(), activeDeviceId });
 
@@ -213,15 +309,26 @@ export const playbackMutations = {
 
   "playback.next": async (ctx, viewer) => {
     const session = await ensureSession(ctx, viewer.id);
+    const queue = await loadQueue(ctx, viewer);
     const now = Date.now();
-    const last = session.queue.length - 1;
+    const last = queue.tracks.length - 1;
+    // Whatever comes next starts from the top, so it counts as a new play.
+    const restart = { ...queue, reportedTrackId: undefined };
 
-    if (session.index < last) {
-      await ctx.db.patch(session._id, { index: session.index + 1, positionMs: 0, updatedAt: now });
-    } else if (session.repeat === "all" && session.queue.length > 0) {
-      await ctx.db.patch(session._id, { index: 0, positionMs: 0, updatedAt: now });
+    if (queue.index < last) {
+      await saveQueue(ctx, viewer.id, { ...restart, index: queue.index + 1 });
+      await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now, movedAt: now });
+    } else if (queue.repeat === "all" && queue.tracks.length > 0) {
+      await saveQueue(ctx, viewer.id, { ...restart, index: 0 });
+      await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now, movedAt: now });
     } else {
-      await ctx.db.patch(session._id, { positionMs: 0, playing: false, updatedAt: now });
+      await saveQueue(ctx, viewer.id, restart);
+      await ctx.db.patch(session._id, {
+        positionMs: 0,
+        playing: false,
+        updatedAt: now,
+        movedAt: now,
+      });
     }
 
     return ok;
@@ -229,18 +336,21 @@ export const playbackMutations = {
 
   "playback.previous": async (ctx, viewer) => {
     const session = await ensureSession(ctx, viewer.id);
+    const queue = await loadQueue(ctx, viewer);
     const now = Date.now();
+    const position = livePosition(session, now);
 
-    if (livePosition(session, now) > RESTART_THRESHOLD_MS || session.index === 0) {
-      const index =
-        session.index === 0 && session.repeat === "all" && livePosition(session, now) <= 3000
-          ? Math.max(0, session.queue.length - 1)
-          : session.index;
+    const index =
+      position > RESTART_THRESHOLD_MS
+        ? queue.index
+        : queue.index > 0
+          ? queue.index - 1
+          : queue.repeat === "all"
+            ? Math.max(0, queue.tracks.length - 1)
+            : 0;
 
-      await ctx.db.patch(session._id, { index, positionMs: 0, updatedAt: now });
-    } else {
-      await ctx.db.patch(session._id, { index: session.index - 1, positionMs: 0, updatedAt: now });
-    }
+    await saveQueue(ctx, viewer.id, { ...queue, index, reportedTrackId: undefined });
+    await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now, movedAt: now });
 
     return ok;
   },
@@ -254,12 +364,14 @@ export const playbackMutations = {
 
   "playback.jump": async (ctx, viewer, args) => {
     const session = await ensureSession(ctx, viewer.id);
+    const queue = await loadQueue(ctx, viewer);
 
-    if (args.index >= session.queue.length) return fail("invalid_args", "No song at that index");
+    if (args.index >= queue.tracks.length) return fail("invalid_args", "No song at that index");
+    await saveQueue(ctx, viewer.id, { ...queue, index: args.index, reportedTrackId: undefined });
     const activeDeviceId = await defaultDevice(ctx, viewer, session);
     await ctx.db.patch(session._id, {
-      index: args.index,
       positionMs: 0,
+      movedAt: Date.now(),
       playing: true,
       updatedAt: Date.now(),
       activeDeviceId,
@@ -269,27 +381,33 @@ export const playbackMutations = {
   },
 
   "playback.shuffle": async (ctx, viewer, args) => {
-    const session = await ensureSession(ctx, viewer.id);
+    const queue = await loadQueue(ctx, viewer);
 
-    if (args.on === session.shuffle) return ok;
-    const current = session.queue[session.index];
+    if (args.on === queue.shuffle) {
+      await saveQueue(ctx, viewer.id, queue);
+
+      return ok;
+    }
+
+    const current = queue.queue[queue.index];
 
     if (args.on) {
-      const rest = shuffled(session.queue.filter((_, position) => position !== session.index));
-      await ctx.db.patch(session._id, {
+      const rest = shuffled(queue.queue.filter((_, position) => position !== queue.index));
+      await saveQueue(ctx, viewer.id, {
+        ...queue,
         shuffle: true,
-        unshuffled: session.queue,
+        unshuffled: queue.queue,
         queue: current === undefined ? rest : [current, ...rest],
         index: 0,
       });
     } else {
-      const original = session.unshuffled ?? session.queue;
-      const index = current === undefined ? 0 : Math.max(0, original.indexOf(current));
-      await ctx.db.patch(session._id, {
+      const original = queue.unshuffled ?? queue.queue;
+      await saveQueue(ctx, viewer.id, {
+        ...queue,
         shuffle: false,
         unshuffled: undefined,
         queue: original,
-        index,
+        index: current === undefined ? 0 : Math.max(0, original.indexOf(current)),
       });
     }
 
@@ -297,8 +415,8 @@ export const playbackMutations = {
   },
 
   "playback.repeat": async (ctx, viewer, args) => {
-    const session = await ensureSession(ctx, viewer.id);
-    await ctx.db.patch(session._id, { repeat: args.mode });
+    const queue = await loadQueue(ctx, viewer);
+    await saveQueue(ctx, viewer.id, { ...queue, repeat: args.mode });
 
     return ok;
   },
@@ -329,29 +447,51 @@ export const playbackMutations = {
     const session = await ensureSession(ctx, viewer.id);
 
     if (session.activeDeviceId !== args.deviceId) return ok;
-    const trackId = session.queue[args.index];
+    const located = await locateReport(ctx, viewer, args.index, args.trackId);
 
-    if (trackId === undefined) return ok;
+    if (located === null) return ok;
+    const { queue, index, track } = located;
+    const now = Date.now();
+
+    // A report sent before the player saw a skip or jump would move the queue back to the old
+    // song; the player reports again once it plays the new one.
+    if (
+      index !== queue.index &&
+      session.movedAt !== undefined &&
+      now - session.movedAt < MOVE_GRACE_MS
+    ) {
+      return ok;
+    }
+
+    // A short song loops sooner than the gap, so its gap is half its length.
+    const gap = Math.min(REPLAY_GAP_MS, track.durationMs / 2);
+
+    const startedAgain =
+      track._id === queue.reportedTrackId &&
+      args.positionMs < gap &&
+      livePosition(session, now) - args.positionMs > gap;
+
+    const newPlay = args.playing && (track._id !== queue.reportedTrackId || startedAgain);
+
     await ctx.db.patch(session._id, {
-      index: args.index,
       positionMs: args.positionMs,
       playing: args.playing,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
 
-    if (args.playing && session.reportedTrackId !== trackId) {
-      const track = await ctx.db.get(trackId);
+    await saveQueue(ctx, viewer.id, {
+      ...queue,
+      index,
+      reportedTrackId: newPlay ? track._id : queue.reportedTrackId,
+    });
 
-      if (track !== null) {
-        await ctx.db.insert("history", {
-          userId: viewer.id,
-          trackId,
-          albumId: track.albumId,
-          deviceId: args.deviceId,
-        });
-      }
-
-      await ctx.db.patch(session._id, { reportedTrackId: trackId });
+    if (newPlay) {
+      await ctx.db.insert("history", {
+        userId: viewer.id,
+        trackId: track._id,
+        albumId: track.albumId,
+        deviceId: args.deviceId,
+      });
     }
 
     return ok;
@@ -359,61 +499,105 @@ export const playbackMutations = {
 
   "queue.add": async (ctx, viewer, args) => {
     const session = await ensureSession(ctx, viewer.id);
-    const added = await playableTracks(ctx, viewer, args.trackIds);
+    const queue = await loadQueue(ctx, viewer);
+    const added = (await playableTracks(ctx, viewer, args.trackIds)).ids;
 
-    if (session.queue.length === 0) {
-      await ctx.db.patch(session._id, {
-        queue: added.slice(0, MAX_QUEUE),
+    if (queue.tracks.length === 0) {
+      const ids = added.slice(0, MAX_QUEUE);
+
+      await saveQueue(ctx, viewer.id, {
+        ...queue,
+        queue: ids,
+        unshuffled: queue.shuffle ? ids : undefined,
         index: 0,
+        reportedTrackId: undefined,
+      });
+
+      await ctx.db.patch(session._id, {
         positionMs: 0,
         playing: false,
         updatedAt: Date.now(),
+        movedAt: Date.now(),
       });
 
       return ok;
     }
 
-    const insertAt = args.next === true ? session.index + 1 : session.queue.length;
+    const insertAt = args.next === true ? queue.index + 1 : queue.queue.length;
 
-    const queue = [
-      ...session.queue.slice(0, insertAt),
+    const next = [
+      ...queue.queue.slice(0, insertAt),
       ...added,
-      ...session.queue.slice(insertAt),
+      ...queue.queue.slice(insertAt),
     ].slice(0, MAX_QUEUE);
 
-    await ctx.db.patch(session._id, { queue, unshuffled: undefined });
+    // Added songs join the unshuffled order too, after the current song or at the end, so
+    // turning shuffle off keeps them.
+    const current = queue.queue[queue.index];
+
+    const unshuffledAt = (order: ReadonlyArray<Id<"tracks">>): number =>
+      args.next === true && current !== undefined ? order.indexOf(current) + 1 : order.length;
+
+    const unshuffled =
+      queue.unshuffled === undefined
+        ? undefined
+        : restrictTo(
+            [
+              ...queue.unshuffled.slice(0, unshuffledAt(queue.unshuffled)),
+              ...added,
+              ...queue.unshuffled.slice(unshuffledAt(queue.unshuffled)),
+            ],
+            next,
+          );
+
+    await saveQueue(ctx, viewer.id, { ...queue, queue: next, unshuffled });
 
     return ok;
   },
 
   "queue.remove": async (ctx, viewer, args) => {
     const session = await ensureSession(ctx, viewer.id);
+    const queue = await loadQueue(ctx, viewer);
 
-    if (args.index >= session.queue.length) return fail("invalid_args", "No song at that index");
-    const queue = session.queue.filter((_, position) => position !== args.index);
+    if (args.index >= queue.tracks.length) return fail("invalid_args", "No song at that index");
+    const next = queue.queue.filter((_, position) => position !== args.index);
 
-    if (args.index < session.index) {
-      await ctx.db.patch(session._id, { queue, index: session.index - 1 });
-    } else if (args.index === session.index) {
+    const remaining = {
+      ...queue,
+      queue: next,
+      unshuffled: queue.unshuffled === undefined ? undefined : restrictTo(queue.unshuffled, next),
+    };
+
+    if (args.index < queue.index) {
+      await saveQueue(ctx, viewer.id, { ...remaining, index: queue.index - 1 });
+    } else if (args.index === queue.index) {
+      await saveQueue(ctx, viewer.id, {
+        ...remaining,
+        index: Math.min(queue.index, Math.max(0, next.length - 1)),
+        reportedTrackId: undefined,
+      });
+
       await ctx.db.patch(session._id, {
-        queue,
-        index: Math.min(session.index, Math.max(0, queue.length - 1)),
         positionMs: 0,
-        playing: session.playing && queue.length > 0,
+        movedAt: Date.now(),
+        playing: session.playing && next.length > 0,
         updatedAt: Date.now(),
       });
     } else {
-      await ctx.db.patch(session._id, { queue });
+      await saveQueue(ctx, viewer.id, remaining);
     }
 
     return ok;
   },
 
   "queue.clear": async (ctx, viewer) => {
-    const session = await ensureSession(ctx, viewer.id);
-    await ctx.db.patch(session._id, {
-      queue: session.queue.slice(0, session.index + 1),
-      unshuffled: undefined,
+    const queue = await loadQueue(ctx, viewer);
+    const next = queue.queue.slice(0, queue.index + 1);
+
+    await saveQueue(ctx, viewer.id, {
+      ...queue,
+      queue: next,
+      unshuffled: queue.unshuffled === undefined ? undefined : restrictTo(queue.unshuffled, next),
     });
 
     return ok;

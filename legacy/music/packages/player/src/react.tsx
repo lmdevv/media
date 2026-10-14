@@ -199,7 +199,17 @@ export function PlayerProvider({
     [convex, engine, audioElement],
   );
 
-  const state = useRead("playback.state", {});
+  // The position and the queue are separate subscriptions, so a position report re-runs only the
+  // small one. Convex delivers every subscription of a client from one database snapshot, so the
+  // two always agree.
+  const position = useRead("playback.position", {});
+  const queue = useRead("queue.list", {});
+
+  const state = useMemo(
+    () => (position === undefined || queue === undefined ? undefined : { ...position, ...queue }),
+    [position, queue],
+  );
+
   const local = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
 
   useEffect(() => controller.start(), [controller]);

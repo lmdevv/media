@@ -60,6 +60,7 @@ import { useQueueActions } from "@/components/playlists/track-menu";
 import { useUi } from "@/components/shell/ui-state";
 import { describeFailure, toastFailure } from "@/lib/action";
 import { formatCount, formatDuration, formatTotal, plural } from "@/lib/format";
+import { readPages } from "@/lib/read-pages";
 
 import { ArgsForm } from "./args-form";
 import type { MenuContext } from "./args-form";
@@ -67,6 +68,9 @@ import { fieldsOf, missingFields, rawArgs } from "./fields";
 import type { FieldSpec, FormValues } from "./fields";
 
 const listFormat = new Intl.ListFormat("en", { type: "conjunction" });
+
+/** Most liked songs "Shuffle liked songs" reads; the queue keeps 1,000 of them. */
+const SHUFFLE_LIMIT = 2000;
 
 /** Commands that only players send; people never run them by hand. */
 const INTERNAL: ReadonlySet<CommandName> = new Set([
@@ -339,7 +343,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   const me = useRead("account.me", {});
   const home = useRead("library.home", {});
   const playlists = useRead("playlists.list", {});
-  const readLikes = useReadOnce("likes.list");
+  const readLikes = useReadOnce("likes.page");
   const playTracks = usePlayTracks();
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query.trim());
@@ -381,7 +385,10 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
           onClose();
           void (async () => {
             try {
-              const tracks = await readLikes({});
+              const tracks = await readPages(
+                (cursor) => readLikes({ cursor, limit: 200 }),
+                SHUFFLE_LIMIT,
+              );
 
               if (tracks.length === 0) toast("You haven't liked any songs yet.");
               else await playTracks(tracks, { shuffle: true });
@@ -1299,7 +1306,7 @@ function PlaylistPreview({
           disabled={detail === undefined || detail.items.length === 0}
           onClick={() => {
             onClose();
-            void play(detail?.items.map((item) => item.track) ?? []);
+            void play(detail?.items.flatMap((item) => (item.available ? [item.track] : [])) ?? []);
           }}
         >
           <PlayIcon fill="currentColor" strokeWidth={0} />

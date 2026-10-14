@@ -17,6 +17,13 @@ crons.interval(
 );
 
 crons.daily(
+  "delete old jobs, invites, and revoked keys",
+  { hourUTC: 4, minuteUTC: 30 },
+  internal.maintenance.pruneOldRecords,
+  {},
+);
+
+crons.daily(
   "prune long-silent devices",
   { hourUTC: 4, minuteUTC: 0 },
   internal.maintenance.pruneStaleDevices,

@@ -14,6 +14,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { albumSearchText, artistSearchText, trackSearchText } from "./lib/catalog";
+import { clearedLegacyQueue, hasLegacyQueue, legacyQueue, saveQueue } from "./lib/queue";
 
 /** Rows per batch: a track is well under 2 KB, so a batch stays far below the read limits. */
 const BATCH = 256;
@@ -69,6 +70,28 @@ const MIGRATIONS = {
 
     return page;
   },
+  /**
+   * The queue moved off the session into its own row, so position reports stop re-running
+   * queries that read the queue. A user whose queue a write already moved is skipped.
+   */
+  splitPlaybackQueues: async (ctx, cursor) => {
+    const page = await ctx.db.query("playbackSessions").paginate({ cursor, numItems: BATCH });
+
+    await Promise.all(
+      page.page.filter(hasLegacyQueue).map(async (session) => {
+        const row = await ctx.db
+          .query("playbackQueues")
+          .withIndex("by_user", (q) => q.eq("userId", session.userId))
+          .unique();
+
+        // Without a row, saving creates it and clears the session; with one, the row is newer.
+        if (row === null) await saveQueue(ctx, session.userId, legacyQueue(session));
+        else await ctx.db.patch(session._id, clearedLegacyQueue);
+      }),
+    );
+
+    return page;
+  },
 } satisfies Record<string, Migration>;
 
 type MigrationName = keyof typeof MIGRATIONS;
@@ -77,12 +100,14 @@ const migrationName = v.union(
   v.literal("foldTrackSearchText"),
   v.literal("foldAlbumSearchText"),
   v.literal("foldArtistSearchText"),
+  v.literal("splitPlaybackQueues"),
 );
 
 const NAMES: ReadonlyArray<MigrationName> = [
   "foldTrackSearchText",
   "foldAlbumSearchText",
   "foldArtistSearchText",
+  "splitPlaybackQueues",
 ];
 
 /**

@@ -147,4 +147,42 @@ describe("PlaybackController", () => {
     await vi.waitFor(() => expect(reports(mutations).at(-1)).toMatchObject({ playing: false }));
     stop();
   });
+
+  it("registers again before playing when the first heartbeat failed", async () => {
+    const mutations: Array<Mutation> = [];
+    const recording = recordingTransport(mutations);
+    let heartbeats = 0;
+
+    const flaky: CommandTransport = {
+      query: async (reference, args) => recording.query(reference, args),
+      mutation: async (reference, args) => {
+        if (args.name === "devices.heartbeat") {
+          heartbeats += 1;
+
+          if (heartbeats === 1) throw new Error("The network dropped");
+        }
+
+        return recording.mutation(reference, args);
+      },
+    };
+
+    const controller = new PlaybackController(
+      makeMusicClient(flaky),
+      { mse: null, create: instantEngine },
+      {
+        deviceId,
+        device: { name: "Test", kind: "web" },
+        canPlay: () => true,
+        now: () => 1000,
+        quality: "high",
+        saveQuality: () => {},
+      },
+    );
+
+    const stop = controller.start();
+    await controller.playTracks([song.id]);
+
+    expect(mutations.map(({ name }) => name)).toStrictEqual(["devices.heartbeat", "playback.play"]);
+    stop();
+  });
 });

@@ -129,6 +129,15 @@ export interface ArtistDetail extends Schema.Schema.Type<typeof ArtistDetail> {}
 /** Cursor-based page. Pass `cursor` back to read the next page until `done`. */
 export const PageArgs = Schema.Struct({
   cursor: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /**
+   * The cursor the following page starts at, once a live client has loaded that page. The page
+   * then covers everything up to it, growing past `limit` as rows are added, so no row falls
+   * between two pages on screen. Such a page always reports `done: false`; the page that starts
+   * at `end` tells whether the list ends there. Its `cursor` is `end`, unless it grew past the
+   * most rows a page holds: then `cursor` is where it stopped, and a page starting there belongs
+   * in front of the one at `end`.
+   */
+  end: Schema.optionalKey(Schema.NullOr(Schema.String)),
   limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 }))),
 });
 
@@ -175,6 +184,9 @@ export const SearchResults = Schema.Struct({
 
 export interface SearchResults extends Schema.Schema.Type<typeof SearchResults> {}
 
+/** Songs a playlist holds at most. */
+export const PLAYLIST_LIMIT = 2000;
+
 export const Playlist = Schema.Struct({
   id: PlaylistId,
   name: Schema.String,
@@ -191,7 +203,14 @@ export const PlaylistEntry = Schema.Struct({
   itemId: PlaylistItemId,
   addedAt: Timestamp,
   track: Track,
+  /**
+   * False when the song's file is gone from disk. The entry stays, greyed out, so you can see what
+   * the playlist held and remove it; it comes back if the file does.
+   */
+  available: Schema.Boolean,
 });
+
+export interface PlaylistEntry extends Schema.Schema.Type<typeof PlaylistEntry> {}
 
 export const PlaylistDetail = Schema.Struct({
   playlist: Playlist,
@@ -224,19 +243,33 @@ export const RepeatMode = Schema.Literals(["off", "all", "one"]);
 export type RepeatMode = typeof RepeatMode.Type;
 
 /**
- * The user's playback session. `positionMs` was true at `updatedAt`; while `playing`, the live
- * position is `positionMs + (now - updatedAt)`.
+ * Where the user's playback is. `positionMs` was true at `updatedAt`; while `playing`, the live
+ * position is `positionMs + (now - updatedAt)`. It changes with every position report.
  */
-export const PlaybackState = Schema.Struct({
+export const PlaybackPosition = Schema.Struct({
   activeDevice: Schema.NullOr(Device),
-  queue: Schema.Array(Track),
-  index: Count,
   positionMs: Millis,
   playing: Schema.Boolean,
   updatedAt: Timestamp,
+  volume: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+});
+
+export interface PlaybackPosition extends Schema.Schema.Type<typeof PlaybackPosition> {}
+
+/** The user's queue and play order. It changes when the song or the queue changes. */
+export const PlaybackQueue = Schema.Struct({
+  queue: Schema.Array(Track),
+  index: Count,
   shuffle: Schema.Boolean,
   repeat: RepeatMode,
-  volume: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+});
+
+export interface PlaybackQueue extends Schema.Schema.Type<typeof PlaybackQueue> {}
+
+/** The user's playback session: the position and the queue together. */
+export const PlaybackState = Schema.Struct({
+  ...PlaybackPosition.fields,
+  ...PlaybackQueue.fields,
 });
 
 export interface PlaybackState extends Schema.Schema.Type<typeof PlaybackState> {}

@@ -1,11 +1,11 @@
-import { useRead } from "@music/sdk/react";
 import { Badge } from "@music/ui/components/badge";
 import { createFileRoute } from "@tanstack/react-router";
 import { HeartIcon } from "lucide-react";
 
 import { CollectionHeader } from "@/components/library/collection-header";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
-import { formatTotal, plural } from "@/lib/format";
+import { formatCount, formatTotal, plural } from "@/lib/format";
+import { useLikedSongs } from "@/lib/use-liked-songs";
 
 export const Route = createFileRoute("/_app/liked")({ component: LikedPage });
 
@@ -21,8 +21,15 @@ function LikedCover({ size }: { readonly size: string }) {
 }
 
 function LikedPage() {
-  const tracks = useRead("likes.list", {});
+  const liked = useLikedSongs();
+  const tracks = liked?.tracks;
   const total = (tracks ?? []).reduce((sum, track) => sum + track.durationMs, 0);
+
+  // Past the songs kept live, the count says there are more.
+  const count =
+    liked === undefined || liked.done
+      ? plural(tracks?.length ?? 0, "song")
+      : `${formatCount(liked.tracks.length)}+ songs`;
 
   return (
     <div className="flex flex-col gap-8 px-5 pt-[max(12px,env(safe-area-inset-top))] lg:px-12 lg:pt-row">
@@ -32,7 +39,7 @@ function LikedPage() {
         eyebrow={
           tracks === undefined
             ? "Liked songs"
-            : `${plural(tracks.length, "song")}${tracks.length > 0 ? ` · ${formatTotal(total)}` : ""}`
+            : `${count}${tracks.length > 0 ? ` · ${formatTotal(total)}` : ""}`
         }
         title="Liked songs"
         subtitle={<span className="text-text-muted">Private to you. Newest first.</span>}

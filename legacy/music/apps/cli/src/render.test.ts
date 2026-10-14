@@ -64,7 +64,15 @@ describe("renderResult", () => {
         artUrls: [],
         updatedAt: Date.UTC(2026, 9, 10, 12, 0),
       },
-      items: [{ itemId: "i1", addedAt: Date.UTC(2026, 9, 10, 12, 0), track }],
+      items: [
+        { itemId: "i1", addedAt: Date.UTC(2026, 9, 10, 12, 0), track, available: true },
+        {
+          itemId: "i2",
+          addedAt: Date.UTC(2026, 9, 10, 12, 0),
+          track: { ...track, id: "t2", title: "Gone" },
+          available: false,
+        },
+      ],
     } satisfies (typeof commands)["playlists.get"]["result"]["Encoded"];
 
     expect(renderResult(commands["playlists.get"].result, playlist).split("\n")).toEqual([
@@ -77,8 +85,9 @@ describe("renderResult", () => {
       "  art urls: (none)",
       `  updated at: ${formatTimestamp(playlist.playlist.updatedAt)}`,
       "items:",
-      "  ITEM  TRACK  TITLE                             ARTIST     TIME",
+      "  ITEM  TRACK  TITLE                             ARTIST     TIME  STATUS",
       "  i1    t1     Harder, Better, Faster, Stronger  Daft Punk  3:44",
+      "  i2    t2     Gone                              Daft Punk  3:44  unavailable",
     ]);
   });
 

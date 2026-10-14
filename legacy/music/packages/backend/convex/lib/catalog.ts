@@ -1,5 +1,6 @@
 import { foldSearchText } from "@music/commands/search-text";
 
+import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 
@@ -92,6 +93,12 @@ export const adjustAlbum = async (
   const vanished = album.trackCount > 0 && trackCount === 0;
 
   if (!appeared && !vanished) return;
+
+  // A retag can move an album's last song elsewhere; check it once this write commits.
+  if (vanished) {
+    await ctx.scheduler.runAfter(0, internal.maintenance.pruneEmptyAlbum, { albumId });
+  }
+
   const step = appeared ? 1 : -1;
   const artist = await ctx.db.get(album.artistId);
 
@@ -256,6 +263,13 @@ export const upsertScannedTrack = async (
   }
 
   await ctx.db.patch(existing._id, fields);
+
+  // Still in the same album: only the length changes, so the album never looks empty midway.
+  if (!existing.missing && existing.albumId === album._id) {
+    await adjustAlbum(ctx, album._id, 0, scanned.durationMs - existing.durationMs);
+
+    return;
+  }
 
   if (!existing.missing) await adjustAlbum(ctx, existing.albumId, -1, -existing.durationMs);
   await adjustAlbum(ctx, album._id, 1, scanned.durationMs);

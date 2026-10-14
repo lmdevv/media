@@ -1,9 +1,12 @@
+import { Match } from "effect";
+
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { randomToken, sha256Hex } from "../lib/crypto";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
+import { normaliseLibraryPath, overlapOf } from "../lib/paths";
 import { presentJob, presentLibrary } from "../lib/present";
 import { endSession } from "../lib/sessions";
 import { canRead } from "../lib/viewer";
@@ -76,6 +79,32 @@ const visibleJob = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise<Do
   return job;
 };
 
+/**
+ * Fails unless `path` (normalised) stays clear of every library's folder: the same folder, one
+ * inside another, or one containing another would index the same files twice. A library the
+ * viewer can't see is named only as "another library".
+ */
+const checkNoOverlap = async (ctx: QueryCtx, viewer: Viewer, path: string): Promise<void> => {
+  // Every folder must be compared, and an install has a handful of libraries (`loadViewer` reads
+  // them all on every request too).
+  const libraries = await ctx.db.query("libraries").collect();
+
+  for (const library of libraries) {
+    const other = normaliseLibraryPath(library.path) ?? library.path;
+    const overlap = overlapOf(path, other);
+
+    if (overlap === "apart") continue;
+    const name = canRead(viewer, library._id) ? `${library.name} (${other})` : "another library";
+
+    return Match.value(overlap).pipe(
+      Match.when("same", () => fail("conflict", `${path} is already the folder of ${name}`)),
+      Match.when("inside", () => fail("conflict", `${path} is inside the folder of ${name}`)),
+      Match.when("contains", () => fail("conflict", `${path} contains the folder of ${name}`)),
+      Match.exhaustive,
+    );
+  }
+};
+
 /** Enqueues a scan unless the library already has a pending or running job, which it returns. */
 export const enqueueScan = async (
   ctx: MutationCtx,
@@ -131,23 +160,24 @@ export const adminQueries = {
 
   "invites.list": async (ctx) => {
     const invites = await ctx.db.query("invites").order("desc").take(100);
+    const now = Date.now();
 
+    // Open invites only: an expired one can no longer be used, so it is not listed as open.
     return invites
-      .filter((invite) => !invite.revoked && invite.acceptedBy === undefined)
+      .filter(
+        (invite) => !invite.revoked && invite.acceptedBy === undefined && invite.expiresAt > now,
+      )
       .map(presentInvite);
   },
 } satisfies Partial<QueryHandlers>;
 
 export const adminMutations = {
   "libraries.create": async (ctx, viewer, args) => {
-    const path = args.path.replace(/\/+$/, "") || "/";
+    const path =
+      normaliseLibraryPath(args.path) ??
+      fail("invalid_args", `Use an absolute folder path, such as /music, not ${args.path}`);
 
-    const existing = await ctx.db
-      .query("libraries")
-      .withIndex("by_path", (q) => q.eq("path", path))
-      .unique();
-
-    if (existing !== null) return fail("conflict", `${path} is already a library`);
+    await checkNoOverlap(ctx, viewer, path);
 
     const libraryId = await ctx.db.insert("libraries", {
       name: args.name,

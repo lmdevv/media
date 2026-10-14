@@ -1,50 +1,237 @@
 import { v } from "convex/values";
+import { Match } from "effect";
 
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { DEVICE_RETAINED_MS } from "./lib/devices";
 import { findSession } from "./lib/playback";
 import { DEVICE_ONLINE_MS } from "./lib/present";
+import { normaliseStored, rowQueue, saveQueue } from "./lib/queue";
+import { inOrder } from "./lib/sequence";
 
-const PURGE_BATCH = 200;
+/** Rows one purge run deletes at most, well inside Convex's per-mutation limits. */
+const PURGE_BUDGET = 256;
+
+/** Queues one purge run rewrites; each reads up to `MAX_QUEUE` songs. */
+const PURGE_QUEUES = 4;
 
 const PRUNE_BATCH = 200;
 
-/** Deletes a removed library's index in batches, rescheduling until it is gone. */
+/** A scan whose lease expires this many times in a row before it saves anything fails. */
+export const MAX_SCAN_STALLS = 3;
+
+/** Finished jobs, used invites, and revoked keys are kept this long, then deleted. */
+export const RECORD_RETAINED_MS = 30 * 24 * 60 * 60 * 1000;
+
+const purgePhase = v.union(
+  v.literal("tracks"),
+  v.literal("albums"),
+  v.literal("artists"),
+  v.literal("queues"),
+);
+
+type PurgePhase = typeof purgePhase.type;
+
+/** Takes a song out of a playlist's counters, so it stops counting toward the playlist cap. */
+const shrinkPlaylist = async (
+  ctx: MutationCtx,
+  playlistId: Id<"playlists">,
+  durationMs: number,
+): Promise<void> => {
+  const playlist = await ctx.db.get(playlistId);
+
+  if (playlist === null) return;
+  await ctx.db.patch(playlist._id, {
+    trackCount: Math.max(0, playlist.trackCount - 1),
+    durationMs: Math.max(0, playlist.durationMs - durationMs),
+  });
+};
+
+/**
+ * Deletes up to `budget` rows that point at `track`: playlist entries (fixing their playlists'
+ * counters), likes, and plays. Returns how many it deleted and whether none are left.
+ */
+const deleteDependents = async (
+  ctx: MutationCtx,
+  track: Doc<"tracks">,
+  budget: number,
+): Promise<{ readonly deleted: number; readonly finished: boolean }> => {
+  const items = await ctx.db
+    .query("playlistItems")
+    .withIndex("by_track", (q) => q.eq("trackId", track._id))
+    .take(budget);
+
+  // One after another: two entries in the same playlist update the same counters.
+  await inOrder(items, async (item) => {
+    await ctx.db.delete(item._id);
+    await shrinkPlaylist(ctx, item.playlistId, track.durationMs);
+  });
+
+  if (items.length === budget) return { deleted: budget, finished: false };
+
+  const likes = await ctx.db
+    .query("likes")
+    .withIndex("by_track", (q) => q.eq("trackId", track._id))
+    .take(budget - items.length);
+
+  await Promise.all(likes.map((like) => ctx.db.delete(like._id)));
+
+  if (items.length + likes.length === budget) return { deleted: budget, finished: false };
+
+  const plays = await ctx.db
+    .query("history")
+    .withIndex("by_track", (q) => q.eq("trackId", track._id))
+    .take(budget - items.length - likes.length);
+
+  await Promise.all(plays.map((play) => ctx.db.delete(play._id)));
+  const deleted = items.length + likes.length + plays.length;
+
+  return { deleted, finished: deleted < budget };
+};
+
+/**
+ * Deletes songs and everything pointing at them, within the budget. Returns whether the library
+ * has no songs left.
+ */
+const purgeTracks = async (ctx: MutationCtx, libraryId: Id<"libraries">): Promise<boolean> => {
+  const tracks = await ctx.db
+    .query("tracks")
+    .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId))
+    .take(PURGE_BUDGET);
+
+  let budget = PURGE_BUDGET;
+
+  await inOrder(tracks, async (track) => {
+    if (budget <= 0) return;
+    const { deleted, finished } = await deleteDependents(ctx, track, budget);
+    budget -= deleted;
+
+    if (!finished) return;
+    await ctx.db.delete(track._id);
+    budget -= 1;
+  });
+
+  return tracks.length === 0;
+};
+
+/** Deletes a batch of a library's albums. Returns whether none are left. */
+const purgeAlbums = async (ctx: MutationCtx, libraryId: Id<"libraries">): Promise<boolean> => {
+  const albums = await ctx.db
+    .query("albums")
+    .withIndex("by_library_artist_key", (q) => q.eq("libraryId", libraryId))
+    .take(PURGE_BUDGET);
+
+  await Promise.all(albums.map((album) => ctx.db.delete(album._id)));
+
+  return albums.length < PURGE_BUDGET;
+};
+
+/** Deletes a batch of a library's artists. Returns whether none are left. */
+const purgeArtists = async (ctx: MutationCtx, libraryId: Id<"libraries">): Promise<boolean> => {
+  const artists = await ctx.db
+    .query("artists")
+    .withIndex("by_library_key", (q) => q.eq("libraryId", libraryId))
+    .take(PURGE_BUDGET);
+
+  await Promise.all(artists.map((artist) => ctx.db.delete(artist._id)));
+
+  return artists.length < PURGE_BUDGET;
+};
+
+/**
+ * Drops deleted songs from a batch of queues. Readers already skip them; this keeps stored
+ * queues from carrying dead IDs. Returns where the next batch starts, or null when done.
+ */
+const purgeQueues = async (ctx: MutationCtx, cursor: string | null): Promise<string | null> => {
+  const page = await ctx.db.query("playbackQueues").paginate({ cursor, numItems: PURGE_QUEUES });
+
+  await Promise.all(
+    page.page.map(async (row) => {
+      const stored = rowQueue(row);
+      const queue = await normaliseStored(ctx, stored, () => true);
+
+      if (!queue.stale) return;
+      await saveQueue(ctx, row.userId, queue);
+
+      // The song playing was deleted: the position belonged to it, so the next song starts over.
+      if (queue.queue[queue.index] !== stored.queue[stored.index]) {
+        const session = await findSession(ctx, row.userId);
+
+        // With nothing left to play, playback stops.
+        if (session !== null) {
+          await ctx.db.patch(session._id, {
+            positionMs: 0,
+            playing: session.playing && queue.queue.length > 0,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+    }),
+  );
+
+  return page.isDone ? null : page.continueCursor;
+};
+
+/**
+ * Deletes a removed library's catalog and everything pointing into it, in phases of bounded
+ * batches, rescheduling itself until it is gone: songs with their playlist entries (fixing the
+ * playlists' counters), likes, and plays; then albums; then artists; then deleted songs left in
+ * queues.
+ */
 export const purgeLibrary = internalMutation({
-  args: { libraryId: v.id("libraries") },
-  handler: async (ctx, { libraryId }) => {
-    const tracks = await ctx.db
-      .query("tracks")
-      .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId))
-      .take(PURGE_BATCH);
+  args: {
+    libraryId: v.id("libraries"),
+    // Optional so a purge scheduled by an older version, with only the library, still runs.
+    phase: v.optional(purgePhase),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, { libraryId, phase = "tracks", cursor = null }) => {
+    const next = async (nextPhase: PurgePhase, nextCursor: string | null = null) => {
+      await ctx.scheduler.runAfter(0, internal.maintenance.purgeLibrary, {
+        libraryId,
+        phase: nextPhase,
+        cursor: nextCursor,
+      });
+    };
 
-    await Promise.all(tracks.map((track) => ctx.db.delete(track._id)));
+    switch (phase) {
+      case "tracks": {
+        await next((await purgeTracks(ctx, libraryId)) ? "albums" : "tracks");
 
-    if (tracks.length === PURGE_BATCH) {
-      await ctx.scheduler.runAfter(0, internal.maintenance.purgeLibrary, { libraryId });
+        return;
+      }
 
-      return;
+      case "albums": {
+        await next((await purgeAlbums(ctx, libraryId)) ? "artists" : "albums");
+
+        return;
+      }
+
+      case "artists": {
+        await next((await purgeArtists(ctx, libraryId)) ? "queues" : "artists");
+
+        return;
+      }
+
+      case "queues": {
+        const after = await purgeQueues(ctx, cursor);
+
+        if (after !== null) await next("queues", after);
+
+        return;
+      }
     }
-
-    const albums = await ctx.db
-      .query("albums")
-      .withIndex("by_library_artist_key", (q) => q.eq("libraryId", libraryId))
-      .collect();
-
-    await Promise.all(albums.map((album) => ctx.db.delete(album._id)));
-
-    const artists = await ctx.db
-      .query("artists")
-      .withIndex("by_library_key", (q) => q.eq("libraryId", libraryId))
-      .collect();
-
-    await Promise.all(artists.map((artist) => ctx.db.delete(artist._id)));
   },
 });
 
-/** Returns running jobs whose worker stopped renewing the lease to the pending queue. */
+/**
+ * Returns running jobs whose worker stopped renewing the lease to the pending queue, or fails one
+ * whose lease expired `MAX_SCAN_STALLS` times in a row before saving anything: a file that crashes
+ * the scanner would otherwise crash it again on every retry, forever. A scan that saves batches
+ * between restarts (the service restarted for a deploy) keeps retrying.
+ */
 export const releaseExpiredLeases = internalMutation({
   args: {},
   handler: async (ctx) => {
@@ -58,14 +245,28 @@ export const releaseExpiredLeases = internalMutation({
     const expired = running.filter((job) => job.leaseUntil !== undefined && job.leaseUntil < now);
 
     await Promise.all(
-      expired.map((job) =>
-        ctx.db.patch(job._id, {
-          status: "pending",
-          workerId: undefined,
-          leaseUntil: undefined,
-          message: "Worker stopped responding; retrying",
-        }),
-      ),
+      expired.map((job) => {
+        // `done` counts files this lease saved: claiming resets it, and the scanner adds a batch
+        // only once it is written. Files already saved are skipped on the next try.
+        const stalls = job.done > 0 ? 0 : (job.stalls ?? 0) + 1;
+
+        return stalls >= MAX_SCAN_STALLS
+          ? ctx.db.patch(job._id, {
+              status: "failed",
+              workerId: undefined,
+              leaseUntil: undefined,
+              finishedAt: now,
+              stalls,
+              error: `The scan stopped responding ${MAX_SCAN_STALLS} times without saving anything, so it was stopped. Check the media service log for the file it was reading, then scan again.`,
+            })
+          : ctx.db.patch(job._id, {
+              status: "pending",
+              workerId: undefined,
+              leaseUntil: undefined,
+              stalls,
+              message: "Worker stopped responding; retrying",
+            });
+      }),
     );
   },
 });
@@ -78,8 +279,11 @@ export const pauseOrphanedSessions = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
-    const sessions = await ctx.db.query("playbackSessions").collect();
-    const playing = sessions.filter((session) => session.playing);
+
+    const playing = await ctx.db
+      .query("playbackSessions")
+      .withIndex("by_playing", (q) => q.eq("playing", true))
+      .collect();
 
     const lastSeen = await Promise.all(
       playing.map(async (session) => {
@@ -152,5 +356,128 @@ export const pruneStaleDevices = internalMutation({
         cursor: batch.continueCursor,
       });
     }
+  },
+});
+
+const recordKind = v.union(
+  v.literal("jobs"),
+  v.literal("expiredInvites"),
+  v.literal("acceptedInvites"),
+  v.literal("revokedKeys"),
+);
+
+type RecordKind = typeof recordKind.type;
+
+const NEXT_KIND: Readonly<Record<RecordKind, RecordKind | null>> = {
+  jobs: "expiredInvites",
+  expiredInvites: "acceptedInvites",
+  acceptedInvites: "revokedKeys",
+  revokedKeys: null,
+};
+
+/** Deletes up to `PRUNE_BATCH` records of `kind` older than `cutoff`; returns how many. */
+const pruneRecords = async (
+  ctx: MutationCtx,
+  kind: RecordKind,
+  cutoff: number,
+): Promise<number> => {
+  const rows = await Match.value(kind).pipe(
+    Match.when("jobs", async () => {
+      const finished = await Promise.all(
+        (["done", "failed", "cancelled"] as const).map((status) =>
+          ctx.db
+            .query("jobs")
+            .withIndex("by_status_finished", (q) =>
+              q.eq("status", status).gte("finishedAt", 0).lt("finishedAt", cutoff),
+            )
+            .take(PRUNE_BATCH),
+        ),
+      );
+
+      return finished.flat().slice(0, PRUNE_BATCH);
+    }),
+    Match.when("expiredInvites", () =>
+      ctx.db
+        .query("invites")
+        .withIndex("by_expires", (q) => q.lt("expiresAt", cutoff))
+        .take(PRUNE_BATCH),
+    ),
+    Match.when("acceptedInvites", () =>
+      ctx.db
+        .query("invites")
+        .withIndex("by_accepted", (q) => q.gte("acceptedAt", 0).lt("acceptedAt", cutoff))
+        .take(PRUNE_BATCH),
+    ),
+    Match.when("revokedKeys", () =>
+      ctx.db
+        .query("apiKeys")
+        .withIndex("by_revoked", (q) => q.gte("revokedAt", 0).lt("revokedAt", cutoff))
+        .take(PRUNE_BATCH),
+    ),
+    Match.exhaustive,
+  );
+
+  await Promise.all(rows.map((row) => ctx.db.delete(row._id)));
+
+  return rows.length;
+};
+
+/**
+ * Deletes jobs that finished, failed, or were cancelled, invites that expired or were accepted,
+ * and API keys that were revoked, all more than `RECORD_RETAINED_MS` ago, a batch per run. Play
+ * history is the user's own record and is kept.
+ */
+export const pruneOldRecords = internalMutation({
+  args: { kind: v.optional(recordKind), cutoff: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const kind = args.kind ?? "jobs";
+    // Continuations reuse the first run's cutoff, so the range they finish is the one it started.
+    const cutoff = args.cutoff ?? Date.now() - RECORD_RETAINED_MS;
+    const deleted = await pruneRecords(ctx, kind, cutoff);
+    const next = deleted === PRUNE_BATCH ? kind : NEXT_KIND[kind];
+
+    if (next !== null) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.pruneOldRecords, { kind: next, cutoff });
+    }
+  },
+});
+
+/**
+ * Deletes an album that lost its last playable song (`adjustAlbum` schedules this) once no song
+ * points at it any more, as after a retag moved its songs to another album, and then its artist
+ * if nothing points at that either. An album whose songs are only missing keeps its row, so the
+ * songs find it again when their files come back.
+ */
+export const pruneEmptyAlbum = internalMutation({
+  args: { albumId: v.id("albums") },
+  handler: async (ctx, { albumId }) => {
+    const album = await ctx.db.get(albumId);
+
+    if (album === null || album.trackCount > 0) return;
+
+    const song = await ctx.db
+      .query("tracks")
+      .withIndex("by_album", (q) => q.eq("albumId", album._id))
+      .first();
+
+    if (song !== null) return;
+    await ctx.db.delete(album._id);
+
+    const artist = await ctx.db.get(album.artistId);
+
+    if (artist === null || artist.albumCount > 0) return;
+
+    const [otherAlbum, otherSong] = await Promise.all([
+      ctx.db
+        .query("albums")
+        .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
+        .first(),
+      ctx.db
+        .query("tracks")
+        .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
+        .first(),
+    ]);
+
+    if (otherAlbum === null && otherSong === null) await ctx.db.delete(artist._id);
   },
 });

@@ -172,9 +172,13 @@ export const presentLibrary = (
   scanning,
 });
 
-/** A playlist summary with up to four covers for its mosaic. */
+/**
+ * A playlist summary with up to four covers for its mosaic, taken only from songs the viewer can
+ * read: a cover is signed for anyone who holds its URL.
+ */
 export const presentPlaylist = async (
   ctx: ReadCtx,
+  viewer: Viewer,
   presenter: Presenter,
   doc: Doc<"playlists">,
 ): Promise<(typeof Playlist)["Encoded"]> => {
@@ -186,7 +190,13 @@ export const presentPlaylist = async (
   const tracks = await Promise.all(items.map((item) => ctx.db.get(item.trackId)));
 
   const hashes = [
-    ...new Set(tracks.flatMap((track) => (track?.artHash === undefined ? [] : [track.artHash]))),
+    ...new Set(
+      tracks.flatMap((track) =>
+        track === null || track.artHash === undefined || !canRead(viewer, track.libraryId)
+          ? []
+          : [track.artHash],
+      ),
+    ),
   ].slice(0, 4);
 
   const urls = await Promise.all(hashes.map(presenter.artUrl));

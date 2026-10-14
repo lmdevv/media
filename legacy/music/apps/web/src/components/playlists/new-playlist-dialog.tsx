@@ -1,4 +1,5 @@
 import type { TrackId } from "@music/commands/ids";
+import { PLAYLIST_LIMIT } from "@music/commands/models";
 import { usePlayer } from "@music/player/react";
 import { useReadOnce, useRun } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
@@ -13,6 +14,7 @@ import type { FormEvent } from "react";
 import { useUi } from "@/components/shell/ui-state";
 import { useAction } from "@/lib/action";
 import { formatCount, plural } from "@/lib/format";
+import { readPages } from "@/lib/read-pages";
 
 type StartWith = "nothing" | "selection" | "queue" | "liked";
 
@@ -42,7 +44,7 @@ function NewPlaylistForm({
   const navigate = useNavigate();
   const player = usePlayer();
   const create = useRun("playlists.create");
-  const readLikes = useReadOnce("likes.list");
+  const readLikes = useReadOnce("likes.page");
   const [name, setName] = useState("");
   const [startWith, setStartWith] = useState<StartWith>(seed.length > 0 ? "selection" : "nothing");
 
@@ -53,7 +55,11 @@ function NewPlaylistForm({
       const trackIds: ReadonlyArray<TrackId> = await Match.value(startWith).pipe(
         Match.when("selection", () => Promise.resolve(seed)),
         Match.when("queue", () => Promise.resolve(player.queue.map((track) => track.id))),
-        Match.when("liked", async () => (await readLikes({})).map((track) => track.id)),
+        Match.when("liked", async () =>
+          (await readPages((cursor) => readLikes({ cursor, limit: 200 }), PLAYLIST_LIMIT)).map(
+            (track) => track.id,
+          ),
+        ),
         Match.when("nothing", () => Promise.resolve([])),
         Match.exhaustive,
       );
@@ -63,7 +69,7 @@ function NewPlaylistForm({
       const { playlistId } = await create(
         trackIds.length === 0
           ? { name: trimmed }
-          : { name: trimmed, trackIds: trackIds.slice(0, 2000) },
+          : { name: trimmed, trackIds: trackIds.slice(0, PLAYLIST_LIMIT) },
       );
 
       onDone();

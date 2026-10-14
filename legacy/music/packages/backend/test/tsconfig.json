@@ -1,4 +1,13 @@
 {
+  /* The in-memory tests import the Convex functions and schema, so this directory compiles them
+     under the same setting as `convex/tsconfig.json`: exactOptionalPropertyTypes is off because
+     Convex removes a field by patching it to `undefined`, and its generated document types are
+     not assignable to `GenericDocument` under the flag (TS2344 on DataModel, TS2379 on every
+     optional insert). */
   "extends": "@music/config/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "dom"],
+    "exactOptionalPropertyTypes": false
+  },
   "include": ["./*.ts"]
 }

@@ -133,7 +133,8 @@ export class PlaybackController {
   /** A session snapshot paused the engine; that pause is already on the server. */
   #sessionPaused = false;
   #unsubscribeEngine: (() => void) | null = null;
-  #registered: Promise<void> = Promise.resolve();
+  /** The first heartbeat, and whether it registered this device. */
+  #registered: Promise<boolean> = Promise.resolve(false);
   #healthFiber: Fiber.Fiber<void, unknown> | null = null;
   #stop: (() => void) | null = null;
 
@@ -271,7 +272,7 @@ export class PlaybackController {
   /** Replaces the queue and plays it on this browser. */
   async playTracks(trackIds: ReadonlyArray<TrackId>, index?: number): Promise<void> {
     this.#unlockOutput();
-    await this.#registered;
+    await this.#ensureRegistered();
 
     await this.capture(
       this.#client.run(
@@ -339,7 +340,7 @@ export class PlaybackController {
   /** Moves playback to this browser. */
   async playHere(): Promise<void> {
     this.#unlockOutput();
-    await this.#registered;
+    await this.#ensureRegistered();
     await this.capture(this.#client.run("playback.transfer", { deviceId: this.deviceId }));
   }
 
@@ -413,12 +414,27 @@ export class PlaybackController {
     }
   }
 
-  async #heartbeat(): Promise<void> {
+  /** Sends a heartbeat. Resolves whether it landed; a failed one is superseded by the next. */
+  async #heartbeat(): Promise<boolean> {
     const { name, kind } = this.#env.device;
 
-    await this.#quietly(
-      this.#client.run("devices.heartbeat", { deviceId: this.deviceId, name, kind }),
-    );
+    try {
+      await this.#client.run("devices.heartbeat", { deviceId: this.deviceId, name, kind });
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Waits for the first heartbeat, and sends another when it failed: the server refuses to play
+   * on a device it has never heard from.
+   */
+  async #ensureRegistered(): Promise<void> {
+    if (await this.#registered) return;
+    this.#registered = this.#heartbeat();
+    await this.#registered;
   }
 
   async #report(playing: boolean): Promise<void> {
@@ -432,6 +448,7 @@ export class PlaybackController {
       this.#client.run("playback.report", {
         deviceId: this.deviceId,
         index: loaded.index,
+        trackId: loaded.track.id,
         positionMs,
         playing,
       }),

@@ -6,15 +6,19 @@ import { tableId } from "../lib/ids";
 import { makePresenter, presentPlaylist } from "../lib/present";
 import { canRead } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
+import { PLAYLIST_LIMIT } from "@music/commands/models";
 import { signResource } from "@music/commands/signed-url";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
 
 const STREAM_TTL_MS = 6 * 60 * 60 * 1000;
 
+/** Most likes `likes.list` returns; `likes.page` reads any number. */
 const MAX_LIKES = 1000;
 
-const MAX_PLAYLIST = 2000;
+const LIKES_PAGE = 50;
+
+const MAX_PLAYLIST = PLAYLIST_LIMIT;
 
 const readableTracks = async (
   ctx: QueryCtx,
@@ -104,6 +108,32 @@ export const collectionQueries = {
     return makePresenter(ctx, viewer).tracks(tracks);
   },
 
+  "likes.page": async (ctx, viewer, args) => {
+    const page = await ctx.db
+      .query("likes")
+      .withIndex("by_user", (q) => q.eq("userId", viewer.id))
+      .order("desc")
+      .paginate({
+        cursor: args.cursor ?? null,
+        endCursor: args.end ?? null,
+        numItems: args.limit ?? LIKES_PAGE,
+      });
+
+    // A song you can no longer read, or whose file is gone, is left out, so a page can come back
+    // short while `done` is false.
+    const tracks = await readableTracks(
+      ctx,
+      viewer,
+      page.page.map((like) => like.trackId),
+    );
+
+    return {
+      items: await makePresenter(ctx, viewer).tracks(tracks),
+      cursor: page.continueCursor,
+      done: page.isDone,
+    };
+  },
+
   "history.list": async (ctx, viewer, args) => {
     const plays = await ctx.db
       .query("history")
@@ -139,7 +169,9 @@ export const collectionQueries = {
 
     const present = makePresenter(ctx, viewer);
 
-    return Promise.all(playlists.map((playlist) => presentPlaylist(ctx, present, playlist)));
+    return Promise.all(
+      playlists.map((playlist) => presentPlaylist(ctx, viewer, present, playlist)),
+    );
   },
 
   "playlists.get": async (ctx, viewer, args) => {
@@ -153,24 +185,24 @@ export const collectionQueries = {
 
     const tracks = await Promise.all(items.map((item) => ctx.db.get(item.trackId)));
 
+    // A song whose file is gone stays as an unavailable entry you can remove. One in a library
+    // you can no longer read stays hidden: listing it would show what that library holds.
     const entries = items.flatMap((item, index) => {
       const track = tracks[index];
 
-      return track === undefined ||
-        track === null ||
-        track.missing ||
-        !canRead(viewer, track.libraryId)
+      return track === undefined || track === null || !canRead(viewer, track.libraryId)
         ? []
         : [{ item, track }];
     });
 
     return {
-      playlist: await presentPlaylist(ctx, present, playlist),
+      playlist: await presentPlaylist(ctx, viewer, present, playlist),
       items: await Promise.all(
         entries.map(async ({ item, track }) => ({
           itemId: item._id,
           addedAt: item._creationTime,
           track: await present.track(track),
+          available: !track.missing,
         })),
       ),
     };

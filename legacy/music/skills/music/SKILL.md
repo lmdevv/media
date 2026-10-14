@@ -122,11 +122,11 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 ### library
 
 - `music library home`: Recently added and recently played albums, recently played artists, and library totals.
-- `music albums list [--cursor <text>] [--limit <int>]`: List albums, newest first.
+- `music albums list [--cursor <text>] [--end <text>] [--limit <int>]`: List albums, newest first.
 - `music albums get <album-id>`: Show an album and its tracks.
-- `music artists list [--cursor <text>] [--limit <int>]`: List artists by name.
+- `music artists list [--cursor <text>] [--end <text>] [--limit <int>]`: List artists by name.
 - `music artists get <artist-id>`: Show an artist, their albums, and top songs.
-- `music tracks list [--cursor <text>] [--limit <int>]`: List songs by title.
+- `music tracks list [--cursor <text>] [--end <text>] [--limit <int>]`: List songs by title.
 
 ### search
 
@@ -135,6 +135,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 ### playback
 
 - `music playback state`: Show what is playing, where, and the queue.
+- `music playback position`: Show the playing device, position, and volume, without the queue.
 - `music playback play <track-ids...> [--index <int>] [--device-id <id>]`: Replace the queue and start playing.
 - `music playback pause`: Pause playback.
 - `music playback resume`: Resume playback.
@@ -145,7 +146,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music playback shuffle (--on | --no-on)`: Turn shuffle on or off.
 - `music playback repeat <off|all|one>`: Set repeat to off, all, or one.
 - `music playback volume <volume>`: Set the volume from 0 to 1.
-- `music playback report --device-id <id> --index <int> --position-ms <number> (--playing | --no-playing)`: Report the active device's position (sent by players).
+- `music playback report --device-id <id> --index <int> [--track-id <id>] --position-ms <number> (--playing | --no-playing)`: Report the active device's position (sent by players).
 - `music stream url --track-id <id> --profile <original|aac-320|aac-128|fmp4-flac|fmp4-aac>`: Get a signed stream URL for a song.
 
 ### devices
@@ -156,13 +157,15 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 
 ### queue
 
+- `music queue list`: Show the queue, the current song's index, shuffle, and repeat.
 - `music queue add <track-ids...> [--next | --no-next]`: Add songs to the queue, next or at the end.
 - `music queue remove <index>`: Remove the queue entry at an index.
 - `music queue clear`: Clear everything after the current song.
 
 ### likes
 
-- `music likes list`: List liked songs, newest first.
+- `music likes list`: List up to 1,000 liked songs, newest first (likes.page reads them all).
+- `music likes page [--cursor <text>] [--end <text>] [--limit <int>]`: List liked songs, newest first, a page at a time.
 - `music likes set <track-id> (--liked | --no-liked)`: Like or unlike a song.
 - `music history list [--limit <int>]`: List recently played songs.
 

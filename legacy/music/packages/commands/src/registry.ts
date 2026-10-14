@@ -29,6 +29,8 @@ import {
   LibraryVisibility,
   Millis,
   PageArgs,
+  PlaybackPosition,
+  PlaybackQueue,
   PlaybackState,
   Playlist,
   PlaylistDetail,
@@ -135,6 +137,15 @@ export const commands = {
     job: false,
     args: NoArgs,
     result: PlaybackState,
+  }),
+  "playback.position": command({
+    summary: "Show the playing device, position, and volume, without the queue",
+    group: "playback",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: PlaybackPosition,
   }),
   "playback.play": command({
     summary: "Replace the queue and start playing",
@@ -250,6 +261,11 @@ export const commands = {
     args: Schema.Struct({
       deviceId: DeviceId,
       index: QueueIndex,
+      /**
+       * The song playing at `index`. When the queue changed before the player saw it, the server
+       * finds this song near `index` instead of trusting the index.
+       */
+      trackId: Schema.optionalKey(TrackId),
       positionMs: Millis,
       playing: Schema.Boolean,
     }),
@@ -257,6 +273,15 @@ export const commands = {
   }),
 
   // Queue
+  "queue.list": command({
+    summary: "Show the queue, the current song's index, shuffle, and repeat",
+    group: "queue",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: PlaybackQueue,
+  }),
   "queue.add": command({
     summary: "Add songs to the queue, next or at the end",
     group: "queue",
@@ -310,13 +335,22 @@ export const commands = {
 
   // Likes and history
   "likes.list": command({
-    summary: "List liked songs, newest first",
+    summary: "List up to 1,000 liked songs, newest first (likes.page reads them all)",
     group: "likes",
     kind: "query",
     access: "user",
     job: false,
     args: NoArgs,
     result: Schema.Array(Track),
+  }),
+  "likes.page": command({
+    summary: "List liked songs, newest first, a page at a time",
+    group: "likes",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: PageArgs,
+    result: TrackPage,
   }),
   "likes.set": command({
     summary: "Like or unlike a song",

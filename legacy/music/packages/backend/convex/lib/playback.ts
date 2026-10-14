@@ -2,7 +2,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import type { ReadCtx } from "./viewer";
 
-/** Longest queue kept in a session; Convex arrays and query reads stay well inside limits. */
+/** Longest queue kept; Convex arrays and query reads stay well inside limits. */
 export const MAX_QUEUE = 1000;
 
 /** The user's session, if they have played anything yet. */
@@ -26,13 +26,9 @@ export const ensureSession = async (
 
   const id = await ctx.db.insert("playbackSessions", {
     userId,
-    queue: [],
-    index: 0,
     positionMs: 0,
     playing: false,
     updatedAt: Date.now(),
-    shuffle: false,
-    repeat: "off",
     volume: 1,
   });
 

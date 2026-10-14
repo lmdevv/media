@@ -1,14 +1,15 @@
 import { foldSearchText } from "@music/commands/search-text";
 
 import type { Doc, Id } from "../_generated/dataModel";
+import type { QueryCtx } from "../_generated/server";
 import { canRead } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
+import { mergedPage, numberKey, textKey } from "../lib/pages";
+import type { Source } from "../lib/pages";
 import { makePresenter } from "../lib/present";
 import type { QueryHandlers } from "./types";
-
-const DEFAULT_PAGE = 50;
 
 const emptyPage = { items: [], cursor: "", done: true } as const;
 
@@ -19,16 +20,138 @@ const byDiscAndNumber = (left: Doc<"tracks">, right: Doc<"tracks">): number =>
   left.title.localeCompare(right.title);
 
 /**
- * Keeps the rows of one page that the viewer may read. Paginated queries filter by library here,
- * after `paginate`, rather than in the database query: Convex re-runs a subscribed page from its
- * recorded cursors, and a query whose filter lists the viewer's libraries changes shape whenever a
- * library is added or removed, which fails every open page with `InvalidCursor`. A page can come
- * back short or empty while `done` is false; clients keep loading until `done`.
+ * Keeps the rows of one page that the viewer may read. Lists read only readable libraries' index
+ * ranges, so this drops only rows of a library deleted moments ago that its purge has not reached.
  */
 const readable = <Row extends { readonly libraryId: Id<"libraries"> }>(
   viewer: Viewer,
   rows: ReadonlyArray<Row>,
 ): Array<Row> => rows.filter((row) => canRead(viewer, row.libraryId));
+
+/**
+ * The index ranges a list reads: one global range when the viewer reads every library, else one
+ * range per library they read, merged by `mergedPage`. A member who reads a small shared library
+ * then never pages through another user's large private one.
+ */
+const listScopes = async (
+  ctx: QueryCtx,
+  viewer: Viewer,
+): Promise<ReadonlyArray<Id<"libraries"> | null>> => {
+  const libraries = await ctx.db.query("libraries").collect();
+
+  return libraries.every((library) => canRead(viewer, library._id))
+    ? [null]
+    : [...viewer.libraryIds];
+};
+
+/** Albums with songs, newest first, from one library or all of them. */
+const albumSource =
+  (ctx: QueryCtx, libraryId: Id<"libraries"> | null): Source<Doc<"albums">> =>
+  async ({ start, end }, limit) => {
+    const startKey = start === null ? null : numberKey(start);
+    const endKey = end === null ? null : numberKey(end);
+
+    const query =
+      libraryId === null
+        ? ctx.db.query("albums").withIndex("by_added", (q) => {
+            const lower = endKey === null ? q : q.gte("addedAt", endKey);
+
+            return startKey === null ? lower : lower.lte("addedAt", startKey);
+          })
+        : ctx.db.query("albums").withIndex("by_library_added", (q) => {
+            const scoped = q.eq("libraryId", libraryId);
+            const lower = endKey === null ? scoped : scoped.gte("addedAt", endKey);
+
+            return startKey === null ? lower : lower.lte("addedAt", startKey);
+          });
+
+    return query
+      .order("desc")
+      .filter((q) =>
+        q.and(
+          q.gt(q.field("trackCount"), 0),
+          start === null || startKey === null
+            ? true
+            : q.or(q.lt(q.field("addedAt"), startKey), q.lt(q.field("_creationTime"), start.time)),
+          end === null || endKey === null
+            ? true
+            : q.or(q.gt(q.field("addedAt"), endKey), q.gte(q.field("_creationTime"), end.time)),
+        ),
+      )
+      .take(limit);
+  };
+
+/** Artists with albums, by name, from one library or all of them. */
+const artistSource =
+  (ctx: QueryCtx, libraryId: Id<"libraries"> | null): Source<Doc<"artists">> =>
+  async ({ start, end }, limit) => {
+    const startKey = start === null ? null : textKey(start);
+    const endKey = end === null ? null : textKey(end);
+
+    const query =
+      libraryId === null
+        ? ctx.db.query("artists").withIndex("by_key", (q) => {
+            const lower = startKey === null ? q : q.gte("key", startKey);
+
+            return endKey === null ? lower : lower.lte("key", endKey);
+          })
+        : ctx.db.query("artists").withIndex("by_library_key", (q) => {
+            const scoped = q.eq("libraryId", libraryId);
+            const lower = startKey === null ? scoped : scoped.gte("key", startKey);
+
+            return endKey === null ? lower : lower.lte("key", endKey);
+          });
+
+    return query
+      .filter((q) =>
+        q.and(
+          q.gt(q.field("albumCount"), 0),
+          start === null || startKey === null
+            ? true
+            : q.or(q.gt(q.field("key"), startKey), q.gt(q.field("_creationTime"), start.time)),
+          end === null || endKey === null
+            ? true
+            : q.or(q.lt(q.field("key"), endKey), q.lte(q.field("_creationTime"), end.time)),
+        ),
+      )
+      .take(limit);
+  };
+
+/** Playable songs by title, from one library or all of them. */
+const trackSource =
+  (ctx: QueryCtx, libraryId: Id<"libraries"> | null): Source<Doc<"tracks">> =>
+  async ({ start, end }, limit) => {
+    const startKey = start === null ? null : textKey(start);
+    const endKey = end === null ? null : textKey(end);
+
+    const query =
+      libraryId === null
+        ? ctx.db.query("tracks").withIndex("by_title", (q) => {
+            const scoped = q.eq("missing", false);
+            const lower = startKey === null ? scoped : scoped.gte("titleKey", startKey);
+
+            return endKey === null ? lower : lower.lte("titleKey", endKey);
+          })
+        : ctx.db.query("tracks").withIndex("by_library_title", (q) => {
+            const scoped = q.eq("libraryId", libraryId).eq("missing", false);
+            const lower = startKey === null ? scoped : scoped.gte("titleKey", startKey);
+
+            return endKey === null ? lower : lower.lte("titleKey", endKey);
+          });
+
+    return query
+      .filter((q) =>
+        q.and(
+          start === null || startKey === null
+            ? true
+            : q.or(q.gt(q.field("titleKey"), startKey), q.gt(q.field("_creationTime"), start.time)),
+          end === null || endKey === null
+            ? true
+            : q.or(q.lt(q.field("titleKey"), endKey), q.lte(q.field("_creationTime"), end.time)),
+        ),
+      )
+      .take(limit);
+  };
 
 const readableAlbums = (viewer: Viewer, albums: ReadonlyArray<Doc<"albums"> | null>) =>
   albums.filter(
@@ -39,8 +162,17 @@ const readableAlbums = (viewer: Viewer, albums: ReadonlyArray<Doc<"albums"> | nu
 export const libraryQueries = {
   "library.home": async (ctx, viewer) => {
     const present = makePresenter(ctx, viewer);
-    const recent = await ctx.db.query("albums").withIndex("by_added").order("desc").take(200);
-    const recentlyAdded = readableAlbums(viewer, recent).slice(0, 12);
+    const scopes = await listScopes(ctx, viewer);
+
+    // Newest albums over the readable libraries' indexes, as `albums.list` reads them.
+    const recent = await mergedPage(
+      scopes.map((libraryId) => albumSource(ctx, libraryId)),
+      (album) => album.addedAt,
+      "desc",
+      { limit: 12 },
+    );
+
+    const recentlyAdded = readableAlbums(viewer, recent.items);
 
     const plays = await ctx.db
       .query("history")
@@ -90,19 +222,16 @@ export const libraryQueries = {
   "albums.list": async (ctx, viewer, args) => {
     if (viewer.libraryIds.size === 0) return emptyPage;
     const present = makePresenter(ctx, viewer);
+    const scopes = await listScopes(ctx, viewer);
 
-    const page = await ctx.db
-      .query("albums")
-      .withIndex("by_added")
-      .order("desc")
-      .filter((q) => q.gt(q.field("trackCount"), 0))
-      .paginate({ cursor: args.cursor ?? null, numItems: args.limit ?? DEFAULT_PAGE });
+    const page = await mergedPage(
+      scopes.map((libraryId) => albumSource(ctx, libraryId)),
+      (album) => album.addedAt,
+      "desc",
+      args,
+    );
 
-    return {
-      items: await Promise.all(readable(viewer, page.page).map(present.album)),
-      cursor: page.continueCursor,
-      done: page.isDone,
-    };
+    return { ...page, items: await Promise.all(readable(viewer, page.items).map(present.album)) };
   },
 
   "albums.get": async (ctx, viewer, args) => {
@@ -133,18 +262,16 @@ export const libraryQueries = {
   "artists.list": async (ctx, viewer, args) => {
     if (viewer.libraryIds.size === 0) return emptyPage;
     const present = makePresenter(ctx, viewer);
+    const scopes = await listScopes(ctx, viewer);
 
-    const page = await ctx.db
-      .query("artists")
-      .withIndex("by_key")
-      .filter((q) => q.gt(q.field("albumCount"), 0))
-      .paginate({ cursor: args.cursor ?? null, numItems: args.limit ?? DEFAULT_PAGE });
+    const page = await mergedPage(
+      scopes.map((libraryId) => artistSource(ctx, libraryId)),
+      (artist) => artist.key,
+      "asc",
+      args,
+    );
 
-    return {
-      items: await Promise.all(readable(viewer, page.page).map(present.artist)),
-      cursor: page.continueCursor,
-      done: page.isDone,
-    };
+    return { ...page, items: await Promise.all(readable(viewer, page.items).map(present.artist)) };
   },
 
   "artists.get": async (ctx, viewer, args) => {
@@ -182,17 +309,16 @@ export const libraryQueries = {
   "tracks.list": async (ctx, viewer, args) => {
     if (viewer.libraryIds.size === 0) return emptyPage;
     const present = makePresenter(ctx, viewer);
+    const scopes = await listScopes(ctx, viewer);
 
-    const page = await ctx.db
-      .query("tracks")
-      .withIndex("by_title", (q) => q.eq("missing", false))
-      .paginate({ cursor: args.cursor ?? null, numItems: args.limit ?? DEFAULT_PAGE });
+    const page = await mergedPage(
+      scopes.map((libraryId) => trackSource(ctx, libraryId)),
+      (track) => track.titleKey,
+      "asc",
+      args,
+    );
 
-    return {
-      items: await present.tracks(readable(viewer, page.page)),
-      cursor: page.continueCursor,
-      done: page.isDone,
-    };
+    return { ...page, items: await present.tracks(readable(viewer, page.items)) };
   },
 
   search: async (ctx, viewer, args) => {

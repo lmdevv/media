@@ -89,6 +89,7 @@ function PlaylistPage() {
 
   const { playlist, items } = detail;
   const tracks = items.map((item) => item.track);
+  const playable = items.flatMap((item) => (item.available ? [item.track] : []));
   const owner = me?.name ?? me?.email ?? "You";
 
   const eyebrow = [
@@ -118,7 +119,7 @@ function PlaylistPage() {
         }
         phoneSubtitle={owner}
         phoneMeta={`${plural(playlist.trackCount, "song")} · updated ${formatAgo(playlist.updatedAt)}`}
-        tracks={tracks}
+        tracks={playable}
         menuExtra={
           <>
             <DropdownMenuItem onClick={() => setRenaming(true)}>Rename…</DropdownMenuItem>
@@ -134,6 +135,7 @@ function PlaylistPage() {
         <TrackList
           tracks={tracks}
           variant="list"
+          unavailable={(index) => items[index]?.available === false}
           label={`Songs in ${playlist.name}`}
           menuExtra={(track, index) => {
             const item = items[index];
