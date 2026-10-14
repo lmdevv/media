@@ -22,6 +22,8 @@
  * - `POST /control/busy?ms=<n>`: for the next `n` milliseconds, answer every stream from an offset
  *   (`&start=`) like a media service whose seek transcodes are all taken: `503` with
  *   `Retry-After: 1`.
+ * - `POST /control/expire-urls` and `POST /control/renew-urls`: answer every stream and fixture
+ *   request `403`, as the media service answers a signed URL that has expired, or stop.
  *
  *   node harness/media-stub.ts
  */
@@ -91,6 +93,9 @@ let down = false;
 let failFragmented = false;
 
 let failAac = false;
+
+/** Every stream URL is refused like an expired one; see `/control/expire-urls`. */
+let refuseUrls = false;
 
 /** Until when (`Date.now()`) streams from an offset get a busy answer; see `/control/busy`. */
 let busyUntil = 0;
@@ -372,7 +377,9 @@ const server = createServer((request, response) => {
     else if (action === "slow") throttleTranscodes(8);
     else if (action === "fast") throttleTranscodes(null);
     else if (action === "busy") busyUntil = Date.now() + Number(url.searchParams.get("ms"));
-    else down = action === "down";
+    else if (action === "expire-urls" || action === "renew-urls") {
+      refuseUrls = action === "expire-urls";
+    } else down = action === "down";
     response.writeHead(200, cors).end(action);
 
     return;
@@ -388,6 +395,15 @@ const server = createServer((request, response) => {
   if (down) {
     // The real outage case is a refused connection; a 503 exercises the same player path.
     response.writeHead(503, cors).end("Down");
+
+    return;
+  }
+
+  if (
+    refuseUrls &&
+    (url.pathname.startsWith("/media/stream/") || url.pathname.startsWith("/fixtures/"))
+  ) {
+    response.writeHead(403, cors).end("Invalid or expired signature");
 
     return;
   }

@@ -41,6 +41,30 @@ const lastPosition = async (page: Page): Promise<number> => {
   return last?.type === "time" ? last.positionMs : -1;
 };
 
+/**
+ * Page script for a browser whose buffer quota holds twenty seconds: an append to a buffer that
+ * holds that much already fails as a real one over its byte quota does. Plain JavaScript, as it
+ * replaces a built-in method in the page.
+ */
+const QUOTA_OF_TWENTY_SECONDS = `
+  const append = SourceBuffer.prototype.appendBuffer;
+  SourceBuffer.prototype.appendBuffer = function (data) {
+    let seconds = 0;
+    for (let index = 0; index < this.buffered.length; index += 1) {
+      seconds += this.buffered.end(index) - this.buffered.start(index);
+    }
+    if (seconds >= 20) throw new DOMException("The SourceBuffer is full", "QuotaExceededError");
+    return append.call(this, data);
+  };
+`;
+
+/** Where the audio the engine has buffered ends, in seconds; 0 before anything is buffered. */
+const bufferedEnd = async (page: Page): Promise<number> =>
+  Math.max(
+    0,
+    ...(await page.evaluate(() => window.harness?.buffered() ?? [])).map(([, end]) => end),
+  );
+
 const keysOf = (list: ReadonlyArray<TimedEvent>): ReadonlyArray<string> =>
   list.map((event) => (event.type === "advanced" ? event.key : ""));
 
@@ -309,6 +333,66 @@ test.describe("MseEngine", () => {
       const gap = await page.evaluate(() => window.harness?.gap());
 
       expect(gap?.soundMs ?? 0).toBeGreaterThan(1000);
+    }
+  });
+
+  test("frees the audio behind the playhead when the buffer is full and the playhead waits", async ({
+    page,
+    request,
+  }) => {
+    const song = "song-1.flac?p=fmp4-flac";
+
+    await warmCache(request, [song]);
+    // A browser whose buffer holds twenty seconds of the song, as Firefox's does for hi-res FLAC:
+    // an append to a buffer that holds that much fails like a real one over its byte quota.
+    await page.addInitScript({ content: QUOTA_OF_TWENTY_SECONDS });
+
+    await open(page, "mse");
+    await page.evaluate((file) => window.harness?.load(file, 0, false, 90_000), song);
+    await waitForEvent(page, "paused");
+    await expect.poll(() => bufferedEnd(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(19);
+    await page.waitForTimeout(500);
+
+    // Just before the end of what fits: under a second to play, twenty seconds behind.
+    const end = await bufferedEnd(page);
+
+    await page.evaluate(
+      (positionMs) => {
+        window.harness?.engine.seek(positionMs);
+      },
+      Math.round((end - 0.5) * 1000),
+    );
+    await page.evaluate(() => window.harness?.engine.play());
+
+    await expect
+      .poll(() => lastPosition(page), { timeout: 15_000 })
+      .toBeGreaterThan((end + 3) * 1000);
+    expect(await ofType(page, "error")).toEqual([]);
+  });
+
+  test("reports a refused stream URL as expired, not as a format it cannot play", async ({
+    page,
+    request,
+  }) => {
+    const song = "song-1.flac?p=fmp4-flac";
+
+    await warmCache(request, [song]);
+    await page.evaluate((file) => window.harness?.load(file, 0, true, 90_000), song);
+    await waitForEvent(page, "playing");
+
+    // Hours later, the signed URL has expired; a seek outside the buffer fetches again.
+    expect((await request.post(`${media}/control/expire-urls`)).ok()).toBe(true);
+
+    try {
+      await page.evaluate(() => {
+        window.harness?.engine.seek(80_000);
+      });
+      await waitForEvent(page, "error");
+      expect(
+        (await ofType(page, "error")).map((event) => event.type === "error" && event.reason),
+      ).toEqual(["expired"]);
+    } finally {
+      expect((await request.post(`${media}/control/renew-urls`)).ok()).toBe(true);
     }
   });
 

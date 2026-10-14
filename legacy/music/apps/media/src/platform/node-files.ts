@@ -45,11 +45,33 @@ export const statPath = async (
   return { size: info.size, mtimeMs: info.mtimeMs, kind };
 };
 
-/** Streams the inclusive byte range `start..end` of a file as a web stream. */
-export const readRange = (path: string, start: number, end: number): ReadableStream<Uint8Array> =>
+/**
+ * Streams the inclusive byte range `start..end` of a file as a web stream. The file closes when
+ * the stream ends, is cancelled, or `signal` aborts: a response body that nobody reads or cancels
+ * (the client left before the server started sending it) would otherwise hold the file open.
+ */
+export const readRange = (
+  path: string,
+  start: number,
+  end: number,
+  signal: AbortSignal,
+): ReadableStream<Uint8Array> => {
+  // A read stream created with an aborted signal destroys itself before its file opens, and
+  // Node 24 then never closes the descriptor it opens.
+  if (signal.aborted) {
+    return new ReadableStream({
+      start: (controller) => {
+        controller.close();
+      },
+    });
+  }
+
   // SAFETY: `Readable.toWeb` is typed as `ReadableStream<any>`. A file read stream without an
   // `encoding` option emits only `Buffer` chunks, and `Buffer` is a `Uint8Array`.
-  Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream<Uint8Array>;
+  return Readable.toWeb(
+    createReadStream(path, { start, end, signal }),
+  ) as ReadableStream<Uint8Array>;
+};
 
 /** Reads up to `length` bytes of a file starting at byte `position`. */
 export const readAt = async (

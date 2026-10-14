@@ -5,7 +5,13 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option, Stream } from "effect";
 
-import { AAC_TAIL_PADDING, aacSampleRate, countFrameSamples, runTool } from "./ffmpeg.ts";
+import {
+  AAC_TAIL_PADDING,
+  aacSampleRate,
+  countFrameSamples,
+  FrameSampleCount,
+  runTool,
+} from "./ffmpeg.ts";
 import * as Files from "./files.ts";
 import { declaredLength, measureTiming } from "./sample-timing.ts";
 import { MEDIA_TEST_TIMEOUT, temporaryDirectory, testConfig } from "./testing/fixtures.ts";
@@ -377,6 +383,34 @@ describe("countFrameSamples", () => {
     ].join("\n");
 
     expect(countFrameSamples(listing)).toBe(6001);
+  });
+
+  it("counts a listing that arrives in pieces cut anywhere like the whole listing", () => {
+    const line = fc
+      .tuple(fc.nat(1_000_000), fc.integer({ min: 1, max: 8192 }))
+      .map(([pts, samples]) => `0, ${pts}, ${pts}, ${samples}, ${samples * 8}, 0x0badf00d`);
+
+    fc.assert(
+      fc.property(
+        fc.array(fc.oneof(line, fc.constant("#tb 0: 1/48000")), { maxLength: 40 }),
+        fc.array(fc.nat(), { maxLength: 10 }),
+        (lines, cuts) => {
+          const listing = lines.join("\n");
+
+          const at = [...new Set(cuts.map((cut) => cut % (listing.length + 1)))].toSorted(
+            (left, right) => left - right,
+          );
+
+          const count = new FrameSampleCount();
+
+          [0, ...at].forEach((start, index) => {
+            count.push(listing.slice(start, at[index] ?? listing.length));
+          });
+
+          expect(count.total()).toBe(countFrameSamples(listing));
+        },
+      ),
+    );
   });
 });
 

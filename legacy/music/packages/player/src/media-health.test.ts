@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { Effect, Exit, Schedule, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { mediaBaseUrl, probeMediaHealth, waitForMedia } from "./media-health";
+import { isStreamRefused, mediaBaseUrl, probeMediaHealth, waitForMedia } from "./media-health";
 
 const ListeningAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }));
 
@@ -81,5 +81,30 @@ describe("waitForMedia", () => {
     const exit = await Effect.runPromiseExit(probeMediaHealth("http://127.0.0.1:9/media"));
 
     expect(Exit.isFailure(exit)).toBe(true);
+  });
+});
+
+describe("isStreamRefused", () => {
+  it("is true only for a stream URL the media service answers with 403", async () => {
+    const server = createServer((request, response) => {
+      response.writeHead(request.url?.includes("expired") === true ? 403 : 206).end("ab");
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    const { port } = ListeningAddress(server.address());
+    const base = `http://127.0.0.1:${port}/media/stream`;
+
+    try {
+      expect(await Effect.runPromise(isStreamRefused(`${base}/song?exp=expired`))).toBe(true);
+      expect(await Effect.runPromise(isStreamRefused(`${base}/song?exp=later`))).toBe(false);
+      expect(await Effect.runPromise(isStreamRefused("http://127.0.0.1:9/media/stream/song"))).toBe(
+        false,
+      );
+    } finally {
+      server.close();
+    }
   });
 });

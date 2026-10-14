@@ -147,7 +147,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music playback repeat <off|all|one>`: Set repeat to off, all, or one.
 - `music playback volume <volume>`: Set the volume from 0 to 1.
 - `music playback report --device-id <id> --index <int> [--track-id <id>] --position-ms <number> (--playing | --no-playing)`: Report the active device's position (sent by players).
-- `music stream url --track-id <id> --profile <original|aac-320|aac-128|fmp4-flac|fmp4-aac>`: Get a signed stream URL for a song.
+- `music stream url --track-id <id> --profile <original|aac-320|aac-128|fmp4-flac|fmp4-aac> [--requested-at <number>]`: Get a signed stream URL for a song.
 
 ### devices
 

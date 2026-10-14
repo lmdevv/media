@@ -54,6 +54,13 @@ const Fingerprint = Schema.Struct({
   size: Schema.Finite,
   mtimeMs: Schema.Finite,
   missing: Schema.Boolean,
+  /** The folder artwork the last scan saw beside the file (see `ScannedTrack.folderArt`). */
+  folderArt: Schema.optional(Schema.String),
+  /** Length and tags, for telling a moved file from a new one (see `moved-files.ts`). */
+  durationMs: Schema.optional(Schema.Finite),
+  title: Schema.optional(Schema.String),
+  artist: Schema.optional(Schema.String),
+  album: Schema.optional(Schema.String),
 });
 
 /** What Convex knows about one file, for skipping unchanged files. */
@@ -64,6 +71,18 @@ const FingerprintPage = Schema.Struct({
   cursor: Schema.String,
   done: Schema.Boolean,
 });
+
+const ArtHashPage = Schema.Struct({
+  hashes: Schema.Array(Schema.String),
+  cursor: Schema.String,
+  done: Schema.Boolean,
+});
+
+/** The artwork hashes one page of a table uses, and the cursor for the next page. */
+export interface ArtHashPage extends Schema.Schema.Type<typeof ArtHashPage> {}
+
+/** The tables whose rows refer to stored artwork by hash. */
+export type ArtworkTable = "tracks" | "albums" | "artists";
 
 const TrackSource = Schema.Struct({
   path: Schema.String,
@@ -79,6 +98,8 @@ const TrackSource = Schema.Struct({
 export interface TrackSource extends Schema.Schema.Type<typeof TrackSource> {}
 
 const ReportResult = Schema.Struct({ cancelled: Schema.Boolean });
+
+const MoveResult = Schema.Struct({ moved: Schema.Finite });
 
 /** Tags read from one file, in the shape `media:upsertTracks` accepts. */
 export interface ScannedTrack {
@@ -100,6 +121,17 @@ export interface ScannedTrack {
   readonly sampleRate?: number | undefined;
   readonly bitDepth?: number | undefined;
   readonly artHash?: string | undefined;
+  /**
+   * The folder artwork file beside the file, as `path:size:mtime` (see `folder-art.ts`), whether
+   * or not the file has a picture of its own. A later scan reads the file again when it changes.
+   */
+  readonly folderArt?: string | undefined;
+}
+
+/** A file found at `track.path` that is the known track at `from`, moved or renamed. */
+export interface TrackMove {
+  readonly from: string;
+  readonly track: ScannedTrack;
 }
 
 /** Progress of a running job. */
@@ -159,6 +191,11 @@ const functions = {
     Secret & { libraryId: string; tracks: ReadonlyArray<ScannedTrack> },
     unknown
   >("media:upsertTracks"),
+  moveTracks: makeFunctionReference<
+    "mutation",
+    Secret & { libraryId: string; moves: ReadonlyArray<TrackMove> },
+    unknown
+  >("media:moveTracks"),
   markMissing: makeFunctionReference<
     "mutation",
     Secret & { libraryId: string; paths: ReadonlyArray<string> },
@@ -167,6 +204,11 @@ const functions = {
   trackSource: makeFunctionReference<"query", Secret & { trackId: string }, unknown>(
     "media:trackSource",
   ),
+  artHashes: makeFunctionReference<
+    "query",
+    Secret & { table: ArtworkTable; cursor: string | null },
+    unknown
+  >("media:artHashes"),
   requestScan: makeFunctionReference<"mutation", Secret & { libraryId: string }, unknown>(
     "media:requestScan",
   ),
@@ -203,10 +245,24 @@ export interface Interface {
     libraryId: LibraryId,
     tracks: ReadonlyArray<ScannedTrack>,
   ) => Effect.Effect<void, BackendError>;
+  /**
+   * Moves at most 100 known tracks to the paths their files were found at, keeping their IDs. A
+   * move whose source is gone or whose new path is taken is stored as a new file instead.
+   * Returns how many tracks moved.
+   */
+  readonly moveTracks: (
+    libraryId: LibraryId,
+    moves: ReadonlyArray<TrackMove>,
+  ) => Effect.Effect<number, BackendError>;
   readonly markMissing: (
     libraryId: LibraryId,
     paths: ReadonlyArray<string>,
   ) => Effect.Effect<void, BackendError>;
+  /** The artwork hashes one page of `table` uses; start from a `null` cursor until `done`. */
+  readonly artHashes: (
+    table: ArtworkTable,
+    cursor: string | null,
+  ) => Effect.Effect<ArtHashPage, BackendError>;
   /** Resolves a track to its file; `None` when the track is unknown or missing. */
   readonly trackSource: (
     trackId: TrackId,
@@ -234,9 +290,13 @@ const decodeClaim = Schema.decodeUnknownEffect(Schema.NullOr(ClaimedJob));
 
 const decodeReport = Schema.decodeUnknownEffect(ReportResult);
 
+const decodeMove = Schema.decodeUnknownEffect(MoveResult);
+
 const decodeFingerprints = Schema.decodeUnknownEffect(FingerprintPage);
 
 const decodeTrackSource = Schema.decodeUnknownEffect(Schema.NullOr(TrackSource));
+
+const decodeArtHashes = Schema.decodeUnknownEffect(ArtHashPage);
 
 const call = <A>(operation: string, run: () => Promise<A>): Effect.Effect<A, BackendError> =>
   Effect.tryPromise({ try: run, catch: (cause) => new BackendError({ operation, cause }) }).pipe(
@@ -352,6 +412,21 @@ const make = Effect.gen(function* () {
       );
     }),
 
+    moveTracks: Effect.fn("MediaBackend.moveTracks")(function* (
+      libraryId: LibraryId,
+      moves: ReadonlyArray<TrackMove>,
+    ) {
+      const result = yield* call("moveTracks", () =>
+        client.mutation(functions.moveTracks, { secret: secret(), libraryId, moves }),
+      );
+
+      const { moved } = yield* decodeMove(result).pipe(
+        Effect.mapError(decodeFailure("moveTracks")),
+      );
+
+      return moved;
+    }),
+
     markMissing: Effect.fn("MediaBackend.markMissing")(function* (
       libraryId: LibraryId,
       paths: ReadonlyArray<string>,
@@ -359,6 +434,17 @@ const make = Effect.gen(function* () {
       yield* call("markMissing", () =>
         client.mutation(functions.markMissing, { secret: secret(), libraryId, paths }),
       );
+    }),
+
+    artHashes: Effect.fn("MediaBackend.artHashes")(function* (
+      table: ArtworkTable,
+      cursor: string | null,
+    ) {
+      const result = yield* call("artHashes", () =>
+        client.query(functions.artHashes, { secret: secret(), table, cursor }),
+      );
+
+      return yield* decodeArtHashes(result).pipe(Effect.mapError(decodeFailure("artHashes")));
     }),
 
     trackSource: Effect.fn("MediaBackend.trackSource")(function* (trackId: TrackId) {

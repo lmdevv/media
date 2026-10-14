@@ -519,7 +519,8 @@ export class HtmlAudioEngine implements PlayerEngine {
   /**
    * The stream at `reopening.positionMs` could not be played (the element failed with `error`, or
    * never got going): asks the media service what it has there. No audio means the song is over
-   * (an offset past its real end). A busy service is asked again after its `Retry-After`, and
+   * (an offset past its real end), and a refused URL is reported as `expired`. A busy service is
+   * asked again after its `Retry-After`, and
    * with `retryAudio`, a stream it has audio for is opened again at once, once (the element may
    * have met a busy answer that has cleared since; failing again, the element can't play it).
    * Busy answers are retried up to `MAX_BUSY_RETRIES` times in a row.
@@ -568,7 +569,13 @@ export class HtmlAudioEngine implements PlayerEngine {
     if (!this.#isCurrent(slot)) return;
 
     if (OffsetProbe.$is("Empty")(probe)) this.#advance(slot);
-    else this.#fail(error);
+    else if (OffsetProbe.$is("Expired")(probe)) {
+      this.#emit({
+        type: "error",
+        reason: "expired",
+        message: "The stream's signed URL has expired",
+      });
+    } else this.#fail(error);
   }
 
   /**

@@ -43,19 +43,21 @@ export const runTool = (
 
 /**
  * Runs a tool like `runTool` while handing each chunk it writes to file descriptor 3 (`pipe:3`)
- * to `onChunk`, in order and one at a time; the tool waits while `onChunk` runs. Fails with the
- * first `onChunk` failure (killing the tool), or like `runTool`.
+ * to `onChunk`, in order and one at a time; the tool waits while `onChunk` runs. With
+ * `onStdout`, standard output goes there piece by piece rather than into the result. Fails with
+ * the first `onChunk` failure (killing the tool), or like `runTool`.
  */
 export const runToolPiped = <E, R>(
   command: string,
   args: ReadonlyArray<string>,
   onChunk: (chunk: Uint8Array) => Effect.Effect<void, E, R>,
+  onStdout?: (text: string) => void,
 ): Effect.Effect<ProcessResult, ProcessError | E, R> =>
   Effect.acquireRelease(
     Effect.sync(() => {
       const controller = new AbortController();
 
-      return { controller, child: spawnPiped(command, args, controller.signal) };
+      return { controller, child: spawnPiped(command, args, controller.signal, onStdout) };
     }),
     // Kills the tool when the run stops early; a no-op once it has exited.
     ({ controller }) =>
@@ -436,14 +438,47 @@ export const offsetArgs = (
 };
 
 /**
- * Sums the frame durations of a `framecrc` listing of decoded PCM: the exact number of samples
- * per channel. Lines look like `0, 0, 0, 4096, 32768, 0x1234abcd`; `#` lines are headers.
+ * The running sum of the frame durations of a `framecrc` listing of decoded PCM, which arrives
+ * in pieces of any size: the exact number of samples per channel. Lines look like
+ * `0, 0, 0, 4096, 32768, 0x1234abcd`; `#` lines are headers. Only the unfinished last line is
+ * kept, so an hour of hi-res audio does not hold megabytes of listing.
  */
-export const countFrameSamples = (listing: string): number =>
-  listing
-    .split("\n")
-    .filter((line) => line.length > 0 && !line.startsWith("#"))
-    .reduce((total, line) => total + Number(line.split(",")[3]?.trim() ?? Number.NaN), 0);
+export class FrameSampleCount {
+  #partial = "";
+
+  #total = 0;
+
+  /** Adds the next piece of the listing. */
+  push(text: string): void {
+    const lines = `${this.#partial}${text}`.split("\n");
+
+    this.#partial = lines.pop() ?? "";
+
+    for (const line of lines) this.#count(line);
+  }
+
+  /** The samples in every line pushed so far, counting an unfinished last line as complete. */
+  total(): number {
+    this.#count(this.#partial);
+    this.#partial = "";
+
+    return this.#total;
+  }
+
+  #count(line: string): void {
+    if (line.length === 0 || line.startsWith("#")) return;
+    this.#total += Number(line.split(",")[3]?.trim() ?? Number.NaN);
+  }
+}
+
+/** Sums the frame durations of a whole `framecrc` listing; see `FrameSampleCount`. */
+export const countFrameSamples = (listing: string): number => {
+  const count = new FrameSampleCount();
+
+  count.push(listing);
+
+  return count.total();
+};
 
 /**
  * ffprobe arguments that print the container format and duration, and the first audio stream's

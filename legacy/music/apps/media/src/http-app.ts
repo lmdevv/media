@@ -2,7 +2,7 @@
  * The media HTTP API under `/media`: health, signed audio streams, and signed artwork. Every
  * handler turns its failures into a response; access is decided only by Convex's signatures.
  */
-import { resolve, sep } from "node:path";
+import { resolve } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
 import { StreamProfile, StreamTimingHeader } from "@music/commands/models";
@@ -18,6 +18,7 @@ import { fileResponse, STREAM_CACHE_CONTROL } from "./file-response.ts";
 import * as Files from "./files.ts";
 import { MediaBackend, type TrackSource } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
+import { isWithin } from "./platform/node-files.ts";
 import { isSignedRequestValid } from "./signed-request.ts";
 import { offsetResponse, transcodedResponse } from "./transcoded-response.ts";
 import { Transcoder } from "./transcoder.ts";
@@ -78,12 +79,15 @@ const clientGone = (signal: AbortSignal): Effect.Effect<Response> =>
     });
   });
 
-/** Joins a library-relative path onto its root, refusing paths that escape the root. */
+/**
+ * Joins a library-relative path onto its root, refusing paths that escape the root and the root
+ * itself. A library at `/` holds every absolute path but itself.
+ */
 const resolveInside = (root: string, relative: string): Option.Option<string> => {
   const base = resolve(root);
   const absolute = resolve(base, relative);
 
-  return absolute.startsWith(base + sep) ? Option.some(absolute) : Option.none();
+  return absolute !== base && isWithin(base, absolute) ? Option.some(absolute) : Option.none();
 };
 
 const serveOriginal = (request: Request, path: string, source: TrackSource) =>

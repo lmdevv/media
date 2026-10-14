@@ -33,9 +33,16 @@ export interface EngineSource {
  * - `decode`: the bytes arrived but could not be decoded.
  * - `unsupported`: the browser rejected the source; it may be an HTTP error page or an
  *   unplayable format, so check the media service before blaming the format.
+ * - `expired`: the media service refused the stream's signed URL (`403`), which it does once
+ *   the URL has expired; a fresh URL for the same song plays.
  * - `autoplay-blocked`: the browser refused to start audio without a user gesture.
  */
-export type EngineErrorReason = "network" | "decode" | "unsupported" | "autoplay-blocked";
+export type EngineErrorReason =
+  | "network"
+  | "decode"
+  | "unsupported"
+  | "expired"
+  | "autoplay-blocked";
 
 export type EngineEvent =
   | { readonly type: "playing" }

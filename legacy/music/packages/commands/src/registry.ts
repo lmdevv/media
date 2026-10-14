@@ -39,6 +39,7 @@ import {
   SearchResults,
   StreamProfile,
   StreamUrl,
+  Timestamp,
   Track,
   TrackPage,
   User,
@@ -449,7 +450,17 @@ export const commands = {
     kind: "query",
     access: "user",
     job: false,
-    args: Schema.Struct({ trackId: TrackId, profile: StreamProfile }),
+    args: Schema.Struct({
+      trackId: TrackId,
+      profile: StreamProfile,
+      /**
+       * When the client asks, in milliseconds since the epoch. Convex answers a query again from
+       * its cache while the data it read is unchanged, so without a new value here a client gets
+       * the URL it was given before, which may have expired. The URL is signed with the server's
+       * time either way.
+       */
+      requestedAt: Schema.optionalKey(Timestamp),
+    }),
     result: StreamUrl,
   }),
 

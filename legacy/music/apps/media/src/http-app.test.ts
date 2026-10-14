@@ -23,6 +23,7 @@ import {
   testConfig,
 } from "./testing/fixtures.ts";
 import { layerMemory, MemoryMediaBackendControl } from "./testing/memory-media-backend.ts";
+import { canCountOpenFiles, openDescriptors } from "./testing/open-files.ts";
 import { adtsPayload } from "./testing/adts.ts";
 import { ffmpegFailingOnce } from "./testing/failing-ffmpeg.ts";
 import { ffmpegRecordingRuns } from "./testing/recording-ffmpeg.ts";
@@ -96,6 +97,23 @@ const abandonedGet = (port: number, path: string, afterMs: number): Effect.Effec
     request.on("error", leave);
   });
 
+/** A `GET` whose client goes away once the first piece of the body has arrived. */
+const abandonedMidBody = (port: number, path: string): Effect.Effect<void> =>
+  Effect.callback<void>((resume) => {
+    const request = get({ host: "127.0.0.1", port, path });
+
+    const leave = () => {
+      request.destroy();
+      resume(Effect.void);
+    };
+
+    request.on("response", (response) => {
+      response.once("data", leave);
+      response.once("end", leave);
+    });
+    request.on("error", leave);
+  });
+
 /** The whole body of a `GET` through a real socket. */
 const fetchWhole = (port: number, path: string): Effect.Effect<Uint8Array> =>
   Effect.promise(async () => {
@@ -155,6 +173,7 @@ const setupWith = Effect.fn("Test.setup")(function* (ffmpegPath: string) {
     dataDir,
     scan,
     libraryId,
+    control,
     backend,
     trackId,
     findTrackId,
@@ -208,6 +227,26 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(head.status).toBe(200);
         expect(head.headers.get("Content-Length")).toBe(String(file.length));
         expect((yield* bytes(head)).length).toBe(0);
+      }),
+    ));
+
+  it("plays from a library whose folder is the file system root", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, control, backend, findTrackId, request } = yield* setup;
+        const dawn = (yield* control.tracks).find((track) => track.scanned.path === DAWN);
+
+        if (dawn === undefined) expect.unreachable("the fixture scan found no Dawn");
+        const everything = yield* control.addLibrary("/");
+        const fromRoot = join(root, DAWN).slice(1);
+
+        yield* backend.upsertTracks(everything, [{ ...dawn.scanned, path: fromRoot }]);
+        const response = yield* request(yield* streamUrl(yield* findTrackId(fromRoot), "original"));
+
+        expect(response.status).toBe(200);
+        expect(yield* bytes(response)).toEqual(
+          new Uint8Array(yield* Files.readWholeFile(join(root, DAWN))),
+        );
       }),
     ));
 
@@ -815,6 +854,61 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(remaining).toEqual([]);
       }),
     ));
+
+  it.skipIf(!canCountOpenFiles())(
+    "closes original and finished files whose clients go away before or while they stream",
+    () =>
+      runScoped(
+        Effect.gen(function* () {
+          const { app, root, dataDir, scan, findTrackId } = yield* setup;
+
+          // Two minutes of tone: more than a socket buffers, so a client that leaves mid-way
+          // leaves the rest of the file unread.
+          yield* sineSegment(root, "long", "flac", 0, 48_000 * 120);
+          yield* scan;
+          const id = yield* findTrackId("long.flac");
+          const original = yield* streamUrl(id, "original");
+          const finished = yield* streamUrl(id, "aac-320");
+          const port = yield* listen(app);
+
+          // HEAD waits for the finished transcode, which a GET then serves as a file.
+          yield* Effect.promise(() =>
+            fetch(`http://127.0.0.1:${port}${finished}`, { method: "HEAD" }),
+          );
+          const [cached] = yield* Files.listNames(join(dataDir, "cache", "aac-320"));
+
+          if (cached === undefined) expect.unreachable("the transcode was not cached");
+          const files = [join(root, "long.flac"), join(dataDir, "cache", "aac-320", cached)];
+
+          yield* Effect.forEach(
+            [original, finished].flatMap((url) =>
+              [0, 1, 2, 5, 10, 50].map((afterMs) => ({ url, afterMs })),
+            ),
+            ({ url, afterMs }) => abandonedGet(port, url, afterMs),
+            { concurrency: "unbounded" },
+          );
+
+          // And some while the body streams, after its first bytes.
+          yield* Effect.forEach(
+            [original, finished, original, finished],
+            (url) => abandonedMidBody(port, url),
+            { concurrency: "unbounded" },
+          );
+
+          const open = yield* Effect.forEach(files, (path) =>
+            Effect.promise(() => openDescriptors(path)).pipe(
+              Effect.repeat({
+                until: (count) => count === 0,
+                schedule: Schedule.spaced("50 millis"),
+                times: 60,
+              }),
+            ),
+          );
+
+          expect(open).toEqual([0, 0]);
+        }),
+      ),
+  );
 
   it("frees the run of every seek whose client goes away before it streams", () =>
     runScoped(

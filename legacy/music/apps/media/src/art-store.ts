@@ -3,7 +3,7 @@
  * so files are written once and served as immutable.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { Effect, Option } from "effect";
 
@@ -35,6 +35,31 @@ export const saveArt = Effect.fn("ArtStore.save")(function* (dataDir: string, by
   }
 
   return Option.some(hash);
+});
+
+/**
+ * Deletes stored artwork whose hash is not in `inUse`, and leftovers of interrupted writes, when
+ * they were last written before `before` (milliseconds since the epoch). Artwork written since
+ * may belong to a scan that has not stored its songs yet. Other files are left alone.
+ *
+ * @returns How many files were deleted.
+ */
+export const sweepArt = Effect.fn("ArtStore.sweep")(function* (
+  dataDir: string,
+  inUse: ReadonlySet<string>,
+  before: number,
+) {
+  const files = yield* Files.listFiles(join(dataDir, "art"));
+
+  const unused = files.filter((file) => {
+    const name = basename(file.path);
+
+    return file.mtimeMs < before && (isArtHash(name) ? !inUse.has(name) : name.endsWith(".part"));
+  });
+
+  yield* Effect.forEach(unused, (file) => Files.removePath(file.path), { discard: true });
+
+  return unused.length;
 });
 
 /** The image `Content-Type` from the first bytes of a file. */

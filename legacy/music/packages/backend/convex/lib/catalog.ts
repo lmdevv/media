@@ -24,7 +24,55 @@ export interface ScannedTrack {
   readonly sampleRate?: number | undefined;
   readonly bitDepth?: number | undefined;
   readonly artHash?: string | undefined;
+  /** The folder artwork file the scan saw beside the file, as `path:size:mtime`. */
+  readonly folderArt?: string | undefined;
 }
+
+/** How one upsert changes a track's artwork. */
+interface ArtChange {
+  /** The track as stored before the upsert, or null for a new one. */
+  readonly track: Doc<"tracks"> | null;
+  /** The art the scan found for it. */
+  readonly next: string | undefined;
+  /** The folder cover beside it was replaced, added, or removed since the last scan. */
+  readonly coverChanged: boolean;
+}
+
+/**
+ * The artwork an album or artist keeps when one of its tracks changes art. One that has none
+ * takes the track's. One whose art is the track's old art takes the new art when the folder cover
+ * was replaced (every song of the folder follows), and when the track lost its art, the art
+ * of another of its tracks, or none. A new embedded picture on a single track leaves it alone.
+ */
+const keptArt = async (
+  current: string | undefined,
+  change: ArtChange,
+  otherTracksArt: () => Promise<string | undefined>,
+): Promise<string | undefined> => {
+  const previous = change.track?.artHash;
+
+  if (current === undefined) return change.next;
+
+  if (previous === undefined || current !== previous || change.next === previous) return current;
+
+  if (change.next === undefined) return otherTracksArt();
+
+  return change.coverChanged ? change.next : current;
+};
+
+/** The art of the first playable track in `tracks` other than `except` that has some. */
+const firstArtOf = async (
+  tracks: AsyncIterable<Doc<"tracks">>,
+  except: Id<"tracks"> | undefined,
+): Promise<string | undefined> => {
+  for await (const track of tracks) {
+    if (track._id !== except && !track.missing && track.artHash !== undefined) {
+      return track.artHash;
+    }
+  }
+
+  return undefined;
+};
 
 const keyOf = (value: string): string => value.trim().toLowerCase();
 
@@ -120,8 +168,9 @@ const findOrCreateArtist = async (
   ctx: MutationCtx,
   libraryId: Id<"libraries">,
   name: string,
-  artHash: string | undefined,
+  art: ArtChange,
 ): Promise<Doc<"artists">> => {
+  const artHash = art.next;
   const key = keyOf(name);
 
   const existing = await ctx.db
@@ -130,9 +179,14 @@ const findOrCreateArtist = async (
     .unique();
 
   if (existing !== null) {
-    if (existing.artHash === undefined && artHash !== undefined) {
-      await ctx.db.patch(existing._id, { artHash });
-    }
+    const kept = await keptArt(existing.artHash, art, () =>
+      firstArtOf(
+        ctx.db.query("tracks").withIndex("by_artist", (q) => q.eq("artistId", existing._id)),
+        art.track?._id,
+      ),
+    );
+
+    if (kept !== existing.artHash) await ctx.db.patch(existing._id, { artHash: kept });
 
     return existing;
   }
@@ -158,6 +212,7 @@ const findOrCreateAlbum = async (
   libraryId: Id<"libraries">,
   artist: Doc<"artists">,
   track: ScannedTrack,
+  art: ArtChange,
 ): Promise<Doc<"albums">> => {
   const key = keyOf(track.album);
 
@@ -169,13 +224,20 @@ const findOrCreateAlbum = async (
     .unique();
 
   if (existing !== null) {
+    const artHash = await keptArt(existing.artHash, art, () =>
+      firstArtOf(
+        ctx.db.query("tracks").withIndex("by_album", (q) => q.eq("albumId", existing._id)),
+        art.track?._id,
+      ),
+    );
+
     if (
-      (existing.artHash === undefined && track.artHash !== undefined) ||
+      artHash !== existing.artHash ||
       (existing.year === undefined && track.year !== undefined) ||
       (existing.genre === undefined && track.genre !== undefined)
     ) {
       await ctx.db.patch(existing._id, {
-        artHash: existing.artHash ?? track.artHash,
+        artHash,
         year: existing.year ?? track.year,
         genre: existing.genre ?? track.genre,
       });
@@ -207,20 +269,34 @@ const findOrCreateAlbum = async (
   return created;
 };
 
-/** Inserts or updates one scanned file and its album and artist. */
+/**
+ * Inserts or updates one scanned file and its album and artist. An album or artist whose art
+ * came from this file's old art follows a replaced or removed cover (see `keptArt`).
+ */
 export const upsertScannedTrack = async (
   ctx: MutationCtx,
   libraryId: Id<"libraries">,
   scanned: ScannedTrack,
 ): Promise<void> => {
+  const existing = await ctx.db
+    .query("tracks")
+    .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId).eq("path", scanned.path))
+    .unique();
+
+  const art: ArtChange = {
+    track: existing,
+    next: scanned.artHash,
+    coverChanged: existing !== null && existing.folderArt !== scanned.folderArt,
+  };
+
   const artist = await findOrCreateArtist(
     ctx,
     libraryId,
     scanned.albumArtist ?? scanned.artist,
-    scanned.artHash,
+    art,
   );
 
-  const album = await findOrCreateAlbum(ctx, libraryId, artist, scanned);
+  const album = await findOrCreateAlbum(ctx, libraryId, artist, scanned, art);
 
   const fields = {
     libraryId,
@@ -242,6 +318,7 @@ export const upsertScannedTrack = async (
     sampleRate: scanned.sampleRate,
     bitDepth: scanned.bitDepth,
     artHash: scanned.artHash,
+    folderArt: scanned.folderArt,
     missing: false,
     searchText: trackSearchText({
       title: scanned.title,
@@ -249,11 +326,6 @@ export const upsertScannedTrack = async (
       albumTitle: scanned.album,
     }),
   };
-
-  const existing = await ctx.db
-    .query("tracks")
-    .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId).eq("path", scanned.path))
-    .unique();
 
   if (existing === null) {
     await ctx.db.insert("tracks", fields);
@@ -273,6 +345,41 @@ export const upsertScannedTrack = async (
 
   if (!existing.missing) await adjustAlbum(ctx, existing.albumId, -1, -existing.durationMs);
   await adjustAlbum(ctx, album._id, 1, scanned.durationMs);
+};
+
+/**
+ * Moves the track at `from` to the scanned file's path and updates it like `upsertScannedTrack`,
+ * keeping its ID, so its likes, plays, playlist entries, and queue places follow the file. A
+ * missing track at `from` comes back. When there is no track at `from`, or another track already
+ * has the new path, the file is upserted as usual and `from` is marked missing instead.
+ *
+ * @returns Whether the track at `from` moved.
+ */
+export const moveScannedTrack = async (
+  ctx: MutationCtx,
+  libraryId: Id<"libraries">,
+  from: string,
+  scanned: ScannedTrack,
+): Promise<boolean> => {
+  const byPath = (path: string) =>
+    ctx.db
+      .query("tracks")
+      .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId).eq("path", path))
+      .unique();
+
+  const [source, occupied] = await Promise.all([byPath(from), byPath(scanned.path)]);
+
+  if (source === null || occupied !== null || from === scanned.path) {
+    if (from !== scanned.path) await markTrackMissing(ctx, libraryId, from);
+    await upsertScannedTrack(ctx, libraryId, scanned);
+
+    return false;
+  }
+
+  await ctx.db.patch(source._id, { path: scanned.path });
+  await upsertScannedTrack(ctx, libraryId, scanned);
+
+  return true;
 };
 
 /** Hides a file that disappeared from disk. Likes and playlists keep pointing at it. */

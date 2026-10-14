@@ -51,6 +51,31 @@ export const probeMediaHealth = (baseUrl: string): Effect.Effect<void, MediaUnre
     Effect.withSpan("MediaHealth.probe"),
   );
 
+/**
+ * True when the media service refuses the signed stream URL (`403`), as it does once the URL has
+ * expired. Asks for the two bytes a media element opens a source with, which every profile
+ * answers at once; an answer that does not come in time, or any other answer, is not a refusal.
+ */
+export const isStreamRefused = (streamUrl: string): Effect.Effect<boolean> =>
+  Effect.tryPromise({
+    try: async (signal) => {
+      const response = await fetch(streamUrl, {
+        signal,
+        cache: "no-store",
+        headers: { Range: "bytes=0-1" },
+      });
+
+      await response.body?.cancel();
+
+      return response.status === 403;
+    },
+    catch: (cause) => new MediaUnreachable({ baseUrl: streamUrl, status: null, cause }),
+  }).pipe(
+    Effect.timeoutOrElse({ duration: PROBE_TIMEOUT, orElse: () => Effect.succeed(false) }),
+    Effect.orElseSucceed(() => false),
+    Effect.withSpan("MediaHealth.isStreamRefused"),
+  );
+
 /** Retry delays between probes: 1 s, 2 s, 4 s, ... capped at 30 s, with jitter. */
 const healthRetrySchedule = Schedule.min([
   Schedule.exponential("1 second"),

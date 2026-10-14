@@ -45,8 +45,8 @@ import {
   AAC_PROFILE_RATE,
   AAC_TAIL_PADDING,
   aacSampleRate,
-  countFrameSamples,
   FRAGMENTED_PRIMING,
+  FrameSampleCount,
   fragmentedArgs,
   isFragmentedProfile,
   offsetArgs,
@@ -73,6 +73,7 @@ const MAX_CONCURRENT_TRANSCODES = 2;
  */
 export const MAX_CONCURRENT_OFFSET_RUNS = 8;
 
+/** How long one ffmpeg run may take, from when it gets its slot (waiting for one is not counted). */
 const TRANSCODE_TIMEOUT = Duration.minutes(10);
 
 /**
@@ -322,13 +323,14 @@ const awaitProgress = <A, E>(
  * Deletes the least recently used files until the cache fits in `maxBytes`. `lastUsed` holds the
  * serve times seen by this process; older files fall back to their modification time. Files are
  * never touched to record use, because their modification time feeds the `ETag` players send
- * back in `If-Range`.
+ * back in `If-Range`. Entries of `lastUsed` for files no longer in the cache are dropped, so it
+ * never outgrows the cache.
  */
 const evict = Effect.fn("Transcoder.evict")(function* (
   cacheDir: string,
   maxBytes: number,
   keep: string,
-  lastUsed: ReadonlyMap<string, number>,
+  lastUsed: Map<string, number>,
 ) {
   const listed = yield* Effect.forEach(PROFILES, (profile) =>
     Files.listFiles(join(cacheDir, profile)),
@@ -338,6 +340,10 @@ const evict = Effect.fn("Transcoder.evict")(function* (
   const files = listed
     .flat()
     .filter((file) => !file.path.endsWith(PARTIAL_SUFFIX) && !file.path.endsWith(SIDECAR_SUFFIX));
+
+  const present = new Set(files.map((file) => file.path));
+
+  for (const path of lastUsed.keys()) if (!present.has(path)) lastUsed.delete(path);
 
   let total = files.reduce((sum, file) => sum + file.size, 0);
 
@@ -354,6 +360,7 @@ const evict = Effect.fn("Transcoder.evict")(function* (
     if (file.path !== keep) {
       yield* Files.removePath(sidecarOf(file.path));
       yield* Files.removePath(file.path);
+      lastUsed.delete(file.path);
       total -= file.size;
       yield* Effect.logInfo("Transcoder.evicted").pipe(Effect.annotateLogs({ bytes: file.size }));
     }
@@ -382,17 +389,19 @@ const make = Effect.gen(function* () {
   const cacheDir = join(config.dataDir, "cache");
   const permits = yield* Semaphore.make(MAX_CONCURRENT_TRANSCODES);
   const offsetRuns = yield* Semaphore.make(MAX_CONCURRENT_OFFSET_RUNS);
-  const lastUsed = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+  /** Serve times by cached file, updated in place: copying it on every serve would cost O(n). */
+  const lastUsed = new Map<string, number>();
   /** Running jobs by output path. Changes, and holds taken on a job, happen under `registry`. */
   const jobs = yield* Ref.make<ReadonlyMap<string, Job>>(new Map());
   const registry = yield* Semaphore.make(1);
 
   const markUsed = (output: string, at: number): Effect.Effect<void> =>
-    Ref.update(lastUsed, (current) => new Map(current).set(output, at));
+    Effect.sync(() => {
+      lastUsed.set(output, at);
+    });
 
   const evictNow = (keep: string): Effect.Effect<void> =>
-    Ref.get(lastUsed).pipe(
-      Effect.flatMap((used) => evict(cacheDir, config.cacheMaxBytes, keep, used)),
+    evict(cacheDir, config.cacheMaxBytes, keep, lastUsed).pipe(
       Effect.catchTag("FileError", (error) => Effect.logWarning("Transcoder.evict_failed", error)),
     );
 
@@ -464,11 +473,15 @@ const make = Effect.gen(function* () {
     };
 
     yield* startLive(job, Option.some(expected));
+    const decoded = new FrameSampleCount();
 
-    const encoded = yield* runToolPiped(
+    yield* runToolPiped(
       config.ffmpegPath,
       fragmentedArgs(input.source, temporary, profile, input.codec, aacRate),
       (chunk) => appendLive(job, chunk),
+      (listing) => {
+        decoded.push(listing);
+      },
     );
 
     const probed = yield* runTool(config.ffprobePath, timelineProbeArgs(temporary));
@@ -479,7 +492,7 @@ const make = Effect.gen(function* () {
 
     const timing = measureTiming(
       stream.duration_ts,
-      countFrameSamples(encoded.stdout),
+      decoded.total(),
       profile === "fmp4-aac" ? AAC_TAIL_PADDING : 0,
       stream.sample_rate,
       declaredLength(
@@ -549,16 +562,16 @@ const make = Effect.gen(function* () {
 
       return { path: job.output, timing };
     }).pipe(
-      Effect.onError(() => Files.removePath(temporary).pipe(Effect.ignore)),
-      permits.withPermits(1),
-    );
-
-    const transcoded = yield* run.pipe(
+      // Inside the permit: a run that waited for a slot behind two long ones still gets its time.
       Effect.timeoutOrElse({
         duration: TRANSCODE_TIMEOUT,
         orElse: () => Effect.fail("timeout" as const),
       }),
+      Effect.onError(() => Files.removePath(temporary).pipe(Effect.ignore)),
+      permits.withPermits(1),
     );
+
+    const transcoded = yield* run;
 
     yield* markUsed(job.output, yield* Clock.currentTimeMillis);
     yield* evictNow(job.output);

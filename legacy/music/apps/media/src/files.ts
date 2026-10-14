@@ -119,5 +119,8 @@ export const resolveWithin = (
     ),
   );
 
-/** Streams the inclusive byte range of a file. Read errors surface through the stream itself. */
+/**
+ * Streams the inclusive byte range of a file, closing it once `signal` aborts. Read errors surface
+ * through the stream itself.
+ */
 export const readRange = NodeFiles.readRange;

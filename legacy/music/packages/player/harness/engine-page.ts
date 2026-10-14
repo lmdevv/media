@@ -76,8 +76,13 @@ const mediaBase = `http://127.0.0.1:${params.get("media") ?? "4300"}`;
 /** `?capture=0` leaves the elements on their default output, as in production. */
 const capture = params.get("capture") !== "0";
 
+/** Every audio element the engine was given, for reading what they buffered. */
+const elements: Array<HTMLAudioElement> = [];
+
 const audioElement = (): HTMLAudioElement => {
   const element = new Audio();
+
+  elements.push(element);
 
   if (capture) {
     element.crossOrigin = "anonymous";
@@ -151,6 +156,13 @@ window.harness = {
   preload: (file) => {
     engine.preload(file === null ? null : fixture(file));
   },
+  buffered: () =>
+    elements.flatMap((element) =>
+      Array.from(
+        { length: element.buffered.length },
+        (_, index) => [element.buffered.start(index), element.buffered.end(index)] as const,
+      ),
+    ),
   resetGap: () => {
     meter.port.postMessage("reset", []);
   },

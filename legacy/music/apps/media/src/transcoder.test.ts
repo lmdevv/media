@@ -2,7 +2,8 @@ import { join } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option, Stream } from "effect";
+import { Cause, Clock, Effect, Exit, Fiber, Layer, Option, Schedule, Stream } from "effect";
+import { TestClock } from "effect/testing";
 
 import * as Files from "./files.ts";
 import {
@@ -14,6 +15,7 @@ import {
 } from "./testing/fixtures.ts";
 import * as Transcoder from "./transcoder.ts";
 import { adtsPayload } from "./testing/adts.ts";
+import { ffmpegHangingOnName } from "./testing/hanging-ffmpeg.ts";
 import { mediaData, withoutIndex } from "./testing/mp4-boxes.ts";
 import { runScoped } from "./testing/run.ts";
 import { sineSegment } from "./testing/sine.ts";
@@ -25,6 +27,15 @@ const transcoderWith = (dataDir: string, cacheMaxBytes: number) =>
   Layer.build(Transcoder.layer.pipe(Layer.provide(testConfig(dataDir, cacheMaxBytes)))).pipe(
     Effect.flatMap((context) => Transcoder.Transcoder.pipe(Effect.provideContext(context))),
   );
+
+/** An `aac-128` transcode of `source`, a song with ID `id`. */
+const aacInput = (id: string, source: string): Transcoder.TranscodeInput => ({
+  trackId: TrackId.make(id),
+  profile: "aac-128",
+  source,
+  mtimeMs: 1,
+  codec: "mp3",
+});
 
 const collect = (bytes: Stream.Stream<Uint8Array, Transcoder.TranscodeError>) =>
   Stream.runCollect(bytes).pipe(Effect.map((chunks) => Buffer.concat(chunks)));
@@ -247,6 +258,78 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(
           Transcoder.Opened.$is("Finished")(yield* Effect.scoped(transcoder.open(input))),
         ).toBe(true);
+      }),
+    ));
+
+  it("runs two transcodes at once and times each out from its start, not from its wait", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const clock = yield* TestClock.make();
+
+        yield* Effect.gen(function* () {
+          const scratch = yield* temporaryDirectory("ffmpeg");
+          const ffmpeg = yield* Effect.promise(() => ffmpegHangingOnName(scratch));
+          const library = yield* temporaryDirectory("library");
+          const dataDir = yield* temporaryDirectory("data");
+
+          const transcoder = yield* Layer.build(
+            Transcoder.layer.pipe(Layer.provide(testConfig(dataDir, undefined, ffmpeg.path))),
+          ).pipe(
+            Effect.flatMap((context) => Transcoder.Transcoder.pipe(Effect.provideContext(context))),
+          );
+
+          const started = Effect.promise(ffmpeg.started);
+
+          const startedRuns = (count: number) =>
+            clock.withLive(
+              started.pipe(
+                Effect.repeat({
+                  schedule: Schedule.spaced("20 millis"),
+                  until: (runs) => runs >= count,
+                  times: 250,
+                }),
+              ),
+            );
+
+          // Two songs whose ffmpeg never finishes take both slots.
+          const stuck = yield* Effect.forEach(["hang-a", "hang-b"], (name) =>
+            sineSegment(library, name, "mp3", 0, 48_000).pipe(
+              Effect.flatMap((source) => transcoder.transcode(aacInput(name, source))),
+              Effect.exit,
+              Effect.forkScoped,
+            ),
+          );
+
+          expect(yield* startedRuns(2)).toBe(2);
+          const source = yield* sineSegment(library, "next", "mp3", 0, 48_000);
+
+          const next = yield* transcoder
+            .transcode(aacInput("next", source))
+            .pipe(Effect.forkScoped);
+
+          // The third waits for a slot.
+          yield* clock.withLive(Effect.sleep("300 millis"));
+          expect(yield* started).toBe(2);
+
+          // Ten minutes on, the stuck ones time out and free their slots. The third has not run
+          // yet, so its own ten minutes start now.
+          yield* clock.adjust("10 minutes");
+
+          for (const exit of yield* Fiber.joinAll(stuck)) {
+            expect(Exit.isFailure(exit)).toBe(true);
+
+            if (Exit.isFailure(exit)) {
+              expect(Cause.findErrorOption(exit.cause)).toEqual(
+                Option.some(expect.objectContaining({ cause: "timeout" })),
+              );
+            }
+          }
+
+          const transcoded = yield* Fiber.join(next);
+
+          expect(transcoded.path).toBe(join(dataDir, "cache", "aac-128", "next-1.m4a"));
+          expect(yield* started).toBe(3);
+        }).pipe(Effect.provideService(Clock.Clock, clock));
       }),
     ));
 

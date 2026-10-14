@@ -28,6 +28,8 @@ interface EngineHarness {
   /** Preloads a generated fixture, or clears the preload. */
   readonly preload: (file: string | null) => void;
   readonly gap: () => Promise<GapMeasurement>;
+  /** The time ranges, in seconds, that the engine's audio elements have buffered. */
+  readonly buffered: () => ReadonlyArray<readonly [number, number]>;
   readonly resetGap: () => void;
   /** Starts recording the first output channel, dropping any earlier recording. */
   readonly record: () => void;

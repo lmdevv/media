@@ -21,7 +21,7 @@ import type {
 import { EngineCommand, followingIndex, planEngine, sessionView } from "./engine-plan";
 import type { SessionView } from "./engine-plan";
 import { livePosition } from "./live-position";
-import { mediaBaseUrl, probeMediaHealth, waitForMedia } from "./media-health";
+import { isStreamRefused, mediaBaseUrl, probeMediaHealth, waitForMedia } from "./media-health";
 import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
 import { chooseEngine, chooseGaplessProfile, chooseStreamProfile } from "./stream-quality";
 import type { MseSupport, StreamQuality } from "./stream-quality";
@@ -39,6 +39,16 @@ const PRELOAD_LEAD_MS = 20_000;
 const AUTOPLAY_BLOCKED_MESSAGE = "Tap play to start here";
 
 const MEDIA_OFFLINE_MESSAGE = "Can't reach the media server. Retrying…";
+
+/** Shown when the media server refuses a stream URL even right after it was signed. */
+const STREAM_REFUSED_MESSAGE = "The media server refused this song's stream";
+
+/**
+ * A stream URL this close to its expiry counts as expired: it is signed again before playback
+ * resumes or seeks, which would otherwise send a request it may no longer cover. Also absorbs a
+ * device clock a few minutes off the server's.
+ */
+const RENEW_MARGIN_MS = 5 * 60_000;
 
 /** What the engine is doing, as the UI sees it. */
 type EngineStatus = "idle" | "loading" | "playing" | "paused" | "buffering" | "error";
@@ -86,6 +96,8 @@ interface LoadedEntry {
   /** The profile requested for this entry; null until its stream URL arrives. */
   readonly profile: StreamProfile | null;
   readonly url: string | null;
+  /** See `ResolvedSource.renewAt`; null without a URL. */
+  readonly renewAt: number | null;
 }
 
 interface PreloadedEntry {
@@ -93,11 +105,18 @@ interface PreloadedEntry {
   readonly index: number;
   readonly source: EngineSource;
   readonly profile: StreamProfile;
+  readonly renewAt: number | null;
 }
 
 interface ResolvedSource {
   readonly source: EngineSource;
   readonly profile: StreamProfile;
+  /**
+   * When, on this device's clock, the URL is signed again before use: `RENEW_MARGIN_MS` before
+   * it expires. Null when the URL looked expired the moment it arrived, which means the device
+   * clock is far off the server's: only a refusal then tells that it expired.
+   */
+  readonly renewAt: number | null;
 }
 
 /**
@@ -128,6 +147,11 @@ export class PlaybackController {
   readonly #transcode = new Set<TrackId>();
   /** The MSE engine failed to play a song; HTML audio plays for the rest of the session. */
   #mseFailed = false;
+  /**
+   * The track whose refused stream URL was last signed again; cleared once audio plays. A fresh
+   * URL that is refused too is an error, not another renewal.
+   */
+  #renewed: TrackId | null = null;
   /** The volume last given to the engine, reapplied when the engine is replaced. */
   #volume = 1;
   /** A session snapshot paused the engine; that pause is already on the server. */
@@ -308,7 +332,7 @@ export class PlaybackController {
 
     if (view.active && this.#loaded !== null) {
       if (playing) this.#engine.pause();
-      else void this.#engine.play();
+      else if (!this.#reloadIfExpired(this.#positionMs, true)) void this.#engine.play();
     }
 
     this.#update({ pendingPlaying: !playing, autoplayBlocked: false, error: null });
@@ -320,7 +344,7 @@ export class PlaybackController {
     const target = Math.max(0, Math.round(positionMs));
 
     if (this.#view?.active === true && this.#loaded !== null) {
-      this.#engine.seek(target);
+      if (!this.#reloadIfExpired(target, this.#isAudible())) this.#engine.seek(target);
       this.#positionMs = target;
       this.#showNowPlaying();
     }
@@ -478,7 +502,7 @@ export class PlaybackController {
         if (this.#loaded !== null) this.#loaded = { ...this.#loaded, index };
       },
       Play: () => {
-        void this.#engine.play();
+        if (!this.#reloadIfExpired(this.#positionMs, true)) void this.#engine.play();
       },
       Pause: () => {
         // An engine that is already silent emits no `paused` to consume the mark.
@@ -486,7 +510,7 @@ export class PlaybackController {
         this.#engine.pause();
       },
       Seek: ({ positionMs }) => {
-        this.#engine.seek(positionMs);
+        if (!this.#reloadIfExpired(positionMs, this.#isAudible())) this.#engine.seek(positionMs);
         this.#positionMs = positionMs;
       },
       SetVolume: ({ volume }) => {
@@ -528,12 +552,36 @@ export class PlaybackController {
     this.#reportedMs = null;
   }
 
+  /** True when a stream URL to renew at `renewAt` should not be used any more. */
+  #isExpired(renewAt: number | null): boolean {
+    return renewAt !== null && this.#env.now() >= renewAt;
+  }
+
+  /**
+   * Loads the current song again with a freshly signed URL, at `positionMs`, when its URL has
+   * expired (after a long pause): playing or seeking on would send requests it no longer
+   * covers. Returns whether it did; the caller then leaves the engine alone.
+   */
+  #reloadIfExpired(positionMs: number, autoplay: boolean): boolean {
+    const loaded = this.#loaded;
+
+    if (loaded === null || !this.#isExpired(loaded.renewAt)) return false;
+    void this.#load(loaded.track, loaded.index, positionMs, autoplay);
+
+    return true;
+  }
+
   async #load(track: Track, index: number, startMs: number, autoplay: boolean): Promise<void> {
     this.#generation += 1;
     const generation = this.#generation;
     const plannedAt = this.#env.now();
-    const preloaded = this.#preloaded?.track.id === track.id ? this.#preloaded : null;
-    this.#loaded = { track, index, profile: null, url: null };
+
+    const preloaded =
+      this.#preloaded?.track.id === track.id && !this.#isExpired(this.#preloaded.renewAt)
+        ? this.#preloaded
+        : null;
+
+    this.#loaded = { track, index, profile: null, url: null, renewAt: null };
     this.#preloaded = null;
     this.#positionMs = startMs;
     this.#reportedMs = null;
@@ -547,7 +595,14 @@ export class PlaybackController {
     const resolved = reusable ?? (await this.#resolveSource(track));
 
     if (generation !== this.#generation || resolved === null) return;
-    this.#loaded = { track, index, profile: resolved.profile, url: resolved.source.url };
+
+    this.#loaded = {
+      track,
+      index,
+      profile: resolved.profile,
+      url: resolved.source.url,
+      renewAt: resolved.renewAt,
+    };
 
     // The stream URL took a moment to arrive; a playing session moved on meanwhile.
     const elapsed = autoplay ? this.#env.now() - plannedAt : 0;
@@ -574,11 +629,21 @@ export class PlaybackController {
     const profile = this.#profileFor(track);
 
     try {
-      const stream = await this.#client.read("stream.url", { trackId: track.id, profile });
+      const requestedAt = this.#env.now();
+
+      // A new `requestedAt` gets a newly signed URL rather than an earlier one from Convex's cache.
+      const stream = await this.#client.read("stream.url", {
+        trackId: track.id,
+        profile,
+        requestedAt,
+      });
+
+      const renewAt = stream.expiresAt - RENEW_MARGIN_MS;
 
       return {
         profile,
         source: { key: `${track.id}:${profile}`, url: stream.url, durationMs: track.durationMs },
+        renewAt: renewAt > requestedAt ? renewAt : null,
       };
     } catch (error) {
       this.#update({
@@ -642,6 +707,7 @@ export class PlaybackController {
 
       case "playing": {
         this.#sessionPaused = false;
+        this.#renewed = null;
         this.#update({ engineStatus: "playing", error: null, autoplayBlocked: false });
         this.#showNowPlaying();
         void this.#report(true);
@@ -693,6 +759,7 @@ export class PlaybackController {
       index: preloaded.index,
       profile: preloaded.profile,
       url: preloaded.source.url,
+      renewAt: preloaded.renewAt,
     };
 
     this.#preloaded = null;
@@ -740,6 +807,34 @@ export class PlaybackController {
     }
 
     const generation = this.#generation;
+
+    // A stream URL that expired (or that the media service refuses) is signed again; the format
+    // is not to blame. The HTML engine cannot see a refusal of an original file, which it would
+    // take for a format to transcode, so it is asked about here. Asking about a transcoded
+    // profile could start a transcode, and the gapless engine reports refusals itself.
+    const refused =
+      reason === "expired" ||
+      this.#isExpired(loaded.renewAt) ||
+      (url !== null &&
+        loaded.profile === "original" &&
+        reason !== "network" &&
+        (await Effect.runPromise(isStreamRefused(url))));
+
+    if (generation !== this.#generation) return;
+
+    if (refused) {
+      if (this.#renewed === loaded.track.id) {
+        this.#update({ engineStatus: "error", error: STREAM_REFUSED_MESSAGE });
+
+        return;
+      }
+
+      this.#renewed = loaded.track.id;
+      void this.#load(loaded.track, loaded.index, this.#positionMs, this.#view?.playing ?? false);
+
+      return;
+    }
+
     const health = await Effect.runPromiseExit(probeMediaHealth(baseUrl));
 
     if (generation !== this.#generation) return;

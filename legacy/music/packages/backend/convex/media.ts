@@ -6,13 +6,15 @@ import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
-import { markTrackMissing, upsertScannedTrack } from "./lib/catalog";
+import { markTrackMissing, moveScannedTrack, upsertScannedTrack } from "./lib/catalog";
 import { inOrder } from "./lib/sequence";
 import { requireService } from "./lib/service";
 
 const LEASE_MS = 60_000;
 
 const FINGERPRINT_PAGE = 1000;
+
+const ART_PAGE = 1000;
 
 const scannedTrack = v.object({
   path: v.string(),
@@ -33,6 +35,7 @@ const scannedTrack = v.object({
   sampleRate: v.optional(v.number()),
   bitDepth: v.optional(v.number()),
   artHash: v.optional(v.string()),
+  folderArt: v.optional(v.string()),
 });
 
 /** Pending jobs, oldest first. The media service subscribes to this. */
@@ -162,6 +165,12 @@ export const fingerprints = query({
         size: track.size,
         mtimeMs: track.mtimeMs,
         missing: track.missing,
+        folderArt: track.folderArt,
+        // What a scan matches a new file against to tell a moved file from a new one.
+        durationMs: track.durationMs,
+        title: track.title,
+        artist: track.artistName,
+        album: track.albumTitle,
       })),
       cursor: page.continueCursor,
       done: page.isDone,
@@ -187,6 +196,31 @@ export const upsertTracks = mutation({
   },
 });
 
+/**
+ * Moves tracks whose files a scan found at new paths (renamed, or moved within the library),
+ * keeping each track's ID and so its likes, plays, and playlist entries. Keep batches at 100
+ * moves or fewer.
+ */
+export const moveTracks = mutation({
+  args: {
+    secret: v.string(),
+    libraryId: v.id("libraries"),
+    moves: v.array(v.object({ from: v.string(), track: scannedTrack })),
+  },
+  handler: async (ctx, { secret, libraryId, moves }) => {
+    requireService(secret);
+
+    if ((await ctx.db.get(libraryId)) === null) return { moved: 0 };
+    let moved = 0;
+
+    await inOrder(moves, async ({ from, track }) => {
+      if (await moveScannedTrack(ctx, libraryId, from, track)) moved += 1;
+    });
+
+    return { moved };
+  },
+});
+
 /** Marks files that were not found on disk during a scan. */
 export const markMissing = mutation({
   args: { secret: v.string(), libraryId: v.id("libraries"), paths: v.array(v.string()) },
@@ -196,6 +230,28 @@ export const markMissing = mutation({
     await inOrder(paths, (path) => markTrackMissing(ctx, libraryId, path));
 
     return { marked: paths.length };
+  },
+});
+
+/**
+ * The artwork hashes one page of tracks, albums, or artists uses, so the media service can
+ * delete stored artwork nothing uses any more. Walk each table from a `null` cursor until `done`.
+ */
+export const artHashes = query({
+  args: {
+    secret: v.string(),
+    table: v.union(v.literal("tracks"), v.literal("albums"), v.literal("artists")),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, { secret, table, cursor }) => {
+    requireService(secret);
+
+    const page = await ctx.db.query(table).paginate({ cursor, numItems: ART_PAGE });
+    const hashes = new Set<string>();
+
+    for (const doc of page.page) if (doc.artHash !== undefined) hashes.add(doc.artHash);
+
+    return { hashes: [...hashes], cursor: page.continueCursor, done: page.isDone };
   },
 });
 

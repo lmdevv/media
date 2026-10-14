@@ -64,12 +64,15 @@ export interface PipedProcess {
 
 /**
  * Spawns `command` like `runProcess`, with an extra pipe on file descriptor 3 for a tool that
- * writes a stream there (ffmpeg's `pipe:3`) while standard output stays free for text.
+ * writes a stream there (ffmpeg's `pipe:3`) while standard output stays free for text. With
+ * `onStdout`, standard output goes there piece by piece instead of into the result, whose
+ * `stdout` is then empty: for long listings nobody needs whole.
  */
 export const spawnPiped = (
   command: string,
   args: ReadonlyArray<string>,
   signal: AbortSignal,
+  onStdout?: (text: string) => void,
 ): PipedProcess => {
   const child = spawn(command, args, {
     stdio: ["ignore", "pipe", "pipe", "pipe"],
@@ -94,7 +97,8 @@ export const spawnPiped = (
     stdoutPipe.setEncoding("utf8");
     stderrPipe.setEncoding("utf8");
     stdoutPipe.on("data", (chunk: string) => {
-      stdout += chunk;
+      if (onStdout === undefined) stdout += chunk;
+      else onStdout(chunk);
     });
 
     stderrPipe.on("data", (chunk: string) => {
@@ -111,8 +115,29 @@ export const spawnPiped = (
 };
 
 /** The chunks of a byte stream (one opened without an encoding, so every chunk is a `Buffer`). */
-async function* bytesOf(stream: Readable): AsyncGenerator<Uint8Array> {
+async function* chunksOf(stream: Readable): AsyncGenerator<Uint8Array, void> {
   for await (const chunk of stream.iterator()) {
     if (chunk instanceof Uint8Array) yield chunk;
   }
 }
+
+/**
+ * The chunks of a byte stream, like `chunksOf`, where ending the iteration early (`return`)
+ * destroys the stream at once. An async generator's `return` waits for its pending read, and a
+ * process that writes nothing (a hung ffmpeg) never ends that read: whoever stops reading would
+ * wait as long, before the process could even be killed.
+ */
+const bytesOf = (stream: Readable): AsyncIterable<Uint8Array, void> => ({
+  [Symbol.asyncIterator]: () => {
+    const chunks = chunksOf(stream);
+
+    return {
+      next: () => chunks.next(),
+      return: async () => {
+        stream.destroy();
+
+        return chunks.return();
+      },
+    };
+  },
+});

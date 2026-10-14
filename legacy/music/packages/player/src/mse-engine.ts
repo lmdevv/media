@@ -65,6 +65,19 @@ const BEHIND_SECONDS = 30;
 const EVICT_MIN_SECONDS = 5;
 
 /**
+ * Seconds kept behind the playhead when the buffer is full and less than a second is left to
+ * play: everything older goes, so the append the playhead waits for fits.
+ */
+const QUOTA_BEHIND_SECONDS = 1;
+
+/**
+ * Least that freeing the buffer behind the playhead must remove to count, when it is full and
+ * less than a second is left to play. Removing the few milliseconds just played would only
+ * repeat the failing append until the playhead stalls.
+ */
+const QUOTA_FREED_SECONDS = 1;
+
+/**
  * Largest single append. Browsers hand `fetch` chunks of any size (WebKit delivers megabytes at
  * once), and one append larger than the buffer quota could never succeed.
  */
@@ -100,6 +113,9 @@ const STUCK_AHEAD_SECONDS = 1;
 
 /** Pickups of a cut-off stream in a row, without a successful append, before the song fails. */
 const MAX_RECOVERIES = 3;
+
+/** The media service's answer to a signed URL it refuses, such as an expired one. */
+const FORBIDDEN = 403;
 
 /** A playhead this close to a seek target is at it. */
 const TARGET_TOLERANCE = 0.01;
@@ -600,6 +616,12 @@ export class MseEngine implements PlayerEngine {
       throw new EngineFailure("network", error instanceof Error ? error.message : String(error));
     }
 
+    if (response.status === FORBIDDEN) {
+      void response.body?.cancel().catch(() => undefined);
+
+      throw new EngineFailure("expired", "The stream's signed URL has expired");
+    }
+
     const timing = parseStreamTiming((name) => response.headers.get(name));
 
     if (!response.ok || timing === null || timing.estimated) {
@@ -886,14 +908,22 @@ export class MseEngine implements PlayerEngine {
     return true;
   }
 
-  async #evictBehind(session: Session, keep: number): Promise<boolean> {
+  /**
+   * Removes what lies more than `keep` seconds behind the playhead, when at least `atLeast`
+   * seconds can go. Resolves whether it removed anything.
+   */
+  async #evictBehind(
+    session: Session,
+    keep: number,
+    atLeast = EVICT_MIN_SECONDS,
+  ): Promise<boolean> {
     const ranges = session.buffer?.buffered;
 
     if (ranges === undefined || ranges.length === 0) return false;
     const start = ranges.start(0);
     const end = evictionEnd(start, this.#element.currentTime, keep);
 
-    if (end === null || end - start < EVICT_MIN_SECONDS) return false;
+    if (end === null || end - start < atLeast) return false;
 
     await this.#operate(session, (buffer) => {
       buffer.remove(start, end);
@@ -994,6 +1024,12 @@ export class MseEngine implements PlayerEngine {
       await delay(busy, song.abort.signal);
 
       return;
+    }
+
+    if (response.status === FORBIDDEN) {
+      void response.body?.cancel().catch(() => undefined);
+
+      throw new EngineFailure("expired", "The stream's signed URL has expired");
     }
 
     if (!response.ok || response.body === null) {
@@ -1505,16 +1541,22 @@ export class MseEngine implements PlayerEngine {
         }
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "QuotaExceededError")) throw error;
+        song.pending = { offset: piece.offset, bytes: usable };
+        const ahead = this.#aheadOfPlayhead();
 
-        // Nothing to play out and evict: the stream can never fit.
-        if (this.#aheadOfPlayhead() < 1) {
+        if (ahead < 1) {
+          // The playhead is about to wait for this append. Free all but the last moment behind
+          // it (up to `BEHIND_SECONDS` can be there) and append again on the next step; only a
+          // buffer with nothing behind to free and nothing ahead to play out can never fit it.
+          if (await this.#evictBehind(session, QUOTA_BEHIND_SECONDS, QUOTA_FREED_SECONDS)) return;
+
           throw new EngineFailure("decode", "The browser's buffer cannot hold the stream");
         }
 
-        // The buffer is full: free what lies behind the playhead, and buffer less far ahead from
-        // now on so the pump waits for the playhead instead of retrying.
-        song.pending = { offset: piece.offset, bytes: usable };
-        session.aheadLimit = Math.max(EVICT_MIN_SECONDS, this.#aheadOfPlayhead() - 2);
+        // The buffer is full of audio still to play: free what lies behind the playhead, and
+        // buffer less far ahead from now on so the pump waits for the playhead instead of
+        // retrying.
+        session.aheadLimit = Math.max(EVICT_MIN_SECONDS, ahead - 2);
         await this.#evictBehind(session, EVICT_MIN_SECONDS);
         await this.#idle(session);
 

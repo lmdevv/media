@@ -26,8 +26,9 @@ const matchesEtag = (header: string, etag: string): boolean =>
   header.split(",").some((candidate) => candidate.trim().replace(/^W\//, "") === etag);
 
 /**
- * Builds the response for `request` from the file at `path`. Fails with `FileError` when the
- * file cannot be read; a missing file has `missing: true`.
+ * Builds the response for `request` from the file at `path`. The body holds the file open until
+ * it is read to the end, cancelled, or `request.signal` aborts (the client went away). Fails with
+ * `FileError` when the file cannot be read; a missing file has `missing: true`.
  */
 export const fileResponse = Effect.fn("FileResponse.make")(function* (
   request: Request,
@@ -74,16 +75,19 @@ export const fileResponse = Effect.fn("FileResponse.make")(function* (
     Full: () => {
       headers.set("Content-Length", String(size));
 
-      return new Response(withBody && size > 0 ? Files.readRange(path, 0, size - 1) : null, {
-        status: 200,
-        headers,
-      });
+      return new Response(
+        withBody && size > 0 ? Files.readRange(path, 0, size - 1, request.signal) : null,
+        {
+          status: 200,
+          headers,
+        },
+      );
     },
     Partial: ({ start, end }) => {
       headers.set("Content-Length", String(end - start + 1));
       headers.set("Content-Range", `bytes ${start}-${end}/${size}`);
 
-      return new Response(withBody ? Files.readRange(path, start, end) : null, {
+      return new Response(withBody ? Files.readRange(path, start, end, request.signal) : null, {
         status: 206,
         headers,
       });

@@ -41,6 +41,8 @@ export type OffsetProbe = Data.TaggedEnum<{
   Audio: {};
   /** Every seek transcode is taken (`503`); asking again after `retryAfterMs` may work. */
   Busy: { readonly retryAfterMs: number };
+  /** The signed URL was refused (`403`), as once it expires: a fresh URL may work. */
+  Expired: {};
   /** An error status, or no answer within `PROBE_TIMEOUT_MS`. */
   Failed: {};
 }>;
@@ -74,6 +76,12 @@ export const probeOffset = async (url: string, signal: AbortSignal): Promise<Off
       void response.body?.cancel().catch(() => undefined);
 
       return OffsetProbe.Busy({ retryAfterMs: busy });
+    }
+
+    if (response.status === 403) {
+      void response.body?.cancel().catch(() => undefined);
+
+      return OffsetProbe.Expired();
     }
 
     if (!response.ok || response.body === null) return OffsetProbe.Failed();

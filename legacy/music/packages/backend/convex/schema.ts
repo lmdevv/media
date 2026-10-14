@@ -135,6 +135,12 @@ export default defineSchema({
     sampleRate: v.optional(v.number()),
     bitDepth: v.optional(v.number()),
     artHash: v.optional(v.string()),
+    /**
+     * The folder artwork file (`cover.jpg` and the like) the last scan saw beside this file, as
+     * `path:size:mtime`, so replacing it rescans the track. Absent where the folder has none, and
+     * on tracks scanned before it existed, which the next scan fills in.
+     */
+    folderArt: v.optional(v.string()),
     missing: v.boolean(),
     /** Title, artist, and album, folded for accent-insensitive search. */
     searchText: v.string(),

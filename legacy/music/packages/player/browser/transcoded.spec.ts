@@ -301,6 +301,27 @@ test("reports an error when a cut-off stream cannot be reopened", async ({ page,
   }
 });
 
+test("reports a refused stream URL as expired when a seek opens the song again", async ({
+  page,
+  request,
+}) => {
+  await coldCache(request);
+  await load(page, `${SONG}?p=aac-128`, 0, true);
+  await waitForEvent(page, "playing");
+  // Hours later, the signed URL has expired; a seek in the live stream opens it again.
+  await control(request, "expire-urls");
+
+  try {
+    await seek(page, 80_000);
+    await waitForEvent(page, "error");
+    expect(
+      (await ofType(page, "error")).map((event) => event.type === "error" && event.reason),
+    ).toEqual(["expired"]);
+  } finally {
+    await control(request, "renew-urls");
+  }
+});
+
 test("ends a song whose stream ends near its catalogued length", async ({ page, request }) => {
   await coldCache(request);
   // A catalogued length a second too long, as an estimate can be: the end still counts.
