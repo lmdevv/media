@@ -35,8 +35,11 @@
 		-Server
 	}
 
+	# The media service's health check, which also queries Convex: 200 only while Caddy, the media
+	# service, and Convex all answer, 502/503 otherwise. Monitors and the image's HEALTHCHECK use it.
 	handle /healthz {
-		respond "ok" 200
+		rewrite * /media/health
+		reverse_proxy 127.0.0.1:4100
 	}
 
 	handle_path /convex/* {

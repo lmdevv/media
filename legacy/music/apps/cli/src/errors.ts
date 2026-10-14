@@ -33,6 +33,12 @@ export class ConfigFileError extends Schema.TaggedError<ConfigFileError>()("Conf
   cause: Schema.Defect(),
 }) {}
 
+/** Standard input could not be read, or the user cancelled a prompt. */
+export class InputError extends Schema.TaggedError<InputError>()("InputError", {
+  message: Schema.String,
+  cause: Schema.Defect(),
+}) {}
+
 /** A job waited on with `--wait` failed, was cancelled, or outlived `--timeout`. */
 export class JobError extends Schema.TaggedError<JobError>()("JobError", {
   code: Schema.Literals(["job_failed", "job_cancelled", "timeout"]),
@@ -47,6 +53,7 @@ export type CliError =
   | CommandFailed
   | ServerError
   | ConfigFileError
+  | InputError
   | JobError;
 
 /** Process exit codes. Agents branch on these. */
@@ -68,6 +75,7 @@ export const exitCodeOf: (error: CliError) => ExitCode = Match.type<CliError>().
     CommandFailed: () => ExitCode.failed,
     ServerError: () => ExitCode.failed,
     ConfigFileError: () => ExitCode.failed,
+    InputError: () => ExitCode.failed,
     JobError: () => ExitCode.failed,
   }),
 );
@@ -80,6 +88,7 @@ export const reportOf: (error: CliError) => ErrorReport = Match.type<CliError>()
     CommandFailed: (error) => ({ code: error.code, message: error.message }),
     ServerError: (error) => ({ code: "server_error", message: error.message }),
     ConfigFileError: (error) => ({ code: "config_error", message: error.message }),
+    InputError: (error) => ({ code: "input_error", message: error.message }),
     JobError: (error) => ({ code: error.code, message: error.message }),
   }),
 );

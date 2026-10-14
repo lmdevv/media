@@ -16,13 +16,20 @@ CLI, the web app, and this skill always agree.
    `https://<host>/convex`:
 
    ```sh
-   music login --server https://music.example.com/convex --key mk_...
+   printf '%s' "$KEY" | music login --server https://music.example.com/convex --key-stdin
    music whoami
    ```
 
-   `login` checks the key, then stores `{ server, key }` in `$XDG_CONFIG_HOME/music/config.json`
-   (mode 0600). `MUSIC_SERVER` and `MUSIC_API_KEY` override the file, which suits CI and sandboxes.
-   `music logout` deletes the stored key and the cached session.
+   Keep the key off the command line, where it lands in shell history and the process list: pipe
+   it to `--key-stdin`, set `MUSIC_API_KEY`, or run `music login --server <url>` at a terminal and
+   type it at the hidden prompt. (`--key <api-key>` still works, but avoid it.) `login` checks the
+   key, then stores `{ server, key }` in `$XDG_CONFIG_HOME/music/config.json` (mode 0600, in a
+   0700 directory). `MUSIC_SERVER` and `MUSIC_API_KEY` override the file, which suits CI and
+   sandboxes. `music logout` deletes the stored key and the cached session.
+
+   A plain `http://` server on another machine would carry the key unencrypted, so `login`
+   refuses it unless you pass `--insecure` (and remembers that you did), and `MUSIC_SERVER` is
+   refused unless `MUSIC_INSECURE=1` is set. `http://localhost` and `http://127.0.0.1` are fine.
 
 ## How it works
 

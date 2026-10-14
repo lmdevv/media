@@ -2,15 +2,41 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 
 import { commands } from "@music/commands/registry";
-import { ConfigProvider, Effect, Schema } from "effect";
+import { ConfigProvider, Effect, Redacted, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runCli } from "./cli";
+import { Input } from "./input";
 import { Output } from "./output";
 import { makeTempDir, packageRoot, readText, removeDir } from "./testing/process";
 
+/** What a script or a person at a terminal supplies on stdin. */
+interface Stdin {
+  readonly piped?: string;
+  /** What the user types at the prompt; the prompt is only offered when this is set. */
+  readonly typed?: string;
+}
+
+/** Stdin as a pipe or a terminal, recording each prompt shown. */
+const stdinOf = (stdin: Stdin, prompts: Array<string>) =>
+  Input.of({
+    interactive: Effect.succeed(stdin.typed !== undefined),
+    readAll: Effect.succeed(Redacted.make(stdin.piped ?? "")),
+    promptSecret: (question) =>
+      Effect.sync(() => {
+        prompts.push(question);
+
+        return Redacted.make(stdin.typed ?? "");
+      }),
+  });
+
 /** Runs the CLI in-process with recorded output and only the given environment. */
-const invoke = async (argv: ReadonlyArray<string>, env: Readonly<Record<string, string>>) => {
+const invoke = async (
+  argv: ReadonlyArray<string>,
+  env: Readonly<Record<string, string>>,
+  stdin: Stdin = {},
+) => {
+  const prompts: Array<string> = [];
   const stdout: Array<string> = [];
   const stderr: Array<string> = [];
 
@@ -28,11 +54,12 @@ const invoke = async (argv: ReadonlyArray<string>, env: Readonly<Record<string, 
   const code = await Effect.runPromise(
     runCli(argv).pipe(
       Effect.provideService(Output, output),
+      Effect.provideService(Input, stdinOf(stdin, prompts)),
       Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown(env)),
     ),
   );
 
-  return { code, stdout: stdout.join("\n"), stderr: stderr.join("\n") };
+  return { code, stdout: stdout.join("\n"), stderr: stderr.join("\n"), prompts };
 };
 
 const ErrorOutput = Schema.fromJsonString(
@@ -42,6 +69,39 @@ const ErrorOutput = Schema.fromJsonString(
 const decodeError = Schema.decodeSync(ErrorOutput);
 
 const decodeAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }));
+
+/** A stand-in server that records each request body and answers like a Convex that is down. */
+interface Recording {
+  readonly url: string;
+  readonly bodies: Array<string>;
+  readonly close: () => Promise<void>;
+}
+
+const recordingServer = async (host: string): Promise<Recording> => {
+  const bodies: Array<string> = [];
+
+  const server = createServer((request, response) => {
+    let body = "";
+
+    request.on("data", (chunk: Buffer) => {
+      body += chunk.toString("utf8");
+    });
+    request.on("end", () => {
+      bodies.push(body);
+      response.writeHead(502).end();
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, host, resolve));
+
+  const { port } = decodeAddress(server.address());
+
+  return {
+    url: `http://${host}:${port}`,
+    bodies,
+    close: () => new Promise((resolve) => server.close(() => resolve())),
+  };
+};
 
 describe("music (in-process)", () => {
   let home = "";
@@ -109,11 +169,169 @@ describe("music (in-process)", () => {
     expect(decodeError(result.stderr).error.code).toBe("not_logged_in");
   });
 
-  it("requires --server and --key to log in", async () => {
-    expect((await run("login", "--server", "https://music.example.com")).code).toBe(2);
+  it("requires --server and a key to log in", async () => {
+    expect((await run("login", "--key", "k")).stderr).toContain("login needs --server <url>");
     expect((await run("login", "--server", "music.example.com", "--key", "k")).stderr).toContain(
       "--server must be an http(s) URL",
     );
+
+    const keyless = await run("login", "--server", "https://music.example.com/convex");
+
+    expect(keyless.code).toBe(2);
+    expect(keyless.stderr).toContain("pipe it to --key-stdin, or set MUSIC_API_KEY");
+  });
+
+  describe("login key sources", () => {
+    let server: Recording = { url: "", bodies: [], close: () => Promise.resolve() };
+
+    beforeAll(async () => {
+      server = await recordingServer("127.0.0.1");
+    });
+
+    afterAll(() => server.close());
+
+    const signedInWith = (key: string): boolean =>
+      server.bodies.some((body) => body.includes(`"key":"${key}"`));
+
+    it("reads the key from stdin with --key-stdin, without a trailing newline", async () => {
+      const result = await invoke(
+        ["login", "--server", `${server.url}/convex`, "--key-stdin"],
+        { HOME: home },
+        { piped: "mk_piped-key\n" },
+      );
+
+      expect(result.code).toBe(1);
+      expect(signedInWith("mk_piped-key")).toBe(true);
+    });
+
+    it("refuses an empty --key-stdin and --key with --key-stdin", async () => {
+      const empty = await invoke(
+        ["login", "--server", `${server.url}/convex`, "--key-stdin"],
+        { HOME: home },
+        { piped: "\n" },
+      );
+
+      expect(empty.code).toBe(2);
+      expect(empty.stderr).toContain("--key-stdin read no key from stdin");
+
+      const both = await run(
+        "login",
+        "--server",
+        `${server.url}/convex`,
+        "--key",
+        "k",
+        "--key-stdin",
+      );
+
+      expect(both.code).toBe(2);
+      expect(both.stderr).toContain("Use --key or --key-stdin, not both");
+
+      const blank = await run("login", "--server", `${server.url}/convex`, "--key", " ");
+
+      expect(blank.code).toBe(2);
+      expect(blank.stderr).toContain("--key is empty");
+    });
+
+    it("takes the key from MUSIC_API_KEY", async () => {
+      const result = await invoke(["login", "--server", `${server.url}/convex`], {
+        HOME: home,
+        MUSIC_API_KEY: "mk_env-key",
+      });
+
+      expect(result.code).toBe(1);
+      expect(signedInWith("mk_env-key")).toBe(true);
+    });
+
+    it("asks with the hidden prompt when --key-stdin is given a terminal", async () => {
+      const result = await invoke(
+        ["login", "--server", `${server.url}/convex`, "--key-stdin"],
+        { HOME: home },
+        { typed: "mk_typed-for-stdin", piped: "mk_never-read" },
+      );
+
+      expect(result.prompts).toEqual(["API key: "]);
+      expect(signedInWith("mk_typed-for-stdin")).toBe(true);
+      expect(signedInWith("mk_never-read")).toBe(false);
+    });
+
+    it("asks for the key at a terminal", async () => {
+      const result = await invoke(
+        ["login", "--server", `${server.url}/convex`],
+        { HOME: home },
+        { typed: "mk_typed-key" },
+      );
+
+      expect(result.prompts).toEqual(["API key: "]);
+      expect(signedInWith("mk_typed-key")).toBe(true);
+    });
+  });
+
+  describe("plain http to another machine", () => {
+    // 0.0.0.0 reaches this machine without being a loopback name, so it stands in for a remote
+    // server while the request still lands on the recording server.
+    let server: Recording = { url: "", bodies: [], close: () => Promise.resolve() };
+
+    beforeAll(async () => {
+      server = await recordingServer("0.0.0.0");
+    });
+
+    afterAll(() => server.close());
+
+    it("refuses to log in without --insecure, before asking for the key", async () => {
+      const refused = await invoke(
+        ["login", "--server", `${server.url}/convex`],
+        { HOME: home },
+        { typed: "mk_never-sent" },
+      );
+
+      expect(refused.code).toBe(2);
+      expect(refused.stderr).toContain("would send the API key unencrypted");
+      expect(refused.stderr).toContain("--insecure");
+      expect(refused.prompts).toEqual([]);
+      expect(server.bodies).toEqual([]);
+
+      const allowed = await run(
+        "login",
+        "--server",
+        `${server.url}/convex`,
+        "--key",
+        "mk_insecure",
+        "--insecure",
+      );
+
+      expect(allowed.code).toBe(1);
+      expect(server.bodies.some((body) => body.includes('"key":"mk_insecure"'))).toBe(true);
+    });
+
+    it("refuses MUSIC_SERVER unless MUSIC_INSECURE is set", async () => {
+      const env = {
+        HOME: home,
+        MUSIC_SERVER: `${server.url}/convex`,
+        MUSIC_API_KEY: "mk_env-remote",
+      };
+
+      const refused = await invoke(["whoami"], env);
+
+      expect(refused.code).toBe(2);
+      expect(refused.stderr).toContain("MUSIC_INSECURE=1");
+
+      // An empty or unrecognized value leaves it off rather than breaking every command.
+      const offs = await Promise.all(
+        ["", "nope"].map((off) => invoke(["whoami"], { ...env, MUSIC_INSECURE: off })),
+      );
+
+      for (const result of offs) {
+        expect(result.code).toBe(2);
+        expect(result.stderr).toContain("MUSIC_INSECURE=1");
+      }
+
+      expect((await invoke(["whoami"], { HOME: home, MUSIC_INSECURE: "" })).code).toBe(3);
+
+      const allowed = await invoke(["whoami"], { ...env, MUSIC_INSECURE: "yes" });
+
+      expect(allowed.code).toBe(1);
+      expect(server.bodies.some((body) => body.includes('"key":"mk_env-remote"'))).toBe(true);
+    });
   });
 
   it("explains a server URL that is not the Convex URL", async () => {

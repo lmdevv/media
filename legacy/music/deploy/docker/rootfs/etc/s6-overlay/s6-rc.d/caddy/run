@@ -1,2 +1,7 @@
 #!/command/with-contenv sh
-exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+# Caddy, as the unprivileged `caddy` user: it listens on 8080 and only reads its config and the
+# web app. Its autosave and storage directories go to a private directory that lasts one boot.
+set -e
+install -d -m 700 -o caddy -g caddy /run/caddy
+export HOME=/run/caddy XDG_CONFIG_HOME=/run/caddy/config XDG_DATA_HOME=/run/caddy/data
+exec s6-setuidgid caddy caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

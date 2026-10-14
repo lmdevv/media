@@ -12,7 +12,12 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-image="ghcr.io/get-convex/convex-backend:latest"
+# The same Convex backend the image ships, pinned by digest in the Dockerfile.
+image="$(sed -n 's/^ARG CONVEX_IMAGE=//p' "${root}/deploy/docker/Dockerfile")"
+if [[ "$image" != ghcr.io/get-convex/convex-backend@sha256:* ]]; then
+  echo "could not read the pinned CONVEX_IMAGE from deploy/docker/Dockerfile" >&2
+  exit 1
+fi
 
 if [[ "${1:-}" == "stop" ]]; then
   docker rm -f "music-convex-${2:-main}" >/dev/null

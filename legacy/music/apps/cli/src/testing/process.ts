@@ -4,7 +4,7 @@
  * and raw Node I/O inside Effect modules.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,15 +25,23 @@ export interface Run {
   readonly stderr: string;
 }
 
-/** Runs the built CLI with only PATH plus the given variables in its environment. */
+/**
+ * Runs the built CLI with only PATH plus the given variables in its environment, and `stdin`
+ * piped to its standard input (which is closed at once when there is none).
+ */
 export const runMusic = (
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
+  stdin = "",
 ): Promise<Run> =>
   new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [binary, ...args], {
       env: { PATH: process.env["PATH"] ?? "", ...env },
     });
+
+    // A run that exits before reading stdin closes the pipe; that EPIPE is not a test failure.
+    child.stdin.on("error", () => {});
+    child.stdin.end(stdin);
 
     let stdout = "";
     let stderr = "";
@@ -54,6 +62,12 @@ export const runMusic = (
 
 /** Creates an empty temporary directory. */
 export const makeTempDir = (prefix: string): Promise<string> => mkdtemp(join(tmpdir(), prefix));
+
+/** Creates a directory with exactly `mode`, whatever the umask. */
+export const makeDir = async (path: string, mode: number): Promise<void> => {
+  await mkdir(path, { recursive: true });
+  await chmod(path, mode);
+};
 
 /** Removes a directory tree. */
 export const removeDir = (path: string): Promise<void> =>

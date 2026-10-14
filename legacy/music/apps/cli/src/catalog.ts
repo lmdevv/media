@@ -68,8 +68,9 @@ export const builtins: ReadonlyArray<Builtin> = [
   },
   {
     name: "login",
-    synopsis: "login --server <url> --key <api-key>",
-    summary: "Verify an API key and store it with the server URL",
+    synopsis: "login --server <url> [--key-stdin] [--insecure]",
+    summary:
+      "Verify an API key (piped with --key-stdin, MUSIC_API_KEY, or asked for) and store it with the server URL",
     section: "Account",
   },
   {

@@ -5,14 +5,16 @@
  * - `session.json` caches the JWT the key signs in to, with its expiry, so most commands skip the
  *   sign-in round trip. It is keyed by server and a hash of the key, so switching either drops it.
  *
- * `MUSIC_SERVER` and `MUSIC_API_KEY` override the file field by field.
+ * `MUSIC_SERVER` and `MUSIC_API_KEY` override the file field by field. A plain `http://` server on
+ * another machine would carry the key unencrypted, so `music login` refuses one unless given
+ * `--insecure`, and `MUSIC_SERVER` is refused unless `MUSIC_INSECURE` is set.
  */
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import { Config, Effect, Option, Redacted, Result, Schema } from "effect";
 
-import { AuthError, ConfigFileError } from "./errors";
+import { AuthError, ConfigFileError, UsageError } from "./errors";
 import { readTextFile, removeFile, writePrivateFile } from "./files";
 
 /** Where the CLI keeps its files. */
@@ -34,21 +36,34 @@ const nonEmpty = (name: string): Config.Config<Option.Option<string>> =>
     Config.map(Option.filter((value) => value.trim().length > 0)),
   );
 
+/**
+ * Whether an opt-in variable is switched on. Anything else, including a typo, leaves it off: the
+ * safe side for `MUSIC_INSECURE`, and no reason to fail every command.
+ */
+const isTruthy = (value: string): boolean =>
+  ["1", "true", "yes", "y", "on"].includes(value.trim().toLowerCase());
+
 /** Values the environment supplies. */
 export interface Environment {
   readonly paths: ConfigPaths;
   readonly server: Option.Option<string>;
   readonly key: Option.Option<Redacted.Redacted>;
+  /** `MUSIC_INSECURE`: allow a plain `http://` server on another machine. */
+  readonly insecure: boolean;
 }
 
-/** Reads `XDG_CONFIG_HOME` (or `HOME/.config`), `MUSIC_SERVER`, and `MUSIC_API_KEY`. */
+/**
+ * Reads `XDG_CONFIG_HOME` (or `HOME/.config`), `MUSIC_SERVER`, `MUSIC_API_KEY`, and
+ * `MUSIC_INSECURE`.
+ */
 export const environment: Config.Config<Environment> = Config.all({
   xdg: nonEmpty("XDG_CONFIG_HOME"),
   home: nonEmpty("HOME"),
   server: nonEmpty("MUSIC_SERVER"),
   key: nonEmpty("MUSIC_API_KEY"),
+  insecure: nonEmpty("MUSIC_INSECURE"),
 }).pipe(
-  Config.map(({ xdg, home, server, key }) => ({
+  Config.map(({ xdg, home, server, key, insecure }) => ({
     paths: pathsFor(
       Option.getOrElse(xdg, () =>
         join(
@@ -59,6 +74,7 @@ export const environment: Config.Config<Environment> = Config.all({
     ),
     server: Option.map(server, normalizeServer),
     key: Option.map(key, (value) => Redacted.make(value.trim())),
+    insecure: Option.exists(insecure, isTruthy),
   })),
 );
 
@@ -70,10 +86,41 @@ export const ServerUrl = Schema.String.check(
   Schema.isPattern(/^https?:\/\/[^\s/]+/u, { message: "Expected an http(s) URL" }),
 );
 
+const isLoopbackHost = (host: string): boolean =>
+  host === "localhost" ||
+  host.endsWith(".localhost") ||
+  host === "[::1]" ||
+  /^127(?:\.\d{1,3}){3}$/u.test(host);
+
+/**
+ * Whether talking to `server` would send the API key unencrypted to another machine: a plain
+ * `http://` URL whose host is not this machine's loopback interface.
+ */
+export const sendsKeyInCleartext = (server: string): boolean => {
+  if (!URL.canParse(server)) return false;
+
+  const url = new URL(server);
+
+  return url.protocol === "http:" && !isLoopbackHost(url.hostname);
+};
+
+/** Refuses a cleartext `server`, naming the flag or variable that allows it anyway. */
+export const cleartextError = (
+  server: string,
+  allowWith: string,
+  command: string | null,
+): UsageError =>
+  new UsageError({
+    message: `${server} is plain http:// to another machine, which would send the API key unencrypted. Use https://, or allow it with ${allowWith}`,
+    command,
+  });
+
 /** What `music login` stores. */
 const StoredConfig = Schema.Struct({
   server: ServerUrl,
   key: Schema.String.check(Schema.isMinLength(1)),
+  /** Set by `music login --insecure`: the user chose a plain http:// server on another machine. */
+  insecure: Schema.optionalKey(Schema.Boolean),
 });
 
 /** A cached auth token for one server and key. */
@@ -144,8 +191,18 @@ export const loadCredentials = Effect.fn("Config.loadCredentials")(function* (en
     return yield* new AuthError({
       code: "not_logged_in",
       message:
-        "Not logged in. Run music login --server <url> --key <api-key>, or set MUSIC_SERVER and MUSIC_API_KEY",
+        "Not logged in. Run music login --server <url>, or set MUSIC_SERVER and MUSIC_API_KEY",
     });
+  }
+
+  if (!env.insecure && sendsKeyInCleartext(server)) {
+    if (Option.isSome(env.server)) return yield* cleartextError(server, "MUSIC_INSECURE=1", null);
+
+    // `music login --insecure` records the choice. A config without it was written by a CLI that
+    // did not ask, so the key would go out unencrypted without anyone having agreed to it.
+    if (file?.insecure !== true) {
+      return yield* cleartextError(server, "music login --insecure (or MUSIC_INSECURE=1)", "login");
+    }
   }
 
   const credentials: Credentials = { server, key };
@@ -153,15 +210,21 @@ export const loadCredentials = Effect.fn("Config.loadCredentials")(function* (en
   return credentials;
 });
 
-/** Stores credentials from `music login`. */
+/**
+ * Stores credentials from `music login`, with `insecure` when the user allowed a plain http://
+ * server on another machine.
+ */
 export const saveCredentials = (
   paths: ConfigPaths,
   credentials: Credentials,
+  insecure = false,
 ): Effect.Effect<void, ConfigFileError> =>
-  writeJson(paths.config, {
-    server: credentials.server,
-    key: Redacted.value(credentials.key),
-  });
+  writeJson(
+    paths.config,
+    insecure
+      ? { server: credentials.server, key: Redacted.value(credentials.key), insecure: true }
+      : { server: credentials.server, key: Redacted.value(credentials.key) },
+  );
 
 /** Reads the cached session, treating a missing or unreadable cache as empty. */
 export const loadSession = (

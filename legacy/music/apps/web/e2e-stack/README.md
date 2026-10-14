@@ -11,6 +11,13 @@ MUSIC_DIR=~/music scripts/stack-e2e.sh     # your own library
 IMAGE=ghcr.io/lmdevv/music:main scripts/stack-e2e.sh
 ```
 
+Before and after the suite, `scripts/stack-e2e.sh` checks how the container is put together:
+each service runs as its own non-root user, secrets and the database stay private to their owner,
+the media user finds no secret in any `/proc/*/cmdline` or `/proc/*/environ`, `/healthz` fails
+while the media service is down, an upgrade from an image that only recorded `/data/version`
+backs up first and keeps the newest five backups, and a stop and start keeps the data without a
+new backup.
+
 The suite expects a fresh container: the first test creates the admin account. The script also
 passes the container name as `MUSIC_CONTAINER`; the device-pruning test runs the container's Convex
 CLI through `docker exec` to import long-silent devices and run the prune, and is skipped without

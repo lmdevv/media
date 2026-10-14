@@ -24,7 +24,12 @@ export const readTextFile = (path: string): Promise<string | null> =>
  * goes to a temporary file first so a crash never leaves half a config behind.
  */
 export const writePrivateFile = async (path: string, text: string): Promise<void> => {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const dir = dirname(path);
+
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  // `mkdir` leaves an existing directory's mode alone, and older versions or the user may have
+  // created it group- or world-readable.
+  await chmod(dir, 0o700);
 
   const temporary = `${path}.${String(process.pid)}.tmp`;
 

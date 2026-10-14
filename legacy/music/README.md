@@ -55,11 +55,13 @@ scan starts at once; albums appear while it runs.
 - **Remote access:** put it behind your own reverse proxy or Tailscale and set `PUBLIC_URL`.
 - **Images:** `linux/amd64` and `linux/arm64`.
 - **Data:** everything lives in `/data`: the database, artwork, the transcode cache, generated
-  secrets, and a backup taken before every upgrade.
-- **Permissions:** the media service, which reads your music with ffmpeg, runs as an unprivileged
-  user, uid and gid 1000 unless you set `PUID` and `PGID` (the NixOS module's `uid` and `gid`).
-  Your music must be readable by that user; ordinary `644` files in `755` folders are. It owns
-  `/data/media` (fixed on every start) and cannot read the secrets or the database.
+  secrets, and a backup taken before every upgrade (the newest `BACKUP_KEEP`, default 5).
+- **Permissions:** no service runs as root. The media service, which reads your music with
+  ffmpeg, runs as uid and gid 1000 unless you set `PUID` and `PGID` (the NixOS module's `uid` and
+  `gid`). Your music must be readable by that user; ordinary `644` files in `755` folders are. It
+  owns `/data/media` (fixed on every start) and cannot read the secrets or the database.
+- **Operations:** backups, restoring one, upgrading Docker, Compose, and NixOS installs, health
+  checks, and permissions are in [`docs/operations.md`](docs/operations.md).
 - **Try it with free music:** [`docs/demo-music.md`](docs/demo-music.md) downloads five Creative
   Commons albums.
 
@@ -69,12 +71,17 @@ Create an API key in Settings → API keys, then:
 
 ```sh
 pnpm --filter @music/cli build && alias music="node $PWD/apps/cli/dist/music.js"
-music login --server http://localhost:8080/convex --key mk_...
+music login --server http://localhost:8080/convex   # asks for the key; or pipe it to --key-stdin
 music play cosmic lullabies
 music playlists create "Late night" --track-ids "$(music search neptune --json | jq -r '[.tracks[].id] | join(",")')"
 music libraries scan <library-id> --wait
 music commands --json        # every command with its arguments as JSON Schema
 ```
+
+Keep keys out of shell history and the process list: `music login` asks for the key at a
+terminal, reads it from stdin with `--key-stdin` (`printf %s "$KEY" | music login --server ...
+--key-stdin`), or takes `MUSIC_API_KEY`. It refuses a plain `http://` server on another machine
+unless you pass `--insecure`, since the key would cross the network unencrypted.
 
 Give an agent [`skills/music/SKILL.md`](skills/music/SKILL.md) and an API key. There is no MCP
 server; the CLI is the interface.

@@ -270,8 +270,11 @@ describe.skipIf(server === undefined)("music against a real server", () => {
   let home = "";
   let key = "";
 
-  const music = (args: ReadonlyArray<string>, env: Readonly<Record<string, string>> = {}) =>
-    runMusic(args, { HOME: home, XDG_CONFIG_HOME: home, ...env });
+  const music = (
+    args: ReadonlyArray<string>,
+    env: Readonly<Record<string, string>> = {},
+    stdin = "",
+  ) => runMusic(args, { HOME: home, XDG_CONFIG_HOME: home, ...env }, stdin);
 
   beforeAll(async () => {
     buildCli();
@@ -281,8 +284,8 @@ describe.skipIf(server === undefined)("music against a real server", () => {
 
   afterAll(() => removeDir(home));
 
-  it("logs in, stores the key privately, and reports the user", async () => {
-    const login = await music(["login", "--server", url, "--key", key]);
+  it("logs in with a key piped to stdin, stores it privately, and reports the user", async () => {
+    const login = await music(["login", "--server", url, "--key-stdin"], {}, `${key}\n`);
 
     expect(login.stderr).toContain("Saved to");
     expect(login.code).toBe(0);
@@ -357,6 +360,15 @@ describe.skipIf(server === undefined)("music against a real server", () => {
     expect(fromEnv.code).toBe(3);
     expect(errorOf(fromEnv).code).toBe("invalid_key");
     expect((await music(["login", "--server", url, "--key", badKey])).code).toBe(3);
+    expect((await music(["login", "--server", url], { MUSIC_API_KEY: badKey })).code).toBe(3);
+  });
+
+  it("explains where the key comes from when none is given and nobody is at a terminal", async () => {
+    // Stdin is a pipe, so a prompt would wait for nobody.
+    const result = await music(["login", "--server", url]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("pipe it to --key-stdin, or set MUSIC_API_KEY");
   });
 
   it("exits 3 with forbidden when a member runs an admin command", async () => {

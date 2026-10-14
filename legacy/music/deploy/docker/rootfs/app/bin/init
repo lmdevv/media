@@ -9,14 +9,23 @@ umask 077
 
 data="${MUSIC_DATA:-/data}"
 secrets="$data/secrets"
+backups="$data/backups"
 public="${PUBLIC_URL%/}"
 version="$(node -p 'require("/app/backend/package.json").version')"
-mkdir -p "$secrets" "$data/media" "$data/backups"
+# A hash of the functions, schema, and migrations this image deploys (see the Dockerfile).
+build="$(cat /app/build-id)"
+mkdir -p "$secrets" "$data/media" "$backups"
 # Installs from before the umask kept group- and world-readable secrets and backups.
-chmod 700 "$secrets" "$data/backups"
-find "$secrets" "$data/backups" -type f -exec chmod 600 {} +
+chmod 700 "$secrets" "$backups"
+find "$secrets" "$backups" -type f -exec chmod 600 {} +
 
 log() { echo "[init] $*"; }
+
+keep="${BACKUP_KEEP:-5}"
+if ! [[ "$keep" =~ ^[0-9]+$ ]]; then
+  log "BACKUP_KEEP must be a whole number (0 keeps every backup); got BACKUP_KEEP=$keep"
+  exit 1
+fi
 
 # The media service runs as the `music` user with the PUID/PGID the container was given. It
 # reads the library, owns /data/media, and cannot read the secrets or the database (700, root).
@@ -26,6 +35,13 @@ if ! [[ "$puid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ ]] || [ "$puid" = 0 ] || [ "$
   log "PUID and PGID must be numeric and not 0 (root); got PUID=$puid PGID=$pgid"
   exit 1
 fi
+# Sharing an id with Convex or Caddy would let the media service read the database.
+for reserved in convex caddy; do
+  if [ "$puid" = "$(id -u "$reserved")" ] || [ "$pgid" = "$(id -g "$reserved")" ]; then
+    log "PUID and PGID may not be $(id -u "$reserved"), which the $reserved service uses; got PUID=$puid PGID=$pgid"
+    exit 1
+  fi
+done
 [ "$(id -g music)" = "$pgid" ] || groupmod --non-unique --gid "$pgid" music
 [ "$(id -u music)" = "$puid" ] || usermod --non-unique --uid "$puid" --gid "$pgid" music
 # The media user passes through /data (without listing it) to reach /data/media.
@@ -44,7 +60,10 @@ for _ in $(seq 1 120); do
 done
 curl -fsS http://127.0.0.1:3210/version >/dev/null
 
-admin_key="$(/app/convex/generate_key music "$(cat "$secrets/instance_secret")" | tail -n 1)"
+# generate_key takes the instance secret as an argument too; the shim keeps it off the command
+# line (see the Convex service's run script).
+admin_key="$(LD_PRELOAD=/app/convex/argv-secret.so ARGV_SECRET_FILE="$secrets/instance_secret" \
+  /app/convex/generate_key music @ARGV_SECRET_FILE | tail -n 1)"
 export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210
 export CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
 printf '%s\n' "$admin_key" > "$secrets/admin_key"
@@ -56,10 +75,42 @@ fi
 cd /app/backend
 convex() { ./node_modules/.bin/convex "$@"; }
 
-if [ -s "$data/version" ] && [ "$(cat "$data/version")" != "$version" ]; then
-  backup="$data/backups/pre-$version-$(date +%Y%m%d%H%M%S).zip"
-  log "upgrading from $(cat "$data/version") to $version; exporting to $backup"
+# What the last successful boot deployed. Images before the build identity record only the
+# package version, rewriting /data/version on every boot, and never touch /data/build. So an
+# install with /data/version but no /data/build, or with a /data/version newer than /data/build
+# (someone rolled back to such an image since), last ran one of them. An install with neither
+# has never finished a boot and has nothing to back up.
+if [ -s "$data/build" ] && ! [ "$data/version" -nt "$data/build" ]; then
+  previous="$(cat "$data/build")"
+elif [ -s "$data/version" ]; then
+  previous="version $(cat "$data/version")"
+else
+  previous=""
+fi
+
+# An upgrade whose boot fails after the export retries on the next boot (and a restart policy may
+# retry it many times). The first export is the one taken before anything changed, so the retries
+# reuse it instead of exporting again and pruning it away, as long as it is still there.
+pending="$backups/.pending"
+upgrade="$previous -> $build"
+
+if [ -n "$previous" ] && [ "$previous" != "$build" ] && [ -s "$pending" ] \
+  && [ "$(head -n 1 "$pending")" = "$upgrade" ] && [ -s "$(tail -n 1 "$pending")" ]; then
+  log "upgrading from $previous to $version ($build); already backed up to $(tail -n 1 "$pending")"
+elif [ -n "$previous" ] && [ "$previous" != "$build" ]; then
+  backup="$backups/pre-$version-$build-$(date -u +%Y%m%d%H%M%S).zip"
+  log "upgrading from $previous to $version ($build); exporting to $backup"
+  # A failed export stops the boot before anything is deployed.
   convex export --path "$backup"
+  printf '%s\n%s\n' "$upgrade" "$backup" > "$pending"
+  if [ "$keep" -gt 0 ]; then
+    # Newest first by modification time; everything past the newest $keep goes.
+    find "$backups" -maxdepth 1 -type f -name 'pre-*.zip' -printf '%T@ %p\n' | sort -rn \
+      | tail -n +"$((keep + 1))" | cut -d' ' -f2- | while IFS= read -r old; do
+        log "removing old backup $old"
+        rm -f -- "$old"
+      done
+  fi
 fi
 
 log "deploying functions"
@@ -86,5 +137,11 @@ MEDIA_DATA_DIR=$data/media
 PORT=4100
 ENV
 
+# Recorded only once the deploy succeeded, so a failed upgrade backs up again on the next try.
+# /data/version stays for images from before the build identity, should someone roll back. It is
+# written first so that /data/build is the newer file until such an image rewrites /data/version.
 printf '%s\n' "$version" > "$data/version"
-log "ready at $public"
+printf '%s\n' "$build" > "$data/build"
+touch -r "$data/version" -d '+1 second' "$data/build" 2>/dev/null || touch "$data/build"
+rm -f "$pending"
+log "ready at $public (version $version, build $build)"
