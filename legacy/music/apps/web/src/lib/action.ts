@@ -1,5 +1,5 @@
 import { commandFailure, errorMessage } from "@music/sdk/errors";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 /** The message to show for any thrown value; server failures carry their own wording. */
@@ -33,7 +33,10 @@ export const useAction = <Args extends ReadonlyArray<unknown>, Result>(
   const [pending, setPending] = useState(false);
   const latest = useRef(options);
 
-  latest.current = options;
+  // Read when the action finishes, which is always after the render that started it committed.
+  useEffect(() => {
+    latest.current = options;
+  });
 
   const run = useCallback(
     async (...args: Args): Promise<Result | undefined> => {

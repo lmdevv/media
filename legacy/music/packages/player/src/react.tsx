@@ -11,13 +11,21 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import type { ReactNode } from "react";
 
-import { describeDevice, loadDeviceId, readItem, writeItem } from "./device-identity";
+import {
+  browserStorage,
+  describeDevice,
+  loadDeviceId,
+  readItem,
+  writeItem,
+} from "./device-identity";
 import type { EngineKind, PlayerEngine } from "./engine";
 import { HtmlAudioEngine } from "./html-audio-engine";
 import { MseEngine } from "./mse-engine";
@@ -31,8 +39,10 @@ const POSITION_INTERVAL_MS = 250;
 
 const QUALITY_KEY = "music.streamQuality";
 
+/** What the player is doing: nothing queued, loading a song, playing, paused, waiting, or failed. */
 export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "buffering" | "error";
 
+/** The player as the UI shows it: the session from Convex merged with this browser's audio. */
 export interface PlayerState {
   readonly status: PlayerStatus;
   readonly track: QueueEntry | null;
@@ -76,6 +86,7 @@ export interface PlayerState {
   readonly following: boolean;
 }
 
+/** What the UI can ask the player to do. Actions never reject: failures become `error`. */
 export interface PlayerActions {
   /** Replaces the queue and plays it on this browser. */
   readonly playTracks: (trackIds: ReadonlyArray<TrackId>, index?: number) => Promise<void>;
@@ -88,22 +99,51 @@ export interface PlayerActions {
   readonly setShuffle: (on: boolean) => Promise<void>;
   readonly setRepeat: (mode: RepeatMode) => Promise<void>;
   readonly setVolume: (volume: number) => Promise<void>;
-  readonly addToQueue: (trackIds: ReadonlyArray<TrackId>, next?: boolean) => Promise<void>;
+  /** Adds songs to the queue; resolves whether they landed (a failure sets `error`). */
+  readonly addToQueue: (trackIds: ReadonlyArray<TrackId>, next?: boolean) => Promise<boolean>;
   /** Removes the entry `itemId`; resolves whether the removal landed (a failure sets `error`). */
   readonly removeFromQueue: (itemId: QueueItemId) => Promise<boolean>;
   readonly setAutoplay: (on: boolean) => Promise<void>;
-  /** Moves playback to this browser. */
-  readonly playHere: () => Promise<void>;
-  readonly transferTo: (deviceId: DeviceId) => Promise<void>;
+  /** Moves playback to this browser; resolves whether the move landed (a failure sets `error`). */
+  readonly playHere: () => Promise<boolean>;
+  /** Moves playback to another device; resolves whether the move landed. */
+  readonly transferTo: (deviceId: DeviceId) => Promise<boolean>;
   /** Changes the streaming quality. It applies from the next song. */
   readonly setQuality: (quality: StreamQuality) => void;
 }
 
+/** The player state and actions that `usePlayer` returns. */
 export type Player = PlayerState & PlayerActions;
 
 const PlayerContext = createContext<Player | null>(null);
 
 const PositionContext = createContext<number>(0);
+
+/** The song that plays and what the player does with it: the slice a long song list needs. */
+export interface CurrentTrack {
+  readonly trackId: TrackId | null;
+  readonly status: PlayerStatus;
+}
+
+const CurrentTrackContext = createContext<CurrentTrack>({ trackId: null, status: "idle" });
+
+const HasTrackContext = createContext(false);
+
+/** Reads the player when it is needed (in an event handler) without re-rendering on its changes. */
+interface PlayerReaders {
+  readonly player: () => Player;
+  readonly positionMs: () => number;
+}
+
+const ReadersContext = createContext<PlayerReaders | null>(null);
+
+const useReaders = (): PlayerReaders => {
+  const readers = useContext(ReadersContext);
+
+  if (readers === null) throw new Error("Player readers must be used inside PlayerProvider");
+
+  return readers;
+};
 
 /**
  * The player state and actions. Must be inside `PlayerProvider`. Actions never reject: server
@@ -119,6 +159,32 @@ export const usePlayer = (): Player => {
 
 /** The live position in milliseconds. Separate from `usePlayer` because it changes often. */
 export const usePlayerPosition = (): number => useContext(PositionContext);
+
+/**
+ * The current song's ID and the player status, which change far less often than the rest of the
+ * player (a position report, the queue, or the device list). Long lists use it to mark the playing
+ * row without re-rendering every row on each player change.
+ */
+export const useCurrentTrack = (): CurrentTrack => useContext(CurrentTrackContext);
+
+/**
+ * Whether a song is loaded. Changes only when the queue goes from empty to not, for chrome (the
+ * player bar's frame, the shell's surfaces) that shows or hides with it but ignores play, pause,
+ * and buffering.
+ */
+export const useHasTrack = (): boolean => useContext(HasTrackContext);
+
+/**
+ * A stable function that returns the player as it is now. For event handlers and callbacks that
+ * act on the player but don't show it, so their component doesn't re-render on player changes.
+ */
+export const useLatestPlayer = (): (() => Player) => useReaders().player;
+
+/**
+ * A stable function that returns the live position in milliseconds, for handlers (such as a seek
+ * shortcut) that would otherwise re-render with every position tick.
+ */
+export const usePositionReader = (): (() => number) => useReaders().positionMs;
 
 /**
  * The engines the provider switches between. A fixed `engine` disables the switching (and is
@@ -144,14 +210,14 @@ const engineFactory = (
  * a Jam link's page joining to listen along here).
  */
 export const thisBrowserDeviceId = (): DeviceId =>
-  loadDeviceId("localStorage" in globalThis ? localStorage : null, () => crypto.randomUUID());
+  loadDeviceId(browserStorage(), () => crypto.randomUUID());
 
 /** Builds the controller from browser globals. Runs once per provider mount. */
 const createController = (
   convex: ReturnType<typeof useConvex>,
   engines: EngineFactory,
 ): PlaybackController => {
-  const storage = "localStorage" in globalThis ? localStorage : null;
+  const storage = browserStorage();
   const probe = document.createElement("audio");
 
   return new PlaybackController(makeMusicClient(convex), engines, {
@@ -190,7 +256,8 @@ function PositionTicker({
 }
 
 /**
- * Provides `usePlayer` and `usePlayerPosition`. Place it inside the Convex provider of a signed-in
+ * Provides `usePlayer`, `usePlayerPosition`, `useCurrentTrack`, `useHasTrack`,
+ * `useLatestPlayer`, and `usePositionReader`. Place it inside the Convex provider of a signed-in
  * user. It registers this browser as a device, plays audio while this browser is the session's
  * active device, and stops the moment another device takes over.
  */
@@ -304,7 +371,7 @@ export function PlayerProvider({
       setRepeat: (mode) => controller.capture(client.run("playback.repeat", { mode })),
       setVolume: (volume) => controller.setVolume(volume),
       addToQueue: (ids, toFront) =>
-        controller.capture(
+        controller.attempt(
           client.run(
             "queue.add",
             toFront === undefined ? { trackIds: ids } : { trackIds: ids, next: toFront },
@@ -320,9 +387,35 @@ export function PlayerProvider({
     };
   }, [state, local, controller, convex, jam]);
 
+  const latest = useRef(player);
+
+  // Updated right after the commit, before the browser can dispatch another event, so a handler
+  // never reads the player from the render before.
+  useLayoutEffect(() => {
+    latest.current = player;
+  }, [player]);
+
+  const readers = useMemo(
+    (): PlayerReaders => ({
+      player: () => latest.current,
+      positionMs: () => Math.round(controller.positionMs()),
+    }),
+    [controller],
+  );
+
+  const trackId = player.track?.id ?? null;
+  const status = player.status;
+  const current = useMemo((): CurrentTrack => ({ trackId, status }), [trackId, status]);
+
   return (
-    <PlayerContext.Provider value={player}>
-      <PositionTicker controller={controller}>{children}</PositionTicker>
-    </PlayerContext.Provider>
+    <ReadersContext.Provider value={readers}>
+      <PlayerContext.Provider value={player}>
+        <CurrentTrackContext.Provider value={current}>
+          <HasTrackContext.Provider value={trackId !== null}>
+            <PositionTicker controller={controller}>{children}</PositionTicker>
+          </HasTrackContext.Provider>
+        </CurrentTrackContext.Provider>
+      </PlayerContext.Provider>
+    </ReadersContext.Provider>
   );
 }

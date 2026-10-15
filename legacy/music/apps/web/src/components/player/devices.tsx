@@ -10,10 +10,9 @@ import { toast } from "sonner";
 
 import { JamButton } from "@/components/jam/jam-band";
 import { PlayingBars } from "@/components/library/artwork";
-import { toastFailure } from "@/lib/action";
 import { formatAgo, formatDuration } from "@/lib/format";
 
-import { deviceIcon } from "./controls";
+import { deviceIcon } from "./player-actions";
 
 const TRANSFER_TIMEOUT_MS = 10_000;
 
@@ -78,10 +77,19 @@ export const useDevices = (): DevicesState => {
     if (target === "here" ? player.isThisDevice : target === activeId) return;
 
     setPending(target);
-    (target === "here" ? player.playHere() : player.transferTo(target)).catch((cause: unknown) => {
+
+    // A refused move clears the spinner at once and says so; one that landed clears it when the
+    // session shows the new device.
+    const move = async () => {
+      const landed = await (target === "here" ? player.playHere() : player.transferTo(target));
+
+      if (landed) return;
+
       setPending(null);
-      toastFailure(cause);
-    });
+      toast.error("Couldn't move playback there. Try again.");
+    };
+
+    void move();
   };
 
   return {

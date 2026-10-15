@@ -79,6 +79,18 @@ export const loadDeviceId = (storage: Storage | null, generate: () => string): D
   return created;
 };
 
+/**
+ * The browser's `localStorage`, or null where there is none (outside a browser) or where reading it
+ * throws: with cookies blocked, Chrome throws on the `localStorage` getter itself.
+ */
+export const browserStorage = (): Storage | null => {
+  try {
+    return "localStorage" in globalThis ? globalThis.localStorage : null;
+  } catch {
+    return null;
+  }
+};
+
 /** Reads a key, treating a storage that throws (blocked cookies, Safari private mode) as empty. */
 export const readItem = (storage: Storage | null, key: string): string | null => {
   try {

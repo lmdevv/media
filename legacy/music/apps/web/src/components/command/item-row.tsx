@@ -18,7 +18,8 @@ import {
   UsersRoundIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { MouseEvent } from "react";
+import { memo } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
 import { formatDuration, plural } from "@/lib/format";
@@ -83,14 +84,25 @@ function Thumb({ item }: { readonly item: Item }) {
   }
 }
 
+/** The "now playing" row's subtitle: the only part of the list that follows the position. */
+function NowSubtitle({ artist }: { readonly artist: string }) {
+  const player = usePlayer();
+  const position = usePlayerPosition();
+
+  return `${player.status === "playing" ? "Playing" : "Paused"} at ${formatDuration(position)} · ${artist}`;
+}
+
 /**
  * One option in the menu's list, with its section header when it starts a section. The row's
  * element ID is `command-<item id>`, which the search field names as its active descendant.
+ * Memoized, so typing re-renders only the rows whose item or selection changed.
  *
  * @param index - Position in the list, written to `data-index` so the list can scroll to it.
  * @param header - The section name to show above the row, or null inside a section.
+ * @param onHover - Called with the row's index when the pointer moves over it.
+ * @param onSelect - Called with the row's index when it is clicked.
  */
-export function ItemRow({
+export const ItemRow = memo(function ItemRow({
   item,
   index,
   active,
@@ -102,16 +114,13 @@ export function ItemRow({
   readonly index: number;
   readonly active: boolean;
   readonly header: string | null;
-  readonly onHover: (event: MouseEvent<HTMLDivElement>) => void;
-  readonly onSelect: () => void;
+  readonly onHover: (index: number, event: MouseEvent<HTMLDivElement>) => void;
+  readonly onSelect: (index: number) => void;
 }) {
-  const player = usePlayer();
-  const position = usePlayerPosition();
-
-  const subtitle = ((): string | null => {
+  const subtitle = ((): ReactNode => {
     switch (item.kind) {
       case "now":
-        return `${player.status === "playing" ? "Playing" : "Paused"} at ${formatDuration(position)} · ${item.track.artist}`;
+        return <NowSubtitle artist={item.track.artist} />;
       case "album":
         return `Album · ${item.album.artist}${item.album.year === null ? "" : ` · ${item.album.year}`}`;
       case "artist":
@@ -147,8 +156,8 @@ export function ItemRow({
         aria-selected={active}
         data-index={index}
         tabIndex={-1}
-        onMouseMove={onHover}
-        onClick={onSelect}
+        onMouseMove={(event) => onHover(index, event)}
+        onClick={() => onSelect(index)}
         className={cn(
           "flex shrink-0 cursor-pointer items-center gap-3 rounded-md px-2.5",
           subtitle === null ? "h-11" : "h-12",
@@ -179,4 +188,4 @@ export function ItemRow({
       </div>
     </>
   );
-}
+});

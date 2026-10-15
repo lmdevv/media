@@ -16,7 +16,8 @@ import type { NowPlayingView } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
 import { useArtColors } from "@/lib/use-art-colors";
 
-import { NEXT_REPEAT, Progress, Volume, perform, useIsRemote } from "./controls";
+import { Progress, Volume } from "./controls";
+import { NEXT_REPEAT, perform, useIsRemote } from "./player-actions";
 import { nowPlayingBackground } from "./now-playing-background";
 import { AirPlayGlyph, RepeatGlyph, ShuffleGlyph } from "./now-playing-glyphs";
 import { RemotePill } from "./now-playing-remote-pill";

@@ -45,17 +45,25 @@ export const useArtColors = (url: string | null, seed: string): readonly [string
   );
 
   useEffect(() => {
-    if (url === null) return;
+    if (url === null) return undefined;
 
     const image = new Image();
+    // A cover that loads after the song changed is not sampled.
+    const loading = new AbortController();
     image.crossOrigin = "anonymous";
     image.decoding = "async";
-    image.addEventListener("load", () => {
-      const color = averageColor(image);
+    image.addEventListener(
+      "load",
+      () => {
+        const color = averageColor(image);
 
-      if (color !== null) setSampled({ url, color });
-    });
+        if (color !== null) setSampled({ url, color });
+      },
+      { signal: loading.signal },
+    );
     image.src = url;
+
+    return () => loading.abort();
   }, [url]);
 
   if (sampled !== null && sampled.url === url) return [sampled.color, sampled.color];

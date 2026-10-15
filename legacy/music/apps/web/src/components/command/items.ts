@@ -195,6 +195,8 @@ export const searchItems = ({
   readonly playlists: ReadonlyArray<Playlist>;
   readonly actions: ReadonlyArray<Item>;
 }): ReadonlyArray<Item> => {
+  const folded = foldSearchText(query);
+
   const library: Array<Item> =
     results === undefined
       ? []
@@ -219,7 +221,7 @@ export const searchItems = ({
             tracks: results.tracks,
           })),
           ...playlists
-            .filter((playlist) => foldSearchText(playlist.name).includes(foldSearchText(query)))
+            .filter((playlist) => foldSearchText(playlist.name).includes(folded))
             .slice(0, 2)
             .map((playlist): Item => ({
               kind: "playlist",

@@ -106,9 +106,10 @@ export const formatUntil = (ms: number, now: number = Date.now()): string => {
 /** A clock time such as `21:04`. */
 export const formatTime = (ms: number): string => times.format(ms);
 
+const weekdays = new Intl.DateTimeFormat("en-US", { weekday: "long" });
+
 /** The day of the week in capitals for the Home eyebrow, such as `FRIDAY`. */
-export const weekday = (ms: number): string =>
-  new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(ms).toUpperCase();
+export const weekday = (ms: number): string => weekdays.format(ms).toUpperCase();
 
 /** `Good morning`, `Good afternoon`, or `Good evening` for the local hour. */
 export const greeting = (ms: number): string => {

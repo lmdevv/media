@@ -8,7 +8,7 @@ import { Dialog, DialogClose, DialogContent, DialogFooter } from "@music/ui/comp
 import { FieldLabel, Input } from "@music/ui/components/input";
 import { useNavigate } from "@tanstack/react-router";
 import { Match } from "effect";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { useUi } from "@/components/shell/ui-state";
@@ -49,7 +49,14 @@ function NewPlaylistForm({
   const [name, setName] = useState("");
   const [startWith, setStartWith] = useState<StartWith>(seed.length > 0 ? "selection" : "nothing");
 
-  useEffect(() => setStartWith(seed.length > 0 ? "selection" : "nothing"), [seed]);
+  const [seedShown, setSeedShown] = useState(seed);
+
+  // New songs to start with (the dialog reopened from another selection) pick them again, set
+  // while rendering rather than in an effect that rendered the old choice first.
+  if (seed !== seedShown) {
+    setSeedShown(seed);
+    setStartWith(seed.length > 0 ? "selection" : "nothing");
+  }
 
   const [submit, pending] = useAction(
     async (): Promise<string> => {

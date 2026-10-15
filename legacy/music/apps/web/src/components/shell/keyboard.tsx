@@ -1,8 +1,8 @@
-import { usePlayer, usePlayerPosition } from "@music/player/react";
+import { usePlayer, usePositionReader } from "@music/player/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
-import { perform } from "@/components/player/controls";
+import { perform } from "@/components/player/player-actions";
 import { hasMod, isTyping } from "@/lib/keys";
 import { useLike } from "@/lib/use-like";
 
@@ -19,17 +19,20 @@ export const SEARCH_INPUT_ID = "search-input";
  */
 export function KeyboardShortcuts() {
   const player = usePlayer();
-  const position = usePlayerPosition();
+  // Read when a seek key is pressed, so the shortcuts don't re-render with every position tick.
+  const positionMs = usePositionReader();
   const ui = useUi();
   const navigate = useNavigate();
   const like = useLike(player.track);
-  const latest = useRef({ player, position, ui, like });
+  const latest = useRef({ player, ui, like });
 
-  latest.current = { player, position, ui, like };
+  useEffect(() => {
+    latest.current = { player, ui, like };
+  }, [player, ui, like]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const { player: current, position: at, ui: state, like: liking } = latest.current;
+      const { player: current, ui: state, like: liking } = latest.current;
 
       if (hasMod(event) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -71,7 +74,7 @@ export function KeyboardShortcuts() {
           if (event.shiftKey) {
             perform(forward ? current.next() : current.previous());
           } else {
-            const target = at + (forward ? SEEK_STEP_MS : -SEEK_STEP_MS);
+            const target = positionMs() + (forward ? SEEK_STEP_MS : -SEEK_STEP_MS);
             perform(current.seek(Math.min(Math.max(0, target), current.durationMs)));
           }
 
@@ -125,7 +128,7 @@ export function KeyboardShortcuts() {
     window.addEventListener("keydown", onKeyDown);
 
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [navigate]);
+  }, [navigate, positionMs]);
 
   return null;
 }

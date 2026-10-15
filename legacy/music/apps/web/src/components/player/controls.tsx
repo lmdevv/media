@@ -1,11 +1,9 @@
-import type { DeviceKind } from "@music/commands/models";
 import { usePlayer, usePlayerPosition } from "@music/player/react";
 import { Slider } from "@music/ui/components/slider";
 import { Spinner } from "@music/ui/components/spinner";
 import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
 import {
-  LaptopIcon,
   PauseIcon,
   PlayIcon,
   Repeat1Icon,
@@ -13,38 +11,15 @@ import {
   ShuffleIcon,
   SkipBackIcon,
   SkipForwardIcon,
-  SmartphoneIcon,
-  SquareTerminalIcon,
   Volume1Icon,
   Volume2Icon,
   VolumeXIcon,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 
-import { toastFailure } from "@/lib/action";
 import { formatDuration } from "@/lib/format";
 
-/** Runs a player action and reports a failure as a toast. */
-export const perform = (action: Promise<void>): void => {
-  action.catch(toastFailure);
-};
-
-/** True while another device outputs the audio and this browser is a remote control. */
-export const useIsRemote = (): boolean => {
-  const player = usePlayer();
-
-  return player.activeDevice !== null && !player.isThisDevice;
-};
-
-/** The icon for a device kind. */
-const DEVICE_ICONS: Readonly<Record<DeviceKind, LucideIcon>> = {
-  web: LaptopIcon,
-  phone: SmartphoneIcon,
-  cli: SquareTerminalIcon,
-};
-
-export const deviceIcon = (kind: DeviceKind): LucideIcon => DEVICE_ICONS[kind];
+import { NEXT_REPEAT, perform } from "./player-actions";
 
 const roundIcon =
   "flex shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-(--opacity-disabled)";
@@ -156,9 +131,6 @@ export function ShuffleButton({
     </Tooltip>
   );
 }
-
-/** The repeat mode after the current one when the repeat control is pressed. */
-export const NEXT_REPEAT = { off: "all", all: "one", one: "off" } as const;
 
 const REPEAT_LABEL = { off: "Repeat", all: "Repeat all", one: "Repeat one" } as const;
 

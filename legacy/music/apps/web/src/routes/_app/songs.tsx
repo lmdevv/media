@@ -3,15 +3,17 @@ import { Button } from "@music/ui/components/button";
 import { Input } from "@music/ui/components/input";
 import { createFileRoute } from "@tanstack/react-router";
 import { SearchIcon, ShuffleIcon } from "lucide-react";
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useRef, useState } from "react";
 
 import { PageHeader, usePlayTracks } from "@/components/library/cards";
-import { useHeldPage, usePageChain, useReportPage } from "@/components/library/paged";
-import type { PageResult } from "@/components/library/paged";
+import { usePageChain, useReportPage } from "@/components/library/page-chain";
+import type { PageResult } from "@/components/library/page-chain";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { toastFailure } from "@/lib/action";
 import { formatTotal, plural } from "@/lib/format";
 import { readPages } from "@/lib/read-pages";
+import { useHeld } from "@/lib/use-held";
+import { scrollRootOf } from "@/lib/scroll-root";
 
 export const Route = createFileRoute("/_app/songs")({ component: SongsPage });
 
@@ -46,7 +48,7 @@ function SongsPage() {
       <PageHeader
         eyebrow={
           home === undefined
-            ? undefined
+            ? null
             : `${plural(home.stats.tracks, "song")} · ${formatTotal(home.stats.durationMs)} of music`
         }
         title="Songs"
@@ -82,11 +84,9 @@ function SongsPage() {
 
 function FilteredSongs({ query }: { readonly query: string }) {
   const results = useRead("search", { query, limit: 50 });
-  const [shown, setShown] = useState(results);
-
-  useEffect(() => {
-    if (results !== undefined) setShown(results);
-  }, [results]);
+  // The previous results stay while a new query loads, held during render (an effect cost an
+  // extra render and commit per result).
+  const shown = useHeld(results);
 
   if (shown === undefined) return <TrackListSkeleton />;
 
@@ -128,7 +128,11 @@ function AllSongs() {
   );
 }
 
-function SongPage({
+/**
+ * One live page of the Songs list. Memoized, so loading the next page doesn't re-render the pages
+ * above it; its list is windowed, so pages far from view keep only their height.
+ */
+const SongPage = memo(function SongPage({
   cursor,
   end,
   header,
@@ -145,7 +149,7 @@ function SongPage({
   readonly onMore: (cursor: string) => void;
   readonly onReport: (cursor: string | null, page: PageResult<unknown>) => void;
 }) {
-  const page = useHeldPage(useRead("tracks.list", { cursor, end, limit: PAGE_SIZE }));
+  const page = useHeld(useRead("tracks.list", { cursor, end, limit: PAGE_SIZE }));
   useReportPage(cursor, page, onReport);
   const sentinel = useRef<HTMLDivElement>(null);
   const more = page !== undefined && !page.done && last ? page.cursor : null;
@@ -159,7 +163,7 @@ function SongPage({
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) onMore(more);
       },
-      { rootMargin: "600px" },
+      { root: scrollRootOf(node), rootMargin: "600px" },
     );
 
     observer.observe(node);
@@ -173,9 +177,16 @@ function SongPage({
   return (
     <>
       {page.items.length === 0 ? null : (
-        <TrackList tracks={page.items} variant="list" label="Songs" header={header} />
+        // The list windows this page's rows itself, even though they fit one block.
+        <TrackList
+          tracks={page.items}
+          variant="list"
+          label="Songs"
+          header={header}
+          windowing="always"
+        />
       )}
       {more === null ? null : <div ref={sentinel} aria-hidden className="h-px" />}
     </>
   );
-}
+});

@@ -4,6 +4,8 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 
+import { copyText } from "@/lib/copy-text";
+
 /** The heading, lead, and optional action at the top of a settings section. */
 export function SettingsHeader({
   title,
@@ -45,11 +47,10 @@ export function TerminalHint({
 export function SecretLink({ link, testId }: { readonly link: string; readonly testId: string }) {
   const [copied, setCopied] = useState(false);
 
-  const copy = () =>
-    void navigator.clipboard.writeText(link).then(
-      () => setCopied(true),
-      () => toast.error("Couldn't copy. Select the link and copy it yourself."),
-    );
+  const copy = async () => {
+    if (await copyText(link)) setCopied(true);
+    else toast.error("Couldn't copy. Select the link and copy it yourself.");
+  };
 
   return (
     <div className="flex h-12 items-center gap-2.5 rounded-sm bg-surface pr-1.5 pl-3.5">
@@ -59,7 +60,7 @@ export function SecretLink({ link, testId }: { readonly link: string; readonly t
       >
         {link}
       </code>
-      <Button variant="solid" size="sm" className="h-9 rounded-sm px-3" onClick={copy}>
+      <Button variant="solid" size="sm" className="h-9 rounded-sm px-3" onClick={() => void copy()}>
         {copied ? <CheckIcon strokeWidth={2} /> : <CopyIcon />}
         {copied ? "Copied" : "Copy"}
       </Button>

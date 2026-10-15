@@ -21,7 +21,8 @@ import { FolderIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
-import { ProgressBar, jobPercent } from "@/components/auth/scan-progress";
+import { ProgressBar } from "@/components/auth/scan-progress";
+import { jobPercent } from "@/lib/job-progress";
 import { AdminOnly, SettingsHeader, TerminalHint } from "@/components/settings/settings-ui";
 import { describeFailure, useAction } from "@/lib/action";
 import { formatAgo, formatCount } from "@/lib/format";

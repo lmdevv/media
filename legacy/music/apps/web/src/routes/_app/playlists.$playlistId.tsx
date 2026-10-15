@@ -1,6 +1,6 @@
 import { PlaylistId, UserId } from "@music/commands/ids";
 import type { PlaylistItemId } from "@music/commands/ids";
-import type { Playlist, PlaylistEntry, UnavailableReason } from "@music/commands/models";
+import type { Playlist, PlaylistEntry, Track, UnavailableReason } from "@music/commands/models";
 import { can, canEditPlaylistItems, canManagePlaylist } from "@music/commands/permissions";
 import { useRead, useRun } from "@music/sdk/react";
 import { Badge } from "@music/ui/components/badge";
@@ -14,7 +14,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { PlusIcon, SearchIcon, UsersIcon } from "lucide-react";
-import { useDeferredValue, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 
@@ -99,18 +99,24 @@ const sharingLabel = (playlist: Playlist): string | null => {
  * "Added by" under each song, once someone besides the owner added any: a playlist only you
  * edit doesn't need it.
  */
-const useBylines = (playlist: Playlist, items: ReadonlyArray<PlaylistEntry>) => {
-  const mixed = items.some(
-    (item) => item.addedBy !== null && item.addedBy.id !== playlist.owner?.id,
-  );
+const useBylines = (
+  playlist: Playlist,
+  items: ReadonlyArray<PlaylistEntry>,
+): ((index: number) => string | null) | undefined => {
+  const ownerId = playlist.owner?.id;
 
-  return mixed
-    ? (index: number) => {
-        const addedBy = items[index]?.addedBy;
+  // The same function while the songs are, so the rows stay memoized.
+  return useMemo(() => {
+    const mixed = items.some((item) => item.addedBy !== null && item.addedBy.id !== ownerId);
 
-        return addedBy === null || addedBy === undefined ? null : `Added by ${addedBy.name}`;
-      }
-    : undefined;
+    return mixed
+      ? (index: number) => {
+          const addedBy = items[index]?.addedBy;
+
+          return addedBy === null || addedBy === undefined ? null : `Added by ${addedBy.name}`;
+        }
+      : undefined;
+  }, [items, ownerId]);
 };
 
 function PlaylistPage() {
@@ -299,6 +305,45 @@ function PlaylistSongs({
     },
   );
 
+  // The same values while the playlist is, so its rows skip re-rendering when nothing changed.
+  const tracks = useMemo(() => items.map(entryTrack), [items]);
+
+  const withheld = useCallback((index: number) => items[index]?.track === null, [items]);
+
+  // Rows keyed by entry, so a move doesn't remount the rows between its old and new places.
+  const rowKey = useCallback(
+    (index: number) => items[index]?.itemId ?? `missing-${String(index)}`,
+    [items],
+  );
+
+  const unavailable = useCallback(
+    (index: number) => {
+      const reason = items[index]?.reason ?? null;
+
+      return reason === null ? null : REASONS[reason];
+    },
+    [items],
+  );
+
+  const menuExtra = useCallback(
+    (track: Track, index: number) => {
+      const item = items[index];
+
+      return item === undefined || !canEdit ? null : (
+        <DropdownMenuItem
+          onClick={() =>
+            void remove({ playlistId: playlist.id, itemId: item.itemId })
+              .then(() => toast.success(`Removed ${track.title} from ${playlist.name}`))
+              .catch(toastFailure)
+          }
+        >
+          Remove from this playlist
+        </DropdownMenuItem>
+      );
+    },
+    [items, canEdit, remove, playlist.id, playlist.name],
+  );
+
   if (items.length === 0) {
     return canEdit ? (
       <EmptyPlaylist playlist={playlist} />
@@ -322,32 +367,15 @@ function PlaylistSongs({
         </div>
       ) : null}
       <TrackList
-        tracks={items.map(entryTrack)}
-        withheld={(index) => items[index]?.track === null}
+        tracks={tracks}
+        withheld={withheld}
         variant="list"
-        unavailable={(index) => {
-          const reason = items[index]?.reason ?? null;
-
-          return reason === null ? null : REASONS[reason];
-        }}
+        unavailable={unavailable}
         byline={byline}
         reorder={canEdit ? { reorder, mode: reordering ? "buttons" : "drag" } : undefined}
         label={`Songs in ${playlist.name}`}
-        menuExtra={(track, index) => {
-          const item = items[index];
-
-          return item === undefined || !canEdit ? null : (
-            <DropdownMenuItem
-              onClick={() =>
-                void remove({ playlistId: playlist.id, itemId: item.itemId })
-                  .then(() => toast.success(`Removed ${track.title} from ${playlist.name}`))
-                  .catch(toastFailure)
-              }
-            >
-              Remove from this playlist
-            </DropdownMenuItem>
-          );
-        }}
+        menuExtra={menuExtra}
+        rowKey={rowKey}
       />
     </>
   );

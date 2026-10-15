@@ -15,7 +15,8 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { AuthHeading, AuthLayout, Field } from "@/components/auth/auth-layout";
-import { ProgressBar, jobEta, jobPercent } from "@/components/auth/scan-progress";
+import { ProgressBar } from "@/components/auth/scan-progress";
+import { jobEta, jobPercent } from "@/lib/job-progress";
 import { describeFailure, toastFailure } from "@/lib/action";
 import { formatCount, formatTime, plural } from "@/lib/format";
 import { useNow } from "@/lib/use-now";

@@ -1,4 +1,4 @@
-import type { PageResult } from "@/components/library/paged";
+import type { PageResult } from "@/components/library/page-chain";
 
 /**
  * Reads a paginated list once, page after page, until it ends or holds `max` items. Each request

@@ -84,7 +84,13 @@ export const probeOffset = async (url: string, signal: AbortSignal): Promise<Off
       return OffsetProbe.Expired();
     }
 
-    if (!response.ok || response.body === null) return OffsetProbe.Failed();
+    if (!response.ok || response.body === null) {
+      // Like the branches above, release the connection rather than leave it to the collector.
+      void response.body?.cancel().catch(() => undefined);
+
+      return OffsetProbe.Failed();
+    }
+
     const reader = response.body.getReader();
     const first = await reader.read();
 

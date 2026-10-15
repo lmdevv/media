@@ -30,9 +30,8 @@ import {
   ShuffleButton,
   SkipButton,
   Volume,
-  deviceIcon,
-  useIsRemote,
 } from "./controls";
+import { deviceIcon, useIsRemote } from "./player-actions";
 import { DeviceList } from "./devices";
 import { nowPlayingBackground } from "./now-playing-background";
 import { RemotePill } from "./now-playing-remote-pill";

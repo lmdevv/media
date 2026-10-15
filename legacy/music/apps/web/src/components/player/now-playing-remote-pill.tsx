@@ -1,6 +1,6 @@
 import { usePlayer } from "@music/player/react";
 
-import { deviceIcon, useIsRemote } from "./controls";
+import { deviceIcon, useIsRemote } from "./player-actions";
 
 /** "Playing on …" badge shown on Now Playing while another device plays; renders nothing locally. */
 export function RemotePill() {

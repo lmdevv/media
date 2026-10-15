@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeDevice, loadDeviceId } from "./device-identity";
+import { browserStorage, describeDevice, loadDeviceId } from "./device-identity";
 
 const agents = {
   macFirefox: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:131.0) Gecko/20100101 Firefox/131.0",
@@ -91,5 +91,28 @@ describe("loadDeviceId", () => {
 
   it("still returns an ID without storage", () => {
     expect(loadDeviceId(null, () => "ephemeral")).toBe("ephemeral");
+  });
+});
+
+describe("browserStorage", () => {
+  // With cookies blocked, Chrome throws on the `localStorage` getter itself, before any
+  // `getItem` that `readItem` could catch.
+  it("is null when reading localStorage throws", () => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get: () => {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      },
+    });
+
+    try {
+      expect(browserStorage()).toBeNull();
+      expect(loadDeviceId(browserStorage(), () => "ephemeral")).toBe("ephemeral");
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(globalThis, "localStorage");
+      else Object.defineProperty(globalThis, "localStorage", previous);
+    }
   });
 });

@@ -1,12 +1,12 @@
 import { usePlayer } from "@music/player/react";
 import { cn } from "@music/ui/lib/utils";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, useSearch } from "@tanstack/react-router";
 import type { LinkProps } from "@tanstack/react-router";
 import { ListMusicIcon, SearchIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
-import { deviceIcon, perform, useIsRemote } from "@/components/player/controls";
+import { deviceIcon, perform, useIsRemote } from "@/components/player/player-actions";
 
 import { useUi } from "./ui-state";
 
@@ -205,8 +205,8 @@ const focusOnMount = (input: HTMLInputElement | null): void => {
 
 function PhoneSearchField() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const query = new URLSearchParams(location.searchStr).get("q") ?? "";
+  // The search route's own parsed search; this field only shows on that route.
+  const query = useSearch({ from: "/_app/search", shouldThrow: false })?.q ?? "";
 
   return (
     <label

@@ -3,7 +3,7 @@ import { usePlayer } from "@music/player/react";
 import { useRead } from "@music/sdk/react";
 import { Match } from "effect";
 
-import { NEXT_REPEAT } from "@/components/player/controls";
+import { NEXT_REPEAT } from "@/components/player/player-actions";
 
 import type { FieldSpec, FormValues } from "./fields";
 

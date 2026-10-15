@@ -414,15 +414,19 @@ export class PlaybackController {
   }
 
   /** Moves playback to this browser. */
-  async playHere(): Promise<void> {
+  async playHere(): Promise<boolean> {
     this.#unlockOutput();
     await this.#ensureRegistered();
-    await this.capture(this.#client.run("playback.transfer", { deviceId: this.deviceId }));
+
+    return this.attempt(this.#client.run("playback.transfer", { deviceId: this.deviceId }));
   }
 
-  /** Moves playback to another of the user's devices. */
-  async transferTo(deviceId: DeviceId): Promise<void> {
-    await this.capture(this.#client.run("playback.transfer", { deviceId }));
+  /**
+   * Moves playback to another of the user's devices. Resolves whether the move landed; a failure
+   * becomes the player `error`.
+   */
+  async transferTo(deviceId: DeviceId): Promise<boolean> {
+    return this.attempt(this.#client.run("playback.transfer", { deviceId }));
   }
 
   /** Saves the quality setting. It applies from the next song so the current one never skips. */

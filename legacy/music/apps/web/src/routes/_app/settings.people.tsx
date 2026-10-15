@@ -35,6 +35,7 @@ import {
   TerminalHint,
 } from "@/components/settings/settings-ui";
 import { useAction } from "@/lib/action";
+import { copyText } from "@/lib/copy-text";
 import { formatAgo, formatUntil, initial } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 
@@ -46,11 +47,9 @@ const inviteLink = (code: string): string => `${window.location.origin}/invite/$
 /** The one-time link that lets someone choose a new password. */
 const resetLink = (token: string): string => `${window.location.origin}/reset/${token}`;
 
-const copyLink = (link: string, what: string): void => {
-  navigator.clipboard
-    .writeText(link)
-    .then(() => toast.success(`Copied the ${what} link`))
-    .catch(() => toast.error(`Couldn't copy. The link is ${link}`));
+const copyLink = async (link: string, what: string): Promise<void> => {
+  if (await copyText(link)) toast.success(`Copied the ${what} link`);
+  else toast.error(`Couldn't copy. The link is ${link}`);
 };
 
 /** What each role means, shown where a role is picked. */
@@ -528,7 +527,7 @@ function InviteRow({ invite }: { readonly invite: Invite }) {
         {expired ? null : (
           <button
             type="button"
-            onClick={() => copyLink(inviteLink(invite.code), "invite")}
+            onClick={() => void copyLink(inviteLink(invite.code), "invite")}
             className="font-sans text-sm/xs font-medium text-text hover:underline"
           >
             Copy link

@@ -4,6 +4,7 @@ import type { PlaylistEntry, Track } from "@music/commands/models";
 /** What a playlist row says in place of a song in a library you can't read. */
 export const WITHHELD_TITLE = "A song you can't play";
 
+/** What a playlist row says under {@link WITHHELD_TITLE}, in place of the artist. */
 export const WITHHELD_ARTIST = "In a library that isn't shared with you";
 
 /**

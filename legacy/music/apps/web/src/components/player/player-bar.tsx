@@ -21,10 +21,8 @@ import {
   ShuffleButton,
   SkipButton,
   Volume,
-  deviceIcon,
-  perform,
-  useIsRemote,
 } from "./controls";
+import { deviceIcon, perform, useIsRemote } from "./player-actions";
 import { barTools } from "./bar-tools";
 import { DeviceList, useDevices } from "./devices";
 import { shownSurface } from "./play-on";

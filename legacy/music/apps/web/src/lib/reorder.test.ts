@@ -1,7 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { afterIdFor, dropIndex, moveItem, orderToMoveFrom } from "./reorder";
+import { afterIdFor, dragPositions, dropIndex, moveItem, orderToMoveFrom } from "./reorder";
 
 /** Applies a move the way the server does: take the entry out, put it after `after`. */
 const applyMove = (
@@ -74,5 +74,31 @@ describe("dropIndex", () => {
     expect(dropIndex(0, 2, "before")).toBe(1);
     expect(dropIndex(3, 0, "before")).toBe(0);
     expect(dropIndex(3, 1, "after")).toBe(2);
+  });
+});
+
+describe("dragPositions", () => {
+  const drag = { id: "c", over: { id: "e", side: "after" } } as const;
+
+  it("follows the dragged and hovered entries when the list shifts under the drag", () => {
+    // The song playing ends and the head of the queue moves up; or the person's previous move lands.
+    expect(dragPositions(["a", "b", "c", "d", "e"], drag)).toEqual({
+      from: 2,
+      over: { index: 4, side: "after" },
+    });
+    expect(dragPositions(["b", "c", "d", "e"], drag)).toEqual({
+      from: 1,
+      over: { index: 3, side: "after" },
+    });
+    expect(dragPositions(["c", "a", "b", "e", "d"], drag)).toEqual({
+      from: 0,
+      over: { index: 3, side: "after" },
+    });
+  });
+
+  it("drops the hovered row when it leaves, and the drag when the dragged entry leaves", () => {
+    expect(dragPositions(["a", "b", "c", "d"], drag)).toEqual({ from: 2, over: null });
+    expect(dragPositions(["a", "b", "d", "e"], drag)).toBeNull();
+    expect(dragPositions(["a", "b"], { id: null, over: null })).toBeNull();
   });
 });

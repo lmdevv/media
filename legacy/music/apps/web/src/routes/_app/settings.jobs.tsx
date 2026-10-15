@@ -7,7 +7,8 @@ import { cn } from "@music/ui/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { ProgressBar, jobPercent } from "@/components/auth/scan-progress";
+import { ProgressBar } from "@/components/auth/scan-progress";
+import { jobPercent } from "@/lib/job-progress";
 import { SettingsHeader, TerminalHint } from "@/components/settings/settings-ui";
 import { useAction } from "@/lib/action";
 import { formatAgo, formatCount } from "@/lib/format";

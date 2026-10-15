@@ -7,8 +7,8 @@ import { cn } from "@music/ui/lib/utils";
 import { useParams } from "@tanstack/react-router";
 import { Option, Schema } from "effect";
 import { SearchIcon } from "lucide-react";
-import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 
 import { useUi } from "@/components/shell/ui-state";
 
@@ -27,13 +27,17 @@ const decodePlaylistId = Schema.decodeUnknownOption(PlaylistId);
 
 /** What the screen behind the menu shows, from the current route's parameters. */
 const useMenuContext = (): MenuContext => {
-  const params = useParams({ strict: false });
+  const { albumId, artistId, playlistId } = useParams({ strict: false });
 
-  return {
-    albumId: Option.getOrNull(decodeAlbumId(params.albumId)),
-    artistId: Option.getOrNull(decodeArtistId(params.artistId)),
-    playlistId: Option.getOrNull(decodePlaylistId(params.playlistId)),
-  };
+  // The same object while the route is, so the preview pane skips renders while typing.
+  return useMemo(
+    () => ({
+      albumId: Option.getOrNull(decodeAlbumId(albumId)),
+      artistId: Option.getOrNull(decodeArtistId(artistId)),
+      playlistId: Option.getOrNull(decodePlaylistId(playlistId)),
+    }),
+    [albumId, artistId, playlistId],
+  );
 };
 
 /**
@@ -42,6 +46,8 @@ const useMenuContext = (): MenuContext => {
  */
 export function CommandMenu() {
   const { commandOpen, setCommandOpen } = useUi();
+  // Stable, so the menu's actions aren't rebuilt each time the shell's UI state changes.
+  const close = useCallback(() => setCommandOpen(false), [setCommandOpen]);
 
   return (
     <Dialog open={commandOpen} onOpenChange={setCommandOpen}>
@@ -51,7 +57,7 @@ export function CommandMenu() {
           aria-label="Command menu"
           className="fixed inset-x-2 top-2 z-50 flex max-h-dvh-inset-sm flex-col overflow-hidden rounded-lg border border-border bg-surface-raised text-text shadow-command outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 lg:inset-x-auto lg:top-27.5 lg:left-1/2 lg:w-195 lg:-translate-x-1/2"
         >
-          {commandOpen ? <Menu onClose={() => setCommandOpen(false)} /> : null}
+          {commandOpen ? <Menu onClose={close} /> : null}
         </DialogPopup>
       </DialogPortal>
     </Dialog>
@@ -78,20 +84,25 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
   // A row clicked while another was selected: it runs once its own preview registers.
   const [runWhenShown, setRunWhenShown] = useState<string | null>(null);
+  const [selectionQuery, setSelectionQuery] = useState(deferred);
 
-  useEffect(() => {
+  // State that follows the query and the results is updated while rendering, as React documents,
+  // rather than in effects: each effect cost the menu another render and commit per keystroke.
+  // A new query starts with nothing selected and the list showing.
+  if (selectionQuery !== deferred) {
+    setSelectionQuery(deferred);
     setActiveId(null);
     setDetail(false);
     setRunWhenShown(null);
-  }, [deferred]);
+  }
 
   // Once results for the query settle, the selection follows its item, so results arriving later
   // never move what Enter runs.
-  useEffect(() => {
-    const [first] = items;
+  const [first] = items;
 
-    if (activeId === null && !searching && first !== undefined) setActiveId(first.id);
-  }, [activeId, items, searching]);
+  if (selectionQuery === deferred && activeId === null && !searching && first !== undefined) {
+    setActiveId(first.id);
+  }
 
   const active = Math.max(
     0,
@@ -99,7 +110,8 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   );
 
   const current = items[active];
-  const select = (index: number) => setActiveId(items[index]?.id ?? null);
+
+  const select = useCallback((index: number) => setActiveId(items[index]?.id ?? null), [items]);
 
   useEffect(() => {
     list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
@@ -140,6 +152,46 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     setRunWhenShown(null);
     primary.run();
   }, [currentId, primary, runWhenShown]);
+
+  // The rows' handlers stay the same while the results do, so moving the selection or typing
+  // re-renders only the rows that change. They read the selection when they run.
+  const latest = useRef({ active, runPrimary });
+
+  useEffect(() => {
+    latest.current = { active, runPrimary };
+  }, [active, runPrimary]);
+
+  const onRowHover = useCallback(
+    (index: number, event: MouseEvent<HTMLDivElement>) => {
+      // Browsers report rows moving under a resting pointer (the list filling in or scrolling to
+      // the selection) as mouse movement. Only a pointer that moved selects, so a resting mouse
+      // never takes the row the keyboard chose.
+      const last = pointer.current;
+      pointer.current = { x: event.clientX, y: event.clientY };
+
+      if (last !== null && (last.x !== event.clientX || last.y !== event.clientY)) select(index);
+    },
+    [select],
+  );
+
+  const onRowSelect = useCallback(
+    (index: number) => {
+      const item = items[index];
+
+      if (item === undefined) return;
+
+      select(index);
+
+      if (item.kind === "command" && item.fields.length > 0) setDetail(true);
+      else if (item.kind === "now") setDetail(true);
+      // A tap can select and click in one go; the old row's action must not run.
+      else if (index === latest.current.active) latest.current.runPrimary?.();
+      else setRunWhenShown(item.id);
+    },
+    [items, select],
+  );
+
+  const back = useCallback(() => setDetail(false), []);
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     const key = menuKeyOf(event.nativeEvent);
@@ -215,26 +267,8 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
                 header={
                   index === 0 || items[index - 1]?.section !== item.section ? item.section : null
                 }
-                onHover={(event) => {
-                  // Browsers report rows moving under a resting pointer (the list filling in or
-                  // scrolling to the selection) as mouse movement. Only a pointer that moved
-                  // selects, so a resting mouse never takes the row the keyboard chose.
-                  const last = pointer.current;
-                  pointer.current = { x: event.clientX, y: event.clientY };
-
-                  if (last !== null && (last.x !== event.clientX || last.y !== event.clientY)) {
-                    select(index);
-                  }
-                }}
-                onSelect={() => {
-                  select(index);
-
-                  if (item.kind === "command" && item.fields.length > 0) setDetail(true);
-                  else if (item.kind === "now") setDetail(true);
-                  // A tap can select and click in one go; the old row's action must not run.
-                  else if (index === active) runPrimary?.();
-                  else setRunWhenShown(item.id);
-                }}
+                onHover={onRowHover}
+                onSelect={onRowSelect}
               />
             ))}
           </div>
@@ -250,7 +284,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
                 item={current}
                 context={context}
                 onClose={onClose}
-                onBack={() => setDetail(false)}
+                onBack={back}
                 registerPrimary={registerPrimary}
               />
             )}

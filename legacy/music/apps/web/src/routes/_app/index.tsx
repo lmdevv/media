@@ -7,7 +7,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { DiscIcon, FolderIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { ProgressBar, jobEta, jobPercent } from "@/components/auth/scan-progress";
+import { ProgressBar } from "@/components/auth/scan-progress";
+import { jobEta, jobPercent } from "@/lib/job-progress";
 import { Artwork } from "@/components/library/artwork";
 import {
   AlbumCard,

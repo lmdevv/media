@@ -16,6 +16,7 @@ import { toast } from "sonner";
 
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure, useAction } from "@/lib/action";
+import { copyText } from "@/lib/copy-text";
 import { plural } from "@/lib/format";
 import { useIsDesktop } from "@/lib/use-media";
 
@@ -99,17 +100,10 @@ function ShareJam({ jam }: { readonly jam: Jam }) {
     success: () => "New link made; the old one no longer works",
   });
 
-  const copy = () => {
-    if (!window.isSecureContext) {
-      toast("Jam link", { description: link });
-
-      return;
-    }
-
-    navigator.clipboard
-      .writeText(link)
-      .then(() => toast.success("Link copied"))
-      .catch(toastFailure);
+  // Without a clipboard (a plain-http address) or when the browser refuses, show the link instead.
+  const copy = async () => {
+    if (await copyText(link)) toast.success("Link copied");
+    else toast("Jam link", { description: link });
   };
 
   return (
@@ -119,7 +113,7 @@ function ShareJam({ jam }: { readonly jam: Jam }) {
         <div className="flex min-w-0 grow flex-col gap-2">
           <Input readOnly aria-label="Jam link" value={link} data-testid="jam-link" />
           <div className="flex flex-wrap gap-2">
-            <Button variant="solid" size="sm" className="pl-3" onClick={copy}>
+            <Button variant="solid" size="sm" className="pl-3" onClick={() => void copy()}>
               <CopyIcon />
               Copy link
             </Button>

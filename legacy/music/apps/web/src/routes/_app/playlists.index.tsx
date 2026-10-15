@@ -23,7 +23,7 @@ function PlaylistsPage() {
     <div className="flex flex-col gap-6 px-5 pt-safe-top lg:px-12 lg:pt-row">
       <PageHeader
         title="Playlists"
-        eyebrow={playlists === undefined ? undefined : plural(playlists.length, "playlist")}
+        eyebrow={playlists === undefined ? null : plural(playlists.length, "playlist")}
         actions={
           <Button variant="solid" className="pl-3.5" onClick={() => openNewPlaylist()}>
             <PlusIcon />

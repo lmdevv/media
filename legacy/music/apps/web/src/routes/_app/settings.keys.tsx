@@ -15,6 +15,7 @@ import { NotForYou, SettingsHeader, TerminalHint } from "@/components/settings/s
 import { resolveConvexUrl } from "@/config";
 import { cliLoginBase, cliLoginCommand, needsInsecure } from "@/lib/cli-login";
 import { useAction } from "@/lib/action";
+import { copyText } from "@/lib/copy-text";
 import { formatAgo, formatDate } from "@/lib/format";
 
 /** The URL the CLI signs in to: the Convex URL, not the web app's address. */
@@ -229,12 +230,8 @@ function NewKeyDialog({
   };
 
   const copy = async (key: string) => {
-    try {
-      await navigator.clipboard.writeText(key);
-      setCopied(true);
-    } catch {
-      toast.error("Couldn't copy. Select the key and copy it yourself.");
-    }
+    if (await copyText(key)) setCopied(true);
+    else toast.error("Couldn't copy. Select the key and copy it yourself.");
   };
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {

@@ -64,3 +64,40 @@ export const dropIndex = (from: number, over: number, side: DropSide): number =>
 
   return from < target ? target - 1 : target;
 };
+
+/**
+ * A drag, held by entry rather than by index, so the list can change under it (a move from another
+ * device, or the person's own previous move landing) without the drag losing track.
+ */
+export interface DragState<Id> {
+  readonly id: Id | null;
+  readonly over: { readonly id: Id; readonly side: DropSide } | null;
+}
+
+/** Where a drag stands in the list as it is now. */
+export interface DragPositions {
+  /** The dragged row's index. */
+  readonly from: number;
+  /** The row under the pointer and which half of it, or null when there is none (or it left). */
+  readonly over: { readonly index: number; readonly side: DropSide } | null;
+}
+
+/** The drag's rows as indexes into `ids`; null when nothing is dragged or the dragged entry left. */
+export const dragPositions = <Id>(
+  ids: ReadonlyArray<Id>,
+  drag: DragState<Id>,
+): DragPositions | null => {
+  if (drag.id === null) return null;
+
+  const from = ids.indexOf(drag.id);
+
+  if (from === -1) return null;
+
+  const overIndex = drag.over === null ? -1 : ids.indexOf(drag.over.id);
+
+  return {
+    from,
+    over:
+      drag.over === null || overIndex === -1 ? null : { index: overIndex, side: drag.over.side },
+  };
+};

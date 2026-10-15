@@ -2,13 +2,14 @@ import { usePlayer } from "@music/player/react";
 import { useRead, useReadOnce } from "@music/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
 import { HeartIcon, ListMusicIcon, PlusIcon, SpeakerIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { toast } from "sonner";
 
 import { usePlayTracks } from "@/components/library/cards";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
 import { readPages } from "@/lib/read-pages";
+import { useHeld } from "@/lib/use-held";
 
 import { offeredCommands, offeredScreens } from "./catalog";
 import type { Route } from "./catalog";
@@ -37,7 +38,7 @@ interface MenuItems {
  */
 export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
   const player = usePlayer();
-  const ui = useUi();
+  const { openPlayOn, openNewPlaylist, setNowPlaying } = useUi();
   const navigate = useNavigate();
   const me = useRead("account.me", {});
   const home = useRead("library.home", {});
@@ -45,15 +46,13 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
   const readLikes = useReadOnce("likes.page");
   const playTracks = usePlayTracks();
   const search = useRead("search", query.length === 0 ? "skip" : { query, limit: 6 });
-  const [lastSearch, setLastSearch] = useState(search);
   // Until the account loads, offer only what everyone may do.
   const role = me?.role ?? "guest";
 
-  // Remember the last results during render (not in an effect, which would show one frame with
-  // the new results missing). While a new query loads, the previous results stay on screen.
-  if (search !== undefined && search !== lastSearch) setLastSearch(search);
-
-  const results = search ?? lastSearch;
+  // While a new query loads, the previous results stay on screen.
+  const results = useHeld(search);
+  // The actions only change with whether something plays, not with each queue or position update.
+  const hasTrack = player.track !== null;
 
   const actions = useMemo((): ReadonlyArray<Item> => {
     const go = (to: Route) => () => {
@@ -98,7 +97,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         label: "Choose",
         run: () => {
           onClose();
-          ui.openPlayOn();
+          openPlayOn();
         },
       },
       {
@@ -112,12 +111,12 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         label: "Create",
         run: () => {
           onClose();
-          ui.openNewPlaylist();
+          openNewPlaylist();
         },
       },
     ];
 
-    if (player.track !== null) {
+    if (hasTrack) {
       quick.push({
         kind: "action",
         id: "open-queue",
@@ -128,7 +127,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         label: "Open",
         run: () => {
           onClose();
-          ui.setNowPlaying("queue");
+          setNowPlaying("queue");
         },
       });
     }
@@ -144,18 +143,26 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
       run: go(screen.to),
     }));
 
-    const registry = offeredCommands({ role, playing: player.track !== null }).map(
-      ({ name, fields }): Item => ({
-        kind: "command",
-        id: `cmd-${name}`,
-        section: "Commands",
-        name,
-        fields,
-      }),
-    );
+    const registry = offeredCommands({ role, playing: hasTrack }).map(({ name, fields }): Item => ({
+      kind: "command",
+      id: `cmd-${name}`,
+      section: "Commands",
+      name,
+      fields,
+    }));
 
     return [...quick, ...registry, ...screens];
-  }, [role, navigate, onClose, player.track, playTracks, readLikes, ui]);
+  }, [
+    role,
+    navigate,
+    onClose,
+    hasTrack,
+    playTracks,
+    readLikes,
+    openPlayOn,
+    openNewPlaylist,
+    setNowPlaying,
+  ]);
 
   const items = useMemo(
     (): ReadonlyArray<Item> =>

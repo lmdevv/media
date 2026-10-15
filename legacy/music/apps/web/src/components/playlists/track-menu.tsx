@@ -1,6 +1,6 @@
 import type { TrackId } from "@music/commands/ids";
 import type { Playlist, Track } from "@music/commands/models";
-import { usePlayer } from "@music/player/react";
+import { useLatestPlayer } from "@music/player/react";
 import { useRun } from "@music/sdk/react";
 import { Dialog, DialogContent, DialogFooter, DialogClose } from "@music/ui/components/dialog";
 import {
@@ -17,7 +17,7 @@ import { Button } from "@music/ui/components/button";
 import { cn } from "@music/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { MoreHorizontalIcon, PlusIcon, SearchIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { toast } from "sonner";
 
@@ -28,6 +28,7 @@ import { formatCount, formatDuration, formatQuality } from "@/lib/format";
 import { isTyping } from "@/lib/keys";
 import { useCopyLink } from "@/lib/use-copy-link";
 import { useLike } from "@/lib/use-like";
+import { useOpenedOnce } from "@/lib/use-opened-once";
 import { useWritablePlaylists } from "@/lib/use-writable-playlists";
 
 /** Queue actions that report their result as a toast. */
@@ -36,27 +37,32 @@ export interface QueueActions {
   readonly addToQueue: (tracks: ReadonlyArray<Pick<Track, "id" | "title">>) => void;
 }
 
-/** Adds songs to the end of the queue or right after the current song, with a toast. */
+/**
+ * Adds songs to the end of the queue or right after the current song, with a toast. The actions
+ * are stable and read the player when they run, so every row's menu doesn't re-render with it.
+ */
 export const useQueueActions = (): QueueActions => {
-  const player = usePlayer();
+  const latestPlayer = useLatestPlayer();
 
-  const add = (tracks: ReadonlyArray<Pick<Track, "id" | "title">>, next: boolean) => {
-    const label =
-      tracks.length === 1 ? (tracks[0]?.title ?? "") : `${formatCount(tracks.length)} songs`;
+  return useMemo((): QueueActions => {
+    const add = async (tracks: ReadonlyArray<Pick<Track, "id" | "title">>, next: boolean) => {
+      const label =
+        tracks.length === 1 ? (tracks[0]?.title ?? "") : `${formatCount(tracks.length)} songs`;
 
-    player
-      .addToQueue(
+      const landed = await latestPlayer().addToQueue(
         tracks.map((track) => track.id),
         next,
-      )
-      .then(() => toast.success(next ? `${label} plays next` : `Added ${label} to the queue`))
-      .catch(toastFailure);
-  };
+      );
 
-  return {
-    playNext: (tracks) => add(tracks, true),
-    addToQueue: (tracks) => add(tracks, false),
-  };
+      if (landed) toast.success(next ? `${label} plays next` : `Added ${label} to the queue`);
+      else toast.error(`Couldn't add ${label} to the queue. Try again.`);
+    };
+
+    return {
+      playNext: (tracks) => void add(tracks, true),
+      addToQueue: (tracks) => void add(tracks, false),
+    };
+  }, [latestPlayer]);
 };
 
 /** Adds songs to a playlist with a toast that names it. */
@@ -226,6 +232,7 @@ export function TrackMenu({
   const { liked, toggle } = useLike(track);
   const copyLink = useCopyLink();
   const [info, setInfo] = useState(false);
+  const infoMounted = useOpenedOnce(info);
   const [open, setOpen] = useState(false);
 
   // The keys the menu shows: ⇧↵ play next, Q add to queue, L like. Captured before the menu's own
@@ -313,7 +320,8 @@ export function TrackMenu({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-      <FileInfoDialog track={track} open={info} onOpenChange={setInfo} />
+      {/* A list renders one menu per row, so the dialog mounts the first time it opens. */}
+      {infoMounted ? <FileInfoDialog track={track} open={info} onOpenChange={setInfo} /> : null}
     </>
   );
 }

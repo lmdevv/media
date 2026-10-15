@@ -14,8 +14,10 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { ProgressBar, jobPercent } from "@/components/auth/scan-progress";
+import { ProgressBar } from "@/components/auth/scan-progress";
+import { jobPercent } from "@/lib/job-progress";
 import { describeFailure, toastFailure } from "@/lib/action";
+import { copyText } from "@/lib/copy-text";
 import { formatCount } from "@/lib/format";
 
 import { ArgsForm } from "./args-form";
@@ -229,6 +231,11 @@ function OutcomePreview({
 
   const value = outcome.kind === "key" ? outcome.key : outcome.link;
 
+  const copy = async () => {
+    if (await copyText(value)) setCopied(true);
+    else toast.error("Couldn't copy. Select it and copy it yourself.");
+  };
+
   return (
     <PreviewFrame onBack={onBack}>
       <PreviewTitle title={SECRET_COPY[outcome.kind].title} meta={SECRET_COPY[outcome.kind].meta} />
@@ -240,12 +247,7 @@ function OutcomePreview({
           variant="solid"
           size="sm"
           className="h-9 rounded-sm px-3"
-          onClick={() =>
-            void navigator.clipboard.writeText(value).then(
-              () => setCopied(true),
-              () => toast.error("Couldn't copy. Select it and copy it yourself."),
-            )
-          }
+          onClick={() => void copy()}
         >
           {copied ? <CheckIcon strokeWidth={2} /> : <CopyIcon />}
           {copied ? "Copied" : "Copy"}

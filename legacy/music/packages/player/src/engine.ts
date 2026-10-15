@@ -44,6 +44,7 @@ export type EngineErrorReason =
   | "expired"
   | "autoplay-blocked";
 
+/** What an engine reports to its subscribers as playback changes. */
 export type EngineEvent =
   | { readonly type: "playing" }
   | { readonly type: "paused" }
@@ -55,14 +56,22 @@ export type EngineEvent =
   | { readonly type: "ended" }
   | { readonly type: "error"; readonly message: string; readonly reason: EngineErrorReason };
 
+/**
+ * Plays one source at a time through an audio element. `MseEngine` plays gaplessly through Media
+ * Source Extensions; `HtmlAudioEngine` is the plain HTML audio fallback.
+ */
 export interface PlayerEngine {
   /** Replaces whatever is loaded and starts at `startMs`. Resolves once playback can begin. */
   load(source: EngineSource, startMs: number, autoplay: boolean): Promise<void>;
   /** Queues the next source so it starts without a gap when the current one ends. */
   preload(source: EngineSource | null): void;
+  /** Starts or resumes output. Resolves once the browser allowed it to start. */
   play(): Promise<void>;
+  /** Pauses output, keeping the position. */
   pause(): void;
+  /** Moves to `positionMs` in the current source. */
   seek(positionMs: number): void;
+  /** Sets the output volume, from 0 to 1. */
   setVolume(volume: number): void;
   /** Stops output and releases the audio element and buffers. */
   unload(): void;
@@ -72,5 +81,6 @@ export interface PlayerEngine {
    * after it was started inside a gesture once. Does nothing to output that is loaded or playing.
    */
   unlock?(): void;
+  /** Calls `listener` with every engine event. Returns the unsubscribe function. */
   subscribe(listener: (event: EngineEvent) => void): () => void;
 }

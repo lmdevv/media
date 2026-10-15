@@ -1,7 +1,5 @@
 import { usePlayer } from "@music/player/react";
 import { Dialog, DialogPopup, DialogPortal } from "@music/ui/components/dialog";
-import { useLocation } from "@tanstack/react-router";
-import { useEffect } from "react";
 
 import { useUi } from "@/components/shell/ui-state";
 
@@ -17,12 +15,6 @@ import { PhoneNowPlaying } from "./now-playing-phone";
 export function NowPlaying() {
   const { nowPlaying, setNowPlaying } = useUi();
   const player = usePlayer();
-  const location = useLocation();
-
-  useEffect(() => {
-    setNowPlaying(null);
-  }, [location.pathname, setNowPlaying]);
-
   const open = nowPlaying !== null && player.track !== null;
 
   return (

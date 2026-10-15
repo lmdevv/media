@@ -1,5 +1,13 @@
 import type { TrackId } from "@music/commands/ids";
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 
 import { chooseSurface } from "@/components/player/play-on";
@@ -63,6 +71,34 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
     if (view !== null) setPlayOn((opened) => (opened === "popover" ? null : opened));
   }, []);
 
+  // Openers stay the same function for the provider's life, so menus and lists that hold them
+  // don't rebuild when some other part of the UI opens or closes.
+  const surface = useRef({ playOnPopoverMounted, nowPlayingOpen: nowPlaying !== null });
+
+  // Right after the commit, before another event can call the openers.
+  useLayoutEffect(() => {
+    surface.current = { playOnPopoverMounted, nowPlayingOpen: nowPlaying !== null };
+  }, [playOnPopoverMounted, nowPlaying]);
+
+  const openPlayOn = useCallback(() => {
+    setPlayOn(
+      chooseSurface({
+        desktop: isDesktopNow(),
+        popoverMounted: surface.current.playOnPopoverMounted,
+        nowPlayingOpen: surface.current.nowPlayingOpen,
+      }),
+    );
+  }, []);
+
+  const closePlayOn = useCallback(() => setPlayOn(null), []);
+
+  const openNewPlaylist = useCallback(
+    (trackIds: ReadonlyArray<TrackId> = []) => setNewPlaylist({ trackIds }),
+    [],
+  );
+
+  const closeNewPlaylist = useCallback(() => setNewPlaylist(null), []);
+
   const value = useMemo(
     (): UiState => ({
       nowPlaying,
@@ -72,32 +108,28 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
       commandOpen,
       setCommandOpen,
       playOn,
-      openPlayOn: () =>
-        setPlayOn(
-          chooseSurface({
-            desktop: isDesktopNow(),
-            popoverMounted: playOnPopoverMounted,
-            nowPlayingOpen: nowPlaying !== null,
-          }),
-        ),
-      closePlayOn: () => setPlayOn(null),
+      openPlayOn,
+      closePlayOn,
       setPlayOnPopoverMounted,
       jamOpen,
       setJamOpen,
       newPlaylist,
-      openNewPlaylist: (trackIds = []) => setNewPlaylist({ trackIds }),
-      closeNewPlaylist: () => setNewPlaylist(null),
+      openNewPlaylist,
+      closeNewPlaylist,
     }),
     [
       nowPlaying,
       queueOpen,
       commandOpen,
       playOn,
-      playOnPopoverMounted,
+      openPlayOn,
+      closePlayOn,
       setPlayOnPopoverMounted,
       setNowPlaying,
       jamOpen,
       newPlaylist,
+      openNewPlaylist,
+      closeNewPlaylist,
     ],
   );
 

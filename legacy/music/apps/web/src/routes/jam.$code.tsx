@@ -19,6 +19,28 @@ const MIN_PASSWORD = 8;
 
 const GUEST_EMAIL_KEY = "music.jamGuestEmail";
 
+/**
+ * The email of the guest who signed up on this page, kept for this tab. Storage can throw (cookies
+ * blocked, Safari private mode); the page then just doesn't remember the guest.
+ */
+const guestEmail = {
+  read: (): string | null => {
+    try {
+      return window.sessionStorage.getItem(GUEST_EMAIL_KEY);
+    } catch {
+      return null;
+    }
+  },
+  write: (email: string | null): void => {
+    try {
+      if (email === null) window.sessionStorage.removeItem(GUEST_EMAIL_KEY);
+      else window.sessionStorage.setItem(GUEST_EMAIL_KEY, email);
+    } catch {
+      // Not remembered; the page offers the regular join instead.
+    }
+  },
+};
+
 /** What a Jam link shows: whose Jam, what plays, how many are in, and how to join. */
 function JamPage() {
   const { code } = Route.useParams();
@@ -81,14 +103,14 @@ function JoinJam({
   const me = useRead("account.me", {});
   // Set by the guest sign-up on this page; shown only to that guest, so a later account in the
   // same tab never sees it.
-  const stored = window.sessionStorage.getItem(GUEST_EMAIL_KEY);
-  const guestEmail = stored !== null && stored === me?.email ? stored : null;
+  const stored = guestEmail.read();
+  const signedUpHere = stored !== null && stored === me?.email ? stored : null;
 
   const [run, pending] = useAction(
     async () => {
       const joined = await join({ code, deviceId: thisBrowserDeviceId() });
 
-      window.sessionStorage.removeItem(GUEST_EMAIL_KEY);
+      guestEmail.write(null);
 
       await navigate({ to: "/" });
 
@@ -110,9 +132,9 @@ function JoinJam({
       <FieldHint>
         Your own music waits until you leave. You can add songs, and listen along here.
       </FieldHint>
-      {guestEmail === null ? null : (
+      {signedUpHere === null ? null : (
         <p className="rounded-md border border-border px-4 py-3 font-sans text-sm/sm text-text">
-          Your guest account signs in as <strong>{guestEmail}</strong> with your password, so you
+          Your guest account signs in as <strong>{signedUpHere}</strong> with your password, so you
           can come back while the Jam lasts. It goes when the Jam ends.
         </p>
       )}
@@ -186,7 +208,7 @@ function GuestAccount({ code }: { readonly code: string }) {
         jamCode: code,
         flow: "signUp",
       });
-      window.sessionStorage.setItem(GUEST_EMAIL_KEY, email);
+      guestEmail.write(email);
     } catch (cause) {
       setError(describeFailure(cause));
     } finally {
