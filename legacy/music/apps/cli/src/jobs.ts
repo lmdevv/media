@@ -4,6 +4,7 @@ import { Duration, Effect, Ref, Schedule } from "effect";
 
 import type { Api } from "./api";
 import { JobError } from "./errors";
+import { escapeControlCharacters } from "./escape";
 import { Output } from "./output";
 
 /** Polling starts fast for quick jobs and backs off to one request every five seconds. */
@@ -17,11 +18,13 @@ const isFinished = (job: Job): boolean =>
   job.status === "done" || job.status === "failed" || job.status === "cancelled";
 
 /** `Scan Music: running 120/500 (reading tags)` */
-const progressLine = (job: Job): string => {
+export const progressLine = (job: Job): string => {
   const count = job.total === null ? String(job.done) : `${String(job.done)}/${String(job.total)}`;
   const note = job.error ?? job.message;
+  const detail = note === null ? "" : ` (${escapeControlCharacters(note)})`;
 
-  return `${job.label}: ${job.status} ${count}${note === null ? "" : ` (${note})`}`;
+  // The label names a library, and the note can quote a file's name or an error from disk.
+  return `${escapeControlCharacters(job.label)}: ${job.status} ${count}${detail}`;
 };
 
 /** How `--wait` behaves. */

@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, type MutationCtx } from "./_generated/server";
+import { internalMutation, internalQuery, type MutationCtx } from "./_generated/server";
 import { fail } from "./lib/errors";
 import { inviterStillAllows } from "./lib/invites";
 import { openSession } from "./lib/sessions";
@@ -74,6 +74,27 @@ const insertSignedUp = async (
  * account already uses it. Sign-up has no rate limit, so without a valid invite every email gets
  * the same answer, and nobody learns which have accounts. `secret` is the password's hash.
  */
+/**
+ * The account ID to sign in with, for an email as typed and as sign-up cleans it: the typed one
+ * when an account has it (one made before the cleaning), otherwise the cleaned one (where sign-up
+ * keeps new accounts). Both lead to the same check and the same answer, so this tells nothing.
+ */
+export const signInAccountId = internalQuery({
+  args: { provider: v.string(), typed: v.string(), cleaned: v.string() },
+  handler: async (ctx, { provider, typed, cleaned }) => {
+    if (typed === cleaned) return typed;
+
+    const legacy = await ctx.db
+      .query("authAccounts")
+      .withIndex("providerAndAccountId", (q) =>
+        q.eq("provider", provider).eq("providerAccountId", typed),
+      )
+      .unique();
+
+    return legacy === null ? cleaned : typed;
+  },
+});
+
 export const createPasswordAccount = internalMutation({
   args: {
     email: v.string(),

@@ -3,7 +3,13 @@
  * the backend, the web app, the command menu, and the CLI all ask this module, so a rule changed
  * here changes everywhere at once.
  */
-import type { AccessControl, AssignableRole, LibraryVisibility, Role } from "./models";
+import type {
+  AccessControl,
+  AssignableRole,
+  LibraryVisibility,
+  PlaylistAccess,
+  Role,
+} from "./models";
 
 /**
  * What a command needs from the caller's role:
@@ -11,15 +17,17 @@ import type { AccessControl, AssignableRole, LibraryVisibility, Role } from "./m
  * - `user`: anyone signed in, guests included: listen, and keep your own likes, history, and
  *   playlists.
  * - `keys`: create and revoke API keys for the CLI and agents. Not guests.
+ * - `share`: see who else is on the server and share your playlists with them. Not guests, who
+ *   only see what is shared with them.
  * - `admin`: run the server: people, invites, password reset links, libraries, and jobs.
  * - `owner`: hand the server to someone else.
  */
-export type Capability = "user" | "keys" | "admin" | "owner";
+export type Capability = "user" | "keys" | "share" | "admin" | "owner";
 
 const CAPABILITIES: Readonly<Record<Role, ReadonlySet<Capability>>> = {
-  owner: new Set(["user", "keys", "admin", "owner"]),
-  admin: new Set(["user", "keys", "admin"]),
-  member: new Set(["user", "keys"]),
+  owner: new Set(["user", "keys", "share", "admin", "owner"]),
+  admin: new Set(["user", "keys", "share", "admin"]),
+  member: new Set(["user", "keys", "share"]),
   guest: new Set(["user"]),
 };
 
@@ -130,6 +138,7 @@ export const canTransferOwnership = (
 const CAPABILITY_LABELS: Readonly<Record<Capability, string>> = {
   user: "any user",
   keys: "members and admins; not guests",
+  share: "members and admins; not guests",
   admin: "admins only",
   owner: "the owner only",
 };
@@ -140,6 +149,7 @@ export const capabilityLabel = (capability: Capability): string => CAPABILITY_LA
 const FORBIDDEN_MESSAGES: Readonly<Record<Capability, string>> = {
   user: "Sign in first",
   keys: "Guests can't use API keys",
+  share: "Guests can't share with other people",
   admin: "Only an admin can do that",
   owner: "Only the owner can do that",
 };
@@ -156,3 +166,20 @@ const ROLE_LABELS: Readonly<Record<Role, string>> = {
 
 /** A role as people read it. */
 export const roleLabel = (role: Role): string => ROLE_LABELS[role];
+
+/**
+ * What someone may do with a playlist: change it (`owner`), add, remove, and reorder its songs
+ * (`collaborator`), or view and play it (`viewer`). Only the owner renames, shares, or deletes it.
+ */
+const PLAYLIST_RANK: Readonly<Record<PlaylistAccess, number>> = {
+  viewer: 0,
+  collaborator: 1,
+  owner: 2,
+};
+
+/** Whether `access` lets someone add, remove, and reorder a playlist's songs. */
+export const canEditPlaylistItems = (access: PlaylistAccess): boolean =>
+  PLAYLIST_RANK[access] >= PLAYLIST_RANK.collaborator;
+
+/** Whether `access` lets someone rename, describe, share, or delete a playlist. */
+export const canManagePlaylist = (access: PlaylistAccess): boolean => access === "owner";

@@ -2,7 +2,7 @@
  * The playback state machine through the real command dispatcher: play, next, previous, jump,
  * repeat, shuffle, the queue commands, position reports, and history, against convex-test.
  */
-import { DeviceId } from "@music/commands/ids";
+import { DeviceId, QueueItemId } from "@music/commands/ids";
 import type { TrackId } from "@music/commands/ids";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -45,6 +45,15 @@ const setup = async (): Promise<Fixture> => {
 const queueIds = async (user: User): Promise<ReadonlyArray<TrackId>> =>
   (await user.music.read("playback.state", {})).queue.map((track) => track.id);
 
+/** The ID of the queue entry at `position`, as a client reads it from the queue. */
+const itemAt = async (user: User, position: number): Promise<QueueItemId> => {
+  const entry = (await user.music.read("queue.list", {})).queue[position];
+
+  if (entry === undefined) throw new Error(`No queue entry at ${position}`);
+
+  return entry.itemId;
+};
+
 const current = async (user: User): Promise<TrackId | undefined> => {
   const { queue, index } = await user.music.read("playback.state", {});
 
@@ -71,9 +80,10 @@ const mixed = async () => {
   const queue = [at(0, rock), at(0, jazz), at(1, rock), at(1, jazz), at(2, rock), at(2, jazz)];
 
   await admin.music.run("playback.play", { trackIds: queue, index: 3, deviceId: DEVICE });
+  const items = (await admin.music.read("queue.list", {})).queue.map((entry) => entry.itemId);
   await admin.music.run("libraries.delete", { libraryId: jazzLibrary.libraryId });
 
-  return { ...fixture, jazz };
+  return { ...fixture, jazz, items };
 };
 
 const report = (user: User, index: number, positionMs: number, playing = true) =>
@@ -209,17 +219,19 @@ describe("play, next, and previous", () => {
     expect(await current(admin)).toBe(at(1, rock));
   });
 
-  it("jumps to an entry and refuses an index past the end", async () => {
+  it("jumps to an entry and refuses one that is not in the queue", async () => {
     const { admin, rock } = await setup();
     await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
     await admin.music.run("playback.pause", {});
 
-    await admin.music.run("playback.jump", { index: 3 });
+    await admin.music.run("playback.jump", { itemId: await itemAt(admin, 3) });
     const state = await admin.music.read("playback.state", {});
 
     expect(state.queue[state.index]?.id).toBe(at(3, rock));
     expect(state.playing).toBe(true);
-    expect(await failureCode(admin.music.run("playback.jump", { index: 5 }))).toBe("invalid_args");
+    expect(
+      await failureCode(admin.music.run("playback.jump", { itemId: QueueItemId.make("999") })),
+    ).toBe("not_found");
   });
 });
 
@@ -232,27 +244,35 @@ describe("the queue", () => {
       throw new Error("Seed missing");
     }
 
+    // Autoplay would follow the cleared queue with songs of its own.
+    await admin.music.run("queue.autoplay", { on: false });
     await admin.music.run("playback.play", { trackIds: [first, second], deviceId: DEVICE });
     await admin.music.run("queue.add", { trackIds: [at(2, rock)], next: true });
     await admin.music.run("queue.add", { trackIds: [at(3, rock)] });
     expect(await queueIds(admin)).toEqual([first, third, second, fourth]);
 
-    await admin.music.run("playback.jump", { index: 2 });
-    await admin.music.run("queue.remove", { index: 1 });
+    await admin.music.run("playback.jump", { itemId: await itemAt(admin, 2) });
+    await admin.music.run("queue.remove", { itemId: await itemAt(admin, 1) });
     expect(await queueIds(admin)).toEqual([first, second, fourth]);
     expect(await current(admin)).toBe(second);
 
-    await admin.music.run("queue.add", { trackIds: [fifth] });
+    const { itemIds } = await admin.music.run("queue.add", { trackIds: [fifth] });
     await admin.music.run("queue.clear", {});
     expect(await queueIds(admin)).toEqual([first, second]);
-    expect(await failureCode(admin.music.run("queue.remove", { index: 2 }))).toBe("invalid_args");
+
+    const [cleared] = itemIds;
+
+    if (cleared === undefined) throw new Error("queue.add returned no entry");
+    expect(await failureCode(admin.music.run("queue.remove", { itemId: cleared }))).toBe(
+      "not_found",
+    );
   });
 
   it("removing the current song moves to the next one", async () => {
     const { admin, rock } = await setup();
     await admin.music.run("playback.play", { trackIds: [...rock], index: 1, deviceId: DEVICE });
 
-    await admin.music.run("queue.remove", { index: 1 });
+    await admin.music.run("queue.remove", { itemId: await itemAt(admin, 1) });
     expect(await current(admin)).toBe(at(2, rock));
     expect((await admin.music.read("playback.state", {})).positionMs).toBe(0);
   });
@@ -283,7 +303,7 @@ describe("shuffle", () => {
     await admin.music.run("playback.shuffle", { on: true });
     const removed = at(3, await queueIds(admin));
 
-    await admin.music.run("queue.remove", { index: 3 });
+    await admin.music.run("queue.remove", { itemId: await itemAt(admin, 3) });
     await admin.music.run("playback.shuffle", { on: false });
 
     expect(await queueIds(admin)).toEqual(rock.filter((id) => id !== removed));
@@ -376,10 +396,10 @@ describe("after a library is deleted", () => {
     expect(state.index).toBe(2);
   });
 
-  it("jumps, removes, and reports by the index the client was shown", async () => {
+  it("jumps, removes, and reports by the entry the client was shown", async () => {
     const { admin, rock } = await mixed();
 
-    await admin.music.run("playback.jump", { index: 1 });
+    await admin.music.run("playback.jump", { itemId: await itemAt(admin, 1) });
     expect(await current(admin)).toBe(at(1, rock));
 
     await admin.music.run("playback.report", {
@@ -391,7 +411,7 @@ describe("after a library is deleted", () => {
 
     expect(await history(admin)).toEqual([at(1, rock)]);
 
-    await admin.music.run("queue.remove", { index: 0 });
+    await admin.music.run("queue.remove", { itemId: await itemAt(admin, 0) });
     expect(await queueIds(admin)).toEqual([at(1, rock), at(2, rock)]);
     expect(await current(admin)).toBe(at(1, rock));
   });
@@ -420,11 +440,18 @@ describe("after a library is deleted", () => {
     expect(await history(admin)).toEqual([at(2, rock)]);
   });
 
-  it("refuses an index that only existed before the songs were dropped", async () => {
-    const { admin } = await mixed();
+  it("refuses an entry whose song was dropped", async () => {
+    const { admin, items } = await mixed();
+    // The second entry was a Jazz song.
+    const dropped = items[1];
 
-    expect(await failureCode(admin.music.run("playback.jump", { index: 4 }))).toBe("invalid_args");
-    expect(await failureCode(admin.music.run("queue.remove", { index: 3 }))).toBe("invalid_args");
+    if (dropped === undefined) throw new Error("Seed missing");
+    expect(await failureCode(admin.music.run("playback.jump", { itemId: dropped }))).toBe(
+      "not_found",
+    );
+    expect(await failureCode(admin.music.run("queue.remove", { itemId: dropped }))).toBe(
+      "not_found",
+    );
   });
 });
 
@@ -556,12 +583,13 @@ describe("what a position report costs", () => {
       ),
     ).toBe(2);
 
-    // The queue reads its own row and its songs, never the session the reports rewrite.
+    // The queue reads its own row, its songs, and who added them (one person here), never the
+    // session the reports rewrite.
     expect(
       await documentsRead(admin, async (ctx) =>
         playbackQueries["queue.list"](ctx, await loadViewer(ctx)),
       ),
-    ).toBe(1 + 1000);
+    ).toBe(1 + 1000 + 1);
 
     // A periodic report rewrites only the session, and reads the queue row and one song.
     const [first] = tracks;
@@ -623,7 +651,9 @@ describe("a session saved by an older version", () => {
 
     expect(await current(admin)).toBe(at(3, rock));
     expect(sessions[0]?.queue).toBeUndefined();
-    expect(queues.map((row) => [row.queue.length, row.index, row.repeat])).toEqual([[5, 3, "all"]]);
+    expect(queues.map((row) => [row.items?.length, row.index, row.repeat])).toEqual([
+      [5, 3, "all"],
+    ]);
   });
 
   it("is moved by the splitPlaybackQueues migration", async () => {

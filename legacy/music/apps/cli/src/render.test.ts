@@ -63,14 +63,29 @@ describe("renderResult", () => {
         durationMs: 224_000,
         artUrls: [],
         updatedAt: Date.UTC(2026, 9, 10, 12, 0),
+        owner: { id: "u1", name: "Lucía" },
+        visibility: "shared",
+        sharedWithPeople: true,
+        access: "owner",
       },
       items: [
-        { itemId: "i1", addedAt: Date.UTC(2026, 9, 10, 12, 0), track, available: true },
+        {
+          itemId: "i1",
+          addedAt: Date.UTC(2026, 9, 10, 12, 0),
+          track,
+          durationMs: track.durationMs,
+          available: true,
+          reason: null,
+          addedBy: { id: "u1", name: "Lucía" },
+        },
         {
           itemId: "i2",
           addedAt: Date.UTC(2026, 9, 10, 12, 0),
-          track: { ...track, id: "t2", title: "Gone" },
+          track: null,
+          durationMs: 251_000,
           available: false,
+          reason: "no_access",
+          addedBy: null,
         },
       ],
     } satisfies (typeof commands)["playlists.get"]["result"]["Encoded"];
@@ -84,10 +99,16 @@ describe("renderResult", () => {
       "  duration: 3:44",
       "  art urls: (none)",
       `  updated at: ${formatTimestamp(playlist.playlist.updatedAt)}`,
+      "  owner:",
+      "    id: u1",
+      "    name: Lucía",
+      "  visibility: shared",
+      "  shared with people: yes",
+      "  access: owner",
       "items:",
-      "  ITEM  TRACK  TITLE                             ARTIST     TIME  STATUS",
-      "  i1    t1     Harder, Better, Faster, Stronger  Daft Punk  3:44",
-      "  i2    t2     Gone                              Daft Punk  3:44  unavailable",
+      "  ITEM  TRACK  TITLE                             ARTIST     TIME  ADDED BY  STATUS",
+      "  i1    t1     Harder, Better, Faster, Stronger  Daft Punk  3:44  Lucía",
+      "  i2    -      -                                 -          4:11  -         no access",
     ]);
   });
 
@@ -134,5 +155,21 @@ describe("renderResult", () => {
     const [, row] = renderResult(commands["likes.list"].result, [long]).split("\n");
 
     expect(row).toContain(`${"x".repeat(47)}…`);
+  });
+
+  it("writes out control characters instead of passing them to the terminal", () => {
+    const hostile = { ...track, title: "\u001b[2JGone\u009b31m\u0007" };
+    const table = renderResult(commands["likes.list"].result, [hostile]);
+
+    const lines = renderResult(commands["account.me"].result, {
+      id: "u1",
+      email: "me@music.test",
+      name: "\u001b]0;pwned\u0007",
+      role: "member",
+    });
+
+    expect(table).toContain(String.raw`\u001b[2JGone\u009b31m\u0007`);
+    expect(lines).toContain(String.raw`\u001b]0;pwned\u0007`);
+    expect(/\p{Cc}/u.test(`${table}${lines}`.replaceAll("\n", ""))).toBe(false);
   });
 });

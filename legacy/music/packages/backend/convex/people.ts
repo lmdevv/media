@@ -176,9 +176,10 @@ const heirOf = async (ctx: MutationCtx, fallback: Id<"users">): Promise<Id<"user
 
 /**
  * Deletes what a removed person owned, rescheduling until it is gone: keys, devices, library
- * access, reset links, likes, history, and playlists; their libraries move to the server's owner
- * (`heirOf`). `people.remove` has already deleted the account, so none of this is reachable
- * meanwhile.
+ * access, reset links, likes, history, playlists shared with them, and their own playlists with
+ * those playlists' shares; their libraries move to the server's owner (`heirOf`). Songs they
+ * added to other people's playlists stay, credited to nobody. `people.remove` has already deleted
+ * the account, so none of this is reachable meanwhile.
  */
 export const purgeRemovedUser = internalMutation({
   args: { userId: v.id("users"), heir: v.id("users") },
@@ -209,6 +210,10 @@ export const purgeRemovedUser = internalMutation({
         .take(PURGE_BATCH),
       ctx.db
         .query("history")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .take(PURGE_BATCH),
+      ctx.db
+        .query("playlistShares")
         .withIndex("by_user", (q) => q.eq("userId", userId))
         .take(PURGE_BATCH),
     ]);
@@ -245,14 +250,22 @@ export const purgeRemovedUser = internalMutation({
 
     if (playlist === null) return;
 
-    const items = await ctx.db
-      .query("playlistItems")
-      .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
-      .take(PURGE_BATCH);
+    const [items, shares] = await Promise.all([
+      ctx.db
+        .query("playlistItems")
+        .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
+        .take(PURGE_BATCH),
+      ctx.db
+        .query("playlistShares")
+        .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
+        .take(PURGE_BATCH),
+    ]);
 
-    await Promise.all(items.map((item) => ctx.db.delete(item._id)));
+    await Promise.all([...items, ...shares].map((doc) => ctx.db.delete(doc._id)));
 
-    if (items.length < PURGE_BATCH) await ctx.db.delete(playlist._id);
+    if (items.length < PURGE_BATCH && shares.length < PURGE_BATCH) {
+      await ctx.db.delete(playlist._id);
+    }
 
     await again();
   },

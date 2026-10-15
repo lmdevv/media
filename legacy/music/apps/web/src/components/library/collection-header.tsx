@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import { CollectionMenu } from "@/components/playlists/collection-menu";
 import { glassClassName } from "@/components/shell/phone-chrome";
 import { useUi } from "@/components/shell/ui-state";
+import type { LinkTarget } from "@/lib/use-copy-link";
 
 import { usePlayTracks } from "./cards";
 
@@ -27,7 +28,9 @@ export function CollectionHeader({
   phoneMeta,
   badge,
   tracks,
+  link,
   menuExtra,
+  actions,
 }: {
   readonly cover: ReactNode;
   readonly phoneCover: ReactNode;
@@ -38,7 +41,11 @@ export function CollectionHeader({
   readonly phoneMeta?: string;
   readonly badge?: ReactNode;
   readonly tracks: ReadonlyArray<Track>;
+  /** What the menu's "Copy link" links to. */
+  readonly link?: LinkTarget | undefined;
   readonly menuExtra?: ReactNode;
+  /** Buttons after the menu, such as Share. */
+  readonly actions?: ReactNode;
 }) {
   const play = usePlayTracks();
   const router = useRouter();
@@ -85,7 +92,8 @@ export function CollectionHeader({
               <ShuffleIcon />
               Shuffle
             </Button>
-            <CollectionMenu tracks={tracks} label={title} extra={menuExtra} />
+            <CollectionMenu tracks={tracks} label={title} link={link} extra={menuExtra} />
+            {actions}
             {badge}
           </div>
         </div>
@@ -120,6 +128,7 @@ export function CollectionHeader({
             <CollectionMenu
               tracks={tracks}
               label={title}
+              link={link}
               extra={menuExtra}
               className={cn("size-11 border-hairline", glassClassName)}
             />

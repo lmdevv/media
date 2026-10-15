@@ -50,15 +50,28 @@ CLI, the web app, and this skill always agree.
 - Roles: the `owner` (the first account, exactly one) can do everything; `admin` runs people,
   invites, libraries, and jobs, but only the owner changes another admin; `member` listens and
   keeps playlists, likes, history, and API keys; `guest` only listens to the libraries they were
-  added to and has no API keys. `access` in
-  `music commands --json` names what each command needs: `user` (anyone), `keys` (not guests),
-  `admin`, or `owner`. Other callers get exit code 3 and `forbidden`.
+  added to, has no API keys, and can't share with other people (but sees what is shared with
+  them). `access` in `music commands --json` names what each command needs: `user` (anyone),
+  `keys` or `share` (not guests), `admin`, or `owner`. Other callers get exit code 3 and
+  `forbidden`.
 - Library visibility: `shared` is everyone but guests, `restricted` is only the people added with
   `music libraries grant`, and `private` is only the library's owner. Guests hear a shared library
   once they are added to it. Only a library's own owner changes its visibility or who is added
   (`forbidden` otherwise). Admins rename and rescan libraries they can listen to, and the
   server's owner every library; only a library's own owner or the server's owner removes it; `music libraries list` shows other libraries with `path: null` and
   `manageable: false`, and commands on them answer `not_found`.
+- Queue entries have their own IDs (`itemId` in `music queue list --json`), separate from song
+  IDs. `queue remove`, `queue move`, and `playback jump` take an entry ID, so they act on the row
+  you read even if someone changed the queue since; an entry that is gone fails with `not_found`
+  (read the queue again). The same song can be queued twice as two entries.
+- Autoplay (on by default, `music queue autoplay --no-on` turns it off) adds up to 10 songs when
+  the last queued song starts: the same artist, then the same genre, then albums within two years,
+  from libraries you can read, skipping songs played recently. Those entries have
+  `autoplay: true`; `queue add` without `--next` puts songs before them.
+- Playlists are `private` (default) or `shared` (anyone signed in with the link can view and play
+  them), and can be shared with people as `viewer` or `collaborator`. Collaborators add, remove,
+  and reorder songs; only the owner renames, shares, or deletes. Sharing never grants library
+  access: songs someone can't read show as unavailable (`reason: "no_access"`).
 
 ## Recipes
 
@@ -78,6 +91,35 @@ Make a playlist from search results:
 ids=$(music search "miles davis" --limit 10 --json | jq -r '[.tracks[].id] | join(",")')
 music playlists create "Late night" --track-ids "$ids" --json   # → {"playlistId": ...}
 music playlists add --playlist-id <playlist-id> --track-ids <id>
+```
+
+Reorder the queue: entry IDs, not positions. The top of "Next up" is right after the song playing:
+
+```sh
+music queue list --json                         # .queue[].itemId, .index is the song playing
+music queue move <item-id> --after-item-id <id> # or no --after-item-id for the very top
+music queue remove <item-id>
+music playback jump <item-id>
+```
+
+Share a playlist and work on it together:
+
+```sh
+music people directory --json                   # names and roles of people you can share with
+music playlists share --playlist-id <id> --user-id <user-id> --role collaborator
+music playlists visibility --playlist-id <id> --visibility shared   # anyone with the link
+music playlists sharing <playlist-id> --json     # who it is shared with
+music playlists shared --json                    # playlists others shared with you
+music playlists move --playlist-id <id> --item-id <entry> --after-item-id <entry>
+music playlists unshare --playlist-id <id> --user-id <user-id>  # one person, or yourself to leave
+music playlists unshare --playlist-id <id>       # owner: stop sharing with everyone
+```
+
+Get a link to send: the path goes after the web address (the server URL without `/convex`). A
+song opens its album with the song highlighted; someone who can't open it sees a no-access page:
+
+```sh
+music links get --kind album --id <album-id> --json   # {"path": "/albums/...", "title": ...}
 ```
 
 Like the current song:
@@ -133,7 +175,7 @@ music libraries people <library-id> --json
 
 Playback controls: `music pause`, `music resume`, `music next`, `music previous`,
 `music playback seek <ms>`, `music playback volume 0.5`, `music playback shuffle --on`,
-`music playback repeat all`, `music queue add <id> --next`.
+`music playback repeat all`, `music queue add <id> --next` (plays after the current song).
 
 ## Exit codes
 
@@ -170,6 +212,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music artists list [--cursor <text>] [--end <text>] [--limit <int>]`: List artists by name.
 - `music artists get <artist-id>`: Show an artist, their albums, and top songs.
 - `music tracks list [--cursor <text>] [--end <text>] [--limit <int>]`: List songs by title.
+- `music links get --kind <album|artist|playlist|track> --id <text>`: Get a link to an album, artist, playlist, or song you can open (a song opens its album).
 
 ### search
 
@@ -185,11 +228,11 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music playback next`: Skip to the next song.
 - `music playback previous`: Go back to the previous song.
 - `music playback seek <position-ms>`: Seek within the current song.
-- `music playback jump <index>`: Play the queue entry at an index.
+- `music playback jump <item-id>`: Play a queue entry by its item ID (queue list shows them).
 - `music playback shuffle (--on | --no-on)`: Turn shuffle on or off.
 - `music playback repeat <off|all|one>`: Set repeat to off, all, or one.
 - `music playback volume <volume>`: Set the volume from 0 to 1.
-- `music playback report --device-id <id> --index <int> [--track-id <id>] --position-ms <number> (--playing | --no-playing)`: Report the active device's position (sent by players).
+- `music playback report --device-id <id> --index <int> [--track-id <id>] [--item-id <id>] --position-ms <number> (--playing | --no-playing)`: Report the active device's position (sent by players).
 - `music stream url --track-id <id> --profile <original|aac-320|aac-128|fmp4-flac|fmp4-aac> [--requested-at <number>]`: Get a signed stream URL for a song.
 
 ### devices
@@ -201,9 +244,11 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 ### queue
 
 - `music queue list`: Show the queue, the current song's index, shuffle, and repeat.
-- `music queue add <track-ids...> [--next | --no-next]`: Add songs to the queue, next or at the end.
-- `music queue remove <index>`: Remove the queue entry at an index.
+- `music queue add <track-ids...> [--next | --no-next]`: Add songs to the queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay).
+- `music queue remove <item-id>`: Remove a queue entry by its item ID.
+- `music queue move <item-id> [--after-item-id <id>]`: Move a queue entry to just after another (--after-item-id), or to the top when none is given.
 - `music queue clear`: Clear everything after the current song.
+- `music queue autoplay (--on | --no-on)`: Turn autoplay on or off: when the queue runs out, play the same artist, then genre, then era.
 
 ### likes
 
@@ -215,12 +260,19 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 ### playlists
 
 - `music playlists list`: List your playlists.
-- `music playlists get <playlist-id>`: Show a playlist and its songs.
+- `music playlists shared`: List playlists other people shared with you by name.
+- `music playlists get <playlist-id>`: Show a playlist and its songs: yours, one shared with you, or one shared by link.
 - `music playlists create <name> [--description <text>] [--track-ids <id,...>]`: Create a playlist.
-- `music playlists rename --playlist-id <id> --name <text>`: Rename a playlist.
-- `music playlists delete <playlist-id>`: Delete a playlist.
-- `music playlists add --playlist-id <id> --track-ids <id,...>`: Add songs to a playlist.
-- `music playlists remove --playlist-id <id> --item-id <id>`: Remove an entry from a playlist.
+- `music playlists rename --playlist-id <id> --name <text>`: Rename a playlist you own.
+- `music playlists update <playlist-id> [--name <text>] [--description <text>]`: Change a playlist's name or description (an empty description clears it).
+- `music playlists delete <playlist-id>`: Delete a playlist you own.
+- `music playlists add --playlist-id <id> --track-ids <id,...>`: Add songs to a playlist you own or collaborate on.
+- `music playlists remove --playlist-id <id> --item-id <id>`: Remove an entry from a playlist you own or collaborate on.
+- `music playlists move --playlist-id <id> --item-id <id> [--after-item-id <id>]`: Move a playlist entry to just after another (--after-item-id), or to the top when none is given.
+- `music playlists sharing <playlist-id>`: Show who a playlist you own is shared with.
+- `music playlists visibility --playlist-id <id> --visibility <private|shared>`: Make a playlist you own private, or shared: anyone on this server with the link can view and play it. (not guests)
+- `music playlists share --playlist-id <id> --user-id <id> [--role <viewer|collaborator>]`: Share a playlist you own with someone as a viewer (default) or a collaborator, who adds, removes, and reorders songs. (not guests)
+- `music playlists unshare <playlist-id> [--user-id <id>]`: Stop sharing a playlist with someone, or leave one shared with you; naming no one stops sharing it at all.
 
 ### libraries
 
@@ -253,6 +305,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 ### people
 
 - `music people list`: List people on this server. (admin)
+- `music people directory`: List the people on this server you can share with: names and roles, no emails. (not guests)
 - `music people role --user-id <id> --role <admin|member|guest>`: Change someone's role to admin, member, or guest. (admin)
 - `music people suspend <user-id>`: Suspend someone: sign them out everywhere and stop their API keys. (admin)
 - `music people unsuspend <user-id>`: Let a suspended person sign in again. (admin)

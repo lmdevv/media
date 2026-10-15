@@ -8,6 +8,7 @@ import {
   ApiKey,
   ArtistCard,
   Device,
+  DirectoryPerson,
   HistoryEntry,
   Invite,
   Job,
@@ -16,11 +17,15 @@ import {
   Person,
   Playlist,
   PlaylistEntry,
+  PlaylistShare,
+  QueueEntry,
   Track,
   User,
 } from "@music/commands/models";
 import { Predicate, SchemaAST } from "effect";
 import type { Schema } from "effect";
+
+import { escapeControlCharacters } from "./escape";
 
 type Json = Schema.Json;
 
@@ -74,15 +79,18 @@ const formatScalar = (key: string, value: Json): string => {
 
   if (Predicate.isNumber(value)) return formatNumber(key, value);
 
-  if (Predicate.isString(value)) return value;
+  if (Predicate.isString(value)) return escapeControlCharacters(value);
 
-  return JSON.stringify(value);
+  return escapeControlCharacters(JSON.stringify(value));
 };
 
+/** The value at `path` in a row; null once a step is null (a withheld song shows `-`). */
 const at = (row: Schema.JsonObject, path: ReadonlyArray<string>): Json | undefined => {
   let current: Json | undefined = row;
 
   for (const key of path) {
+    if (current === null) return null;
+
     if (current === undefined || !isJsonObject(current)) return undefined;
     current = current[key];
   }
@@ -104,10 +112,29 @@ const liked: Column = {
   cell: (row) => (row["liked"] === true ? "♥" : ""),
 };
 
-/** Marks a playlist entry whose file is gone; it stays listed so it can be removed. */
+const REASONS = new Map([
+  ["missing", "file missing"],
+  ["no_access", "no access"],
+]);
+
+/**
+ * Marks a playlist entry that can't play: its file is gone, or it is in a library you can't
+ * listen to. It stays listed so it can be removed.
+ */
 const unavailable: Column = {
   header: "STATUS",
-  cell: (row) => (row["available"] === false ? "unavailable" : ""),
+  cell: (row) => {
+    if (row["available"] !== false) return "";
+    const reason = row["reason"];
+
+    return (Predicate.isString(reason) ? REASONS.get(reason) : undefined) ?? "unavailable";
+  },
+};
+
+/** Marks a queue entry autoplay added. */
+const autoplayed: Column = {
+  header: "FROM",
+  cell: (row) => (row["autoplay"] === true ? "autoplay" : ""),
 };
 
 const progress: Column = {
@@ -164,6 +191,8 @@ const presets = new Map<SchemaAST.AST, ReadonlyArray<Column>>([
       field("NAME", "name"),
       field("SONGS", "trackCount"),
       field("TIME", "durationMs"),
+      field("OWNER", "owner", "name"),
+      field("ACCESS", "access"),
       field("UPDATED", "updatedAt"),
     ],
   ],
@@ -174,10 +203,28 @@ const presets = new Map<SchemaAST.AST, ReadonlyArray<Column>>([
       field("TRACK", "track", "id"),
       field("TITLE", "track", "title"),
       field("ARTIST", "track", "artist"),
-      field("TIME", "track", "durationMs"),
+      field("TIME", "durationMs"),
+      field("ADDED BY", "addedBy", "name"),
       unavailable,
     ],
   ],
+  [
+    QueueEntry.ast,
+    [
+      field("ITEM", "itemId"),
+      field("TRACK", "id"),
+      field("TITLE", "title"),
+      field("ARTIST", "artist"),
+      field("TIME", "durationMs"),
+      field("ADDED BY", "addedBy", "name"),
+      autoplayed,
+    ],
+  ],
+  [
+    PlaylistShare.ast,
+    [field("ID", "person", "id"), field("NAME", "person", "name"), field("ROLE", "role")],
+  ],
+  [DirectoryPerson.ast, [field("ID", "id"), field("NAME", "name"), field("ROLE", "role")]],
   [
     HistoryEntry.ast,
     [

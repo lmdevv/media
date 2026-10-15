@@ -1,7 +1,7 @@
 import type { TrackId } from "@music/commands/ids";
 import type { Playlist, Track } from "@music/commands/models";
 import { usePlayer } from "@music/player/react";
-import { useRead, useRun } from "@music/sdk/react";
+import { useRun } from "@music/sdk/react";
 import { Dialog, DialogContent, DialogFooter, DialogClose } from "@music/ui/components/dialog";
 import {
   DropdownMenu,
@@ -26,7 +26,9 @@ import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
 import { formatCount, formatDuration, formatQuality } from "@/lib/format";
 import { isTyping } from "@/lib/keys";
+import { useCopyLink } from "@/lib/use-copy-link";
 import { useLike } from "@/lib/use-like";
+import { useWritablePlaylists } from "@/lib/use-writable-playlists";
 
 /** Queue actions that report their result as a toast. */
 export interface QueueActions {
@@ -72,7 +74,7 @@ export const useAddToPlaylist = (): ((
 };
 
 function PlaylistSubmenu({ tracks }: { readonly tracks: ReadonlyArray<Track> }) {
-  const playlists = useRead("playlists.list", {});
+  const playlists = useWritablePlaylists();
   const { openNewPlaylist } = useUi();
   const addToPlaylist = useAddToPlaylist();
   const [filter, setFilter] = useState("");
@@ -204,6 +206,7 @@ export function TrackMenu({
   align = "end",
   className,
   playable = true,
+  withheld = false,
 }: {
   readonly track: Track;
   readonly trigger?: ReactNode;
@@ -212,10 +215,16 @@ export function TrackMenu({
   readonly className?: string;
   /** False for a song whose file is gone: the menu leaves out the queue actions. */
   readonly playable?: boolean;
+  /**
+   * True for a stand-in for a song in a library you can't read: nothing about the song is known,
+   * so the menu has only `extra` (such as removing it from the playlist).
+   */
+  readonly withheld?: boolean;
 }) {
   const navigate = useNavigate();
   const { playNext, addToQueue } = useQueueActions();
   const { liked, toggle } = useLike(track);
+  const copyLink = useCopyLink();
   const [info, setInfo] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -231,7 +240,7 @@ export function TrackMenu({
         ? () => playNext([track])
         : playable && key === "q"
           ? () => addToQueue([track])
-          : key === "l"
+          : key === "l" && !withheld
             ? () => void toggle()
             : null;
 
@@ -267,32 +276,41 @@ export function TrackMenu({
               <DropdownMenuSeparator />
             </>
           ) : null}
-          <PlaylistSubmenu tracks={[track]} />
-          <DropdownMenuItem shortcut="L" onClick={() => void toggle()}>
-            {liked ? "Unlike" : "Like"}
-          </DropdownMenuItem>
-          {extra === undefined ? null : (
+          {withheld ? (
+            extra
+          ) : (
             <>
+              <PlaylistSubmenu tracks={[track]} />
+              <DropdownMenuItem shortcut="L" onClick={() => void toggle()}>
+                {liked ? "Unlike" : "Like"}
+              </DropdownMenuItem>
+              {extra === undefined ? null : (
+                <>
+                  <DropdownMenuSeparator />
+                  {extra}
+                </>
+              )}
               <DropdownMenuSeparator />
-              {extra}
+              <DropdownMenuItem
+                onClick={() =>
+                  void navigate({ to: "/albums/$albumId", params: { albumId: track.albumId } })
+                }
+              >
+                Go to album
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  void navigate({ to: "/artists/$artistId", params: { artistId: track.artistId } })
+                }
+              >
+                Go to artist
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => copyLink({ kind: "track", id: track.id })}>
+                Copy link
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setInfo(true)}>File info</DropdownMenuItem>
             </>
           )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() =>
-              void navigate({ to: "/albums/$albumId", params: { albumId: track.albumId } })
-            }
-          >
-            Go to album
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() =>
-              void navigate({ to: "/artists/$artistId", params: { artistId: track.artistId } })
-            }
-          >
-            Go to artist
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setInfo(true)}>File info</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <FileInfoDialog track={track} open={info} onOpenChange={setInfo} />

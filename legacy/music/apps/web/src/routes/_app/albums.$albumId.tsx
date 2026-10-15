@@ -1,4 +1,4 @@
-import { AlbumId } from "@music/commands/ids";
+import { AlbumId, TrackId } from "@music/commands/ids";
 import { useRead } from "@music/sdk/react";
 import { Badge } from "@music/ui/components/badge";
 import { Skeleton } from "@music/ui/components/skeleton";
@@ -18,21 +18,26 @@ const decodeAlbumId = Schema.decodeUnknownSync(AlbumId);
 const MISSING: MissingCopy = {
   title: "This album isn't in your library anymore",
   description:
-    "A rescan may have removed it, its folder was removed from [music], or the link is wrong.",
+    "A rescan may have removed it, its folder was removed from [music], it's in a library that isn't shared with you, or the link is wrong.",
   back: { to: "/albums", label: "Back to albums" },
 };
+
+/** `?track=` highlights a song: shared song links open its album this way. */
+const AlbumSearch = Schema.Struct({ track: Schema.optionalKey(TrackId) });
 
 export const Route = createFileRoute("/_app/albums/$albumId")({
   params: {
     parse: (params) => ({ albumId: decodeAlbumId(params.albumId) }),
     stringify: (params) => ({ albumId: params.albumId }),
   },
+  validateSearch: Schema.toStandardSchemaV1(AlbumSearch),
   component: AlbumPage,
   errorComponent: AlbumError,
 });
 
 function AlbumPage() {
   const { albumId } = Route.useParams();
+  const { track: highlight } = Route.useSearch();
   const detail = useRead("albums.get", { albumId });
 
   if (detail === undefined) {
@@ -93,9 +98,15 @@ function AlbumPage() {
           .join(" · ")}
         badge={<Badge tone="outline">{detail.format}</Badge>}
         tracks={tracks}
+        link={{ kind: "album", id: album.id }}
       />
       <div className="-mx-5 pl-5 lg:mx-0 lg:pl-0">
-        <TrackList tracks={tracks} variant="album" label={`Songs on ${album.title}`} />
+        <TrackList
+          tracks={tracks}
+          variant="album"
+          label={`Songs on ${album.title}`}
+          highlight={highlight ?? null}
+        />
       </div>
     </div>
   );

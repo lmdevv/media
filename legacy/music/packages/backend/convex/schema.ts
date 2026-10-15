@@ -27,6 +27,23 @@ export const repeatMode = v.union(v.literal("off"), v.literal("all"), v.literal(
 
 export const deviceKind = v.union(v.literal("web"), v.literal("phone"), v.literal("cli"));
 
+export const playlistVisibility = v.union(v.literal("private"), v.literal("shared"));
+
+export const playlistRole = v.union(v.literal("viewer"), v.literal("collaborator"));
+
+/**
+ * One queue entry. `id` is unique within its queue and never reused (`nextItemId` counts on), so a
+ * command naming it reaches this entry however the queue changed since the client saw it.
+ */
+export const queueItem = v.object({
+  id: v.string(),
+  trackId: v.id("tracks"),
+  /** Missing on entries converted from queues stored before entries had IDs. */
+  addedBy: v.optional(v.id("users")),
+  /** Set on entries autoplay added when the queue ran out. */
+  autoplay: v.optional(v.boolean()),
+});
+
 export default defineSchema({
   ...authTables,
 
@@ -212,6 +229,10 @@ export default defineSchema({
     .index("by_artist", ["artistId"])
     .index("by_added", ["addedAt"])
     .index("by_library_added", ["libraryId", "addedAt"])
+    // Autoplay picks songs of the same genre, then of albums from around the same year, in each
+    // library the listener can read.
+    .index("by_library_genre", ["libraryId", "genre", "year"])
+    .index("by_library_year", ["libraryId", "year"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["libraryId"] }),
 
   tracks: defineTable({
@@ -261,15 +282,30 @@ export default defineSchema({
     trackCount: v.number(),
     durationMs: v.number(),
     updatedAt: v.number(),
+    /** Missing on playlists from before sharing; they read as `private`. */
+    visibility: v.optional(playlistVisibility),
   }).index("by_owner", ["ownerId", "updatedAt"]),
 
   playlistItems: defineTable({
     playlistId: v.id("playlists"),
     trackId: v.id("tracks"),
+    /** Sort key within the playlist. Moving an entry gives it a key between its new neighbours. */
     position: v.number(),
+    /** Missing on entries from before sharing; the playlist's owner added those. */
+    addedBy: v.optional(v.id("users")),
   })
     .index("by_playlist", ["playlistId", "position"])
     .index("by_track", ["trackId"]),
+
+  /** People a playlist is shared with by name, and what each may do with it. */
+  playlistShares: defineTable({
+    playlistId: v.id("playlists"),
+    userId: v.id("users"),
+    role: playlistRole,
+    sharedBy: v.id("users"),
+  })
+    .index("by_playlist", ["playlistId", "userId"])
+    .index("by_user", ["userId"]),
 
   likes: defineTable({
     userId: v.id("users"),
@@ -330,8 +366,19 @@ export default defineSchema({
   /** A user's queue and play order. It changes when the song changes, not with the position. */
   playbackQueues: defineTable({
     userId: v.id("users"),
-    queue: v.array(v.id("tracks")),
-    /** The queue before shuffle, restored when shuffle turns off. */
+    /** The entries in play order. Missing on rows from before entries had IDs (see `queue`). */
+    items: v.optional(v.array(queueItem)),
+    /** The entry IDs in their order before shuffle, restored when shuffle turns off. */
+    unshuffledItems: v.optional(v.array(v.string())),
+    /** The number in the next entry's ID. */
+    nextItemId: v.optional(v.number()),
+    /** Whether autoplay adds similar songs when the queue runs out; missing reads as on. */
+    autoplay: v.optional(v.boolean()),
+    /**
+     * Song IDs from before entries had IDs. The next write to the queue, or the `queueItems`
+     * migration, turns them into `items` and clears them.
+     */
+    queue: v.optional(v.array(v.id("tracks"))),
     unshuffled: v.optional(v.array(v.id("tracks"))),
     index: v.number(),
     shuffle: v.boolean(),

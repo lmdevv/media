@@ -1,6 +1,9 @@
-import { PlaylistId } from "@music/commands/ids";
-import type { Playlist } from "@music/commands/models";
+import { PlaylistId, UserId } from "@music/commands/ids";
+import type { PlaylistItemId } from "@music/commands/ids";
+import type { Playlist, PlaylistEntry, UnavailableReason } from "@music/commands/models";
+import { can, canEditPlaylistItems, canManagePlaylist } from "@music/commands/permissions";
 import { useRead, useRun } from "@music/sdk/react";
+import { Badge } from "@music/ui/components/badge";
 import { Button } from "@music/ui/components/button";
 import { Dialog, DialogClose, DialogContent, DialogFooter } from "@music/ui/components/dialog";
 import { DropdownMenuItem } from "@music/ui/components/dropdown-menu";
@@ -10,7 +13,7 @@ import { cn } from "@music/ui/lib/utils";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Schema } from "effect";
-import { PlusIcon, SearchIcon } from "lucide-react";
+import { PlusIcon, SearchIcon, UsersIcon } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
@@ -19,17 +22,20 @@ import { DetailError } from "@/components/route-error";
 import type { MissingCopy } from "@/components/route-error";
 import { Artwork } from "@/components/library/artwork";
 import { CollectionHeader } from "@/components/library/collection-header";
+import { useReorder } from "@/components/library/reorder";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
+import { ShareDialog } from "@/components/playlists/share-dialog";
 import { useAddToPlaylist } from "@/components/playlists/track-menu";
 import { toastFailure, useAction } from "@/lib/action";
+import { entryTrack, playableTracks } from "@/lib/playlist-entries";
 import { formatAgo, formatDuration, formatTotal, plural } from "@/lib/format";
 
 const decodePlaylistId = Schema.decodeUnknownSync(PlaylistId);
 
 const MISSING: MissingCopy = {
-  title: "This playlist was deleted",
+  title: "You can't open this playlist",
   description:
-    "It may have been deleted on another device, or the link is wrong. Your songs are still in your library.",
+    "It was deleted, it isn't shared with you, or the link is wrong. Ask the person who sent it to share it with you.",
   back: { to: "/playlists", label: "Back to playlists" },
 };
 
@@ -41,6 +47,11 @@ export const Route = createFileRoute("/_app/playlists/$playlistId")({
   component: PlaylistPage,
   errorComponent: PlaylistError,
 });
+
+const REASONS: Readonly<Record<UnavailableReason, string>> = {
+  missing: "Unavailable",
+  no_access: "No access",
+};
 
 /** A 2×2 mosaic of the first covers, one cover, or the empty surface tile. */
 function PlaylistCover({
@@ -75,13 +86,36 @@ function PlaylistCover({
   );
 }
 
+/** How a playlist is shared, for the header badge; null when it is private. */
+const sharingLabel = (playlist: Playlist): string | null => {
+  if (playlist.access === "collaborator") return "Collaborative";
+
+  if (playlist.visibility === "shared") return "Shared by link";
+
+  return playlist.sharedWithPeople ? "Shared" : null;
+};
+
+/**
+ * "Added by" under each song, once someone besides the owner added any: a playlist only you
+ * edit doesn't need it.
+ */
+const useBylines = (playlist: Playlist, items: ReadonlyArray<PlaylistEntry>) => {
+  const mixed = items.some(
+    (item) => item.addedBy !== null && item.addedBy.id !== playlist.owner?.id,
+  );
+
+  return mixed
+    ? (index: number) => {
+        const addedBy = items[index]?.addedBy;
+
+        return addedBy === null || addedBy === undefined ? null : `Added by ${addedBy.name}`;
+      }
+    : undefined;
+};
+
 function PlaylistPage() {
   const { playlistId } = Route.useParams();
   const detail = useRead("playlists.get", { playlistId });
-  const me = useRead("account.me", {});
-  const remove = useRun("playlists.remove");
-  const [renaming, setRenaming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
   if (detail === undefined) {
     return (
@@ -98,10 +132,21 @@ function PlaylistPage() {
     );
   }
 
-  const { playlist, items } = detail;
-  const tracks = items.map((item) => item.track);
-  const playable = items.flatMap((item) => (item.available ? [item.track] : []));
-  const owner = me?.name ?? me?.email ?? "You";
+  return <PlaylistView playlist={detail.playlist} items={detail.items} />;
+}
+
+function PlaylistView({
+  playlist,
+  items,
+}: {
+  readonly playlist: Playlist;
+  readonly items: ReadonlyArray<PlaylistEntry>;
+}) {
+  const [dialog, setDialog] = useState<PlaylistDialog | null>(null);
+  const canShare = useCanShare(playlist);
+  const playable = playableTracks(items);
+  const owner = playlist.owner?.name ?? "Someone who left";
+  const badge = sharingLabel(playlist);
 
   const eyebrow = [
     "Playlist",
@@ -126,43 +171,185 @@ function PlaylistPage() {
         phoneSubtitle={owner}
         phoneMeta={`${plural(playlist.trackCount, "song")} · updated ${formatAgo(playlist.updatedAt)}`}
         tracks={playable}
-        menuExtra={
-          <>
-            <DropdownMenuItem onClick={() => setRenaming(true)}>Rename…</DropdownMenuItem>
-            <DropdownMenuItem tone="danger" onClick={() => setDeleting(true)}>
-              Delete playlist…
-            </DropdownMenuItem>
-          </>
+        link={{ kind: "playlist", id: playlist.id }}
+        badge={badge === null ? null : <Badge tone="surface">{badge}</Badge>}
+        actions={
+          canShare ? (
+            <Button variant="secondary" className="pl-4" onClick={() => setDialog("share")}>
+              <UsersIcon />
+              Share
+            </Button>
+          ) : null
         }
+        menuExtra={<PlaylistMenuItems playlist={playlist} open={setDialog} />}
       />
-      {items.length === 0 ? (
-        <EmptyPlaylist playlist={playlist} />
-      ) : (
-        <TrackList
-          tracks={tracks}
-          variant="list"
-          unavailable={(index) => items[index]?.available === false}
-          label={`Songs in ${playlist.name}`}
-          menuExtra={(track, index) => {
-            const item = items[index];
-
-            return item === undefined ? null : (
-              <DropdownMenuItem
-                onClick={() =>
-                  void remove({ playlistId: playlist.id, itemId: item.itemId })
-                    .then(() => toast.success(`Removed ${track.title} from ${playlist.name}`))
-                    .catch(toastFailure)
-                }
-              >
-                Remove from this playlist
-              </DropdownMenuItem>
-            );
-          }}
-        />
-      )}
-      <RenameDialog playlist={playlist} open={renaming} onOpenChange={setRenaming} />
-      <DeleteDialog playlist={playlist} open={deleting} onOpenChange={setDeleting} />
+      <PlaylistSongs playlist={playlist} items={items} />
+      <PlaylistDialogs playlist={playlist} dialog={dialog} setDialog={setDialog} />
     </div>
+  );
+}
+
+/** Whether the viewer may share this playlist: its owner, unless they are a guest. */
+const useCanShare = (playlist: Playlist): boolean => {
+  const me = useRead("account.me", {});
+
+  return canManagePlaylist(playlist.access) && me !== undefined && can(me.role, "share");
+};
+
+/** The dialogs a playlist's menu opens. */
+type PlaylistDialog = "edit" | "share" | "delete" | "leave";
+
+/**
+ * The playlist's own items in its "…" menu: the owner edits, shares, or deletes it; someone it was
+ * shared with by name can leave it. One opened only by link has nothing to leave.
+ */
+function PlaylistMenuItems({
+  playlist,
+  open,
+}: {
+  readonly playlist: Playlist;
+  readonly open: (dialog: PlaylistDialog) => void;
+}) {
+  const canManage = canManagePlaylist(playlist.access);
+  const canShare = useCanShare(playlist);
+  const sharedWithMe = useRead("playlists.shared", canManage ? "skip" : {});
+
+  if (canManage) {
+    return (
+      <>
+        <DropdownMenuItem onClick={() => open("edit")}>Edit details…</DropdownMenuItem>
+        {canShare ? (
+          <DropdownMenuItem onClick={() => open("share")}>Share…</DropdownMenuItem>
+        ) : null}
+        <DropdownMenuItem tone="danger" onClick={() => open("delete")}>
+          Delete playlist…
+        </DropdownMenuItem>
+      </>
+    );
+  }
+
+  return sharedWithMe?.some((entry) => entry.id === playlist.id) === true ? (
+    <DropdownMenuItem tone="danger" onClick={() => open("leave")}>
+      Leave playlist…
+    </DropdownMenuItem>
+  ) : null;
+}
+
+function PlaylistDialogs({
+  playlist,
+  dialog,
+  setDialog,
+}: {
+  readonly playlist: Playlist;
+  readonly dialog: PlaylistDialog | null;
+  readonly setDialog: (dialog: PlaylistDialog | null) => void;
+}) {
+  const me = useRead("account.me", {});
+
+  const props = (name: PlaylistDialog) => ({
+    playlist,
+    open: dialog === name,
+    onOpenChange: (open: boolean) => setDialog(open ? name : null),
+  });
+
+  if (!canManagePlaylist(playlist.access)) {
+    return me === undefined ? null : <LeaveDialog {...props("leave")} me={UserId.make(me.id)} />;
+  }
+
+  return (
+    <>
+      <EditDialog {...props("edit")} />
+      {can(me?.role ?? "guest", "share") ? <ShareDialog {...props("share")} /> : null}
+      <DeleteDialog {...props("delete")} />
+    </>
+  );
+}
+
+/**
+ * The playlist's songs. Owners and collaborators can remove and reorder them: drag on desktop,
+ * arrow keys on a row's handle, or Reorder mode with up/down buttons on phones.
+ */
+function PlaylistSongs({
+  playlist,
+  items,
+}: {
+  readonly playlist: Playlist;
+  readonly items: ReadonlyArray<PlaylistEntry>;
+}) {
+  const remove = useRun("playlists.remove");
+  const move = useRun("playlists.move");
+  const [reordering, setReordering] = useState(false);
+  const canEdit = canEditPlaylistItems(playlist.access);
+  const byline = useBylines(playlist, items);
+
+  const reorder = useReorder<PlaylistItemId>(
+    items.map((item) => item.itemId),
+    null,
+    async (itemId, afterItemId) => {
+      try {
+        await move(
+          afterItemId === null
+            ? { playlistId: playlist.id, itemId }
+            : { playlistId: playlist.id, itemId, afterItemId },
+        );
+      } catch (cause) {
+        toastFailure(cause);
+        throw cause;
+      }
+    },
+  );
+
+  if (items.length === 0) {
+    return canEdit ? (
+      <EmptyPlaylist playlist={playlist} />
+    ) : (
+      <p className="font-sans text-md/md text-text-muted">No songs in this playlist yet.</p>
+    );
+  }
+
+  return (
+    <>
+      {canEdit && items.length > 1 ? (
+        <div className="-mb-4 flex justify-end lg:hidden">
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-pressed={reordering}
+            onClick={() => setReordering((on) => !on)}
+          >
+            {reordering ? "Done" : "Reorder"}
+          </Button>
+        </div>
+      ) : null}
+      <TrackList
+        tracks={items.map(entryTrack)}
+        withheld={(index) => items[index]?.track === null}
+        variant="list"
+        unavailable={(index) => {
+          const reason = items[index]?.reason ?? null;
+
+          return reason === null ? null : REASONS[reason];
+        }}
+        byline={byline}
+        reorder={canEdit ? { reorder, mode: reordering ? "buttons" : "drag" } : undefined}
+        label={`Songs in ${playlist.name}`}
+        menuExtra={(track, index) => {
+          const item = items[index];
+
+          return item === undefined || !canEdit ? null : (
+            <DropdownMenuItem
+              onClick={() =>
+                void remove({ playlistId: playlist.id, itemId: item.itemId })
+                  .then(() => toast.success(`Removed ${track.title} from ${playlist.name}`))
+                  .catch(toastFailure)
+              }
+            >
+              Remove from this playlist
+            </DropdownMenuItem>
+          );
+        }}
+      />
+    </>
   );
 }
 
@@ -240,7 +427,8 @@ function AddResults({ playlist, query }: { readonly playlist: Playlist; readonly
   );
 }
 
-function RenameDialog({
+/** Name and description, which only the owner changes. */
+function EditDialog({
   playlist,
   open,
   onOpenChange,
@@ -249,15 +437,34 @@ function RenameDialog({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
 }) {
-  const rename = useRun("playlists.rename");
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {open ? <EditForm playlist={playlist} onDone={() => onOpenChange(false)} /> : null}
+    </Dialog>
+  );
+}
+
+function EditForm({
+  playlist,
+  onDone,
+}: {
+  readonly playlist: Playlist;
+  readonly onDone: () => void;
+}) {
+  const update = useRun("playlists.update");
   const [name, setName] = useState(playlist.name);
+  const [description, setDescription] = useState(playlist.description ?? "");
 
   const [submit, pending] = useAction(
     async () => {
-      await rename({ playlistId: playlist.id, name: name.trim() });
-      onOpenChange(false);
+      await update({
+        playlistId: playlist.id,
+        name: name.trim(),
+        description: description.trim(),
+      });
+      onDone();
     },
-    { success: () => "Renamed the playlist" },
+    { success: () => "Saved the playlist" },
   );
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -266,33 +473,41 @@ function RenameDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Rename playlist">
-        <form className="flex flex-col gap-6" onSubmit={onSubmit}>
-          <div className="flex flex-col gap-1.5">
-            <FieldLabel htmlFor="rename-playlist">Name</FieldLabel>
-            <Input
-              id="rename-playlist"
-              required
-              maxLength={120}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <DialogClose render={<Button variant="ghost" type="button" />}>Cancel</DialogClose>
-            <Button
-              type="submit"
-              variant="solid"
-              disabled={name.trim().length === 0}
-              pending={pending}
-            >
-              Save
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <DialogContent title="Edit details">
+      <form className="flex flex-col gap-6" onSubmit={onSubmit}>
+        <div className="flex flex-col gap-1.5">
+          <FieldLabel htmlFor="playlist-name">Name</FieldLabel>
+          <Input
+            id="playlist-name"
+            required
+            maxLength={120}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <FieldLabel htmlFor="playlist-description">Description</FieldLabel>
+          <Input
+            id="playlist-description"
+            maxLength={500}
+            placeholder="Add an optional description"
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          <DialogClose render={<Button variant="ghost" type="button" />}>Cancel</DialogClose>
+          <Button
+            type="submit"
+            variant="solid"
+            disabled={name.trim().length === 0}
+            pending={pending}
+          >
+            Save
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
   );
 }
 
@@ -322,7 +537,11 @@ function DeleteDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title={`Delete ${playlist.name}?`}
-        description="The playlist is removed. Your songs stay in the library."
+        description={
+          playlist.sharedWithPeople || playlist.visibility === "shared"
+            ? "The playlist is removed for everyone it's shared with. Your songs stay in the library."
+            : "The playlist is removed. Your songs stay in the library."
+        }
       >
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
@@ -337,4 +556,45 @@ function DeleteDialog({
 
 function PlaylistError(props: ErrorComponentProps) {
   return <DetailError {...props} copy={MISSING} />;
+}
+
+/** Leaving a playlist someone shared with you; they can share it again. */
+function LeaveDialog({
+  playlist,
+  me,
+  open,
+  onOpenChange,
+}: {
+  readonly playlist: Playlist;
+  readonly me: UserId;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+}) {
+  const unshare = useRun("playlists.unshare");
+  const navigate = useNavigate();
+
+  const [submit, pending] = useAction(
+    async () => {
+      onOpenChange(false);
+      await navigate({ to: "/playlists" });
+      await unshare({ playlistId: playlist.id, userId: me });
+    },
+    { success: () => `Left ${playlist.name}` },
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        title={`Leave ${playlist.name}?`}
+        description={`It leaves your Shared with you list. ${playlist.owner?.name ?? "The owner"} can share it with you again.`}
+      >
+        <DialogFooter>
+          <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
+          <Button variant="danger" pending={pending} onClick={() => void submit()}>
+            Leave playlist
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

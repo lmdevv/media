@@ -79,3 +79,50 @@ export const joinAsNewMember = async (admin: Page, browser: Browser): Promise<Pa
 
 /** A name no earlier run used, for things tests create. */
 export const unique = (prefix: string): string => `${prefix} ${Date.now().toString(36)}`;
+
+/** The password of everyone tests invite. */
+const PASSWORD = "password123";
+
+/** A fresh email address no earlier run used. */
+export const freshEmail = (prefix: string): string =>
+  `${unique(prefix).replace(" ", "-")}@music.local`;
+
+/** Creates an invite as `role` from the People screen and returns its link. */
+export const createInvite = async (
+  page: Page,
+  role: "Admin" | "Member" | "Guest",
+): Promise<string> => {
+  await page.goto("/settings/people");
+  await page.getByRole("button", { name: "Invite" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Invite someone" });
+
+  await dialog.getByRole("group", { name: "Role" }).getByRole("button", { name: role }).click();
+  await dialog.getByRole("button", { name: "Create invite" }).click();
+
+  const link = (await page.getByTestId("invite-link").textContent()) ?? "";
+
+  await page.getByRole("button", { name: "Done" }).click();
+
+  return link;
+};
+
+/** Joins through an invite link in a separate browser profile and waits for Home. */
+export const join = async (
+  browser: Browser,
+  link: string,
+  email: string,
+  name: string,
+): Promise<Page> => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  await page.goto(link);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Your name").fill(name);
+  await page.getByLabel("Choose a password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Join" }).click();
+  await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
+
+  return page;
+};

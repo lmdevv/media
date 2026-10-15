@@ -46,6 +46,8 @@ export const cn = createCn({
         "now-playing-art-sm",
         "now-playing-art-phone",
         "now-playing-thumb",
+        "drop-before",
+        "drop-after",
       ],
       spacing: [
         "row",

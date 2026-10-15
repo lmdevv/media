@@ -1,9 +1,11 @@
+import type { TrackId } from "@music/commands/ids";
 import type { Track } from "@music/commands/models";
 import { usePlayer } from "@music/player/react";
 import { Skeleton } from "@music/ui/components/skeleton";
 import { cn } from "@music/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { MoreHorizontalIcon, PlayIcon } from "lucide-react";
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { TrackMenu } from "@/components/playlists/track-menu";
@@ -12,6 +14,16 @@ import { formatDuration, formatQuality } from "@/lib/format";
 import { Artwork, PlayingBars } from "./artwork";
 import { usePlayTracks } from "./cards";
 import { LikeButton } from "./like-button";
+import { dropLine } from "@/lib/reorder";
+
+import { MoveButtons, ReorderHandle } from "./reorder";
+import type { Reorder } from "./reorder";
+
+/** Reordering for a list whose rows can move: drag (desktop) or up/down buttons (phone mode). */
+export interface ListReorder {
+  readonly reorder: Reorder;
+  readonly mode: "drag" | "buttons";
+}
 
 /**
  * `album` is the numbered Apple-style list (album detail); `list` is the songs table with covers,
@@ -45,7 +57,7 @@ const formatCell = "hidden w-27.5 shrink-0 font-mono text-xs/xs text-text-muted 
  */
 const useRowPlay = (
   tracks: ReadonlyArray<Track>,
-  unavailable: ((index: number) => boolean) | undefined,
+  unavailable: ((index: number) => string | null) | undefined,
 ) => {
   const play = usePlayTracks();
 
@@ -56,8 +68,9 @@ const useRowPlay = (
       return;
     }
 
-    const playable = tracks.filter((_, position) => !unavailable(position));
-    const before = tracks.slice(0, index).filter((_, position) => !unavailable(position));
+    const playable = tracks.filter((_, position) => unavailable(position) === null);
+
+    const before = tracks.slice(0, index).filter((_, position) => unavailable(position) === null);
 
     void play(playable, { index: before.length });
   };
@@ -74,6 +87,10 @@ export function TrackList({
   label,
   header = true,
   unavailable,
+  withheld,
+  byline,
+  highlight,
+  reorder,
 }: {
   readonly tracks: ReadonlyArray<Track>;
   readonly variant: TrackListVariant;
@@ -81,10 +98,22 @@ export function TrackList({
   readonly label: string;
   readonly header?: boolean;
   /**
-   * Whether the song at an index can't play because its file is gone. Such rows are greyed out,
-   * can't be played, and keep their menu so they can be removed.
+   * Why the song at an index can't play ("Unavailable" when its file is gone, "No access" when it
+   * is in a library you can't listen to), or null when it can. Such rows are greyed out, can't be
+   * played, and keep their menu so they can be removed.
    */
-  readonly unavailable?: (index: number) => boolean;
+  readonly unavailable?: (index: number) => string | null;
+  /**
+   * Whether the row at an index stands in for a song you may not know anything about: its menu
+   * keeps only `menuExtra`.
+   */
+  readonly withheld?: (index: number) => boolean;
+  /** More to say under a row's artist, such as who added it to a shared playlist. */
+  readonly byline?: ((index: number) => string | null) | undefined;
+  /** A song to highlight and scroll to, from a shared song link. */
+  readonly highlight?: TrackId | null;
+  /** Lets rows be moved; the list's order then comes back from the server. */
+  readonly reorder?: ListReorder | undefined;
 }) {
   const player = usePlayer();
   const play = useRowPlay(tracks, unavailable);
@@ -137,7 +166,12 @@ export function TrackList({
           variant={variant}
           current={track.id === currentId}
           playing={track.id === currentId && playing}
-          available={unavailable?.(index) !== true}
+          unavailable={unavailable?.(index) ?? null}
+          withheld={withheld?.(index) ?? false}
+          byline={byline?.(index) ?? null}
+          highlighted={highlight === track.id}
+          count={tracks.length}
+          reorder={reorder}
           onPlay={() => play(index)}
           menuExtra={menuExtra?.(track, index)}
         />
@@ -146,13 +180,69 @@ export function TrackList({
   );
 }
 
+/** The drag handle (desktop) or up/down buttons (phone reorder mode) of a movable row. */
+function RowMover({
+  reorder,
+  label,
+  index,
+  count,
+  place,
+}: {
+  readonly reorder: ListReorder | undefined;
+  readonly label: string;
+  readonly index: number;
+  readonly count: number;
+  /** The handle sits before the row; the buttons go before the row's menu. */
+  readonly place: "start" | "end";
+}) {
+  if (reorder === undefined) return null;
+
+  if (reorder.mode === "drag" && place === "start") {
+    return (
+      <span role="cell" className="relative hidden shrink-0 lg:flex">
+        <ReorderHandle
+          label={label}
+          index={index}
+          count={count}
+          reorder={reorder.reorder}
+          className="-mx-1 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
+        />
+      </span>
+    );
+  }
+
+  if (reorder.mode === "buttons" && place === "end") {
+    return (
+      <span role="cell" className="relative flex shrink-0">
+        <MoveButtons label={label} index={index} count={count} reorder={reorder.reorder} />
+      </span>
+    );
+  }
+
+  return null;
+}
+
+/** Drag props and the drop line for a movable row. */
+const movable = (reorder: ListReorder | undefined, index: number) =>
+  reorder?.mode === "drag"
+    ? {
+        props: reorder.reorder.rowProps(index),
+        line: dropLine(reorder.reorder.dropSide(index)),
+      }
+    : { props: {}, line: null };
+
 function TrackRow({
   track,
   index,
   variant,
   current,
   playing,
-  available,
+  unavailable,
+  withheld,
+  byline,
+  highlighted,
+  count,
+  reorder,
   onPlay,
   menuExtra,
 }: {
@@ -161,14 +251,37 @@ function TrackRow({
   readonly variant: TrackListVariant;
   readonly current: boolean;
   readonly playing: boolean;
-  readonly available: boolean;
+  readonly unavailable: string | null;
+  readonly withheld: boolean;
+  readonly byline: string | null;
+  readonly highlighted: boolean;
+  readonly count: number;
+  readonly reorder: ListReorder | undefined;
   readonly onPlay: () => void;
   readonly menuExtra: ReactNode;
 }) {
   const number = track.trackNumber ?? index + 1;
+  const row = useRef<HTMLDivElement>(null);
+  const move = movable(reorder, index);
 
-  if (!available) {
-    return <UnavailableRow track={track} number={number} variant={variant} menuExtra={menuExtra} />;
+  // A shared song link opens the album scrolled to the song.
+  useEffect(() => {
+    if (highlighted) row.current?.scrollIntoView({ block: "center" });
+  }, [highlighted]);
+
+  if (unavailable !== null) {
+    return (
+      <UnavailableRow
+        track={track}
+        number={number}
+        variant={variant}
+        reason={unavailable}
+        withheld={withheld}
+        byline={byline}
+        menuExtra={menuExtra}
+        mover={{ reorder, index, count }}
+      />
+    );
   }
 
   const playButton = (
@@ -189,11 +302,19 @@ function TrackRow({
 
   return (
     <div
+      ref={row}
       role="row"
       aria-current={current ? "true" : undefined}
+      data-highlighted={highlighted ? "" : undefined}
       onDoubleClick={onPlay}
-      className={rowClassName(variant)}
+      {...move.props}
+      className={cn(
+        rowClassName(variant),
+        highlighted && "bg-surface ring-2 ring-accent/40",
+        move.line,
+      )}
     >
+      <RowMover reorder={reorder} label={track.title} index={index} count={count} place="start" />
       {variant === "album" ? (
         <span
           role="cell"
@@ -252,7 +373,9 @@ function TrackRow({
           {track.title}
         </span>
         {variant === "list" ? (
-          <span className="truncate font-sans text-sm/xs text-text-muted">{track.artist}</span>
+          <span className="truncate font-sans text-sm/xs text-text-muted">
+            {byline === null ? track.artist : `${track.artist} · ${byline}`}
+          </span>
         ) : null}
       </span>
 
@@ -289,6 +412,7 @@ function TrackRow({
       >
         {formatDuration(track.durationMs)}
       </span>
+      <RowMover reorder={reorder} label={track.title} index={index} count={count} place="end" />
       <span role="cell" className="relative flex w-12 shrink-0 justify-center lg:w-9">
         <TrackMenu
           track={track}
@@ -302,22 +426,38 @@ function TrackRow({
 }
 
 /**
- * A song whose file is gone from disk, greyed out like Spotify's unavailable songs: it can't play,
- * and its menu keeps the actions that still work, such as removing it from the playlist.
+ * A song that can't play here, greyed out like Spotify's unavailable songs: its file is gone, or
+ * it is in a library you can't listen to. Its menu keeps the actions that still work, such as
+ * removing it from the playlist.
  */
 function UnavailableRow({
   track,
   number,
   variant,
+  reason,
+  withheld,
+  byline,
   menuExtra,
+  mover,
 }: {
   readonly track: Track;
   readonly number: number;
   readonly variant: TrackListVariant;
+  readonly reason: string;
+  readonly withheld: boolean;
+  readonly byline: string | null;
   readonly menuExtra: ReactNode;
+  readonly mover: {
+    readonly reorder: ListReorder | undefined;
+    readonly index: number;
+    readonly count: number;
+  };
 }) {
+  const move = movable(mover.reorder, mover.index);
+
   return (
-    <div role="row" className={cn(rowClassName(variant), "gap-3")}>
+    <div role="row" {...move.props} className={cn(rowClassName(variant), "gap-3", move.line)}>
+      <RowMover {...mover} label={track.title} place="start" />
       <span role="cell" className="flex min-w-0 grow items-center gap-3 opacity-(--opacity-muted)">
         {variant === "album" ? (
           <span
@@ -341,7 +481,7 @@ function UnavailableRow({
             {track.title}
           </span>
           <span className="truncate font-sans text-sm/xs text-text-muted">
-            Unavailable · {track.artist}
+            {[reason, track.artist, byline].filter((part) => part !== null).join(" · ")}
           </span>
         </span>
         {variant === "list" ? (
@@ -357,10 +497,12 @@ function UnavailableRow({
           {formatDuration(track.durationMs)}
         </span>
       </span>
+      <RowMover {...mover} label={track.title} place="end" />
       <span role="cell" className="relative flex w-12 shrink-0 justify-center lg:w-9">
         <TrackMenu
           track={track}
           playable={false}
+          withheld={withheld}
           extra={menuExtra}
           className="lg:opacity-0 lg:group-hover/row:opacity-100 lg:focus-visible:opacity-100 lg:data-popup-open:opacity-100"
           trigger={<MoreHorizontalIcon className="size-5" />}

@@ -17,6 +17,7 @@ import { perform } from "@/components/player/controls";
 import { useQueueActions } from "@/components/playlists/track-menu";
 import { useUi } from "@/components/shell/ui-state";
 import { formatDuration, formatTotal, plural } from "@/lib/format";
+import { playableTracks } from "@/lib/playlist-entries";
 
 import type { MenuContext } from "./args-form";
 import { CommandPreview } from "./command-preview";
@@ -377,7 +378,7 @@ function PlaylistPreview({
           disabled={detail === undefined || detail.items.length === 0}
           onClick={() => {
             onClose();
-            void play(detail?.items.flatMap((item) => (item.available ? [item.track] : [])) ?? []);
+            void play(playableTracks(detail?.items ?? []));
           }}
         >
           <PlayIcon fill="currentColor" strokeWidth={0} />

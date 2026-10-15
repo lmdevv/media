@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
-import type { Browser, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
-import { seed, signIn, unique } from "./support";
+import { createInvite, freshEmail, join, seed, signIn, unique } from "./support";
 
 test.describe.configure({ mode: "serial" });
 
@@ -9,43 +9,6 @@ test.beforeAll(() => {
   // Idempotent: ensures the owner, the /music library, and its songs.
   seed();
 });
-
-const PASSWORD = "password123";
-
-/** A fresh email address no earlier run used. */
-const freshEmail = (prefix: string): string => `${unique(prefix).replace(" ", "-")}@music.local`;
-
-/** Creates an invite as `role` from the People screen and returns its link. */
-const createInvite = async (page: Page, role: "Admin" | "Member" | "Guest"): Promise<string> => {
-  await page.goto("/settings/people");
-  await page.getByRole("button", { name: "Invite" }).click();
-
-  const dialog = page.getByRole("dialog", { name: "Invite someone" });
-
-  await dialog.getByRole("group", { name: "Role" }).getByRole("button", { name: role }).click();
-  await dialog.getByRole("button", { name: "Create invite" }).click();
-
-  const link = (await page.getByTestId("invite-link").textContent()) ?? "";
-
-  await page.getByRole("button", { name: "Done" }).click();
-
-  return link;
-};
-
-/** Joins through an invite link in a separate browser profile and waits for Home. */
-const join = async (browser: Browser, link: string, email: string, name: string): Promise<Page> => {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-
-  await page.goto(link);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Your name").fill(name);
-  await page.getByLabel("Choose a password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Join" }).click();
-  await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
-
-  return page;
-};
 
 /** Opens the actions menu of someone on the People screen and picks `item`. */
 const personAction = async (page: Page, name: string, item: string): Promise<void> => {

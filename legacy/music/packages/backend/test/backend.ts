@@ -90,6 +90,8 @@ export interface SeedFile {
   readonly album?: string;
   readonly durationMs?: number;
   readonly artHash?: string;
+  readonly genre?: string;
+  readonly year?: number;
 }
 
 /**
@@ -143,6 +145,8 @@ export const upsertFiles = async (
       codec: "flac",
       lossless: true,
       artHash: file.artHash ?? DEFAULT_ART,
+      genre: file.genre,
+      year: file.year,
     })),
   });
 };

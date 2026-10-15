@@ -138,6 +138,8 @@
   --shadow-now-playing-art: 0 40px 80px rgb(0 0 0 / 45%);
   --shadow-now-playing-art-sm: 0 32px 64px rgb(0 0 0 / 45%);
   --shadow-now-playing-art-phone: 0 24px 48px rgb(0 0 0 / 40%);
+  --shadow-drop-before: inset 0 2px 0 var(--color-accent);
+  --shadow-drop-after: inset 0 -2px 0 var(--color-accent);
   --shadow-now-playing-thumb: 0 6px 14px rgb(0 0 0 / 35%);
 }
 

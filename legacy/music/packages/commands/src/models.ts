@@ -10,6 +10,7 @@ import {
   LibraryId,
   PlaylistId,
   PlaylistItemId,
+  QueueItemId,
   TrackId,
   UserId,
 } from "./ids";
@@ -196,6 +197,32 @@ export interface SearchResults extends Schema.Schema.Type<typeof SearchResults> 
 /** Songs a playlist holds at most. */
 export const PLAYLIST_LIMIT = 2000;
 
+/**
+ * Someone named on shared things: who owns a playlist, who added a song. `name` is their display
+ * name; emails are never shown to other people.
+ */
+export const Contributor = Schema.Struct({ id: UserId, name: Schema.String });
+
+export interface Contributor extends Schema.Schema.Type<typeof Contributor> {}
+
+/**
+ * Who can open a playlist besides its owner and the people it is shared with: nobody (`private`),
+ * or anyone signed in to the server who has the link (`shared`), as a viewer.
+ */
+export const PlaylistVisibility = Schema.Literals(["private", "shared"]);
+
+export type PlaylistVisibility = typeof PlaylistVisibility.Type;
+
+/** A role on one playlist given to a person: `viewer` plays it, `collaborator` also edits songs. */
+export const PlaylistRole = Schema.Literals(["viewer", "collaborator"]);
+
+export type PlaylistRole = typeof PlaylistRole.Type;
+
+/** What the viewer may do with a playlist; see `canEditPlaylistItems` in `permissions.ts`. */
+export const PlaylistAccess = Schema.Literals(["owner", "collaborator", "viewer"]);
+
+export type PlaylistAccess = typeof PlaylistAccess.Type;
+
 export const Playlist = Schema.Struct({
   id: PlaylistId,
   name: Schema.String,
@@ -204,19 +231,40 @@ export const Playlist = Schema.Struct({
   durationMs: Millis,
   artUrls: Schema.Array(Schema.String),
   updatedAt: Timestamp,
+  /** Null when the owner's account is gone. */
+  owner: Schema.NullOr(Contributor),
+  visibility: PlaylistVisibility,
+  /** Whether the owner shared it with anyone by name. */
+  sharedWithPeople: Schema.Boolean,
+  access: PlaylistAccess,
 });
 
 export interface Playlist extends Schema.Schema.Type<typeof Playlist> {}
 
+/**
+ * Why a playlist entry can't play: its file is gone from disk (`missing`; it comes back if the
+ * file does), or it is in a library the viewer can't listen to (`no_access`). Sharing a playlist
+ * never grants library access.
+ */
+export const UnavailableReason = Schema.Literals(["missing", "no_access"]);
+
+export type UnavailableReason = typeof UnavailableReason.Type;
+
 export const PlaylistEntry = Schema.Struct({
   itemId: PlaylistItemId,
   addedAt: Timestamp,
-  track: Track,
+  /** The song; null when it is in a library you can't read (`reason: "no_access"`). */
+  track: Schema.NullOr(Track),
+  /** The song's length, which every entry shows, the withheld ones too. */
+  durationMs: Millis,
   /**
-   * False when the song's file is gone from disk. The entry stays, greyed out, so you can see what
-   * the playlist held and remove it; it comes back if the file does.
+   * False when the song can't play here (see `reason`). The entry stays, greyed out, so you can
+   * see what the playlist holds and remove it.
    */
   available: Schema.Boolean,
+  reason: Schema.NullOr(UnavailableReason),
+  /** Who added the song; null when their account is gone. */
+  addedBy: Schema.NullOr(Contributor),
 });
 
 export interface PlaylistEntry extends Schema.Schema.Type<typeof PlaylistEntry> {}
@@ -227,6 +275,34 @@ export const PlaylistDetail = Schema.Struct({
 });
 
 export interface PlaylistDetail extends Schema.Schema.Type<typeof PlaylistDetail> {}
+
+/** Someone a playlist is shared with by name. */
+export const PlaylistShare = Schema.Struct({ person: Contributor, role: PlaylistRole });
+
+export interface PlaylistShare extends Schema.Schema.Type<typeof PlaylistShare> {}
+
+/** Who a playlist is shared with, as its owner sees it. */
+export const PlaylistSharing = Schema.Struct({
+  visibility: PlaylistVisibility,
+  people: Schema.Array(PlaylistShare),
+});
+
+export interface PlaylistSharing extends Schema.Schema.Type<typeof PlaylistSharing> {}
+
+/** Someone on the server you can share with. */
+export const DirectoryPerson = Schema.Struct({ id: UserId, name: Schema.String, role: Role });
+
+export interface DirectoryPerson extends Schema.Schema.Type<typeof DirectoryPerson> {}
+
+/** What a share link points at. A track link opens its album with the song highlighted. */
+export const LinkKind = Schema.Literals(["album", "artist", "playlist", "track"]);
+
+export type LinkKind = typeof LinkKind.Type;
+
+/** A link to open in the web app: `path` is relative to the server's address. */
+export const ShareLink = Schema.Struct({ path: Schema.String, title: Schema.String });
+
+export interface ShareLink extends Schema.Schema.Type<typeof ShareLink> {}
 
 export const HistoryEntry = Schema.Struct({
   playedAt: Timestamp,
@@ -265,12 +341,32 @@ export const PlaybackPosition = Schema.Struct({
 
 export interface PlaybackPosition extends Schema.Schema.Type<typeof PlaybackPosition> {}
 
+/**
+ * One entry in the play queue: the song, plus the entry's own ID (stable while it is queued, so
+ * commands address it by ID rather than by position), who added it, and whether autoplay did.
+ */
+export const QueueEntry = Schema.Struct({
+  ...Track.fields,
+  itemId: QueueItemId,
+  /** Null for entries queued before entries recorded who added them, or whose account is gone. */
+  addedBy: Schema.NullOr(Contributor),
+  /** Added by autoplay when the queue ran out, not by a person. */
+  autoplay: Schema.Boolean,
+});
+
+export interface QueueEntry extends Schema.Schema.Type<typeof QueueEntry> {}
+
 /** The user's queue and play order. It changes when the song or the queue changes. */
 export const PlaybackQueue = Schema.Struct({
-  queue: Schema.Array(Track),
+  queue: Schema.Array(QueueEntry),
   index: Count,
   shuffle: Schema.Boolean,
   repeat: RepeatMode,
+  /**
+   * Whether autoplay keeps the music going when the queue runs out, with songs from libraries you
+   * can read: the same artist, then the same genre, then albums from around the same year.
+   */
+  autoplay: Schema.Boolean,
 });
 
 export interface PlaybackQueue extends Schema.Schema.Type<typeof PlaybackQueue> {}

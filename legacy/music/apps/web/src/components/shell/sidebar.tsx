@@ -1,3 +1,4 @@
+import type { Playlist } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
 import { Kbd } from "@music/ui/components/kbd";
 import { Tooltip } from "@music/ui/components/tooltip";
@@ -40,6 +41,30 @@ const itemClassName =
 
 const activeClassName = "bg-bg font-semibold text-text dark:bg-surface-raised";
 
+/** One playlist in the sidebar: its cover, name, and a short detail line. */
+function PlaylistLink({
+  playlist,
+  detail,
+}: {
+  readonly playlist: Playlist;
+  readonly detail: string;
+}) {
+  return (
+    <Link
+      to="/playlists/$playlistId"
+      params={{ playlistId: playlist.id }}
+      className="flex h-11 shrink-0 items-center gap-2.5 rounded-sm px-1.5 outline-none hover:bg-bg/60 focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-surface"
+      activeProps={{ className: "bg-bg dark:bg-surface-raised", "aria-current": "page" }}
+    >
+      <Artwork url={playlist.artUrls[0] ?? null} seed={playlist.id} className="size-8 rounded-xs" />
+      <span className="flex min-w-0 flex-col gap-px">
+        <span className="truncate font-sans text-base/sm text-text">{playlist.name}</span>
+        <span className="truncate font-sans text-xs/xs text-text-muted">{detail}</span>
+      </span>
+    </Link>
+  );
+}
+
 /**
  * The desktop library sidebar from Paper: wordmark and ⌘K, main navigation, your playlists, and
  * your account. Light mode insets it as a rounded surface; dark mode draws it as a panel.
@@ -47,6 +72,7 @@ const activeClassName = "bg-bg font-semibold text-text dark:bg-surface-raised";
 export function Sidebar() {
   const { setCommandOpen, openNewPlaylist } = useUi();
   const playlists = useRead("playlists.list", {});
+  const shared = useRead("playlists.shared", {});
   const me = useRead("account.me", {});
   const name = me?.name ?? me?.email ?? "";
 
@@ -104,26 +130,26 @@ export function Sidebar() {
             </p>
           ) : (
             playlists.map((playlist) => (
-              <Link
+              <PlaylistLink
                 key={playlist.id}
-                to="/playlists/$playlistId"
-                params={{ playlistId: playlist.id }}
-                className="flex h-11 shrink-0 items-center gap-2.5 rounded-sm px-1.5 outline-none hover:bg-bg/60 focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-surface"
-                activeProps={{ className: "bg-bg dark:bg-surface-raised", "aria-current": "page" }}
-              >
-                <Artwork
-                  url={playlist.artUrls[0] ?? null}
-                  seed={playlist.id}
-                  className="size-8 rounded-xs"
-                />
-                <span className="flex min-w-0 flex-col gap-px">
-                  <span className="truncate font-sans text-base/sm text-text">{playlist.name}</span>
-                  <span className="truncate font-sans text-xs/xs text-text-muted">
-                    {plural(playlist.trackCount, "song")}
-                  </span>
-                </span>
-              </Link>
+                playlist={playlist}
+                detail={plural(playlist.trackCount, "song")}
+              />
             ))
+          )}
+          {shared === undefined || shared.length === 0 ? null : (
+            <section aria-label="Shared with you" className="flex flex-col gap-0.5 pt-3">
+              <span className="px-2.5 pb-1.5 font-mono text-xs/xs tracking-mono text-text-muted">
+                SHARED WITH YOU
+              </span>
+              {shared.map((playlist) => (
+                <PlaylistLink
+                  key={playlist.id}
+                  playlist={playlist}
+                  detail={`${playlist.owner?.name ?? "Someone"} · ${plural(playlist.trackCount, "song")}`}
+                />
+              ))}
+            </section>
           )}
         </div>
       </div>

@@ -9,6 +9,7 @@ import { cn } from "@music/ui/lib/utils";
 import type { ReactNode } from "react";
 
 import { formatDuration } from "@/lib/format";
+import { WITHHELD_ARTIST, WITHHELD_TITLE, playableTracks } from "@/lib/playlist-entries";
 
 import type { Entity, FieldSpec, FormValues } from "./fields";
 
@@ -57,6 +58,7 @@ const useEntityOptions = (
   const invites = useRead("invites.list", entity === "invite" ? {} : "skip");
   const devices = useRead("devices.list", entity === "device" ? {} : "skip");
   const people = useRead("people.list", entity === "person" ? {} : "skip");
+  const directory = useRead("people.directory", entity === "sharee" ? {} : "skip");
 
   const artist = useRead(
     "artists.get",
@@ -86,9 +88,7 @@ const useEntityOptions = (
       }
 
       // Songs whose file is gone can't play, so the option leaves them out.
-      const playable = (playlist?.items ?? []).flatMap((item) =>
-        item.available ? [item.track.id] : [],
-      );
+      const playable = playableTracks(playlist?.items ?? []).map((track) => track.id);
 
       if (many && playlist !== undefined && playable.length > 0) {
         options.push({
@@ -174,8 +174,27 @@ const useEntityOptions = (
       return (playlist?.items ?? []).map((item) => ({
         key: item.itemId,
         value: item.itemId,
-        label: item.track.title,
-        detail: item.track.artist,
+        label: item.track?.title ?? WITHHELD_TITLE,
+        detail: item.track?.artist ?? WITHHELD_ARTIST,
+      }));
+
+    case "queueItem":
+      return player.queue.map((entry, position) => ({
+        key: entry.itemId,
+        value: entry.itemId,
+        label: entry.title,
+        detail:
+          position === player.index
+            ? "Playing now"
+            : `${entry.artist}${entry.autoplay ? " · Autoplay" : ""}`,
+      }));
+
+    case "sharee":
+      return (directory ?? []).map((person) => ({
+        key: person.id,
+        value: person.id,
+        label: person.name,
+        detail: roleLabel(person.role),
       }));
 
     case "library":

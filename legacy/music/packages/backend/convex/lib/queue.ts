@@ -1,7 +1,10 @@
 /**
  * The play queue. Every reader and writer goes through `loadQueue`, which drops songs the viewer
- * can no longer read (their library was deleted or hidden) and moves the index with them, so an
- * index a client sends always means the song that client was shown.
+ * can no longer read (their library was deleted or hidden) and moves the index with them.
+ *
+ * Each entry has its own ID, unique within the queue and never reused, so commands name the entry
+ * they mean: a remove or move sent from one device while another device changed the queue still
+ * reaches the right row, or fails when that row is gone.
  */
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
@@ -11,33 +14,48 @@ import type { ReadCtx, Viewer } from "./viewer";
 
 type TrackId = Id<"tracks">;
 
+/** One queue entry. */
+export interface QueueItem {
+  readonly id: string;
+  readonly trackId: TrackId;
+  /** Who added it; unknown for entries converted from queues stored before entries had IDs. */
+  readonly addedBy: Id<"users"> | undefined;
+  /** Added by autoplay, not by a person. */
+  readonly autoplay: boolean;
+}
+
 /** A queue as stored, before the viewer's access is applied. */
 export interface StoredQueue {
-  readonly queue: ReadonlyArray<TrackId>;
-  /** The order before shuffle, kept while shuffle is on and restored when it turns off. */
-  readonly unshuffled: ReadonlyArray<TrackId> | undefined;
+  readonly items: ReadonlyArray<QueueItem>;
+  /** The entry IDs in their order before shuffle, kept while shuffle is on. */
+  readonly unshuffled: ReadonlyArray<string> | undefined;
   readonly index: number;
   readonly shuffle: boolean;
   readonly repeat: Doc<"playbackQueues">["repeat"];
   /** The song whose play history last recorded; cleared when a song starts again. */
   readonly reportedTrackId: TrackId | undefined;
+  /** The number in the next entry's ID. */
+  readonly nextItemId: number;
+  readonly autoplay: boolean;
 }
 
 /** A queue the viewer may play: every entry is a song they can read. */
 export interface Queue extends StoredQueue {
-  /** The songs of `queue`, in order. */
+  /** The songs of `items`, in order. */
   readonly tracks: ReadonlyArray<Doc<"tracks">>;
   /** Normalising changed the stored queue, so the next write should save it. */
   readonly stale: boolean;
 }
 
 const EMPTY: StoredQueue = {
-  queue: [],
+  items: [],
   unshuffled: undefined,
   index: 0,
   shuffle: false,
   repeat: "off",
   reportedTrackId: undefined,
+  nextItemId: 1,
+  autoplay: true,
 };
 
 const findQueueRow = (ctx: ReadCtx, userId: Id<"users">) =>
@@ -45,6 +63,35 @@ const findQueueRow = (ctx: ReadCtx, userId: Id<"users">) =>
     .query("playbackQueues")
     .withIndex("by_user", (q) => q.eq("userId", userId))
     .unique();
+
+/**
+ * Entries for a queue stored as song IDs, numbered from 1 in play order. The numbering is the same
+ * on every read, so an ID a client saw before the queue was first rewritten still names its entry.
+ * Each song in the old unshuffled order takes the first entry of that song not yet taken.
+ */
+export const itemsFromTrackIds = (
+  queue: ReadonlyArray<TrackId>,
+  unshuffled: ReadonlyArray<TrackId> | undefined,
+): Pick<StoredQueue, "items" | "unshuffled" | "nextItemId"> => {
+  const items = queue.map((trackId, position): QueueItem => ({
+    id: String(position + 1),
+    trackId,
+    addedBy: undefined,
+    autoplay: false,
+  }));
+
+  const free = new Map<TrackId, Array<string>>();
+
+  for (const item of items) free.set(item.trackId, [...(free.get(item.trackId) ?? []), item.id]);
+
+  const order = unshuffled?.flatMap((trackId) => {
+    const id = free.get(trackId)?.shift();
+
+    return id === undefined ? [] : [id];
+  });
+
+  return { items, unshuffled: order, nextItemId: items.length + 1 };
+};
 
 /** Whether a session still carries the queue fields older versions stored on it. */
 export const hasLegacyQueue = (session: Doc<"playbackSessions">): boolean =>
@@ -57,23 +104,43 @@ export const hasLegacyQueue = (session: Doc<"playbackSessions">): boolean =>
 
 /** The queue an older version stored on the session. */
 export const legacyQueue = (session: Doc<"playbackSessions">): StoredQueue => ({
-  queue: session.queue ?? [],
-  unshuffled: session.unshuffled,
+  ...EMPTY,
+  ...itemsFromTrackIds(session.queue ?? [], session.unshuffled),
   index: session.index ?? 0,
   shuffle: session.shuffle ?? false,
   repeat: session.repeat ?? "off",
   reportedTrackId: session.reportedTrackId,
 });
 
-/** The queue a `playbackQueues` row holds. */
-export const rowQueue = (row: Doc<"playbackQueues">): StoredQueue => ({
-  queue: row.queue,
-  unshuffled: row.unshuffled,
-  index: row.index,
-  shuffle: row.shuffle,
-  repeat: row.repeat,
-  reportedTrackId: row.reportedTrackId,
-});
+/** Whether a `playbackQueues` row still stores song IDs instead of entries. */
+export const hasLegacyItems = (row: Doc<"playbackQueues">): boolean =>
+  row.items === undefined || row.queue !== undefined || row.unshuffled !== undefined;
+
+/** The queue a `playbackQueues` row holds, in either representation. */
+export const rowQueue = (row: Doc<"playbackQueues">): StoredQueue => {
+  const entries =
+    row.items === undefined
+      ? itemsFromTrackIds(row.queue ?? [], row.unshuffled)
+      : {
+          items: row.items.map((item): QueueItem => ({
+            id: item.id,
+            trackId: item.trackId,
+            addedBy: item.addedBy,
+            autoplay: item.autoplay === true,
+          })),
+          unshuffled: row.unshuffledItems,
+          nextItemId: row.nextItemId ?? row.items.length + 1,
+        };
+
+  return {
+    ...entries,
+    index: row.index,
+    shuffle: row.shuffle,
+    repeat: row.repeat,
+    reportedTrackId: row.reportedTrackId,
+    autoplay: row.autoplay ?? true,
+  };
+};
 
 /** Clears the legacy queue fields from a session. */
 export const clearedLegacyQueue = {
@@ -98,55 +165,88 @@ export const storedQueue = async (ctx: ReadCtx, userId: Id<"users">): Promise<St
   return session === null ? EMPTY : legacyQueue(session);
 };
 
+/** The position of the entry `itemId`, or null when it is not in the queue. */
+export const itemPosition = (queue: StoredQueue, itemId: string): number | null => {
+  const position = queue.items.findIndex((item) => item.id === itemId);
+
+  return position === -1 ? null : position;
+};
+
+/** Who added new entries, or that autoplay did. */
+export type ItemOrigin =
+  | { readonly kind: "person"; readonly userId: Id<"users"> }
+  | { readonly kind: "autoplay" };
+
+/** Entries just made, and the queue's counter after them. */
+export interface NewItems {
+  readonly items: ReadonlyArray<QueueItem>;
+  readonly nextItemId: number;
+}
+
+/** New entries for `trackIds`, numbered on from the queue's counter. */
+export const newItems = (
+  queue: Pick<StoredQueue, "nextItemId">,
+  trackIds: ReadonlyArray<TrackId>,
+  origin: ItemOrigin,
+): NewItems => ({
+  items: trackIds.map((trackId, offset) => ({
+    id: String(queue.nextItemId + offset),
+    trackId,
+    addedBy: origin.kind === "person" ? origin.userId : undefined,
+    autoplay: origin.kind === "autoplay",
+  })),
+  nextItemId: queue.nextItemId + trackIds.length,
+});
+
 /**
- * The items of `order`, in that order, each kept as many times as it appears in `kept`. Used to
- * keep the unshuffled order in step with the queue: removing a song from the queue removes one
- * copy of it from the unshuffled order too.
+ * Where songs added "to the end" go: after the entries people queued, before the first upcoming
+ * entry autoplay added, so autoplay always plays last.
  */
-export const restrictTo = <Item>(
-  order: ReadonlyArray<Item>,
-  kept: ReadonlyArray<Item>,
-): Array<Item> => {
-  const remaining = new Map<Item, number>();
+export const endOfQueued = (queue: StoredQueue): number => {
+  const autoplayAt = queue.items.findIndex(
+    (item, position) => position > queue.index && item.autoplay,
+  );
 
-  for (const item of kept) remaining.set(item, (remaining.get(item) ?? 0) + 1);
+  return autoplayAt === -1 ? queue.items.length : autoplayAt;
+};
 
-  return order.filter((item) => {
-    const count = remaining.get(item) ?? 0;
+/** `order` without the IDs that are no longer entries of `items`. */
+export const keptOrder = (
+  order: ReadonlyArray<string>,
+  items: ReadonlyArray<QueueItem>,
+): Array<string> => {
+  const present = new Set(items.map((item) => item.id));
 
-    if (count === 0) return false;
-    remaining.set(item, count - 1);
-
-    return true;
-  });
+  return order.filter((id) => present.has(id));
 };
 
 /**
- * Drops the entries `lookup` cannot find and moves the index to the same song, or to the next one
- * left when that song was dropped. Pure, so it can be checked on its own.
+ * Drops the entries `lookup` cannot find and moves the index to the same entry, or to the next one
+ * left when that entry was dropped. Pure, so it can be checked on its own.
  */
 export const normaliseQueue = (
   stored: StoredQueue,
   lookup: (id: TrackId) => Doc<"tracks"> | null,
 ): Queue => {
-  const found = stored.queue.map(lookup);
+  const found = stored.items.map((item) => lookup(item.trackId));
+  const items = stored.items.filter((_, position) => found[position] !== null);
   const tracks = found.filter((track): track is Doc<"tracks"> => track !== null);
   const before = found.slice(0, Math.max(0, stored.index)).filter((track) => track !== null);
   const index = Math.min(before.length, Math.max(0, tracks.length - 1));
 
   const unshuffled =
     stored.shuffle && stored.unshuffled !== undefined
-      ? stored.unshuffled.filter((id) => lookup(id) !== null)
+      ? keptOrder(stored.unshuffled, items)
       : undefined;
 
   return {
     ...stored,
-    queue: tracks.map((track) => track._id),
+    items,
     tracks,
     unshuffled,
     index,
     stale:
-      tracks.length !== stored.queue.length ||
+      items.length !== stored.items.length ||
       index !== stored.index ||
       unshuffled?.length !== stored.unshuffled?.length,
   };
@@ -158,7 +258,7 @@ export const normaliseStored = async (
   stored: StoredQueue,
   keep: (track: Doc<"tracks">) => boolean,
 ): Promise<Queue> => {
-  const ids = [...new Set([...stored.queue, ...(stored.unshuffled ?? [])])];
+  const ids = [...new Set(stored.items.map((item) => item.trackId))];
   const docs = await Promise.all(ids.map((id) => ctx.db.get(id)));
 
   const kept = new Map(
@@ -181,13 +281,31 @@ export const loadQueue = async (ctx: ReadCtx, viewer: Viewer): Promise<Queue> =>
     canRead(viewer, track.libraryId),
   );
 
-const sameIds = (
-  left: ReadonlyArray<TrackId> | undefined,
-  right: ReadonlyArray<TrackId> | undefined,
+const sameOrder = (
+  left: ReadonlyArray<string> | undefined,
+  right: ReadonlyArray<string> | undefined,
 ): boolean =>
   left === undefined || right === undefined
     ? left === right
     : left.length === right.length && left.every((id, position) => right[position] === id);
+
+const sameItems = (
+  stored: Doc<"playbackQueues">["items"],
+  next: ReadonlyArray<QueueItem>,
+): boolean =>
+  stored !== undefined &&
+  stored.length === next.length &&
+  stored.every((item, position) => {
+    const other = next[position];
+
+    return (
+      other !== undefined &&
+      item.id === other.id &&
+      item.trackId === other.trackId &&
+      item.addedBy === other.addedBy &&
+      (item.autoplay === true) === other.autoplay
+    );
+  });
 
 /**
  * Saves the user's queue to its own row, creating it (and clearing the legacy session fields) on
@@ -200,8 +318,18 @@ export const saveQueue = async (
   next: StoredQueue,
 ): Promise<void> => {
   const fields = {
-    queue: [...next.queue],
-    unshuffled: next.unshuffled === undefined ? undefined : [...next.unshuffled],
+    // Convex leaves out fields set to `undefined`, so entries store only what they have.
+    items: next.items.map((item) => ({
+      id: item.id,
+      trackId: item.trackId,
+      addedBy: item.addedBy,
+      autoplay: item.autoplay ? true : undefined,
+    })),
+    unshuffledItems: next.unshuffled === undefined ? undefined : [...next.unshuffled],
+    nextItemId: next.nextItemId,
+    autoplay: next.autoplay,
+    queue: undefined,
+    unshuffled: undefined,
     index: next.index,
     shuffle: next.shuffle,
     repeat: next.repeat,
@@ -222,8 +350,11 @@ export const saveQueue = async (
   }
 
   const unchanged =
-    sameIds(row.queue, next.queue) &&
-    sameIds(row.unshuffled, next.unshuffled) &&
+    !hasLegacyItems(row) &&
+    sameItems(row.items, next.items) &&
+    sameOrder(row.unshuffledItems, next.unshuffled) &&
+    row.nextItemId === next.nextItemId &&
+    row.autoplay === next.autoplay &&
     row.index === next.index &&
     row.shuffle === next.shuffle &&
     row.repeat === next.repeat &&

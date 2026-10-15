@@ -24,7 +24,7 @@ describe("fieldsOf", () => {
       min: 0,
       max: 1,
     });
-    expect(fieldsOf("playback.jump")?.[0]?.field).toEqual({
+    expect(fieldsOf("playback.play")?.[1]?.field).toEqual({
       kind: "number",
       integer: true,
       min: 0,

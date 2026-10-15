@@ -207,7 +207,7 @@ test("a playlist deleted in another session shows that, and the player keeps goi
   await expect(elsewhere).toHaveURL(/\/playlists$/);
   await other.close();
 
-  await expect(page.getByRole("heading", { name: "This playlist was deleted" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "You can't open this playlist" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
   await expect(bar.getByRole("button", { name: "Safe From Harm", exact: true })).toBeVisible();
   // The stand-in streams a tone, so the song is still playing; the stack suite checks real audio.

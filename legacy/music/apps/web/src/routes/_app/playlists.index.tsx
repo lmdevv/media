@@ -16,6 +16,7 @@ const rowClassName =
 
 function PlaylistsPage() {
   const playlists = useRead("playlists.list", {});
+  const shared = useRead("playlists.shared", {});
   const { openNewPlaylist } = useUi();
 
   return (
@@ -84,6 +85,40 @@ function PlaylistsPage() {
           </p>
         ) : null}
       </div>
+      {shared === undefined || shared.length === 0 ? null : (
+        <section aria-label="Shared with you" className="flex flex-col gap-2">
+          <h2 className="font-sans text-lg/lg font-semibold tracking-tight text-text">
+            Shared with you
+          </h2>
+          <div className="flex flex-col">
+            {shared.map((playlist) => (
+              <Link
+                key={playlist.id}
+                to="/playlists/$playlistId"
+                params={{ playlistId: playlist.id }}
+                className={rowClassName}
+              >
+                <Artwork
+                  url={playlist.artUrls[0] ?? null}
+                  seed={playlist.id}
+                  className="size-14 rounded-sm lg:size-12"
+                />
+                <span className="flex min-w-0 grow flex-col gap-px">
+                  <span className="truncate font-sans text-md/base text-text lg:text-base/sm lg:font-medium">
+                    {playlist.name}
+                  </span>
+                  <span className="truncate font-sans text-sm/xs text-text-muted">
+                    {playlist.owner?.name ?? "Someone"} ·{" "}
+                    {playlist.access === "collaborator" ? "you can edit" : "view only"} ·{" "}
+                    {plural(playlist.trackCount, "song")}
+                  </span>
+                </span>
+                <ChevronRightIcon aria-hidden className="size-5 text-text-muted" />
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

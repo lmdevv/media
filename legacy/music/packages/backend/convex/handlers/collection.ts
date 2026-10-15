@@ -1,14 +1,26 @@
+import { PLAYLIST_LIMIT } from "@music/commands/models";
+import type { LinkKind, PlaylistEntry, ShareLink } from "@music/commands/models";
+import { signResource } from "@music/commands/signed-url";
+
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { mediaBaseUrl, requireEnv } from "../lib/env";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { isClaimed } from "../lib/paths";
-import { makePresenter, presentPlaylist } from "../lib/present";
-import { canRead } from "../lib/viewer";
-import type { Viewer } from "../lib/viewer";
-import { PLAYLIST_LIMIT } from "@music/commands/models";
-import { signResource } from "@music/commands/signed-url";
+import {
+  findShare,
+  ownerShares,
+  isSharedWithPeople,
+  openPlaylist,
+  positionBetween,
+  POSITION_STEP,
+} from "../lib/playlists";
+import type { OpenedPlaylist } from "../lib/playlists";
+import { contributorOf, makeContributors, makePresenter, presentPlaylist } from "../lib/present";
+import type { Presenter } from "../lib/present";
+import { canRead, loadPerson } from "../lib/viewer";
+import type { ReadCtx, Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
 
@@ -20,6 +32,9 @@ const MAX_LIKES = 1000;
 const LIKES_PAGE = 50;
 
 const MAX_PLAYLIST = PLAYLIST_LIMIT;
+
+/** Most shares one playlist lists, and most playlists "Shared with you" lists. */
+const MAX_SHARES = 500;
 
 const readableTracks = async (
   ctx: QueryCtx,
@@ -33,19 +48,11 @@ const readableTracks = async (
   );
 };
 
-const ownPlaylist = async (
-  ctx: QueryCtx,
-  viewer: Viewer,
-  id: string,
-): Promise<Doc<"playlists">> => {
-  const playlist = await ctx.db.get(tableId(ctx, "playlists", id));
-
-  if (playlist === null || playlist.ownerId !== viewer.id) {
-    return fail("not_found", "Playlist not found");
-  }
-
-  return playlist;
-};
+const playlistEntries = (ctx: ReadCtx, playlistId: Id<"playlists">) =>
+  ctx.db
+    .query("playlistItems")
+    .withIndex("by_playlist", (q) => q.eq("playlistId", playlistId))
+    .take(MAX_PLAYLIST);
 
 const appendTracks = async (
   ctx: MutationCtx,
@@ -63,9 +70,10 @@ const appendTracks = async (
     return fail("conflict", `Playlists hold up to ${MAX_PLAYLIST} songs`);
   }
 
-  const first = (last?.position ?? 0) + 1;
+  const first = (last?.position ?? 0) + POSITION_STEP;
   const tracks = await Promise.all(ids.map((id) => ctx.db.get(tableId(ctx, "tracks", id))));
 
+  // People add only what they can read themselves, collaborators included.
   const readable = tracks.filter(
     (track): track is Doc<"tracks"> => track !== null && canRead(viewer, track.libraryId),
   );
@@ -77,7 +85,8 @@ const appendTracks = async (
       ctx.db.insert("playlistItems", {
         playlistId: playlist._id,
         trackId: track._id,
-        position: first + offset,
+        position: first + offset * POSITION_STEP,
+        addedBy: viewer.id,
       }),
     ),
   );
@@ -91,6 +100,130 @@ const appendTracks = async (
     updatedAt: Date.now(),
   });
 };
+
+/**
+ * Changes a playlist's name or description (owner only). `undefined` in a patch removes a field,
+ * so only the fields asked for go in; an empty description, already cleaned and trimmed by its
+ * schema, removes it.
+ */
+const updatePlaylist = async (
+  ctx: MutationCtx,
+  viewer: Viewer,
+  args: { readonly playlistId: string; readonly name?: string; readonly description?: string },
+): Promise<typeof ok> => {
+  const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "manage");
+  const changes: Partial<Doc<"playlists">> = { updatedAt: Date.now() };
+
+  if (args.name !== undefined) changes.name = args.name;
+
+  if (args.description !== undefined) {
+    changes.description = args.description.length === 0 ? undefined : args.description;
+  }
+
+  await ctx.db.patch(playlist._id, changes);
+
+  return ok;
+};
+
+/** A playlist summary for someone who opened it with `opened.access`. */
+const summary = async (ctx: ReadCtx, viewer: Viewer, present: Presenter, opened: OpenedPlaylist) =>
+  presentPlaylist(ctx, viewer, present, opened.playlist, {
+    access: opened.access,
+    sharedWithPeople: await isSharedWithPeople(ctx, opened.playlist._id),
+  });
+
+/**
+ * One playlist entry as the viewer sees it. A song in a library they can't read still shows, so
+ * everyone sees the same playlist, but greyed out and without its cover or file details.
+ */
+const presentEntry = async (
+  viewer: Viewer,
+  present: Presenter,
+  contributor: ReturnType<typeof makeContributors>,
+  playlist: Doc<"playlists">,
+  item: Doc<"playlistItems">,
+  track: Doc<"tracks">,
+): Promise<(typeof PlaylistEntry)["Encoded"]> => {
+  const readable = canRead(viewer, track.libraryId);
+  const reason = !readable ? "no_access" : track.missing ? "missing" : null;
+
+  return {
+    itemId: item._id,
+    addedAt: item._creationTime,
+    // A song in a library the viewer can't read is withheld whole: no name, cover, file detail,
+    // or ID, so neither sharing a playlist nor a library's access narrowing later shows what the
+    // library holds. The entry keeps its place and length.
+    track: readable ? await present.track(track) : null,
+    durationMs: track.durationMs,
+    available: reason === null,
+    reason,
+    addedBy: await contributor(item.addedBy ?? playlist.ownerId),
+  };
+};
+
+/** Deletes a playlist with its entries and shares. */
+const deletePlaylist = async (ctx: MutationCtx, playlist: Doc<"playlists">): Promise<void> => {
+  // Adding stops at these limits, so they bound what a playlist holds.
+  const [items, shares] = await Promise.all([
+    ctx.db
+      .query("playlistItems")
+      .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
+      .take(MAX_PLAYLIST),
+    ctx.db
+      .query("playlistShares")
+      .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
+      .take(MAX_SHARES),
+  ]);
+
+  await Promise.all([...items, ...shares].map((doc) => ctx.db.delete(doc._id)));
+  await ctx.db.delete(playlist._id);
+};
+
+const unavailableLink = () => fail("not_found", "That isn't available to you");
+
+/**
+ * Builds a link to something the viewer can open. Albums, artists, and songs need a library they
+ * can read; a playlist needs access to it. A song opens its album, highlighted.
+ */
+type LinkBuilders = {
+  readonly [Kind in LinkKind]: (
+    ctx: QueryCtx,
+    viewer: Viewer,
+    id: string,
+  ) => Promise<(typeof ShareLink)["Encoded"]>;
+};
+
+const LINKS = {
+  album: async (ctx, viewer, id) => {
+    const album = await ctx.db.get(tableId(ctx, "albums", id));
+
+    if (album === null || !canRead(viewer, album.libraryId)) return unavailableLink();
+
+    return { path: `/albums/${album._id}`, title: album.title };
+  },
+  artist: async (ctx, viewer, id) => {
+    const artist = await ctx.db.get(tableId(ctx, "artists", id));
+
+    if (artist === null || !canRead(viewer, artist.libraryId)) return unavailableLink();
+
+    return { path: `/artists/${artist._id}`, title: artist.name };
+  },
+  playlist: async (ctx, viewer, id) => {
+    const { playlist } = await openPlaylist(ctx, viewer, id, "view");
+
+    return { path: `/playlists/${playlist._id}`, title: playlist.name };
+  },
+  track: async (ctx, viewer, id) => {
+    const track = await ctx.db.get(tableId(ctx, "tracks", id));
+
+    if (track === null || !canRead(viewer, track.libraryId)) return unavailableLink();
+
+    return { path: `/albums/${track.albumId}?track=${track._id}`, title: track.title };
+  },
+} satisfies LinkBuilders;
+
+const touch = (ctx: MutationCtx, playlist: Doc<"playlists">) =>
+  ctx.db.patch(playlist._id, { updatedAt: Date.now() });
 
 export const collectionQueries = {
   "likes.list": async (ctx, viewer) => {
@@ -171,43 +304,93 @@ export const collectionQueries = {
     const present = makePresenter(ctx, viewer);
 
     return Promise.all(
-      playlists.map((playlist) => presentPlaylist(ctx, viewer, present, playlist)),
+      playlists.map((playlist) => summary(ctx, viewer, present, { playlist, access: "owner" })),
     );
   },
 
-  "playlists.get": async (ctx, viewer, args) => {
-    const playlist = await ownPlaylist(ctx, viewer, args.playlistId);
+  "playlists.shared": async (ctx, viewer) => {
+    const shares = await ctx.db
+      .query("playlistShares")
+      .withIndex("by_user", (q) => q.eq("userId", viewer.id))
+      .take(MAX_SHARES);
+
     const present = makePresenter(ctx, viewer);
+    const playlists = await Promise.all(shares.map((share) => ctx.db.get(share.playlistId)));
 
-    const items = await ctx.db
-      .query("playlistItems")
-      .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
-      .take(MAX_PLAYLIST);
+    const owners = await Promise.all(
+      playlists.map(async (playlist) => (playlist === null ? null : ctx.db.get(playlist.ownerId))),
+    );
 
+    const opened = shares.flatMap((share, index) => {
+      const playlist = playlists[index];
+      const owner = owners[index];
+
+      // A removed owner's playlists go with them; a guest's are theirs alone (`playlistAccess`).
+      return playlist === undefined || playlist === null || !ownerShares(owner ?? null)
+        ? []
+        : [{ playlist, access: share.role }];
+    });
+
+    // Each of these is shared with the viewer, so none needs looking up.
+    const listed = await Promise.all(
+      opened.map((open) =>
+        presentPlaylist(ctx, viewer, present, open.playlist, {
+          access: open.access,
+          sharedWithPeople: true,
+        }),
+      ),
+    );
+
+    return listed.toSorted((left, right) => right.updatedAt - left.updatedAt);
+  },
+
+  "playlists.get": async (ctx, viewer, args) => {
+    const opened = await openPlaylist(ctx, viewer, args.playlistId, "view");
+    const { playlist } = opened;
+    const present = makePresenter(ctx, viewer);
+    const contributor = makeContributors(ctx);
+    const items = await playlistEntries(ctx, playlist._id);
     const tracks = await Promise.all(items.map((item) => ctx.db.get(item.trackId)));
 
-    // A song whose file is gone stays as an unavailable entry you can remove. One in a library
-    // you can no longer read stays hidden: listing it would show what that library holds.
     const entries = items.flatMap((item, index) => {
       const track = tracks[index];
 
-      return track === undefined || track === null || !canRead(viewer, track.libraryId)
-        ? []
-        : [{ item, track }];
+      return track === undefined || track === null ? [] : [{ item, track }];
     });
 
     return {
-      playlist: await presentPlaylist(ctx, viewer, present, playlist),
+      playlist: await summary(ctx, viewer, present, opened),
       items: await Promise.all(
-        entries.map(async ({ item, track }) => ({
-          itemId: item._id,
-          addedAt: item._creationTime,
-          track: await present.track(track),
-          available: !track.missing,
-        })),
+        entries.map(({ item, track }) =>
+          presentEntry(viewer, present, contributor, playlist, item, track),
+        ),
       ),
     };
   },
+
+  "playlists.sharing": async (ctx, viewer, args) => {
+    const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "manage");
+
+    const shares = await ctx.db
+      .query("playlistShares")
+      .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
+      .take(MAX_SHARES);
+
+    const people = await Promise.all(shares.map((share) => ctx.db.get(share.userId)));
+
+    return {
+      visibility: playlist.visibility ?? "private",
+      people: shares.flatMap((share, index) => {
+        const person = people[index];
+
+        return person === undefined || person === null
+          ? []
+          : [{ person: contributorOf(person), role: share.role }];
+      }),
+    };
+  },
+
+  "links.get": (ctx, viewer, args) => LINKS[args.kind](ctx, viewer, args.id),
 
   "stream.url": async (ctx, viewer, args) => {
     const track = await ctx.db.get(tableId(ctx, "tracks", args.trackId));
@@ -266,10 +449,15 @@ export const collectionMutations = {
     const playlistId = await ctx.db.insert("playlists", {
       ownerId: viewer.id,
       name: args.name,
-      description: args.description,
+      // Cleaned and trimmed by its schema; empty means none, as `playlists.update` treats it.
+      description:
+        args.description === undefined || args.description.length === 0
+          ? undefined
+          : args.description,
       trackCount: 0,
       durationMs: 0,
       updatedAt: Date.now(),
+      visibility: "private",
     });
 
     if (args.trackIds !== undefined) {
@@ -281,36 +469,27 @@ export const collectionMutations = {
     return { playlistId };
   },
 
-  "playlists.rename": async (ctx, viewer, args) => {
-    const playlist = await ownPlaylist(ctx, viewer, args.playlistId);
-    await ctx.db.patch(playlist._id, { name: args.name, updatedAt: Date.now() });
+  // Kept for clients from before `playlists.update`; it is that command with only a name.
+  "playlists.rename": async (ctx, viewer, args) => updatePlaylist(ctx, viewer, args),
 
-    return ok;
-  },
+  "playlists.update": updatePlaylist,
 
   "playlists.delete": async (ctx, viewer, args) => {
-    const playlist = await ownPlaylist(ctx, viewer, args.playlistId);
-
-    const items = await ctx.db
-      .query("playlistItems")
-      .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
-      .collect();
-
-    await Promise.all(items.map((item) => ctx.db.delete(item._id)));
-    await ctx.db.delete(playlist._id);
+    const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "manage");
+    await deletePlaylist(ctx, playlist);
 
     return ok;
   },
 
   "playlists.add": async (ctx, viewer, args) => {
-    const playlist = await ownPlaylist(ctx, viewer, args.playlistId);
+    const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "edit");
     await appendTracks(ctx, viewer, playlist, args.trackIds);
 
     return ok;
   },
 
   "playlists.remove": async (ctx, viewer, args) => {
-    const playlist = await ownPlaylist(ctx, viewer, args.playlistId);
+    const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "edit");
     const item = await ctx.db.get(tableId(ctx, "playlistItems", args.itemId));
 
     if (item === null || item.playlistId !== playlist._id) {
@@ -324,6 +503,147 @@ export const collectionMutations = {
       durationMs: Math.max(0, playlist.durationMs - (track?.durationMs ?? 0)),
       updatedAt: Date.now(),
     });
+
+    return ok;
+  },
+
+  "playlists.move": async (ctx, viewer, args) => {
+    const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "edit");
+
+    if (args.afterItemId === args.itemId) {
+      return fail("invalid_args", "An entry can't move after itself");
+    }
+
+    const itemId = tableId(ctx, "playlistItems", args.itemId);
+
+    const afterId =
+      args.afterItemId === undefined ? null : tableId(ctx, "playlistItems", args.afterItemId);
+
+    const items = await playlistEntries(ctx, playlist._id);
+    const moving = items.find((item) => item._id === itemId);
+
+    if (moving === undefined) return fail("not_found", "That entry is not in this playlist");
+
+    const rest = items.filter((item) => item._id !== moving._id);
+    const after = afterId === null ? -1 : rest.findIndex((item) => item._id === afterId);
+
+    // The entry it should follow was removed meanwhile; moving anyway would guess the place.
+    if (after === -1 && args.afterItemId !== undefined) {
+      return fail("not_found", "The entry to move it after is no longer in this playlist");
+    }
+
+    const position = positionBetween(rest[after]?.position, rest[after + 1]?.position);
+
+    if (position !== null) {
+      await ctx.db.patch(moving._id, { position });
+    } else {
+      // Moved between the same two entries many times over: renumber the whole playlist.
+      const order = [...rest.slice(0, after + 1), moving, ...rest.slice(after + 1)];
+
+      await Promise.all(
+        order.map((item, index) =>
+          ctx.db.patch(item._id, { position: (index + 1) * POSITION_STEP }),
+        ),
+      );
+    }
+
+    await touch(ctx, playlist);
+
+    return ok;
+  },
+
+  "playlists.visibility": async (ctx, viewer, args) => {
+    const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "manage");
+    await ctx.db.patch(playlist._id, { visibility: args.visibility, updatedAt: Date.now() });
+
+    return ok;
+  },
+
+  "playlists.share": async (ctx, viewer, args) => {
+    const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "manage");
+    const person = await loadPerson(ctx, args.userId);
+
+    if (person._id === viewer.id) return fail("invalid_args", "You already own this playlist");
+
+    // The directory leaves suspended people out; a share made by ID can't reach them either.
+    if (person.suspendedAt !== undefined) return fail("not_found", "Person not found");
+
+    const existing = await findShare(ctx, playlist._id, person._id);
+    // Sharing again without a role keeps theirs, so it never quietly takes edit rights away.
+    const role = args.role ?? existing?.role ?? "viewer";
+
+    if (existing === null) {
+      // Lists of shares stop at this many, so a share past it could never be seen or left.
+      const [onPlaylist, toPerson] = await Promise.all([
+        ctx.db
+          .query("playlistShares")
+          .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
+          .take(MAX_SHARES),
+        ctx.db
+          .query("playlistShares")
+          .withIndex("by_user", (q) => q.eq("userId", person._id))
+          .take(MAX_SHARES),
+      ]);
+
+      if (onPlaylist.length >= MAX_SHARES) {
+        return fail("conflict", `A playlist can be shared with up to ${MAX_SHARES} people`);
+      }
+
+      if (toPerson.length >= MAX_SHARES) {
+        return fail("conflict", `They already have ${MAX_SHARES} playlists shared with them`);
+      }
+
+      await ctx.db.insert("playlistShares", {
+        playlistId: playlist._id,
+        userId: person._id,
+        role,
+        sharedBy: viewer.id,
+      });
+    } else if (existing.role !== role) {
+      await ctx.db.patch(existing._id, { role });
+    }
+
+    await touch(ctx, playlist);
+
+    return ok;
+  },
+
+  "playlists.unshare": async (ctx, viewer, args) => {
+    const { playlist, access } = await openPlaylist(ctx, viewer, args.playlistId, "view");
+    const userId = args.userId === undefined ? null : tableId(ctx, "users", args.userId);
+
+    // Anyone a playlist is shared with can leave it.
+    if (userId === viewer.id && access !== "owner") {
+      const share = await findShare(ctx, playlist._id, viewer.id);
+
+      // Opened by its link only: there is no share to leave, and access stays.
+      if (share === null) return fail("not_found", "This playlist isn't shared with you by name");
+      await ctx.db.delete(share._id);
+
+      return ok;
+    }
+
+    if (access !== "owner") return fail("forbidden", "Only the playlist's owner can do that");
+
+    if (userId !== null) {
+      const share = await findShare(ctx, playlist._id, userId);
+
+      if (share === null) return fail("not_found", "This playlist isn't shared with them");
+      await ctx.db.delete(share._id);
+      await touch(ctx, playlist);
+
+      return ok;
+    }
+
+    // Stop sharing at all: nobody but the owner can open it from now on. Sharing stops at
+    // `MAX_SHARES`, so this takes them all.
+    const shares = await ctx.db
+      .query("playlistShares")
+      .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
+      .take(MAX_SHARES);
+
+    await Promise.all(shares.map((share) => ctx.db.delete(share._id)));
+    await ctx.db.patch(playlist._id, { visibility: "private", updatedAt: Date.now() });
 
     return ok;
   },

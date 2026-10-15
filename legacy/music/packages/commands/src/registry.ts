@@ -11,6 +11,7 @@ import {
   LibraryId,
   PlaylistId,
   PlaylistItemId,
+  QueueItemId,
   TrackId,
   UserId,
 } from "./ids";
@@ -23,6 +24,7 @@ import {
   AssignableRole,
   Device,
   DeviceKind,
+  DirectoryPerson,
   HistoryEntry,
   Home,
   Invite,
@@ -30,6 +32,7 @@ import {
   Library,
   LibraryMember,
   LibraryVisibility,
+  LinkKind,
   Millis,
   PageArgs,
   PasswordReset,
@@ -39,8 +42,12 @@ import {
   PlaybackState,
   Playlist,
   PlaylistDetail,
+  PlaylistRole,
+  PlaylistSharing,
+  PlaylistVisibility,
   RepeatMode,
   SearchResults,
+  ShareLink,
   StreamProfile,
   StreamUrl,
   Timestamp,
@@ -48,12 +55,24 @@ import {
   TrackPage,
   User,
 } from "./models";
+import { Description, Name, Text, hasControlCharacter } from "./text";
 
 const NoArgs = Schema.Struct({});
 
 const Ok = Schema.Struct({ ok: Schema.Literal(true) });
 
-const Name = Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(120));
+/**
+ * A library folder, as an absolute path on the server. Unlike a name it can't be cleaned (that
+ * would name another folder), so one with a control character is refused, without repeating it.
+ */
+const FolderPath = Schema.String.check(
+  Schema.makeFilter(
+    (path: string) =>
+      !hasControlCharacter(path) || "A folder path can't contain control characters",
+  ),
+  Schema.isTrimmed(),
+  Schema.isStartingWith("/"),
+);
 
 const TrackIds = Schema.Array(TrackId).check(Schema.isMinLength(1), Schema.isMaxLength(2000));
 
@@ -211,12 +230,12 @@ export const commands = {
     result: Ok,
   }),
   "playback.jump": command({
-    summary: "Play the queue entry at an index",
+    summary: "Play a queue entry by its item ID (queue list shows them)",
     group: "playback",
     kind: "mutation",
     access: "user",
     job: false,
-    args: Schema.Struct({ index: QueueIndex }),
+    args: Schema.Struct({ itemId: QueueItemId }),
     result: Ok,
   }),
   "playback.shuffle": command({
@@ -271,6 +290,8 @@ export const commands = {
        * finds this song near `index` instead of trusting the index.
        */
       trackId: Schema.optionalKey(TrackId),
+      /** The queue entry playing. When given, the server finds the entry by ID first. */
+      itemId: Schema.optionalKey(QueueItemId),
       positionMs: Millis,
       playing: Schema.Boolean,
     }),
@@ -288,21 +309,33 @@ export const commands = {
     result: PlaybackQueue,
   }),
   "queue.add": command({
-    summary: "Add songs to the queue, next or at the end",
+    summary:
+      "Add songs to the queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay)",
     group: "queue",
     kind: "mutation",
     access: "user",
     job: false,
     args: Schema.Struct({ trackIds: TrackIds, next: Schema.optionalKey(Schema.Boolean) }),
-    result: Ok,
+    // `ok` stays for clients from before entries had IDs, which read `{ ok: true }`.
+    result: Schema.Struct({ ok: Schema.Literal(true), itemIds: Schema.Array(QueueItemId) }),
   }),
   "queue.remove": command({
-    summary: "Remove the queue entry at an index",
+    summary: "Remove a queue entry by its item ID",
     group: "queue",
     kind: "mutation",
     access: "user",
     job: false,
-    args: Schema.Struct({ index: QueueIndex }),
+    args: Schema.Struct({ itemId: QueueItemId }),
+    result: Ok,
+  }),
+  "queue.move": command({
+    summary:
+      "Move a queue entry to just after another (--after-item-id), or to the top when none is given",
+    group: "queue",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ itemId: QueueItemId, afterItemId: Schema.optionalKey(QueueItemId) }),
     result: Ok,
   }),
   "queue.clear": command({
@@ -312,6 +345,16 @@ export const commands = {
     access: "user",
     job: false,
     args: NoArgs,
+    result: Ok,
+  }),
+  "queue.autoplay": command({
+    summary:
+      "Turn autoplay on or off: when the queue runs out, play the same artist, then genre, then era",
+    group: "queue",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ on: Schema.Boolean }),
     result: Ok,
   }),
 
@@ -388,8 +431,17 @@ export const commands = {
     args: NoArgs,
     result: Schema.Array(Playlist),
   }),
+  "playlists.shared": command({
+    summary: "List playlists other people shared with you by name",
+    group: "playlists",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: Schema.Array(Playlist),
+  }),
   "playlists.get": command({
-    summary: "Show a playlist and its songs",
+    summary: "Show a playlist and its songs: yours, one shared with you, or one shared by link",
     group: "playlists",
     kind: "query",
     access: "user",
@@ -405,13 +457,13 @@ export const commands = {
     job: false,
     args: Schema.Struct({
       name: Name,
-      description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(500))),
+      description: Schema.optionalKey(Description),
       trackIds: Schema.optionalKey(TrackIds),
     }),
     result: Schema.Struct({ playlistId: PlaylistId }),
   }),
   "playlists.rename": command({
-    summary: "Rename a playlist",
+    summary: "Rename a playlist you own",
     group: "playlists",
     kind: "mutation",
     access: "user",
@@ -419,8 +471,21 @@ export const commands = {
     args: Schema.Struct({ playlistId: PlaylistId, name: Name }),
     result: Ok,
   }),
+  "playlists.update": command({
+    summary: "Change a playlist's name or description (an empty description clears it)",
+    group: "playlists",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({
+      playlistId: PlaylistId,
+      name: Schema.optionalKey(Name),
+      description: Schema.optionalKey(Description),
+    }),
+    result: Ok,
+  }),
   "playlists.delete": command({
-    summary: "Delete a playlist",
+    summary: "Delete a playlist you own",
     group: "playlists",
     kind: "mutation",
     access: "user",
@@ -429,7 +494,7 @@ export const commands = {
     result: Ok,
   }),
   "playlists.add": command({
-    summary: "Add songs to a playlist",
+    summary: "Add songs to a playlist you own or collaborate on",
     group: "playlists",
     kind: "mutation",
     access: "user",
@@ -438,13 +503,82 @@ export const commands = {
     result: Ok,
   }),
   "playlists.remove": command({
-    summary: "Remove an entry from a playlist",
+    summary: "Remove an entry from a playlist you own or collaborate on",
     group: "playlists",
     kind: "mutation",
     access: "user",
     job: false,
     args: Schema.Struct({ playlistId: PlaylistId, itemId: PlaylistItemId }),
     result: Ok,
+  }),
+  "playlists.move": command({
+    summary:
+      "Move a playlist entry to just after another (--after-item-id), or to the top when none is given",
+    group: "playlists",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({
+      playlistId: PlaylistId,
+      itemId: PlaylistItemId,
+      afterItemId: Schema.optionalKey(PlaylistItemId),
+    }),
+    result: Ok,
+  }),
+  "playlists.sharing": command({
+    summary: "Show who a playlist you own is shared with",
+    group: "playlists",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ playlistId: PlaylistId }),
+    result: PlaylistSharing,
+  }),
+  "playlists.visibility": command({
+    summary:
+      "Make a playlist you own private, or shared: anyone on this server with the link can view and play it",
+    group: "playlists",
+    kind: "mutation",
+    access: "share",
+    job: false,
+    args: Schema.Struct({ playlistId: PlaylistId, visibility: PlaylistVisibility }),
+    result: Ok,
+  }),
+  "playlists.share": command({
+    summary:
+      "Share a playlist you own with someone as a viewer (default) or a collaborator, who adds, removes, and reorders songs",
+    group: "playlists",
+    kind: "mutation",
+    access: "share",
+    job: false,
+    args: Schema.Struct({
+      playlistId: PlaylistId,
+      userId: UserId,
+      role: Schema.optionalKey(PlaylistRole),
+    }),
+    result: Ok,
+  }),
+  "playlists.unshare": command({
+    summary:
+      "Stop sharing a playlist with someone, or leave one shared with you; naming no one stops sharing it at all",
+    group: "playlists",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ playlistId: PlaylistId, userId: Schema.optionalKey(UserId) }),
+    result: Ok,
+  }),
+
+  // Links
+  "links.get": command({
+    summary:
+      "Get a link to an album, artist, playlist, or song you can open (a song opens its album)",
+    group: "library",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ kind: LinkKind, id: Schema.NonEmptyString }),
+    result: ShareLink,
   }),
 
   // Streaming
@@ -486,7 +620,7 @@ export const commands = {
     job: true,
     args: Schema.Struct({
       name: Name,
-      path: Schema.Trimmed.check(Schema.isStartingWith("/")),
+      path: FolderPath,
       visibility: Schema.optionalKey(LibraryVisibility),
     }),
     result: Schema.Struct({ libraryId: LibraryId, jobId: JobId }),
@@ -634,6 +768,15 @@ export const commands = {
     args: NoArgs,
     result: Schema.Array(Person),
   }),
+  "people.directory": command({
+    summary: "List the people on this server you can share with: names and roles, no emails",
+    group: "people",
+    kind: "query",
+    access: "share",
+    job: false,
+    args: NoArgs,
+    result: Schema.Array(DirectoryPerson),
+  }),
   "people.role": command({
     summary: "Change someone's role to admin, member, or guest",
     group: "people",
@@ -705,7 +848,7 @@ export const commands = {
     access: "admin",
     job: false,
     args: Schema.Struct({
-      email: Schema.optionalKey(Schema.Trimmed.check(Schema.isMinLength(3))),
+      email: Schema.optionalKey(Text.check(Schema.isMinLength(3))),
       role: Schema.optionalKey(AssignableRole),
     }),
     result: Invite,

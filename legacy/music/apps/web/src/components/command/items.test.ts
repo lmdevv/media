@@ -50,6 +50,10 @@ const playlist = (id: string, name: string): Playlist =>
     durationMs: 300_000,
     artUrls: [],
     updatedAt: 0,
+    owner: null,
+    visibility: "private",
+    sharedWithPeople: false,
+    access: "owner",
   });
 
 const action = (id: string, title: string, detail: string): Item => ({

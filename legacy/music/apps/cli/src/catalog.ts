@@ -306,6 +306,7 @@ export const catalog = (): ReadonlyArray<CatalogEntry> =>
 const ACCESS_NOTES: Readonly<Record<Capability, string | null>> = {
   user: null,
   keys: "not guests",
+  share: "not guests",
   admin: "admin",
   owner: "owner",
 };

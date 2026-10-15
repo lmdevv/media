@@ -2,8 +2,8 @@
  * The player contract the web app builds on. `PlayerProvider` mirrors the user's Convex playback
  * session, plays audio when this browser is the active device, and reports position back.
  */
-import type { DeviceId, TrackId } from "@music/commands/ids";
-import type { Device, RepeatMode, Track } from "@music/commands/models";
+import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
+import type { Device, QueueEntry, RepeatMode } from "@music/commands/models";
 import { makeMusicClient } from "@music/sdk/client";
 import { useRead } from "@music/sdk/react";
 import { useConvex } from "convex/react";
@@ -35,12 +35,14 @@ export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "bufferin
 
 export interface PlayerState {
   readonly status: PlayerStatus;
-  readonly track: Track | null;
-  readonly queue: ReadonlyArray<Track>;
+  readonly track: QueueEntry | null;
+  readonly queue: ReadonlyArray<QueueEntry>;
   readonly index: number;
   readonly durationMs: number;
   readonly shuffle: boolean;
   readonly repeat: RepeatMode;
+  /** Whether autoplay adds similar songs when the queue runs out. */
+  readonly autoplay: boolean;
   readonly volume: number;
   /** This browser's device ID, stable per browser profile. */
   readonly deviceId: DeviceId | null;
@@ -74,13 +76,15 @@ export interface PlayerActions {
   readonly next: () => Promise<void>;
   readonly previous: () => Promise<void>;
   readonly seek: (positionMs: number) => Promise<void>;
-  readonly jump: (index: number) => Promise<void>;
+  /** Plays a queue entry. */
+  readonly jump: (itemId: QueueItemId) => Promise<void>;
   readonly setShuffle: (on: boolean) => Promise<void>;
   readonly setRepeat: (mode: RepeatMode) => Promise<void>;
   readonly setVolume: (volume: number) => Promise<void>;
   readonly addToQueue: (trackIds: ReadonlyArray<TrackId>, next?: boolean) => Promise<void>;
-  /** Removes the song at `index`; resolves whether the removal landed (a failure sets `error`). */
-  readonly removeFromQueue: (index: number) => Promise<boolean>;
+  /** Removes the entry `itemId`; resolves whether the removal landed (a failure sets `error`). */
+  readonly removeFromQueue: (itemId: QueueItemId) => Promise<boolean>;
+  readonly setAutoplay: (on: boolean) => Promise<void>;
   /** Moves playback to this browser. */
   readonly playHere: () => Promise<void>;
   readonly transferTo: (deviceId: DeviceId) => Promise<void>;
@@ -251,6 +255,7 @@ export function PlayerProvider({
       durationMs: track?.durationMs ?? 0,
       shuffle: state?.shuffle ?? false,
       repeat: state?.repeat ?? "off",
+      autoplay: state?.autoplay ?? true,
       volume: local.pendingVolume ?? state?.volume ?? 1,
       deviceId: controller.deviceId,
       activeDevice: state?.activeDevice ?? null,
@@ -265,7 +270,7 @@ export function PlayerProvider({
       next: () => controller.capture(client.run("playback.next", {})),
       previous: () => controller.capture(client.run("playback.previous", {})),
       seek: (positionMs) => controller.seek(positionMs),
-      jump: (index) => controller.capture(client.run("playback.jump", { index })),
+      jump: (itemId) => controller.capture(client.run("playback.jump", { itemId })),
       setShuffle: (on) => controller.capture(client.run("playback.shuffle", { on })),
       setRepeat: (mode) => controller.capture(client.run("playback.repeat", { mode })),
       setVolume: (volume) => controller.setVolume(volume),
@@ -276,7 +281,8 @@ export function PlayerProvider({
             toFront === undefined ? { trackIds: ids } : { trackIds: ids, next: toFront },
           ),
         ),
-      removeFromQueue: (index) => controller.attempt(client.run("queue.remove", { index })),
+      removeFromQueue: (itemId) => controller.attempt(client.run("queue.remove", { itemId })),
+      setAutoplay: (on) => controller.capture(client.run("queue.autoplay", { on })),
       playHere: () => controller.playHere(),
       transferTo: (deviceId) => controller.transferTo(deviceId),
       setQuality: (quality) => {

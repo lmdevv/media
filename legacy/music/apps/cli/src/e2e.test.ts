@@ -347,7 +347,7 @@ describe.skipIf(server === undefined)("music against a real server", () => {
 
     const table = await music(["playlists", "list"]);
 
-    expect(table.stdout).toMatch(/^ID\s+NAME\s+SONGS\s+TIME\s+UPDATED/u);
+    expect(table.stdout).toMatch(/^ID\s+NAME\s+SONGS\s+TIME\s+OWNER\s+ACCESS\s+UPDATED/u);
     expect(table.stdout).toContain(name);
   });
 
@@ -536,6 +536,158 @@ describe.skipIf(server === undefined)("music against a real server", () => {
       expect(
         parse(commands["playback.state"].result, (await music(["now", "--json"])).stdout).playing,
       ).toBe(false);
+    },
+    60_000,
+  );
+
+  /** The IDs of the songs on an album, by title, from the catalog the fake scan saved. */
+  const albumSongs = async (title: string) => {
+    const albums = parse(
+      commands["albums.list"].result,
+      (await music(["albums", "list", "--json"])).stdout,
+    );
+
+    const album = albums.items.find((item) => item.title === title);
+
+    if (album === undefined) throw new Error(`No album ${title}`);
+
+    return parse(
+      commands["albums.get"].result,
+      (await music(["albums", "get", album.id, "--json"])).stdout,
+    ).tracks;
+  };
+
+  const queueOf = async () =>
+    parse(commands["queue.list"].result, (await music(["queue", "list", "--json"])).stdout);
+
+  it.skipIf(mediaSecret === undefined)(
+    "edits the queue by entry ID, and refuses an entry that is gone",
+    async () => {
+      const songs = await albumSongs("Discovery");
+      const ids = songs.map((song) => song.id);
+
+      expect((await music(["queue", "autoplay", "--no-on"])).code).toBe(0);
+      expect((await music(["playback", "play", ...ids])).code).toBe(0);
+
+      const added = parse(
+        commands["queue.add"].result,
+        (await music(["queue", "add", ids[0] ?? "", "--json"])).stdout,
+      );
+
+      const before = await queueOf();
+      const [first, second] = before.queue;
+      const last = before.queue.at(-1);
+
+      expect(last?.itemId).toBe(added.itemIds[0]);
+      expect(before.autoplay).toBe(false);
+
+      // Move the last entry right after the first; the song playing stays put.
+      expect(
+        (await music(["queue", "move", last?.itemId ?? "", "--after-item-id", first?.itemId ?? ""]))
+          .code,
+      ).toBe(0);
+
+      const moved = await queueOf();
+
+      expect(moved.queue.map((entry) => entry.itemId)).toEqual([
+        first?.itemId,
+        last?.itemId,
+        ...before.queue.slice(1, -1).map((entry) => entry.itemId),
+      ]);
+      expect(moved.queue[moved.index]?.itemId).toBe(before.queue[before.index]?.itemId);
+
+      expect((await music(["queue", "remove", second?.itemId ?? ""])).code).toBe(0);
+
+      const stale = await music(["queue", "remove", second?.itemId ?? "", "--json"]);
+
+      expect(stale.code).toBe(1);
+      expect(errorOf(stale).code).toBe("not_found");
+
+      const table = await music(["queue", "list"]);
+
+      expect(table.stdout).toMatch(/ITEM\s+TRACK\s+TITLE\s+ARTIST\s+TIME\s+ADDED BY\s+FROM/u);
+      expect((await music(["queue", "autoplay", "--on"])).code).toBe(0);
+    },
+    60_000,
+  );
+
+  it.skipIf(mediaSecret === undefined)(
+    "shares a playlist with a collaborator, links to it, and stops sharing",
+    async () => {
+      const asMember = { MUSIC_API_KEY: await createMemberKey(url, key) };
+
+      const member = parse(
+        commands["account.me"].result,
+        (await music(["whoami", "--json"], asMember)).stdout,
+      );
+
+      const [song, other] = await albumSongs("Abbey Road");
+      const name = `E2E shared ${String(Date.now())}`;
+
+      const { playlistId } = parse(
+        commands["playlists.create"].result,
+        (await music(["playlists", "create", name, "--track-ids", song?.id ?? "", "--json"]))
+          .stdout,
+      );
+
+      const directory = parse(
+        commands["people.directory"].result,
+        (await music(["people", "directory", "--json"])).stdout,
+      );
+
+      expect(directory.map((person) => person.id)).toContain(member.id);
+
+      expect(
+        (
+          await music([
+            "playlists",
+            "share",
+            "--playlist-id",
+            playlistId,
+            "--user-id",
+            member.id,
+            "--role",
+            "collaborator",
+          ])
+        ).code,
+      ).toBe(0);
+
+      const shared = parse(
+        commands["playlists.shared"].result,
+        (await music(["playlists", "shared", "--json"], asMember)).stdout,
+      );
+
+      expect(shared.map((playlist) => [playlist.id, playlist.access])).toContainEqual([
+        playlistId,
+        "collaborator",
+      ]);
+
+      expect(
+        (
+          await music(
+            ["playlists", "add", "--playlist-id", playlistId, "--track-ids", other?.id ?? ""],
+            asMember,
+          )
+        ).code,
+      ).toBe(0);
+
+      const detail = await music(["playlists", "get", playlistId]);
+
+      expect(detail.stdout).toContain("E2E Member");
+
+      const link = parse(
+        commands["links.get"].result,
+        (await music(["links", "get", "--kind", "playlist", "--id", playlistId, "--json"])).stdout,
+      );
+
+      expect(link).toEqual({ path: `/playlists/${playlistId}`, title: name });
+
+      expect((await music(["playlists", "unshare", "--playlist-id", playlistId])).code).toBe(0);
+
+      const closed = await music(["playlists", "get", playlistId, "--json"], asMember);
+
+      expect(closed.code).toBe(1);
+      expect(errorOf(closed).code).toBe("not_found");
     },
     60_000,
   );

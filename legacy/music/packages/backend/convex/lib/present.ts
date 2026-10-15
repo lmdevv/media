@@ -2,10 +2,12 @@ import type {
   AccessControl,
   AlbumCard,
   ArtistCard,
+  Contributor,
   Device,
   Job,
   Library,
   Playlist,
+  PlaylistAccess,
   Role,
   Track,
 } from "@music/commands/models";
@@ -194,6 +196,40 @@ export const presentLibrary = (
   scanning,
 });
 
+/** How a person is named on things they share or add. */
+export const contributorOf = (user: Doc<"users">): (typeof Contributor)["Encoded"] => ({
+  id: user._id,
+  name: user.name ?? "Unnamed",
+});
+
+/**
+ * Looks people up by ID for one request, caching each, for naming who added what. Null for a
+ * person whose account is gone.
+ */
+export const makeContributors = (
+  ctx: ReadCtx,
+): ((userId: Id<"users">) => Promise<(typeof Contributor)["Encoded"] | null>) => {
+  const cache = new Map<Id<"users">, Promise<(typeof Contributor)["Encoded"] | null>>();
+
+  return (userId) => {
+    const cached = cache.get(userId);
+
+    if (cached !== undefined) return cached;
+
+    const pending = ctx.db.get(userId).then((user) => (user === null ? null : contributorOf(user)));
+
+    cache.set(userId, pending);
+
+    return pending;
+  };
+};
+
+/** What the viewer may do with a playlist, and how it is shared, as `presentPlaylist` shows it. */
+export interface PlaylistStanding {
+  readonly access: PlaylistAccess;
+  readonly sharedWithPeople: boolean;
+}
+
 /**
  * A playlist summary with up to four covers for its mosaic, taken only from songs the viewer can
  * read: a cover is signed for anyone who holds its URL.
@@ -203,6 +239,7 @@ export const presentPlaylist = async (
   viewer: Viewer,
   presenter: Presenter,
   doc: Doc<"playlists">,
+  standing: PlaylistStanding,
 ): Promise<(typeof Playlist)["Encoded"]> => {
   const items = await ctx.db
     .query("playlistItems")
@@ -221,7 +258,11 @@ export const presentPlaylist = async (
     ),
   ].slice(0, 4);
 
-  const urls = await Promise.all(hashes.map(presenter.artUrl));
+  const [urls, owner] = await Promise.all([
+    Promise.all(hashes.map(presenter.artUrl)),
+    ctx.db.get(doc.ownerId),
+  ]);
+
   const artUrls = urls.filter((url): url is string => url !== null);
 
   return {
@@ -232,5 +273,9 @@ export const presentPlaylist = async (
     durationMs: doc.durationMs,
     artUrls,
     updatedAt: doc.updatedAt,
+    owner: owner === null ? null : contributorOf(owner),
+    visibility: doc.visibility ?? "private",
+    sharedWithPeople: standing.sharedWithPeople,
+    access: standing.access,
   };
 };

@@ -117,16 +117,31 @@ describe("choosePlay", () => {
   });
 });
 
-const state = (playing: boolean): PlaybackState =>
+const state = (
+  playing: boolean,
+  names: { readonly device?: string; readonly title?: string } = {},
+): PlaybackState =>
   decodeState({
-    activeDevice: { id: "d1", name: "Kitchen", kind: "web", lastSeenAt: 0, online: true },
-    queue: [track("t1", "Digital Love", "Daft Punk"), track("t2", "Voyager", "Daft Punk")],
+    activeDevice: {
+      id: "d1",
+      name: names.device ?? "Kitchen",
+      kind: "web",
+      lastSeenAt: 0,
+      online: true,
+    },
+    queue: [
+      track("t1", names.title ?? "Digital Love", "Daft Punk"),
+      track("t2", "Voyager", "Daft Punk"),
+    ].map((entry, position) =>
+      Object.assign(entry, { itemId: String(position + 1), addedBy: null, autoplay: false }),
+    ),
     index: 0,
     positionMs: 30_000,
     playing,
     updatedAt: 1_000_000,
     shuffle: false,
     repeat: "all",
+    autoplay: true,
     volume: 0.8,
   });
 
@@ -144,5 +159,16 @@ describe("describePlayback", () => {
       "  on Kitchen (web) · 1 of 2 in queue · shuffle off · repeat all · volume 80%",
       "  track t1",
     ]);
+  });
+
+  it("writes out control characters and line breaks in names, so they can't fake a line", () => {
+    const text = describePlayback(
+      state(true, { title: "Song\n  on Kitchen\u001b[2J", device: "Den\u009b31m" }),
+      1_010_000,
+    );
+
+    expect(text.split("\n")).toHaveLength(4);
+    expect(text).toContain(String.raw`▶ Song\u000a  on Kitchen\u001b[2J — Daft Punk`);
+    expect(text).toContain(String.raw`on Den\u009b31m (web)`);
   });
 });

@@ -19,15 +19,16 @@ describe("permissions", () => {
       role,
       can(role, "user"),
       can(role, "keys"),
+      can(role, "share"),
       can(role, "admin"),
       can(role, "owner"),
     ]);
 
     expect(table).toEqual([
-      ["owner", true, true, true, true],
-      ["admin", true, true, true, false],
-      ["member", true, true, false, false],
-      ["guest", true, false, false, false],
+      ["owner", true, true, true, true, true],
+      ["admin", true, true, true, true, false],
+      ["member", true, true, true, false, false],
+      ["guest", true, false, false, false, false],
     ]);
   });
 

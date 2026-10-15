@@ -9,7 +9,7 @@
  * flight) or a gapless advance the server has not heard about yet.
  */
 import type { DeviceId, TrackId } from "@music/commands/ids";
-import type { PlaybackState, RepeatMode, Track } from "@music/commands/models";
+import type { PlaybackState, QueueEntry, RepeatMode } from "@music/commands/models";
 import { Data } from "effect";
 
 import { livePosition } from "./live-position";
@@ -23,7 +23,7 @@ export interface SessionView {
   readonly active: boolean;
   readonly index: number;
   /** The queue entry at `index`, or null when the queue is empty. */
-  readonly track: Track | null;
+  readonly track: QueueEntry | null;
   readonly positionMs: number;
   readonly updatedAt: number;
   readonly playing: boolean;
@@ -61,13 +61,16 @@ export type EngineCommand = Data.TaggedEnum<{
   Unload: {};
   /** Load the queue entry at `index` and start at `startMs`. */
   Load: {
-    readonly track: Track;
+    readonly track: QueueEntry;
     readonly index: number;
     readonly startMs: number;
     readonly autoplay: boolean;
   };
-  /** The engine already plays this track; it now sits at `index` in the queue. */
-  AdoptIndex: { readonly index: number };
+  /**
+   * The engine already plays this track; it is now the entry `track` at `index` in the queue (the
+   * same song, moved, or queued again as another entry).
+   */
+  AdoptIndex: { readonly index: number; readonly track: QueueEntry };
   Play: {};
   Pause: {};
   Seek: { readonly positionMs: number };
@@ -93,7 +96,7 @@ export const planEngine = (
 
   const target = livePosition(next, now, next.track.durationMs);
 
-  const load = (track: Track): ReadonlyArray<EngineCommand> => [
+  const load = (track: QueueEntry): ReadonlyArray<EngineCommand> => [
     EngineCommand.SetVolume({ volume: next.volume }),
     EngineCommand.Load({ track, index: next.index, startMs: target, autoplay: next.playing }),
   ];
@@ -101,11 +104,17 @@ export const planEngine = (
   if (previous === null || !previous.active || local.trackId === null) return load(next.track);
 
   const commands: Array<EngineCommand> = [];
-  const entryChanged = previous.index !== next.index || previous.track?.id !== next.track.id;
+
+  const entryChanged =
+    previous.index !== next.index ||
+    previous.track?.id !== next.track.id ||
+    previous.track.itemId !== next.track.itemId;
 
   if (entryChanged && next.track.id !== local.trackId) return load(next.track);
 
-  if (entryChanged) commands.push(EngineCommand.AdoptIndex({ index: next.index }));
+  if (entryChanged) {
+    commands.push(EngineCommand.AdoptIndex({ index: next.index, track: next.track }));
+  }
 
   if (previous.volume !== next.volume) {
     commands.push(EngineCommand.SetVolume({ volume: next.volume }));

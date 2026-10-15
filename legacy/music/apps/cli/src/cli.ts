@@ -37,6 +37,7 @@ import {
 } from "./config";
 import type { CliError } from "./errors";
 import { ConfigFileError, ExitCode, exitCodeOf, reportOf, UsageError } from "./errors";
+import { escapeControlCharacters } from "./escape";
 import type { ParsedTokens } from "./flags";
 import { buildArgs, optionsFor, tokenize } from "./flags";
 import { Input } from "./input";
@@ -314,7 +315,9 @@ const login = Effect.fn("Cli.login")(function* (tokens: ParsedTokens, json: bool
 
   if (json) return yield* printJson({ server: credentials.server, user });
 
-  yield* output.out(`Logged in to ${credentials.server} as ${user.email} (${user.role}).`);
+  yield* output.out(
+    `Logged in to ${escapeControlCharacters(credentials.server)} as ${escapeControlCharacters(user.email)} (${user.role}).`,
+  );
 
   return yield* output.err(`Saved to ${env.paths.config}.`);
 });
@@ -402,7 +405,9 @@ const playQuery = (tokens: ParsedTokens, json: boolean): Effect.Effect<void, Cli
 
     return yield* json
       ? printJson(played)
-      : output.out(`Playing ${played.title} (${songCount(played.trackIds.length)}).`);
+      : output.out(
+          `Playing ${escapeControlCharacters(played.title)} (${songCount(played.trackIds.length)}).`,
+        );
   });
 
 const showNow = (json: boolean): Effect.Effect<void, CliError, Output> =>
@@ -479,6 +484,15 @@ const program = (argv: ReadonlyArray<string>): Effect.Effect<void, CliError, Out
     });
   });
 
+/**
+ * An error message as stderr lines. Messages can quote the server, file tags, or the command line:
+ * every control character is written out, and lines after the first are indented, so no message
+ * can pass a line of its own off as the CLI's. JSON output keeps the message as it was; `Output`
+ * escapes what a terminal would act on there.
+ */
+const messageLines = (message: string): string =>
+  message.split("\n").map(escapeControlCharacters).join("\n  ");
+
 const reportError = (error: CliError, json: boolean): Effect.Effect<void, never, Output> =>
   Effect.gen(function* () {
     const output = yield* Output;
@@ -487,7 +501,7 @@ const reportError = (error: CliError, json: boolean): Effect.Effect<void, never,
     if (json) {
       yield* output.err(JSON.stringify({ error: report }));
     } else {
-      yield* output.err(`music: ${report.message}`);
+      yield* output.err(`music: ${messageLines(report.message)}`);
     }
 
     if (!json && Predicate.isTagged(error, "UsageError")) {
@@ -513,7 +527,7 @@ export const runCli = (
 
         yield* json
           ? output.err(JSON.stringify({ error: { code: "internal", message } }))
-          : output.err(`music: ${message}`);
+          : output.err(`music: ${messageLines(message)}`);
 
         return ExitCode.failed;
       }),

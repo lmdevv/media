@@ -2,6 +2,7 @@ import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials"
 import { convexAuth, retrieveAccount } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import { Scrypt } from "lucia";
+import { OptionalName, Text, cleanText } from "@music/commands/text";
 import { Result, Schema } from "effect";
 
 import { internal } from "./_generated/api";
@@ -12,6 +13,13 @@ import { SUSPENDED_MESSAGE } from "./lib/viewer";
 /** The provider ID stored on every password account; it must never change. */
 const PASSWORD = "password";
 
+/**
+ * A new account's email, cleaned like any typed text: an account without a name shows the part
+ * before the `@`. Sign-in looks an email up as typed (`Email`), so an account made before the
+ * cleaning still finds its own.
+ */
+const NewEmail = Text.check(Schema.isMinLength(3));
+
 const Email = Schema.Trimmed.check(Schema.isMinLength(3));
 
 /**
@@ -21,9 +29,9 @@ const Email = Schema.Trimmed.check(Schema.isMinLength(3));
 const PasswordParams = Schema.Union([
   Schema.Struct({
     flow: Schema.Literal("signUp"),
-    email: Email,
+    email: NewEmail,
     password: Schema.String,
-    name: Schema.optionalKey(Schema.Trimmed),
+    name: Schema.optionalKey(OptionalName),
     inviteCode: Schema.optionalKey(Schema.Trimmed),
   }),
   Schema.Struct({ flow: Schema.Literal("signIn"), email: Email, password: Schema.String }),
@@ -136,10 +144,19 @@ const password = ConvexCredentials<DataModel>({
     }
 
     if (input.flow === "signIn") {
+      // Sign-up keeps an email cleaned (`NewEmail`); one made before that keeps it as typed.
+      const typed = input.email.toLowerCase();
+
+      const id = await ctx.runQuery(internal.users.signInAccountId, {
+        provider: PASSWORD,
+        typed,
+        cleaned: cleanText(typed),
+      });
+
       // Fails on a wrong password before anything reveals that the account is suspended.
       const { account, user } = await retrieveAccount(ctx, {
         provider: PASSWORD,
-        account: { id: input.email.toLowerCase(), secret: input.password },
+        account: { id, secret: input.password },
       }).catch(async (cause: unknown) => {
         const reason = cause instanceof Error ? cause.message : "";
 

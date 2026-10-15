@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
 
-import { AlbumId, ArtistId, DeviceId, TrackId } from "@music/commands/ids";
+import { AlbumId, ArtistId, DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import { StreamProfile } from "@music/commands/models";
-import type { PlaybackState, Track } from "@music/commands/models";
+import type { PlaybackState, QueueEntry } from "@music/commands/models";
 import { makeMusicClient } from "@music/sdk/client";
 import type { CommandTransport } from "@music/sdk/client";
 import { Schema } from "effect";
@@ -16,7 +16,10 @@ const deviceId = DeviceId.make("this-browser");
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
-const song: Track = {
+const song: QueueEntry = {
+  itemId: QueueItemId.make("1"),
+  addedBy: null,
+  autoplay: false,
   id: TrackId.make("song"),
   title: "Song",
   artist: "Artist",
@@ -44,6 +47,7 @@ const session = (playing: boolean, updatedAt: number): PlaybackState => ({
   updatedAt,
   shuffle: false,
   repeat: "off",
+  autoplay: false,
   volume: 1,
 });
 

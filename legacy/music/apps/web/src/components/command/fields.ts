@@ -9,6 +9,8 @@ export type Entity =
   | "artist"
   | "playlist"
   | "playlistItem"
+  | "queueItem"
+  | "sharee"
   | "library"
   | "job"
   | "apiKey"
@@ -54,6 +56,22 @@ const ENTITIES = new Map<string, Entity>([
   ["userId", "person"],
 ]);
 
+/**
+ * The record an ID argument points at. `itemId` names a playlist entry in playlist commands and a
+ * queue entry elsewhere; people to share with come from the directory, which members can read.
+ */
+const entityOf = (command: CommandName, name: string): Entity | undefined => {
+  const group = commands[command].group;
+
+  if (name === "itemId" || name === "afterItemId") {
+    return group === "playlists" ? "playlistItem" : "queueItem";
+  }
+
+  if (name === "userId" && group === "playlists") return "sharee";
+
+  return ENTITIES.get(name);
+};
+
 /** Labels for fields whose names read poorly when split. */
 const LABELS = new Map<string, string>([
   ["trackId", "Song"],
@@ -61,7 +79,8 @@ const LABELS = new Map<string, string>([
   ["albumId", "Album"],
   ["artistId", "Artist"],
   ["playlistId", "Playlist"],
-  ["itemId", "Song in the playlist"],
+  ["itemId", "Song"],
+  ["afterItemId", "After this song"],
   ["libraryId", "Library folder"],
   ["jobId", "Job"],
   ["apiKeyId", "Key"],
@@ -119,8 +138,8 @@ const numberField = (ast: SchemaAST.AST): FieldKind => {
   return { kind: "number", integer, min, max };
 };
 
-const fieldOf = (name: string, ast: SchemaAST.AST): FieldKind | null => {
-  const entity = ENTITIES.get(name);
+const fieldOf = (command: CommandName, name: string, ast: SchemaAST.AST): FieldKind | null => {
+  const entity = entityOf(command, name);
 
   if (SchemaAST.isUnion(ast)) {
     const literals = ast.types.filter(SchemaAST.isLiteral).map((member) => String(member.literal));
@@ -129,7 +148,7 @@ const fieldOf = (name: string, ast: SchemaAST.AST): FieldKind | null => {
 
     const inner = ast.types.find((member) => !SchemaAST.isNull(member));
 
-    return inner === undefined ? null : fieldOf(name, inner);
+    return inner === undefined ? null : fieldOf(command, name, inner);
   }
 
   if (SchemaAST.isArrays(ast)) return entity === undefined ? null : { kind: "ids", entity };
@@ -159,7 +178,7 @@ export const fieldsOf = (name: CommandName): ReadonlyArray<FieldSpec> | null => 
 
   for (const property of ast.propertySignatures) {
     const key = String(property.name);
-    const field = fieldOf(key, property.type);
+    const field = fieldOf(name, key, property.type);
 
     if (field === null) return null;
 

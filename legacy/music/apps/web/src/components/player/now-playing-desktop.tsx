@@ -35,7 +35,7 @@ import {
 import { DeviceList } from "./devices";
 import { nowPlayingBackground } from "./now-playing-background";
 import { RemotePill } from "./now-playing-remote-pill";
-import { QueueList, useClearQueue, useUpNext } from "./queue";
+import { UpcomingQueue, useClearQueue, useUpNext } from "./queue";
 
 /** Translucent white fills on the always-dark Now Playing; `text` is white inside `.dark`. */
 const glassButton =
@@ -276,7 +276,7 @@ function DevicePill() {
 }
 
 function UpNext() {
-  const { next, source } = useUpNext();
+  const { queued, source } = useUpNext();
   const [clear, clearing] = useClearQueue();
 
   return (
@@ -285,7 +285,7 @@ function UpNext() {
         <h2 className="font-sans text-xl leading-8.5 font-heavy tracking-tight text-text">
           Up next
         </h2>
-        {next.length > 0 ? (
+        {queued.length > 0 ? (
           <button
             type="button"
             disabled={clearing}
@@ -296,14 +296,14 @@ function UpNext() {
           </button>
         ) : null}
       </div>
-      <div className="flex flex-col gap-1">
-        <span className="px-3 pb-1.5 font-sans text-xs/xs font-medium tracking-mono text-text/55 uppercase">
-          {source === null ? "Next up" : `From ${source}`}
-        </span>
-        <QueueList
-          next={next}
+      <div className="flex flex-col gap-6">
+        <UpcomingQueue
           tone="glass"
-          className="flex flex-col gap-1"
+          heading={
+            <span className="px-3 pb-1.5 font-sans text-xs/xs font-medium tracking-mono text-text/55 uppercase">
+              {source === null ? "Next up" : `From ${source}`}
+            </span>
+          }
           empty={
             <p className="px-3 font-sans text-base/sm text-text/60">Nothing after this song.</p>
           }

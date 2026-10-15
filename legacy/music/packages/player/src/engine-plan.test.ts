@@ -1,12 +1,15 @@
-import { AlbumId, ArtistId, TrackId } from "@music/commands/ids";
-import type { Track } from "@music/commands/models";
+import { AlbumId, ArtistId, QueueItemId, TrackId } from "@music/commands/ids";
+import type { QueueEntry } from "@music/commands/models";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { EngineCommand, followingIndex, planEngine } from "./engine-plan";
 import type { SessionView } from "./engine-plan";
 
-const track = (id: string, durationMs = 200_000): Track => ({
+const track = (id: string, durationMs = 200_000, itemId = `item-${id}`): QueueEntry => ({
+  itemId: QueueItemId.make(itemId),
+  addedBy: null,
+  autoplay: false,
   id: TrackId.make(id),
   title: id,
   artist: "Artist",
@@ -104,7 +107,15 @@ describe("planEngine", () => {
     const after = view({ index: 0 });
 
     expect(planEngine(before, after, loaded("a", 3000), 4000)).toEqual([
-      EngineCommand.AdoptIndex({ index: 0 }),
+      EngineCommand.AdoptIndex({ index: 0, track: a }),
+    ]);
+  });
+
+  it("adopts a new entry of the same song at the same index without reloading", () => {
+    const again = track("a", 200_000, "item-a-again");
+
+    expect(planEngine(view(), view({ track: again }), loaded("a", 3000), 4000)).toEqual([
+      EngineCommand.AdoptIndex({ index: 0, track: again }),
     ]);
   });
 

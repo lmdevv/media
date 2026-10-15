@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runCli } from "./cli";
 import { Input } from "./input";
-import { Output } from "./output";
+import { Output, lineOutput } from "./output";
 import { makeTempDir, packageRoot, readText, removeDir } from "./testing/process";
 
 /** What a script or a person at a terminal supplies on stdin. */
@@ -40,15 +40,10 @@ const invoke = async (
   const stdout: Array<string> = [];
   const stderr: Array<string> = [];
 
-  const output = Output.of({
-    out: (text) =>
-      Effect.sync(() => {
-        stdout.push(text);
-      }),
-    err: (text) =>
-      Effect.sync(() => {
-        stderr.push(text);
-      }),
+  // The real line writer, which guards every line, into arrays instead of the process streams.
+  const output = lineOutput({
+    out: (line) => stdout.push(line.slice(0, -1)),
+    err: (line) => stderr.push(line.slice(0, -1)),
   });
 
   const code = await Effect.runPromise(
@@ -143,6 +138,40 @@ describe("music (in-process)", () => {
 
     expect(sub.code).toBe(2);
     expect(sub.stderr).toContain("run music playlists --help");
+  });
+
+  it("writes out control characters in error messages instead of passing them on", async () => {
+    const hostile = "\u001b]0;pwned\u0007\u009b2J";
+    const plain = await run(hostile);
+    const json = await run("--json", hostile);
+
+    expect(plain.stderr).toContain(String.raw`\u001b]0;pwned\u0007\u009b2J`);
+    expect(/\p{Cc}/u.test(plain.stderr.replaceAll("\n", ""))).toBe(false);
+    // Still JSON, and it decodes to the message as the CLI made it.
+    expect(/\p{Cc}/u.test(json.stderr)).toBe(false);
+    expect(decodeError(json.stderr).error.message).toContain(hostile);
+  });
+
+  it("indents an error message's later lines, so none passes for a line of its own", async () => {
+    const result = await run("x\nmusic: Logged out.");
+    const [, ...rest] = result.stderr.split("\n");
+
+    expect(rest[0]).toMatch(/^ {2}music: Logged out\./u);
+  });
+
+  it("refuses a library folder path with a control character without repeating it", async () => {
+    const result = await run(
+      "libraries",
+      "create",
+      "--name",
+      "Vinyl",
+      "--path",
+      "music/\u001b]0;pwned\u0007 ",
+    );
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("can't contain control characters");
+    expect(result.stderr).not.toContain("pwned");
   });
 
   it("prints usage errors as JSON on stderr with --json", async () => {

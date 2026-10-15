@@ -1,5 +1,4 @@
 import type { Track } from "@music/commands/models";
-import { useRead } from "@music/sdk/react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,29 +15,36 @@ import type { ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
+import { useCopyLink } from "@/lib/use-copy-link";
+import type { LinkTarget } from "@/lib/use-copy-link";
+import { useWritablePlaylists } from "@/lib/use-writable-playlists";
 
 import { useAddToPlaylist, useQueueActions } from "./track-menu";
 
 /**
- * The "…" menu for a whole album, artist, or playlist: queue it, add it to a playlist, plus any
- * screen-specific `extra` items such as rename or delete.
+ * The "…" menu for a whole album, artist, or playlist: queue it, add it to a playlist, copy a
+ * link to it, plus any screen-specific `extra` items such as rename or delete.
  */
 export function CollectionMenu({
   tracks,
   label,
+  link,
   extra,
   className,
   trigger,
 }: {
   readonly tracks: ReadonlyArray<Track>;
   readonly label: string;
+  /** What "Copy link" links to; left out when absent. */
+  readonly link?: LinkTarget | undefined;
   readonly extra?: ReactNode;
   readonly className?: string;
   readonly trigger?: ReactNode;
 }) {
   const { playNext, addToQueue } = useQueueActions();
   const { openNewPlaylist } = useUi();
-  const playlists = useRead("playlists.list", {});
+  const playlists = useWritablePlaylists();
+  const copyLink = useCopyLink();
   const addToPlaylist = useAddToPlaylist();
   const empty = tracks.length === 0;
   const ids = tracks.map((track) => track.id);
@@ -86,6 +92,9 @@ export function CollectionMenu({
             ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        {link === undefined ? null : (
+          <DropdownMenuItem onClick={() => copyLink(link)}>Copy link</DropdownMenuItem>
+        )}
         {extra === undefined ? null : (
           <>
             <DropdownMenuSeparator />

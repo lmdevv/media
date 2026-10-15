@@ -213,7 +213,7 @@ test("a playlist deleted from the CLI while open shows its deleted state and the
 
   cli(apiKey, ["playlists", "delete", created.playlistId]);
 
-  await expect(page.getByRole("heading", { name: "This playlist was deleted" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "You can't open this playlist" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
   const bar = page.getByRole("region", { name: "Player" });
   await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
@@ -325,7 +325,7 @@ test("playlists: create with N, add from a song's menu, remove, rename, and dele
   await expect(page.getByText("Let's find something for this playlist")).toBeVisible();
 
   await page.getByRole("button", { name: "More actions for Road trip" }).click();
-  await page.getByRole("menuitem", { name: "Rename…" }).click();
+  await page.getByRole("menuitem", { name: "Edit details…" }).click();
   await page.getByLabel("Name", { exact: true }).fill("Night drive");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { level: 1, name: "Night drive" })).toBeVisible();
@@ -563,6 +563,8 @@ test("the last song in the queue stops at its end instead of starting over", asy
   test.setTimeout(180_000);
   cli(apiKey, ["playback", "shuffle", "--no-on"]);
   cli(apiKey, ["playback", "repeat", "off"]);
+  // Autoplay would follow the last song with more; this test is about the queue running out.
+  cli(apiKey, ["queue", "autoplay", "--no-on"]);
 
   await signIn(page);
   await openFirstAlbum(page);
@@ -609,6 +611,62 @@ test("the last song in the queue stops at its end instead of starting over", asy
   await expect(
     page.getByRole("region", { name: "Player" }).getByRole("button", { name: "Play", exact: true }),
   ).toBeVisible();
+});
+
+test("autoplay keeps the music going after the last song", async ({ page }) => {
+  test.setTimeout(180_000);
+  cli(apiKey, ["playback", "shuffle", "--no-on"]);
+  cli(apiKey, ["playback", "repeat", "off"]);
+  cli(apiKey, ["queue", "autoplay", "--on"]);
+
+  await signIn(page);
+  await openFirstAlbum(page);
+
+  const last = page
+    .locator("main [role=row]")
+    .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
+    .last();
+
+  const label =
+    (await last.getByRole("button", { name: /^More actions for / }).getAttribute("aria-label")) ??
+    "";
+
+  const title = label.replace(/^More actions for /, "");
+
+  await last.hover();
+  await last.getByRole("button", { name: `Play ${title}`, exact: true }).click();
+  await expectAudioPast(page, 1);
+
+  // Playing the album's last song lines up autoplay's songs after it.
+  const playing = decodeState(cli(apiKey, ["now", "--json"]));
+  const durationMs = playing.queue[playing.index]?.durationMs ?? 0;
+
+  expect(playing.queue.slice(playing.index + 1).some((entry) => entry.autoplay)).toBe(true);
+  cli(apiKey, ["playback", "seek", "--position-ms", String(Math.max(0, durationMs - 3000))]);
+
+  // The song ends and an autoplay song plays next, with sound.
+  await expect
+    .poll(
+      () => {
+        const state = decodeState(cli(apiKey, ["now", "--json"]));
+
+        return state.playing && (state.queue[state.index]?.autoplay ?? false);
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+
+  // The last song played past one second already; the autoplay song must play on from here.
+  const autoplayBaseline = await page.evaluate(() =>
+    Math.max(
+      0,
+      ...[...(window.musicTestMedia ?? [])].map((element) =>
+        element.paused ? 0 : element.currentTime,
+      ),
+    ),
+  );
+
+  await expectAudioPast(page, autoplayBaseline + 1);
 });
 
 test("the command menu rescans the only library folder with Enter", async ({ page }) => {

@@ -5,6 +5,7 @@
 import { UserId } from "@music/commands/ids";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
 import { decodeJwt } from "jose";
+import { Scrypt } from "lucia";
 import { sha256Hex } from "../convex/lib/crypto";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -853,5 +854,109 @@ describe("library access", () => {
     const found = await admin.music.read("search", { query: "Private Song", limit: 10 });
 
     expect(found.tracks).toEqual([]);
+  });
+});
+
+describe("names given at sign-up", () => {
+  it("lose their control characters", async () => {
+    const { backend, owner } = await household();
+    const { code: inviteCode } = await owner.music.run("invites.create", {});
+
+    const joined = await passwordFlow(backend, {
+      flow: "signUp",
+      email: "named@music.test",
+      password: PASSWORD,
+      name: "\u001b[31mMallory\u009b0m\u0007",
+      inviteCode,
+    });
+
+    expect((await joined.music.read("account.me", {})).name).toBe("[31mMallory0m");
+  });
+
+  it("lose them from the address too, which names an account given no name", async () => {
+    const { backend, owner } = await household();
+    const { code: inviteCode } = await owner.music.run("invites.create", {});
+
+    const joined = await passwordFlow(backend, {
+      flow: "signUp",
+      email: "\u001b]0;x\u0007evil@music.test",
+      password: PASSWORD,
+      inviteCode,
+    });
+
+    expect(await joined.music.read("account.me", {})).toMatchObject({
+      email: "]0;xevil@music.test",
+      name: "]0;xevil",
+    });
+  });
+
+  it("can't be only characters that draw nothing", async () => {
+    const { backend, owner } = await household();
+    const { code: inviteCode } = await owner.music.run("invites.create", {});
+
+    expect(
+      await failureCode(
+        passwordFlow(backend, {
+          flow: "signUp",
+          email: "blank@music.test",
+          password: PASSWORD,
+          name: "\u3164\u115F\u2800\u034F",
+          inviteCode,
+        }),
+      ),
+    ).toBe("invalid_args");
+    // Straight to the dispatcher: the SDK would refuse it before sending.
+    expect(
+      await failureCode(
+        owner.as.mutation(api.commands.run, {
+          name: "account.rename",
+          args: { name: "\u3164 \uFFA0" },
+        }),
+      ),
+    ).toBe("invalid_args");
+  });
+
+  it("sign in with the address as typed at sign-up, though it was stored cleaned", async () => {
+    const { backend, owner } = await household();
+    const { code: inviteCode } = await owner.music.run("invites.create", {});
+    const typed = "tab\tafter@music.test";
+
+    await passwordFlow(backend, { flow: "signUp", email: typed, password: PASSWORD, inviteCode });
+
+    expect(
+      await failureCode(
+        passwordFlow(backend, { flow: "signIn", email: typed, password: PASSWORD }),
+      ),
+    ).toBe("succeeded");
+    expect(
+      await failureCode(
+        passwordFlow(backend, {
+          flow: "signIn",
+          email: "tab after@music.test",
+          password: PASSWORD,
+        }),
+      ),
+    ).toBe("succeeded");
+  });
+
+  it("leave an account made before the cleaning able to sign in as it was made", async () => {
+    const { backend } = await household();
+    const email = "tab\tbefore@music.test";
+    const secret = await new Scrypt().hash(PASSWORD);
+
+    await backend.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", { email, name: "Old", role: "member" });
+
+      await ctx.db.insert("authAccounts", {
+        userId,
+        provider: "password",
+        providerAccountId: email,
+        secret,
+      });
+    });
+
+    expect(
+      await failureCode(passwordFlow(backend, { flow: "signIn", email, password: PASSWORD })),
+    ).toBe("succeeded");
   });
 });

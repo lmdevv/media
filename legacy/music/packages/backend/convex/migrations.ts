@@ -15,7 +15,14 @@ import { internal } from "./_generated/api";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
 import { albumSearchText, artistSearchText, trackSearchText } from "./lib/catalog";
-import { clearedLegacyQueue, hasLegacyQueue, legacyQueue, saveQueue } from "./lib/queue";
+import {
+  clearedLegacyQueue,
+  hasLegacyItems,
+  hasLegacyQueue,
+  legacyQueue,
+  rowQueue,
+  saveQueue,
+} from "./lib/queue";
 
 /** Rows per batch: a track is well under 2 KB, so a batch stays far below the read limits. */
 const BATCH = 256;
@@ -110,6 +117,20 @@ const MIGRATIONS = {
     return page;
   },
   /**
+   * Queues stored song IDs before each entry had its own ID. Readers number such entries the
+   * same way every time (see `itemsFromTrackIds`), so an ID a client saw before this batch ran
+   * still names the same entry after it.
+   */
+  queueItems: async (ctx, cursor) => {
+    const page = await ctx.db.query("playbackQueues").paginate({ cursor, numItems: BATCH });
+
+    await Promise.all(
+      page.page.filter(hasLegacyItems).map((row) => saveQueue(ctx, row.userId, rowQueue(row))),
+    );
+
+    return page;
+  },
+  /**
    * Servers from before owners have admins only; the earliest-created admin who is not suspended
    * becomes the owner. A suspended admin is never picked, nor unsuspended: with no admin left to
    * pick, the server stays without an owner, as one with no admins at all does, until the next
@@ -145,6 +166,7 @@ const migrationName = v.union(
   v.literal("foldAlbumSearchText"),
   v.literal("foldArtistSearchText"),
   v.literal("splitPlaybackQueues"),
+  v.literal("queueItems"),
   v.literal("promoteOwner"),
   v.literal("claimLibraryRoots"),
 );
@@ -154,6 +176,7 @@ const NAMES: ReadonlyArray<MigrationName> = [
   "foldAlbumSearchText",
   "foldArtistSearchText",
   "splitPlaybackQueues",
+  "queueItems",
   "promoteOwner",
   "claimLibraryRoots",
 ];

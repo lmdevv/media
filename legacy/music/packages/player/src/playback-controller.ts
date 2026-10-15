@@ -5,7 +5,7 @@
  * pure `planEngine`.
  */
 import type { DeviceId, TrackId } from "@music/commands/ids";
-import type { PlaybackState, StreamProfile, Track } from "@music/commands/models";
+import type { PlaybackState, QueueEntry, StreamProfile, Track } from "@music/commands/models";
 import type { MusicClient } from "@music/sdk/client";
 import { errorMessage } from "@music/sdk/errors";
 import { Effect, Exit, Fiber } from "effect";
@@ -91,7 +91,7 @@ export interface ControllerEnvironment {
 
 /** The queue entry the engine holds. */
 interface LoadedEntry {
-  readonly track: Track;
+  readonly track: QueueEntry;
   readonly index: number;
   /** The profile requested for this entry; null until its stream URL arrives. */
   readonly profile: StreamProfile | null;
@@ -101,7 +101,7 @@ interface LoadedEntry {
 }
 
 interface PreloadedEntry {
-  readonly track: Track;
+  readonly track: QueueEntry;
   readonly index: number;
   readonly source: EngineSource;
   readonly profile: StreamProfile;
@@ -485,6 +485,7 @@ export class PlaybackController {
         deviceId: this.deviceId,
         index: loaded.index,
         trackId: loaded.track.id,
+        itemId: loaded.track.itemId,
         positionMs,
         playing,
       }),
@@ -510,8 +511,8 @@ export class PlaybackController {
       Load: ({ track, index, startMs, autoplay }) => {
         void this.#load(track, index, startMs, autoplay);
       },
-      AdoptIndex: ({ index }) => {
-        if (this.#loaded !== null) this.#loaded = { ...this.#loaded, index };
+      AdoptIndex: ({ index, track }) => {
+        if (this.#loaded !== null) this.#loaded = { ...this.#loaded, index, track };
       },
       Play: () => {
         if (!this.#reloadIfExpired(this.#positionMs, true)) void this.#engine.play();
@@ -583,7 +584,7 @@ export class PlaybackController {
     return true;
   }
 
-  async #load(track: Track, index: number, startMs: number, autoplay: boolean): Promise<void> {
+  async #load(track: QueueEntry, index: number, startMs: number, autoplay: boolean): Promise<void> {
     this.#generation += 1;
     const generation = this.#generation;
     const plannedAt = this.#env.now();

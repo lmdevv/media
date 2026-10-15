@@ -3,6 +3,7 @@ import { usePlayer } from "@music/player/react";
 import { DialogClose } from "@music/ui/components/dialog";
 import { cn } from "@music/ui/lib/utils";
 import { ListMusicIcon, MessageCircleIcon, MoreHorizontalIcon } from "lucide-react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
@@ -18,7 +19,7 @@ import { NEXT_REPEAT, Progress, Volume, perform, useIsRemote } from "./controls"
 import { nowPlayingBackground } from "./now-playing-background";
 import { AirPlayGlyph, RepeatGlyph, ShuffleGlyph } from "./now-playing-glyphs";
 import { RemotePill } from "./now-playing-remote-pill";
-import { QueueList, useUpNext } from "./queue";
+import { UpcomingQueue, useUpNext } from "./queue";
 
 interface PhoneNowPlayingProps {
   readonly track: Track;
@@ -284,24 +285,39 @@ function PillToggle({
 }
 
 function PhoneUpNext() {
-  const { next, source } = useUpNext();
+  const { queued, source } = useUpNext();
+  const [reordering, setReordering] = useState(false);
 
   return (
     <div className="flex min-h-0 grow flex-col pt-5.5">
-      <div className="flex flex-col px-2 pb-2">
-        <span className="font-sans text-phone-body leading-5.5 font-semibold text-text">
-          Continue Playing
+      <div className="flex items-start justify-between gap-3 px-2 pb-2">
+        <span className="flex min-w-0 flex-col">
+          <span className="font-sans text-phone-body leading-5.5 font-semibold text-text">
+            Continue Playing
+          </span>
+          {source === null ? null : (
+            <span className="truncate font-sans text-sm/sm text-text/55">From {source}</span>
+          )}
         </span>
-        {source === null ? null : (
-          <span className="font-sans text-sm/sm text-text/55">From {source}</span>
-        )}
+        {queued.length > 1 || reordering ? (
+          <button
+            type="button"
+            aria-pressed={reordering}
+            onClick={() => setReordering((on) => !on)}
+            className="shrink-0 rounded-full bg-text/8 px-3.5 py-1.75 font-sans text-sm/xs font-medium text-text hover:bg-text/14"
+          >
+            {reordering ? "Done" : "Reorder"}
+          </button>
+        ) : null}
       </div>
-      <QueueList
-        next={next}
-        tone="glass"
-        className="min-h-0 grow overflow-y-auto overscroll-contain"
-        empty={<p className="px-2 font-sans text-sm/sm text-text/60">Nothing after this song.</p>}
-      />
+      <div className="flex min-h-0 grow flex-col gap-4 overflow-y-auto overscroll-contain">
+        <UpcomingQueue
+          tone="glass"
+          reorderMode={reordering}
+          heading={null}
+          empty={<p className="px-2 font-sans text-sm/sm text-text/60">Nothing after this song.</p>}
+        />
+      </div>
     </div>
   );
 }

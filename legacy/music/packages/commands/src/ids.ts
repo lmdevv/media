@@ -21,6 +21,14 @@ export const PlaylistItemId = Schema.NonEmptyString.pipe(Schema.brand("PlaylistI
 
 export type PlaylistItemId = typeof PlaylistItemId.Type;
 
+/**
+ * One entry in a play queue. It stays the same while the entry is in the queue, whatever moves
+ * around it, so two devices editing the queue at once never act on the wrong row.
+ */
+export const QueueItemId = Schema.NonEmptyString.pipe(Schema.brand("QueueItemId"));
+
+export type QueueItemId = typeof QueueItemId.Type;
+
 export const LibraryId = Schema.NonEmptyString.pipe(Schema.brand("LibraryId"));
 
 export type LibraryId = typeof LibraryId.Type;

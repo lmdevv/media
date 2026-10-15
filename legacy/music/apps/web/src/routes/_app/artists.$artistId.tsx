@@ -12,6 +12,7 @@ import { PlayIcon } from "lucide-react";
 import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { AlbumCard, SectionHeader, usePlayTracks } from "@/components/library/cards";
 import { LikeButton } from "@/components/library/like-button";
+import { CollectionMenu } from "@/components/playlists/collection-menu";
 import { TrackMenu } from "@/components/playlists/track-menu";
 import { DetailError } from "@/components/route-error";
 import type { MissingCopy } from "@/components/route-error";
@@ -23,7 +24,7 @@ const decodeArtistId = Schema.decodeUnknownSync(ArtistId);
 const MISSING: MissingCopy = {
   title: "This artist isn't in your library anymore",
   description:
-    "A rescan may have removed their songs, their folder was removed from [music], or the link is wrong.",
+    "A rescan may have removed their songs, their folder was removed from [music], they're in a library that isn't shared with you, or the link is wrong.",
   back: { to: "/artists", label: "Back to artists" },
 };
 
@@ -85,9 +86,15 @@ function ArtistPage() {
           >
             <PlayIcon className="size-5 translate-x-px" fill="currentColor" strokeWidth={0} />
           </button>
-          <h1 className="font-sans text-phone-large-title leading-10.25 font-heavy tracking-tighter text-dark-text lg:text-display/display lg:tracking-display">
+          <h1 className="min-w-0 grow font-sans text-phone-large-title leading-10.25 font-heavy tracking-tighter text-dark-text lg:text-display/display lg:tracking-display">
             {artist.name}
           </h1>
+          <CollectionMenu
+            tracks={topTracks}
+            label={artist.name}
+            link={{ kind: "artist", id: artist.id }}
+            className="border-dark-text/40 text-dark-text hover:bg-dark-text/15 data-popup-open:bg-dark-text/15"
+          />
         </div>
       </header>
 

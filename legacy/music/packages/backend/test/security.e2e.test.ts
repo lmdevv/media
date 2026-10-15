@@ -807,7 +807,9 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       before.id,
     );
     expect(
-      (await adminA.music.read("playlists.get", { playlistId })).items.map((item) => item.track.id),
+      (await adminA.music.read("playlists.get", { playlistId })).items.map(
+        (item) => item.track?.id,
+      ),
     ).toEqual([before.id]);
 
     const known = await media.query(fingerprintsRef, {
@@ -1116,6 +1118,21 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       "keys.revoke": ({ music }) =>
         failureCode(music.run("keys.revoke", { apiKeyId: ApiKeyId.make(shared.libraryId) })),
       "people.list": ({ music }) => failureCode(music.read("people.list", {})),
+      "people.directory": ({ music }) => failureCode(music.read("people.directory", {})),
+      "playlists.visibility": ({ music }) =>
+        failureCode(
+          music.run("playlists.visibility", {
+            playlistId: PlaylistId.make(shared.libraryId),
+            visibility: "shared",
+          }),
+        ),
+      "playlists.share": ({ music }) =>
+        failureCode(
+          music.run("playlists.share", {
+            playlistId: PlaylistId.make(shared.libraryId),
+            userId: nobody,
+          }),
+        ),
       "people.role": ({ music }) =>
         failureCode(music.run("people.role", { userId: nobody, role: "member" })),
       "people.suspend": ({ music }) => failureCode(music.run("people.suspend", { userId: nobody })),

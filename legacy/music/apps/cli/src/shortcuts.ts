@@ -14,6 +14,7 @@ import { Clock, Data, Effect } from "effect";
 
 import type { Api } from "./api";
 import { CommandFailed } from "./errors";
+import { escapeControlCharacters } from "./escape";
 import { formatDuration } from "./render";
 
 /** What `music play` decided to play. */
@@ -181,14 +182,15 @@ export const describePlayback = (state: PlaybackState, now: number): string => {
 
   if (current === undefined) return "Nothing is playing.";
 
+  // Names come from file tags and other people: written out, they can't fake more lines.
   const device =
     state.activeDevice === null
       ? "no active device"
-      : `on ${state.activeDevice.name} (${state.activeDevice.kind})`;
+      : `on ${escapeControlCharacters(state.activeDevice.name)} (${state.activeDevice.kind})`;
 
   return [
-    `${state.playing ? "▶" : "⏸"} ${current.title} — ${current.artist}`,
-    `  ${current.album} · ${formatDuration(livePosition(state, now))} / ${formatDuration(current.durationMs)}`,
+    `${state.playing ? "▶" : "⏸"} ${escapeControlCharacters(current.title)} — ${escapeControlCharacters(current.artist)}`,
+    `  ${escapeControlCharacters(current.album)} · ${formatDuration(livePosition(state, now))} / ${formatDuration(current.durationMs)}`,
     `  ${device} · ${String(state.index + 1)} of ${String(state.queue.length)} in queue · shuffle ${state.shuffle ? "on" : "off"} · repeat ${state.repeat} · volume ${String(Math.round(state.volume * 100))}%`,
     `  track ${current.id}`,
   ].join("\n");
