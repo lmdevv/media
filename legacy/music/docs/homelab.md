@@ -42,7 +42,7 @@ every time:
 
 ```sh
 MUSIC_DIR=/srv/music
-MUSIC_VERSION=0.2.0             # pin a release; see "Upgrading"
+MUSIC_VERSION=0.3.0             # pin a release; see "Upgrading"
 PUBLIC_URL=https://music.example.com
 PUID=1000                       # `id -u` of the user that owns your music
 PGID=1000                       # `id -g`

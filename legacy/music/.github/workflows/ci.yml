@@ -63,10 +63,15 @@ jobs:
       - run: scripts/stack-e2e.sh
         env:
           IMAGE: music:stack-e2e
-      # The released 0.1.0 image, upgraded in place to this image, then rolled back.
+      # Each supported release, upgraded in place to this image, then rolled back: 0.1.0, the
+      # oldest, and 0.2.0, the one before this release.
       - run: scripts/upgrade-e2e.sh
         env:
           IMAGE: music:stack-e2e
+      - run: scripts/upgrade-e2e.sh
+        env:
+          IMAGE: music:stack-e2e
+          OLD_IMAGE: ghcr.io/lmdevv/music:0.2.0@sha256:d0b19fce0acee3b39519e11c5b86343e1abf9f2c028ec41337c03704c73ab51e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

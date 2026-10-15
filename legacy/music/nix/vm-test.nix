@@ -6,16 +6,16 @@
 #   nix build -L .#checks.x86_64-linux.vm     # needs KVM; CI runs it
 #   nix build .#checks.x86_64-linux.vm.driver # builds the VM without running it
 #
-# The image is the 0.1.0 release, pulled by digest so the test is reproducible; it exercises the
+# The image is the 0.2.0 release, pulled by digest so the test is reproducible; it exercises the
 # module, while scripts/stack-e2e.sh exercises the image of each commit.
 { pkgs, module }:
 let
   image = pkgs.dockerTools.pullImage {
     imageName = "ghcr.io/lmdevv/music";
-    imageDigest = "sha256:8eeaa3b3808b72ab97ac787cf547b69359bd214f0dd5cc86b216cc76f9c152eb";
-    hash = "sha256-6tgCuNm0Bc4gaejCr/Hg7dx5z/v1qDaJ9xd1g6dWU0Q=";
+    imageDigest = "sha256:d0b19fce0acee3b39519e11c5b86343e1abf9f2c028ec41337c03704c73ab51e";
+    hash = "sha256-i1Q+1mu+LYQC2vDBJ8H/b701R+vzR1V6pEv2SbW9Ng4=";
     finalImageName = "ghcr.io/lmdevv/music";
-    finalImageTag = "0.1.0";
+    finalImageTag = "0.2.0";
     os = "linux";
     arch = "amd64";
   };
@@ -39,7 +39,7 @@ pkgs.testers.runNixOSTest {
 
     services.music = {
       enable = true;
-      image = "ghcr.io/lmdevv/music:0.1.0";
+      image = "ghcr.io/lmdevv/music:0.2.0";
       imageFile = image;
       musicDirs.library = "/srv/music";
       extraEnvironment.BACKUP_KEEP = "3";

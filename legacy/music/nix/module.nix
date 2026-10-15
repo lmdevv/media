@@ -96,7 +96,7 @@ in
           imageDigest = "sha256:...";
           hash = "sha256-...";
           finalImageName = "ghcr.io/lmdevv/music";
-          finalImageTag = "0.2.0";
+          finalImageTag = "0.3.0";
         }
       '';
       description = ''

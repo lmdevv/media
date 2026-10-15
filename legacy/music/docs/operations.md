@@ -92,33 +92,33 @@ API keys keep working.
 ## Upgrade
 
 Images on `ghcr.io/lmdevv/music` are published only after every CI check has passed. A release is
-a tag such as `v0.2.0` in the repository; its images drop the `v`:
+a tag such as `v0.3.0` in the repository; its images drop the `v`:
 
 | Tag           | What it is                                             |
 | ------------- | ------------------------------------------------------ |
-| `0.2.0`       | A release. Never changes.                              |
-| `0.2`         | The newest release in that minor series.               |
+| `0.3.0`       | A release. Never changes.                              |
+| `0.3`         | The newest release in that minor series.               |
 | `latest`      | The newest release.                                    |
 | `main`        | The newest commit on `main`. Moves often; for testing. |
 | `sha-<short>` | One commit from `main` or a release.                   |
 
 ### Pin a version
 
-Run a release tag such as `0.2.0` and change it to upgrade. Every start of a new build backs up
+Run a release tag such as `0.3.0` and change it to upgrade. Every start of a new build backs up
 first, so upgrading (or going back) is: change the tag, then recreate the container.
 
 ### Docker
 
 ```sh
-docker pull ghcr.io/lmdevv/music:0.2.0
+docker pull ghcr.io/lmdevv/music:0.3.0
 docker stop music && docker rm music   # stop lets the database shut down cleanly
 docker run -d --name music -p 8080:8080 -v music-data:/data -v /path/to/music:/music:ro \
-  -e PUBLIC_URL=https://music.example.com ghcr.io/lmdevv/music:0.2.0
+  -e PUBLIC_URL=https://music.example.com ghcr.io/lmdevv/music:0.3.0
 ```
 
 ### Docker Compose
 
-Set the tag (`MUSIC_VERSION=0.2.0` in the `.env` next to `compose.yaml`), then:
+Set the tag (`MUSIC_VERSION=0.3.0` in the `.env` next to `compose.yaml`), then:
 
 ```sh
 docker compose pull && docker compose up -d
