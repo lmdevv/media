@@ -11,6 +11,7 @@ import {
   DirectoryPerson,
   HistoryEntry,
   Invite,
+  JamMember,
   Job,
   Library,
   LibraryMember,
@@ -131,6 +132,12 @@ const unavailable: Column = {
   },
 };
 
+/** When someone joined a Jam, or asked to. */
+const since: Column = {
+  header: "SINCE",
+  cell: (row) => (Predicate.isNumber(row["since"]) ? formatTimestamp(row["since"]) : ""),
+};
+
 /** Marks a queue entry autoplay added. */
 const autoplayed: Column = {
   header: "FROM",
@@ -225,6 +232,16 @@ const presets = new Map<SchemaAST.AST, ReadonlyArray<Column>>([
     [field("ID", "person", "id"), field("NAME", "person", "name"), field("ROLE", "role")],
   ],
   [DirectoryPerson.ast, [field("ID", "id"), field("NAME", "name"), field("ROLE", "role")]],
+  [
+    JamMember.ast,
+    [
+      field("ID", "person", "id"),
+      field("NAME", "person", "name"),
+      field("STATUS", "status"),
+      field("LISTENING", "listening"),
+      since,
+    ],
+  ],
   [
     HistoryEntry.ast,
     [

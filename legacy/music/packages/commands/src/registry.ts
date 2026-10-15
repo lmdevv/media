@@ -7,6 +7,7 @@ import {
   ArtistId,
   DeviceId,
   InviteId,
+  JamId,
   JobId,
   LibraryId,
   PlaylistId,
@@ -28,6 +29,11 @@ import {
   HistoryEntry,
   Home,
   Invite,
+  JAM_ADD_LIMIT_MAX,
+  Jam,
+  JamEditScope,
+  JamJoinPolicy,
+  JamMember,
   Job,
   Library,
   LibraryMember,
@@ -47,6 +53,7 @@ import {
   PlaylistVisibility,
   RepeatMode,
   SearchResults,
+  ServerSettings,
   ShareLink,
   StreamProfile,
   StreamUrl,
@@ -77,6 +84,9 @@ const FolderPath = Schema.String.check(
 const TrackIds = Schema.Array(TrackId).check(Schema.isMinLength(1), Schema.isMaxLength(2000));
 
 const QueueIndex = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
+/** A Jam's link code, or the whole link (`https://…/jam/<code>`); the server takes the code. */
+const JamCode = Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(500));
 
 /**
  * Every user action, keyed by its dotted name. The web app, command menu, CLI, and agent skill all
@@ -861,6 +871,141 @@ export const commands = {
     job: false,
     args: Schema.Struct({ inviteId: InviteId }),
     result: Ok,
+  }),
+
+  // Server settings
+  "server.settings": command({
+    summary: "Show server settings, such as whether Jam links can create guest accounts",
+    group: "server",
+    kind: "query",
+    access: "admin",
+    job: false,
+    args: NoArgs,
+    result: ServerSettings,
+  }),
+  "server.update": command({
+    summary:
+      "Change server settings: --jam-guest-accounts lets people without an account join a Jam from its link as guests",
+    group: "server",
+    kind: "mutation",
+    access: "admin",
+    job: false,
+    args: Schema.Struct({ jamGuestAccounts: Schema.optionalKey(Schema.Boolean) }),
+    result: Ok,
+  }),
+
+  // Jams
+  "jam.start": command({
+    summary: "Start a Jam from your playback: people who open its link share your queue and player",
+    group: "jams",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: Schema.Struct({ jamId: JamId, code: Schema.String }),
+  }),
+  "jam.get": command({
+    summary:
+      "Show the Jam you host, are in, or are waiting to join: host, settings, people, and its link code",
+    group: "jams",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: Schema.NullOr(Jam),
+  }),
+  "jam.members": command({
+    summary: "List the people in your Jam (the host also sees who is waiting to be let in)",
+    group: "jams",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: Schema.Array(JamMember),
+  }),
+  "jam.join": command({
+    summary:
+      "Join a Jam by its code or link; leaves any other Jam you are in. --device-id plays it on that device",
+    group: "jams",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ code: JamCode, deviceId: Schema.optionalKey(DeviceId) }),
+    result: Schema.Struct({ jamId: JamId, status: Schema.Literals(["joined", "pending"]) }),
+  }),
+  "jam.leave": command({
+    summary: "Leave the Jam you are in, or dismiss one that ended; your own playback comes back",
+    group: "jams",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: Ok,
+  }),
+  "jam.listen": command({
+    summary:
+      "Listen along to your Jam on a device (--on --device-id <id>), or stop and use it as a remote (--no-on)",
+    group: "jams",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ on: Schema.Boolean, deviceId: Schema.optionalKey(DeviceId) }),
+    result: Ok,
+  }),
+  "jam.end": command({
+    summary: "End the Jam you host; everyone gets their own player back",
+    group: "jams",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: Ok,
+  }),
+  "jam.settings": command({
+    summary: "Change what people in your Jam may do (host only); flags left out stay as they are",
+    group: "jams",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({
+      join: Schema.optionalKey(JamJoinPolicy),
+      membersCanAdd: Schema.optionalKey(Schema.Boolean),
+      /** 0 removes the limit. */
+      addLimit: Schema.optionalKey(
+        Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: JAM_ADD_LIMIT_MAX })),
+      ),
+      membersCanControl: Schema.optionalKey(Schema.Boolean),
+      membersCanEdit: Schema.optionalKey(JamEditScope),
+      listenAlong: Schema.optionalKey(Schema.Boolean),
+    }),
+    result: Ok,
+  }),
+  "jam.approve": command({
+    summary: "Let someone waiting into your Jam (--approve), or turn them away (--no-approve)",
+    group: "jams",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ userId: UserId, approve: Schema.Boolean }),
+    result: Ok,
+  }),
+  "jam.remove": command({
+    summary: "Remove someone from your Jam; the same link won't let them back in",
+    group: "jams",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ userId: UserId }),
+    result: Ok,
+  }),
+  "jam.relink": command({
+    summary: "Give your Jam a new link; the old one stops working",
+    group: "jams",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: Schema.Struct({ code: Schema.String }),
   }),
 } as const;
 

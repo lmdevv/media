@@ -17,6 +17,12 @@ import { livePosition } from "./live-position";
 /** A server position more than this far from the engine's counts as a seek. */
 const SEEK_THRESHOLD_MS = 1500;
 
+/**
+ * How far a device listening along to someone else's Jam may drift from the host before it seeks
+ * back in step.
+ */
+export const FOLLOW_DRIFT_MS = 1000;
+
 /** The session as one device sees it. */
 export interface SessionView {
   /** True when this device is the session's active device. */
@@ -28,6 +34,11 @@ export interface SessionView {
   readonly updatedAt: number;
   readonly playing: boolean;
   readonly volume: number;
+  /**
+   * This device listens along to someone else's Jam: it plays in step with the host's device,
+   * which is the clock, and never reports or moves the queue itself.
+   */
+  readonly following: boolean;
 }
 
 /** Projects the session onto one device. */
@@ -39,6 +50,7 @@ export const sessionView = (state: PlaybackState, deviceId: DeviceId): SessionVi
   updatedAt: state.updatedAt,
   playing: state.playing,
   volume: state.volume,
+  following: state.following,
 });
 
 /** What the engine holds right now. */
@@ -124,7 +136,9 @@ export const planEngine = (
     (previous.positionMs !== next.positionMs || previous.updatedAt !== next.updatedAt) &&
     next.positionMs !== local.reportedMs;
 
-  if (positionWritten && Math.abs(target - local.positionMs) > SEEK_THRESHOLD_MS) {
+  const threshold = next.following ? FOLLOW_DRIFT_MS : SEEK_THRESHOLD_MS;
+
+  if (positionWritten && Math.abs(target - local.positionMs) > threshold) {
     commands.push(EngineCommand.Seek({ positionMs: target }));
   }
 

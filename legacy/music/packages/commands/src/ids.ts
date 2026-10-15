@@ -53,3 +53,8 @@ export type UserId = typeof UserId.Type;
 export const DeviceId = Schema.NonEmptyString.pipe(Schema.brand("DeviceId"));
 
 export type DeviceId = typeof DeviceId.Type;
+
+/** A Jam: a shared live listening session hosted from someone's playback. */
+export const JamId = Schema.NonEmptyString.pipe(Schema.brand("JamId"));
+
+export type JamId = typeof JamId.Type;

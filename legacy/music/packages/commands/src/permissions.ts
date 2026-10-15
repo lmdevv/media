@@ -6,6 +6,7 @@
 import type {
   AccessControl,
   AssignableRole,
+  JamSettings,
   LibraryVisibility,
   PlaylistAccess,
   Role,
@@ -183,3 +184,37 @@ export const canEditPlaylistItems = (access: PlaylistAccess): boolean =>
 
 /** Whether `access` lets someone rename, describe, share, or delete a playlist. */
 export const canManagePlaylist = (access: PlaylistAccess): boolean => access === "owner";
+
+/**
+ * Whether someone in a Jam may play, pause, skip, and seek: the host always, others when the host
+ * allows it.
+ */
+export const canControlJam = (settings: JamSettings, isHost: boolean): boolean =>
+  isHost || settings.membersCanControl;
+
+/**
+ * Whether someone in a Jam may reorder or remove a queue entry: the host always; others any
+ * entry, only their own, or none, as the host set.
+ */
+export const canEditJamEntry = (
+  settings: JamSettings,
+  isHost: boolean,
+  addedByThem: boolean,
+): boolean =>
+  isHost || settings.membersCanEdit === "any" || (settings.membersCanEdit === "own" && addedByThem);
+
+/**
+ * How many more songs someone in a Jam may add, given how many upcoming songs they already have
+ * queued: null for no limit (the host, or no limit set), 0 when adding is off.
+ */
+export const jamAddsLeft = (
+  settings: JamSettings,
+  isHost: boolean,
+  upcoming: number,
+): number | null => {
+  if (isHost) return null;
+
+  if (!settings.membersCanAdd) return 0;
+
+  return settings.addLimit === null ? null : Math.max(0, settings.addLimit - upcoming);
+};

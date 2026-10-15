@@ -4,8 +4,9 @@
  * the viewer's access from the database.
  *
  * Access comes from ownership, then from a share naming the viewer, then from the playlist's
- * visibility (`shared` lets anyone signed in view it). A playlist the viewer has no access to
- * reads as not found, so a link never tells someone what a private playlist is called.
+ * visibility (`shared` lets anyone signed in view it, except guest accounts made from a Jam link,
+ * which anyone with that link can create). A playlist the viewer has no access to reads as not
+ * found, so a link never tells someone what a private playlist is called.
  */
 import type { PlaylistAccess } from "@music/commands/models";
 import { can, canEditPlaylistItems, canManagePlaylist } from "@music/commands/permissions";
@@ -13,6 +14,7 @@ import { can, canEditPlaylistItems, canManagePlaylist } from "@music/commands/pe
 import type { Doc, Id } from "../_generated/dataModel";
 import { fail } from "./errors";
 import { tableId } from "./ids";
+import { isJamGuest } from "./jams";
 import { roleOf } from "./viewer";
 import type { ReadCtx, Viewer } from "./viewer";
 
@@ -59,7 +61,7 @@ export const playlistAccess = async (
 
   if (share !== null) return share.role;
 
-  return playlist.visibility === "shared" ? "viewer" : null;
+  return playlist.visibility === "shared" && !isJamGuest(viewer) ? "viewer" : null;
 };
 
 /** What a command needs to do with a playlist. */

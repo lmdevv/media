@@ -1119,6 +1119,9 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
         failureCode(music.run("keys.revoke", { apiKeyId: ApiKeyId.make(shared.libraryId) })),
       "people.list": ({ music }) => failureCode(music.read("people.list", {})),
       "people.directory": ({ music }) => failureCode(music.read("people.directory", {})),
+      "server.settings": ({ music }) => failureCode(music.read("server.settings", {})),
+      // No change asked for: checks who may, without turning guest accounts on.
+      "server.update": ({ music }) => failureCode(music.run("server.update", {})),
       "playlists.visibility": ({ music }) =>
         failureCode(
           music.run("playlists.visibility", {

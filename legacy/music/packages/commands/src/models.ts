@@ -6,6 +6,7 @@ import {
   ArtistId,
   DeviceId,
   InviteId,
+  JamId,
   JobId,
   LibraryId,
   PlaylistId,
@@ -337,6 +338,12 @@ export const PlaybackPosition = Schema.Struct({
   playing: Schema.Boolean,
   updatedAt: Timestamp,
   volume: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  /**
+   * True while the viewer listens along to someone else's Jam: the queue and position are the
+   * host's, and `activeDevice` is the viewer's own device that plays along. Such a device keeps
+   * within a second of the host by seeking, and never reports its position or moves the queue.
+   */
+  following: Schema.Boolean,
 });
 
 export interface PlaybackPosition extends Schema.Schema.Type<typeof PlaybackPosition> {}
@@ -352,6 +359,12 @@ export const QueueEntry = Schema.Struct({
   addedBy: Schema.NullOr(Contributor),
   /** Added by autoplay when the queue ran out, not by a person. */
   autoplay: Schema.Boolean,
+  /**
+   * Set on an entry of a Jam's queue that people in it may not know about: a song autoplay picked
+   * for the host from a library shared with the host alone. Its title, artist, album, and art are
+   * empty, and its song, album, and artist IDs are stand-ins that name nothing.
+   */
+  withheld: Schema.optionalKey(Schema.Literal(true)),
 });
 
 export interface QueueEntry extends Schema.Schema.Type<typeof QueueEntry> {}
@@ -473,6 +486,8 @@ export const Person = Schema.Struct({
   createdAt: Timestamp,
   /** The latest sign-in, player heartbeat, playback change, or API key use; null if none. */
   lastActiveAt: Schema.NullOr(Timestamp),
+  /** A guest account made from a Jam link (when the server allows it), not from an invite. */
+  joinedViaJam: Schema.Boolean,
 });
 
 export interface Person extends Schema.Schema.Type<typeof Person> {}
@@ -523,3 +538,105 @@ export const StreamUrl = Schema.Struct({
 });
 
 export interface StreamUrl extends Schema.Schema.Type<typeof StreamUrl> {}
+
+/**
+ * Who can join a Jam from its link: anyone signed in (`open`), people the host approves one by
+ * one (`approval`), or nobody new (`locked`).
+ */
+export const JamJoinPolicy = Schema.Literals(["open", "approval", "locked"]);
+
+export type JamJoinPolicy = typeof JamJoinPolicy.Type;
+
+/** Which queue entries people in a Jam may reorder or remove: none, their own, or any. */
+export const JamEditScope = Schema.Literals(["none", "own", "any"]);
+
+export type JamEditScope = typeof JamEditScope.Type;
+
+/** Most upcoming songs one person may have queued in a Jam, when the host sets a limit. */
+export const JAM_ADD_LIMIT_MAX = 50;
+
+/**
+ * What people in a Jam may do; the host can always do everything. Defaults: anyone with the link
+ * joins, people add up to 5 upcoming songs each, only the host controls playback, people reorder
+ * or remove only their own songs, and they may listen along on their own devices.
+ */
+export const JamSettings = Schema.Struct({
+  join: JamJoinPolicy,
+  membersCanAdd: Schema.Boolean,
+  /** Upcoming songs one person may have queued at once; null for no limit. */
+  addLimit: Schema.NullOr(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: JAM_ADD_LIMIT_MAX })),
+  ),
+  /** Play, pause, skip, and seek. */
+  membersCanControl: Schema.Boolean,
+  membersCanEdit: JamEditScope,
+  /** Play the Jam on their own devices, in step with the host. */
+  listenAlong: Schema.Boolean,
+});
+
+export interface JamSettings extends Schema.Schema.Type<typeof JamSettings> {}
+
+/** Where someone stands in a Jam. */
+export const JamMemberStatus = Schema.Literals(["pending", "joined", "left", "removed"]);
+
+export type JamMemberStatus = typeof JamMemberStatus.Type;
+
+/** Someone in a Jam, or waiting to be let in. */
+export const JamMember = Schema.Struct({
+  person: Contributor,
+  status: JamMemberStatus,
+  /** Playing the Jam on their own device. */
+  listening: Schema.Boolean,
+  /** When they asked to join, or joined. */
+  since: Timestamp,
+});
+
+export interface JamMember extends Schema.Schema.Type<typeof JamMember> {}
+
+/** Why a Jam ended: the host ended it, the host was offline too long, or nothing played too long. */
+export const JamEndReason = Schema.Literals(["host", "host_offline", "idle"]);
+
+export type JamEndReason = typeof JamEndReason.Type;
+
+/** The viewer's place in a Jam. */
+export const JamRole = Schema.Literals(["host", "member", "pending"]);
+
+export type JamRole = typeof JamRole.Type;
+
+/**
+ * A Jam as the viewer sees it: the one they host, are in, are waiting to join, or that just
+ * ended under them (until they leave it). Only the host sees people waiting for approval.
+ */
+export const Jam = Schema.Struct({
+  id: JamId,
+  /** The link code: `/jam/<code>`. Empty for someone still waiting to be let in. */
+  code: Schema.String,
+  host: Contributor,
+  status: Schema.Literals(["active", "ended"]),
+  endedReason: Schema.NullOr(JamEndReason),
+  settings: JamSettings,
+  /**
+   * The host removed or turned someone away under this link, so an open Jam asks the host about
+   * everyone new until they make a new link. Always false for anyone but the host.
+   */
+  approvalAfterRemoval: Schema.Boolean,
+  role: JamRole,
+  /** Whether the viewer plays the Jam on their own device. */
+  listening: Schema.Boolean,
+  /** People joined, and for the host also those waiting for approval. */
+  members: Schema.Array(JamMember),
+  createdAt: Timestamp,
+});
+
+export interface Jam extends Schema.Schema.Type<typeof Jam> {}
+
+/** Server settings an admin changes. */
+export const ServerSettings = Schema.Struct({
+  /**
+   * Whether someone without an account can open a Jam link and make a guest account (name and
+   * password) to join it. Such guests hear nothing outside the Jam.
+   */
+  jamGuestAccounts: Schema.Boolean,
+});
+
+export interface ServerSettings extends Schema.Schema.Type<typeof ServerSettings> {}

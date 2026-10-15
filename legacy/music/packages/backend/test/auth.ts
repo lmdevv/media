@@ -27,6 +27,7 @@ export type PasswordParams =
       readonly password: string;
       readonly name?: string;
       readonly inviteCode?: string;
+      readonly jamCode?: string;
     }
   | { readonly flow: "reset"; readonly token: string; readonly newPassword: string };
 

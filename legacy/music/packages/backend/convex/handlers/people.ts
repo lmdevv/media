@@ -15,6 +15,13 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { randomToken, sha256Hex } from "../lib/crypto";
 import { fail } from "../lib/errors";
+import {
+  endHostedJam,
+  findOwner,
+  removeAccount,
+  revokeLapsedInvites,
+  voidResets,
+} from "../lib/people";
 import { findSession } from "../lib/playback";
 import { contributorOf } from "../lib/present";
 import { endUserSessions } from "../lib/sessions";
@@ -76,6 +83,7 @@ const presentPerson = async (ctx: QueryCtx, doc: Doc<"users">) => ({
   suspended: doc.suspendedAt !== undefined,
   createdAt: doc._creationTime,
   lastActiveAt: await lastActiveAt(ctx, doc._id),
+  joinedViaJam: doc.joinedViaJam !== undefined,
 });
 
 /** A person the viewer may manage (see `canManagePerson`), or a `forbidden` failure saying why. */
@@ -121,39 +129,6 @@ const keepAnAdmin = async (ctx: QueryCtx, leaving: Doc<"users">): Promise<void> 
     fail("conflict", "This is the last admin. Make someone else an admin first.");
   }
 };
-
-/**
- * Voids the password reset links around a change to a person: the ones made for them, since who
- * may reset them can change with it, and, in batches, the ones they made, since their own rights
- * changed. Redemption re-checks both anyway (`resetStillAllowed`).
- */
-const voidResets = async (ctx: MutationCtx, personId: Id<"users">): Promise<void> => {
-  const own = await ctx.db
-    .query("passwordResets")
-    .withIndex("by_user", (q) => q.eq("userId", personId))
-    .take(10);
-
-  await Promise.all(own.map((reset) => ctx.db.delete(reset._id)));
-  await ctx.scheduler.runAfter(0, internal.people.deleteResetsBy, { creatorId: personId });
-};
-
-/**
- * Tidies the invite list after someone loses the right to their open invites. Sign-up already
- * refuses those invites (`inviterStillAllows`), so this can run later, in batches.
- */
-const revokeLapsedInvites = async (ctx: MutationCtx, inviterId: Id<"users">): Promise<void> => {
-  await ctx.scheduler.runAfter(0, internal.people.revokeLapsedInvites, {
-    inviterId,
-    cursor: null,
-  });
-};
-
-/** The server's owner, if a migration or the first sign-up has named one. */
-const findOwner = (ctx: QueryCtx): Promise<Doc<"users"> | null> =>
-  ctx.db
-    .query("users")
-    .withIndex("by_role", (q) => q.eq("role", "owner"))
-    .first();
 
 /**
  * Creates a one-time reset link for `userId`, replacing any earlier unused one. Returns the token,
@@ -233,6 +208,9 @@ export const peopleMutations = {
         userId: user._id,
         cursor: null,
       });
+      // Guests can't host a Jam, whose link can make accounts: theirs ends, with its guests, as
+      // on suspension or removal.
+      await endHostedJam(ctx, user._id);
     }
 
     return ok;
@@ -250,6 +228,8 @@ export const peopleMutations = {
     // API keys stay, refusing to sign in until the person is unsuspended. Stream URLs already
     // signed keep working until they expire, as after any revocation.
     await endUserSessions(ctx, user._id);
+    // A Jam they host ends now, rather than when the cron next notices, and its guests go.
+    await endHostedJam(ctx, user._id);
 
     return ok;
   },
@@ -291,43 +271,7 @@ export const peopleMutations = {
     // A server from before owners has none until its migration runs; the remover takes over.
     const heir = (await findOwner(ctx))?._id ?? viewer.id;
 
-    // Only the account, its sign-in method, and its one playback session and queue go here: a person has
-    // one password account with at most a code or two. Everything they could create without
-    // limit (keys, devices, likes, history, playlists) goes in batches after, which cannot fail
-    // the removal; with the account gone, none of it is reachable meanwhile.
-    const [accounts, playback, queue] = await Promise.all([
-      ctx.db
-        .query("authAccounts")
-        .withIndex("userIdAndProvider", (q) => q.eq("userId", user._id))
-        .take(10),
-      findSession(ctx, user._id),
-      ctx.db
-        .query("playbackQueues")
-        .withIndex("by_user", (q) => q.eq("userId", user._id))
-        .unique(),
-    ]);
-
-    const codes = await Promise.all(
-      accounts.map((account) =>
-        ctx.db
-          .query("authVerificationCodes")
-          .withIndex("accountId", (q) => q.eq("accountId", account._id))
-          .take(10),
-      ),
-    );
-
-    await endUserSessions(ctx, user._id);
-
-    await Promise.all([
-      // Deleting the account frees the email for a new invite.
-      ...[...accounts, ...codes.flat()].map((doc) => ctx.db.delete(doc._id)),
-      ...[playback, queue].flatMap((row) => (row === null ? [] : [ctx.db.delete(row._id)])),
-    ]);
-
-    await ctx.db.delete(user._id);
-    await revokeLapsedInvites(ctx, user._id);
-    await voidResets(ctx, user._id);
-    await ctx.scheduler.runAfter(0, internal.people.purgeRemovedUser, { userId: user._id, heir });
+    await removeAccount(ctx, user, heir);
 
     return ok;
   },

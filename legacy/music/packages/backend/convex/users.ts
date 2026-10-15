@@ -4,24 +4,119 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, type MutationCtx } from "./_generated/server";
 import { fail } from "./lib/errors";
 import { inviterStillAllows } from "./lib/invites";
+import {
+  GUESTS_PER_HOUR,
+  GUESTS_PER_JAM_PER_HOUR,
+  MAX_GUESTS_PER_JAM,
+  jamCodeOf,
+  joinPolicy,
+} from "./lib/jams";
+import { takeAttempt } from "./lib/rateLimit";
+import { readServerSettings } from "./lib/serverSettings";
 import { openSession } from "./lib/sessions";
+import { roleOf } from "./lib/viewer";
 import type { ReadCtx } from "./lib/viewer";
 
-/** What lets a sign-up in: being the first account, or an open invite for this email. */
+const TOO_MANY = "Too many people joined as guests just now. Try again in a few minutes.";
+
+/**
+ * Makes a guest account from a Jam link, within the limits above, and puts it in the Jam: let in
+ * at once when the Jam is open, or waiting for the host when it asks for approval.
+ */
+const createJamGuest = async (
+  ctx: MutationCtx,
+  jam: Doc<"jams">,
+  email: string,
+  name: string | undefined,
+): Promise<Id<"users">> => {
+  const guests = await ctx.db
+    .query("users")
+    .withIndex("by_jam_guest", (q) => q.eq("joinedViaJam", jam._id))
+    .take(MAX_GUESTS_PER_JAM);
+
+  if (guests.length >= MAX_GUESTS_PER_JAM) {
+    return fail("signup_closed", "This Jam has as many guests as it can take. Ask for an invite.");
+  }
+
+  // Server-wide first: one busy Jam must not use up the others' share.
+  if (!(await takeAttempt(ctx, "jam-guests", GUESTS_PER_HOUR))) {
+    return fail("rate_limited", TOO_MANY);
+  }
+
+  if (!(await takeAttempt(ctx, `jam-guests:${jam._id}`, GUESTS_PER_JAM_PER_HOUR))) {
+    return fail("rate_limited", TOO_MANY);
+  }
+
+  const userId = await ctx.db.insert("users", {
+    email,
+    name,
+    role: "guest",
+    joinedViaJam: jam._id,
+  });
+
+  await ctx.db.insert("jamMembers", {
+    jamId: jam._id,
+    userId,
+    status: joinPolicy(jam) === "approval" ? "pending" : "joined",
+    listening: false,
+    updatedAt: Date.now(),
+  });
+
+  return userId;
+};
+
+/**
+ * What lets a sign-up in: being the first account, an open invite for this email, or, where an
+ * admin allows it, the link of an active Jam that lets people in (a guest account).
+ */
 type SignUpPass =
   | { readonly kind: "first" }
-  | { readonly kind: "invite"; readonly invite: Doc<"invites"> };
+  | { readonly kind: "invite"; readonly invite: Doc<"invites"> }
+  | { readonly kind: "jam"; readonly jam: Doc<"jams"> };
+
+/**
+ * A Jam link as a pass: only while an admin lets Jam links make guest accounts, and only for an
+ * active Jam that is letting people in.
+ */
+const jamPass = async (ctx: ReadCtx, code: string): Promise<SignUpPass> => {
+  if (!(await readServerSettings(ctx)).jamGuestAccounts) {
+    return fail("signup_closed", "This server doesn't make accounts from Jam links");
+  }
+
+  const jam = await ctx.db
+    .query("jams")
+    .withIndex("by_code", (q) => q.eq("code", jamCodeOf(code)))
+    .unique();
+
+  if (jam === null || jam.status !== "active" || joinPolicy(jam) === "locked") {
+    return fail("signup_closed", "This Jam link doesn't work any more");
+  }
+
+  // Only members and admins may hand out a link that makes accounts. Their Jam ends when they stop
+  // being one; this holds meanwhile, and for any Jam that slipped past.
+  const host = await ctx.db.get(jam.hostId);
+
+  if (host === null || host.suspendedAt !== undefined || roleOf(host) === "guest") {
+    return fail("signup_closed", "This Jam link doesn't work any more");
+  }
+
+  return { kind: "jam", jam };
+};
 
 /**
  * Checks that `email` may sign up, or fails with `signup_closed` saying why. The first account
- * needs nothing; every later one needs an open invite that its sender may still give.
+ * needs nothing; every later one needs an open invite that its sender may still give, or a Jam
+ * link as above.
  */
 const signUpPass = async (
   ctx: ReadCtx,
   email: string,
   inviteCode: string | undefined,
+  jamCode: string | undefined,
 ): Promise<SignUpPass> => {
   if ((await ctx.db.query("users").first()) === null) return { kind: "first" };
+
+  if (inviteCode === undefined && jamCode !== undefined) return jamPass(ctx, jamCode);
 
   if (inviteCode === undefined)
     return fail("signup_closed", "Sign-up needs an invite from an admin");
@@ -48,7 +143,10 @@ const signUpPass = async (
   return { kind: "invite", invite };
 };
 
-/** Adds the person a sign-up lets in, using up their invite. The first account is the owner. */
+/**
+ * Adds the person a sign-up lets in, using up their invite. The first account is the owner; a Jam
+ * link makes a guest who hears nothing but that Jam.
+ */
 const insertSignedUp = async (
   ctx: MutationCtx,
   pass: SignUpPass,
@@ -60,6 +158,8 @@ const insertSignedUp = async (
   if (pass.kind === "first") {
     return ctx.db.insert("users", { email, name: displayName, role: "owner" });
   }
+
+  if (pass.kind === "jam") return createJamGuest(ctx, pass.jam, email, displayName);
 
   const userId = await ctx.db.insert("users", { email, name: displayName, role: pass.invite.role });
 
@@ -100,11 +200,12 @@ export const createPasswordAccount = internalMutation({
     email: v.string(),
     name: v.optional(v.string()),
     inviteCode: v.optional(v.string()),
+    jamCode: v.optional(v.string()),
     provider: v.string(),
     secret: v.string(),
   },
-  handler: async (ctx, { email, name, inviteCode, provider, secret }) => {
-    const pass = await signUpPass(ctx, email, inviteCode);
+  handler: async (ctx, { email, name, inviteCode, jamCode, provider, secret }) => {
+    const pass = await signUpPass(ctx, email, inviteCode, jamCode);
 
     const existing = await ctx.db
       .query("authAccounts")
@@ -155,7 +256,8 @@ export const createFromSignUp = internalMutation({
     email: v.string(),
     name: v.optional(v.string()),
     inviteCode: v.optional(v.string()),
+    jamCode: v.optional(v.string()),
   },
-  handler: async (ctx, { email, name, inviteCode }) =>
-    insertSignedUp(ctx, await signUpPass(ctx, email, inviteCode), email, name),
+  handler: async (ctx, { email, name, inviteCode, jamCode }) =>
+    insertSignedUp(ctx, await signUpPass(ctx, email, inviteCode, jamCode), email, name),
 });

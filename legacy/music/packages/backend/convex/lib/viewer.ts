@@ -188,10 +188,18 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
     }
   }
 
+  return viewerOf(ctx, user);
+};
+
+/**
+ * Someone as a viewer, with the libraries they may read. `loadViewer` builds the signed-in
+ * person's; a Jam builds its host's, whose queue its members play.
+ */
+export const viewerOf = async (ctx: ReadCtx, user: Doc<"users">): Promise<Viewer> => {
   const { all, libraries } = await listenable(ctx, user);
 
   return {
-    id: userId,
+    id: user._id,
     user,
     role: roleOf(user),
     libraries,

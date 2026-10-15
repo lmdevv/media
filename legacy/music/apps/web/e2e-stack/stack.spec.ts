@@ -13,6 +13,8 @@ import {
   cspViolations,
   expectAudioPast,
   isPlayingAudio,
+  joinWithInvite,
+  playedSeconds,
   signIn,
 } from "./support";
 
@@ -251,6 +253,133 @@ test("playback moves to a second browser and the first one stops", async ({ page
   await expectAudioPast(phone, 1);
   await expect(page.getByText(/Playing on /).first()).toBeVisible();
   await other.close();
+});
+
+const decodeInvite = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ code: Schema.String })),
+);
+
+const decodeJam = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ code: Schema.String })),
+);
+
+/** `jam get --json`: the Jam's status, or null outside any. */
+const decodeJamState = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.NullOr(Schema.Struct({ status: Schema.String }))),
+);
+
+/** A stream URL a page asked for, and when. */
+interface StreamRequest {
+  readonly url: URL;
+  readonly at: number;
+}
+
+/** Records every stream request `page` makes from now on. */
+const recordStreams = (page: Page): Array<StreamRequest> => {
+  const streams: Array<StreamRequest> = [];
+
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+
+    if (url.pathname.includes("/stream/")) streams.push({ url, at: Date.now() });
+  });
+
+  return streams;
+};
+
+/** Refuses the next stream request `page` makes, as the media service refuses an expired URL. */
+const refuseNextStream = async (page: Page): Promise<{ refused: boolean }> => {
+  const state = { refused: false };
+
+  await page.route(/\/stream\//u, async (route) => {
+    if (state.refused) {
+      await route.continue();
+
+      return;
+    }
+
+    state.refused = true;
+    await route.fulfill({ status: 403, body: "The link has expired" });
+  });
+
+  return state;
+};
+
+test("a Jam member listens along with real audio, in step with the host", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  cli(apiKey, ["playback", "repeat", "all"]);
+
+  // Later tests share this admin's playback: put repeat back and end the Jam however this ends.
+  try {
+    // The host plays an album in this browser and starts a Jam.
+    await signIn(page);
+    await openFirstAlbum(page);
+    await page.getByRole("button", { name: "Play", exact: true }).first().click();
+    await expectAudioPast(page, 1);
+    const { code } = decodeJam(cli(apiKey, ["jam", "start", "--json"]));
+
+    // A friend with a guest account, who hears no library of their own, opens the link in
+    // another browser and joins.
+    const invite = decodeInvite(cli(apiKey, ["invites", "create", "--role", "guest", "--json"]));
+    const other = await browser.newContext();
+    const friend = await other.newPage();
+    const streams = recordStreams(friend);
+
+    await joinWithInvite(friend, invite.code, {
+      email: `jam-${Date.now().toString(36)}@music.local`,
+      name: "Noor",
+    });
+    await friend.goto(`/jam/${code}`);
+    await friend.getByRole("button", { name: "Join", exact: true }).click();
+    await expect(friend.getByRole("status", { name: "Jam" })).toContainText("listening along here");
+
+    const inStep = async () => {
+      const [host, member] = await Promise.all([playedSeconds(page), playedSeconds(friend)]);
+      const state = decodeState(cli(apiKey, ["now", "--json"]));
+      const length = (state.queue[state.index]?.durationMs ?? 0) / 1000;
+      // Fixture songs are a few seconds long: compare around the loop too.
+      const gap = Math.abs(host - member);
+
+      return host > 0 && member > 0 && Math.min(gap, length - gap) < 2;
+    };
+
+    // Real audio plays on the friend's browser too, within a couple of seconds of the host's.
+    await expectAudioPast(friend, 0.5);
+    await expect.poll(inStep, { timeout: 30_000 }).toBe(true);
+
+    // The friend hears these songs only through the Jam, so each URL lasts five minutes, not
+    // hours. Refused once, as an expired URL is, the player signs a new one and stays in step.
+    const lifetimes = streams.map(({ url, at }) => Number(url.searchParams.get("exp")) - at);
+
+    expect(lifetimes.length).toBeGreaterThan(0);
+    expect(Math.max(...lifetimes)).toBeLessThanOrEqual(5 * 60_000);
+
+    const refusal = await refuseNextStream(friend);
+
+    await expect.poll(() => refusal.refused, { timeout: 30_000 }).toBe(true);
+    const refusedAt = Date.now();
+
+    await expect
+      .poll(() => streams.filter(({ at }) => at > refusedAt).length, { timeout: 30_000 })
+      .toBeGreaterThan(0);
+    await expect.poll(() => isPlayingAudio(friend), { timeout: 30_000 }).toBe(true);
+    await expect.poll(inStep, { timeout: 30_000 }).toBe(true);
+
+    // The host ends the Jam: the friend's player stops, back to their own (empty) queue.
+    cli(apiKey, ["jam", "end"]);
+    await expect.poll(() => isPlayingAudio(friend), { timeout: 30_000 }).toBe(false);
+    await expect(friend.getByRole("status", { name: "Jam" })).toContainText("The Jam ended");
+    await other.close();
+  } finally {
+    cli(apiKey, ["playback", "repeat", "off"]);
+
+    if (decodeJamState(cli(apiKey, ["jam", "get", "--json"]))?.status === "active") {
+      cli(apiKey, ["jam", "end"]);
+    }
+  }
 });
 
 test("the app runs under its Content-Security-Policy and security headers", async ({ page }) => {

@@ -3,7 +3,7 @@
  * session, plays audio when this browser is the active device, and reports position back.
  */
 import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
-import type { Device, QueueEntry, RepeatMode } from "@music/commands/models";
+import type { Device, Jam, QueueEntry, RepeatMode } from "@music/commands/models";
 import { makeMusicClient } from "@music/sdk/client";
 import { useRead } from "@music/sdk/react";
 import { useConvex } from "convex/react";
@@ -67,6 +67,13 @@ export interface PlayerState {
    * failed on a song this session).
    */
   readonly engine: EngineKind;
+  /**
+   * The Jam this person hosts, is in, or waits to join, or the one that just ended under them;
+   * null outside any. In someone else's Jam the queue and position are the host's.
+   */
+  readonly jam: Jam | null;
+  /** This person listens along to someone else's Jam, on `activeDevice`. */
+  readonly following: boolean;
 }
 
 export interface PlayerActions {
@@ -131,6 +138,13 @@ const engineFactory = (
         : new HtmlAudioEngine(audioElement),
   };
 };
+
+/**
+ * This browser's device ID, the one `PlayerProvider` registers, for screens outside it (such as
+ * a Jam link's page joining to listen along here).
+ */
+export const thisBrowserDeviceId = (): DeviceId =>
+  loadDeviceId("localStorage" in globalThis ? localStorage : null, () => crypto.randomUUID());
 
 /** Builds the controller from browser globals. Runs once per provider mount. */
 const createController = (
@@ -209,6 +223,7 @@ export function PlayerProvider({
   // two always agree.
   const position = useRead("playback.position", {});
   const queue = useRead("queue.list", {});
+  const jam = useRead("jam.get", {}) ?? null;
 
   const state = useMemo(
     () => (position === undefined || queue === undefined ? undefined : { ...position, ...queue }),
@@ -265,7 +280,21 @@ export function PlayerProvider({
       quality: local.quality,
       autoplayBlocked: local.autoplayBlocked,
       engine: local.engine,
-      playTracks: (ids, index) => controller.playTracks(ids, index),
+      jam,
+      following: state?.following ?? false,
+      // In someone else's Jam the host's queue plays: "play" adds the song tapped to it instead
+      // (one song, so a whole album doesn't run into the host's limit on upcoming songs).
+      playTracks: (ids, index) => {
+        const picked = ids[index ?? 0];
+
+        if (jam?.role !== "member" || jam.status !== "active") {
+          return controller.playTracks(ids, index);
+        }
+
+        return picked === undefined
+          ? Promise.resolve()
+          : controller.capture(client.run("queue.add", { trackIds: [picked] }));
+      },
       togglePlay: () => controller.togglePlay(),
       next: () => controller.capture(client.run("playback.next", {})),
       previous: () => controller.capture(client.run("playback.previous", {})),
@@ -289,7 +318,7 @@ export function PlayerProvider({
         controller.setQuality(quality);
       },
     };
-  }, [state, local, controller, convex]);
+  }, [state, local, controller, convex, jam]);
 
   return (
     <PlayerContext.Provider value={player}>

@@ -20,6 +20,7 @@ import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppSongsRouteImport } from './routes/_app/songs'
 import { Route as InviteCodeRouteImport } from './routes/invite.$code'
+import { Route as JamCodeRouteImport } from './routes/jam.$code'
 import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as AppAlbumsIndexRouteImport } from './routes/_app/albums.index'
 import { Route as AppAlbumsAlbumIdRouteImport } from './routes/_app/albums.$albumId'
@@ -87,6 +88,11 @@ const AppSongsRoute = AppSongsRouteImport.update({
 const InviteCodeRoute = InviteCodeRouteImport.update({
   id: '/invite/$code',
   path: '/invite/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JamCodeRoute = JamCodeRouteImport.update({
+  id: '/jam/$code',
+  path: '/jam/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetTokenRoute = ResetTokenRouteImport.update({
@@ -171,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRouteWithChildren
   '/songs': typeof AppSongsRoute
   '/invite/$code': typeof InviteCodeRoute
+  '/jam/$code': typeof JamCodeRoute
   '/reset/$token': typeof ResetTokenRoute
   '/albums/$albumId': typeof AppAlbumsAlbumIdRoute
   '/artists/$artistId': typeof AppArtistsArtistIdRoute
@@ -195,6 +202,7 @@ export interface FileRoutesByTo {
   '/search': typeof AppSearchRoute
   '/songs': typeof AppSongsRoute
   '/invite/$code': typeof InviteCodeRoute
+  '/jam/$code': typeof JamCodeRoute
   '/reset/$token': typeof ResetTokenRoute
   '/': typeof AppIndexRoute
   '/albums/$albumId': typeof AppAlbumsAlbumIdRoute
@@ -223,6 +231,7 @@ export interface FileRoutesById {
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/songs': typeof AppSongsRoute
   '/invite/$code': typeof InviteCodeRoute
+  '/jam/$code': typeof JamCodeRoute
   '/reset/$token': typeof ResetTokenRoute
   '/_app/': typeof AppIndexRoute
   '/_app/albums/$albumId': typeof AppAlbumsAlbumIdRoute
@@ -252,6 +261,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/songs'
     | '/invite/$code'
+    | '/jam/$code'
     | '/reset/$token'
     | '/albums/$albumId'
     | '/artists/$artistId'
@@ -276,6 +286,7 @@ export interface FileRouteTypes {
     | '/search'
     | '/songs'
     | '/invite/$code'
+    | '/jam/$code'
     | '/reset/$token'
     | '/'
     | '/albums/$albumId'
@@ -303,6 +314,7 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/songs'
     | '/invite/$code'
+    | '/jam/$code'
     | '/reset/$token'
     | '/_app/'
     | '/_app/albums/$albumId'
@@ -325,6 +337,7 @@ export interface RootRouteChildren {
   SetupRoute: typeof SetupRoute
   SignInRoute: typeof SignInRoute
   InviteCodeRoute: typeof InviteCodeRoute
+  JamCodeRoute: typeof JamCodeRoute
   ResetTokenRoute: typeof ResetTokenRoute
 }
 
@@ -405,6 +418,13 @@ declare module '@tanstack/react-router' {
       path: '/invite/$code'
       fullPath: '/invite/$code'
       preLoaderRoute: typeof InviteCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/jam/$code': {
+      id: '/jam/$code'
+      path: '/jam/$code'
+      fullPath: '/jam/$code'
+      preLoaderRoute: typeof JamCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reset/$token': {
@@ -571,6 +591,7 @@ const rootRouteChildren: RootRouteChildren = {
   SetupRoute: SetupRoute,
   SignInRoute: SignInRoute,
   InviteCodeRoute: InviteCodeRoute,
+  JamCodeRoute: JamCodeRoute,
   ResetTokenRoute: ResetTokenRoute,
 }
 export const routeTree = rootRouteImport

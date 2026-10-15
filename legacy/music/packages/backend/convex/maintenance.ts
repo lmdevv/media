@@ -6,6 +6,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { DEVICE_RETAINED_MS } from "./lib/devices";
+import { endJam, expiryReason } from "./lib/jams";
 import { findSession } from "./lib/playback";
 import { DEVICE_ONLINE_MS } from "./lib/present";
 import { normaliseStored, rowQueue, saveQueue } from "./lib/queue";
@@ -342,6 +343,52 @@ export const pauseOrphanedSessions = internalMutation({
         }),
       ),
     );
+  },
+});
+
+/** Active Jams checked per batch; each run works through all of them, a batch at a time. */
+const JAMS_PER_RUN = 100;
+
+/**
+ * Ends Jams whose host is gone or offline for 30 minutes, or where nothing has played for four
+ * hours (see `expiryReason`). Their people get "The Jam ended" and their own player back.
+ */
+export const expireJams = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, { cursor = null }) => {
+    const now = Date.now();
+
+    const page = await ctx.db
+      .query("jams")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .paginate({ cursor, numItems: JAMS_PER_RUN });
+
+    await Promise.all(
+      page.page.map(async (jam) => {
+        const [host, device, session] = await Promise.all([
+          ctx.db.get(jam.hostId),
+          ctx.db
+            .query("devices")
+            .withIndex("by_user_last_seen", (q) => q.eq("userId", jam.hostId))
+            .order("desc")
+            .first(),
+          findSession(ctx, jam.hostId),
+        ]);
+
+        // A host on the CLI sends no heartbeats; their commands show they are there. The
+        // session's update time doesn't count: people in the Jam move it too.
+        const lastSeen = Math.max(device?.lastSeenAt ?? 0, jam.hostActiveAt ?? 0);
+        const reason = expiryReason(host, lastSeen, session, jam._creationTime, now);
+
+        if (reason !== null) await endJam(ctx, jam, reason);
+      }),
+    );
+
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.expireJams, {
+        cursor: page.continueCursor,
+      });
+    }
   },
 });
 

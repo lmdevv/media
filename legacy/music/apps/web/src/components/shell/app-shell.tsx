@@ -2,6 +2,8 @@ import { usePlayer } from "@music/player/react";
 import type { ReactNode } from "react";
 
 import { CommandMenu } from "@/components/command/command-menu";
+import { JamBand } from "@/components/jam/jam-band";
+import { JamPanel } from "@/components/jam/jam-panel";
 import { DeviceSheet } from "@/components/player/device-sheet";
 import { NowPlaying } from "@/components/player/now-playing";
 import { PlayerBar } from "@/components/player/player-bar";
@@ -28,6 +30,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
       <NewPlaylistDialog />
       <NowPlaying />
       <DeviceSheet />
+      <JamPanel />
     </UiStateProvider>
   );
 }
@@ -43,6 +46,7 @@ function Frame({ children }: { readonly children: ReactNode }) {
         <Sidebar />
         <div className="flex min-w-0 grow flex-col overflow-clip lg:dark:rounded-md dark:bg-bg">
           <ConnectionBanners />
+          <JamBand />
           <main
             id="main"
             className={`relative min-h-0 grow overflow-y-auto overscroll-contain ${hasTrack ? "pb-50" : "pb-35"} lg:pb-0`}

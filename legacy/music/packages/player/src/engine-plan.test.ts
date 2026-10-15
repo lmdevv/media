@@ -40,6 +40,7 @@ const view = (overrides: Partial<SessionView> = {}): SessionView => ({
   updatedAt: 1000,
   playing: true,
   volume: 1,
+  following: false,
   ...overrides,
 });
 
@@ -157,6 +158,23 @@ describe("planEngine", () => {
     expect(planEngine(view(), view(), loaded("a", 4000), 5000)).toEqual([]);
   });
 
+  it("keeps a device listening along within a second of the host", () => {
+    // The host reports 1.2 s further on than this device plays: a remote device would let it be,
+    // one listening along seeks back in step.
+    const before = view({ positionMs: 10_000, updatedAt: 1000 });
+    const after = view({ positionMs: 21_200, updatedAt: 12_000 });
+
+    expect(planEngine(before, after, loaded("a", 20_000), 12_000)).toEqual([]);
+    expect(
+      planEngine(
+        { ...before, following: true },
+        { ...after, following: true },
+        loaded("a", 20_000),
+        12_000,
+      ),
+    ).toEqual([EngineCommand.Seek({ positionMs: 21_200 })]);
+  });
+
   it("follows volume changes", () => {
     expect(planEngine(view(), view({ volume: 0.4 }), loaded("a"), 1000)).toEqual([
       EngineCommand.SetVolume({ volume: 0.4 }),
@@ -175,6 +193,7 @@ describe("planEngine", () => {
     updatedAt: fc.integer({ min: 0, max: 1_000_000 }),
     playing: fc.boolean(),
     volume: fc.double({ min: 0, max: 1, noNaN: true }),
+    following: fc.boolean(),
   });
 
   const localArbitrary = fc.record({

@@ -31,6 +31,30 @@ export const playlistVisibility = v.union(v.literal("private"), v.literal("share
 
 export const playlistRole = v.union(v.literal("viewer"), v.literal("collaborator"));
 
+export const jamStatus = v.union(v.literal("active"), v.literal("ended"));
+
+export const jamEndReason = v.union(
+  v.literal("host"),
+  v.literal("host_offline"),
+  v.literal("idle"),
+);
+
+export const jamMemberStatus = v.union(
+  v.literal("pending"),
+  v.literal("joined"),
+  v.literal("left"),
+  v.literal("removed"),
+);
+
+export const jamSettings = v.object({
+  join: v.union(v.literal("open"), v.literal("approval"), v.literal("locked")),
+  membersCanAdd: v.boolean(),
+  addLimit: v.union(v.number(), v.null()),
+  membersCanControl: v.boolean(),
+  membersCanEdit: v.union(v.literal("none"), v.literal("own"), v.literal("any")),
+  listenAlong: v.boolean(),
+});
+
 /**
  * One queue entry. `id` is unique within its queue and never reused (`nextItemId` counts on), so a
  * command naming it reaches this entry however the queue changed since the client saw it.
@@ -91,9 +115,14 @@ export default defineSchema({
     keysValidAfter: v.optional(v.number()),
     /** Carried from the sign-up form to `createOrUpdateUser`; never stored on a created user. */
     inviteCode: v.optional(v.string()),
+    /** Like `inviteCode`, for a guest account made from a Jam link; never stored either. */
+    jamCode: v.optional(v.string()),
+    /** Set on guest accounts made from a Jam link rather than an invite. */
+    joinedViaJam: v.optional(v.id("jams")),
   })
     .index("email", ["email"])
-    .index("by_role", ["role"]),
+    .index("by_role", ["role"])
+    .index("by_jam_guest", ["joinedViaJam", "role"]),
 
   invites: defineTable({
     code: v.string(),
@@ -411,6 +440,60 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_status_finished", ["status", "finishedAt"])
     .index("by_library_status", ["libraryId", "status"]),
+
+  /**
+   * A Jam: a live listening session shared from its host's playback. People who join play the
+   * host's queue (see `lib/jams.ts`); their own playback stays as it was.
+   */
+  jams: defineTable({
+    hostId: v.id("users"),
+    /** The secret in the Jam's link. Regenerating it makes the old link stop working. */
+    code: v.string(),
+    status: jamStatus,
+    endedReason: v.optional(jamEndReason),
+    endedAt: v.optional(v.number()),
+    settings: jamSettings,
+    /**
+     * When the host last ran a command (to the minute; see `noteHostActivity`). With their
+     * devices' heartbeats it tells whether the host is still there; the session's own update
+     * time doesn't, since people in the Jam move it too.
+     */
+    hostActiveAt: v.optional(v.number()),
+    /**
+     * The link code in use when the host last removed or turned someone away. While it is still
+     * the code, an open Jam asks the host about everyone new (`joinPolicy`), so a guest removed
+     * can't come straight back with a new account; a new link lets people in again.
+     */
+    removedUnderCode: v.optional(v.string()),
+  })
+    .index("by_code", ["code"])
+    .index("by_host_status", ["hostId", "status"])
+    .index("by_status", ["status"]),
+
+  /** Someone in a Jam, or asking to join one. A person is `joined` to at most one Jam at a time. */
+  jamMembers: defineTable({
+    jamId: v.id("jams"),
+    userId: v.id("users"),
+    status: jamMemberStatus,
+    /** Listening along: the Jam plays on `deviceId`, one of their own devices. */
+    listening: v.boolean(),
+    deviceId: v.optional(v.string()),
+    /**
+     * The link code in use when the host removed them or turned them away: that link won't let
+     * them back in, but a regenerated one would.
+     */
+    blockedCode: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_jam", ["jamId", "status"])
+    .index("by_jam_user", ["jamId", "userId"])
+    .index("by_user", ["userId", "updatedAt"])
+    .index("by_user_status", ["userId", "status"]),
+
+  /** Server-wide settings admins change; one row, created on first change. */
+  serverSettings: defineTable({
+    jamGuestAccounts: v.boolean(),
+  }),
 
   /** Progress of each data migration in `migrations.ts`, so an interrupted one resumes. */
   migrations: defineTable({

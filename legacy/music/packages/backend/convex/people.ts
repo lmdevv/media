@@ -10,9 +10,14 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { inviterStillAllows } from "./lib/invites";
+import { endJam, hostedJam } from "./lib/jams";
+import { removeJamGuest } from "./lib/people";
 import { endSession, isStale } from "./lib/sessions";
 
 const PURGE_BATCH = 100;
+
+/** Guest accounts removed per run: each is a few reads and deletes, and schedules its purge. */
+const GUEST_BATCH = 10;
 
 const cursor = v.union(v.string(), v.null());
 
@@ -128,6 +133,30 @@ export const deleteResetsBy = internalMutation({
   },
 });
 
+/**
+ * Removes the guest accounts an ended Jam's link made, a batch at a time. Ones an admin promoted
+ * leave the `by_jam_guest` range, so each batch takes the next ones.
+ */
+export const removeJamGuests = internalMutation({
+  args: { jamId: v.id("jams") },
+  handler: async (ctx, { jamId }) => {
+    const jam = await ctx.db.get(jamId);
+
+    if (jam === null) return;
+
+    const guests = await ctx.db
+      .query("users")
+      .withIndex("by_jam_guest", (q) => q.eq("joinedViaJam", jamId).eq("role", "guest"))
+      .take(GUEST_BATCH);
+
+    await Promise.all(guests.map((guest) => removeJamGuest(ctx, jam, guest._id)));
+
+    if (guests.length === GUEST_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.people.removeJamGuests, { jamId });
+    }
+  },
+});
+
 /** Revokes every API key a person has and ends the sessions they opened, for someone made a guest. */
 export const revokeKeys = internalMutation({
   args: { userId: v.id("users"), cursor },
@@ -176,10 +205,11 @@ const heirOf = async (ctx: MutationCtx, fallback: Id<"users">): Promise<Id<"user
 
 /**
  * Deletes what a removed person owned, rescheduling until it is gone: keys, devices, library
- * access, reset links, likes, history, playlists shared with them, and their own playlists with
- * those playlists' shares; their libraries move to the server's owner (`heirOf`). Songs they
- * added to other people's playlists stay, credited to nobody. `people.remove` has already deleted
- * the account, so none of this is reachable meanwhile.
+ * access, reset links, likes, history, playlists shared with them, their Jam memberships, and
+ * their own playlists with those playlists' shares; their libraries move to the server's owner
+ * (`heirOf`), and a Jam they host ends. Songs they added to other people's playlists stay,
+ * credited to nobody. `people.remove` has already deleted the account, so none of this is
+ * reachable meanwhile.
  */
 export const purgeRemovedUser = internalMutation({
   args: { userId: v.id("users"), heir: v.id("users") },
@@ -216,7 +246,16 @@ export const purgeRemovedUser = internalMutation({
         .query("playlistShares")
         .withIndex("by_user", (q) => q.eq("userId", userId))
         .take(PURGE_BATCH),
+      ctx.db
+        .query("jamMembers")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .take(PURGE_BATCH),
     ]);
+
+    // A Jam they host ends at once, so its people get their own playback back.
+    const hosted = await hostedJam(ctx, userId);
+
+    if (hosted !== null) await endJam(ctx, hosted, "host");
 
     // Their libraries leave the `by_owner` range as they move, so each batch takes the next ones.
     // With nobody to take them (no owner, and the remover gone too) they stay for an owner's

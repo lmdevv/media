@@ -28,6 +28,9 @@ export interface UiState {
    * away, which closes its open popover.
    */
   readonly setPlayOnPopoverMounted: (mounted: boolean) => void;
+  /** The Jam panel: start, share, and run a Jam, or see the one you're in. */
+  readonly jamOpen: boolean;
+  readonly setJamOpen: (open: boolean) => void;
   /** Open with the songs a new playlist starts with; null when the dialog is closed. */
   readonly newPlaylist: { readonly trackIds: ReadonlyArray<TrackId> } | null;
   readonly openNewPlaylist: (trackIds?: ReadonlyArray<TrackId>) => void;
@@ -43,6 +46,7 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
   const [commandOpen, setCommandOpen] = useState(false);
   const [playOn, setPlayOn] = useState<PlayOnSurface | null>(null);
   const [playOnPopoverMounted, setPopoverMounted] = useState(false);
+  const [jamOpen, setJamOpen] = useState(false);
   const [newPlaylist, setNewPlaylist] = useState<UiState["newPlaylist"]>(null);
 
   // Stable, so the speaker button's mount effect runs once, not on every UI state change.
@@ -78,6 +82,8 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
         ),
       closePlayOn: () => setPlayOn(null),
       setPlayOnPopoverMounted,
+      jamOpen,
+      setJamOpen,
       newPlaylist,
       openNewPlaylist: (trackIds = []) => setNewPlaylist({ trackIds }),
       closeNewPlaylist: () => setNewPlaylist(null),
@@ -90,6 +96,7 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
       playOnPopoverMounted,
       setPlayOnPopoverMounted,
       setNowPlaying,
+      jamOpen,
       newPlaylist,
     ],
   );

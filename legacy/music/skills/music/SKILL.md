@@ -72,6 +72,14 @@ CLI, the web app, and this skill always agree.
   them), and can be shared with people as `viewer` or `collaborator`. Collaborators add, remove,
   and reorder songs; only the owner renames, shares, or deletes. Sharing never grants library
   access: songs someone can't read show as unavailable (`reason: "no_access"`).
+- A Jam is a live listening session shared from its host's playback. While someone is in a Jam,
+  their `playback` and `queue` commands act on the host's session: `queue list` shows the host's
+  queue (every entry has `addedBy`), and their own playback waits, untouched, until they leave.
+  What they may do is the host's settings (`music jam get --json` → `.settings`): add songs (up
+  to `addLimit` upcoming each, they can read), control playback (off by default), move or remove
+  none, their own (default), or any entries. Replacing the queue (`playback play`), clearing it,
+  and autoplay stay the host's; other attempts fail with `forbidden`. A person is in one Jam at a
+  time; joining another leaves the first.
 
 ## Recipes
 
@@ -114,6 +122,40 @@ music playlists move --playlist-id <id> --item-id <entry> --after-item-id <entry
 music playlists unshare --playlist-id <id> --user-id <user-id>  # one person, or yourself to leave
 music playlists unshare --playlist-id <id>       # owner: stop sharing with everyone
 ```
+
+Run a Jam (the link is `<web address>/jam/<code>`):
+
+```sh
+music jam start --json                          # {"jamId", "code"}: from what you are playing
+music jam settings --join approval --add-limit 3 --members-can-control
+music jam members                               # people in it, and who waits to be let in
+music jam approve --user-id <id> --approve      # or --no-approve to turn them away
+music jam remove --user-id <id>                 # that link won't let them back in
+music jam relink --json                         # a new link; the old one stops working
+music jam end                                   # everyone gets their own player back
+```
+
+Join someone's Jam, and listen along or use it as a remote:
+
+```sh
+music jam join https://music.example.com/jam/<code>   # or just the code
+music queue add <track-id>                       # adds to the host's queue, credited to you
+music jam listen --on --device-id <device-id>    # play it in step on one of your devices
+music jam listen --no-on                         # stop; keep using it as a remote
+music jam leave                                  # also dismisses a Jam that ended
+```
+
+Jams end when the host ends them, after the host has been offline for 30 minutes, or after four
+hours without playback. An admin can let Jam links make guest accounts (`music server update
+--jam-guest-accounts`); such guests hear only the Jams they join, and `music people list --json`
+marks them `joinedViaJam`. Once the host removes or turns someone away, an open Jam asks the host
+about everyone new until `music jam relink`. A guest account goes when the host removes or turns it
+away and when its Jam ends, unless an admin promotes it first (`music people role --user-id <id>
+--role member`). One Jam's link makes at most 25 guests, and 10 an hour (30 an hour across the
+server). No guest can start a Jam, and Jam guests don't see playlists shared with everyone, only
+ones shared with them by name. Songs heard only through a Jam get stream URLs that last five
+minutes, and while a Jam runs, autoplay picks only from libraries the host owns or that are shared
+with everyone. A Jam link's page shows only the host's name and whether the host lets people in.
 
 Get a link to send: the path goes after the web address (the server URL without `/convex`). A
 song opens its album with the song highlighted; someone who can't open it sees a no-access page:
@@ -315,5 +357,24 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music invites list`: List open and expired invites. (admin)
 - `music invites create [--email <text>] [--role <admin|member|guest>]`: Invite someone as an admin, member, or guest; share the code or link. (admin)
 - `music invites revoke <invite-id>`: Revoke an invite. (admin)
+
+### server
+
+- `music server settings`: Show server settings, such as whether Jam links can create guest accounts. (admin)
+- `music server update [--jam-guest-accounts | --no-jam-guest-accounts]`: Change server settings: --jam-guest-accounts lets people without an account join a Jam from its link as guests. (admin)
+
+### jams
+
+- `music jam start`: Start a Jam from your playback: people who open its link share your queue and player.
+- `music jam get`: Show the Jam you host, are in, or are waiting to join: host, settings, people, and its link code.
+- `music jam members`: List the people in your Jam (the host also sees who is waiting to be let in).
+- `music jam join <code> [--device-id <id>]`: Join a Jam by its code or link; leaves any other Jam you are in. --device-id plays it on that device.
+- `music jam leave`: Leave the Jam you are in, or dismiss one that ended; your own playback comes back.
+- `music jam listen (--on | --no-on) [--device-id <id>]`: Listen along to your Jam on a device (--on --device-id <id>), or stop and use it as a remote (--no-on).
+- `music jam end`: End the Jam you host; everyone gets their own player back.
+- `music jam settings [--join <open|approval|locked>] [--members-can-add | --no-members-can-add] [--add-limit <int>] [--members-can-control | --no-members-can-control] [--members-can-edit <none|own|any>] [--listen-along | --no-listen-along]`: Change what people in your Jam may do (host only); flags left out stay as they are.
+- `music jam approve <user-id> (--approve | --no-approve)`: Let someone waiting into your Jam (--approve), or turn them away (--no-approve).
+- `music jam remove <user-id>`: Remove someone from your Jam; the same link won't let them back in.
+- `music jam relink`: Give your Jam a new link; the old one stops working.
 
 <!-- END:commands -->

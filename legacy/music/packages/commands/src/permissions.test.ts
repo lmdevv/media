@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { Role } from "./models";
+import type { JamEditScope, JamSettings, Role } from "./models";
 import {
   assignableRoles,
   can,
+  canControlJam,
+  canEditJamEntry,
+  jamAddsLeft,
   canManagePerson,
   canManageLibrary,
   canTransferOwnership,
@@ -84,5 +87,55 @@ describe("permissions", () => {
       "members and admins; not guests",
       "the owner only",
     ]);
+  });
+});
+
+/** The default settings, with the given ones changed. */
+const jam = ({
+  membersCanAdd = true,
+  addLimit = 5,
+  membersCanControl = false,
+  membersCanEdit = "own",
+}: {
+  readonly membersCanAdd?: boolean;
+  readonly addLimit?: number | null;
+  readonly membersCanControl?: boolean;
+  readonly membersCanEdit?: JamEditScope;
+} = {}): JamSettings => ({
+  join: "open",
+  membersCanAdd,
+  addLimit,
+  membersCanControl,
+  membersCanEdit,
+  listenAlong: true,
+});
+
+describe("Jam rules", () => {
+  it("leaves control to the host unless they share it", () => {
+    expect([canControlJam(jam(), true), canControlJam(jam(), false)]).toEqual([true, false]);
+    expect(canControlJam(jam({ membersCanControl: true }), false)).toBe(true);
+  });
+
+  it("lets people edit nothing, their own entries, or any, and the host everything", () => {
+    const table = (["none", "own", "any"] as const).map((scope) => [
+      scope,
+      canEditJamEntry(jam({ membersCanEdit: scope }), false, true),
+      canEditJamEntry(jam({ membersCanEdit: scope }), false, false),
+      canEditJamEntry(jam({ membersCanEdit: scope }), true, false),
+    ]);
+
+    expect(table).toEqual([
+      ["none", false, false, true],
+      ["own", true, false, true],
+      ["any", true, true, true],
+    ]);
+  });
+
+  it("counts down each person's upcoming songs to the limit", () => {
+    expect(jamAddsLeft(jam(), false, 3)).toBe(2);
+    expect(jamAddsLeft(jam(), false, 7)).toBe(0);
+    expect(jamAddsLeft(jam({ addLimit: null }), false, 100)).toBeNull();
+    expect(jamAddsLeft(jam({ membersCanAdd: false }), false, 0)).toBe(0);
+    expect(jamAddsLeft(jam(), true, 100)).toBeNull();
   });
 });

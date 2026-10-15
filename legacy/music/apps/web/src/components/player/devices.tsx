@@ -8,6 +8,7 @@ import { MonitorIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { JamButton } from "@/components/jam/jam-band";
 import { PlayingBars } from "@/components/library/artwork";
 import { toastFailure } from "@/lib/action";
 import { formatAgo, formatDuration } from "@/lib/format";
@@ -205,6 +206,9 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
           onSelect: () => transfer(device.id),
         });
       })}
+      <div className="flex justify-center px-3 pt-2 pb-1">
+        <JamButton />
+      </div>
       {others.length === 0 ? (
         <div className="flex flex-col items-center gap-1.5 px-6 pt-5 pb-3 text-center">
           <span className="font-sans text-base/sm font-medium text-text">

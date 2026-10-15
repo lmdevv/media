@@ -10,10 +10,12 @@ import {
   ListMusicIcon,
   PlayIcon,
   SearchIcon,
+  ServerIcon,
   SpeakerIcon,
   TerminalIcon,
   UserRoundIcon,
   UsersIcon,
+  UsersRoundIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { MouseEvent } from "react";
@@ -32,10 +34,12 @@ const GROUP_ICONS: Readonly<Record<CommandGroup, LucideIcon>> = {
   playlists: ListMusicIcon,
   likes: HeartIcon,
   devices: SpeakerIcon,
+  jams: UsersRoundIcon,
   libraries: FolderIcon,
   jobs: TerminalIcon,
   keys: KeyRoundIcon,
   people: UsersIcon,
+  server: ServerIcon,
   account: UserRoundIcon,
 };
 

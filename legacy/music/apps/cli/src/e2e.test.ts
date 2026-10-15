@@ -692,6 +692,71 @@ describe.skipIf(server === undefined)("music against a real server", () => {
     60_000,
   );
 
+  it.skipIf(mediaSecret === undefined)(
+    "runs a Jam: join from a link, add a song, remove someone, new link, end",
+    async () => {
+      const asMember = { MUSIC_API_KEY: await createMemberKey(url, key) };
+
+      const member = parse(
+        commands["account.me"].result,
+        (await music(["whoami", "--json"], asMember)).stdout,
+      );
+
+      const [song] = await albumSongs("Abbey Road");
+
+      expect((await music(["play", "discovery"])).code).toBe(0);
+
+      const { code } = parse(
+        commands["jam.start"].result,
+        (await music(["jam", "start", "--json"])).stdout,
+      );
+
+      // A whole link works as well as the code.
+      const joined = await music(
+        ["jam", "join", `https://music.example.com/jam/${code}`, "--json"],
+        asMember,
+      );
+
+      expect(parse(commands["jam.join"].result, joined.stdout).status).toBe("joined");
+      expect(
+        parse(commands["jam.get"].result, (await music(["jam", "get", "--json"], asMember)).stdout)
+          ?.role,
+      ).toBe("member");
+
+      // The member's queue is the host's: what they add, the host sees, credited to them.
+      expect((await music(["queue", "add", song?.id ?? ""], asMember)).code).toBe(0);
+      expect((await music(["queue", "list"])).stdout).toContain("E2E Member");
+      expect((await music(["jam", "members"])).stdout).toContain("E2E Member");
+
+      // Only the host steers playback by default.
+      const steer = await music(["pause", "--json"], asMember);
+
+      expect(steer.code).toBe(3);
+      expect(errorOf(steer).code).toBe("forbidden");
+
+      // Removed: that link won't let them back; a new one would.
+      expect((await music(["jam", "remove", "--user-id", member.id])).code).toBe(0);
+      expect((await music(["jam", "join", code, "--json"], asMember)).code).toBe(3);
+
+      const relinked = parse(
+        commands["jam.relink"].result,
+        (await music(["jam", "relink", "--json"])).stdout,
+      );
+
+      expect((await music(["jam", "join", relinked.code], asMember)).code).toBe(0);
+      expect((await music(["jam", "end"])).code).toBe(0);
+
+      const ended = parse(
+        commands["jam.get"].result,
+        (await music(["jam", "get", "--json"], asMember)).stdout,
+      );
+
+      expect([ended?.status, ended?.endedReason]).toEqual(["ended", "host"]);
+      expect((await music(["jam", "leave"], asMember)).code).toBe(0);
+    },
+    60_000,
+  );
+
   it("logs out", async () => {
     expect((await music(["logout"])).code).toBe(0);
     expect((await music(["whoami"])).code).toBe(3);

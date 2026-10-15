@@ -3,6 +3,8 @@ import { v } from "convex/values";
 import { query } from "./_generated/server";
 import { sha256Hex } from "./lib/crypto";
 import { inviterStillAllows } from "./lib/invites";
+import { jamCodeOf, joinPolicy } from "./lib/jams";
+import { readServerSettings } from "./lib/serverSettings";
 import { resetByHash, resetStillAllowed } from "./lib/resets";
 
 /** First-run state for the welcome screen. Public: it reveals only whether setup is done. */
@@ -47,6 +49,39 @@ export const invite = query({
     if (found.expiresAt < Date.now()) return { state: "expired" as const, ...details };
 
     return { state: "open" as const, ...details };
+  },
+});
+
+/**
+ * What a Jam link's landing page shows before someone joins: the host, what plays, how many are
+ * in, and whether a visitor without an account may make a guest account. Public like `invite`:
+ * only someone holding the secret link learns this.
+ */
+export const jam = query({
+  args: { code: v.string() },
+  handler: async (ctx, { code }) => {
+    const found = await ctx.db
+      .query("jams")
+      .withIndex("by_code", (q) => q.eq("code", jamCodeOf(code)))
+      .unique();
+
+    if (found === null) return { state: "invalid" as const };
+
+    if (found.status !== "active") return { state: "ended" as const };
+
+    // Anyone holding the link sees this, signed in or not: whose Jam it is and how to get in,
+    // nothing of what plays or who listens.
+    const [host, settings] = await Promise.all([ctx.db.get(found.hostId), readServerSettings(ctx)]);
+
+    // The policy in effect, so the page offers what will happen: after a removal an open Jam
+    // asks the host, which anyone with the link can then tell.
+    const policy = joinPolicy(found);
+
+    return {
+      state: policy,
+      hostName: host?.name ?? "Someone",
+      guestAccounts: settings.jamGuestAccounts && policy !== "locked",
+    };
   },
 });
 

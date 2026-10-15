@@ -10,11 +10,13 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Artwork, PlayingBars } from "@/components/library/artwork";
+import { JamButton } from "@/components/jam/jam-band";
 import { MoveButtons, ReorderHandle, useReorder } from "@/components/library/reorder";
 import type { Reorder } from "@/components/library/reorder";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure, useAction } from "@/lib/action";
 import { formatDuration } from "@/lib/format";
+import { WITHHELD_ARTIST, WITHHELD_TITLE } from "@/lib/playlist-entries";
 import { dropLine } from "@/lib/reorder";
 
 import { perform } from "./controls";
@@ -158,10 +160,12 @@ function QueueRowText({
   readonly current: boolean;
   readonly showAddedBy: boolean;
 }) {
+  // A song autoplay picked for the Jam's host from a library shared with them alone.
+  const title = entry.withheld === true ? WITHHELD_TITLE : entry.title;
+  const artist = entry.withheld === true ? WITHHELD_ARTIST : entry.artist;
+
   const byline =
-    showAddedBy && entry.addedBy !== null
-      ? `${entry.artist} · Added by ${entry.addedBy.name}`
-      : entry.artist;
+    showAddedBy && entry.addedBy !== null ? `${artist} · Added by ${entry.addedBy.name}` : artist;
 
   return (
     <div className="pointer-events-none flex min-w-0 grow flex-col gap-px">
@@ -172,7 +176,7 @@ function QueueRowText({
           current && !glass && "font-semibold",
         )}
       >
-        {entry.title}
+        {title}
       </span>
       <span
         className={cn("truncate font-sans text-sm/xs", glass ? "text-text/60" : "text-text-muted")}
@@ -242,11 +246,18 @@ function QueueRowEnd({
   );
 }
 
-/** Whether entries should say who added them: only when someone other than you added any. */
+/**
+ * Whether entries should say who added them: always in a Jam, and otherwise only when someone
+ * other than you added any.
+ */
 const useShowAddedBy = (entries: ReadonlyArray<QueueEntry>): boolean => {
   const me = useRead("account.me", {});
+  const { jam } = usePlayer();
 
-  return entries.some((entry) => entry.addedBy !== null && entry.addedBy.id !== me?.id);
+  return (
+    (jam !== null && jam.status === "active" && jam.role !== "pending") ||
+    entries.some((entry) => entry.addedBy !== null && entry.addedBy.id !== me?.id)
+  );
 };
 
 /**
@@ -461,8 +472,9 @@ export function QueuePanel() {
       aria-label="Queue"
       className="hidden w-85 shrink-0 flex-col gap-5 overflow-y-auto border-l border-border bg-bg px-4 py-6 lg:flex dark:rounded-md dark:border-transparent"
     >
-      <div className="flex items-center justify-between px-2">
-        <h2 className="font-sans text-lg/md font-semibold tracking-tight text-text">Queue</h2>
+      <div className="flex items-center justify-between gap-2 px-2">
+        <h2 className="grow font-sans text-lg/md font-semibold tracking-tight text-text">Queue</h2>
+        <JamButton />
         <button
           type="button"
           aria-label="Close the queue"

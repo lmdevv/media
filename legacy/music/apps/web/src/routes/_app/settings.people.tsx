@@ -20,6 +20,7 @@ import {
 } from "@music/ui/components/dropdown-menu";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
 import { Skeleton } from "@music/ui/components/skeleton";
+import { Switch } from "@music/ui/components/switch";
 import { cn } from "@music/ui/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
 import { MoreHorizontalIcon, PlusIcon } from "lucide-react";
@@ -109,9 +110,7 @@ function People({ me }: { readonly me: User }) {
           ))}
         </div>
       )}
-      <p className="w-fit rounded-md bg-surface px-3.5 py-3 font-sans text-sm/xs text-text">
-        Sign-up is closed. People can only join with an invite link.
-      </p>
+      <SignUpSettings />
       <TerminalHint label="From a terminal" command="music people list · music people --help" />
       <InviteDialog role={me.role} open={inviting} onOpenChange={setInviting} />
       <PersonDialog
@@ -120,6 +119,45 @@ function People({ me }: { readonly me: User }) {
         ownerName={owner === undefined ? "the owner" : (owner.name ?? owner.email)}
         onClose={() => setAction(null)}
       />
+    </div>
+  );
+}
+
+/**
+ * How people get accounts: invites always; and, when an admin turns it on, Jam links, which make
+ * guest accounts that hear only the Jam. Such guests are marked "joined via Jam" above.
+ */
+function SignUpSettings() {
+  const settings = useRead("server.settings", {});
+  const update = useRun("server.update");
+
+  const [save, saving] = useAction((jamGuestAccounts: boolean) => update({ jamGuestAccounts }), {
+    success: () => "Saved",
+  });
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md bg-surface px-3.5 py-3">
+      <label className="flex items-center justify-between gap-4">
+        <span className="flex flex-col gap-0.5">
+          <span className="font-sans text-sm/xs font-medium text-text">
+            Jam links can create guest accounts
+          </span>
+          <span className="font-sans text-sm/xs text-text-muted">
+            Someone without an account can join a Jam as a guest with a name and password. They hear
+            only the Jam, and the account goes when the Jam ends unless you change their role.
+          </span>
+        </span>
+        <Switch
+          checked={settings?.jamGuestAccounts ?? false}
+          disabled={settings === undefined || saving}
+          onCheckedChange={(on) => void save(on)}
+        />
+      </label>
+      <span className="font-sans text-sm/xs text-text">
+        {settings?.jamGuestAccounts === true
+          ? "Otherwise, people join with an invite link."
+          : "Sign-up is closed. People can only join with an invite link."}
+      </span>
     </div>
   );
 }
@@ -162,7 +200,9 @@ function PersonRow({
       </span>
       <span className="flex w-45 shrink-0 flex-wrap items-center gap-1.5 max-md:w-auto">
         <Badge tone={person.role === "owner" ? "accent" : "surface"}>
-          {roleLabel(person.role)}
+          {person.joinedViaJam
+            ? `${roleLabel(person.role)} · joined via Jam`
+            : roleLabel(person.role)}
         </Badge>
         {person.suspended ? (
           <Badge tone="outline" className="max-md:hidden">

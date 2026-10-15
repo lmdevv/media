@@ -6,6 +6,7 @@ import { ListMusicIcon, MessageCircleIcon, MoreHorizontalIcon } from "lucide-rea
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { JamButton } from "@/components/jam/jam-band";
 import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
 import { TrackMenu } from "@/components/playlists/track-menu";
@@ -299,6 +300,7 @@ function PhoneUpNext() {
             <span className="truncate font-sans text-sm/sm text-text/55">From {source}</span>
           )}
         </span>
+        <JamButton tone="glass" />
         {queued.length > 1 || reordering ? (
           <button
             type="button"

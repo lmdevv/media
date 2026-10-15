@@ -66,3 +66,18 @@ export const passwordResetLookup = makeFunctionReference<
   { token: string },
   PasswordResetLookup
 >("setup:passwordReset");
+
+/** What a Jam link shows before someone joins. */
+export type JamPreview =
+  | { readonly state: "invalid" }
+  | { readonly state: "ended" }
+  | {
+      /** Who may join: anyone signed in, people the host approves, or nobody new. */
+      readonly state: "open" | "approval" | "locked";
+      readonly hostName: string;
+      /** Whether a visitor without an account may make a guest account to join. */
+      readonly guestAccounts: boolean;
+    };
+
+/** `setup:jam`: public lookup of a Jam link code for its landing page. */
+export const jamPreview = makeFunctionReference<"query", { code: string }, JamPreview>("setup:jam");

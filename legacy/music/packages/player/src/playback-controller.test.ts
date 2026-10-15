@@ -5,6 +5,7 @@ import { StreamProfile } from "@music/commands/models";
 import type { PlaybackState, QueueEntry } from "@music/commands/models";
 import { makeMusicClient } from "@music/sdk/client";
 import type { CommandTransport } from "@music/sdk/client";
+import { ConvexError } from "convex/values";
 import { Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -38,7 +39,7 @@ const song: QueueEntry = {
   liked: false,
 };
 
-const session = (playing: boolean, updatedAt: number): PlaybackState => ({
+const session = (playing: boolean, updatedAt: number, following = false): PlaybackState => ({
   activeDevice: { id: deviceId, name: "Test", kind: "web", lastSeenAt: 0, online: true },
   queue: [song],
   index: 0,
@@ -49,6 +50,7 @@ const session = (playing: boolean, updatedAt: number): PlaybackState => ({
   repeat: "off",
   autoplay: false,
   volume: 1,
+  following,
 });
 
 interface Mutation {
@@ -143,13 +145,14 @@ const fakeMediaService = async () => {
 
 /**
  * A Convex transport that records every mutation and answers like the server: a `stream.url`
- * is a URL on `base` signed for six hours from `now()`, and the same arguments again get the
- * same answer, as Convex's query cache gives them.
+ * is a URL on `base` signed for `ttlMs` (six hours, or minutes for a Jam member) from `now()`,
+ * and the same arguments again get the same answer, as Convex's query cache gives them.
  */
 const recordingTransport = (
   mutations: Array<Mutation>,
   base: string,
   now: () => number,
+  ttlMs = SIX_HOURS,
 ): CommandTransport => {
   const cached = new Map<string, { url: string; profile: StreamProfile; expiresAt: number }>();
 
@@ -161,7 +164,7 @@ const recordingTransport = (
       const signed = cached.get(key) ?? {
         url: `${base}/stream/song?p=${profile}&n=${cached.size + 1}`,
         profile,
-        expiresAt: now() + SIX_HOURS,
+        expiresAt: now() + ttlMs,
       };
 
       cached.set(key, signed);
@@ -189,6 +192,8 @@ const setup = async (options: {
   readonly quality?: StreamQuality;
   /** How far the server's clock is ahead of this device's. */
   readonly serverAheadMs?: number;
+  /** How long the server's stream URLs last. */
+  readonly ttlMs?: number;
 }) => {
   const media = await fakeMediaService();
   const mutations: Array<Mutation> = [];
@@ -198,7 +203,12 @@ const setup = async (options: {
 
   const controller = new PlaybackController(
     makeMusicClient(
-      recordingTransport(mutations, media.base, () => clock.now + (options.serverAheadMs ?? 0)),
+      recordingTransport(
+        mutations,
+        media.base,
+        () => clock.now + (options.serverAheadMs ?? 0),
+        options.ttlMs,
+      ),
     ),
     {
       mse: options.gapless ? { flac: true, changeType: true } : null,
@@ -278,6 +288,83 @@ describe("PlaybackController", () => {
     await Promise.resolve();
     expect(reports(mutations).slice(before)).toStrictEqual([]);
     stop();
+  });
+
+  it("listening along, plays the host's song but never reports or moves the queue on", async () => {
+    const { controller, engine, mutations, stop } = await setup({ gapless: false });
+    const following = session(true, 1, true);
+
+    controller.sync(following);
+    await vi.waitFor(() => expect(controller.getSnapshot().engineStatus).toBe("playing"));
+
+    // The song ends here first: the host's device moves the queue on, this one waits for it.
+    engine().emit({ type: "ended" });
+    engine().emit({ type: "paused" });
+    await Promise.resolve();
+
+    const moved = mutations.filter(
+      ({ name }) => name === "playback.next" || name === "playback.report",
+    );
+
+    expect(moved).toStrictEqual([]);
+    stop();
+  });
+
+  it("listening along, starts at the live position when the host reported a while ago", async () => {
+    const { controller, clock, record, stop } = await setup({ gapless: false });
+
+    // The host's last report is 14 seconds old: they have played on since.
+    controller.sync(session(true, clock.now - 14_000, true));
+    await vi.waitFor(() => expect(record.loads).toHaveLength(1));
+
+    expect(record.loads[0]?.startMs).toBeGreaterThanOrEqual(14_000);
+    stop();
+  });
+
+  it("listening along, plays on when the host refuses a pause", async () => {
+    const media = await fakeMediaService();
+    const mutations: Array<Mutation> = [];
+    const recording = recordingTransport(mutations, media.base, () => 1000);
+    const record: EngineRecord = { created: [], loads: [], plays: 0 };
+
+    const controller = new PlaybackController(
+      makeMusicClient({
+        query: (reference, args) => recording.query(reference, args),
+        mutation: async (reference, args) => {
+          if (args.name === "playback.pause") {
+            throw new ConvexError({
+              code: "forbidden",
+              message: "The host controls playback in this Jam",
+            });
+          }
+
+          return recording.mutation(reference, args);
+        },
+      }),
+      { mse: null, create: (kind) => instantEngine(kind, record) },
+      {
+        deviceId,
+        device: { name: "Test", kind: "web" },
+        canPlay: () => true,
+        now: () => 1000,
+        quality: "high",
+        saveQuality: () => {},
+      },
+    );
+
+    const stop = controller.start();
+
+    controller.sync(session(true, 1, true));
+    await vi.waitFor(() => expect(controller.getSnapshot().engineStatus).toBe("playing"));
+    const plays = record.plays;
+
+    await controller.togglePlay();
+
+    // The engine paused at once, then plays on with the host.
+    expect(controller.getSnapshot().engineStatus).toBe("playing");
+    expect(record.plays).toBe(plays + 1);
+    stop();
+    media.close();
   });
 
   it("reports a pause the browser causes before the server confirms a Play", async () => {
@@ -466,6 +553,26 @@ describe("PlaybackController", () => {
 
     await vi.waitFor(() => expect(record.loads).toHaveLength(2));
     expect(record.plays).toBe(0);
+    expect(record.loads[1]?.url).not.toBe(record.loads[0]?.url);
+    stop();
+  });
+
+  it("signs a short-lived stream (a Jam member's) again halfway through its life", async () => {
+    const { controller, clock, record, stop } = await setup({ gapless: true, ttlMs: 5 * 60_000 });
+    controller.sync(session(true, 1));
+    await vi.waitFor(() => expect(record.loads).toHaveLength(1));
+    await controller.togglePlay();
+
+    // Two minutes in, the URL is good: resuming plays on.
+    clock.now += 2 * 60_000;
+    await controller.togglePlay();
+    expect(record.loads).toHaveLength(1);
+    await controller.togglePlay();
+
+    // Past halfway, it is signed again before it is used.
+    clock.now += 60_000;
+    await controller.togglePlay();
+    await vi.waitFor(() => expect(record.loads).toHaveLength(2));
     expect(record.loads[1]?.url).not.toBe(record.loads[0]?.url);
     stop();
   });

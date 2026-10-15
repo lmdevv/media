@@ -20,11 +20,13 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
 import { adminMutations, adminQueries } from "./handlers/admin";
 import { collectionMutations, collectionQueries } from "./handlers/collection";
+import { jamMutations, jamQueries } from "./handlers/jams";
 import { libraryQueries } from "./handlers/library";
 import { peopleMutations, peopleQueries } from "./handlers/people";
 import { playbackMutations, playbackQueries } from "./handlers/playback";
 import type { MutationHandlers, QueryHandlers } from "./handlers/types";
 import { fail } from "./lib/errors";
+import { noteHostActivity } from "./lib/jams";
 import { loadViewer } from "./lib/viewer";
 import type { Viewer } from "./lib/viewer";
 
@@ -34,6 +36,7 @@ const queryHandlers: QueryHandlers = {
   ...collectionQueries,
   ...adminQueries,
   ...peopleQueries,
+  ...jamQueries,
 };
 
 const mutationHandlers: MutationHandlers = {
@@ -41,6 +44,7 @@ const mutationHandlers: MutationHandlers = {
   ...collectionMutations,
   ...adminMutations,
   ...peopleMutations,
+  ...jamMutations,
 };
 
 const isQueryName = (name: CommandName): name is QueryName => commands[name].kind === "query";
@@ -88,6 +92,8 @@ const executeMutation = async <Name extends MutationName>(
 ): Promise<CommandResultEncoded<Name>> => {
   const viewer = await authorize(ctx, name);
   const handler: MutationHandlers[Name] = mutationHandlers[name];
+
+  await noteHostActivity(ctx, viewer.id);
 
   return checked(name, await handler(ctx, viewer, args));
 };

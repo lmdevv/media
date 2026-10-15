@@ -143,6 +143,7 @@ const state = (
     repeat: "all",
     autoplay: true,
     volume: 0.8,
+    following: false,
   });
 
 describe("describePlayback", () => {

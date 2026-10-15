@@ -11,10 +11,12 @@ export type CommandGroup =
   | "playlists"
   | "likes"
   | "devices"
+  | "jams"
   | "libraries"
   | "jobs"
   | "keys"
   | "people"
+  | "server"
   | "account";
 
 /**

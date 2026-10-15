@@ -16,6 +16,8 @@ crons.interval(
   internal.maintenance.pauseOrphanedSessions,
 );
 
+crons.interval("end abandoned Jams", { minutes: 5 }, internal.maintenance.expireJams, {});
+
 crons.daily(
   "delete old jobs, invites, and revoked keys",
   { hourUTC: 4, minuteUTC: 30 },

@@ -33,6 +33,8 @@ const PasswordParams = Schema.Union([
     password: Schema.String,
     name: Schema.optionalKey(OptionalName),
     inviteCode: Schema.optionalKey(Schema.Trimmed),
+    /** A Jam link's code: makes a guest account to join it, when the server allows that. */
+    jamCode: Schema.optionalKey(Schema.Trimmed),
   }),
   Schema.Struct({ flow: Schema.Literal("signIn"), email: Email, password: Schema.String }),
   Schema.Struct({
@@ -48,6 +50,7 @@ const SignUpProfile = Schema.Struct({
   email: Schema.String,
   name: Schema.optionalKey(Schema.String),
   inviteCode: Schema.optionalKey(Schema.String),
+  jamCode: Schema.optionalKey(Schema.String),
 });
 
 const decodeSignUpProfile = Schema.decodeUnknownResult(SignUpProfile);
@@ -118,13 +121,20 @@ const password = ConvexCredentials<DataModel>({
     if (input.flow === "signUp") {
       checkPassword(input.password);
       const email = input.email.toLowerCase();
-      const profile: Partial<Record<"name" | "inviteCode", string>> & { email: string } = { email };
+
+      const profile: Partial<Record<"name" | "inviteCode" | "jamCode", string>> & {
+        email: string;
+      } = { email };
+
       const name = given(input.name);
       const inviteCode = given(input.inviteCode);
+      const jamCode = given(input.jamCode);
 
       if (name !== undefined) profile.name = name;
 
       if (inviteCode !== undefined) profile.inviteCode = inviteCode;
+
+      if (jamCode !== undefined) profile.jamCode = jamCode;
 
       // Convex Auth's `createAccount` signs in an existing account when the password matches,
       // without the sign-in rate limit: sign-up would be an unlimited password oracle, and a way

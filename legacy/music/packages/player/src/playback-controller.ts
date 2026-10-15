@@ -18,7 +18,14 @@ import type {
   EngineSource,
   PlayerEngine,
 } from "./engine";
-import { EngineCommand, followingIndex, planEngine, sessionView } from "./engine-plan";
+import {
+  EngineCommand,
+  FOLLOW_DRIFT_MS,
+  followingIndex,
+  planEngine,
+  sessionView,
+} from "./engine-plan";
+import { clockOffset, withClockSample } from "./clock-offset";
 import type { SessionView } from "./engine-plan";
 import { livePosition } from "./live-position";
 import { isStreamRefused, mediaBaseUrl, probeMediaHealth, waitForMedia } from "./media-health";
@@ -31,6 +38,12 @@ const HEARTBEAT_MS = 30_000;
 
 /** How often the active device reports its position while playing. */
 const REPORT_MS = 15_000;
+
+/** How often a device listening along to a Jam checks that it is still in step with the host. */
+const FOLLOW_CHECK_MS = 2000;
+
+/** After seeking back in step, how long to let playback settle before checking drift again. */
+const FOLLOW_SETTLE_MS = 6000;
 
 /** Start buffering the next song this long before the current one ends. */
 const PRELOAD_LEAD_MS = 20_000;
@@ -143,6 +156,9 @@ export class PlaybackController {
   #generation = 0;
   #positionMs = 0;
   #reportedMs: number | null = null;
+  /** Clock samples for listening along; see `clock-offset.ts`. */
+  #clockSamples: ReadonlyArray<number> = [];
+  #lastFollowSeekAt = 0;
   /** Tracks whose original stream failed to play; they fall back to AAC 320. */
   readonly #transcode = new Set<TrackId>();
   /** The MSE engine failed to play a song; HTML audio plays for the rest of the session. */
@@ -211,6 +227,10 @@ export class PlaybackController {
       if (this.#snapshot.engineStatus === "playing") void this.#report(true);
     }, REPORT_MS);
 
+    const follow = setInterval(() => {
+      this.#keepInStep();
+    }, FOLLOW_CHECK_MS);
+
     const onVisibility = (): void => {
       if (document.visibilityState === "visible") void this.#heartbeat();
     };
@@ -240,6 +260,7 @@ export class PlaybackController {
       this.#unsubscribeEngine = null;
       clearInterval(heartbeats);
       clearInterval(reports);
+      clearInterval(follow);
       document.removeEventListener("visibilitychange", onVisibility);
       setMediaSessionHandlers(null);
       showNowPlaying(null, false, 0);
@@ -256,6 +277,17 @@ export class PlaybackController {
 
   /** Brings the engine in line with a new session snapshot. */
   sync(state: PlaybackState): void {
+    // Each new host report while listening along is a sample of this clock against the server's.
+    // The first snapshot is not: the host may have reported long before this device asked, and
+    // that wait would read as a clock offset, putting this device behind until the next report.
+    if (
+      state.following &&
+      this.#state?.following === true &&
+      state.updatedAt !== this.#state.updatedAt
+    ) {
+      this.#clockSamples = withClockSample(this.#clockSamples, this.#env.now() - state.updatedAt);
+    }
+
     this.#state = state;
     const view = sessionView(state, this.deviceId);
 
@@ -267,7 +299,7 @@ export class PlaybackController {
         positionMs: this.#positionMs,
         reportedMs: this.#reportedMs,
       },
-      this.#env.now(),
+      this.#serverNow(state),
     );
 
     this.#view = view;
@@ -336,7 +368,27 @@ export class PlaybackController {
     }
 
     this.#update({ pendingPlaying: !playing, autoplayBlocked: false, error: null });
-    await this.capture(this.#client.run(playing ? "playback.pause" : "playback.resume", {}));
+
+    try {
+      await this.#client.run(playing ? "playback.pause" : "playback.resume", {});
+    } catch (error) {
+      // Refused, as for someone in a Jam who may not steer it: no new snapshot will come, so put
+      // this device back the way the session is, or a follower would stay silent.
+      this.#restoreToSession();
+      this.#update({ error: error instanceof Error ? errorMessage(error) : String(error) });
+    }
+  }
+
+  /** Undoes an optimistic play or pause: the engine and the shown state follow the session. */
+  #restoreToSession(): void {
+    const view = this.#view;
+
+    this.#update({ pendingPlaying: null });
+
+    if (view?.active !== true || this.#loaded === null) return;
+
+    if (view.playing && !this.#isAudible()) void this.#engine.play();
+    else if (!view.playing && this.#isAudible()) this.#engine.pause();
   }
 
   /** Seeks the engine at once (when playing here) and the session. */
@@ -473,10 +525,48 @@ export class PlaybackController {
     await this.#registered;
   }
 
+  /**
+   * Listening along to a Jam: seeks back in step when the engine drifted more than
+   * `FOLLOW_DRIFT_MS` from the host's position, worked out from the host's last report.
+   */
+  #keepInStep(): void {
+    const state = this.#state;
+    const view = this.#view;
+    const now = this.#env.now();
+
+    if (state === null || view?.following !== true || !view.playing) return;
+
+    if (this.#snapshot.engineStatus !== "playing" || this.#loaded?.track.id !== view.track?.id) {
+      return;
+    }
+
+    // A seek takes a moment to land; checking again at once would chase its own tail.
+    if (now - this.#lastFollowSeekAt < FOLLOW_SETTLE_MS) return;
+    const durationMs = view.track?.durationMs ?? 0;
+    const target = livePosition(state, this.#serverNow(state), durationMs);
+
+    // At the very end the host has likely moved on already; the next snapshot brings the song.
+    if (target >= durationMs - FOLLOW_DRIFT_MS) return;
+
+    if (Math.abs(target - this.#positionMs) <= FOLLOW_DRIFT_MS) return;
+    this.#engine.seek(target);
+    this.#positionMs = target;
+    this.#lastFollowSeekAt = now;
+  }
+
+  /**
+   * The time to work out the session's live position with: this device's clock, put on the
+   * server's while listening along (where positions are the host's, stamped by the server).
+   */
+  #serverNow(state: PlaybackState): number {
+    return this.#env.now() - (state.following ? clockOffset(this.#clockSamples) : 0);
+  }
+
   async #report(playing: boolean): Promise<void> {
     const loaded = this.#loaded;
 
-    if (this.#view?.active !== true || loaded === null) return;
+    // Listening along, the host's device reports; this one only follows.
+    if (this.#view?.active !== true || this.#view.following || loaded === null) return;
     const positionMs = Math.max(0, Math.round(this.#positionMs));
     this.#reportedMs = positionMs;
 
@@ -651,7 +741,9 @@ export class PlaybackController {
         requestedAt,
       });
 
-      const renewAt = stream.expiresAt - RENEW_MARGIN_MS;
+      // A short-lived URL (a Jam member's lasts minutes) is renewed halfway through instead.
+      const margin = Math.min(RENEW_MARGIN_MS, (stream.expiresAt - requestedAt) / 2);
+      const renewAt = stream.expiresAt - margin;
 
       return {
         profile,
@@ -782,6 +874,13 @@ export class PlaybackController {
   }
 
   #onEnded(): void {
+    // Listening along, the host's device moves the queue on; this one follows when it does.
+    if (this.#view?.following === true) {
+      this.#update({ engineStatus: "paused" });
+
+      return;
+    }
+
     if (this.#state?.repeat === "one") {
       this.#engine.seek(0);
       void this.#engine.play();

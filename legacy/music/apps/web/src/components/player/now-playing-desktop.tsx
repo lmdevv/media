@@ -17,6 +17,7 @@ import {
 import { Match } from "effect";
 import type { ReactNode } from "react";
 
+import { JamButton } from "@/components/jam/jam-band";
 import { Artwork } from "@/components/library/artwork";
 import type { NowPlayingView } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
@@ -282,9 +283,10 @@ function UpNext() {
   return (
     <div className="flex max-w-155 min-w-0 grow flex-col gap-7">
       <div className="flex items-center justify-between">
-        <h2 className="font-sans text-xl leading-8.5 font-heavy tracking-tight text-text">
+        <h2 className="grow font-sans text-xl leading-8.5 font-heavy tracking-tight text-text">
           Up next
         </h2>
+        <JamButton tone="glass" className="mr-2" />
         {queued.length > 0 ? (
           <button
             type="button"

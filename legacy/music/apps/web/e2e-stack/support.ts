@@ -43,6 +43,25 @@ const trackMediaElements = async (page: Page): Promise<void> => {
   });
 };
 
+/** Makes an account from an invite code in `page` and waits for the library. */
+export const joinWithInvite = async (
+  page: Page,
+  code: string,
+  account: { readonly email: string; readonly name: string },
+): Promise<void> => {
+  await trackMediaElements(page);
+  await page.goto(`/invite/${code}`);
+  await page.getByLabel("Email").fill(account.email);
+  await page.getByLabel("Your name").fill(account.name);
+  await page.getByLabel("Choose a password").fill(ADMIN.password);
+  await page.getByRole("button", { name: "Join" }).click();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Library" })
+      .or(page.getByRole("navigation", { name: "Main" })),
+  ).toBeVisible();
+};
+
 /** Signs in through the sign-in screen and waits for the library. */
 export const signIn = async (page: Page): Promise<void> => {
   await trackMediaElements(page);
@@ -59,7 +78,7 @@ export const signIn = async (page: Page): Promise<void> => {
 };
 
 /** Seconds of audio the page has actually played, from its media elements. */
-const playedSeconds = (page: Page): Promise<number> =>
+export const playedSeconds = (page: Page): Promise<number> =>
   page.evaluate(() =>
     Math.max(
       0,

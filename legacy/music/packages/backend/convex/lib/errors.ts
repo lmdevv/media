@@ -8,6 +8,7 @@ export type FailureCode =
   | "invalid_args"
   | "conflict"
   | "signup_closed"
+  | "rate_limited"
   | "internal";
 
 /** Throws a `ConvexError`, Convex's transport for expected failures. */
