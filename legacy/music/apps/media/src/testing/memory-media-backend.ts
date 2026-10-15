@@ -7,6 +7,7 @@
  * It keeps tracks only: albums and artists, whose artwork Convex takes from their tracks, list no
  * artwork of their own.
  */
+import { chainsOverlap, type FolderChain, fsPathsOverlap } from "@music/commands/folder-ids";
 import { JobId, LibraryId, TrackId } from "@music/commands/ids";
 import { Context, Effect, Layer, Option, Stream, SubscriptionRef } from "effect";
 
@@ -18,6 +19,7 @@ import {
   MediaBackend,
   type PendingJob,
   type ArtHashPage,
+  type RootClaim,
   type ArtworkTable,
   type ScannedTrack,
   type TrackMove,
@@ -42,8 +44,29 @@ export interface MemoryJob {
   readonly outcome: JobOutcome | undefined;
 }
 
+/** What a claim stores: the folder's identities (`@music/commands/folder-ids`) and their boot. */
+interface Claim {
+  readonly rootIds: FolderChain;
+  readonly fsPath: string | null;
+  readonly bootId: string | null;
+}
+
+/**
+ * Whether two claims are the same folder, or one is inside the other, by either identity; only
+ * identities read in the same boot are compared, as `media:claimRoot` does.
+ */
+const claimsOverlap = (left: Claim, right: Claim): boolean =>
+  left.bootId === right.bootId &&
+  (chainsOverlap(left.rootIds, right.rootIds) ||
+    (left.fsPath !== null && right.fsPath !== null && fsPathsOverlap(left.fsPath, right.fsPath)));
+
 interface State {
-  readonly libraries: ReadonlyArray<LibraryFolder>;
+  readonly libraries: ReadonlyArray<Omit<LibraryFolder, "claimed" | "bootId">>;
+  /**
+   * The identities of the folders libraries claimed, as `media:claimRoot` stores them. Compared
+   * by identity only, so tests show the service reports identities that catch any overlap.
+   */
+  readonly roots: ReadonlyMap<LibraryId, Claim>;
   readonly tracks: ReadonlyArray<MemoryTrack>;
   readonly jobs: ReadonlyArray<MemoryJob>;
   readonly nextId: number;
@@ -59,6 +82,8 @@ export interface ControlInterface {
   readonly cancelJob: (jobId: JobId) => Effect.Effect<void>;
   readonly tracks: Effect.Effect<ReadonlyArray<MemoryTrack>>;
   readonly jobs: Effect.Effect<ReadonlyArray<MemoryJob>>;
+  /** Libraries whose folders are claimed. */
+  readonly claimed: Effect.Effect<ReadonlyArray<LibraryId>>;
 }
 
 /** Controls for `layerMemory`. */
@@ -75,6 +100,7 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
     Effect.gen(function* () {
       const state = yield* SubscriptionRef.make<State>({
         libraries: [],
+        roots: new Map(),
         tracks: [],
         jobs: [],
         nextId: 1,
@@ -188,7 +214,45 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
               .map((job) => ({ jobId: job.id, kind: "scan" })),
           ),
         ),
-        libraries: changes.pipe(Stream.map((current) => current.libraries)),
+        libraries: changes.pipe(
+          Stream.map((current) =>
+            current.libraries.map((library) => ({
+              ...library,
+              claimed: current.roots.has(library.id),
+              bootId: current.roots.get(library.id)?.bootId ?? null,
+            })),
+          ),
+        ),
+
+        claimRoot: Effect.fn("MemoryMediaBackend.claimRoot")(function* (
+          libraryId: LibraryId,
+          _realPath: string,
+          rootIds: FolderChain,
+          fsPath: string | null,
+          bootId: string | null,
+        ) {
+          return yield* SubscriptionRef.modify(state, (current): [RootClaim, State] => {
+            const others = [...current.roots].filter(([other]) => other !== libraryId);
+
+            const claim: Claim = { rootIds, fsPath, bootId };
+
+            if (others.some(([, root]) => claimsOverlap(root, claim))) {
+              return [
+                { ok: false, error: "This folder overlaps another library" },
+                { ...current, roots: new Map(others) },
+              ];
+            }
+
+            return [{ ok: true }, { ...current, roots: new Map([...others, [libraryId, claim]]) }];
+          });
+        }),
+
+        refuseRoot: Effect.fn("MemoryMediaBackend.refuseRoot")(function* (libraryId: LibraryId) {
+          yield* SubscriptionRef.update(state, (current) => ({
+            ...current,
+            roots: new Map([...current.roots].filter(([id]) => id !== libraryId)),
+          }));
+        }),
 
         claimJob: Effect.fn("MemoryMediaBackend.claimJob")(function* (
           jobId: JobId,
@@ -357,6 +421,7 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           yield* SubscriptionRef.update(state, (current) => ({
             ...current,
             libraries: current.libraries.filter((library) => library.id !== libraryId),
+            roots: new Map([...current.roots].filter(([id]) => id !== libraryId)),
             tracks: current.tracks.filter((track) => track.libraryId !== libraryId),
           }));
         }),
@@ -370,6 +435,9 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
         }),
         tracks: SubscriptionRef.get(state).pipe(Effect.map((current) => current.tracks)),
         jobs: SubscriptionRef.get(state).pipe(Effect.map((current) => current.jobs)),
+        claimed: SubscriptionRef.get(state).pipe(
+          Effect.map((current) => Array.from(current.roots.keys())),
+        ),
       });
 
       return Context.make(MediaBackend, backend).pipe(

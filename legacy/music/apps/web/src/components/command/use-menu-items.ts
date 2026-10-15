@@ -46,7 +46,8 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
   const playTracks = usePlayTracks();
   const search = useRead("search", query.length === 0 ? "skip" : { query, limit: 6 });
   const [lastSearch, setLastSearch] = useState(search);
-  const admin = me?.role === "admin";
+  // Until the account loads, offer only what everyone may do.
+  const role = me?.role ?? "guest";
 
   // Remember the last results during render (not in an effect, which would show one frame with
   // the new results missing). While a new query loads, the previous results stay on screen.
@@ -132,7 +133,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
       });
     }
 
-    const screens = offeredScreens(admin).map((screen): Item => ({
+    const screens = offeredScreens(role).map((screen): Item => ({
       kind: "action",
       id: `go-${screen.name}`,
       section: "Go to",
@@ -143,7 +144,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
       run: go(screen.to),
     }));
 
-    const registry = offeredCommands({ admin, playing: player.track !== null }).map(
+    const registry = offeredCommands({ role, playing: player.track !== null }).map(
       ({ name, fields }): Item => ({
         kind: "command",
         id: `cmd-${name}`,
@@ -154,7 +155,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
     );
 
     return [...quick, ...registry, ...screens];
-  }, [admin, navigate, onClose, player.track, playTracks, readLikes, ui]);
+  }, [role, navigate, onClose, player.track, playTracks, readLikes, ui]);
 
   const items = useMemo(
     (): ReadonlyArray<Item> =>

@@ -1,3 +1,5 @@
+import type { Role } from "@music/commands/models";
+import { can } from "@music/commands/permissions";
 import { commands, isCommandName } from "@music/commands/registry";
 import type { CommandName, MutationName } from "@music/commands/registry";
 import type { LinkProps } from "@tanstack/react-router";
@@ -75,20 +77,21 @@ const isMutation = (name: CommandName): name is MutationName => commands[name].k
  * The screens the menu offers under "Go to", in display order: every screen whose query command
  * the person may run.
  */
-export const offeredScreens = (admin: boolean): ReadonlyArray<Screen> =>
-  SCREENS.filter((screen) => admin || commands[screen.name].access === "user");
+export const offeredScreens = (role: Role): ReadonlyArray<Screen> =>
+  SCREENS.filter((screen) => can(role, commands[screen.name].access));
 
 /**
  * The registry commands the menu offers, in registry order, with their form fields. It leaves out
- * queries (they open screens instead), commands only players send, admin commands for other
- * people, playback and queue controls while nothing plays, and commands whose arguments no form
+ * queries (they open screens instead), commands only players send, commands the viewer's role
+ * may not run, playback and queue controls while nothing plays, and commands whose arguments no form
  * field can express.
  */
 export const offeredCommands = ({
-  admin,
+  role,
   playing,
 }: {
-  readonly admin: boolean;
+  /** The viewer's role; each command is offered only to roles with its capability. */
+  readonly role: Role;
   /** Whether a song is loaded, playing or paused. */
   readonly playing: boolean;
 }): ReadonlyArray<{ readonly name: MutationName; readonly fields: ReadonlyArray<FieldSpec> }> =>
@@ -100,7 +103,7 @@ export const offeredCommands = ({
 
       if (INTERNAL.has(name)) return [];
 
-      if (command.access === "admin" && !admin) return [];
+      if (!can(role, command.access)) return [];
 
       if (!playing && NEEDS_TRACK.has(name)) return [];
 

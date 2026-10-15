@@ -29,6 +29,7 @@ const config = Layer.succeed(
     // ffmpeg itself, slowed down while the stub's `slow` control is on.
     ffmpegPath: join(import.meta.dirname, "throttled-ffmpeg.sh"),
     ffprobePath: "ffprobe",
+    musicRoots: null,
   }),
 );
 

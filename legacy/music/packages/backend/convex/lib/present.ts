@@ -1,12 +1,15 @@
 import type {
+  AccessControl,
   AlbumCard,
   ArtistCard,
   Device,
   Job,
   Library,
   Playlist,
+  Role,
   Track,
 } from "@music/commands/models";
+import { can } from "@music/commands/permissions";
 import { signResource } from "@music/commands/signed-url";
 
 import type { Doc, Id } from "../_generated/dataModel";
@@ -158,15 +161,34 @@ export const presentJob = (
   finishedAt: doc.finishedAt ?? null,
 });
 
+/**
+ * How a library's owner is named to `viewerRole`: their name, or, for admins (who see everyone's
+ * email in People anyway), their email when they have no name. Members and guests never see
+ * someone else's email.
+ */
+export const ownerLabel = (owner: Doc<"users"> | null, viewerRole: Role): string | null =>
+  owner?.name ?? (can(viewerRole, "admin") ? owner?.email : undefined) ?? null;
+
 /** A library folder as clients see it. */
 export const presentLibrary = (
   doc: Doc<"libraries">,
+  /** How to name the owner: see `ownerLabel`. */
+  ownerName: string | null,
+  readable: boolean,
+  manageable: boolean,
+  accessControl: AccessControl,
   scanning: boolean,
 ): (typeof Library)["Encoded"] => ({
   id: doc._id,
   name: doc.name,
-  path: doc.path,
+  // A folder path is how a library is found and indexed again, so only its managers see it.
+  path: manageable ? doc.path : null,
+  manageable,
+  accessControl,
   visibility: doc.visibility,
+  ownerId: doc.ownerId,
+  ownerName,
+  readable,
   trackCount: doc.trackCount,
   lastScanAt: doc.lastScanAt ?? null,
   scanning,

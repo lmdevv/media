@@ -1,4 +1,5 @@
 import type { AlbumId, ArtistId, PlaylistId } from "@music/commands/ids";
+import { roleLabel } from "@music/commands/permissions";
 import { usePlayer } from "@music/player/react";
 import { useRead } from "@music/sdk/react";
 import { Chip } from "@music/ui/components/chip";
@@ -55,6 +56,7 @@ const useEntityOptions = (
   const keys = useRead("keys.list", entity === "apiKey" ? {} : "skip");
   const invites = useRead("invites.list", entity === "invite" ? {} : "skip");
   const devices = useRead("devices.list", entity === "device" ? {} : "skip");
+  const people = useRead("people.list", entity === "person" ? {} : "skip");
 
   const artist = useRead(
     "artists.get",
@@ -177,12 +179,12 @@ const useEntityOptions = (
       }));
 
     case "library":
-      return (libraries ?? []).map((library) => ({
-        key: library.id,
-        value: library.id,
-        label: library.path,
-        detail: library.name,
-      }));
+      // Every library command needs a library you manage; the others have no folder to show.
+      return (libraries ?? []).flatMap((library) =>
+        library.path === null
+          ? []
+          : [{ key: library.id, value: library.id, label: library.path, detail: library.name }],
+      );
 
     case "job":
       return (jobs ?? [])
@@ -202,7 +204,15 @@ const useEntityOptions = (
         key: invite.id,
         value: invite.id,
         label: invite.email ?? "Open invite",
-        detail: invite.role,
+        detail: `${roleLabel(invite.role)}${invite.status === "expired" ? " · expired" : ""}`,
+      }));
+
+    case "person":
+      return (people ?? []).map((person) => ({
+        key: person.id,
+        value: person.id,
+        label: person.name ?? person.email,
+        detail: `${roleLabel(person.role)}${person.suspended ? " · suspended" : ""}`,
       }));
 
     case "device":

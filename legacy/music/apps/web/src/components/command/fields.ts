@@ -13,7 +13,8 @@ export type Entity =
   | "job"
   | "apiKey"
   | "invite"
-  | "device";
+  | "device"
+  | "person";
 
 /** How one argument is edited in the command menu's inline form. */
 type FieldKind =
@@ -50,6 +51,7 @@ const ENTITIES = new Map<string, Entity>([
   ["apiKeyId", "apiKey"],
   ["inviteId", "invite"],
   ["deviceId", "device"],
+  ["userId", "person"],
 ]);
 
 /** Labels for fields whose names read poorly when split. */
@@ -65,6 +67,7 @@ const LABELS = new Map<string, string>([
   ["apiKeyId", "Key"],
   ["inviteId", "Invite"],
   ["deviceId", "Device"],
+  ["userId", "Person"],
   ["positionMs", "Position in milliseconds"],
   ["path", "Folder path"],
   ["on", "On"],

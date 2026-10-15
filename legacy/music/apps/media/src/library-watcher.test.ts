@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Schedule } from "effect";
+import { Effect, Layer, Ref, Schedule } from "effect";
 
 import * as Files from "./files.ts";
 import * as LibraryWatcher from "./library-watcher.ts";
@@ -77,6 +77,19 @@ describe("LibraryWatcher", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* Files.writeFileAtomic(join(root, "02 Song.mp3"), new Uint8Array([1, 2, 3]), "w");
         yield* waitForPending;
         expect(yield* control.jobs).toHaveLength(5);
+      }),
+    ));
+
+  it("sees a link that went from one folder, to nowhere, to another as moved", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const last = yield* Ref.make<string | null>(null);
+
+        const moves = yield* Effect.forEach(["/a", null, "/b", "/b", null, "/b"], (real) =>
+          LibraryWatcher.movedSince(last, real),
+        );
+
+        expect(moves).toEqual([false, false, true, false, false, false]);
       }),
     ));
 

@@ -4,7 +4,14 @@
  */
 import { Effect, Option, Schema } from "effect";
 
+import { type Mount, parseMountinfo } from "./mounts.ts";
 import * as NodeFiles from "./platform/node-files.ts";
+
+/** The mount table of the service's own mount namespace. */
+const MOUNTINFO = "/proc/self/mountinfo";
+
+/** The kernel's identity for this boot. */
+const BOOT_ID = "/proc/sys/kernel/random/boot_id";
 
 /** A file system operation failed. `missing` is true when the path does not exist. */
 export class FileError extends Schema.TaggedError<FileError>()("FileError", {
@@ -101,6 +108,39 @@ export const walkTree = (
   include: (name: string) => boolean,
 ): Effect.Effect<ReadonlyArray<NodeFiles.WalkedFile>, FileError> =>
   attempt("walk", root, () => NodeFiles.walkTree(root, include));
+
+/** The canonical path of `path` through every link. Fails with `FileError` when it does not exist. */
+export const realPath = (path: string): Effect.Effect<string, FileError> =>
+  attempt("realpath", path, () => NodeFiles.realPath(path));
+
+/**
+ * The service's mount table (`/proc/self/mountinfo`, see `mounts.ts`), or null where there is
+ * none to read (not Linux).
+ */
+export const readMounts: Effect.Effect<ReadonlyArray<Mount> | null> = attempt(
+  "read",
+  MOUNTINFO,
+  () => NodeFiles.readWholeFile(MOUNTINFO),
+).pipe(
+  Effect.map((bytes) => parseMountinfo(new TextDecoder().decode(bytes))),
+  Effect.orElseSucceed(() => null),
+);
+
+/**
+ * This boot of the machine (`/proc/sys/kernel/random/boot_id`), or null where there is none (not
+ * Linux). Device numbers and inodes can change or be reused across reboots, so folder identities
+ * are compared only within one boot.
+ */
+export const readBootId: Effect.Effect<string | null> = attempt("read", BOOT_ID, () =>
+  NodeFiles.readWholeFile(BOOT_ID),
+).pipe(
+  Effect.map((bytes) => new TextDecoder().decode(bytes).trim() || null),
+  Effect.orElseSucceed(() => null),
+);
+
+/** A folder's identity and its parents' up to `/`, the folder first (`NodeFiles.folderIds`). */
+export const folderIds = (path: string): Effect.Effect<ReadonlyArray<string>, FileError> =>
+  attempt("stat", path, () => NodeFiles.folderIds(path));
 
 /**
  * The canonical path of `path` when it resolves, through any symlinks, to somewhere inside the

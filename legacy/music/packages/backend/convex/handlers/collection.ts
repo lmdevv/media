@@ -3,6 +3,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { mediaBaseUrl, requireEnv } from "../lib/env";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
+import { isClaimed } from "../lib/paths";
 import { makePresenter, presentPlaylist } from "../lib/present";
 import { canRead } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
@@ -212,6 +213,12 @@ export const collectionQueries = {
     const track = await ctx.db.get(tableId(ctx, "tracks", args.trackId));
 
     if (track === null || track.missing || !canRead(viewer, track.libraryId)) {
+      return fail("not_found", "Track not found");
+    }
+
+    // No token for a library whose folder no scan has claimed, or whose claim was refused: the
+    // media service would refuse it anyway (`media:trackSource`), so fail here, plainly.
+    if (!isClaimed(await ctx.db.get(track.libraryId))) {
       return fail("not_found", "Track not found");
     }
 

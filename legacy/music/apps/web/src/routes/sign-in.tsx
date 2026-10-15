@@ -1,5 +1,6 @@
 import { useAuthActions } from "@convex-dev/auth/react";
 import { Redirect } from "@/components/redirect";
+import { commandFailure } from "@music/sdk/errors";
 import { setupStatus } from "@music/sdk/functions";
 import { Button } from "@music/ui/components/button";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
@@ -40,12 +41,46 @@ function SignInPage() {
   return <SignInForm />;
 }
 
+/** What the sign-in form says after a failure, and whether it blames the credentials. */
+interface Failed {
+  readonly message: string;
+  readonly credentials: boolean;
+}
+
+/** Messages for failures the server did not explain itself (see `signInFailure`). */
+const describeSignInFailure = (failure: SignInFailure): string =>
+  Match.value(failure).pipe(
+    Match.when("credentials", () => "That email and password don't match."),
+    Match.when("rate-limited", () => "Too many attempts. Wait a minute and try again."),
+    Match.when("server", () => "Couldn't sign in. The server reported an error."),
+    Match.exhaustive,
+  );
+
+/**
+ * Reads a failed sign-in: the password provider's own refusals carry a code and a message meant
+ * for people (wrong credentials, too many attempts, a suspended account); anything else is
+ * classified by `signInFailure`.
+ */
+const failedFrom = (cause: Error | null): Failed => {
+  const failure = cause === null ? null : commandFailure(cause);
+
+  if (failure !== null) {
+    return { message: failure.message, credentials: failure.code === "unauthenticated" };
+  }
+
+  const kind = cause === null ? "server" : signInFailure(cause);
+
+  return { message: describeSignInFailure(kind), credentials: kind === "credentials" };
+};
+
 function SignInForm() {
   const { signIn } = useAuthActions();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
-  const [failed, setFailed] = useState<SignInFailure | null>(null);
+  // The server explains refusals it means (a suspended account, too many attempts); anything
+  // else is classified here, and wrong passwords stay generic.
+  const [failed, setFailed] = useState<Failed | null>(null);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -55,7 +90,7 @@ function SignInForm() {
     try {
       await signIn("password", { email, password, flow: "signIn" });
     } catch (cause) {
-      setFailed(cause instanceof Error ? signInFailure(cause) : "server");
+      setFailed(cause instanceof Error ? failedFrom(cause) : failedFrom(null));
     } finally {
       setPending(false);
     }
@@ -84,7 +119,7 @@ function SignInForm() {
               type="password"
               autoComplete="current-password"
               required
-              aria-invalid={failed === "credentials"}
+              aria-invalid={failed?.credentials === true}
               aria-describedby={failed === null ? undefined : "sign-in-error"}
               value={password}
               onChange={(event) => {
@@ -94,15 +129,7 @@ function SignInForm() {
             />
             {failed === null ? null : (
               <FieldHint id="sign-in-error" tone="danger" role="alert">
-                {Match.value(failed).pipe(
-                  Match.when("credentials", () => "That email and password don't match."),
-                  Match.when(
-                    "rate-limited",
-                    () => "Too many attempts. Wait a minute and try again.",
-                  ),
-                  Match.when("server", () => "Couldn't sign in. The server reported an error."),
-                  Match.exhaustive,
-                )}
+                {failed.message}
               </FieldHint>
             )}
           </Field>

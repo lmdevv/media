@@ -4,7 +4,7 @@
  * does.
  */
 import type { LibraryId, TrackId } from "@music/commands/ids";
-import type { Track } from "@music/commands/models";
+import type { Role, Track } from "@music/commands/models";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
 import { convexTest } from "convex-test";
 import { vi } from "vitest";
@@ -53,7 +53,7 @@ export interface User {
 /** Creates a user with an auth session and returns a client signed in as them. */
 export const signUp = async (
   backend: Backend,
-  role: "admin" | "member",
+  role: Role,
   email = `${role}-${Math.random().toString(36).slice(2, 8)}@music.test`,
 ): Promise<User> => {
   const { userId, sessionId } = await backend.run(async (ctx) => {
@@ -92,7 +92,32 @@ export interface SeedFile {
   readonly artHash?: string;
 }
 
-/** Upserts files into a library through `media:upsertTracks`, as a scan does. */
+/**
+ * Claims a library's folder as the media service does before a scan (`media:claimRoot`): at the
+ * path it was added with, under a made-up identity no other library shares.
+ */
+const claimFolder = async (backend: Backend, libraryId: string): Promise<void> => {
+  const library = await backend.run(async (ctx) => {
+    const id = ctx.db.normalizeId("libraries", libraryId);
+
+    return id === null ? null : ctx.db.get(id);
+  });
+
+  if (library === null) throw new Error(`${libraryId} is not a library`);
+
+  const claim = await backend.mutation(api.media.claimRoot, {
+    secret: MEDIA_SECRET,
+    libraryId: library._id,
+    realPath: library.path,
+    rootIds: [`test:${library._id}`],
+    fsPath: null,
+    bootId: null,
+  });
+
+  if (!claim.ok) throw new Error(`The claim on ${library.path} was refused: ${claim.error}`);
+};
+
+/** Upserts files into a library through `media:upsertTracks`, as a scan does, claiming first. */
 export const upsertFiles = async (
   backend: Backend,
   libraryId: string,
@@ -101,6 +126,8 @@ export const upsertFiles = async (
   const id = await backend.run(async (ctx) => ctx.db.normalizeId("libraries", libraryId));
 
   if (id === null) throw new Error(`${libraryId} is not a library ID`);
+
+  await claimFolder(backend, id);
 
   await backend.mutation(api.media.upsertTracks, {
     secret: MEDIA_SECRET,

@@ -10,12 +10,18 @@ const failures = [
   "[CONVEX A(auth:signIn)] [Request ID: 3] Server Error\nUncaught Error: Invalid refresh token",
   "[CONVEX A(auth:signIn)] [Request ID: 4] Server Error",
   '[CONVEX A(auth:signIn)] [Request ID: 5] Server Error\nUncaught ConvexError: {"code":"unauthenticated","message":"Session expired"}',
+  '[CONVEX A(auth:signIn)] [Request ID: 6] Server Error\nUncaught ConvexError: {"code":"unauthenticated","message":"Invalid email or password"}',
 ];
 
 describe("signInFailure", () => {
-  it("reads only InvalidAccountId and InvalidSecret as a wrong email or password", () => {
+  it("reads only InvalidAccountId, InvalidSecret, and [music]'s own refusal as a wrong email or password", () => {
     expect(signInFailure(new Error("Uncaught Error: InvalidSecret"))).toBe("credentials");
     expect(signInFailure(new Error("Uncaught Error: InvalidAccountId"))).toBe("credentials");
+    expect(
+      signInFailure(
+        new ConvexError({ code: "unauthenticated", message: "Invalid email or password" }),
+      ),
+    ).toBe("credentials");
   });
 
   it("reads Convex Auth's rate limit as too many attempts", () => {

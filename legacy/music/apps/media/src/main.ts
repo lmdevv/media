@@ -9,15 +9,19 @@ import * as JobWorker from "./job-worker.ts";
 import * as LibraryWatcher from "./library-watcher.ts";
 import * as MediaBackend from "./media-backend.ts";
 import * as MediaConfig from "./media-config.ts";
+import * as RootClaim from "./root-claim.ts";
 import * as Transcoder from "./transcoder.ts";
 
 const services = Layer.mergeAll(MediaBackend.layer, Transcoder.layer).pipe(
   Layer.provideMerge(MediaConfig.layer),
 );
 
-const processes = Layer.mergeAll(HttpServer.layer, JobWorker.layer, LibraryWatcher.layer).pipe(
-  Layer.provide(services),
-);
+const processes = Layer.mergeAll(
+  HttpServer.layer,
+  JobWorker.layer,
+  LibraryWatcher.layer,
+  RootClaim.layer,
+).pipe(Layer.provide(services));
 
 const main = Layer.launch(processes).pipe(
   Effect.tapCause((cause) =>

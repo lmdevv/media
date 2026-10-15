@@ -1,9 +1,11 @@
+import { useAuthActions } from "@convex-dev/auth/react";
+import { commandFailure } from "@music/sdk/errors";
 import { Button, buttonClassName } from "@music/ui/components/button";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import type { ErrorComponentProps, LinkProps } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { describeFailure, isNotFoundFailure } from "@/lib/action";
+import { describeFailure, isNotFoundFailure, useAction } from "@/lib/action";
 
 /** Where a missing-item screen sends the user instead. */
 interface BackLink {
@@ -43,6 +45,11 @@ function BackButton({ back }: { readonly back: BackLink }) {
  * shell, so the sidebar and the player (and its audio) stay.
  */
 export function RouteError({ error, reset }: ErrorComponentProps) {
+  // A session ended elsewhere (signed out, suspended, removed) fails every read; offer sign-in.
+  if (error instanceof Error && commandFailure(error)?.code === "unauthenticated") {
+    return <SignedOut message={describeFailure(error)} />;
+  }
+
   return (
     <ScreenMessage
       title="This screen didn't load"
@@ -50,6 +57,28 @@ export function RouteError({ error, reset }: ErrorComponentProps) {
       action={
         <Button variant="solid" onClick={reset}>
           Try again
+        </Button>
+      }
+    />
+  );
+}
+
+function SignedOut({ message }: { readonly message: string }) {
+  const { signOut } = useAuthActions();
+  const navigate = useNavigate();
+
+  const [leave, leaving] = useAction(async () => {
+    await signOut();
+    await navigate({ to: "/sign-in" });
+  });
+
+  return (
+    <ScreenMessage
+      title="You're signed out"
+      description={message}
+      action={
+        <Button variant="solid" pending={leaving} onClick={() => void leave()}>
+          Sign in again
         </Button>
       }
     />

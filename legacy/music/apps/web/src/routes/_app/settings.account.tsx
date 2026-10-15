@@ -1,3 +1,4 @@
+import { roleLabel } from "@music/commands/permissions";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useRead, useRun } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
@@ -74,7 +75,7 @@ function AccountSettings() {
           </span>
           <span className="flex flex-col gap-px">
             <span className="font-sans text-base/sm font-semibold text-text">
-              {me.name ?? me.email} · {me.role === "admin" ? "Admin" : "Member"}
+              {me.name ?? me.email} · {roleLabel(me.role)}
             </span>
             <span className="font-sans text-sm/xs text-text-muted">{me.email}</span>
           </span>

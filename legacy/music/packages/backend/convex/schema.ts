@@ -2,9 +2,18 @@ import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
-export const role = v.union(v.literal("admin"), v.literal("member"));
+/** See `Role` in `@music/commands/models` and `permissions.ts`. */
+const role = v.union(
+  v.literal("owner"),
+  v.literal("admin"),
+  v.literal("member"),
+  v.literal("guest"),
+);
 
-export const visibility = v.union(v.literal("shared"), v.literal("private"));
+/** Ownership only moves by transfer, so no invite gives it. */
+const inviteRole = v.union(v.literal("admin"), v.literal("member"), v.literal("guest"));
+
+const visibility = v.union(v.literal("shared"), v.literal("restricted"), v.literal("private"));
 
 export const jobStatus = v.union(
   v.literal("pending"),
@@ -21,6 +30,17 @@ export const deviceKind = v.union(v.literal("web"), v.literal("phone"), v.litera
 export default defineSchema({
   ...authTables,
 
+  /**
+   * Convex Auth's sessions, plus the generation of the person's sessions each was opened in
+   * (`users.sessionGeneration`); sessions [music] opens itself (password sign-in, reset, API
+   * keys) record it, and one from an older generation no longer counts (`isStale`).
+   */
+  authSessions: defineTable({
+    userId: v.id("users"),
+    expirationTime: v.number(),
+    generation: v.optional(v.number()),
+  }).index("userId", ["userId"]),
+
   users: defineTable({
     name: v.optional(v.string()),
     image: v.optional(v.string()),
@@ -29,15 +49,39 @@ export default defineSchema({
     phone: v.optional(v.string()),
     phoneVerificationTime: v.optional(v.number()),
     isAnonymous: v.optional(v.boolean()),
+    /** Missing on accounts from before roles were stored; they read as `member`. */
     role: v.optional(role),
+    /** Set while the account is suspended: it cannot sign in, and its keys stop working. */
+    suspendedAt: v.optional(v.number()),
+    /**
+     * Sessions created up to this time no longer count, whatever their tokens say. Suspension,
+     * unsuspension, and a password reset move it forward, which ends every session at once
+     * however many there are; the rows themselves are purged in batches afterwards.
+     */
+    sessionsValidAfter: v.optional(v.number()),
+    /**
+     * Bumped with `sessionsValidAfter` whenever every session ends. A session opened with the
+     * password must have checked it in the generation it records, so one whose check raced a
+     * reset can't outlive it, whatever the clocks say.
+     */
+    sessionGeneration: v.optional(v.number()),
+    /**
+     * API keys created up to this time no longer work, nor do the sessions they opened. Demotion
+     * to guest sets it, so a later promotion can't revive keys the batched revocation
+     * (`people:revokeKeys`) has not reached yet, and so does a password reset, since whoever had
+     * the account may have made keys.
+     */
+    keysValidAfter: v.optional(v.number()),
     /** Carried from the sign-up form to `createOrUpdateUser`; never stored on a created user. */
     inviteCode: v.optional(v.string()),
-  }).index("email", ["email"]),
+  })
+    .index("email", ["email"])
+    .index("by_role", ["role"]),
 
   invites: defineTable({
     code: v.string(),
     email: v.optional(v.string()),
-    role,
+    role: inviteRole,
     createdBy: v.id("users"),
     expiresAt: v.number(),
     acceptedBy: v.optional(v.id("users")),
@@ -46,7 +90,22 @@ export default defineSchema({
   })
     .index("by_code", ["code"])
     .index("by_expires", ["expiresAt"])
-    .index("by_accepted", ["acceptedAt"]),
+    .index("by_accepted", ["acceptedAt"])
+    .index("by_creator", ["createdBy"]),
+
+  /** One-time password reset links an admin made. Only the token's hash is stored. */
+  passwordResets: defineTable({
+    userId: v.id("users"),
+    /** SHA-256 of the token, hex. */
+    hash: v.string(),
+    createdBy: v.optional(v.id("users")),
+    expiresAt: v.number(),
+    usedAt: v.optional(v.number()),
+  })
+    .index("by_hash", ["hash"])
+    .index("by_user", ["userId"])
+    .index("by_expires", ["expiresAt"])
+    .index("by_creator", ["createdBy"]),
 
   apiKeys: defineTable({
     userId: v.id("users"),
@@ -60,12 +119,40 @@ export default defineSchema({
     sessionId: v.optional(v.id("authSessions")),
   })
     .index("by_hash", ["hash"])
+    .index("by_session", ["sessionId"])
     .index("by_user", ["userId"])
-    .index("by_revoked", ["revokedAt"]),
+    .index("by_revoked", ["revokedAt"])
+    .index("by_user_last_used", ["userId", "lastUsedAt"]),
 
   libraries: defineTable({
     name: v.string(),
     path: v.string(),
+    /**
+     * The folder `path` resolves to through links and mounts, as the media service last found it
+     * before a scan (`media:claimRoot`). No two libraries' real folders may overlap. Missing until
+     * the first scan after the library was added or this field was.
+     */
+    realPath: v.optional(v.string()),
+    /**
+     * The claimed folder's identity and its parents' up to `/` (`<device>:<inode>`, see
+     * `@music/commands/folder-ids`), which a bind mount can't disguise. Missing on claims made
+     * before it was recorded; the next scan fills it in. Cleared with `realPath` when a claim is
+     * refused, so nothing of the library streams until a scan claims it again.
+     */
+    rootIds: v.optional(v.array(v.string())),
+    /**
+     * Where the claimed folder is on its file system (`<major>:<minor>:/path`, from the media
+     * service's mount table), which a bind mount of a subfolder can't disguise. Missing without a
+     * mount table, or on claims from before it was recorded. Cleared with `realPath`.
+     */
+    fsPath: v.optional(v.string()),
+    /**
+     * The boot of the media service's machine that read `rootIds` and `fsPath`. Device numbers
+     * and inodes can change or be reused across reboots, so another library's identities are
+     * compared only when read in the same boot; claims from another boot are made again within
+     * seconds by the media service's claim pass. Cleared with `realPath`.
+     */
+    bootId: v.optional(v.string()),
     visibility,
     ownerId: v.id("users"),
     lastScanAt: v.optional(v.number()),
@@ -73,7 +160,19 @@ export default defineSchema({
     albumCount: v.number(),
     artistCount: v.number(),
     durationMs: v.number(),
-  }).index("by_path", ["path"]),
+  }).index("by_owner", ["ownerId"]),
+
+  /**
+   * People added to a library. They can listen to it while it is `restricted`, or, for guests,
+   * `shared`; a `private` library ignores the list but keeps it for when it opens again.
+   */
+  libraryAccess: defineTable({
+    libraryId: v.id("libraries"),
+    userId: v.id("users"),
+    grantedBy: v.id("users"),
+  })
+    .index("by_user", ["userId", "libraryId"])
+    .index("by_library", ["libraryId", "userId"]),
 
   artists: defineTable({
     libraryId: v.id("libraries"),

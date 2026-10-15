@@ -11,7 +11,10 @@
     "./registry": "./src/registry.ts",
     "./codec": "./src/codec.ts",
     "./signed-url": "./src/signed-url.ts",
-    "./search-text": "./src/search-text.ts"
+    "./search-text": "./src/search-text.ts",
+    "./permissions": "./src/permissions.ts",
+    "./folder-ids": "./src/folder-ids.ts",
+    "./system-folders": "./src/system-folders.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

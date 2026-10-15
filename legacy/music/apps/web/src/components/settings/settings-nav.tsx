@@ -1,3 +1,4 @@
+import { can } from "@music/commands/permissions";
 import { useRead } from "@music/sdk/react";
 import { cn } from "@music/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
@@ -8,8 +9,9 @@ type SettingsPath = NonNullable<LinkProps["to"]>;
 const YOU: ReadonlyArray<{ readonly to: SettingsPath; readonly label: string }> = [
   { to: "/settings/account", label: "Account" },
   { to: "/settings/playback", label: "Playback" },
-  { to: "/settings/keys", label: "API keys" },
 ];
+
+const KEYS = { to: "/settings/keys", label: "API keys" } as const;
 
 const ADMIN: ReadonlyArray<{ readonly to: SettingsPath; readonly label: string }> = [
   { to: "/settings/people", label: "People" },
@@ -45,7 +47,8 @@ export function SettingsNav({ className }: { readonly className?: string }) {
     <nav aria-label="Settings" className={cn("flex flex-col gap-0.5", className)}>
       <span className="px-2.5 pb-1.5 font-mono text-xs/xs tracking-mono text-text-muted">YOU</span>
       {YOU.map(item)}
-      {me?.role === "admin" ? (
+      {me !== undefined && can(me.role, "keys") ? item(KEYS) : null}
+      {me !== undefined && can(me.role, "admin") ? (
         <>
           <span className="px-2.5 pt-4 pb-1.5 font-mono text-xs/xs tracking-mono text-text-muted">
             SERVER · ADMIN

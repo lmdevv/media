@@ -1,5 +1,7 @@
 import type { Schema } from "effect";
 
+import type { Capability } from "./permissions";
+
 /** Where a command shows up in the command menu and the CLI help. */
 export type CommandGroup =
   | "library"
@@ -28,7 +30,8 @@ export interface Command<
   readonly group: CommandGroup;
   /** `query` reads and can be subscribed to; `mutation` changes state. */
   readonly kind: Kind;
-  readonly access: "user" | "admin";
+  /** The capability the caller needs; see `permissions.ts`. */
+  readonly access: Capability;
   /** The result carries a `jobId` the caller can wait on. */
   readonly job: boolean;
   readonly args: Args;

@@ -20,6 +20,12 @@ export interface Interface {
   readonly rescanInterval: Duration.Duration;
   readonly ffmpegPath: string;
   readonly ffprobePath: string;
+  /**
+   * The folders libraries may be in (`MUSIC_ROOTS`, comma-separated absolute paths): a library
+   * whose real folder is elsewhere is not scanned. Null allows every folder outside /proc, /sys,
+   * and /dev, as in development; the container image sets `/music`.
+   */
+  readonly musicRoots: ReadonlyArray<string> | null;
 }
 
 /** The media service configuration. */
@@ -57,6 +63,14 @@ export const layer: Layer.Layer<MediaConfig, Config.ConfigError> = Layer.effect(
       Config.withDefault("ffprobe"),
     );
 
+    const roots = yield* Config.String("MUSIC_ROOTS").pipe(Config.withDefault(""));
+
+    const musicRoots = roots
+      .split(",")
+      .map((root) => root.trim())
+      .filter((root) => root.length > 0)
+      .map((root) => resolve(root));
+
     return MediaConfig.of({
       convexUrl: convexUrl.origin + convexUrl.pathname.replace(/\/+$/, ""),
       serviceSecret,
@@ -67,6 +81,7 @@ export const layer: Layer.Layer<MediaConfig, Config.ConfigError> = Layer.effect(
       rescanInterval: Duration.minutes(rescanMinutes),
       ffmpegPath,
       ffprobePath,
+      musicRoots: musicRoots.length === 0 ? null : musicRoots,
     });
   }),
 );

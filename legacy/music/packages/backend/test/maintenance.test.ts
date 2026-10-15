@@ -359,7 +359,7 @@ describe("daily cleanup", () => {
 });
 
 describe("invites", () => {
-  it("lists only open invites", async () => {
+  it("lists unused invites, marking the expired ones as expired", async () => {
     const backend = makeBackend();
     const admin = await signUp(backend, "admin");
     const expiring = await admin.music.run("invites.create", {});
@@ -370,7 +370,9 @@ describe("invites", () => {
     vi.setSystemTime(START + 8 * DAY_MS);
     const listed = await admin.music.read("invites.list", {});
 
-    expect(listed.map((invite) => invite.id)).toEqual([fresh.id]);
-    expect(listed.map((invite) => invite.id)).not.toContain(expiring.id);
+    expect(listed.map((invite) => [invite.id, invite.status])).toEqual([
+      [fresh.id, "open"],
+      [expiring.id, "expired"],
+    ]);
   });
 });

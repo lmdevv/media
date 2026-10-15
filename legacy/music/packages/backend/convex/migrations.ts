@@ -13,6 +13,7 @@ import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
 import { internalMutation, type MutationCtx } from "./_generated/server";
+import { enqueueScan } from "./handlers/admin";
 import { albumSearchText, artistSearchText, trackSearchText } from "./lib/catalog";
 import { clearedLegacyQueue, hasLegacyQueue, legacyQueue, saveQueue } from "./lib/queue";
 
@@ -92,6 +93,49 @@ const MIGRATIONS = {
 
     return page;
   },
+  /**
+   * Libraries from before real folders were claimed (`media:claimRoot`) have no claim, or one
+   * without folder identities, and stream nothing until claimed; a scan for each makes the media
+   * service claim it now rather than at its next periodic scan.
+   */
+  claimLibraryRoots: async (ctx, cursor) => {
+    const page = await ctx.db.query("libraries").paginate({ cursor, numItems: BATCH });
+
+    await Promise.all(
+      page.page
+        .filter((library) => library.rootIds === undefined)
+        .map((library) => enqueueScan(ctx, library._id, library.ownerId)),
+    );
+
+    return page;
+  },
+  /**
+   * Servers from before owners have admins only; the earliest-created admin who is not suspended
+   * becomes the owner. A suspended admin is never picked, nor unsuspended: with no admin left to
+   * pick, the server stays without an owner, as one with no admins at all does, until the next
+   * run finds one. One batch: the `by_role` index finds the rows directly.
+   */
+  promoteOwner: async (ctx) => {
+    const done = { continueCursor: "", isDone: true };
+
+    const owner = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "owner"))
+      .first();
+
+    if (owner !== null) return done;
+
+    // Within one role the index orders by creation time, so this is the first active admin.
+    const admin = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "admin"))
+      .filter((q) => q.eq(q.field("suspendedAt"), undefined))
+      .first();
+
+    if (admin !== null) await ctx.db.patch(admin._id, { role: "owner" });
+
+    return done;
+  },
 } satisfies Record<string, Migration>;
 
 type MigrationName = keyof typeof MIGRATIONS;
@@ -101,6 +145,8 @@ const migrationName = v.union(
   v.literal("foldAlbumSearchText"),
   v.literal("foldArtistSearchText"),
   v.literal("splitPlaybackQueues"),
+  v.literal("promoteOwner"),
+  v.literal("claimLibraryRoots"),
 );
 
 const NAMES: ReadonlyArray<MigrationName> = [
@@ -108,6 +154,8 @@ const NAMES: ReadonlyArray<MigrationName> = [
   "foldAlbumSearchText",
   "foldArtistSearchText",
   "splitPlaybackQueues",
+  "promoteOwner",
+  "claimLibraryRoots",
 ];
 
 /**

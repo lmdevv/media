@@ -1,6 +1,6 @@
 import { JobId, PlaylistId } from "@music/commands/ids";
 import type { Job } from "@music/commands/models";
-import { Invite } from "@music/commands/models";
+import { Invite, PasswordReset } from "@music/commands/models";
 import type { CommandResult, MutationName } from "@music/commands/registry";
 import { Option, Schema } from "effect";
 
@@ -10,22 +10,27 @@ const decodeKey = Schema.decodeUnknownOption(Schema.Struct({ key: Schema.String 
 
 const decodeInvite = Schema.decodeUnknownOption(Invite);
 
+const decodeReset = Schema.decodeUnknownOption(PasswordReset);
+
 const decodePlaylist = Schema.decodeUnknownOption(Schema.Struct({ playlistId: PlaylistId }));
 
 /**
- * What a command's result means for the menu: a job to follow, a key or invite code to show once,
+ * What a command's result means for the menu: a job to follow, a key, invite code, or reset link
+ * to show once,
  * a playlist to open, or nothing worth showing.
  */
 type CommandOutcome =
   | { readonly kind: "job"; readonly jobId: JobId }
   | { readonly kind: "key"; readonly key: string }
   | { readonly kind: "invite"; readonly code: string }
+  | { readonly kind: "reset"; readonly token: string }
   | { readonly kind: "playlist"; readonly playlistId: PlaylistId }
   | { readonly kind: "none" };
 
 /**
  * Reads a command's result by shape, since the menu runs any mutation and only some return
- * something to show. The first shape that matches wins, in the order job, key, invite, playlist.
+ * something to show. The first shape that matches wins, in the order job, key, invite, reset
+ * link, playlist.
  */
 export const outcomeOf = (result: CommandResult<MutationName>): CommandOutcome => {
   const job = decodeJob(result);
@@ -39,6 +44,10 @@ export const outcomeOf = (result: CommandResult<MutationName>): CommandOutcome =
   const invite = decodeInvite(result);
 
   if (Option.isSome(invite)) return { kind: "invite", code: invite.value.code };
+
+  const reset = decodeReset(result);
+
+  if (Option.isSome(reset)) return { kind: "reset", token: reset.value.token };
 
   const playlist = decodePlaylist(result);
 

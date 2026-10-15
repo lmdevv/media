@@ -190,5 +190,87 @@ describe.skipIf(convexUrl === undefined || serviceSecret === undefined || signin
           }
         }),
       ));
+
+    it("indexes nothing for a library whose folder is another library's under a second name", () =>
+      runScoped(
+        Effect.gen(function* () {
+          const suffix = ` (alias ${randomUUID().slice(0, 8)})`;
+          const { root } = yield* fixtureLibraryWith(suffix);
+          const dataDir = yield* temporaryDirectory("data");
+          const links = yield* temporaryDirectory("links");
+          const client = yield* signedInClient(convexUrl ?? "");
+
+          const config = MediaConfig.layer.pipe(
+            Layer.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromUnknown({
+                  CONVEX_URL: convexUrl,
+                  MEDIA_SERVICE_SECRET: serviceSecret,
+                  STREAM_SIGNING_KEY: signingKey,
+                  MEDIA_DATA_DIR: dataDir,
+                }),
+              ),
+            ),
+          );
+
+          const services = Layer.mergeAll(MediaBackend.layer, Transcoder.layer).pipe(
+            Layer.provideMerge(config),
+          );
+
+          yield* Layer.build(Layer.merge(services, JobWorker.layer.pipe(Layer.provide(services))));
+
+          const scan = (name: string, path: string) =>
+            Effect.gen(function* () {
+              const created = yield* call(() => client.run("libraries.create", { name, path }));
+
+              yield* Effect.addFinalizer(() =>
+                call(() => client.run("libraries.delete", { libraryId: created.libraryId })).pipe(
+                  Effect.ignore,
+                ),
+              );
+
+              const job = yield* call(() => client.read("jobs.get", { jobId: created.jobId })).pipe(
+                Effect.repeat({
+                  schedule: Schedule.spaced("200 millis"),
+                  until: (current) => current.status !== "pending" && current.status !== "running",
+                  times: 150,
+                }),
+              );
+
+              const libraries = yield* call(() => client.read("libraries.list", {}));
+
+              return {
+                job,
+                library: libraries.find((candidate) => candidate.id === created.libraryId),
+              };
+            });
+
+          const owner = yield* scan(`Owner${suffix}`, root);
+
+          expect(owner.job.status).toBe("done");
+          expect(owner.library?.trackCount).toBe(10);
+
+          // A link to the folder around it: a different path, the same files.
+          yield* Files.makeSymlink(join(root, ".."), join(links, "around"));
+          const alias = yield* scan(`Alias${suffix}`, join(links, "around"));
+
+          expect(alias.job).toMatchObject({ status: "failed" });
+          expect(alias.job.error).toMatch(/another library's folder/u);
+          expect(alias.library?.trackCount).toBe(0);
+
+          // /proc/self/root names the whole file system again; such a folder is never added.
+          const proc = yield* call(() =>
+            client
+              .run("libraries.create", { name: `Proc${suffix}`, path: `/proc/self/root${root}` })
+              .then(
+                () => "added",
+                // The Convex client rejects with a ConvexError, which is an Error.
+                (error: Error) => error.message,
+              ),
+          );
+
+          expect(proc).toMatch(/\/proc, \/sys, or \/dev/u);
+        }),
+      ));
   },
 );

@@ -1,5 +1,6 @@
 import { argsDecoder } from "@music/commands/codec";
 import type { JobId } from "@music/commands/ids";
+import { capabilityLabel } from "@music/commands/permissions";
 import { commands } from "@music/commands/registry";
 import type { MutationName } from "@music/commands/registry";
 import { usePlayerPosition } from "@music/player/react";
@@ -33,7 +34,19 @@ const listFormat = new Intl.ListFormat("en", { type: "conjunction" });
 type Outcome =
   | { readonly kind: "job"; readonly jobId: JobId; readonly title: string }
   | { readonly kind: "key"; readonly key: string }
-  | { readonly kind: "invite"; readonly link: string };
+  | { readonly kind: "invite" | "reset"; readonly link: string };
+
+/** How the preview presents a secret a command returned once. */
+const SECRET_COPY = {
+  key: { title: "Copy your new key", meta: "This is the only time it's shown." },
+  invite: { title: "Share the invite link", meta: "It works once and expires in 7 days." },
+  reset: {
+    title: "Share the reset link",
+    meta:
+      "It works once, expires in 24 hours, and signs them out everywhere else. " +
+      "Signing in with the new password also turns off this person's API keys.",
+  },
+} as const;
 
 /** What {@link CommandPreview} takes. */
 type CommandPreviewProps = PreviewProps & {
@@ -119,6 +132,9 @@ function CommandForm({
         case "invite":
           setOutcome({ kind: "invite", link: `${window.location.origin}/invite/${result.code}` });
           break;
+        case "reset":
+          setOutcome({ kind: "reset", link: `${window.location.origin}/reset/${result.token}` });
+          break;
         case "playlist":
           onClose();
           await navigate({
@@ -152,7 +168,7 @@ function CommandForm({
       <div className="flex flex-col gap-1">
         <span className="font-mono text-xs/xs tracking-mono text-text-muted uppercase">
           {command.group}
-          {command.access === "admin" ? " · admin" : ""}
+          {command.access === "user" ? "" : ` · ${capabilityLabel(command.access)}`}
         </span>
         <h2 className="font-sans text-xl/xl font-heavy tracking-tight text-text">
           {command.summary}
@@ -215,14 +231,7 @@ function OutcomePreview({
 
   return (
     <PreviewFrame onBack={onBack}>
-      <PreviewTitle
-        title={outcome.kind === "key" ? "Copy your new key" : "Share the invite link"}
-        meta={
-          outcome.kind === "key"
-            ? "This is the only time it's shown."
-            : "It works once and expires in 7 days."
-        }
-      />
+      <PreviewTitle title={SECRET_COPY[outcome.kind].title} meta={SECRET_COPY[outcome.kind].meta} />
       <div className="flex h-12 items-center gap-2.5 rounded-sm bg-surface pr-1.5 pl-3.5">
         <code className="min-w-0 grow truncate font-mono text-sm/xs text-text select-all">
           {value}

@@ -21,7 +21,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { Readable } from "node:stream";
 
 /** Size and modification time of one regular file. */
@@ -125,6 +125,24 @@ export const makeSymlink = (target: string, path: string): Promise<void> => syml
 
 /** The canonical absolute path of an existing file or directory, with every symlink resolved. */
 export const realPath = (path: string): Promise<string> => realpath(path);
+
+/** `path` and each folder above it, up to `/`. */
+const foldersUp = (path: string): ReadonlyArray<string> => {
+  const parent = dirname(path);
+
+  return parent === path ? [path] : [path, ...foldersUp(parent)];
+};
+
+/**
+ * The identity (`<device>:<inode>`) of an absolute folder and of each folder above it, up to `/`,
+ * the folder first: a `FolderChain` from `@music/commands/folder-ids`. A bind mount shows a folder
+ * under another path, but not under another identity.
+ */
+export const folderIds = async (path: string): Promise<ReadonlyArray<string>> => {
+  const stats = await Promise.all(foldersUp(path).map((folder) => stat(folder, { bigint: true })));
+
+  return stats.map((folder) => `${folder.dev}:${folder.ino}`);
+};
 
 /** Removes a file or directory tree; a missing path is not an error. */
 export const removePath = (path: string): Promise<void> =>

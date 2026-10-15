@@ -1,3 +1,4 @@
+import { can } from "@music/commands/permissions";
 import type { Job, JobStatus } from "@music/commands/models";
 import { useRead, useRun } from "@music/sdk/react";
 import { Segmented } from "@music/ui/components/segmented";
@@ -56,7 +57,7 @@ function JobsSettings() {
       ) : (
         <div role="list" aria-label="Jobs" className="flex flex-col">
           {shown.map((job) => (
-            <JobRow key={job.id} job={job} admin={me?.role === "admin"} />
+            <JobRow key={job.id} job={job} admin={me !== undefined && can(me.role, "admin")} />
           ))}
         </div>
       )}

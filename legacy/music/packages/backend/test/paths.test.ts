@@ -84,14 +84,21 @@ describe("libraries.create", () => {
     expect(await create("/srv")).toBe("conflict");
     expect(await create("/srv/music2")).toBe("succeeded");
 
-    // Another admin's private library stays anonymous.
+    // Another admin's private library stays anonymous: neither folder is named.
     await expect(
       admin.music.run("libraries.create", { name: "New", path: "/srv/secret/x" }),
-    ).rejects.toThrow(/inside the folder of another library/u);
+    ).rejects.toThrow(/"message":"This folder overlaps another library"\}/u);
 
-    expect((await admin.music.read("libraries.list", {})).map((library) => library.path)).toEqual([
-      "/srv/music",
-      "/srv/music2",
+    // The other admin's private library is listed, unreadable and without its folder.
+    expect(
+      (await admin.music.read("libraries.list", {})).map((library) => [
+        library.path,
+        library.readable,
+      ]),
+    ).toEqual([
+      ["/srv/music", true],
+      [null, false],
+      ["/srv/music2", true],
     ]);
   });
 });

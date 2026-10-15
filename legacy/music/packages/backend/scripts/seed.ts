@@ -359,6 +359,19 @@ const finishJob = makeFunctionReference<
   null
 >("media:finishJob");
 
+const claimRoot = makeFunctionReference<
+  "mutation",
+  {
+    secret: string;
+    libraryId: string;
+    realPath: string;
+    rootIds: ReadonlyArray<string>;
+    fsPath: string | null;
+    bootId: string | null;
+  },
+  { ok: boolean }
+>("media:claimRoot");
+
 const deploymentUrl = (): string => {
   const line = readFileSync(".env.local", "utf8")
     .split("\n")
@@ -392,6 +405,16 @@ const finishPendingJobs = async (client: ConvexHttpClient, secret: string): Prom
 
     if (claim === null) return;
     const prefix = claim.library.path.replace(/\/$/, "");
+
+    // The media service claims a library's folder before a scan; nothing streams without it.
+    await client.mutation(claimRoot, {
+      secret,
+      libraryId: claim.library.id,
+      realPath: claim.library.path,
+      rootIds: [`seed:${claim.library.id}`],
+      fsPath: null,
+      bootId: null,
+    });
 
     await inOrder(batches, async (batch, index) => {
       const located = batch.map((track) =>

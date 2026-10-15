@@ -1,3 +1,4 @@
+import { can } from "@music/commands/permissions";
 import type { ApiKey } from "@music/commands/models";
 import { useRead, useRun } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
@@ -10,7 +11,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 
-import { SettingsHeader, TerminalHint } from "@/components/settings/settings-ui";
+import { NotForYou, SettingsHeader, TerminalHint } from "@/components/settings/settings-ui";
 import { resolveConvexUrl } from "@/config";
 import { cliLoginBase, cliLoginCommand, needsInsecure } from "@/lib/cli-login";
 import { useAction } from "@/lib/action";
@@ -26,6 +27,23 @@ export const Route = createFileRoute("/_app/settings/keys")({ component: KeysSet
 const RECENT_MS = 10 * 60_000;
 
 function KeysSettings() {
+  const me = useRead("account.me", {});
+
+  if (me === undefined) return <Skeleton className="h-40 w-full rounded-lg" />;
+
+  if (!can(me.role, "keys")) {
+    return (
+      <NotForYou
+        title="Guests don't have API keys"
+        lead="Keys let the CLI and agents act for you. Ask an admin to make you a member if you need one."
+      />
+    );
+  }
+
+  return <Keys />;
+}
+
+function Keys() {
   const keys = useRead("keys.list", {});
   const [creating, setCreating] = useState(false);
 

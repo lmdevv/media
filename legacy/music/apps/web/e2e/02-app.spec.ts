@@ -44,7 +44,7 @@ test("a wrong password shows the sign-in error and logs nothing", async ({ page 
   await page.getByLabel("Email").fill(ADMIN.email);
   await page.getByLabel("Password").fill("not-the-password");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("alert")).toHaveText("That email and password don't match.");
+  await expect(page.getByRole("alert")).toHaveText("Invalid email or password");
   await expect(page.getByLabel("Password")).toHaveAttribute("aria-invalid", "true");
   // A wrong password is an expected outcome, not a server error (ADS-109).
   expect(errors).toEqual([]);

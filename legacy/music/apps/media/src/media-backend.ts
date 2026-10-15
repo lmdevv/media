@@ -2,22 +2,13 @@
  * The media service's view of Convex: the `media:*` functions, called with the shared service
  * secret. Convex owns all product state; this module only moves data in and out.
  */
+import type { FolderChain } from "@music/commands/folder-ids";
 import { JobId, LibraryId, type TrackId } from "@music/commands/ids";
 import { ConvexClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
-import {
-  Cause,
-  Context,
-  Effect,
-  Layer,
-  Option,
-  Queue,
-  Redacted,
-  Schedule,
-  Schema,
-  Stream,
-} from "effect";
+import { Cause, Context, Effect, Layer, Option, Queue, Redacted, Schema, Stream } from "effect";
 
+import { cappedBackoff } from "./backoff.ts";
 import { MediaConfig } from "./media-config.ts";
 
 /** A Convex call failed or returned data the service does not understand. */
@@ -35,9 +26,16 @@ const PendingJob = Schema.Struct({ jobId: JobId, kind: Schema.Literal("scan") })
 /** A job waiting for a worker. */
 export interface PendingJob extends Schema.Schema.Type<typeof PendingJob> {}
 
-const LibraryFolder = Schema.Struct({ id: LibraryId, path: Schema.String });
+const LibraryFolder = Schema.Struct({
+  id: LibraryId,
+  path: Schema.String,
+  /** Whether its folder is claimed, with identities (`media:claimRoot`), so its songs stream. */
+  claimed: Schema.Boolean,
+  /** The boot its claim's identities were read in (`Files.readBootId`); null without one. */
+  bootId: Schema.NullOr(Schema.String),
+});
 
-/** A library and the folder it reads. */
+/** A library, the folder it reads, and whether that folder is claimed. */
 export interface LibraryFolder extends Schema.Schema.Type<typeof LibraryFolder> {}
 
 const ClaimedJob = Schema.Struct({
@@ -99,6 +97,14 @@ export interface TrackSource extends Schema.Schema.Type<typeof TrackSource> {}
 
 const ReportResult = Schema.Struct({ cancelled: Schema.Boolean });
 
+const RootClaim = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true) }),
+  Schema.Struct({ ok: Schema.Literal(false), error: Schema.String }),
+]);
+
+/** Whether Convex accepted a library's real folder, and why not. */
+export type RootClaim = Schema.Schema.Type<typeof RootClaim>;
+
 const MoveResult = Schema.Struct({ moved: Schema.Finite });
 
 /** Tags read from one file, in the shape `media:upsertTracks` accepts. */
@@ -154,6 +160,20 @@ type Secret = { secret: string };
 const functions = {
   pendingJobs: makeFunctionReference<"query", Secret, unknown>("media:pendingJobs"),
   libraries: makeFunctionReference<"query", Secret, unknown>("media:libraries"),
+  claimRoot: makeFunctionReference<
+    "mutation",
+    Secret & {
+      libraryId: string;
+      realPath: string;
+      rootIds: ReadonlyArray<string>;
+      fsPath: string | null;
+      bootId: string | null;
+    },
+    unknown
+  >("media:claimRoot"),
+  refuseRoot: makeFunctionReference<"mutation", Secret & { libraryId: string }, unknown>(
+    "media:refuseRoot",
+  ),
   claimJob: makeFunctionReference<
     "mutation",
     Secret & { jobId: string; workerId: string },
@@ -225,6 +245,26 @@ export interface Interface {
     jobId: JobId,
     workerId: string,
   ) => Effect.Effect<Option.Option<ClaimedJob>, BackendError>;
+  /**
+   * Claims the real folder a library's path resolves to before it is scanned, with the folder's
+   * identity and its parents' (`FolderChain`). Refused when it is, is inside, or holds another
+   * library's folder by path or by identity; the error names no other folder. A refusal drops
+   * the library's earlier claim, so it stops streaming.
+   */
+  readonly claimRoot: (
+    libraryId: LibraryId,
+    realPath: string,
+    rootIds: FolderChain,
+    /** Where the folder is on its file system (`mounts.ts`); null without a mount table. */
+    fsPath: string | null,
+    /** The boot those identities belong to (`Files.readBootId`). */
+    bootId: string | null,
+  ) => Effect.Effect<RootClaim, BackendError>;
+  /**
+   * Drops a library's claim after the service refused its folder itself (outside `MUSIC_ROOTS`,
+   * or a system folder), so it stops streaming.
+   */
+  readonly refuseRoot: (libraryId: LibraryId) => Effect.Effect<void, BackendError>;
   /** Reports progress and renews the lease. Returns true when the job was cancelled. */
   readonly reportJob: (
     jobId: JobId,
@@ -281,14 +321,13 @@ export class MediaBackend extends Context.Service<MediaBackend, Interface>()(
 const CALL_TIMEOUT = "30 seconds";
 
 /** Backoff for restarting a dropped subscription: exponential from one second, capped at 30. */
-export const resubscribeSchedule = Schedule.min([
-  Schedule.exponential("1 second"),
-  Schedule.spaced("30 seconds"),
-]);
+export const resubscribeSchedule = cappedBackoff("1 second", "30 seconds");
 
 const decodeClaim = Schema.decodeUnknownEffect(Schema.NullOr(ClaimedJob));
 
 const decodeReport = Schema.decodeUnknownEffect(ReportResult);
+
+const decodeRootClaim = Schema.decodeUnknownEffect(RootClaim);
 
 const decodeMove = Schema.decodeUnknownEffect(MoveResult);
 
@@ -364,6 +403,33 @@ const make = Effect.gen(function* () {
       const claimed = yield* decodeClaim(result).pipe(Effect.mapError(decodeFailure("claimJob")));
 
       return Option.fromNullOr(claimed);
+    }),
+
+    claimRoot: Effect.fn("MediaBackend.claimRoot")(function* (
+      libraryId: LibraryId,
+      realPath: string,
+      rootIds: FolderChain,
+      fsPath: string | null,
+      bootId: string | null,
+    ) {
+      const result = yield* call("claimRoot", () =>
+        client.mutation(functions.claimRoot, {
+          secret: secret(),
+          libraryId,
+          realPath,
+          rootIds,
+          fsPath,
+          bootId,
+        }),
+      );
+
+      return yield* decodeRootClaim(result).pipe(Effect.mapError(decodeFailure("claimRoot")));
+    }),
+
+    refuseRoot: Effect.fn("MediaBackend.refuseRoot")(function* (libraryId: LibraryId) {
+      yield* call("refuseRoot", () =>
+        client.mutation(functions.refuseRoot, { secret: secret(), libraryId }),
+      );
     }),
 
     reportJob: Effect.fn("MediaBackend.reportJob")(function* (

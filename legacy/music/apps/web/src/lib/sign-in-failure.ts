@@ -1,9 +1,10 @@
 /**
  * How a wrong email or password reads: Convex Auth's Password provider throws `InvalidAccountId`
- * (no such email) or `InvalidSecret` (wrong password). Refresh-token renewal, rate limits, an
- * expired session, and server faults read differently, so they still count as errors.
+ * (no such email) or `InvalidSecret` (wrong password), and [music]'s own password provider
+ * (`auth.ts`) refuses both alike with "Invalid email or password". Refresh-token renewal, rate
+ * limits, an expired session, and server faults read differently, so they still count as errors.
  */
-const WRONG_CREDENTIALS = /\b(?:InvalidAccountId|InvalidSecret)\b/;
+const WRONG_CREDENTIALS = /\b(?:InvalidAccountId|InvalidSecret)\b|Invalid email or password/;
 
 /**
  * Whether a Convex log line or error message reports a wrong email or password. The one rule the

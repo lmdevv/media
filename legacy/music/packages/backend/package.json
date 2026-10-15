@@ -15,7 +15,8 @@
     "@music/commands": "workspace:*",
     "convex": "catalog:",
     "effect": "catalog:",
-    "jose": "^6.2.12"
+    "jose": "^6.2.12",
+    "lucia": "^3.2.2"
   },
   "devDependencies": {
     "@music/config": "workspace:*",

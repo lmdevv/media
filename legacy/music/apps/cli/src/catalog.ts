@@ -2,6 +2,8 @@
  * The command tree: registry commands mapped to CLI paths, the built-in commands, help text, and
  * the machine-readable catalog behind `music commands`.
  */
+import type { Capability } from "@music/commands/permissions";
+import { capabilityLabel } from "@music/commands/permissions";
 import type { CommandGroup } from "@music/commands/command";
 import { commands, isCommandName } from "@music/commands/registry";
 import type { CommandName } from "@music/commands/registry";
@@ -208,7 +210,7 @@ export const commandHelp = (entry: RegistryEntry): string => {
     "",
     command.summary,
     "",
-    `Registry command ${entry.name} (${command.kind}, ${command.access === "admin" ? "admins only" : "any user"}).`,
+    `Registry command ${entry.name} (${command.kind}, ${capabilityLabel(command.access)}).`,
     ...(positional === null
       ? []
       : [`The ${positionalUsage(positional)} argument fills --${positional.flag}.`]),
@@ -232,7 +234,7 @@ export type CatalogEntry = {
   readonly synopsis: string;
   readonly group: CommandGroup;
   readonly kind: "query" | "mutation";
-  readonly access: "user" | "admin";
+  readonly access: Capability;
   readonly job: boolean;
   readonly summary: string;
   readonly positional: string | null;
@@ -300,6 +302,14 @@ export const catalog = (): ReadonlyArray<CatalogEntry> =>
     };
   });
 
+/** Who may run a command, as the skill reference marks it; commands for anyone are unmarked. */
+const ACCESS_NOTES: Readonly<Record<Capability, string | null>> = {
+  user: null,
+  keys: "not guests",
+  admin: "admin",
+  owner: "owner",
+};
+
 /** The command reference section of the agent skill, generated from the registry. */
 export const markdownReference = (): string => {
   const groups = new Map<CommandGroup, Array<RegistryEntry>>();
@@ -320,7 +330,7 @@ export const markdownReference = (): string => {
         const command = commands[entry.name];
 
         const notes = [
-          command.access === "admin" ? "admin" : null,
+          ACCESS_NOTES[command.access],
           command.job ? "job: add `--wait`" : null,
         ].filter((note) => note !== null);
 

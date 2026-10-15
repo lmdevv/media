@@ -47,3 +47,22 @@ export type InviteLookup =
 export const inviteLookup = makeFunctionReference<"query", { code: string }, InviteLookup>(
   "setup:invite",
 );
+
+/** Details a password reset link reveals before the new password is set. */
+export interface PasswordResetDetails {
+  readonly email: string;
+  readonly name: string | null;
+  readonly expiresAt: number;
+}
+
+/** What a reset token currently allows: `open` can set a password; the others explain why not. */
+export type PasswordResetLookup =
+  | { readonly state: "invalid" }
+  | ({ readonly state: "open" | "expired" | "used" } & PasswordResetDetails);
+
+/** `setup:passwordReset`: public lookup of a reset token for the reset-password screen. */
+export const passwordResetLookup = makeFunctionReference<
+  "query",
+  { token: string },
+  PasswordResetLookup
+>("setup:passwordReset");

@@ -82,11 +82,15 @@ export const fixtureLibraryWith = (
 /** The generated fixture library with its plain album titles. */
 export const fixtureLibrary = fixtureLibraryWith("");
 
-/** `MediaConfig` for tests, rooted at `dataDir`; `ffmpegPath` may name a stand-in. */
+/**
+ * `MediaConfig` for tests, rooted at `dataDir`; `ffmpegPath` may name a stand-in, and `musicRoots`
+ * limits library folders as `MUSIC_ROOTS` does.
+ */
 export const testConfig = (
   dataDir: string,
   cacheMaxBytes = 512 * 1024 * 1024,
   ffmpegPath = "ffmpeg",
+  musicRoots: ReadonlyArray<string> | null = null,
 ): Layer.Layer<MediaConfig> =>
   Layer.succeed(
     MediaConfig,
@@ -100,6 +104,7 @@ export const testConfig = (
       rescanInterval: Duration.hours(1),
       ffmpegPath,
       ffprobePath: "ffprobe",
+      musicRoots,
     }),
   );
 

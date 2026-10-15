@@ -2,11 +2,15 @@
  * Functions for the media service. Each takes the shared `MEDIA_SERVICE_SECRET`; none of them
  * decides user access. Convex never calls the media service; the service subscribes here.
  */
+import { chainsOverlap, fsPathsOverlap } from "@music/commands/folder-ids";
+import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
 import { v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
 import { markTrackMissing, moveScannedTrack, upsertScannedTrack } from "./lib/catalog";
+import { firstOverlap, isClaimed, normaliseLibraryPath } from "./lib/paths";
 import { inOrder } from "./lib/sequence";
 import { requireService } from "./lib/service";
 
@@ -87,6 +91,111 @@ export const claimJob = mutation({
       kind: job.kind,
       library: { id: library._id, path: library.path, name: library.name },
     };
+  },
+});
+
+/** The message of a refused root claim. It names no folder: the job's viewer may not read the other library. */
+const OVERLAP_MESSAGE =
+  "This folder is the same as, inside, or around another library's folder (through a link or a " +
+  "mount), so it was not scanned. Add a folder that holds only this library's music.";
+
+/**
+ * Records the real folder a library's path resolves to, before the media service indexes
+ * anything in it, or refuses it. A link or a bind mount can give one folder two names, so the
+ * text check when a library is added is not enough: the claim is refused when the real folder
+ * equals, contains, or sits inside another library's folder (by either of its names), or lies
+ * in /proc, /sys, or /dev. The media service claims at the start of every scan and indexes
+ * nothing when refused; a refusal says nothing about the other library.
+ */
+export const claimRoot = mutation({
+  args: {
+    secret: v.string(),
+    libraryId: v.id("libraries"),
+    realPath: v.string(),
+    /** The folder's identity and its parents' up to `/`, the folder first (see `folder-ids`). */
+    rootIds: v.array(v.string()),
+    /** Where the folder is on its file system (see `folder-ids`); null without a mount table. */
+    fsPath: v.union(v.string(), v.null()),
+    /** The boot those identities were read in (see `schema.ts`); null without one. */
+    bootId: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, { secret, libraryId, realPath, rootIds, fsPath, bootId }) => {
+    requireService(secret);
+    const library = await ctx.db.get(libraryId);
+    const real = normaliseLibraryPath(realPath);
+
+    if (library === null) return { ok: false, error: "The library was removed" } as const;
+
+    if (real === null || isSystemFolder(real)) {
+      await unclaim(ctx, library);
+
+      return { ok: false, error: SYSTEM_FOLDER_MESSAGE } as const;
+    }
+
+    const overlapping = (await ctx.db.query("libraries").collect()).filter(
+      (other) =>
+        other._id !== libraryId &&
+        (firstOverlap([other], real) !== null ||
+          // Identities read in another boot may name other folders now; paths still count.
+          ((other.bootId ?? null) === bootId &&
+            ((other.rootIds !== undefined && chainsOverlap(other.rootIds, rootIds)) ||
+              (fsPath !== null &&
+                other.fsPath !== undefined &&
+                fsPathsOverlap(other.fsPath, fsPath))))),
+    );
+
+    // The library added first keeps a folder two libraries name, whichever scan claims it first:
+    // an older library that had no claim yet (from before claims, say) takes its folder back from
+    // a newer one on another path to it, such as a bind mount, which stops streaming.
+    if (overlapping.some((other) => other._creationTime < library._creationTime)) {
+      await unclaim(ctx, library);
+
+      return { ok: false, error: OVERLAP_MESSAGE } as const;
+    }
+
+    await Promise.all(overlapping.map(async (other) => unclaim(ctx, other)));
+
+    const stored = { fsPath: fsPath ?? undefined, bootId: bootId ?? undefined };
+
+    if (
+      library.realPath !== real ||
+      library.rootIds?.join("/") !== rootIds.join("/") ||
+      library.fsPath !== stored.fsPath ||
+      library.bootId !== stored.bootId
+    ) {
+      await ctx.db.patch(libraryId, { realPath: real, rootIds: [...rootIds], ...stored });
+    }
+
+    return { ok: true } as const;
+  },
+});
+
+/**
+ * Drops a library's claim, so none of its songs stream (`trackSource`, `stream.url`) until a scan
+ * claims its folder again. Its songs stay indexed, for when the folder is put right.
+ */
+const unclaim = async (ctx: MutationCtx, library: Doc<"libraries">): Promise<void> => {
+  if (library.realPath !== undefined || library.rootIds !== undefined) {
+    await ctx.db.patch(library._id, {
+      realPath: undefined,
+      rootIds: undefined,
+      fsPath: undefined,
+      bootId: undefined,
+    });
+  }
+};
+
+/**
+ * Records that the media service refused a library's folder before claiming it: outside
+ * `MUSIC_ROOTS`, or in /proc, /sys, or /dev. Like a refused claim, it stops the library streaming.
+ */
+export const refuseRoot = mutation({
+  args: { secret: v.string(), libraryId: v.id("libraries") },
+  handler: async (ctx, { secret, libraryId }) => {
+    requireService(secret);
+    const library = await ctx.db.get(libraryId);
+
+    if (library !== null) await unclaim(ctx, library);
   },
 });
 
@@ -268,11 +377,14 @@ export const trackSource = query({
     if (track === null || track.missing) return null;
     const library = await ctx.db.get(track.libraryId);
 
-    if (library === null) return null;
+    // Nothing streams from a folder no scan has claimed (`claimRoot`): a library refused since it
+    // was indexed, or one from before claims whose next scan hasn't run yet.
+    if (!isClaimed(library)) return null;
 
     return {
       path: track.path,
-      libraryPath: library.path,
+      // The folder the last scan claimed: a link retargeted since must not change what plays.
+      libraryPath: library.realPath,
       codec: track.codec,
       lossless: track.lossless,
       size: track.size,
@@ -289,7 +401,13 @@ export const libraries = query({
     requireService(secret);
     const all = await ctx.db.query("libraries").collect();
 
-    return all.map((library) => ({ id: library._id, path: library.path }));
+    // `claimed` lets the service claim new and upgraded libraries at once, before any scan.
+    return all.map((library) => ({
+      id: library._id,
+      path: library.path,
+      claimed: isClaimed(library) && library.rootIds !== undefined,
+      bootId: library.bootId ?? null,
+    }));
   },
 });
 

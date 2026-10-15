@@ -20,7 +20,8 @@ import {
   resubscribeSchedule,
 } from "./media-backend.ts";
 import type { MediaConfig } from "./media-config.ts";
-import { describeScan, scanLibrary, type ScanSummary } from "./scan.ts";
+import { claimRoot } from "./root-claim.ts";
+import { describeScan, LibraryUnavailable, scanLibrary, type ScanSummary } from "./scan.ts";
 
 /** How often a running job reports progress; well inside the 60 second lease. */
 const HEARTBEAT = "5 seconds";
@@ -60,11 +61,17 @@ const runJob = Effect.fn("JobWorker.runJob")(
 
     yield* Effect.logInfo("JobWorker.started");
 
-    const scan = scanLibrary(library, progress).pipe(
+    // The scan reads the real folder Convex accepted, not the path the library was added with.
+    const scan = claimRoot(library).pipe(
+      Effect.catchTag("FileError", (cause) =>
+        Effect.fail(new LibraryUnavailable({ libraryId: library.id, path: library.path, cause })),
+      ),
+      Effect.flatMap((realPath) => scanLibrary({ ...library, path: realPath }, progress)),
       Effect.map((summary) => JobEnd.Finished({ summary })),
       Effect.catchTags({
         LibraryUnavailable: (error) => Effect.succeed(JobEnd.Failed({ error: error.message })),
         LibraryEmpty: (error) => Effect.succeed(JobEnd.Failed({ error: error.message })),
+        RootRefused: (error) => Effect.succeed(JobEnd.Failed({ error: error.message })),
         BackendError: (error) => Effect.succeed(JobEnd.Failed({ error: error.message })),
       }),
       // A defect in one scan must not stop the worker; record it on the job instead.

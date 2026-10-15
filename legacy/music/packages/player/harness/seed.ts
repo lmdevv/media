@@ -36,6 +36,19 @@ const upsertTracks = makeFunctionReference<
   { upserted: number }
 >("media:upsertTracks");
 
+const claimRoot = makeFunctionReference<
+  "mutation",
+  {
+    secret: string;
+    libraryId: string;
+    realPath: string;
+    rootIds: ReadonlyArray<string>;
+    fsPath: string | null;
+    bootId: string | null;
+  },
+  { ok: boolean }
+>("media:claimRoot");
+
 const requireBackend = (): NonNullable<typeof backend> => {
   if (backend === null) {
     throw new Error("No dev backend: run scripts/dev-backend.sh <name> <port> first");
@@ -68,6 +81,16 @@ export const seedSession = async (): Promise<ReadonlyArray<TrackId>> => {
   const libraryId =
     libraries.find((library) => library.path === fixturesDir)?.id ??
     (await music.run("libraries.create", { name: "Player fixtures", path: fixturesDir })).libraryId;
+
+  // The media service claims a library's folder before a scan; nothing streams without it.
+  await http.mutation(claimRoot, {
+    secret: mediaSecret,
+    libraryId,
+    realPath: fixturesDir,
+    rootIds: [`harness:${libraryId}`],
+    fsPath: null,
+    bootId: null,
+  });
 
   await http.mutation(upsertTracks, {
     secret: mediaSecret,

@@ -47,7 +47,18 @@ CLI, the web app, and this skill always agree.
   <seconds>` (default 3600) bounds the wait.
 - `music commands --json` lists every command with its flags and its arguments as JSON Schema.
   `music <command> --help` shows one command.
-- Admin-only commands fail with exit code 3 and `forbidden` for other users.
+- Roles: the `owner` (the first account, exactly one) can do everything; `admin` runs people,
+  invites, libraries, and jobs, but only the owner changes another admin; `member` listens and
+  keeps playlists, likes, history, and API keys; `guest` only listens to the libraries they were
+  added to and has no API keys. `access` in
+  `music commands --json` names what each command needs: `user` (anyone), `keys` (not guests),
+  `admin`, or `owner`. Other callers get exit code 3 and `forbidden`.
+- Library visibility: `shared` is everyone but guests, `restricted` is only the people added with
+  `music libraries grant`, and `private` is only the library's owner. Guests hear a shared library
+  once they are added to it. Only a library's own owner changes its visibility or who is added
+  (`forbidden` otherwise). Admins rename and rescan libraries they can listen to, and the
+  server's owner every library; only a library's own owner or the server's owner removes it; `music libraries list` shows other libraries with `path: null` and
+  `manageable: false`, and commands on them answer `not_found`.
 
 ## Recipes
 
@@ -91,10 +102,33 @@ music libraries create --name Music --path /srv/music --wait
 music libraries scan <library-id> --wait --timeout 600
 ```
 
-Invite someone (admin):
+Invite someone (admin). The link is `<web address>/invite/<code>`; the web address is the server
+URL without `/convex`:
 
 ```sh
-music invites create --email friend@example.com --json   # share .code with them
+music invites create --email friend@example.com --json             # share .code with them
+music invites create --role guest --json                           # a friend who only listens
+```
+
+Run the people on the server (admin). The owner cannot be changed, only the owner changes another
+admin, and nobody changes their own account this way:
+
+```sh
+music people list --json                       # .id, .role, .suspended, .lastActiveAt
+music people role --user-id <id> --role guest  # admin, member, or guest
+music people suspend <user-id>                 # signs them out everywhere; keys stop working
+music people unsuspend <user-id>
+music people reset <user-id> --json            # share <web address>/reset/<.token>; one use, 24 h
+music people remove <user-id>                  # deletes their data; their libraries go to the owner
+music people transfer <user-id>                # owner only: hand the server to an admin
+```
+
+Share a library you own with specific people (admin; only the library's owner may):
+
+```sh
+music libraries update <library-id> --visibility restricted --name "Kids"
+music libraries grant --library-id <library-id> --user-id <user-id>
+music libraries people <library-id> --json
 ```
 
 Playback controls: `music pause`, `music resume`, `music next`, `music previous`,
@@ -103,17 +137,19 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 
 ## Exit codes
 
-| Code | Meaning                                                   | What to do                                |
-| ---- | --------------------------------------------------------- | ----------------------------------------- |
-| 0    | Success                                                   |                                           |
-| 1    | The command failed (`not_found`, `conflict`, job failure) | Read `error.code` and `error.message`     |
-| 2    | Usage error: unknown command, missing flag, invalid value | Fix the command; see `music <cmd> --help` |
-| 3    | Auth error: not logged in, bad key, or admin-only command | `music login`, a new key, or an admin key |
+| Code | Meaning                                                     | What to do                                |
+| ---- | ----------------------------------------------------------- | ----------------------------------------- |
+| 0    | Success                                                     |                                           |
+| 1    | The command failed (`not_found`, `conflict`, job failure)   | Read `error.code` and `error.message`     |
+| 2    | Usage error: unknown command, missing flag, invalid value   | Fix the command; see `music <cmd> --help` |
+| 3    | Auth error: not logged in, bad key, suspended, or no access | `music login`, a new key, or an admin key |
 
 ## Troubleshooting
 
 - `not_logged_in`: run `music login`, or set both `MUSIC_SERVER` and `MUSIC_API_KEY`.
-- `invalid_key`: the key was revoked or mistyped. Create a new one.
+- `invalid_key`: the key was revoked or mistyped. Create a new one. A person made a guest loses
+  their keys.
+- `forbidden` with "suspended": an admin suspended the account; only an admin can lift it.
 - `server_error` with "Could not reach": check the URL. It is the Convex URL (`.../convex`), not
   the web app URL.
 - `timeout` from `--wait`: the job is still running. Check it with `music jobs get <job-id>`. A job
@@ -189,9 +225,13 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 ### libraries
 
 - `music libraries list`: List library folders you can see.
-- `music libraries create --name <text> --path <text> [--visibility <shared|private>] [--wait [--timeout <seconds>]]`: Add a library folder and scan it. (admin; job: add `--wait`)
+- `music libraries create --name <text> --path <text> [--visibility <shared|restricted|private>] [--wait [--timeout <seconds>]]`: Add a library folder and scan it. (admin; job: add `--wait`)
 - `music libraries scan <library-id> [--wait [--timeout <seconds>]]`: Rescan a library folder. (admin; job: add `--wait`)
-- `music libraries delete <library-id>`: Remove a library folder from the index (files stay on disk). (admin)
+- `music libraries delete <library-id>`: Remove a library folder from the index (its owner or the server owner; files stay on disk). (admin)
+- `music libraries update <library-id> [--name <text>] [--visibility <shared|restricted|private>]`: Rename a library folder, or (its owner only) change who can listen to it. (admin)
+- `music libraries people <library-id>`: List the people added to a library folder. (admin)
+- `music libraries grant --library-id <id> --user-id <id>`: Let someone listen to a restricted library folder you own, or a guest to a shared one. (admin)
+- `music libraries revoke --library-id <id> --user-id <id>`: Take someone off the access list of a library folder you own. (admin)
 
 ### jobs
 
@@ -206,15 +246,21 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 
 ### keys
 
-- `music keys list`: List your API keys.
-- `music keys create <name>`: Create an API key for the CLI or an agent; the key is shown once.
-- `music keys revoke <api-key-id>`: Revoke an API key.
+- `music keys list`: List your API keys. (not guests)
+- `music keys create <name>`: Create an API key for the CLI or an agent; the key is shown once. (not guests)
+- `music keys revoke <api-key-id>`: Revoke an API key. (not guests)
 
 ### people
 
 - `music people list`: List people on this server. (admin)
-- `music invites list`: List open invites. (admin)
-- `music invites create [--email <text>] [--role <admin|member>]`: Invite someone; share the code or link. (admin)
+- `music people role --user-id <id> --role <admin|member|guest>`: Change someone's role to admin, member, or guest. (admin)
+- `music people suspend <user-id>`: Suspend someone: sign them out everywhere and stop their API keys. (admin)
+- `music people unsuspend <user-id>`: Let a suspended person sign in again. (admin)
+- `music people reset <user-id>`: Create a one-time password reset link for someone; it lasts 24 hours. (admin)
+- `music people remove <user-id>`: Remove someone with their playlists, likes, history, devices, and keys; their libraries move to the owner. (admin)
+- `music people transfer <user-id>`: Make an admin the owner of this server; you become an admin. (owner)
+- `music invites list`: List open and expired invites. (admin)
+- `music invites create [--email <text>] [--role <admin|member|guest>]`: Invite someone as an admin, member, or guest; share the code or link. (admin)
 - `music invites revoke <invite-id>`: Revoke an invite. (admin)
 
 <!-- END:commands -->

@@ -4,7 +4,7 @@
  */
 import type { CommandArgs, MutationName, QueryName } from "@music/commands/registry";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
-import { commandFailure } from "@music/sdk/errors";
+import { commandFailure, type CommandFailure } from "@music/sdk/errors";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import { expect } from "vitest";
@@ -57,6 +57,25 @@ const upsertTracksMutation = makeFunctionReference<
   },
   { upserted: number }
 >("media:upsertTracks");
+
+const librariesQuery = makeFunctionReference<
+  "query",
+  { secret: string },
+  ReadonlyArray<{ id: string; path: string }>
+>("media:libraries");
+
+const claimRootMutation = makeFunctionReference<
+  "mutation",
+  {
+    secret: string;
+    libraryId: string;
+    realPath: string;
+    rootIds: ReadonlyArray<string>;
+    fsPath: string | null;
+    bootId: string | null;
+  },
+  { ok: true } | { ok: false; error: string }
+>("media:claimRoot");
 
 /** A Convex connection, optionally signed in, with the typed command client on top. */
 export interface Session {
@@ -124,13 +143,54 @@ export const passwordSignIn = async (
   return withTokens(url, tokens);
 };
 
-/** Upserts tracks into a library as the media service does. */
+/** Redeems a password reset token with a new password; resolves the new session. */
+export const resetPassword = async (
+  url: string,
+  token: string,
+  newPassword: string,
+): Promise<Session> => {
+  const tokens = await signIn(url, {
+    provider: "password",
+    params: { flow: "reset", token, newPassword },
+  });
+
+  if (tokens === null) throw new Error("The password reset returned no tokens");
+
+  return withTokens(url, tokens);
+};
+
+/**
+ * Claims a library's folder as the media service does before a scan: at the path it was added
+ * with, under a made-up identity no other library shares.
+ */
+const claimFolder = async (url: string, secret: string, libraryId: string) => {
+  const { convex } = anonymous(url);
+  const libraries = await convex.query(librariesQuery, { secret });
+  const library = libraries.find((candidate) => candidate.id === libraryId);
+
+  if (library === undefined) throw new Error(`${libraryId} is not a library`);
+
+  const claim = await convex.mutation(claimRootMutation, {
+    secret,
+    libraryId,
+    realPath: library.path,
+    rootIds: [`test:${libraryId}`],
+    fsPath: null,
+    bootId: null,
+  });
+
+  if (!claim.ok) throw new Error(`The claim on ${library.path} was refused: ${claim.error}`);
+};
+
+/** Upserts tracks into a library as the media service does, claiming its folder first. */
 export const upsertTracks = async (
   url: string,
   secret: string,
   libraryId: string,
   tracks: ReadonlyArray<SeedTrack>,
 ): Promise<void> => {
+  await claimFolder(url, secret, libraryId);
+
   await anonymous(url).convex.mutation(upsertTracksMutation, {
     secret,
     libraryId,
@@ -155,6 +215,19 @@ export const failureCode = async (call: Promise<unknown>): Promise<string> => {
     if (!(error instanceof Error)) return "threw a non-error";
 
     return commandFailure(error)?.code ?? `failed without a code: ${error.message}`;
+  }
+};
+
+/** The expected failure a rejected call carried, or a description of what happened instead. */
+export const failure = async (call: Promise<unknown>): Promise<CommandFailure | string> => {
+  try {
+    await call;
+
+    return "succeeded";
+  } catch (error) {
+    if (!(error instanceof Error)) return "threw a non-error";
+
+    return commandFailure(error) ?? `failed without a code: ${error.message}`;
   }
 };
 

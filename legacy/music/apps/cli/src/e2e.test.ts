@@ -2,7 +2,7 @@
  * Runs the built `music` binary as a subprocess against a real [music] server. Set
  * MUSIC_E2E_SERVER to a Convex URL (for example from `scripts/dev-backend.sh cli 3610`) to run;
  * without it the suite is skipped. The first run signs up the server's first user, which becomes
- * the admin, so point it at a fresh backend or reuse MUSIC_E2E_EMAIL / MUSIC_E2E_PASSWORD.
+ * the owner, so point it at a fresh backend or reuse MUSIC_E2E_EMAIL / MUSIC_E2E_PASSWORD.
  *
  * With MUSIC_E2E_MEDIA_SECRET (the server's MEDIA_SERVICE_SECRET) set as well, a fake media
  * service completes a library scan with a small catalog, which covers `--wait` success, `play`,
@@ -78,8 +78,21 @@ const pendingJobs = makeFunctionReference<
 const claimJob = makeFunctionReference<
   "mutation",
   { secret: string; jobId: string; workerId: string },
-  { jobId: string; library: { id: string } } | null
+  { jobId: string; library: { id: string; path: string } } | null
 >("media:claimJob");
+
+const claimRoot = makeFunctionReference<
+  "mutation",
+  {
+    secret: string;
+    libraryId: string;
+    realPath: string;
+    rootIds: ReadonlyArray<string>;
+    fsPath: string | null;
+    bootId: string | null;
+  },
+  { ok: boolean }
+>("media:claimRoot");
 
 const reportJob = makeFunctionReference<
   "mutation",
@@ -158,6 +171,18 @@ const completeNextScan = async (url: string, secret: string): Promise<void> => {
   if (claimed === null) throw new Error("The fake media service lost the job");
 
   const progress = { secret, jobId, workerId, total: catalogTracks.length };
+
+  // The real service claims the library's folder before reading it; the identity is made up.
+  const root = await client.mutation(claimRoot, {
+    secret,
+    libraryId: claimed.library.id,
+    realPath: claimed.library.path,
+    rootIds: [`e2e:${claimed.library.id}`],
+    fsPath: null,
+    bootId: null,
+  });
+
+  if (!root.ok) throw new Error("The fake media service's folder claim was refused");
 
   await client.mutation(reportJob, { ...progress, done: 0, message: "reading tags" });
 
@@ -289,7 +314,7 @@ describe.skipIf(server === undefined)("music against a real server", () => {
 
     expect(login.stderr).toContain("Saved to");
     expect(login.code).toBe(0);
-    expect(login.stdout).toContain(`as ${email} (admin)`);
+    expect(login.stdout).toContain(`as ${email} (owner)`);
 
     const configFile = join(home, "music", "config.json");
 
@@ -302,7 +327,7 @@ describe.skipIf(server === undefined)("music against a real server", () => {
     expect(whoami.code).toBe(0);
     expect(parse(commands["account.me"].result, whoami.stdout)).toMatchObject({
       email,
-      role: "admin",
+      role: "owner",
     });
   });
 
@@ -377,6 +402,28 @@ describe.skipIf(server === undefined)("music against a real server", () => {
 
     expect(result.code).toBe(3);
     expect(errorOf(result)).toEqual({ code: "forbidden", message: "Only an admin can do that" });
+  });
+
+  it("suspends a member, which locks their key out until they are unsuspended", async () => {
+    const asMember = { MUSIC_API_KEY: await createMemberKey(url, key) };
+    const whoami = await music(["whoami", "--json"], asMember);
+    const member = parse(commands["account.me"].result, whoami.stdout);
+
+    const table = await music(["people", "list"]);
+
+    expect(table.stdout).toMatch(/^ID\s+EMAIL\s+NAME\s+ROLE\s+SUSPENDED\s+LAST ACTIVE/u);
+    expect((await music(["people", "suspend", member.id])).code).toBe(0);
+
+    const locked = await music(["whoami", "--json"], asMember);
+
+    expect(locked.code).toBe(3);
+    expect(errorOf(locked)).toEqual({
+      code: "forbidden",
+      message: "This account is suspended. Ask an admin on this server.",
+    });
+
+    expect((await music(["people", "unsuspend", member.id])).code).toBe(0);
+    expect((await music(["whoami", "--json"], asMember)).code).toBe(0);
   });
 
   it("signs in again when the cached token is rejected", async () => {

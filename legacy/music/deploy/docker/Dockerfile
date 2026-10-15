@@ -119,6 +119,7 @@ COPY deploy/docker/rootfs/ /
 
 ENV PUBLIC_URL=http://localhost:8080 \
     MUSIC_DATA=/data \
+    MUSIC_ROOTS=/music \
     PUID=1000 \
     PGID=1000 \
     BACKUP_KEEP=5 \

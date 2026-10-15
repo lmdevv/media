@@ -1,3 +1,4 @@
+import { can } from "@music/commands/permissions";
 import type { AlbumCard as Album, Job } from "@music/commands/models";
 import { usePlayer } from "@music/player/react";
 import { useRead } from "@music/sdk/react";
@@ -40,7 +41,7 @@ function HomePage() {
   const name = firstName(me.name, me.email);
 
   if (home.stats.tracks === 0 && scan === undefined)
-    return <EmptyLibrary admin={me.role === "admin"} />;
+    return <EmptyLibrary admin={can(me.role, "admin")} />;
 
   const tiles: ReadonlyArray<{
     readonly key: string;
@@ -195,7 +196,7 @@ function EmptyLibrary({ admin }: { readonly admin: boolean }) {
         <p className="font-sans text-md/md text-text-muted">
           {admin
             ? "Point [music] at the folder where your music lives. Files stay where they are. We only read them."
-            : "An admin hasn't shared a library folder yet. Ask them to add one in Settings → Libraries."}
+            : "No library folder is shared with you yet. Ask an admin to add one, or to add you to theirs."}
         </p>
       </div>
       {admin ? (

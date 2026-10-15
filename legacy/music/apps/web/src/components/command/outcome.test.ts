@@ -57,12 +57,23 @@ describe("outcomeOf", () => {
       code: "abc123",
       email: null,
       role: "member",
+      status: "open",
       createdAt: 0,
       expiresAt: 1,
       acceptedAt: null,
     });
 
     expect(outcomeOf(result)).toEqual({ kind: "invite", code: "abc123" });
+  });
+
+  it("shows a new password reset link", () => {
+    const result = Schema.decodeSync(commands["people.reset"].result)({
+      userId: "u1",
+      token: "reset-token",
+      expiresAt: 1,
+    });
+
+    expect(outcomeOf(result)).toEqual({ kind: "reset", token: "reset-token" });
   });
 
   it("opens a new playlist", () => {

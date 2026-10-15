@@ -10,6 +10,8 @@
  */
 import { Cause, Effect, FiberMap, Layer, Queue, Ref, Schedule, Schema, Stream } from "effect";
 
+import { cappedBackoff } from "./backoff.ts";
+import * as Files from "./files.ts";
 import { type LibraryFolder, MediaBackend, resubscribeSchedule } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
 import { watchTree } from "./platform/node-watch.ts";
@@ -17,10 +19,7 @@ import { watchTree } from "./platform/node-watch.ts";
 const DEBOUNCE = "5 seconds";
 
 /** Backoff for starting a failed watch again: exponential from one second, capped at a minute. */
-const RESTART_SCHEDULE = Schedule.min([
-  Schedule.exponential("1 second"),
-  Schedule.spaced("1 minute"),
-]);
+const RESTART_SCHEDULE = cappedBackoff("1 second", "1 minute");
 
 const errorCode = (cause: unknown): string =>
   cause instanceof Error && "code" in cause ? String(cause.code) : "";
@@ -98,6 +97,21 @@ const folderChanges = (
     ),
   );
 
+/**
+ * Whether a library's folder now resolves somewhere else than the last time it resolved, and
+ * records where. A folder that doesn't resolve right now (its link points at nothing for a
+ * while) keeps the last place it did, so a link that goes from A to nowhere to B is seen to move.
+ */
+export const movedSince = (
+  last: Ref.Ref<string | null>,
+  real: string | null,
+): Effect.Effect<boolean> =>
+  real === null
+    ? Effect.succeed(false)
+    : Ref.getAndSet(last, real).pipe(
+        Effect.map((previous) => previous !== null && previous !== real),
+      );
+
 const watchLibrary = Effect.fn("LibraryWatcher.watch")(
   function* (library: LibraryFolder) {
     const backend = yield* MediaBackend;
@@ -116,8 +130,18 @@ const watchLibrary = Effect.fn("LibraryWatcher.watch")(
     // Failures since the watch last ran: a watch that starts again after one scans for what it
     // missed, and only the first failure in a row is a warning.
     const failures = yield* Ref.make(0);
+    // The real folder at the last start. A scan claims the folder anew (`root-claim.ts`), so one
+    // whose link now points elsewhere is checked again before anything is read from it.
+    const lastReal = yield* Ref.make<string | null>(null);
 
-    const started = Ref.getAndSet(failures, 0).pipe(Effect.map((missed) => missed > 0));
+    const retargeted = Files.realPath(library.path).pipe(
+      Effect.orElseSucceed(() => null),
+      Effect.flatMap((real) => movedSince(lastReal, real)),
+    );
+
+    const started = Effect.all([Ref.getAndSet(failures, 0), retargeted]).pipe(
+      Effect.map(([missed, moved]) => missed > 0 || moved),
+    );
 
     const onChange = folderChanges(library.path, started).pipe(
       Stream.debounce(DEBOUNCE),

@@ -4,6 +4,7 @@
  * registry in `@music/commands`.
  */
 import { argsDecoder, resultDecoder } from "@music/commands/codec";
+import { can, forbiddenMessage } from "@music/commands/permissions";
 import { commands, isCommandName } from "@music/commands/registry";
 import type {
   CommandArgs,
@@ -20,6 +21,7 @@ import { mutation, query } from "./_generated/server";
 import { adminMutations, adminQueries } from "./handlers/admin";
 import { collectionMutations, collectionQueries } from "./handlers/collection";
 import { libraryQueries } from "./handlers/library";
+import { peopleMutations, peopleQueries } from "./handlers/people";
 import { playbackMutations, playbackQueries } from "./handlers/playback";
 import type { MutationHandlers, QueryHandlers } from "./handlers/types";
 import { fail } from "./lib/errors";
@@ -31,12 +33,14 @@ const queryHandlers: QueryHandlers = {
   ...playbackQueries,
   ...collectionQueries,
   ...adminQueries,
+  ...peopleQueries,
 };
 
 const mutationHandlers: MutationHandlers = {
   ...playbackMutations,
   ...collectionMutations,
   ...adminMutations,
+  ...peopleMutations,
 };
 
 const isQueryName = (name: CommandName): name is QueryName => commands[name].kind === "query";
@@ -46,10 +50,9 @@ const isMutationName = (name: CommandName): name is MutationName =>
 
 const authorize = async (ctx: QueryCtx, name: CommandName): Promise<Viewer> => {
   const viewer = await loadViewer(ctx);
+  const { access } = commands[name];
 
-  if (commands[name].access === "admin" && viewer.role !== "admin") {
-    return fail("forbidden", "Only an admin can do that");
-  }
+  if (!can(viewer.role, access)) return fail("forbidden", forbiddenMessage(access));
 
   return viewer;
 };

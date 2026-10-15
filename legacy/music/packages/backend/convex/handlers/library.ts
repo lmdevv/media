@@ -33,16 +33,8 @@ const readable = <Row extends { readonly libraryId: Id<"libraries"> }>(
  * range per library they read, merged by `mergedPage`. A member who reads a small shared library
  * then never pages through another user's large private one.
  */
-const listScopes = async (
-  ctx: QueryCtx,
-  viewer: Viewer,
-): Promise<ReadonlyArray<Id<"libraries"> | null>> => {
-  const libraries = await ctx.db.query("libraries").collect();
-
-  return libraries.every((library) => canRead(viewer, library._id))
-    ? [null]
-    : [...viewer.libraryIds];
-};
+const listScopes = (viewer: Viewer): ReadonlyArray<Id<"libraries"> | null> =>
+  viewer.readsEveryLibrary ? [null] : [...viewer.libraryIds];
 
 /** Albums with songs, newest first, from one library or all of them. */
 const albumSource =
@@ -162,7 +154,7 @@ const readableAlbums = (viewer: Viewer, albums: ReadonlyArray<Doc<"albums"> | nu
 export const libraryQueries = {
   "library.home": async (ctx, viewer) => {
     const present = makePresenter(ctx, viewer);
-    const scopes = await listScopes(ctx, viewer);
+    const scopes = listScopes(viewer);
 
     // Newest albums over the readable libraries' indexes, as `albums.list` reads them.
     const recent = await mergedPage(
@@ -222,7 +214,7 @@ export const libraryQueries = {
   "albums.list": async (ctx, viewer, args) => {
     if (viewer.libraryIds.size === 0) return emptyPage;
     const present = makePresenter(ctx, viewer);
-    const scopes = await listScopes(ctx, viewer);
+    const scopes = listScopes(viewer);
 
     const page = await mergedPage(
       scopes.map((libraryId) => albumSource(ctx, libraryId)),
@@ -262,7 +254,7 @@ export const libraryQueries = {
   "artists.list": async (ctx, viewer, args) => {
     if (viewer.libraryIds.size === 0) return emptyPage;
     const present = makePresenter(ctx, viewer);
-    const scopes = await listScopes(ctx, viewer);
+    const scopes = listScopes(viewer);
 
     const page = await mergedPage(
       scopes.map((libraryId) => artistSource(ctx, libraryId)),
@@ -309,7 +301,7 @@ export const libraryQueries = {
   "tracks.list": async (ctx, viewer, args) => {
     if (viewer.libraryIds.size === 0) return emptyPage;
     const present = makePresenter(ctx, viewer);
-    const scopes = await listScopes(ctx, viewer);
+    const scopes = listScopes(viewer);
 
     const page = await mergedPage(
       scopes.map((libraryId) => trackSource(ctx, libraryId)),
