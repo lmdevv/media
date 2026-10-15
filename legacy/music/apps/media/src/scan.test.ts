@@ -1,14 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 
+import { compareText } from "@music/commands/text-order";
+import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Effect, HashSet, Layer, Ref } from "effect";
 
 import { artPath, imageContentType } from "./art-store.ts";
 import { runTool } from "./ffmpeg.ts";
 import * as Files from "./files.ts";
 import type { JobProgress } from "./media-backend.ts";
-import { LibraryEmpty, LibraryUnavailable, scanLibrary } from "./scan.ts";
+import { LibraryEmpty, LibraryUnavailable, pathRanges, scanLibrary } from "./scan.ts";
 import {
   fixtureLibrary,
   MEDIA_TEST_TIMEOUT,
@@ -26,8 +28,9 @@ const setup = Effect.gen(function* () {
   const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
   const libraryId = yield* control.addLibrary(library.root);
   const progress = yield* Ref.make<JobProgress>({ done: 0 });
+  const releasedArt = yield* Ref.make(HashSet.empty<string>());
 
-  const scan = scanLibrary({ id: libraryId, path: library.root }, progress).pipe(
+  const scan = scanLibrary({ id: libraryId, path: library.root }, progress, releasedArt).pipe(
     Effect.provideContext(context),
   );
 
@@ -46,7 +49,13 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const { root, albums, dataDir, control, progress, scan, trackAt } = yield* setup;
         const summary = yield* scan;
 
-        expect(summary).toEqual({ files: 10, updated: 10, moved: 0, missing: 0, failed: 0 });
+        expect(summary).toEqual({
+          files: 10,
+          updated: 10,
+          moved: 0,
+          missing: 0,
+          failed: 0,
+        });
         expect(yield* Ref.get(progress)).toMatchObject({ done: 10, total: 10 });
         const tracks = yield* control.tracks;
 
@@ -131,15 +140,33 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const path = "Aurora Tones/Night Drive/02 Overpass.mp3";
 
         yield* scan;
-        expect(yield* scan).toEqual({ files: 10, updated: 0, moved: 0, missing: 0, failed: 0 });
+        expect(yield* scan).toEqual({
+          files: 10,
+          updated: 0,
+          moved: 0,
+          missing: 0,
+          failed: 0,
+        });
 
         const bytes = yield* Files.readWholeFile(join(root, path));
         yield* Files.removePath(join(root, path));
-        expect(yield* scan).toEqual({ files: 9, updated: 0, moved: 0, missing: 1, failed: 0 });
+        expect(yield* scan).toEqual({
+          files: 9,
+          updated: 0,
+          moved: 0,
+          missing: 1,
+          failed: 0,
+        });
         expect((yield* trackAt(path))?.missing).toBe(true);
 
         yield* Files.writeFileAtomic(join(root, path), bytes, "restore");
-        expect(yield* scan).toEqual({ files: 10, updated: 1, moved: 0, missing: 0, failed: 0 });
+        expect(yield* scan).toEqual({
+          files: 10,
+          updated: 1,
+          moved: 0,
+          missing: 0,
+          failed: 0,
+        });
         expect((yield* trackAt(path))?.missing).toBe(false);
       }),
     ));
@@ -164,12 +191,24 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* Files.renameFile(join(root, album), join(root, "Moved/Night Drive"));
 
         // Dawn, and the three songs of Night Drive.
-        expect(yield* scan).toEqual({ files: 10, updated: 0, moved: 4, missing: 0, failed: 0 });
+        expect(yield* scan).toEqual({
+          files: 10,
+          updated: 0,
+          moved: 4,
+          missing: 0,
+          failed: 0,
+        });
         expect((yield* trackAt("Aurora Tones/First Light/Dawn.flac"))?.id).toBe(dawn?.id);
         expect((yield* trackAt("Moved/Night Drive/01 Neon.mp3"))?.id).toBe(neon?.id);
         expect((yield* trackAt("Moved/Night Drive/02 Overpass.mp3"))?.id).toBe(overpass?.id);
         expect(yield* trackAt(renamed)).toBeUndefined();
-        expect(yield* scan).toEqual({ files: 10, updated: 0, moved: 0, missing: 0, failed: 0 });
+        expect(yield* scan).toEqual({
+          files: 10,
+          updated: 0,
+          moved: 0,
+          missing: 0,
+          failed: 0,
+        });
       }),
     ));
 
@@ -257,7 +296,13 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           new TextEncoder().encode("not audio"),
           "x",
         );
-        expect(yield* scan).toEqual({ files: 12, updated: 11, moved: 0, missing: 0, failed: 1 });
+        expect(yield* scan).toEqual({
+          files: 12,
+          updated: 11,
+          moved: 0,
+          missing: 0,
+          failed: 1,
+        });
 
         expect((yield* trackAt("Loose/untitled take.mp3"))?.scanned).toMatchObject({
           title: "untitled take",
@@ -290,7 +335,13 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* Files.copyTree(join(folderArt, "01 Brushes.m4a"), join(root, "Bare", "song.m4a"));
         yield* Files.makeSymlink(join(outside, "cover.jpg"), join(root, "Bare", "cover.jpg"));
 
-        expect(yield* scan).toEqual({ files: 12, updated: 12, moved: 0, missing: 0, failed: 0 });
+        expect(yield* scan).toEqual({
+          files: 12,
+          updated: 12,
+          moved: 0,
+          missing: 0,
+          failed: 0,
+        });
 
         const paths = (yield* control.tracks).map((track) => track.scanned.path);
 
@@ -442,9 +493,11 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const progress = yield* Ref.make<JobProgress>({ done: 0 });
 
         expect(
-          yield* scanLibrary({ id: libraryId, path: empty }, progress).pipe(
-            Effect.provideContext(context),
-          ),
+          yield* scanLibrary(
+            { id: libraryId, path: empty },
+            progress,
+            yield* Ref.make(HashSet.empty<string>()),
+          ).pipe(Effect.provideContext(context)),
         ).toMatchObject({ files: 0, missing: 0 });
       }),
     ));
@@ -459,13 +512,50 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const libraryId = yield* control.addLibrary(missing);
         const progress = yield* Ref.make<JobProgress>({ done: 0 });
 
-        const error = yield* scanLibrary({ id: libraryId, path: missing }, progress).pipe(
-          Effect.provideContext(context),
-          Effect.flip,
-        );
+        const error = yield* scanLibrary(
+          { id: libraryId, path: missing },
+          progress,
+          yield* Ref.make(HashSet.empty<string>()),
+        ).pipe(Effect.provideContext(context), Effect.flip);
 
         expect(error).toBeInstanceOf(LibraryUnavailable);
         expect(error.message).toContain(missing);
       }),
     ));
+});
+
+const inRange = (path: string, range: ReturnType<typeof pathRanges>[number]): boolean =>
+  (range.from === undefined || compareText(path, range.from) >= 0) &&
+  (range.to === undefined || compareText(path, range.to) < 0);
+
+describe("pathRanges", () => {
+  it("puts every path, found on disk or not, in exactly one range of about the size asked", () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.string({ unit: "grapheme" }), { maxLength: 60 }),
+        fc.array(fc.string({ unit: "grapheme" }), { maxLength: 20 }),
+        fc.integer({ min: 1, max: 8 }),
+        (found, other, size) => {
+          const ranges = pathRanges(found, size);
+
+          for (const path of [...found, ...other]) {
+            expect(ranges.filter((range) => inRange(path, range))).toHaveLength(1);
+          }
+
+          for (const range of ranges) {
+            expect(found.filter((path) => inRange(path, range)).length).toBeLessThanOrEqual(size);
+          }
+        },
+      ),
+    );
+  });
+
+  it("orders by code point, as Convex keeps paths", () => {
+    // UTF-16 order would put the emoji first and leave "！" in no range.
+    expect(pathRanges(["！", "😀"], 1)).toEqual([
+      { from: undefined, to: "😀" },
+      { from: "😀", to: undefined },
+    ]);
+    expect(pathRanges([], 1000)).toEqual([{ from: undefined, to: undefined }]);
+  });
 });

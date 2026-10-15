@@ -62,6 +62,47 @@ export const sweepArt = Effect.fn("ArtStore.sweep")(function* (
   return unused.length;
 });
 
+/** What `deleteArt` did with each hash it was given. */
+interface DeletedArt {
+  readonly removed: number;
+  /** Hashes whose file was written at or after `before`, left for a later try. */
+  readonly tooNew: ReadonlyArray<string>;
+}
+
+/**
+ * Deletes the stored artwork of `hashes` that was last written before `before`, like `sweepArt`
+ * but without listing the art store. Hashes with no stored file are skipped.
+ */
+export const deleteArt = Effect.fn("ArtStore.delete")(function* (
+  dataDir: string,
+  hashes: Iterable<string>,
+  before: number,
+) {
+  const outcomes = yield* Effect.forEach(
+    [...hashes].filter(isArtHash),
+    (hash) =>
+      Effect.gen(function* () {
+        const path = artPath(dataDir, hash);
+        const info = yield* Files.statPath(path).pipe(Effect.option);
+
+        if (Option.isNone(info)) return "gone" as const;
+
+        if (info.value.mtimeMs >= before) return hash;
+        yield* Files.removePath(path);
+
+        return "removed" as const;
+      }),
+    { concurrency: 8 },
+  );
+
+  const deleted: DeletedArt = {
+    removed: outcomes.filter((outcome) => outcome === "removed").length,
+    tooNew: outcomes.filter((outcome) => isArtHash(outcome)),
+  };
+
+  return deleted;
+});
+
 /** The image `Content-Type` from the first bytes of a file. */
 export const imageContentType = (head: Uint8Array): string => {
   if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47)

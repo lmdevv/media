@@ -16,6 +16,7 @@ import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { firstOverlap, normaliseLibraryPath } from "../lib/paths";
 import { ownerLabel, presentJob, presentLibrary } from "../lib/present";
+import { EMPTY_COUNTS, findStats, libraryCounts } from "../lib/stats";
 import { endSession } from "../lib/sessions";
 import { canManage, canRead, loadPerson, roleOf } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
@@ -188,15 +189,20 @@ export const adminQueries = {
 
     return Promise.all(
       listed.map(async (library) => {
-        const owner = await ctx.db.get(library.ownerId);
+        const [owner, counts, job] = await Promise.all([
+          ctx.db.get(library.ownerId),
+          libraryCounts(ctx, library),
+          activeJob(ctx, library._id),
+        ]);
 
         return presentLibrary(
           library,
+          counts,
           ownerLabel(owner, viewer.role),
           canRead(viewer, library._id),
           canManage(viewer, library),
           libraryAccessControl(viewer, accessOf(library, owner)),
-          (await activeJob(ctx, library._id)) !== null,
+          job !== null,
         );
       }),
     );
@@ -290,11 +296,9 @@ export const adminMutations = {
       path,
       visibility: args.visibility ?? "shared",
       ownerId: viewer.id,
-      trackCount: 0,
-      albumCount: 0,
-      artistCount: 0,
-      durationMs: 0,
     });
+
+    await ctx.db.insert("libraryStats", { libraryId, ...EMPTY_COUNTS });
 
     const jobId = await enqueueScan(ctx, libraryId, viewer.id);
 
@@ -375,6 +379,9 @@ export const adminMutations = {
     }
 
     await ctx.db.delete(library._id);
+    const stats = await findStats(ctx, library._id);
+
+    if (stats !== null) await ctx.db.delete(stats._id);
 
     // A library has at most one pending and one running job (`enqueueScan`).
     const open = await Promise.all(

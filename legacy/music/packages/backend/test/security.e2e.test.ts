@@ -800,7 +800,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
         libraryId,
         moves: [{ from: song.path, track: { ...song, path: "After/song.flac" } }],
       }),
-    ).toEqual({ moved: 1 });
+    ).toEqual({ moved: 1, released: [] });
 
     expect((await findTrack(adminA, song.title)).id).toBe(before.id);
     expect((await adminA.music.read("likes.list", {})).map((track) => track.id)).toContain(

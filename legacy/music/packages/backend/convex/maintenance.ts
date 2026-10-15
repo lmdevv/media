@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
+import { deleteEmptyAlbum } from "./lib/catalog";
 import { DEVICE_RETAINED_MS } from "./lib/devices";
 import { endJam, expiryReason } from "./lib/jams";
 import { findSession } from "./lib/playback";
@@ -272,8 +273,11 @@ export const releaseExpiredLeases = internalMutation({
     await Promise.all(
       expired.map((job) => {
         // `done` counts files this lease saved: claiming resets it, and the scanner adds a batch
-        // only once it is written. Files already saved are skipped on the next try.
-        const stalls = job.done > 0 ? 0 : (job.stalls ?? 0) + 1;
+        // only once it is written. Files already saved are skipped on the next try. A `total` of
+        // 0 (claiming clears it too) means this lease compared every file, found none to read,
+        // and marked the missing ones: an unchanged library made all the progress it could.
+        const progressed = job.done > 0 || job.total === 0;
+        const stalls = progressed ? 0 : (job.stalls ?? 0) + 1;
 
         return stalls >= MAX_SCAN_STALLS
           ? ctx.db.patch(job._id, {
@@ -523,41 +527,13 @@ export const pruneOldRecords = internalMutation({
 });
 
 /**
- * Deletes an album that lost its last playable song (`adjustAlbum` schedules this) once no song
- * points at it any more, as after a retag moved its songs to another album, and then its artist
- * if nothing points at that either. An album whose songs are only missing keeps its row, so the
- * songs find it again when their files come back.
+ * Deletes an album without playable songs once no song points at it, and then its artist if
+ * nothing points at that either (see `deleteEmptyAlbum`). Scan batches do this themselves now;
+ * this runs the ones older versions scheduled.
  */
 export const pruneEmptyAlbum = internalMutation({
   args: { albumId: v.id("albums") },
   handler: async (ctx, { albumId }) => {
-    const album = await ctx.db.get(albumId);
-
-    if (album === null || album.trackCount > 0) return;
-
-    const song = await ctx.db
-      .query("tracks")
-      .withIndex("by_album", (q) => q.eq("albumId", album._id))
-      .first();
-
-    if (song !== null) return;
-    await ctx.db.delete(album._id);
-
-    const artist = await ctx.db.get(album.artistId);
-
-    if (artist === null || artist.albumCount > 0) return;
-
-    const [otherAlbum, otherSong] = await Promise.all([
-      ctx.db
-        .query("albums")
-        .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
-        .first(),
-      ctx.db
-        .query("tracks")
-        .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
-        .first(),
-    ]);
-
-    if (otherAlbum === null && otherSong === null) await ctx.db.delete(artist._id);
+    await deleteEmptyAlbum(ctx, albumId);
   },
 });

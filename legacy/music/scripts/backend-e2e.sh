@@ -15,6 +15,8 @@
 #
 # Env: BASE_PORT (default 3810): the suites' backends use BASE_PORT, +10, +20, and +30, each also
 # taking the next port for HTTP actions and port + 890 for a media service.
+# E2E_NAME (default e2e-<checkout folder name>) names the backends' containers and volumes
+# (music-convex-$E2E_NAME-<suite>), so runs from different worktrees don't stop each other's.
 # E2E_PORT (default 3002) for the Playwright suite's web server, CHROMIUM_PATH for its browser,
 # KEEP=1 to leave the backends running (and the .env.local files pointing at the last one).
 set -euo pipefail
@@ -23,6 +25,12 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 base="${BASE_PORT:-3810}"
 e2e_port="${E2E_PORT:-3002}"
 suites=("$@")
+# Docker names allow letters, digits, `_`, `.`, and `-`. A name that needed changing gets a
+# suffix from the name as given, so two names that clean up the same still differ.
+prefix="${E2E_NAME:-e2e-$(basename "$root")}"
+if [[ "$prefix" =~ [^a-zA-Z0-9_.-] ]]; then
+  prefix="${prefix//[^a-zA-Z0-9_.-]/-}-$(printf '%s' "$prefix" | cksum | cut -d' ' -f1)"
+fi
 [[ ${#suites[@]} -gt 0 ]] || suites=(security cli media web)
 started=()
 results="$(mktemp -d)"
@@ -55,9 +63,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Starts an empty backend called e2e-$1 on port $2 and points the .env.local files at it.
+# Starts an empty backend called $prefix-$1 on port $2 and points the .env.local files at it.
 fresh_backend() {
-  local name="e2e-$1"
+  local name="$prefix-$1"
   "$root/scripts/dev-backend.sh" stop "$name" >/dev/null 2>&1 || true
   docker volume rm "music-convex-${name}-data" >/dev/null 2>&1 || true
   started+=("$name")

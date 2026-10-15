@@ -105,7 +105,29 @@ const RootClaim = Schema.Union([
 /** Whether Convex accepted a library's real folder, and why not. */
 export type RootClaim = Schema.Schema.Type<typeof RootClaim>;
 
-const MoveResult = Schema.Struct({ moved: Schema.Finite });
+/**
+ * The artwork a batch stopped using somewhere. Convex versions before it was reported send none,
+ * so their art is left to the full collection at startup.
+ */
+const Released = Schema.optional(Schema.Array(Schema.String));
+
+const BatchResult = Schema.Struct({ released: Released });
+
+const MoveResult = Schema.Struct({ moved: Schema.Finite, released: Released });
+
+const ArtInUse = Schema.Struct({ inUse: Schema.Array(Schema.String) });
+
+/** What a batch of moves did: how many tracks moved, and the artwork it stopped using. */
+export interface MoveOutcome {
+  readonly moved: number;
+  readonly released: ReadonlyArray<string>;
+}
+
+/** Paths from `from` (inclusive) up to `to` (exclusive), in code point order; open when absent. */
+export interface PathRange {
+  readonly from?: string | undefined;
+  readonly to?: string | undefined;
+}
 
 /** Tags read from one file, in the shape `media:upsertTracks` accepts. */
 export interface ScannedTrack {
@@ -203,7 +225,12 @@ const functions = {
   >("media:finishJob"),
   fingerprints: makeFunctionReference<
     "query",
-    Secret & { libraryId: string; cursor: string | null },
+    Secret & {
+      libraryId: string;
+      cursor: string | null;
+      from?: string | undefined;
+      to?: string | undefined;
+    },
     unknown
   >("media:fingerprints"),
   upsertTracks: makeFunctionReference<
@@ -229,6 +256,9 @@ const functions = {
     Secret & { table: ArtworkTable; cursor: string | null },
     unknown
   >("media:artHashes"),
+  artInUse: makeFunctionReference<"query", Secret & { hashes: ReadonlyArray<string> }, unknown>(
+    "media:artInUse",
+  ),
   requestScan: makeFunctionReference<"mutation", Secret & { libraryId: string }, unknown>(
     "media:requestScan",
   ),
@@ -276,33 +306,40 @@ export interface Interface {
     workerId: string,
     outcome: JobOutcome,
   ) => Effect.Effect<void, BackendError>;
+  /** One page of the library's known files in `range`; start from a `null` cursor until `done`. */
   readonly fingerprints: (
     libraryId: LibraryId,
     cursor: string | null,
+    range?: PathRange,
   ) => Effect.Effect<FingerprintPage, BackendError>;
-  /** Upserts at most 100 scanned files. */
+  /** Upserts at most 100 scanned files. Returns the artwork the batch stopped using somewhere. */
   readonly upsertTracks: (
     libraryId: LibraryId,
     tracks: ReadonlyArray<ScannedTrack>,
-  ) => Effect.Effect<void, BackendError>;
+  ) => Effect.Effect<ReadonlyArray<string>, BackendError>;
   /**
    * Moves at most 100 known tracks to the paths their files were found at, keeping their IDs. A
    * move whose source is gone or whose new path is taken is stored as a new file instead.
-   * Returns how many tracks moved.
+   * Returns how many tracks moved and the artwork the batch stopped using somewhere.
    */
   readonly moveTracks: (
     libraryId: LibraryId,
     moves: ReadonlyArray<TrackMove>,
-  ) => Effect.Effect<number, BackendError>;
+  ) => Effect.Effect<MoveOutcome, BackendError>;
+  /** Marks files missing. Returns the artwork the batch stopped using somewhere. */
   readonly markMissing: (
     libraryId: LibraryId,
     paths: ReadonlyArray<string>,
-  ) => Effect.Effect<void, BackendError>;
+  ) => Effect.Effect<ReadonlyArray<string>, BackendError>;
   /** The artwork hashes one page of `table` uses; start from a `null` cursor until `done`. */
   readonly artHashes: (
     table: ArtworkTable,
     cursor: string | null,
   ) => Effect.Effect<ArtHashPage, BackendError>;
+  /** Which of at most 200 artwork hashes a track, album, or artist still uses. */
+  readonly artInUse: (
+    hashes: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlySet<string>, BackendError>;
   /** Resolves a track to its file; `None` when the track is unknown or missing. */
   readonly trackSource: (
     trackId: TrackId,
@@ -330,6 +367,10 @@ const decodeReport = Schema.decodeUnknownEffect(ReportResult);
 const decodeRootClaim = Schema.decodeUnknownEffect(RootClaim);
 
 const decodeMove = Schema.decodeUnknownEffect(MoveResult);
+
+const decodeBatch = Schema.decodeUnknownEffect(BatchResult);
+
+const decodeArtInUse = Schema.decodeUnknownEffect(ArtInUse);
 
 const decodeFingerprints = Schema.decodeUnknownEffect(FingerprintPage);
 
@@ -461,9 +502,16 @@ const make = Effect.gen(function* () {
     fingerprints: Effect.fn("MediaBackend.fingerprints")(function* (
       libraryId: LibraryId,
       cursor: string | null,
+      range: PathRange = {},
     ) {
       const result = yield* call("fingerprints", () =>
-        client.query(functions.fingerprints, { secret: secret(), libraryId, cursor }),
+        client.query(functions.fingerprints, {
+          secret: secret(),
+          libraryId,
+          cursor,
+          from: range.from,
+          to: range.to,
+        }),
       );
 
       return yield* decodeFingerprints(result).pipe(Effect.mapError(decodeFailure("fingerprints")));
@@ -473,9 +521,15 @@ const make = Effect.gen(function* () {
       libraryId: LibraryId,
       tracks: ReadonlyArray<ScannedTrack>,
     ) {
-      yield* call("upsertTracks", () =>
+      const result = yield* call("upsertTracks", () =>
         client.mutation(functions.upsertTracks, { secret: secret(), libraryId, tracks }),
       );
+
+      const { released } = yield* decodeBatch(result).pipe(
+        Effect.mapError(decodeFailure("upsertTracks")),
+      );
+
+      return released ?? [];
     }),
 
     moveTracks: Effect.fn("MediaBackend.moveTracks")(function* (
@@ -486,20 +540,28 @@ const make = Effect.gen(function* () {
         client.mutation(functions.moveTracks, { secret: secret(), libraryId, moves }),
       );
 
-      const { moved } = yield* decodeMove(result).pipe(
+      const { moved, released } = yield* decodeMove(result).pipe(
         Effect.mapError(decodeFailure("moveTracks")),
       );
 
-      return moved;
+      const outcome: MoveOutcome = { moved, released: released ?? [] };
+
+      return outcome;
     }),
 
     markMissing: Effect.fn("MediaBackend.markMissing")(function* (
       libraryId: LibraryId,
       paths: ReadonlyArray<string>,
     ) {
-      yield* call("markMissing", () =>
+      const result = yield* call("markMissing", () =>
         client.mutation(functions.markMissing, { secret: secret(), libraryId, paths }),
       );
+
+      const { released } = yield* decodeBatch(result).pipe(
+        Effect.mapError(decodeFailure("markMissing")),
+      );
+
+      return released ?? [];
     }),
 
     artHashes: Effect.fn("MediaBackend.artHashes")(function* (
@@ -511,6 +573,18 @@ const make = Effect.gen(function* () {
       );
 
       return yield* decodeArtHashes(result).pipe(Effect.mapError(decodeFailure("artHashes")));
+    }),
+
+    artInUse: Effect.fn("MediaBackend.artInUse")(function* (hashes: ReadonlyArray<string>) {
+      const result = yield* call("artInUse", () =>
+        client.query(functions.artInUse, { secret: secret(), hashes }),
+      );
+
+      const { inUse } = yield* decodeArtInUse(result).pipe(
+        Effect.mapError(decodeFailure("artInUse")),
+      );
+
+      return new Set(inUse);
     }),
 
     trackSource: Effect.fn("MediaBackend.trackSource")(function* (trackId: TrackId) {

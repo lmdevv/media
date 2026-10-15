@@ -9,7 +9,8 @@
 import { basename, dirname, join } from "node:path";
 
 import type { LibraryId } from "@music/commands/ids";
-import { Cache, Effect, Option, Ref, Schema } from "effect";
+import { compareText } from "@music/commands/text-order";
+import { Cache, Effect, HashSet, Option, Ref, Schema, Stream } from "effect";
 
 import { saveArt } from "./art-store.ts";
 import { extensionOf, isAudioFile } from "./audio-format.ts";
@@ -20,6 +21,7 @@ import {
   type FingerprintPage,
   type JobProgress,
   MediaBackend,
+  type PathRange,
   type ScannedTrack,
   type TrackMove,
 } from "./media-backend.ts";
@@ -33,6 +35,15 @@ const UPSERT_BATCH = 100;
 const MISSING_BATCH = 200;
 
 const TAG_CONCURRENCY = 8;
+
+/**
+ * Files found on disk per fingerprint range, below Convex's page of 1000 so a range with a few
+ * known files gone from disk still fits one page.
+ */
+const FINGERPRINT_RANGE = 800;
+
+/** Fingerprint ranges read at once. */
+const FINGERPRINT_CONCURRENCY = 4;
 
 /** The message of an unreadable folder somewhere in an error's cause chain, if any. */
 const unreadableReason = (cause: Error | undefined, depth = 0): string | null => {
@@ -123,25 +134,60 @@ const isUnchanged = (
   known.mtimeMs === file.mtimeMs &&
   known.folderArt === folderArt;
 
-const knownFingerprints = Effect.fn("Scan.knownFingerprints")(function* (libraryId: LibraryId) {
+/**
+ * Splits a library's paths into ranges holding about `size` of `paths` each, in the code point
+ * order Convex keeps them in. The first range is open below and the last open above, so every
+ * path Convex knows, found on disk or not, falls in exactly one range.
+ */
+export const pathRanges = (
+  paths: ReadonlyArray<string>,
+  size: number,
+): ReadonlyArray<PathRange> => {
+  const sorted = paths.toSorted(compareText);
+  const bounds = sorted.filter((_, index) => index > 0 && index % size === 0);
+
+  return [undefined, ...bounds].map((from, index) => ({ from, to: bounds[index] }));
+};
+
+/**
+ * Every file Convex knows in the library. A query's cost on the self-hosted backend grows with
+ * the size of the index range it reads, however few rows it takes, so paging through the whole
+ * library one cursor after another reads most of it again for every page. Ranges of about a
+ * page each, cut at the paths found on disk, read side by side, cost one page each instead.
+ */
+const knownFingerprints = Effect.fn("Scan.knownFingerprints")(function* (
+  libraryId: LibraryId,
+  paths: ReadonlyArray<string>,
+) {
   const backend = yield* MediaBackend;
-  const known = new Map<string, Fingerprint>();
-  let cursor: string | null = null;
-  let done = false;
 
-  while (!done) {
-    const page: FingerprintPage = yield* backend.fingerprints(libraryId, cursor);
+  const readRange = Effect.fnUntraced(function* (range: PathRange) {
+    const files: Array<Fingerprint> = [];
+    let cursor: string | null = null;
+    let done = false;
 
-    for (const file of page.files) known.set(file.path, file);
-    cursor = page.cursor;
-    ({ done } = page);
-  }
+    while (!done) {
+      const page: FingerprintPage = yield* backend.fingerprints(libraryId, cursor, range);
 
-  return known;
+      files.push(...page.files);
+      cursor = page.cursor;
+      ({ done } = page);
+    }
+
+    return files;
+  });
+
+  const ranges = yield* Effect.forEach(pathRanges(paths, FINGERPRINT_RANGE), readRange, {
+    concurrency: FINGERPRINT_CONCURRENCY,
+  });
+
+  return new Map(ranges.flat().map((file) => [file.path, file]));
 });
 
 /**
- * Scans `library`, writing progress into `progress` as it goes. Unreadable files are skipped and
+ * Scans `library`, writing progress into `progress` as it goes, and adding the artwork each
+ * saved batch stopped using somewhere to `releasedArt` (for `collectReleasedArt`) as soon as the
+ * batch is written, so it counts even when the scan fails or is cancelled later. Unreadable files are skipped and
  * counted; they are retried on the next scan because Convex never learns their fingerprint.
  *
  * @returns The scan's counts, or `LibraryUnavailable` when the folder cannot be read, or
@@ -150,6 +196,7 @@ const knownFingerprints = Effect.fn("Scan.knownFingerprints")(function* (library
 export const scanLibrary = Effect.fn("Scan.library")(function* (
   library: ScanTarget,
   progress: Ref.Ref<JobProgress>,
+  releasedArt: Ref.Ref<HashSet.HashSet<string>>,
 ) {
   const backend = yield* MediaBackend;
   const { dataDir } = yield* MediaConfig;
@@ -170,7 +217,11 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
   const folderArtOf = (file: WalkedFile) => artFor(dirname(file.relativePath));
 
   yield* Ref.set(progress, { done: 0, message: `Found ${files.length} files, comparing` });
-  const known = yield* knownFingerprints(library.id);
+
+  const known = yield* knownFingerprints(
+    library.id,
+    files.map((file) => file.relativePath),
+  );
 
   if (files.length === 0 && known.values().some((file) => !file.missing)) {
     return yield* new LibraryEmpty({ libraryId: library.id, path: library.path });
@@ -179,6 +230,14 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
   const changed = files.filter(
     (file) => !isUnchanged(known.get(file.relativePath), file, folderArtKey(folderArtOf(file))),
   );
+
+  // A total of 0 tells Convex this lease made all the progress an unchanged library can make, so
+  // it is reported only at the end, once missing files are marked too (`releaseExpiredLeases`).
+  yield* Ref.set(progress, {
+    done: 0,
+    total: changed.length > 0 ? changed.length : undefined,
+    message: `Found ${files.length} files, ${changed.length} changed`,
+  });
 
   // Artwork hashes by library-relative artwork file, so each cover is read once per scan.
   const folderArt = yield* Cache.make({
@@ -258,11 +317,22 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
   const claimed = new Set<string>();
   let moved = 0;
 
+  // A batch's write and the art it released are recorded together: a cancel between the two
+  // would lose that art until the next full collection.
+  const saved = <E>(write: Effect.Effect<ReadonlyArray<string>, E>) =>
+    write.pipe(
+      Effect.tap((hashes) =>
+        Ref.update(releasedArt, (current) =>
+          hashes.reduce((set, hash) => HashSet.add(set, hash), current),
+        ),
+      ),
+      Effect.uninterruptible,
+    );
+
   let done = 0;
   let failed = 0;
 
-  for (const batch of chunks(changed, UPSERT_BATCH)) {
-    const read = yield* Effect.forEach(batch, readOne, { concurrency: TAG_CONCURRENCY });
+  const save = Effect.fnUntraced(function* (read: ReadonlyArray<Option.Option<ScannedTrack>>) {
     const tracks = read.flatMap((track) => (Option.isSome(track) ? [track.value] : []));
     const moves: Array<TrackMove> = [];
     const upserts: Array<ScannedTrack> = [];
@@ -276,24 +346,45 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
 
     failed += read.length - tracks.length;
 
-    if (upserts.length > 0) yield* backend.upsertTracks(library.id, upserts);
+    if (upserts.length > 0) {
+      yield* saved(backend.upsertTracks(library.id, upserts));
+    }
 
-    if (moves.length > 0) moved += yield* backend.moveTracks(library.id, moves);
+    if (moves.length > 0) {
+      yield* saved(
+        backend.moveTracks(library.id, moves).pipe(
+          Effect.map((result) => {
+            moved += result.moved;
+
+            return result.released;
+          }),
+        ),
+      );
+    }
 
     for (const { from } of moves) claimed.add(from);
-    done += batch.length;
+    done += read.length;
     yield* Ref.set(progress, {
       done,
       total: changed.length,
       message: `Read ${done} of ${changed.length} changed files`,
     });
-  }
+  });
+
+  // Tags for the next batch are read while Convex stores the last one.
+  yield* Stream.fromIterable(chunks(changed, UPSERT_BATCH)).pipe(
+    Stream.mapEffect((batch) => Effect.forEach(batch, readOne, { concurrency: TAG_CONCURRENCY })),
+    Stream.buffer({ capacity: 1 }),
+    Stream.runForEach(save),
+  );
 
   const gone = vanished
     .filter((file) => !file.missing && !claimed.has(file.path))
     .map((file) => file.path);
 
-  for (const batch of chunks(gone, MISSING_BATCH)) yield* backend.markMissing(library.id, batch);
+  for (const batch of chunks(gone, MISSING_BATCH)) {
+    yield* saved(backend.markMissing(library.id, batch));
+  }
 
   const summary: ScanSummary = {
     files: files.length,

@@ -16,6 +16,7 @@ import { signResource } from "@music/commands/signed-url";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import { mediaBaseUrl, requireEnv } from "./env";
+import type { LibraryCounts } from "./stats";
 import { canRead } from "./viewer";
 import type { ReadCtx, Viewer } from "./viewer";
 
@@ -26,6 +27,15 @@ type AlbumOut = (typeof AlbumCard)["Encoded"];
 type ArtistOut = (typeof ArtistCard)["Encoded"];
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Lists of at least this many songs (a queue) look up the viewer's likes in one read when they
+ * have at most `LIKES_AT_ONCE`, instead of one index lookup per song.
+ */
+const LIKES_AT_ONCE_FROM = 100;
+
+/** Most likes read in one go. Every like is an index row the read covers, needed or not. */
+const LIKES_AT_ONCE = 200;
 
 /** A device that has not sent a heartbeat for this long is offline. */
 export const DEVICE_ONLINE_MS = 75_000;
@@ -75,6 +85,16 @@ export const makePresenter = (ctx: ReadCtx, viewer: Viewer): Presenter => {
     return like !== null;
   };
 
+  /** Every song the viewer likes, or null when they like more than `LIKES_AT_ONCE`. */
+  const fewLikes = async (): Promise<ReadonlySet<Id<"tracks">> | null> => {
+    const likes = await ctx.db
+      .query("likes")
+      .withIndex("by_user", (q) => q.eq("userId", viewer.id))
+      .take(LIKES_AT_ONCE + 1);
+
+    return likes.length > LIKES_AT_ONCE ? null : new Set(likes.map((like) => like.trackId));
+  };
+
   /** The cover of the artist's newest readable album that has one, for artists without art. */
   const newestAlbumArt = async (artistId: Id<"artists">): Promise<string | undefined> => {
     const albums = await ctx.db
@@ -94,7 +114,7 @@ export const makePresenter = (ctx: ReadCtx, viewer: Viewer): Presenter => {
     return newest?.artHash;
   };
 
-  const track = async (doc: Doc<"tracks">): Promise<TrackOut> => ({
+  const present = async (doc: Doc<"tracks">, liked: boolean): Promise<TrackOut> => ({
     id: doc._id,
     title: doc.title,
     artist: doc.artistName,
@@ -110,13 +130,24 @@ export const makePresenter = (ctx: ReadCtx, viewer: Viewer): Presenter => {
     sampleRate: doc.sampleRate ?? null,
     bitDepth: doc.bitDepth ?? null,
     artUrl: await artUrl(doc.artHash),
-    liked: await isLiked(doc._id),
+    liked,
   });
+
+  const track = async (doc: Doc<"tracks">): Promise<TrackOut> =>
+    present(doc, await isLiked(doc._id));
+
+  const tracks = async (docs: ReadonlyArray<Doc<"tracks">>): Promise<Array<TrackOut>> => {
+    const liked = docs.length >= LIKES_AT_ONCE_FROM ? await fewLikes() : null;
+
+    return Promise.all(
+      docs.map((doc) => (liked === null ? track(doc) : present(doc, liked.has(doc._id)))),
+    );
+  };
 
   return {
     artUrl,
     track,
-    tracks: (docs) => Promise.all(docs.map(track)),
+    tracks,
     album: async (doc) => ({
       id: doc._id,
       title: doc.title,
@@ -174,6 +205,8 @@ export const ownerLabel = (owner: Doc<"users"> | null, viewerRole: Role): string
 /** A library folder as clients see it. */
 export const presentLibrary = (
   doc: Doc<"libraries">,
+  /** Its counters, from `libraryCounts`. */
+  counts: LibraryCounts,
   /** How to name the owner: see `ownerLabel`. */
   ownerName: string | null,
   readable: boolean,
@@ -191,7 +224,7 @@ export const presentLibrary = (
   ownerId: doc.ownerId,
   ownerName,
   readable,
-  trackCount: doc.trackCount,
+  trackCount: counts.trackCount,
   lastScanAt: doc.lastScanAt ?? null,
   scanning,
 });

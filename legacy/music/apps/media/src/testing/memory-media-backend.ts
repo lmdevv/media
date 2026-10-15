@@ -5,10 +5,11 @@
  * library's pending or running job. `MemoryMediaBackendControl` adds libraries and inspects state.
  *
  * It keeps tracks only: albums and artists, whose artwork Convex takes from their tracks, list no
- * artwork of their own.
+ * artwork of their own, so a batch releases a track's old art only.
  */
 import { chainsOverlap, type FolderChain, fsPathsOverlap } from "@music/commands/folder-ids";
 import { JobId, LibraryId, TrackId } from "@music/commands/ids";
+import { compareText } from "@music/commands/text-order";
 import { Context, Effect, Layer, Option, Stream, SubscriptionRef } from "effect";
 
 import {
@@ -17,6 +18,8 @@ import {
   type JobProgress,
   type LibraryFolder,
   MediaBackend,
+  type MoveOutcome,
+  type PathRange,
   type PendingJob,
   type ArtHashPage,
   type RootClaim,
@@ -182,12 +185,18 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
         libraryId: LibraryId,
         scanned: ReadonlyArray<ScannedTrack>,
       ) {
+        const released: Array<string> = [];
+
         for (const track of scanned) {
           const existing = yield* trackAt(libraryId, track.path);
           const id = existing?.id ?? TrackId.make(yield* allocate("track"));
+          const previous = existing?.scanned.artHash;
 
+          if (previous !== undefined && previous !== track.artHash) released.push(previous);
           yield* store({ id, libraryId, scanned: track, missing: false });
         }
+
+        return released;
       });
 
       const markMissing = Effect.fn("MemoryMediaBackend.markMissing")(function* (
@@ -204,6 +213,11 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
               : track,
           ),
         }));
+
+        // Missing tracks keep their art, so marking them releases none.
+        const released: ReadonlyArray<string> = [];
+
+        return released;
       });
 
       const backend = MediaBackend.of({
@@ -306,12 +320,20 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
         fingerprints: Effect.fn("MemoryMediaBackend.fingerprints")(function* (
           libraryId: LibraryId,
           cursor: string | null,
+          range: PathRange = {},
         ) {
           const current = yield* SubscriptionRef.get(state);
           const start = cursor === null ? 0 : Number(cursor);
+          const { from, to } = range;
 
           const files = current.tracks
-            .filter((track) => track.libraryId === libraryId)
+            .filter(
+              ({ libraryId: library, scanned: { path } }) =>
+                library === libraryId &&
+                (from === undefined || compareText(path, from) >= 0) &&
+                (to === undefined || compareText(path, to) < 0),
+            )
+            .toSorted((left, right) => compareText(left.scanned.path, right.scanned.path))
             .slice(start, start + PAGE)
             .map((track) => ({
               path: track.scanned.path,
@@ -341,6 +363,7 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           moves: ReadonlyArray<TrackMove>,
         ) {
           let moved = 0;
+          const released: Array<string> = [];
 
           for (const { from, track } of moves) {
             const source = yield* trackAt(libraryId, from);
@@ -348,14 +371,19 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
 
             if (source === undefined || occupied !== undefined || from === track.path) {
               if (from !== track.path) yield* markMissing(libraryId, [from]);
-              yield* upsertTracks(libraryId, [track]);
+              released.push(...(yield* upsertTracks(libraryId, [track])));
             } else {
+              const previous = source.scanned.artHash;
+
+              if (previous !== undefined && previous !== track.artHash) released.push(previous);
               yield* store({ id: source.id, libraryId, scanned: track, missing: false });
               moved += 1;
             }
           }
 
-          return moved;
+          const outcome: MoveOutcome = { moved, released };
+
+          return outcome;
         }),
 
         markMissing,
@@ -375,6 +403,15 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           };
 
           return page;
+        }),
+
+        artInUse: Effect.fn("MemoryMediaBackend.artInUse")(function* (
+          hashes: ReadonlyArray<string>,
+        ) {
+          const current = yield* SubscriptionRef.get(state);
+          const used = new Set(current.tracks.flatMap((track) => track.scanned.artHash ?? []));
+
+          return new Set(hashes.filter((hash) => used.has(hash)));
         }),
 
         trackSource: Effect.fn("MemoryMediaBackend.trackSource")(function* (trackId: TrackId) {

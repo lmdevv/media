@@ -42,6 +42,7 @@ import type * as lib_sequence from "../lib/sequence.js";
 import type * as lib_serverSettings from "../lib/serverSettings.js";
 import type * as lib_service from "../lib/service.js";
 import type * as lib_sessions from "../lib/sessions.js";
+import type * as lib_stats from "../lib/stats.js";
 import type * as lib_viewer from "../lib/viewer.js";
 import type * as maintenance from "../maintenance.js";
 import type * as media from "../media.js";
@@ -92,6 +93,7 @@ declare const fullApi: ApiFromModules<{
   "lib/serverSettings": typeof lib_serverSettings;
   "lib/service": typeof lib_service;
   "lib/sessions": typeof lib_sessions;
+  "lib/stats": typeof lib_stats;
   "lib/viewer": typeof lib_viewer;
   maintenance: typeof maintenance;
   media: typeof media;

@@ -162,6 +162,49 @@ describe("the scan job lifecycle", () => {
     expect(statuses).toEqual(["pending", "pending", "pending", "pending", "pending"]);
   });
 
+  it("keeps retrying a scan of an unchanged library that restarts after comparing", async () => {
+    const backend = makeBackend();
+    const admin = await signUp(backend, "admin");
+    const created = await admin.music.run("libraries.create", { name: "Rock", path: "/music" });
+    const job = await jobId(backend, created.jobId);
+
+    const restart = async (attempt: number, total: number | undefined) => {
+      vi.setSystemTime(START + attempt * 10 * 60_000);
+      expect(await claim(backend, job)).not.toBeNull();
+
+      // The worker compared every file and found none changed, so it has nothing to save.
+      if (total !== undefined) {
+        await backend.mutation(api.media.reportJob, {
+          secret: MEDIA_SECRET,
+          jobId: job,
+          workerId: WORKER,
+          done: 0,
+          total,
+        });
+      }
+
+      vi.setSystemTime(START + attempt * 10 * 60_000 + 2 * 60_000);
+      await backend.mutation(internal.maintenance.releaseExpiredLeases, {});
+
+      return (await admin.music.read("jobs.get", { jobId: created.jobId })).status;
+    };
+
+    const unchanged = await [1, 2, 3, 4, 5].reduce<Promise<ReadonlyArray<string>>>(
+      async (previous, attempt) => [...(await previous), await restart(attempt, 0)],
+      Promise.resolve([]),
+    );
+
+    expect(unchanged).toEqual(["pending", "pending", "pending", "pending", "pending"]);
+
+    // A lease that compared nothing does not count the last one's total as its own progress.
+    const stalled = await [6, 7, 8].reduce<Promise<ReadonlyArray<string>>>(
+      async (previous, attempt) => [...(await previous), await restart(attempt, undefined)],
+      Promise.resolve([]),
+    );
+
+    expect(stalled).toEqual(["pending", "pending", "failed"]);
+  });
+
   it("deletes albums and artists that no song points at after a scan", async () => {
     const backend = makeBackend();
     const admin = await signUp(backend, "admin");

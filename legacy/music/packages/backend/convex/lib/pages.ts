@@ -8,6 +8,7 @@
  * page that also gets `end` (the next page's cursor) returns everything up to it, so pages already
  * on screen keep their ranges while rows are added or removed.
  */
+import { compareText } from "@music/commands/text-order";
 import { Option, Predicate, Schema } from "effect";
 
 import { fail } from "./errors";
@@ -80,25 +81,6 @@ const decodeCursor = (cursor: string | null | undefined): Bound | null => {
     onNone: invalidCursor,
     onSome: ([key, time]) => ({ key, time }),
   });
-};
-
-/**
- * Orders text by code point, as Convex orders index keys, rather than by UTF-16 unit as `<` does:
- * the two disagree when one string has a character beyond U+FFFF (an emoji) where the other has
- * one from U+E000 to U+FFFF, and the merge must agree with each index it merges.
- */
-export const compareText = (left: string, right: string): number => {
-  const leftPoints = Array.from(left, (character) => character.codePointAt(0) ?? 0);
-  const rightPoints = Array.from(right, (character) => character.codePointAt(0) ?? 0);
-  const length = Math.min(leftPoints.length, rightPoints.length);
-
-  for (let position = 0; position < length; position += 1) {
-    const difference = (leftPoints[position] ?? 0) - (rightPoints[position] ?? 0);
-
-    if (difference !== 0) return difference;
-  }
-
-  return leftPoints.length - rightPoints.length;
 };
 
 const compareKeys = (left: string | number, right: string | number): number =>

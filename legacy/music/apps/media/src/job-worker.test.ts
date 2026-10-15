@@ -108,7 +108,7 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
-  it("deletes the artwork nothing uses once a scan changed songs", () =>
+  it("deletes the artwork a scan stopped using once nothing else uses it", () =>
     runScoped(
       Effect.gen(function* () {
         const { root } = yield* fixtureLibrary;
@@ -131,8 +131,13 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           .update(yield* Files.readWholeFile(cover))
           .digest("hex");
 
+        // Art nothing uses that this scan did not stop using waits for the next full collection:
+        // a scan asks Convex only about the art it changed.
+        const orphan = createHash("sha256").update("orphan").digest("hex");
+        yield* Files.writeFileAtomic(join(art, orphan), new Uint8Array([0xff, 0xd8, 0xff]), "x");
+
         // An hour later, the album's cover is replaced.
-        for (const name of before) {
+        for (const name of [...before, orphan]) {
           yield* Effect.promise(() => setFileTime(join(art, name), Date.now() - 60 * 60 * 1000));
         }
 
@@ -154,8 +159,54 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           [
             ...before.filter((name) => name !== oldCover),
             createHash("sha256").update(replaced).digest("hex"),
+            orphan,
           ].toSorted(),
         );
+      }),
+    ));
+
+  it("keeps released artwork that is too new, and deletes it after a later scan", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root } = yield* fixtureLibrary;
+        const dataDir = yield* temporaryDirectory("data");
+        const art = join(dataDir, "art");
+        const services = Layer.merge(layerMemory, testConfig(dataDir));
+
+        const context = yield* Layer.build(
+          Layer.merge(services, JobWorker.layer.pipe(Layer.provide(services))),
+        );
+
+        const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
+        const libraryId = yield* control.addLibrary(root);
+        const cover = join(root, "The Sine Waves/Folder Art/cover.jpg");
+
+        yield* untilSettled(control, yield* control.enqueueScan(libraryId));
+
+        const oldCover = createHash("sha256")
+          .update(yield* Files.readWholeFile(cover))
+          .digest("hex");
+
+        // The cover is replaced minutes after it was saved: a scan may still be about to use it.
+        const replaced = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...randomBytes(64)]);
+        yield* Files.writeFileAtomic(cover, replaced, "x");
+        yield* untilSettled(control, yield* control.enqueueScan(libraryId));
+
+        expect(yield* Files.listNames(art)).toContain(oldCover);
+
+        // Later, a scan that changed nothing tries again and deletes it.
+        yield* Effect.promise(() => setFileTime(join(art, oldCover), Date.now() - 60 * 60 * 1000));
+        yield* untilSettled(control, yield* control.enqueueScan(libraryId));
+
+        const after = yield* Files.listNames(art).pipe(
+          Effect.repeat({
+            schedule: Schedule.spaced("20 millis"),
+            until: (names) => !names.includes(oldCover),
+            times: 100,
+          }),
+        );
+
+        expect(after).not.toContain(oldCover);
       }),
     ));
 

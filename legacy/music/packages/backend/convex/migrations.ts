@@ -23,6 +23,7 @@ import {
   rowQueue,
   saveQueue,
 } from "./lib/queue";
+import { hasLegacyCounts, splitLegacyCounts } from "./lib/stats";
 
 /** Rows per batch: a track is well under 2 KB, so a batch stays far below the read limits. */
 const BATCH = 256;
@@ -157,6 +158,19 @@ const MIGRATIONS = {
 
     return done;
   },
+  /**
+   * Library counters moved off the library row into `libraryStats`, so the counts a scan bumps
+   * with every batch stop re-running every query that reads the libraries.
+   */
+  splitLibraryStats: async (ctx, cursor) => {
+    const page = await ctx.db.query("libraries").paginate({ cursor, numItems: BATCH });
+
+    await Promise.all(
+      page.page.filter(hasLegacyCounts).map((library) => splitLegacyCounts(ctx, library)),
+    );
+
+    return page;
+  },
 } satisfies Record<string, Migration>;
 
 type MigrationName = keyof typeof MIGRATIONS;
@@ -169,6 +183,7 @@ const migrationName = v.union(
   v.literal("queueItems"),
   v.literal("promoteOwner"),
   v.literal("claimLibraryRoots"),
+  v.literal("splitLibraryStats"),
 );
 
 const NAMES: ReadonlyArray<MigrationName> = [
@@ -179,6 +194,7 @@ const NAMES: ReadonlyArray<MigrationName> = [
   "queueItems",
   "promoteOwner",
   "claimLibraryRoots",
+  "splitLibraryStats",
 ];
 
 /**

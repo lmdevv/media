@@ -3,16 +3,28 @@
  * renews its lease while the scan runs, stops when the job is cancelled, and reports the result.
  * Claims are guarded by Convex and scans are idempotent, so a job that runs twice is harmless.
  *
- * It also deletes the artwork nothing uses any more: at startup, after a scan that changed
- * songs, and a while after a library is deleted (Convex purges its songs in the background).
- * Collections and jobs take turns, so no scan of this worker is storing artwork meanwhile.
+ * It also deletes the artwork nothing uses any more: all of it at startup and a while after a
+ * library is deleted (Convex purges its songs in the background), and after a scan the artwork
+ * that scan stopped using. Collections and jobs take turns, so no scan of this worker is storing
+ * artwork meanwhile.
  */
 import { hostname } from "node:os";
 
 import type { JobId } from "@music/commands/ids";
-import { Cause, Data, Effect, Layer, Option, Ref, Schedule, Semaphore, Stream } from "effect";
+import {
+  Cause,
+  Data,
+  Effect,
+  HashSet,
+  Layer,
+  Option,
+  Ref,
+  Schedule,
+  Semaphore,
+  Stream,
+} from "effect";
 
-import { collectUnusedArt } from "./art-collector.ts";
+import { collectReleasedArt, collectUnusedArt } from "./art-collector.ts";
 import {
   type JobOutcome,
   type JobProgress,
@@ -47,11 +59,22 @@ const outcomeOf = (end: JobEnd): JobOutcome | undefined =>
     Cancelled: () => undefined,
   });
 
-const changedSongs = (summary: ScanSummary): boolean =>
-  summary.updated + summary.moved + summary.missing > 0;
+/**
+ * Deletes the artwork scans released that nothing uses any more. Hashes too new to delete yet,
+ * and all of them when Convex cannot be asked, stay in `releasedArt` for the next try.
+ */
+const collectReleased = (releasedArt: Ref.Ref<HashSet.HashSet<string>>) =>
+  Ref.get(releasedArt).pipe(
+    Effect.flatMap(collectReleasedArt),
+    Effect.flatMap((waiting) => Ref.set(releasedArt, HashSet.fromIterable(waiting))),
+    Effect.catchTags({
+      BackendError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
+      FileError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
+    }),
+  );
 
 const runJob = Effect.fn("JobWorker.runJob")(
-  function* (jobId: JobId, workerId: string) {
+  function* (jobId: JobId, workerId: string, releasedArt: Ref.Ref<HashSet.HashSet<string>>) {
     const backend = yield* MediaBackend;
     const claimed = yield* backend.claimJob(jobId, workerId);
 
@@ -66,7 +89,9 @@ const runJob = Effect.fn("JobWorker.runJob")(
       Effect.catchTag("FileError", (cause) =>
         Effect.fail(new LibraryUnavailable({ libraryId: library.id, path: library.path, cause })),
       ),
-      Effect.flatMap((realPath) => scanLibrary({ ...library, path: realPath }, progress)),
+      Effect.flatMap((realPath) =>
+        scanLibrary({ ...library, path: realPath }, progress, releasedArt),
+      ),
       Effect.map((summary) => JobEnd.Finished({ summary })),
       Effect.catchTags({
         LibraryUnavailable: (error) => Effect.succeed(JobEnd.Failed({ error: error.message })),
@@ -101,6 +126,8 @@ const runJob = Effect.fn("JobWorker.runJob")(
 
     if (outcome === undefined) {
       yield* Effect.logInfo("JobWorker.cancelled");
+      // Batches saved before the cancel may have released artwork.
+      yield* collectReleased(releasedArt);
 
       return;
     }
@@ -110,15 +137,9 @@ const runJob = Effect.fn("JobWorker.runJob")(
     yield* backend.finishJob(jobId, workerId, outcome);
     yield* Effect.logInfo("JobWorker.finished").pipe(Effect.annotateLogs({ outcome }));
 
-    // Artwork only falls out of use when songs change.
-    if (JobEnd.$is("Finished")(end) && changedSongs(end.summary)) {
-      yield* collectUnusedArt().pipe(
-        Effect.catchTags({
-          BackendError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
-          FileError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
-        }),
-      );
-    }
+    // Artwork only falls out of use where songs changed, and Convex says where. A failed scan
+    // still saved the batches before the failure.
+    yield* collectReleased(releasedArt);
   },
   (effect, jobId) => effect.pipe(Effect.annotateLogs({ jobId })),
 );
@@ -130,6 +151,8 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
     const workerId = `${hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
     // Jobs and collections take turns: a scan stores artwork before it stores the songs using it.
     const turns = yield* Semaphore.make(1);
+    // Artwork scans released and not yet deleted, kept across jobs.
+    const releasedArt = yield* Ref.make(HashSet.empty<string>());
 
     const collect = turns.withPermits(1)(
       collectUnusedArt().pipe(
@@ -162,7 +185,7 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
           jobs,
           (job) =>
             turns
-              .withPermits(1)(runJob(job.jobId, workerId))
+              .withPermits(1)(runJob(job.jobId, workerId, releasedArt))
               .pipe(
                 Effect.catchTag("BackendError", (error) =>
                   Effect.logWarning("JobWorker.job_failed", error),

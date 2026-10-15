@@ -168,13 +168,16 @@ const defaultDevice = async (
   viewer: Viewer,
   session: Doc<"playbackSessions">,
 ): Promise<string | undefined> => {
-  const devices = await ctx.db
-    .query("devices")
-    .withIndex("by_user_device", (q) => q.eq("userId", viewer.id))
-    .collect();
-
   const now = Date.now();
-  const online = devices.filter((device) => now - device.lastSeenAt < DEVICE_ONLINE_MS);
+
+  // Only online devices can take playback, so only their range is read: every browser that ever
+  // opened the app keeps a device row for a month.
+  const online = await ctx.db
+    .query("devices")
+    .withIndex("by_user_last_seen", (q) =>
+      q.eq("userId", viewer.id).gt("lastSeenAt", now - DEVICE_ONLINE_MS),
+    )
+    .collect();
 
   // Keep the active device while it is online; otherwise hand playback to the player that was
   // seen most recently, so a closed tab does not keep "playing" with nobody listening.
@@ -420,18 +423,40 @@ const presentQueue = async (
     return track === undefined ? [] : [{ item, track }];
   });
 
+  const shared = entries.map(
+    ({ item, track }) => jamHost === null || jamShareableEntry(jamHost, item, track),
+  );
+
+  // The songs shown are presented together, so a long queue looks the viewer's likes up in one
+  // read (see `tracks`); withheld entries are never presented.
+  const presented = await present.tracks(
+    entries.flatMap(({ track }, position) => (shared[position] === true ? [track] : [])),
+  );
+
+  // Where each shown entry's song is in `presented`.
+  const slots: Array<number> = [];
+  let shownBefore = 0;
+
+  for (const isShared of shared) {
+    slots.push(shownBefore);
+
+    if (isShared) shownBefore += 1;
+  }
+
   return {
     queue: await Promise.all(
-      entries.map(async ({ item, track }) =>
-        jamHost !== null && !jamShareableEntry(jamHost, item, track)
+      entries.map(async ({ item, track }, position) => {
+        const shown = shared[position] === true ? presented[slots[position] ?? -1] : undefined;
+
+        return shown === undefined
           ? withheldEntry(item, track)
           : // The presented track is a new object made for this entry.
-            Object.assign(await present.track(track), {
+            Object.assign(shown, {
               itemId: item.id,
               addedBy: item.addedBy === undefined ? null : await contributor(item.addedBy),
               autoplay: item.autoplay,
-            }),
-      ),
+            });
+      }),
     ),
     index: queue.index,
     shuffle: queue.shuffle,

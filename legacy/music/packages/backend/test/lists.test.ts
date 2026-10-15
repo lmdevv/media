@@ -6,7 +6,6 @@ import type { TrackId } from "@music/commands/ids";
 import { describe, expect, it } from "vitest";
 
 import { libraryQueries } from "../convex/handlers/library";
-import { compareText } from "../convex/lib/pages";
 import { loadViewer } from "../convex/lib/viewer";
 import { allTracks, makeBackend, seedLibrary, signUp, trackIds, upsertFiles } from "./backend";
 import type { User } from "./backend";
@@ -252,16 +251,5 @@ describe("liked songs", () => {
 
     expect(ids).toHaveLength(1100);
     expect(ids).toEqual([first, ...many.slice(1).toReversed()]);
-  });
-});
-
-describe("compareText", () => {
-  it("orders by code point, as Convex orders index keys", () => {
-    // UTF-16 puts the emoji (a surrogate pair from U+D83D) before U+FF01; code points don't.
-    expect(["！", "😀"].toSorted()).toEqual(["😀", "！"]);
-    expect(compareText("😀", "！")).toBeGreaterThan(0);
-    expect(compareText("abc", "abd")).toBeLessThan(0);
-    expect(compareText("ab", "abc")).toBeLessThan(0);
-    expect(compareText("same", "same")).toBe(0);
   });
 });

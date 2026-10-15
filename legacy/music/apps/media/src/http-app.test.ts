@@ -6,7 +6,7 @@ import { serve } from "@hono/node-server";
 import type { TrackId } from "@music/commands/ids";
 import { signResource } from "@music/commands/signed-url";
 import { describe, expect, it } from "vitest";
-import { Duration, Effect, Layer, Ref, Schedule } from "effect";
+import { Duration, Effect, HashSet, Layer, Ref, Schedule } from "effect";
 import type { Hono } from "hono";
 
 import packageJson from "../package.json" with { type: "json" };
@@ -140,7 +140,9 @@ const setupWith = Effect.fn("Test.setup")(function* (ffmpegPath: string) {
   const libraryId = yield* control.addLibrary(root);
   const progress = yield* Ref.make<JobProgress>({ done: 0 });
 
-  const scan = scanLibrary({ id: libraryId, path: root }, progress).pipe(
+  const releasedArt = yield* Ref.make(HashSet.empty<string>());
+
+  const scan = scanLibrary({ id: libraryId, path: root }, progress, releasedArt).pipe(
     Effect.provideContext(context),
   );
 

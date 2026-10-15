@@ -170,6 +170,10 @@ export default defineSchema({
     .index("by_revoked", ["revokedAt"])
     .index("by_user_last_used", ["userId", "lastUsedAt"]),
 
+  /**
+   * Every request reads every library to decide what the viewer may read, so this row holds only
+   * what rarely changes. The counters a scan moves with every batch live in `libraryStats`.
+   */
   libraries: defineTable({
     name: v.string(),
     path: v.string(),
@@ -202,11 +206,24 @@ export default defineSchema({
     visibility,
     ownerId: v.id("users"),
     lastScanAt: v.optional(v.number()),
+    /**
+     * Counters from before they had their own row (`libraryStats`). The next change to the
+     * counts, or the `splitLibraryStats` migration, moves them there and clears them.
+     */
+    trackCount: v.optional(v.number()),
+    albumCount: v.optional(v.number()),
+    artistCount: v.optional(v.number()),
+    durationMs: v.optional(v.number()),
+  }).index("by_owner", ["ownerId"]),
+
+  /** A library's playable songs, albums with songs, artists with albums, and total length. */
+  libraryStats: defineTable({
+    libraryId: v.id("libraries"),
     trackCount: v.number(),
     albumCount: v.number(),
     artistCount: v.number(),
     durationMs: v.number(),
-  }).index("by_owner", ["ownerId"]),
+  }).index("by_library", ["libraryId"]),
 
   /**
    * People added to a library. They can listen to it while it is `restricted`, or, for guests,
@@ -236,6 +253,7 @@ export default defineSchema({
   })
     .index("by_library_key", ["libraryId", "key"])
     .index("by_key", ["key"])
+    .index("by_art", ["artHash"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["libraryId"] }),
 
   albums: defineTable({
@@ -262,6 +280,7 @@ export default defineSchema({
     // library the listener can read.
     .index("by_library_genre", ["libraryId", "genre", "year"])
     .index("by_library_year", ["libraryId", "year"])
+    .index("by_art", ["artHash"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["libraryId"] }),
 
   tracks: defineTable({
@@ -299,6 +318,11 @@ export default defineSchema({
     .index("by_artist", ["artistId"])
     .index("by_title", ["missing", "titleKey"])
     .index("by_library_title", ["libraryId", "missing", "titleKey"])
+    // Where an album or artist finds other art when its own goes, in a few reads however many
+    // songs it has, and whether any song still uses a cover.
+    .index("by_album_art", ["albumId", "missing", "artHash"])
+    .index("by_artist_art", ["artistId", "missing", "artHash"])
+    .index("by_art", ["artHash"])
     .searchIndex("search_text", {
       searchField: "searchText",
       filterFields: ["libraryId", "missing"],
@@ -431,7 +455,8 @@ export default defineSchema({
     finishedAt: v.optional(v.number()),
     /**
      * How many leases in a row expired before the worker saved a single batch (`done` is 0 when a
-     * lease ends, since claiming resets it and it counts saved files). A file that crashes the
+     * lease ends, since claiming resets it and it counts saved files) or found that no file
+     * changed (`total` is 0; claiming clears it). A file that crashes the
      * scanner stops it before its batch saves every time, so the job fails after a few; a scan
      * that restarts for other reasons (a deploy) still saves batches and keeps retrying.
      */

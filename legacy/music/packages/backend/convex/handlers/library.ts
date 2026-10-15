@@ -6,6 +6,7 @@ import { canRead } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
+import { libraryCounts } from "../lib/stats";
 import { mergedPage, numberKey, textKey } from "../lib/pages";
 import type { Source } from "../lib/pages";
 import { makePresenter } from "../lib/present";
@@ -191,12 +192,16 @@ export const libraryQueries = {
       (artist): artist is Doc<"artists"> => artist !== null,
     );
 
+    const counts = await Promise.all(
+      viewer.libraries.map((library) => libraryCounts(ctx, library)),
+    );
+
     let tracks = 0;
     let albums = 0;
     let artists = 0;
     let durationMs = 0;
 
-    for (const library of viewer.libraries) {
+    for (const library of counts) {
       tracks += library.trackCount;
       albums += library.albumCount;
       artists += library.artistCount;

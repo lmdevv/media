@@ -164,6 +164,41 @@ describe("play, next, and previous", () => {
     expect(state.activeDevice?.id).toBe(DEVICE);
   });
 
+  it("plays on the online player when none is named, reading only online devices", async () => {
+    const { backend, admin, rock } = await setup();
+
+    // A month of closed tabs, each still a device row, all long silent.
+    await backend.run(async (ctx) => {
+      await Promise.all(
+        Array.from({ length: 100 }, (_, index) =>
+          ctx.db.insert("devices", {
+            userId: admin.id,
+            deviceId: `old-tab-${index}`,
+            name: "Old tab",
+            kind: "web",
+            lastSeenAt: START - (index + 1) * 60 * 60 * 1000,
+          }),
+        ),
+      );
+    });
+
+    const read = await admin.as.mutation(async (ctx) => {
+      const viewer = await loadViewer(ctx);
+      const before = await ctx.meta.getTransactionMetrics();
+
+      await playbackMutations["playback.play"](ctx, viewer, { trackIds: [...rock] });
+
+      return (
+        (await ctx.meta.getTransactionMetrics()).documentsRead.used - before.documentsRead.used
+      );
+    });
+
+    expect((await admin.music.read("playback.state", {})).activeDevice?.id).toBe(DEVICE);
+    // The five songs, the session and queue rows (read, then read by their writes), and the one
+    // online device: none of the hundred silent ones.
+    expect(read).toBeLessThan(20);
+  });
+
   it("refuses to play on a device that never registered", async () => {
     const { admin, rock } = await setup();
 
@@ -626,6 +661,56 @@ describe("what a position report costs", () => {
     // The session (read, then read again by its patch), the queue row (read to locate the song,
     // then to save), and the one song: never the other 999.
     expect(cost).toEqual({ read: 5, written: 1 });
+
+    // A player that names no song (the CLI) costs the same while it reports the current one.
+    const unnamed = await admin.as.mutation(async (ctx) => {
+      const viewer = await loadViewer(ctx);
+      const before = await ctx.meta.getTransactionMetrics();
+
+      await playbackMutations["playback.report"](ctx, viewer, {
+        deviceId: DEVICE,
+        index: 0,
+        positionMs: 30_100,
+        playing: true,
+      });
+
+      const after = await ctx.meta.getTransactionMetrics();
+
+      return after.documentsRead.used - before.documentsRead.used;
+    });
+
+    expect(unnamed).toBe(5);
+  });
+});
+
+describe("liked songs in a long queue", () => {
+  it("are marked whether the viewer likes a few songs or many", async () => {
+    const backend = makeBackend();
+    const admin = await signUp(backend, "admin");
+    await seedLibrary(backend, admin, { name: "Long", count: 250 });
+    await admin.music.run("devices.heartbeat", { deviceId: DEVICE, name: "Laptop", kind: "web" });
+    const ids = (await allTracks(admin)).map((track) => track.id);
+
+    await admin.music.run("playback.play", { trackIds: ids, deviceId: DEVICE });
+
+    const likeAll = async (liked: ReadonlyArray<TrackId>) => {
+      await Promise.all(
+        liked.map((trackId) => admin.music.run("likes.set", { trackId, liked: true })),
+      );
+    };
+
+    const likedInQueue = async () =>
+      (await admin.music.read("queue.list", {})).queue.flatMap((track) =>
+        track.liked ? [track.id] : [],
+      );
+
+    // A few likes are read in one go.
+    await likeAll(ids.slice(10, 13));
+    expect(await likedInQueue()).toEqual(ids.slice(10, 13));
+
+    // More than one read takes are looked up song by song.
+    await likeAll(ids.slice(0, 210));
+    expect(await likedInQueue()).toEqual(ids.slice(0, 210));
   });
 });
 
