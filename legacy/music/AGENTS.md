@@ -89,6 +89,20 @@ worktree. Commit the regenerated `convex/_generated/`.
   (`remote.defaultEnvironmentId`) and write the Codex ID here for `codex cloud exec --env`. Docker
   suites run in Claude cloud only.
 
+## pstack
+
+[pstack](https://github.com/cursor/plugins/tree/main/pstack) is Lauren Tan's skill stack. Start
+rigorous work with `poteto-mode`. Where a pstack skill conflicts with this file, this file wins.
+
+- Claude Code: `.claude/settings.json` enables `pstack@cursor-plugins`. Skills are `/pstack:<name>`.
+  Model roles are in `.claude/rules/pstack-models.md`, which Claude Code loads on its own.
+- Codex: install once per machine with `codex plugin marketplace add cursor/plugins` and
+  `codex plugin add pstack@cursor-plugins`. Skills are `$pstack:<name>`. Before you follow a pstack
+  skill, read `.agents/pstack/codex.md`. Model roles are in `.agents/pstack/codex-models.md`.
+- Model agreement: each tool writes code with its session model and runs judgment roles at high
+  effort. Every review panel pairs Opus with GPT-6.1-Sol by calling the other tool's CLI, as
+  `.agents/pstack/cross-tool.md` describes. Change both model files together.
+
 ## Design
 
 Build UI from the Paper file `[music]` (ID `01M4KQQQ46CWH4S1JGX96NPA0T`) through the Paper MCP.
