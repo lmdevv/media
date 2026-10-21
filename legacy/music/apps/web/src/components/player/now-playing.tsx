@@ -8,9 +8,9 @@ import { DesktopNowPlaying } from "./now-playing-desktop";
 import { PhoneNowPlaying } from "./now-playing-phone";
 
 /**
- * Now Playing, always on the art-tinted dark background. Desktop has the player, queue, and
- * cover-only views (Paper 05 · 01, 01c, 01d); phones get the full-screen player and queue
- * (05 · 04, 04c). Lyrics are V1, so their button is shown but disabled.
+ * Now Playing, always on the art-tinted dark background. Desktop opens on the cover and can add the
+ * queue beside it (Paper 05 · 01, 01c); phones get the full-screen player and queue (05 · 04, 04c).
+ * Lyrics are V1, so their button is shown but disabled.
  */
 export function NowPlaying() {
   const { nowPlaying, setNowPlaying } = useUi();

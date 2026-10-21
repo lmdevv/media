@@ -14,7 +14,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 # The same Convex backend the image ships, pinned by digest in the Dockerfile.
 image="$(sed -n 's/^ARG CONVEX_IMAGE=//p' "${root}/deploy/docker/Dockerfile")"
-if [[ "$image" != ghcr.io/get-convex/convex-backend@sha256:* ]]; then
+if [[ "$image" != ghcr.io/convex/convex-backend@sha256:* ]]; then
   echo "could not read the pinned CONVEX_IMAGE from deploy/docker/Dockerfile" >&2
   exit 1
 fi
@@ -82,5 +82,5 @@ PORT=${media_port}
 ENV
 
 echo "Convex ${name}: http://127.0.0.1:${port} (HTTP actions ${site_port}), media port ${media_port}"
-echo "Dashboard: docker run --rm -p 6791:6791 -e NEXT_PUBLIC_DEPLOYMENT_URL=http://127.0.0.1:${port} ghcr.io/get-convex/convex-dashboard"
+echo "Dashboard: docker run --rm -p 6791:6791 -e NEXT_PUBLIC_DEPLOYMENT_URL=http://127.0.0.1:${port} ghcr.io/convex/convex-dashboard"
 echo "Admin key is in packages/backend/.env.local"

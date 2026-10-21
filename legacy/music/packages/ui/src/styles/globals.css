@@ -123,7 +123,9 @@
   --spacing-dvh-message: 60dvh;
   --spacing-dvh-device-list: min(440px, 60dvh);
   --spacing-now-playing-cover: min(560px, 58vh);
-  --spacing-now-playing-art: min(520px, 42vw, 62vh);
+  /* The desktop queue view's art: the window height less the rest of its column, its padding,
+     and the top bar (448px), down to 240px at the view's 688px minimum height. */
+  --spacing-now-playing-queue-art: clamp(240px, calc(100dvh - 448px), 380px);
   --container-vw-inset: calc(100vw - 2rem);
   --shadow-dialog: 0 32px 80px color-mix(in oklab, var(--color-shadow) 24%, transparent);
   --shadow-popover: 0 24px 64px color-mix(in oklab, var(--color-shadow) 16%, transparent);

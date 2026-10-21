@@ -14,8 +14,11 @@ import { chooseSurface } from "@/components/player/play-on";
 import type { PlayOnSurface } from "@/components/player/play-on";
 import { isDesktopNow } from "@/lib/use-media";
 
-/** Which full-screen Now Playing view is open, if any. */
-export type NowPlayingView = "player" | "queue" | "cover";
+/**
+ * Which full-screen Now Playing view is open, if any: `player` is the cover on desktop and the full
+ * player on phones, and `queue` adds the queue.
+ */
+export type NowPlayingView = "player" | "queue";
 
 /** App-wide UI state that several screens open or close. */
 export interface UiState {

@@ -7,8 +7,8 @@
 # from is in the comment above it. Update both together.
 # node:24-trixie-slim
 ARG NODE_IMAGE=node:24-trixie-slim@sha256:173f125896c3b47ddf056734c7ea789d04595a6a08769a8f78e0df642781fb66
-# ghcr.io/get-convex/convex-backend (scripts/dev-backend.sh reads this line to run the same one)
-ARG CONVEX_IMAGE=ghcr.io/get-convex/convex-backend@sha256:d715e9ec088784407ca4ba2d3db592702cd328d02c76cdca3852c0018f2a76b4
+# ghcr.io/convex/convex-backend (scripts/dev-backend.sh reads this line to run the same one)
+ARG CONVEX_IMAGE=ghcr.io/convex/convex-backend@sha256:d715e9ec088784407ca4ba2d3db592702cd328d02c76cdca3852c0018f2a76b4
 # caddy:2.11
 ARG CADDY_IMAGE=caddy:2.11@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
 

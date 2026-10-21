@@ -62,7 +62,7 @@ export const cn = createCn({
         "dvh-message",
         "dvh-device-list",
         "now-playing-cover",
-        "now-playing-art",
+        "now-playing-queue-art",
       ],
       container: ["sidebar", "dialog", "content", "vw-inset"],
       blur: ["scrim"],
