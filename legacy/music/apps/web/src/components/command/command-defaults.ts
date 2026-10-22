@@ -1,11 +1,10 @@
+import type { FieldSpec, FormValues } from "@music/commands/forms";
 import type { MutationName } from "@music/commands/registry";
 import { usePlayer } from "@music/player/react";
 import { useRead } from "@music/sdk/react";
 import { Match } from "effect";
 
 import { NEXT_REPEAT } from "@/components/player/player-actions";
-
-import type { FieldSpec, FormValues } from "./fields";
 
 /**
  * A command form's default values from what is playing and on screen. Only the open command's

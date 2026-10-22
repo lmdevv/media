@@ -2,11 +2,15 @@
   "name": "@music/player",
   "version": "0.3.0",
   "private": true,
-  "description": "PlayerEngine (MSE gapless with an HTML audio fallback) and the React player provider.",
+  "description": "PlayerEngine (MSE gapless with an HTML audio fallback), the playback controller the web and iOS apps share, and the web's React player provider.",
   "type": "module",
   "exports": {
+    "./busy-retry": "./src/busy-retry.ts",
+    "./device-identity": "./src/device-identity.ts",
     "./engine": "./src/engine.ts",
+    "./playback-controller": "./src/playback-controller.ts",
     "./react": "./src/react.tsx",
+    "./stream-offset": "./src/stream-offset.ts",
     "./stream-quality": "./src/stream-quality.ts"
   },
   "scripts": {

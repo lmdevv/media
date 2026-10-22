@@ -10,6 +10,10 @@
     "apps/web": {
       "entry": ["e2e-stack/first-audio.ts"]
     },
+    "apps/mobile": {
+      "entry": ["src/app/**/*.tsx"],
+      "project": ["src/**/*.{ts,tsx,css}"]
+    },
     "apps/cli": {
       "entry": ["src/main.ts", "scripts/*.ts"]
     },

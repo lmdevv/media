@@ -29,6 +29,7 @@ included; the repo and packages use `music`.
 | ------------------- | ---------------------------------------------------------- |
 | `apps/web`          | Vite + React + TanStack Router client app                  |
 | `apps/media`        | Node + Hono + Effect media service                         |
+| `apps/mobile`       | Expo + Expo Router + Uniwind iOS app                       |
 | `apps/cli`          | CLI generated from the command registry                    |
 | `packages/backend`  | Convex functions, schema, and auth                         |
 | `packages/commands` | Every user action as an Effect Schema                      |
@@ -58,6 +59,7 @@ pnpm test            # Vitest
 pnpm test:e2e        # Playwright
 pnpm knip            # unused files, exports, and dependencies
 scripts/stack-e2e.sh # build the image and run the real-stack E2E suite against it
+scripts/ios-mac.sh build-sim <udid>  # build the iOS dev client on a Mac over ssh (apps/mobile/README.md)
 ```
 
 `typecheck`, `lint`, `fmt:check`, and `test` run in the lefthook pre-commit hook and in CI. All

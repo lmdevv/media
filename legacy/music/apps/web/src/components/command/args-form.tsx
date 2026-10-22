@@ -1,3 +1,4 @@
+import type { Entity, FieldSpec, FormValues } from "@music/commands/forms";
 import type { AlbumId, ArtistId, PlaylistId } from "@music/commands/ids";
 import { roleLabel } from "@music/commands/permissions";
 import { usePlayer } from "@music/player/react";
@@ -10,8 +11,6 @@ import type { ReactNode } from "react";
 
 import { formatDuration } from "@/lib/format";
 import { WITHHELD_ARTIST, WITHHELD_TITLE, playableTracks } from "@/lib/playlist-entries";
-
-import type { Entity, FieldSpec, FormValues } from "./fields";
 
 /** What the screen behind the menu is showing, used to fill and offer arguments. */
 export interface MenuContext {

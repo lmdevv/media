@@ -1,7 +1,7 @@
 import type { Role } from "@music/commands/models";
 import { can } from "@music/commands/permissions";
-import { commands, isCommandName } from "@music/commands/registry";
-import type { CommandName, MutationName } from "@music/commands/registry";
+import { commands } from "@music/commands/registry";
+import type { CommandName } from "@music/commands/registry";
 import type { LinkProps } from "@tanstack/react-router";
 import {
   DiscIcon,
@@ -19,33 +19,8 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import { fieldsOf } from "./fields";
-import type { FieldSpec } from "./fields";
-
 /** A path in the web app that the menu can navigate to. */
 export type Route = NonNullable<LinkProps["to"]>;
-
-/** Commands that only players send; people never run them by hand. */
-const INTERNAL: ReadonlySet<CommandName> = new Set([
-  "devices.heartbeat",
-  "playback.report",
-  "stream.url",
-]);
-
-/** Commands that need something playing. */
-const NEEDS_TRACK: ReadonlySet<CommandName> = new Set([
-  "playback.pause",
-  "playback.resume",
-  "playback.next",
-  "playback.previous",
-  "playback.seek",
-  "playback.jump",
-  "queue.remove",
-  "queue.clear",
-  "playback.shuffle",
-  "playback.repeat",
-  "playback.volume",
-]);
 
 interface Screen {
   readonly name: CommandName;
@@ -70,46 +45,9 @@ const SCREENS: ReadonlyArray<Screen> = [
   { name: "jobs.list", title: "Jobs", to: "/settings/jobs", icon: TerminalIcon },
 ];
 
-/** Narrows a command name to one that changes state. */
-const isMutation = (name: CommandName): name is MutationName => commands[name].kind === "mutation";
-
 /**
  * The screens the menu offers under "Go to", in display order: every screen whose query command
  * the person may run.
  */
 export const offeredScreens = (role: Role): ReadonlyArray<Screen> =>
   SCREENS.filter((screen) => can(role, commands[screen.name].access));
-
-/**
- * The registry commands the menu offers, in registry order, with their form fields. It leaves out
- * queries (they open screens instead), commands only players send, commands the viewer's role
- * may not run, playback and queue controls while nothing plays, and commands whose arguments no form
- * field can express.
- */
-export const offeredCommands = ({
-  role,
-  playing,
-}: {
-  /** The viewer's role; each command is offered only to roles with its capability. */
-  readonly role: Role;
-  /** Whether a song is loaded, playing or paused. */
-  readonly playing: boolean;
-}): ReadonlyArray<{ readonly name: MutationName; readonly fields: ReadonlyArray<FieldSpec> }> =>
-  Object.keys(commands)
-    .filter(isCommandName)
-    .filter(isMutation)
-    .flatMap((name) => {
-      const command = commands[name];
-
-      if (INTERNAL.has(name)) return [];
-
-      if (!can(role, command.access)) return [];
-
-      if (!playing && NEEDS_TRACK.has(name)) return [];
-
-      const fields = fieldsOf(name);
-
-      if (fields === null) return [];
-
-      return [{ name, fields }];
-    });

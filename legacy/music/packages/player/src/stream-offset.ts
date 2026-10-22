@@ -12,10 +12,11 @@ const START_PARAMETER = "start";
 
 /**
  * `url` (a signed stream URL) asking for the stream from `startMs` into the song. The signature
- * does not cover the offset, so the URL stays valid.
+ * does not cover the offset, so the URL stays valid. A relative URL resolves against the page;
+ * outside a browser it must be absolute.
  */
 export const offsetUrl = (url: string, startMs: number): string => {
-  const parsed = new URL(url, globalThis.location.href);
+  const parsed = new URL(url, "location" in globalThis ? globalThis.location.href : undefined);
 
   parsed.searchParams.set(START_PARAMETER, String(Math.max(0, Math.round(startMs))));
 

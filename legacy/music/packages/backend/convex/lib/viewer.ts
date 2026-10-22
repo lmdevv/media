@@ -4,7 +4,7 @@ import { can, canManageLibrary } from "@music/commands/permissions";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
-import { fail } from "./errors";
+import { fail, failEnded } from "./errors";
 import { tableId } from "./ids";
 import { isStale, keyLapsed } from "./sessions";
 
@@ -154,25 +154,23 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
   const userId = await getAuthUserId(ctx);
 
   if (userId === null) return fail("unauthenticated", "Sign in first");
+
+  // Removing or suspending someone ends their sessions too, so the person is checked before the
+  // session: their token, signed for them, then hears why it stopped working.
+  const user = await ctx.db.get(userId);
+
+  if (user === null) return failEnded("removed", "This account no longer exists");
+
+  if (user.suspendedAt !== undefined) return failEnded("suspended", SUSPENDED_MESSAGE);
+
   // A token outlives sign-out and key revocation by up to its one-hour lifetime unless the
   // session it names is checked here; ending a session must end its tokens at once.
   const sessionId = ctx.db.normalizeId("authSessions", (await getAuthSessionId(ctx)) ?? "");
   const session = sessionId === null ? null : await ctx.db.get(sessionId);
 
-  if (session === null || session.userId !== userId) {
+  if (session === null || session.userId !== userId || isStale(session, user)) {
     return fail("unauthenticated", "This session has ended; sign in again");
   }
-
-  const user = await ctx.db.get(userId);
-
-  if (user === null) return fail("unauthenticated", "This account no longer exists");
-
-  if (isStale(session, user)) {
-    return fail("unauthenticated", "This session has ended; sign in again");
-  }
-
-  // Suspending ends every session, so this only catches a sign-in racing the suspension.
-  if (user.suspendedAt !== undefined) return fail("unauthenticated", SUSPENDED_MESSAGE);
 
   // A session an API key opened ends with the key's right to work: at once for a guest, who has
   // no keys, and for keys made before a demotion to guest, which a promotion doesn't revive.

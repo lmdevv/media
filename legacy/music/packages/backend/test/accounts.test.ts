@@ -4,6 +4,7 @@
  */
 import { UserId } from "@music/commands/ids";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
+import { sessionEnd } from "@music/sdk/errors";
 import { decodeJwt } from "jose";
 import { Scrypt } from "lucia";
 import { sha256Hex } from "../convex/lib/crypto";
@@ -57,6 +58,46 @@ const keySignIn = async (backend: Backend, key: string): Promise<MusicClient | n
 
 const redeem = (backend: Backend, token: string) =>
   passwordFlow(backend, { flow: "reset", token, newPassword: "a-new-password-1" });
+
+/** Why the server refused `call`'s session, or what happened instead. */
+const endedBy = async (call: Promise<unknown>): Promise<string> => {
+  try {
+    await call;
+
+    return "succeeded";
+  } catch (error) {
+    if (!(error instanceof Error)) return "threw a non-error";
+
+    return sessionEnd(error) ?? `failed otherwise: ${error.message}`;
+  }
+};
+
+describe("a session the server ends", () => {
+  it("says the account was suspended", async () => {
+    const { owner, member } = await household();
+
+    await owner.music.run("people.suspend", { userId: member.userId });
+
+    expect(await endedBy(member.music.read("account.me", {}))).toBe("suspended");
+  });
+
+  it("says the account was removed", async () => {
+    const { backend, owner, member } = await household();
+
+    await owner.music.run("people.remove", { userId: member.userId });
+    await drainScheduled(backend);
+
+    expect(await endedBy(member.music.read("account.me", {}))).toBe("removed");
+  });
+
+  it("says only that it ended when the account is still fine", async () => {
+    const { backend, admin, member } = await household();
+    const { token } = await admin.music.run("people.reset", { userId: member.userId });
+
+    expect(await failureCode(redeem(backend, token))).toBe("succeeded");
+    expect(await endedBy(member.music.read("account.me", {}))).toBe("ended");
+  });
+});
 
 describe("password reset links", () => {
   it("work while their maker may still manage the person", async () => {

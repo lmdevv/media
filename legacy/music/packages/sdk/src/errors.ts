@@ -21,3 +21,27 @@ export const commandFailure = (error: Error): CommandFailure | null => {
 /** A message safe to show to the user for any thrown value. */
 export const errorMessage = (error: Error): string =>
   commandFailure(error)?.message ?? "Something went wrong. Try again.";
+
+/**
+ * Why the server refused a session: the account was suspended or removed, or the session itself
+ * ended (signed out elsewhere, a password reset, an expired token).
+ */
+export type SessionEnd = "suspended" | "removed" | "ended";
+
+const RefusedData = Schema.Struct({
+  code: Schema.Literal("unauthenticated"),
+  reason: Schema.optional(Schema.Unknown),
+});
+
+const decodeRefusedData = Schema.decodeUnknownOption(RefusedData);
+
+/** Why a refused session ended, or null when `error` is not a refused session. */
+export const sessionEnd = (error: Error): SessionEnd | null => {
+  if (!(error instanceof ConvexError)) return null;
+
+  return Option.match(decodeRefusedData(error.data), {
+    onNone: () => null,
+    // A reason this client doesn't know still means the session is over.
+    onSome: ({ reason }) => (reason === "suspended" || reason === "removed" ? reason : "ended"),
+  });
+};

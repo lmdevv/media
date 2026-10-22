@@ -34,6 +34,8 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pnpm test
       - run: pnpm knip
+      # The iOS app bundles with Metro, so a module it cannot resolve fails here, not on a phone.
+      - run: pnpm --filter mobile bundle
 
   stack-e2e:
     runs-on: ubuntu-latest

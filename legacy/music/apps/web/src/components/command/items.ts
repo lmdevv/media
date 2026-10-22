@@ -1,3 +1,4 @@
+import type { FieldSpec } from "@music/commands/forms";
 import type {
   AlbumCard as Album,
   ArtistCard as Artist,
@@ -9,8 +10,6 @@ import { commands } from "@music/commands/registry";
 import type { CommandName, MutationName } from "@music/commands/registry";
 import { foldSearchText } from "@music/commands/search-text";
 import type { LucideIcon } from "lucide-react";
-
-import type { FieldSpec } from "./fields";
 
 /**
  * One row in the command menu: the song playing, a library record, a registry command, or a

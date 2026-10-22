@@ -29,7 +29,7 @@ import { clockOffset, withClockSample } from "./clock-offset";
 import type { SessionView } from "./engine-plan";
 import { livePosition } from "./live-position";
 import { isStreamRefused, mediaBaseUrl, probeMediaHealth, waitForMedia } from "./media-health";
-import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
+import type { MediaSessionHandlers } from "./media-session";
 import { chooseEngine, chooseGaplessProfile, chooseStreamProfile } from "./stream-quality";
 import type { MseSupport, StreamQuality } from "./stream-quality";
 
@@ -88,6 +88,17 @@ export interface EngineFactory {
   readonly create: (kind: EngineKind) => PlayerEngine;
 }
 
+/**
+ * The system's now-playing surface: the lock screen, notifications, and hardware media keys. The
+ * web routes it through the Media Session API (`media-session.ts`).
+ */
+export interface NowPlayingControls {
+  /** Routes system media controls to `handlers`, or detaches them when `handlers` is null. */
+  readonly setHandlers: (handlers: MediaSessionHandlers | null) => void;
+  /** Shows `track` at `positionMs`, or clears the surface when nothing plays here. */
+  readonly show: (track: Track | null, playing: boolean, positionMs: number) => void;
+}
+
 /** What the controller needs from its host besides the server and the engine. */
 export interface ControllerEnvironment {
   readonly deviceId: DeviceId;
@@ -100,6 +111,14 @@ export interface ControllerEnvironment {
   readonly quality: StreamQuality;
   /** Persists a changed quality setting. */
   readonly saveQuality: (quality: StreamQuality) => void;
+  readonly nowPlaying: NowPlayingControls;
+  /** Calls `listener` each time the app returns to the foreground. Returns the unsubscribe function. */
+  readonly onForeground: (listener: () => void) => () => void;
+  /**
+   * Turns a stream URL as the server signed it (relative behind the image's proxy) into the URL
+   * this host fetches: the browser resolves it against the page, a native app against its server.
+   */
+  readonly resolveUrl: (url: string) => string;
 }
 
 /** The queue entry the engine holds. */
@@ -231,13 +250,11 @@ export class PlaybackController {
       this.#keepInStep();
     }, FOLLOW_CHECK_MS);
 
-    const onVisibility = (): void => {
-      if (document.visibilityState === "visible") void this.#heartbeat();
-    };
+    const stopForeground = this.#env.onForeground(() => {
+      void this.#heartbeat();
+    });
 
-    document.addEventListener("visibilitychange", onVisibility);
-
-    setMediaSessionHandlers({
+    this.#env.nowPlaying.setHandlers({
       play: () => {
         if (!this.#isAudible()) void this.togglePlay();
       },
@@ -261,9 +278,9 @@ export class PlaybackController {
       clearInterval(heartbeats);
       clearInterval(reports);
       clearInterval(follow);
-      document.removeEventListener("visibilitychange", onVisibility);
-      setMediaSessionHandlers(null);
-      showNowPlaying(null, false, 0);
+      stopForeground();
+      this.#env.nowPlaying.setHandlers(null);
+      this.#env.nowPlaying.show(null, false, 0);
       this.#stopHealthProbe();
       this.#unload();
       this.#view = null;
@@ -411,6 +428,19 @@ export class PlaybackController {
     if (this.#view?.active === true) this.#setEngineVolume(value);
     this.#update({ pendingVolume: value });
     await this.capture(this.#client.run("playback.volume", { volume: value }));
+  }
+
+  /**
+   * Loads the current song again from the session's position after a failure, as the media
+   * health check does once the service answers again. A song that still fails shows its error.
+   */
+  retry(): void {
+    if (this.#snapshot.engineStatus !== "error") return;
+    this.#stopHealthProbe();
+    this.#update({ mediaOnline: true, engineStatus: "idle", error: null });
+    this.#view = null;
+
+    if (this.#state !== null) this.sync(this.#state);
   }
 
   /** Moves playback to this browser. */
@@ -751,7 +781,11 @@ export class PlaybackController {
 
       return {
         profile,
-        source: { key: `${track.id}:${profile}`, url: stream.url, durationMs: track.durationMs },
+        source: {
+          key: `${track.id}:${profile}`,
+          url: this.#env.resolveUrl(stream.url),
+          durationMs: track.durationMs,
+        },
         renewAt: renewAt > requestedAt ? renewAt : null,
       };
     } catch (error) {
@@ -1011,6 +1045,6 @@ export class PlaybackController {
     const active = this.#view?.active === true;
     const track = active ? (this.#loaded?.track ?? null) : null;
 
-    showNowPlaying(track, this.#isAudible(), this.#positionMs);
+    this.#env.nowPlaying.show(track, this.#isAudible(), this.#positionMs);
   }
 }

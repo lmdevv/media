@@ -2,6 +2,7 @@ import "@fontsource-variable/inter/index.css";
 import "@fontsource-variable/geist-mono/index.css";
 
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
+import { convexLogger } from "@music/sdk/convex-logger";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { ConvexReactClient } from "convex/react";
 import { StrictMode } from "react";
@@ -10,7 +11,6 @@ import { createRoot } from "react-dom/client";
 
 import { LazyPageNotFound, LazyRouteError } from "./components/lazy-route-error";
 import { resolveConvexUrl } from "./config";
-import { convexLogger } from "./lib/convex-logger";
 import { parseSearch, stringifySearch } from "./lib/search-params";
 import { whenSettled } from "./lib/when-settled";
 import { routeTree } from "./routeTree.gen";

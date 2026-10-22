@@ -17,7 +17,8 @@
     "./folder-ids": "./src/folder-ids.ts",
     "./system-folders": "./src/system-folders.ts",
     "./text-order": "./src/text-order.ts",
-    "./media-limits": "./src/media-limits.ts"
+    "./media-limits": "./src/media-limits.ts",
+    "./forms": "./src/forms.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

@@ -2,6 +2,8 @@ import { useAuthActions } from "@convex-dev/auth/react";
 import { Redirect } from "@/components/redirect";
 import { commandFailure } from "@music/sdk/errors";
 import { setupStatus } from "@music/sdk/functions";
+import { signInFailure } from "@music/sdk/sign-in";
+import type { SignInFailure } from "@music/sdk/sign-in";
 import { Button } from "@music/ui/components/button";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
 import { createFileRoute } from "@tanstack/react-router";
@@ -11,8 +13,6 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { AuthHeading, AuthLayout, Field } from "@/components/auth/auth-layout";
-import { signInFailure } from "@/lib/sign-in-failure";
-import type { SignInFailure } from "@/lib/sign-in-failure";
 
 const SignInSearch = Schema.Struct({ redirect: Schema.optionalKey(Schema.String) });
 

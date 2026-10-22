@@ -22,6 +22,7 @@ export default defineConfig({
     "**/dist/**",
     "packages/backend/convex/_generated/**",
     "apps/web/src/routeTree.gen.ts",
+    "apps/mobile/src/uniwind-types.d.ts",
   ],
   jsPlugins: [
     { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },

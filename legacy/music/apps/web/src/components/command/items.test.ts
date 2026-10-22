@@ -1,9 +1,9 @@
+import { fieldsOf } from "@music/commands/forms";
 import { AlbumCard, ArtistCard, Playlist, Track } from "@music/commands/models";
 import { Schema } from "effect";
 import { HeartIcon } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
-import { fieldsOf } from "./fields";
 import { browseItems, cliOf, primaryLabel, searchItems, titleOf } from "./items";
 import type { Item } from "./items";
 

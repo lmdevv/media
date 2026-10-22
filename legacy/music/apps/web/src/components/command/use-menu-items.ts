@@ -1,3 +1,4 @@
+import { offeredCommands } from "@music/commands/forms";
 import { usePlayer } from "@music/player/react";
 import { useRead, useReadOnce } from "@music/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
@@ -11,7 +12,7 @@ import { toastFailure } from "@/lib/action";
 import { readPages } from "@/lib/read-pages";
 import { useHeld } from "@/lib/use-held";
 
-import { offeredCommands, offeredScreens } from "./catalog";
+import { offeredScreens } from "./catalog";
 import type { Route } from "./catalog";
 import { browseItems, cliOf, searchItems } from "./items";
 import type { Item } from "./items";

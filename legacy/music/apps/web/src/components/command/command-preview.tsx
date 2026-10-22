@@ -1,5 +1,7 @@
 import { argsDecoder } from "@music/commands/codec";
 import type { JobId } from "@music/commands/ids";
+import { missingFields, outcomeOf, rawArgs } from "@music/commands/forms";
+import type { FieldSpec, FormValues } from "@music/commands/forms";
 import { capabilityLabel } from "@music/commands/permissions";
 import { commands } from "@music/commands/registry";
 import type { MutationName } from "@music/commands/registry";
@@ -22,11 +24,9 @@ import { formatCount } from "@/lib/format";
 
 import { ArgsForm } from "./args-form";
 import type { MenuContext } from "./args-form";
-import { missingFields, rawArgs } from "./fields";
 import { useCommandDefaults } from "./command-defaults";
-import type { FieldSpec, FormValues } from "./fields";
 import { cliOf } from "./items";
-import { jobMeta, outcomeOf } from "./outcome";
+import { jobMeta } from "./outcome";
 import { PreviewFrame, PreviewTitle, usePrimary } from "./preview-frame";
 import type { PreviewProps } from "./preview-frame";
 

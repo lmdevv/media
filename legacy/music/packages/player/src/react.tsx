@@ -28,6 +28,7 @@ import {
 } from "./device-identity";
 import type { EngineKind, PlayerEngine } from "./engine";
 import { HtmlAudioEngine } from "./html-audio-engine";
+import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
 import { MseEngine } from "./mse-engine";
 import { PlaybackController } from "./playback-controller";
 import type { EngineFactory } from "./playback-controller";
@@ -229,6 +230,20 @@ const createController = (
     saveQuality: (quality) => {
       writeItem(storage, QUALITY_KEY, quality);
     },
+    nowPlaying: { setHandlers: setMediaSessionHandlers, show: showNowPlaying },
+    onForeground: (listener) => {
+      const onVisibility = (): void => {
+        if (document.visibilityState === "visible") listener();
+      };
+
+      document.addEventListener("visibilitychange", onVisibility);
+
+      return () => {
+        document.removeEventListener("visibilitychange", onVisibility);
+      };
+    },
+    // The browser resolves the server's relative stream URLs against the page.
+    resolveUrl: (url) => url,
   });
 };
 

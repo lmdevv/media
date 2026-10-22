@@ -1,9 +1,10 @@
-import { encodeArgs } from "@music/commands/codec";
+import { encodeArgs, resultDecoder } from "@music/commands/codec";
 import type { CommandArgs, CommandResult, MutationName, QueryName } from "@music/commands/registry";
-import { useConvex, useQuery } from "convex/react";
+import { useConvex, useQueries, useQuery } from "convex/react";
+import { Result } from "effect";
 import { useCallback, useMemo } from "react";
 
-import { decodeCommandResult } from "./client";
+import { decodeCommandResult, InvalidResultError } from "./client";
 import { readCommand, runCommand } from "./functions";
 
 /**
@@ -24,6 +25,39 @@ export const useRead = <Name extends QueryName>(
     () => (wire === undefined ? undefined : decodeCommandResult(name, wire)),
     [name, wire],
   );
+};
+
+/**
+ * Like `useRead`, but a server failure, or a result the registry doesn't accept, comes back as
+ * an `Error` instead of being thrown. For
+ * hooks above every error boundary, such as the session phase, which must outlive a read that
+ * fails while signing out.
+ */
+export const useReadSettled = <Name extends QueryName>(
+  name: Name,
+  args: CommandArgs<Name> | "skip",
+): CommandResult<Name> | Error | undefined => {
+  const key = args === "skip" ? "skip" : JSON.stringify(encodeArgs(name, args));
+
+  const queries = useMemo(
+    () =>
+      args === "skip"
+        ? {}
+        : { read: { query: readCommand, args: { name, args: encodeArgs(name, args) } } },
+    [name, key],
+  );
+
+  const wire: unknown = useQueries(queries)["read"];
+
+  return useMemo(() => {
+    if (wire === undefined || wire instanceof Error) return wire;
+
+    const decoded = resultDecoder(name)(wire);
+
+    return Result.isFailure(decoded)
+      ? new InvalidResultError(`${name} returned an unexpected result: ${decoded.failure.message}`)
+      : decoded.success;
+  }, [name, wire]);
 };
 
 /** Returns a function that runs a mutation command and resolves with its decoded result. */

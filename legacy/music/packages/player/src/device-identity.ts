@@ -59,16 +59,19 @@ export const describeDevice = (userAgent: string, maxTouchPoints: number): Devic
   return { name: `${browserName(userAgent)} on ${platform}`, kind: phone ? "phone" : "web" };
 };
 
+/** The part of `localStorage` the player uses; a native app passes its own key-value store. */
+export type KeyValueStorage = Pick<Storage, "getItem" | "setItem">;
+
 const DEVICE_ID_KEY = "music.deviceId";
 
 const decodeDeviceId = Schema.decodeUnknownOption(DeviceId);
 
 /**
- * The stable device ID of this browser profile, kept in `localStorage`. Creates one with
- * `generate` on first use. When storage is unavailable (blocked or private mode) the ID lasts
- * for this page only.
+ * The stable device ID of this browser profile, kept in `localStorage` (or a native app's store).
+ * Creates one with `generate` on first use. When storage is unavailable (blocked or private mode)
+ * the ID lasts for this page only.
  */
-export const loadDeviceId = (storage: Storage | null, generate: () => string): DeviceId => {
+export const loadDeviceId = (storage: KeyValueStorage | null, generate: () => string): DeviceId => {
   const stored = decodeDeviceId(readItem(storage, DEVICE_ID_KEY));
 
   if (Option.isSome(stored)) return stored.value;
@@ -92,7 +95,7 @@ export const browserStorage = (): Storage | null => {
 };
 
 /** Reads a key, treating a storage that throws (blocked cookies, Safari private mode) as empty. */
-export const readItem = (storage: Storage | null, key: string): string | null => {
+export const readItem = (storage: KeyValueStorage | null, key: string): string | null => {
   try {
     return storage?.getItem(key) ?? null;
   } catch {
@@ -101,7 +104,7 @@ export const readItem = (storage: Storage | null, key: string): string | null =>
 };
 
 /** Writes a key, ignoring a storage that throws: the value then lasts for this page only. */
-export const writeItem = (storage: Storage | null, key: string, value: string): void => {
+export const writeItem = (storage: KeyValueStorage | null, key: string, value: string): void => {
   try {
     storage?.setItem(key, value);
   } catch {

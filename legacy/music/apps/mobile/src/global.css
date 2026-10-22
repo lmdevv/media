@@ -1,0 +1,185 @@
+@import "tailwindcss";
+@import "uniwind";
+
+/* Tokens from the [music] Paper file (01M4KQQQ46CWH4S1JGX96NPA0T), names unchanged, as in
+   packages/ui plus the iOS tokens Paper adds. Paper keeps each color's light role and a `dark-`
+   twin; the themes below put the twin in the role, so components only use role names.
+   React Native loads one font file per weight, so each weight is its own family. */
+@theme {
+  --color-dark-bg: #121212;
+  --color-dark-surface: #1f1f1f;
+  --color-dark-surface-raised: #282828;
+  --color-dark-border: #2a2a2a;
+  --color-dark-text: #ffffff;
+  --color-dark-text-muted: #b3b3b3;
+  --color-dark-text-inverse: #000000;
+  --color-dark-accent: #1ed760;
+  --color-dark-on-accent: #000000;
+  --color-dark-success: #3dd68c;
+  --color-dark-danger: #ff6369;
+  --color-dark-art: #3a2a24;
+  --color-dark-glass: #1f1f1feb;
+  --color-dark-player: #211b16;
+  --color-dark-canvas: #000000;
+  --color-player-light: #f3ece3;
+  --color-scrim: #00000066;
+  --color-glass-shadow: #00000014;
+
+  --font-sans: "Inter-Regular";
+  --font-sans-medium: "Inter-Medium";
+  --font-sans-semibold: "Inter-SemiBold";
+  --font-sans-bold: "Inter-Bold";
+  --font-sans-heavy: "Inter-ExtraBold";
+  --font-mono: "GeistMono-Regular";
+  --font-mono-medium: "GeistMono-Medium";
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 28px;
+  --text-2xl: 40px;
+  --text-display: 64px;
+  --text-mobile-title: 34px;
+  --text-mobile-section: 22px;
+
+  --tracking-display: -0.035em;
+  --tracking-tight: -0.015em;
+  --tracking-normal: 0em;
+  --tracking-mono: 0.04em;
+
+  --leading-xs: 16px;
+  --leading-sm: 18px;
+  --leading-base: 20px;
+  --leading-md: 24px;
+  --leading-lg: 28px;
+  --leading-xl: 32px;
+  --leading-2xl: 44px;
+  --leading-display: 64px;
+  --leading-mobile-title: 40px;
+  --leading-mobile-section: 28px;
+
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+  --spacing-row: 40px;
+  --spacing-row-touch: 56px;
+  --spacing-mobile-edge: 20px;
+  --spacing-hit-target: 44px;
+  --spacing-ios-18: 18px;
+  --spacing-ios-28: 28px;
+  --spacing-ios-36: 36px;
+  --spacing-ios-60: 60px;
+  --spacing-ios-72: 72px;
+  --spacing-ios-80: 80px;
+  --spacing-ios-88: 88px;
+  --spacing-ios-96: 96px;
+  --spacing-ios-104: 104px;
+  --spacing-ios-112: 112px;
+  --spacing-ios-120: 120px;
+  --spacing-ios-128: 128px;
+  --spacing-ios-134: 134px;
+  --spacing-ios-144: 144px;
+  --spacing-ios-152: 152px;
+  --spacing-ios-160: 160px;
+  --spacing-ios-168: 168px;
+  --spacing-ios-176: 176px;
+  --spacing-ios-180: 180px;
+  --spacing-ios-192: 192px;
+  --spacing-ios-200: 200px;
+  --spacing-ios-208: 208px;
+  --spacing-ios-224: 224px;
+  --spacing-ios-240: 240px;
+  --spacing-ios-256: 256px;
+  --spacing-ios-272: 272px;
+  --spacing-ios-280: 280px;
+  --spacing-ios-288: 288px;
+  --spacing-ios-300: 300px;
+  --spacing-ios-320: 320px;
+  --spacing-ios-326: 326px;
+  --spacing-ios-342: 342px;
+  --spacing-ios-350: 350px;
+  --spacing-ios-360: 360px;
+  --spacing-ios-400: 400px;
+  --spacing-ios-440: 440px;
+  --spacing-ios-480: 480px;
+  --spacing-ios-520: 520px;
+  --spacing-ios-560: 560px;
+  --spacing-ios-600: 600px;
+  --spacing-ios-640: 640px;
+  --spacing-ios-680: 680px;
+  --spacing-ios-700: 700px;
+  --spacing-ios-720: 720px;
+  --spacing-ios-780: 780px;
+  --spacing-ios-800: 800px;
+  --spacing-ios-840: 840px;
+  --spacing-ios-900: 900px;
+  --spacing-ios-960: 960px;
+  --spacing-ios-1120: 1120px;
+  --spacing-ios-1200: 1200px;
+  --spacing-ios-1440: 1440px;
+  --spacing-ios-1600: 1600px;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-mobile-card: 20px;
+  --radius-sheet: 28px;
+  --radius-full: 9999px;
+}
+
+/* Inlined into their utilities (`opacity-muted`, `opacity-disabled`): React Native has no
+   variable lookup for opacity, so the value must land in the class itself. */
+@theme inline {
+  --opacity-muted: 60%;
+  --opacity-disabled: 40%;
+}
+
+/* Light follows Apple Music (red on white), dark follows Spotify (green on a black canvas). The
+   canvas is the screen background: `bg` in light, true black in dark, where `bg` is the sheet
+   and fade color. The player tint is Paper's Blue Lines preview until it follows the artwork. */
+@layer theme {
+  :root {
+    @variant light {
+      --color-bg: #ffffff;
+      --color-surface: #f5f5f7;
+      --color-surface-raised: #ffffff;
+      --color-border: #e5e5ea;
+      --color-text: #1d1d1f;
+      --color-text-muted: #6e6e73;
+      --color-text-inverse: #ffffff;
+      --color-accent: #fa2d48;
+      --color-on-accent: #ffffff;
+      --color-success: #30a46c;
+      --color-danger: #e5484d;
+      --color-art: #7a5c4e;
+      --color-glass: #ffffffe8;
+      --color-player: var(--color-player-light);
+      --color-canvas: var(--color-bg);
+    }
+
+    @variant dark {
+      --color-bg: var(--color-dark-bg);
+      --color-surface: var(--color-dark-surface);
+      --color-surface-raised: var(--color-dark-surface-raised);
+      --color-border: var(--color-dark-border);
+      --color-text: var(--color-dark-text);
+      --color-text-muted: var(--color-dark-text-muted);
+      --color-text-inverse: var(--color-dark-text-inverse);
+      --color-accent: var(--color-dark-accent);
+      --color-on-accent: var(--color-dark-on-accent);
+      --color-success: var(--color-dark-success);
+      --color-danger: var(--color-dark-danger);
+      --color-art: var(--color-dark-art);
+      --color-glass: var(--color-dark-glass);
+      --color-player: var(--color-dark-player);
+      --color-canvas: var(--color-dark-canvas);
+    }
+  }
+}

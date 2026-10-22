@@ -7,10 +7,11 @@ import { makeMusicClient } from "@music/sdk/client";
 import type { CommandTransport } from "@music/sdk/client";
 import { ConvexError } from "convex/values";
 import { Schema } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { EngineEvent, EngineKind, PlayerEngine } from "./engine";
 import { PlaybackController } from "./playback-controller";
+import type { ControllerEnvironment } from "./playback-controller";
 import type { StreamQuality } from "./stream-quality";
 
 const deviceId = DeviceId.make("this-browser");
@@ -186,6 +187,29 @@ const reports = (mutations: ReadonlyArray<Mutation>): ReadonlyArray<unknown> =>
 const profileOf = (url: string | undefined): StreamProfile | null =>
   url === undefined ? null : decodeProfile(new URL(url).searchParams.get("p"));
 
+/**
+ * The host seams of a controller with no system media controls: `foreground()` runs what the
+ * controller registered for the app's return to the foreground.
+ */
+const testHost = (
+  resolveUrl: (url: string) => string = (url) => url,
+): Pick<ControllerEnvironment, "nowPlaying" | "onForeground" | "resolveUrl"> & {
+  readonly foreground: () => void;
+} => {
+  const listeners = new Set<() => void>();
+
+  return {
+    nowPlaying: { setHandlers: () => {}, show: () => {} },
+    onForeground: (listener) => {
+      listeners.add(listener);
+
+      return () => listeners.delete(listener);
+    },
+    resolveUrl,
+    foreground: () => listeners.forEach((listener) => listener()),
+  };
+};
+
 /** A started controller on a recording transport and instant engines, with a settable clock. */
 const setup = async (options: {
   readonly gapless: boolean;
@@ -194,12 +218,15 @@ const setup = async (options: {
   readonly serverAheadMs?: number;
   /** How long the server's stream URLs last. */
   readonly ttlMs?: number;
+  /** How the host turns a signed stream URL into the one it fetches. */
+  readonly resolveUrl?: (url: string) => string;
 }) => {
   const media = await fakeMediaService();
   const mutations: Array<Mutation> = [];
   const clock = { now: 1_000_000 };
   const record: EngineRecord = { created: [], loads: [], plays: 0 };
   const engines: Array<ReturnType<typeof instantEngine>> = [];
+  const host = testHost(options.resolveUrl);
 
   const controller = new PlaybackController(
     makeMusicClient(
@@ -227,6 +254,7 @@ const setup = async (options: {
       now: () => clock.now,
       quality: options.quality ?? "high",
       saveQuality: () => {},
+      ...host,
     },
   );
 
@@ -238,6 +266,7 @@ const setup = async (options: {
     mutations,
     clock,
     record,
+    foreground: host.foreground,
     /** The engine in use now. */
     engine: () => {
       const engine = engines.at(-1);
@@ -254,12 +283,31 @@ const setup = async (options: {
 };
 
 describe("PlaybackController", () => {
-  beforeEach(() => {
-    vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+  it("plays a stream from the URL the host resolves the signed one to", async () => {
+    const { controller, media, record, stop } = await setup({
+      gapless: false,
+      resolveUrl: (url) => url.replace("/stream/", "/resolved/stream/"),
+    });
+
+    controller.sync(session(true, 1));
+    await vi.waitFor(() => expect(record.loads).toHaveLength(1));
+
+    expect(record.loads[0]?.url.startsWith(`${media.base}/resolved/stream/song?`)).toBe(true);
+    stop();
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
+  it("tells the server this device is online when the app returns to the foreground", async () => {
+    const { mutations, foreground, stop } = await setup({ gapless: false });
+    await vi.waitFor(() => expect(mutations).toHaveLength(1));
+
+    foreground();
+    await vi.waitFor(() => expect(mutations).toHaveLength(2));
+
+    expect(mutations.map(({ name }) => name)).toStrictEqual([
+      "devices.heartbeat",
+      "devices.heartbeat",
+    ]);
+    stop();
   });
 
   it("tells attempt's caller whether a server call landed, and shows a failure as the error", async () => {
@@ -349,6 +397,7 @@ describe("PlaybackController", () => {
         now: () => 1000,
         quality: "high",
         saveQuality: () => {},
+        ...testHost(),
       },
     );
 
@@ -411,6 +460,7 @@ describe("PlaybackController", () => {
         now: () => 1000,
         quality: "high",
         saveQuality: () => {},
+        ...testHost(),
       },
     );
 
@@ -594,6 +644,33 @@ describe("PlaybackController", () => {
       }),
     );
     expect(record.loads).toHaveLength(2);
+    stop();
+  });
+
+  it("loads the song again from the session on retry after it failed", async () => {
+    const { controller, engine, record, stop } = await setup({ gapless: true });
+    controller.sync(session(false, 1));
+    await vi.waitFor(() => expect(record.loads).toHaveLength(1));
+    engine().emit({ type: "error", reason: "expired", message: "Refused" });
+    await vi.waitFor(() => expect(record.loads).toHaveLength(2));
+    engine().emit({ type: "error", reason: "expired", message: "Refused" });
+    await vi.waitFor(() => expect(controller.getSnapshot().engineStatus).toBe("error"));
+
+    controller.retry();
+
+    expect(controller.getSnapshot().error).toBeNull();
+    await vi.waitFor(() => expect(record.loads).toHaveLength(3));
+    stop();
+  });
+
+  it("does nothing on retry while the song plays", async () => {
+    const { controller, record, stop } = await setup({ gapless: true });
+    controller.sync(session(true, 1));
+    await vi.waitFor(() => expect(record.loads).toHaveLength(1));
+
+    controller.retry();
+
+    expect(record.loads).toHaveLength(1);
     stop();
   });
 });

@@ -15,3 +15,14 @@ export type FailureCode =
 export const fail = (code: FailureCode, message: string): never => {
   throw new ConvexError({ code, message });
 };
+
+/** Why the server stopped honoring a session it can still name the person for. */
+export type SessionEnd = "suspended" | "removed";
+
+/**
+ * Fails `unauthenticated`, like any refused session, and says why beside the code, so a client
+ * can tell someone their account was suspended or removed instead of only signing them out.
+ */
+export const failEnded = (reason: SessionEnd, message: string): never => {
+  throw new ConvexError({ code: "unauthenticated", message, reason });
+};
