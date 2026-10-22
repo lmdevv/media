@@ -128,7 +128,9 @@ export const openExpoOutput = (url: string): AudioOutput => {
     },
     release: () => {
       released = true;
-      player.remove();
+      // `remove()` only forgets the player and leaves it playing until garbage collection;
+      // `release()` stops it and frees it now.
+      player.release();
     },
   };
 };
