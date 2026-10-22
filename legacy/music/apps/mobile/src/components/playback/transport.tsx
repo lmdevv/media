@@ -13,7 +13,7 @@ import {
   Repeat1,
   Rewind,
   Shuffle,
-  Speaker,
+  Volume,
   Volume2,
 } from "lucide-react-native";
 import { Pressable, View } from "react-native";
@@ -107,8 +107,8 @@ export function VolumeRow() {
   const { setVolume } = usePlayerActions();
 
   return (
-    <View className="flex-row items-center gap-3">
-      <Icon icon={Volume2} size="inline" />
+    <View className="flex-row items-center gap-3 py-2">
+      <Icon icon={Volume} size="inline" />
       <View className="flex-1">
         <Slider
           value={volume}
@@ -118,7 +118,7 @@ export function VolumeRow() {
           onChange={(next) => void setVolume(next)}
         />
       </View>
-      <Icon icon={Speaker} size="inline" />
+      <Icon icon={Volume2} size="inline" />
     </View>
   );
 }

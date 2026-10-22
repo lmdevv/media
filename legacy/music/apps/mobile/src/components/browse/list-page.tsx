@@ -1,7 +1,8 @@
 /**
  * A pushed browse page whose content is a recycled list (A03–A08): Paper's back bar over a
- * FlashList. The list is the page's first child, where UIKit looks for the scroll view that
- * minimizes the tab bar; the bar floats over it on the page color, and the list starts under it.
+ * FlashList. The bar floats over the list on the page color, and the list starts under it; the
+ * list is the page's content, so scrolling it minimizes the tab bar. A page that draws its own
+ * top, such as an artist's hero (A08b), passes no bar.
  */
 import { FlashList } from "@shopify/flash-list";
 import type { FlashListProps } from "@shopify/flash-list";
@@ -10,6 +11,7 @@ import type { ReactNode } from "react";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ContentScroll } from "@/components/ui/content-scroll";
 import { NavBar } from "@/components/ui/nav-bar";
 import type { NavBarProps } from "@/components/ui/nav-bar";
 
@@ -21,7 +23,8 @@ export interface ListPageProps<Item> extends Omit<
   FlashListProps<Item>,
   "ListHeaderComponent" | "ListFooterComponent"
 > {
-  readonly bar: NavBarProps;
+  /** Null for a page that draws its own top over the list. */
+  readonly bar: NavBarProps | null;
   /** What scrolls above the rows, such as a summary line or an album's hero. */
   readonly header?: ReactNode;
   /** What scrolls below the rows, such as an empty state. */
@@ -31,10 +34,11 @@ export interface ListPageProps<Item> extends Omit<
 /** A pushed page of rows under Paper's back bar, with room for the tab bar below. */
 export function ListPage<Item>({ bar, header, footer, ...list }: ListPageProps<Item>) {
   const insets = useSafeAreaInsets();
-  const [barHeight, setBarHeight] = useState(insets.top + BAR_HEIGHT);
+  const [measured, setBarHeight] = useState(insets.top + BAR_HEIGHT);
+  const barHeight = bar === null ? 0 : measured;
 
   return (
-    <View className="flex-1 bg-canvas">
+    <ContentScroll>
       <FlashList
         {...list}
         scrollIndicatorInsets={{ top: barHeight }}
@@ -51,12 +55,14 @@ export function ListPage<Item>({ bar, header, footer, ...list }: ListPageProps<I
           </>
         }
       />
-      <View
-        className="absolute inset-x-0 top-0"
-        onLayout={(event) => setBarHeight(event.nativeEvent.layout.height)}
-      >
-        <NavBar {...bar} />
-      </View>
-    </View>
+      {bar === null ? null : (
+        <View
+          className="absolute inset-x-0 top-0"
+          onLayout={(event) => setBarHeight(event.nativeEvent.layout.height)}
+        >
+          <NavBar {...bar} />
+        </View>
+      )}
+    </ContentScroll>
   );
 }

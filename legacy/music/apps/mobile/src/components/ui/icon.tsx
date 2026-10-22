@@ -16,6 +16,7 @@ const TONE_VARIABLES = {
   success: "--color-success",
   onAccent: "--color-on-accent",
   inverse: "--color-text-inverse",
+  overArt: "--color-dark-text",
 } as const satisfies Record<TextTone, `--color-${string}`>;
 
 /**

@@ -1,7 +1,7 @@
 /**
  * Now Playing's own stack, presented as a modal sheet over the tabs that the person drags down to
- * dismiss (B01, B11). The queue pushes inside it (B03); the device picker, audio details, and
- * confirmations present over it as form sheets.
+ * dismiss (B01, B11). The queue opens in place inside it (B03); the device picker, audio details,
+ * and confirmations present over it as form sheets.
  */
 import { Stack } from "expo-router";
 
@@ -15,7 +15,6 @@ export default function PlayerLayout() {
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
       <Stack.Screen name="index" />
-      <Stack.Screen name="queue" />
       <Stack.Screen name="devices" options={sheet} />
       <Stack.Screen name="audio" options={sheet} />
       <Stack.Screen name="clear-queue" options={sheet} />

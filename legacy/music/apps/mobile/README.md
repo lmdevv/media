@@ -42,3 +42,10 @@ whenever Metro runs; commit it, since typechecking needs it.
 `src/player/index.ts` and never import expo-audio. A song the server is still transcoding plays as
 a live stream that can't seek, so a seek opens it again from the offset (`&start=`), or from the
 finished file once the server has it.
+
+## Tab bar
+
+iOS minimizes the tab bar and moves the mini player inline as a page scrolls, but it finds the
+page's scroll view by guessing and misses most pushed pages. `modules/content-scroll` names it
+instead: every page in the tabs (`TabRoot`, `Page`, `ListPage`, `SongListPage`) wraps its scroll
+view in `ContentScroll`, so a new page gets the morph by using one of them.

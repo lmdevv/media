@@ -1,7 +1,7 @@
 /**
- * A09, A10, A13, A16, G03 · Search. iOS draws the field: on the Search tab it sits in the tab bar
- * beside a return button (A09), and once tapped it rises above the keyboard with a Cancel circle
- * while the tabs and mini player hide (A13, A16). Before typing the page offers what was played
+ * A09, A10, A13, A16, G03 · Search. iOS draws the field: selecting the Search tab turns the tab
+ * bar into it beside a return button and focuses it, so searching starts at once (A13, A17); it
+ * rises above the keyboard with a Cancel circle while the tabs and mini player hide (A13, A16). Before typing the page offers what was played
  * lately; focused with nothing typed it lists what was opened from Search before. Typing shows
  * live results by kind with filter chips (A10), or says nothing matched (G03). Clearing keeps the
  * keyboard; Cancel empties the field and returns to browsing. The tab stays mounted, so leaving
@@ -12,25 +12,24 @@ import type { AlbumCard, ArtistCard, Track } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
 import { FlashList } from "@shopify/flash-list";
 import type { FlashListRef } from "@shopify/flash-list";
-import { Stack, router } from "expo-router";
+import { Stack, router, useFocusEffect, useNavigation } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { Search as SearchIcon } from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import type { SearchBarCommands } from "react-native-screens";
 import { useCSSVariable } from "uniwind";
 
 import { usePlayList } from "@/components/browse/play";
 import { useRecentSearches } from "@/components/browse/recent-searches-store";
+import { useOnSearchActivate } from "@/components/browse/search-activation";
 import { AlbumRow, ArtistRow, TrackRow, openAlbum, openArtist } from "@/components/browse/rows";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ChipGroup } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Notice } from "@/components/ui/notice";
 import { SectionHeader } from "@/components/ui/section-header";
 import type { SectionAction } from "@/components/ui/section-header";
-import { Text } from "@/components/ui/text";
 import { countOf } from "@/lib/format";
 import { distinctSongs } from "@/lib/history";
 import { recentAlbum, recentArtist, recentKey, recentTrack } from "@/lib/recent-searches";
@@ -119,6 +118,27 @@ export default function Search() {
   const [focused, setFocused] = useState(false);
   const [filter, setFilter] = useState<SearchFilter>("all");
   const query = useSettled(typed);
+
+  const navigation = useNavigation();
+  // Set when the Search tab is selected while another tab is on screen; the field focuses once
+  // this screen is.
+  const focusOnArrival = useRef(false);
+
+  useOnSearchActivate(
+    useCallback(() => {
+      if (navigation.isFocused()) field.current?.focus();
+      else focusOnArrival.current = true;
+    }, [navigation]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusOnArrival.current) return;
+
+      focusOnArrival.current = false;
+      field.current?.focus();
+    }, []),
+  );
 
   const results = useHeld(
     useRead("search", query === "" ? "skip" : { query, limit: RESULT_LIMIT }),
@@ -321,27 +341,12 @@ export default function Search() {
                 />
               </View>
             )
-          ) : browsing ? (
-            <View className="px-mobile-edge pb-6">
-              <Text variant="lede" tone="muted">
-                Find something you love.
-              </Text>
-            </View>
           ) : null
         }
         ListFooterComponent={
           <>
             {searching && results !== undefined && foundNothing(results) ? (
               <NoResults query={query} onEdit={() => field.current?.focus()} />
-            ) : null}
-            {browsing ? (
-              <View className="px-mobile-edge">
-                <Notice
-                  icon={SearchIcon}
-                  title="Search your collection"
-                  body="Songs, albums, and artists from the libraries you can access."
-                />
-              </View>
             ) : null}
             <View className="h-ios-180" />
           </>

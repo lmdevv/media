@@ -1,7 +1,7 @@
 /**
- * Paper's list row (pages 12 · 04 and 13): 64pt tall, a fixed leading lane (48pt art or a 32pt
- * icon slot), title over subtitle, and a fixed 32pt trailing lane, with a full-width hairline
- * under every row. The lanes keep their width when empty, so columns line up across rows.
+ * Paper's list row (pages 12 · 04 and 13): at least 56pt tall (64pt with 48pt art), a fixed leading
+ * lane (48pt art or a 32pt icon slot), title over subtitle, and a fixed 32pt trailing lane, with a
+ * full-width hairline under every row. The lanes keep their width when empty, so columns line up across rows.
  */
 import { Check, ChevronRight, Ellipsis } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
@@ -95,7 +95,7 @@ export function Row({
   // The trailing lane sits beside the row's own target, not inside it, so VoiceOver reaches its
   // action (an ellipsis menu) as a separate button.
   return (
-    <View className="min-h-16 flex-row items-center gap-3 border-b border-border py-2">
+    <View className="min-h-row-touch flex-row items-center gap-3 border-b border-border py-2">
       {onPress === undefined && onLongPress === undefined ? (
         <View className={lane} accessible accessibilityLabel={label}>
           {main}

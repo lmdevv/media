@@ -1,34 +1,45 @@
 /**
- * The upcoming queue with drag to reorder (B03) and remove (B04). Holding a row's handle lifts a
- * copy of the row that follows the finger, the rows between slide apart to show where it will
- * land, and the list scrolls while the finger rests near an edge. The drag runs on the UI thread;
- * only the drop crosses into React, which shows the new order at once and sends one move.
+ * The upcoming queue with drag to reorder (B03) and swipe to remove (B04). Holding a row's handle
+ * lifts a copy of the row that follows the finger, the rows between slide apart to show where it
+ * will land, and the list scrolls while the finger rests near an edge. The drag runs on the UI
+ * thread; only the drop crosses into React, which shows the new order at once and sends one move.
+ * Swiping a row left uncovers Remove; VoiceOver offers the same as a row action.
  */
 import { FlashList } from "@shopify/flash-list";
 import type { FlashListRef } from "@shopify/flash-list";
 import * as Haptics from "expo-haptics";
-import { Equal, X } from "lucide-react-native";
+import { Menu } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
 import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import type { SharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 
+import { Artwork } from "@/components/ui/artwork";
 import { Icon } from "@/components/ui/icon";
-import { IconButton } from "@/components/ui/icon-button";
-import { Row } from "@/components/ui/row";
+import { Text } from "@/components/ui/text";
 import { dropIndex, edgeScroll, moved, shiftOf } from "@/lib/reorder";
 import type { QueueItem } from "@/player";
 
 /** How long the rows take to slide out of the lifted row's way. */
 const SHIFT_MS = 150;
+
+/** How far a swiped row slides to uncover Remove: the action's width, Paper's 104pt. */
+const REMOVE_WIDTH = 104;
+
+/** A swipe faster than this, in points a second, opens or closes the row whatever its distance. */
+const FLICK_SPEED = 500;
+
+/** Paper's 220ms damped spring with no bounce (A17), for a row settling open or closed. */
+const SETTLE = { duration: 220, dampingRatio: 1 } as const;
 
 /** The drag in progress, shared between the cells and the lifted copy. */
 interface Drag {
@@ -54,7 +65,7 @@ interface RowActions {
   readonly onRemove: (item: QueueItem) => void;
 }
 
-/** The two-line handle Paper draws; holding it lifts the row. */
+/** The three-line handle Paper draws; holding it lifts the row. */
 function Handle({
   index,
   title,
@@ -104,62 +115,142 @@ function Handle({
           actions.onDrop(index, Math.max(0, index + step));
         }}
       >
-        <Icon icon={Equal} size="inline" />
+        <Icon icon={Menu} tone="muted" size="inline" />
       </View>
     </GestureDetector>
   );
 }
 
-/** A queue row: remove (in edit mode), art, title, artist, and the handle. */
+/** A queue song: 40pt art, title over artist, then the handle in a fixed 32pt lane. */
+export function QueueLine({
+  item,
+  trailing,
+}: {
+  readonly item: QueueItem;
+  readonly trailing?: ReactNode;
+}) {
+  return (
+    <>
+      <Artwork
+        url={item.artUrl}
+        recyclingKey={item.itemId}
+        className="size-row shrink-0 rounded-sm"
+      />
+      <View className="min-w-0 flex-1">
+        <Text variant="calloutMedium" numberOfLines={1}>
+          {item.title}
+        </Text>
+        <Text variant="secondary" tone="muted" numberOfLines={1}>
+          {item.artist}
+        </Text>
+      </View>
+      <View className="w-8 shrink-0 items-center">{trailing}</View>
+    </>
+  );
+}
+
+/** A queue row: tap to play it, hold the handle to move it, swipe left to uncover Remove (B04). */
 function QueueRow({
   item,
   index,
-  editing,
   drag,
   actions,
+  background,
 }: {
   readonly item: QueueItem;
   readonly index: number;
-  readonly editing: boolean;
   readonly drag: Drag | null;
   readonly actions: RowActions;
+  /** The sheet's color, so the row covers Remove until it slides aside. */
+  readonly background: string;
 }) {
+  const offset = useSharedValue(0);
+  const start = useSharedValue(0);
+  const speed = useSharedValue(0);
+
+  // A recycled cell starts closed when it shows another song.
+  useEffect(() => {
+    offset.value = 0;
+  }, [offset, item.itemId]);
+
+  const remove = () => {
+    offset.value = 0;
+    actions.onRemove(item);
+  };
+
+  const swipe = usePanGesture({
+    enabled: drag !== null,
+    activeOffsetX: [-10, 10],
+    failOffsetY: [-10, 10],
+    onBegin: () => {
+      "worklet";
+      start.value = offset.value;
+    },
+    onUpdate: (event) => {
+      "worklet";
+      offset.value = Math.min(0, Math.max(-REMOVE_WIDTH, start.value + event.translationX));
+      speed.value = event.velocityX;
+    },
+    onFinalize: () => {
+      "worklet";
+
+      const open =
+        speed.value < -FLICK_SPEED ||
+        (speed.value <= FLICK_SPEED && offset.value < -REMOVE_WIDTH / 2);
+
+      speed.value = 0;
+      offset.value = withSpring(open ? -REMOVE_WIDTH : 0, SETTLE);
+    },
+  });
+
+  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
+  // Remove stays hidden while the row is closed, so nothing of it shows around the row's edges.
+  const uncovered = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
+
+  const handle =
+    drag === null ? (
+      <Icon icon={Menu} tone="muted" size="inline" />
+    ) : (
+      <Handle index={index} title={item.title} drag={drag} actions={actions} />
+    );
+
   return (
-    <View className="flex-row items-center gap-2 bg-canvas">
-      {editing ? (
-        <IconButton
-          icon={X}
-          label={`Remove ${item.title}`}
-          size="inline"
-          className="-mx-3"
-          onPress={() => {
-            actions.onRemove(item);
-          }}
-        />
-      ) : null}
-      <View className="min-w-0 flex-1">
-        <Row
-          title={item.title}
-          subtitle={item.artist}
-          leading={{ kind: "art", url: item.artUrl, recyclingKey: item.itemId }}
-          onPress={
-            editing
-              ? undefined
-              : () => {
-                  actions.onJump(item);
-                }
-          }
-          trailing={
-            drag === null ? (
-              <View className="size-hit-target items-center justify-center">
-                <Icon icon={Equal} size="inline" />
-              </View>
-            ) : (
-              <Handle index={index} title={item.title} drag={drag} actions={actions} />
-            )
-          }
-        />
-      </View>
+    <View>
+      <Animated.View style={uncovered} className="absolute inset-y-0 right-0">
+        <Pressable
+          accessible={false}
+          onPress={remove}
+          className="h-full w-ios-104 items-center justify-center bg-danger active:opacity-80"
+        >
+          <Text variant="label" tone="onAccent">
+            Remove
+          </Text>
+        </Pressable>
+      </Animated.View>
+      <GestureDetector gesture={swipe}>
+        <Animated.View style={[slide, { backgroundColor: background }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${item.title}, ${item.artist}`}
+            accessibilityHint="Plays this song"
+            accessibilityActions={[{ name: "remove", label: "Remove" }]}
+            onAccessibilityAction={remove}
+            onPress={() => {
+              // A tap on an open row closes it rather than playing the song.
+              if (offset.value < 0) {
+                offset.value = withSpring(0, SETTLE);
+
+                return;
+              }
+
+              actions.onJump(item);
+            }}
+            className="min-h-row-touch flex-row items-center gap-3 px-mobile-edge py-2 active:opacity-60"
+          >
+            <QueueLine item={item} trailing={handle} />
+          </Pressable>
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 }
@@ -203,13 +294,13 @@ function Cell({
 export interface ReorderListProps {
   /** The songs after the current one that the listener queued. */
   readonly items: ReadonlyArray<QueueItem>;
-  /** B04: rows show a remove button and don't jump when tapped. */
-  readonly editing: boolean;
+  /** The page color under the rows, which the lifted row carries with it. */
+  readonly background: string;
   /** Moves the song at `from` to `to`, both indexes into `items`. */
   readonly onMove: (item: QueueItem, to: number) => void;
   readonly onJump: (item: QueueItem) => void;
   readonly onRemove: (item: QueueItem) => void;
-  /** Above the rows: the current song, the modes, and the section title. */
+  /** Above the rows: the section title. */
   readonly header: ReactNode;
   /** Under the rows: what autoplay added. */
   readonly footer?: ReactNode;
@@ -218,7 +309,7 @@ export interface ReorderListProps {
 /** The queue list with its header and footer. */
 export function ReorderList({
   items,
-  editing,
+  background,
   onMove,
   onJump,
   onRemove,
@@ -349,14 +440,13 @@ export function ReorderList({
       <FlashList
         ref={list}
         data={shown}
-        extraData={editing}
         keyExtractor={(item) => item.itemId}
         scrollEnabled={lifted === null}
         onScroll={(event) => {
           drag.scrollY.value = event.nativeEvent.contentOffset.y;
         }}
         scrollEventThrottle={16}
-        contentContainerClassName="px-mobile-edge pb-row"
+        contentContainerClassName="pb-row"
         ListHeaderComponent={
           <View
             onLayout={(event) => {
@@ -369,23 +459,25 @@ export function ReorderList({
         ListFooterComponent={footer === undefined ? null : <>{footer}</>}
         renderItem={({ item, index }) => (
           <Cell index={index} drag={drag}>
-            <QueueRow item={item} index={index} editing={editing} drag={drag} actions={actions} />
+            <QueueRow
+              item={item}
+              index={index}
+              drag={drag}
+              actions={actions}
+              background={background}
+            />
           </Cell>
         )}
       />
-      <Animated.View
-        pointerEvents="none"
-        style={ghost}
-        className="absolute top-0 right-0 left-0 px-mobile-edge"
-      >
+      <Animated.View pointerEvents="none" style={ghost} className="absolute top-0 right-0 left-0">
         {liftedItem === undefined ? null : (
-          <View className="rounded-md bg-canvas shadow-lg">
+          <View className="rounded-md shadow-lg">
             <QueueRow
               item={liftedItem}
               index={-1}
-              editing={editing}
               drag={null}
               actions={actions}
+              background={background}
             />
           </View>
         )}

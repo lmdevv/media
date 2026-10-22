@@ -2,13 +2,14 @@
  * A pushed page whose body is a long list of songs (C02, C03, C11): Paper's nav bar stuck to the
  * top, the page's own header (hero, privacy row, Play and Shuffle), then one row per song in a
  * FlashList, so a playlist of two thousand songs scrolls as lightly as one of twenty. The list is
- * the page's root scroll view, where UIKit finds it to minimize the system tab bar.
+ * the page's content, so scrolling it minimizes the system tab bar.
  */
 import { FlashList } from "@shopify/flash-list";
 import type { ReactNode } from "react";
 import { View } from "react-native";
 
 import { openSongActions } from "@/components/browse/rows";
+import { ContentScroll } from "@/components/ui/content-scroll";
 import { NavBar } from "@/components/ui/nav-bar";
 import type { NavBarProps } from "@/components/ui/nav-bar";
 import { Row, RowMore } from "@/components/ui/row";
@@ -95,29 +96,31 @@ export function SongListPage({ bar, header, songs, onPlay, onEndReached }: SongL
   }
 
   return (
-    <FlashList
-      data={cells}
-      extraData={playingId}
-      stickyHeaderIndices={STICKY_BAR}
-      contentInsetAdjustmentBehavior="never"
-      keyExtractor={(cell) => (cell.kind === "song" ? cell.entry.key : cell.kind)}
-      getItemType={(cell) => cell.kind}
-      onEndReached={onEndReached}
-      onEndReachedThreshold={1}
-      ListFooterComponent={<View className="h-ios-180" />}
-      renderItem={({ item }) => {
-        if (item.kind === "bar") return <NavBar {...bar} />;
+    <ContentScroll>
+      <FlashList
+        data={cells}
+        extraData={playingId}
+        stickyHeaderIndices={STICKY_BAR}
+        contentInsetAdjustmentBehavior="never"
+        keyExtractor={(cell) => (cell.kind === "song" ? cell.entry.key : cell.kind)}
+        getItemType={(cell) => cell.kind}
+        onEndReached={onEndReached}
+        onEndReachedThreshold={1}
+        ListFooterComponent={<View className="h-ios-180" />}
+        renderItem={({ item }) => {
+          if (item.kind === "bar") return <NavBar {...bar} />;
 
-        if (item.kind === "header") return <View className="px-mobile-edge">{header}</View>;
+          if (item.kind === "header") return <View className="px-mobile-edge">{header}</View>;
 
-        return (
-          <SongRow
-            entry={item.entry}
-            active={item.entry.song !== null && item.entry.song.id === playingId}
-            onPress={() => onPlay(item.playIndex)}
-          />
-        );
-      }}
-    />
+          return (
+            <SongRow
+              entry={item.entry}
+              active={item.entry.song !== null && item.entry.song.id === playingId}
+              onPress={() => onPlay(item.playIndex)}
+            />
+          );
+        }}
+      />
+    </ContentScroll>
   );
 }

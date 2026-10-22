@@ -1,6 +1,4 @@
 /** Counts and labels as Paper words them, such as `1,248 songs · 126 albums · 84 artists`. */
-import type { LibraryVisibility } from "@music/commands/models";
-
 const grouped = new Intl.NumberFormat("en-US");
 
 /** A count grouped as Paper writes it: `1,248`. */
@@ -21,13 +19,3 @@ export const librarySummary = (stats: {
     countOf(stats.albums, "album"),
     countOf(stats.artists, "artist"),
   ].join(" · ");
-
-const VISIBILITY = {
-  shared: "Shared",
-  restricted: "Some people",
-  private: "Only you",
-} as const satisfies Record<LibraryVisibility, string>;
-
-/** Who hears a library, then its size, as A02's library rows say: `Shared · 1,106 songs`. */
-export const libraryLine = (visibility: LibraryVisibility, tracks: number): string =>
-  `${VISIBILITY[visibility]} · ${countOf(tracks, "song")}`;

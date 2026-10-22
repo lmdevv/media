@@ -1,37 +1,34 @@
 /**
- * Playing next (B03, H06) and its edit mode (B04): the current song, the shuffle, repeat, and
- * autoplay chips, then the songs queued after it, which drag to reorder and, in edit mode, remove.
- * Songs autoplay added follow under their own heading, as on the web.
+ * The queue inside Now Playing (B03, B04, H06), as Apple Music shows it: shuffle, repeat, and
+ * autoplay as three pills, then "Playing Next" with the songs queued after the current one, which
+ * drag to reorder and swipe left to remove. Songs autoplay added follow under "Continue Playing",
+ * as on the web. The rows fade out above the controls.
  */
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { Check, ListOrdered, Pause, Play } from "lucide-react-native";
-import { useState } from "react";
-import { Pressable, View } from "react-native";
-import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
+import type { LucideIcon } from "lucide-react-native";
+import { Infinity as Endless, Repeat, Repeat1, Shuffle } from "lucide-react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
-import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
-import { IconButton } from "@/components/ui/icon-button";
-import { NavBar } from "@/components/ui/nav-bar";
-import { Row } from "@/components/ui/row";
-import { SectionHeader } from "@/components/ui/section-header";
 import { Text } from "@/components/ui/text";
-import { playsOn } from "@/lib/playback-format";
+import { clearOf } from "@/lib/color";
 import { usePlayer, usePlayerActions } from "@/player";
 import type { QueueItem } from "@/player";
 
-import { MenuButton } from "./menu-button";
-import { ReorderList } from "./reorder-list";
+import { QueueLine, ReorderList } from "./reorder-list";
 
-const REPEAT_CHIP = { off: "Repeat", all: "Repeat", one: "Repeat one" } as const;
+const REPEAT_LABELS = { off: "Repeat off", all: "Repeat all", one: "Repeat one" } as const;
 
-/** A mode chip: on is the text color with inverse label, off sits on the surface. */
-function ModeChip({
+/** A mode pill: the text color with an inverse glyph when on, a faint wash of it when off. */
+function ModePill({
+  icon,
   label,
   on,
   onPress,
 }: {
+  readonly icon: LucideIcon;
   readonly label: string;
   readonly on: boolean;
   readonly onPress: () => void;
@@ -45,54 +42,66 @@ function ModeChip({
         void Haptics.selectionAsync();
         onPress();
       }}
-      className={`rounded-full px-4 py-2 active:opacity-70 ${on ? "bg-text" : "bg-surface"}`}
+      className={`h-ios-36 flex-1 items-center justify-center rounded-full active:opacity-70 ${on ? "bg-text" : "bg-text/8"}`}
     >
-      <Text variant="secondaryStrong" tone={on ? "inverse" : "default"}>
-        {label}
-      </Text>
+      <Icon icon={icon} tone={on ? "inverse" : "default"} size="inline" />
     </Pressable>
   );
 }
 
-/** The current song, the mode chips, and the "Next in queue" heading. */
-function Header({ current, empty }: { readonly current: QueueItem; readonly empty: boolean }) {
-  const { status, shuffle, repeat, autoplay } = usePlayer();
+/** Shuffle, repeat, and autoplay. */
+export function ModePills() {
+  const { shuffle, repeat, autoplay } = usePlayer();
   const actions = usePlayerActions();
-  const playing = playsOn(status);
 
   return (
-    <View>
-      <Row
-        title={current.title}
-        subtitle={current.artist}
-        active
-        leading={{ kind: "art", url: current.artUrl, recyclingKey: current.itemId }}
-        accessibilityLabel={`Now playing: ${current.title}, ${current.artist}`}
-        trailing={<Icon icon={playing ? Pause : Play} tone="muted" size="inline" filled />}
+    <View className="flex-row gap-2 py-2">
+      <ModePill
+        icon={Shuffle}
+        label="Shuffle"
+        on={shuffle}
+        onPress={() => void actions.setShuffle(!shuffle)}
       />
-      <View className="flex-row gap-2 py-3">
-        <ModeChip label="Shuffle" on={shuffle} onPress={() => void actions.setShuffle(!shuffle)} />
-        <ModeChip
-          label={REPEAT_CHIP[repeat]}
-          on={repeat !== "off"}
-          onPress={() => void actions.cycleRepeat()}
-        />
-        <ModeChip
-          label="Autoplay"
-          on={autoplay}
-          onPress={() => void actions.setAutoplay(!autoplay)}
-        />
+      <ModePill
+        icon={repeat === "one" ? Repeat1 : Repeat}
+        label={REPEAT_LABELS[repeat]}
+        on={repeat !== "off"}
+        onPress={() => void actions.cycleRepeat()}
+      />
+      <ModePill
+        icon={Endless}
+        label="Autoplay"
+        on={autoplay}
+        onPress={() => void actions.setAutoplay(!autoplay)}
+      />
+    </View>
+  );
+}
+
+/** "Playing Next" and Clear, or what an empty queue says. */
+function PlayingNext({ empty }: { readonly empty: boolean }) {
+  return (
+    <View className="px-mobile-edge">
+      <View className="flex-row items-center justify-between pt-4 pb-1">
+        <Text variant="subheading" accessibilityRole="header">
+          Playing Next
+        </Text>
+        {empty ? null : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Clear queue"
+            hitSlop={12}
+            onPress={() => router.push("/player/clear-queue")}
+            className="active:opacity-60"
+          >
+            <Text variant="secondaryStrong" tone="accent">
+              Clear
+            </Text>
+          </Pressable>
+        )}
       </View>
-      <SectionHeader
-        title="Next in queue"
-        action={
-          empty
-            ? undefined
-            : { kind: "link", label: "Clear", onPress: () => router.push("/player/clear-queue") }
-        }
-      />
       {empty ? (
-        <Text tone="muted" className="pb-2">
+        <Text tone="muted" className="py-2">
           Nothing is queued after this song.
         </Text>
       ) : null}
@@ -101,116 +110,67 @@ function Header({ current, empty }: { readonly current: QueueItem; readonly empt
 }
 
 /** What autoplay added after the queued songs; tapping one plays it. */
-function AutoplaySection({ items }: { readonly items: ReadonlyArray<QueueItem> }) {
+function ContinuePlaying({ items }: { readonly items: ReadonlyArray<QueueItem> }) {
   const { jump } = usePlayerActions();
 
   if (items.length === 0) return null;
 
   return (
     <View>
-      <SectionHeader title="Autoplay" />
+      <View className="px-mobile-edge pt-4 pb-1">
+        <Text variant="subheading" accessibilityRole="header">
+          Continue Playing
+        </Text>
+        <Text variant="secondary" tone="muted">
+          Autoplay · similar in your library
+        </Text>
+      </View>
       {items.map((item) => (
-        <Row
+        <Pressable
           key={item.itemId}
-          title={item.title}
-          subtitle={item.artist}
-          leading={{ kind: "art", url: item.artUrl, recyclingKey: item.itemId }}
+          accessibilityRole="button"
+          accessibilityLabel={`${item.title}, ${item.artist}`}
+          accessibilityHint="Plays this song"
           onPress={() => void jump(item.itemId)}
-        />
+          className="min-h-row-touch flex-row items-center gap-3 px-mobile-edge py-2 active:opacity-60"
+        >
+          <QueueLine item={item} />
+        </Pressable>
       ))}
     </View>
   );
 }
 
-/** The Playing next screen. */
-export function QueueScreen() {
+/** The songs after the current one, on `background`, the sheet's color. */
+export function QueueList({ background }: { readonly background: string }) {
   const { queue, index, autoplay } = usePlayer();
   const actions = usePlayerActions();
-  const insets = useSafeAreaInsets();
-  const [editing, setEditing] = useState(false);
 
-  const current = queue[index];
   const upcoming = queue.slice(index + 1);
   const queued = upcoming.filter((item) => !item.autoplay);
   const added = upcoming.filter((item) => item.autoplay);
 
-  const trailing = editing ? (
-    <IconButton
-      icon={Check}
-      label="Done"
-      onPress={() => {
-        setEditing(false);
-      }}
-    />
-  ) : (
-    <MenuButton
-      label="Queue actions"
-      items={[
-        {
-          title: "Edit queue",
-          icon: "pencil",
-          onPress: () => {
-            setEditing(true);
-          },
-        },
-        {
-          title: "Clear queue",
-          icon: "trash",
-          destructive: true,
-          onPress: () => {
-            router.push("/player/clear-queue");
-          },
-        },
-      ]}
-    />
-  );
-
   return (
-    <View className="flex-1 bg-canvas" style={{ paddingBottom: insets.bottom }}>
-      {/* The queue sits in the Now Playing sheet, which starts below the status bar. */}
-      <SafeAreaInsetsContext value={{ ...insets, top: 0 }}>
-        {editing ? (
-          <NavBar
-            title="Edit queue"
-            trailing={trailing}
-            onBack={() => {
-              setEditing(false);
-            }}
-          />
-        ) : (
-          <NavBar title="Playing next" {...(current === undefined ? {} : { trailing })} />
-        )}
-      </SafeAreaInsetsContext>
-      {current === undefined ? (
-        <View className="px-mobile-edge">
-          <EmptyState
-            icon={ListOrdered}
-            title={"Nothing\nqueued."}
-            body={"Play a song and what comes\nnext shows up here."}
-          />
-        </View>
-      ) : (
-        <ReorderList
-          items={queued}
-          editing={editing}
-          onMove={(item, to) => void actions.moveInQueue(item.itemId, index + 1 + to)}
-          onJump={(item) => void actions.jump(item.itemId)}
-          onRemove={(item) => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            void actions.removeFromQueue(item.itemId);
-          }}
-          header={
-            editing ? (
-              <Text variant="callout" tone="muted">
-                Drag to reorder. Tap a minus to remove.
-              </Text>
-            ) : (
-              <Header current={current} empty={queued.length === 0} />
-            )
-          }
-          footer={editing || !autoplay ? undefined : <AutoplaySection items={added} />}
+    // The rows run to the sheet's edges, so a swiped row's Remove reaches the side of the screen.
+    <View className="-mx-mobile-edge min-h-0 flex-1 overflow-hidden">
+      <ReorderList
+        items={queued}
+        background={background}
+        onMove={(item, to) => void actions.moveInQueue(item.itemId, index + 1 + to)}
+        onJump={(item) => void actions.jump(item.itemId)}
+        onRemove={(item) => {
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          void actions.removeFromQueue(item.itemId);
+        }}
+        header={<PlayingNext empty={queued.length === 0} />}
+        footer={autoplay ? <ContinuePlaying items={added} /> : undefined}
+      />
+      <View className="absolute inset-x-0 bottom-0 h-12" pointerEvents="none">
+        <LinearGradient
+          colors={[clearOf(background), background]}
+          style={StyleSheet.absoluteFill}
         />
-      )}
+      </View>
     </View>
   );
 }

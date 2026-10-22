@@ -2,8 +2,8 @@
  * The chrome of a tab root (A01, A02 expanded; A14, A15 scrolled): a 34/40 heavy large title with
  * the account avatar (and an optional action), scrolling with the content, then once it has scrolled away a 44pt bar on the
  * page color with the centered 16/24 title and the avatar, and a short fade under it so rows slip
- * beneath rather than showing through. The scroll view is the page's root, where UIKit
- * finds it to minimize the system tab bar and move the mini player inline as the page scrolls.
+ * beneath rather than showing through. The scroll view is the page's content, so UIKit minimizes
+ * the system tab bar and moves the mini player inline as the page scrolls.
  */
 import { useRead } from "@music/sdk/react";
 import { LinearGradient } from "expo-linear-gradient";
@@ -20,6 +20,7 @@ import { clearOf } from "@/lib/color";
 import { useThemeColor } from "@/lib/theme-color";
 
 import { Avatar } from "./avatar";
+import { ContentScroll } from "./content-scroll";
 import { Text } from "./text";
 
 /** How far the content scrolls before the large title is gone and the compact bar takes over. */
@@ -120,27 +121,34 @@ export function TabRoot({ title, children, action }: TabRootProps) {
   };
 
   return (
-    <ScrollView
-      onScroll={onScroll}
-      scrollEventThrottle={16}
-      stickyHeaderIndices={STICKY_BAR}
-      contentInsetAdjustmentBehavior="never"
-      className="flex-1 bg-canvas"
-      contentContainerClassName="pb-ios-180"
-    >
-      <CompactBar title={title} collapsed={collapsed} action={action} />
-      <View className="-mt-hit-target min-h-row-touch flex-row items-center gap-2 px-mobile-edge pt-2 pb-3">
-        <Text variant="largeTitle" numberOfLines={1} accessibilityRole="header" className="flex-1">
-          {title}
-        </Text>
-        {/* The avatar and action stay in the bar above, so they are always on top to be tapped. */}
-        {action === undefined ? null : <View className="size-hit-target" />}
-        <View className="size-row" />
-      </View>
-      <View className="px-mobile-edge">
-        <ReconnectingNotice />
-        {children}
-      </View>
-    </ScrollView>
+    <ContentScroll>
+      <ScrollView
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        stickyHeaderIndices={STICKY_BAR}
+        contentInsetAdjustmentBehavior="never"
+        className="flex-1 bg-canvas"
+        contentContainerClassName="pb-ios-180"
+      >
+        <CompactBar title={title} collapsed={collapsed} action={action} />
+        <View className="-mt-hit-target min-h-row-touch flex-row items-center gap-2 px-mobile-edge pt-2 pb-3">
+          <Text
+            variant="largeTitle"
+            numberOfLines={1}
+            accessibilityRole="header"
+            className="flex-1"
+          >
+            {title}
+          </Text>
+          {/* The avatar and action stay in the bar above, so they are always on top to be tapped. */}
+          {action === undefined ? null : <View className="size-hit-target" />}
+          <View className="size-row" />
+        </View>
+        <View className="px-mobile-edge">
+          <ReconnectingNotice />
+          {children}
+        </View>
+      </ScrollView>
+    </ContentScroll>
   );
 }

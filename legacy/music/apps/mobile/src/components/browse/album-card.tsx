@@ -1,7 +1,8 @@
 /**
  * Paper's album card: art with 12pt corners, then the title at 16/24 semibold and the artist at
- * 13/18 muted. Rails use 168pt cards (A01), the artist page 144pt (A08), and the Albums grid lets
- * the card fill its column (A03). Tapping opens the album in the current tab's stack.
+ * 13/18 muted. Rails use 168pt cards (A01) and the Albums grid lets the card fill its column
+ * (A03). The artist page (A08b) uses 160pt cards with the year in place of the artist, whom the
+ * page already names. Tapping opens the album in the current tab's stack.
  */
 import type { AlbumCard as Album } from "@music/commands/models";
 import { Pressable, View } from "react-native";
@@ -13,7 +14,7 @@ import { openAlbum } from "./rows";
 
 const SIZES = {
   rail: { card: "w-ios-168", art: "size-ios-168" },
-  small: { card: "w-ios-144", art: "size-ios-144" },
+  artist: { card: "w-ios-160", art: "size-ios-160" },
   fill: { card: "w-full", art: "aspect-square w-full" },
 } as const;
 
@@ -31,6 +32,7 @@ export function AlbumCard({
   readonly onPress?: () => void;
 }) {
   const { card, art } = SIZES[size];
+  const year = album.year === null ? "" : String(album.year);
 
   return (
     <Pressable
@@ -45,7 +47,7 @@ export function AlbumCard({
           {album.title}
         </Text>
         <Text variant="secondary" tone="muted" numberOfLines={1}>
-          {album.artist}
+          {size === "artist" ? year : album.artist}
         </Text>
       </View>
     </Pressable>

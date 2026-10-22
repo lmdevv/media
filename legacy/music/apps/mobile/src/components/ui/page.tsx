@@ -1,10 +1,11 @@
 /**
- * A pushed page: the nav bar stuck to the top of a scroll view that is the page's root, so the
- * system tab bar still minimizes as the page scrolls. Content sits on Paper's 20pt edge.
+ * A pushed page: the nav bar stuck to the top of a scroll view that is the page's content, so the
+ * system tab bar minimizes as the page scrolls. Content sits on Paper's 20pt edge.
  */
 import type { ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 
+import { ContentScroll } from "./content-scroll";
 import { NavBar } from "./nav-bar";
 import type { NavBarProps } from "./nav-bar";
 
@@ -24,17 +25,19 @@ export interface PageProps extends NavBarProps {
 /** A scrolling pushed page with Paper's nav bar. */
 export function Page({ children, bottom = "tabs", ...bar }: PageProps) {
   return (
-    <ScrollView
-      stickyHeaderIndices={STICKY_BAR}
-      contentInsetAdjustmentBehavior="never"
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="interactive"
-      automaticallyAdjustKeyboardInsets
-      className="flex-1 bg-canvas"
-      contentContainerClassName={bottom === "tabs" ? "pb-ios-180" : "pb-row"}
-    >
-      <NavBar {...bar} />
-      <View className="px-mobile-edge">{children}</View>
-    </ScrollView>
+    <ContentScroll>
+      <ScrollView
+        stickyHeaderIndices={STICKY_BAR}
+        contentInsetAdjustmentBehavior="never"
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        automaticallyAdjustKeyboardInsets
+        className="flex-1 bg-canvas"
+        contentContainerClassName={bottom === "tabs" ? "pb-ios-180" : "pb-row"}
+      >
+        <NavBar {...bar} />
+        <View className="px-mobile-edge">{children}</View>
+      </ScrollView>
+    </ContentScroll>
   );
 }

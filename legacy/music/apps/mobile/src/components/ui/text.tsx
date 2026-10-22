@@ -24,8 +24,8 @@ const VARIANTS = {
   songTitle: "font-sans-heavy text-mobile-section leading-mobile-section",
   /** Section headers and sheet titles: 22/28 heavy, tight tracking. */
   section: "font-sans-heavy text-mobile-section leading-mobile-section tracking-tight",
-  /** A tab root's lede under its title, such as Search's (A09): 20/28 medium. */
-  lede: "font-sans-medium text-lg leading-lg",
+  /** A heading inside a sheet, such as the queue's "Playing Next" (B03): 16/24 heavy. */
+  subheading: "font-sans-heavy text-md leading-md",
   /** Body copy and field values: 16/24 regular. */
   body: "font-sans text-md leading-md",
   /** Row titles: 16/24 medium. */
@@ -57,6 +57,8 @@ const TONES = {
   onAccent: "text-on-accent",
   /** The page color on a text-colored fill, such as a selected chip. */
   inverse: "text-text-inverse",
+  /** White in both modes, over artwork darkened by the scrim (A08b's hero). */
+  overArt: "text-dark-text",
 } as const;
 
 /** A step of the type scale. */

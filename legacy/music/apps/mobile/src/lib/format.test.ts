@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { countOf, libraryLine, librarySummary } from "./format";
+import { countOf, librarySummary } from "./format";
 
 describe("countOf", () => {
   it("groups thousands and pluralizes", () => {
@@ -15,12 +15,5 @@ describe("librarySummary", () => {
     expect(librarySummary({ tracks: 1248, albums: 126, artists: 84 })).toBe(
       "1,248 songs · 126 albums · 84 artists",
     );
-  });
-});
-
-describe("libraryLine", () => {
-  it("says who hears the library, then its size", () => {
-    expect(libraryLine("shared", 1106)).toBe("Shared · 1,106 songs");
-    expect(libraryLine("private", 142)).toBe("Only you · 142 songs");
   });
 });

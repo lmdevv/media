@@ -17,8 +17,8 @@ export interface AlbumRailProps {
   readonly albums: ReadonlyArray<Album>;
   readonly action?: SectionAction | undefined;
   readonly first?: boolean;
-  /** 168pt cards on Home (A01), 144pt on an artist's page (A08). */
-  readonly size?: "rail" | "small";
+  /** 168pt cards on Home (A01); 160pt with the year on an artist's page (A08b). */
+  readonly size?: "rail" | "artist";
 }
 
 /** A titled, sideways-scrolling row of albums; nothing when there are none. */
