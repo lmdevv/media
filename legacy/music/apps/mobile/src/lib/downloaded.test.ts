@@ -3,13 +3,14 @@ import type { DownloadedItem } from "@music/sdk/downloads";
 import { describe, expect, it } from "vitest";
 
 import {
-  downloadedCount,
+  downloadedDetail,
   downloadedEmpty,
   downloadedLine,
   downloadedNote,
   downloadedSummary,
   downloadsFor,
   downloadsSettingsLine,
+  onThisPhone,
   storageLine,
 } from "./downloaded";
 
@@ -108,7 +109,14 @@ describe("Downloaded", () => {
   });
 
   it("counts songs on the Library row only once there are some", () => {
-    expect(downloadedCount(usage)).toBe("55 songs");
-    expect(downloadedCount({ tracks: 0, bytes: 0, freeBytes: null })).toBeNull();
+    expect(downloadedDetail(usage, false)).toBe("55 songs");
+    expect(downloadedDetail({ tracks: 0, bytes: 0, freeBytes: null }, false)).toBeNull();
+  });
+
+  it("gives the space on the Library row and the songs under its title while offline", () => {
+    expect(downloadedDetail(usage, true)).toBe("2.4 GB");
+    expect(downloadedDetail({ tracks: 0, bytes: 0, freeBytes: null }, true)).toBeNull();
+    expect(onThisPhone(usage)).toBe("55 songs on this iPhone");
+    expect(onThisPhone({ ...usage, tracks: 1 })).toBe("1 song on this iPhone");
   });
 });

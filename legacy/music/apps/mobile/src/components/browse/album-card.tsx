@@ -2,13 +2,14 @@
  * Paper's album card: art with 12pt corners, then the title at 16/24 semibold and the artist at
  * 13/18 muted. Rails use 168pt cards (A01) and the Albums grid lets the card fill its column
  * (A03). The artist page (A08b) uses 160pt cards with the year in place of the artist, whom the
- * page already names. Tapping opens the album in the current tab's stack.
+ * page already names. Tapping opens the album in the current tab's stack. A downloaded album
+ * (D14) draws its cover from this phone.
  */
-import type { AlbumCard as Album } from "@music/commands/models";
 import { Pressable, View } from "react-native";
 
 import { Artwork } from "@/components/ui/artwork";
 import { Text } from "@/components/ui/text";
+import type { CardAlbum } from "@/lib/offline-library";
 
 import { openAlbum } from "./rows";
 
@@ -27,7 +28,7 @@ export function AlbumCard({
   size = "rail",
   onPress,
 }: {
-  readonly album: Album;
+  readonly album: CardAlbum;
   readonly size?: AlbumCardSize;
   readonly onPress?: () => void;
 }) {

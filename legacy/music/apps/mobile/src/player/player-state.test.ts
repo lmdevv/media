@@ -13,6 +13,7 @@ import {
   nowPlayingOf,
   parseQuality,
   playsOnIos,
+  queueItemOf,
   roleOf,
   statusOf,
 } from "./player-state";
@@ -130,6 +131,13 @@ describe("player state", () => {
     );
     expect(nowPlayingOf(song, origin)).toMatchObject({ albumId: "album" });
     expect(nowPlayingOf(entry("a", true), origin)).not.toHaveProperty("albumId");
+  });
+
+  it("shows a downloaded song's cover from its file", () => {
+    const origin = ServerOrigin.make("https://music.example");
+
+    expect(nowPlayingOf(entry("a"), origin, "file:///art/abc").artUrl).toBe("file:///art/abc");
+    expect(queueItemOf(entry("a"), origin, "file:///art/abc").artUrl).toBe("file:///art/abc");
   });
 
   it("cycles repeat off, all, one, and back", () => {

@@ -81,14 +81,22 @@ export interface PlayerView {
   readonly following: boolean;
 }
 
-export const nowPlayingOf = (entry: QueueEntry, origin: ServerOrigin): NowPlaying => {
+/**
+ * The song at the queue's current index, as screens show it. `localArt` is the cover's file on
+ * this phone, for a downloaded song: it shows with no connection, unlike the server's.
+ */
+export const nowPlayingOf = (
+  entry: QueueEntry,
+  origin: ServerOrigin,
+  localArt: string | null = null,
+): NowPlaying => {
   const song: NowPlaying = {
     itemId: entry.itemId,
     trackId: entry.id,
     title: entry.title,
     artist: entry.artist,
     album: entry.album,
-    artUrl: resolveMediaUrl(origin, entry.artUrl),
+    artUrl: localArt ?? resolveMediaUrl(origin, entry.artUrl),
     durationMs: entry.durationMs,
     codec: entry.codec,
     lossless: entry.lossless,
@@ -103,12 +111,17 @@ export const nowPlayingOf = (entry: QueueEntry, origin: ServerOrigin): NowPlayin
     : { ...song, artistId: entry.artistId, albumId: entry.albumId };
 };
 
-export const queueItemOf = (entry: QueueEntry, origin: ServerOrigin): QueueItem => ({
+/** A queue entry as the queue shows it; `localArt` as for `nowPlayingOf`. */
+export const queueItemOf = (
+  entry: QueueEntry,
+  origin: ServerOrigin,
+  localArt: string | null = null,
+): QueueItem => ({
   itemId: entry.itemId,
   trackId: entry.id,
   title: entry.title,
   artist: entry.artist,
-  artUrl: resolveMediaUrl(origin, entry.artUrl),
+  artUrl: localArt ?? resolveMediaUrl(origin, entry.artUrl),
   durationMs: entry.durationMs,
   autoplay: entry.autoplay,
 });

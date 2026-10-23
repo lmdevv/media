@@ -8,6 +8,7 @@ import { router } from "expo-router";
 import { Heart, ListMusic, Plus, Users } from "lucide-react-native";
 import { useState } from "react";
 
+import { OfflineNotice, OfflineState } from "@/components/states/offline-notice";
 import { Button } from "@/components/ui/button";
 import { ChipGroup } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -16,6 +17,7 @@ import { Row, RowChevron } from "@/components/ui/row";
 import { TabRoot } from "@/components/ui/tab-root";
 import { countOf } from "@/lib/format";
 import { playlistLine } from "@/lib/playlist-format";
+import { useServerReach } from "@/session/server-reach";
 
 /** Which playlists the list shows. */
 type Shelf = "yours" | "shared";
@@ -107,11 +109,21 @@ function Shared() {
 export default function Playlists() {
   const [shelf, setShelf] = useState<Shelf>("yours");
 
+  // A launch that never reached the server has no playlists to show, and can't make one.
+  if (useServerReach() === "offline") {
+    return (
+      <TabRoot title="Playlists">
+        <OfflineState body="Your playlists come back when the server answers." />
+      </TabRoot>
+    );
+  }
+
   return (
     <TabRoot
       title="Playlists"
       action={<IconButton icon={Plus} label="New playlist" onPress={openNew} />}
     >
+      <OfflineNotice variant="card" className="mb-1" />
       <ChipGroup label="Show" options={SHELVES} value={shelf} onChange={setShelf} />
       {shelf === "yours" ? <Yours /> : <Shared />}
     </TabRoot>

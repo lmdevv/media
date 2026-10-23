@@ -14,6 +14,11 @@ export type SessionPhase =
   | { readonly kind: "connecting" }
   /** The remembered server has not answered for a while (G05). */
   | { readonly kind: "unreachable" }
+  /**
+   * The remembered server has not answered since launch, and this install keeps downloads for the
+   * account last signed in to it: the app opens on them (D11).
+   */
+  | { readonly kind: "offline" }
   /** The server has people, and this install isn't signed in (E03). */
   | { readonly kind: "signedOut" }
   /** The server ended this install's session because an admin suspended the account (G17). */
@@ -56,6 +61,8 @@ export interface PhaseInputs {
   readonly connected: boolean;
   /** Whether the server has been silent long enough to call it unreachable. */
   readonly silent: boolean;
+  /** Whether this install keeps downloads for the account last signed in to this server. */
+  readonly hasDownloads: boolean;
   readonly auth: "loading" | "signedIn" | "signedOut";
   /** Why the server ended this install's session, once it said; null while nothing ended. */
   readonly ended: SessionEnd | null;
@@ -65,8 +72,11 @@ export interface PhaseInputs {
   readonly progress: SetupProgress;
 }
 
-const waiting = (inputs: PhaseInputs): SessionPhase =>
-  inputs.silent ? { kind: "unreachable" } : { kind: "connecting" };
+const waiting = (inputs: PhaseInputs): SessionPhase => {
+  if (!inputs.silent) return { kind: "connecting" };
+
+  return inputs.hasDownloads ? { kind: "offline" } : { kind: "unreachable" };
+};
 
 /**
  * The phase for what the server has said so far. A server with nobody on it always asks for the
@@ -101,16 +111,23 @@ export const sessionPhase = (inputs: PhaseInputs): SessionPhase => {
 /** A phase the root stack has screens for. */
 export type SettledPhase = Exclude<SessionPhase, { readonly kind: "connecting" }>;
 
+/** A server that hasn't answered since launch: out of reach, or offline with downloads. */
+const isSilent = (phase: SessionPhase): boolean =>
+  phase.kind === "unreachable" || phase.kind === "offline";
+
 /**
  * `next` when it has screens, else the phase already on screen. A reconnect or a token refresh
  * then keeps the screens, and their navigation, in place instead of falling back to the splash,
  * and losing the server after it answered stays on screen too (G04 reconnects in place); only a
- * server that never answered this launch shows as unreachable.
+ * server that never answered this launch shows as unreachable, or as offline with downloads.
  */
 export const settle = (next: SessionPhase, shown: SettledPhase | null): SettledPhase | null => {
   if (next.kind === "connecting") return shown;
 
-  if (next.kind === "unreachable" && shown !== null && shown.kind !== "disconnected") return shown;
+  const answered = shown !== null && shown.kind !== "disconnected" && !isSilent(shown);
 
-  return next;
+  // The downloads stay on show once they are, even when the last one goes: G05 would close them.
+  const offline = shown?.kind === "offline" && next.kind === "unreachable";
+
+  return (isSilent(next) && answered) || offline ? shown : next;
 };

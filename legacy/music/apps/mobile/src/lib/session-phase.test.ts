@@ -6,6 +6,7 @@ import type { PhaseInputs } from "./session-phase";
 const signedIn: PhaseInputs = {
   connected: true,
   silent: false,
+  hasDownloads: false,
   auth: "signedIn",
   ended: null,
   setup: { hasUsers: true, hasLibraries: true },
@@ -22,6 +23,22 @@ describe("sessionPhase", () => {
   it("waits for the server, then calls a silent one unreachable", () => {
     expect(sessionPhase({ ...signedIn, setup: undefined }).kind).toBe("connecting");
     expect(sessionPhase({ ...signedIn, auth: "loading", silent: true }).kind).toBe("unreachable");
+  });
+
+  it("opens on the downloads when a silent server's account keeps some here", () => {
+    const silent = { ...signedIn, hasDownloads: true, silent: true };
+
+    expect(sessionPhase({ ...silent, auth: "loading" }).kind).toBe("offline");
+    expect(sessionPhase({ ...silent, setup: undefined }).kind).toBe("offline");
+    expect(sessionPhase({ ...silent, role: undefined }).kind).toBe("offline");
+    expect(sessionPhase({ ...silent, silent: false, auth: "loading" }).kind).toBe("connecting");
+  });
+
+  it("follows what a server says once it answers, downloads or not", () => {
+    const answered = { ...signedIn, hasDownloads: true, silent: true };
+
+    expect(sessionPhase(answered).kind).toBe("ready");
+    expect(sessionPhase({ ...answered, auth: "signedOut" }).kind).toBe("signedOut");
   });
 
   it("asks for the owner on a server without people, even with an old session", () => {
@@ -109,5 +126,22 @@ describe("settle", () => {
 
   it("moves to a new phase at once", () => {
     expect(settle({ kind: "signedOut" }, { kind: "ready" })).toEqual({ kind: "signedOut" });
+  });
+
+  it("opens offline only on a server that never answered this launch", () => {
+    expect(settle({ kind: "offline" }, null)).toEqual({ kind: "offline" });
+    expect(settle({ kind: "offline" }, { kind: "unreachable" })).toEqual({ kind: "offline" });
+    expect(settle({ kind: "offline" }, { kind: "ready" })).toEqual({ kind: "ready" });
+    expect(settle({ kind: "offline" }, { kind: "signedOut" })).toEqual({ kind: "signedOut" });
+  });
+
+  it("keeps the downloads on show when the last one goes, rather than closing them for G05", () => {
+    expect(settle({ kind: "unreachable" }, { kind: "offline" })).toEqual({ kind: "offline" });
+  });
+
+  it("keeps the downloads on show while the server is heard from, then leaves for its phase", () => {
+    expect(settle({ kind: "connecting" }, { kind: "offline" })).toEqual({ kind: "offline" });
+    expect(settle({ kind: "ready" }, { kind: "offline" })).toEqual({ kind: "ready" });
+    expect(settle({ kind: "signedOut" }, { kind: "offline" })).toEqual({ kind: "signedOut" });
   });
 });

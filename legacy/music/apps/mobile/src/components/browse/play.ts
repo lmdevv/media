@@ -23,10 +23,10 @@ export const usePlayList = (): PlayList => {
     playAll: (trackIds, shuffle) => {
       if (trackIds.length === 0) return;
 
-      void (async () => {
-        await setShuffle(shuffle);
-        await play(trackIds, shuffle ? Math.floor(Math.random() * trackIds.length) : 0);
-      })();
+      // Sent together, in this order, and the session runs them in order. Waiting for the shuffle
+      // first would hold the play back while the server is gone, though the play could start here.
+      void setShuffle(shuffle);
+      void play(trackIds, shuffle ? Math.floor(Math.random() * trackIds.length) : 0);
     },
   };
 };

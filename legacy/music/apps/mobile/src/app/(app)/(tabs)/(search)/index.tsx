@@ -24,6 +24,7 @@ import { usePlayList } from "@/components/browse/play";
 import { useRecentSearches } from "@/components/browse/recent-searches-store";
 import { useOnSearchActivate } from "@/components/browse/search-activation";
 import { AlbumRow, ArtistRow, TrackRow, openAlbum, openArtist } from "@/components/browse/rows";
+import { OfflineNotice, OfflineState } from "@/components/states/offline-notice";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ChipGroup } from "@/components/ui/chip";
@@ -38,6 +39,7 @@ import { SEARCH_FILTERS, foundNothing, searchRows } from "@/lib/search-results";
 import type { SearchFilter, SearchRow, TopResult } from "@/lib/search-results";
 import { useThemeColor } from "@/lib/theme-color";
 import { useNowPlaying } from "@/player";
+import { useServerReach } from "@/session/server-reach";
 
 /** How long typing pauses before the search runs. */
 const DEBOUNCE_MS = 250;
@@ -148,6 +150,8 @@ export default function Search() {
   const { recents, remember, clear } = useRecentSearches();
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom } = usePlayList();
+  // A launch that never reached the server has nothing to search.
+  const offline = useServerReach() === "offline";
 
   const searching = query !== "" && typed.trim() !== "";
   const played = distinctSongs(plays ?? [], RECENTLY_PLAYED);
@@ -322,7 +326,7 @@ export default function Search() {
         ref={list}
         // React Native clamps scrolling at zero, but iOS insets the list for the bar above it.
         scrollToOverflowEnabled
-        data={rows}
+        data={offline ? [] : rows}
         extraData={playingId}
         keyExtractor={(row) => row.key}
         getItemType={(row) => row.kind}
@@ -330,18 +334,21 @@ export default function Search() {
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
-          searching ? (
-            results === undefined || foundNothing(results) ? null : (
-              <View className="px-mobile-edge">
-                <ChipGroup
-                  label="Show"
-                  options={SEARCH_FILTERS}
-                  value={filter}
-                  onChange={setFilter}
-                />
-              </View>
-            )
-          ) : null
+          <View className="px-mobile-edge">
+            {offline ? (
+              <OfflineState body="Search comes back when the server answers." />
+            ) : (
+              <OfflineNotice variant="card" className="mb-1" />
+            )}
+            {searching && results !== undefined && !foundNothing(results) ? (
+              <ChipGroup
+                label="Show"
+                options={SEARCH_FILTERS}
+                value={filter}
+                onChange={setFilter}
+              />
+            ) : null}
+          </View>
         }
         ListFooterComponent={
           <>

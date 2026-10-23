@@ -1,4 +1,4 @@
-import type { TrackId } from "@music/commands/ids";
+import { TrackId } from "@music/commands/ids";
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineEvent, PlayerEngine } from "./engine";
@@ -197,6 +197,28 @@ describe("playing without a connection", () => {
 
     await vi.waitFor(() => expect(output.loads).toEqual([fileOf("a"), fileOf("b"), fileOf("c")]));
     expect(discarded).toEqual([{ trackId: "b", url: fileOf("b") }]);
+    stop();
+  });
+
+  it("moves the queue on when a preloaded song plays on gaplessly after the queue was replaced", async () => {
+    const { controller, router, server, clock, output, stop } = setup(
+      ["a", "b", "c"],
+      ["a", "b", "c"],
+    );
+
+    await vi.waitFor(() => expect(output.loads).toEqual([fileOf("a")]));
+    server.setConnected(false);
+    // Near the end of "a", the controller preloads "b" for a gapless start.
+    output.emit({ type: "time", positionMs: 179_000 });
+    // Playing the same songs again gives every entry a new ID; "a" plays on from the top.
+    await controller.playTracks(["a", "b", "c"].map((id) => TrackId.make(id)));
+    clock.advance(179_000);
+    output.emit({ type: "time", positionMs: 179_000 });
+
+    output.emit({ type: "advanced", key: "b:aac-320:local" });
+
+    await vi.waitFor(() => expect(router.getSnapshot().state?.index).toBe(1));
+    expect(output.loads).toEqual([fileOf("a")]);
     stop();
   });
 

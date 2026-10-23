@@ -71,8 +71,9 @@ function SongRow({
   );
 
   return (
-    <View className={`px-mobile-edge ${entry.playable ? "" : "opacity-disabled"}`}>
+    <View className="px-mobile-edge">
       <Row
+        dimmed={!entry.playable}
         {...line}
         title={entry.title}
         active={active}

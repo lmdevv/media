@@ -7,6 +7,7 @@ import { useAuthActions } from "@convex-dev/auth/react";
 import { useCallback } from "react";
 
 import { wipeDownloads } from "@/downloads";
+import { saveAccount } from "@/lib/account-memory";
 import { useConnection } from "@/session/connection";
 
 /** Returns the function that signs out and deletes this server's downloads on this iPhone. */
@@ -16,6 +17,7 @@ export const useSignOut = (): (() => Promise<void>) => {
 
   return useCallback(async () => {
     await signOut();
+    saveAccount(origin, null);
 
     // Files a failed wipe leaves go with the next one, which takes the server's whole directory.
     await wipeDownloads(origin).catch(() => undefined);

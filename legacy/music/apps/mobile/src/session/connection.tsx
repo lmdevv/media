@@ -20,14 +20,22 @@ export interface ConnectionControls {
    * connecting to it again finds the session it had.
    */
   readonly disconnect: () => void;
-  /** Opens the server again from scratch, as Try again does when it never answered (G05). */
-  readonly reconnect: () => void;
+  /**
+   * Opens the server again from scratch, as Try again does when it never answered: from G05
+   * (`unreachable`), or from the downloads (`offline`), which stay on show while it waits.
+   */
+  readonly reconnect: (from: RetriedPhase) => void;
   /**
    * Bumped by `reconnect`, and back to 0 on another connection; the server session is keyed by it,
    * so a new client replaces the old.
    */
   readonly attempt: number;
+  /** The phase on show when `reconnect` last ran. */
+  readonly retriedFrom: RetriedPhase;
 }
+
+/** The phases that offer Try again: the server never answered this launch. */
+export type RetriedPhase = "unreachable" | "offline";
 
 const ConnectionContext = createContext<ConnectionControls | null>(null);
 
@@ -35,6 +43,7 @@ const ConnectionContext = createContext<ConnectionControls | null>(null);
 export function ConnectionProvider({ children }: { readonly children: ReactNode }) {
   const [connection, setConnection] = useState<ServerConnection | null>(loadConnection);
   const [attempt, setAttempt] = useState(0);
+  const [retriedFrom, setRetriedFrom] = useState<RetriedPhase>("unreachable");
 
   const value: ConnectionControls = {
     connection,
@@ -48,8 +57,12 @@ export function ConnectionProvider({ children }: { readonly children: ReactNode 
       setConnection(null);
       setAttempt(0);
     },
-    reconnect: () => setAttempt((count) => count + 1),
+    reconnect: (from) => {
+      setRetriedFrom(from);
+      setAttempt((count) => count + 1);
+    },
     attempt,
+    retriedFrom,
   };
 
   return <ConnectionContext value={value}>{children}</ConnectionContext>;
@@ -72,7 +85,7 @@ export const useConnectionControls = (): ConnectionControls => {
 export interface Connection extends ServerConnection {
   readonly connect: (connection: ServerConnection) => void;
   readonly disconnect: () => void;
-  readonly reconnect: () => void;
+  readonly reconnect: (from: RetriedPhase) => void;
 }
 
 /**

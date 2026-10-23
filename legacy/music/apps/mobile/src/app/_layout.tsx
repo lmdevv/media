@@ -24,6 +24,8 @@ import {
   SetupProgressProvider,
   useSettledPhase,
 } from "@/session/session-phase";
+import { ServerReachProvider } from "@/session/server-reach";
+import { DownloadsProvider } from "@/downloads";
 
 applyAppearance();
 
@@ -65,6 +67,7 @@ const FIRST_SCREEN = {
   needsLibrary: "/setup/folder",
   scanning: "/setup/scan",
   unreachable: "/unreachable",
+  offline: "/",
   ready: "/",
 } as const satisfies Record<SettledPhase["kind"], string>;
 
@@ -104,7 +107,8 @@ function RootStack({ phase }: { readonly phase: SettledPhase["kind"] }) {
       <Stack.Protected guard={phase === "unreachable"} redirectTo={first}>
         <Stack.Screen name="unreachable" options={{ animation: "fade" }} />
       </Stack.Protected>
-      <Stack.Protected guard={phase === "ready"} redirectTo={first}>
+      {/* Offline it opens on the downloads, and stays mounted as the server answers (D11). */}
+      <Stack.Protected guard={phase === "ready" || phase === "offline"} redirectTo={first}>
         <Stack.Screen name="(app)" options={{ animation: "fade" }} />
       </Stack.Protected>
     </Stack>
@@ -127,11 +131,11 @@ function ConnectedApp() {
   if (phase === null) return <View className="flex-1 bg-canvas" />;
 
   return (
-    <>
+    <ServerReachProvider phase={phase.kind}>
       <HideSplash />
       <RootStack phase={phase.kind} />
       <OpenEntryLink phase={phase.kind} />
-    </>
+    </ServerReachProvider>
   );
 }
 
@@ -151,7 +155,9 @@ function App() {
     <ServerSession key={`${connection.convexUrl}#${String(attempt)}`} connection={connection}>
       <SetupProgressProvider>
         <SessionEndProvider>
-          <ConnectedApp />
+          <DownloadsProvider>
+            <ConnectedApp />
+          </DownloadsProvider>
         </SessionEndProvider>
       </SetupProgressProvider>
     </ServerSession>

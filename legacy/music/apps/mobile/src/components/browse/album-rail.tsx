@@ -3,18 +3,18 @@
  * visible at 390pt, scrolling sideways. The rail runs edge to edge while its cards start on the
  * page's 20pt edge.
  */
-import type { AlbumCard as Album } from "@music/commands/models";
 import { FlatList, View } from "react-native";
 
 import { SectionHeader } from "@/components/ui/section-header";
 import type { SectionAction } from "@/components/ui/section-header";
+import type { CardAlbum } from "@/lib/offline-library";
 
 import { AlbumCard } from "./album-card";
 
 /** Props for `AlbumRail`. */
 export interface AlbumRailProps {
   readonly title: string;
-  readonly albums: ReadonlyArray<Album>;
+  readonly albums: ReadonlyArray<CardAlbum>;
   readonly action?: SectionAction | undefined;
   readonly first?: boolean;
   /** 168pt cards on Home (A01); 160pt with the year on an artist's page (A08b). */

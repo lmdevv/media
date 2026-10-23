@@ -824,8 +824,16 @@ export class PlaybackController {
 
     if (state === null || loaded === null || preloaded === null) return;
     const index = followingIndex(loaded.index, state.queue.length, state.repeat);
+    const following = index === null ? undefined : state.queue[index];
 
-    if (index === preloaded.index && state.queue[index]?.id === preloaded.track.id) return;
+    // The same song under a new entry ID (the queue was played again, or a session handed back
+    // from a device renumbered it) keeps its bytes, but must report as the entry it now is.
+    if (index === preloaded.index && following?.id === preloaded.track.id) {
+      this.#preloaded = { ...preloaded, track: following };
+
+      return;
+    }
+
     this.#engine.preload(null);
     this.#preloaded = null;
   }

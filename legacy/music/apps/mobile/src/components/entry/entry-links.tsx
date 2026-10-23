@@ -243,6 +243,7 @@ export function OpenEntryLink({ phase }: { readonly phase: SettledPhase["kind"] 
 
         return;
       case "unreachable":
+      case "offline":
         return;
     }
   }, [held, phase, origin, drop, pathname]);

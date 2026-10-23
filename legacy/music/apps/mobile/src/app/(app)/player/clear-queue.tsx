@@ -1,13 +1,13 @@
 /** B10 · Clear the queue? Everything after the current song goes; the song keeps playing. */
-import { useRun } from "@music/sdk/react";
 import { router } from "expo-router";
 
 import { ConfirmSheet } from "@/components/ui/confirm-sheet";
+import { useSessionRun } from "@/player";
 
 export default function Screen() {
-  // The server call itself, not the player's action, which never rejects: a refusal keeps the
-  // sheet open with the reason instead of closing as if the queue were cleared.
-  const clearQueue = useRun("queue.clear");
+  // The command itself, not the player's action, which never rejects: a refusal keeps the sheet
+  // open with the reason instead of closing as if the queue were cleared.
+  const run = useSessionRun();
 
   return (
     <ConfirmSheet
@@ -17,7 +17,7 @@ export default function Screen() {
       pendingLabel="Clearing…"
       cancelLabel="Keep queue"
       onConfirm={async () => {
-        await clearQueue({});
+        await run("queue.clear", {});
         router.back();
       }}
     />

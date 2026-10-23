@@ -23,6 +23,7 @@ import { Text } from "@/components/ui/text";
 import { mediaUrl } from "@/lib/media-url";
 import { parseSongSheet } from "@/lib/song-sheet";
 import type { SheetSong } from "@/lib/song-sheet";
+import { useSessionRun } from "@/player";
 import { useConnection } from "@/session/connection";
 
 /** One action: its icon and label, filled for the transport glyph. */
@@ -61,9 +62,9 @@ const leaveFor = (open: () => void) => {
 
 function Actions({ song }: { readonly song: SheetSong }) {
   const { origin } = useConnection();
-  // The server call itself, not the player's actions, which never reject: a refusal keeps the
-  // sheet open with the reason instead of closing as if the song were queued.
-  const queueAdd = useRun("queue.add");
+  // The command itself, not the player's actions, which never reject: a refusal keeps the sheet
+  // open with the reason instead of closing as if the song were queued.
+  const run = useSessionRun();
   const setLike = useRun("likes.set");
   const readLink = useReadOnce("links.get");
   const [failure, setFailure] = useState<string | null>(null);
@@ -103,7 +104,7 @@ function Actions({ song }: { readonly song: SheetSong }) {
         label="Play next"
         onPress={() =>
           void finish(async () => {
-            await queueAdd({ trackIds: [song.id], next: true });
+            await run("queue.add", { trackIds: [song.id], next: true });
           })
         }
       />
@@ -112,7 +113,7 @@ function Actions({ song }: { readonly song: SheetSong }) {
         label="Add to queue"
         onPress={() =>
           void finish(async () => {
-            await queueAdd({ trackIds: [song.id] });
+            await run("queue.add", { trackIds: [song.id] });
           })
         }
       />

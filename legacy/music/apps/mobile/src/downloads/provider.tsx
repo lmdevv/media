@@ -4,7 +4,7 @@
  * manifest, and whether the server answers. Screens use the hooks below and never see pins,
  * manifests, revisions, or files.
  */
-import type { DeviceId, DownloadPinId, TrackId } from "@music/commands/ids";
+import type { DeviceId, DownloadPinId, TrackId, UserId } from "@music/commands/ids";
 import type { DownloadTarget } from "@music/commands/models";
 import {
   canToggleDownload,
@@ -25,13 +25,15 @@ import type {
 } from "@music/sdk/downloads";
 import { makeMusicClient } from "@music/sdk/client";
 import { useReadSettled } from "@music/sdk/react";
+import type { SessionStore, StoredSessions } from "@music/player/session-router";
 import { chooseStreamProfile } from "@music/player/stream-quality";
-import { useConvex, useConvexConnectionState } from "convex/react";
+import { useConvex, useConvexAuth, useConvexConnectionState } from "convex/react";
 import {
   createContext,
   use,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -45,9 +47,11 @@ import type { ExpoVault } from "./expo-vault";
 import { loadDownloadQuality, loadPhoneId, saveDownloadQuality } from "../player/native-host";
 import type { DownloadQuality } from "../player/native-host";
 import { playsOnIos } from "../player/player-state";
+import { loadAccount, saveAccount } from "../lib/account-memory";
 import { mediaUrl } from "../lib/media-url";
 import type { ServerOrigin } from "../lib/server";
 import { useConnection } from "../session/connection";
+import { useServerReach } from "../session/server-reach";
 
 /** What a song, album, or playlist row offers for its download. */
 interface DownloadView {
@@ -86,7 +90,12 @@ interface Downloads {
   readonly copies: DownloadedCopies;
   readonly quality: DownloadQuality;
   readonly setQuality: (quality: DownloadQuality) => void;
+  /** The account's session store; a new one when the account changes. */
+  readonly sessions: SessionStore;
 }
+
+/** What a session store holds when no vault is open. */
+const NOTHING_STORED: StoredSessions = { local: null, server: null };
 
 const DownloadsContext = createContext<Downloads | null>(null);
 
@@ -163,27 +172,56 @@ function ServerFeed({
 }
 
 /**
- * Keeps the signed-in account's downloads on this phone while the app runs. Mount it inside the
- * signed-in Convex provider, above the player, which plays downloaded songs from their files.
+ * The account whose downloads this phone opens: the one signed in, else the one last signed in to
+ * this server, so a launch with no connection still opens its downloads. Signing out forgets it.
+ */
+const useDownloadsAccount = (origin: ServerOrigin): UserId | null => {
+  const { isLoading, isAuthenticated } = useConvexAuth();
+  const account = useReadSettled("account.me", isAuthenticated ? {} : "skip");
+  const signedIn = account === undefined || account instanceof Error ? null : account.id;
+  const signedOut = !isLoading && !isAuthenticated;
+  const [known, setKnown] = useState(() => loadAccount(origin));
+  // Signed out, the account is gone: whoever signs in next waits for the server to say who.
+  const next = signedOut ? null : (signedIn ?? known);
+
+  if (next !== known) setKnown(next);
+
+  useEffect(() => {
+    if (signedIn !== null) saveAccount(origin, signedIn);
+  }, [origin, signedIn]);
+
+  return next;
+};
+
+/**
+ * Keeps the account's downloads on this phone while the app runs, and fetches new ones while the
+ * server answers. Mount it inside the Convex provider, above the session phase, which opens the
+ * app on the downloads when the server is out of reach, and above the player, which plays
+ * downloaded songs from their files.
  */
 export function DownloadsProvider({ children }: { readonly children: ReactNode }) {
   const convex = useConvex();
   const { origin } = useConnection();
-  const account = useReadSettled("account.me", {});
-  const userId = account === undefined || account instanceof Error ? null : account.id;
+  const { isAuthenticated } = useConvexAuth();
+  const userId = useDownloadsAccount(origin);
   const deviceId = useMemo(() => loadPhoneId(), []);
   const [sync, setSync] = useState<DownloadSync | null>(null);
   const [quality, setStoredQuality] = useState(loadDownloadQuality);
   // The sync reads the policy at every plan, so a new quality applies from the next fetch.
   const chosen = useRef(quality);
   const current = useRef<DownloadSync | null>(null);
+  // Each account's vault while it is open, so a session store reaches only its own account's.
+  const vaults = useRef(new Map<UserId, Promise<ExpoVault>>());
 
-  useEffect(() => {
+  // A layout effect, so the vault is opening before any child's effect (the player's session
+  // router) asks it for the session it stored.
+  useLayoutEffect(() => {
     if (userId === null) return undefined;
     let closed = false;
     let created: DownloadSync | null = null;
     let shutting: Promise<void> | null = null;
     const opening = openVault(origin, userId);
+    vaults.current.set(userId, opening);
 
     /** Stops the sync, waiting for its fetches to end, then closes the vault. Once. */
     const shutdown = (): Promise<void> => {
@@ -235,6 +273,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     void run();
 
     return () => {
+      if (vaults.current.get(userId) === opening) vaults.current.delete(userId);
       void shutdown().finally(() => {
         if (shutdowns.get(origin) === shutdown) shutdowns.delete(origin);
       });
@@ -257,14 +296,38 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     setStoredQuality(next);
   }, []);
 
+  // Bound to this account: a player built for it, even one left running past a sign-out, never
+  // reads or writes another account's session. Without a vault open, nothing is stored.
+  const sessions = useMemo((): SessionStore => {
+    const vault = async (): Promise<ExpoVault | null> => {
+      const opening = userId === null ? undefined : vaults.current.get(userId);
+
+      try {
+        return (await opening) ?? null;
+      } catch {
+        return null;
+      }
+    };
+
+    return {
+      load: async () => (await vault())?.session.load() ?? NOTHING_STORED,
+      saveLocal: async (state) => {
+        await (await vault())?.session.saveLocal(state);
+      },
+      saveServer: async (state) => {
+        await (await vault())?.session.saveServer(state);
+      },
+    };
+  }, [userId]);
+
   const value = useMemo(
-    () => ({ sync, copies, quality, setQuality }),
-    [sync, copies, quality, setQuality],
+    () => ({ sync, copies, sessions, quality, setQuality }),
+    [sync, copies, sessions, quality, setQuality],
   );
 
   return (
     <DownloadsContext value={value}>
-      {sync === null ? null : <ServerFeed sync={sync} deviceId={deviceId} />}
+      {sync === null || !isAuthenticated ? null : <ServerFeed sync={sync} deviceId={deviceId} />}
       {children}
     </DownloadsContext>
   );
@@ -357,3 +420,41 @@ export const useDownloadSettings = (): DownloadSettings => {
  * too. Stable, and reads the vault when called.
  */
 export const useLocalCopies = (): DownloadedCopies => useDownloads("useLocalCopies").copies;
+
+/**
+ * Whether a song can play now: always while the server answers, else only when this phone holds
+ * it; never offline for a row that isn't a real track. Rows of songs it can't play dim, and say
+ * "Not downloaded" (D13). Reads only this song's copy, so a row redraws when its own song arrives
+ * or goes, not on every download.
+ */
+export const useTrackReachable = (trackId: TrackId | null): boolean => {
+  const { sync } = useDownloads("useTrackReachable");
+  const online = useServerReach() === "online";
+
+  const held = useSyncExternalStore(
+    sync?.subscribe ?? subscribeToNothing,
+    () => sync !== null && trackId !== null && sync.getSnapshot().copies.has(trackId),
+  );
+
+  return online || held;
+};
+
+/**
+ * Whether this phone holds a downloaded song of the account it opened: what a launch with no
+ * connection can play. False until the vault opens.
+ */
+export const useHasDownloads = (): boolean => {
+  const { sync } = useDownloads("useHasDownloads");
+
+  return useSyncExternalStore(
+    sync?.subscribe ?? subscribeToNothing,
+    () => sync !== null && sync.getSnapshot().copies.size > 0,
+  );
+};
+
+/**
+ * Where the player keeps its playback session across launches: the open vault's database, so it
+ * belongs to the account whose downloads it plays and goes with them on sign-out. A new store for
+ * each account: build the player again when it changes.
+ */
+export const useSessionStore = (): SessionStore => useDownloads("useSessionStore").sessions;

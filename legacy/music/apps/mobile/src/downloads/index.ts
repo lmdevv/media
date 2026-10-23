@@ -6,8 +6,11 @@ export {
   useDownload,
   useDownloadSettings,
   useDownloadsLibrary,
+  useHasDownloads,
   useLocalCopies,
   useTrackDownload,
+  useSessionStore,
+  useTrackReachable,
   wipeDownloads,
 } from "./provider";
 

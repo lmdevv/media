@@ -15,7 +15,6 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { ReconnectingNotice } from "@/components/states/reconnecting";
 import { clearOf } from "@/lib/color";
 import { useThemeColor } from "@/lib/theme-color";
 
@@ -144,10 +143,7 @@ export function TabRoot({ title, children, action }: TabRootProps) {
           {action === undefined ? null : <View className="size-hit-target" />}
           <View className="size-row" />
         </View>
-        <View className="px-mobile-edge">
-          <ReconnectingNotice />
-          {children}
-        </View>
+        <View className="px-mobile-edge">{children}</View>
       </ScrollView>
     </ContentScroll>
   );

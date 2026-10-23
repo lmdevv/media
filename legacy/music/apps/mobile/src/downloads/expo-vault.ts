@@ -12,6 +12,7 @@ import {
   OfflineTrack,
   StreamProfile,
 } from "@music/commands/models";
+import type { SessionStore } from "@music/player/session-router";
 import { VaultChange } from "@music/sdk/downloads";
 import type { StoredArt, StoredCopy, StoredPin, VaultRows, VaultStore } from "@music/sdk/downloads";
 import { Option, Schema } from "effect";
@@ -21,6 +22,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { openDatabaseAsync } from "expo-sqlite";
 import type { SQLiteDatabase } from "expo-sqlite";
 
+import { SESSION_TABLE, vaultSessions } from "./session-store";
 import type { ServerOrigin } from "../lib/server";
 
 /**
@@ -118,6 +120,8 @@ const serverDirectory = async (origin: ServerOrigin): Promise<Directory> => {
 
 /** A vault this app opened; close it before its account's downloads are wiped. */
 export interface ExpoVault extends VaultStore {
+  /** Where the player keeps its playback session across launches. */
+  readonly session: SessionStore;
   readonly close: () => Promise<void>;
 }
 
@@ -286,6 +290,7 @@ export const openVault = async (origin: ServerOrigin, account: UserId): Promise<
 
   try {
     await db.execAsync(SCHEMA);
+    await db.execAsync(SESSION_TABLE);
   } catch (error) {
     await db.closeAsync();
     throw error;
@@ -313,6 +318,7 @@ export const openVault = async (origin: ServerOrigin, account: UserId): Promise<
       return found.exists ? found.size : null;
     },
     freeBytes: () => Paths.availableDiskSpace,
+    session: vaultSessions(db),
     close: () => db.closeAsync(),
   };
 };

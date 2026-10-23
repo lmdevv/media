@@ -44,6 +44,8 @@ export interface RowProps {
   readonly detail?: { readonly text: string; readonly variant: "callout" | "mono" } | undefined;
   /** The playing row: accent title at semibold. */
   readonly active?: boolean;
+  /** A row that can't be used now, such as a song not downloaded while offline (D11, D13). */
+  readonly dimmed?: boolean;
   readonly onPress?: (() => void) | undefined;
   readonly onLongPress?: (() => void) | undefined;
   /** Read instead of the title and subtitle, when they don't say enough. */
@@ -78,6 +80,7 @@ export function Row({
   trailing,
   detail,
   active = false,
+  dimmed = false,
   onPress,
   onLongPress,
   accessibilityLabel,
@@ -115,7 +118,9 @@ export function Row({
   // The trailing lane sits beside the row's own target, not inside it, so VoiceOver reaches its
   // action (an ellipsis menu) as a separate button.
   return (
-    <View className="min-h-row-touch flex-row items-center gap-3 border-b border-border py-2">
+    <View
+      className={`min-h-row-touch flex-row items-center gap-3 border-b border-border py-2 ${dimmed ? "opacity-disabled" : ""}`}
+    >
       {onPress === undefined && onLongPress === undefined ? (
         <View className={lane} accessible accessibilityLabel={label}>
           {main}

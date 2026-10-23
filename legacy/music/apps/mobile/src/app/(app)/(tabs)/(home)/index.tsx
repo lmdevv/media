@@ -1,8 +1,10 @@
 /**
  * A01 · Home: albums back in rotation and recently added, as rails under the large title, then the
  * songs played most recently, each once. Scrolled past the title it is A14: the compact bar above, and
- * the system tab bar minimized with the mini player inline.
+ * the system tab bar minimized with the mini player inline. While the server is out of reach it
+ * is D14: the notice, then the albums on this iPhone; a phone with none keeps what Home last showed.
  */
+import type { OfflineAlbum } from "@music/sdk/downloads";
 import { useRead } from "@music/sdk/react";
 import { router } from "expo-router";
 import { View } from "react-native";
@@ -11,10 +13,14 @@ import { AlbumRail } from "@/components/browse/album-rail";
 import { usePlayList } from "@/components/browse/play";
 import { TrackRow } from "@/components/browse/rows";
 import { EmptyHome, HomeSkeleton, MoreOnTheWay, ScanNotice } from "@/components/states/home-states";
+import { OfflineNotice } from "@/components/states/offline-notice";
 import { SectionHeader } from "@/components/ui/section-header";
 import { TabRoot } from "@/components/ui/tab-root";
+import { useDownloadsLibrary } from "@/downloads";
 import { distinctSongs } from "@/lib/history";
+import { cardOf } from "@/lib/offline-library";
 import { useNowPlaying } from "@/player";
+import { useServerReach } from "@/session/server-reach";
 
 /** How many recently played songs Home lists; History has the rest. */
 const RECENT_SONGS = 5;
@@ -54,12 +60,29 @@ function RecentlyPlayed() {
   );
 }
 
+/** D14's rail of the albums this iPhone holds; its chevron opens Downloaded. */
+function OnThisPhone({ albums }: { readonly albums: ReadonlyArray<OfflineAlbum> }) {
+  return (
+    <AlbumRail
+      title="On this iPhone"
+      albums={albums.map(cardOf)}
+      action={{ kind: "chevron", onPress: () => router.push("/downloaded") }}
+    />
+  );
+}
+
 export default function Home() {
   const home = useRead("library.home", {});
+  const reach = useServerReach();
+  const { albums } = useDownloadsLibrary();
+  const onPhone = reach === "offline" || (reach === "reconnecting" && albums.length > 0);
 
   return (
     <TabRoot title="Home">
-      {home === undefined ? (
+      <OfflineNotice variant="card" className={onPhone ? "" : "mb-1"} />
+      {onPhone ? (
+        <OnThisPhone albums={albums} />
+      ) : home === undefined ? (
         <HomeSkeleton />
       ) : home.stats.tracks === 0 ? (
         <EmptyHome />

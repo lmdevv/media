@@ -4,7 +4,7 @@
  * hands it back when the server answers again. The controller and the player's actions send every
  * command through a `SessionPort` and never learn which one runs.
  */
-import type { TrackId } from "@music/commands/ids";
+import type { DeviceId, TrackId } from "@music/commands/ids";
 import type { OfflinePlay, PlaybackState } from "@music/commands/models";
 import type { CommandArgs, CommandResult, MutationName } from "@music/commands/registry";
 import { isSessionMutation } from "@music/commands/session-commands";
@@ -140,6 +140,11 @@ export interface SessionRouterDeps {
   readonly random: () => number;
   /** Overrides `ACK_DEADLINE_MS`. */
   readonly ackDeadlineMs?: number;
+  /**
+   * Whether this device's user is in a Jam. The session may then be the host's, which a command
+   * started here never takes over. Defaults to no Jam.
+   */
+  readonly inJam?: () => boolean;
 }
 
 /** A session command sent to the server and not answered yet. */
@@ -152,15 +157,18 @@ interface Outstanding {
     state: LocalSessionState,
     context: LocalContext,
   ) => { readonly state: LocalSessionState; readonly ran: boolean; readonly answer: () => void };
+  /** The command plays songs on this device, so the session may be this device's to take. */
+  readonly playsHere: boolean;
 }
 
 /**
  * Routes session commands to the server while it answers, and to this device's own session while
  * it doesn't. The session moves onto the device when the connection drops while the device plays
- * it, or when a command goes unanswered past the deadline and this device plays it or nothing
- * does; never while it listens along to someone's Jam. When the connection is back it hands the
- * session back with `devices.reconcile`: the plays for history, then the queue, which the server
- * adopts while it still names this device active or the device still plays.
+ * it, or when a command goes unanswered past the deadline and this device plays it, nothing does,
+ * or the command plays songs here outside a Jam; never while it listens along to someone's Jam.
+ * When the connection is back it hands the session back with `devices.reconcile`: the plays for
+ * history, then the queue, which the server adopts while it still names this device active or the
+ * device still plays.
  */
 export class SessionRouter implements SessionPort {
   readonly #client: MusicClient;
@@ -171,6 +179,7 @@ export class SessionRouter implements SessionPort {
   readonly #clock: RouterClock;
   readonly #random: () => number;
   readonly #ackDeadlineMs: number;
+  readonly #inJam: () => boolean;
   readonly #listeners = new Set<() => void>();
   /** In the order they were sent, which is the order the session takes them in. */
   readonly #outstanding = new Set<Outstanding>();
@@ -183,6 +192,11 @@ export class SessionRouter implements SessionPort {
   /** Counts changes to the local session other than a hand-back's, so one can tell it moved. */
   #revision = 0;
   #reconciling = false;
+  /**
+   * `start`'s stop ran. The client may outlive this device's account (signing out keeps the
+   * connection), so nothing more is sent or stored for it: no hand-back, retry, or store write.
+   */
+  #stopped = false;
   #retryMs = RETRY_FIRST_MS;
   #cancelRetry: (() => void) | null = null;
   #stored: Promise<StoredSessions | null> | null = null;
@@ -198,6 +212,7 @@ export class SessionRouter implements SessionPort {
     this.#clock = deps.clock;
     this.#random = deps.random;
     this.#ackDeadlineMs = deps.ackDeadlineMs ?? ACK_DEADLINE_MS;
+    this.#inJam = deps.inJam ?? (() => false);
   }
 
   /** Where session commands go right now. */
@@ -225,6 +240,7 @@ export class SessionRouter implements SessionPort {
     void this.#resumeStored();
 
     return () => {
+      this.#stopped = true;
       unsubscribe();
       this.#cancelRetry?.();
       this.#cancelRetry = null;
@@ -255,7 +271,8 @@ export class SessionRouter implements SessionPort {
 
     this.#takeStored(stored);
 
-    if (this.mode() === "local" || this.#connection.connected()) return;
+    // Even with the socket up: a server that answers takes the session straight back.
+    if (this.mode() === "local") return;
     const now = this.#clock.now();
     const server = this.#server ?? stored?.server ?? null;
     const session = server === null ? emptyLocal(now) : seedLocal(server, this.#device.id);
@@ -289,6 +306,7 @@ export class SessionRouter implements SessionPort {
     });
 
     const command: Outstanding = {
+      playsHere: playsOn(name, args, this.#device.id),
       runHere: (state, context) => {
         const stepped = stepLocal(name, state, args, context);
 
@@ -377,7 +395,8 @@ export class SessionRouter implements SessionPort {
    * Moves the session onto this device, from the session the player shows, with every command
    * still out with the server run here first, in the order sent; each caller is answered from
    * here, a refusal included. On a dropped connection (`needed` null) only while this device plays
-   * the session; for a command past its deadline also while nothing plays it, and only when that
+   * the session; for a command past its deadline also while nothing plays it or when the command
+   * plays songs here outside a Jam (another device may still be named), and only when that
    * command runs here, or it keeps waiting for the server. Returns whether the session moved.
    */
   #takeOver(needed: Outstanding | null): boolean {
@@ -386,7 +405,10 @@ export class SessionRouter implements SessionPort {
     if (this.#local !== null || shown === undefined || shown.following) return false;
     const active = shown.activeDevice?.id ?? null;
 
-    if (active !== this.#device.id && (needed === null || active !== null)) return false;
+    const claimed = needed?.playsHere === true && !this.#inJam();
+
+    if (active !== this.#device.id && !claimed && (needed === null || active !== null))
+      return false;
     const context = this.#context();
     let state = seedLocal(shown, this.#device.id);
     const answers: Array<() => void> = [];
@@ -476,7 +498,15 @@ export class SessionRouter implements SessionPort {
    * session stored at an earlier launch goes back with it. A failure is tried again later.
    */
   async #reconcile(): Promise<void> {
-    if (this.#reconciling || this.#local === null || !this.#connection.connected()) return;
+    if (
+      this.#stopped ||
+      this.#reconciling ||
+      this.#local === null ||
+      !this.#connection.connected()
+    ) {
+      return;
+    }
+
     this.#cancelRetry?.();
     this.#cancelRetry = null;
     this.#reconciling = true;
@@ -502,7 +532,7 @@ export class SessionRouter implements SessionPort {
   async #handBack(): Promise<void> {
     const local = this.#local;
 
-    if (local === null) return;
+    if (local === null || this.#stopped) return;
     const revision = this.#revision;
     const offers = this.#offers;
     const plays = local.plays.slice(0, PLAYS_PER_RECONCILE);
@@ -560,6 +590,8 @@ export class SessionRouter implements SessionPort {
    * moved here meanwhile writes over the row itself.
    */
   #clearStored(): void {
+    if (this.#stopped) return;
+
     void this.#store.saveLocal(null).catch(() => {
       this.#clock.after(RETRY_FIRST_MS, () => {
         if (this.#local === null) this.#clearStored();
@@ -568,6 +600,7 @@ export class SessionRouter implements SessionPort {
   }
 
   #retryLater(): void {
+    if (this.#stopped) return;
     const delay = this.#retryMs;
 
     this.#retryMs = Math.min(delay * 2, RETRY_LONGEST_MS);
@@ -609,6 +642,17 @@ export class SessionRouter implements SessionPort {
     for (const listener of this.#listeners) listener();
   }
 }
+
+/**
+ * Whether a command plays songs on `device`, which may take the session over from another device
+ * that last played it. Moving playback here doesn't: the session would come over paused, at the
+ * other device's last report, while that device may still be playing.
+ */
+const playsOn = <Name extends SessionMutation>(
+  name: Name,
+  args: CommandArgs<Name>,
+  device: DeviceId,
+): boolean => name === "playback.play" && "deviceId" in args && args.deviceId === device;
 
 const isPlayReport = (name: SessionMutation): name is "playback.report" =>
   name === "playback.report";

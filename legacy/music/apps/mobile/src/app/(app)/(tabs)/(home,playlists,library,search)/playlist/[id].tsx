@@ -2,7 +2,9 @@
  * C02, C05, C11, H08 · Playlist. Its owner sees the hero, who can open it, Share, Add, and Play
  * and Shuffle (C02), or "Make it yours." while it is empty (C05). A collaborator sees whose it is
  * and may add songs (C11); a viewer may only play. The song list's bar holds the download ring
- * beside the ellipsis (D06). A playlist the viewer can't open is G10.
+ * beside the ellipsis (D06). A playlist the viewer can't open is G10. While the server is out of
+ * reach the offline bar leads (D13), and a playlist it hasn't sent opens from this phone's
+ * downloads.
  */
 import { PlaylistId } from "@music/commands/ids";
 import type { PlaylistDetail, PlaylistEntry } from "@music/commands/models";
@@ -12,17 +14,21 @@ import { router, useLocalSearchParams } from "expo-router";
 import { Ellipsis, ListMusic, Plus } from "lucide-react-native";
 
 import { DownloadButton } from "@/components/downloads/download-button";
+import { OfflineCollectionPage } from "@/components/downloads/offline-collection";
 import { PlayButtons } from "@/components/playlists/play-buttons";
 import { OwnerHeader, SharedHeader, openAddSongs } from "@/components/playlists/playlist-header";
 import { SongListPage } from "@/components/playlists/song-list-page";
 import type { SongEntry } from "@/components/playlists/song-list-page";
 import { ContentUnavailable } from "@/components/states/content-unavailable";
+import { OfflineNotice } from "@/components/states/offline-notice";
 import { usePlaylist } from "@/components/playlists/use-playlist";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconButton } from "@/components/ui/icon-button";
 import { Page } from "@/components/ui/page";
+import { offlinePlaylist } from "@/lib/offline-library";
 import { usePlayerActions } from "@/player";
+import { useServerReach } from "@/session/server-reach";
 
 const REASONS = {
   missing: "File missing",
@@ -119,11 +125,13 @@ function Loaded({
       header={
         owner ? (
           <>
+            <OfflineNotice variant="bar" className="pb-4" />
             <OwnerHeader playlist={playlist} canShare={canShare} />
             <PlayButtons trackIds={trackIds} second={{ kind: "shuffle" }} className="pb-3" />
           </>
         ) : (
           <>
+            <OfflineNotice variant="bar" className="pb-4" />
             <SharedHeader playlist={playlist} />
             <PlayButtons
               trackIds={trackIds}
@@ -144,8 +152,19 @@ function Loaded({
 
 export default function PlaylistScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const state = usePlaylist(PlaylistId.make(id));
+  const playlistId = PlaylistId.make(id);
+  const state = usePlaylist(playlistId);
   const me = useRead("account.me", {});
+  const reach = useServerReach();
+
+  if (state.kind === "loading" && reach !== "online") {
+    return (
+      <OfflineCollectionPage
+        kind="playlist"
+        find={(library) => offlinePlaylist(library, playlistId)}
+      />
+    );
+  }
 
   if (state.kind === "loading") return <Page>{null}</Page>;
 

@@ -1,20 +1,22 @@
 /**
  * The player screens build on. `PlayerProvider` registers this iPhone as one of the user's
  * devices, plays the Convex playback session here while it is the active device, mirrors it while
- * another device plays, and moves playback between devices. The protocol and the decisions live
+ * another device plays, and moves playback between devices. Without the server it plays its own
+ * session over the downloads, and hands it back when the server answers (`SessionRouter`). The protocol and the decisions live
  * in `PlaybackController` from `@music/player`, shared with the web; this file only adapts it to
  * React Native and to the contract in `player-api.md`.
  */
 import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { DeviceKind, PlaybackState } from "@music/commands/models";
 import { PlaybackController } from "@music/player/playback-controller";
-import { serverSession } from "@music/player/session-router";
+import { SessionRouter, systemClock } from "@music/player/session-router";
+import type { SessionStore } from "@music/player/session-router";
 import { localFirst, streamSources } from "@music/player/source-resolver";
 import type { StreamQuality } from "@music/player/stream-quality";
 import { makeMusicClient } from "@music/sdk/client";
-import type { MusicClient } from "@music/sdk/client";
 import { useRead } from "@music/sdk/react";
 import { useConvex } from "convex/react";
+import type { ConvexReactClient } from "convex/react";
 import {
   createContext,
   use,
@@ -28,6 +30,7 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 
+import { convexConnection } from "./convex-connection";
 import { openExpoOutput } from "./expo-audio-output";
 import { NativeEngine } from "./native-engine";
 import {
@@ -51,10 +54,11 @@ import {
 import type { NowPlaying, PlayerRole, PlayerStatus, PlayerView } from "./player-state";
 import { idleTransfer, nextTransfer, TRANSFER_TIMEOUT_MS } from "./transfer";
 import type { Transfer } from "./transfer";
-import { useLocalCopies } from "../downloads";
+import { useLocalCopies, useSessionStore } from "../downloads";
 import type { DownloadedCopies } from "../downloads";
 import { mediaUrl, resolveMediaUrl } from "../lib/media-url";
 import type { ServerOrigin } from "../lib/server";
+import { useServerReach } from "../session/server-reach";
 
 /** How often `usePlaybackPosition` updates. */
 const POSITION_INTERVAL_MS = 250;
@@ -147,6 +151,8 @@ const ActionsContext = createContext<PlayerActions | null>(null);
 
 const DevicesContext = createContext<DevicesView | null>(null);
 
+const SessionRunContext = createContext<SessionRouter["run"] | null>(null);
+
 const required = <Value,>(value: Value | null, hook: string): Value => {
   if (value === null) throw new Error(`${hook} must be used inside PlayerProvider`);
 
@@ -173,24 +179,45 @@ export const usePlayerActions = (): PlayerActions =>
 /** The user's devices and a move between them. */
 export const useDevices = (): DevicesView => required(use(DevicesContext), "useDevices");
 
+/**
+ * Runs a command where the session plays: on the server, or on this phone while it plays its own
+ * session offline. Unlike the actions it rejects with the failure, for a sheet that keeps a
+ * refusal on screen. Stable for the provider's lifetime.
+ */
+export const useSessionRun = (): SessionRouter["run"] =>
+  required(use(SessionRunContext), "useSessionRun");
+
 /** The controller of this iPhone, with its identity. Built once per server. */
 interface Phone {
   readonly controller: PlaybackController;
-  readonly client: MusicClient;
+  /** Where every playback and queue command goes: the server, or this phone's own session. */
+  readonly session: SessionRouter;
   readonly id: DeviceId;
   readonly name: string;
 }
 
 const createPhone = (
-  client: MusicClient,
+  convex: ConvexReactClient,
   origin: ServerOrigin,
   copies: DownloadedCopies,
+  store: SessionStore,
+  inJam: () => boolean,
 ): Phone => {
+  const client = makeMusicClient(convex);
   const engine = new NativeEngine(openExpoOutput);
   const id = loadPhoneId();
   const name = phoneName();
 
-  const session = serverSession(client);
+  const session = new SessionRouter({
+    client,
+    connection: convexConnection(convex),
+    store,
+    device: { id, name, kind: "phone" },
+    playable: (trackId) => copies.find(trackId)?.track ?? null,
+    clock: systemClock,
+    random: Math.random,
+    inJam,
+  });
 
   // A downloaded song plays from its file, online too; anything else streams.
   const sources = localFirst(
@@ -218,7 +245,7 @@ const createPhone = (
     },
   );
 
-  return { controller, client, id, name };
+  return { controller, session, id, name };
 };
 
 /** What the actions read at the moment they run. */
@@ -233,7 +260,7 @@ const createActions = (
   latest: { readonly current: Latest },
   transfer: (event: Parameters<typeof nextTransfer>[1]) => void,
 ): PlayerActions => {
-  const { controller, client } = phone;
+  const { controller, session } = phone;
   const run = controller.capture.bind(controller);
 
   const move = async (to: DeviceId): Promise<void> => {
@@ -252,7 +279,7 @@ const createActions = (
       if (latest.current.listeningAlong) {
         const picked = trackIds[index ?? 0];
 
-        if (picked !== undefined) await run(client.run("queue.add", { trackIds: [picked] }));
+        if (picked !== undefined) await run(session.run("queue.add", { trackIds: [picked] }));
 
         return;
       }
@@ -266,26 +293,26 @@ const createActions = (
       if (!latest.current.playing) await controller.togglePlay();
     },
     toggle: () => controller.togglePlay(),
-    next: () => run(client.run("playback.next", {})),
-    previous: () => run(client.run("playback.previous", {})),
+    next: () => run(session.run("playback.next", {})),
+    previous: () => run(session.run("playback.previous", {})),
     seek: (positionMs) => controller.seek(positionMs),
-    jump: (itemId) => run(client.run("playback.jump", { itemId })),
-    setShuffle: (on) => run(client.run("playback.shuffle", { on })),
+    jump: (itemId) => run(session.run("playback.jump", { itemId })),
+    setShuffle: (on) => run(session.run("playback.shuffle", { on })),
     cycleRepeat: () =>
       run(
-        client.run("playback.repeat", { mode: nextRepeat(latest.current.state?.repeat ?? "off") }),
+        session.run("playback.repeat", { mode: nextRepeat(latest.current.state?.repeat ?? "off") }),
       ),
-    setAutoplay: (on) => run(client.run("queue.autoplay", { on })),
+    setAutoplay: (on) => run(session.run("queue.autoplay", { on })),
     setVolume: (volume) => controller.setVolume(volume),
-    playNext: (trackIds) => run(client.run("queue.add", { trackIds, next: true })),
-    playLater: (trackIds) => run(client.run("queue.add", { trackIds })),
-    removeFromQueue: (itemId) => run(client.run("queue.remove", { itemId })),
+    playNext: (trackIds) => run(session.run("queue.add", { trackIds, next: true })),
+    playLater: (trackIds) => run(session.run("queue.add", { trackIds })),
+    removeFromQueue: (itemId) => run(session.run("queue.remove", { itemId })),
     moveInQueue: async (itemId, toIndex) => {
       const args = moveArgs(latest.current.state?.queue ?? [], itemId, toIndex);
 
-      if (args !== null) await run(client.run("queue.move", args));
+      if (args !== null) await run(session.run("queue.move", args));
     },
-    clearQueue: () => run(client.run("queue.clear", {})),
+    clearQueue: () => run(session.run("queue.clear", {})),
     transferTo: move,
     playHere: () => move(phone.id),
     setQuality: (quality) => {
@@ -337,26 +364,48 @@ export function PlayerProvider({
 }) {
   const convex = useConvex();
   const copies = useLocalCopies();
+  const store = useSessionStore();
+  // Whether the account is in a Jam, as the server last said; the router reads it when it decides.
+  const inJam = useRef(false);
 
   const phone = useMemo(
-    () => createPhone(makeMusicClient(convex), origin, copies),
-    [convex, origin, copies],
+    () => createPhone(convex, origin, copies, store, () => inJam.current),
+    [convex, origin, copies, store],
   );
 
-  const { controller } = phone;
+  const { controller, session } = phone;
 
   // Separate subscriptions, so a position report re-runs only the small one. Convex delivers a
   // client's subscriptions from one database snapshot, so the two always agree.
   const position = useRead("playback.position", {});
   const queue = useRead("queue.list", {});
   const jam = useRead("jam.get", {}) ?? null;
+
+  useLayoutEffect(() => {
+    inJam.current = jam?.status === "active";
+  }, [jam]);
   const devices = useRead("devices.list", { deviceId: phone.id });
 
-  const state = useMemo(
+  const served = useMemo(
     () => (position === undefined || queue === undefined ? undefined : { ...position, ...queue }),
     [position, queue],
   );
 
+  // A launch that never reached the server plays this phone's own session from the start.
+  const offline = useServerReach() === "offline";
+
+  useEffect(() => session.start(), [session]);
+
+  useEffect(() => {
+    if (served !== undefined) session.offerServer(served);
+  }, [session, served]);
+
+  useEffect(() => {
+    if (offline) void session.startLocal();
+  }, [session, offline]);
+
+  // The session the router says plays: the server's, or this phone's own while it is offline.
+  const { state } = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const local = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
 
   useEffect(() => controller.start(), [controller]);
@@ -381,16 +430,19 @@ export function PlayerProvider({
     [activeId, activeName, activeKind, phone.id],
   );
 
-  const entry = queue?.queue[queue.index] ?? null;
+  const entry = state?.queue[state.index] ?? null;
 
   const nowPlaying = useMemo(
-    () => (entry === null ? null : nowPlayingOf(entry, origin)),
-    [entry, origin],
+    () => (entry === null ? null : nowPlayingOf(entry, origin, copies.find(entry.id)?.artUri)),
+    [entry, origin, copies],
   );
 
   const items = useMemo(
-    () => (queue?.queue ?? []).map((queued) => queueItemOf(queued, origin)),
-    [queue, origin],
+    () =>
+      (state?.queue ?? []).map((queued) =>
+        queueItemOf(queued, origin, copies.find(queued.id)?.artUri),
+      ),
+    [state?.queue, origin, copies],
   );
 
   const status = statusOf(state, local, role);
@@ -468,16 +520,18 @@ export function PlayerProvider({
   );
 
   return (
-    <ActionsContext value={actions}>
-      <DevicesContext value={deviceList}>
-        <PlayerContext value={player}>
-          <NowPlayingContext value={current}>
-            <PositionTicker controller={controller} durationMs={nowPlaying?.durationMs ?? 0}>
-              {children}
-            </PositionTicker>
-          </NowPlayingContext>
-        </PlayerContext>
-      </DevicesContext>
-    </ActionsContext>
+    <SessionRunContext value={session.run}>
+      <ActionsContext value={actions}>
+        <DevicesContext value={deviceList}>
+          <PlayerContext value={player}>
+            <NowPlayingContext value={current}>
+              <PositionTicker controller={controller} durationMs={nowPlaying?.durationMs ?? 0}>
+                {children}
+              </PositionTicker>
+            </NowPlayingContext>
+          </PlayerContext>
+        </DevicesContext>
+      </ActionsContext>
+    </SessionRunContext>
   );
 }

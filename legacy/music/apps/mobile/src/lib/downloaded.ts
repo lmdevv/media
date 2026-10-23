@@ -126,6 +126,16 @@ export const storageLine = (usage: DownloadUsage): string =>
     ? "Nothing downloaded"
     : `${countOf(usage.tracks, "song")} · ${formatBytes(usage.bytes)}`;
 
-/** The Library row's count, such as `55 songs`; none while nothing is downloaded. */
-export const downloadedCount = (usage: DownloadUsage): string | null =>
-  usage.tracks === 0 ? null : countOf(usage.tracks, "song");
+/**
+ * The Library row's figure: how many songs, such as `55 songs` (D09), or while the server is out
+ * of reach how much space they take, such as `2.4 GB` (D11); none while nothing is downloaded.
+ */
+export const downloadedDetail = (usage: DownloadUsage, offline: boolean): string | null => {
+  if (usage.tracks === 0) return null;
+
+  return offline ? formatBytes(usage.bytes) : countOf(usage.tracks, "song");
+};
+
+/** Library's line under its title while offline, such as `55 songs on this iPhone` (D11). */
+export const onThisPhone = (usage: DownloadUsage): string =>
+  `${countOf(usage.tracks, "song")} on this iPhone`;
