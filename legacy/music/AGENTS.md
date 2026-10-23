@@ -86,6 +86,10 @@ type(scope): summary
   is needed, the resulting behavior, and any important risk, migration, or follow-up.
 - Base the message on the staged diff. Replace vague messages such as `fix stuff` or `address
   review` with the actual change.
+- Put relevant PR and issue references in a `Refs:` trailer, such as `Refs: #19, ADS-145`.
+  Place it after any bullet body and before co-author trailers. Use known references only,
+  deduplicate them, and omit the trailer when none apply. Preserve relevant references when
+  rewording, rebasing, squashing, or merging commits.
 - Every agent-created or agent-amended commit must include `Co-authored-by` trailers identifying
   the contributing model and coding tool. Read the actual identities from runtime context or
   configuration. Never silently omit attribution because a trailer was not supplied by the harness.
