@@ -1,7 +1,7 @@
 /**
- * C08 · Playlist actions. Everyone may queue the playlist and copy its link. Its owner also edits,
- * shares, and deletes it; a collaborator edits its songs; anyone it was shared with by name may
- * leave it. The server enforces each of these again.
+ * C08 · Playlist actions. Everyone may queue, download, and copy a link to the playlist. Its owner
+ * also edits, shares, and deletes it; a collaborator edits its songs; anyone it was shared with by
+ * name may leave it. The server enforces each of these again.
  */
 import type { TrackId } from "@music/commands/ids";
 import { PlaylistId } from "@music/commands/ids";
@@ -11,10 +11,20 @@ import { errorMessage } from "@music/sdk/errors";
 import { useRead } from "@music/sdk/react";
 import type { Href } from "expo-router";
 import { router, useLocalSearchParams } from "expo-router";
-import { FastForward, List, ListMusic, LogOut, Share, Trash2, Users } from "lucide-react-native";
+import {
+  CircleArrowDown,
+  FastForward,
+  List,
+  ListMusic,
+  LogOut,
+  Share,
+  Trash2,
+  Users,
+} from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import { useState } from "react";
 
+import { DownloadRow } from "@/components/downloads/download-row";
 import { SheetUnavailable } from "@/components/playlists/unavailable";
 import { usePlaylist } from "@/components/playlists/use-playlist";
 import { useCopyPlaylistLink } from "@/components/playlists/copy-link";
@@ -35,9 +45,13 @@ interface Context {
   readonly sharedByName: boolean;
 }
 
-/** What a row does: queue songs, copy the link, or go to another screen. */
+/**
+ * What a row does: queue songs, keep the playlist on this iPhone (a row that words itself by the
+ * download's state), copy the link, or go to another screen.
+ */
 type Effect =
   | { readonly kind: "queue"; readonly next: boolean }
+  | { readonly kind: "download" }
   | { readonly kind: "copy" }
   | {
       readonly kind: "open";
@@ -76,6 +90,13 @@ const ACTIONS: ReadonlyArray<Action> = [
     done: "Added to queue",
     when: hasSongs,
     effect: { kind: "queue", next: false },
+  },
+  {
+    key: "download",
+    label: () => "Download",
+    icon: CircleArrowDown,
+    when: () => true,
+    effect: { kind: "download" },
   },
   {
     key: "edit",
@@ -165,6 +186,8 @@ function Sheet({
       return;
     }
 
+    if (effect.kind === "download") return;
+
     if (effect.kind === "copy") {
       try {
         await copyLink(playlist.id);
@@ -192,6 +215,18 @@ function Sheet({
       {ACTIONS.flatMap((action) => {
         if (!action.when(context)) return [];
         const confirmed = confirmedKey === action.key;
+
+        if (action.effect.kind === "download") {
+          return [
+            <DownloadRow
+              key={action.key}
+              target={{ kind: "playlist", id: playlist.id }}
+              tone="muted"
+              onDone={() => router.back()}
+              onFailure={setFailure}
+            />,
+          ];
+        }
 
         return [
           <Row

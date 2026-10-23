@@ -1,7 +1,8 @@
 /**
- * A11 · Song actions: play next, add to the queue, add to a playlist, like, go to the album or the
- * artist, or copy a link. Queueing and liking close the sheet once done; a failure stays in the
- * sheet with the server's reason. Copying says so in the row, since iOS shows no toast.
+ * A11 · Song actions: play next, add to the queue, download, add to a playlist, like, go to the
+ * album or the artist, or copy a link. Queueing, downloading, and liking close the sheet once
+ * done; a failure stays in the sheet with the server's reason. Copying says so in the row, since
+ * iOS shows no toast.
  */
 import { errorMessage } from "@music/sdk/errors";
 import { useReadOnce, useRun } from "@music/sdk/react";
@@ -14,6 +15,7 @@ import { useState } from "react";
 import { View } from "react-native";
 
 import { openAlbum, openArtist } from "@/components/browse/rows";
+import { DownloadRow } from "@/components/downloads/download-row";
 import { Icon } from "@/components/ui/icon";
 import { Row } from "@/components/ui/row";
 import { SheetLayout } from "@/components/ui/sheet-layout";
@@ -113,6 +115,12 @@ function Actions({ song }: { readonly song: SheetSong }) {
             await queueAdd({ trackIds: [song.id] });
           })
         }
+      />
+      <DownloadRow
+        target={{ kind: "track", id: song.id }}
+        tone="default"
+        onDone={() => router.back()}
+        onFailure={setFailure}
       />
       <ActionRow
         icon={Plus}

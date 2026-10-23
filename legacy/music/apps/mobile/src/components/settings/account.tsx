@@ -2,7 +2,6 @@
  * F02 · Account: who is signed in, their display name to change, the email they sign in with,
  * and Sign out. Signing out ends the session; the root stack then shows Sign in on its own.
  */
-import { useAuthActions } from "@convex-dev/auth/react";
 import type { User } from "@music/commands/models";
 import { roleLabel } from "@music/commands/permissions";
 import { isBlank } from "@music/commands/text";
@@ -18,6 +17,7 @@ import { Page } from "@/components/ui/page";
 import { Row } from "@/components/ui/row";
 import { hostOf } from "@/lib/links";
 import { useConnection } from "@/session/connection";
+import { useSignOut } from "@/session/sign-out";
 
 import { useMe } from "./access";
 import { Failure } from "./failure";
@@ -27,7 +27,7 @@ import { useFlash } from "./use-flash";
 /** The account form, once the account has loaded. */
 function AccountForm({ me }: { readonly me: User }) {
   const { origin } = useConnection();
-  const { signOut } = useAuthActions();
+  const signOut = useSignOut();
   const rename = useRun("account.rename");
   const save = useAction();
   const leave = useAction();

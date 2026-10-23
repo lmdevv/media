@@ -61,8 +61,11 @@ export interface SourceResolver {
    * and costs nothing: a stream is signed only when its plan's `sign` runs.
    */
   readonly resolve: (track: Track, wanted: StreamProfile) => SourcePlan;
-  /** A copy on this device failed to play: stop offering it. Streams ignore it. */
-  readonly discard: (trackId: TrackId) => void;
+  /**
+   * The copy of `trackId` at `url` on this device failed to play: stop offering it. Naming the
+   * URL keeps a newer copy that replaced it meanwhile. Streams ignore it.
+   */
+  readonly discard: (trackId: TrackId, url: string) => void;
 }
 
 /**
@@ -124,8 +127,11 @@ export interface LocalCopy {
 /** The copies this device holds, as downloads keep them. */
 export interface LocalCopies {
   readonly find: (trackId: TrackId) => LocalCopy | null;
-  /** A copy failed to play: stop offering it, and fetch it again when downloads next sync. */
-  readonly discard: (trackId: TrackId) => void;
+  /**
+   * The copy at `url` failed to play: stop offering it, and fetch it again when the file itself is
+   * broken. A newer copy that replaced it meanwhile stays.
+   */
+  readonly discard: (trackId: TrackId, url: string) => void;
 }
 
 /**

@@ -4,19 +4,20 @@
  * fail `unauthenticated` just before the session phase moves to Sign in; that case says so and
  * offers the way back in. Anything else offers Try again.
  */
-import { useAuthActions } from "@convex-dev/auth/react";
 import { commandFailure, errorMessage } from "@music/sdk/errors";
 import type { ErrorBoundaryProps } from "expo-router";
 import { CircleAlert, LogIn } from "lucide-react-native";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useSignOut } from "@/session/sign-out";
+
 import { Button } from "./ui/button";
 import { EmptyState } from "./ui/empty-state";
 
 /** What the signed-in app shows in place of a screen that threw. */
 export function AppFailure({ error, retry }: ErrorBoundaryProps) {
-  const { signOut } = useAuthActions();
+  const signOut = useSignOut();
   const insets = useSafeAreaInsets();
   const signedOut = commandFailure(error)?.code === "unauthenticated";
 

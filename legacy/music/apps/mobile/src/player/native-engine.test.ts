@@ -323,6 +323,22 @@ describe("NativeEngine", () => {
     expect(output(1).wantsPlay).toBe(false);
   });
 
+  it("opens and preloads downloaded files at once, asking the media service nothing", async () => {
+    const { engine, media, outputs, output } = await setup();
+    const downloaded = (key: string): EngineSource => ({ ...media.source(key), finished: true });
+    // Any question about a finished file would wait here for good.
+    media.state.finished = deferred().promise;
+    const loaded = engine.load(downloaded("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+
+    engine.preload(downloaded("b"));
+    await vi.waitFor(() => expect(outputs).toHaveLength(2));
+
+    expect(output(1).url).toBe(downloaded("b").url);
+    expect(media.state.finishedAsks).toBe(0);
+  });
+
   it("starts the preloaded song the moment the current one ends", async () => {
     const { engine, media, output, events } = await setup();
     const loaded = engine.load(media.source("a"), 0, true);

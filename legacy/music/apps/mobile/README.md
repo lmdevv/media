@@ -43,6 +43,20 @@ whenever Metro runs; commit it, since typechecking needs it.
 a live stream that can't seek, so a seek opens it again from the offset (`&start=`), or from the
 finished file once the server has it.
 
+## Downloads
+
+`src/downloads` keeps the albums, playlists, and songs someone downloads on this phone. The server
+says what each download holds (`downloads.manifest`); `DownloadSync` from `@music/sdk/downloads`
+plans what to fetch and delete, and fetches finished files with `&finished=1`. Files and a SQLite
+index live in Application Support under `downloads/<server>/<account>/`, which
+`modules/vault-files` marks excluded from backup. Signing out deletes the server's downloads. Screens
+use the hooks in `src/downloads/index.ts` and never see files or manifests.
+
+To check a download on a simulator, pin it from the CLI with the phone's device ID
+(`music devices list`, then `music downloads add --device-id <id> --kind album --id <albumId>`),
+and look under the app's data container (`xcrun simctl get_app_container <udid> dev.lmdevv.music
+data`).
+
 ## Tab bar
 
 iOS minimizes the tab bar and moves the mini player inline as a page scrolls, but it finds the

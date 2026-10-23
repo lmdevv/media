@@ -9,7 +9,7 @@ import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { DeviceKind, PlaybackState } from "@music/commands/models";
 import { PlaybackController } from "@music/player/playback-controller";
 import { serverSession } from "@music/player/session-router";
-import { streamSources } from "@music/player/source-resolver";
+import { localFirst, streamSources } from "@music/player/source-resolver";
 import type { StreamQuality } from "@music/player/stream-quality";
 import { makeMusicClient } from "@music/sdk/client";
 import type { MusicClient } from "@music/sdk/client";
@@ -51,7 +51,9 @@ import {
 import type { NowPlaying, PlayerRole, PlayerStatus, PlayerView } from "./player-state";
 import { idleTransfer, nextTransfer, TRANSFER_TIMEOUT_MS } from "./transfer";
 import type { Transfer } from "./transfer";
-import { mediaUrl } from "../lib/media-url";
+import { useLocalCopies } from "../downloads";
+import type { DownloadedCopies } from "../downloads";
+import { mediaUrl, resolveMediaUrl } from "../lib/media-url";
 import type { ServerOrigin } from "../lib/server";
 
 /** How often `usePlaybackPosition` updates. */
@@ -179,14 +181,27 @@ interface Phone {
   readonly name: string;
 }
 
-const createPhone = (client: MusicClient, origin: ServerOrigin): Phone => {
+const createPhone = (
+  client: MusicClient,
+  origin: ServerOrigin,
+  copies: DownloadedCopies,
+): Phone => {
   const engine = new NativeEngine(openExpoOutput);
   const id = loadPhoneId();
   const name = phoneName();
 
-  const controller = new PlaybackController(
-    serverSession(client),
+  const session = serverSession(client);
+
+  // A downloaded song plays from its file, online too; anything else streams.
+  const sources = localFirst(
+    copies,
     streamSources(client, { now: Date.now, resolveUrl: (url) => mediaUrl(origin, url) }),
+    session,
+  );
+
+  const controller = new PlaybackController(
+    session,
+    sources,
     { mse: null, create: () => engine },
     {
       deviceId: id,
@@ -195,7 +210,10 @@ const createPhone = (client: MusicClient, origin: ServerOrigin): Phone => {
       now: Date.now,
       quality: loadQuality(),
       saveQuality,
-      nowPlaying: lockScreenControls(engine, origin),
+      nowPlaying: lockScreenControls(
+        engine,
+        (track) => copies.find(track.id)?.artUri ?? resolveMediaUrl(origin, track.artUrl),
+      ),
       onForeground,
     },
   );
@@ -318,7 +336,13 @@ export function PlayerProvider({
   readonly children: ReactNode;
 }) {
   const convex = useConvex();
-  const phone = useMemo(() => createPhone(makeMusicClient(convex), origin), [convex, origin]);
+  const copies = useLocalCopies();
+
+  const phone = useMemo(
+    () => createPhone(makeMusicClient(convex), origin, copies),
+    [convex, origin, copies],
+  );
+
   const { controller } = phone;
 
   // Separate subscriptions, so a position report re-runs only the small one. Convex delivers a

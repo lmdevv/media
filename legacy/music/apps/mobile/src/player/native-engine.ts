@@ -190,7 +190,7 @@ export class NativeEngine implements PlayerEngine {
       const slot = this.#currentSlot();
       this.#release(slot);
       slot.source = source;
-      slot.finished = this.#askFinished(source.url);
+      slot.finished = this.#askFinished(source);
     }
 
     const slot = this.#currentSlot();
@@ -251,7 +251,7 @@ export class NativeEngine implements PlayerEngine {
     if (idle.source?.url === source.url) return;
     this.#release(idle);
     idle.source = source;
-    const finished = this.#askFinished(source.url);
+    const finished = this.#askFinished(source);
     idle.finished = finished;
 
     // Open it once the finished file exists (or the question failed): a player opened earlier
@@ -364,14 +364,19 @@ export class NativeEngine implements PlayerEngine {
     for (const listener of this.#listeners) listener(event);
   }
 
-  /** Asks the media service in the background whether the finished file for `url` exists. */
-  #askFinished(url: string): Finished {
+  /**
+   * Asks the media service in the background whether the finished file for `source` exists. A
+   * finished source (a downloaded file) is one already, and nothing is asked.
+   */
+  #askFinished(source: EngineSource): Finished {
     const abort = new AbortController();
+
+    if (source.finished) return { ready: true, abort, settled: Promise.resolve() };
 
     const finished: Finished = { ready: null, abort, settled: Promise.resolve() };
 
     const ask = async (): Promise<void> => {
-      finished.ready = await fetchFinished(url, abort.signal);
+      finished.ready = await fetchFinished(source.url, abort.signal);
     };
 
     finished.settled = ask();

@@ -1,6 +1,6 @@
 /**
- * What `PlaybackController` needs from the iPhone: its device identity, the saved quality, the
- * lock screen, and the app's return to the foreground.
+ * What `PlaybackController` needs from the iPhone: its device identity, the saved qualities (for
+ * streaming and for downloads), the lock screen, and the app's return to the foreground.
  */
 import type { DeviceId } from "@music/commands/ids";
 import type { Track } from "@music/commands/models";
@@ -8,6 +8,7 @@ import { loadDeviceId, readItem, writeItem } from "@music/player/device-identity
 import type { KeyValueStorage } from "@music/player/device-identity";
 import type { NowPlayingControls } from "@music/player/playback-controller";
 import type { StreamQuality } from "@music/player/stream-quality";
+import { Option, Schema } from "effect";
 import { requireNativeModule } from "expo";
 import type { EventEmitter } from "expo";
 import { randomUUID } from "expo-crypto";
@@ -17,10 +18,10 @@ import { AppState } from "react-native";
 
 import type { NativeEngine } from "./native-engine";
 import { parseQuality } from "./player-state";
-import { resolveMediaUrl } from "../lib/media-url";
-import type { ServerOrigin } from "../lib/server";
 
 const QUALITY_KEY = "music.streamQuality";
+
+const DOWNLOAD_QUALITY_KEY = "music.downloadQuality";
 
 /** The keychain, read and written synchronously: the controller needs its device ID at once. */
 const storage: KeyValueStorage = {
@@ -44,6 +45,17 @@ export const loadQuality = (): StreamQuality => parseQuality(readItem(storage, Q
 export const saveQuality = (quality: StreamQuality): void => {
   writeItem(storage, QUALITY_KEY, quality);
 };
+
+/** The quality songs download in: AAC 320 kbps, or the original file when this iPhone plays it. */
+const DownloadQuality = Schema.Literals(["high", "lossless"]);
+
+export type DownloadQuality = typeof DownloadQuality.Type;
+
+const decodeDownloadQuality = Schema.decodeUnknownOption(DownloadQuality);
+
+/** The saved download quality; `high` until someone picks lossless, or when the value is unknown. */
+export const loadDownloadQuality = (): DownloadQuality =>
+  Option.getOrElse(decodeDownloadQuality(readItem(storage, DOWNLOAD_QUALITY_KEY)), () => "high");
 
 /** Calls `listener` each time the app comes back to the screen. */
 export const onForeground = (listener: () => void): (() => void) => {
@@ -87,11 +99,12 @@ const listenForTrackCommands = (handlers: {
  * The lock screen, Control Center, headphones, and CarPlay. expo-audio routes play, pause, and
  * scrubbing to the playing AVPlayer itself, which the engine sees as status changes. Next and
  * previous come from the `RemoteCommands` module and go to the controller's handlers, which ask
- * the server to move the queue.
+ * the server to move the queue. `artwork` names the cover to show for a song: its downloaded
+ * file when this phone holds one, so the cover shows without the server.
  */
 export const lockScreenControls = (
   engine: NativeEngine,
-  origin: ServerOrigin,
+  artwork: (track: Track) => string | null,
 ): NowPlayingControls => {
   let shown: Track | null = null;
   let stopListening = nothingToStop;
@@ -112,7 +125,7 @@ export const lockScreenControls = (
               title: track.title,
               artist: track.artist,
               album: track.album,
-              artworkUrl: resolveMediaUrl(origin, track.artUrl),
+              artworkUrl: artwork(track),
             },
       );
     },

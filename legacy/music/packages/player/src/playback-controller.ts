@@ -940,7 +940,7 @@ export class PlaybackController {
     const loaded = this.#loaded;
 
     if (loaded?.origin === "local") {
-      this.#sources.discard(loaded.track.id);
+      if (loaded.url !== null) this.#sources.discard(loaded.track.id, loaded.url);
       void this.#load(loaded.track, loaded.index, this.#positionMs, this.#view?.playing ?? false);
 
       return;

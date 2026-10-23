@@ -1,13 +1,15 @@
 /**
  * The signed-in app: the tabs, then everything pushed or presented over them. Pages Paper draws
  * without the tab bar (settings, Jams, playlist editing) push here, above the tabs; Paper's bottom
- * sheets present here as native form sheets; Now Playing is a modal with its own stack.
+ * sheets present here as native form sheets; Now Playing is a modal with its own stack. Downloads
+ * sit above the player, which plays downloaded songs from their files.
  */
 import { Stack } from "expo-router";
 
 import { AppFailure } from "@/components/app-failure";
 import { SaveFailureProvider } from "@/components/states/save-failure";
 
+import { DownloadsProvider } from "@/downloads";
 import { PlayerProvider } from "@/player";
 import { useConnection } from "@/session/connection";
 
@@ -46,17 +48,19 @@ export default function AppLayout() {
   const { origin } = useConnection();
 
   return (
-    <PlayerProvider origin={origin}>
-      <SaveFailureProvider>
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="player" options={{ presentation: "modal" }} />
-          {SHEETS.map((name) => (
-            <Stack.Screen key={name} name={name} options={sheet} />
-          ))}
-        </Stack>
-      </SaveFailureProvider>
-    </PlayerProvider>
+    <DownloadsProvider>
+      <PlayerProvider origin={origin}>
+        <SaveFailureProvider>
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="player" options={{ presentation: "modal" }} />
+            {SHEETS.map((name) => (
+              <Stack.Screen key={name} name={name} options={sheet} />
+            ))}
+          </Stack>
+        </SaveFailureProvider>
+      </PlayerProvider>
+    </DownloadsProvider>
   );
 }
 

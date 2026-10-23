@@ -10,7 +10,8 @@
     "./sign-in": "./src/sign-in.ts",
     "./convex-logger": "./src/convex-logger.ts",
     "./react": "./src/react.ts",
-    "./functions": "./src/functions.ts"
+    "./functions": "./src/functions.ts",
+    "./downloads": "./src/downloads/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@music/config": "workspace:*",
     "@types/react": "catalog:",
+    "fast-check": "4.10.2",
     "react": "catalog:",
     "typescript": "catalog:"
   },

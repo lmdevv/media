@@ -2,7 +2,6 @@
  * The live session phase: what the connected server says about setup, auth, the account, and
  * its libraries, folded by `sessionPhase` and held on screen by `settle`.
  */
-import { useAuthActions } from "@convex-dev/auth/react";
 import { setupStatus } from "@music/sdk/functions";
 import { sessionEnd } from "@music/sdk/errors";
 import type { SessionEnd } from "@music/sdk/errors";
@@ -15,6 +14,7 @@ import type { ReactNode } from "react";
 import { sessionPhase, settle } from "@/lib/session-phase";
 import type { SessionPhase, SettledPhase, SetupProgress } from "@/lib/session-phase";
 import { useConnectionControls } from "@/session/connection";
+import { useSignOut } from "@/session/sign-out";
 
 /** This install's setup progress on the connected server, and the way setup screens move it. */
 interface SetupSteps {
@@ -140,7 +140,7 @@ const valueOf = <Value,>(read: Value | Error | undefined): Value | undefined =>
  * server accepts again forgets it.
  */
 const useSessionEnding = (refusal: SessionEnd | null, role: Role | undefined): void => {
-  const { signOut } = useAuthActions();
+  const signOut = useSignOut();
   const ending = useContext(SessionEndContext);
   const [guest, setGuest] = useState(false);
 

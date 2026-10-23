@@ -19,3 +19,14 @@ export const librarySummary = (stats: {
     countOf(stats.albums, "album"),
     countOf(stats.artists, "artist"),
   ].join(" · ");
+
+const tenths = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+
+/** A size as iOS writes it, in decimal units: `850 KB`, `412 MB`, `1.4 GB`. */
+export const formatBytes = (bytes: number): string => {
+  if (bytes >= 999_500_000) return `${tenths.format(bytes / 1e9)} GB`;
+
+  if (bytes >= 999_500) return `${grouped.format(Math.round(bytes / 1e6))} MB`;
+
+  return `${grouped.format(Math.max(1, Math.round(bytes / 1e3)))} KB`;
+};

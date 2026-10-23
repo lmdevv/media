@@ -59,7 +59,7 @@ const setup = (queue: ReadonlyArray<SongId>, downloaded: ReadonlyArray<SongId>) 
   const server = recordingServer();
   const clock = manualClock();
   const held = new Set<string>(downloaded);
-  const discarded: Array<TrackId> = [];
+  const discarded: Array<{ readonly trackId: TrackId; readonly url: string }> = [];
   const output = instantEngine();
   let lockScreen: MediaSessionHandlers | null = null;
 
@@ -76,9 +76,9 @@ const setup = (queue: ReadonlyArray<SongId>, downloaded: ReadonlyArray<SongId>) 
   const copies = {
     find: (trackId: TrackId) =>
       held.has(trackId) ? { uri: fileOf(trackId), profile: "aac-320" as const } : null,
-    discard: (trackId: TrackId) => {
+    discard: (trackId: TrackId, url: string) => {
       held.delete(trackId);
-      discarded.push(trackId);
+      discarded.push({ trackId, url });
     },
   };
 
@@ -196,7 +196,7 @@ describe("playing without a connection", () => {
     output.emit({ type: "error", reason: "decode", message: "The file is damaged" });
 
     await vi.waitFor(() => expect(output.loads).toEqual([fileOf("a"), fileOf("b"), fileOf("c")]));
-    expect(discarded).toEqual(["b"]);
+    expect(discarded).toEqual([{ trackId: "b", url: fileOf("b") }]);
     stop();
   });
 
