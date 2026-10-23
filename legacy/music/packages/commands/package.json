@@ -18,6 +18,7 @@
     "./system-folders": "./src/system-folders.ts",
     "./text-order": "./src/text-order.ts",
     "./media-limits": "./src/media-limits.ts",
+    "./revision": "./src/revision.ts",
     "./forms": "./src/forms.ts"
   },
   "scripts": {

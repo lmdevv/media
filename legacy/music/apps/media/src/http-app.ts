@@ -5,7 +5,7 @@
 import { resolve } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
-import { StreamProfile, StreamTimingHeader } from "@music/commands/models";
+import { FINISHED_PARAM, StreamProfile, StreamTimingHeader } from "@music/commands/models";
 import { Cache, Clock, Duration, Effect, Exit, Option, Schema } from "effect";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -20,7 +20,7 @@ import { MediaBackend, type TrackSource } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
 import { isWithin } from "./platform/node-files.ts";
 import { isSignedRequestValid } from "./signed-request.ts";
-import { offsetResponse, transcodedResponse } from "./transcoded-response.ts";
+import { finishedResponse, offsetResponse, transcodedResponse } from "./transcoded-response.ts";
 import { Transcoder } from "./transcoder.ts";
 
 /** What request handlers run on. */
@@ -59,6 +59,16 @@ const parseStart = (raw: string | null): Option.Option<number> => {
   if (raw === null) return Option.some(0);
 
   return START_MS.test(raw) ? Option.some(Number(raw)) : Option.none();
+};
+
+/**
+ * The `finished` query parameter: true for `1`, false when absent, and none for anything else, so
+ * a misspelt flag is refused rather than answered with a live stream.
+ */
+const parseFinished = (raw: string | null): Option.Option<boolean> => {
+  if (raw === null) return Option.some(false);
+
+  return raw === "1" ? Option.some(true) : Option.none();
 };
 
 /**
@@ -116,11 +126,18 @@ export const makeHttpApp = Effect.gen(function* () {
       const trackId = decodeTrackId(rawTrackId);
       const profile = decodeProfile(url.searchParams.get("p") ?? "original");
       const startMs = parseStart(url.searchParams.get("start"));
+      const finished = parseFinished(url.searchParams.get(FINISHED_PARAM));
 
       if (Option.isNone(trackId) || Option.isNone(profile))
         return text(400, "Unknown track or profile");
 
-      if (Option.isNone(startMs) || (startMs.value > 0 && profile.value === "original"))
+      if (Option.isNone(finished)) return text(400, "Invalid finished");
+
+      // A finished file is the whole song, so it has no offset to start from.
+      if (
+        Option.isNone(startMs) ||
+        (startMs.value > 0 && (profile.value === "original" || finished.value))
+      )
         return text(400, "Invalid start");
 
       const valid = yield* isSignedRequestValid(
@@ -158,6 +175,17 @@ export const makeHttpApp = Effect.gen(function* () {
         mtimeMs: source.mtimeMs,
         codec: source.codec,
       };
+
+      // A download falls back to nothing: it asked for this profile's file, not a playable one.
+      if (finished.value) {
+        return yield* finishedResponse(request, input).pipe(
+          Effect.catchTag("TranscodeError", (error) =>
+            Effect.logError("Http.transcode_failed", error).pipe(
+              Effect.as(text(502, "Transcode failed")),
+            ),
+          ),
+        );
+      }
 
       // The original cannot start mid-way, so a seek that fails has nothing to fall back to.
       if (startMs.value > 0) {

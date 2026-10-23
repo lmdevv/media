@@ -6,7 +6,7 @@ import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /** True while a process with this ID exists. */
-const isRunning = (pid: number): boolean => {
+export const isRunning = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
 

@@ -1,15 +1,23 @@
 /**
  * The HTTP response for a transcoded stream profile. A profile that is not in the cache yet
  * streams while ffmpeg writes it: playback starts after the first frames instead of after the
- * whole encode. Everything else is served from the finished file, with byte ranges.
+ * whole encode. Everything else is served from the finished file, with byte ranges. A download
+ * asks for the finished file only, and polls while it is prepared.
  */
 import { StreamTimingHeader } from "@music/commands/models";
-import { type Context, Effect, Exit, Option, Scope, Stream } from "effect";
+import { type Context, Duration, Effect, Exit, Option, Scope, Stream } from "effect";
 
 import { isFragmentedProfile } from "./ffmpeg.ts";
 import { fileResponse, STREAM_CACHE_CONTROL } from "./file-response.ts";
 import { estimatedTimingHeaders, timingHeaders } from "./sample-timing.ts";
-import { Opened, type TranscodeError, Transcoder, type TranscodeInput } from "./transcoder.ts";
+import {
+  Opened,
+  Prepared,
+  type Transcoded,
+  type TranscodeError,
+  Transcoder,
+  type TranscodeInput,
+} from "./transcoder.ts";
 
 /**
  * The ranges a media element opens a source with: `bytes=0-` (Chromium, Firefox) and Safari's
@@ -34,6 +42,14 @@ const wantsWholeStream = (request: Request): boolean => {
   );
 };
 
+/** Answers `request` from a finished transcode, with byte ranges and validators. */
+const finishedFile = (request: Request, { path, timing }: Transcoded) =>
+  fileResponse(request, path, {
+    contentType: "audio/mp4",
+    cacheControl: STREAM_CACHE_CONTROL,
+    headers: Option.match(timing, { onNone: () => [], onSome: timingHeaders }),
+  });
+
 /**
  * Answers `request` with the transcode of `input`. A `GET` for the whole stream while it is
  * still being transcoded gets a `200` streamed as ffmpeg writes it, with no `Content-Length`, no
@@ -51,13 +67,7 @@ export const transcodedResponse = Effect.fn("TranscodedResponse.make")(function*
   const transcoder = yield* Transcoder;
 
   const serveFinished = Effect.fn("TranscodedResponse.serveFinished")(function* () {
-    const { path, timing } = yield* transcoder.transcode(input);
-
-    return yield* fileResponse(request, path, {
-      contentType: "audio/mp4",
-      cacheControl: STREAM_CACHE_CONTROL,
-      headers: Option.match(timing, { onNone: () => [], onSome: timingHeaders }),
-    });
+    return yield* finishedFile(request, yield* transcoder.transcode(input));
   });
 
   if (!wantsWholeStream(request)) return yield* serveFinished();
@@ -86,6 +96,39 @@ export const transcodedResponse = Effect.fn("TranscodedResponse.make")(function*
     ),
     Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
   );
+});
+
+/**
+ * Answers a request for the finished transcode of `input` (`&finished=1`, `GET` or `HEAD`): the
+ * cached file as `transcodedResponse` serves it once finished, with `Content-Length`, `ETag`, and
+ * byte ranges. While the transcode is prepared in the background, it answers `503` with
+ * `Retry-After` and `Cache-Control: no-store` instead, so a client polls rather than holding a
+ * connection through the encode, and leaving does not stop it.
+ *
+ * @returns The response, or `TranscodeError` when the background transcode failed just now, or
+ *   `FileError` when the finished file cannot be read.
+ */
+export const finishedResponse = Effect.fn("TranscodedResponse.finished")(function* (
+  request: Request,
+  input: TranscodeInput,
+) {
+  const transcoder = yield* Transcoder;
+
+  return yield* Prepared.$match(yield* transcoder.prepare(input), {
+    Ready: ({ transcoded }) => finishedFile(request, transcoded),
+    Pending: ({ retryAfter }) =>
+      Effect.succeed(
+        new Response("Preparing the file; retry shortly", {
+          status: 503,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Retry-After": String(Math.ceil(Duration.toSeconds(retryAfter))),
+          },
+        }),
+      ),
+    Failed: ({ error }) => Effect.fail(error),
+  });
 });
 
 /**

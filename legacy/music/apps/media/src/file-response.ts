@@ -2,6 +2,7 @@
  * Serves a file over HTTP with validators and single byte ranges: `ETag`, `Last-Modified`,
  * `If-None-Match`, `If-Range`, `Range` (206 and 416), and bodiless `HEAD`.
  */
+import { fileRevision } from "@music/commands/revision";
 import { Effect } from "effect";
 
 import { ByteRange, parseByteRange } from "./byte-range.ts";
@@ -18,8 +19,7 @@ export interface FileResponseOptions {
   readonly headers?: ReadonlyArray<readonly [string, string]>;
 }
 
-const etagOf = (size: number, mtimeMs: number): string =>
-  `"${size.toString(36)}-${Math.trunc(mtimeMs).toString(36)}"`;
+const etagOf = (size: number, mtimeMs: number): string => `"${fileRevision(size, mtimeMs)}"`;
 
 const matchesEtag = (header: string, etag: string): boolean =>
   header.trim() === "*" ||

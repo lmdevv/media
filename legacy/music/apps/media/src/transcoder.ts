@@ -13,6 +13,9 @@
  *
  * A seek ahead of a running transcode gets its own ffmpeg run from that point (`openAt`), which
  * streams straight to the one listener and is never cached.
+ *
+ * A download asks for the finished file without reading the live one (`prepare`): its transcode
+ * runs detached from the request, in a lane of its own beside the shared runs.
  */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -66,6 +69,25 @@ import { MediaConfig } from "./media-config.ts";
 import { declaredLength, estimatedLength, measureTiming, SampleTiming } from "./sample-timing.ts";
 
 const MAX_CONCURRENT_TRANSCODES = 2;
+
+/**
+ * Detached runs (`prepare`) encode in their own lane, beside the shared runs: a device downloading
+ * a whole library never takes a listener's ffmpeg slot.
+ */
+const PREPARE_RUNS = 1;
+
+/**
+ * How long a detached run is held while nobody asks about it; then it stops like a stream nobody
+ * reads. Well past a poller's `PREPARE_RETRY` and shorter than `TRANSCODE_TIMEOUT`, so a client
+ * that gave up frees the prepare lane before the run would time out.
+ */
+export const PREPARE_HOLD = Duration.minutes(2);
+
+/** How soon a client waiting for a detached run should ask again. */
+const PREPARE_RETRY = Duration.seconds(2);
+
+/** How long the failure of a detached run is reported; asking after that starts a new run. */
+export const PREPARE_FAILURE_TTL = Duration.minutes(1);
 
 /**
  * Offset runs (`openAt`) skip the cached transcodes' queue so a seek never waits behind other
@@ -198,6 +220,18 @@ export type Opened = Data.TaggedEnum<{
 /** Constructors and matchers for `Opened`. */
 export const Opened = Data.taggedEnum<Opened>();
 
+/** What `prepare` found: the finished file, a run still going, or a run that failed just now. */
+export type Prepared = Data.TaggedEnum<{
+  Ready: { readonly transcoded: Transcoded };
+  /** Encoding, or waiting for the prepare lane, in the background; ask again after `retryAfter`. */
+  Pending: { readonly retryAfter: Duration.Duration };
+  /** The detached run failed less than `PREPARE_FAILURE_TTL` ago. */
+  Failed: { readonly error: TranscodeError };
+}>;
+
+/** Constructors and matchers for `Prepared`. */
+export const Prepared = Data.taggedEnum<Prepared>();
+
 /**
  * A transcode that starts part-way into the song, encoded for one listener and never cached.
  *
@@ -249,6 +283,14 @@ export interface Interface {
     input: TranscodeInput,
     startMs: number,
   ) => Effect.Effect<FromOffset, TranscodeError | OffsetRunsBusy, Scope.Scope>;
+  /**
+   * Returns the cached transcode of `input`, or starts or joins its transcode detached from the
+   * caller and returns `Pending`. A detached run is held until it finishes or nobody has asked
+   * about it for `PREPARE_HOLD`. New detached runs take the prepare lane, `PREPARE_RUNS` at once
+   * and never a shared slot; while the lane is taken, `prepare` returns `Pending` without starting
+   * one, and a later ask starts it. A held run's failure is returned for `PREPARE_FAILURE_TTL`.
+   */
+  readonly prepare: (input: TranscodeInput) => Effect.Effect<Prepared>;
   /** True when ffmpeg runs. Cached for a minute. */
   readonly ffmpegAvailable: Effect.Effect<boolean>;
 }
@@ -281,6 +323,8 @@ const Progress = Data.taggedEnum<Progress>();
 /** One running transcode. */
 interface Job {
   readonly output: string;
+  /** The slots its ffmpeg run takes one of: the shared ones, or the prepare lane. */
+  readonly lane: Semaphore.Semaphore;
   /** Where the live copy goes. */
   readonly live: string;
   readonly progress: SubscriptionRef.SubscriptionRef<Progress>;
@@ -388,12 +432,17 @@ const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;
   const cacheDir = join(config.dataDir, "cache");
   const permits = yield* Semaphore.make(MAX_CONCURRENT_TRANSCODES);
+  const prepareLane = yield* Semaphore.make(PREPARE_RUNS);
   const offsetRuns = yield* Semaphore.make(MAX_CONCURRENT_OFFSET_RUNS);
   /** Serve times by cached file, updated in place: copying it on every serve would cost O(n). */
   const lastUsed = new Map<string, number>();
   /** Running jobs by output path. Changes, and holds taken on a job, happen under `registry`. */
   const jobs = yield* Ref.make<ReadonlyMap<string, Job>>(new Map());
   const registry = yield* Semaphore.make(1);
+  /** Jobs held for `prepare` by output, with when someone last asked. Changed under `registry`. */
+  const preparing = new Map<string, { readonly job: Job; readonly askedAt: number }>();
+  /** Failures of held jobs by output, reported until `until`. Changed under `registry`. */
+  const failures = new Map<string, { readonly error: TranscodeError; readonly until: number }>();
 
   const markUsed = (output: string, at: number): Effect.Effect<void> =>
     Effect.sync(() => {
@@ -568,7 +617,7 @@ const make = Effect.gen(function* () {
         orElse: () => Effect.fail("timeout" as const),
       }),
       Effect.onError(() => Files.removePath(temporary).pipe(Effect.ignore)),
-      permits.withPermits(1),
+      job.lane.withPermits(1),
     );
 
     const transcoded = yield* run;
@@ -670,10 +719,15 @@ const make = Effect.gen(function* () {
       () => release(job),
     );
 
-  /** Registers a new job and starts it in the background. Call under `registry`. */
-  const start = Effect.fn("Transcoder.start")(function* (input: TranscodeInput, output: string) {
+  /** Registers a new job on `lane` and starts it in the background. Call under `registry`. */
+  const start = Effect.fn("Transcoder.start")(function* (
+    input: TranscodeInput,
+    output: string,
+    lane: Semaphore.Semaphore,
+  ) {
     const job: Job = {
       output,
+      lane,
       live: `${output}.${randomUUID()}.live${PARTIAL_SUFFIX}`,
       progress: yield* SubscriptionRef.make<Progress>(Progress.Queued()),
       holds: yield* Ref.make({ readers: 0, settled: false }),
@@ -744,12 +798,11 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  const outputOf = (input: TranscodeInput): string =>
+    join(cacheDir, input.profile, `${input.trackId}-${Math.trunc(input.mtimeMs)}.m4a`);
+
   const open = Effect.fn("Transcoder.open")(function* (input: TranscodeInput) {
-    const output = join(
-      cacheDir,
-      input.profile,
-      `${input.trackId}-${Math.trunc(input.mtimeMs)}.m4a`,
-    );
+    const output = outputOf(input);
 
     const found = yield* registry.withPermits(1)(
       Effect.gen(function* () {
@@ -764,7 +817,7 @@ const make = Effect.gen(function* () {
         const existing = yield* cached(output, input);
 
         if (Option.isSome(existing)) return Result.fail(existing.value);
-        const job = yield* start(input, output);
+        const job = yield* start(input, output, permits);
         yield* hold(job);
 
         return Result.succeed(job);
@@ -799,6 +852,108 @@ const make = Effect.gen(function* () {
         Failed: ({ error }) => Result.succeed(Effect.fail(error)),
       }),
     );
+  });
+
+  /** Waits until nobody has asked `prepare` about `job` for `PREPARE_HOLD`. */
+  const quietFor = (job: Job): Effect.Effect<void> =>
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((now) => {
+        const held = preparing.get(job.output);
+
+        if (held?.job !== job) return Effect.void;
+        const remaining = held.askedAt + Duration.toMillis(PREPARE_HOLD) - now;
+
+        return remaining > 0
+          ? Effect.sleep(Duration.millis(remaining)).pipe(Effect.andThen(quietFor(job)))
+          : Effect.void;
+      }),
+    );
+
+  /** Forgets that `prepare` holds `job`, and remembers how it failed, if it did. */
+  const unprepare = (job: Job, failed: Option.Option<TranscodeError>) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((now) =>
+        registry.withPermits(1)(
+          Effect.sync(() => {
+            if (preparing.get(job.output)?.job === job) preparing.delete(job.output);
+
+            if (Option.isNone(failed)) return;
+
+            for (const [output, { until }] of failures) if (until <= now) failures.delete(output);
+            failures.set(job.output, {
+              error: failed.value,
+              until: now + Duration.toMillis(PREPARE_FAILURE_TTL),
+            });
+          }),
+        ),
+      ),
+    );
+
+  /**
+   * Notes that someone asked `prepare` about `job` at `now`. The first ask holds the job until it
+   * settles or `quietFor` passes, like a reader that stays. Call under `registry`.
+   */
+  const holdForPrepare = (job: Job, now: number) =>
+    Effect.gen(function* () {
+      const held = preparing.get(job.output)?.job === job;
+
+      preparing.set(job.output, { job, askedAt: now });
+
+      if (held) return;
+
+      yield* Ref.update(job.holds, (holds) => ({ ...holds, readers: holds.readers + 1 }));
+      yield* Effect.raceFirst(
+        finishedOf(job).pipe(
+          Effect.match({ onFailure: Option.some, onSuccess: () => Option.none() }),
+        ),
+        quietFor(job).pipe(Effect.as(Option.none<TranscodeError>())),
+      ).pipe(
+        Effect.flatMap((failed) => unprepare(job, failed)),
+        Effect.ensuring(release(job)),
+        Effect.forkIn(scope),
+      );
+    });
+
+  const prepare = Effect.fn("Transcoder.prepare")(function* (input: TranscodeInput) {
+    const output = outputOf(input);
+    const now = yield* Clock.currentTimeMillis;
+    const pending = Prepared.Pending({ retryAfter: PREPARE_RETRY });
+
+    const prepared = yield* registry.withPermits(1)(
+      Effect.gen(function* () {
+        const running = yield* Ref.get(jobs);
+        const job = running.get(output);
+
+        if (job !== undefined) {
+          yield* holdForPrepare(job, now);
+
+          return pending;
+        }
+
+        const existing = yield* cached(output, input);
+
+        if (Option.isSome(existing)) return Prepared.Ready({ transcoded: existing.value });
+        const failed = failures.get(output);
+
+        if (failed !== undefined && failed.until > now) {
+          return Prepared.Failed({ error: failed.error });
+        }
+
+        failures.delete(output);
+
+        const detached = [...running.values()].filter((other) => other.lane === prepareLane);
+
+        if (detached.length < PREPARE_RUNS) {
+          yield* holdForPrepare(yield* start(input, output, prepareLane), now);
+        }
+
+        return pending;
+      }),
+    );
+
+    if (Prepared.$is("Ready")(prepared)) yield* markUsed(output, now);
+
+    return prepared;
   });
 
   /** The rates and expected length an offset transcode of `input` has. */
@@ -910,6 +1065,7 @@ const make = Effect.gen(function* () {
       ),
     open,
     openAt,
+    prepare,
     ffmpegAvailable,
   });
 });

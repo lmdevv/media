@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
+import { FINISHED_PARAM } from "@music/commands/models";
 import { makeMusicClient } from "@music/sdk/client";
 import { describe, expect, it } from "vitest";
 import { ConvexHttpClient } from "convex/browser";
@@ -156,6 +157,36 @@ describe.skipIf(convexUrl === undefined || serviceSecret === undefined || signin
             const [first] = detail.tracks;
 
             if (first === undefined) expect.unreachable(`${album.title} has no tracks`);
+
+            // A download of the track: 503 while its file is prepared, then the finished MP4.
+            const signed = yield* call(() =>
+              client.read("stream.url", { trackId: first.id, profile: "aac-320" }),
+            );
+
+            const downloadUrl = new URL(signed.url);
+
+            downloadUrl.searchParams.set(FINISHED_PARAM, "1");
+
+            const download = call(async () =>
+              app.request(downloadUrl.pathname + downloadUrl.search),
+            );
+
+            expect((yield* download).status).toBe(503);
+
+            const downloaded = yield* download.pipe(
+              Effect.repeat({
+                schedule: Schedule.spaced("100 millis"),
+                until: (response) => response.status !== 503,
+                times: 300,
+              }),
+            );
+
+            expect(downloaded.status).toBe(200);
+            const file = yield* call(async () => new Uint8Array(await downloaded.arrayBuffer()));
+
+            expect(downloaded.headers.get("Content-Length")).toBe(String(file.length));
+            expect(downloaded.headers.get("ETag")).not.toBeNull();
+            expect(String.fromCodePoint(...file.subarray(4, 8))).toBe("ftyp");
 
             for (const profile of PROFILES) {
               const stream = yield* call(() =>

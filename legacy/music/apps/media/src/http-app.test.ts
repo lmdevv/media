@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 
 import type { TrackId } from "@music/commands/ids";
+import { FINISHED_PARAM } from "@music/commands/models";
+import { fileRevision } from "@music/commands/revision";
 import { signResource } from "@music/commands/signed-url";
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, HashSet, Layer, Ref, Schedule } from "effect";
@@ -26,8 +28,14 @@ import { layerMemory, MemoryMediaBackendControl } from "./testing/memory-media-b
 import { canCountOpenFiles, openDescriptors } from "./testing/open-files.ts";
 import { adtsPayload } from "./testing/adts.ts";
 import { ffmpegFailingOnce } from "./testing/failing-ffmpeg.ts";
+import { ffmpegHangingOnName } from "./testing/hanging-ffmpeg.ts";
 import { ffmpegRecordingRuns } from "./testing/recording-ffmpeg.ts";
-import { fragmentDecodeTimes, mediaData, withoutIndex } from "./testing/mp4-boxes.ts";
+import {
+  fragmentDecodeTimes,
+  mediaData,
+  topLevelBoxes,
+  withoutIndex,
+} from "./testing/mp4-boxes.ts";
 import { sineSegment } from "./testing/sine.ts";
 import * as Transcoder from "./transcoder.ts";
 import { runScoped } from "./testing/run.ts";
@@ -121,6 +129,23 @@ const fetchWhole = (port: number, path: string): Effect.Effect<Uint8Array> =>
 
     return new Uint8Array(await response.arrayBuffer());
   });
+
+/** A `GET` through a real socket. */
+const fetchAt = (port: number, path: string): Effect.Effect<Response> =>
+  Effect.promise(() => fetch(`http://127.0.0.1:${port}${path}`));
+
+/** `url` asking for the finished file, as a download does. */
+const finishedUrl = (url: string): string => `${url}&${FINISHED_PARAM}=1`;
+
+/** Repeats `send` while it answers 503, as a download polls a file that is being prepared. */
+const untilPrepared = (send: Effect.Effect<Response>): Effect.Effect<Response> =>
+  send.pipe(
+    Effect.repeat({
+      schedule: Schedule.spaced("50 millis"),
+      until: (response) => response.status !== 503,
+      times: 400,
+    }),
+  );
 
 /** The app on a fresh fixture library, with `ffmpegPath` as its ffmpeg. */
 const setupWith = Effect.fn("Test.setup")(function* (ffmpegPath: string) {
@@ -219,7 +244,11 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(response.headers.get("Access-Control-Expose-Headers")).toContain("Content-Range");
         expect(yield* bytes(response)).toEqual(file);
 
+        // A download stores the file's revision and resumes with it as the validator.
+        const { size, mtimeMs } = yield* Files.statPath(join(root, DAWN));
         const etag = response.headers.get("ETag") ?? "";
+
+        expect(etag).toBe(`"${fileRevision(size, mtimeMs)}"`);
         const cached = yield* request(url, { headers: { "If-None-Match": etag } });
 
         expect(cached.status).toBe(304);
@@ -746,6 +775,112 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
+  it("answers a download with 503 while its file is prepared, then the finished file", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { trackId, request } = yield* setup;
+        const url = `${yield* streamUrl(trackId(DAWN), "aac-320")}&${FINISHED_PARAM}=1`;
+        const preparing = yield* request(url, { headers: { Origin: "http://localhost:3001" } });
+
+        expect(preparing.status).toBe(503);
+        expect(preparing.headers.get("Retry-After")).toBe("2");
+        expect(preparing.headers.get("Cache-Control")).toBe("no-store");
+        expect(preparing.headers.get("Access-Control-Expose-Headers")).toContain("Retry-After");
+
+        const response = yield* untilPrepared(request(url));
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get("Content-Type")).toBe("audio/mp4");
+        expect(response.headers.get("Accept-Ranges")).toBe("bytes");
+        const body = yield* bytes(response);
+
+        expect(response.headers.get("Content-Length")).toBe(String(body.length));
+        // An MP4 with its index first, not the ADTS a live stream of this profile sends.
+        const boxes = topLevelBoxes(body).map((box) => box.type);
+
+        expect(boxes[0]).toBe("ftyp");
+        expect(boxes.indexOf("moov")).toBeLessThan(boxes.indexOf("mdat"));
+
+        // A download resumes with a range and the validator it was given.
+        const etag = response.headers.get("ETag") ?? "";
+
+        expect(etag).not.toBe("");
+
+        const resumed = yield* request(url, {
+          headers: { Range: "bytes=100-", "If-Range": etag },
+        });
+
+        expect(resumed.status).toBe(206);
+        expect(resumed.headers.get("Content-Range")).toBe(
+          `bytes 100-${body.length - 1}/${body.length}`,
+        );
+        expect(yield* bytes(resumed)).toEqual(body.subarray(100));
+
+        const head = yield* request(url, { method: "HEAD" });
+
+        expect(head.status).toBe(200);
+        expect(head.headers.get("ETag")).toBe(etag);
+        expect((yield* bytes(head)).length).toBe(0);
+      }),
+    ));
+
+  it("serves an original unchanged to a download, and refuses offsets and unknown flags", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, trackId, request } = yield* setup;
+        const id = trackId(NEON);
+        const original = yield* streamUrl(id, "original");
+        const plain = yield* request(original);
+        const downloaded = yield* request(`${original}&${FINISHED_PARAM}=1`);
+
+        expect(downloaded.status).toBe(200);
+        expect(downloaded.headers.get("ETag")).toBe(plain.headers.get("ETag"));
+        expect(yield* bytes(downloaded)).toEqual(
+          new Uint8Array(yield* Files.readWholeFile(join(root, NEON))),
+        );
+
+        const transcoded = yield* streamUrl(id, "aac-320");
+
+        expect((yield* request(`${transcoded}&${FINISHED_PARAM}=1&start=1000`)).status).toBe(400);
+        expect((yield* request(`${original}&${FINISHED_PARAM}=1&start=1000`)).status).toBe(400);
+        expect((yield* request(`${transcoded}&${FINISHED_PARAM}=yes`)).status).toBe(400);
+        expect((yield* request(`${transcoded}&${FINISHED_PARAM}=0`)).status).toBe(400);
+
+        const expired = yield* streamUrl(id, "aac-320", Date.now() - 1000);
+
+        expect((yield* request(`${expired}&${FINISHED_PARAM}=1`)).status).toBe(403);
+      }),
+    ));
+
+  it("answers 502, never the original, when a download's transcode fails", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, libraryId, backend, findTrackId, request } = yield* setup;
+        const junk = new TextEncoder().encode("this is not really an audio file");
+
+        yield* Files.writeFileAtomic(join(root, "junk.mp3"), junk, "a");
+        yield* backend.upsertTracks(libraryId, [
+          {
+            path: "junk.mp3",
+            size: junk.length,
+            mtimeMs: 1,
+            title: "junk",
+            artist: "Nobody",
+            album: "Junk",
+            durationMs: 1000,
+            codec: "mp3",
+            lossless: false,
+          },
+        ]);
+
+        const url = `${yield* streamUrl(yield* findTrackId("junk.mp3"), "aac-128")}&${FINISHED_PARAM}=1`;
+
+        expect((yield* untilPrepared(request(url))).status).toBe(502);
+        // Remembered for a while, so every poller hears it.
+        expect((yield* request(url)).status).toBe(502);
+      }),
+    ));
+
   it("answers 404 when a catalogued file is gone from disk", () =>
     runScoped(
       Effect.gen(function* () {
@@ -911,6 +1046,50 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         }),
       ),
   );
+
+  it("keeps preparing a download whose client goes away, in a lane listeners never wait for", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const scratch = yield* temporaryDirectory("ffmpeg");
+        const ffmpeg = yield* Effect.promise(() => ffmpegHangingOnName(scratch));
+        const { app, root, scan, findTrackId, trackId } = yield* setupWith(ffmpeg.path);
+
+        // A song whose encode never ends: it holds the prepare lane for the whole test.
+        yield* sineSegment(root, "hang-download", "mp3", 0, 48_000);
+        yield* scan;
+        const port = yield* listen(app);
+        const id = yield* findTrackId("hang-download.mp3");
+        const download = finishedUrl(yield* streamUrl(id, "aac-320"));
+        const started = Effect.promise(ffmpeg.started);
+        const before = yield* started;
+
+        // One ask starts the run; the clients after it leave at every point of their request.
+        expect((yield* fetchAt(port, download)).status).toBe(503);
+        yield* Effect.forEach([0, 1, 5, 20], (afterMs) => abandonedGet(port, download, afterMs), {
+          concurrency: "unbounded",
+        });
+
+        // Past the second a stream nobody reads is given, the one run still goes, and asking
+        // again joins it.
+        yield* Effect.sleep("1500 millis");
+        expect(yield* Effect.promise(ffmpeg.running)).toBe(1);
+        expect((yield* fetchAt(port, download)).status).toBe(503);
+        expect(yield* started).toBe(before + 1);
+
+        // A second download waits for the lane without starting ffmpeg, while a listener streams
+        // the same song at once, and the download then finds the listener's finished file.
+        const dawn = yield* streamUrl(trackId(DAWN), "aac-320");
+
+        expect((yield* fetchAt(port, finishedUrl(dawn))).status).toBe(503);
+        expect(yield* started).toBe(before + 1);
+        expect((yield* fetchWhole(port, dawn)).length).toBeGreaterThan(0);
+        const ready = yield* untilPrepared(fetchAt(port, finishedUrl(dawn)));
+
+        expect(ready.status).toBe(200);
+        expect(topLevelBoxes(yield* bytes(ready))[0]?.type).toBe("ftyp");
+        expect(yield* started).toBe(before + 2);
+      }),
+    ));
 
   it("frees the run of every seek whose client goes away before it streams", () =>
     runScoped(

@@ -65,6 +65,14 @@ export const StreamTimingHeader = {
 } as const;
 
 /**
+ * The stream URL query parameter that asks for the finished file (`&finished=1`): the whole
+ * transcode with a length, an `ETag`, and byte ranges, or a `503` with `Retry-After` while the
+ * media service prepares it in the background. Never a live stream. An original is always
+ * finished. The parameter is not signed: it picks the response's shape, not what the URL reads.
+ */
+export const FINISHED_PARAM = "finished";
+
+/**
  * What a person may do on the server (see `permissions.ts`). `owner` is the first account and
  * exactly one person; `guest` only hears the libraries shared with them.
  */

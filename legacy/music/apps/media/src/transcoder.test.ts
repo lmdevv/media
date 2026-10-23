@@ -2,7 +2,18 @@ import { join } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
 import { describe, expect, it } from "vitest";
-import { Cause, Clock, Effect, Exit, Fiber, Layer, Option, Schedule, Stream } from "effect";
+import {
+  Cause,
+  Clock,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Schedule,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 
 import * as Files from "./files.ts";
@@ -23,10 +34,30 @@ import { sineSegment } from "./testing/sine.ts";
 const indexOfAtom = (bytes: Uint8Array, name: string): number =>
   Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).indexOf(name, 0, "latin1");
 
-const transcoderWith = (dataDir: string, cacheMaxBytes: number) =>
-  Layer.build(Transcoder.layer.pipe(Layer.provide(testConfig(dataDir, cacheMaxBytes)))).pipe(
-    Effect.flatMap((context) => Transcoder.Transcoder.pipe(Effect.provideContext(context))),
+const transcoderWith = (dataDir: string, cacheMaxBytes?: number, ffmpegPath?: string) =>
+  Layer.build(
+    Transcoder.layer.pipe(Layer.provide(testConfig(dataDir, cacheMaxBytes, ffmpegPath))),
+  ).pipe(Effect.flatMap((context) => Transcoder.Transcoder.pipe(Effect.provideContext(context))));
+
+/**
+ * Asks `prepare` about `input`, pausing between asks, until it is no longer pending. The pause is
+ * separate so a test on a `TestClock` can wait in real time while `prepare` reads the test clock.
+ */
+const settledPrepare = (
+  transcoder: Transcoder.Transcoder["Service"],
+  input: Transcoder.TranscodeInput,
+  pause: Effect.Effect<void> = Effect.sleep("50 millis"),
+): Effect.Effect<Transcoder.Prepared> =>
+  transcoder.prepare(input).pipe(
+    Effect.filterOrElse(
+      (prepared) => !Transcoder.Prepared.$is("Pending")(prepared),
+      () => pause.pipe(Effect.andThen(settledPrepare(transcoder, input, pause))),
+    ),
   );
+
+/** Repeats `count` until `until` passes, in real time. */
+const eventually = <A>(count: Effect.Effect<A>, until: (value: A) => boolean) =>
+  count.pipe(Effect.repeat({ schedule: Schedule.spaced("20 millis"), until, times: 250 }));
 
 /** An `aac-128` transcode of `source`, a song with ID `id`. */
 const aacInput = (id: string, source: string): Transcoder.TranscodeInput => ({
@@ -385,6 +416,171 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           "left-1.m4a",
           "left-1.m4a.json",
         ]);
+      }),
+    ));
+
+  it("prepares transcodes in the background in a lane of its own, one at a time", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const scratch = yield* temporaryDirectory("ffmpeg");
+        const ffmpeg = yield* Effect.promise(() => ffmpegHangingOnName(scratch));
+        const library = yield* temporaryDirectory("library");
+        const started = Effect.promise(ffmpeg.started);
+
+        const song = (name: string) =>
+          sineSegment(library, name, "mp3", 0, 48_000).pipe(
+            Effect.map((source) => aacInput(name, source)),
+          );
+
+        // Listeners stuck in both shared slots do not hold up a download.
+        const listened = yield* transcoderWith(
+          yield* temporaryDirectory("data"),
+          undefined,
+          ffmpeg.path,
+        );
+
+        yield* Effect.forEach(["hang-a", "hang-b"], (name) =>
+          song(name).pipe(Effect.flatMap(listened.transcode), Effect.exit, Effect.forkScoped),
+        );
+        expect(yield* eventually(started, (runs) => runs >= 2)).toBe(2);
+        const wanted = yield* song("wanted");
+
+        expect(yield* listened.prepare(wanted)).toMatchObject({ _tag: "Pending" });
+        const ready = yield* settledPrepare(listened, wanted);
+
+        if (!Transcoder.Prepared.$is("Ready")(ready)) expect.unreachable("not prepared");
+        const probed = yield* probe(ready.transcoded.path);
+
+        expect(probed.format.format_name).toContain("mp4");
+        expect(probed.streams).toMatchObject([{ codec_name: "aac" }]);
+        expect(yield* listened.prepare(wanted)).toEqual(ready);
+
+        // A download stuck in the prepare lane leaves both shared slots to listeners, and the
+        // next download waits for the lane without starting ffmpeg.
+        const downloaded = yield* transcoderWith(
+          yield* temporaryDirectory("data"),
+          undefined,
+          ffmpeg.path,
+        );
+
+        const before = yield* started;
+
+        expect(yield* downloaded.prepare(yield* song("hang-download"))).toMatchObject({
+          _tag: "Pending",
+        });
+        expect(yield* downloaded.prepare(yield* song("queued"))).toMatchObject({
+          _tag: "Pending",
+        });
+
+        const played = yield* Effect.forEach(
+          ["a", "b"],
+          (name) => song(name).pipe(Effect.flatMap(downloaded.transcode)),
+          { concurrency: 2 },
+        );
+
+        expect(played).toHaveLength(2);
+        expect(yield* started).toBe(before + 3);
+      }),
+    ));
+
+  it("stops a prepared transcode nobody has asked about for a while, and keeps it while asked", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const clock = yield* TestClock.make();
+
+        yield* Effect.gen(function* () {
+          const scratch = yield* temporaryDirectory("ffmpeg");
+          const ffmpeg = yield* Effect.promise(() => ffmpegHangingOnName(scratch));
+          const library = yield* temporaryDirectory("library");
+
+          const transcoder = yield* transcoderWith(
+            yield* temporaryDirectory("data"),
+            undefined,
+            ffmpeg.path,
+          );
+
+          const input = aacInput("hang", yield* sineSegment(library, "hang", "mp3", 0, 48_000));
+
+          const runs = Effect.promise(async () => ({
+            started: await ffmpeg.started(),
+            running: await ffmpeg.running(),
+          }));
+
+          const almostHold = Duration.toMillis(Transcoder.PREPARE_HOLD) - 1000;
+
+          expect(yield* transcoder.prepare(input)).toMatchObject({ _tag: "Pending" });
+          expect(yield* clock.withLive(eventually(runs, ({ running }) => running === 1))).toEqual({
+            started: 1,
+            running: 1,
+          });
+
+          // Asked again within the hold, the same run goes on past it.
+          yield* clock.adjust(almostHold);
+          expect(yield* transcoder.prepare(input)).toMatchObject({ _tag: "Pending" });
+          yield* clock.adjust(almostHold);
+          yield* clock.withLive(Effect.sleep("200 millis"));
+          expect(yield* runs).toEqual({ started: 1, running: 1 });
+
+          // Unasked for the whole hold, it stops once a stream nobody reads would.
+          yield* clock.adjust("2 seconds");
+          yield* clock.withLive(Effect.sleep("100 millis"));
+          yield* clock.adjust("1 second");
+          expect(yield* clock.withLive(eventually(runs, ({ running }) => running === 0))).toEqual({
+            started: 1,
+            running: 0,
+          });
+
+          // A later ask starts over.
+          expect(yield* transcoder.prepare(input)).toMatchObject({ _tag: "Pending" });
+          expect(yield* clock.withLive(eventually(runs, ({ running }) => running === 1))).toEqual({
+            started: 2,
+            running: 1,
+          });
+        }).pipe(Effect.provideService(Clock.Clock, clock));
+      }),
+    ));
+
+  it("reports a prepared transcode's failure to every ask for a while, then tries again", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const clock = yield* TestClock.make();
+
+        yield* Effect.gen(function* () {
+          const scratch = yield* temporaryDirectory("ffmpeg");
+          const ffmpeg = yield* Effect.promise(() => ffmpegHangingOnName(scratch));
+          const library = yield* temporaryDirectory("library");
+          const source = join(library, "junk.mp3");
+
+          yield* Files.writeFileAtomic(source, new TextEncoder().encode("not audio"), "junk");
+
+          const transcoder = yield* transcoderWith(
+            yield* temporaryDirectory("data"),
+            undefined,
+            ffmpeg.path,
+          );
+
+          const input = aacInput("junk", source);
+          const pause = clock.withLive(Effect.sleep("50 millis"));
+          const started = Effect.promise(ffmpeg.started);
+          const ttl = Duration.toMillis(Transcoder.PREPARE_FAILURE_TTL);
+
+          expect(yield* settledPrepare(transcoder, input, pause)).toMatchObject({
+            _tag: "Failed",
+            error: { trackId: "junk", profile: "aac-128" },
+          });
+          expect(yield* started).toBe(1);
+
+          yield* clock.adjust(ttl - 1000);
+          expect(yield* transcoder.prepare(input)).toMatchObject({ _tag: "Failed" });
+          expect(yield* started).toBe(1);
+
+          yield* clock.adjust("2 seconds");
+          expect(yield* transcoder.prepare(input)).toMatchObject({ _tag: "Pending" });
+          expect(yield* settledPrepare(transcoder, input, pause)).toMatchObject({
+            _tag: "Failed",
+          });
+          expect(yield* started).toBe(2);
+        }).pipe(Effect.provideService(Clock.Clock, clock));
       }),
     ));
 });
