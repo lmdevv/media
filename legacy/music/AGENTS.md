@@ -68,6 +68,62 @@ four must pass before every commit.
 Use `scripts/dev-backend.sh` for a local self-hosted Convex; pick a different name and port per
 worktree. Commit the regenerated `convex/_generated/`.
 
+## Contributing
+
+### Commit messages
+
+Use this structure for commit messages and PR titles:
+
+```text
+type(scope): summary
+```
+
+- Use `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `migrate`, `update`, `perf`, `build`, or `ci`
+  for the type. Name the affected package or domain in the scope, such as `media`, `web`, or `sdk`.
+- Write the summary in imperative present tense, lowercase, with no trailing period. Describe the
+  concrete change, such as `fix(media): stop streams when playback ends`.
+- Add an optional bullet body for substantial changes or notable impact. Explain why the change
+  is needed, the resulting behavior, and any important risk, migration, or follow-up.
+- Base the message on the staged diff. Replace vague messages such as `fix stuff` or `address
+  review` with the actual change.
+- Every agent-created or agent-amended commit must include `Co-authored-by` trailers identifying
+  the contributing model and coding tool. Read the actual identities from runtime context or
+  configuration. Never silently omit attribution because a trailer was not supplied by the harness.
+- Use `noreply@openai.com` for OpenAI models and Codex, and `noreply@anthropic.com` for Anthropic
+  models and Claude Code. For other providers or tools, resolve their attribution address before
+  committing. Do not invent model identities or addresses, and do not include thinking-level metadata.
+- Deduplicate trailers and verify that attribution is present before every commit or amend.
+  Preserve all contributing agents' trailers through rebases, squashes, and merges.
+
+Example:
+
+```text
+docs(agents): define commit and pull request writing rules
+
+- define commit titles and optional bodies so history explains each change.
+- require PR descriptions and merge messages to match the final diff.
+
+Co-authored-by: openai/gpt-6.1-sol <noreply@openai.com>
+Co-authored-by: Codex <noreply@openai.com>
+```
+
+The example identities must be replaced with the model and tool that actually contributed.
+
+### PR descriptions, rebases, and merges
+
+- Write the PR description for a reviewer who has not read the conversation. Lead with the
+  problem and resulting behavior. Include relevant validation results and material risks or
+  migration steps. Keep simple changes to a short paragraph and validation notes.
+- After scope changes or a rebase, and immediately before merging, compare the PR title and
+  description with the final diff against the target branch. Rewrite stale or vague text, remove
+  abandoned approaches, and update validation results. Report skipped or failing checks accurately.
+- During a rebase, review the messages of commits that will remain in history. Reword vague or
+  outdated messages and combine fixup commits where appropriate. Preserve valid co-author trailers.
+- Before a squash or merge commit, explicitly review and improve its title and body using the
+  same rules. Use the final PR title and description as the starting point, then remove review
+  chatter and redundant commit lists. For a rebase merge, check each retained commit message.
+- These writing checks supplement the verification and review requirements below.
+
 ## Verify and review
 
 - Ports: web dev on 3001, Playwright on `E2E_PORT` (3002), Convex on 3210 and 3211, media service
