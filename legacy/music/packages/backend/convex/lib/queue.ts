@@ -6,6 +6,8 @@
  * they mean: a remove or move sent from one device while another device changed the queue still
  * reaches the right row, or fails when that row is gone.
  */
+import { keptOrder } from "@music/commands/queue-rules";
+
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { findSession } from "./playback";
@@ -197,28 +199,6 @@ export const newItems = (
   })),
   nextItemId: queue.nextItemId + trackIds.length,
 });
-
-/**
- * Where songs added "to the end" go: after the entries people queued, before the first upcoming
- * entry autoplay added, so autoplay always plays last.
- */
-export const endOfQueued = (queue: StoredQueue): number => {
-  const autoplayAt = queue.items.findIndex(
-    (item, position) => position > queue.index && item.autoplay,
-  );
-
-  return autoplayAt === -1 ? queue.items.length : autoplayAt;
-};
-
-/** `order` without the IDs that are no longer entries of `items`. */
-export const keptOrder = (
-  order: ReadonlyArray<string>,
-  items: ReadonlyArray<QueueItem>,
-): Array<string> => {
-  const present = new Set(items.map((item) => item.id));
-
-  return order.filter((id) => present.has(id));
-};
 
 /**
  * Drops the entries `lookup` cannot find and moves the index to the same entry, or to the next one

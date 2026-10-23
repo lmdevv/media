@@ -1,4 +1,23 @@
-import type { PlaybackPosition, PlaybackQueue } from "@music/commands/models";
+import type {
+  OfflinePlay,
+  OfflineResume,
+  PlaybackPosition,
+  PlaybackQueue,
+} from "@music/commands/models";
+import {
+  MAX_QUEUE,
+  addedOrder,
+  isNewPlay,
+  isStaleReport,
+  keptOrder,
+  movedInOrder,
+  nextIndex,
+  playOrder,
+  previousIndex,
+  shuffledOff,
+  shuffledOn,
+  withoutUpcomingAutoplay,
+} from "@music/commands/queue-rules";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
@@ -6,12 +25,10 @@ import { autoplaySongs } from "../lib/autoplay";
 import { DEVICE_LISTED_MS, DEVICE_LIST_LIMIT, listedDevices } from "../lib/devices";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
-import { MAX_QUEUE, ensureSession, findSession, livePosition, shuffled } from "../lib/playback";
+import { ensureSession, findSession, livePosition } from "../lib/playback";
 import { DEVICE_ONLINE_MS, makeContributors, makePresenter, presentDevice } from "../lib/present";
 import {
-  endOfQueued,
   itemPosition,
-  keptOrder,
   loadQueue,
   newItems,
   normaliseStored,
@@ -35,18 +52,6 @@ import { canRead } from "../lib/viewer";
 import type { ReadCtx, Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
-
-const RESTART_THRESHOLD_MS = 3000;
-
-/**
- * A report this close to the start of the song history last recorded, after the session had
- * played this much further, is the same song starting again (repeat one, or a seek back to the
- * start), so it counts as another play.
- */
-const REPLAY_GAP_MS = 10_000;
-
-/** How long after a command moves the queue a report naming another song counts as stale. */
-const MOVE_GRACE_MS = 3000;
 
 const GONE_MESSAGE = "That song is no longer in the queue";
 
@@ -251,7 +256,7 @@ export const refreshJamAutoplay = async (ctx: MutationCtx, host: Viewer): Promis
   const before = await loadQueue(ctx, host);
 
   if (before.items.some((item, position) => position > before.index && item.autoplay)) {
-    await saveTopped(ctx, host, withoutAutoplay(before));
+    await saveTopped(ctx, host, { ...before, ...withoutUpcomingAutoplay(before) });
   }
 
   // A song autoplay picked from a library shared with the host alone may be playing: move on to
@@ -290,32 +295,6 @@ export const refreshJamAutoplay = async (ctx: MutationCtx, host: Viewer): Promis
  */
 const saveTopped = async (ctx: MutationCtx, viewer: Viewer, queue: StoredQueue): Promise<void> => {
   await saveQueue(ctx, viewer.id, await toppedUp(ctx, viewer, queue));
-};
-
-/**
- * The unshuffled order with `itemId` moved after `afterItemId` there too (or to the top), so a
- * move made while shuffled still holds once shuffle turns off.
- */
-const movedInOrder = (
-  order: ReadonlyArray<string>,
-  itemId: string,
-  afterItemId: string | undefined,
-): Array<string> => {
-  const rest = order.filter((id) => id !== itemId);
-  const after = afterItemId === undefined ? -1 : rest.indexOf(afterItemId);
-
-  return [...rest.slice(0, after + 1), itemId, ...rest.slice(after + 1)];
-};
-
-/** Removes the upcoming entries autoplay added, for when autoplay turns off. */
-const withoutAutoplay = (queue: StoredQueue): StoredQueue => {
-  const items = queue.items.filter((item, position) => position <= queue.index || !item.autoplay);
-
-  return {
-    ...queue,
-    items,
-    unshuffled: queue.unshuffled === undefined ? undefined : keptOrder(queue.unshuffled, items),
-  };
 };
 
 /** The device someone in a Jam listens along on, when they do and the host allows it. */
@@ -492,6 +471,162 @@ const restartSession = async (
   await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now, movedAt: now, ...fields });
 };
 
+/**
+ * How many of the viewer's latest plays are checked for ones a device already handed back, so a
+ * device that sends its offline plays again (its first call's answer was lost) records them once.
+ */
+const RECENT_PLAYS_CHECKED = 500;
+
+const playKey = (trackId: Id<"tracks">, playedAt: number): string => `${trackId}@${playedAt}`;
+
+/**
+ * The songs among `ids` that exist and the viewer may read, by the ID as given. IDs that name no
+ * song are left out rather than failing: a device that played offline may name songs removed or
+ * hidden since.
+ */
+const readableById = async (
+  ctx: ReadCtx,
+  viewer: Viewer,
+  ids: ReadonlyArray<string>,
+): Promise<ReadonlyMap<string, Doc<"tracks">>> => {
+  const parsed = [...new Set(ids)].flatMap((id) => {
+    const trackId = ctx.db.normalizeId("tracks", id);
+
+    return trackId === null ? [] : [[id, trackId] as const];
+  });
+
+  const tracks = await Promise.all(parsed.map(([, trackId]) => ctx.db.get(trackId)));
+
+  return new Map(
+    parsed.flatMap(([id], position) => {
+      const track = tracks[position] ?? null;
+
+      return track !== null && canRead(viewer, track.libraryId) ? [[id, track] as const] : [];
+    }),
+  );
+};
+
+/**
+ * Records the plays a device made offline, in the order given, at the times it played them.
+ * Songs the viewer can't read are skipped, and so is a play history already holds from the same
+ * device for the same song at the same time.
+ */
+const recordOfflinePlays = async (
+  ctx: MutationCtx,
+  viewer: Viewer,
+  deviceId: string,
+  plays: ReadonlyArray<OfflinePlay>,
+): Promise<void> => {
+  const [recent, tracks] = await Promise.all([
+    ctx.db
+      .query("history")
+      .withIndex("by_user", (q) => q.eq("userId", viewer.id))
+      .order("desc")
+      .take(RECENT_PLAYS_CHECKED),
+    readableById(
+      ctx,
+      viewer,
+      plays.map((play) => play.trackId),
+    ),
+  ]);
+
+  const recorded = new Set(
+    recent.flatMap((play) =>
+      play.deviceId === deviceId && play.playedAt !== undefined
+        ? [playKey(play.trackId, play.playedAt)]
+        : [],
+    ),
+  );
+
+  // Keyed the same way, so a play the batch lists twice is recorded once, where it first appears.
+  const offered = new Map(
+    plays.flatMap((play) => {
+      const track = tracks.get(play.trackId);
+
+      return track === undefined
+        ? []
+        : [[playKey(track._id, play.playedAt), { track, playedAt: play.playedAt }] as const];
+    }),
+  );
+
+  await Promise.all(
+    [...offered].flatMap(([key, { track, playedAt }]) =>
+      recorded.has(key)
+        ? []
+        : [
+            ctx.db.insert("history", {
+              userId: viewer.id,
+              trackId: track._id,
+              albumId: track.albumId,
+              deviceId,
+              playedAt,
+            }),
+          ],
+    ),
+  );
+};
+
+/** A device's offline queue as the server's entries, and where it stands in them. */
+interface ResumedQueue {
+  readonly items: ReadonlyArray<QueueItem>;
+  readonly index: number;
+  readonly nextItemId: number;
+  /** The entry that played on the device is still in the queue; otherwise `index` is the next. */
+  readonly current: boolean;
+}
+
+/**
+ * A device's offline queue as server entries. Songs that name nothing, that the viewer can't
+ * read, or whose file is missing drop out, and `index` moves to the same entry or the next one
+ * kept. An entry the stored queue still holds under the same ID and song stays as it is, with who
+ * added it and whether autoplay did; the others become new entries the viewer added.
+ */
+const resumedQueue = async (
+  ctx: ReadCtx,
+  viewer: Viewer,
+  stored: StoredQueue,
+  resume: OfflineResume,
+): Promise<ResumedQueue> => {
+  const readable = await readableById(
+    ctx,
+    viewer,
+    resume.items.map((entry) => entry.trackId),
+  );
+
+  const held = new Map(stored.items.map((item) => [item.id, item]));
+  const items: Array<QueueItem> = [];
+  const kept: Array<boolean> = [];
+  let nextItemId = stored.nextItemId;
+
+  for (const entry of resume.items) {
+    const track = readable.get(entry.trackId);
+    const same = held.get(entry.itemId);
+
+    kept.push(track !== undefined && !track.missing);
+
+    if (track === undefined || track.missing) continue;
+
+    if (same?.trackId === track._id) {
+      items.push(same);
+      // An ID the device lists twice names one entry; the second becomes a new one.
+      held.delete(same.id);
+      continue;
+    }
+
+    items.push({ id: String(nextItemId), trackId: track._id, addedBy: viewer.id, autoplay: false });
+    nextItemId += 1;
+  }
+
+  const before = kept.slice(0, resume.index).filter(Boolean).length;
+
+  return {
+    items,
+    index: Math.min(before, Math.max(0, items.length - 1)),
+    nextItemId,
+    current: kept[resume.index] === true,
+  };
+};
+
 export const playbackQueries = {
   "playback.state": async (ctx, viewer) => {
     // Resolved once for both halves: for someone in a Jam it reads the host and their libraries.
@@ -562,32 +697,10 @@ export const playbackMutations = {
     const stored = await storedQueue(ctx, viewer.id);
     const playable = await playableTracks(ctx, viewer, args.trackIds, args.index);
     const created = newItems(stored, playable.ids, { kind: "person", userId: viewer.id });
-    let items: ReadonlyArray<QueueItem> = created.items;
-    let { index } = playable;
-    let unshuffled: ReadonlyArray<string> | undefined;
-
-    if (stored.shuffle) {
-      // Shuffle the whole list, then keep `MAX_QUEUE` of it: a long list shuffled from a random
-      // song near its end still fills the queue.
-      const current = items[index];
-      const rest = shuffled(items.filter((_, position) => position !== index));
-      const kept = (current === undefined ? rest : [current, ...rest]).slice(0, MAX_QUEUE);
-      unshuffled = keptOrder(
-        items.map((item) => item.id),
-        kept,
-      );
-      items = kept;
-      index = 0;
-    } else if (items.length > MAX_QUEUE) {
-      items = items.slice(index, index + MAX_QUEUE);
-      index = 0;
-    }
 
     const next = await toppedUp(ctx, viewer, {
       ...stored,
-      items,
-      unshuffled,
-      index,
+      ...playOrder(created.items, playable.index, stored.shuffle, Math.random),
       nextItemId: created.nextItemId,
       reportedTrackId: undefined,
     });
@@ -645,21 +758,11 @@ export const playbackMutations = {
     const session = await ensureSession(ctx, viewer.id);
     // Whatever comes next starts from the top, so it counts as a new play.
     const queue = { ...(await loadQueue(ctx, viewer)), reportedTrackId: undefined };
-    const last = queue.items.length - 1;
+    const index = nextIndex(queue.index, queue.items.length, queue.repeat);
 
-    if (queue.index < last) {
-      await saveQueue(
-        ctx,
-        viewer.id,
-        await toppedUp(ctx, viewer, { ...queue, index: queue.index + 1 }),
-      );
-      await restartSession(ctx, session);
-
-      return ok;
-    }
-
-    if (queue.repeat === "all" && queue.items.length > 0) {
-      await saveQueue(ctx, viewer.id, { ...queue, index: 0 });
+    // `toppedUp` leaves a repeat-all queue alone, so wrapping to the start never adds autoplay.
+    if (index !== null) {
+      await saveQueue(ctx, viewer.id, await toppedUp(ctx, viewer, { ...queue, index }));
       await restartSession(ctx, session);
 
       return ok;
@@ -689,16 +792,13 @@ export const playbackMutations = {
 
     const session = await ensureSession(ctx, viewer.id);
     const queue = await loadQueue(ctx, viewer);
-    const position = livePosition(session, Date.now());
 
-    const index =
-      position > RESTART_THRESHOLD_MS
-        ? queue.index
-        : queue.index > 0
-          ? queue.index - 1
-          : queue.repeat === "all"
-            ? Math.max(0, queue.items.length - 1)
-            : 0;
+    const index = previousIndex(
+      livePosition(session, Date.now()),
+      queue.index,
+      queue.items.length,
+      queue.repeat,
+    );
 
     await saveQueue(ctx, viewer.id, { ...queue, index, reportedTrackId: undefined });
     await restartSession(ctx, session);
@@ -758,50 +858,10 @@ export const playbackMutations = {
       return ok;
     }
 
-    const current = queue.items[queue.index];
-
-    if (args.on) {
-      // People's songs are shuffled; autoplay's stay after them, so autoplay still plays last.
-      const others = queue.items.filter((_, position) => position !== queue.index);
-
-      const rest = [
-        ...shuffled(others.filter((item) => !item.autoplay)),
-        ...others.filter((item) => item.autoplay),
-      ];
-
-      await saveQueue(ctx, viewer.id, {
-        ...queue,
-        shuffle: true,
-        unshuffled: queue.items.map((item) => item.id),
-        items: current === undefined ? rest : [current, ...rest],
-        index: 0,
-      });
-
-      return ok;
-    }
-
-    // Back to the order before shuffle; entries it does not list (none, normally) go at the end.
-    const byId = new Map(queue.items.map((item) => [item.id, item]));
-    const order = keptOrder(queue.unshuffled ?? [], queue.items);
-    const listed = new Set(order);
-
-    const items = [
-      ...order.flatMap((id) => {
-        const item = byId.get(id);
-
-        return item === undefined ? [] : [item];
-      }),
-      ...queue.items.filter((item) => !listed.has(item.id)),
-    ];
-
-    const index = current === undefined ? 0 : items.findIndex((item) => item.id === current.id);
-
     await saveQueue(ctx, viewer.id, {
       ...queue,
-      shuffle: false,
-      unshuffled: undefined,
-      items,
-      index: Math.max(0, index),
+      shuffle: args.on,
+      ...(args.on ? shuffledOn(queue, Math.random) : shuffledOff(queue)),
     });
 
     return ok;
@@ -866,25 +926,13 @@ export const playbackMutations = {
     const { queue, index, track } = located;
     const now = Date.now();
 
-    // A report sent before the player saw a skip or jump would move the queue back to the old
-    // song; the player reports again once it plays the new one.
-    if (
-      index !== queue.index &&
-      session.movedAt !== undefined &&
-      now - session.movedAt < MOVE_GRACE_MS
-    ) {
-      return ok;
-    }
+    if (isStaleReport(index, queue.index, session.movedAt ?? null, now)) return ok;
 
-    // A short song loops sooner than the gap, so its gap is half its length.
-    const gap = Math.min(REPLAY_GAP_MS, track.durationMs / 2);
-
-    const startedAgain =
-      track._id === queue.reportedTrackId &&
-      args.positionMs < gap &&
-      livePosition(session, now) - args.positionMs > gap;
-
-    const newPlay = args.playing && (track._id !== queue.reportedTrackId || startedAgain);
+    const newPlay = isNewPlay(
+      { trackId: track._id, positionMs: args.positionMs, playing: args.playing },
+      { trackId: queue.reportedTrackId ?? null, livePositionMs: livePosition(session, now) },
+      track.durationMs,
+    );
 
     await ctx.db.patch(session._id, {
       positionMs: args.positionMs,
@@ -949,44 +997,14 @@ export const playbackMutations = {
       return { ok: true, itemIds: items.map((item) => item.id) } as const;
     }
 
-    const insertAt = args.next === true ? queue.index + 1 : endOfQueued(queue);
+    const order = addedOrder(queue, created.items, args.next === true ? "next" : "end");
+    await saveTopped(ctx, viewer, { ...queue, ...order, nextItemId: created.nextItemId });
+    const kept = new Set(order.items.map((item) => item.id));
 
-    const items = [
-      ...queue.items.slice(0, insertAt),
-      ...created.items,
-      ...queue.items.slice(insertAt),
-    ].slice(0, MAX_QUEUE);
-
-    // Added songs join the unshuffled order too, after the current song or at the end, so
-    // turning shuffle off keeps them.
-    const current = queue.items[queue.index];
-    const addedIds = created.items.map((item) => item.id);
-
-    const unshuffledAt = (order: ReadonlyArray<string>): number =>
-      args.next === true && current !== undefined ? order.indexOf(current.id) + 1 : order.length;
-
-    const unshuffled =
-      queue.unshuffled === undefined
-        ? undefined
-        : keptOrder(
-            [
-              ...queue.unshuffled.slice(0, unshuffledAt(queue.unshuffled)),
-              ...addedIds,
-              ...queue.unshuffled.slice(unshuffledAt(queue.unshuffled)),
-            ],
-            items,
-          );
-
-    await saveTopped(ctx, viewer, {
-      ...queue,
-      items,
-      unshuffled,
-      nextItemId: created.nextItemId,
-    });
-
-    const kept = new Set(items.map((item) => item.id));
-
-    return { ok: true, itemIds: addedIds.filter((id) => kept.has(id)) } as const;
+    return {
+      ok: true,
+      itemIds: created.items.flatMap((item) => (kept.has(item.id) ? [item.id] : [])),
+    } as const;
   },
 
   "queue.remove": async (ctx, actor, args) => {
@@ -1101,7 +1119,9 @@ export const playbackMutations = {
     await saveQueue(
       ctx,
       viewer.id,
-      args.on ? await toppedUp(ctx, viewer, queue) : withoutAutoplay(queue),
+      args.on
+        ? await toppedUp(ctx, viewer, queue)
+        : { ...queue, ...withoutUpcomingAutoplay(queue) },
     );
 
     return ok;
@@ -1124,5 +1144,61 @@ export const playbackMutations = {
     }
 
     return ok;
+  },
+
+  "devices.reconcile": async (ctx, viewer, args) => {
+    await recordOfflinePlays(ctx, viewer, args.deviceId, args.plays);
+
+    // In someone else's Jam the session is the host's, not this device's to hand back.
+    if ((await resolvePlayback(ctx, viewer)).kind === "member") return { adopted: false };
+    const { resume } = args;
+
+    if (resume === null || (await findDevice(ctx, viewer.id, args.deviceId)) === null) {
+      return { adopted: false };
+    }
+
+    const session = await ensureSession(ctx, viewer.id);
+
+    // When another device took over meanwhile, a paused device leaves playback there; a playing
+    // one takes it back.
+    if (session.activeDeviceId !== args.deviceId && !resume.playing) return { adopted: false };
+    const stored = await storedQueue(ctx, viewer.id);
+    const resumed = await resumedQueue(ctx, viewer, stored, resume);
+
+    // A queue none of whose songs can play here is not handed back; one emptied there is.
+    if (resumed.items.length === 0 && resume.items.length > 0) return { adopted: false };
+    const order = playOrder(resumed.items, resumed.index, false, Math.random);
+
+    // While shuffled, the entries the server knew keep their order from before shuffle.
+    const known = resume.shuffle ? keptOrder(stored.unshuffled ?? [], order.items) : [];
+    const listed = new Set(known);
+
+    await saveTopped(ctx, viewer, {
+      ...stored,
+      ...order,
+      unshuffled: resume.shuffle
+        ? [...known, ...order.items.flatMap((item) => (listed.has(item.id) ? [] : [item.id]))]
+        : undefined,
+      shuffle: resume.shuffle,
+      repeat: resume.repeat,
+      autoplay: resume.autoplay,
+      nextItemId: resumed.nextItemId,
+      // The device counted the current song's play offline; a song that took its place has not
+      // played yet.
+      reportedTrackId: resumed.current ? order.items[order.index]?.trackId : undefined,
+    });
+
+    const now = Date.now();
+
+    await ctx.db.patch(session._id, {
+      activeDeviceId: args.deviceId,
+      positionMs: resumed.current ? resume.positionMs : 0,
+      playing: resume.playing && order.items.length > 0,
+      volume: resume.volume,
+      updatedAt: now,
+      movedAt: now,
+    });
+
+    return { adopted: true };
   },
 } satisfies Partial<MutationHandlers>;

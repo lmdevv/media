@@ -45,6 +45,8 @@ import {
   LibraryVisibility,
   LinkKind,
   Millis,
+  OfflinePlay,
+  OfflineResume,
   PageArgs,
   PasswordReset,
   Person,
@@ -394,6 +396,20 @@ export const commands = {
     job: false,
     args: Schema.Struct({ deviceId: DeviceId, name: Name, kind: DeviceKind }),
     result: Ok,
+  }),
+  "devices.reconcile": command({
+    summary:
+      "Hand playback back after a device played offline: its plays, then its queue if it still plays (sent by players)",
+    group: "devices",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({
+      deviceId: DeviceId,
+      plays: Schema.Array(OfflinePlay).check(Schema.isMaxLength(500)),
+      resume: Schema.NullOr(OfflineResume),
+    }),
+    result: Schema.Struct({ adopted: Schema.Boolean }),
   }),
 
   // Downloads

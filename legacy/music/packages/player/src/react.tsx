@@ -32,6 +32,8 @@ import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
 import { MseEngine } from "./mse-engine";
 import { PlaybackController } from "./playback-controller";
 import type { EngineFactory } from "./playback-controller";
+import { serverSession } from "./session-router";
+import { streamSources } from "./source-resolver";
 import { parseStreamQuality } from "./stream-quality";
 import type { StreamQuality } from "./stream-quality";
 
@@ -220,8 +222,12 @@ const createController = (
 ): PlaybackController => {
   const storage = browserStorage();
   const probe = document.createElement("audio");
+  const client = makeMusicClient(convex);
 
-  return new PlaybackController(makeMusicClient(convex), engines, {
+  // The browser resolves the server's relative stream URLs against the page.
+  const sources = streamSources(client, { now: Date.now, resolveUrl: (url) => url });
+
+  return new PlaybackController(serverSession(client), sources, engines, {
     deviceId: loadDeviceId(storage, () => crypto.randomUUID()),
     device: describeDevice(navigator.userAgent, navigator.maxTouchPoints),
     canPlay: (mimeType) => probe.canPlayType(mimeType) !== "",
@@ -242,8 +248,6 @@ const createController = (
         document.removeEventListener("visibilitychange", onVisibility);
       };
     },
-    // The browser resolves the server's relative stream URLs against the page.
-    resolveUrl: (url) => url,
   });
 };
 

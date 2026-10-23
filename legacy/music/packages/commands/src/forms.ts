@@ -248,6 +248,7 @@ export const missingFields = (
 /** Commands that only players send; people never run them by hand. */
 const INTERNAL: ReadonlySet<CommandName> = new Set([
   "devices.heartbeat",
+  "devices.reconcile",
   "playback.report",
   "stream.url",
 ]);

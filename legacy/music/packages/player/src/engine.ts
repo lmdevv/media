@@ -20,11 +20,19 @@
 /** Which engine implementation plays the audio. */
 export type EngineKind = "mse" | "html";
 
-/** One playable source: a signed stream URL plus what the engine needs to schedule it. */
+/**
+ * One playable source: a signed stream URL or a copy on this device, plus what the engine needs
+ * to schedule it.
+ */
 export interface EngineSource {
   readonly key: string;
   readonly url: string;
   readonly durationMs: number;
+  /**
+   * The URL is a finished file (a copy on this device): it has a length and seeks anywhere, so an
+   * engine never needs to ask the media service whether it is ready. False for streams.
+   */
+  readonly finished: boolean;
 }
 
 /**

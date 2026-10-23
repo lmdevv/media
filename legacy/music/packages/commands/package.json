@@ -19,7 +19,9 @@
     "./text-order": "./src/text-order.ts",
     "./media-limits": "./src/media-limits.ts",
     "./revision": "./src/revision.ts",
-    "./forms": "./src/forms.ts"
+    "./forms": "./src/forms.ts",
+    "./queue-rules": "./src/queue-rules.ts",
+    "./session-commands": "./src/session-commands.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

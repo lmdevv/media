@@ -8,6 +8,8 @@
 import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { DeviceKind, PlaybackState } from "@music/commands/models";
 import { PlaybackController } from "@music/player/playback-controller";
+import { serverSession } from "@music/player/session-router";
+import { streamSources } from "@music/player/source-resolver";
 import type { StreamQuality } from "@music/player/stream-quality";
 import { makeMusicClient } from "@music/sdk/client";
 import type { MusicClient } from "@music/sdk/client";
@@ -183,7 +185,8 @@ const createPhone = (client: MusicClient, origin: ServerOrigin): Phone => {
   const name = phoneName();
 
   const controller = new PlaybackController(
-    client,
+    serverSession(client),
+    streamSources(client, { now: Date.now, resolveUrl: (url) => mediaUrl(origin, url) }),
     { mse: null, create: () => engine },
     {
       deviceId: id,
@@ -194,7 +197,6 @@ const createPhone = (client: MusicClient, origin: ServerOrigin): Phone => {
       saveQuality,
       nowPlaying: lockScreenControls(engine, origin),
       onForeground,
-      resolveUrl: (url) => mediaUrl(origin, url),
     },
   );
 

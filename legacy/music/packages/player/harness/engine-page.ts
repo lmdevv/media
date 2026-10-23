@@ -124,6 +124,7 @@ const fixture = (file: string, durationMs = 3000): EngineSource => ({
   key: file,
   url: `${mediaBase}/fixtures/${file}`,
   durationMs,
+  finished: false,
 });
 
 const toMs = (frames: number): number => (frames / context.sampleRate) * 1000;

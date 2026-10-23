@@ -62,7 +62,7 @@ describe("fieldsOf", () => {
       .filter(isCommandName)
       .filter((name) => fieldsOf(name) === null);
 
-    expect(unreadable).toEqual([]);
+    expect(unreadable).toEqual(["devices.reconcile"]);
   });
 });
 
@@ -120,6 +120,7 @@ describe("offeredCommands", () => {
     const offered = names("owner", true);
 
     expect(offered).not.toContain("devices.heartbeat");
+    expect(offered).not.toContain("devices.reconcile");
     expect(offered).not.toContain("playback.report");
   });
 

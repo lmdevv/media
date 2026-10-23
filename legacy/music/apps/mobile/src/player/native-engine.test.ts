@@ -146,6 +146,7 @@ const mediaService = async () => {
       key,
       url: `http://127.0.0.1:${port}/media/stream/${key}?p=aac-320&sig=s`,
       durationMs: 200_000,
+      finished: false,
     }),
     close: () => {
       server.closeAllConnections();

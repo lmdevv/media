@@ -9,8 +9,9 @@
  * leaving out songs already in the queue, songs played recently, and songs whose file is missing.
  * Within each step the songs come in random order, so autoplay doesn't replay one album in order.
  */
+import { shuffled } from "@music/commands/queue-rules";
+
 import type { Doc, Id } from "../_generated/dataModel";
-import { shuffled } from "./playback";
 import { canRead } from "./viewer";
 import type { ReadCtx, Viewer } from "./viewer";
 
@@ -254,7 +255,7 @@ export const autoplaySongs = async (
     if (step === undefined || picked.length >= count) return [...picked];
     const taken = new Set(picked);
 
-    const fresh = shuffled(await step())
+    const fresh = shuffled(await step(), Math.random)
       .map((track) => track._id)
       .filter((id) => {
         if (taken.has(id)) return false;

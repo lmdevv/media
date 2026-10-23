@@ -282,6 +282,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music playback transfer <device-id>`: Move playback to another device.
 - `music devices list [--device-id <id>]`: List devices seen in the last day and the one playing.
 - `music devices heartbeat --device-id <id> --name <text> --kind <web|phone|cli>`: Mark a device as online (sent by players).
+- `music devices reconcile <device-id> --plays <json> --resume <json>`: Hand playback back after a device played offline: its plays, then its queue if it still plays (sent by players).
 
 ### queue
 

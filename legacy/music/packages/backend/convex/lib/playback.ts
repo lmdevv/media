@@ -2,9 +2,6 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import type { ReadCtx } from "./viewer";
 
-/** Longest queue kept; Convex arrays and query reads stay well inside limits. */
-export const MAX_QUEUE = 1000;
-
 /** The user's session, if they have played anything yet. */
 export const findSession = (
   ctx: ReadCtx,
@@ -42,20 +39,3 @@ export const ensureSession = async (
 /** Where playback is now, given the last report. */
 export const livePosition = (session: Doc<"playbackSessions">, now: number): number =>
   session.playing ? session.positionMs + Math.max(0, now - session.updatedAt) : session.positionMs;
-
-/** Fisher-Yates shuffle into a new array. */
-export const shuffled = <Item>(items: ReadonlyArray<Item>): Array<Item> => {
-  const result = [...items];
-
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    const other = Math.floor(Math.random() * (index + 1));
-    const current = result[index];
-    const swap = result[other];
-
-    if (current === undefined || swap === undefined) continue;
-    result[index] = swap;
-    result[other] = current;
-  }
-
-  return result;
-};

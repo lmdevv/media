@@ -8,8 +8,11 @@
     "./busy-retry": "./src/busy-retry.ts",
     "./device-identity": "./src/device-identity.ts",
     "./engine": "./src/engine.ts",
+    "./local-session": "./src/local-session.ts",
     "./playback-controller": "./src/playback-controller.ts",
     "./react": "./src/react.tsx",
+    "./session-router": "./src/session-router.ts",
+    "./source-resolver": "./src/source-resolver.ts",
     "./stream-offset": "./src/stream-offset.ts",
     "./stream-quality": "./src/stream-quality.ts"
   },

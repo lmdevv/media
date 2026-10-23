@@ -12,6 +12,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineEvent, EngineKind, PlayerEngine } from "./engine";
 import { PlaybackController } from "./playback-controller";
 import type { ControllerEnvironment } from "./playback-controller";
+import { serverSession } from "./session-router";
+import { streamSources } from "./source-resolver";
 import type { StreamQuality } from "./stream-quality";
 
 const deviceId = DeviceId.make("this-browser");
@@ -193,7 +195,8 @@ const profileOf = (url: string | undefined): StreamProfile | null =>
  */
 const testHost = (
   resolveUrl: (url: string) => string = (url) => url,
-): Pick<ControllerEnvironment, "nowPlaying" | "onForeground" | "resolveUrl"> & {
+): Pick<ControllerEnvironment, "nowPlaying" | "onForeground"> & {
+  readonly resolveUrl: (url: string) => string;
   readonly foreground: () => void;
 } => {
   const listeners = new Set<() => void>();
@@ -228,15 +231,18 @@ const setup = async (options: {
   const engines: Array<ReturnType<typeof instantEngine>> = [];
   const host = testHost(options.resolveUrl);
 
-  const controller = new PlaybackController(
-    makeMusicClient(
-      recordingTransport(
-        mutations,
-        media.base,
-        () => clock.now + (options.serverAheadMs ?? 0),
-        options.ttlMs,
-      ),
+  const client = makeMusicClient(
+    recordingTransport(
+      mutations,
+      media.base,
+      () => clock.now + (options.serverAheadMs ?? 0),
+      options.ttlMs,
     ),
+  );
+
+  const controller = new PlaybackController(
+    serverSession(client),
+    streamSources(client, { now: () => clock.now, resolveUrl: host.resolveUrl }),
     {
       mse: options.gapless ? { flac: true, changeType: true } : null,
       create: (kind) => {
@@ -375,20 +381,23 @@ describe("PlaybackController", () => {
     const recording = recordingTransport(mutations, media.base, () => 1000);
     const record: EngineRecord = { created: [], loads: [], plays: 0 };
 
-    const controller = new PlaybackController(
-      makeMusicClient({
-        query: (reference, args) => recording.query(reference, args),
-        mutation: async (reference, args) => {
-          if (args.name === "playback.pause") {
-            throw new ConvexError({
-              code: "forbidden",
-              message: "The host controls playback in this Jam",
-            });
-          }
+    const client = makeMusicClient({
+      query: (reference, args) => recording.query(reference, args),
+      mutation: async (reference, args) => {
+        if (args.name === "playback.pause") {
+          throw new ConvexError({
+            code: "forbidden",
+            message: "The host controls playback in this Jam",
+          });
+        }
 
-          return recording.mutation(reference, args);
-        },
-      }),
+        return recording.mutation(reference, args);
+      },
+    });
+
+    const controller = new PlaybackController(
+      serverSession(client),
+      streamSources(client, { now: () => 1000, resolveUrl: (url) => url }),
       { mse: null, create: (kind) => instantEngine(kind, record) },
       {
         deviceId,
@@ -450,8 +459,11 @@ describe("PlaybackController", () => {
       },
     };
 
+    const client = makeMusicClient(flaky);
+
     const controller = new PlaybackController(
-      makeMusicClient(flaky),
+      serverSession(client),
+      streamSources(client, { now: () => 1000, resolveUrl: (url) => url }),
       { mse: null, create: (kind) => instantEngine(kind, record) },
       {
         deviceId,

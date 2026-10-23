@@ -1,23 +1,16 @@
 /**
  * The imperative shell of the player: owns the audio engine, this browser's device identity, and
- * the conversation with the Convex playback session. `PlayerProvider` creates one per mount and
- * forwards session snapshots to `sync`; everything that decides what the engine does lives in the
- * pure `planEngine`.
+ * the conversation with the playback session through a `SessionPort`. `PlayerProvider` creates one
+ * per mount and forwards session snapshots to `sync`; everything that decides what the engine
+ * does lives in the pure `planEngine`, and where a song's bytes come from in the `SourceResolver`.
  */
 import type { DeviceId, TrackId } from "@music/commands/ids";
 import type { PlaybackState, QueueEntry, StreamProfile, Track } from "@music/commands/models";
-import type { MusicClient } from "@music/sdk/client";
 import { errorMessage } from "@music/sdk/errors";
-import { Effect, Exit, Fiber } from "effect";
+import { Effect, Exit, Fiber, Result } from "effect";
 
 import type { DeviceDescription } from "./device-identity";
-import type {
-  EngineErrorReason,
-  EngineEvent,
-  EngineKind,
-  EngineSource,
-  PlayerEngine,
-} from "./engine";
+import type { EngineErrorReason, EngineEvent, EngineKind, PlayerEngine } from "./engine";
 import {
   EngineCommand,
   FOLLOW_DRIFT_MS,
@@ -30,6 +23,9 @@ import type { SessionView } from "./engine-plan";
 import { livePosition } from "./live-position";
 import { isStreamRefused, mediaBaseUrl, probeMediaHealth, waitForMedia } from "./media-health";
 import type { MediaSessionHandlers } from "./media-session";
+import type { SessionPort } from "./session-router";
+import { SourcePlan } from "./source-resolver";
+import type { ResolvedSource, SourceResolver, StreamRefused } from "./source-resolver";
 import { chooseEngine, chooseGaplessProfile, chooseStreamProfile } from "./stream-quality";
 import type { MseSupport, StreamQuality } from "./stream-quality";
 
@@ -56,12 +52,7 @@ const MEDIA_OFFLINE_MESSAGE = "Can't reach the media server. Retrying…";
 /** Shown when the media server refuses a stream URL even right after it was signed. */
 const STREAM_REFUSED_MESSAGE = "The media server refused this song's stream";
 
-/**
- * A stream URL this close to its expiry counts as expired: it is signed again before playback
- * resumes or seeks, which would otherwise send a request it may no longer cover. Also absorbs a
- * device clock a few minutes off the server's.
- */
-const RENEW_MARGIN_MS = 5 * 60_000;
+const UNREACHABLE_MESSAGE = "This song isn't downloaded";
 
 /** What the engine is doing, as the UI sees it. */
 type EngineStatus = "idle" | "loading" | "playing" | "paused" | "buffering" | "error";
@@ -114,42 +105,27 @@ export interface ControllerEnvironment {
   readonly nowPlaying: NowPlayingControls;
   /** Calls `listener` each time the app returns to the foreground. Returns the unsubscribe function. */
   readonly onForeground: (listener: () => void) => () => void;
-  /**
-   * Turns a stream URL as the server signed it (relative behind the image's proxy) into the URL
-   * this host fetches: the browser resolves it against the page, a native app against its server.
-   */
-  readonly resolveUrl: (url: string) => string;
 }
 
 /** The queue entry the engine holds. */
 interface LoadedEntry {
   readonly track: QueueEntry;
   readonly index: number;
-  /** The profile requested for this entry; null until its stream URL arrives. */
+  readonly origin: ResolvedSource["origin"] | null;
+  /** The profile requested for this entry; null until its source resolves. */
   readonly profile: StreamProfile | null;
   readonly url: string | null;
   /** See `ResolvedSource.renewAt`; null without a URL. */
   readonly renewAt: number | null;
 }
 
-interface PreloadedEntry {
+interface PreloadedEntry extends ResolvedSource {
   readonly track: QueueEntry;
   readonly index: number;
-  readonly source: EngineSource;
-  readonly profile: StreamProfile;
-  readonly renewAt: number | null;
 }
 
-interface ResolvedSource {
-  readonly source: EngineSource;
-  readonly profile: StreamProfile;
-  /**
-   * When, on this device's clock, the URL is signed again before use: `RENEW_MARGIN_MS` before
-   * it expires. Null when the URL looked expired the moment it arrived, which means the device
-   * clock is far off the server's: only a refusal then tells that it expired.
-   */
-  readonly renewAt: number | null;
-}
+const isLocal = (plan: SourcePlan): boolean =>
+  SourcePlan.$is("Ready")(plan) && plan.resolved.origin === "local";
 
 /**
  * Plays the user's playback session on this browser when it is the active device, mirrors it
@@ -157,7 +133,8 @@ interface ResolvedSource {
  */
 export class PlaybackController {
   readonly deviceId: DeviceId;
-  readonly #client: MusicClient;
+  readonly #session: SessionPort;
+  readonly #sources: SourceResolver;
   readonly #engines: EngineFactory;
   #engine: PlayerEngine;
   readonly #env: ControllerEnvironment;
@@ -197,9 +174,19 @@ export class PlaybackController {
   #healthFiber: Fiber.Fiber<void, unknown> | null = null;
   #stop: (() => void) | null = null;
 
-  constructor(client: MusicClient, engines: EngineFactory, env: ControllerEnvironment) {
+  /**
+   * @param session - Where commands go: the server, or this device's own session while offline.
+   * @param sources - Where each song's bytes come from.
+   */
+  constructor(
+    session: SessionPort,
+    sources: SourceResolver,
+    engines: EngineFactory,
+    env: ControllerEnvironment,
+  ) {
     this.deviceId = env.deviceId;
-    this.#client = client;
+    this.#session = session;
+    this.#sources = sources;
     this.#engines = engines;
     this.#env = env;
     const engine = chooseEngine(env.quality, engines.mse, false);
@@ -262,10 +249,10 @@ export class PlaybackController {
         if (this.#isAudible()) void this.togglePlay();
       },
       next: () => {
-        void this.capture(this.#client.run("playback.next", {}));
+        void this.capture(this.#session.run("playback.next", {}));
       },
       previous: () => {
-        void this.capture(this.#client.run("playback.previous", {}));
+        void this.capture(this.#session.run("playback.previous", {}));
       },
       seekTo: (positionMs) => {
         void this.seek(positionMs);
@@ -348,7 +335,7 @@ export class PlaybackController {
     await this.#ensureRegistered();
 
     await this.capture(
-      this.#client.run(
+      this.#session.run(
         "playback.play",
         index === undefined
           ? { trackIds, deviceId: this.deviceId }
@@ -370,7 +357,7 @@ export class PlaybackController {
     if (state.activeDevice === null) {
       await this.playHere();
 
-      if (!state.playing) await this.capture(this.#client.run("playback.resume", {}));
+      if (!state.playing) await this.capture(this.#session.run("playback.resume", {}));
 
       return;
     }
@@ -387,7 +374,7 @@ export class PlaybackController {
     this.#update({ pendingPlaying: !playing, autoplayBlocked: false, error: null });
 
     try {
-      await this.#client.run(playing ? "playback.pause" : "playback.resume", {});
+      await this.#session.run(playing ? "playback.pause" : "playback.resume", {});
     } catch (error) {
       // Refused, as for someone in a Jam who may not steer it: no new snapshot will come, so put
       // this device back the way the session is, or a follower would stay silent.
@@ -418,7 +405,7 @@ export class PlaybackController {
       this.#showNowPlaying();
     }
 
-    await this.capture(this.#client.run("playback.seek", { positionMs: target }));
+    await this.capture(this.#session.run("playback.seek", { positionMs: target }));
   }
 
   /** Sets the volume here at once (when playing here) and in the session. */
@@ -427,7 +414,7 @@ export class PlaybackController {
 
     if (this.#view?.active === true) this.#setEngineVolume(value);
     this.#update({ pendingVolume: value });
-    await this.capture(this.#client.run("playback.volume", { volume: value }));
+    await this.capture(this.#session.run("playback.volume", { volume: value }));
   }
 
   /**
@@ -448,7 +435,7 @@ export class PlaybackController {
     this.#unlockOutput();
     await this.#ensureRegistered();
 
-    return this.attempt(this.#client.run("playback.transfer", { deviceId: this.deviceId }));
+    return this.attempt(this.#session.run("playback.transfer", { deviceId: this.deviceId }));
   }
 
   /**
@@ -456,7 +443,7 @@ export class PlaybackController {
    * becomes the player `error`.
    */
   async transferTo(deviceId: DeviceId): Promise<boolean> {
-    return this.attempt(this.#client.run("playback.transfer", { deviceId }));
+    return this.attempt(this.#session.run("playback.transfer", { deviceId }));
   }
 
   /** Saves the quality setting. It applies from the next song so the current one never skips. */
@@ -536,12 +523,18 @@ export class PlaybackController {
     }
   }
 
-  /** Sends a heartbeat. Resolves whether it landed; a failed one is superseded by the next. */
+  /**
+   * Sends a heartbeat. Resolves whether it landed; a failed one is superseded by the next. None
+   * goes out while this device plays its own session: the server can't hear it, and heartbeats
+   * would pile up until it can.
+   */
   async #heartbeat(): Promise<boolean> {
     const { name, kind } = this.#env.device;
 
+    if (this.#session.mode() === "local") return false;
+
     try {
-      await this.#client.run("devices.heartbeat", { deviceId: this.deviceId, name, kind });
+      await this.#session.run("devices.heartbeat", { deviceId: this.deviceId, name, kind });
 
       return true;
     } catch {
@@ -554,7 +547,7 @@ export class PlaybackController {
    * on a device it has never heard from.
    */
   async #ensureRegistered(): Promise<void> {
-    if (await this.#registered) return;
+    if (this.#session.mode() === "local" || (await this.#registered)) return;
     this.#registered = this.#heartbeat();
     await this.#registered;
   }
@@ -605,7 +598,7 @@ export class PlaybackController {
     this.#reportedMs = positionMs;
 
     await this.#quietly(
-      this.#client.run("playback.report", {
+      this.#session.run("playback.report", {
         deviceId: this.deviceId,
         index: loaded.index,
         trackId: loaded.track.id,
@@ -718,24 +711,35 @@ export class PlaybackController {
         ? this.#preloaded
         : null;
 
-    this.#loaded = { track, index, profile: null, url: null, renewAt: null };
+    this.#loaded = { track, index, origin: null, profile: null, url: null, renewAt: null };
     this.#preloaded = null;
     this.#positionMs = startMs;
     this.#reportedMs = null;
-
-    if (!this.#snapshot.mediaOnline) return;
-    this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false });
     const engine = this.#wantedEngine();
+
     // A preloaded URL was signed for the other engine's profile.
-    const reusable = preloaded !== null && engine === this.#snapshot.engine ? preloaded : null;
+    const plan =
+      preloaded !== null && engine === this.#snapshot.engine
+        ? SourcePlan.Ready({ resolved: preloaded })
+        : this.#sources.resolve(track, this.#profileFor(track, engine));
+
+    if (SourcePlan.$is("Unreachable")(plan)) {
+      this.#skipUnreachable();
+
+      return;
+    }
+
+    if (!this.#snapshot.mediaOnline && !isLocal(plan)) return;
+    this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false });
     this.#useEngine(engine);
-    const resolved = reusable ?? (await this.#resolveSource(track));
+    const resolved = SourcePlan.$is("Ready")(plan) ? plan.resolved : await this.#sign(plan.sign);
 
     if (generation !== this.#generation || resolved === null) return;
 
     this.#loaded = {
       track,
       index,
+      origin: resolved.origin,
       profile: resolved.profile,
       url: resolved.source.url,
       renewAt: resolved.renewAt,
@@ -748,11 +752,18 @@ export class PlaybackController {
     await this.#engine.load(resolved.source, start, autoplay);
   }
 
-  /** The stream profile the engine in use plays for `track`. */
-  #profileFor(track: Track): StreamProfile {
+  /** Lets go of the song before, so a play can't resume it, and moves on to one that can play. */
+  #skipUnreachable(): void {
+    this.#engine.unload();
+    this.#update({ engineStatus: "error", error: UNREACHABLE_MESSAGE, autoplayBlocked: false });
+    void this.capture(this.#session.run("playback.next", {}));
+  }
+
+  /** The stream profile `engine` plays for `track`. */
+  #profileFor(track: Track, engine: EngineKind): StreamProfile {
     const support = this.#engines.mse;
 
-    if (this.#snapshot.engine === "mse" && support !== null) {
+    if (engine === "mse" && support !== null) {
       return chooseGaplessProfile(this.#snapshot.quality, track.lossless, support);
     }
 
@@ -761,41 +772,15 @@ export class PlaybackController {
       : chooseStreamProfile(this.#snapshot.quality, track.codec, this.#env.canPlay);
   }
 
-  /** Picks the profile and asks the server for a signed stream URL. */
-  async #resolveSource(track: Track): Promise<ResolvedSource | null> {
-    const profile = this.#profileFor(track);
+  async #sign(
+    sign: () => Promise<Result.Result<ResolvedSource, StreamRefused>>,
+  ): Promise<ResolvedSource | null> {
+    const signed = await sign();
 
-    try {
-      const requestedAt = this.#env.now();
+    if (Result.isSuccess(signed)) return signed.success;
+    this.#update({ engineStatus: "error", error: signed.failure.message });
 
-      // A new `requestedAt` gets a newly signed URL rather than an earlier one from Convex's cache.
-      const stream = await this.#client.read("stream.url", {
-        trackId: track.id,
-        profile,
-        requestedAt,
-      });
-
-      // A short-lived URL (a Jam member's lasts minutes) is renewed halfway through instead.
-      const margin = Math.min(RENEW_MARGIN_MS, (stream.expiresAt - requestedAt) / 2);
-      const renewAt = stream.expiresAt - margin;
-
-      return {
-        profile,
-        source: {
-          key: `${track.id}:${profile}`,
-          url: this.#env.resolveUrl(stream.url),
-          durationMs: track.durationMs,
-        },
-        renewAt: renewAt > requestedAt ? renewAt : null,
-      };
-    } catch (error) {
-      this.#update({
-        engineStatus: "error",
-        error: error instanceof Error ? errorMessage(error) : String(error),
-      });
-
-      return null;
-    }
+    return null;
   }
 
   /** Buffers the following entry once the current one is close to its end. */
@@ -805,7 +790,7 @@ export class PlaybackController {
 
     if (state === null || loaded === null || this.#preloaded !== null || this.#preloading) return;
 
-    if (this.#view?.active !== true || !this.#snapshot.mediaOnline) return;
+    if (this.#view?.active !== true) return;
 
     if (loaded.track.durationMs - this.#positionMs > PRELOAD_LEAD_MS) return;
 
@@ -816,9 +801,14 @@ export class PlaybackController {
     const track = index === null ? undefined : state.queue[index];
 
     if (index === null || track === undefined) return;
+    const plan = this.#sources.resolve(track, this.#profileFor(track, this.#snapshot.engine));
+
+    if (SourcePlan.$is("Unreachable")(plan)) return;
+
+    if (!this.#snapshot.mediaOnline && !isLocal(plan)) return;
     const generation = this.#generation;
     this.#preloading = true;
-    const resolved = await this.#resolveSource(track);
+    const resolved = SourcePlan.$is("Ready")(plan) ? plan.resolved : await this.#sign(plan.sign);
     this.#preloading = false;
 
     if (generation !== this.#generation || resolved === null) return;
@@ -900,6 +890,7 @@ export class PlaybackController {
     this.#loaded = {
       track: preloaded.track,
       index: preloaded.index,
+      origin: preloaded.origin,
       profile: preloaded.profile,
       url: preloaded.source.url,
       renewAt: preloaded.renewAt,
@@ -930,7 +921,7 @@ export class PlaybackController {
     // Mark it, or the periodic report would tell the server this device is still playing and
     // restart the last song after `playback.next` stopped at the end of the queue.
     this.#update({ engineStatus: "paused" });
-    void this.capture(this.#client.run("playback.next", {}));
+    void this.capture(this.#session.run("playback.next", {}));
   }
 
   async #onError(reason: EngineErrorReason, message: string): Promise<void> {
@@ -947,6 +938,14 @@ export class PlaybackController {
     }
 
     const loaded = this.#loaded;
+
+    if (loaded?.origin === "local") {
+      this.#sources.discard(loaded.track.id);
+      void this.#load(loaded.track, loaded.index, this.#positionMs, this.#view?.playing ?? false);
+
+      return;
+    }
+
     const url = loaded?.url ?? null;
     const baseUrl = url === null ? null : mediaBaseUrl(url);
 

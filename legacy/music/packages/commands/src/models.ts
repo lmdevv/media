@@ -496,6 +496,32 @@ export const PlaybackState = Schema.Struct({
 
 export interface PlaybackState extends Schema.Schema.Type<typeof PlaybackState> {}
 
+/** A song that started playing while a device was offline, timed by the device's clock. */
+export const OfflinePlay = Schema.Struct({ trackId: TrackId, playedAt: Timestamp });
+
+export interface OfflinePlay extends Schema.Schema.Type<typeof OfflinePlay> {}
+
+/** One entry of a device's offline queue: its song, and the entry ID it had there. */
+const OfflineEntry = Schema.Struct({ trackId: TrackId, itemId: QueueItemId });
+
+/**
+ * Where a device's offline playback stood when it reconnected: its queue in play order (empty
+ * when it was emptied there), the entry playing, the position in it, and its settings. An entry
+ * the server still holds under the same ID keeps who added it and whether autoplay did.
+ */
+export const OfflineResume = Schema.Struct({
+  items: Schema.Array(OfflineEntry).check(Schema.isMaxLength(2000)),
+  index: Count,
+  positionMs: Millis,
+  playing: Schema.Boolean,
+  shuffle: Schema.Boolean,
+  repeat: RepeatMode,
+  volume: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  autoplay: Schema.Boolean,
+});
+
+export interface OfflineResume extends Schema.Schema.Type<typeof OfflineResume> {}
+
 export const JobKind = Schema.Literals(["scan"]);
 
 export const JobStatus = Schema.Literals(["pending", "running", "done", "failed", "cancelled"]);

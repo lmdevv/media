@@ -327,7 +327,7 @@ export const collectionQueries = {
 
       return track === undefined || track === null || !canRead(viewer, track.libraryId)
         ? []
-        : [{ playedAt: play._creationTime, track }];
+        : [{ playedAt: play.playedAt ?? play._creationTime, track }];
     });
 
     return Promise.all(

@@ -89,11 +89,13 @@ describe("deriveFlags", () => {
   });
 
   it("covers every registry command without falling back to JSON flags", () => {
-    const jsonFlags = Object.values(commands).flatMap((command) =>
-      deriveFlags(command.args).flags.filter((spec) => FlagType.$is("Json")(spec.type)),
+    const jsonFlags = Object.entries(commands).flatMap(([name, command]) =>
+      deriveFlags(command.args).flags.flatMap((spec) =>
+        FlagType.$is("Json")(spec.type) ? [`${name} --${spec.flag}`] : [],
+      ),
     );
 
-    expect(jsonFlags).toEqual([]);
+    expect(jsonFlags).toEqual(["devices.reconcile --plays", "devices.reconcile --resume"]);
   });
 
   it("renders usage for each flag type", () => {
