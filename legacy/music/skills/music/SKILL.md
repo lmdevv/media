@@ -292,6 +292,13 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music queue clear`: Clear everything after the current song.
 - `music queue autoplay (--on | --no-on)`: Turn autoplay on or off: when the queue runs out, play the same artist, then genre, then era.
 
+### downloads
+
+- `music downloads list [--device-id <id>]`: List the albums, playlists, and songs each of your devices keeps downloaded.
+- `music downloads add --device-id <id> --kind <track|album|playlist> --id <text>`: Download an album, playlist, or song to one of your devices and keep it in sync (up to 500 per device).
+- `music downloads remove --device-id <id> --kind <track|album|playlist> --id <text>`: Stop keeping an album, playlist, or song on a device; the device deletes its files.
+- `music downloads manifest <pin-id>`: List the songs and file revisions a download holds now (read by devices).
+
 ### likes
 
 - `music likes list`: List up to 1,000 liked songs, newest first (likes.page reads them all).

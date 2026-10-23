@@ -58,3 +58,8 @@ export type DeviceId = typeof DeviceId.Type;
 export const JamId = Schema.NonEmptyString.pipe(Schema.brand("JamId"));
 
 export type JamId = typeof JamId.Type;
+
+/** A download pin: one album, playlist, or song a person keeps on one device. */
+export const DownloadPinId = Schema.NonEmptyString.pipe(Schema.brand("DownloadPinId"));
+
+export type DownloadPinId = typeof DownloadPinId.Type;

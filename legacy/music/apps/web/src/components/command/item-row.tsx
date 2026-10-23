@@ -4,6 +4,7 @@ import { usePlayer, usePlayerPosition } from "@music/player/react";
 import { cn } from "@music/ui/lib/utils";
 import {
   DiscIcon,
+  DownloadIcon,
   FolderIcon,
   HeartIcon,
   KeyRoundIcon,
@@ -35,6 +36,7 @@ const GROUP_ICONS: Readonly<Record<CommandGroup, LucideIcon>> = {
   playlists: ListMusicIcon,
   likes: HeartIcon,
   devices: SpeakerIcon,
+  downloads: DownloadIcon,
   jams: UsersRoundIcon,
   libraries: FolderIcon,
   jobs: TerminalIcon,

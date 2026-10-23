@@ -1,10 +1,11 @@
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 
 import {
   AlbumId,
   ApiKeyId,
   ArtistId,
   DeviceId,
+  DownloadPinId,
   InviteId,
   JamId,
   JobId,
@@ -331,6 +332,101 @@ export const Device = Schema.Struct({
 });
 
 export interface Device extends Schema.Schema.Type<typeof Device> {}
+
+/** Downloads one device keeps at most. */
+export const DOWNLOAD_PIN_LIMIT = 500;
+
+/** What a download keeps on a device: a song, an album, or a playlist. */
+export const DownloadTargetKind = Schema.Literals(["track", "album", "playlist"]);
+
+export type DownloadTargetKind = typeof DownloadTargetKind.Type;
+
+/** The song, album, or playlist a download keeps. */
+export const DownloadTarget = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("track"), id: TrackId }),
+  Schema.Struct({ kind: Schema.Literal("album"), id: AlbumId }),
+  Schema.Struct({ kind: Schema.Literal("playlist"), id: PlaylistId }),
+]);
+
+export type DownloadTarget = typeof DownloadTarget.Type;
+
+const downloadPinFields = {
+  id: DownloadPinId,
+  deviceId: DeviceId,
+  target: DownloadTarget,
+  createdAt: Timestamp,
+};
+
+/**
+ * One song, album, or playlist a person keeps on one device; the device keeps it in sync. It is
+ * `available: false` once its target is gone or you can no longer read it: the device deletes
+ * what it holds for it, and the pin stays until it is removed. Its name is withheld then, as a
+ * playlist withholds a song in a library you can't read.
+ */
+export const DownloadPin = Schema.Union([
+  Schema.Struct({
+    ...downloadPinFields,
+    available: Schema.Literal(true),
+    title: Schema.String,
+    /** The artist of a song or album; the owner of a playlist. */
+    subtitle: Schema.String,
+    /** A playlist's cover comes with its manifest; `downloads.list` leaves it null. */
+    artUrl: Schema.NullOr(Schema.String),
+    /** The cover's content hash, which stays the same while `artUrl`'s signature rotates. */
+    artHash: Schema.NullOr(Schema.String),
+  }),
+  Schema.Struct({ ...downloadPinFields, available: Schema.Literal(false) }),
+]);
+
+export type DownloadPin = typeof DownloadPin.Type;
+
+/** A song as a download carries it: `Track` without `liked`, so a like never changes a manifest. */
+export const OfflineTrack = Track.mapFields(Struct.omit(["liked"]));
+
+export interface OfflineTrack extends Schema.Schema.Type<typeof OfflineTrack> {}
+
+/**
+ * What a device does with one song of a download:
+ *
+ * - `fetchable`: fetch it when it holds no copy of this revision.
+ * - `missing`: its file is gone from the server's disk. Keep a copy you hold; there is nothing to
+ *   fetch. Only playlists and single songs list these; an album leaves them out.
+ * - `held`: its library's folder is not claimed right now (a NAS that hasn't remounted). Keep a
+ *   copy you hold, fetch nothing, and delete nothing.
+ */
+export const ManifestEntryState = Schema.Literals(["fetchable", "missing", "held"]);
+
+export type ManifestEntryState = typeof ManifestEntryState.Type;
+
+export const ManifestEntry = Schema.Struct({
+  track: OfflineTrack,
+  /** The file's `fileRevision`. A device holding another revision fetches it again. */
+  rev: Schema.String,
+  artHash: Schema.NullOr(Schema.String),
+  state: ManifestEntryState,
+});
+
+export interface ManifestEntry extends Schema.Schema.Type<typeof ManifestEntry> {}
+
+/**
+ * The songs a download holds now, in album or playlist order. Songs you can't read are left out,
+ * and an unavailable pin holds none.
+ */
+export const DownloadManifest = Schema.Struct({
+  pin: DownloadPin,
+  entries: Schema.Array(ManifestEntry),
+});
+
+export interface DownloadManifest extends Schema.Schema.Type<typeof DownloadManifest> {}
+
+/** One device's downloads. `device` is null when the device has no row (never seen, or pruned). */
+export const DeviceDownloads = Schema.Struct({
+  deviceId: DeviceId,
+  device: Schema.NullOr(Device),
+  pins: Schema.Array(DownloadPin),
+});
+
+export interface DeviceDownloads extends Schema.Schema.Type<typeof DeviceDownloads> {}
 
 export const RepeatMode = Schema.Literals(["off", "all", "one"]);
 

@@ -399,7 +399,8 @@ export const expireJams = internalMutation({
 /**
  * Deletes devices silent for longer than `DEVICE_RETAINED_MS`, one batch per run, rescheduling
  * with the batch's cursor until the whole range is read. A session's active device is kept
- * however old, so no session points at a deleted device.
+ * however old, so no session points at a deleted device, and so is a device that keeps downloads,
+ * so the CLI and agents can still name it.
  */
 export const pruneStaleDevices = internalMutation({
   args: { cutoff: v.optional(v.number()), cursor: v.optional(v.string()) },
@@ -422,7 +423,16 @@ export const pruneStaleDevices = internalMutation({
     await Promise.all(
       batch.page
         .filter((device) => active.get(device.userId) !== device.deviceId)
-        .map((device) => ctx.db.delete(device._id)),
+        .map(async (device) => {
+          const pin = await ctx.db
+            .query("downloadPins")
+            .withIndex("by_user_device", (q) =>
+              q.eq("userId", device.userId).eq("deviceId", device.deviceId),
+            )
+            .first();
+
+          if (pin === null) await ctx.db.delete(device._id);
+        }),
     );
 
     if (!batch.isDone) {

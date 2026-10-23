@@ -1,6 +1,7 @@
 /** The glyph each command group shows on its Actions rows and in its form's callout. */
 import type { CommandGroup } from "@music/commands/command";
 import {
+  Download,
   Folder,
   Heart,
   Key,
@@ -22,6 +23,7 @@ export const GROUP_ICON = {
   playback: Play,
   queue: ListOrdered,
   devices: Monitor,
+  downloads: Download,
   likes: Heart,
   jams: Users,
   library: Library,

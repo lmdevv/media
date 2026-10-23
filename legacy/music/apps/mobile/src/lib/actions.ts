@@ -31,6 +31,7 @@ const SECTION_OF = {
   playback: "Listening",
   queue: "Listening",
   devices: "Listening",
+  downloads: "Listening",
   likes: "Listening",
   jams: "Listening",
   library: "Listening",

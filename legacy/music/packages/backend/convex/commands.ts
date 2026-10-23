@@ -20,6 +20,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
 import { adminMutations, adminQueries } from "./handlers/admin";
 import { collectionMutations, collectionQueries } from "./handlers/collection";
+import { downloadMutations, downloadQueries } from "./handlers/downloads";
 import { jamMutations, jamQueries } from "./handlers/jams";
 import { libraryQueries } from "./handlers/library";
 import { peopleMutations, peopleQueries } from "./handlers/people";
@@ -37,6 +38,7 @@ const queryHandlers: QueryHandlers = {
   ...adminQueries,
   ...peopleQueries,
   ...jamQueries,
+  ...downloadQueries,
 };
 
 const mutationHandlers: MutationHandlers = {
@@ -45,6 +47,7 @@ const mutationHandlers: MutationHandlers = {
   ...adminMutations,
   ...peopleMutations,
   ...jamMutations,
+  ...downloadMutations,
 };
 
 const isQueryName = (name: CommandName): name is QueryName => commands[name].kind === "query";

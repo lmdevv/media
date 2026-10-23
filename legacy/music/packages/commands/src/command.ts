@@ -11,6 +11,7 @@ export type CommandGroup =
   | "playlists"
   | "likes"
   | "devices"
+  | "downloads"
   | "jams"
   | "libraries"
   | "jobs"

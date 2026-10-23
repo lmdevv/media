@@ -6,6 +6,7 @@ import type {
   Device,
   Job,
   Library,
+  OfflineTrack,
   Playlist,
   PlaylistAccess,
   Role,
@@ -21,6 +22,8 @@ import { canRead } from "./viewer";
 import type { ReadCtx, Viewer } from "./viewer";
 
 type TrackOut = (typeof Track)["Encoded"];
+
+type OfflineTrackOut = (typeof OfflineTrack)["Encoded"];
 
 type AlbumOut = (typeof AlbumCard)["Encoded"];
 
@@ -46,10 +49,18 @@ export const DEVICE_ONLINE_MS = 75_000;
  */
 const artExpiry = (now: number): number => Math.ceil(now / WEEK_MS) * WEEK_MS + WEEK_MS;
 
+/** Sorts album tracks by disc, then track number, then title: the order an album lists them. */
+export const byDiscAndNumber = (left: Doc<"tracks">, right: Doc<"tracks">): number =>
+  (left.discNumber ?? 1) - (right.discNumber ?? 1) ||
+  (left.trackNumber ?? 0) - (right.trackNumber ?? 0) ||
+  left.title.localeCompare(right.title);
+
 /** Converts documents into command results for one request, caching signatures and likes. */
 export interface Presenter {
   readonly artUrl: (hash: string | undefined) => Promise<string | null>;
   readonly track: (track: Doc<"tracks">) => Promise<TrackOut>;
+  /** A song as a download carries it, without `liked`, so it reads none of the viewer's likes. */
+  readonly offlineTrack: (track: Doc<"tracks">) => Promise<OfflineTrackOut>;
   readonly tracks: (tracks: ReadonlyArray<Doc<"tracks">>) => Promise<Array<TrackOut>>;
   readonly album: (album: Doc<"albums">) => Promise<AlbumOut>;
   readonly artist: (artist: Doc<"artists">) => Promise<ArtistOut>;
@@ -114,7 +125,7 @@ export const makePresenter = (ctx: ReadCtx, viewer: Viewer): Presenter => {
     return newest?.artHash;
   };
 
-  const present = async (doc: Doc<"tracks">, liked: boolean): Promise<TrackOut> => ({
+  const offlineTrack = async (doc: Doc<"tracks">): Promise<OfflineTrackOut> => ({
     id: doc._id,
     title: doc.title,
     artist: doc.artistName,
@@ -130,6 +141,10 @@ export const makePresenter = (ctx: ReadCtx, viewer: Viewer): Presenter => {
     sampleRate: doc.sampleRate ?? null,
     bitDepth: doc.bitDepth ?? null,
     artUrl: await artUrl(doc.artHash),
+  });
+
+  const present = async (doc: Doc<"tracks">, liked: boolean): Promise<TrackOut> => ({
+    ...(await offlineTrack(doc)),
     liked,
   });
 
@@ -147,6 +162,7 @@ export const makePresenter = (ctx: ReadCtx, viewer: Viewer): Presenter => {
   return {
     artUrl,
     track,
+    offlineTrack,
     tracks,
     album: async (doc) => ({
       id: doc._id,

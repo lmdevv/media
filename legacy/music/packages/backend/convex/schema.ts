@@ -389,6 +389,27 @@ export default defineSchema({
     .index("by_last_seen", ["lastSeenAt"]),
 
   /**
+   * A song, album, or playlist someone keeps downloaded on one device. The device owns the files;
+   * this row is only the intent, which any client (the device, the CLI, an agent) may change.
+   */
+  downloadPins: defineTable({
+    userId: v.id("users"),
+    /**
+     * The device's own ID (`devices.deviceId`), not a reference: a pin outlives the device row,
+     * and the prune keeps a device that holds one (`maintenance:pruneStaleDevices`).
+     */
+    deviceId: v.string(),
+    target: v.union(
+      v.object({ kind: v.literal("track"), id: v.id("tracks") }),
+      v.object({ kind: v.literal("album"), id: v.id("albums") }),
+      v.object({ kind: v.literal("playlist"), id: v.id("playlists") }),
+    ),
+  })
+    .index("by_user_device", ["userId", "deviceId", "target.kind", "target.id"])
+    // A retag that empties an album moves its pins to the album its songs went to.
+    .index("by_target", ["target.kind", "target.id"]),
+
+  /**
    * Where a user's playback is: the device, the position, and the volume. Players report the
    * position every few seconds, so these fields live apart from the queue: a report rewrites only
    * this row, and nothing that reads the queue runs again.

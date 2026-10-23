@@ -205,11 +205,11 @@ const heirOf = async (ctx: MutationCtx, fallback: Id<"users">): Promise<Id<"user
 
 /**
  * Deletes what a removed person owned, rescheduling until it is gone: keys, devices, library
- * access, reset links, likes, history, playlists shared with them, their Jam memberships, and
- * their own playlists with those playlists' shares; their libraries move to the server's owner
- * (`heirOf`), and a Jam they host ends. Songs they added to other people's playlists stay,
- * credited to nobody. `people.remove` has already deleted the account, so none of this is
- * reachable meanwhile.
+ * access, reset links, likes, history, playlists shared with them, their Jam memberships, their
+ * download pins, and their own playlists with those playlists' shares; their libraries move to
+ * the server's owner (`heirOf`), and a Jam they host ends. Songs they added to other people's
+ * playlists stay, credited to nobody. `people.remove` has already deleted the account, so none of
+ * this is reachable meanwhile.
  */
 export const purgeRemovedUser = internalMutation({
   args: { userId: v.id("users"), heir: v.id("users") },
@@ -249,6 +249,10 @@ export const purgeRemovedUser = internalMutation({
       ctx.db
         .query("jamMembers")
         .withIndex("by_user", (q) => q.eq("userId", userId))
+        .take(PURGE_BATCH),
+      ctx.db
+        .query("downloadPins")
+        .withIndex("by_user_device", (q) => q.eq("userId", userId))
         .take(PURGE_BATCH),
     ]);
 

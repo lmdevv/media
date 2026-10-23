@@ -2,6 +2,7 @@ import { foldSearchText } from "@music/commands/search-text";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { repointAlbumPins } from "./downloads";
 import { bumpLibraryCounts } from "./stats";
 import { inOrder } from "./sequence";
 
@@ -144,6 +145,23 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
   const albums = new Map<string, Doc<"albums">>();
   const deltas = new Map<Id<"albums">, AlbumDelta>();
   const released = new Set<string>();
+  /** For each album songs left in this batch, how many went to each other album. */
+  const moves = new Map<Id<"albums">, Map<Id<"albums">, number>>();
+
+  const noteMove = (from: Id<"albums">, to: Id<"albums">): void => {
+    const counts = moves.get(from) ?? new Map<Id<"albums">, number>();
+
+    counts.set(to, (counts.get(to) ?? 0) + 1);
+    moves.set(from, counts);
+  };
+
+  /**
+   * The album that took the most of `albumId`'s songs in this batch, the first one on a tie, or
+   * none when no song left it. An album re-tagged across two batches is judged by the moves of
+   * the batch that emptied it.
+   */
+  const successorOf = (albumId: Id<"albums">): Id<"albums"> | undefined =>
+    [...(moves.get(albumId) ?? [])].toSorted(([, left], [, right]) => right - left)[0]?.[0];
 
   const release = (previous: string | undefined, next: string | undefined): void => {
     if (previous !== undefined && previous !== next) released.add(previous);
@@ -355,6 +373,8 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
       return;
     }
 
+    if (existing.albumId !== album._id) noteMove(existing.albumId, album._id);
+
     if (!existing.missing) adjust(existing.albumId, -1, -existing.durationMs);
     adjust(album._id, 1, scanned.durationMs);
   };
@@ -436,10 +456,15 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
     }
 
     // Every write of the batch is done, so an album no song points at any more (a retag moved its
-    // songs) goes now, and its art is released only once no row holds it. One after another: two
-    // albums of one artist may both be its last.
+    // songs) goes now, and its art is released only once no row holds it. Its downloads follow
+    // its songs. One after another: two albums of one artist may both be its last.
     await inOrder(vanished, async (albumId) => {
       for (const hash of await deleteEmptyAlbum(ctx, albumId)) release(hash, undefined);
+      const successor = successorOf(albumId);
+
+      if (successor !== undefined && (await ctx.db.get(albumId)) === null) {
+        await repointAlbumPins(ctx, albumId, successor);
+      }
     });
 
     return [...released];

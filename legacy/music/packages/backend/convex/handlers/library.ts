@@ -9,16 +9,10 @@ import { tableId } from "../lib/ids";
 import { libraryCounts } from "../lib/stats";
 import { mergedPage, numberKey, textKey } from "../lib/pages";
 import type { Source } from "../lib/pages";
-import { makePresenter } from "../lib/present";
+import { byDiscAndNumber, makePresenter } from "../lib/present";
 import type { QueryHandlers } from "./types";
 
 const emptyPage = { items: [], cursor: "", done: true } as const;
-
-/** Sorts album tracks by disc, then track number, then title. */
-const byDiscAndNumber = (left: Doc<"tracks">, right: Doc<"tracks">): number =>
-  (left.discNumber ?? 1) - (right.discNumber ?? 1) ||
-  (left.trackNumber ?? 0) - (right.trackNumber ?? 0) ||
-  left.title.localeCompare(right.title);
 
 /**
  * Keeps the rows of one page that the viewer may read. Lists read only readable libraries' index

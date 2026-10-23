@@ -6,6 +6,7 @@ import {
   ApiKeyId,
   ArtistId,
   DeviceId,
+  DownloadPinId,
   InviteId,
   JamId,
   JobId,
@@ -24,7 +25,11 @@ import {
   ArtistPage,
   AssignableRole,
   Device,
+  DeviceDownloads,
   DeviceKind,
+  DOWNLOAD_PIN_LIMIT,
+  DownloadManifest,
+  DownloadTargetKind,
   DirectoryPerson,
   HistoryEntry,
   Home,
@@ -389,6 +394,55 @@ export const commands = {
     job: false,
     args: Schema.Struct({ deviceId: DeviceId, name: Name, kind: DeviceKind }),
     result: Ok,
+  }),
+
+  // Downloads
+  "downloads.list": command({
+    summary: "List the albums, playlists, and songs each of your devices keeps downloaded",
+    group: "downloads",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: Schema.Struct({
+      /** Only this device, listed even when it keeps nothing. */
+      deviceId: Schema.optionalKey(DeviceId),
+    }),
+    result: Schema.Array(DeviceDownloads),
+  }),
+  "downloads.add": command({
+    summary: `Download an album, playlist, or song to one of your devices and keep it in sync (up to ${DOWNLOAD_PIN_LIMIT} per device)`,
+    group: "downloads",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({
+      deviceId: DeviceId,
+      kind: DownloadTargetKind,
+      id: Schema.NonEmptyString,
+    }),
+    result: Schema.Struct({ pinId: DownloadPinId }),
+  }),
+  "downloads.remove": command({
+    summary: "Stop keeping an album, playlist, or song on a device; the device deletes its files",
+    group: "downloads",
+    kind: "mutation",
+    access: "user",
+    job: false,
+    args: Schema.Struct({
+      deviceId: DeviceId,
+      kind: DownloadTargetKind,
+      id: Schema.NonEmptyString,
+    }),
+    result: Ok,
+  }),
+  "downloads.manifest": command({
+    summary: "List the songs and file revisions a download holds now (read by devices)",
+    group: "downloads",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ pinId: DownloadPinId }),
+    result: DownloadManifest,
   }),
 
   // Likes and history
