@@ -7,6 +7,7 @@ import type { AlbumCard, ArtistCard } from "@music/commands/models";
 import { router } from "expo-router";
 import { View } from "react-native";
 
+import { useSongDownloadLine } from "@/components/downloads/song-download";
 import { Row, RowChevron, RowMore } from "@/components/ui/row";
 import { songSheetParams } from "@/lib/song-sheet";
 import type { SheetSong } from "@/lib/song-sheet";
@@ -26,7 +27,10 @@ export const openArtist = (artist: Pick<ArtistCard, "id">): void => {
   router.push({ pathname: "/artist/[id]", params: { id: artist.id } });
 };
 
-/** A song: art, title, artist, and its actions. The playing song's title is the accent. */
+/**
+ * A song: art, title, artist with its download state, and its actions. The playing song's title is
+ * the accent.
+ */
 export function TrackRow({
   song,
   artUrl,
@@ -41,14 +45,15 @@ export function TrackRow({
   readonly active: boolean;
   readonly onPress: () => void;
 }) {
+  const line = useSongDownloadLine(song.id, song.title, subtitle ?? song.artist, onPress);
+
   return (
     <View className="px-mobile-edge">
       <Row
+        {...line}
         title={song.title}
-        subtitle={subtitle ?? song.artist}
         leading={{ kind: "art", url: artUrl, recyclingKey: song.id }}
         active={active}
-        onPress={onPress}
         onLongPress={() => openSongActions(song)}
         trailing={<RowMore label={`More, ${song.title}`} onPress={() => openSongActions(song)} />}
       />

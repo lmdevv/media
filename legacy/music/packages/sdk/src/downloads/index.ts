@@ -10,7 +10,7 @@ export type { DownloadRequest, FinishedFileRequest, Transfer } from "./finished-
 
 export { offlineLibrary } from "./library";
 
-export type { OfflineAlbum, OfflineLibrary, OfflinePlaylist } from "./library";
+export type { DownloadedItem, OfflineAlbum, OfflineLibrary, OfflinePlaylist } from "./library";
 
 export { planSync, SyncStep, targetKey } from "./plan";
 

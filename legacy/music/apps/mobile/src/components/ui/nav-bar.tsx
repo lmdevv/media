@@ -17,7 +17,10 @@ import { Text } from "./text";
 export interface NavBarProps {
   /** The page title; empty on pages whose content carries it, such as an album. */
   readonly title?: string;
-  /** A 44pt `IconButton`, such as the page's ellipsis menu. */
+  /**
+   * 44pt `IconButton`s, such as the page's ellipsis menu, side by side with no gap (an album's
+   * download ring sits right before its ellipsis).
+   */
   readonly trailing?: ReactNode;
   /**
    * What Back does: pop by default (no Back on a stack's root), a replacement where the page is a
@@ -53,7 +56,9 @@ export function NavBar({ title, trailing, onBack }: NavBarProps) {
         >
           {title ?? ""}
         </Text>
-        {trailing === undefined ? null : <View className="size-hit-target">{trailing}</View>}
+        {trailing === undefined ? null : (
+          <View className="min-h-hit-target min-w-hit-target flex-row">{trailing}</View>
+        )}
       </View>
     </View>
   );

@@ -18,6 +18,10 @@ describe("resolveMediaUrl", () => {
     expect(resolveMediaUrl(origin, "https://cdn.example/a.jpg")).toBe("https://cdn.example/a.jpg");
   });
 
+  it("keeps a downloaded cover's file on this phone", () => {
+    expect(resolveMediaUrl(origin, "file:///vault/art/a1.jpg")).toBe("file:///vault/art/a1.jpg");
+  });
+
   it("has no URL without artwork", () => {
     expect(resolveMediaUrl(origin, null)).toBeNull();
     expect(resolveMediaUrl(origin, "")).toBeNull();

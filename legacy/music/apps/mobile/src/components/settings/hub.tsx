@@ -1,15 +1,27 @@
 /**
- * F01 · Settings: the account, then personal settings, Actions, joining a Jam, and, for admins
- * and the owner only, server administration. Rows a role may not use are left out, not disabled.
+ * F01 · Settings: the account, then personal settings (playback, and downloads on this iPhone,
+ * D15), Actions, joining a Jam, and, for admins and the owner only, server administration. Rows a
+ * role may not use are left out, not disabled.
  */
 import { can } from "@music/commands/permissions";
 import { router } from "expo-router";
-import { Command, Info, Key, Monitor, Music, Settings, Users } from "lucide-react-native";
+import {
+  CircleArrowDown,
+  Command,
+  Info,
+  Key,
+  Monitor,
+  Music,
+  Settings,
+  Users,
+} from "lucide-react-native";
 import { View } from "react-native";
 
 import { Page } from "@/components/ui/page";
 import { Row, RowChevron } from "@/components/ui/row";
 import { Text } from "@/components/ui/text";
+import { useDownloadSettings } from "@/downloads";
+import { downloadsSettingsLine } from "@/lib/downloaded";
 import { hostOf } from "@/lib/links";
 import { accountLine } from "@/lib/people";
 import { useConnection } from "@/session/connection";
@@ -21,6 +33,7 @@ import { NavGlyph } from "./nav-glyph";
 export function SettingsHub() {
   const me = useMe();
   const { origin } = useConnection();
+  const { usage } = useDownloadSettings();
 
   return (
     <Page title="Settings" bottom="plain" trailing={<NavGlyph icon={Info} />}>
@@ -39,6 +52,13 @@ export function SettingsHub() {
             subtitle="Quality, theme, and autoplay"
             trailing={<RowChevron />}
             onPress={() => router.push("/settings/playback")}
+          />
+          <Row
+            leading={{ kind: "icon", icon: CircleArrowDown, tone: "muted" }}
+            title="Downloads"
+            subtitle={downloadsSettingsLine(usage)}
+            trailing={<RowChevron />}
+            onPress={() => router.push("/settings/downloads")}
           />
           <Row
             leading={{ kind: "icon", icon: Monitor, tone: "muted" }}

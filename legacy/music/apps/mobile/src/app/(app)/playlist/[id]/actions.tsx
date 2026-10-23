@@ -27,7 +27,7 @@ import { useState } from "react";
 import { DownloadRow } from "@/components/downloads/download-row";
 import { SheetUnavailable } from "@/components/playlists/unavailable";
 import { usePlaylist } from "@/components/playlists/use-playlist";
-import { useCopyPlaylistLink } from "@/components/playlists/copy-link";
+import { useCopyLink } from "@/components/playlists/copy-link";
 import { useCloseAfter } from "@/components/playlists/use-close-after";
 import { Row, RowCheck } from "@/components/ui/row";
 import { SheetLayout } from "@/components/ui/sheet-layout";
@@ -164,7 +164,7 @@ function Sheet({
   readonly context: Context;
 }) {
   const { playNext, playLater } = usePlayerActions();
-  const copyLink = useCopyPlaylistLink();
+  const copyLink = useCopyLink();
   const [confirmedKey, setConfirmedKey] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const closeSoon = useCloseAfter(CONFIRM_MS);
@@ -190,7 +190,7 @@ function Sheet({
 
     if (effect.kind === "copy") {
       try {
-        await copyLink(playlist.id);
+        await copyLink("playlist", playlist.id);
         confirm(action.key);
       } catch (cause) {
         setFailure(cause instanceof Error ? errorMessage(cause) : "Couldn’t copy the link.");

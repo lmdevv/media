@@ -57,6 +57,11 @@ const decodeDownloadQuality = Schema.decodeUnknownOption(DownloadQuality);
 export const loadDownloadQuality = (): DownloadQuality =>
   Option.getOrElse(decodeDownloadQuality(readItem(storage, DOWNLOAD_QUALITY_KEY)), () => "high");
 
+/** Saves the download quality for this phone. */
+export const saveDownloadQuality = (quality: DownloadQuality): void => {
+  writeItem(storage, DOWNLOAD_QUALITY_KEY, quality);
+};
+
 /** Calls `listener` each time the app comes back to the screen. */
 export const onForeground = (listener: () => void): (() => void) => {
   const subscription = AppState.addEventListener("change", (state) => {

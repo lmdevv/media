@@ -1,7 +1,8 @@
 /**
  * C02, C05, C11, H08 · Playlist. Its owner sees the hero, who can open it, Share, Add, and Play
  * and Shuffle (C02), or "Make it yours." while it is empty (C05). A collaborator sees whose it is
- * and may add songs (C11); a viewer may only play. A playlist the viewer can't open is G10.
+ * and may add songs (C11); a viewer may only play. The song list's bar holds the download ring
+ * beside the ellipsis (D06). A playlist the viewer can't open is G10.
  */
 import { PlaylistId } from "@music/commands/ids";
 import type { PlaylistDetail, PlaylistEntry } from "@music/commands/models";
@@ -10,6 +11,7 @@ import { useRead } from "@music/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ellipsis, ListMusic, Plus } from "lucide-react-native";
 
+import { DownloadButton } from "@/components/downloads/download-button";
 import { PlayButtons } from "@/components/playlists/play-buttons";
 import { OwnerHeader, SharedHeader, openAddSongs } from "@/components/playlists/playlist-header";
 import { SongListPage } from "@/components/playlists/song-list-page";
@@ -102,9 +104,16 @@ function Loaded({
     );
   }
 
+  const trailing = (
+    <>
+      <DownloadButton target={{ kind: "playlist", id: playlist.id }} title={playlist.name} />
+      {actions}
+    </>
+  );
+
   return (
     <SongListPage
-      bar={owner ? { trailing: actions } : { title: playlist.name, trailing: actions }}
+      bar={owner ? { trailing } : { title: playlist.name, trailing }}
       songs={songs}
       onPlay={(index) => void play(trackIds, index)}
       header={

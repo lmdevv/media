@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import { View } from "react-native";
 
 import { openSongActions } from "@/components/browse/rows";
+import { useSongDownloadLine } from "@/components/downloads/song-download";
 import { ContentScroll } from "@/components/ui/content-scroll";
 import { NavBar } from "@/components/ui/nav-bar";
 import type { NavBarProps } from "@/components/ui/nav-bar";
@@ -62,14 +63,20 @@ function SongRow({
 }) {
   const { song } = entry;
 
+  const line = useSongDownloadLine(
+    song?.id ?? null,
+    entry.title,
+    entry.subtitle,
+    entry.playable ? onPress : undefined,
+  );
+
   return (
     <View className={`px-mobile-edge ${entry.playable ? "" : "opacity-disabled"}`}>
       <Row
+        {...line}
         title={entry.title}
-        subtitle={entry.subtitle}
         active={active}
         leading={{ kind: "art", url: entry.artUrl, recyclingKey: entry.key }}
-        onPress={entry.playable ? onPress : undefined}
         trailing={
           song === null || !entry.playable ? undefined : (
             <RowMore label={`More, ${entry.title}`} onPress={() => openSongActions(song)} />

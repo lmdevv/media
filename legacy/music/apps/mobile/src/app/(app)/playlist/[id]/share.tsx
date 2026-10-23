@@ -13,7 +13,7 @@ import { Check, Lock, Plus, Share, Users } from "lucide-react-native";
 import { useState } from "react";
 import { View } from "react-native";
 
-import { useCopyPlaylistLink } from "@/components/playlists/copy-link";
+import { useCopyLink } from "@/components/playlists/copy-link";
 import { ContentUnavailable } from "@/components/states/content-unavailable";
 import { unavailableFrom } from "@/lib/detail-state";
 import { usePlaylist } from "@/components/playlists/use-playlist";
@@ -54,7 +54,7 @@ function Sharing({
   readonly sharing: PlaylistSharing;
 }) {
   const setVisibility = useRun("playlists.visibility");
-  const copyLink = useCopyPlaylistLink();
+  const copyLink = useCopyLink();
   // The choice shows at once; the server's answer replaces it, or a failure puts it back.
   const [choice, setChoice] = useState<PlaylistVisibility | null>(null);
   const [copied, setCopied] = useState(false);
@@ -78,7 +78,7 @@ function Sharing({
     setFailure(null);
 
     try {
-      await copyLink(playlist.id);
+      await copyLink("playlist", playlist.id);
       setCopied(true);
       setTimeout(() => setCopied(false), COPIED_MS);
     } catch (cause) {

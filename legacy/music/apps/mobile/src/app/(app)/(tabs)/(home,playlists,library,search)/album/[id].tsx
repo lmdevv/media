@@ -1,21 +1,25 @@
 /**
  * A07 · Album: the cover, title, artist (which opens the artist, A08), and a line of facts, then
  * Play and Shuffle over the songs. A song plays the album from there; its ellipsis opens Song
- * actions (A11). The playing song's title is the accent. An album the viewer can no longer open,
- * such as one whose library was made private, is G10.
+ * actions (A11). The playing song's title is the accent. The bar holds the download ring (D01)
+ * and the ellipsis that opens Album actions (D03b). An album the viewer can no longer open, such
+ * as one whose library was made private, is G10.
  */
 import { AlbumId } from "@music/commands/ids";
 import { useReadSettled } from "@music/sdk/react";
 import { Option, Schema } from "effect";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
+import { Ellipsis } from "lucide-react-native";
 import { Pressable, View } from "react-native";
 
 import { ListPage } from "@/components/browse/list-page";
 import { usePlayList } from "@/components/browse/play";
 import { PlayShuffle } from "@/components/browse/play-shuffle";
 import { TrackRow, openArtist } from "@/components/browse/rows";
+import { DownloadButton } from "@/components/downloads/download-button";
 import { ContentUnavailable } from "@/components/states/content-unavailable";
 import { Artwork } from "@/components/ui/artwork";
+import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { albumMeta } from "@/lib/album-meta";
 import { detailStateOf } from "@/lib/detail-state";
@@ -42,7 +46,27 @@ function Album({ albumId }: { readonly albumId: AlbumId }) {
 
   return (
     <ListPage
-      bar={{}}
+      bar={
+        detail === undefined
+          ? {}
+          : {
+              trailing: (
+                <>
+                  <DownloadButton
+                    target={{ kind: "album", id: albumId }}
+                    title={detail.album.title}
+                  />
+                  <IconButton
+                    icon={Ellipsis}
+                    label="Album actions"
+                    onPress={() =>
+                      router.push({ pathname: "/album/[id]/actions", params: { id: albumId } })
+                    }
+                  />
+                </>
+              ),
+            }
+      }
       data={tracks}
       extraData={playingId}
       keyExtractor={(track) => track.id}
