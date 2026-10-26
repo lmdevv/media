@@ -184,8 +184,11 @@ export const useHasTrack = (): boolean => useContext(HasTrackContext);
 export const useLatestPlayer = (): (() => Player) => useReaders().player;
 
 /**
- * A stable function that returns the live position in milliseconds, for handlers (such as a seek
- * shortcut) that would otherwise re-render with every position tick.
+ * A stable function that returns the live position in milliseconds, worked out afresh on every
+ * call: between the engine's reports it moves on with a monotonic clock while playing and holds
+ * while paused or buffering. For handlers (such as a seek shortcut) that would otherwise re-render
+ * with every position tick, and for animation-frame loops that follow playback closely, such as
+ * synced lyrics.
  */
 export const usePositionReader = (): (() => number) => useReaders().positionMs;
 
@@ -232,6 +235,7 @@ const createController = (
     device: describeDevice(navigator.userAgent, navigator.maxTouchPoints),
     canPlay: (mimeType) => probe.canPlayType(mimeType) !== "",
     now: Date.now,
+    monotonicNow: () => performance.now(),
     quality: parseStreamQuality(readItem(storage, QUALITY_KEY)),
     saveQuality: (quality) => {
       writeItem(storage, QUALITY_KEY, quality);

@@ -21,6 +21,7 @@ import {
 import { clockOffset, withClockSample } from "./clock-offset";
 import type { SessionView } from "./engine-plan";
 import { livePosition } from "./live-position";
+import type { PositionSnapshot } from "./live-position";
 import { isStreamRefused, mediaBaseUrl, probeMediaHealth, waitForMedia } from "./media-health";
 import type { MediaSessionHandlers } from "./media-session";
 import type { SessionPort } from "./session-router";
@@ -98,6 +99,11 @@ export interface ControllerEnvironment {
   readonly canPlay: (mimeType: string) => boolean;
   /** Milliseconds since the Unix epoch. */
   readonly now: () => number;
+  /**
+   * Milliseconds on a clock that never jumps or runs backwards (`performance.now()`), to move the
+   * position on between the engine's reports.
+   */
+  readonly monotonicNow: () => number;
   /** The saved quality setting. */
   readonly quality: StreamQuality;
   /** Persists a changed quality setting. */
@@ -150,7 +156,12 @@ export class PlaybackController {
   #preloading = false;
   /** Bumped by every load and unload so stale async work drops its result. */
   #generation = 0;
-  #positionMs = 0;
+  /**
+   * Where the engine was, stamped with `monotonicNow`, and whether its audio was moving then: the
+   * live position on this browser runs on from it (see `#livePositionMs`). Restamped by each new
+   * position (engine report, seek, load) and by each engine event that starts or stops the audio.
+   */
+  #sample: PositionSnapshot = { positionMs: 0, updatedAt: 0, playing: false };
   #reportedMs: number | null = null;
   /** Clock samples for listening along; see `clock-offset.ts`. */
   #clockSamples: ReadonlyArray<number> = [];
@@ -300,7 +311,7 @@ export class PlaybackController {
       view,
       {
         trackId: this.#loaded?.track.id ?? null,
-        positionMs: this.#positionMs,
+        positionMs: this.#livePositionMs(),
         reportedMs: this.#reportedMs,
       },
       this.#serverNow(state),
@@ -316,11 +327,12 @@ export class PlaybackController {
   }
 
   /**
-   * The live position in milliseconds: the engine's when this browser plays, else the session's
-   * last report advanced by the time since.
+   * The live position in milliseconds, fresh on every call, so an animation frame can read it: the
+   * engine's last report advanced by the time since while this browser plays (held while paused
+   * or buffering), else the session's last report advanced by the time since.
    */
   positionMs(): number {
-    if (this.#view?.active === true && this.#loaded !== null) return this.#positionMs;
+    if (this.#view?.active === true && this.#loaded !== null) return this.#livePositionMs();
 
     const state = this.#state;
 
@@ -368,7 +380,7 @@ export class PlaybackController {
 
     if (view.active && this.#loaded !== null) {
       if (playing) this.#engine.pause();
-      else if (!this.#reloadIfExpired(this.#positionMs, true)) void this.#engine.play();
+      else if (!this.#reloadIfExpired(this.#livePositionMs(), true)) void this.#engine.play();
     }
 
     this.#update({ pendingPlaying: !playing, autoplayBlocked: false, error: null });
@@ -401,7 +413,7 @@ export class PlaybackController {
 
     if (this.#view?.active === true && this.#loaded !== null) {
       if (!this.#reloadIfExpired(target, this.#isAudible())) this.#engine.seek(target);
-      this.#positionMs = target;
+      this.#setPosition(target);
       this.#showNowPlaying();
     }
 
@@ -485,6 +497,33 @@ export class PlaybackController {
     this.#snapshot = next;
 
     for (const listener of this.#listeners) listener();
+  }
+
+  /**
+   * The engine's position now: its last sample, moved on by the time since while its audio moves.
+   * Every read of where this browser's playback is goes through here.
+   */
+  #livePositionMs(): number {
+    return livePosition(
+      this.#sample,
+      this.#env.monotonicNow(),
+      this.#loaded?.track.durationMs ?? 0,
+    );
+  }
+
+  /** Restamps the live position at `positionMs` from now, moving on only while `playing`. */
+  #stamp(positionMs: number, playing: boolean): void {
+    this.#sample = { positionMs, updatedAt: this.#env.monotonicNow(), playing };
+  }
+
+  /** Puts the live position at `positionMs`; whether the audio moves stays as the engine said. */
+  #setPosition(positionMs: number): void {
+    this.#stamp(positionMs, this.#sample.playing);
+  }
+
+  /** The audio started or stopped: the live position moves on, or holds, from here. */
+  #setMoving(playing: boolean): void {
+    this.#stamp(this.#livePositionMs(), playing);
   }
 
   /**
@@ -575,9 +614,9 @@ export class PlaybackController {
     // At the very end the host has likely moved on already; the next snapshot brings the song.
     if (target >= durationMs - FOLLOW_DRIFT_MS) return;
 
-    if (Math.abs(target - this.#positionMs) <= FOLLOW_DRIFT_MS) return;
+    if (Math.abs(target - this.#livePositionMs()) <= FOLLOW_DRIFT_MS) return;
     this.#engine.seek(target);
-    this.#positionMs = target;
+    this.#setPosition(target);
     this.#lastFollowSeekAt = now;
   }
 
@@ -594,7 +633,7 @@ export class PlaybackController {
 
     // Listening along, the host's device reports; this one only follows.
     if (this.#view?.active !== true || this.#view.following || loaded === null) return;
-    const positionMs = Math.max(0, Math.round(this.#positionMs));
+    const positionMs = Math.max(0, Math.round(this.#livePositionMs()));
     this.#reportedMs = positionMs;
 
     await this.#quietly(
@@ -632,7 +671,7 @@ export class PlaybackController {
         if (this.#loaded !== null) this.#loaded = { ...this.#loaded, index, track };
       },
       Play: () => {
-        if (!this.#reloadIfExpired(this.#positionMs, true)) void this.#engine.play();
+        if (!this.#reloadIfExpired(this.#livePositionMs(), true)) void this.#engine.play();
       },
       Pause: () => {
         // An engine that is already silent emits no `paused` to consume the mark.
@@ -641,7 +680,7 @@ export class PlaybackController {
       },
       Seek: ({ positionMs }) => {
         if (!this.#reloadIfExpired(positionMs, this.#isAudible())) this.#engine.seek(positionMs);
-        this.#positionMs = positionMs;
+        this.#setPosition(positionMs);
       },
       SetVolume: ({ volume }) => {
         this.#setEngineVolume(volume);
@@ -678,7 +717,7 @@ export class PlaybackController {
     this.#loaded = null;
     this.#preloaded = null;
     this.#preloading = false;
-    this.#positionMs = 0;
+    this.#stamp(0, false);
     this.#reportedMs = null;
   }
 
@@ -713,7 +752,8 @@ export class PlaybackController {
 
     this.#loaded = { track, index, origin: null, profile: null, url: null, renewAt: null };
     this.#preloaded = null;
-    this.#positionMs = startMs;
+    // Silent until the engine reports that the new song plays.
+    this.#stamp(startMs, false);
     this.#reportedMs = null;
     const engine = this.#wantedEngine();
 
@@ -748,7 +788,7 @@ export class PlaybackController {
     // The stream URL took a moment to arrive; a playing session moved on meanwhile.
     const elapsed = autoplay ? this.#env.now() - plannedAt : 0;
     const start = Math.min(startMs + elapsed, Math.max(0, track.durationMs - 1000));
-    this.#positionMs = start;
+    this.#setPosition(start);
     await this.#engine.load(resolved.source, start, autoplay);
   }
 
@@ -792,7 +832,7 @@ export class PlaybackController {
 
     if (this.#view?.active !== true) return;
 
-    if (loaded.track.durationMs - this.#positionMs > PRELOAD_LEAD_MS) return;
+    if (loaded.track.durationMs - this.#livePositionMs() > PRELOAD_LEAD_MS) return;
 
     // A quality change switches engines at the next song, which then loads instead of preloading.
     if (this.#wantedEngine() !== this.#snapshot.engine) return;
@@ -841,12 +881,13 @@ export class PlaybackController {
   #onEngineEvent = (event: EngineEvent): void => {
     switch (event.type) {
       case "time": {
-        this.#positionMs = event.positionMs;
+        this.#setPosition(event.positionMs);
         void this.#preloadFollowing();
         break;
       }
 
       case "playing": {
+        this.#setMoving(true);
         this.#sessionPaused = false;
         this.#renewed = null;
         this.#update({ engineStatus: "playing", error: null, autoplayBlocked: false });
@@ -856,6 +897,7 @@ export class PlaybackController {
       }
 
       case "paused": {
+        this.#setMoving(false);
         const ordered = this.#sessionPaused;
         this.#sessionPaused = false;
         this.#update({ engineStatus: "paused" });
@@ -869,6 +911,7 @@ export class PlaybackController {
       }
 
       case "waiting": {
+        this.#setMoving(false);
         this.#update({ engineStatus: "buffering" });
         break;
       }
@@ -879,11 +922,13 @@ export class PlaybackController {
       }
 
       case "ended": {
+        this.#setMoving(false);
         this.#onEnded();
         break;
       }
 
       case "error": {
+        this.#setMoving(false);
         void this.#onError(event.reason, event.message);
         break;
       }
@@ -905,7 +950,7 @@ export class PlaybackController {
     };
 
     this.#preloaded = null;
-    this.#positionMs = 0;
+    this.#setPosition(0);
     this.#showNowPlaying();
     void this.#report(true);
   }
@@ -949,7 +994,12 @@ export class PlaybackController {
 
     if (loaded?.origin === "local") {
       if (loaded.url !== null) this.#sources.discard(loaded.track.id, loaded.url);
-      void this.#load(loaded.track, loaded.index, this.#positionMs, this.#view?.playing ?? false);
+      void this.#load(
+        loaded.track,
+        loaded.index,
+        this.#livePositionMs(),
+        this.#view?.playing ?? false,
+      );
 
       return;
     }
@@ -987,7 +1037,12 @@ export class PlaybackController {
       }
 
       this.#renewed = loaded.track.id;
-      void this.#load(loaded.track, loaded.index, this.#positionMs, this.#view?.playing ?? false);
+      void this.#load(
+        loaded.track,
+        loaded.index,
+        this.#livePositionMs(),
+        this.#view?.playing ?? false,
+      );
 
       return;
     }
@@ -1005,7 +1060,12 @@ export class PlaybackController {
     // The service is up, so the gapless engine could not play this stream: use HTML audio.
     if (this.#snapshot.engine === "mse" && reason !== "network") {
       this.#mseFailed = true;
-      void this.#load(loaded.track, loaded.index, this.#positionMs, this.#view?.playing ?? false);
+      void this.#load(
+        loaded.track,
+        loaded.index,
+        this.#livePositionMs(),
+        this.#view?.playing ?? false,
+      );
 
       return;
     }
@@ -1013,7 +1073,12 @@ export class PlaybackController {
     // The service is up, so the browser could not play the original file: transcode instead.
     if (loaded.profile === "original" && !this.#transcode.has(loaded.track.id)) {
       this.#transcode.add(loaded.track.id);
-      void this.#load(loaded.track, loaded.index, this.#positionMs, this.#view?.playing ?? false);
+      void this.#load(
+        loaded.track,
+        loaded.index,
+        this.#livePositionMs(),
+        this.#view?.playing ?? false,
+      );
 
       return;
     }
@@ -1052,6 +1117,6 @@ export class PlaybackController {
     const active = this.#view?.active === true;
     const track = active ? (this.#loaded?.track ?? null) : null;
 
-    this.#env.nowPlaying.show(track, this.#isAudible(), this.#positionMs);
+    this.#env.nowPlaying.show(track, this.#isAudible(), this.#livePositionMs());
   }
 }

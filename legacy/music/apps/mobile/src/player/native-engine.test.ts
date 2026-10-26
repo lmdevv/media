@@ -19,8 +19,11 @@ class FakeOutput implements AudioOutput {
   durationMs = 0;
   positionMs = 0;
   released = false;
+  /** While set, each seek waits for the test to land it, as AVPlayer's lands a moment later. */
+  holdSeeks = false;
   lockScreen: { readonly info: LockScreenInfo | null; readonly live: boolean } | null = null;
   readonly #listeners = new Set<(status: OutputStatus) => void>();
+  readonly #heldSeeks: Array<{ readonly land: () => void; readonly refuse: () => void }> = [];
 
   constructor(url: string) {
     this.url = url;
@@ -37,6 +40,12 @@ class FakeOutput implements AudioOutput {
   };
 
   seek = async (positionMs: number): Promise<void> => {
+    if (this.holdSeeks) {
+      await new Promise<void>((resolve, reject) => {
+        this.#heldSeeks.push({ land: resolve, refuse: () => reject(new Error("seek refused")) });
+      });
+    }
+
     if (!this.live) this.positionMs = positionMs;
     this.#report();
   };
@@ -75,6 +84,34 @@ class FakeOutput implements AudioOutput {
   finish(): void {
     this.wantsPlay = false;
     this.#report({ finished: true, positionMs: this.live ? 0 : this.durationMs });
+  }
+
+  /**
+   * Lands the held seeks newest first, and each seek the engine asks for meanwhile, until none is
+   * left. Nothing makes a player land its seeks in the order they were asked for.
+   */
+  async landSeeksNewestFirst(): Promise<void> {
+    const held = this.#heldSeeks.pop();
+
+    if (held === undefined) return;
+    held.land();
+    await settled();
+    await this.landSeeksNewestFirst();
+  }
+
+  /** Fails the oldest held seek, as AVPlayer can when a seek is interrupted. */
+  async refuseOldestSeek(): Promise<void> {
+    this.#heldSeeks.shift()?.refuse();
+    await settled();
+  }
+
+  /**
+   * Reports the end it reached before a seek moved it back, as AVPlayer can once the seek has
+   * landed: paused (an item that ends pauses), where the seek took it.
+   */
+  reportEndLate(): void {
+    this.wantsPlay = false;
+    this.#report({ finished: true });
   }
 
   fail(message: string): void {
@@ -154,6 +191,12 @@ const mediaService = async () => {
     },
   };
 };
+
+/** Resolves once the engine has handled everything already settled. */
+const settled = () =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
 
 /** A deferred the test settles by hand. */
 const deferred = () => Promise.withResolvers<void>();
@@ -251,6 +294,147 @@ describe("NativeEngine", () => {
 
     expect(outputs).toHaveLength(1);
     expect(lastTime(events)).toBe(60_000);
+  });
+
+  it("reports the seek target until the seek lands, never a status from before it", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+    output(0).advance(30_000);
+    output(0).holdSeeks = true;
+    const before = events.length;
+
+    engine.seek(60_000);
+    output(0).advance(250);
+    await output(0).landSeeksNewestFirst();
+    output(0).advance(250);
+
+    const times = events
+      .slice(before)
+      .flatMap((event) => (event.type === "time" ? [event.positionMs] : []));
+
+    expect(Math.min(...times)).toBe(60_000);
+    expect(times.at(-1)).toBe(60_250);
+  });
+
+  it("pauses at the seek target while the seek is still landing", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+    output(0).advance(30_000);
+    output(0).holdSeeks = true;
+
+    engine.seek(60_000);
+    engine.pause();
+
+    expect(lastTime(events)).toBe(60_000);
+  });
+
+  it("lands on the latest of two quick seeks, whichever of the player's seeks lands first", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+    output(0).advance(30_000);
+    output(0).holdSeeks = true;
+
+    engine.seek(60_000);
+    const before = events.length;
+    engine.seek(90_000);
+    await output(0).landSeeksNewestFirst();
+    output(0).advance(250);
+
+    const times = events
+      .slice(before)
+      .flatMap((event) => (event.type === "time" ? [event.positionMs] : []));
+
+    expect(output(0).positionMs).toBe(90_250);
+    expect(Math.min(...times)).toBe(90_000);
+    expect(times.at(-1)).toBe(90_250);
+  });
+
+  it("still lands on a newer seek when the running seek fails", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+    output(0).advance(30_000);
+    output(0).holdSeeks = true;
+
+    engine.seek(60_000);
+    const before = events.length;
+    engine.seek(90_000);
+    await output(0).refuseOldestSeek();
+    await output(0).landSeeksNewestFirst();
+    output(0).advance(250);
+
+    const times = events
+      .slice(before)
+      .flatMap((event) => (event.type === "time" ? [event.positionMs] : []));
+
+    expect(output(0).positionMs).toBe(90_250);
+    expect(Math.min(...times)).toBe(90_000);
+  });
+
+  it("plays on from a seek back that was landing as the song ended, without moving on", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+    engine.preload(media.source("b"));
+    await vi.waitFor(() => expect(output(1).url).toBe(media.source("b").url));
+    output(1).ready(false);
+    output(0).advance(199_000);
+    output(0).holdSeeks = true;
+
+    engine.seek(60_000);
+    output(0).finish();
+    await output(0).landSeeksNewestFirst();
+    output(0).advance(250);
+
+    expect(types(events)).not.toContain("advanced");
+    expect(types(events)).not.toContain("ended");
+    expect(output(1).wantsPlay).toBe(false);
+    expect(output(0).wantsPlay).toBe(true);
+    expect(lastTime(events)).toBe(60_250);
+  });
+
+  it("plays on from a seek back that landed before the player reported the song's end", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+    engine.preload(media.source("b"));
+    await vi.waitFor(() => expect(output(1).url).toBe(media.source("b").url));
+    output(1).ready(false);
+    output(0).advance(199_000);
+
+    engine.seek(60_000);
+    await settled();
+    output(0).reportEndLate();
+    output(0).advance(250);
+
+    expect(types(events)).not.toContain("advanced");
+    expect(output(1).wantsPlay).toBe(false);
+    expect(output(0).wantsPlay).toBe(true);
+    expect(lastTime(events)).toBe(60_250);
+  });
+
+  it("ends the song when a seek that was landing as it ended lands at its end", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+    output(0).advance(199_000);
+    output(0).holdSeeks = true;
+
+    engine.seek(199_500);
+    output(0).finish();
+    await output(0).landSeeksNewestFirst();
+
+    expect(types(events).at(-1)).toBe("ended");
   });
 
   it("seeks in a live song by opening it from the offset, counting time from there", async () => {

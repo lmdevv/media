@@ -97,6 +97,7 @@ const setup = (queue: ReadonlyArray<SongId>, downloaded: ReadonlyArray<SongId>) 
       device: { name: phone.name, kind: phone.kind },
       canPlay: () => true,
       now: clock.now,
+      monotonicNow: clock.now,
       quality: "high",
       saveQuality: () => {},
       nowPlaying: {

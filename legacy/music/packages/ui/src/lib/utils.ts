@@ -26,6 +26,8 @@ export const cn = createCn({
         "phone-title",
         "phone-card",
         "phone-large-title",
+        "lyric",
+        "phone-lyric",
       ],
       leading: ["xs", "sm", "base", "md", "lg", "xl", "2xl", "display"],
       tracking: ["display", "mono", "snug"],

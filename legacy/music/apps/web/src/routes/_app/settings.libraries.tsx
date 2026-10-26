@@ -14,6 +14,7 @@ import {
 } from "@music/ui/components/dropdown-menu";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
 import { Skeleton } from "@music/ui/components/skeleton";
+import { Switch } from "@music/ui/components/switch";
 import { cn } from "@music/ui/lib/utils";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
@@ -91,6 +92,7 @@ function Libraries({ me }: { readonly me: User }) {
           ))}
         </div>
       )}
+      <RemoteLyricsSetting />
       <TerminalHint
         label="From a terminal"
         command="music libraries list · music libraries scan --help"
@@ -101,6 +103,34 @@ function Libraries({ me }: { readonly me: User }) {
         serverOwner={can(me.role, "owner")}
       />
     </div>
+  );
+}
+
+/** The server setting that lets the media service find lyrics on LRCLIB for songs that have none. */
+function RemoteLyricsSetting() {
+  const settings = useRead("server.settings", {});
+  const update = useRun("server.update");
+
+  const [save, saving] = useAction((remoteLyrics: boolean) => update({ remoteLyrics }), {
+    success: () => "Saved",
+  });
+
+  return (
+    <label className="flex items-center justify-between gap-4 border-y border-border py-6">
+      <span className="flex flex-col gap-0.5">
+        <span className="font-sans text-base/sm font-semibold text-text">
+          Look up lyrics online
+        </span>
+        <span className="font-sans text-sm/xs text-text-muted">
+          Sends the title, artist, album, and length of songs without lyrics to LRCLIB.
+        </span>
+      </span>
+      <Switch
+        checked={settings?.remoteLyrics ?? false}
+        disabled={settings === undefined || saving}
+        onCheckedChange={(on) => void save(on)}
+      />
+    </label>
   );
 }
 

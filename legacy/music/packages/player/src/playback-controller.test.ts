@@ -20,11 +20,12 @@ const deviceId = DeviceId.make("this-browser");
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
-const song: QueueEntry = {
-  itemId: QueueItemId.make("1"),
+/** A queue entry for the track `id`, at queue item `itemId`. */
+const entry = (id: string, itemId: string): QueueEntry => ({
+  itemId: QueueItemId.make(itemId),
   addedBy: null,
   autoplay: false,
-  id: TrackId.make("song"),
+  id: TrackId.make(id),
   title: "Song",
   artist: "Artist",
   artistId: ArtistId.make("artist"),
@@ -40,9 +41,21 @@ const song: QueueEntry = {
   bitDepth: null,
   artUrl: null,
   liked: false,
-};
+});
 
-const session = (playing: boolean, updatedAt: number, following = false): PlaybackState => ({
+const song = entry("song", "1");
+
+/** The session fields some tests set; the rest stay as `session` makes them. */
+type SessionFields = Partial<
+  Pick<PlaybackState, "activeDevice" | "queue" | "index" | "positionMs">
+>;
+
+const session = (
+  playing: boolean,
+  updatedAt: number,
+  following = false,
+  fields: SessionFields = {},
+): PlaybackState => ({
   activeDevice: { id: deviceId, name: "Test", kind: "web", lastSeenAt: 0, online: true },
   queue: [song],
   index: 0,
@@ -54,6 +67,7 @@ const session = (playing: boolean, updatedAt: number, following = false): Playba
   autoplay: false,
   volume: 1,
   following,
+  ...fields,
 });
 
 interface Mutation {
@@ -226,7 +240,8 @@ const setup = async (options: {
 }) => {
   const media = await fakeMediaService();
   const mutations: Array<Mutation> = [];
-  const clock = { now: 1_000_000 };
+  /** `now` is the wall clock; `monotonic` the clock the live position runs on. */
+  const clock = { now: 1_000_000, monotonic: 0 };
   const record: EngineRecord = { created: [], loads: [], plays: 0 };
   const engines: Array<ReturnType<typeof instantEngine>> = [];
   const host = testHost(options.resolveUrl);
@@ -258,6 +273,7 @@ const setup = async (options: {
       device: { name: "Test", kind: "web" },
       canPlay: () => true,
       now: () => clock.now,
+      monotonicNow: () => clock.monotonic,
       quality: options.quality ?? "high",
       saveQuality: () => {},
       ...host,
@@ -404,6 +420,7 @@ describe("PlaybackController", () => {
         device: { name: "Test", kind: "web" },
         canPlay: () => true,
         now: () => 1000,
+        monotonicNow: () => 1000,
         quality: "high",
         saveQuality: () => {},
         ...testHost(),
@@ -470,6 +487,7 @@ describe("PlaybackController", () => {
         device: { name: "Test", kind: "web" },
         canPlay: () => true,
         now: () => 1000,
+        monotonicNow: () => 1000,
         quality: "high",
         saveQuality: () => {},
         ...testHost(),
@@ -683,6 +701,132 @@ describe("PlaybackController", () => {
     controller.retry();
 
     expect(record.loads).toHaveLength(1);
+    stop();
+  });
+});
+
+/** A started controller playing `song` on this browser, the engine at `atMs`. */
+const playingAt = async (atMs: number) => {
+  const harness = await setup({ gapless: false });
+
+  harness.controller.sync(session(true, harness.clock.now));
+  await vi.waitFor(() => expect(harness.controller.getSnapshot().engineStatus).toBe("playing"));
+  harness.engine().emit({ type: "time", positionMs: atMs });
+
+  return harness;
+};
+
+describe("PlaybackController.positionMs", () => {
+  it("moves on between the engine's reports while playing", async () => {
+    const { controller, clock, stop } = await playingAt(10_000);
+
+    clock.monotonic += 150;
+    expect(controller.positionMs()).toBe(10_150);
+    clock.monotonic += 40;
+    expect(controller.positionMs()).toBe(10_190);
+    stop();
+  });
+
+  it("starts again from each new report, even one behind the extrapolation", async () => {
+    const { controller, clock, engine, stop } = await playingAt(10_000);
+
+    clock.monotonic += 190;
+    engine().emit({ type: "time", positionMs: 10_180 });
+    expect(controller.positionMs()).toBe(10_180);
+    clock.monotonic += 20;
+    expect(controller.positionMs()).toBe(10_200);
+    stop();
+  });
+
+  it("holds while buffering or paused and moves on again once playing", async () => {
+    const { controller, clock, engine, stop } = await playingAt(10_000);
+
+    clock.monotonic += 100;
+    engine().emit({ type: "waiting" });
+    clock.monotonic += 500;
+    expect(controller.positionMs()).toBe(10_100);
+
+    engine().emit({ type: "playing" });
+    clock.monotonic += 50;
+    expect(controller.positionMs()).toBe(10_150);
+
+    engine().emit({ type: "paused" });
+    clock.monotonic += 5000;
+    expect(controller.positionMs()).toBe(10_150);
+    stop();
+  });
+
+  it("moves on from a seek's target at once", async () => {
+    const { controller, clock, stop } = await playingAt(10_000);
+
+    clock.monotonic += 120;
+    void controller.seek(42_000);
+    expect(controller.positionMs()).toBe(42_000);
+    clock.monotonic += 100;
+    expect(controller.positionMs()).toBe(42_100);
+    stop();
+  });
+
+  it("starts a new song from its start", async () => {
+    const { controller, clock, record, stop } = await playingAt(10_000);
+    clock.monotonic += 3000;
+    controller.sync(
+      session(true, clock.now, false, { queue: [song, entry("next", "2")], index: 1 }),
+    );
+    await vi.waitFor(() => expect(record.loads).toHaveLength(2));
+    expect(controller.positionMs()).toBe(0);
+    clock.monotonic += 80;
+    expect(controller.positionMs()).toBe(80);
+    stop();
+  });
+
+  it("follows the monotonic clock, not the wall clock, and stops at the end of the song", async () => {
+    const { controller, clock, stop } = await playingAt(song.durationMs - 100);
+
+    clock.now += 60_000;
+    expect(controller.positionMs()).toBe(song.durationMs - 100);
+    clock.monotonic += 500;
+    expect(controller.positionMs()).toBe(song.durationMs);
+    stop();
+  });
+
+  it("reports a pause at the moved-on position, not the engine's last report", async () => {
+    const { controller, clock, mutations, stop } = await playingAt(10_000);
+
+    clock.monotonic += 150;
+    await controller.togglePlay();
+
+    expect(reports(mutations).at(-1)).toMatchObject({ positionMs: 10_150, playing: false });
+    stop();
+  });
+
+  it("signs an expired stream again and loads it from the moved-on position", async () => {
+    const { clock, engine, record, stop } = await playingAt(10_000);
+
+    clock.monotonic += 150;
+    engine().emit({ type: "error", reason: "expired", message: "Expired" });
+    clock.monotonic += 5000;
+    await vi.waitFor(() => expect(record.loads).toHaveLength(2));
+
+    expect(record.loads[1]?.startMs).toBe(10_150);
+    stop();
+  });
+
+  it("on another device, runs on from the session's last report", async () => {
+    const { controller, clock, stop } = await setup({ gapless: false });
+    controller.sync(
+      session(true, clock.now - 5000, false, {
+        activeDevice: {
+          id: DeviceId.make("phone"),
+          name: "Phone",
+          kind: "phone",
+          lastSeenAt: 0,
+          online: true,
+        },
+        positionMs: 30_000,
+      }),
+    );
+    expect(controller.positionMs()).toBe(35_000);
     stop();
   });
 });

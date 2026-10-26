@@ -16,9 +16,9 @@ import { isDesktopNow } from "@/lib/use-media";
 
 /**
  * Which full-screen Now Playing view is open, if any: `player` is the cover on desktop and the full
- * player on phones, and `queue` adds the queue.
+ * player on phones, `queue` adds the queue, and `lyrics` the playing song's lyrics.
  */
-export type NowPlayingView = "player" | "queue";
+export type NowPlayingView = "player" | "queue" | "lyrics";
 
 /** App-wide UI state that several screens open or close. */
 export interface UiState {

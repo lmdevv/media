@@ -25,7 +25,10 @@ export interface OutputStatus {
   readonly positionMs: number;
   /** The stream's length, or null while unknown: always for a transcode the server still writes. */
   readonly durationMs: number | null;
-  /** The stream just played to its end. */
+  /**
+   * The stream played to its end. The report can arrive after a seek has moved the player back
+   * from there, so `positionMs` is where the player is when it reports.
+   */
   readonly finished: boolean;
   /** Why the stream failed, or null. */
   readonly error: string | null;
@@ -75,6 +78,14 @@ const MAX_RECOVERIES = 3;
 /** Playback this far past where a recovery reopened the stream means it worked. */
 const RECOVERED_MS = 2000;
 
+/** A seek in a stream that can seek, from when it is asked for until the player lands it. */
+interface Seeking {
+  /** Where the latest seek takes the player. Until it lands, statuses carry an older position. */
+  positionMs: number;
+  /** The player played to its end before the seek landed. */
+  ended: boolean;
+}
+
 /** One opened stream on one native player. */
 interface Stream {
   readonly output: AudioOutput;
@@ -85,6 +96,8 @@ interface Stream {
   status: OutputStatus | null;
   /** The playback state last reported to the engine's listeners for this stream. */
   reported: OutputControl | null;
+  /** The seek the player has not landed yet, or null. */
+  seeking: Seeking | null;
   /** Calls waiting for the stream to open or fail. */
   readonly waiters: Set<(ready: boolean) => void>;
   /** Whether this stream is on the lock screen, and as live or not. */
@@ -314,7 +327,7 @@ export class NativeEngine implements PlayerEngine {
       const play = stream.reported !== "paused";
 
       void this.#reopen(slot, { positionMs, play, abort: new AbortController() });
-    } else if (stream !== null) void stream.output.seek(positionMs);
+    } else if (stream !== null) void this.#seekStream(slot, stream, positionMs);
 
     this.#emit({ type: "time", positionMs });
   }
@@ -396,6 +409,7 @@ export class NativeEngine implements PlayerEngine {
       unsubscribe: () => {},
       status: null,
       reported: null,
+      seeking: null,
       waiters: new Set(),
       shown: null,
     };
@@ -460,11 +474,52 @@ export class NativeEngine implements PlayerEngine {
     });
   }
 
+  /**
+   * Seeks in a stream that can seek, holding its position at `positionMs` until the player lands
+   * there. One native seek runs at a time: a seek asked for meanwhile moves the target, and the
+   * player seeks again once the running one lands, so the latest target wins.
+   */
+  async #seekStream(slot: Slot, stream: Stream, positionMs: number): Promise<void> {
+    if (stream.seeking !== null) {
+      stream.seeking.positionMs = positionMs;
+
+      return;
+    }
+
+    const seeking: Seeking = { positionMs, ended: false };
+    stream.seeking = seeking;
+
+    try {
+      await this.#land(slot, stream, seeking);
+    } finally {
+      stream.seeking = null;
+    }
+
+    if (seeking.ended && slot.stream === stream) this.#onFinished(slot, stream, seeking.positionMs);
+  }
+
+  /** Seeks the player to the seek's target, and again while a newer target arrives meanwhile. */
+  async #land(slot: Slot, stream: Stream, seeking: Seeking): Promise<void> {
+    const target = seeking.positionMs;
+
+    try {
+      await stream.output.seek(target);
+    } catch (error) {
+      // A newer target still needs landing even when the seek it replaced failed.
+      if (slot.stream !== stream || seeking.positionMs === target) throw error;
+    }
+
+    if (slot.stream === stream && seeking.positionMs !== target) {
+      await this.#land(slot, stream, seeking);
+    }
+  }
+
   #positionOf(slot: Slot): number {
     const stream = slot.stream;
 
     return (
       slot.reopening?.positionMs ??
+      stream?.seeking?.positionMs ??
       (stream === null ? 0 : stream.startMs + Math.round(stream.status?.positionMs ?? 0))
     );
   }
@@ -483,7 +538,7 @@ export class NativeEngine implements PlayerEngine {
 
     // At its end a live stream reports position 0 (its length is unknown): keep where it got to.
     stream.status =
-      status.finished && previous !== null
+      status.finished && previous !== null && isLive(stream)
         ? { ...status, positionMs: Math.max(status.positionMs, previous.positionMs) }
         : status;
 
@@ -502,8 +557,18 @@ export class NativeEngine implements PlayerEngine {
       return;
     }
 
+    const seeking = stream.seeking;
+
+    // The player reached the song's end while a seek was landing: where the seek lands decides
+    // whether the song ended, and nothing reported until then is news.
+    if (seeking !== null && (status.finished || seeking.ended)) {
+      seeking.ended = true;
+
+      return;
+    }
+
     if (status.finished) {
-      this.#onFinished(slot, stream);
+      this.#onFinished(slot, stream, this.#positionOf(slot));
 
       return;
     }
@@ -525,7 +590,7 @@ export class NativeEngine implements PlayerEngine {
       this.#emit({ type: status.control });
     }
 
-    if (status.control !== "playing") return;
+    if (status.control !== "playing" || stream.seeking !== null) return;
 
     if (positionMs > slot.recoveredAtMs + RECOVERED_MS) slot.recoveries = 0;
     this.#emit({ type: "time", positionMs });
@@ -542,12 +607,20 @@ export class NativeEngine implements PlayerEngine {
     this.#fail("unsupported", stream.status?.error ?? "The stream did not start");
   }
 
-  #onFinished(slot: Slot, stream: Stream): void {
+  /** The player stopped at the end of `stream`, and is at `positionMs` in the song by now. */
+  #onFinished(slot: Slot, stream: Stream, positionMs: number): void {
+    // A seek moved the player back from the end since (an item that ends pauses): play on there.
+    if (!isLive(stream) && endedEarly(positionMs, stream.status?.durationMs ?? 0)) {
+      if (stream.reported !== "paused") stream.output.play();
+
+      return;
+    }
+
     // The end of the song: nothing reports this stop as a pause.
     stream.reported = "paused";
 
     // A live stream that ends before the song does was cut off: carry on from there.
-    if (isLive(stream) && endedEarly(this.#positionOf(slot), slot.source?.durationMs ?? 0)) {
+    if (isLive(stream) && endedEarly(positionMs, slot.source?.durationMs ?? 0)) {
       void this.#recover(slot, true);
 
       return;

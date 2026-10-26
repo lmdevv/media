@@ -1,6 +1,7 @@
 import type { Track } from "@music/commands/models";
 import { Badge } from "@music/ui/components/badge";
 import { DialogClose } from "@music/ui/components/dialog";
+import { Spinner } from "@music/ui/components/spinner";
 import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
 import { ChevronDownIcon, ListMusicIcon, MessageCircleIcon } from "lucide-react";
@@ -13,6 +14,9 @@ import { formatQuality } from "@/lib/format";
 import { useArtColors } from "@/lib/use-art-colors";
 
 import { PlayPauseButton, Progress, RepeatButton, ShuffleButton, SkipButton } from "./controls";
+import { lyricsButton, lyricsOffer } from "./lyrics";
+import type { LyricsAnswer, LyricsOffer } from "./lyrics";
+import { LyricsPane } from "./lyrics-view";
 import { nowPlayingBackground } from "./now-playing-background";
 import { UpcomingQueue, useClearQueue, useUpNext } from "./queue";
 
@@ -22,27 +26,30 @@ const glassButton =
 
 interface DesktopNowPlayingProps {
   readonly track: Track;
+  /** `lyrics.get`'s answer for `track`. */
+  readonly lyrics: LyricsAnswer;
   readonly view: NowPlayingView;
   readonly onView: (view: NowPlayingView | null) => void;
 }
 
 /**
  * Desktop Now Playing on the radial art-tinted background: the cover first (Paper 05 · 01), and
- * the queue beside the player when its toggle is on (05 · 01c). Lyrics are V1, so their toggle is
- * shown but disabled.
+ * the queue (05 · 01c) or the lyrics (05 · 01b) beside the player when their toggle is on.
  */
-export function DesktopNowPlaying({ track, view, onView }: DesktopNowPlayingProps) {
+export function DesktopNowPlaying({ track, lyrics, view, onView }: DesktopNowPlayingProps) {
   const colors = useArtColors(track.artUrl, track.albumId);
   const background = nowPlayingBackground(colors, "radial");
-  const queue = view === "queue";
+  const offer = lyricsOffer(lyrics);
+  const beside = view !== "player";
 
   return (
     <div
       className={cn(
         "flex flex-col px-12 pt-7 pb-row",
-        // Only the queue list scrolls, so the player column stays put beside it (05 · 01c). Below
-        // 688px the whole view scrolls instead, with the column at its smallest art.
-        queue ? "h-full min-h-172" : "min-h-full",
+        // Only the queue or the lyrics scroll, so the player column stays put beside them (05 ·
+        // 01c, 01b). Below 688px the whole view scrolls instead, with the column at its smallest
+        // art.
+        beside ? "h-full min-h-172" : "min-h-full",
       )}
       style={background}
     >
@@ -53,7 +60,9 @@ export function DesktopNowPlaying({ track, view, onView }: DesktopNowPlayingProp
         <span className="font-mono text-md/base font-semibold text-text">[music]</span>
       </div>
 
-      {queue ? (
+      {beside ? (
+        // The column and the queue or lyrics are centred as one group, so a wide window keeps them
+        // together in the middle instead of leaving the right side empty (ADS-165).
         <div className="flex min-h-0 grow justify-center gap-24 px-6 py-6">
           {/* Sized to the window height, so the whole column fits beside the scrolling list. */}
           <div className="flex w-now-playing-queue-art shrink-0 flex-col gap-5.5 self-center-safe">
@@ -88,9 +97,18 @@ export function DesktopNowPlaying({ track, view, onView }: DesktopNowPlayingProp
               <SkipButton direction="next" iconClassName="size-7" />
               <RepeatButton iconClassName="size-5" />
             </div>
-            <ViewToggles queue onView={onView} />
+            <ViewToggles view={view} offer={offer} onView={onView} />
           </div>
-          <UpNext />
+          {view === "queue" ? (
+            <UpNext />
+          ) : (
+            <LyricsPane
+              key={track.id}
+              lyrics={lyrics}
+              layout="desktop"
+              className="max-w-155 grow"
+            />
+          )}
         </div>
       ) : (
         <div className="flex grow flex-col items-center justify-center gap-7 py-6">
@@ -120,7 +138,7 @@ export function DesktopNowPlaying({ track, view, onView }: DesktopNowPlayingProp
               <PlayPauseButton iconClassName="size-4" />
               <SkipButton direction="next" className="size-9" iconClassName="size-4.5" />
             </div>
-            <ViewToggles queue={false} onView={onView} />
+            <ViewToggles view={view} offer={offer} onView={onView} />
           </div>
         </div>
       )}
@@ -128,17 +146,37 @@ export function DesktopNowPlaying({ track, view, onView }: DesktopNowPlayingProp
   );
 }
 
-/** Lyrics and queue toggles; with both off, Now Playing shows the cover. */
+/**
+ * Lyrics and queue toggles; with both off, Now Playing shows the cover. The lyrics toggle is dimmed
+ * for a song without lyrics, unless they are open (they went away while shown).
+ */
 function ViewToggles({
-  queue,
+  view,
+  offer,
   onView,
 }: {
-  readonly queue: boolean;
+  readonly view: NowPlayingView;
+  readonly offer: LyricsOffer;
   readonly onView: (view: NowPlayingView) => void;
 }) {
+  const lyrics = view === "lyrics";
+  const queue = view === "queue";
+  const button = lyricsButton(offer, lyrics);
+
   return (
     <div className="flex shrink-0 items-center justify-center gap-2">
-      <LyricsButton />
+      <ViewButton
+        label={button.label}
+        active={lyrics}
+        disabled={button.disabled}
+        onClick={() => onView(lyrics ? "player" : "lyrics")}
+      >
+        {button.loading ? (
+          <Spinner label="Looking for lyrics" className="size-4.5" />
+        ) : (
+          <MessageCircleIcon className="size-4.5" />
+        )}
+      </ViewButton>
       <ViewButton
         label={queue ? "Hide queue" : "Queue"}
         active={queue}
@@ -150,47 +188,39 @@ function ViewToggles({
   );
 }
 
-function LyricsButton({ className }: { readonly className?: string }) {
-  return (
-    <Tooltip label="Lyrics are coming in a later version">
-      <span>
-        <button
-          type="button"
-          aria-label="Lyrics (coming later)"
-          disabled
-          className={cn(glassButton, "size-9 opacity-(--opacity-disabled)", className)}
-        >
-          <MessageCircleIcon className="size-4.5" />
-        </button>
-      </span>
-    </Tooltip>
-  );
-}
-
 function ViewButton({
   label,
   active,
+  disabled = false,
   onClick,
   children,
 }: {
   readonly label: string;
   readonly active: boolean;
+  readonly disabled?: boolean;
   readonly onClick: () => void;
   readonly children: ReactNode;
 }) {
-  return (
-    <Tooltip label={label}>
-      <button
-        type="button"
-        aria-label={label}
-        aria-pressed={active}
-        onClick={onClick}
-        className={cn(glassButton, "size-9", active && "bg-text text-text-inverse hover:bg-text")}
-      >
-        {children}
-      </button>
-    </Tooltip>
+  const button = (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        glassButton,
+        "size-9",
+        active && "bg-text text-text-inverse hover:bg-text",
+        disabled && "opacity-(--opacity-disabled) hover:bg-text/10",
+      )}
+    >
+      {children}
+    </button>
   );
+
+  // A disabled button gets no pointer events, so its tooltip hangs on a wrapper.
+  return <Tooltip label={label}>{disabled ? <span>{button}</span> : button}</Tooltip>;
 }
 
 function UpNext() {

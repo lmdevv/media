@@ -38,10 +38,14 @@ const controlOf = (status: AudioStatus): OutputControl => {
   return status.timeControlStatus === "waitingToPlayAtSpecifiedRate" ? "waiting" : "paused";
 };
 
-const outputStatus = (status: AudioStatus): OutputStatus => ({
+/** `status` from a player now at `currentTime` seconds. */
+const outputStatus = (status: AudioStatus, currentTime: number): OutputStatus => ({
   loaded: status.isLoaded,
   control: controlOf(status),
-  positionMs: status.currentTime * 1000,
+  // expo-audio reports an end at the item's length, even once a seek has moved the player back.
+  positionMs:
+    (status.didJustFinish && Number.isFinite(currentTime) ? currentTime : status.currentTime) *
+    1000,
   // expo-audio reports an unknown length (a live transcode) as 0.
   durationMs: status.isLoaded && status.duration > 0 ? status.duration * 1000 : null,
   finished: status.didJustFinish,
@@ -119,7 +123,7 @@ export const openExpoOutput = (url: string): AudioOutput => {
     },
     subscribe: (listener) => {
       const subscription = player.addListener("playbackStatusUpdate", (status) => {
-        listener(outputStatus(status));
+        listener(outputStatus(status, player.currentTime));
       });
 
       return () => {

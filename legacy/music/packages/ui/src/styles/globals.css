@@ -102,6 +102,9 @@
   --text-phone-title: 22px;
   --text-phone-card: 24px;
   --text-phone-large-title: 34px;
+  /* Synced lyrics lines: desktop Now Playing (Paper 05 · 01b) and the phone's (05 · 04b). */
+  --text-lyric: 36px;
+  --text-phone-lyric: 30px;
   --tracking-snug: -0.01em;
   --tracking-tighter: -0.02em;
   --radius-3xs: 1px;

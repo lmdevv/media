@@ -1,20 +1,32 @@
 import { usePlayer } from "@music/player/react";
+import { useReadSettled } from "@music/sdk/react";
 import { Dialog, DialogPopup, DialogPortal } from "@music/ui/components/dialog";
 
 import { useUi } from "@/components/shell/ui-state";
+import { useIsDesktop } from "@/lib/use-media";
 
 import { PlayOnSurfaces } from "./device-sheet";
+import { lyricsAnswer } from "./lyrics";
 import { DesktopNowPlaying } from "./now-playing-desktop";
 import { PhoneNowPlaying } from "./now-playing-phone";
 
 /**
  * Now Playing, always on the art-tinted dark background. Desktop opens on the cover and can add the
- * queue beside it (Paper 05 · 01, 01c); phones get the full-screen player and queue (05 · 04, 04c).
- * Lyrics are V1, so their button is shown but disabled.
+ * queue or the lyrics beside it (Paper 05 · 01, 01c, 01b); phones get the full-screen player,
+ * queue, and lyrics (05 · 04, 04c, 04b).
  */
 export function NowPlaying() {
   const { nowPlaying, setNowPlaying } = useUi();
   const player = usePlayer();
+  const desktop = useIsDesktop();
+  const trackId = nowPlaying === null ? null : (player.track?.id ?? null);
+
+  // While open, for the lyrics button's state as much as for the lyrics view. Settled, not
+  // thrown: a failed read shows in the lyrics view instead of taking Now Playing down.
+  const lyrics = lyricsAnswer(
+    useReadSettled("lyrics.get", trackId === null ? "skip" : { trackId }),
+  );
+
   const open = nowPlaying !== null && player.track !== null;
 
   return (
@@ -26,11 +38,22 @@ export function NowPlaying() {
         >
           {nowPlaying !== null && player.track !== null ? (
             <>
-              <div className="hidden h-full lg:block">
-                <DesktopNowPlaying track={player.track} view={nowPlaying} onView={setNowPlaying} />
-              </div>
-              <div className="h-full lg:hidden">
-                <PhoneNowPlaying track={player.track} view={nowPlaying} onView={setNowPlaying} />
+              <div className="h-full">
+                {desktop ? (
+                  <DesktopNowPlaying
+                    track={player.track}
+                    lyrics={lyrics}
+                    view={nowPlaying}
+                    onView={setNowPlaying}
+                  />
+                ) : (
+                  <PhoneNowPlaying
+                    track={player.track}
+                    lyrics={lyrics}
+                    view={nowPlaying}
+                    onView={setNowPlaying}
+                  />
+                )}
               </div>
               <PlayOnSurfaces />
             </>

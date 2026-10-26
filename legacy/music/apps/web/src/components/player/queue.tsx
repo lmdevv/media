@@ -7,7 +7,7 @@ import { Switch } from "@music/ui/components/switch";
 import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
 import { XIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Artwork, PlayingBars } from "@/components/library/artwork";
@@ -278,22 +278,21 @@ const useQueueRemoval = (entries: ReadonlyArray<QueueEntry>) => {
   const handled = useRef<LandedRemoval | null>(null);
   const signature = entries.map((entry) => entry.itemId).join(" ");
 
-  useEffect(() => {
+  // A layout effect, so focus moves in the commit that unmounts the removed row's button. Focus
+  // left on the page for a moment would be taken by Now Playing's dialog, which moves it to itself
+  // again a frame later, after any passive effect has run.
+  useLayoutEffect(() => {
     const element = list.current;
 
     if (removed === null || handled.current === removed || element === null) return;
 
     const active = document.activeElement;
-    // Inside Now Playing the dialog itself takes focus when the removed row's button unmounts, so
-    // focus on that popup is free too; focus on any other control in it is the user's choice.
-    const popup = element.closest("[role=dialog]");
 
     // Entry IDs are unique, so "the song's count dropped" means this entry is gone.
     const move = focusMove(removed, {
       now: Date.now(),
       trackIds: signature.length === 0 ? [] : signature.split(" "),
-      focusFree:
-        active === null || active === document.body || active === popup || element.contains(active),
+      focusFree: active === null || active === document.body || element.contains(active),
     });
 
     if (move === "wait") return;

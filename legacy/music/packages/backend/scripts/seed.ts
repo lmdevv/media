@@ -4,6 +4,7 @@
  * so clients must render their artwork placeholders.
  *
  *   node scripts/seed.ts             # admin@music.local / password123, one library, full catalog
+ *                                    # (and the seeded songs' lyrics, also on an existing library)
  *   node scripts/seed.ts --pending   # only finish pending scan jobs (a stand-in media worker)
  *   node scripts/seed.ts --device "Lucía's iPhone"   # also move playback to a stand-in phone
  *
@@ -18,6 +19,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 
 import { inOrder } from "../convex/lib/sequence.ts";
+import seedLyrics from "./seed-lyrics.json" with { type: "json" };
 
 const ADMIN = { email: "admin@music.local", password: "password123", name: "Lucía" };
 
@@ -44,8 +46,11 @@ interface SeedTrack {
   readonly bitDepth?: number;
   readonly lyricsFiles: string;
   readonly lyricsReader: number;
-  readonly lyrics: ReadonlyArray<never>;
+  readonly lyrics: SeedLyrics["lyrics"];
 }
+
+/** A seeded song's lyric files and the lyric sets they hold, as `LocalLyricSet` encodes them. */
+type SeedLyrics = (typeof seedLyrics)[keyof typeof seedLyrics];
 
 type Format = "flac-24-96" | "flac-16-44" | "alac-24-48" | "mp3-320";
 
@@ -257,6 +262,24 @@ const ALBUMS: ReadonlyArray<SeedAlbum> = [
   },
 ];
 
+/**
+ * The lyrics of the seeded songs that have any, as the media service sends them: a synced file
+ * beside the first song of Blue Lines and plain lyrics in the tags of the first song of
+ * Mezzanine, in made-up words. Within the first minute, the length of the stand-in's tone, synced
+ * lines start every 2.5 seconds from 0:01 to 0:43; that last one ends at 0:46, and a line of two
+ * rows follows a gap at 0:50. Every other song has none.
+ */
+const SEED_LYRICS: ReadonlyMap<string, SeedLyrics> = new Map(Object.entries(seedLyrics));
+
+/** The lyrics fields of the seeded song at `path` (relative to the library folder). */
+const lyricsOf = (path: string): Pick<SeedTrack, "lyricsFiles" | "lyricsReader" | "lyrics"> => ({
+  lyricsFiles: "",
+  lyrics: [],
+  ...SEED_LYRICS.get(path),
+  // From no reader: a real scan of these files reads their lyrics again.
+  lyricsReader: 0,
+});
+
 const FORMATS: Record<Format, Pick<SeedTrack, "codec" | "lossless"> & Partial<SeedTrack>> = {
   "flac-24-96": { codec: "flac", lossless: true, bitDepth: 24, sampleRate: 96_000 },
   "flac-16-44": { codec: "flac", lossless: true, bitDepth: 16, sampleRate: 44_100 },
@@ -275,10 +298,11 @@ const catalog = (): Array<SeedTrack> =>
     album.tracks.map(([title, duration], index) => {
       const number = index + 1;
       const extension = album.format.startsWith("mp3") ? "mp3" : "flac";
+      const path = `${album.artist}/${album.title}/${String(number).padStart(2, "0")} ${title}.${extension}`;
 
       return {
         ...FORMATS[album.format],
-        path: `${album.artist}/${album.title}/${String(number).padStart(2, "0")} ${title}.${extension}`,
+        path,
         size: millis(duration) * 120,
         mtimeMs: Date.UTC(album.year, 0, number),
         title,
@@ -289,10 +313,7 @@ const catalog = (): Array<SeedTrack> =>
         year: album.year,
         genre: album.genre,
         durationMs: millis(duration),
-        // No lyrics, from no reader: a real scan of these files reads theirs.
-        lyricsFiles: "",
-        lyricsReader: 0,
-        lyrics: [],
+        ...lyricsOf(path),
       };
     }),
   );
@@ -378,6 +399,16 @@ const claimRoot = makeFunctionReference<
   },
   { ok: boolean }
 >("media:claimRoot");
+
+const saveLocalLyrics = makeFunctionReference<
+  "mutation",
+  {
+    secret: string;
+    libraryId: string;
+    tracks: ReadonlyArray<Pick<SeedTrack, "path" | "lyricsFiles" | "lyricsReader" | "lyrics">>;
+  },
+  { saved: number }
+>("media:saveLocalLyrics");
 
 const deploymentUrl = (): string => {
   const line = readFileSync(".env.local", "utf8")
@@ -485,6 +516,24 @@ if (values.pending) {
   }
 
   await finishPendingJobs(client, secret);
+
+  // A library scanned before the seeded songs had lyrics gets them without a new scan.
+  const seeded = await client.query(readCommand, { name: "libraries.list", args: {} });
+  const library = seeded.find((entry) => entry.path === LIBRARY.path);
+
+  if (library !== undefined) {
+    const tracks = [...SEED_LYRICS.keys()].map((path) =>
+      Object.assign(lyricsOf(path), { path: `${LIBRARY.path}/${path}` }),
+    );
+
+    const { saved } = await client.mutation(saveLocalLyrics, {
+      secret,
+      libraryId: library.id,
+      tracks,
+    });
+
+    console.log(`saved the lyrics of ${saved} song(s)`);
+  }
 
   // A stand-in phone for remote-control testing: it checks in and playback moves to it.
   if (values.device !== undefined) {

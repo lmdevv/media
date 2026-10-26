@@ -1,8 +1,14 @@
-/** The part of the playback session that fixes where playback is at a moment in time. */
+/**
+ * Where playback was at a moment in time: the part of the playback session that fixes it, or the
+ * engine's last report on this device.
+ */
 export interface PositionSnapshot {
   /** Position in milliseconds that was true at `updatedAt`. */
   readonly positionMs: number;
-  /** Milliseconds since the Unix epoch when `positionMs` was recorded. */
+  /**
+   * When `positionMs` was recorded, in milliseconds on the clock `livePosition` reads `now` from:
+   * the Unix epoch for the session's reports, the monotonic clock for the engine's.
+   */
   readonly updatedAt: number;
   readonly playing: boolean;
 }

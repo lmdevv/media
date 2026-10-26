@@ -72,7 +72,7 @@ test("Play on opens with nothing loaded, and never pops up by itself later", asy
     .getByRole("link", { name: "Albums" })
     .click();
   await page.getByRole("link", { name: "Moon Safari" }).first().click();
-  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await page.getByRole("main").getByRole("button", { name: "Play", exact: true }).click();
   await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   await expect(popover).toHaveCount(0);
   await expect(dialog).toHaveCount(0);
@@ -93,7 +93,7 @@ test("Play on opens while the media service is unreachable", async ({ page }) =>
     .getByRole("link", { name: "Albums" })
     .click();
   await page.getByRole("link", { name: "Dummy" }).first().click();
-  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await page.getByRole("main").getByRole("button", { name: "Play", exact: true }).click();
 
   const bar = page.getByRole("region", { name: "Player" });
 
@@ -120,7 +120,7 @@ test("browse to an album and press play", async ({ page }) => {
   await page.getByRole("link", { name: "Blue Lines" }).first().click();
   await expect(page.getByRole("heading", { name: "Blue Lines" }).first()).toBeVisible();
 
-  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await page.getByRole("main").getByRole("button", { name: "Play", exact: true }).click();
 
   const bar = page.getByRole("region", { name: "Player" });
   await expect(bar.getByRole("button", { name: "Safe From Harm", exact: true })).toBeVisible();
@@ -187,7 +187,7 @@ test("a playlist deleted in another session shows that, and the player keeps goi
   await signIn(page);
   await page.goto("/albums");
   await page.getByRole("link", { name: "Blue Lines" }).first().click();
-  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await page.getByRole("main").getByRole("button", { name: "Play", exact: true }).click();
   const bar = page.getByRole("region", { name: "Player" });
   await expect(bar.getByRole("button", { name: "Safe From Harm", exact: true })).toBeVisible();
   await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
@@ -316,7 +316,7 @@ test("removing a queue row from the keyboard keeps focus in the queue", async ({
   await signIn(page);
   await page.goto("/albums");
   await page.getByRole("link", { name: "Mezzanine" }).first().click();
-  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await page.getByRole("main").getByRole("button", { name: "Play", exact: true }).click();
 
   const bar = page.getByRole("region", { name: "Player" });
 
@@ -342,7 +342,7 @@ test("removing a row in the Now Playing queue keeps focus there, and Play on ope
   await signIn(page);
   await page.goto("/albums");
   await page.getByRole("link", { name: "Mezzanine" }).first().click();
-  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await page.getByRole("main").getByRole("button", { name: "Play", exact: true }).click();
 
   const bar = page.getByRole("region", { name: "Player" });
 
@@ -358,7 +358,7 @@ test("removing a row in the Now Playing queue keeps focus there, and Play on ope
 
   await remove.first().focus();
   await page.keyboard.press("Enter");
-  // The dialog takes focus when the removed button unmounts; focus still moves to the next row.
+  // Focus moves to the next row before Now Playing's dialog can take it.
   await expect(nowPlaying.getByRole("button", { name: second, exact: true })).toBeFocused();
 
   // The player bar's speaker is under Now Playing, so Play on opens as a dialog above it.
@@ -446,7 +446,7 @@ test("the command menu runs a registry command with arguments", async ({ page })
   await signIn(page);
   await page.goto("/albums");
   await page.getByRole("link", { name: "Blue Lines" }).first().click();
-  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await page.getByRole("main").getByRole("button", { name: "Play", exact: true }).click();
 
   const shuffle = page
     .getByRole("region", { name: "Player" })
@@ -496,7 +496,7 @@ test("remote control mode shows where music plays and controls it", async ({ pag
   await signIn(page);
   await page.goto("/albums");
   await page.getByRole("link", { name: "Blue Lines" }).first().click();
-  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await page.getByRole("main").getByRole("button", { name: "Play", exact: true }).click();
   await expect(
     page
       .getByRole("region", { name: "Player" })

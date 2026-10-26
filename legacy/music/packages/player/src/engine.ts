@@ -77,7 +77,10 @@ export interface PlayerEngine {
   play(): Promise<void>;
   /** Pauses output, keeping the position. */
   pause(): void;
-  /** Moves to `positionMs` in the current source. */
+  /**
+   * Moves to `positionMs` in the current source. Reports `time` at `positionMs` at once, and never
+   * a position from before the seek after that, even while the seek is still landing.
+   */
   seek(positionMs: number): void;
   /** Sets the output volume, from 0 to 1. */
   setVolume(volume: number): void;

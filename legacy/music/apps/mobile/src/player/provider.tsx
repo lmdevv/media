@@ -235,6 +235,7 @@ const createPhone = (
       device: { name, kind: "phone" },
       canPlay: playsOnIos,
       now: Date.now,
+      monotonicNow: () => performance.now(),
       quality: loadQuality(),
       saveQuality,
       nowPlaying: lockScreenControls(
