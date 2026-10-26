@@ -68,6 +68,62 @@ export const queueItem = v.object({
   autoplay: v.optional(v.boolean()),
 });
 
+const lyricWord = v.object({
+  text: v.string(),
+  startMs: v.number(),
+  endMs: v.union(v.number(), v.null()),
+});
+
+const lyricLine = v.object({
+  text: v.string(),
+  startMs: v.number(),
+  endMs: v.union(v.number(), v.null()),
+  words: v.union(v.array(lyricWord), v.null()),
+  voice: v.union(v.string(), v.null()),
+});
+
+/**
+ * One of a song's own lyric sets as `LocalLyricSet` in `@music/commands/lyrics` encodes it: from
+ * a file beside the song or a tag inside it, never LRCLIB. The validator checks its shape; the
+ * schema's refinements (language tags, non-empty text) are checked where it is written and read
+ * (`lib/lyrics.ts`).
+ */
+export const localLyricSet = v.object({
+  kind: v.union(v.literal("main"), v.literal("translation"), v.literal("pronunciation")),
+  lang: v.union(v.string(), v.null()),
+  origin: v.union(
+    v.object({
+      _tag: v.literal("Sidecar"),
+      fileName: v.string(),
+      format: v.union(
+        v.literal("lrc"),
+        v.literal("elrc"),
+        v.literal("ttml"),
+        v.literal("vtt"),
+        v.literal("srt"),
+        v.literal("txt"),
+        v.literal("lyricsfile"),
+      ),
+    }),
+    v.object({
+      _tag: v.literal("Embedded"),
+      tag: v.union(
+        v.literal("id3:USLT"),
+        v.literal("id3:SYLT"),
+        v.literal("vorbis:LYRICS"),
+        v.literal("vorbis:UNSYNCEDLYRICS"),
+        v.literal("vorbis:SYNCEDLYRICS"),
+        v.literal("mp4:lyr"),
+        v.literal("other"),
+      ),
+    }),
+  ),
+  body: v.union(
+    v.object({ _tag: v.literal("Synced"), lines: v.array(lyricLine) }),
+    v.object({ _tag: v.literal("Plain"), text: v.string() }),
+  ),
+});
+
 export default defineSchema({
   ...authTables,
 
@@ -309,6 +365,23 @@ export default defineSchema({
      * on tracks scanned before it existed, which the next scan fills in.
      */
     folderArt: v.optional(v.string()),
+    /**
+     * The lyric files the last scan read beside this file, as `name:size:mtime` joined by `/`,
+     * empty when it had none, so adding, editing, or removing one reads its lyrics again. Absent
+     * on tracks scanned before lyrics were read.
+     */
+    lyricsFiles: v.optional(v.string()),
+    /**
+     * The version of the media service's lyrics reader that read this file's lyrics. A newer
+     * reader reads them again; absent on tracks scanned before lyrics were read, so every one of
+     * those is read once.
+     */
+    lyricsReader: v.optional(v.number()),
+    /**
+     * The size of this file's `localLyrics` sets as JSON, absent when it has none. Replacing or
+     * deleting them reads them, so scans and purges size their batches by it.
+     */
+    lyricsBytes: v.optional(v.number()),
     missing: v.boolean(),
     /** Title, artist, and album, folded for accent-insensitive search. */
     searchText: v.string(),
@@ -327,6 +400,17 @@ export default defineSchema({
       searchField: "searchText",
       filterFields: ["libraryId", "missing"],
     }),
+
+  /**
+   * The lyrics a song's own files hold: the lyric files beside it and the lyrics in its tags. One
+   * row per song that has any, replaced whole by every scan that reads them. It stays while the
+   * song is missing and goes when the song is deleted.
+   */
+  localLyrics: defineTable({
+    trackId: v.id("tracks"),
+    /** Never empty: a song without lyrics has no row. */
+    sets: v.array(localLyricSet),
+  }).index("by_track", ["trackId"]),
 
   playlists: defineTable({
     ownerId: v.id("users"),

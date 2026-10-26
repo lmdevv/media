@@ -3,11 +3,12 @@ import { foldSearchText } from "@music/commands/search-text";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { repointAlbumPins } from "./downloads";
+import { lyricsFieldsOf, replaceLocalLyrics, type ScannedLyrics } from "./lyrics";
 import { bumpLibraryCounts } from "./stats";
 import { inOrder } from "./sequence";
 
-/** Tags read from one file by the media service. */
-export interface ScannedTrack {
+/** Tags read from one file by the media service, and the lyrics beside and inside it. */
+export interface ScannedTrack extends ScannedLyrics {
   readonly path: string;
   readonly size: number;
   readonly mtimeMs: number;
@@ -114,8 +115,9 @@ interface AlbumDelta {
  */
 export interface CatalogBatch {
   /**
-   * Inserts or updates one scanned file and its album and artist. An album or artist whose art
-   * came from this file's old art follows a replaced or removed cover (see `keptArt`).
+   * Inserts or updates one scanned file, its album and artist, and its own lyrics. An album or
+   * artist whose art came from this file's old art follows a replaced or removed cover (see
+   * `keptArt`).
    */
   readonly upsert: (scanned: ScannedTrack) => Promise<void>;
   /**
@@ -348,6 +350,7 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
       bitDepth: scanned.bitDepth,
       artHash: scanned.artHash,
       folderArt: scanned.folderArt,
+      ...lyricsFieldsOf(scanned),
       missing: false,
       searchText: trackSearchText({
         title: scanned.title,
@@ -357,13 +360,15 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
     };
 
     if (existing === null) {
-      await ctx.db.insert("tracks", fields);
+      const id = await ctx.db.insert("tracks", fields);
+      await replaceLocalLyrics(ctx, id, scanned.lyrics);
       adjust(album._id, 1, scanned.durationMs);
 
       return;
     }
 
     await ctx.db.patch(existing._id, fields);
+    await replaceLocalLyrics(ctx, existing._id, scanned.lyrics);
     release(existing.artHash, scanned.artHash);
 
     // Still in the same album: only the length changes, so the album never looks empty midway.

@@ -8,6 +8,7 @@ import type { MutationCtx } from "./_generated/server";
 import { deleteEmptyAlbum } from "./lib/catalog";
 import { DEVICE_RETAINED_MS } from "./lib/devices";
 import { endJam, expiryReason } from "./lib/jams";
+import { deleteLocalLyrics } from "./lib/lyrics";
 import { findSession } from "./lib/playback";
 import { DEVICE_ONLINE_MS } from "./lib/present";
 import { normaliseStored, rowQueue, saveQueue } from "./lib/queue";
@@ -15,6 +16,13 @@ import { inOrder } from "./lib/sequence";
 
 /** Rows one purge run deletes at most, well inside Convex's per-mutation limits. */
 const PURGE_BUDGET = 256;
+
+/**
+ * Bytes of songs' lyrics (`tracks.lyricsBytes`) one purge run deletes at most, besides the first
+ * song's, which is deleted whatever its size: deleting a song's lyrics reads them, and Convex
+ * reads at most 16 MiB in one mutation.
+ */
+const PURGE_LYRICS_BYTES = 4 * 1024 * 1024;
 
 /** Queues one purge run rewrites; each reads up to `MAX_QUEUE` songs. */
 const PURGE_QUEUES = 4;
@@ -56,7 +64,7 @@ const shrinkPlaylist = async (
 
 /**
  * Deletes up to `budget` rows that point at `track`: playlist entries (fixing their playlists'
- * counters), likes, and plays. Returns how many it deleted and whether none are left.
+ * counters), likes, plays, and its lyrics. Returns how many it deleted and whether none are left.
  */
 const deleteDependents = async (
   ctx: MutationCtx,
@@ -91,14 +99,17 @@ const deleteDependents = async (
     .take(budget - items.length - likes.length);
 
   await Promise.all(plays.map((play) => ctx.db.delete(play._id)));
-  const deleted = items.length + likes.length + plays.length;
+  const rows = items.length + likes.length + plays.length;
+
+  if (rows === budget) return { deleted: budget, finished: false };
+  const deleted = rows + (await deleteLocalLyrics(ctx, track._id));
 
   return { deleted, finished: deleted < budget };
 };
 
 /**
- * Deletes songs and everything pointing at them, within the budget. Returns whether the library
- * has no songs left.
+ * Deletes songs and everything pointing at them, within the row and lyrics budgets. Returns
+ * whether the library has no songs left.
  */
 const purgeTracks = async (ctx: MutationCtx, libraryId: Id<"libraries">): Promise<boolean> => {
   const tracks = await ctx.db
@@ -107,9 +118,13 @@ const purgeTracks = async (ctx: MutationCtx, libraryId: Id<"libraries">): Promis
     .take(PURGE_BUDGET);
 
   let budget = PURGE_BUDGET;
+  let lyricsBytes = 0;
 
   await inOrder(tracks, async (track) => {
-    if (budget <= 0) return;
+    const size = track.lyricsBytes ?? 0;
+
+    if (budget <= 0 || (lyricsBytes > 0 && lyricsBytes + size > PURGE_LYRICS_BYTES)) return;
+    lyricsBytes += size;
     const { deleted, finished } = await deleteDependents(ctx, track, budget);
     budget -= deleted;
 

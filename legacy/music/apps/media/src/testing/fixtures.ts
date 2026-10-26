@@ -11,6 +11,9 @@ import { runTool } from "../ffmpeg.ts";
 import * as Files from "../files.ts";
 import { MediaConfig } from "../media-config.ts";
 
+/** What a file stored without a scan holds of lyrics: none, read by no lyrics reader. */
+export const NO_LYRICS = { lyricsFiles: "", lyricsReader: 0, lyrics: [] } as const;
+
 /** The signing key test configurations use. */
 export const TEST_SIGNING_KEY = "test-signing-key";
 

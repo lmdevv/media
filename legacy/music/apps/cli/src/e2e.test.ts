@@ -117,6 +117,9 @@ const upsertTracks = makeFunctionReference<
       durationMs: number;
       codec: string;
       lossless: boolean;
+      lyricsFiles: string;
+      lyricsReader: number;
+      lyrics: ReadonlyArray<never>;
     }>;
   },
   { upserted: number }
@@ -201,6 +204,9 @@ const completeNextScan = async (url: string, secret: string): Promise<void> => {
       durationMs,
       codec: "flac",
       lossless: true,
+      lyricsFiles: "",
+      lyricsReader: 0,
+      lyrics: [],
     })),
   });
 

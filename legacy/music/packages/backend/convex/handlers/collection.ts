@@ -7,7 +7,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { mediaBaseUrl, requireEnv } from "../lib/env";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
-import { jamShareable, resolvePlayback } from "../lib/jams";
+import { inJamQueue } from "../lib/jams";
 import { isClaimed } from "../lib/paths";
 import {
   findShare,
@@ -18,7 +18,6 @@ import {
   POSITION_STEP,
 } from "../lib/playlists";
 import type { OpenedPlaylist } from "../lib/playlists";
-import { storedQueue } from "../lib/queue";
 import { contributorOf, makeContributors, makePresenter, presentPlaylist } from "../lib/present";
 import type { Presenter } from "../lib/present";
 import { canRead, loadPerson } from "../lib/viewer";
@@ -232,40 +231,6 @@ const LINKS = {
   },
 } satisfies LinkBuilders;
 
-/**
- * Whether `trackId` is in the queue of the Jam the viewer has joined. People in a Jam may stream
- * the songs the host plays even from libraries they can't read, but only those, and only while
- * they are in it. The host must still be able to read the song.
- */
-const inJamQueue = async (
-  ctx: QueryCtx,
-  viewer: Viewer,
-  trackId: Id<"tracks">,
-): Promise<boolean> => {
-  const playback = await resolvePlayback(ctx, viewer);
-
-  if (playback.kind !== "member") return false;
-
-  const [queue, track] = await Promise.all([
-    storedQueue(ctx, playback.owner.id),
-    ctx.db.get(trackId),
-  ]);
-
-  const entries = queue.items.filter((item) => item.trackId === trackId);
-
-  if (track === null || !canRead(playback.owner, track.libraryId) || entries.length === 0) {
-    return false;
-  }
-
-  // Someone in the Jam chose it (the host, or a person who can read it): it plays for all.
-  if (entries.some((item) => !item.autoplay)) return true;
-
-  // Autoplay chose it: only from a library the Jam may share, for entries from before that rule.
-  const library = await ctx.db.get(track.libraryId);
-
-  return library !== null && jamShareable(library, playback.owner.id);
-};
-
 const touch = (ctx: MutationCtx, playlist: Doc<"playlists">) =>
   ctx.db.patch(playlist._id, { updatedAt: Date.now() });
 
@@ -443,7 +408,7 @@ export const collectionQueries = {
 
     const readable = canRead(viewer, track.libraryId);
 
-    if (!readable && !(await inJamQueue(ctx, viewer, track._id))) {
+    if (!readable && !(await inJamQueue(ctx, viewer, track))) {
       return fail("not_found", "Track not found");
     }
 

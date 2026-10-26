@@ -1,4 +1,4 @@
-import { type LyricSet, parseLang } from "@music/commands/lyrics";
+import { type LocalLyricSet, parseLang } from "@music/commands/lyrics";
 import { describe, expect, it } from "vitest";
 
 import type { WalkedFile } from "../platform/node-files.ts";
@@ -149,7 +149,7 @@ const sidecar = (relativePath: string, lang: string | null): LyricsSidecar => ({
   lang: lang === null ? null : parseLang(lang),
 });
 
-const taggedIn = (lang: string | null): LyricSet => ({
+const taggedIn = (lang: string | null): LocalLyricSet => ({
   kind: "main",
   lang: lang === null ? null : parseLang(lang),
   origin: { _tag: "Embedded", tag: "id3:USLT" },
@@ -158,7 +158,7 @@ const taggedIn = (lang: string | null): LyricSet => ({
 
 const tagged = taggedIn(null);
 
-const kinds = (sets: ReadonlyArray<LyricSet>) =>
+const kinds = (sets: ReadonlyArray<LocalLyricSet>) =>
   sets.map((set) => [set.kind, set.lang, set.origin]);
 
 describe("localLyricSets", () => {

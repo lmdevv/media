@@ -19,6 +19,7 @@ import { scanLibrary } from "./scan.ts";
 import {
   fixtureLibrary,
   MEDIA_TEST_TIMEOUT,
+  NO_LYRICS,
   probe,
   temporaryDirectory,
   TEST_SIGNING_KEY,
@@ -271,7 +272,9 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const everything = yield* control.addLibrary("/");
         const fromRoot = join(root, DAWN).slice(1);
 
-        yield* backend.upsertTracks(everything, [{ ...dawn.scanned, path: fromRoot }]);
+        yield* backend.upsertTracks(everything, [
+          { ...dawn.scanned, ...NO_LYRICS, path: fromRoot },
+        ]);
         const response = yield* request(yield* streamUrl(yield* findTrackId(fromRoot), "original"));
 
         expect(response.status).toBe(200);
@@ -726,6 +729,7 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             durationMs: 1000,
             codec: "flac",
             lossless: true,
+            ...NO_LYRICS,
           },
         ]);
 
@@ -753,6 +757,7 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           durationMs: 1000,
           codec,
           lossless: false,
+          ...NO_LYRICS,
         });
 
         yield* Files.writeFileAtomic(join(root, "junk.mp3"), junk, "a");
@@ -870,6 +875,7 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             durationMs: 1000,
             codec: "mp3",
             lossless: false,
+            ...NO_LYRICS,
           },
         ]);
 

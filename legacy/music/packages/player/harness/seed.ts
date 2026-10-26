@@ -31,6 +31,9 @@ const upsertTracks = makeFunctionReference<
       durationMs: number;
       codec: string;
       lossless: boolean;
+      lyricsFiles: string;
+      lyricsReader: number;
+      lyrics: ReadonlyArray<never>;
     }>;
   },
   { upserted: number }
@@ -109,6 +112,9 @@ export const seedSession = async (): Promise<ReadonlyArray<TrackId>> => {
         durationMs: fixture.durationMs,
         codec: fixture.codec,
         lossless: fixture.lossless,
+        lyricsFiles: "",
+        lyricsReader: 0,
+        lyrics: [],
       };
     }),
   });

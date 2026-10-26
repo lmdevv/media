@@ -9,7 +9,7 @@ import {
   type LyricBody,
   type LyricLine,
   LyricOrigin,
-  type LyricSet,
+  type LocalLyricSet,
   parseLang,
 } from "@music/commands/lyrics";
 import { Array as Arr, Option, Result, Schema } from "effect";
@@ -224,7 +224,7 @@ const commonFound = (tag: ILyricsTag): ReadonlyArray<Found> =>
  */
 export const embeddedLyrics = (
   metadata: Pick<IAudioMetadata, "common" | "native">,
-): ReadonlyArray<LyricSet> => {
+): ReadonlyArray<LocalLyricSet> => {
   const native = Object.entries(metadata.native).flatMap(([format, tags]) =>
     tags.flatMap((tag) => nativeFound(format, tag)),
   );
@@ -232,10 +232,10 @@ export const embeddedLyrics = (
   const found = native.length > 0 ? native : (metadata.common.lyrics ?? []).flatMap(commonFound);
   const seen = new Set<string>();
 
-  return found.flatMap(({ tag, sets }): ReadonlyArray<LyricSet> => {
+  return found.flatMap(({ tag, sets }): ReadonlyArray<LocalLyricSet> => {
     if (Result.isFailure(sets)) return [];
 
-    return sets.success.flatMap((set): ReadonlyArray<LyricSet> => {
+    return sets.success.flatMap((set): ReadonlyArray<LocalLyricSet> => {
       const key = JSON.stringify(set.body);
 
       if (seen.has(key)) return [];

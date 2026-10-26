@@ -11,6 +11,7 @@ import { vi } from "vitest";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import type { StoredLyricSet } from "../convex/lib/lyrics";
 import schema from "../convex/schema";
 
 export const MEDIA_SECRET = "test-media-secret";
@@ -79,6 +80,9 @@ export const signUp = async (
   };
 };
 
+/** What a scan reports for a file with no lyrics of its own, from no lyrics reader. */
+export const NO_LYRICS = { lyricsFiles: "", lyricsReader: 0, lyrics: [] };
+
 /** The cover every seeded file carries unless it names its own. */
 const DEFAULT_ART = "0".repeat(64);
 
@@ -92,6 +96,8 @@ export interface SeedFile {
   readonly artHash?: string;
   readonly genre?: string;
   readonly year?: number;
+  /** The file's own lyric sets; none when absent. */
+  readonly lyrics?: ReadonlyArray<StoredLyricSet>;
 }
 
 /**
@@ -147,6 +153,8 @@ export const upsertFiles = async (
       artHash: file.artHash ?? DEFAULT_ART,
       genre: file.genre,
       year: file.year,
+      ...NO_LYRICS,
+      lyrics: [...(file.lyrics ?? [])],
     })),
   });
 };

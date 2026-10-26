@@ -23,6 +23,7 @@ import { collectionMutations, collectionQueries } from "./handlers/collection";
 import { downloadMutations, downloadQueries } from "./handlers/downloads";
 import { jamMutations, jamQueries } from "./handlers/jams";
 import { libraryQueries } from "./handlers/library";
+import { lyricsQueries } from "./handlers/lyrics";
 import { peopleMutations, peopleQueries } from "./handlers/people";
 import { playbackMutations, playbackQueries } from "./handlers/playback";
 import type { MutationHandlers, QueryHandlers } from "./handlers/types";
@@ -39,6 +40,7 @@ const queryHandlers: QueryHandlers = {
   ...peopleQueries,
   ...jamQueries,
   ...downloadQueries,
+  ...lyricsQueries,
 };
 
 const mutationHandlers: MutationHandlers = {

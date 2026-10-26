@@ -53,6 +53,9 @@ const upsertTracksMutation = makeFunctionReference<
       codec: string;
       lossless: boolean;
       artHash: string;
+      lyricsFiles: string;
+      lyricsReader: number;
+      lyrics: ReadonlyArray<never>;
     }>;
   },
   { upserted: number }
@@ -201,6 +204,9 @@ export const upsertTracks = async (
       durationMs: 180_000,
       codec: "flac",
       lossless: true,
+      lyricsFiles: "",
+      lyricsReader: 0,
+      lyrics: [],
     })),
   });
 };

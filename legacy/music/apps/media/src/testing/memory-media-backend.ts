@@ -2,7 +2,8 @@
  * An in-memory `MediaBackend` that follows the `media:*` Convex contract closely enough for
  * scans, streams, and the job worker to run without a deployment: fingerprints come from earlier
  * upserts, claims and reports are guarded by worker and status, and scan requests collapse into a
- * library's pending or running job. `MemoryMediaBackendControl` adds libraries and inspects state.
+ * library's pending or running job. `MemoryMediaBackendControl` adds libraries and inspects state,
+ * including the catalog writes each call made.
  *
  * It keeps tracks only: albums and artists, whose artwork Convex takes from their tracks, list no
  * artwork of their own, so a batch releases a track's old art only.
@@ -24,17 +25,29 @@ import {
   type ArtHashPage,
   type RootClaim,
   type ArtworkTable,
+  type ScannedLyrics,
   type ScannedTrack,
   type TrackMove,
   type TrackSource,
 } from "../media-backend.ts";
 
+/** A scanned file as stored, with no lyrics reader on tracks stored before scans read lyrics. */
+interface StoredFile extends Omit<ScannedTrack, "lyricsReader"> {
+  readonly lyricsReader?: number | undefined;
+}
+
 /** A stored track and its generated ID. */
 interface MemoryTrack {
   readonly id: TrackId;
   readonly libraryId: LibraryId;
-  readonly scanned: ScannedTrack;
+  readonly scanned: StoredFile;
   readonly missing: boolean;
+}
+
+/** One call that wrote tracks, and the paths it wrote, in the order they came. */
+interface MemoryWrite {
+  readonly operation: "upsertTracks" | "moveTracks" | "saveLocalLyrics" | "markMissing";
+  readonly paths: ReadonlyArray<string>;
 }
 
 /** A stored job. */
@@ -72,6 +85,7 @@ interface State {
   readonly roots: ReadonlyMap<LibraryId, Claim>;
   readonly tracks: ReadonlyArray<MemoryTrack>;
   readonly jobs: ReadonlyArray<MemoryJob>;
+  readonly writes: ReadonlyArray<MemoryWrite>;
   readonly nextId: number;
 }
 
@@ -84,6 +98,10 @@ export interface ControlInterface {
   readonly enqueueScan: (libraryId: LibraryId) => Effect.Effect<JobId>;
   readonly cancelJob: (jobId: JobId) => Effect.Effect<void>;
   readonly tracks: Effect.Effect<ReadonlyArray<MemoryTrack>>;
+  /** Every call that wrote tracks, oldest first. */
+  readonly writes: Effect.Effect<ReadonlyArray<MemoryWrite>>;
+  /** Makes every track look as tracks stored before scans read lyrics do, with no reader. */
+  readonly forgetLyricsReader: Effect.Effect<void>;
   readonly jobs: Effect.Effect<ReadonlyArray<MemoryJob>>;
   /** Libraries whose folders are claimed. */
   readonly claimed: Effect.Effect<ReadonlyArray<LibraryId>>;
@@ -106,8 +124,15 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
         roots: new Map(),
         tracks: [],
         jobs: [],
+        writes: [],
         nextId: 1,
       });
+
+      const record = (write: MemoryWrite): Effect.Effect<void> =>
+        SubscriptionRef.update(state, (current) => ({
+          ...current,
+          writes: [...current.writes, write],
+        }));
 
       const allocate = (prefix: string): Effect.Effect<string> =>
         SubscriptionRef.modify(state, (current) => [
@@ -181,20 +206,37 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
             : [...latest.tracks, track],
         }));
 
+      const upsertOne = Effect.fn("MemoryMediaBackend.upsertOne")(function* (
+        libraryId: LibraryId,
+        track: ScannedTrack,
+      ) {
+        const existing = yield* trackAt(libraryId, track.path);
+        const id = existing?.id ?? TrackId.make(yield* allocate("track"));
+        const previous = existing?.scanned.artHash;
+
+        yield* store({ id, libraryId, scanned: track, missing: false });
+
+        return previous !== undefined && previous !== track.artHash ? [previous] : [];
+      });
+
+      const markOneMissing = (libraryId: LibraryId, path: string): Effect.Effect<void> =>
+        SubscriptionRef.update(state, (current) => ({
+          ...current,
+          tracks: current.tracks.map((track) =>
+            track.libraryId === libraryId && track.scanned.path === path
+              ? { ...track, missing: true }
+              : track,
+          ),
+        }));
+
       const upsertTracks = Effect.fn("MemoryMediaBackend.upsertTracks")(function* (
         libraryId: LibraryId,
         scanned: ReadonlyArray<ScannedTrack>,
       ) {
         const released: Array<string> = [];
 
-        for (const track of scanned) {
-          const existing = yield* trackAt(libraryId, track.path);
-          const id = existing?.id ?? TrackId.make(yield* allocate("track"));
-          const previous = existing?.scanned.artHash;
-
-          if (previous !== undefined && previous !== track.artHash) released.push(previous);
-          yield* store({ id, libraryId, scanned: track, missing: false });
-        }
+        for (const track of scanned) released.push(...(yield* upsertOne(libraryId, track)));
+        yield* record({ operation: "upsertTracks", paths: scanned.map((track) => track.path) });
 
         return released;
       });
@@ -203,16 +245,8 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
         libraryId: LibraryId,
         paths: ReadonlyArray<string>,
       ) {
-        const gone = new Set(paths);
-
-        yield* SubscriptionRef.update(state, (current) => ({
-          ...current,
-          tracks: current.tracks.map((track) =>
-            track.libraryId === libraryId && gone.has(track.scanned.path)
-              ? { ...track, missing: true }
-              : track,
-          ),
-        }));
+        for (const path of paths) yield* markOneMissing(libraryId, path);
+        yield* record({ operation: "markMissing", paths });
 
         // Missing tracks keep their art, so marking them releases none.
         const released: ReadonlyArray<string> = [];
@@ -341,6 +375,12 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
               mtimeMs: track.scanned.mtimeMs,
               missing: track.missing,
               folderArt: track.scanned.folderArt,
+              lyricsFiles: track.scanned.lyricsFiles,
+              lyricsReader: track.scanned.lyricsReader,
+              lyricsBytes:
+                track.scanned.lyrics.length === 0
+                  ? undefined
+                  : new TextEncoder().encode(JSON.stringify(track.scanned.lyrics)).length,
               durationMs: track.scanned.durationMs,
               title: track.scanned.title,
               artist: track.scanned.artist,
@@ -370,8 +410,8 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
             const occupied = yield* trackAt(libraryId, track.path);
 
             if (source === undefined || occupied !== undefined || from === track.path) {
-              if (from !== track.path) yield* markMissing(libraryId, [from]);
-              released.push(...(yield* upsertTracks(libraryId, [track])));
+              if (from !== track.path) yield* markOneMissing(libraryId, from);
+              released.push(...(yield* upsertOne(libraryId, track)));
             } else {
               const previous = source.scanned.artHash;
 
@@ -381,12 +421,28 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
             }
           }
 
+          yield* record({ operation: "moveTracks", paths: moves.map(({ track }) => track.path) });
           const outcome: MoveOutcome = { moved, released };
 
           return outcome;
         }),
 
         markMissing,
+
+        saveLocalLyrics: Effect.fn("MemoryMediaBackend.saveLocalLyrics")(function* (
+          libraryId: LibraryId,
+          tracks: ReadonlyArray<ScannedLyrics>,
+        ) {
+          for (const lyrics of tracks) {
+            const existing = yield* trackAt(libraryId, lyrics.path);
+
+            if (existing !== undefined) {
+              yield* store({ ...existing, scanned: { ...existing.scanned, ...lyrics } });
+            }
+          }
+
+          yield* record({ operation: "saveLocalLyrics", paths: tracks.map((track) => track.path) });
+        }),
 
         artHashes: Effect.fn("MemoryMediaBackend.artHashes")(function* (
           table: ArtworkTable,
@@ -471,6 +527,14 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           );
         }),
         tracks: SubscriptionRef.get(state).pipe(Effect.map((current) => current.tracks)),
+        writes: SubscriptionRef.get(state).pipe(Effect.map((current) => current.writes)),
+        forgetLyricsReader: SubscriptionRef.update(state, (current) => ({
+          ...current,
+          tracks: current.tracks.map((track) => ({
+            ...track,
+            scanned: { ...track.scanned, lyricsReader: undefined },
+          })),
+        })),
         jobs: SubscriptionRef.get(state).pipe(Effect.map((current) => current.jobs)),
         claimed: SubscriptionRef.get(state).pipe(
           Effect.map((current) => Array.from(current.roots.keys())),

@@ -17,6 +17,7 @@ import { DEVICE_RETAINED_MS } from "../convex/lib/devices";
 import { inOrder } from "../convex/lib/sequence";
 import {
   MEDIA_SECRET,
+  NO_LYRICS,
   drainScheduled,
   makeBackend,
   markMissing,
@@ -59,6 +60,7 @@ const file = (
   codec: "flac",
   lossless: true,
   artHash: COVER,
+  ...NO_LYRICS,
   ...extra,
 });
 

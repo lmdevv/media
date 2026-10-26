@@ -137,6 +137,15 @@ export const LyricSet = Schema.Struct({ ...lyricSetFields, body: LyricBody });
 
 export interface LyricSet extends Schema.Schema.Type<typeof LyricSet> {}
 
+/** A lyric set a song's own files hold: from a file beside it or a tag inside it. */
+export const LocalLyricSet = Schema.Struct({
+  ...lyricSetFields,
+  origin: Schema.Union([LyricOrigin.cases.Sidecar, LyricOrigin.cases.Embedded]),
+  body: LyricBody,
+});
+
+export interface LocalLyricSet extends Schema.Schema.Type<typeof LocalLyricSet> {}
+
 const SyncedLyricSet = Schema.Struct({ ...lyricSetFields, body: LyricBody.cases.Synced });
 
 const PlainLyricSet = Schema.Struct({ ...lyricSetFields, body: LyricBody.cases.Plain });

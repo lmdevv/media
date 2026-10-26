@@ -8,7 +8,7 @@ import { basename, dirname } from "node:path";
 import {
   type Lang,
   LyricOrigin,
-  type LyricSet,
+  type LocalLyricSet,
   type LyricsFormat,
   parseLang,
 } from "@music/commands/lyrics";
@@ -185,8 +185,8 @@ const primaryOf = (lang: Lang): string => lang.split("-")[0] ?? lang;
  */
 export const localLyricSets = (
   read: ReadonlyArray<ReadSidecar>,
-  embedded: ReadonlyArray<LyricSet>,
-): ReadonlyArray<LyricSet> => {
+  embedded: ReadonlyArray<LocalLyricSet>,
+): ReadonlyArray<LocalLyricSet> => {
   const mainLanguages = new Set(
     [
       ...embedded,
@@ -203,7 +203,7 @@ export const localLyricSets = (
       format: sidecar.format,
     });
 
-    return sets.map((set): LyricSet => ({
+    return sets.map((set): LocalLyricSet => ({
       kind:
         set.kind === "main" && sidecar.lang !== null && translates(sidecar.lang)
           ? "translation"

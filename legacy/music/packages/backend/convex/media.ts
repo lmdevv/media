@@ -12,9 +12,11 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
 import { catalogBatch } from "./lib/catalog";
 import { fail } from "./lib/errors";
+import { lyricsFieldsOf, replaceLocalLyrics } from "./lib/lyrics";
 import { firstOverlap, isClaimed, normaliseLibraryPath } from "./lib/paths";
 import { inOrder } from "./lib/sequence";
 import { requireService } from "./lib/service";
+import { localLyricSet } from "./schema";
 
 const LEASE_MS = 60_000;
 
@@ -22,7 +24,14 @@ const FINGERPRINT_PAGE = 1000;
 
 const ART_PAGE = 1000;
 
+const lyricsFields = {
+  lyricsFiles: v.string(),
+  lyricsReader: v.number(),
+  lyrics: v.array(localLyricSet),
+};
+
 const scannedTrack = v.object({
+  ...lyricsFields,
   path: v.string(),
   size: v.number(),
   mtimeMs: v.number(),
@@ -292,6 +301,9 @@ export const fingerprints = query({
         mtimeMs: track.mtimeMs,
         missing: track.missing,
         folderArt: track.folderArt,
+        lyricsFiles: track.lyricsFiles,
+        lyricsReader: track.lyricsReader,
+        lyricsBytes: track.lyricsBytes,
         // What a scan matches a new file against to tell a moved file from a new one.
         durationMs: track.durationMs,
         title: track.title,
@@ -349,6 +361,47 @@ export const moveTracks = mutation({
     });
 
     return { moved, released: await batch.finish() };
+  },
+});
+
+/**
+ * Saves lyrics a scan read again for files whose audio did not change: a lyric file beside one
+ * was added, edited, or removed, or a newer reader reads its lyrics. Only the lyrics and their
+ * fingerprint change, never the catalog or its artwork. A path with no track is skipped. Keep
+ * batches at 100 files or fewer.
+ */
+export const saveLocalLyrics = mutation({
+  args: {
+    secret: v.string(),
+    libraryId: v.id("libraries"),
+    tracks: v.array(v.object({ path: v.string(), ...lyricsFields })),
+  },
+  handler: async (ctx, { secret, libraryId, tracks }) => {
+    requireService(secret);
+    let saved = 0;
+
+    await inOrder(tracks, async (scanned) => {
+      const track = await ctx.db
+        .query("tracks")
+        .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId).eq("path", scanned.path))
+        .unique();
+
+      if (track === null) return;
+      const fields = lyricsFieldsOf(scanned);
+
+      if (
+        track.lyricsFiles !== fields.lyricsFiles ||
+        track.lyricsReader !== fields.lyricsReader ||
+        track.lyricsBytes !== fields.lyricsBytes
+      ) {
+        await ctx.db.patch(track._id, fields);
+      }
+
+      await replaceLocalLyrics(ctx, track._id, scanned.lyrics);
+      saved += 1;
+    });
+
+    return { saved };
   },
 });
 

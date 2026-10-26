@@ -16,7 +16,8 @@ import type { MutationCtx } from "../_generated/server";
 import { randomToken } from "./crypto";
 import { fail } from "./errors";
 import type { QueueItem, StoredQueue } from "./queue";
-import { viewerOf } from "./viewer";
+import { storedQueue } from "./queue";
+import { canRead, viewerOf } from "./viewer";
 import type { ReadCtx, Viewer } from "./viewer";
 
 /** Characters in a Jam link code: about 100 bits, so a code cannot be guessed. */
@@ -217,6 +218,33 @@ export const resolvePlayback = async (ctx: ReadCtx, viewer: Viewer): Promise<Pla
     jam: joined.jam,
     member: joined.member,
   };
+};
+
+/**
+ * Whether `track` is in the queue of the Jam the viewer has joined. People in a Jam may stream
+ * the songs the host plays, and read their lyrics, even from libraries they can't read, but only
+ * those, and only while they are in it. The host must still be able to read the song.
+ */
+export const inJamQueue = async (
+  ctx: ReadCtx,
+  viewer: Viewer,
+  track: Doc<"tracks">,
+): Promise<boolean> => {
+  const playback = await resolvePlayback(ctx, viewer);
+
+  if (playback.kind !== "member" || !canRead(playback.owner, track.libraryId)) return false;
+  const queue = await storedQueue(ctx, playback.owner.id);
+  const entries = queue.items.filter((item) => item.trackId === track._id);
+
+  if (entries.length === 0) return false;
+
+  // Someone in the Jam chose it (the host, or a person who can read it): it plays for all.
+  if (entries.some((item) => !item.autoplay)) return true;
+
+  // Autoplay chose it: only from a library the Jam may share, for entries from before that rule.
+  const library = await ctx.db.get(track.libraryId);
+
+  return library !== null && jamShareable(library, playback.owner.id);
 };
 
 /** Fails unless the actor may play, pause, skip, and seek this playback. */

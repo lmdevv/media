@@ -1,11 +1,14 @@
 /**
  * Scans one library folder into Convex: list audio files, skip the ones Convex already has with
- * the same size and modification time (and the same folder artwork beside them), read tags for
- * the rest, upsert them in batches, and mark files that disappeared as missing. A new file that
- * is a gone one moved or renamed (see `moved-files.ts`) moves that track instead, keeping its
- * likes, plays, and playlist entries. Every write is keyed by library and relative path, so
- * running a scan twice is safe.
+ * the same size and modification time (and the same folder artwork and lyric files beside them),
+ * read tags and lyrics for the rest, upsert them in batches, and mark files that disappeared as
+ * missing. A file whose only change is its lyrics (a lyric file added, edited, or removed, or a
+ * newer lyrics reader) has only its lyrics read and saved, leaving its tags and artwork alone. A
+ * new file that is a gone one moved or renamed (see `moved-files.ts`) moves that track instead,
+ * keeping its likes, plays, and playlist entries. Every write is keyed by library and relative
+ * path, so running a scan twice is safe.
  */
+import { Buffer } from "node:buffer";
 import { basename, dirname, join } from "node:path";
 
 import type { LibraryId } from "@music/commands/ids";
@@ -16,21 +19,27 @@ import { saveArt } from "./art-store.ts";
 import { extensionOf, isAudioFile } from "./audio-format.ts";
 import * as Files from "./files.ts";
 import { folderArtKey, folderArtLookup, isFolderArt } from "./folder-art.ts";
+import { isLyricsSidecar, lyricsFilesKey, lyricsSidecarMatcher } from "./lyrics/sidecars.ts";
 import {
   type Fingerprint,
   type FingerprintPage,
   type JobProgress,
   MediaBackend,
   type PathRange,
+  type ScannedLyrics,
   type ScannedTrack,
   type TrackMove,
 } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
 import { movedFileMatcher } from "./moved-files.ts";
 import type { WalkedFile } from "./platform/node-files.ts";
-import { readTrackTags } from "./tag-reader.ts";
+import { readTagLyrics, readTrackTags } from "./tag-reader.ts";
+import { LYRICS_READER_VERSION, readTrackLyrics } from "./track-lyrics.ts";
 
 const UPSERT_BATCH = 100;
+
+/** Most bytes of lyrics one write sends; lyric files make some songs far larger than others. */
+const BATCH_LYRICS_BYTES = 2 * 1024 * 1024;
 
 const MISSING_BATCH = 200;
 
@@ -123,16 +132,70 @@ const chunks = <A>(items: ReadonlyArray<A>, size: number): ReadonlyArray<Readonl
     items.slice(index * size, (index + 1) * size),
   );
 
-const isUnchanged = (
+/**
+ * Splits one read batch into writes that each send or replace at most `BATCH_LYRICS_BYTES` of
+ * lyrics, as `lyricsBytesOf` sizes an item; one song never holds more than a batch may send.
+ */
+const byLyricsSize = <A>(
+  items: ReadonlyArray<A>,
+  lyricsBytesOf: (item: A) => number,
+): ReadonlyArray<ReadonlyArray<A>> => {
+  const batches: Array<Array<A>> = [];
+  let bytes = 0;
+
+  for (const item of items) {
+    const size = lyricsBytesOf(item);
+    const last = batches.at(-1);
+
+    if (last === undefined || bytes + size > BATCH_LYRICS_BYTES) {
+      batches.push([item]);
+      bytes = size;
+    } else {
+      last.push(item);
+      bytes += size;
+    }
+  }
+
+  return batches;
+};
+
+/** A file found on disk that Convex does not have as it is now, and what to read of it. */
+interface Pending {
+  /** `file`: its tags, art, and lyrics. `lyrics`: only its lyrics, the rest is unchanged. */
+  readonly read: "file" | "lyrics";
+  readonly file: WalkedFile;
+}
+
+/** What reading a pending file found. */
+type Read =
+  | { readonly read: "file"; readonly track: ScannedTrack }
+  | { readonly read: "lyrics"; readonly lyrics: ScannedLyrics };
+
+/**
+ * What a scan reads of a file: nothing when Convex has it with the same size, modification time,
+ * folder artwork, lyric files, and lyrics reader; only its lyrics when just the lyric files or
+ * the reader differ; all of it otherwise.
+ */
+const readNeeded = (
   known: Fingerprint | undefined,
   file: { size: number; mtimeMs: number },
   folderArt: string | undefined,
-): boolean =>
-  known !== undefined &&
-  !known.missing &&
-  known.size === file.size &&
-  known.mtimeMs === file.mtimeMs &&
-  known.folderArt === folderArt;
+  lyricsFiles: string,
+): Pending["read"] | null => {
+  if (
+    known === undefined ||
+    known.missing ||
+    known.size !== file.size ||
+    known.mtimeMs !== file.mtimeMs ||
+    known.folderArt !== folderArt
+  ) {
+    return "file";
+  }
+
+  return known.lyricsFiles === lyricsFiles && known.lyricsReader === LYRICS_READER_VERSION
+    ? null
+    : "lyrics";
+};
 
 /**
  * Splits a library's paths into ranges holding about `size` of `paths` each, in the code point
@@ -205,7 +268,7 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
 
   const walked = yield* Files.walkTree(
     library.path,
-    (name) => isAudioFile(name) || isFolderArt(name),
+    (name) => isAudioFile(name) || isFolderArt(name) || isLyricsSidecar(name),
   ).pipe(
     Effect.mapError(
       (cause) => new LibraryUnavailable({ libraryId: library.id, path: library.path, cause }),
@@ -213,8 +276,9 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
   );
 
   const files = walked.filter((file) => isAudioFile(file.relativePath));
-  const artFor = folderArtLookup(walked.filter((file) => !isAudioFile(file.relativePath)));
+  const artFor = folderArtLookup(walked.filter((file) => isFolderArt(basename(file.relativePath))));
   const folderArtOf = (file: WalkedFile) => artFor(dirname(file.relativePath));
+  const sidecarsOf = lyricsSidecarMatcher(walked);
 
   yield* Ref.set(progress, { done: 0, message: `Found ${files.length} files, comparing` });
 
@@ -227,9 +291,16 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     return yield* new LibraryEmpty({ libraryId: library.id, path: library.path });
   }
 
-  const changed = files.filter(
-    (file) => !isUnchanged(known.get(file.relativePath), file, folderArtKey(folderArtOf(file))),
-  );
+  const changed = files.flatMap((file): ReadonlyArray<Pending> => {
+    const read = readNeeded(
+      known.get(file.relativePath),
+      file,
+      folderArtKey(folderArtOf(file)),
+      lyricsFilesKey(sidecarsOf(file.relativePath)),
+    );
+
+    return read === null ? [] : [{ read, file }];
+  });
 
   // A total of 0 tells Convex this lease made all the progress an unchanged library can make, so
   // it is reported only at the end, once missing files are marked too (`releaseExpiredLeases`).
@@ -254,47 +325,62 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
       }),
   });
 
-  const readOne = (file: WalkedFile): Effect.Effect<Option.Option<ScannedTrack>> =>
+  const readFile = Effect.fnUntraced(function* (file: WalkedFile) {
+    const absolute = join(library.path, file.relativePath);
+    const tags = yield* readTrackTags(absolute);
+    const art = folderArtOf(file);
+
+    const artHash =
+      tags.picture !== undefined
+        ? Option.getOrUndefined(yield* saveArt(dataDir, tags.picture))
+        : art === undefined
+          ? undefined
+          : yield* Cache.get(folderArt, art.relativePath);
+
+    const lyrics = yield* readTrackLyrics(library.path, sidecarsOf(file.relativePath), tags.lyrics);
+    const folder = dirname(file.relativePath);
+    const fileName = basename(file.relativePath);
+    const extension = extensionOf(fileName);
+
+    const track: ScannedTrack = {
+      path: file.relativePath,
+      size: file.size,
+      mtimeMs: file.mtimeMs,
+      title:
+        tags.title ?? (extension === "" ? fileName : fileName.slice(0, -(extension.length + 1))),
+      artist: tags.artist ?? tags.albumArtist ?? "Unknown Artist",
+      albumArtist: tags.albumArtist,
+      album: tags.album ?? (folder === "." ? "Unknown Album" : basename(folder)),
+      trackNumber: tags.trackNumber,
+      discNumber: tags.discNumber,
+      year: tags.year,
+      genre: tags.genre,
+      durationMs: tags.durationMs,
+      codec: tags.codec,
+      lossless: tags.lossless,
+      bitrate: tags.bitrate,
+      sampleRate: tags.sampleRate,
+      bitDepth: tags.bitDepth,
+      artHash,
+      folderArt: folderArtKey(art),
+      ...lyrics,
+    };
+
+    return { read: "file", track } satisfies Read;
+  });
+
+  const readLyrics = Effect.fnUntraced(function* (file: WalkedFile) {
+    const embedded = yield* readTagLyrics(join(library.path, file.relativePath));
+    const lyrics = yield* readTrackLyrics(library.path, sidecarsOf(file.relativePath), embedded);
+
+    return { read: "lyrics", lyrics: { path: file.relativePath, ...lyrics } } satisfies Read;
+  });
+
+  const readOne = ({ read, file }: Pending): Effect.Effect<Option.Option<Read>> =>
     Effect.gen(function* () {
-      const absolute = join(library.path, file.relativePath);
-      const tags = yield* readTrackTags(absolute);
-      const art = folderArtOf(file);
+      const found: Read = read === "file" ? yield* readFile(file) : yield* readLyrics(file);
 
-      const artHash =
-        tags.picture !== undefined
-          ? Option.getOrUndefined(yield* saveArt(dataDir, tags.picture))
-          : art === undefined
-            ? undefined
-            : yield* Cache.get(folderArt, art.relativePath);
-
-      const folder = dirname(file.relativePath);
-      const fileName = basename(file.relativePath);
-      const extension = extensionOf(fileName);
-
-      const track: ScannedTrack = {
-        path: file.relativePath,
-        size: file.size,
-        mtimeMs: file.mtimeMs,
-        title:
-          tags.title ?? (extension === "" ? fileName : fileName.slice(0, -(extension.length + 1))),
-        artist: tags.artist ?? tags.albumArtist ?? "Unknown Artist",
-        albumArtist: tags.albumArtist,
-        album: tags.album ?? (folder === "." ? "Unknown Album" : basename(folder)),
-        trackNumber: tags.trackNumber,
-        discNumber: tags.discNumber,
-        year: tags.year,
-        genre: tags.genre,
-        durationMs: tags.durationMs,
-        codec: tags.codec,
-        lossless: tags.lossless,
-        bitrate: tags.bitrate,
-        sampleRate: tags.sampleRate,
-        bitDepth: tags.bitDepth,
-        artHash,
-        folderArt: folderArtKey(art),
-      };
-
-      return Option.some(track);
+      return Option.some(found);
     }).pipe(
       Effect.catchTags({
         TagReadError: (error) =>
@@ -329,30 +415,44 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
       Effect.uninterruptible,
     );
 
+  /**
+   * What writing `read`'s lyrics over the track Convex keeps at `path` costs: Convex reads the
+   * lyrics it replaces as well as storing the new ones, so the larger of the two counts.
+   */
+  const lyricsBytes = (path: string, read: ScannedLyrics): number =>
+    Math.max(Buffer.byteLength(JSON.stringify(read.lyrics)), known.get(path)?.lyricsBytes ?? 0);
+
   let done = 0;
   let failed = 0;
 
-  const save = Effect.fnUntraced(function* (read: ReadonlyArray<Option.Option<ScannedTrack>>) {
-    const tracks = read.flatMap((track) => (Option.isSome(track) ? [track.value] : []));
+  const save = Effect.fnUntraced(function* (read: ReadonlyArray<Option.Option<Read>>) {
+    const found = read.flatMap(Option.toArray);
     const moves: Array<TrackMove> = [];
     const upserts: Array<ScannedTrack> = [];
+    const lyrics: Array<ScannedLyrics> = [];
 
-    for (const track of tracks) {
+    for (const item of found) {
+      if (item.read === "lyrics") {
+        lyrics.push(item.lyrics);
+        continue;
+      }
+
+      const { track } = item;
       const from = known.has(track.path) ? undefined : movedFrom(track);
 
       if (from === undefined) upserts.push(track);
       else moves.push({ from, track });
     }
 
-    failed += read.length - tracks.length;
+    failed += read.length - found.length;
 
-    if (upserts.length > 0) {
-      yield* saved(backend.upsertTracks(library.id, upserts));
+    for (const batch of byLyricsSize(upserts, (track) => lyricsBytes(track.path, track))) {
+      yield* saved(backend.upsertTracks(library.id, batch));
     }
 
-    if (moves.length > 0) {
+    for (const batch of byLyricsSize(moves, (move) => lyricsBytes(move.from, move.track))) {
       yield* saved(
-        backend.moveTracks(library.id, moves).pipe(
+        backend.moveTracks(library.id, batch).pipe(
           Effect.map((result) => {
             moved += result.moved;
 
@@ -360,6 +460,10 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
           }),
         ),
       );
+    }
+
+    for (const batch of byLyricsSize(lyrics, (track) => lyricsBytes(track.path, track))) {
+      yield* backend.saveLocalLyrics(library.id, batch);
     }
 
     for (const { from } of moves) claimed.add(from);

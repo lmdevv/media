@@ -4,6 +4,7 @@
  */
 import type { FolderChain } from "@music/commands/folder-ids";
 import { JobId, LibraryId, type TrackId } from "@music/commands/ids";
+import type { LocalLyricSet } from "@music/commands/lyrics";
 import { ConvexClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import { Cause, Context, Effect, Layer, Option, Queue, Redacted, Schema, Stream } from "effect";
@@ -54,6 +55,12 @@ const Fingerprint = Schema.Struct({
   missing: Schema.Boolean,
   /** The folder artwork the last scan saw beside the file (see `ScannedTrack.folderArt`). */
   folderArt: Schema.optional(Schema.String),
+  /** The lyric files the last scan read beside the file (see `ScannedLyrics`). */
+  lyricsFiles: Schema.optional(Schema.String),
+  /** The lyrics reader that read them; absent before scans read lyrics. */
+  lyricsReader: Schema.optional(Schema.Finite),
+  /** The size of the lyric sets Convex keeps for the file, as JSON; absent when it has none. */
+  lyricsBytes: Schema.optional(Schema.Finite),
   /** Length and tags, for telling a moved file from a new one (see `moved-files.ts`). */
   durationMs: Schema.optional(Schema.Finite),
   title: Schema.optional(Schema.String),
@@ -129,9 +136,22 @@ export interface PathRange {
   readonly to?: string | undefined;
 }
 
-/** Tags read from one file, in the shape `media:upsertTracks` accepts. */
-export interface ScannedTrack {
+/** The lyrics read for one file, in the shape `media:saveLocalLyrics` accepts. */
+export interface ScannedLyrics {
   readonly path: string;
+  /**
+   * The lyric files beside the file that were read, as `lyricsFilesKey` writes them; empty when
+   * it has none. A later scan reads the file's lyrics again when it changes.
+   */
+  readonly lyricsFiles: string;
+  /** `LYRICS_READER_VERSION` of the reader that read them. */
+  readonly lyricsReader: number;
+  /** The file's own lyric sets, from its lyric files and its tags. */
+  readonly lyrics: ReadonlyArray<LocalLyricSet>;
+}
+
+/** Tags and lyrics read from one file, in the shape `media:upsertTracks` accepts. */
+export interface ScannedTrack extends ScannedLyrics {
   readonly size: number;
   readonly mtimeMs: number;
   readonly title: string;
@@ -248,6 +268,11 @@ const functions = {
     Secret & { libraryId: string; paths: ReadonlyArray<string> },
     unknown
   >("media:markMissing"),
+  saveLocalLyrics: makeFunctionReference<
+    "mutation",
+    Secret & { libraryId: string; tracks: ReadonlyArray<ScannedLyrics> },
+    unknown
+  >("media:saveLocalLyrics"),
   trackSource: makeFunctionReference<"query", Secret & { trackId: string }, unknown>(
     "media:trackSource",
   ),
@@ -326,6 +351,14 @@ export interface Interface {
     libraryId: LibraryId,
     moves: ReadonlyArray<TrackMove>,
   ) => Effect.Effect<MoveOutcome, BackendError>;
+  /**
+   * Saves the lyrics of at most 100 known files whose audio did not change, leaving their tags
+   * and artwork as they are.
+   */
+  readonly saveLocalLyrics: (
+    libraryId: LibraryId,
+    tracks: ReadonlyArray<ScannedLyrics>,
+  ) => Effect.Effect<void, BackendError>;
   /** Marks files missing. Returns the artwork the batch stopped using somewhere. */
   readonly markMissing: (
     libraryId: LibraryId,
@@ -562,6 +595,15 @@ const make = Effect.gen(function* () {
       );
 
       return released ?? [];
+    }),
+
+    saveLocalLyrics: Effect.fn("MediaBackend.saveLocalLyrics")(function* (
+      libraryId: LibraryId,
+      tracks: ReadonlyArray<ScannedLyrics>,
+    ) {
+      yield* call("saveLocalLyrics", () =>
+        client.mutation(functions.saveLocalLyrics, { secret: secret(), libraryId, tracks }),
+      );
     }),
 
     artHashes: Effect.fn("MediaBackend.artHashes")(function* (

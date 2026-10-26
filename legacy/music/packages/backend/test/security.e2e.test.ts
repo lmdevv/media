@@ -67,7 +67,13 @@ interface ScannedSong {
   readonly lossless: boolean;
   readonly artHash?: string;
   readonly folderArt?: string;
+  readonly lyricsFiles: string;
+  readonly lyricsReader: number;
+  readonly lyrics: ReadonlyArray<never>;
 }
+
+/** No lyric files and no lyrics, from no lyrics reader. */
+const NO_LYRICS = { lyricsFiles: "", lyricsReader: 0, lyrics: [] } as const;
 
 /** The one song of the cover test, with the art the media service found for it. */
 const coverSong = (artHash: string, folderArt: string): ScannedSong => ({
@@ -82,6 +88,7 @@ const coverSong = (artHash: string, folderArt: string): ScannedSong => ({
   lossless: true,
   artHash,
   folderArt,
+  ...NO_LYRICS,
 });
 
 /** A song of the cover test's album at `path`, with the art the media service found for it. */
@@ -98,6 +105,7 @@ const canvasSong = (
   durationMs: 100_000,
   codec: "flac",
   lossless: true,
+  ...NO_LYRICS,
   ...art,
 });
 
@@ -782,6 +790,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       durationMs: 200_000,
       codec: "flac",
       lossless: true,
+      ...NO_LYRICS,
     };
 
     await media.mutation(upsertTracksRef, { secret: mediaSecret, libraryId, tracks: [song] });

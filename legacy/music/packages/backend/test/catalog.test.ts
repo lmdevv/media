@@ -9,7 +9,14 @@ import type { Id } from "../convex/_generated/dataModel";
 import type { MutationCtx } from "../convex/_generated/server";
 import { catalogBatch, type ScannedTrack } from "../convex/lib/catalog";
 import { inOrder } from "../convex/lib/sequence";
-import { MEDIA_SECRET, drainScheduled, makeBackend, seedLibrary, signUp } from "./backend";
+import {
+  MEDIA_SECRET,
+  NO_LYRICS,
+  drainScheduled,
+  makeBackend,
+  seedLibrary,
+  signUp,
+} from "./backend";
 import type { Backend } from "./backend";
 
 const COVER = "c".repeat(64);
@@ -29,6 +36,7 @@ const song = (index: number, artHash?: string): ScannedTrack => ({
   codec: "flac",
   lossless: true,
   artHash,
+  ...NO_LYRICS,
 });
 
 const libraryOf = async (backend: Backend, id: string): Promise<Id<"libraries">> => {

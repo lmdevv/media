@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Fingerprint, ScannedTrack } from "./media-backend.ts";
 import { movedFileMatcher } from "./moved-files.ts";
 import { describeScan } from "./scan.ts";
+import { NO_LYRICS } from "./testing/fixtures.ts";
 
 const gone = (path: string, changes: Partial<Fingerprint> = {}): Fingerprint => ({
   path,
@@ -26,6 +27,7 @@ const found = (path: string, changes: Partial<ScannedTrack> = {}): ScannedTrack 
   durationMs: 180_000,
   codec: "flac",
   lossless: true,
+  ...NO_LYRICS,
   ...changes,
 });
 

@@ -171,6 +171,19 @@ id=$(music now --json | jq -r '.queue[.index].id')
 music likes set "$id" --liked
 ```
 
+Read the lyrics of the current song. Lyrics come from the song's own files: a lyric file beside
+it with the same name (`.lrc`, `.elrc`, `.ttml`, `.vtt`, `.srt`, `.txt`, or Lyricsfile `.yaml`,
+and `Song.de.lrc` for a language) or the lyrics in its tags. A scan picks up added, edited, and
+removed lyric files. `_tag` is `Synced` (`.main.body.lines[]` with `startMs`), `Plain`
+(`.main.body.text`), or `None`; `.source` and `.main.origin` say where they came from, and
+`.extras` holds the song's other sets, such as translations:
+
+```sh
+id=$(music now --json | jq -r '.queue[.index].id')
+music lyrics get "$id"                          # [mm:ss.xx] lines under a caption, or plain text
+music lyrics get --track-id "$id" --json | jq -r '.main.body.lines[].text'
+```
+
 Move playback to another device. The list leaves out devices silent for over a day, except the
 one playing:
 
@@ -276,6 +289,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music playback volume <volume>`: Set the volume from 0 to 1.
 - `music playback report --device-id <id> --index <int> [--track-id <id>] [--item-id <id>] --position-ms <number> (--playing | --no-playing)`: Report the active device's position (sent by players).
 - `music stream url --track-id <id> --profile <original|aac-320|aac-128|fmp4-flac|fmp4-aac> [--requested-at <number>]`: Get a signed stream URL for a song.
+- `music lyrics get <track-id>`: Get a song's lyrics, timed line by line when its lyrics are synced.
 
 ### devices
 

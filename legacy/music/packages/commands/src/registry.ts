@@ -69,6 +69,7 @@ import {
   TrackPage,
   User,
 } from "./models";
+import { TrackLyrics } from "./lyrics";
 import { Description, Name, Text, hasControlCharacter } from "./text";
 
 const NoArgs = Schema.Struct({});
@@ -680,6 +681,16 @@ export const commands = {
       requestedAt: Schema.optionalKey(Timestamp),
     }),
     result: StreamUrl,
+  }),
+
+  "lyrics.get": command({
+    summary: "Get a song's lyrics, timed line by line when its lyrics are synced",
+    group: "playback",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: Schema.Struct({ trackId: TrackId }),
+    result: TrackLyrics,
   }),
 
   // Libraries and jobs (admin)

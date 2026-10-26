@@ -173,3 +173,97 @@ describe("renderResult", () => {
     expect(/\p{Cc}/u.test(`${table}${lines}`.replaceAll("\n", ""))).toBe(false);
   });
 });
+
+describe("renderResult for lyrics", () => {
+  const lyrics = commands["lyrics.get"].result;
+
+  it("prints synced lyrics with their times under the player's caption, then the other sets", () => {
+    const synced = {
+      _tag: "Synced",
+      source: "file",
+      main: {
+        kind: "main",
+        lang: null,
+        origin: { _tag: "Sidecar", fileName: "Song.lrc", format: "lrc" },
+        body: {
+          _tag: "Synced",
+          lines: [
+            { text: "First line", startMs: 1000, endMs: null, words: null, voice: null },
+            { text: "Later \u001b[2J", startMs: 62_345, endMs: null, words: null, voice: null },
+          ],
+        },
+      },
+      extras: [
+        {
+          kind: "translation",
+          lang: "de",
+          origin: { _tag: "Sidecar", fileName: "Song.de.lrc", format: "lrc" },
+          body: { _tag: "Plain", text: "Erste Zeile" },
+        },
+      ],
+    };
+
+    expect(renderResult(lyrics, synced).split("\n")).toEqual([
+      "SYNCED LYRICS · FROM FILE (Song.lrc)",
+      "",
+      "[00:01.00] First line",
+      String.raw`[01:02.34] Later \u001b[2J`,
+      "",
+      "Also:",
+      "  translation (de) from Song.de.lrc",
+    ]);
+  });
+
+  it("prints each row of a multi-row subtitle cue on its own line, under the cue's time", () => {
+    const cue = {
+      _tag: "Synced",
+      source: "file",
+      main: {
+        kind: "main",
+        lang: null,
+        origin: { _tag: "Sidecar", fileName: "Song.vtt", format: "vtt" },
+        body: {
+          _tag: "Synced",
+          lines: [
+            { text: "Top row\nBottom row", startMs: 1000, endMs: 3000, words: null, voice: null },
+          ],
+        },
+      },
+      extras: [],
+    };
+
+    expect(renderResult(lyrics, cue).split("\n")).toEqual([
+      "SYNCED LYRICS · FROM FILE (Song.vtt)",
+      "",
+      "[00:01.00] Top row",
+      "           Bottom row",
+    ]);
+  });
+
+  it("prints plain lyrics as their text, and says when there are none", () => {
+    const plain = {
+      _tag: "Plain",
+      source: "file",
+      main: {
+        kind: "main",
+        lang: "en",
+        origin: { _tag: "Embedded", tag: "mp4:lyr" },
+        body: { _tag: "Plain", text: "Just words\nMore words" },
+      },
+      extras: [],
+    };
+
+    expect(renderResult(lyrics, plain).split("\n")).toEqual([
+      "LYRICS · FROM FILE (mp4:lyr tag)",
+      "",
+      "Just words",
+      "More words",
+    ]);
+    expect(renderResult(lyrics, { _tag: "None" })).toBe("No lyrics");
+    expect(renderResult(lyrics, { _tag: "Instrumental" })).toBe("Instrumental");
+  });
+
+  it("fails loudly for a value that is not lyrics instead of printing it as something else", () => {
+    expect(() => renderResult(lyrics, { _tag: "Synced", source: "file" })).toThrow();
+  });
+});

@@ -1,8 +1,10 @@
-/** Reads audio tags and technical details from one file with `music-metadata`. */
+/** Reads audio tags, technical details, and embedded lyrics from one file with `music-metadata`. */
+import type { LocalLyricSet } from "@music/commands/lyrics";
 import { Effect, Schema } from "effect";
 import { parseFile, selectCover } from "music-metadata";
 
 import { normalizeCodec } from "./audio-format.ts";
+import { embeddedLyrics } from "./lyrics/embedded.ts";
 
 /** A file's tags could not be read. */
 class TagReadError extends Schema.TaggedError<TagReadError>()("TagReadError", {
@@ -32,6 +34,8 @@ interface TrackTags {
   readonly bitDepth: number | undefined;
   /** Bytes of the embedded front cover, or the first embedded picture. */
   readonly picture: Uint8Array | undefined;
+  /** The lyrics in its tags (see `embeddedLyrics`). */
+  readonly lyrics: ReadonlyArray<LocalLyricSet>;
 }
 
 const text = (value: string | undefined): string | undefined => {
@@ -45,12 +49,16 @@ const positive = (value: number | null | undefined): number | undefined =>
     ? undefined
     : value;
 
-/** Reads tags, duration, codec, and embedded art from the file at `path`. */
-export const readTrackTags = Effect.fn("TagReader.read")(function* (path: string) {
-  const metadata = yield* Effect.tryPromise({
-    try: () => parseFile(path, { duration: false, skipCovers: false }),
+/** Parses the tags of the file at `path`, its pictures too when `covers` is set. */
+const parseTags = (path: string, options: { readonly covers: boolean }) =>
+  Effect.tryPromise({
+    try: () => parseFile(path, { duration: false, skipCovers: !options.covers }),
     catch: (cause) => new TagReadError({ path, cause }),
   });
+
+/** Reads tags, duration, codec, embedded art, and embedded lyrics from the file at `path`. */
+export const readTrackTags = Effect.fn("TagReader.read")(function* (path: string) {
+  const metadata = yield* parseTags(path, { covers: true });
 
   const { common, format } = metadata;
 
@@ -75,7 +83,16 @@ export const readTrackTags = Effect.fn("TagReader.read")(function* (path: string
     sampleRate: positive(format.sampleRate),
     bitDepth: positive(format.bitsPerSample),
     picture: selectCover(common.picture)?.data,
+    lyrics: embeddedLyrics(metadata),
   };
 
   return tags;
+});
+
+/**
+ * Reads only the lyrics in the tags of the file at `path`, skipping its pictures, for a file
+ * whose audio and tags a scan already stored.
+ */
+export const readTagLyrics = Effect.fn("TagReader.readLyrics")(function* (path: string) {
+  return embeddedLyrics(yield* parseTags(path, { covers: false }));
 });

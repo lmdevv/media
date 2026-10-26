@@ -9,7 +9,7 @@ import {
 import { Array as Arr, Data, Result, Schema } from "effect";
 
 /** Largest lyric source read, in bytes of a file or characters of a tag or LRCLIB record. */
-const MAX_LYRICS_SIZE = 256 * 1024;
+export const MAX_LYRICS_SIZE = 256 * 1024;
 
 /** Most lines one lyric set keeps; a longer source is not read. */
 export const MAX_LYRIC_LINES = 2000;

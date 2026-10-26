@@ -4,6 +4,13 @@
  * lines. `--json` bypasses this module.
  */
 import {
+  LyricBody,
+  LyricOrigin,
+  type LyricSet,
+  type LyricsSource,
+  TrackLyrics,
+} from "@music/commands/lyrics";
+import {
   AlbumCard,
   ApiKey,
   ArtistCard,
@@ -23,8 +30,7 @@ import {
   Track,
   User,
 } from "@music/commands/models";
-import { Predicate, SchemaAST } from "effect";
-import type { Schema } from "effect";
+import { Predicate, Schema, SchemaAST } from "effect";
 
 import { escapeControlCharacters } from "./escape";
 
@@ -433,8 +439,100 @@ const renderPage = (ast: SchemaAST.AST, value: Schema.JsonObject): string | null
   return [...lines, ...(done ? [] : [`More: --cursor ${cursor}`])].join("\n");
 };
 
+/** `62_340` → `[01:02.34]`, the line stamps of an LRC file. */
+const lyricStamp = (ms: number): string => {
+  const minutes = Math.floor(ms / 60_000);
+  const hundredths = Math.floor((ms % 60_000) / 10);
+
+  return `[${pad(minutes)}:${pad(Math.floor(hundredths / 100))}.${pad(hundredths % 100)}]`;
+};
+
+const SOURCE_CAPTIONS: Readonly<Record<LyricsSource, string>> = {
+  file: "FROM FILE",
+  lrclib: "LRCLIB",
+};
+
+const originLabel = LyricOrigin.match({
+  Sidecar: ({ fileName }) => escapeControlCharacters(fileName),
+  Embedded: ({ tag }) => `${tag} tag`,
+  Lrclib: ({ recordId }) => `LRCLIB record ${String(recordId)}`,
+});
+
+const bodyLines = LyricBody.match({
+  // A subtitle cue with several rows is one line with `\n` between them: one row per output line.
+  Synced: ({ lines }) =>
+    lines.flatMap((line) => {
+      const stamp = lyricStamp(line.startMs);
+
+      return line.text
+        .split("\n")
+        .map(
+          (row, index) =>
+            `${index === 0 ? stamp : " ".repeat(stamp.length)} ${escapeControlCharacters(row)}`,
+        );
+    }),
+  Plain: ({ text }) => text.split("\n").map(escapeControlCharacters),
+});
+
+/** `translation (de) from Song.de.lrc` for each set beside the one shown. */
+const extraLines = (extras: ReadonlyArray<LyricSet>): ReadonlyArray<string> =>
+  extras.length === 0
+    ? []
+    : [
+        "",
+        "Also:",
+        ...extras.map((set) => {
+          const lang = set.lang === null ? "" : ` (${escapeControlCharacters(set.lang)})`;
+          const timing = LyricBody.guards.Synced(set.body) ? "synced " : "";
+
+          return `  ${timing}${set.kind}${lang} from ${originLabel(set.origin)}`;
+        }),
+      ];
+
+/** Lyrics as the player captions them, then their lines, each synced one with its time. */
+const renderLyrics = TrackLyrics.match({
+  None: () => "No lyrics",
+  Instrumental: () => "Instrumental",
+  Pending: ({ fallback }) =>
+    fallback === null
+      ? "Looking up lyrics"
+      : [
+          `LYRICS · ${SOURCE_CAPTIONS.file} (${originLabel(fallback.origin)}), looking up synced lyrics`,
+          "",
+          ...bodyLines(fallback.body),
+        ].join("\n"),
+  Synced: ({ source, main, extras }) =>
+    [
+      `SYNCED LYRICS · ${SOURCE_CAPTIONS[source]} (${originLabel(main.origin)})`,
+      "",
+      ...bodyLines(main.body),
+      ...extraLines(extras),
+    ].join("\n"),
+  Plain: ({ source, main, extras }) =>
+    [
+      `LYRICS · ${SOURCE_CAPTIONS[source]} (${originLabel(main.origin)})`,
+      "",
+      ...bodyLines(main.body),
+      ...extraLines(extras),
+    ].join("\n"),
+});
+
+const decodeLyrics = Schema.decodeUnknownSync(TrackLyrics);
+
+/**
+ * Results printed their own way rather than as tables and key-value lines, by the schema the
+ * command returns. A value that does not decode as that schema is a bug, so it throws.
+ */
+const customRenderers: ReadonlyMap<Schema.Top, (value: Json) => string> = new Map([
+  [TrackLyrics, (value: Json) => renderLyrics(decodeLyrics(value))],
+]);
+
 /** Renders a decoded command result for people. */
 export const renderResult = (schema: Schema.Top, value: Json): string => {
+  const custom = customRenderers.get(schema);
+
+  if (custom !== undefined) return custom(value);
+
   const ast = presentMember(schema.ast);
 
   if (isJsonArray(value)) return renderArray(ast, value).join("\n");

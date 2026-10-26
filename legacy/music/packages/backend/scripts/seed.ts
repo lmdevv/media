@@ -42,6 +42,9 @@ interface SeedTrack {
   readonly bitrate?: number;
   readonly sampleRate?: number;
   readonly bitDepth?: number;
+  readonly lyricsFiles: string;
+  readonly lyricsReader: number;
+  readonly lyrics: ReadonlyArray<never>;
 }
 
 type Format = "flac-24-96" | "flac-16-44" | "alac-24-48" | "mp3-320";
@@ -286,6 +289,10 @@ const catalog = (): Array<SeedTrack> =>
         year: album.year,
         genre: album.genre,
         durationMs: millis(duration),
+        // No lyrics, from no reader: a real scan of these files reads theirs.
+        lyricsFiles: "",
+        lyricsReader: 0,
+        lyrics: [],
       };
     }),
   );
