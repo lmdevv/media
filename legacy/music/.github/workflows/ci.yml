@@ -15,9 +15,12 @@ concurrency:
 permissions:
   contents: read
 
+# The long jobs have time limits: a hung step fails its job instead of holding it for GitHub's
+# six-hour default.
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -31,7 +34,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm fmt:check
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: scripts/ci-install-ffmpeg.sh
       - run: pnpm test
       - run: pnpm knip
       # The iOS app bundles with Metro, so a module it cannot resolve fails here, not on a phone.
@@ -39,6 +42,7 @@ jobs:
 
   stack-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
         with:
@@ -49,7 +53,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: scripts/ci-install-ffmpeg.sh
       - run: pnpm --filter web exec playwright install --with-deps chromium
       # Built through the same cache the publish job reads, so the amd64 image it pushes is made
       # of the layers tested here.
@@ -84,6 +88,7 @@ jobs:
   # authorization, the CLI binary, the media service, and the web app's Playwright suite.
   backend-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
@@ -94,7 +99,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: scripts/ci-install-ffmpeg.sh
       - run: pnpm --filter web exec playwright install --with-deps chromium
       - run: scripts/backend-e2e.sh
       - uses: actions/upload-artifact@v4
