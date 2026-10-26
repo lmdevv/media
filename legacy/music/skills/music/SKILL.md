@@ -327,6 +327,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music downloads add --device-id <id> --kind <track|album|playlist> --id <text>`: Download an album, playlist, or song to one of your devices and keep it in sync (up to 500 per device).
 - `music downloads remove --device-id <id> --kind <track|album|playlist> --id <text>`: Stop keeping an album, playlist, or song on a device; the device deletes its files.
 - `music downloads manifest <pin-id>`: List the songs and file revisions a download holds now (read by devices).
+- `music downloads lyrics --held <json>`: List how the lyrics of up to 200 downloaded songs differ from the revisions a device keeps, with the new lyrics (read by devices).
 
 ### likes
 

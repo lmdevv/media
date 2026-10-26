@@ -1,4 +1,4 @@
-import { LyricLine, TrackLyrics } from "@music/commands/lyrics";
+import { LyricLine, OfflineLyrics, TrackLyrics } from "@music/commands/lyrics";
 import { ConvexError } from "convex/values";
 import { Schema } from "effect";
 import * as fc from "fast-check";
@@ -11,10 +11,13 @@ import {
   lyricsCaption,
   lyricsMoment,
   lyricsOffer,
+  offlineLyrics,
 } from "./lyrics";
 import type { LyricsOffer } from "./lyrics";
 
 const decode = Schema.decodeUnknownSync(TrackLyrics);
+
+const decodeOffline = Schema.decodeUnknownSync(OfflineLyrics);
 
 const decodeLines = Schema.decodeUnknownSync(Schema.Array(LyricLine));
 
@@ -70,6 +73,41 @@ describe("lyricsOffer", () => {
     );
     expect(lyricsAnswer(new Error("lyrics.get returned an unexpected result"))).toBe("failed");
     expect(offerOf(new Error("Network error"))).toBe("failed");
+  });
+});
+
+describe("offlineLyrics", () => {
+  const synced = decode({ _tag: "Synced", source: "file", main: syncedSet, extras: [] });
+  const plain = decode({ _tag: "Plain", source: "lrclib", main: plainSet, extras: [] });
+  const none = decode({ _tag: "None" });
+  const kept = decodeOffline({ _tag: "Synced", source: "file", main: syncedSet, extras: [] });
+
+  it("shows the lyrics kept with the download first, loading while they are read", () => {
+    expect(offlineLyrics("loading", kept)).toBe(kept);
+    expect(offlineLyrics(plain, kept)).toBe(kept);
+    expect(offlineLyrics(synced, "loading")).toBe("loading");
+  });
+
+  it("keeps the server's last final answer for a song without kept lyrics", () => {
+    expect(offlineLyrics(plain, null)).toBe(plain);
+    expect(offlineLyrics(decode({ _tag: "Instrumental" }), null)).toEqual({
+      _tag: "Instrumental",
+    });
+  });
+
+  it("shows the song's own words a pending lookup carries, as lyrics from its file", () => {
+    expect(offlineLyrics(decode({ _tag: "Pending", fallback: plainSet }), null)).toEqual({
+      _tag: "Plain",
+      source: "file",
+      main: plainSet,
+      extras: [],
+    });
+  });
+
+  it("shows none rather than loading for good with nothing kept", () => {
+    expect(offlineLyrics("loading", null)).toEqual(none);
+    expect(offlineLyrics("failed", null)).toEqual(none);
+    expect(offlineLyrics(decode({ _tag: "Pending", fallback: null }), null)).toEqual(none);
   });
 });
 

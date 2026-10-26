@@ -351,7 +351,7 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
       bitDepth: scanned.bitDepth,
       artHash: scanned.artHash,
       folderArt: scanned.folderArt,
-      ...lyricsFieldsOf(scanned),
+      ...(await lyricsFieldsOf(scanned)),
       lookupKey: lookupKeyFor({
         title: scanned.title,
         artistName: scanned.artist,

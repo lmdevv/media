@@ -1,12 +1,13 @@
 /**
- * The vault: where a device keeps its downloads, as rows (songs, pins, covers) and files. Each
- * platform implements `VaultStore`; `DownloadSync` is its one writer.
+ * The vault: where a device keeps its downloads, as rows (songs, pins, covers, lyrics) and files.
+ * Each platform implements `VaultStore`; `DownloadSync` is its one writer.
  */
 import type { DownloadPinId, TrackId } from "@music/commands/ids";
+import type { LyricsRevision, OfflineLyrics } from "@music/commands/lyrics";
 import type { DownloadTarget, StreamProfile } from "@music/commands/models";
 import { Data } from "effect";
 
-import type { StoredArt, StoredCopy, StoredPin, VaultView } from "./plan";
+import type { NewLyrics, StoredArt, StoredCopy, StoredPin, VaultView } from "./plan";
 
 /** Everything the vault holds: what the planner reads, and the removals still to confirm. */
 export interface VaultRows extends VaultView {
@@ -35,15 +36,30 @@ export type VaultChange = Data.TaggedEnum<{
   DeleteArt: { readonly hash: string };
   PutRemoval: { readonly key: string; readonly target: DownloadTarget };
   DeleteRemoval: { readonly key: string };
+  /** Adds songs' lyrics, or replaces those they kept, all in one transaction. */
+  PutLyrics: { readonly lyrics: ReadonlyArray<NewLyrics> };
+  /** Deletes songs' lyrics, all in one transaction. */
+  DeleteLyrics: { readonly trackIds: ReadonlyArray<TrackId> };
 }>;
 
 /** Constructors and matchers for `VaultChange`. */
 export const VaultChange = Data.taggedEnum<VaultChange>();
 
+/** Lyrics the vault keeps for a song, read to show them. */
+export interface KeptLyrics {
+  readonly rev: LyricsRevision;
+  readonly lyrics: OfflineLyrics;
+}
+
 /** A device's durable store for its downloads. Rows reach `DownloadSync` parsed. */
 export interface VaultStore {
-  /** Every row. */
+  /** Every row, lyrics without the lyrics themselves. */
   readonly load: () => Promise<VaultRows>;
+  /**
+   * The lyrics kept for a song, or null when it keeps none or they no longer read as lyrics,
+   * which deletes them.
+   */
+  readonly lyrics: (trackId: TrackId) => Promise<KeptLyrics | null>;
   /** Applies one change in one transaction. */
   readonly commit: (change: VaultChange) => Promise<void>;
   /** Every file in the vault, relative to it, for the sweep at start. */
@@ -97,6 +113,20 @@ export const applyChange = (view: VaultRows, change: VaultChange): VaultRows =>
 
       return { ...view, removals };
     },
+    PutLyrics: ({ lyrics }) => {
+      const next = new Map(view.lyrics);
+
+      for (const { trackId, rev, bytes } of lyrics) next.set(trackId, { trackId, rev, bytes });
+
+      return { ...view, lyrics: next };
+    },
+    DeleteLyrics: ({ trackIds }) => {
+      const lyrics = new Map(view.lyrics);
+
+      for (const trackId of trackIds) lyrics.delete(trackId);
+
+      return { ...view, lyrics };
+    },
   });
 
 /** Nothing held: a new vault. */
@@ -104,6 +134,7 @@ export const emptyVault: VaultRows = {
   copies: new Map(),
   pins: new Map(),
   art: new Map(),
+  lyrics: new Map(),
   removals: new Map(),
 };
 

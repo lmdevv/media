@@ -5,6 +5,7 @@
  * manifests, revisions, or files.
  */
 import type { DeviceId, DownloadPinId, TrackId, UserId } from "@music/commands/ids";
+import type { HeldLyrics } from "@music/commands/lyrics";
 import type { DownloadTarget } from "@music/commands/models";
 import {
   canToggleDownload,
@@ -19,6 +20,7 @@ import type {
   DownloadStatus,
   DownloadUsage,
   LocalCopy,
+  LocalLyrics,
   OfflineLibrary,
   SyncPolicy,
   TrackDownloadState,
@@ -141,7 +143,27 @@ function PinWatcher({
   return null;
 }
 
-/** Feeds `sync` this phone's downloads and the manifest of each. Renders nothing visible. */
+/** Reads how one batch of kept songs' lyrics changed and hands it to the sync. Renders nothing. */
+function LyricsWatcher({
+  sync,
+  held,
+}: {
+  readonly sync: DownloadSync;
+  readonly held: ReadonlyArray<HeldLyrics>;
+}) {
+  const changes = useReadSettled("downloads.lyrics", { held: [...held] });
+
+  useEffect(() => {
+    if (changes !== undefined && !(changes instanceof Error)) sync.offerLyrics(changes);
+  }, [sync, changes]);
+
+  return null;
+}
+
+/**
+ * Feeds `sync` this phone's downloads, the manifest of each, and how their songs' lyrics changed.
+ * Renders nothing visible, and again only when the downloads or the lyrics questions change.
+ */
 function ServerFeed({
   sync,
   deviceId,
@@ -151,6 +173,11 @@ function ServerFeed({
 }) {
   const { isWebSocketConnected } = useConvexConnectionState();
   const listed = useReadSettled("downloads.list", { deviceId });
+
+  const lyricsQuestions = useSyncExternalStore(
+    sync.subscribe,
+    () => sync.getSnapshot().lyricsQuestions,
+  );
 
   const pins = useMemo(
     () =>
@@ -168,7 +195,16 @@ function ServerFeed({
     if (pins !== null) sync.offerPins(pins);
   }, [sync, pins]);
 
-  return (pins ?? []).map((pin) => <PinWatcher key={pin.id} sync={sync} pinId={pin.id} />);
+  return (
+    <>
+      {(pins ?? []).map((pin) => (
+        <PinWatcher key={pin.id} sync={sync} pinId={pin.id} />
+      ))}
+      {lyricsQuestions.map((question) => (
+        <LyricsWatcher key={question.key} sync={sync} held={question.held} />
+      ))}
+    </>
+  );
 }
 
 /**
@@ -437,6 +473,25 @@ export const useTrackReachable = (trackId: TrackId | null): boolean => {
   );
 
   return online || held;
+};
+
+/**
+ * The lyrics this phone keeps with a downloaded song, what shows with no server: null for none,
+ * `loading` while they are read from the vault. Reads only this song's lyrics, so it redraws when
+ * they change, not on every download.
+ */
+export const useDownloadedLyrics = (trackId: TrackId | null): LocalLyrics => {
+  const { sync } = useDownloads("useDownloadedLyrics");
+
+  const kept = useSyncExternalStore(sync?.subscribe ?? subscribeToNothing, () =>
+    sync === null || trackId === null ? null : sync.localLyrics(trackId),
+  );
+
+  useEffect(() => {
+    if (kept === "loading" && trackId !== null) sync?.loadLyrics(trackId);
+  }, [sync, trackId, kept]);
+
+  return kept;
 };
 
 /**

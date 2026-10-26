@@ -23,7 +23,7 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
 import { catalogBatch } from "./lib/catalog";
 import { fail } from "./lib/errors";
-import { pauseLookups } from "./lib/lyricLookups";
+import { pauseLookups, STORED_LYRICS_MAX_BYTES } from "./lib/lyricLookups";
 import { lyricsFieldsOf, replaceLocalLyrics } from "./lib/lyrics";
 import { firstOverlap, isClaimed, normaliseLibraryPath } from "./lib/paths";
 import { inOrder } from "./lib/sequence";
@@ -402,12 +402,13 @@ export const saveLocalLyrics = mutation({
         .unique();
 
       if (track === null) return;
-      const fields = lyricsFieldsOf(scanned);
+      const fields = await lyricsFieldsOf(scanned);
 
       if (
         track.lyricsFiles !== fields.lyricsFiles ||
         track.lyricsReader !== fields.lyricsReader ||
         track.lyricsBytes !== fields.lyricsBytes ||
+        track.lyricsHash !== fields.lyricsHash ||
         track.lyricsSynced !== fields.lyricsSynced
       ) {
         await ctx.db.patch(track._id, fields);
@@ -617,24 +618,20 @@ export const claimLookup = mutation({
   },
 });
 
-/**
- * Found lyrics stored at most, as JSON. Convex keeps a document under 1 MiB, and JSON measures
- * it closely but not exactly, so this leaves room.
- */
-const STORED_LYRICS_MAX_BYTES = 800 * 1024;
-
 const decodeLrclibSets = Schema.decodeUnknownResult(Schema.NonEmptyArray(LrclibLyricSet));
 
 /**
- * Stores lyrics LRCLIB found for a lookup and returns the outcome to save: found, or a miss when
- * they break the `LrclibLyricSet` schema or are too large to store, since asking again would get
- * the same record.
+ * Stores lyrics LRCLIB found for a lookup and returns the outcome to save: found, with the size
+ * of what it stored, or a miss when they break the `LrclibLyricSet` schema or are too large to
+ * store, since asking again would get the same record.
  */
 const storeFound = async (
   ctx: MutationCtx,
   lookupId: Id<"lyricLookups">,
   found: { readonly recordId: number; readonly sets: Array<StoredLrclibSet> },
-): Promise<LookupOutcome> => {
+): Promise<
+  { readonly kind: "found"; readonly recordId: number; readonly bytes: number } | { kind: "miss" }
+> => {
   const decoded = decodeLrclibSets(found.sets);
   const bytes = new TextEncoder().encode(JSON.stringify(found.sets)).length;
 
@@ -654,7 +651,7 @@ const storeFound = async (
   if (stored === null) await ctx.db.insert("lrclibLyrics", { lookupId, sets: found.sets });
   else await ctx.db.patch(stored._id, { sets: found.sets });
 
-  return { kind: "found", recordId: found.recordId };
+  return { kind: "found", recordId: found.recordId, bytes };
 };
 
 /**
@@ -685,8 +682,12 @@ export const saveLookup = mutation({
     }
 
     const now = Date.now();
-    const outcome = answer.kind === "found" ? await storeFound(ctx, row._id, answer) : answer;
-    const state = answered(row.state, outcome, now);
+    const stored = answer.kind === "found" ? await storeFound(ctx, row._id, answer) : null;
+    const outcome: LookupOutcome = stored ?? answer;
+    const next = answered(row.state, outcome, now);
+
+    const state =
+      next.status === "found" && stored?.kind === "found" ? { ...next, bytes: stored.bytes } : next;
 
     await ctx.db.patch(row._id, { state });
 

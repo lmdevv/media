@@ -5,6 +5,7 @@
  * retrying failures with backoff. Screens read its snapshot.
  */
 import type { DeviceId, DownloadPinId, TrackId } from "@music/commands/ids";
+import type { LyricsChange, LyricsRevision, OfflineLyrics } from "@music/commands/lyrics";
 import type {
   DownloadManifest,
   DownloadPin,
@@ -13,13 +14,21 @@ import type {
   StreamProfile,
 } from "@music/commands/models";
 import type { Data } from "effect";
-import { Option } from "effect";
+import { Equal, Option } from "effect";
 
 import type { MusicClient } from "../client";
 import { DownloadResult, fetchFinishedFile, FetchOutcome } from "./finished-file";
 import type { Transfer } from "./finished-file";
-import { planSync, SyncStep, targetKey } from "./plan";
-import type { StoredArt, StoredCopy, StoredMember, SyncPolicy } from "./plan";
+import { lyricsQuestions, planSync, SyncStep, targetKey } from "./plan";
+import type {
+  Desired,
+  LyricsQuestion,
+  NewLyrics,
+  StoredArt,
+  StoredCopy,
+  StoredMember,
+  SyncPolicy,
+} from "./plan";
 import { applyChange, artFile, audioFile, emptyVault, VaultChange } from "./vault";
 import type { VaultRows, VaultStore } from "./vault";
 
@@ -40,16 +49,26 @@ const MAX_RETRY_MS = 10 * 60_000;
 /** The wait after a vault write failed (a full disk, say) before planning again. */
 const VAULT_RETRY_MS = 30_000;
 
+/** Songs whose lyrics stay read from the vault: the one playing and those just before it. */
+const LYRICS_CACHE_SIZE = 4;
+
 /** A song this device can play from its own storage. */
 export interface LocalCopy {
   readonly track: OfflineTrack;
   /** The file's URI. */
   readonly uri: string;
   readonly profile: StreamProfile;
+  /** Space the song takes here: its file and its lyrics. */
   readonly bytes: number;
   /** The cover's file, when the vault holds it. */
   readonly artUri: string | null;
 }
+
+/**
+ * The lyrics this device keeps for a song, as Now Playing reads them: none, `loading` while they
+ * are read from the vault (`DownloadSync.loadLyrics`), or the lyrics.
+ */
+export type LocalLyrics = OfflineLyrics | "loading" | null;
 
 /** Where one song a download keeps stands on this device. */
 export type TrackDownloadState = "queued" | "downloading" | "downloaded" | "failed";
@@ -64,7 +83,7 @@ export interface PinView {
 /** Space downloads take on this device. */
 export interface DownloadUsage {
   readonly tracks: number;
-  /** Songs and covers. */
+  /** Songs, covers, and lyrics. */
   readonly bytes: number;
   readonly freeBytes: number | null;
 }
@@ -84,6 +103,12 @@ export interface DownloadsSnapshot {
   /** Every song this device holds. */
   readonly copies: ReadonlyMap<TrackId, LocalCopy>;
   readonly usage: DownloadUsage;
+  /**
+   * What to ask `downloads.lyrics` about, one read per question, while the server answers; hand
+   * its answers to `offerLyrics`. Recomputed once a plan has applied what it could, and the same
+   * array until a question changes.
+   */
+  readonly lyricsQuestions: ReadonlyArray<LyricsQuestion>;
 }
 
 /** What `DownloadSync` works with. */
@@ -128,6 +153,7 @@ export const EMPTY_DOWNLOADS: DownloadsSnapshot = {
   tracks: new Map(),
   copies: new Map(),
   usage: { tracks: 0, bytes: 0, freeBytes: null },
+  lyricsQuestions: [],
 };
 
 /** Resolves after `ms`, or at once when `signal` aborts. */
@@ -178,6 +204,15 @@ export class DownloadSync {
   #lowSpace = false;
   #pins: Option.Option<ReadonlyArray<DownloadPin>> = Option.none();
   readonly #manifests = new Map<DownloadPinId, DownloadManifest>();
+  /** The newest lyrics change the server sent for each song, until the vault holds it. */
+  readonly #lyrics = new Map<TrackId, LyricsChange>();
+  #questions: ReadonlyArray<LyricsQuestion> = [];
+  /** Lyrics read from the vault, oldest first, at most `LYRICS_CACHE_SIZE`. */
+  readonly #readLyrics = new Map<
+    TrackId,
+    { readonly rev: LyricsRevision; readonly lyrics: OfflineLyrics | null }
+  >();
+  readonly #readingLyrics = new Set<TrackId>();
   /**
    * Files of copies that failed to play, not offered again in this session. A whole file stays
    * on disk, since playing may have failed for a passing reason; a broken one is fetched again.
@@ -249,6 +284,14 @@ export class DownloadSync {
     this.#plan();
   }
 
+  /** How the lyrics of kept songs changed, as `downloads.lyrics` answered. */
+  offerLyrics(changes: ReadonlyArray<LyricsChange>): void {
+    if (changes.length === 0) return;
+
+    for (const change of changes) this.#lyrics.set(change.trackId, change);
+    this.#plan();
+  }
+
   /** Whether the server answers. Fetching runs only while it does. */
   setOnline(online: boolean): void {
     if (online === this.#online) return;
@@ -303,6 +346,67 @@ export class DownloadSync {
 
     for (const trackId of members) this.#trackFailures.delete(trackId);
     this.#plan();
+  }
+
+  /**
+   * The lyrics this device keeps for `trackId`: null for none, `loading` until `loadLyrics` read
+   * them. Returns the same value until the vault's rows or the read change.
+   */
+  localLyrics(trackId: TrackId): LocalLyrics {
+    const stored = this.#view.lyrics.get(trackId);
+
+    if (stored === undefined) return null;
+    const read = this.#readLyrics.get(trackId);
+
+    return read?.rev === stored.rev ? read.lyrics : "loading";
+  }
+
+  /**
+   * Reads the lyrics kept for `trackId` from the vault, when `localLyrics` says `loading`, and
+   * tells subscribers once they are in. Lyrics that no longer read as lyrics are forgotten, so
+   * the server sends them again; a read that fails shows none until they change.
+   */
+  loadLyrics(trackId: TrackId): void {
+    const stored = this.#view.lyrics.get(trackId);
+
+    if (
+      stored === undefined ||
+      this.#readLyrics.get(trackId)?.rev === stored.rev ||
+      this.#readingLyrics.has(trackId)
+    ) {
+      return;
+    }
+
+    this.#readingLyrics.add(trackId);
+
+    const read = async (): Promise<void> => {
+      const kept = await this.#options.vault.lyrics(trackId);
+
+      this.#readingLyrics.delete(trackId);
+
+      if (kept === null) {
+        // Newer lyrics were kept while this read found none, so read those instead.
+        if (this.#view.lyrics.get(trackId)?.rev !== stored.rev) {
+          this.loadLyrics(trackId);
+
+          return;
+        }
+
+        await this.#commit(VaultChange.DeleteLyrics({ trackIds: [trackId] }));
+        this.#plan();
+
+        return;
+      }
+
+      this.#rememberLyrics(trackId, kept.rev, kept.lyrics);
+      // The lyrics changed while they were read: read the new ones.
+      this.loadLyrics(trackId);
+    };
+
+    this.#track(read()).catch(() => {
+      this.#readingLyrics.delete(trackId);
+      this.#rememberLyrics(trackId, stored.rev, null);
+    });
   }
 
   /** The copy of `trackId` this device holds, or null. Reads the vault's rows, not a snapshot. */
@@ -467,41 +571,60 @@ export class DownloadSync {
       })
       .finally(() => {
         this.#planning = false;
+        this.#askAgain();
         this.#publish();
 
         if (this.#replan) this.#plan();
       });
   }
 
-  /** Plans once: applies the cheap steps together, then starts the fetches there is room for. */
+  /**
+   * Plans once: applies the cheap steps together, then starts the fetches there is room for. Once
+   * every step applied, the lyrics changes it planned from leave the inbox: the vault holds them,
+   * or they were for songs no download keeps, which are asked about again if one keeps them.
+   */
   async #planOnce(): Promise<void> {
-    const steps = planSync(
-      {
-        pins: this.#pins,
-        manifests: this.#manifests,
-        removing: new Set(this.#view.removals.keys()),
-      },
-      this.#view,
-      this.#options.policy(),
-    );
-
+    const desired = this.#desired();
+    const offered = new Map(this.#lyrics);
+    const steps = planSync(desired, this.#view, this.#options.policy());
     const fetches = steps.filter(SyncStep.$is("Fetch"));
     const covers = steps.filter(SyncStep.$is("FetchArt"));
+    const saved: Array<NewLyrics> = [];
+    const dropped: Array<TrackId> = [];
 
-    // Each step writes its own row and file, so they don't wait on one another.
-    await Promise.all(
-      steps.map((step) =>
+    for (const step of steps) {
+      if (SyncStep.$is("SaveLyrics")(step)) saved.push(step.lyrics);
+
+      if (SyncStep.$is("DropLyrics")(step)) dropped.push(step.trackId);
+    }
+
+    // Each step writes its own row and file, so they don't wait on one another. Lyrics go in
+    // one write each way, so the questions they answer move once.
+    await Promise.all([
+      ...steps.map((step) =>
         SyncStep.$match(step, {
           SavePin: ({ pin }) => this.#commit(VaultChange.PutPin({ pin })),
           ForgetPin: ({ pinId }) => this.#commit(VaultChange.DeletePin({ pinId })),
           Refresh: ({ copy }) => this.#commit(VaultChange.UpdateCopy({ copy })),
           Drop: ({ copy }) => this.#drop(copy),
           DropArt: ({ art }) => this.#dropArt(art),
+          SaveLyrics: () => Promise.resolve(),
+          DropLyrics: () => Promise.resolve(),
           Fetch: () => Promise.resolve(),
           FetchArt: () => Promise.resolve(),
         }),
       ),
-    );
+      saved.length === 0
+        ? Promise.resolve()
+        : this.#commit(VaultChange.PutLyrics({ lyrics: saved })),
+      dropped.length === 0
+        ? Promise.resolve()
+        : this.#commit(VaultChange.DeleteLyrics({ trackIds: dropped })),
+    ]);
+
+    for (const [trackId, change] of offered) {
+      if (this.#lyrics.get(trackId) === change) this.#lyrics.delete(trackId);
+    }
 
     if (this.#stopped) return;
     this.#follow(fetches, covers);
@@ -510,6 +633,36 @@ export class DownloadSync {
 
     if (this.#online && !this.#lowSpace) this.#startFetches(fetches, covers);
     this.#scheduleWake();
+  }
+
+  /** Keeps lyrics read from the vault, forgetting the oldest past `LYRICS_CACHE_SIZE`. */
+  #rememberLyrics(trackId: TrackId, rev: LyricsRevision, lyrics: OfflineLyrics | null): void {
+    this.#readLyrics.delete(trackId);
+    this.#readLyrics.set(trackId, { rev, lyrics });
+
+    for (const old of this.#readLyrics.keys()) {
+      if (this.#readLyrics.size <= LYRICS_CACHE_SIZE) break;
+      this.#readLyrics.delete(old);
+    }
+
+    this.#notify();
+  }
+
+  /** Recomputes what to ask `downloads.lyrics`, keeping the same array while nothing changed. */
+  #askAgain(): void {
+    const questions = lyricsQuestions(this.#desired(), this.#view);
+
+    if (!Equal.equals(questions, this.#questions)) this.#questions = questions;
+  }
+
+  /** What the server wants this device to hold, as far as it has heard. */
+  #desired(): Desired {
+    return {
+      pins: this.#pins,
+      manifests: this.#manifests,
+      removing: new Set(this.#view.removals.keys()),
+      lyrics: this.#lyrics,
+    };
   }
 
   /** Stops fetches the plan no longer wants and forgets their failures. */
@@ -765,7 +918,7 @@ export class DownloadSync {
       track: copy.track,
       uri: uri(copy.file),
       profile: copy.profile,
-      bytes: copy.bytes,
+      bytes: copy.bytes + (this.#view.lyrics.get(copy.track.id)?.bytes ?? 0),
       artUri: art === undefined ? null : uri(art.file),
     };
   }
@@ -821,6 +974,8 @@ export class DownloadSync {
 
     for (const art of this.#view.art.values()) bytes += art.bytes;
 
+    for (const lyrics of this.#view.lyrics.values()) bytes += lyrics.bytes;
+
     this.#snapshot = {
       ready: this.#ready,
       online: this.#online,
@@ -829,8 +984,13 @@ export class DownloadSync {
       tracks: this.#trackStates(copies),
       copies,
       usage: { tracks: copies.size, bytes, freeBytes: this.#options.vault.freeBytes() },
+      lyricsQuestions: this.#questions,
     };
 
+    this.#notify();
+  }
+
+  #notify(): void {
     for (const listener of this.#listeners) listener();
   }
 }

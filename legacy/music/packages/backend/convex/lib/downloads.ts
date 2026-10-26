@@ -4,6 +4,13 @@
  * so every device (phone, desktop, CLI) reads one answer to re-tags, re-encodes, missing files, and
  * lost access.
  */
+import {
+  LyricsChange,
+  LyricsRevision,
+  offlineLyricsOf,
+  resolveLyrics,
+} from "@music/commands/lyrics";
+import type { HeldLyrics } from "@music/commands/lyrics";
 import { PLAYLIST_LIMIT } from "@music/commands/models";
 import type {
   DownloadManifest,
@@ -12,15 +19,19 @@ import type {
   ManifestEntryState,
 } from "@music/commands/models";
 import { fileRevision } from "@music/commands/revision";
-import { Match } from "effect";
+import { Match, Schema } from "effect";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { sha256Hex } from "./crypto";
 import { tableId } from "./ids";
+import { lookupOfRow, lookupRowOf, storedAnswerBytes } from "./lyricLookups";
+import { localLyricsOf } from "./lyrics";
 import { isClaimed } from "./paths";
 import { playlistAccess } from "./playlists";
 import { byDiscAndNumber, contributorOf, makePresenter } from "./present";
 import type { Presenter } from "./present";
+import { inOrder } from "./sequence";
 import { canRead } from "./viewer";
 import type { ReadCtx, Viewer } from "./viewer";
 
@@ -287,4 +298,103 @@ export const repointAlbumPins = async (
       await (kept === null ? ctx.db.patch(pin._id, { target }) : ctx.db.delete(pin._id));
     }),
   );
+};
+
+/**
+ * Lyrics one `downloads.lyrics` read sends, besides the first song's, as their stored JSON,
+ * counted from the sizes songs and lookups keep before any is read. Each song's lyrics are under
+ * 2 MiB (a document of its own lyrics and one of LRCLIB's), so with the songs read to compare
+ * revisions the read stays well inside Convex's 16 MiB.
+ */
+const LYRICS_PAGE_BYTES = 8 * 1024 ** 2;
+
+/** Raised when the rules that resolve offline lyrics change, so every device fetches them again. */
+const OFFLINE_LYRICS_VERSION = "v2";
+
+const encodeChange = Schema.encodeSync(LyricsChange);
+
+/**
+ * What LRCLIB's answer contributes to a revision, read from the lookup's state: a found answer by
+ * when it was stored, as storing new lyrics always moves `fetchedAt`; never a pending one.
+ */
+const answerPart = (lookup: Doc<"lyricLookups"> | null): string => {
+  if (lookup?.state.status === "found") return `found:${lookup._id}:${lookup.state.fetchedAt}`;
+
+  if (lookup?.state.status === "instrumental") return `instrumental:${lookup.state.fetchedAt}`;
+
+  return "";
+};
+
+/**
+ * The revision of a song's offline lyrics, read from the song and its lookup without their
+ * lyrics: the content revision of its own lyrics (`tracks.lyricsHash`) and of LRCLIB's answer.
+ * Null when there is nothing to keep: no lyrics of its own and no answer from LRCLIB.
+ */
+const revisionOf = async (
+  track: Doc<"tracks">,
+  lookup: Doc<"lyricLookups"> | null,
+): Promise<LyricsRevision | null> => {
+  // Lyrics read before hashes were kept are unchanged since: every scan that writes them hashes them.
+  const own = track.lyricsBytes === undefined ? "" : (track.lyricsHash ?? "unhashed");
+  const answer = answerPart(lookup);
+
+  if (own === "" && answer === "") return null;
+  const digest = await sha256Hex(`${OFFLINE_LYRICS_VERSION}|${own}|${answer}`);
+
+  return LyricsRevision.make(`${OFFLINE_LYRICS_VERSION}-${digest.slice(0, 24)}`);
+};
+
+/**
+ * How the lyrics of downloaded songs differ from the revisions a device keeps, in the order it
+ * asked: new lyrics for a song whose revision moved, and a removal for one that has none now or
+ * that the viewer can no longer read. Lyrics are resolved as a device without the server shows
+ * them (`offlineLyricsOf`). Once the lyrics sent would pass `LYRICS_PAGE_BYTES`, later changed
+ * songs wait: the device asks again with the revisions it then keeps.
+ */
+export const lyricsChanges = async (
+  ctx: ReadCtx,
+  viewer: Viewer,
+  held: ReadonlyArray<HeldLyrics>,
+): Promise<Array<(typeof LyricsChange)["Encoded"]>> => {
+  const changes: Array<(typeof LyricsChange)["Encoded"]> = [];
+  let sent = 0;
+
+  await inOrder(held, async ({ trackId, rev }) => {
+    const id = ctx.db.normalizeId("tracks", trackId);
+    const track = id === null ? null : await ctx.db.get(id);
+
+    if (track === null || !canRead(viewer, track.libraryId)) {
+      if (rev !== null) changes.push(encodeChange(LyricsChange.cases.Removed.make({ trackId })));
+
+      return;
+    }
+
+    // A song's own synced lyrics always win, so LRCLIB's answer can't change what it shows.
+    const lookup = track.lyricsSynced === true ? null : await lookupRowOf(ctx, track);
+    const current = await revisionOf(track, lookup);
+
+    if (current === rev) return;
+
+    if (current === null) {
+      changes.push(encodeChange(LyricsChange.cases.Removed.make({ trackId })));
+
+      return;
+    }
+
+    const bytes = (track.lyricsBytes ?? 0) + storedAnswerBytes(lookup);
+
+    if (sent > 0 && sent + bytes > LYRICS_PAGE_BYTES) return;
+    sent += bytes;
+
+    const [local, answer] = await Promise.all([
+      localLyricsOf(ctx, track._id),
+      lookupOfRow(ctx, lookup),
+    ]);
+
+    const lyrics = offlineLyricsOf(resolveLyrics(local, answer, { remoteLookups: "off" }));
+
+    changes.push(encodeChange(LyricsChange.cases.Changed.make({ trackId, rev: current, lyrics })));
+  });
+
+  return changes;
 };

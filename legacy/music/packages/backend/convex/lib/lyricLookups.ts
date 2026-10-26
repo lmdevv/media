@@ -128,16 +128,37 @@ export const pauseLookups = async (
   await ctx.scheduler.runAt(until, internal.lyricLookups.endPause, {});
 };
 
-const decodeSets = Schema.decodeUnknownResult(Schema.NonEmptyArray(LrclibLyricSet));
+/**
+ * Found lyrics stored at most, as JSON. Convex keeps a document under 1 MiB, and JSON measures
+ * it closely but not exactly, so this leaves room.
+ */
+export const STORED_LYRICS_MAX_BYTES = 800 * 1024;
 
 /**
- * What LRCLIB is known to hold for `track`: pending while its lookup is queued, running, or
- * waiting to retry, and its stored answer once it has one. A stored answer that no longer decodes
- * is logged and reads as none.
+ * The size of the lyrics a lookup stored, read from its state without them: 0 unless it found
+ * some, and the most it can store for an answer stored before sizes were kept.
  */
-export const lookupOf = async (ctx: ReadCtx, track: Doc<"tracks">): Promise<LyricsLookup> => {
-  const row = track.lookupKey === undefined ? null : await lookupByKey(ctx, track.lookupKey);
+export const storedAnswerBytes = (row: Doc<"lyricLookups"> | null): number =>
+  row?.state.status === "found" ? (row.state.bytes ?? STORED_LYRICS_MAX_BYTES) : 0;
 
+const decodeSets = Schema.decodeUnknownResult(Schema.NonEmptyArray(LrclibLyricSet));
+
+/** The lookup `track`'s tags make, if any song asked for it. */
+export const lookupRowOf = (
+  ctx: ReadCtx,
+  track: Doc<"tracks">,
+): Promise<Doc<"lyricLookups"> | null> =>
+  track.lookupKey === undefined ? Promise.resolve(null) : lookupByKey(ctx, track.lookupKey);
+
+/**
+ * What LRCLIB is known to hold for a lookup (`lookupRowOf`): pending while it is queued, running,
+ * or waiting to retry, and its stored answer once it has one. A stored answer that no longer
+ * decodes is logged and reads as none.
+ */
+export const lookupOfRow = async (
+  ctx: ReadCtx,
+  row: Doc<"lyricLookups"> | null,
+): Promise<LyricsLookup> => {
   if (row === null) return LyricsLookup.None();
 
   if (row.state.status === "miss") return LyricsLookup.None();
@@ -161,3 +182,7 @@ export const lookupOf = async (ctx: ReadCtx, track: Doc<"tracks">): Promise<Lyri
 
   return LyricsLookup.Found({ sets: decoded.success });
 };
+
+/** What LRCLIB is known to hold for `track` (`lookupOfRow`). */
+export const lookupOf = async (ctx: ReadCtx, track: Doc<"tracks">): Promise<LyricsLookup> =>
+  lookupOfRow(ctx, await lookupRowOf(ctx, track));

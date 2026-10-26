@@ -47,9 +47,12 @@ finished file once the server has it.
 
 `src/downloads` keeps the albums, playlists, and songs someone downloads on this phone. The server
 says what each download holds (`downloads.manifest`); `DownloadSync` from `@music/sdk/downloads`
-plans what to fetch and delete, and fetches finished files with `&finished=1`. Files and a SQLite
-index live in Application Support under `downloads/<server>/<account>/`, which
-`modules/vault-files` marks excluded from backup. Signing out deletes the server's downloads. Screens
+plans what to fetch and delete, and fetches finished files with `&finished=1`. It keeps each
+downloaded song's lyrics too: it asks `downloads.lyrics` with the lyrics revisions it holds and
+stores what changed, so Now Playing shows them with no connection. It lists them at launch
+without the lyrics themselves, and reads a song's lyrics from the vault only to show them. Files and a SQLite index live
+in Application Support under `downloads/<server>/<account>/`, which `modules/vault-files` marks
+excluded from backup. Signing out deletes the server's downloads. Screens
 use the hooks in `src/downloads/index.ts` and never see files or manifests.
 
 To check a download on a simulator, pin it from the CLI with the phone's device ID

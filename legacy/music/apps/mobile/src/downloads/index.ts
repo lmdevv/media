@@ -4,6 +4,7 @@
 export {
   DownloadsProvider,
   useDownload,
+  useDownloadedLyrics,
   useDownloadSettings,
   useDownloadsLibrary,
   useHasDownloads,

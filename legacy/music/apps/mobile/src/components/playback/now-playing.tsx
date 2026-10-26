@@ -8,7 +8,7 @@
  * sliders keep their own drags. With nothing queued it says so (G14).
  */
 import type { TrackId } from "@music/commands/ids";
-import { lyricsAnswer, lyricsOffer } from "@music/player/lyrics";
+import { lyricsAnswer, lyricsOffer, offlineLyrics } from "@music/player/lyrics";
 import type { LyricsAnswer } from "@music/player/lyrics";
 import { useRead, useReadSettled, useRun } from "@music/sdk/react";
 import * as Haptics from "expo-haptics";
@@ -37,10 +37,12 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
+import { useDownloadedLyrics } from "@/downloads";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
 import { usePlayer } from "@/player";
 import type { NowPlaying, PlayerRole } from "@/player";
+import { useServerReach } from "@/session/server-reach";
 
 import { LyricsButton, LyricsPanel } from "./lyrics";
 import { MenuButton } from "./menu-button";
@@ -508,7 +510,7 @@ function Stage({
 
 /** The Now Playing screen. */
 export function NowPlayingScreen() {
-  const { nowPlaying, role, status, error } = usePlayer();
+  const { nowPlaying, role, status, error, ownSession } = usePlayer();
   const tint = useArtTint(nowPlaying?.artUrl ?? null);
   const player = useThemeColor("--color-player");
   const insets = useSafeAreaInsets();
@@ -519,9 +521,15 @@ export function NowPlayingScreen() {
 
   // Read while Now Playing is up, for the lyrics button as much as for the lyrics. Settled, not
   // thrown: a failed read shows in the lyrics instead of taking Now Playing down.
-  const lyrics = lyricsAnswer(
+  const served = lyricsAnswer(
     useReadSettled("lyrics.get", nowPlaying === null ? "skip" : { trackId: nowPlaying.trackId }),
   );
+
+  // Kept lyrics are read from the vault only while the server can't be counted on.
+  const reach = useServerReach();
+  const offline = ownSession || reach !== "online";
+  const held = useDownloadedLyrics(offline ? (nowPlaying?.trackId ?? null) : null);
+  const lyrics = offline ? offlineLyrics(served, held) : served;
 
   useFailureSheet(status === "failed" && role.kind !== "remote", error, nowPlaying?.itemId);
 

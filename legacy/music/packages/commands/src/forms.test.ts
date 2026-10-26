@@ -62,7 +62,7 @@ describe("fieldsOf", () => {
       .filter(isCommandName)
       .filter((name) => fieldsOf(name) === null);
 
-    expect(unreadable).toEqual(["devices.reconcile"]);
+    expect(unreadable).toEqual(["devices.reconcile", "downloads.lyrics"]);
   });
 });
 

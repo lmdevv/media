@@ -3,7 +3,14 @@ import type { DownloadTargetKind } from "@music/commands/models";
 
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
-import { findPin, openTarget, parseTarget, presentPin, resolveManifest } from "../lib/downloads";
+import {
+  findPin,
+  lyricsChanges,
+  openTarget,
+  parseTarget,
+  presentPin,
+  resolveManifest,
+} from "../lib/downloads";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { makePresenter, presentDevice } from "../lib/present";
@@ -98,6 +105,8 @@ export const downloadQueries = {
 
     return resolveManifest(ctx, viewer, pin);
   },
+
+  "downloads.lyrics": (ctx, viewer, args) => lyricsChanges(ctx, viewer, args.held),
 } satisfies Partial<QueryHandlers>;
 
 export const downloadMutations = {

@@ -16,8 +16,11 @@ export { planSync, SyncStep, targetKey } from "./plan";
 
 export type {
   Desired,
+  LyricsQuestion,
+  NewLyrics,
   StoredArt,
   StoredCopy,
+  StoredLyrics,
   StoredMember,
   StoredPin,
   SyncPolicy,
@@ -35,10 +38,11 @@ export type {
   DownloadSyncOptions,
   DownloadUsage,
   LocalCopy,
+  LocalLyrics,
   PinView,
   TrackDownloadState,
 } from "./sync";
 
 export { VaultChange } from "./vault";
 
-export type { VaultRows, VaultStore } from "./vault";
+export type { KeptLyrics, VaultRows, VaultStore } from "./vault";

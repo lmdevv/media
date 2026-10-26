@@ -10,6 +10,7 @@ import { Predicate, Result, Schema } from "effect";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import type { localLyricSet } from "../schema";
+import { sha256Hex } from "./crypto";
 import { fail } from "./errors";
 import type { ReadCtx } from "./viewer";
 
@@ -42,15 +43,17 @@ export const hasSyncedMain = (sets: ReadonlyArray<StoredLyricSet>): boolean =>
   sets.some((set) => set.kind === "main" && Predicate.isTagged(set.body, "Synced"));
 
 /** The fields a track keeps about its own lyrics, for the lyrics a scan read for it. */
-export const lyricsFieldsOf = (scanned: ScannedLyrics) => ({
-  lyricsFiles: scanned.lyricsFiles,
-  lyricsReader: scanned.lyricsReader,
-  lyricsBytes:
-    scanned.lyrics.length === 0
-      ? undefined
-      : new TextEncoder().encode(JSON.stringify(scanned.lyrics)).length,
-  lyricsSynced: hasSyncedMain(scanned.lyrics),
-});
+export const lyricsFieldsOf = async (scanned: ScannedLyrics) => {
+  const json = scanned.lyrics.length === 0 ? null : JSON.stringify(scanned.lyrics);
+
+  return {
+    lyricsFiles: scanned.lyricsFiles,
+    lyricsReader: scanned.lyricsReader,
+    lyricsBytes: json === null ? undefined : new TextEncoder().encode(json).length,
+    lyricsHash: json === null ? undefined : await sha256Hex(json),
+    lyricsSynced: hasSyncedMain(scanned.lyrics),
+  };
+};
 
 /**
  * A song's own lyric sets, in the order the media service found them; none when it has none. A

@@ -417,7 +417,7 @@ export function PlayerProvider({
   }, [session, offline]);
 
   // The session the router says plays: the server's, or this phone's own while it is offline.
-  const { state } = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const { state, mode } = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const local = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
 
   useEffect(() => controller.start(), [controller]);
@@ -475,8 +475,9 @@ export function PlayerProvider({
       error: local.error,
       quality: local.quality,
       following: state?.following ?? false,
+      ownSession: mode === "local",
     }),
-    [status, role, nowPlaying, items, state, local],
+    [status, role, nowPlaying, items, state, local, mode],
   );
 
   const current = useMemo(

@@ -5,6 +5,7 @@
  */
 import { Data, Option, Schema } from "effect";
 
+import { TrackId } from "./ids";
 import { Millis, UNKNOWN_ARTIST } from "./models";
 import { foldSearchText } from "./search-text";
 
@@ -182,6 +183,62 @@ export const TrackLyrics = Schema.TaggedUnion({
 });
 
 export type TrackLyrics = typeof TrackLyrics.Type;
+
+/**
+ * The lyrics a device keeps with a downloaded song (`downloads.lyrics`), as it shows them without
+ * the server: `TrackLyrics` less `Pending`, since a lookup never finishes without the server.
+ */
+export const OfflineLyrics = Schema.Union([
+  TrackLyrics.cases.None,
+  TrackLyrics.cases.Instrumental,
+  TrackLyrics.cases.Synced,
+  TrackLyrics.cases.Plain,
+]).pipe(Schema.toTaggedUnion("_tag"));
+
+export type OfflineLyrics = typeof OfflineLyrics.Type;
+
+/**
+ * `lyrics` as a device without the server shows them: a pending lookup shows the song's own
+ * plain words it carries as its fallback, or none.
+ */
+export const offlineLyricsOf = (lyrics: TrackLyrics): OfflineLyrics => {
+  if (!TrackLyrics.guards.Pending(lyrics)) return lyrics;
+
+  if (lyrics.fallback === null) return OfflineLyrics.cases.None.make({});
+
+  return OfflineLyrics.cases.Plain.make({ source: "file", main: lyrics.fallback, extras: [] });
+};
+
+/**
+ * The version of the lyrics a device keeps with a downloaded song (`downloads.lyrics`): a digest
+ * of the content revisions of the song's own lyrics (`tracks.lyricsHash`) and of LRCLIB's stored
+ * answer for it, and of the rules that resolve them. It moves when either content changes or a
+ * lookup is answered, and never with the song's audio, so new lyrics never fetch the song again.
+ */
+export const LyricsRevision = Schema.NonEmptyString.pipe(Schema.brand("LyricsRevision"));
+
+export type LyricsRevision = typeof LyricsRevision.Type;
+
+/** Songs one `downloads.lyrics` read asks about at most. */
+export const HELD_LYRICS_LIMIT = 200;
+
+/** A downloaded song and the revision of the lyrics the device keeps for it, null for none. */
+export const HeldLyrics = Schema.Struct({ trackId: TrackId, rev: Schema.NullOr(LyricsRevision) });
+
+export interface HeldLyrics extends Schema.Schema.Type<typeof HeldLyrics> {}
+
+/**
+ * How a downloaded song's lyrics differ from what the device keeps (`downloads.lyrics`):
+ *
+ * - `Changed`: keep `lyrics` at `rev`.
+ * - `Removed`: keep none. The song has no lyrics now, or is gone or no longer yours to read.
+ */
+export const LyricsChange = Schema.TaggedUnion({
+  Changed: { trackId: TrackId, rev: LyricsRevision, lyrics: OfflineLyrics },
+  Removed: { trackId: TrackId },
+});
+
+export type LyricsChange = typeof LyricsChange.Type;
 
 /**
  * What LRCLIB is known to hold for a track's lookup: `None` when it was never asked or had

@@ -221,14 +221,19 @@ describe("stored lyrics", () => {
     // A retried batch writes the same lyrics again.
     await save([PLAIN]);
     await save([PLAIN]);
+    const after = await trackDoc();
 
-    expect(await trackDoc()).toEqual({
+    expect(after).toEqual({
       ...before,
       lyricsFiles: "synced.txt:12:3000",
       lyricsReader: 1,
       lyricsBytes: new TextEncoder().encode(JSON.stringify([PLAIN])).length,
+      lyricsHash: after?.lyricsHash,
       lyricsSynced: false,
     });
+    // The content revision moves with the lyrics.
+    expect(after?.lyricsHash).toMatch(/^[\da-f]{64}$/u);
+    expect(after?.lyricsHash).not.toBe(before?.lyricsHash);
     expect(await lyricsOf(member, trackId)).toMatchObject({ _tag: "Plain", main: PLAIN });
     expect((await rows()).length).toBe(2);
 

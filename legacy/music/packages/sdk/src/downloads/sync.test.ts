@@ -10,6 +10,8 @@ import {
   PlaylistId,
   TrackId,
 } from "@music/commands/ids";
+import { LyricsChange, LyricsRevision } from "@music/commands/lyrics";
+import type { OfflineLyrics } from "@music/commands/lyrics";
 import type { DownloadManifest, DownloadPin, OfflineTrack } from "@music/commands/models";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,15 +21,21 @@ import type { Mutation } from "./fake-media";
 import { DownloadResult } from "./finished-file";
 import type { Transfer } from "./finished-file";
 import { nodeTransfer } from "./node-transfer";
+import { lyricsBytes } from "./plan";
 import type { StoredCopy } from "./plan";
 import { downloadStatus, trackDownloadState } from "./status";
 import { DownloadSync } from "./sync";
+import type { LocalLyrics } from "./sync";
 import { applyChange, emptyVault, VaultChange } from "./vault";
-import type { VaultRows, VaultStore } from "./vault";
+import type { KeptLyrics, VaultRows, VaultStore } from "./vault";
 
 /** A vault whose rows live in memory and whose files live in a real directory. */
 class DirectoryVault implements VaultStore {
   view: VaultRows;
+  /** The lyrics themselves, by song, which `view` lists without them. */
+  readonly bodies = new Map<TrackId, KeptLyrics | "unreadable">();
+  /** Songs whose lyrics were read, in order. */
+  readonly lyricsReads: Array<TrackId> = [];
   free: number | null = 64 * 1024 ** 3;
   /** Loads that fail before one works, as an unreadable database would. */
   failingLoads = 0;
@@ -61,6 +69,26 @@ class DirectoryVault implements VaultStore {
 
     await this.hold(change);
     this.view = applyChange(this.view, change);
+
+    if (VaultChange.$is("PutLyrics")(change)) {
+      for (const { trackId, rev, lyrics } of change.lyrics)
+        this.bodies.set(trackId, { rev, lyrics });
+    }
+
+    if (VaultChange.$is("DeleteLyrics")(change)) {
+      for (const trackId of change.trackIds) this.bodies.delete(trackId);
+    }
+  };
+
+  lyrics = async (trackId: TrackId): Promise<KeptLyrics | null> => {
+    this.lyricsReads.push(trackId);
+    const body = this.bodies.get(trackId);
+
+    if (body !== "unreadable") return body ?? null;
+    this.bodies.delete(trackId);
+    this.view = applyChange(this.view, VaultChange.DeleteLyrics({ trackIds: [trackId] }));
+
+    return null;
   };
 
   files = async (): Promise<ReadonlyArray<string>> => {
@@ -241,6 +269,21 @@ const holdingAlbum = async () => {
   }, SETTLE);
 
   return { sync, vault, uri: sync.localCopy(SAFE.id)?.uri ?? "" };
+};
+
+/** The songs and revisions `sync` asks the server about. */
+const asked = (sync: DownloadSync) =>
+  sync.getSnapshot().lyricsQuestions.flatMap((question) => question.held);
+
+/** The lyrics `sync` keeps for `trackId`, once it read them. */
+const readLyrics = async (sync: DownloadSync, trackId: TrackId): Promise<LocalLyrics> => {
+  sync.loadLyrics(trackId);
+
+  await vi.waitFor(() => {
+    expect(sync.localLyrics(trackId)).not.toBe("loading");
+  }, SETTLE);
+
+  return sync.localLyrics(trackId);
 };
 
 describe("DownloadSync", () => {
@@ -636,5 +679,204 @@ describe("DownloadSync", () => {
     expect(mutations).toEqual([
       { name: "downloads.add", args: { deviceId: "phone", kind: "playlist", id: "late-night" } },
     ]);
+  });
+
+  describe("lyrics", () => {
+    const WORDS: OfflineLyrics = {
+      _tag: "Synced",
+      source: "file",
+      main: {
+        kind: "main",
+        lang: null,
+        origin: { _tag: "Embedded", tag: "id3:SYLT" },
+        body: {
+          _tag: "Synced",
+          lines: [{ text: "The first line", startMs: 1000, endMs: null, words: null, voice: null }],
+        },
+      },
+      extras: [],
+    };
+
+    const changed = (rev: string, trackId: TrackId = SAFE.id) =>
+      LyricsChange.cases.Changed.make({ trackId, rev: LyricsRevision.make(rev), lyrics: WORDS });
+
+    it("keeps the lyrics the server sends for a kept song, counts them, and asks with their revision", async () => {
+      const { sync, vault } = await holdingAlbum();
+
+      expect(asked(sync)).toEqual([
+        { trackId: SAFE.id, rev: null },
+        { trackId: UNFINISHED.id, rev: null },
+      ]);
+
+      const before = sync.getSnapshot().usage.bytes;
+      sync.offerLyrics([changed("l1")]);
+
+      await vi.waitFor(() => {
+        expect(sync.localLyrics(SAFE.id)).toBe("loading");
+      }, SETTLE);
+
+      expect(await readLyrics(sync, SAFE.id)).toEqual(WORDS);
+      expect(vault.view.lyrics.get(SAFE.id)?.rev).toBe("l1");
+      expect(asked(sync)).toContainEqual({ trackId: SAFE.id, rev: "l1" });
+      expect(sync.getSnapshot().usage.bytes).toBe(before + lyricsBytes(WORDS));
+      expect(sync.localCopy(SAFE.id)?.bytes).toBe(14 + lyricsBytes(WORDS));
+      expect(sync.localLyrics(UNFINISHED.id)).toBeNull();
+    });
+
+    it("asks again once a first sync kept every song's lyrics, not once per song", async () => {
+      const { sync, vault } = await holdingAlbum();
+      const questions = [sync.getSnapshot().lyricsQuestions];
+
+      const unsubscribe = sync.subscribe(() => {
+        const next = sync.getSnapshot().lyricsQuestions;
+
+        if (next !== questions.at(-1)) questions.push(next);
+      });
+
+      sync.offerLyrics([changed("l1"), changed("l1", UNFINISHED.id)]);
+
+      await vi.waitFor(() => {
+        expect(vault.view.lyrics.size).toBe(2);
+        expect(asked(sync)).toEqual([
+          { trackId: SAFE.id, rev: "l1" },
+          { trackId: UNFINISHED.id, rev: "l1" },
+        ]);
+      }, SETTLE);
+      unsubscribe();
+
+      expect(questions).toHaveLength(2);
+    });
+
+    it("reads kept lyrics only when asked, and keeps few read", async () => {
+      const first = TrackId.make("t1");
+      const last = TrackId.make("t6");
+      const ids = [first, ...["t2", "t3", "t4", "t5"].map((id) => TrackId.make(id)), last];
+      const vault = new DirectoryVault(dir);
+
+      vault.view = {
+        ...emptyVault,
+        pins: new Map([
+          [ALBUM.id, { pin: ALBUM, members: ids.map((trackId) => ({ trackId, state: "held" })) }],
+        ]),
+        lyrics: new Map(
+          ids.map((trackId) => [
+            trackId,
+            { trackId, rev: LyricsRevision.make("l1"), bytes: lyricsBytes(WORDS) },
+          ]),
+        ),
+      };
+
+      for (const trackId of ids) {
+        vault.bodies.set(trackId, { rev: LyricsRevision.make("l1"), lyrics: WORDS });
+      }
+
+      const sync = started(vault);
+
+      await vi.waitFor(() => {
+        expect(sync.getSnapshot().ready).toBe(true);
+      }, SETTLE);
+
+      expect(vault.lyricsReads).toEqual([]);
+      expect(sync.localLyrics(first)).toBe("loading");
+
+      const read: Array<LocalLyrics> = [];
+
+      // One after another, as songs play.
+      await ids.reduce(async (previous, trackId) => {
+        await previous;
+        read.push(await readLyrics(sync, trackId));
+      }, Promise.resolve());
+
+      expect(read).toEqual(ids.map(() => WORDS));
+      expect(vault.lyricsReads).toEqual(ids);
+      expect(sync.localLyrics(first)).toBe("loading");
+      expect(sync.localLyrics(last)).toEqual(WORDS);
+    });
+
+    it("keeps lyrics through a restart with no server, and deletes them with their download", async () => {
+      const { sync, vault } = await holdingAlbum();
+      sync.offerLyrics([changed("l1")]);
+
+      await vi.waitFor(() => {
+        expect(vault.view.lyrics.size).toBe(1);
+      }, SETTLE);
+
+      stops.pop()?.();
+      const relaunched = started(vault);
+
+      await vi.waitFor(() => {
+        expect(relaunched.localLyrics(SAFE.id)).toBe("loading");
+      }, SETTLE);
+      expect(await readLyrics(relaunched, SAFE.id)).toEqual(WORDS);
+
+      relaunched.setOnline(true);
+      relaunched.offerPins([ALBUM]);
+      await relaunched.remove(ALBUM.target);
+
+      await vi.waitFor(() => {
+        expect(vault.view.lyrics.size).toBe(0);
+      }, SETTLE);
+      expect(relaunched.localLyrics(SAFE.id)).toBeNull();
+    });
+
+    it("deletes a song's lyrics once the server says it has none", async () => {
+      const { sync, vault } = await holdingAlbum();
+      sync.offerLyrics([changed("l1")]);
+
+      await vi.waitFor(() => {
+        expect(vault.view.lyrics.size).toBe(1);
+      }, SETTLE);
+
+      sync.offerLyrics([LyricsChange.cases.Removed.make({ trackId: SAFE.id })]);
+
+      await vi.waitFor(() => {
+        expect(sync.localLyrics(SAFE.id)).toBeNull();
+      }, SETTLE);
+      expect(vault.view.lyrics.size).toBe(0);
+    });
+
+    it("reads lyrics saved while a read found none, rather than loading until the song changes", async () => {
+      const { sync, vault } = await holdingAlbum();
+      sync.offerLyrics([changed("l1")]);
+
+      await vi.waitFor(() => {
+        expect(asked(sync)).toContainEqual({ trackId: SAFE.id, rev: "l1" });
+      }, SETTLE);
+
+      const read = vault.lyrics;
+
+      // As when l2 replaces l1 under the read, which finds no row and answers once l2 is kept.
+      vault.lyrics = async () => {
+        vault.lyrics = read;
+        sync.offerLyrics([changed("l2")]);
+
+        await vi.waitFor(() => {
+          expect(asked(sync)).toContainEqual({ trackId: SAFE.id, rev: "l2" });
+        }, SETTLE);
+
+        return null;
+      };
+
+      expect(await readLyrics(sync, SAFE.id)).toEqual(WORDS);
+      expect(vault.view.lyrics.get(SAFE.id)?.rev).toBe("l2");
+    });
+
+    it("asks the server again for lyrics that no longer read, rather than keeping them from memory", async () => {
+      const { sync, vault } = await holdingAlbum();
+      sync.offerLyrics([changed("l1")]);
+
+      await vi.waitFor(() => {
+        expect(asked(sync)).toContainEqual({ trackId: SAFE.id, rev: "l1" });
+      }, SETTLE);
+
+      vault.bodies.set(SAFE.id, "unreadable");
+
+      expect(await readLyrics(sync, SAFE.id)).toBeNull();
+
+      await vi.waitFor(() => {
+        expect(asked(sync)).toContainEqual({ trackId: SAFE.id, rev: null });
+      }, SETTLE);
+      expect(vault.view.lyrics.size).toBe(0);
+    });
   });
 });

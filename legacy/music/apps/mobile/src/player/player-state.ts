@@ -79,6 +79,11 @@ export interface PlayerView {
   readonly quality: StreamQuality;
   /** This phone listens along to someone else's Jam: the queue and position are the host's. */
   readonly following: boolean;
+  /**
+   * The session plays on this phone's own copy of it, as it does without the server, until it is
+   * handed back.
+   */
+  readonly ownSession: boolean;
 }
 
 /**

@@ -3,8 +3,8 @@
  * lyrics button says and whether it opens, the source caption, and which timed line playback is
  * in.
  */
-import { TrackLyrics } from "@music/commands/lyrics";
-import type { LyricLine, LyricsSource } from "@music/commands/lyrics";
+import { offlineLyricsOf, TrackLyrics } from "@music/commands/lyrics";
+import type { LyricLine, LyricsSource, OfflineLyrics } from "@music/commands/lyrics";
 import { commandFailure } from "@music/sdk/errors";
 
 /**
@@ -24,6 +24,24 @@ export const lyricsAnswer = (read: TrackLyrics | Error | undefined): LyricsAnswe
   }
 
   return read;
+};
+
+/**
+ * The lyrics to show while the server can't be counted on (it is out of reach, or this device
+ * plays its own session): those the device keeps with its download (`loading` while it reads
+ * them), else the server's last answer as a device without the server shows it, else none. A
+ * lookup still pending never finishes without the server, so it shows the song's own plain words
+ * it carries, or nothing, rather than loading for good.
+ */
+export const offlineLyrics = (
+  served: LyricsAnswer,
+  held: OfflineLyrics | "loading" | null,
+): LyricsAnswer => {
+  if (held !== null) return held;
+
+  if (served === "loading" || served === "failed") return TrackLyrics.cases.None.make({});
+
+  return offlineLyricsOf(served);
 };
 
 /**

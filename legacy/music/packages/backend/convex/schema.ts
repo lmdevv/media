@@ -176,8 +176,17 @@ export const lookupState = v.union(
     attempts: v.number(),
     retryAt: v.number(),
   }),
-  /** The lyrics are in `lrclibLyrics`, so reading a lookup's state stays small. */
-  v.object({ status: v.literal("found"), fetchedAt: v.number(), recordId: v.number() }),
+  /**
+   * The lyrics are in `lrclibLyrics`, so reading a lookup's state stays small. `bytes` is their
+   * size as JSON, as `tracks.lyricsBytes` is a song's own, so reads can budget them before reading
+   * them; answers stored before it was kept lack it. `fetchedAt` moves with every answer stored.
+   */
+  v.object({
+    status: v.literal("found"),
+    fetchedAt: v.number(),
+    recordId: v.number(),
+    bytes: v.optional(v.number()),
+  }),
   v.object({ status: v.literal("instrumental"), fetchedAt: v.number(), recordId: v.number() }),
   v.object({ status: v.literal("miss"), checkedAt: v.number() }),
 );
@@ -440,6 +449,13 @@ export default defineSchema({
      * deleting them reads them, so scans and purges size their batches by it.
      */
     lyricsBytes: v.optional(v.number()),
+    /**
+     * SHA-256 of this file's `localLyrics` sets as JSON, written with them, so it moves whenever
+     * their content does (`downloads.lyrics` revisions). Absent when it has none, and on tracks
+     * whose lyrics were read before it existed: their lyrics are unchanged since, as every scan
+     * that writes them writes it.
+     */
+    lyricsHash: v.optional(v.string()),
     /**
      * Whether this file's own lyrics include synced main lyrics, so LRCLIB is never asked for
      * it. Absent on tracks scanned before it existed until the `trackLyricsSynced` migration

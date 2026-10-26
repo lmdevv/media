@@ -69,7 +69,7 @@ import {
   TrackPage,
   User,
 } from "./models";
-import { TrackLyrics } from "./lyrics";
+import { HELD_LYRICS_LIMIT, HeldLyrics, LyricsChange, TrackLyrics } from "./lyrics";
 import { Description, Name, Text, hasControlCharacter } from "./text";
 
 const NoArgs = Schema.Struct({});
@@ -460,6 +460,18 @@ export const commands = {
     job: false,
     args: Schema.Struct({ pinId: DownloadPinId }),
     result: DownloadManifest,
+  }),
+  "downloads.lyrics": command({
+    summary: `List how the lyrics of up to ${HELD_LYRICS_LIMIT} downloaded songs differ from the revisions a device keeps, with the new lyrics (read by devices)`,
+    group: "downloads",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: Schema.Struct({
+      // Mutable, as Convex takes the arguments of a query it subscribes to.
+      held: Schema.mutable(Schema.Array(HeldLyrics)).check(Schema.isMaxLength(HELD_LYRICS_LIMIT)),
+    }),
+    result: Schema.Array(LyricsChange),
   }),
 
   // Likes and history

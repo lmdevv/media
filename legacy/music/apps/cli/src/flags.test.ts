@@ -95,7 +95,11 @@ describe("deriveFlags", () => {
       ),
     );
 
-    expect(jsonFlags).toEqual(["devices.reconcile --plays", "devices.reconcile --resume"]);
+    expect(jsonFlags).toEqual([
+      "devices.reconcile --plays",
+      "devices.reconcile --resume",
+      "downloads.lyrics --held",
+    ]);
   });
 
   it("renders usage for each flag type", () => {
