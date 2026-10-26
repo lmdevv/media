@@ -11,6 +11,12 @@ crons.interval(
 );
 
 crons.interval(
+  "release expired lyrics lookup leases",
+  { minutes: 1 },
+  internal.lyricLookups.releaseExpiredLeases,
+);
+
+crons.interval(
   "pause sessions on offline devices",
   { minutes: 1 },
   internal.maintenance.pauseOrphanedSessions,

@@ -171,17 +171,31 @@ id=$(music now --json | jq -r '.queue[.index].id')
 music likes set "$id" --liked
 ```
 
-Read the lyrics of the current song. Lyrics come from the song's own files: a lyric file beside
-it with the same name (`.lrc`, `.elrc`, `.ttml`, `.vtt`, `.srt`, `.txt`, or Lyricsfile `.yaml`,
-and `Song.de.lrc` for a language) or the lyrics in its tags. A scan picks up added, edited, and
-removed lyric files. `_tag` is `Synced` (`.main.body.lines[]` with `startMs`), `Plain`
-(`.main.body.text`), or `None`; `.source` and `.main.origin` say where they came from, and
-`.extras` holds the song's other sets, such as translations:
+Read the lyrics of the current song. Lyrics come from the song's own files first: a lyric file
+beside it with the same name (`.lrc`, `.elrc`, `.ttml`, `.vtt`, `.srt`, `.txt`, or Lyricsfile
+`.yaml`, and `Song.de.lrc` for a language) or the lyrics in its tags. A scan picks up added,
+edited, and removed lyric files. A song without synced lyrics of its own is looked up on LRCLIB
+when it starts playing (with the song after it) or is downloaded, unless an admin turned remote
+lyrics off. `_tag` is `Synced` (`.main.body.lines[]` with `startMs`), `Plain` (`.main.body.text`),
+`Pending` (LRCLIB is being asked; `.fallback` holds the song's own plain lyrics, if any; ask again
+in a few seconds), `Instrumental`, or `None`. `.source` (`file` or `lrclib`) and `.main.origin` say
+where they came from, and `.extras` holds the other sets, such as translations:
 
 ```sh
 id=$(music now --json | jq -r '.queue[.index].id')
 music lyrics get "$id"                          # [mm:ss.xx] lines under a caption, or plain text
 music lyrics get --track-id "$id" --json | jq -r '.main.body.lines[].text'
+```
+
+Look up lyrics for the whole library ahead of time, or turn LRCLIB lookups off (admin). Lookups
+send each song's title, artist, album, and length to lrclib.net, one about every third of a
+second. Lyrics found are kept and never asked for again; a song LRCLIB lacked is asked again only
+after 30 days:
+
+```sh
+music lyrics backfill               # {"libraries": 2}: every library you can read, in the background
+music server update --no-remote-lyrics
+music server settings               # remoteLyrics: false
 ```
 
 Move playback to another device. The list leaves out devices silent for over a day, except the
@@ -382,8 +396,9 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 
 ### server
 
-- `music server settings`: Show server settings, such as whether Jam links can create guest accounts. (admin)
-- `music server update [--jam-guest-accounts | --no-jam-guest-accounts]`: Change server settings: --jam-guest-accounts lets people without an account join a Jam from its link as guests. (admin)
+- `music server settings`: Show server settings: whether Jam links can create guest accounts and whether lyrics are looked up on LRCLIB. (admin)
+- `music server update [--jam-guest-accounts | --no-jam-guest-accounts] [--remote-lyrics | --no-remote-lyrics]`: Change server settings: --jam-guest-accounts lets people without an account join a Jam from its link as guests; --no-remote-lyrics stops looking up lyrics on LRCLIB. (admin)
+- `music lyrics backfill`: Look up lyrics on LRCLIB for every song in the libraries you can read that has no synced lyrics of its own. (admin)
 
 ### jams
 

@@ -167,29 +167,28 @@ const purgeArtists = async (ctx: MutationCtx, libraryId: Id<"libraries">): Promi
 const purgeQueues = async (ctx: MutationCtx, cursor: string | null): Promise<string | null> => {
   const page = await ctx.db.query("playbackQueues").paginate({ cursor, numItems: PURGE_QUEUES });
 
-  await Promise.all(
-    page.page.map(async (row) => {
-      const stored = rowQueue(row);
-      const queue = await normaliseStored(ctx, stored, () => true);
+  // One after another: queues left playing the same song share its lyrics lookup.
+  await inOrder(page.page, async (row) => {
+    const stored = rowQueue(row);
+    const queue = await normaliseStored(ctx, stored, () => true);
 
-      if (!queue.stale) return;
-      await saveQueue(ctx, row.userId, queue);
+    if (!queue.stale) return;
+    await saveQueue(ctx, row.userId, queue);
 
-      // The song playing was deleted: the position belonged to it, so the next song starts over.
-      if (queue.items[queue.index]?.id !== stored.items[stored.index]?.id) {
-        const session = await findSession(ctx, row.userId);
+    // The song playing was deleted: the position belonged to it, so the next song starts over.
+    if (queue.items[queue.index]?.id !== stored.items[stored.index]?.id) {
+      const session = await findSession(ctx, row.userId);
 
-        // With nothing left to play, playback stops.
-        if (session !== null) {
-          await ctx.db.patch(session._id, {
-            positionMs: 0,
-            playing: session.playing && queue.items.length > 0,
-            updatedAt: Date.now(),
-          });
-        }
+      // With nothing left to play, playback stops.
+      if (session !== null) {
+        await ctx.db.patch(session._id, {
+          positionMs: 0,
+          playing: session.playing && queue.items.length > 0,
+          updatedAt: Date.now(),
+        });
       }
-    }),
-  );
+    }
+  });
 
   return page.isDone ? null : page.continueCursor;
 };

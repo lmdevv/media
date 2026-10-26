@@ -956,7 +956,8 @@ export const commands = {
 
   // Server settings
   "server.settings": command({
-    summary: "Show server settings, such as whether Jam links can create guest accounts",
+    summary:
+      "Show server settings: whether Jam links can create guest accounts and whether lyrics are looked up on LRCLIB",
     group: "server",
     kind: "query",
     access: "admin",
@@ -966,13 +967,26 @@ export const commands = {
   }),
   "server.update": command({
     summary:
-      "Change server settings: --jam-guest-accounts lets people without an account join a Jam from its link as guests",
+      "Change server settings: --jam-guest-accounts lets people without an account join a Jam from its link as guests; --no-remote-lyrics stops looking up lyrics on LRCLIB",
     group: "server",
     kind: "mutation",
     access: "admin",
     job: false,
-    args: Schema.Struct({ jamGuestAccounts: Schema.optionalKey(Schema.Boolean) }),
+    args: Schema.Struct({
+      jamGuestAccounts: Schema.optionalKey(Schema.Boolean),
+      remoteLyrics: Schema.optionalKey(Schema.Boolean),
+    }),
     result: Ok,
+  }),
+  "lyrics.backfill": command({
+    summary:
+      "Look up lyrics on LRCLIB for every song in the libraries you can read that has no synced lyrics of its own",
+    group: "server",
+    kind: "mutation",
+    access: "admin",
+    job: false,
+    args: NoArgs,
+    result: Schema.Struct({ libraries: Schema.Int }),
   }),
 
   // Jams

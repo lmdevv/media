@@ -1,11 +1,13 @@
 import { DOWNLOAD_PIN_LIMIT } from "@music/commands/models";
 import type { DownloadTargetKind } from "@music/commands/models";
 
+import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { findPin, openTarget, parseTarget, presentPin, resolveManifest } from "../lib/downloads";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { makePresenter, presentDevice } from "../lib/present";
+import { readServerSettings } from "../lib/serverSettings";
 import type { ReadCtx } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
@@ -129,6 +131,14 @@ export const downloadMutations = {
       deviceId: args.deviceId,
       target,
     });
+
+    // Downloads often play with no connection, so their lyrics are looked up ahead of time.
+    if ((await readServerSettings(ctx)).remoteLyrics) {
+      await ctx.scheduler.runAfter(0, internal.lyricLookups.requestPinned, {
+        target,
+        cursor: null,
+      });
+    }
 
     return { pinId };
   },

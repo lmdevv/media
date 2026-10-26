@@ -15,6 +15,8 @@ import { internal } from "./_generated/api";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
 import { albumSearchText, artistSearchText, trackSearchText } from "./lib/catalog";
+import { lookupKeyFor } from "./lib/lyricLookups";
+import { hasSyncedMain } from "./lib/lyrics";
 import {
   clearedLegacyQueue,
   hasLegacyItems,
@@ -27,6 +29,9 @@ import { hasLegacyCounts, splitLegacyCounts } from "./lib/stats";
 
 /** Rows per batch: a track is well under 2 KB, so a batch stays far below the read limits. */
 const BATCH = 256;
+
+/** `localLyrics` rows per batch: each may near 1 MiB, so a batch stays below the read limit. */
+const LYRICS_BATCH = 8;
 
 interface Batch {
   readonly continueCursor: string;
@@ -171,6 +176,41 @@ const MIGRATIONS = {
 
     return page;
   },
+  /**
+   * Songs scanned before `tracks.lyricsSynced` existed are not marked when their own lyrics are
+   * synced, so LRCLIB would be asked for them. A batch reads a few lyric rows, which can each
+   * come near Convex's 1 MiB document limit.
+   */
+  trackLyricsSynced: async (ctx, cursor) => {
+    const page = await ctx.db.query("localLyrics").paginate({ cursor, numItems: LYRICS_BATCH });
+
+    await Promise.all(
+      page.page.map(async (row) => {
+        const track = await ctx.db.get(row.trackId);
+        const lyricsSynced = hasSyncedMain(row.sets);
+
+        if (track !== null && track.lyricsSynced !== lyricsSynced) {
+          await ctx.db.patch(track._id, { lyricsSynced });
+        }
+      }),
+    );
+
+    return page;
+  },
+  /** Songs scanned before lyrics were looked up on LRCLIB have no lookup key. */
+  trackLookupKeys: async (ctx, cursor) => {
+    const page = await ctx.db.query("tracks").paginate({ cursor, numItems: BATCH });
+
+    await Promise.all(
+      page.page.map(async (track) => {
+        const lookupKey = lookupKeyFor(track);
+
+        if (track.lookupKey !== lookupKey) await ctx.db.patch(track._id, { lookupKey });
+      }),
+    );
+
+    return page;
+  },
 } satisfies Record<string, Migration>;
 
 type MigrationName = keyof typeof MIGRATIONS;
@@ -184,6 +224,8 @@ const migrationName = v.union(
   v.literal("promoteOwner"),
   v.literal("claimLibraryRoots"),
   v.literal("splitLibraryStats"),
+  v.literal("trackLookupKeys"),
+  v.literal("trackLyricsSynced"),
 );
 
 const NAMES: ReadonlyArray<MigrationName> = [
@@ -195,6 +237,8 @@ const NAMES: ReadonlyArray<MigrationName> = [
   "promoteOwner",
   "claimLibraryRoots",
   "splitLibraryStats",
+  "trackLookupKeys",
+  "trackLyricsSynced",
 ];
 
 /**

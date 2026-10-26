@@ -105,6 +105,20 @@ Convex is the only source of truth for product state. The media service is the o
 touches files, and it never decides access: Convex signs each stream URL after checking the user
 can read that library.
 
+## Lyrics lookups
+
+The server looks up lyrics on [LRCLIB](https://lrclib.net) for songs without synced lyrics of
+their own (a `.lrc` file beside the song, or synced lyrics in its tags): when a song starts
+playing, when it is downloaded to a device, and when an admin runs `music lyrics backfill`. Each
+lookup sends the song's title, artist, album, and length, from the server's IP address with the
+User-Agent `music/<version> (+https://github.com/lmdevv/music)`. Lyrics LRCLIB finds, and its
+answer that a song is instrumental, are kept, so that song is not asked again. A song LRCLIB lacks
+is asked again only when it plays, is downloaded, or is backfilled 30 days or more later. While
+LRCLIB is down or asks for fewer requests, every lookup waits, even across a restart, and none is
+taken as a song LRCLIB lacks. Lookups are on by default; an admin turns them off with
+`music server update --no-remote-lyrics` (a switch in the settings follows). Lyrics already found
+keep showing.
+
 ## Development
 
 ```sh

@@ -6,11 +6,13 @@ import {
   LrclibRecordId,
   LyricOrigin,
   LyricsLookup,
+  canLookUp,
   lookupKeyOf,
   parseLang,
   resolveLyrics,
   TrackLyrics,
 } from "./lyrics";
+import { UNKNOWN_ARTIST } from "./models";
 
 const line = (text: string, startMs: number, words = false) => ({
   text,
@@ -207,6 +209,20 @@ const key = (artist: string, title: string, album = "Album", durationMs = 200_00
   lookupKeyOf({ artist, title, album, durationMs });
 
 const titleKey = (text: string) => key("Artist", text).split("|")[2];
+
+describe("canLookUp", () => {
+  const song = { artist: "Artist", title: "Title", album: "", durationMs: 200_000 };
+
+  it("needs a title, an artist, and a length of a whole second", () => {
+    expect(canLookUp(song)).toBe(true);
+    expect(canLookUp({ ...song, title: " (feat. Guest) " })).toBe(false);
+    expect(canLookUp({ ...song, artist: "" })).toBe(false);
+    expect(canLookUp({ ...song, artist: UNKNOWN_ARTIST })).toBe(false);
+    expect(canLookUp({ ...song, artist: "unknown artist" })).toBe(false);
+    expect(canLookUp({ ...song, durationMs: 499 })).toBe(false);
+    expect(canLookUp({ ...song, durationMs: 500 })).toBe(true);
+  });
+});
 
 describe("lookupKeyOf", () => {
   it("versions the key and rounds the duration to whole seconds", () => {

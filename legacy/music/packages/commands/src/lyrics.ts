@@ -5,7 +5,7 @@
  */
 import { Data, Option, Schema } from "effect";
 
-import { Millis } from "./models";
+import { Millis, UNKNOWN_ARTIST } from "./models";
 import { foldSearchText } from "./search-text";
 
 const LANG = /^[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/u;
@@ -145,6 +145,15 @@ export const LocalLyricSet = Schema.Struct({
 });
 
 export interface LocalLyricSet extends Schema.Schema.Type<typeof LocalLyricSet> {}
+
+/** A lyric set from an LRCLIB record. */
+export const LrclibLyricSet = Schema.Struct({
+  ...lyricSetFields,
+  origin: LyricOrigin.cases.Lrclib,
+  body: LyricBody,
+});
+
+export interface LrclibLyricSet extends Schema.Schema.Type<typeof LrclibLyricSet> {}
 
 const SyncedLyricSet = Schema.Struct({ ...lyricSetFields, body: LyricBody.cases.Synced });
 
@@ -336,7 +345,11 @@ const withoutRemaster = (text: string): string =>
     text,
   );
 
-const normalizeTag = (text: string): string =>
+/**
+ * A tag as lookup keys compare it: NFKC, case- and accent-folded, quotes straightened, featured
+ * artists and remaster labels removed, whitespace collapsed.
+ */
+export const normalizeLyricsTag = (text: string): string =>
   withoutRemaster(
     foldSearchText(
       text.normalize("NFKC").replaceAll(SINGLE_QUOTES, "'").replaceAll(DOUBLE_QUOTES, '"'),
@@ -354,6 +367,24 @@ export interface LyricsQuery {
   readonly durationMs: number;
 }
 
+const UNKNOWN = normalizeLyricsTag(UNKNOWN_ARTIST);
+
+/**
+ * Whether LRCLIB can match a song with these tags: its title and artist are not blank once
+ * normalized, its artist is not the one a scan names when the tags have none, and it lasts at
+ * least half a second, so its length rounds to a whole second.
+ */
+export const canLookUp = (query: LyricsQuery): boolean => {
+  const artist = normalizeLyricsTag(query.artist);
+
+  return (
+    normalizeLyricsTag(query.title) !== "" &&
+    artist !== "" &&
+    artist !== UNKNOWN &&
+    Math.round(query.durationMs / 1000) > 0
+  );
+};
+
 /**
  * The lookup key for a track's tags: artist, title, and album case- and accent-folded, with
  * featured artists and remaster labels removed, and the duration in whole seconds. Live,
@@ -364,9 +395,9 @@ export const lookupKeyOf = (query: LyricsQuery): LyricsLookupKey =>
   LyricsLookupKey.make(
     [
       "v1",
-      normalizeTag(query.artist),
-      normalizeTag(query.title),
-      normalizeTag(query.album),
+      normalizeLyricsTag(query.artist),
+      normalizeLyricsTag(query.title),
+      normalizeLyricsTag(query.album),
       String(Math.round(query.durationMs / 1000)),
     ].join("|"),
   );

@@ -86,6 +86,9 @@ export const AssignableRole = Schema.Literals(["admin", "member", "guest"]);
 
 export type AssignableRole = typeof AssignableRole.Type;
 
+/** The artist a scan names for a file whose tags name none. */
+export const UNKNOWN_ARTIST = "Unknown Artist";
+
 export const Track = Schema.Struct({
   id: TrackId,
   title: Schema.String,
@@ -767,6 +770,11 @@ export const ServerSettings = Schema.Struct({
    * password) to join it. Such guests hear nothing outside the Jam.
    */
   jamGuestAccounts: Schema.Boolean,
+  /**
+   * Whether the server looks up lyrics on LRCLIB for songs without synced lyrics of their own,
+   * sending their title, artist, album, and length. On unless an admin turns it off.
+   */
+  remoteLyrics: Schema.Boolean,
 });
 
 export interface ServerSettings extends Schema.Schema.Type<typeof ServerSettings> {}

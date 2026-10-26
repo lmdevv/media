@@ -227,6 +227,7 @@ describe("stored lyrics", () => {
       lyricsFiles: "synced.txt:12:3000",
       lyricsReader: 1,
       lyricsBytes: new TextEncoder().encode(JSON.stringify([PLAIN])).length,
+      lyricsSynced: false,
     });
     expect(await lyricsOf(member, trackId)).toMatchObject({ _tag: "Plain", main: PLAIN });
     expect((await rows()).length).toBe(2);

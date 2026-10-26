@@ -4,16 +4,28 @@
  */
 import type { FolderChain } from "@music/commands/folder-ids";
 import { JobId, LibraryId, type TrackId } from "@music/commands/ids";
-import type { LocalLyricSet } from "@music/commands/lyrics";
+import type { LookupOutcome } from "@music/commands/lyric-lookups";
+import type { LocalLyricSet, LrclibLyricSet } from "@music/commands/lyrics";
 import { ConvexClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
-import { Cause, Context, Effect, Layer, Option, Queue, Redacted, Schema, Stream } from "effect";
+import {
+  type Array as Arr,
+  Cause,
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Queue,
+  Redacted,
+  Schema,
+  Stream,
+} from "effect";
 
 import { cappedBackoff } from "./backoff.ts";
 import { MediaConfig } from "./media-config.ts";
 
 /** A Convex call failed or returned data the service does not understand. */
-class BackendError extends Schema.TaggedError<BackendError>()("BackendError", {
+export class BackendError extends Schema.TaggedError<BackendError>()("BackendError", {
   operation: Schema.String,
   cause: Schema.Defect(),
 }) {
@@ -194,6 +206,36 @@ export type JobOutcome =
   | { readonly status: "done"; readonly message: string }
   | { readonly status: "failed"; readonly error: string };
 
+/** Identifies one LRCLIB lookup (`lyricLookups`). */
+export const LookupId = Schema.String.pipe(Schema.brand("LookupId"));
+
+export type LookupId = typeof LookupId.Type;
+
+const LookupQuery = Schema.Struct({
+  artist: Schema.String,
+  title: Schema.String,
+  album: Schema.String,
+  /** The song's length in whole seconds. */
+  durationS: Schema.Finite,
+});
+
+/** The tags LRCLIB is asked with. */
+export interface LookupQuery extends Schema.Schema.Type<typeof LookupQuery> {}
+
+const QueuedLookup = Schema.Struct({ lookupId: LookupId, query: LookupQuery });
+
+/** A lookup waiting for the worker, or claimed by it. */
+export interface QueuedLookup extends Schema.Schema.Type<typeof QueuedLookup> {}
+
+/** What one try learned (`LookupOutcome`), as `media:saveLookup` takes it: with found lyrics. */
+export type LookupAnswer =
+  | (Extract<LookupOutcome, { readonly kind: "found" }> & {
+      readonly sets: Arr.NonEmptyReadonlyArray<LrclibLyricSet>;
+    })
+  | Exclude<LookupOutcome, { readonly kind: "found" }>;
+
+const SaveResult = Schema.Struct({ saved: Schema.Boolean });
+
 /** One page of fingerprints and the cursor for the next. */
 export interface FingerprintPage extends Schema.Schema.Type<typeof FingerprintPage> {}
 
@@ -287,6 +329,17 @@ const functions = {
   requestScan: makeFunctionReference<"mutation", Secret & { libraryId: string }, unknown>(
     "media:requestScan",
   ),
+  lyricQueue: makeFunctionReference<"query", Secret, unknown>("media:lyricQueue"),
+  claimLookup: makeFunctionReference<
+    "mutation",
+    Secret & { lookupId: string; workerId: string },
+    unknown
+  >("media:claimLookup"),
+  saveLookup: makeFunctionReference<
+    "mutation",
+    Secret & { lookupId: string; workerId: string; answer: LookupAnswer },
+    unknown
+  >("media:saveLookup"),
 };
 
 /** Convex operations the media service uses. */
@@ -379,6 +432,25 @@ export interface Interface {
   ) => Effect.Effect<Option.Option<TrackSource>, BackendError>;
   /** Enqueues a scan unless one is already pending or running. */
   readonly requestScan: (libraryId: LibraryId) => Effect.Effect<void, BackendError>;
+  /**
+   * The LRCLIB lookups waiting to be asked, most urgent first, re-emitted whenever they change.
+   * Empty while remote lyrics are off.
+   */
+  readonly lyricQueue: Stream.Stream<ReadonlyArray<QueuedLookup>, BackendError>;
+  /** Claims a lookup with a 60 second lease; `None` when it is no longer queued. */
+  readonly claimLookup: (
+    lookupId: LookupId,
+    workerId: string,
+  ) => Effect.Effect<Option.Option<QueuedLookup>, BackendError>;
+  /**
+   * Saves what LRCLIB answered for a lookup the worker holds. Returns false when the lease ran
+   * out first, so the answer was dropped.
+   */
+  readonly saveLookup: (
+    lookupId: LookupId,
+    workerId: string,
+    answer: LookupAnswer,
+  ) => Effect.Effect<boolean, BackendError>;
   /** Succeeds when Convex answers an authenticated query. */
   readonly ping: Effect.Effect<void, BackendError>;
 }
@@ -410,6 +482,10 @@ const decodeFingerprints = Schema.decodeUnknownEffect(FingerprintPage);
 const decodeTrackSource = Schema.decodeUnknownEffect(Schema.NullOr(TrackSource));
 
 const decodeArtHashes = Schema.decodeUnknownEffect(ArtHashPage);
+
+const decodeClaimedLookup = Schema.decodeUnknownEffect(Schema.NullOr(QueuedLookup));
+
+const decodeSave = Schema.decodeUnknownEffect(SaveResult);
 
 const call = <A>(operation: string, run: () => Promise<A>): Effect.Effect<A, BackendError> =>
   Effect.tryPromise({ try: run, catch: (cause) => new BackendError({ operation, cause }) }).pipe(
@@ -468,6 +544,38 @@ const make = Effect.gen(function* () {
   return MediaBackend.of({
     pendingJobs: subscribe("pendingJobs", functions.pendingJobs, Schema.Array(PendingJob)),
     libraries: subscribe("libraries", functions.libraries, Schema.Array(LibraryFolder)),
+    lyricQueue: subscribe("lyricQueue", functions.lyricQueue, Schema.Array(QueuedLookup)),
+
+    claimLookup: Effect.fn("MediaBackend.claimLookup")(function* (
+      lookupId: LookupId,
+      workerId: string,
+    ) {
+      const result = yield* call("claimLookup", () =>
+        client.mutation(functions.claimLookup, { secret: secret(), lookupId, workerId }),
+      );
+
+      const claimed = yield* decodeClaimedLookup(result).pipe(
+        Effect.mapError(decodeFailure("claimLookup")),
+      );
+
+      return Option.fromNullOr(claimed);
+    }),
+
+    saveLookup: Effect.fn("MediaBackend.saveLookup")(function* (
+      lookupId: LookupId,
+      workerId: string,
+      answer: LookupAnswer,
+    ) {
+      const result = yield* call("saveLookup", () =>
+        client.mutation(functions.saveLookup, { secret: secret(), lookupId, workerId, answer }),
+      );
+
+      const { saved } = yield* decodeSave(result).pipe(
+        Effect.mapError(decodeFailure("saveLookup")),
+      );
+
+      return saved;
+    }),
 
     claimJob: Effect.fn("MediaBackend.claimJob")(function* (jobId: JobId, workerId: string) {
       const result = yield* call("claimJob", () =>

@@ -30,6 +30,7 @@ const config = Layer.succeed(
     ffmpegPath: join(import.meta.dirname, "throttled-ffmpeg.sh"),
     ffprobePath: "ffprobe",
     musicRoots: null,
+    lrclibUrl: "http://127.0.0.1:9",
   }),
 );
 

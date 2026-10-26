@@ -3,21 +3,39 @@
  * scans, streams, and the job worker to run without a deployment: fingerprints come from earlier
  * upserts, claims and reports are guarded by worker and status, and scan requests collapse into a
  * library's pending or running job. `MemoryMediaBackendControl` adds libraries and inspects state,
- * including the catalog writes each call made.
+ * including the catalog writes each call made. Lyrics lookups are queued by tests and move from
+ * state to state by the rules Convex runs (`@music/commands/lyric-lookups`): the queue lists ten
+ * at most, most urgent first, and hides while LRCLIB is paused. What Convex schedules (a retry
+ * coming due, the end of a pause) waits until a test runs it with `runScheduled`.
  *
  * It keeps tracks only: albums and artists, whose artwork Convex takes from their tracks, list no
  * artwork of their own, so a batch releases a track's old art only.
  */
 import { chainsOverlap, type FolderChain, fsPathsOverlap } from "@music/commands/folder-ids";
 import { JobId, LibraryId, TrackId } from "@music/commands/ids";
+import {
+  LYRIC_QUEUE_SIZE,
+  answered,
+  expiredLease,
+  leased,
+  pauseEnd,
+  queueOrder,
+  retried,
+  type LookupPriority,
+  type LookupState,
+} from "@music/commands/lyric-lookups";
 import { compareText } from "@music/commands/text-order";
-import { Context, Effect, Layer, Option, Stream, SubscriptionRef } from "effect";
+import { Clock, Context, Effect, Layer, Option, Stream, SubscriptionRef } from "effect";
 
 import {
+  BackendError,
   type FingerprintPage,
   type JobOutcome,
   type JobProgress,
   type LibraryFolder,
+  type LookupAnswer,
+  LookupId,
+  type LookupQuery,
   MediaBackend,
   type MoveOutcome,
   type PathRange,
@@ -60,6 +78,20 @@ export interface MemoryJob {
   readonly outcome: JobOutcome | undefined;
 }
 
+/** A lyrics lookup and where it is. */
+export interface MemoryLookup {
+  readonly id: LookupId;
+  readonly query: LookupQuery;
+  readonly state: LookupState;
+  /** The last answer saved for it. */
+  readonly answer: LookupAnswer | undefined;
+}
+
+/** Work Convex schedules for later: a lookup's retry, or the end of the LRCLIB pause. */
+type Scheduled =
+  | { readonly kind: "retry"; readonly lookupId: LookupId }
+  | { readonly kind: "endPause" };
+
 /** What a claim stores: the folder's identities (`@music/commands/folder-ids`) and their boot. */
 interface Claim {
   readonly rootIds: FolderChain;
@@ -86,6 +118,14 @@ interface State {
   readonly tracks: ReadonlyArray<MemoryTrack>;
   readonly jobs: ReadonlyArray<MemoryJob>;
   readonly writes: ReadonlyArray<MemoryWrite>;
+  readonly lookups: ReadonlyArray<MemoryLookup>;
+  /** Saves dropped because the lease had moved on, oldest first. */
+  readonly droppedSaves: ReadonlyArray<LookupId>;
+  /** When the LRCLIB pause ends, while one is in force. */
+  readonly pausedUntil: number | null;
+  readonly scheduled: ReadonlyArray<Scheduled>;
+  /** Claims still to fail, as when Convex is unreachable. */
+  readonly failingClaims: number;
   readonly nextId: number;
 }
 
@@ -105,6 +145,17 @@ export interface ControlInterface {
   readonly jobs: Effect.Effect<ReadonlyArray<MemoryJob>>;
   /** Libraries whose folders are claimed. */
   readonly claimed: Effect.Effect<ReadonlyArray<LibraryId>>;
+  /** Queues a lyrics lookup, as `requestLyrics` does, at backfill priority unless told. */
+  readonly queueLookup: (query: LookupQuery, priority?: LookupPriority) => Effect.Effect<LookupId>;
+  /** Ends a lookup's lease, as the lease cron does. */
+  readonly expireLease: (lookupId: LookupId) => Effect.Effect<void>;
+  /** Runs everything scheduled so far as if its time had come. */
+  readonly runScheduled: Effect.Effect<void>;
+  /** Makes the next claim fail. */
+  readonly failNextClaim: Effect.Effect<void>;
+  readonly lookups: Effect.Effect<ReadonlyArray<MemoryLookup>>;
+  readonly droppedSaves: Effect.Effect<ReadonlyArray<LookupId>>;
+  readonly pausedUntil: Effect.Effect<number | null>;
 }
 
 /** Controls for `layerMemory`. */
@@ -125,6 +176,11 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
         tracks: [],
         jobs: [],
         writes: [],
+        lookups: [],
+        droppedSaves: [],
+        pausedUntil: null,
+        scheduled: [],
+        failingClaims: 0,
         nextId: 1,
       });
 
@@ -185,6 +241,17 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
       });
 
       const changes = SubscriptionRef.changes(state);
+
+      const updateLookup = (
+        lookupId: LookupId,
+        update: (lookup: MemoryLookup) => MemoryLookup,
+      ): Effect.Effect<void> =>
+        SubscriptionRef.update(state, (current) => ({
+          ...current,
+          lookups: current.lookups.map((lookup) =>
+            lookup.id === lookupId ? update(lookup) : lookup,
+          ),
+        }));
 
       const trackAt = (
         libraryId: LibraryId,
@@ -271,6 +338,102 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
             })),
           ),
         ),
+
+        lyricQueue: changes.pipe(
+          Stream.map((current) =>
+            current.pausedUntil === null
+              ? current.lookups
+                  .flatMap((lookup) =>
+                    lookup.state.status === "queued" ? [{ lookup, state: lookup.state }] : [],
+                  )
+                  .toSorted((left, right) => queueOrder(left.state, right.state))
+                  .slice(0, LYRIC_QUEUE_SIZE)
+                  .map(({ lookup }) => ({ lookupId: lookup.id, query: lookup.query }))
+              : [],
+          ),
+          // A Convex subscription sends a query's result again only when it changed.
+          Stream.changesWith(
+            (left, right) =>
+              left.length === right.length &&
+              left.every((entry, position) => entry.lookupId === right[position]?.lookupId),
+          ),
+        ),
+
+        claimLookup: Effect.fn("MemoryMediaBackend.claimLookup")(function* (
+          lookupId: LookupId,
+          workerId: string,
+        ) {
+          const now = yield* Clock.currentTimeMillis;
+
+          const claimed = yield* SubscriptionRef.modify(state, (current) => {
+            if (current.failingClaims > 0) {
+              return [null, { ...current, failingClaims: current.failingClaims - 1 }];
+            }
+
+            const lookup = current.lookups.find((candidate) => candidate.id === lookupId);
+            const paused = current.pausedUntil !== null && current.pausedUntil > now;
+
+            if (lookup?.state.status !== "queued" || paused) return [Option.none(), current];
+            const next = { ...lookup, state: leased(lookup.state, workerId, now) };
+
+            return [
+              Option.some({ lookupId, query: lookup.query }),
+              {
+                ...current,
+                lookups: current.lookups.map((candidate) =>
+                  candidate.id === lookupId ? next : candidate,
+                ),
+              },
+            ];
+          });
+
+          if (claimed === null) {
+            return yield* new BackendError({ operation: "claimLookup", cause: "unreachable" });
+          }
+
+          return claimed;
+        }),
+
+        saveLookup: Effect.fn("MemoryMediaBackend.saveLookup")(function* (
+          lookupId: LookupId,
+          workerId: string,
+          answer: LookupAnswer,
+        ) {
+          const now = yield* Clock.currentTimeMillis;
+
+          return yield* SubscriptionRef.modify(state, (current) => {
+            const lookup = current.lookups.find((candidate) => candidate.id === lookupId);
+
+            if (lookup?.state.status !== "leased" || lookup.state.workerId !== workerId) {
+              return [false, { ...current, droppedSaves: [...current.droppedSaves, lookupId] }];
+            }
+
+            const next = { ...lookup, state: answered(lookup.state, answer, now), answer };
+
+            const pausedUntil =
+              answer.kind === "unavailable"
+                ? pauseEnd(current.pausedUntil, now, answer.pauseMs)
+                : current.pausedUntil;
+
+            const scheduled: ReadonlyArray<Scheduled> = [
+              ...current.scheduled,
+              ...(next.state.status === "waiting" ? [{ kind: "retry", lookupId } as const] : []),
+              ...(answer.kind === "unavailable" ? [{ kind: "endPause" } as const] : []),
+            ];
+
+            return [
+              true,
+              {
+                ...current,
+                pausedUntil,
+                scheduled,
+                lookups: current.lookups.map((candidate) =>
+                  candidate.id === lookupId ? next : candidate,
+                ),
+              },
+            ];
+          });
+        }),
 
         claimRoot: Effect.fn("MemoryMediaBackend.claimRoot")(function* (
           libraryId: LibraryId,
@@ -539,6 +702,63 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
         claimed: SubscriptionRef.get(state).pipe(
           Effect.map((current) => Array.from(current.roots.keys())),
         ),
+        queueLookup: Effect.fn("MemoryMediaBackend.queueLookup")(function* (
+          query: LookupQuery,
+          priority: LookupPriority = "backfill",
+        ) {
+          const id = LookupId.make(yield* allocate("lookup"));
+          const now = yield* Clock.currentTimeMillis;
+
+          const lookup: MemoryLookup = {
+            id,
+            query,
+            state: { status: "queued", priority, requestedAt: now, attempts: 0 },
+            answer: undefined,
+          };
+
+          yield* SubscriptionRef.update(state, (current) => ({
+            ...current,
+            lookups: [...current.lookups, lookup],
+          }));
+
+          return id;
+        }),
+        expireLease: Effect.fn("MemoryMediaBackend.expireLease")(function* (lookupId: LookupId) {
+          const now = yield* Clock.currentTimeMillis;
+
+          yield* updateLookup(lookupId, (lookup) =>
+            lookup.state.status === "leased"
+              ? { ...lookup, state: expiredLease(lookup.state, now) }
+              : lookup,
+          );
+        }),
+        runScheduled: SubscriptionRef.update(state, (current) => {
+          const retries = new Set(
+            current.scheduled.flatMap((work) => (work.kind === "retry" ? [work.lookupId] : [])),
+          );
+
+          return {
+            ...current,
+            scheduled: [],
+            pausedUntil: current.scheduled.some((work) => work.kind === "endPause")
+              ? null
+              : current.pausedUntil,
+            lookups: current.lookups.map((lookup) =>
+              retries.has(lookup.id) && lookup.state.status === "waiting"
+                ? { ...lookup, state: retried(lookup.state, lookup.state.retryAt) ?? lookup.state }
+                : lookup,
+            ),
+          };
+        }),
+        failNextClaim: SubscriptionRef.update(state, (current) => ({
+          ...current,
+          failingClaims: current.failingClaims + 1,
+        })),
+        lookups: SubscriptionRef.get(state).pipe(Effect.map((current) => current.lookups)),
+        droppedSaves: SubscriptionRef.get(state).pipe(
+          Effect.map((current) => current.droppedSaves),
+        ),
+        pausedUntil: SubscriptionRef.get(state).pipe(Effect.map((current) => current.pausedUntil)),
       });
 
       return Context.make(MediaBackend, backend).pipe(

@@ -3,6 +3,7 @@ import { foldSearchText } from "@music/commands/search-text";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { repointAlbumPins } from "./downloads";
+import { lookupKeyFor } from "./lyricLookups";
 import { lyricsFieldsOf, replaceLocalLyrics, type ScannedLyrics } from "./lyrics";
 import { bumpLibraryCounts } from "./stats";
 import { inOrder } from "./sequence";
@@ -351,6 +352,12 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
       artHash: scanned.artHash,
       folderArt: scanned.folderArt,
       ...lyricsFieldsOf(scanned),
+      lookupKey: lookupKeyFor({
+        title: scanned.title,
+        artistName: scanned.artist,
+        albumTitle: scanned.album,
+        durationMs: scanned.durationMs,
+      }),
       missing: false,
       searchText: trackSearchText({
         title: scanned.title,

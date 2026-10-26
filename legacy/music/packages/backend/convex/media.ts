@@ -3,26 +3,41 @@
  * decides user access. Convex never calls the media service; the service subscribes here.
  */
 import { chainsOverlap, fsPathsOverlap } from "@music/commands/folder-ids";
+import {
+  LYRIC_QUEUE_SIZE,
+  PRIORITIES,
+  answered,
+  leased,
+  newestFirst,
+  type LookupOutcome,
+} from "@music/commands/lyric-lookups";
+import { LrclibLyricSet } from "@music/commands/lyrics";
 import { ART_IN_USE_MAX } from "@music/commands/media-limits";
 import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
+import { Result, Schema } from "effect";
 
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
 import { catalogBatch } from "./lib/catalog";
 import { fail } from "./lib/errors";
+import { pauseLookups } from "./lib/lyricLookups";
 import { lyricsFieldsOf, replaceLocalLyrics } from "./lib/lyrics";
 import { firstOverlap, isClaimed, normaliseLibraryPath } from "./lib/paths";
 import { inOrder } from "./lib/sequence";
+import { readServerSettings } from "./lib/serverSettings";
 import { requireService } from "./lib/service";
-import { localLyricSet } from "./schema";
+import { localLyricSet, lrclibLyricSet } from "./schema";
 
 const LEASE_MS = 60_000;
 
 const FINGERPRINT_PAGE = 1000;
 
 const ART_PAGE = 1000;
+
+type StoredLrclibSet = Infer<typeof lrclibLyricSet>;
 
 const lyricsFields = {
   lyricsFiles: v.string(),
@@ -392,7 +407,8 @@ export const saveLocalLyrics = mutation({
       if (
         track.lyricsFiles !== fields.lyricsFiles ||
         track.lyricsReader !== fields.lyricsReader ||
-        track.lyricsBytes !== fields.lyricsBytes
+        track.lyricsBytes !== fields.lyricsBytes ||
+        track.lyricsSynced !== fields.lyricsSynced
       ) {
         await ctx.db.patch(track._id, fields);
       }
@@ -542,5 +558,144 @@ export const requestScan = mutation({
     if (library === null) return null;
 
     return { jobId: await enqueueScan(ctx, library._id, library.ownerId) };
+  },
+});
+
+/**
+ * The LRCLIB lookups waiting for the media service, most urgent first (`queueOrder`). Empty while
+ * remote lyrics are off and while LRCLIB is paused. The media service subscribes to this.
+ */
+export const lyricQueue = query({
+  args: { secret: v.string() },
+  handler: async (ctx, { secret }) => {
+    requireService(secret);
+
+    if (!(await readServerSettings(ctx)).remoteLyrics) return [];
+
+    if ((await ctx.db.query("lrclibPause").first()) !== null) return [];
+
+    const queued = await Promise.all(
+      PRIORITIES.map((priority) =>
+        ctx.db
+          .query("lyricLookups")
+          .withIndex("by_state", (q) =>
+            q.eq("state.status", "queued").eq("state.priority", priority),
+          )
+          .order(newestFirst(priority) ? "desc" : "asc")
+          .take(LYRIC_QUEUE_SIZE),
+      ),
+    );
+
+    return queued
+      .flat()
+      .slice(0, LYRIC_QUEUE_SIZE)
+      .map((row) => ({ lookupId: row._id, query: row.query }));
+  },
+});
+
+/**
+ * Claims a queued lookup with a lease. Returns its query, or null when another worker got it
+ * first, it is no longer queued, remote lyrics were turned off, or LRCLIB is paused.
+ */
+export const claimLookup = mutation({
+  args: { secret: v.string(), lookupId: v.id("lyricLookups"), workerId: v.string() },
+  handler: async (ctx, { secret, lookupId, workerId }) => {
+    requireService(secret);
+    const row = await ctx.db.get(lookupId);
+
+    if (row?.state.status !== "queued") return null;
+
+    if (!(await readServerSettings(ctx)).remoteLyrics) return null;
+    const now = Date.now();
+    const pause = await ctx.db.query("lrclibPause").first();
+
+    if (pause !== null && pause.until > now) return null;
+
+    await ctx.db.patch(row._id, { state: leased(row.state, workerId, now) });
+
+    return { lookupId: row._id, query: row.query };
+  },
+});
+
+/**
+ * Found lyrics stored at most, as JSON. Convex keeps a document under 1 MiB, and JSON measures
+ * it closely but not exactly, so this leaves room.
+ */
+const STORED_LYRICS_MAX_BYTES = 800 * 1024;
+
+const decodeLrclibSets = Schema.decodeUnknownResult(Schema.NonEmptyArray(LrclibLyricSet));
+
+/**
+ * Stores lyrics LRCLIB found for a lookup and returns the outcome to save: found, or a miss when
+ * they break the `LrclibLyricSet` schema or are too large to store, since asking again would get
+ * the same record.
+ */
+const storeFound = async (
+  ctx: MutationCtx,
+  lookupId: Id<"lyricLookups">,
+  found: { readonly recordId: number; readonly sets: Array<StoredLrclibSet> },
+): Promise<LookupOutcome> => {
+  const decoded = decodeLrclibSets(found.sets);
+  const bytes = new TextEncoder().encode(JSON.stringify(found.sets)).length;
+
+  if (Result.isFailure(decoded) || bytes > STORED_LYRICS_MAX_BYTES) {
+    const reason = Result.isFailure(decoded) ? decoded.failure.message : `${bytes} bytes`;
+
+    console.error(`LRCLIB record ${found.recordId} for ${lookupId} cannot be stored: ${reason}`);
+
+    return { kind: "miss" };
+  }
+
+  const stored = await ctx.db
+    .query("lrclibLyrics")
+    .withIndex("by_lookup", (q) => q.eq("lookupId", lookupId))
+    .unique();
+
+  if (stored === null) await ctx.db.insert("lrclibLyrics", { lookupId, sets: found.sets });
+  else await ctx.db.patch(stored._id, { sets: found.sets });
+
+  return { kind: "found", recordId: found.recordId };
+};
+
+/**
+ * Saves what one try learned for a lookup the worker still holds (`LookupOutcome`), with the
+ * lyrics when LRCLIB found some. A failed try waits for its retry; LRCLIB being unavailable puts
+ * the lookup back and pauses every lookup for `pauseMs`. A worker whose lease ran out saves
+ * nothing, and `saved` is false.
+ */
+export const saveLookup = mutation({
+  args: {
+    secret: v.string(),
+    lookupId: v.id("lyricLookups"),
+    workerId: v.string(),
+    answer: v.union(
+      v.object({ kind: v.literal("found"), recordId: v.number(), sets: v.array(lrclibLyricSet) }),
+      v.object({ kind: v.literal("instrumental"), recordId: v.number() }),
+      v.object({ kind: v.literal("miss") }),
+      v.object({ kind: v.literal("failed") }),
+      v.object({ kind: v.literal("unavailable"), pauseMs: v.number() }),
+    ),
+  },
+  handler: async (ctx, { secret, lookupId, workerId, answer }) => {
+    requireService(secret);
+    const row = await ctx.db.get(lookupId);
+
+    if (row?.state.status !== "leased" || row.state.workerId !== workerId) {
+      return { saved: false };
+    }
+
+    const now = Date.now();
+    const outcome = answer.kind === "found" ? await storeFound(ctx, row._id, answer) : answer;
+    const state = answered(row.state, outcome, now);
+
+    await ctx.db.patch(row._id, { state });
+
+    if (state.status === "waiting") {
+      await ctx.scheduler.runAt(state.retryAt, internal.lyricLookups.requeue, { lookupId });
+    }
+
+    if (outcome.kind === "unavailable") await pauseLookups(ctx, now, outcome.pauseMs);
+
+    return { saved: true };
   },
 });

@@ -32,6 +32,7 @@ import {
   loadQueue,
   newItems,
   normaliseStored,
+  requestPlayingLyrics,
   saveQueue,
   storedQueue,
 } from "../lib/queue";
@@ -706,6 +707,7 @@ export const playbackMutations = {
     });
 
     await saveQueue(ctx, viewer.id, next);
+    await requestPlayingLyrics(ctx, next);
 
     await restartSession(ctx, session, {
       playing: true,
@@ -743,6 +745,7 @@ export const playbackMutations = {
 
     if (queue.items.length === 0) return fail("conflict", "The queue is empty");
     await saveQueue(ctx, viewer.id, queue);
+    await requestPlayingLyrics(ctx, queue);
     const activeDeviceId = await defaultDevice(ctx, viewer, session);
     await ctx.db.patch(session._id, { playing: true, updatedAt: Date.now(), activeDeviceId });
 
@@ -800,7 +803,10 @@ export const playbackMutations = {
       queue.repeat,
     );
 
-    await saveQueue(ctx, viewer.id, { ...queue, index, reportedTrackId: undefined });
+    const restarted = { ...queue, index, reportedTrackId: undefined };
+
+    await saveQueue(ctx, viewer.id, restarted);
+    await requestPlayingLyrics(ctx, restarted);
     await restartSession(ctx, session);
 
     return ok;
@@ -830,11 +836,10 @@ export const playbackMutations = {
 
     if (index === null) return fail("not_found", GONE_MESSAGE);
 
-    await saveQueue(
-      ctx,
-      viewer.id,
-      await toppedUp(ctx, viewer, { ...queue, index, reportedTrackId: undefined }),
-    );
+    const jumped = await toppedUp(ctx, viewer, { ...queue, index, reportedTrackId: undefined });
+
+    await saveQueue(ctx, viewer.id, jumped);
+    await requestPlayingLyrics(ctx, jumped);
 
     await restartSession(ctx, session, {
       playing: true,

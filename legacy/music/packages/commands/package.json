@@ -22,7 +22,8 @@
     "./forms": "./src/forms.ts",
     "./queue-rules": "./src/queue-rules.ts",
     "./session-commands": "./src/session-commands.ts",
-    "./lyrics": "./src/lyrics.ts"
+    "./lyrics": "./src/lyrics.ts",
+    "./lyric-lookups": "./src/lyric-lookups.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

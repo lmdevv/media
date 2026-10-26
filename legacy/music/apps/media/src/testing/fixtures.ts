@@ -108,6 +108,7 @@ export const testConfig = (
       ffmpegPath,
       ffprobePath: "ffprobe",
       musicRoots,
+      lrclibUrl: "http://127.0.0.1:9",
     }),
   );
 

@@ -18,17 +18,18 @@ includes every dependency, `music-metadata` too; `dist/` needs nothing else at r
 
 ## Configuration
 
-| Variable               | Default   | Meaning                                          |
-| ---------------------- | --------- | ------------------------------------------------ |
-| `CONVEX_URL`           | required  | Convex deployment URL                            |
-| `MEDIA_SERVICE_SECRET` | required  | Shared secret for the `media:*` Convex functions |
-| `STREAM_SIGNING_KEY`   | required  | HMAC key Convex signs stream and art URLs with   |
-| `MEDIA_DATA_DIR`       | required  | Holds `art/<sha256>` and the transcode `cache/`  |
-| `PORT`                 | `4100`    | HTTP port                                        |
-| `MEDIA_CACHE_MAX_MB`   | `2048`    | Transcode cache size before LRU eviction         |
-| `MEDIA_RESCAN_MINUTES` | `60`      | Periodic rescan, for file systems without events |
-| `FFMPEG_PATH`          | `ffmpeg`  | ffmpeg binary                                    |
-| `FFPROBE_PATH`         | `ffprobe` | ffprobe binary                                   |
+| Variable               | Default              | Meaning                                          |
+| ---------------------- | -------------------- | ------------------------------------------------ |
+| `CONVEX_URL`           | required             | Convex deployment URL                            |
+| `MEDIA_SERVICE_SECRET` | required             | Shared secret for the `media:*` Convex functions |
+| `STREAM_SIGNING_KEY`   | required             | HMAC key Convex signs stream and art URLs with   |
+| `MEDIA_DATA_DIR`       | required             | Holds `art/<sha256>` and the transcode `cache/`  |
+| `PORT`                 | `4100`               | HTTP port                                        |
+| `MEDIA_CACHE_MAX_MB`   | `2048`               | Transcode cache size before LRU eviction         |
+| `MEDIA_RESCAN_MINUTES` | `60`                 | Periodic rescan, for file systems without events |
+| `FFMPEG_PATH`          | `ffmpeg`             | ffmpeg binary                                    |
+| `FFPROBE_PATH`         | `ffprobe`            | ffprobe binary                                   |
+| `LRCLIB_URL`           | `https://lrclib.net` | Where lyrics are looked up                       |
 
 ## HTTP
 

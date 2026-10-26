@@ -380,7 +380,11 @@ export const jamMutations = {
   "server.update": async (ctx, _viewer, args) => {
     const row = await ctx.db.query("serverSettings").first();
     const current = await readServerSettings(ctx);
-    const next = { jamGuestAccounts: args.jamGuestAccounts ?? current.jamGuestAccounts };
+
+    const next = {
+      jamGuestAccounts: args.jamGuestAccounts ?? current.jamGuestAccounts,
+      remoteLyrics: args.remoteLyrics ?? current.remoteLyrics,
+    };
 
     if (row === null) await ctx.db.insert("serverSettings", next);
     else await ctx.db.patch(row._id, next);

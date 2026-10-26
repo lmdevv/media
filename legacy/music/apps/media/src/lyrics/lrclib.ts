@@ -1,5 +1,10 @@
 /** Reads an LRCLIB lyrics record (https://lrclib.net/docs) through the same parsers as files. */
-import { LrclibRecordId, LyricBody, LyricOrigin, type LyricSet } from "@music/commands/lyrics";
+import {
+  type LrclibLyricSet,
+  LrclibRecordId,
+  LyricBody,
+  LyricOrigin,
+} from "@music/commands/lyrics";
 import { Array as Arr, Data, Result, Schema } from "effect";
 
 import {
@@ -28,7 +33,10 @@ const decodeRecord = Schema.decodeResult(Schema.fromJsonString(LrclibRecord));
  * but has no lyrics, which counts as a miss).
  */
 export type LrclibLyrics = Data.TaggedEnum<{
-  Found: { readonly recordId: LrclibRecordId; readonly sets: Arr.NonEmptyReadonlyArray<LyricSet> };
+  Found: {
+    readonly recordId: LrclibRecordId;
+    readonly sets: Arr.NonEmptyReadonlyArray<LrclibLyricSet>;
+  };
   Instrumental: { readonly recordId: LrclibRecordId };
   Empty: { readonly recordId: LrclibRecordId };
 }>;
@@ -75,7 +83,7 @@ const readRecord = (json: string): Result.Result<LrclibLyrics, LyricsParseError>
         return Result.succeed(
           LrclibLyrics.Found({
             recordId,
-            sets: Arr.map(best, (set): LyricSet => ({
+            sets: Arr.map(best, (set): LrclibLyricSet => ({
               ...set,
               origin: LyricOrigin.cases.Lrclib.make({ recordId }),
             })),

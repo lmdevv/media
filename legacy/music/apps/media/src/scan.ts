@@ -12,6 +12,7 @@ import { Buffer } from "node:buffer";
 import { basename, dirname, join } from "node:path";
 
 import type { LibraryId } from "@music/commands/ids";
+import { UNKNOWN_ARTIST } from "@music/commands/models";
 import { compareText } from "@music/commands/text-order";
 import { Cache, Effect, HashSet, Option, Ref, Schema, Stream } from "effect";
 
@@ -348,7 +349,7 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
       mtimeMs: file.mtimeMs,
       title:
         tags.title ?? (extension === "" ? fileName : fileName.slice(0, -(extension.length + 1))),
-      artist: tags.artist ?? tags.albumArtist ?? "Unknown Artist",
+      artist: tags.artist ?? tags.albumArtist ?? UNKNOWN_ARTIST,
       albumArtist: tags.albumArtist,
       album: tags.album ?? (folder === "." ? "Unknown Album" : basename(folder)),
       trackNumber: tags.trackNumber,

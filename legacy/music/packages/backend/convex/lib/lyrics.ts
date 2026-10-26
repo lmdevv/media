@@ -5,7 +5,7 @@
  */
 import { LocalLyricSet } from "@music/commands/lyrics";
 import type { Infer } from "convex/values";
-import { Result, Schema } from "effect";
+import { Predicate, Result, Schema } from "effect";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
@@ -37,6 +37,10 @@ const rowOf = (ctx: ReadCtx, trackId: Id<"tracks">): Promise<Doc<"localLyrics"> 
     .withIndex("by_track", (q) => q.eq("trackId", trackId))
     .unique();
 
+/** Whether a song's own lyric sets include synced main lyrics, which LRCLIB never replaces. */
+export const hasSyncedMain = (sets: ReadonlyArray<StoredLyricSet>): boolean =>
+  sets.some((set) => set.kind === "main" && Predicate.isTagged(set.body, "Synced"));
+
 /** The fields a track keeps about its own lyrics, for the lyrics a scan read for it. */
 export const lyricsFieldsOf = (scanned: ScannedLyrics) => ({
   lyricsFiles: scanned.lyricsFiles,
@@ -45,6 +49,7 @@ export const lyricsFieldsOf = (scanned: ScannedLyrics) => ({
     scanned.lyrics.length === 0
       ? undefined
       : new TextEncoder().encode(JSON.stringify(scanned.lyrics)).length,
+  lyricsSynced: hasSyncedMain(scanned.lyrics),
 });
 
 /**

@@ -23,6 +23,13 @@ export const jobStatus = v.union(
   v.literal("cancelled"),
 );
 
+/** The song, album, or playlist a download pin keeps. */
+export const pinTarget = v.union(
+  v.object({ kind: v.literal("track"), id: v.id("tracks") }),
+  v.object({ kind: v.literal("album"), id: v.id("albums") }),
+  v.object({ kind: v.literal("playlist"), id: v.id("playlists") }),
+);
+
 export const repeatMode = v.union(v.literal("off"), v.literal("all"), v.literal("one"));
 
 export const deviceKind = v.union(v.literal("web"), v.literal("phone"), v.literal("cli"));
@@ -82,6 +89,13 @@ const lyricLine = v.object({
   voice: v.union(v.string(), v.null()),
 });
 
+const lyricKind = v.union(v.literal("main"), v.literal("translation"), v.literal("pronunciation"));
+
+const lyricBody = v.union(
+  v.object({ _tag: v.literal("Synced"), lines: v.array(lyricLine) }),
+  v.object({ _tag: v.literal("Plain"), text: v.string() }),
+);
+
 /**
  * One of a song's own lyric sets as `LocalLyricSet` in `@music/commands/lyrics` encodes it: from
  * a file beside the song or a tag inside it, never LRCLIB. The validator checks its shape; the
@@ -89,7 +103,7 @@ const lyricLine = v.object({
  * (`lib/lyrics.ts`).
  */
 export const localLyricSet = v.object({
-  kind: v.union(v.literal("main"), v.literal("translation"), v.literal("pronunciation")),
+  kind: lyricKind,
   lang: v.union(v.string(), v.null()),
   origin: v.union(
     v.object({
@@ -118,11 +132,55 @@ export const localLyricSet = v.object({
       ),
     }),
   ),
-  body: v.union(
-    v.object({ _tag: v.literal("Synced"), lines: v.array(lyricLine) }),
-    v.object({ _tag: v.literal("Plain"), text: v.string() }),
-  ),
+  body: lyricBody,
 });
+
+/**
+ * A lyric set LRCLIB returned, as `LrclibLyricSet` in `@music/commands/lyrics` encodes it, checked
+ * like `localLyricSet` (`lib/lyricLookups.ts`).
+ */
+export const lrclibLyricSet = v.object({
+  kind: lyricKind,
+  lang: v.union(v.string(), v.null()),
+  origin: v.object({ _tag: v.literal("Lrclib"), recordId: v.number() }),
+  body: lyricBody,
+});
+
+/** `LookupPriority` in `@music/commands/lyric-lookups`. */
+export const lookupPriority = v.union(v.literal("play"), v.literal("pin"), v.literal("backfill"));
+
+/**
+ * `LookupState` in `@music/commands/lyric-lookups`, which moves it from one state to the next.
+ * `attempts` counts the tries that failed on the lookup's own record (an answer LRCLIB gave that
+ * could not be read, a lost lease); LRCLIB being unavailable counts none.
+ */
+export const lookupState = v.union(
+  v.object({
+    status: v.literal("queued"),
+    priority: lookupPriority,
+    requestedAt: v.number(),
+    attempts: v.number(),
+  }),
+  v.object({
+    status: v.literal("leased"),
+    priority: lookupPriority,
+    requestedAt: v.number(),
+    attempts: v.number(),
+    workerId: v.string(),
+    leaseUntil: v.number(),
+  }),
+  v.object({
+    status: v.literal("waiting"),
+    priority: lookupPriority,
+    requestedAt: v.number(),
+    attempts: v.number(),
+    retryAt: v.number(),
+  }),
+  /** The lyrics are in `lrclibLyrics`, so reading a lookup's state stays small. */
+  v.object({ status: v.literal("found"), fetchedAt: v.number(), recordId: v.number() }),
+  v.object({ status: v.literal("instrumental"), fetchedAt: v.number(), recordId: v.number() }),
+  v.object({ status: v.literal("miss"), checkedAt: v.number() }),
+);
 
 export default defineSchema({
   ...authTables,
@@ -382,6 +440,17 @@ export default defineSchema({
      * deleting them reads them, so scans and purges size their batches by it.
      */
     lyricsBytes: v.optional(v.number()),
+    /**
+     * Whether this file's own lyrics include synced main lyrics, so LRCLIB is never asked for
+     * it. Absent on tracks scanned before it existed until the `trackLyricsSynced` migration
+     * reads their lyrics.
+     */
+    lyricsSynced: v.optional(v.boolean()),
+    /**
+     * The LRCLIB lookup this song's tags make (`lookupKeyOf`), set by every upsert. Absent when
+     * the title or artist is blank or the length unknown: such a song is never looked up.
+     */
+    lookupKey: v.optional(v.string()),
     missing: v.boolean(),
     /** Title, artist, and album, folded for accent-insensitive search. */
     searchText: v.string(),
@@ -396,6 +465,7 @@ export default defineSchema({
     .index("by_album_art", ["albumId", "missing", "artHash"])
     .index("by_artist_art", ["artistId", "missing", "artHash"])
     .index("by_art", ["artHash"])
+    .index("by_lookup_key", ["lookupKey"])
     .searchIndex("search_text", {
       searchField: "searchText",
       filterFields: ["libraryId", "missing"],
@@ -411,6 +481,41 @@ export default defineSchema({
     /** Never empty: a song without lyrics has no row. */
     sets: v.array(localLyricSet),
   }).index("by_track", ["trackId"]),
+
+  /**
+   * LRCLIB lookups, one per lookup key, so songs whose tags normalize alike share one request.
+   * Requests come from playback, downloads, and backfills (`requestLyrics`); the media service
+   * claims queued rows, asks LRCLIB, and saves the answer. A found or instrumental answer is kept
+   * for good; a miss is asked again only when a song asks after 30 days.
+   */
+  lyricLookups: defineTable({
+    key: v.string(),
+    /** The tags LRCLIB is asked with, from the song that asked first. */
+    query: v.object({
+      artist: v.string(),
+      title: v.string(),
+      album: v.string(),
+      durationS: v.number(),
+    }),
+    state: lookupState,
+  })
+    .index("by_key", ["key"])
+    // The media service takes queued rows by priority, oldest first.
+    .index("by_state", ["state.status", "state.priority", "state.requestedAt"]),
+
+  /**
+   * While LRCLIB is paused: after it was unavailable or asked for no requests (`Retry-After`),
+   * the media service sees no queue until `until`, even after a restart. One row at most, deleted
+   * when the pause ends (`lyricLookups:endPause`).
+   */
+  lrclibPause: defineTable({ until: v.number() }),
+
+  /** The lyrics of a found lookup: one row per `lyricLookups` row whose state is `found`. */
+  lrclibLyrics: defineTable({
+    lookupId: v.id("lyricLookups"),
+    /** Never empty. */
+    sets: v.array(lrclibLyricSet),
+  }).index("by_lookup", ["lookupId"]),
 
   playlists: defineTable({
     ownerId: v.id("users"),
@@ -487,11 +592,7 @@ export default defineSchema({
      * and the prune keeps a device that holds one (`maintenance:pruneStaleDevices`).
      */
     deviceId: v.string(),
-    target: v.union(
-      v.object({ kind: v.literal("track"), id: v.id("tracks") }),
-      v.object({ kind: v.literal("album"), id: v.id("albums") }),
-      v.object({ kind: v.literal("playlist"), id: v.id("playlists") }),
-    ),
+    target: pinTarget,
   })
     .index("by_user_device", ["userId", "deviceId", "target.kind", "target.id"])
     // A retag that empties an album moves its pins to the album its songs went to.
@@ -627,6 +728,8 @@ export default defineSchema({
   /** Server-wide settings admins change; one row, created on first change. */
   serverSettings: defineTable({
     jamGuestAccounts: v.boolean(),
+    /** Whether lyrics are looked up on LRCLIB; absent means on. */
+    remoteLyrics: v.optional(v.boolean()),
   }),
 
   /** Progress of each data migration in `migrations.ts`, so an interrupted one resumes. */

@@ -6,10 +6,11 @@
  * they mean: a remove or move sent from one device while another device changed the queue still
  * reaches the right row, or fails when that row is gone.
  */
-import { keptOrder } from "@music/commands/queue-rules";
+import { keptOrder, nextIndex } from "@music/commands/queue-rules";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { requestLyricsFor } from "./lyricLookups";
 import { findSession } from "./playback";
 import { canRead } from "./viewer";
 import type { ReadCtx, Viewer } from "./viewer";
@@ -287,10 +288,29 @@ const sameItems = (
     );
   });
 
+/** The songs playing and up next in `queue`, which lyrics are looked up for. */
+const playingTrackIds = (
+  queue: Pick<StoredQueue, "items" | "index" | "repeat">,
+): ReadonlyArray<TrackId> => {
+  const next = nextIndex(queue.index, queue.items.length, queue.repeat);
+
+  return [queue.items[queue.index], next === null ? undefined : queue.items[next]].flatMap(
+    (item) => (item === undefined ? [] : [item.trackId]),
+  );
+};
+
+/**
+ * Looks up lyrics for the songs playing and up next in `queue`, at play priority, so both are
+ * there by the time they play (see `requestLyrics`). Asking again for a song already asked for
+ * costs nothing.
+ */
+export const requestPlayingLyrics = (ctx: MutationCtx, queue: StoredQueue): Promise<void> =>
+  requestLyricsFor(ctx, playingTrackIds(queue), "play");
+
 /**
  * Saves the user's queue to its own row, creating it (and clearing the legacy session fields) on
  * the first write. Writes nothing when the row already holds `next`, so readers of the queue only
- * re-run when it changed.
+ * re-run when it changed. When the songs playing or up next changed, their lyrics are looked up.
  */
 export const saveQueue = async (
   ctx: MutationCtx,
@@ -317,14 +337,19 @@ export const saveQueue = async (
   };
 
   const row = await findQueueRow(ctx, userId);
+  const session = row === null ? await findSession(ctx, userId) : null;
+  const legacy = session !== null && hasLegacyQueue(session) ? session : null;
+  const before = row === null ? (legacy === null ? EMPTY : legacyQueue(legacy)) : rowQueue(row);
+  const [was, is] = [playingTrackIds(before), playingTrackIds(next)];
+
+  if (was.length !== is.length || was.some((trackId, position) => trackId !== is[position])) {
+    await requestPlayingLyrics(ctx, next);
+  }
 
   if (row === null) {
     await ctx.db.insert("playbackQueues", { userId, ...fields });
-    const session = await findSession(ctx, userId);
 
-    if (session !== null && hasLegacyQueue(session)) {
-      await ctx.db.patch(session._id, clearedLegacyQueue);
-    }
+    if (legacy !== null) await ctx.db.patch(legacy._id, clearedLegacyQueue);
 
     return;
   }

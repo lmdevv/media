@@ -1158,6 +1158,8 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       "invites.create": ({ music }) => failureCode(music.run("invites.create", { role: "guest" })),
       "invites.revoke": ({ music }) =>
         failureCode(music.run("invites.revoke", { inviteId: InviteId.make(shared.libraryId) })),
+      // Queues lookups only; nothing in this suite runs the media service that would send them.
+      "lyrics.backfill": ({ music }) => failureCode(music.run("lyrics.backfill", {})),
     } satisfies Record<string, (session: Session) => Promise<string>>;
 
     const attempts = new Map(Object.entries(calls));
