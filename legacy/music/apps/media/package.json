@@ -21,10 +21,12 @@
   "dependencies": {
     "@hono/node-server": "^2.1.4",
     "@music/commands": "workspace:*",
+    "@xmldom/xmldom": "^0.9.12",
     "convex": "catalog:",
     "effect": "catalog:",
     "hono": "^4.13.13",
-    "music-metadata": "^12.1.0"
+    "music-metadata": "^12.1.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@music/config": "workspace:*",
