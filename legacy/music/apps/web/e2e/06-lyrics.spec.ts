@@ -257,7 +257,7 @@ test("a song without lyrics is looked up online, or has none with lookups off", 
   await nowPlaying.getByRole("button", { name: "Next", exact: true }).first().click();
   await expect(lyrics.getByText("Looking for lyrics…")).toBeVisible();
   await nowPlaying.getByRole("button", { name: "Hide lyrics" }).click();
-  await expect(nowPlaying.getByRole("button", { name: "Lyrics (looking for them)" })).toBeEnabled();
+  await expect(nowPlaying.getByRole("button", { name: "Loading lyrics" })).toBeEnabled();
 
   await page.keyboard.press("Escape");
   await setRemoteLyrics(page, false);

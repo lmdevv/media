@@ -1,4 +1,6 @@
 import type { Track } from "@music/commands/models";
+import { lyricsButton, lyricsOffer } from "@music/player/lyrics";
+import type { LyricsAnswer, LyricsOffer } from "@music/player/lyrics";
 import { usePlayer } from "@music/player/react";
 import { DialogClose } from "@music/ui/components/dialog";
 import { Spinner } from "@music/ui/components/spinner";
@@ -18,8 +20,6 @@ import { formatQuality } from "@/lib/format";
 import { useArtColors } from "@/lib/use-art-colors";
 
 import { Progress, Volume } from "./controls";
-import { lyricsButton, lyricsOffer } from "./lyrics";
-import type { LyricsAnswer, LyricsOffer } from "./lyrics";
 import { LyricsPane } from "./lyrics-view";
 import { NEXT_REPEAT, perform, useIsRemote } from "./player-actions";
 import { nowPlayingBackground } from "./now-playing-background";

@@ -5,6 +5,7 @@ export {
   usePlaybackPosition,
   usePlayer,
   usePlayerActions,
+  usePositionReader,
   useSessionRun,
 } from "./provider";
 

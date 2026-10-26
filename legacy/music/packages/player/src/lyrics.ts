@@ -1,7 +1,11 @@
+/**
+ * How Now Playing offers and shows a song's lyrics, the same on the web and the phone: what the
+ * lyrics button says and whether it opens, the source caption, and which timed line playback is
+ * in.
+ */
 import { TrackLyrics } from "@music/commands/lyrics";
 import type { LyricLine, LyricsSource } from "@music/commands/lyrics";
-
-import { isNotFoundFailure } from "../../lib/action";
+import { commandFailure } from "@music/sdk/errors";
 
 /**
  * `lyrics.get`'s answer as Now Playing shows it: the song's lyrics, `loading` before the first
@@ -16,7 +20,7 @@ export const lyricsAnswer = (read: TrackLyrics | Error | undefined): LyricsAnswe
   if (read === undefined) return "loading";
 
   if (read instanceof Error) {
-    return isNotFoundFailure(read) ? TrackLyrics.cases.None.make({}) : "failed";
+    return commandFailure(read)?.code === "not_found" ? TrackLyrics.cases.None.make({}) : "failed";
   }
 
   return read;
@@ -54,7 +58,7 @@ export interface LyricsButton {
 
 const CLOSED_LABEL: Readonly<Record<LyricsOffer, string>> = {
   ready: "Lyrics",
-  loading: "Lyrics (looking for them)",
+  loading: "Loading lyrics",
   failed: "Lyrics (couldn't load them)",
   none: "No lyrics for this song",
   instrumental: "Instrumental, no lyrics",
@@ -109,4 +113,14 @@ export const lyricsMoment = (
   const endMs = lines[started]?.endMs ?? null;
 
   return { started, sung: started >= 0 && (endMs === null || positionMs < endMs) };
+};
+
+/** Where a timed line stands against playback: sung now, already passed, or still to come. */
+export type LyricLineState = "past" | "active" | "upcoming";
+
+/** A line is sung while `moment` says so; lines up to the last started are past, later ones upcoming. */
+export const lyricLineState = (index: number, moment: LyricsMoment): LyricLineState => {
+  if (index === moment.started && moment.sung) return "active";
+
+  return index <= moment.started ? "past" : "upcoming";
 };

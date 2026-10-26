@@ -9,6 +9,7 @@
     "./device-identity": "./src/device-identity.ts",
     "./engine": "./src/engine.ts",
     "./local-session": "./src/local-session.ts",
+    "./lyrics": "./src/lyrics.ts",
     "./playback-controller": "./src/playback-controller.ts",
     "./react": "./src/react.tsx",
     "./session-router": "./src/session-router.ts",

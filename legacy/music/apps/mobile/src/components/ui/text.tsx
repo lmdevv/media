@@ -18,6 +18,10 @@ const VARIANTS = {
   figure: "font-sans-heavy text-display leading-display",
   /** Empty-state titles and large sheet titles: 28/32 heavy. */
   title: "font-sans-heavy text-xl leading-xl",
+  /** A synced lyric line in Now Playing (B12): 28/32 heavy, tight tracking. */
+  lyric: "font-sans-heavy text-xl leading-xl tracking-tight",
+  /** Plain lyrics in Now Playing (B13): 20/28 semibold, tight tracking. */
+  lyricPlain: "font-sans-semibold text-lg leading-lg tracking-tight",
   /** The inline title beside a back button: 22/28 heavy, display tracking. */
   navTitle: "font-sans-heavy text-mobile-section leading-mobile-section tracking-display",
   /** Now Playing's song title: 22/28 heavy, with no tracking (B01). */

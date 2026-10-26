@@ -4,7 +4,14 @@ import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { lyricsAnswer, lyricsButton, lyricsCaption, lyricsMoment, lyricsOffer } from "./lyrics";
+import {
+  lyricLineState,
+  lyricsAnswer,
+  lyricsButton,
+  lyricsCaption,
+  lyricsMoment,
+  lyricsOffer,
+} from "./lyrics";
 import type { LyricsOffer } from "./lyrics";
 
 const decode = Schema.decodeUnknownSync(TrackLyrics);
@@ -74,7 +81,7 @@ describe("lyricsButton", () => {
       loading: false,
     });
     expect(lyricsButton("loading", false)).toStrictEqual({
-      label: "Lyrics (looking for them)",
+      label: "Loading lyrics",
       disabled: false,
       loading: true,
     });
@@ -170,6 +177,25 @@ describe("lyricsMoment", () => {
           });
         },
       ),
+    );
+  });
+});
+
+describe("lyricLineState", () => {
+  it("marks the sung line active, earlier lines past, and later lines upcoming", () => {
+    const moment = { started: 1, sung: true };
+
+    expect([0, 1, 2].map((index) => lyricLineState(index, moment))).toStrictEqual([
+      "past",
+      "active",
+      "upcoming",
+    ]);
+  });
+
+  it("has no active line before the first line or in a gap after a line's own end", () => {
+    expect(lyricLineState(0, { started: -1, sung: false })).toBe("upcoming");
+    expect([0, 1].map((index) => lyricLineState(index, { started: 0, sung: false }))).toStrictEqual(
+      ["past", "upcoming"],
     );
   });
 });

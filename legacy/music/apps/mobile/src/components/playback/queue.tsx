@@ -5,18 +5,17 @@
  * as on the web. The rows fade out above the controls.
  */
 import * as Haptics from "expo-haptics";
-import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import type { LucideIcon } from "lucide-react-native";
 import { Infinity as Endless, Repeat, Repeat1, Shuffle } from "lucide-react-native";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, View } from "react-native";
 
 import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
-import { clearOf } from "@/lib/color";
 import { usePlayer, usePlayerActions } from "@/player";
 import type { QueueItem } from "@/player";
 
+import { EdgeFade } from "./edge-fade";
 import { QueueLine, ReorderList } from "./reorder-list";
 
 const REPEAT_LABELS = { off: "Repeat off", all: "Repeat all", one: "Repeat one" } as const;
@@ -165,12 +164,7 @@ export function QueueList({ background }: { readonly background: string }) {
         header={<PlayingNext empty={queued.length === 0} />}
         footer={autoplay ? <ContinuePlaying items={added} /> : undefined}
       />
-      <View className="absolute inset-x-0 bottom-0 h-12" pointerEvents="none">
-        <LinearGradient
-          colors={[clearOf(background), background]}
-          style={StyleSheet.absoluteFill}
-        />
-      </View>
+      <EdgeFade edge="bottom" background={background} />
     </View>
   );
 }

@@ -1,5 +1,7 @@
 import { TrackLyrics } from "@music/commands/lyrics";
 import type { LyricLine } from "@music/commands/lyrics";
+import { lyricLineState, lyricsCaption, lyricsMoment } from "@music/player/lyrics";
+import type { LyricLineState, LyricsAnswer, LyricsMoment } from "@music/player/lyrics";
 import { useLatestPlayer, usePositionReader } from "@music/player/react";
 import { Spinner } from "@music/ui/components/spinner";
 import { cn } from "@music/ui/lib/utils";
@@ -8,15 +10,10 @@ import type { ReactNode } from "react";
 
 import { formatDuration } from "@/lib/format";
 
-import { lyricsCaption, lyricsMoment } from "./lyrics";
-import type { LyricsAnswer, LyricsMoment } from "./lyrics";
 import { perform } from "./player-actions";
 
 /** Which Now Playing shows the lyrics: desktop (Paper 05 · 01b) or phone (05 · 04b). */
 export type LyricsLayout = "desktop" | "phone";
-
-/** Where a line stands against the one being sung. */
-type LineState = "past" | "active" | "upcoming";
 
 /** The look of each layout, from Paper. */
 const LAYOUTS = {
@@ -387,7 +384,7 @@ function SyncedLyrics({
           <div aria-hidden className={cn("shrink-0", look.lead)} />
           <ol ref={list} className={cn("flex shrink-0 flex-col", look.lines)}>
             {lines.map((line, index) => {
-              const state = lineState(index, moment);
+              const state = lyricLineState(index, moment);
 
               return (
                 <li key={index} className="flex">
@@ -420,13 +417,6 @@ function SyncedLyrics({
   );
 }
 
-/** A line is sung while `moment` says so; lines up to the last started are past, later ones upcoming. */
-const lineState = (index: number, moment: LyricsMoment): LineState => {
-  if (index === moment.started && moment.sung) return "active";
-
-  return index <= moment.started ? "past" : "upcoming";
-};
-
 /** One timed line: choosing it (click, Enter, or Space) seeks to where it starts. */
 const LineButton = memo(function LineButton({
   index,
@@ -439,7 +429,7 @@ const LineButton = memo(function LineButton({
   readonly index: number;
   readonly text: string;
   readonly startMs: number;
-  readonly state: LineState;
+  readonly state: LyricLineState;
   readonly className: string;
   readonly onSeek: (startMs: number) => void;
 }) {

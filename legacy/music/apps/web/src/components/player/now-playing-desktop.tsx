@@ -1,4 +1,6 @@
 import type { Track } from "@music/commands/models";
+import { lyricsButton, lyricsOffer } from "@music/player/lyrics";
+import type { LyricsAnswer, LyricsOffer } from "@music/player/lyrics";
 import { Badge } from "@music/ui/components/badge";
 import { DialogClose } from "@music/ui/components/dialog";
 import { Spinner } from "@music/ui/components/spinner";
@@ -14,8 +16,6 @@ import { formatQuality } from "@/lib/format";
 import { useArtColors } from "@/lib/use-art-colors";
 
 import { PlayPauseButton, Progress, RepeatButton, ShuffleButton, SkipButton } from "./controls";
-import { lyricsButton, lyricsOffer } from "./lyrics";
-import type { LyricsAnswer, LyricsOffer } from "./lyrics";
 import { LyricsPane } from "./lyrics-view";
 import { nowPlayingBackground } from "./now-playing-background";
 import { UpcomingQueue, useClearQueue, useUpNext } from "./queue";

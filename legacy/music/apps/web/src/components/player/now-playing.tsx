@@ -1,3 +1,4 @@
+import { lyricsAnswer } from "@music/player/lyrics";
 import { usePlayer } from "@music/player/react";
 import { useReadSettled } from "@music/sdk/react";
 import { Dialog, DialogPopup, DialogPortal } from "@music/ui/components/dialog";
@@ -6,7 +7,6 @@ import { useUi } from "@/components/shell/ui-state";
 import { useIsDesktop } from "@/lib/use-media";
 
 import { PlayOnSurfaces } from "./device-sheet";
-import { lyricsAnswer } from "./lyrics";
 import { DesktopNowPlaying } from "./now-playing-desktop";
 import { PhoneNowPlaying } from "./now-playing-phone";
 

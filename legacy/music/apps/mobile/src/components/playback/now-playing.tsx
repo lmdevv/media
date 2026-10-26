@@ -1,13 +1,16 @@
 /**
  * Now Playing (B01 local, B02 remote, H05 dark): a sheet over the tabs with the cover, the song,
  * the scrubber, the controls, the volume, and where the music plays. The background takes the
- * cover's color. The queue button opens the queue in place (B03, H06), as Apple Music does: the
- * cover shrinks into the corner of a row with the song's title, the queue rises under it, and the
- * controls below stay exactly where they are. The person drags the sheet down to dismiss it (B11);
- * the sliders keep their own drags. With nothing queued it says so (G14).
+ * cover's color. The queue and lyrics buttons open the queue (B03, H06) or the lyrics (B12, H13)
+ * in place, as Apple Music does: the cover shrinks into the corner of a row with the song's
+ * title, the queue or the lyrics rise under it, and the controls below stay exactly where they
+ * are. One of the two shows at a time. The person drags the sheet down to dismiss it (B11); the
+ * sliders keep their own drags. With nothing queued it says so (G14).
  */
 import type { TrackId } from "@music/commands/ids";
-import { useRead, useRun } from "@music/sdk/react";
+import { lyricsAnswer, lyricsOffer } from "@music/player/lyrics";
+import type { LyricsAnswer } from "@music/player/lyrics";
+import { useRead, useReadSettled, useRun } from "@music/sdk/react";
 import * as Haptics from "expo-haptics";
 import { router, useNavigation } from "expo-router";
 import { Heart, List, Music, Smartphone, Users, Airplay } from "lucide-react-native";
@@ -18,11 +21,13 @@ import Animated, {
   Extrapolation,
   interpolate,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withSpring,
 } from "react-native-reanimated";
 import type { SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { scheduleOnRN } from "react-native-worklets";
 
 import { openSongActions } from "@/components/browse/rows";
 import { useSave } from "@/components/states/save-failure";
@@ -37,6 +42,7 @@ import { useThemeColor, useThemeLength } from "@/lib/theme-color";
 import { usePlayer } from "@/player";
 import type { NowPlaying, PlayerRole } from "@/player";
 
+import { LyricsButton, LyricsPanel } from "./lyrics";
 import { MenuButton } from "./menu-button";
 import type { MenuItem } from "./menu-button";
 import { ModePills, QueueList } from "./queue";
@@ -72,8 +78,22 @@ const AUDIO_DETAILS: MenuItem = {
   },
 };
 
-/** The cover's move between the full cover and the queue's row: a soft spring with no bounce. */
+/** The cover's move between the full cover and the song's row: a soft spring with no bounce. */
 const MORPH = { duration: 450, dampingRatio: 0.9 } as const;
+
+/** What can open under the song's row in place of the cover. */
+type Panel = "queue" | "lyrics";
+
+/**
+ * What the stage shows: the cover, or a panel under the song's row. Closed, `panel` is the one
+ * still closing, mounted until the cover is back so it can animate, then null, so nothing in it
+ * (the lyrics' frame loop) runs behind the cover.
+ */
+type StageView =
+  | { readonly open: false; readonly panel: Panel | null }
+  | { readonly open: true; readonly panel: Panel };
+
+const CLOSED: StageView = { open: false, panel: null };
 
 /** The drag handle Paper draws in place of a close button. */
 function Handle() {
@@ -206,8 +226,8 @@ function TitleRow({ song }: { readonly song: NowPlaying }) {
 }
 
 /**
- * The song as a row over the queue (B03): room for the 64pt cover, which the morph moves into
- * place, then title over artist, the heart, and the ellipsis.
+ * The song as a row over the queue (B03) or the lyrics (B12): room for the 64pt cover, which the
+ * morph moves into place, then title over artist, the heart, and the ellipsis.
  */
 function SongRow({ song }: { readonly song: NowPlaying }) {
   return (
@@ -274,27 +294,47 @@ function JamButton() {
   );
 }
 
-/** Jam, the playing device, and the queue, which sits on a faint wash while it is open. */
+/**
+ * Lyrics and Jam, the playing device, and the queue (B12). Lyrics and the queue sit on a faint
+ * wash while open.
+ */
 function ActionRow({
   role,
-  queueOpen,
-  onQueue,
+  view,
+  lyrics,
+  onToggle,
 }: {
   readonly role: PlayerRole;
-  readonly queueOpen: boolean;
-  readonly onQueue: () => void;
+  readonly view: StageView;
+  readonly lyrics: LyricsAnswer;
+  readonly onToggle: (panel: Panel) => void;
 }) {
+  const queueOpen = view.open && view.panel === "queue";
+
   return (
     <View className="flex-row items-center justify-between pt-4">
-      <JamButton />
+      <View className="w-ios-88 flex-row items-center">
+        <LyricsButton
+          offer={lyricsOffer(lyrics)}
+          open={view.open && view.panel === "lyrics"}
+          onPress={() => {
+            onToggle("lyrics");
+          }}
+        />
+        <JamButton />
+      </View>
       <DeviceButton role={role} />
-      <IconButton
-        icon={List}
-        label="Queue"
-        accessibilityState={{ selected: queueOpen }}
-        className={queueOpen ? "bg-text/10" : ""}
-        onPress={onQueue}
-      />
+      <View className="w-ios-88 flex-row items-center justify-end">
+        <IconButton
+          icon={List}
+          label="Queue"
+          accessibilityState={{ selected: queueOpen }}
+          className={queueOpen ? "bg-text/10" : ""}
+          onPress={() => {
+            onToggle("queue");
+          }}
+        />
+      </View>
     </View>
   );
 }
@@ -345,25 +385,26 @@ function NothingPlaying() {
 }
 
 /**
- * Everything above the controls: the cover over the song's title, or the queue under the song's
- * row. `progress` runs from 0 (cover) to 1 (queue), and one cover moves between the two places, so
- * it reads as the same picture shrinking into the row.
+ * Everything above the controls: the cover over the song's title, or the queue or the lyrics
+ * under the song's row. `progress` runs from 0 (cover) to 1 (row), and one cover moves between
+ * the two places, so it reads as the same picture shrinking into the row.
  */
 function Stage({
   song,
-  queueOpen,
-  queueMounted,
+  view,
+  lyrics,
   progress,
   background,
-  onCloseQueue,
+  onClose,
 }: {
   readonly song: NowPlaying;
-  readonly queueOpen: boolean;
-  readonly queueMounted: boolean;
+  readonly view: StageView;
+  readonly lyrics: LyricsAnswer;
   readonly progress: SharedValue<number>;
   readonly background: string;
-  readonly onCloseQueue: () => void;
+  readonly onClose: () => void;
 }) {
+  const { open } = view;
   const [box, setBox] = useState<LayoutRectangle | null>(null);
   const [titleHeight, setTitleHeight] = useState(0);
 
@@ -409,7 +450,7 @@ function Stage({
     transform: [{ translateY: -12 * progress.value }],
   }));
 
-  const queue = useAnimatedStyle(() => ({
+  const panel = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0.35, 1], [0, 1], Extrapolation.CLAMP),
     transform: [{ translateY: 24 * (1 - progress.value) }],
   }));
@@ -423,8 +464,8 @@ function Stage({
     >
       <Animated.View
         style={title}
-        pointerEvents={queueOpen ? "none" : "box-none"}
-        accessibilityElementsHidden={queueOpen}
+        pointerEvents={open ? "none" : "box-none"}
+        accessibilityElementsHidden={open}
         className="absolute inset-x-0 bottom-0"
         onLayout={(event) => {
           setTitleHeight(event.nativeEvent.layout.height);
@@ -432,24 +473,30 @@ function Stage({
       >
         <TitleRow song={song} />
       </Animated.View>
-      {queueMounted ? (
+      {view.panel === null ? null : (
         <Animated.View
-          style={queue}
-          pointerEvents={queueOpen ? "box-none" : "none"}
-          accessibilityElementsHidden={!queueOpen}
+          style={panel}
+          pointerEvents={open ? "box-none" : "none"}
+          accessibilityElementsHidden={!open}
           className="absolute inset-0"
         >
           <SongRow song={song} />
-          <ModePills />
-          <QueueList background={background} />
+          {view.panel === "queue" ? (
+            <>
+              <ModePills />
+              <QueueList background={background} />
+            </>
+          ) : (
+            <LyricsPanel key={song.trackId} lyrics={lyrics} background={background} />
+          )}
         </Animated.View>
-      ) : null}
+      )}
       <Animated.View style={cover} className="absolute overflow-hidden">
         <Pressable
-          accessibilityRole={queueOpen ? "button" : "image"}
-          accessibilityLabel={queueOpen ? "Show the cover" : `Cover of ${song.album}`}
-          disabled={!queueOpen}
-          onPress={onCloseQueue}
+          accessibilityRole={open ? "button" : "image"}
+          accessibilityLabel={open ? "Show the cover" : `Cover of ${song.album}`}
+          disabled={!open}
+          onPress={onClose}
           className="size-full"
         >
           <Artwork url={song.artUrl} className="size-full" />
@@ -465,20 +512,44 @@ export function NowPlayingScreen() {
   const tint = useArtTint(nowPlaying?.artUrl ?? null);
   const player = useThemeColor("--color-player");
   const insets = useSafeAreaInsets();
-  const [queueOpen, setQueueOpen] = useState(false);
-  // The queue mounts the first time it opens, then stays, so closing it can animate.
-  const [queueMounted, setQueueMounted] = useState(false);
+  const [view, setView] = useState<StageView>(CLOSED);
   const progress = useSharedValue(0);
+  const reduceMotion = useReducedMotion();
   const background = tint ?? player;
+
+  // Read while Now Playing is up, for the lyrics button as much as for the lyrics. Settled, not
+  // thrown: a failed read shows in the lyrics instead of taking Now Playing down.
+  const lyrics = lyricsAnswer(
+    useReadSettled("lyrics.get", nowPlaying === null ? "skip" : { trackId: nowPlaying.trackId }),
+  );
 
   useFailureSheet(status === "failed" && role.kind !== "remote", error, nowPlaying?.itemId);
 
-  const showQueue = (open: boolean) => {
-    void Haptics.selectionAsync();
-    setQueueOpen(open);
+  // Once the closing morph ends, unless a panel opened again meanwhile.
+  const unmountClosed = () => {
+    setView((current) => (current.open ? current : CLOSED));
+  };
 
-    if (open) setQueueMounted(true);
-    progress.value = withSpring(open ? 1 : 0, MORPH);
+  const show = (panel: Panel | null) => {
+    void Haptics.selectionAsync();
+
+    if (panel !== null) {
+      setView({ open: true, panel });
+      progress.value = reduceMotion ? 1 : withSpring(1, MORPH);
+    } else if (reduceMotion) {
+      setView(CLOSED);
+      progress.value = 0;
+    } else {
+      setView({ open: false, panel: view.panel });
+      progress.value = withSpring(0, MORPH, (finished) => {
+        if (finished === true) scheduleOnRN(unmountClosed);
+      });
+    }
+  };
+
+  // A panel's button opens it, or switches from the other panel; pressed again, it closes.
+  const toggle = (panel: Panel) => {
+    show(view.open && view.panel === panel ? null : panel);
   };
 
   return (
@@ -490,24 +561,18 @@ export function NowPlayingScreen() {
         <View className="flex-1 px-mobile-edge pb-row">
           <Stage
             song={nowPlaying}
-            queueOpen={queueOpen}
-            queueMounted={queueMounted}
+            view={view}
+            lyrics={lyrics}
             progress={progress}
             background={background}
-            onCloseQueue={() => {
-              showQueue(false);
+            onClose={() => {
+              show(null);
             }}
           />
           <Scrubber />
           <Transport />
           <VolumeRow />
-          <ActionRow
-            role={role}
-            queueOpen={queueOpen}
-            onQueue={() => {
-              showQueue(!queueOpen);
-            }}
-          />
+          <ActionRow role={role} view={view} lyrics={lyrics} onToggle={toggle} />
         </View>
       )}
     </View>

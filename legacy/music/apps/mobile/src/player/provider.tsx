@@ -153,6 +153,8 @@ const DevicesContext = createContext<DevicesView | null>(null);
 
 const SessionRunContext = createContext<SessionRouter["run"] | null>(null);
 
+const PositionReaderContext = createContext<(() => number) | null>(null);
+
 const required = <Value,>(value: Value | null, hook: string): Value => {
   if (value === null) throw new Error(`${hook} must be used inside PlayerProvider`);
 
@@ -171,6 +173,15 @@ export const useNowPlaying = (): NowPlayingView =>
  * it: Now Playing's scrubber and the mini player's progress.
  */
 export const usePlaybackPosition = (): PlaybackPosition => use(PositionContext);
+
+/**
+ * A stable function that returns the live position in milliseconds, worked out afresh on every
+ * call: between the engine's reports it moves on with a monotonic clock while this phone plays,
+ * and runs on from the last report while another device plays. For frame loops that follow
+ * playback closely, such as synced lyrics; it never re-renders its caller.
+ */
+export const usePositionReader = (): (() => number) =>
+  required(use(PositionReaderContext), "usePositionReader");
 
 /** The player's actions. Stable for the provider's lifetime, so it never re-renders a caller. */
 export const usePlayerActions = (): PlayerActions =>
@@ -500,6 +511,7 @@ export function PlayerProvider({
   }, [transfer]);
 
   const actions = useMemo(() => createActions(phone, latest, dispatchTransfer), [phone]);
+  const readPosition = useMemo(() => () => controller.positionMs(), [controller]);
 
   const deviceList = useMemo(
     (): DevicesView => ({
@@ -522,17 +534,19 @@ export function PlayerProvider({
 
   return (
     <SessionRunContext value={session.run}>
-      <ActionsContext value={actions}>
-        <DevicesContext value={deviceList}>
-          <PlayerContext value={player}>
-            <NowPlayingContext value={current}>
-              <PositionTicker controller={controller} durationMs={nowPlaying?.durationMs ?? 0}>
-                {children}
-              </PositionTicker>
-            </NowPlayingContext>
-          </PlayerContext>
-        </DevicesContext>
-      </ActionsContext>
+      <PositionReaderContext value={readPosition}>
+        <ActionsContext value={actions}>
+          <DevicesContext value={deviceList}>
+            <PlayerContext value={player}>
+              <NowPlayingContext value={current}>
+                <PositionTicker controller={controller} durationMs={nowPlaying?.durationMs ?? 0}>
+                  {children}
+                </PositionTicker>
+              </NowPlayingContext>
+            </PlayerContext>
+          </DevicesContext>
+        </ActionsContext>
+      </PositionReaderContext>
     </SessionRunContext>
   );
 }
