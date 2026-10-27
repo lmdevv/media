@@ -145,8 +145,9 @@ The example identities must be replaced with the model and tool that actually co
 - `main` requires the `check` and `stack-e2e` CI jobs. PRs matching the `paths` in
   `.github/workflows/image.yml` also run the `Image` workflow; check it too. Never merge with admin
   bypass.
-- Every PR gets CodeRabbit (`.coderabbit.yaml`), Codex automatic review, and Claude's
-  `/code-review`. Don't add a project skill named `code-review`; it shadows Claude's.
+- Every PR gets Codex automatic review on GitHub; address its findings before merging. Run
+  Claude's `/code-review` locally before you open or merge one. Do not enable, request, or wait for
+  CodeRabbit or Bugbot. Don't add a project skill named `code-review`; it shadows Claude's.
 - Cloud environments: none yet. Pin the Claude one in `.claude/settings.json`
   (`remote.defaultEnvironmentId`) and write the Codex ID here for `codex cloud exec --env`. Docker
   suites run in Claude cloud only.

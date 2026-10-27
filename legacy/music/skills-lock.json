@@ -1,12 +1,6 @@
 {
   "version": 1,
   "skills": {
-    "autofix": {
-      "source": "coderabbitai/skills",
-      "sourceType": "github",
-      "skillPath": "skills/autofix/SKILL.md",
-      "computedHash": "1c665af094b2a307a8ab149a4b6ee73097dac24a4fa533821d7cc2e7ede7b9cf"
-    },
     "before-and-after": {
       "source": "vercel-labs/before-and-after",
       "sourceType": "github",
