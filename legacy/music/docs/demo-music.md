@@ -3,14 +3,21 @@
 The demo and the screenshots use five Creative Commons releases from the Internet Archive:
 28 tracks, two of them lossless FLAC EPs, about 520 MB.
 
+They ship as a data-only image, `ghcr.io/lmdevv/music-demo-library:v1`, that a server mounts
+read-only (Docker 28 or later). Docker pulls it once per machine, and every container shares it:
+
 ```sh
-scripts/download-demo-music.sh ~/music-demo
-docker run -d -p 8080:8080 -v music-data:/data -v ~/music-demo:/music:ro ghcr.io/lmdevv/music:main
+docker run -d -p 8080:8080 -v music-data:/data \
+  --mount type=image,source=ghcr.io/lmdevv/music-demo-library:v1,target=/music \
+  ghcr.io/lmdevv/music:main
 ```
 
-The script keeps the original file names, adds tags to the one release that ships without them,
-links each release's artwork as `cover.jpg`, and writes the credits below to `CREDITS.md` next to
-the music.
+`scripts/download-demo-music.sh <dir>` fetches the same files into a folder instead. It keeps the
+original file names, adds tags to the one release that ships without them, links each release's
+artwork as `cover.jpg`, and writes the credits below to `CREDITS.md` next to the music.
+`scripts/build-demo-library.sh` builds the image from it, and the Demo library workflow publishes
+the version named in `deploy/demo-library/image`. A published version never changes: bump the
+version to change the files.
 
 ## Credits
 

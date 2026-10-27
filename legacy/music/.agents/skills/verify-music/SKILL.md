@@ -56,21 +56,20 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/music:main
 
 1. It builds `music:verify-<run>` from the checkout, or pulls the main image for `before`. A warm
    Docker cache builds in about 50 seconds; a cold one takes several minutes.
-2. It mounts the library read-only. The default is the licensed demo library at
-   `~/music-demo/demo-music` (5 albums, 28 songs, real cover art), which makes screenshots look
-   like the product. Without it, `up` generates the fixture library (4 albums of short generated
-   chords). Both sides of a run should use the same library.
+2. It mounts the library read-only at `/music`. The default is the demo library image named in
+   `deploy/demo-library/image` (see [Demo data](#demo-data)), which `up` pulls once per machine.
 3. It starts the container and waits until `/healthz` reports `"ok":true`, which needs Caddy, the
    media service, and Convex.
 4. It starts the browser host and runs first-run setup through the web app. Setup creates the
    admin `admin@music.local` with password `password123`, adds `/music`, and waits for the real
    scan to finish.
 5. It creates an API key at `/settings/keys` and checks that the CLI signs in with it.
+6. It seeds the demo people and their playlists, likes, and sharing (`seed.mjs`).
 
 The side is ready only after a line like this prints:
 
 ```text
-ready: http://localhost:39513 (run verify-music, side after, container music-verify-verify-music-after, image music:verify-verify-music, library /home/zxcv/music-demo/demo-music, evidence …)
+ready: http://localhost:39513 (run verify-music, side after, container music-verify-verify-music-after, image music:verify-verify-music, library ghcr.io/lmdevv/music-demo-library:v1, evidence …)
 ```
 
 | Flag                           | Use                                                              |
@@ -79,13 +78,45 @@ ready: http://localhost:39513 (run verify-music, side after, container music-ver
 | `--image IMG`                  | Run another image, such as a release tag, instead of building    |
 | `--library demo\|fixtures\|DIR` | Pick the library. A DIR must be readable by others (`a+rX`)      |
 | `--port N`                     | Pin the port                                                     |
+| `--no-seed`                    | Stop after setup: only the admin, with no playlists or likes     |
 | `--no-setup`                   | Leave a fresh server, to verify first-run setup itself           |
 
 The image holds the checkout as it was at `up`. After you change code, run `down --side after`
-and `up` again. `doctor` warns when the checkout has moved on since the build.
+and `up` again. `doctor` fails when the checkout has moved on since the build; commits that only
+touch `.agents/` don't count, since the image leaves them out.
 
-Get the demo library with `scripts/download-demo-music.sh ~/music-demo/demo-music` (about
-520 MB, CC BY and CC BY-SA, with `CREDITS.md`).
+### Demo data
+
+Every side starts from the same data, so evidence from any machine looks alike and shows nothing
+personal or unlicensed.
+
+- **Music.** `ghcr.io/lmdevv/music-demo-library:v1` holds the five Creative Commons releases of
+  `scripts/download-demo-music.sh` (28 songs, 520 MB, two FLAC EPs) and their `CREDITS.md`. It's a
+  data-only image that every container mounts read-only, so Docker keeps one copy per machine. A
+  published version never changes; `scripts/build-demo-library.sh` builds it, and the Demo library
+  workflow publishes the version in `deploy/demo-library/image`. When the pull fails, build it
+  locally with `scripts/build-demo-library.sh`.
+- **People.** Everyone's password is `password123`:
+
+  | Who   | Email               | Role   | CLI          |
+  | ----- | ------------------- | ------ | ------------ |
+  | Lucía | `admin@music.local` | owner  | `$S cli --`  |
+  | Mateo | `mateo@music.local` | member | `$S cli --as mateo --` |
+  | Aiko  | `aiko@music.local`  | member | `$S cli --as aiko --`  |
+  | Sam   | `sam@music.local`   | guest  | none: guests can't make API keys |
+
+- **Library access.** `/music` is shared, so members play it. Sam plays it through a grant.
+- **Playlists.**
+  - Lucía's `Sunday morning` (4 songs) is shared with Mateo as a collaborator, and with Aiko and
+    Sam as viewers.
+  - Lucía's `Deep focus` (4 songs) and Aiko's `Waltzes` (2 songs) are private.
+  - Mateo's `Lossless` (the 7 FLAC songs) is shared by link.
+- **Likes.** Lucía likes `Wanderer`, `Doppelgänger`, and `Hoist`. Mateo likes `Drifting Cargo`.
+  Aiko likes `Neptune` and `Naughty Waltz`.
+
+Sign a page in as anyone with `$S browser sign-in --page mateo --email mateo@music.local`.
+`--library fixtures` generates 4 albums of short chords instead. It needs no download, but the seed
+needs the demo songs, so pair it with `--no-seed`.
 
 ## Doctor
 
@@ -135,12 +166,13 @@ Names match by substring unless you pass `--exact`: `Play` without it also match
 | `wait <locator> [--hidden]`, `wait --url RE`    | Waits up to 30 s (`--timeout ms`)                           |
 | `text`, `count`, `attr --attr A`                | Reads the element                                           |
 | `snapshot [locator] [--path F]`                 | Prints the ARIA tree, and saves it with `--path`            |
-| `screenshot --path F [--full]`                  | Saves a PNG of the page, or of the element with a locator   |
+| `screenshot --path F [--full]`                  | Waits for the covers in view, then saves a PNG of the page or element |
 | `audio`                                         | Prints `{"playing","seconds","elements"}` from real media   |
 | `wait-audio --past S` or `--advance S`          | Waits until real audio plays past S, or S more seconds      |
 | `record-start --path F.mp4 [--show-actions]`    | Records the page to an H.264 MP4                            |
 | `record-stop`                                   | Finishes the recording and prints its path                  |
 | `sign-in [--email E --password P]`              | Signs the page in through `/sign-in`, as the admin by default |
+| `join --code C --name N --email E`              | Makes an account from an invite at `/invite/<code>`         |
 | `url`, `pages`, `close-page`, `eval --js`       | Inspects the session, or closes a page and its recording    |
 | `restart`                                       | Restarts the host after `browser.mjs` changed; signs `main` in again |
 
@@ -156,8 +188,8 @@ from the tree.
 
 ### CLI
 
-`$S cli [--side S] -- <args>` runs `apps/cli/dist/music.js` against the side's server as the
-admin. Add `--json` for stable output. Exit codes: `0` ok, `1` failed, `2` usage, `3` auth.
+`$S cli [--side S] [--as mateo|aiko] -- <args>` runs `apps/cli/dist/music.js` against the side's
+server as the admin, or as a seeded member. Add `--json` for stable output. Exit codes: `0` ok, `1` failed, `2` usage, `3` auth.
 `$S cli -- --help` lists every command. The CLI is built from this checkout, so on the before
 side it talks to main's server: a command that is new in the checkout fails there.
 
@@ -266,6 +298,7 @@ Evidence in `captures/verify/<run>/` stays. Clear it yourself when you no longer
 - `scripts/browser.mjs` is the browser host that `up` starts and `browser` talks to. Run it
   directly only to debug the host. Its log is `${TMPDIR:-/tmp}/music-verify/<run>/<side>/browser.log`.
 - `scripts/evidence.mjs` keeps the manifest and publishes it. `$S evidence` calls it.
+- `scripts/seed.mjs` creates the [demo data](#demo-data) after setup. `up` calls it.
 
 ## Feature map
 
@@ -279,6 +312,8 @@ feature's file before you drive it, and add to the map when a change adds a feat
 - A recording runs in real time, and scripted steps finish in about a second, too fast to follow.
   Pause a second or two after each step's result (`sleep 2` between commands) and before
   `record-stop`, so a reviewer sees each state. A still page holds its last frame.
+- The app scrolls inside its own panels, not the page, so `screenshot --full` captures only the
+  window. To show something below the fold, screenshot its element, which scrolls it into view.
 - A shortcut key such as `n` or `/` types into a focused field instead. Open a page where focus is
   outside fields, such as an album, before you press it.
 - The before side runs main's server with the CLI and dev client built from this checkout. If the

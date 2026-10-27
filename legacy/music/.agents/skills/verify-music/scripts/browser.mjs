@@ -57,6 +57,7 @@ const FLAGS = {
   email: { type: "string" },
   password: { type: "string" },
   music: { type: "string" },
+  code: { type: "string" },
 };
 
 const { values: flags, positionals } = parseArgs({
@@ -259,6 +260,35 @@ async function serve(state, base) {
     return path;
   };
 
+  // Covers load lazily and decode off the main thread, so a screenshot taken right after a page
+  // renders shows their placeholder gradients. Wait until every image the screenshot covers has
+  // loaded, decoded, and painted. For a full-page shot that's every image, so lazy ones below the
+  // fold are told to load now; otherwise it's the ones in view, since lazy ones elsewhere never start.
+  const settleImages = async (page, options) => {
+    // One function evaluated in the page: a string predicate, as `waitForFunction` polls it, needs
+    // the eval that the app's Content-Security-Policy blocks.
+    const settled = await page.evaluate(
+      async ([full, ms]) => {
+        const covered = () =>
+          [...document.images].filter((image) => {
+            if (full) image.loading = "eager";
+            const box = image.getBoundingClientRect();
+            return box.width > 0 && (full || (box.bottom > 0 && box.top < innerHeight));
+          });
+        const deadline = Date.now() + ms;
+        while (!covered().every((image) => image.complete)) {
+          if (Date.now() > deadline) return false;
+          await new Promise((done) => setTimeout(done, 100));
+        }
+        await Promise.all(covered().map((image) => image.decode().catch(() => {})));
+        await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+        return true;
+      },
+      [Boolean(options.full), timeout(options)],
+    );
+    if (!settled) throw new Error("the images in the screenshot did not finish loading");
+  };
+
   const navigation = (page) =>
     page
       .getByRole("navigation", { name: "Library" })
@@ -320,6 +350,9 @@ async function serve(state, base) {
     },
     async screenshot({ page }, options) {
       const path = output(options, options.path);
+      // An element below the fold scrolls into view first, so its covers count as in view.
+      if (hasLocator(options)) await locate(page, options).scrollIntoViewIfNeeded();
+      await settleImages(page, options);
       if (hasLocator(options)) await locate(page, options).screenshot({ path });
       else await page.screenshot({ path, fullPage: options.full });
       return path;
@@ -372,6 +405,19 @@ async function serve(state, base) {
       await page.getByRole("button", { name: "Open my library" }).click();
       await page.getByRole("heading", { name: "Recently added" }).waitFor();
       return `signed in as ${ADMIN.email}`;
+    },
+    async join({ page }, options) {
+      if (!options.code || !options.name || !options.email) throw new Error("join needs --code, --name, and --email");
+      await page.goto(`/invite/${options.code}`);
+      // An invite made for an address shows it read-only.
+      const email = page.getByLabel("Email");
+      await email.waitFor({ timeout: timeout(options) });
+      if (await email.isEditable()) await email.fill(options.email);
+      await page.getByLabel("Your name").fill(options.name);
+      await page.getByLabel("Choose a password").fill(options.password ?? ADMIN.password);
+      await page.getByRole("button", { name: "Join" }).click();
+      await navigation(page).waitFor({ timeout: timeout(options) });
+      return `joined as ${options.email}`;
     },
     async "create-key"({ page }) {
       await page.goto("/settings/keys");

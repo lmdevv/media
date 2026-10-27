@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Runs disposable [music] instances for verification and drives them. See ../SKILL.md.
 #
-#   verify-music.sh up [--side after|before] [--image IMG] [--library demo|fixtures|DIR] [--port N] [--no-setup]
+#   verify-music.sh up [--side after|before] [--image IMG] [--library demo|fixtures|DIR] [--port N] [--no-setup] [--no-seed]
 #   verify-music.sh doctor [--side S]
 #   verify-music.sh browser [--side S] <command> [flags]
-#   verify-music.sh cli [--side S] -- <music args>
+#   verify-music.sh cli [--side S] [--as USER] -- <music args>
 #   verify-music.sh logs [--side S] [lines]
 #   verify-music.sh ios <up|doctor|tap|type|swipe|describe|wait|shot|record|appearance|remote|down> [--side S] ...
 #   verify-music.sh evidence <add|list|clear|publish> ...
@@ -27,7 +27,7 @@ evidence_root="$root/captures/verify/$run"
 mac="${MAC_HOST:-darwin}"
 axe='$HOME/music-ios/tools/axe/axe'
 before_image_default="ghcr.io/lmdevv/music:main"
-demo_dir="${MUSIC_DEMO_DIR:-$HOME/music-demo/demo-music}"
+demo_image="$(<"$root/deploy/demo-library/image")"
 
 die() { echo "verify-music: $*" >&2; exit 1; }
 say() { echo "verify-music: $*" >&2; }
@@ -57,7 +57,6 @@ free_port() {
     console.log(s.address().port); s.close(); });'
 }
 
-# HEAD plus a hash of uncommitted changes, so doctor can tell when the checkout moved after `up`.
 # The revision of what the image is built from. `.dockerignore` leaves out `.agents` and `.claude`,
 # so a commit that only edits a skill keeps the revision and the after side stays current.
 checkout_rev() {
@@ -109,14 +108,15 @@ start_browser() {
 
 cmd_up() {
   take_side "$@"
-  local image="" library="" port="" setup=1
+  local image="" library="" port="" setup=1 seed=1
   set -- "${args[@]}"
   while (($#)); do
     case "$1" in
       --image) image="$2"; shift 2 ;;
       --library) library="$2"; shift 2 ;;
       --port) port="$2"; shift 2 ;;
-      --no-setup) setup=0; shift ;;
+      --no-setup) setup=0; seed=0; shift ;;
+      --no-seed) seed=0; shift ;;
       *) die "up: unknown flag $1" ;;
     esac
   done
@@ -140,21 +140,31 @@ cmd_up() {
   write_state image_id "$(docker image inspect -f '{{.Id}}' "$image")"
   write_state rev "$(checkout_rev)"
 
-  case "${library:-}" in
-    "") if [[ -d "$demo_dir" ]]; then library="$demo_dir"; else library=fixtures; fi ;;
-    demo) [[ -d "$demo_dir" ]] || die "no demo library at $demo_dir; run scripts/download-demo-music.sh $demo_dir"
-      library="$demo_dir" ;;
-  esac
-  if [[ "$library" == fixtures ]]; then
-    library="$state/library"
-    rm -rf "$library"
-    node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
-  fi
-  library="$(cd "$library" && pwd)"
-  # The media service runs unprivileged in the container and must read every folder and file.
-  if [[ -n "$(find "$library" \( \( -type d \! -perm -o+rx \) -o \( -type f \! -perm -o+r \) \) -print -quit)" ]]; then
-    if [[ "$library" == "$state/library" ]]; then chmod -R a+rX "$library"
-    else die "$library is not readable by others; run chmod -R a+rX on it"; fi
+  # The demo library is a data-only image that every run on this machine mounts read-only, so
+  # Docker keeps one copy of it. Other libraries are folders bind-mounted read-only.
+  local music
+  library="${library:-demo}"
+  if [[ "$library" == demo ]]; then
+    library="$demo_image"
+    if ! docker image inspect "$library" >/dev/null 2>&1; then
+      say "pulling $library"
+      docker pull -q "$library" >/dev/null ||
+        die "could not pull $library; build it with scripts/build-demo-library.sh"
+    fi
+    music="type=image,source=$library,target=/music"
+  else
+    if [[ "$library" == fixtures ]]; then
+      library="$state/fixtures"
+      rm -rf "$library"
+      node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
+    fi
+    library="$(cd "$library" && pwd)"
+    # The media service runs unprivileged in the container and must read every folder and file.
+    if [[ -n "$(find "$library" \( \( -type d \! -perm -o+rx \) -o \( -type f \! -perm -o+r \) \) -print -quit)" ]]; then
+      if [[ "$library" == "$state/fixtures" ]]; then chmod -R a+rX "$library"
+      else die "$library is not readable by others; run chmod -R a+rX on it"; fi
+    fi
+    music="type=bind,source=$library,target=/music,readonly"
   fi
   write_state library "$library"
 
@@ -163,7 +173,7 @@ cmd_up() {
   # PUBLIC_URL must be the address clients use: sign-in tokens are issued for it. localhost works
   # for the browser here and, through `ios up`'s ssh forward, for the simulator on the Mac.
   docker run -d --name "$name" --label "music.verify.run=$run" --label "music.verify.side=$side" \
-    -p "127.0.0.1:$port:8080" -v "$name-data:/data" -v "$library:/music:ro" -e TZ=UTC \
+    -p "127.0.0.1:$port:8080" -v "$name-data:/data" --mount "$music" -e TZ=UTC \
     -e PUBLIC_URL="http://localhost:$port" "$image" >/dev/null
   say "waiting for $name on port $port"
   wait_healthy "$port"
@@ -175,6 +185,10 @@ cmd_up() {
     browser setup >/dev/null
     write_state key "$(browser create-key)"
     cmd_cli_raw whoami | grep -q admin@music.local || die "the API key does not sign the CLI in"
+  fi
+  if ((seed)); then
+    say "seeding the demo people, playlists, and likes"
+    seed
   fi
   echo "ready: $(url) (run $run, side $side, container $name, image $image, library $library, evidence $evidence)"
 }
@@ -230,17 +244,32 @@ cmd_browser() {
   browser "${args[@]}"
 }
 
+# `as` picks whose key the CLI uses: empty for the admin, or a seeded member such as `mateo`.
+as=""
 cmd_cli_raw() {
-  MUSIC_SERVER="$(url)/convex" MUSIC_API_KEY="$(read_state key)" XDG_CONFIG_HOME="$state/cli-config" \
-    node "$root/apps/cli/dist/music.js" "$@"
+  MUSIC_SERVER="$(url)/convex" MUSIC_API_KEY="$(read_state "key${as:+.$as}")" \
+    XDG_CONFIG_HOME="$state/cli-config${as:+.$as}" node "$root/apps/cli/dist/music.js" "$@"
 }
 
 cmd_cli() {
   take_side "$@"
   set -- "${args[@]}"
+  if [[ "${1:-}" == --as ]]; then
+    as="${2:?--as needs a person}"
+    shift 2
+  fi
+  [[ "$as" == lucia ]] && as=""
   [[ "${1:-}" == "--" ]] && shift
-  [[ -n "$(read_state key)" ]] || die "no API key on the $side side; up ran with --no-setup"
+  if [[ -z "$(read_state "key${as:+.$as}")" ]]; then
+    [[ -z "$as" ]] && die "no API key on the $side side; up ran with --no-setup"
+    die "no API key for $as on the $side side; up ran with --no-seed, or $as is a guest"
+  fi
   cmd_cli_raw "$@"
+}
+
+seed() {
+  node "$scripts/seed.mjs" --state "$state" --server "$(url)/convex" --cli "$root/apps/cli/dist/music.js" \
+    --browser "$scripts/browser.mjs" >&2
 }
 
 cmd_logs() {

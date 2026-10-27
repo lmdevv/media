@@ -9,6 +9,8 @@ this index before you drive the app, then use the matching feature file as the r
 - The side holds the demo library: 5 albums by 4 artists, including `Vienna Blue` by
   `Doc & Lena Selyanina`, whose tracks include `Wanderer` and `Doppelgänger`. With the fixture
   library the names differ. Read them from `$S cli -- albums list --json`.
+- The side holds the seeded [demo data](../SKILL.md#demo-data): Lucía, Mateo, Aiko, and Sam, the
+  playlists `Sunday morning`, `Deep focus`, `Lossless`, and `Waltzes`, and their likes.
 - Page `main` is signed in as `admin@music.local`, and the CLI uses the key that `up` created.
 - For iOS steps, `$S ios up [--side S]` printed `ready` and `$S ios doctor` passes.
 - Never drive a server or simulator that this run did not start.

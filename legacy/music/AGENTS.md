@@ -141,7 +141,9 @@ The example identities must be replaced with the model and tool that actually co
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `react-doctor`,
   `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked. `verify-music` is this
   repo's own: it runs disposable servers built from the checkout and from main, drives the web app,
-  the CLI, and the iOS app on a simulator, and publishes the evidence to a PR.
+  the CLI, and the iOS app on a simulator, and publishes the evidence to a PR. Its servers share
+  one set of demo data: the demo library image (`docs/demo-music.md`) and four seeded people with
+  their playlists and likes. Use that data, never your own music, in screenshots and recordings.
 - Prove a user-facing change with `verify-music` before you open its PR. A PR that changes what a
   user sees carries before and after screenshots of each changed screen, at desktop and phone size
   on the web, and a short video of the changed flow, published with `evidence publish`. When a PR

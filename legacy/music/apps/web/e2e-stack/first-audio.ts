@@ -3,7 +3,8 @@
  * the time from tapping its play button to its audio actually advancing in Chromium. Run it on a
  * fresh container so every song is a first play (an uncached transcode):
  *
- *   NAME=music-measure PORT=8098 MUSIC_DIR=~/music-demo/demo-music KEEP=1 scripts/stack-e2e.sh
+ *   scripts/download-demo-music.sh /tmp/demo-music
+ *   NAME=music-measure PORT=8098 MUSIC_DIR=/tmp/demo-music KEEP=1 scripts/stack-e2e.sh
  *   MUSIC_URL=http://localhost:8098 ALBUM="Vienna Blue" node apps/web/e2e-stack/first-audio.ts
  *
  * Set QUALITY to a streaming quality setting's label to pick it first, for example
