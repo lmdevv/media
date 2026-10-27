@@ -1,15 +1,15 @@
 /**
- * Lyrics inside Now Playing (B12–B16, H13), as Apple Music shows them: the Lyrics button in the
- * bottom row, and under the song's row the source caption, then synced lines that follow playback
- * and seek when tapped, plain text, or what there is to say instead. The rules for the button,
- * the caption, and the sung line are the web's, from `@music/player/lyrics`.
+ * Lyrics inside Now Playing (B12–B16, H13), as Apple Music shows them: under the song's row,
+ * synced lines that follow playback and seek when tapped, plain text, or what there is to say
+ * instead. The cover opens them. The rule for the sung line is the web's, from
+ * `@music/player/lyrics`.
  */
 import type { LyricLine } from "@music/commands/lyrics";
 import { TrackLyrics } from "@music/commands/lyrics";
-import { lyricLineState, lyricsButton, lyricsCaption, lyricsMoment } from "@music/player/lyrics";
-import type { LyricLineState, LyricsAnswer, LyricsMoment, LyricsOffer } from "@music/player/lyrics";
+import { lyricLineState, lyricsMoment } from "@music/player/lyrics";
+import type { LyricLineState, LyricsAnswer, LyricsMoment } from "@music/player/lyrics";
 import * as Haptics from "expo-haptics";
-import { ArrowUp, MessageSquareQuote } from "lucide-react-native";
+import { ArrowDown, ArrowUp } from "lucide-react-native";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import type {
@@ -22,47 +22,13 @@ import { useReducedMotion } from "react-native-reanimated";
 
 import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
-import { anchorTop, followLines, LINES_WAITING } from "@/lib/lyrics-follow";
-import type { LineBox, LineFollow, LineFollowEvent } from "@/lib/lyrics-follow";
+import { anchorTop, followLines, lineDirection, LINES_WAITING } from "@/lib/lyrics-follow";
+import type { LineBox, LineDirection, LineFollow, LineFollowEvent } from "@/lib/lyrics-follow";
 import { clock } from "@/lib/playback-format";
 import { useThemeColor } from "@/lib/theme-color";
 import { usePlayerActions, usePositionReader } from "@/player";
 
 import { EdgeFade } from "./edge-fade";
-
-/**
- * Opens and closes the lyrics: dimmed and disabled for a song without lyrics or an instrumental
- * (B15), a spinner while they are looked up (B16), and on a faint wash while open (B12).
- */
-export function LyricsButton({
-  offer,
-  open,
-  onPress,
-}: {
-  readonly offer: LyricsOffer;
-  readonly open: boolean;
-  readonly onPress: () => void;
-}) {
-  const button = lyricsButton(offer, open);
-  const color = useThemeColor("--color-text");
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={button.label}
-      accessibilityState={{ selected: open, disabled: button.disabled, busy: button.loading }}
-      disabled={button.disabled}
-      onPress={onPress}
-      className={`size-hit-target items-center justify-center rounded-full active:opacity-60 ${open ? "bg-text/10" : ""} ${button.disabled ? "opacity-disabled" : ""}`}
-    >
-      {button.loading ? (
-        <ActivityIndicator color={color} accessibilityElementsHidden />
-      ) : (
-        <Icon icon={MessageSquareQuote} />
-      )}
-    </Pressable>
-  );
-}
 
 /**
  * The playing song's lyrics under its row: synced lines, plain text, the song's own plain text
@@ -82,51 +48,17 @@ export function LyricsPanel({
   if (lyrics === "failed") return <LyricsMessage>Couldn’t load the lyrics</LyricsMessage>;
 
   return TrackLyrics.match(lyrics, {
-    Synced: ({ main, source }) => (
-      <>
-        <Caption text={lyricsCaption("Synced", source)} />
-        <SyncedLyrics lines={main.body.lines} background={background} />
-      </>
-    ),
-    Plain: ({ main, source }) => (
-      <>
-        <Caption text={lyricsCaption("Plain", source)} />
-        <PlainLyrics text={main.body.text} background={background} />
-      </>
-    ),
+    Synced: ({ main }) => <SyncedLyrics lines={main.body.lines} background={background} />,
+    Plain: ({ main }) => <PlainLyrics text={main.body.text} background={background} />,
     Pending: ({ fallback }) =>
       fallback === null ? (
         <LyricsMessage looking>Looking for lyrics…</LyricsMessage>
       ) : (
-        <>
-          <Caption text={lyricsCaption("Plain", "file")} looking />
-          <PlainLyrics text={fallback.body.text} background={background} />
-        </>
+        <PlainLyrics text={fallback.body.text} background={background} />
       ),
     None: () => <LyricsMessage>No lyrics for this song</LyricsMessage>,
     Instrumental: () => <LyricsMessage>Instrumental</LyricsMessage>,
   });
-}
-
-/** The source caption over the lines, and a note while synced lyrics may still be found. */
-function Caption({ text, looking = false }: { readonly text: string; readonly looking?: boolean }) {
-  const muted = useThemeColor("--color-text-muted");
-
-  return (
-    <View className="flex-row items-center gap-3 pt-3 pb-1">
-      <Text variant="mono" tone="muted">
-        {text}
-      </Text>
-      {looking ? (
-        <View className="flex-row items-center gap-2">
-          <ActivityIndicator size="small" color={muted} accessibilityElementsHidden />
-          <Text variant="caption" tone="muted">
-            Looking for synced lyrics…
-          </Text>
-        </View>
-      ) : null}
-    </View>
-  );
 }
 
 function LyricsMessage({
@@ -181,14 +113,17 @@ const SETTLE_MS = 1000;
 /**
  * Keeps line `started` at the anchor by wiring the lines' scroll view to `followLines`: it
  * measures the lines, reports every scroll, drag, and scroll end, and makes the scrolls following
- * asks for, without animating under Reduce Motion (`animate` false).
+ * asks for, without animating under Reduce Motion (`animate` false). Released, it tracks which way
+ * the sung line is, for "Back to current line".
  */
 function useLineFollow(started: number, animate: boolean) {
   const scroller = useRef<ScrollViewInstance>(null);
   const [following, setFollowing] = useState(true);
+  const [direction, setDirection] = useState<LineDirection>("up");
   const [height, setHeight] = useState(0);
   const state = useRef<LineFollow>(LINES_WAITING);
   const sung = useRef(started);
+  const shownDirection = useRef<LineDirection>("up");
   const motion = useRef(animate);
   const viewport = useRef(0);
   const content = useRef(0);
@@ -205,23 +140,40 @@ function useLineFollow(started: number, animate: boolean) {
     [],
   );
 
-  const dispatch = useCallback(function dispatch(event: LineFollowEvent): void {
-    const step = followLines(state.current, event);
-    state.current = step.state;
-    setFollowing(step.state.kind !== "released");
+  const dispatch = useCallback(
+    function dispatch(event: LineFollowEvent): void {
+      const step = followLines(state.current, event);
+      state.current = step.state;
+      setFollowing(step.state.kind !== "released");
 
-    if (step.scroll === undefined) return;
-    scroller.current?.scrollTo({
-      y: step.scroll.top,
-      animated: step.scroll.animated && motion.current,
-    });
+      if (step.state.kind === "released") {
+        const top = topOf(sung.current);
 
-    if (settle.current !== null) clearTimeout(settle.current);
-    settle.current = setTimeout(() => {
-      settle.current = null;
-      dispatch({ type: "scrollSettled" });
-    }, SETTLE_MS);
-  }, []);
+        const next =
+          top === null
+            ? shownDirection.current
+            : lineDirection(step.state.offset, top, shownDirection.current);
+
+        if (next !== shownDirection.current) {
+          shownDirection.current = next;
+          setDirection(next);
+        }
+      }
+
+      if (step.scroll === undefined) return;
+      scroller.current?.scrollTo({
+        y: step.scroll.top,
+        animated: step.scroll.animated && motion.current,
+      });
+
+      if (settle.current !== null) clearTimeout(settle.current);
+      settle.current = setTimeout(() => {
+        settle.current = null;
+        dispatch({ type: "scrollSettled" });
+      }, SETTLE_MS);
+    },
+    [topOf],
+  );
 
   useEffect(() => {
     motion.current = animate;
@@ -301,6 +253,7 @@ function useLineFollow(started: number, animate: boolean) {
   return {
     scroller,
     following,
+    direction,
     follow,
     height,
     onLayout,
@@ -390,7 +343,7 @@ function SyncedLyrics({
       </ScrollView>
       <EdgeFade edge="top" background={background} />
       <EdgeFade edge="bottom" background={background} />
-      {follow.following ? null : <BackToLine onPress={followAgain} />}
+      {follow.following ? null : <BackToLine direction={follow.direction} onPress={followAgain} />}
     </View>
   );
 }
@@ -440,8 +393,17 @@ const Line = memo(function Line({
   );
 });
 
-/** B14's pill over the lines once the person scrolled away: follows the sung line again. */
-function BackToLine({ onPress }: { readonly onPress: () => void }) {
+/**
+ * B14's pill over the lines once the person scrolled away: follows the sung line again. Its arrow
+ * points to the sung line, up past it (B14) or down above it (B14b).
+ */
+function BackToLine({
+  direction,
+  onPress,
+}: {
+  readonly direction: LineDirection;
+  readonly onPress: () => void;
+}) {
   return (
     <View className="absolute inset-x-0 bottom-3 items-center" pointerEvents="box-none">
       <Pressable
@@ -450,7 +412,7 @@ function BackToLine({ onPress }: { readonly onPress: () => void }) {
         onPress={onPress}
         className="h-ios-36 flex-row items-center gap-2 rounded-full bg-text pr-4 pl-3 shadow-lg shadow-glass-shadow active:opacity-80"
       >
-        <Icon icon={ArrowUp} tone="inverse" size="meta" />
+        <Icon icon={direction === "up" ? ArrowUp : ArrowDown} tone="inverse" size="meta" />
         <Text variant="secondaryStrong" tone="inverse">
           Back to current line
         </Text>

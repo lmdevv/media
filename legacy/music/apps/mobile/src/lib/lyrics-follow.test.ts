@@ -1,7 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { anchorTop, followLines, LINES_WAITING } from "./lyrics-follow";
+import { anchorTop, followLines, lineDirection, LINES_WAITING } from "./lyrics-follow";
 import type { FollowScroll, LineFollow, LineFollowEvent, LinesLayout } from "./lyrics-follow";
 
 /** Where following stands after some events, with every scroll it asked the lines to make. */
@@ -258,5 +258,20 @@ describe("anchorTop", () => {
     expect(anchorTop({ ...layout, lines: [first, undefined, third] }, 2)).toBeNull();
     expect(anchorTop({ ...layout, lines: [undefined, undefined, third] }, 0)).toBeNull();
     expect(anchorTop(layout, 3)).toBeNull();
+  });
+});
+
+describe("lineDirection", () => {
+  it("points up once the person scrolled down past the sung line, as B14 does", () => {
+    expect(lineDirection(900, 300, "down")).toBe("up");
+  });
+
+  it("points down once the person scrolled back above the sung line, as B14b does", () => {
+    expect(lineDirection(0, 300, "up")).toBe("down");
+  });
+
+  it("keeps its way while the lines are still where following left them, as a drag begins", () => {
+    expect(lineDirection(300, 300, "up")).toBe("up");
+    expect(lineDirection(301, 300, "down")).toBe("down");
   });
 });

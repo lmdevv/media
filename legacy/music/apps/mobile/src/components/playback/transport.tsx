@@ -1,35 +1,18 @@
 /**
- * Now Playing's controls (B01, B02): shuffle, previous, play or pause, next, and repeat, then the
- * session volume. They act on whichever device plays, so on B02 they steer the remote device.
- * Paper draws shuffle and repeat only when off; on, they take the accent, as H05 notes.
+ * Now Playing's controls (B01, B02): previous, play or pause, and next, then the session volume.
+ * They act on whichever device plays, so on B02 they steer the remote device. Shuffle and repeat
+ * live in the queue's mode pills (B03).
  */
 import * as Haptics from "expo-haptics";
 import type { LucideIcon } from "lucide-react-native";
-import {
-  FastForward,
-  Pause,
-  Play,
-  Repeat,
-  Repeat1,
-  Rewind,
-  Shuffle,
-  Volume,
-  Volume2,
-} from "lucide-react-native";
+import { FastForward, Pause, Play, Rewind, Volume, Volume2 } from "lucide-react-native";
 import { Pressable, View } from "react-native";
 
 import { Icon } from "@/components/ui/icon";
-import { IconButton } from "@/components/ui/icon-button";
 import { playsOn } from "@/lib/playback-format";
 import { usePlayer, usePlayerActions } from "@/player";
 
 import { Slider } from "./slider";
-
-const REPEAT_LABELS = {
-  off: "Repeat off",
-  all: "Repeat all",
-  one: "Repeat one",
-} as const;
 
 /** Previous and next: 32pt filled glyphs in 44pt targets. */
 function SkipButton({
@@ -53,24 +36,14 @@ function SkipButton({
   );
 }
 
-/** The transport row. */
+/** The transport row, centered. */
 export function Transport() {
-  const { status, shuffle, repeat } = usePlayer();
+  const { status } = usePlayer();
   const actions = usePlayerActions();
   const playing = playsOn(status);
 
   return (
-    <View className="flex-row items-center justify-between py-4">
-      <IconButton
-        icon={Shuffle}
-        label={shuffle ? "Shuffle on" : "Shuffle off"}
-        tone={shuffle ? "accent" : "default"}
-        accessibilityState={{ selected: shuffle }}
-        onPress={() => {
-          void Haptics.selectionAsync();
-          void actions.setShuffle(!shuffle);
-        }}
-      />
+    <View className="flex-row items-center justify-center gap-12 py-4">
       <SkipButton icon={Rewind} label="Previous" onPress={() => void actions.previous()} />
       <Pressable
         accessibilityRole="button"
@@ -84,16 +57,6 @@ export function Transport() {
         <Icon icon={playing ? Pause : Play} size="hero" filled />
       </Pressable>
       <SkipButton icon={FastForward} label="Next" onPress={() => void actions.next()} />
-      <IconButton
-        icon={repeat === "one" ? Repeat1 : Repeat}
-        label={REPEAT_LABELS[repeat]}
-        tone={repeat === "off" ? "default" : "accent"}
-        accessibilityState={{ selected: repeat !== "off" }}
-        onPress={() => {
-          void Haptics.selectionAsync();
-          void actions.cycleRepeat();
-        }}
-      />
     </View>
   );
 }

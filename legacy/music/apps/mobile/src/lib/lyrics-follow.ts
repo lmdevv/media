@@ -152,3 +152,17 @@ export const anchorTop = (layout: LinesLayout, index: number): number | null => 
 
   return Math.min(Math.max(0, top), Math.max(0, layout.content - layout.viewport));
 };
+
+/** Which way the sung line is from where the person scrolled: above the view, or below it. */
+export type LineDirection = "up" | "down";
+
+/**
+ * Where "Back to current line" points (B14, B14b): up when the lines sit past `top`, the scroll
+ * position that follows the sung line, so it is above the view; down when they sit before it.
+ * Still at `top`, as when a drag has only just begun, it keeps pointing where it did (`shown`).
+ */
+export const lineDirection = (offset: number, top: number, shown: LineDirection): LineDirection => {
+  if (near(offset, top)) return shown;
+
+  return offset > top ? "up" : "down";
+};

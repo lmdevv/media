@@ -1,21 +1,32 @@
 /**
  * Now Playing (B01 local, B02 remote, H05 dark): a sheet over the tabs with the cover, the song,
  * the scrubber, the controls, the volume, and where the music plays. The background takes the
- * cover's color. The queue and lyrics buttons open the queue (B03, H06) or the lyrics (B12, H13)
- * in place, as Apple Music does: the cover shrinks into the corner of a row with the song's
- * title, the queue or the lyrics rise under it, and the controls below stay exactly where they
- * are. One of the two shows at a time. The person drags the sheet down to dismiss it (B11); the
+ * cover's color. Tapping the cover opens the lyrics (B12, H13) when the song has them, and the
+ * queue button opens the queue (B03, H06), in place, as Apple Music does: the cover shrinks into
+ * the corner of a row with the song's title, and the queue or the lyrics rise under it. The queue
+ * keeps every control below it; the lyrics keep only the scrubber and the transport (B12–B14).
+ * One of the two shows at a time. The person drags the sheet down to dismiss it (B11); the
  * sliders keep their own drags. With nothing queued it says so (G14).
  */
 import type { TrackId } from "@music/commands/ids";
-import { lyricsAnswer, lyricsOffer, offlineLyrics } from "@music/player/lyrics";
-import type { LyricsAnswer } from "@music/player/lyrics";
+import { lyricsAnswer, lyricsButton, lyricsOffer, offlineLyrics } from "@music/player/lyrics";
+import type { LyricsAnswer, LyricsOffer } from "@music/player/lyrics";
 import { useRead, useReadSettled, useRun } from "@music/sdk/react";
 import * as Haptics from "expo-haptics";
 import { router, useNavigation } from "expo-router";
-import { Heart, List, Music, Smartphone, Users, Airplay } from "lucide-react-native";
+import {
+  Airplay,
+  Ellipsis,
+  Heart,
+  List,
+  MessageSquareQuote,
+  Music,
+  Smartphone,
+  Users,
+} from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { Pressable, View } from "react-native";
+import type { ReactNode } from "react";
+import { ActivityIndicator, Pressable, View } from "react-native";
 import type { LayoutRectangle } from "react-native";
 import Animated, {
   Extrapolation,
@@ -44,9 +55,7 @@ import { usePlayer } from "@/player";
 import type { NowPlaying, PlayerRole } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
-import { LyricsButton, LyricsPanel } from "./lyrics";
-import { MenuButton } from "./menu-button";
-import type { MenuItem } from "./menu-button";
+import { LyricsPanel } from "./lyrics";
 import { ModePills, QueueList } from "./queue";
 import { Scrubber } from "./scrubber";
 import { Transport, VolumeRow } from "./transport";
@@ -58,7 +67,7 @@ const leaveTo = (go: () => void) => {
   go();
 };
 
-/** The song as Song actions takes it; null for a Jam song kept private, which has nothing to open. */
+/** The song as Song actions takes it; null for a Jam song kept private, with no album or artist. */
 const sheetSongOf = (song: NowPlaying): SheetSong | null =>
   song.artistId === undefined || song.albumId === undefined
     ? null
@@ -71,14 +80,6 @@ const sheetSongOf = (song: NowPlaying): SheetSong | null =>
         albumId: song.albumId,
         liked: song.liked,
       };
-
-const AUDIO_DETAILS: MenuItem = {
-  title: "Audio details",
-  icon: "waveform",
-  onPress: () => {
-    router.push("/player/audio");
-  },
-};
 
 /** The cover's move between the full cover and the song's row: a soft spring with no bounce. */
 const MORPH = { duration: 450, dampingRatio: 0.9 } as const;
@@ -97,6 +98,56 @@ type StageView =
 
 const CLOSED: StageView = { open: false, panel: null };
 
+/**
+ * The lyrics, open or closing, fold the volume and the bottom row away with the cover's morph,
+ * leaving the scrubber and the transport (B12).
+ */
+const foldsOf = (view: StageView): boolean => view.panel === "lyrics";
+
+/**
+ * The chip on the cover's corner, which says the cover opens the lyrics: their `glyph`, a
+ * `spinner` while they are looked up (B16), or none for a song with no lyrics or an instrumental
+ * (B15), whose cover is only a picture. Looked up, the lyrics open too, on the song's own words
+ * or "Looking for lyrics…"; failed, they open to say so.
+ */
+type LyricsChipLook = "glyph" | "spinner" | null;
+
+const LYRICS_CHIP: Readonly<Record<LyricsOffer, LyricsChipLook>> = {
+  ready: "glyph",
+  failed: "glyph",
+  loading: "spinner",
+  none: null,
+  instrumental: null,
+};
+
+/** What tapping the cover does: shows it again over an open panel, opens the lyrics, or nothing. */
+type CoverTap = "close" | "lyrics" | "none";
+
+const COVER_TAP: Readonly<
+  Record<
+    CoverTap,
+    {
+      readonly role: "button" | "image";
+      readonly label: (album: string, offer: LyricsOffer) => string;
+      readonly hint?: string;
+    }
+  >
+> = {
+  close: { role: "button", label: () => "Show the cover" },
+  lyrics: {
+    role: "button",
+    label: (_album, offer) => lyricsButton(offer, false).label,
+    hint: "Shows the lyrics",
+  },
+  none: { role: "image", label: (album) => `Cover of ${album}` },
+};
+
+const coverTap = (open: boolean, chip: LyricsChipLook): CoverTap => {
+  if (open) return "close";
+
+  return chip === null ? "none" : "lyrics";
+};
+
 /** The drag handle Paper draws in place of a close button. */
 function Handle() {
   return (
@@ -108,25 +159,24 @@ function Handle() {
   );
 }
 
-/** The ellipsis beside the heart: Song actions, and the file's audio details. */
-function SongMenu({ song }: { readonly song: NowPlaying }) {
+/**
+ * The ellipsis beside the heart: Song actions, or Audio details for a Jam song kept private,
+ * which has no song actions.
+ */
+function MoreButton({ song }: { readonly song: NowPlaying }) {
   const sheetSong = sheetSongOf(song);
 
   return (
-    <MenuButton
-      label="More"
-      items={
-        sheetSong === null
-          ? [AUDIO_DETAILS]
-          : [
-              {
-                title: "Song actions",
-                icon: "ellipsis.circle",
-                onPress: () => openSongActions(sheetSong),
-              },
-              AUDIO_DETAILS,
-            ]
-      }
+    <IconButton
+      icon={Ellipsis}
+      label={sheetSong === null ? "Audio details" : "More"}
+      onPress={() => {
+        if (sheetSong === null) {
+          router.push("/audio");
+        } else {
+          openSongActions(sheetSong);
+        }
+      }}
     />
   );
 }
@@ -221,7 +271,7 @@ function TitleRow({ song }: { readonly song: NowPlaying }) {
       </View>
       <View className="flex-row items-center">
         <LikeButton trackId={song.trackId} liked={song.liked} />
-        <SongMenu song={song} />
+        <MoreButton song={song} />
       </View>
     </View>
   );
@@ -243,7 +293,7 @@ function SongRow({ song }: { readonly song: NowPlaying }) {
       </View>
       <View className="flex-row items-center">
         <LikeButton trackId={song.trackId} liked={song.liked} />
-        <SongMenu song={song} />
+        <MoreButton song={song} />
       </View>
     </View>
   );
@@ -296,33 +346,19 @@ function JamButton() {
   );
 }
 
-/**
- * Lyrics and Jam, the playing device, and the queue (B12). Lyrics and the queue sit on a faint
- * wash while open.
- */
+/** Jam, the playing device, and the queue (B01). The queue sits on a faint wash while open. */
 function ActionRow({
   role,
-  view,
-  lyrics,
-  onToggle,
+  queueOpen,
+  onQueue,
 }: {
   readonly role: PlayerRole;
-  readonly view: StageView;
-  readonly lyrics: LyricsAnswer;
-  readonly onToggle: (panel: Panel) => void;
+  readonly queueOpen: boolean;
+  readonly onQueue: () => void;
 }) {
-  const queueOpen = view.open && view.panel === "queue";
-
   return (
     <View className="flex-row items-center justify-between pt-4">
       <View className="w-ios-88 flex-row items-center">
-        <LyricsButton
-          offer={lyricsOffer(lyrics)}
-          open={view.open && view.panel === "lyrics"}
-          onPress={() => {
-            onToggle("lyrics");
-          }}
-        />
         <JamButton />
       </View>
       <DeviceButton role={role} />
@@ -332,9 +368,7 @@ function ActionRow({
           label="Queue"
           accessibilityState={{ selected: queueOpen }}
           className={queueOpen ? "bg-text/10" : ""}
-          onPress={() => {
-            onToggle("queue");
-          }}
+          onPress={onQueue}
         />
       </View>
     </View>
@@ -387,9 +421,46 @@ function NothingPlaying() {
 }
 
 /**
+ * Paper's chip on the cover's corner, saying the cover opens the lyrics: their glyph, or a
+ * spinner while they are looked up. Paper blurs behind it; the app has no blur, so it is the
+ * scrim alone.
+ */
+function LyricsChip({
+  loading,
+  progress,
+}: {
+  readonly loading: boolean;
+  readonly progress: SharedValue<number>;
+}) {
+  const white = useThemeColor("--color-dark-text");
+
+  // Gone before the cover is small, so it never shows on the row's 64pt cover.
+  const fade = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 0.3], [1, 0], Extrapolation.CLAMP),
+  }));
+
+  return (
+    <Animated.View
+      style={fade}
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      className="absolute right-3 bottom-3 size-8 items-center justify-center rounded-full bg-scrim/55"
+    >
+      {loading ? (
+        <ActivityIndicator size="small" color={white} />
+      ) : (
+        <Icon icon={MessageSquareQuote} tone="overArt" size="meta" />
+      )}
+    </Animated.View>
+  );
+}
+
+/**
  * Everything above the controls: the cover over the song's title, or the queue or the lyrics
  * under the song's row. `progress` runs from 0 (cover) to 1 (row), and one cover moves between
- * the two places, so it reads as the same picture shrinking into the row.
+ * the two places, so it reads as the same picture shrinking into the row. Tapped, the cover opens
+ * the lyrics (`onOpenLyrics`) when the song has them, or shows itself again over a panel.
  */
 function Stage({
   song,
@@ -397,6 +468,7 @@ function Stage({
   lyrics,
   progress,
   background,
+  onOpenLyrics,
   onClose,
 }: {
   readonly song: NowPlaying;
@@ -404,9 +476,14 @@ function Stage({
   readonly lyrics: LyricsAnswer;
   readonly progress: SharedValue<number>;
   readonly background: string;
+  readonly onOpenLyrics: () => void;
   readonly onClose: () => void;
 }) {
   const { open } = view;
+  const folds = foldsOf(view);
+  const offer = lyricsOffer(lyrics);
+  const chip = LYRICS_CHIP[offer];
+  const tap = COVER_TAP[coverTap(open, chip)];
   const [box, setBox] = useState<LayoutRectangle | null>(null);
   const [titleHeight, setTitleHeight] = useState(0);
 
@@ -417,7 +494,9 @@ function Stage({
   const coverRadius = useThemeLength("--radius-mobile-card");
   const rowRadius = useThemeLength("--radius-md");
 
-  // The cover fills the width up to Paper's 326pt, leaving room for the title under it.
+  // The cover fills the width up to Paper's 326pt, leaving room for the title under it. The
+  // lyrics grow the stage as the controls under it go; the cover keeps the box it had, so the
+  // morph starts where the cover is.
   const width = box?.width ?? 0;
 
   const size = Math.max(
@@ -461,7 +540,8 @@ function Stage({
     <View
       className="flex-1"
       onLayout={(event) => {
-        setBox(event.nativeEvent.layout);
+        // Mounted with the lyrics already open, it takes the box it has, to show the cover at all.
+        if (!folds || box === null) setBox(event.nativeEvent.layout);
       }}
     >
       <Animated.View
@@ -495,16 +575,74 @@ function Stage({
       )}
       <Animated.View style={cover} className="absolute overflow-hidden">
         <Pressable
-          accessibilityRole={open ? "button" : "image"}
-          accessibilityLabel={open ? "Show the cover" : `Cover of ${song.album}`}
-          disabled={!open}
-          onPress={onClose}
+          accessibilityRole={tap.role}
+          accessibilityLabel={tap.label(song.album, offer)}
+          accessibilityHint={tap.hint}
+          accessibilityState={{ busy: !open && chip === "spinner" }}
+          disabled={tap.role === "image"}
+          onPress={open ? onClose : onOpenLyrics}
           className="size-full"
         >
           <Artwork url={song.artUrl} className="size-full" />
         </Pressable>
+        {chip === null ? null : <LyricsChip loading={chip === "spinner"} progress={progress} />}
       </Animated.View>
     </View>
+  );
+}
+
+/**
+ * The scrubber and the transport, then `children`, the rows the lyrics fold away (`folds`). They
+ * fold with the cover's morph (`progress`), so the stage grows into their room as the cover
+ * shrinks: the rows fade and slide out under the bottom edge, and the transport tightens to B12's
+ * spacing. Folded, the rows take no touches.
+ */
+function Controls({
+  folds,
+  folded,
+  progress,
+  children,
+}: {
+  readonly folds: boolean;
+  readonly folded: boolean;
+  readonly progress: SharedValue<number>;
+  readonly children: ReactNode;
+}) {
+  const rowsHeight = useSharedValue(0);
+  const tighten = useThemeLength("--spacing-2");
+
+  const transport = useAnimatedStyle(() => {
+    const shut = folds ? progress.value : 0;
+
+    return { marginVertical: -tighten * shut };
+  }, [folds, tighten]);
+
+  const rows = useAnimatedStyle(() => {
+    const shut = folds ? progress.value : 0;
+
+    return {
+      opacity: interpolate(shut, [0, 0.5], [1, 0], Extrapolation.CLAMP),
+      marginBottom: -rowsHeight.value * shut,
+    };
+  }, [folds]);
+
+  return (
+    <>
+      <Scrubber />
+      <Animated.View style={transport}>
+        <Transport />
+      </Animated.View>
+      <Animated.View
+        style={rows}
+        pointerEvents={folds && folded ? "none" : "box-none"}
+        accessibilityElementsHidden={folds && folded}
+        onLayout={(event) => {
+          rowsHeight.value = event.nativeEvent.layout.height;
+        }}
+      >
+        {children}
+      </Animated.View>
+    </>
   );
 }
 
@@ -519,7 +657,7 @@ export function NowPlayingScreen() {
   const reduceMotion = useReducedMotion();
   const background = tint ?? player;
 
-  // Read while Now Playing is up, for the lyrics button as much as for the lyrics. Settled, not
+  // Read while Now Playing is up, for the cover's chip as much as for the lyrics. Settled, not
   // thrown: a failed read shows in the lyrics instead of taking Now Playing down.
   const served = lyricsAnswer(
     useReadSettled("lyrics.get", nowPlaying === null ? "skip" : { trackId: nowPlaying.trackId }),
@@ -555,10 +693,7 @@ export function NowPlayingScreen() {
     }
   };
 
-  // A panel's button opens it, or switches from the other panel; pressed again, it closes.
-  const toggle = (panel: Panel) => {
-    show(view.open && view.panel === panel ? null : panel);
-  };
+  const queueOpen = view.open && view.panel === "queue";
 
   return (
     <View className="flex-1" style={{ backgroundColor: background, paddingBottom: insets.bottom }}>
@@ -573,14 +708,23 @@ export function NowPlayingScreen() {
             lyrics={lyrics}
             progress={progress}
             background={background}
+            onOpenLyrics={() => {
+              show("lyrics");
+            }}
             onClose={() => {
               show(null);
             }}
           />
-          <Scrubber />
-          <Transport />
-          <VolumeRow />
-          <ActionRow role={role} view={view} lyrics={lyrics} onToggle={toggle} />
+          <Controls folds={foldsOf(view)} folded={view.open} progress={progress}>
+            <VolumeRow />
+            <ActionRow
+              role={role}
+              queueOpen={queueOpen}
+              onQueue={() => {
+                show(queueOpen ? null : "queue");
+              }}
+            />
+          </Controls>
         </View>
       )}
     </View>

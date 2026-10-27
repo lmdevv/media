@@ -1,15 +1,25 @@
 /**
  * A11 · Song actions: play next, add to the queue, download, add to a playlist, like, go to the
- * album or the artist, or copy a link. Queueing, downloading, and liking close the sheet once
- * done; a failure stays in the sheet with the server's reason. Copying says so in the row, since
- * iOS shows no toast.
+ * album or the artist, or copy a link, and for the song playing now, its audio details (B09).
+ * Queueing, downloading, and liking close the sheet once done; a failure stays in the sheet with
+ * the server's reason. Copying says so in the row, since iOS shows no toast.
  */
 import { errorMessage } from "@music/sdk/errors";
 import { useReadOnce, useRun } from "@music/sdk/react";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
-import { Check, FastForward, Heart, Library, Link, List, Plus, Users } from "lucide-react-native";
+import {
+  AudioWaveform,
+  Check,
+  FastForward,
+  Heart,
+  Library,
+  Link,
+  List,
+  Plus,
+  Users,
+} from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import { useState } from "react";
 import { View } from "react-native";
@@ -17,13 +27,14 @@ import { View } from "react-native";
 import { openAlbum, openArtist } from "@/components/browse/rows";
 import { DownloadRow } from "@/components/downloads/download-row";
 import { Icon } from "@/components/ui/icon";
-import { Row } from "@/components/ui/row";
+import { Row, RowChevron } from "@/components/ui/row";
 import { SheetLayout } from "@/components/ui/sheet-layout";
 import { Text } from "@/components/ui/text";
 import { mediaUrl } from "@/lib/media-url";
+import { fileDetails } from "@/lib/playback-format";
 import { parseSongSheet } from "@/lib/song-sheet";
 import type { SheetSong } from "@/lib/song-sheet";
-import { useSessionRun } from "@/player";
+import { useNowPlaying, useSessionRun } from "@/player";
 import { useConnection } from "@/session/connection";
 
 /** One action: its icon and label, filled for the transport glyph. */
@@ -69,6 +80,9 @@ function Actions({ song }: { readonly song: SheetSong }) {
   const readLink = useReadOnce("links.get");
   const [failure, setFailure] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // Audio details only knows the song playing now.
+  const { nowPlaying } = useNowPlaying();
+  const playing = nowPlaying?.trackId === song.id ? nowPlaying : null;
 
   /** Runs `action`, then closes the sheet; a failure keeps it open with the reason. */
   const finish = async (action: () => Promise<void>) => {
@@ -156,6 +170,15 @@ function Actions({ song }: { readonly song: SheetSong }) {
         done={copied}
         onPress={() => void copyLink()}
       />
+      {playing === null ? null : (
+        <Row
+          title="Audio details"
+          subtitle={fileDetails(playing)}
+          leading={{ kind: "icon", icon: AudioWaveform }}
+          trailing={<RowChevron />}
+          onPress={() => router.replace("/audio")}
+        />
+      )}
       {failure === null ? null : (
         <View className="pt-3">
           <Text variant="calloutMedium" tone="danger" accessibilityLiveRegion="polite">
