@@ -29,6 +29,7 @@
     "@effect/vitest": "4.0.3",
     "@music/config": "workspace:*",
     "@oxlint/plugins": "1.87.0",
+    "@playwright/test": "1.64.0",
     "@types/node": "catalog:",
     "effect": "catalog:",
     "knip": "6.41.0",

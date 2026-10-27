@@ -5,7 +5,8 @@
   "workspaces": {
     ".": {
       "ignoreDependencies": ["@effect/vitest", "effect"],
-      "entry": [".agents/skills/*/scripts/*.mjs"]
+      "entry": [".agents/skills/*/scripts/*.mjs"],
+      "ignoreBinaries": ["ffmpeg"]
     },
     "apps/web": {
       "entry": ["e2e-stack/first-audio.ts"]

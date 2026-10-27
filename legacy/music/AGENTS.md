@@ -139,7 +139,13 @@ The example identities must be replaced with the model and tool that actually co
   `apps/web/test-results/stack`. On NixOS, set `CHROMIUM_PATH=$(which chromium)`.
 - Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, `pnpm test --repeats=20`.
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `react-doctor`,
-  `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked.
+  `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked. `verify-music` is this
+  repo's own: it runs disposable servers built from the checkout and from main, drives the web app,
+  the CLI, and the iOS app on a simulator, and publishes the evidence to a PR.
+- Prove a user-facing change with `verify-music` before you open its PR. A PR that changes what a
+  user sees carries before and after screenshots of each changed screen, at desktop and phone size
+  on the web, and a short video of the changed flow, published with `evidence publish`. When a PR
+  changes nothing a user sees, say so under its verification notes instead.
 - `main` requires the `check` and `stack-e2e` CI jobs. PRs matching the `paths` in
   `.github/workflows/image.yml` also run the `Image` workflow; check it too. Never merge with admin
   bypass.
