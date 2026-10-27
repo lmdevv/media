@@ -138,9 +138,7 @@ The example identities must be replaced with the model and tool that actually co
 - `scripts/stack-e2e.sh` needs Docker. `MUSIC_VIDEO=1` records video; results land in
   `apps/web/test-results/stack`. On NixOS, set `CHROMIUM_PATH=$(which chromium)`.
 - Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, `pnpm test --repeats=20`.
-- Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `before-and-after` attaches UI
-  captures to a PR with `.agents/skills/before-and-after/scripts/format.mjs` and Vercel's
-  `agent-browser` CLI (`npm i -g agent-browser && agent-browser install`), plus `react-doctor`,
+- Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `react-doctor`,
   `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked.
 - `main` requires the `check` and `stack-e2e` CI jobs. PRs matching the `paths` in
   `.github/workflows/image.yml` also run the `Image` workflow; check it too. Never merge with admin
