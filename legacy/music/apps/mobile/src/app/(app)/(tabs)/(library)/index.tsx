@@ -105,7 +105,6 @@ export default function Library() {
             title={category.title}
             leading={{ kind: "icon", icon: category.icon }}
             detail={detail === null ? undefined : { text: detail, variant: "callout" }}
-            accessibilityLabel={detail === null ? undefined : `${category.title}, ${detail}`}
             trailing={<RowChevron />}
             dimmed={dimmed}
             onPress={dimmed ? undefined : () => router.push(category.href)}

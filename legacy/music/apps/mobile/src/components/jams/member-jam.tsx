@@ -47,7 +47,7 @@ function NowPlayingRow({ canControl }: { readonly canControl: boolean }) {
       subtitle={nowPlaying.artist}
       active
       leading={{ kind: "art", url: nowPlaying.artUrl }}
-      trailing={
+      trailingAction={
         canControl ? (
           <IconButton
             icon={playing ? Pause : Play}
@@ -136,7 +136,7 @@ function ContributionRow({
         url: resolveMediaUrl(origin, entry.artUrl),
         recyclingKey: entry.itemId,
       }}
-      trailing={
+      trailingAction={
         canRemove ? (
           <IconButton
             icon={X}

@@ -198,7 +198,7 @@ function Editor({ detail }: { readonly detail: PlaylistDetail }) {
                 title={entry.track?.title ?? "Unavailable song"}
                 subtitle={entry.track?.artist ?? ""}
                 leading={{ kind: "art", url: entry.track?.artUrl ?? null }}
-                trailing={grip}
+                trailingAction={grip}
               />
             )}
           />

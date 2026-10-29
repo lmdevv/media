@@ -121,7 +121,7 @@ function Gallery() {
         title="Unfinished Sympathy"
         subtitle="Massive Attack"
         leading={{ kind: "art", url: null }}
-        trailing={<RowMore label="More, Unfinished Sympathy" onPress={() => {}} />}
+        trailingAction={<RowMore label="More, Unfinished Sympathy" onPress={() => {}} />}
         active
         onPress={() => {}}
       />
@@ -129,7 +129,7 @@ function Gallery() {
         title="Safe from Harm"
         subtitle="Massive Attack"
         leading={{ kind: "art", url: null }}
-        trailing={<RowMore label="More, Safe from Harm" onPress={() => {}} />}
+        trailingAction={<RowMore label="More, Safe from Harm" onPress={() => {}} />}
         onPress={() => {}}
       />
       <Row

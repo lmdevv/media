@@ -19,7 +19,6 @@ import { ContentUnavailable } from "@/components/states/content-unavailable";
 import { usePlaylist } from "@/components/playlists/use-playlist";
 import { useTrackPages } from "@/components/playlists/use-track-pages";
 import { Icon } from "@/components/ui/icon";
-import { IconButton } from "@/components/ui/icon-button";
 import { NavBar } from "@/components/ui/nav-bar";
 import { Row, RowCheck } from "@/components/ui/row";
 import { Text } from "@/components/ui/text";
@@ -134,22 +133,13 @@ function Picker({ detail }: { readonly detail: PlaylistDetail }) {
                 title={track.title}
                 subtitle={track.artist}
                 leading={{ kind: "art", url: track.artUrl, recyclingKey: track.id }}
-                accessibilityLabel={`${track.title}, ${track.artist}${added ? ", added" : ""}`}
-                onPress={() => void addTrack(track)}
-                trailing={
-                  added ? (
-                    <RowCheck />
-                  ) : (
-                    <IconButton
-                      icon={Plus}
-                      label={`Add ${track.title}`}
-                      tone="muted"
-                      size="inline"
-                      disabled={adding.has(track.id)}
-                      onPress={() => void addTrack(track)}
-                    />
-                  )
+                accessibilityLabel={
+                  added
+                    ? `${track.title}, ${track.artist}, added`
+                    : `Add ${track.title}, ${track.artist}`
                 }
+                onPress={added ? undefined : () => void addTrack(track)}
+                trailing={added ? <RowCheck /> : <Icon icon={Plus} tone="muted" size="inline" />}
               />
             </View>
           );

@@ -78,7 +78,7 @@ function SongRow({
         title={entry.title}
         active={active}
         leading={{ kind: "art", url: entry.artUrl, recyclingKey: entry.key }}
-        trailing={
+        trailingAction={
           song === null || !entry.playable ? undefined : (
             <RowMore label={`More, ${entry.title}`} onPress={() => openSongActions(song)} />
           )

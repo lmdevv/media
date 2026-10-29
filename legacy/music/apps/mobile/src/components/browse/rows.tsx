@@ -55,7 +55,9 @@ export function TrackRow({
         leading={{ kind: "art", url: artUrl, recyclingKey: song.id }}
         active={active}
         onLongPress={() => openSongActions(song)}
-        trailing={<RowMore label={`More, ${song.title}`} onPress={() => openSongActions(song)} />}
+        trailingAction={
+          <RowMore label={`More, ${song.title}`} onPress={() => openSongActions(song)} />
+        }
       />
     </View>
   );

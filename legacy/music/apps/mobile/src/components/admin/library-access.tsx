@@ -117,7 +117,7 @@ function AccessList({ me, library }: { readonly me: User; readonly library: Libr
             leading={{ kind: "icon", icon: Users, tone: "muted" }}
             title={name}
             subtitle="Can listen"
-            trailing={
+            trailingAction={
               control === "none" ? null : (
                 <IconButton
                   icon={X}
