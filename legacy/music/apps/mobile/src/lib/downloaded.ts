@@ -2,7 +2,16 @@
  * The words of Library → Downloaded (Paper's D09 and D10): the category's count, the page's
  * filters and storage summary, and each download's line under its title.
  */
-import type { DownloadedItem, DownloadUsage, TrackDownloadState } from "@music/sdk/downloads";
+import type { TrackId } from "@music/commands/ids";
+import type {
+  DownloadedEntry,
+  DownloadedItem,
+  DownloadedSong,
+  DownloadedSongs,
+  DownloadStatus,
+  DownloadUsage,
+  TrackDownloadState,
+} from "@music/sdk/downloads";
 import { Match } from "effect";
 
 import { countOf, formatBytes } from "./format";
@@ -18,14 +27,18 @@ export const DOWNLOADED_FILTERS = [
 /** What the page lists. */
 export type DownloadedFilter = (typeof DOWNLOADED_FILTERS)[number]["value"];
 
-/** The downloads a filter shows; `songs` lists every song on the phone instead. */
-export const downloadsFor = (
+/** The rows a filter shows; `songs` lists every song on the phone instead. */
+export const entriesFor = (
   filter: Exclude<DownloadedFilter, "songs">,
-  downloads: ReadonlyArray<DownloadedItem>,
-): ReadonlyArray<DownloadedItem> =>
+  entries: ReadonlyArray<DownloadedEntry>,
+): ReadonlyArray<DownloadedEntry> =>
   filter === "all"
-    ? downloads
-    : downloads.filter((item) => item.target.kind === (filter === "albums" ? "album" : "playlist"));
+    ? entries
+    : entries.filter(
+        (entry) =>
+          entry.kind === "download" &&
+          entry.item.target.kind === (filter === "albums" ? "album" : "playlist"),
+      );
 
 /** An empty state's title and body. */
 interface EmptyCopy {
@@ -79,39 +92,55 @@ export interface DownloadedLine {
 
 const KINDS = { track: "Song", album: "Album", playlist: "Playlist" } as const;
 
-/** `Album · Massive Attack`, `Playlist · 24 songs`, or where a download still coming stands. */
-export const downloadedLine = (item: DownloadedItem): DownloadedLine => {
-  // A playlist names its songs, as D10 draws it; an album or song names its artist.
-  const who =
-    item.target.kind === "playlist" && item.songs !== null
-      ? countOf(item.songs, "song")
-      : item.subtitle;
-
-  const line = (text: string, glyph: TrackDownloadState | null = null): DownloadedLine => ({
-    text: `${text} · ${who}`,
+const statusLine = (
+  status: DownloadStatus,
+  settled: string | null,
+  who: string | null,
+): DownloadedLine => {
+  const line = (
+    text: string | null,
+    glyph: TrackDownloadState | null = null,
+    tone: DownloadedLine["tone"] = "muted",
+  ): DownloadedLine => ({
+    text: [text, who].filter((part) => part !== null).join(" · "),
     glyph,
-    tone: "muted",
+    tone,
   });
 
-  return Match.value(item.status).pipe(
+  return Match.value(status).pipe(
     Match.discriminatorsExhaustive("kind")({
-      none: () => line(KINDS[item.target.kind]),
-      downloaded: () => line(KINDS[item.target.kind]),
-      included: () => line(KINDS[item.target.kind]),
+      none: () => line(settled),
+      downloaded: () => line(settled),
+      included: () => line(settled),
       unavailable: () => line("No longer available"),
       queued: () => line("Waiting to download", "queued"),
       waiting: ({ reason }) =>
         line(reason === "offline" ? "Waiting for your server" : "Waiting for space", "queued"),
       downloading: ({ done, total }) =>
         line(`Downloading ${String(done)} of ${String(total)}`, "downloading"),
-      failed: ({ failed, total }): DownloadedLine => ({
-        text: `Couldn’t download ${String(failed)} of ${String(total)} · ${who}`,
-        glyph: "failed",
-        tone: "danger",
-      }),
+      failed: ({ failed, total }) =>
+        line(`Couldn’t download ${String(failed)} of ${String(total)}`, "failed", "danger"),
     }),
   );
 };
+
+/** `Album · Massive Attack`, `Playlist · 24 songs`, or where a download still coming stands. */
+export const downloadedLine = (item: DownloadedItem): DownloadedLine =>
+  statusLine(
+    item.status,
+    KINDS[item.target.kind],
+    item.target.kind === "playlist" && item.songs !== null
+      ? countOf(item.songs, "song")
+      : item.subtitle,
+  );
+
+/** A song on the Songs page (D10c): its artist, or where its download stands. */
+export const ownSongLine = (item: DownloadedSong): DownloadedLine =>
+  statusLine(item.status, null, item.subtitle);
+
+/** The Songs row (D10b): how many songs, or where the ones still coming stand. */
+export const ownSongsLine = (songs: DownloadedSongs): DownloadedLine =>
+  statusLine(songs.status, countOf(songs.items.length, "song"), null);
 
 /**
  * The Settings row's subtitle (D15), without Paper's "cellular": the app can't tell cellular from
@@ -139,3 +168,44 @@ export const downloadedDetail = (usage: DownloadUsage, offline: boolean): string
 /** Library's line under its title while offline, such as `55 songs on this iPhone` (D11). */
 export const onThisPhone = (usage: DownloadUsage): string =>
   `${countOf(usage.tracks, "song")} on this iPhone`;
+
+/** D10c's mono line over its songs, such as `3 SONGS`. */
+export const ownSongsSummary = (songs: DownloadedSongs): string =>
+  countOf(songs.items.length, "song").toLocaleUpperCase();
+
+/** D10c's sentence under its summary. */
+export const OWN_SONGS_NOTE =
+  "Downloaded on their own. A song in a downloaded album or playlist is listed there.";
+
+/** D10c's empty state, which also shows once a downloaded album or playlist holds every song. */
+export const OWN_SONGS_EMPTY: EmptyCopy = {
+  title: "No songs downloaded on their own",
+  body: "Songs you download from their menu show here.\nA song in a downloaded album or playlist is listed there.",
+};
+
+/** What a tap on a song of D10c plays, and from where. */
+export interface OwnSongsQueue {
+  readonly trackIds: ReadonlyArray<TrackId>;
+  readonly index: number;
+}
+
+/**
+ * A tap on `tapped` plays the songs on this phone from it, as an offline album does; a song still
+ * coming plays on its own, so the queue never waits on songs this phone doesn't hold.
+ */
+export const ownSongsQueue = (
+  items: ReadonlyArray<DownloadedSong>,
+  tapped: DownloadedSong,
+): OwnSongsQueue => {
+  if (tapped.status.kind !== "downloaded") return { trackIds: [tapped.target.id], index: 0 };
+
+  const here = items.filter((item) => item.status.kind === "downloaded");
+
+  return {
+    trackIds: here.map((item) => item.target.id),
+    index: Math.max(
+      0,
+      here.findIndex((item) => item.target.id === tapped.target.id),
+    ),
+  };
+};

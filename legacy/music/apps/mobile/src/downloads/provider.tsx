@@ -10,6 +10,7 @@ import type { DownloadTarget } from "@music/commands/models";
 import {
   canToggleDownload,
   downloadStatus,
+  freedBytesOf,
   DownloadSync,
   EMPTY_DOWNLOADS,
   offlineLibrary,
@@ -60,6 +61,8 @@ interface DownloadView {
   readonly status: DownloadStatus;
   /** Whether `toggle` does anything now: adding needs the server; removing works offline. */
   readonly canToggle: boolean;
+  /** Space removing it frees: its songs here that no other download keeps. */
+  readonly freedBytes: number;
   /** Downloads it, or removes it, cancelling what is still to come. */
   readonly toggle: () => Promise<void>;
   /** Tries its failed songs again now. */
@@ -391,6 +394,7 @@ export const useDownload = (target: DownloadTarget): DownloadView => {
   return {
     status,
     canToggle,
+    freedBytes: freedBytesOf(snapshot, target),
     toggle: async () => {
       if (sync === null || !canToggle) return;
 

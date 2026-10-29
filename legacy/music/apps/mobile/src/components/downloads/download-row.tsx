@@ -49,7 +49,7 @@ export function DownloadRow({
     }
   };
 
-  return downloadRows(download.status, download.canToggle).map((label) => {
+  return downloadRows(download.status, download.canToggle, download.freedBytes).map((label) => {
     const leading = { kind: "icon", icon: ICONS[label.icon], tone } as const;
     const onPress = label.action === "none" ? undefined : () => void press(label);
 

@@ -29,21 +29,33 @@ export type DownloadStatus =
 
 const NONE: DownloadStatus = { kind: "none" };
 
-/** The album or playlist download that holds `trackId`, if one does. */
-const includedStatus = (snapshot: DownloadsSnapshot, trackId: TrackId): DownloadStatus => {
+/** An album or playlist download that holds a song. */
+type Holder = Extract<DownloadStatus, { readonly kind: "included" }>["by"];
+
+/** Each song an available album or playlist download holds, with the first one that does. */
+export const holdersOf = (snapshot: DownloadsSnapshot): ReadonlyMap<TrackId, Holder> => {
+  const holders = new Map<TrackId, Holder>();
+
   for (const { pin, members } of snapshot.pins) {
     if (!pin.available || pin.target.kind === "track") continue;
 
-    if (members?.some((member) => member.trackId === trackId) === true) {
-      return { kind: "included", by: { kind: pin.target.kind, title: pin.title } };
+    for (const { trackId } of members ?? []) {
+      if (!holders.has(trackId)) holders.set(trackId, { kind: pin.target.kind, title: pin.title });
     }
   }
 
-  return NONE;
+  return holders;
 };
 
-/** The status of a download whose songs are known. */
-const progressOf = (
+/** `included` when an album or playlist download holds `trackId`, else `none`. */
+const includedStatus = (snapshot: DownloadsSnapshot, trackId: TrackId): DownloadStatus => {
+  const by = holdersOf(snapshot).get(trackId);
+
+  return by === undefined ? NONE : { kind: "included", by };
+};
+
+/** The status of a download, or of a group of downloads, whose songs are known. */
+export const progressOf = (
   snapshot: DownloadsSnapshot,
   members: NonNullable<PinView["members"]>,
 ): DownloadStatus => {

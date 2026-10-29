@@ -3,6 +3,7 @@
  * D01 and D04): a ring beside More that downloads, shows progress by songs, cancels, and asks
  * before it removes what is already here.
  */
+import type { DownloadTarget } from "@music/commands/models";
 import type { DownloadStatus, DownloadUsage } from "@music/sdk/downloads";
 import { Match } from "effect";
 
@@ -111,13 +112,33 @@ export const removeAllCopy = (usage: DownloadUsage): RemoveCopy =>
         confirmLabel: `Remove ${formatBytes(usage.bytes)}`,
       };
 
-/** The Remove download sheet for `title`, which takes `bytes` on this iPhone. */
-export const removeDownloadCopy = (title: string, bytes: number): RemoveCopy => {
+/** The space a download takes on this iPhone, and the part of it that only it keeps. */
+export interface DownloadSpace {
+  readonly bytes: number;
+  readonly freedBytes: number;
+}
+
+/** The Remove download sheet for `title`, a `kind`: it frees only what no other download keeps. */
+export const removeDownloadCopy = (
+  title: string,
+  kind: DownloadTarget["kind"],
+  { bytes, freedBytes }: DownloadSpace,
+): RemoveCopy => {
+  const freed = formatBytes(freedBytes);
+
   const leaving =
-    bytes > 0 ? `${title} and the ${formatBytes(bytes)} it takes leave` : `${title} leaves`;
+    freedBytes === bytes
+      ? bytes > 0
+        ? `${title} and the ${freed} it takes leave this iPhone.`
+        : `${title} leaves this iPhone.`
+      : freedBytes > 0
+        ? `${title} leaves your downloads and frees ${freed}. Songs your other downloads keep stay on this iPhone.`
+        : kind === "track"
+          ? `${title} leaves your downloads, and stays on this iPhone with your other downloads.`
+          : `${title} leaves your downloads. Its songs stay on this iPhone with your other downloads.`;
 
   return {
-    body: `${leaving} this iPhone. Nothing changes on your server, and you can download it again any time.`,
-    confirmLabel: bytes > 0 ? `Remove ${formatBytes(bytes)}` : "Remove download",
+    body: `${leaving} Nothing changes on your server, and you can download it again any time.`,
+    confirmLabel: freedBytes > 0 ? `Remove ${freed}` : "Remove download",
   };
 };

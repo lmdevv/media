@@ -8,9 +8,18 @@ export { DownloadResult, fetchFinishedFile, FetchOutcome } from "./finished-file
 
 export type { DownloadRequest, FinishedFileRequest, Transfer } from "./finished-file";
 
-export { offlineLibrary } from "./library";
+export { freedBytesOf, offlineLibrary } from "./library";
 
-export type { DownloadedItem, OfflineAlbum, OfflineLibrary, OfflinePlaylist } from "./library";
+export type {
+  DownloadedCollection,
+  DownloadedEntry,
+  DownloadedItem,
+  DownloadedSong,
+  DownloadedSongs,
+  OfflineAlbum,
+  OfflineLibrary,
+  OfflinePlaylist,
+} from "./library";
 
 export { planSync, SyncStep, targetKey } from "./plan";
 

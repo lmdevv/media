@@ -53,12 +53,36 @@ describe("downloadControl", () => {
   });
 
   it("says what removing a download frees, and doesn't name a size before songs arrive", () => {
-    expect(removeDownloadCopy("Blue Lines", 412_000_000)).toEqual({
+    expect(
+      removeDownloadCopy("Blue Lines", "album", { bytes: 412_000_000, freedBytes: 412_000_000 }),
+    ).toEqual({
       body: "Blue Lines and the 412 MB it takes leave this iPhone. Nothing changes on your server, and you can download it again any time.",
       confirmLabel: "Remove 412 MB",
     });
 
-    expect(removeDownloadCopy("Blue Lines", 0).confirmLabel).toBe("Remove download");
+    expect(
+      removeDownloadCopy("Blue Lines", "album", { bytes: 0, freedBytes: 0 }).confirmLabel,
+    ).toBe("Remove download");
+  });
+
+  it("frees only what no other download keeps", () => {
+    expect(
+      removeDownloadCopy("Blue Lines", "album", { bytes: 412_000_000, freedBytes: 358_000_000 }),
+    ).toEqual({
+      body: "Blue Lines leaves your downloads and frees 358 MB. Songs your other downloads keep stay on this iPhone. Nothing changes on your server, and you can download it again any time.",
+      confirmLabel: "Remove 358 MB",
+    });
+
+    expect(removeDownloadCopy("Teardrop", "track", { bytes: 54_000_000, freedBytes: 0 })).toEqual({
+      body: "Teardrop leaves your downloads, and stays on this iPhone with your other downloads. Nothing changes on your server, and you can download it again any time.",
+      confirmLabel: "Remove download",
+    });
+
+    expect(
+      removeDownloadCopy("Blue Lines", "album", { bytes: 412_000_000, freedBytes: 0 }).body,
+    ).toBe(
+      "Blue Lines leaves your downloads. Its songs stay on this iPhone with your other downloads. Nothing changes on your server, and you can download it again any time.",
+    );
   });
 
   it("says what removing every download frees, as D17 does", () => {

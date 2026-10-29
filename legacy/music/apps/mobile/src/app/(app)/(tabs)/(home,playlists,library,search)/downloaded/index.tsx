@@ -2,10 +2,17 @@
  * D10 · Downloaded: what this iPhone keeps. Chips pick all downloads, albums, playlists, or every
  * song here; a summary says how many songs, albums, and playlists take how much space, and how much
  * is still free. A download still coming says how far it got. Albums and playlists open their own
- * pages; a song plays. While the server is out of reach the offline bar sits over the chips (D12).
+ * pages; songs downloaded on their own share one Songs row (D10b), which opens them (D10c). While
+ * the server is out of reach the offline bar sits over the chips (D12).
  */
-import type { DownloadedItem, LocalCopy, OfflineLibrary } from "@music/sdk/downloads";
+import type {
+  DownloadedCollection,
+  DownloadedEntry,
+  LocalCopy,
+  OfflineLibrary,
+} from "@music/sdk/downloads";
 import { targetKey } from "@music/sdk/downloads";
+import { Match } from "effect";
 import { router } from "expo-router";
 import { CircleArrowDown } from "lucide-react-native";
 import { useState } from "react";
@@ -14,13 +21,12 @@ import { View } from "react-native";
 import { ListPage } from "@/components/browse/list-page";
 import { usePlayList } from "@/components/browse/play";
 import { openAlbum } from "@/components/browse/rows";
-import { TrackDownloadGlyph } from "@/components/downloads/download-glyphs";
+import { DownloadedRow } from "@/components/downloads/downloaded-row";
 import { LocalSongRow } from "@/components/downloads/local-song-row";
+import { StorageSummary } from "@/components/downloads/storage-summary";
 import { OfflineNotice } from "@/components/states/offline-notice";
 import { ChipGroup } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Row } from "@/components/ui/row";
-import { Text } from "@/components/ui/text";
 import { useDownloadsLibrary } from "@/downloads";
 import {
   DOWNLOADED_FILTERS,
@@ -28,47 +34,42 @@ import {
   downloadedLine,
   downloadedNote,
   downloadedSummary,
-  downloadsFor,
+  entriesFor,
+  ownSongsLine,
 } from "@/lib/downloaded";
 import type { DownloadedFilter } from "@/lib/downloaded";
-import { formatBytes } from "@/lib/format";
 import { useNowPlaying } from "@/player";
 
-/** One row of the list: a download, or under Songs, one song on this phone. */
 type Cell =
-  | { readonly kind: "download"; readonly item: DownloadedItem }
+  | DownloadedEntry
   | { readonly kind: "song"; readonly copy: LocalCopy; readonly index: number };
 
-/** A download: its cover, title, where it stands, and the space it takes. */
-function DownloadedRow({ item }: { readonly item: DownloadedItem }) {
-  const { playFrom } = usePlayList();
-  const line = downloadedLine(item);
-  // Empty until its first song arrives, so every row drops the trailing lane alike.
-  const size = item.bytes > 0 ? formatBytes(item.bytes) : null;
+const cellKey = (cell: Cell): string =>
+  Match.value(cell).pipe(
+    Match.discriminatorsExhaustive("kind")({
+      song: ({ copy }) => copy.track.id,
+      songs: () => "songs",
+      download: ({ item }) => targetKey(item.target),
+    }),
+  );
+
+function CollectionRow({ item }: { readonly item: DownloadedCollection }) {
   const { target } = item;
 
   const open = () => {
     if (target.kind === "album") openAlbum({ id: target.id });
-    else if (target.kind === "playlist") {
-      router.push({ pathname: "/playlist/[id]", params: { id: target.id } });
-    } else playFrom([target.id], 0);
+    else router.push({ pathname: "/playlist/[id]", params: { id: target.id } });
   };
 
   return (
-    <View className="px-mobile-edge">
-      <Row
-        title={item.title}
-        subtitle={line.text}
-        subtitleTone={line.tone}
-        subtitleGlyph={line.glyph === null ? undefined : <TrackDownloadGlyph state={line.glyph} />}
-        leading={{ kind: "art", url: item.artUri, recyclingKey: targetKey(target) }}
-        detail={{ text: size ?? "", variant: "mono" }}
-        accessibilityLabel={[item.title, line.text, size]
-          .filter((part) => part !== null)
-          .join(", ")}
-        onPress={open}
-      />
-    </View>
+    <DownloadedRow
+      title={item.title}
+      line={downloadedLine(item)}
+      artUri={item.artUri}
+      recyclingKey={targetKey(target)}
+      bytes={item.bytes}
+      onPress={open}
+    />
   );
 }
 
@@ -86,24 +87,18 @@ function Summary({
     <View className="px-mobile-edge">
       <OfflineNotice variant="bar" />
       <ChipGroup label="Show" options={DOWNLOADED_FILTERS} value={filter} onChange={onFilter} />
-      <View className="gap-2 pt-1 pb-3">
-        <View className="flex-row items-baseline justify-between gap-3">
-          <Text variant="mono" tone="muted" className="shrink">
-            {downloadedSummary(usage, downloads)}
-          </Text>
-          {usage.bytes === 0 ? null : <Text variant="mono">{formatBytes(usage.bytes)}</Text>}
-        </View>
-        <Text variant="secondary" tone="muted">
-          {downloadedNote(usage)}
-        </Text>
-      </View>
+      <StorageSummary
+        line={downloadedSummary(usage, downloads)}
+        bytes={usage.bytes}
+        note={downloadedNote(usage)}
+      />
     </View>
   );
 }
 
 export default function Downloaded() {
   const library = useDownloadsLibrary();
-  const { downloads, songs } = library;
+  const { downloads, entries, songs } = library;
   const { playFrom } = usePlayList();
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const [filter, setFilter] = useState<DownloadedFilter>("all");
@@ -112,16 +107,14 @@ export default function Downloaded() {
   const cells: ReadonlyArray<Cell> =
     filter === "songs"
       ? songs.map((copy, index) => ({ kind: "song", copy, index }))
-      : downloadsFor(filter, downloads).map((item) => ({ kind: "download", item }));
+      : entriesFor(filter, entries);
 
   return (
     <ListPage
       bar={{ title: "Downloaded" }}
       data={cells}
       extraData={playingId}
-      keyExtractor={(cell) =>
-        cell.kind === "song" ? cell.copy.track.id : targetKey(cell.item.target)
-      }
+      keyExtractor={cellKey}
       getItemType={(cell) => cell.kind}
       header={<Summary library={library} filter={filter} onFilter={setFilter} />}
       footer={
@@ -133,15 +126,28 @@ export default function Downloaded() {
         ) : null
       }
       renderItem={({ item: cell }) =>
-        cell.kind === "song" ? (
-          <LocalSongRow
-            copy={cell.copy}
-            active={cell.copy.track.id === playingId}
-            showSize
-            onPress={() => playFrom(songIds, cell.index)}
-          />
-        ) : (
-          <DownloadedRow item={cell.item} />
+        Match.value(cell).pipe(
+          Match.discriminatorsExhaustive("kind")({
+            song: ({ copy, index }) => (
+              <LocalSongRow
+                copy={copy}
+                active={copy.track.id === playingId}
+                showSize
+                onPress={() => playFrom(songIds, index)}
+              />
+            ),
+            songs: ({ songs: own }) => (
+              <DownloadedRow
+                title="Songs"
+                line={ownSongsLine(own)}
+                artUri={own.artUri}
+                recyclingKey="songs"
+                bytes={own.bytes}
+                onPress={() => router.push("/downloaded/songs")}
+              />
+            ),
+            download: ({ item }) => <CollectionRow item={item} />,
+          }),
         )
       }
     />
