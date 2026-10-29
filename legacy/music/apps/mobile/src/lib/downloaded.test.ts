@@ -30,6 +30,7 @@ import {
   ownSongsLine,
   ownSongsQueue,
   ownSongsSummary,
+  removableSongs,
   storageLine,
 } from "./downloaded";
 
@@ -238,6 +239,21 @@ describe("Downloaded's Songs row", () => {
     expect(rows(entriesFor("all", library.entries))).toEqual(["Blue Lines", "Songs"]);
     expect(rows(entriesFor("albums", library.entries))).toEqual(["Blue Lines"]);
     expect(rows(entriesFor("playlists", library.entries))).toEqual([]);
+  });
+
+  it("lets the Songs chip remove only songs downloaded on their own", () => {
+    const library = offlineLibrary(
+      phone(
+        [ownSong(t1), pinOf(blueLines, [t1, t2]), ownSong(t3)],
+        [copyOf(t1, 100), copyOf(t2, 200), copyOf(t3, 50)],
+      ),
+    );
+
+    const removable = removableSongs(library.downloads);
+
+    expect(library.songs.map((copy) => removable.has(copy.track.id))).toEqual(
+      library.songs.map((copy) => copy.track.id !== t2),
+    );
   });
 
   it("says the Songs row failed once its songs still to come failed", () => {

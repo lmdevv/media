@@ -1,7 +1,8 @@
 /**
- * Remove download?: asked from a finished download's ring (Paper's D04, "same sheet as C12"). Its
- * files leave this iPhone at once, less the songs another download keeps; the server's library is
- * untouched.
+ * Remove download?: asked from a finished download's ring (Paper's D04, "same sheet as C12"), and
+ * from a Downloaded row's Remove or hold (D10d), for an album, a playlist, or a song, finished or
+ * not. Its files leave this iPhone at once, less the songs another download keeps; the server's
+ * library is untouched.
  */
 import { DownloadTarget } from "@music/commands/models";
 import { targetKey } from "@music/sdk/downloads";

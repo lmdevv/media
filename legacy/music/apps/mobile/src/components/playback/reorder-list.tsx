@@ -17,7 +17,6 @@ import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import type { SharedValue } from "react-native-reanimated";
@@ -25,21 +24,13 @@ import { scheduleOnRN } from "react-native-worklets";
 
 import { Artwork } from "@/components/ui/artwork";
 import { Icon } from "@/components/ui/icon";
+import { SwipeToRemove } from "@/components/ui/swipe-to-remove";
 import { Text } from "@/components/ui/text";
 import { dropIndex, edgeScroll, moved, shiftOf } from "@/lib/reorder";
 import type { QueueItem } from "@/player";
 
 /** How long the rows take to slide out of the lifted row's way. */
 const SHIFT_MS = 150;
-
-/** How far a swiped row slides to uncover Remove: the action's width, Paper's 104pt. */
-const REMOVE_WIDTH = 104;
-
-/** A swipe faster than this, in points a second, opens or closes the row whatever its distance. */
-const FLICK_SPEED = 500;
-
-/** Paper's 220ms damped spring with no bounce (A17), for a row settling open or closed. */
-const SETTLE = { duration: 220, dampingRatio: 1 } as const;
 
 /** The drag in progress, shared between the cells and the lifted copy. */
 interface Drag {
@@ -164,49 +155,6 @@ function QueueRow({
   /** The sheet's color, so the row covers Remove until it slides aside. */
   readonly background: string;
 }) {
-  const offset = useSharedValue(0);
-  const start = useSharedValue(0);
-  const speed = useSharedValue(0);
-
-  // A recycled cell starts closed when it shows another song.
-  useEffect(() => {
-    offset.value = 0;
-  }, [offset, item.itemId]);
-
-  const remove = () => {
-    offset.value = 0;
-    actions.onRemove(item);
-  };
-
-  const swipe = usePanGesture({
-    enabled: drag !== null,
-    activeOffsetX: [-10, 10],
-    failOffsetY: [-10, 10],
-    onBegin: () => {
-      "worklet";
-      start.value = offset.value;
-    },
-    onUpdate: (event) => {
-      "worklet";
-      offset.value = Math.min(0, Math.max(-REMOVE_WIDTH, start.value + event.translationX));
-      speed.value = event.velocityX;
-    },
-    onFinalize: () => {
-      "worklet";
-
-      const open =
-        speed.value < -FLICK_SPEED ||
-        (speed.value <= FLICK_SPEED && offset.value < -REMOVE_WIDTH / 2);
-
-      speed.value = 0;
-      offset.value = withSpring(open ? -REMOVE_WIDTH : 0, SETTLE);
-    },
-  });
-
-  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
-  // Remove stays hidden while the row is closed, so nothing of it shows around the row's edges.
-  const uncovered = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
-
   const handle =
     drag === null ? (
       <Icon icon={Menu} tone="muted" size="inline" />
@@ -215,43 +163,30 @@ function QueueRow({
     );
 
   return (
-    <View>
-      <Animated.View style={uncovered} className="absolute inset-y-0 right-0">
+    <SwipeToRemove
+      enabled={drag !== null}
+      resetKey={item.itemId}
+      background={background}
+      onRemove={() => {
+        actions.onRemove(item);
+      }}
+    >
+      {({ settle, remove }) => (
         <Pressable
-          accessible={false}
-          onPress={remove}
-          className="h-full w-ios-104 items-center justify-center bg-danger active:opacity-80"
+          accessibilityRole="button"
+          accessibilityLabel={`${item.title}, ${item.artist}`}
+          accessibilityHint="Plays this song"
+          accessibilityActions={[{ name: "remove", label: "Remove" }]}
+          onAccessibilityAction={remove}
+          onPress={() => {
+            if (!settle()) actions.onJump(item);
+          }}
+          className="min-h-row-touch flex-row items-center gap-3 px-mobile-edge py-2 active:opacity-60"
         >
-          <Text variant="label" tone="onAccent">
-            Remove
-          </Text>
+          <QueueLine item={item} trailing={handle} />
         </Pressable>
-      </Animated.View>
-      <GestureDetector gesture={swipe}>
-        <Animated.View style={[slide, { backgroundColor: background }]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${item.title}, ${item.artist}`}
-            accessibilityHint="Plays this song"
-            accessibilityActions={[{ name: "remove", label: "Remove" }]}
-            onAccessibilityAction={remove}
-            onPress={() => {
-              // A tap on an open row closes it rather than playing the song.
-              if (offset.value < 0) {
-                offset.value = withSpring(0, SETTLE);
-
-                return;
-              }
-
-              actions.onJump(item);
-            }}
-            className="min-h-row-touch flex-row items-center gap-3 px-mobile-edge py-2 active:opacity-60"
-          >
-            <QueueLine item={item} trailing={handle} />
-          </Pressable>
-        </Animated.View>
-      </GestureDetector>
-    </View>
+      )}
+    </SwipeToRemove>
   );
 }
 

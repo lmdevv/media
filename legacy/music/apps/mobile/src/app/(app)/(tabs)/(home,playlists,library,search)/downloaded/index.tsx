@@ -23,6 +23,7 @@ import { usePlayList } from "@/components/browse/play";
 import { openAlbum } from "@/components/browse/rows";
 import { DownloadedRow } from "@/components/downloads/downloaded-row";
 import { LocalSongRow } from "@/components/downloads/local-song-row";
+import { openRemoveDownload } from "@/components/downloads/remove-download";
 import { StorageSummary } from "@/components/downloads/storage-summary";
 import { OfflineNotice } from "@/components/states/offline-notice";
 import { ChipGroup } from "@/components/ui/chip";
@@ -36,6 +37,7 @@ import {
   downloadedSummary,
   entriesFor,
   ownSongsLine,
+  removableSongs,
 } from "@/lib/downloaded";
 import type { DownloadedFilter } from "@/lib/downloaded";
 import { useNowPlaying } from "@/player";
@@ -69,6 +71,9 @@ function CollectionRow({ item }: { readonly item: DownloadedCollection }) {
       recyclingKey={targetKey(target)}
       bytes={item.bytes}
       onPress={open}
+      onRemove={() => {
+        openRemoveDownload(target, item.title);
+      }}
     />
   );
 }
@@ -103,6 +108,7 @@ export default function Downloaded() {
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const [filter, setFilter] = useState<DownloadedFilter>("all");
   const songIds = songs.map((copy) => copy.track.id);
+  const removable = removableSongs(downloads);
 
   const cells: ReadonlyArray<Cell> =
     filter === "songs"
@@ -115,7 +121,9 @@ export default function Downloaded() {
       data={cells}
       extraData={playingId}
       keyExtractor={cellKey}
-      getItemType={(cell) => cell.kind}
+      getItemType={(cell) =>
+        cell.kind === "song" && removable.has(cell.copy.track.id) ? "removable-song" : cell.kind
+      }
       header={<Summary library={library} filter={filter} onFilter={setFilter} />}
       footer={
         cells.length === 0 ? (
@@ -134,6 +142,13 @@ export default function Downloaded() {
                 active={copy.track.id === playingId}
                 showSize
                 onPress={() => playFrom(songIds, index)}
+                onRemove={
+                  removable.has(copy.track.id)
+                    ? () => {
+                        openRemoveDownload({ kind: "track", id: copy.track.id }, copy.track.title);
+                      }
+                    : undefined
+                }
               />
             ),
             songs: ({ songs: own }) => (

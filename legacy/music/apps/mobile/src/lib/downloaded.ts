@@ -40,6 +40,13 @@ export const entriesFor = (
           entry.item.target.kind === (filter === "albums" ? "album" : "playlist"),
       );
 
+/**
+ * The songs downloaded on their own, which the Songs chip can remove. A song on the phone only
+ * because an album or playlist holds it goes with that download instead.
+ */
+export const removableSongs = (downloads: ReadonlyArray<DownloadedItem>): ReadonlySet<TrackId> =>
+  new Set(downloads.flatMap(({ target }) => (target.kind === "track" ? [target.id] : [])));
+
 /** An empty state's title and body. */
 interface EmptyCopy {
   readonly title: string;

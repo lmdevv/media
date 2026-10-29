@@ -5,7 +5,6 @@
  */
 import type { AlbumId, PlaylistId } from "@music/commands/ids";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
 import { Pressable } from "react-native";
 
 import { useSave } from "@/components/states/save-failure";
@@ -13,16 +12,12 @@ import { useDownload } from "@/downloads";
 import { downloadControl } from "@/lib/download-control";
 
 import { DownloadRingGlyph } from "./download-glyphs";
+import { openRemoveDownload } from "./remove-download";
 
 /** A collection this phone can keep. */
 type CollectionTarget =
   | { readonly kind: "album"; readonly id: AlbumId }
   | { readonly kind: "playlist"; readonly id: PlaylistId };
-
-/** Opens the Remove download sheet for `target`. */
-const openRemoveDownload = (target: CollectionTarget, title: string): void => {
-  router.push({ pathname: "/download/remove", params: { ...target, title } });
-};
 
 /** A 44pt nav bar button with the download ring of `target`, named `title`. */
 export function DownloadButton({
