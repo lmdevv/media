@@ -71,6 +71,7 @@
   --spacing-row: 40px;
   --spacing-row-touch: 56px;
   --spacing-mobile-edge: 20px;
+  --spacing-tablet-edge: 32px;
   --spacing-hit-target: 44px;
   --spacing-ios-18: 18px;
   --spacing-ios-28: 28px;
@@ -134,6 +135,16 @@
   --radius-full: 9999px;
 }
 
+/* iPad layouts (Paper page 25): at `tablet` the window is wide enough for the iPad design
+   (iPhone and narrow Split View stay below it), and at `wide` two panes fit side by side. Static,
+   so `useWindowLayout` can read the breakpoints, which variants inline rather than reference. */
+@theme static {
+  --breakpoint-tablet: 600px;
+  --breakpoint-wide: 1024px;
+  --container-dialog: 560px;
+  --container-readable: 680px;
+}
+
 /* Inlined into their utilities (`opacity-muted`, `opacity-disabled`): React Native has no
    variable lookup for opacity, so the value must land in the class itself. */
 @theme inline {
@@ -181,5 +192,33 @@
       --color-player: var(--color-dark-player);
       --color-canvas: var(--color-dark-canvas);
     }
+  }
+}
+
+/* The page's side margin: Paper's 20pt edge on a phone, 32pt from `tablet` up. `bleed-page`
+   pulls a sideways rail out to the window's edges while its first card keeps the margin. */
+@utility px-page {
+  padding-inline: var(--spacing-mobile-edge);
+  @variant tablet {
+    padding-inline: var(--spacing-tablet-edge);
+  }
+}
+
+@utility bleed-page {
+  margin-inline: calc(var(--spacing-mobile-edge) * -1);
+  @variant tablet {
+    margin-inline: calc(var(--spacing-tablet-edge) * -1);
+  }
+}
+
+/* Settings and forms (P10): the whole page on a phone; from `tablet` a column at most
+   --container-readable wide, centered between the page's edges, with the phone's 20pt edge inside
+   so its rows match the phone. A readable nav bar's row spans the column without that edge. */
+@utility readable {
+  width: 100%;
+  align-self: center;
+  @variant tablet {
+    max-width: var(--container-readable);
+    padding-inline: var(--spacing-mobile-edge);
   }
 }

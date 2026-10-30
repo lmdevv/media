@@ -18,18 +18,18 @@ export default function Welcome() {
     <ScrollView
       contentInsetAdjustmentBehavior="never"
       className="flex-1 bg-canvas"
-      contentContainerClassName="pb-row"
+      contentContainerClassName="px-page pb-row"
       style={{ paddingTop: insets.top }}
     >
-      <View className="min-h-row-touch flex-row items-center justify-between px-mobile-edge pt-2 pb-3">
-        <Text variant="largeTitle" accessibilityRole="header">
-          [music]
-        </Text>
-        <View className="size-hit-target items-center justify-center">
-          <Icon icon={Info} />
+      <View className="readable">
+        <View className="min-h-row-touch flex-row items-center justify-between pt-2 pb-3">
+          <Text variant="largeTitle" accessibilityRole="header">
+            [music]
+          </Text>
+          <View className="size-hit-target items-center justify-center">
+            <Icon icon={Info} />
+          </View>
         </View>
-      </View>
-      <View className="px-mobile-edge">
         <View
           className="flex-row items-center justify-center gap-3 py-row"
           accessibilityElementsHidden

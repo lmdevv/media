@@ -29,8 +29,16 @@ export interface NavBarProps {
   readonly onBack?: (() => void) | null;
 }
 
-/** The top bar of a pushed page, under the status bar on the page's own background. */
-export function NavBar({ title, trailing, onBack }: NavBarProps) {
+/**
+ * The top bar of a pushed page, under the status bar on the page's own background. A `readable`
+ * bar, over settings and forms, keeps its row on their centered column on an iPad (P10).
+ */
+export function NavBar({
+  title,
+  trailing,
+  onBack,
+  readable = false,
+}: NavBarProps & { readonly readable?: boolean }) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   // A visible page is the top of its stack, so a stack holding more than one route can pop it.
@@ -43,8 +51,12 @@ export function NavBar({ title, trailing, onBack }: NavBarProps) {
     onBack === undefined && (stacked || navigation.canGoBack()) ? () => router.back() : onBack;
 
   return (
-    <View style={{ paddingTop: insets.top }} className="bg-canvas">
-      <View className="min-h-row-touch flex-row items-center px-mobile-edge pt-2 pb-3">
+    <View style={{ paddingTop: insets.top }} className="bg-canvas px-page">
+      <View
+        className={`min-h-row-touch flex-row items-center pt-2 pb-3 ${
+          readable ? "w-full self-center tablet:max-w-readable" : ""
+        }`}
+      >
         {back === null || back === undefined ? null : (
           <IconButton icon={ChevronLeft} label="Back" onPress={back} />
         )}

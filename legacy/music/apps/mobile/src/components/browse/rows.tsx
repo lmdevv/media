@@ -48,7 +48,7 @@ export function TrackRow({
   const line = useSongDownloadLine(song.id, song.title, subtitle ?? song.artist, onPress);
 
   return (
-    <View className="px-mobile-edge">
+    <View className="px-page">
       <Row
         {...line}
         title={song.title}
@@ -75,7 +75,7 @@ export function AlbumRow({
   readonly onPress?: () => void;
 }) {
   return (
-    <View className="px-mobile-edge">
+    <View className="px-page">
       <Row
         title={album.title}
         subtitle={album.year === null ? album.artist : `${album.artist} · ${String(album.year)}`}
@@ -98,7 +98,7 @@ export function ArtistRow({
   readonly onPress?: () => void;
 }) {
   return (
-    <View className="px-mobile-edge">
+    <View className="px-page">
       <Row
         title={artist.name}
         subtitle={subtitle}

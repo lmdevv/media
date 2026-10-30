@@ -32,7 +32,7 @@ export function HomeSkeleton() {
       {[0, 1].map((rail) => (
         <View key={rail} className={rail === 0 ? "pt-4" : "pt-mobile-edge"}>
           <Placeholder className="mb-3 h-ios-28 w-ios-200" />
-          <View className="flex-row gap-3">
+          <View className="flex-row gap-3 tablet:gap-4">
             <Placeholder className="size-ios-168" />
             <Placeholder className="size-ios-168" />
           </View>
@@ -85,7 +85,7 @@ export function MoreOnTheWay() {
             : undefined
         }
       />
-      <View className="flex-row gap-3">
+      <View className="flex-row gap-3 tablet:gap-4">
         <Placeholder className="h-ios-104 w-ios-168" />
         <Placeholder className="h-ios-104 w-ios-168" />
       </View>

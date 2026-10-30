@@ -22,7 +22,7 @@ export function AppFailure({ error, retry }: ErrorBoundaryProps) {
   const signedOut = commandFailure(error)?.code === "unauthenticated";
 
   return (
-    <View style={{ paddingTop: insets.top }} className="flex-1 bg-canvas px-mobile-edge">
+    <View style={{ paddingTop: insets.top }} className="flex-1 bg-canvas px-page">
       {signedOut ? (
         <EmptyState
           icon={LogIn}

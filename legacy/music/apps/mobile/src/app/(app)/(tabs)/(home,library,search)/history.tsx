@@ -35,7 +35,7 @@ export default function History() {
       getItemType={(row) => row.kind}
       footer={
         history !== undefined && history.length === 0 ? (
-          <View className="px-mobile-edge">
+          <View className="px-page">
             <EmptyState
               icon={Clock}
               title={"Nothing played\nyet."}
@@ -46,7 +46,7 @@ export default function History() {
       }
       renderItem={({ item }) =>
         item.kind === "day" ? (
-          <View className="px-mobile-edge">
+          <View className="px-page">
             <SectionHeader title={item.label} />
           </View>
         ) : (

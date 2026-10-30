@@ -152,7 +152,7 @@ const coverTap = (open: boolean, chip: LyricsChipLook): CoverTap => {
 /** The drag handle Paper draws in place of a close button. */
 function Handle() {
   return (
-    <View className="h-row-touch items-center justify-center px-mobile-edge">
+    <View className="h-row-touch items-center justify-center px-page">
       <View className="size-hit-target items-center justify-center" accessible={false}>
         <View className="h-1 w-row rounded-full bg-text-muted opacity-muted" />
       </View>
@@ -401,7 +401,7 @@ const useFailureSheet = (failed: boolean, error: string | null, itemId: string |
 /** G14: the player opened with nothing queued. */
 function NothingPlaying() {
   return (
-    <View className="px-mobile-edge">
+    <View className="px-page">
       <EmptyState
         icon={Music}
         title={"Something good\nis waiting."}
@@ -702,7 +702,7 @@ export function NowPlayingScreen() {
       {nowPlaying === null ? (
         <NothingPlaying />
       ) : (
-        <View className="flex-1 px-mobile-edge pb-row">
+        <View className="flex-1 px-page pb-row">
           <Stage
             song={nowPlaying}
             view={view}

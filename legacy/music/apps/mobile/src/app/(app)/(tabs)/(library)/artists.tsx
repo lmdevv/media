@@ -29,7 +29,7 @@ export default function Artists() {
       onEndReached={pages.loadMore}
       onEndReachedThreshold={1}
       header={
-        <View className="px-mobile-edge pb-3">
+        <View className="px-page pb-3">
           <Text variant="callout" tone="muted">
             {home === undefined
               ? " "
@@ -39,7 +39,7 @@ export default function Artists() {
       }
       footer={
         done && pages.items.length === 0 ? (
-          <View className="px-mobile-edge">
+          <View className="px-page">
             <EmptyState
               icon={Users}
               title={"No artists\nyet."}

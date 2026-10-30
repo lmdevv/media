@@ -40,7 +40,7 @@ export function DownloadedRow({
   return (
     <RemovableRow label={label} resetKey={recyclingKey} onPress={onPress} onRemove={onRemove}>
       {(press) => (
-        <View className="px-mobile-edge">
+        <View className="px-page">
           <Row
             title={title}
             subtitle={line.text}

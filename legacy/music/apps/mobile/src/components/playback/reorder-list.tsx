@@ -181,7 +181,7 @@ function QueueRow({
           onPress={() => {
             if (!settle()) actions.onJump(item);
           }}
-          className="min-h-row-touch flex-row items-center gap-3 px-mobile-edge py-2 active:opacity-60"
+          className="min-h-row-touch flex-row items-center gap-3 px-page py-2 active:opacity-60"
         >
           <QueueLine item={item} trailing={handle} />
         </Pressable>

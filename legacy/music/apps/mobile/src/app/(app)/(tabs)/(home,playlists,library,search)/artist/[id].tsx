@@ -95,7 +95,7 @@ function Hero({
   const playable = detail.topTracks.length > 0;
 
   return (
-    <View className="h-ios-440 justify-end px-mobile-edge pb-6">
+    <View className="h-ios-440 justify-end px-page pb-6">
       <Artwork
         url={detail.artist.artUrl}
         recyclingKey={detail.artist.id}
@@ -161,7 +161,7 @@ function TopSong({
   const subtitle = year === null ? track.album : `${track.album} · ${String(year)}`;
 
   return (
-    <View className="h-row-touch flex-row items-center gap-3 px-mobile-edge">
+    <View className="h-row-touch flex-row items-center gap-3 px-page">
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${String(rank)}. ${track.title}, ${subtitle}`}
@@ -305,7 +305,7 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
             <>
               <Hero detail={detail} onPlay={(shuffle) => playAll(trackIds, shuffle)} />
               {tracks.length === 0 ? null : (
-                <View className="px-mobile-edge pt-1">
+                <View className="px-page pt-1">
                   <SectionHeader title="Top songs" />
                 </View>
               )}
@@ -314,7 +314,7 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
         }
         footer={
           detail === undefined || detail.albums.length === 0 ? null : (
-            <View className="px-mobile-edge pt-3">
+            <View className="px-page pt-3">
               <AlbumRail title="Albums" albums={detail.albums} size="artist" />
             </View>
           )

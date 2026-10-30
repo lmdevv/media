@@ -166,7 +166,7 @@ function Gallery() {
         body="Keep the form open and offer Retry."
         className="mt-3"
       />
-      <View className="-mx-mobile-edge mt-6 border-t border-border">
+      <View className="bleed-page mt-6 border-t border-border">
         <ConfirmSheet
           title="Clear queue?"
           body="Everything after the current song is removed from your queue."

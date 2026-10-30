@@ -80,7 +80,7 @@ export function ModePills() {
 /** "Playing Next" and Clear, or what an empty queue says. */
 function PlayingNext({ empty }: { readonly empty: boolean }) {
   return (
-    <View className="px-mobile-edge">
+    <View className="px-page">
       <View className="flex-row items-center justify-between pt-4 pb-1">
         <Text variant="subheading" accessibilityRole="header">
           Playing Next
@@ -116,7 +116,7 @@ function ContinuePlaying({ items }: { readonly items: ReadonlyArray<QueueItem> }
 
   return (
     <View>
-      <View className="px-mobile-edge pt-4 pb-1">
+      <View className="px-page pt-4 pb-1">
         <Text variant="subheading" accessibilityRole="header">
           Continue Playing
         </Text>
@@ -131,7 +131,7 @@ function ContinuePlaying({ items }: { readonly items: ReadonlyArray<QueueItem> }
           accessibilityLabel={`${item.title}, ${item.artist}`}
           accessibilityHint="Plays this song"
           onPress={() => void jump(item.itemId)}
-          className="min-h-row-touch flex-row items-center gap-3 px-mobile-edge py-2 active:opacity-60"
+          className="min-h-row-touch flex-row items-center gap-3 px-page py-2 active:opacity-60"
         >
           <QueueLine item={item} />
         </Pressable>
@@ -151,7 +151,7 @@ export function QueueList({ background }: { readonly background: string }) {
 
   return (
     // The rows run to the sheet's edges, so a swiped row's Remove reaches the side of the screen.
-    <View className="-mx-mobile-edge min-h-0 flex-1 overflow-hidden">
+    <View className="bleed-page min-h-0 flex-1 overflow-hidden">
       <ReorderList
         items={queued}
         background={background}

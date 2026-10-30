@@ -241,7 +241,7 @@ export default function Search() {
       const more = row.kind === "section" ? row.more : null;
 
       return (
-        <View className="px-mobile-edge">
+        <View className="px-page">
           <SectionHeader
             title={row.title}
             action={
@@ -334,7 +334,7 @@ export default function Search() {
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
-          <View className="px-mobile-edge">
+          <View className="px-page">
             {offline ? (
               <OfflineState body="Search comes back when the server answers." />
             ) : (
@@ -447,7 +447,7 @@ function RecentRow({
 /** G03: the search found nothing; Edit search brings the keyboard back to the query. */
 function NoResults({ query, onEdit }: { readonly query: string; readonly onEdit: () => void }) {
   return (
-    <View className="px-mobile-edge">
+    <View className="px-page">
       <EmptyState
         icon={SearchIcon}
         title={"Nothing here\nyet."}

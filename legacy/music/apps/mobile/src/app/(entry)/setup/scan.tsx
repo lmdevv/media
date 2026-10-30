@@ -168,16 +168,16 @@ function Ready({
     <ScrollView
       contentInsetAdjustmentBehavior="never"
       className="flex-1 bg-canvas"
-      contentContainerClassName="pb-row"
+      contentContainerClassName="px-page pb-row"
       style={{ paddingTop: insets.top }}
     >
-      <View className="min-h-row-touch flex-row items-center justify-between px-mobile-edge pt-2 pb-3">
-        <Text variant="largeTitle" accessibilityRole="header">
-          You’re ready
-        </Text>
-        <IconButton icon={Check} label="Done" onPress={onListen} />
-      </View>
-      <View className="px-mobile-edge">
+      <View className="readable">
+        <View className="min-h-row-touch flex-row items-center justify-between pt-2 pb-3">
+          <Text variant="largeTitle" accessibilityRole="header">
+            You’re ready
+          </Text>
+          <IconButton icon={Check} label="Done" onPress={onListen} />
+        </View>
         <View
           className="flex-row items-center justify-center gap-3 py-row"
           accessibilityElementsHidden

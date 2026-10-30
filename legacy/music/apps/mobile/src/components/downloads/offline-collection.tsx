@@ -51,7 +51,7 @@ export function OfflineCollectionPage({ kind, find }: OfflineCollectionPageProps
       extraData={playingId}
       keyExtractor={(copy) => copy.track.id}
       header={
-        <View className="px-mobile-edge">
+        <View className="px-page">
           <OfflineNotice variant="bar" className="pb-4" />
           <View className="items-center gap-2 pb-4">
             <Artwork url={collection.artUri} className="size-ios-192 rounded-lg" />

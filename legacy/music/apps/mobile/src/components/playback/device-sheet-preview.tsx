@@ -34,7 +34,7 @@ const NOTHING = { moveTo: () => {}, close: () => {}, stay: () => {} };
 /** B06 and B07 one under the other, each on its sheet surface. */
 export function DeviceSheetPreview() {
   return (
-    <View className="-mx-mobile-edge">
+    <View className="bleed-page">
       <View className="mt-6 border-t border-border bg-bg">
         <DeviceSheetBody
           sheet={{ kind: "connecting", from: PHONE, to: MAC }}

@@ -46,7 +46,7 @@ function RecentlyPlayed() {
         title="Recently played"
         action={{ kind: "chevron", onPress: () => router.push("/history") }}
       />
-      <View className="-mx-mobile-edge">
+      <View className="bleed-page">
         {songs.map((song, index) => (
           <TrackRow
             key={song.id}

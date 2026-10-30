@@ -38,7 +38,7 @@ export function LocalSongRow({
       onRemove={onRemove}
     >
       {(press) => (
-        <View className="px-mobile-edge">
+        <View className="px-page">
           <Row
             title={title}
             subtitle={artist}

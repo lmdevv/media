@@ -1,7 +1,7 @@
 /**
  * A horizontal rail of album cards under a section header (A01): two cards and a bit of the third
  * visible at 390pt, scrolling sideways. The rail runs edge to edge while its cards start on the
- * page's 20pt edge.
+ * page's edge. Cards sit 12pt apart on a phone and 16pt on an iPad, which just shows more (P01).
  */
 import { FlatList, View } from "react-native";
 
@@ -34,8 +34,8 @@ export function AlbumRail({ title, albums, action, first = false, size = "rail" 
         keyExtractor={(album) => album.id}
         renderItem={({ item }) => <AlbumCard album={item} size={size} />}
         showsHorizontalScrollIndicator={false}
-        className="-mx-mobile-edge"
-        contentContainerClassName="gap-3 px-mobile-edge"
+        className="bleed-page"
+        contentContainerClassName="gap-3 px-page tablet:gap-4"
         initialNumToRender={3}
         windowSize={3}
       />

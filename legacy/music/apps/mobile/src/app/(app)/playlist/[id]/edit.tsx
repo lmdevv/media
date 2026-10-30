@@ -145,6 +145,7 @@ function Editor({ detail }: { readonly detail: PlaylistDetail }) {
       contentContainerClassName="pb-row"
     >
       <NavBar
+        readable
         title={`Edit ${playlist.name}`}
         trailing={
           <IconButton
@@ -156,53 +157,58 @@ function Editor({ detail }: { readonly detail: PlaylistDetail }) {
           />
         }
       />
-      <View className="px-mobile-edge">
-        {owner ? (
-          <PlaylistFields
-            value={draft.text}
-            onChange={(text) => setDraft({ ...draft, text })}
-            descriptionLabel="Description"
-            onSubmit={() => void save()}
-            error={error}
+      <View className="px-page">
+        <View className="readable">
+          {owner ? (
+            <PlaylistFields
+              value={draft.text}
+              onChange={(text) => setDraft({ ...draft, text })}
+              descriptionLabel="Description"
+              onSubmit={() => void save()}
+              error={error}
+            />
+          ) : null}
+          <SectionHeader
+            title="Songs"
+            action={{ kind: "link", label: "Add", onPress: () => openAddSongs(playlist) }}
           />
-        ) : null}
-        <SectionHeader
-          title="Songs"
-          action={{ kind: "link", label: "Add", onPress: () => openAddSongs(playlist) }}
-        />
-        {!owner && error !== null ? (
-          <Text variant="calloutMedium" tone="danger" className="pb-2">
-            {error}
-          </Text>
-        ) : null}
-        {shown.length === 0 ? (
-          <Text tone="muted" className="py-4">
-            No songs. Add some, or save to leave it empty.
-          </Text>
-        ) : (
-          <ReorderList<PlaylistEntry>
-            items={shown}
-            keyOf={(entry) => entry.itemId}
-            labelOf={(entry) => entry.track?.title ?? "Unavailable song"}
-            scrollRef={scrollRef}
-            scroll={scroll}
-            maxScroll={maxScroll}
-            onMove={(from, to) =>
-              setDraft({ ...draft, order: moveIndex(shown, from, to).map((entry) => entry.itemId) })
-            }
-            onRemove={(entry) =>
-              setDraft({ ...draft, removed: new Set([...draft.removed, entry.itemId]) })
-            }
-            renderItem={(entry, grip) => (
-              <Row
-                title={entry.track?.title ?? "Unavailable song"}
-                subtitle={entry.track?.artist ?? ""}
-                leading={{ kind: "art", url: entry.track?.artUrl ?? null }}
-                trailingAction={grip}
-              />
-            )}
-          />
-        )}
+          {!owner && error !== null ? (
+            <Text variant="calloutMedium" tone="danger" className="pb-2">
+              {error}
+            </Text>
+          ) : null}
+          {shown.length === 0 ? (
+            <Text tone="muted" className="py-4">
+              No songs. Add some, or save to leave it empty.
+            </Text>
+          ) : (
+            <ReorderList<PlaylistEntry>
+              items={shown}
+              keyOf={(entry) => entry.itemId}
+              labelOf={(entry) => entry.track?.title ?? "Unavailable song"}
+              scrollRef={scrollRef}
+              scroll={scroll}
+              maxScroll={maxScroll}
+              onMove={(from, to) =>
+                setDraft({
+                  ...draft,
+                  order: moveIndex(shown, from, to).map((entry) => entry.itemId),
+                })
+              }
+              onRemove={(entry) =>
+                setDraft({ ...draft, removed: new Set([...draft.removed, entry.itemId]) })
+              }
+              renderItem={(entry, grip) => (
+                <Row
+                  title={entry.track?.title ?? "Unavailable song"}
+                  subtitle={entry.track?.artist ?? ""}
+                  leading={{ kind: "art", url: entry.track?.artUrl ?? null }}
+                  trailingAction={grip}
+                />
+              )}
+            />
+          )}
+        </View>
       </View>
     </Animated.ScrollView>
   );

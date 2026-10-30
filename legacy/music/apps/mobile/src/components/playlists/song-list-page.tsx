@@ -71,7 +71,7 @@ function SongRow({
   );
 
   return (
-    <View className="px-mobile-edge">
+    <View className="px-page">
       <Row
         dimmed={!entry.playable}
         {...line}
@@ -118,7 +118,7 @@ export function SongListPage({ bar, header, songs, onPlay, onEndReached }: SongL
         renderItem={({ item }) => {
           if (item.kind === "bar") return <NavBar {...bar} />;
 
-          if (item.kind === "header") return <View className="px-mobile-edge">{header}</View>;
+          if (item.kind === "header") return <View className="px-page">{header}</View>;
 
           return (
             <SongRow

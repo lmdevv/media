@@ -90,7 +90,7 @@ function Summary({
   readonly onFilter: (filter: DownloadedFilter) => void;
 }) {
   return (
-    <View className="px-mobile-edge">
+    <View className="px-page">
       <OfflineNotice variant="bar" />
       <ChipGroup label="Show" options={DOWNLOADED_FILTERS} value={filter} onChange={onFilter} />
       <StorageSummary

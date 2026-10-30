@@ -35,7 +35,7 @@ function SearchField({
   readonly onChange: (query: string) => void;
 }) {
   return (
-    <View className="px-mobile-edge pb-3">
+    <View className="px-page pb-3">
       <View className="min-h-row-touch flex-row items-center gap-2 rounded-full bg-surface px-4">
         <Icon icon={Search} tone="muted" size="inline" />
         <TextInput
@@ -104,7 +104,7 @@ function Picker({ detail }: { readonly detail: PlaylistDetail }) {
       <NavBar title={`Add to ${detail.playlist.name}`} />
       <SearchField query={query} onChange={setQuery} />
       {failure === null ? null : (
-        <Text variant="calloutMedium" tone="danger" className="px-mobile-edge pb-2">
+        <Text variant="calloutMedium" tone="danger" className="px-page pb-2">
           {failure}
         </Text>
       )}
@@ -118,7 +118,7 @@ function Picker({ detail }: { readonly detail: PlaylistDetail }) {
         onEndReached={typed === "" ? songs?.more : undefined}
         onEndReachedThreshold={1}
         ListFooterComponent={
-          <View className="px-mobile-edge pb-row">
+          <View className="px-page pb-row">
             {typed !== "" && results !== undefined && results.tracks.length === 0 ? (
               <Text tone="muted" className="py-4">{`No songs match “${typed}”.`}</Text>
             ) : null}
@@ -128,7 +128,7 @@ function Picker({ detail }: { readonly detail: PlaylistDetail }) {
           const added = inPlaylist.has(track.id);
 
           return (
-            <View className="px-mobile-edge">
+            <View className="px-page">
               <Row
                 title={track.title}
                 subtitle={track.artist}

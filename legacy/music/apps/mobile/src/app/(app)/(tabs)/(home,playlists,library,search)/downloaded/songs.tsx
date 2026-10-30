@@ -37,7 +37,7 @@ export default function DownloadedSongs() {
       extraData={playingId}
       keyExtractor={(item) => targetKey(item.target)}
       header={
-        <View className="px-mobile-edge">
+        <View className="px-page">
           <OfflineNotice variant="bar" />
           <StorageSummary
             line={ownSongsSummary(ownSongs)}

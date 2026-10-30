@@ -84,7 +84,7 @@ function Album({ albumId }: { readonly albumId: AlbumId }) {
       keyExtractor={(track) => track.id}
       header={
         detail === undefined ? null : (
-          <View className="px-mobile-edge">
+          <View className="px-page">
             <OfflineNotice variant="bar" className="pb-4" />
             <View className="items-center gap-2 pb-4">
               <Artwork

@@ -83,7 +83,7 @@ export default function Songs() {
       onEndReached={pages.loadMore}
       onEndReachedThreshold={1}
       header={
-        <View className="px-mobile-edge">
+        <View className="px-page">
           <Text variant="callout" tone="muted">
             {home === undefined ? " " : countOf(home.stats.tracks, "song")}
           </Text>
@@ -97,7 +97,7 @@ export default function Songs() {
       }
       footer={
         done && tracks.length === 0 ? (
-          <View className="px-mobile-edge">
+          <View className="px-page">
             <EmptyState
               icon={Music}
               title={"No songs\nyet."}

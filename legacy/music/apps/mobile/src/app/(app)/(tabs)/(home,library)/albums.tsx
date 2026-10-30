@@ -1,6 +1,6 @@
 /**
- * A03 · Albums: every album, recently added first or A–Z by title or artist, as a two-column grid
- * or a list (A12 sets both; the chips change the order in place). A card opens the album (A07).
+ * A03 · Albums: every album, recently added first or A–Z by title or artist, as a grid (two
+ * columns on a phone, as many as fit on an iPad: P03, P04) or a list (A12 sets both; the chips change the order in place). A card opens the album (A07).
  * Pages load as the grid nears its end, or all at once for an order the server doesn't page in.
  */
 import type { AlbumCard as Album } from "@music/commands/models";
@@ -17,26 +17,51 @@ import { ChipGroup } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconButton } from "@/components/ui/icon-button";
 import { SORT_SHEETS, albumsArriveSorted, sortAlbums } from "@/lib/browse-view";
+import { columnsOf, rowsOf } from "@/lib/layout";
+import { useThemeLength } from "@/lib/theme-color";
+import { useWindowLayout } from "@/lib/window-layout";
 
 /** Albums per page: a few screens of the grid. */
 const PAGE_SIZE = 48;
 
-/** The grid as rows of two cards, as Paper builds it. */
-const rowsOfTwo = (albums: ReadonlyArray<Album>): ReadonlyArray<ReadonlyArray<Album>> =>
-  Array.from({ length: Math.ceil(albums.length / 2) }, (_, row) =>
-    albums.slice(row * 2, row * 2 + 2),
-  );
+/** A03 keeps two columns on every phone, even a 375pt one where two 168pt cards don't fit. */
+const MIN_COLUMNS = 2;
 
-/** One row of the grid: two cards 12pt apart, filling the page between its 20pt edges. */
-function GridRow({ albums }: { readonly albums: ReadonlyArray<Album> }) {
+/**
+ * How many columns the grid has: as many 168pt cards as fit between the page's edges (P03, P04),
+ * 12pt apart on a phone and 16pt from `tablet` up, as the rows' gap classes draw them.
+ */
+const useGridColumns = (): number => {
+  const { width, widthClass, edge } = useWindowLayout();
+  const card = useThemeLength("--spacing-ios-168");
+  const phoneGap = useThemeLength("--spacing-3");
+  const tabletGap = useThemeLength("--spacing-4");
+  const gap = widthClass === "phone" ? phoneGap : tabletGap;
+
+  return Math.max(MIN_COLUMNS, columnsOf(width - 2 * edge, card, gap));
+};
+
+/**
+ * One row of the grid: `columns` cards stretched to fill the page between its edges. A short last
+ * row keeps the cards' width by filling the rest with empty slots.
+ */
+function GridRow({
+  albums,
+  columns,
+}: {
+  readonly albums: ReadonlyArray<Album>;
+  readonly columns: number;
+}) {
   return (
-    <View className="flex-row gap-3 px-mobile-edge pb-4">
+    <View className="flex-row gap-3 px-page pb-4 tablet:gap-4">
       {albums.map((album) => (
         <View key={album.id} className="flex-1">
           <AlbumCard album={album} size="fill" />
         </View>
       ))}
-      {albums.length === 1 ? <View className="flex-1" /> : null}
+      {Array.from({ length: columns - albums.length }, (_, slot) => (
+        <View key={slot} className="flex-1" />
+      ))}
     </View>
   );
 }
@@ -46,6 +71,7 @@ export default function Albums() {
   const pages = useAlbumPages({ limit: PAGE_SIZE, all: !albumsArriveSorted(sort) });
   const albums = sortAlbums(pages.items, sort);
   const done = pages.status.kind === "done";
+  const columns = useGridColumns();
 
   const bar = {
     title: "Albums",
@@ -59,7 +85,7 @@ export default function Albums() {
   };
 
   const header = (
-    <View className="px-mobile-edge">
+    <View className="px-page">
       <ChipGroup
         label="Sort"
         options={SORT_SHEETS.albums.sorts}
@@ -73,7 +99,7 @@ export default function Albums() {
 
   const footer =
     done && albums.length === 0 ? (
-      <View className="px-mobile-edge">
+      <View className="px-page">
         <EmptyState
           icon={Library}
           title={"No albums\nyet."}
@@ -104,11 +130,11 @@ export default function Albums() {
       bar={bar}
       header={header}
       footer={footer}
-      data={rowsOfTwo(albums)}
+      data={rowsOf(albums, columns)}
       keyExtractor={(row) => row.map((album) => album.id).join()}
       onEndReached={pages.loadMore}
       onEndReachedThreshold={1}
-      renderItem={({ item }) => <GridRow albums={item} />}
+      renderItem={({ item }) => <GridRow albums={item} columns={columns} />}
     />
   );
 }

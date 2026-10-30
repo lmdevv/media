@@ -17,13 +17,16 @@ export interface PageProps extends NavBarProps {
   readonly children: ReactNode;
   /**
    * `tabs` leaves Paper's 180pt under the content for the tab bar and mini player; `plain` leaves
-   * 40pt on pages pushed over the tabs (settings, Jams, entry).
+   * 40pt on pages pushed over the tabs (settings, Jams, entry), which hold settings and forms and
+   * so on an iPad keep the bar and content on a centered readable column (P10).
    */
   readonly bottom?: "tabs" | "plain";
 }
 
 /** A scrolling pushed page with Paper's nav bar. */
 export function Page({ children, bottom = "tabs", ...bar }: PageProps) {
+  const readable = bottom === "plain";
+
   return (
     <ContentScroll>
       <ScrollView
@@ -33,10 +36,12 @@ export function Page({ children, bottom = "tabs", ...bar }: PageProps) {
         keyboardDismissMode="interactive"
         automaticallyAdjustKeyboardInsets
         className="flex-1 bg-canvas"
-        contentContainerClassName={bottom === "tabs" ? "pb-ios-180" : "pb-row"}
+        contentContainerClassName={readable ? "pb-row" : "pb-ios-180"}
       >
-        <NavBar {...bar} />
-        <View className="px-mobile-edge">{children}</View>
+        <NavBar {...bar} readable={readable} />
+        <View className="px-page">
+          {readable ? <View className="readable">{children}</View> : children}
+        </View>
       </ScrollView>
     </ContentScroll>
   );
