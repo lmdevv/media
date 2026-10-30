@@ -1,10 +1,11 @@
 /**
  * C02, C05, C11, H08 · Playlist. Its owner sees the hero, who can open it, Share, Add, and Play
  * and Shuffle (C02), or "Make it yours." while it is empty (C05). A collaborator sees whose it is
- * and may add songs (C11); a viewer may only play. The song list's bar holds the download ring
- * beside the ellipsis (D06). A playlist the viewer can't open is G10. While the server is out of
- * reach the offline bar leads (D13), and a playlist it hasn't sent opens from this phone's
- * downloads.
+ * and may add songs (C11); a viewer may only play. On an iPad the header lays out horizontally
+ * (P05) and carries the name, so the bar doesn't repeat it. The song list's bar holds the
+ * download ring beside the ellipsis (D06). A playlist the viewer can't open is G10. While the
+ * server is out of reach the offline bar leads (D13), and a playlist it hasn't sent opens from
+ * this phone's downloads.
  */
 import { PlaylistId } from "@music/commands/ids";
 import type { PlaylistDetail, PlaylistEntry } from "@music/commands/models";
@@ -15,7 +16,6 @@ import { Ellipsis, ListMusic, Plus } from "lucide-react-native";
 
 import { DownloadButton } from "@/components/downloads/download-button";
 import { OfflineCollectionPage } from "@/components/downloads/offline-collection";
-import { PlayButtons } from "@/components/playlists/play-buttons";
 import { OwnerHeader, SharedHeader, openAddSongs } from "@/components/playlists/playlist-header";
 import { SongListPage } from "@/components/playlists/song-list-page";
 import type { SongEntry } from "@/components/playlists/song-list-page";
@@ -27,6 +27,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { IconButton } from "@/components/ui/icon-button";
 import { Page } from "@/components/ui/page";
 import { offlinePlaylist } from "@/lib/offline-library";
+import { useWindowLayout } from "@/lib/window-layout";
 import { usePlayerActions } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
@@ -91,6 +92,7 @@ function Loaded({
   readonly canShare: boolean;
 }) {
   const { play } = usePlayerActions();
+  const { tablet } = useWindowLayout();
   const { playlist } = detail;
   const owner = playlist.access === "owner";
   const canEdit = canEditPlaylistItems(playlist.access);
@@ -119,29 +121,24 @@ function Loaded({
 
   return (
     <SongListPage
-      bar={owner ? { trailing } : { title: playlist.name, trailing }}
+      bar={owner || tablet ? { trailing } : { title: playlist.name, trailing }}
       songs={songs}
       onPlay={(index) => void play(trackIds, index)}
       header={
         owner ? (
           <>
             <OfflineNotice variant="bar" className="pb-4" />
-            <OwnerHeader playlist={playlist} canShare={canShare} />
-            <PlayButtons trackIds={trackIds} second={{ kind: "shuffle" }} className="pb-3" />
+            <OwnerHeader
+              playlist={playlist}
+              canShare={canShare}
+              trackIds={trackIds}
+              tablet={tablet}
+            />
           </>
         ) : (
           <>
             <OfflineNotice variant="bar" className="pb-4" />
-            <SharedHeader playlist={playlist} />
-            <PlayButtons
-              trackIds={trackIds}
-              second={
-                canEdit
-                  ? { kind: "add", onPress: () => openAddSongs(playlist) }
-                  : { kind: "shuffle" }
-              }
-              className="py-4"
-            />
+            <SharedHeader playlist={playlist} trackIds={trackIds} tablet={tablet} />
             {detail.items.length === 0 ? <Empty detail={detail} canEdit={canEdit} /> : null}
           </>
         )

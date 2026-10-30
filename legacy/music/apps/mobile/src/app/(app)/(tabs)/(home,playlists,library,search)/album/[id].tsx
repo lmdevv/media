@@ -1,18 +1,21 @@
 /**
  * A07 · Album: the cover, title, artist (which opens the artist, A08), and a line of facts, then
- * Play and Shuffle over the songs. A song plays the album from there; its ellipsis opens Song
+ * Play and Shuffle over the songs; on an iPad the cover sits left of the facts, title, artist,
+ * and Play and Shuffle (P05, P06). A song plays the album from there; its ellipsis opens Song
  * actions (A11). The playing song's title is the accent. The bar holds the download ring (D01)
  * and the ellipsis that opens Album actions (D03b). An album the viewer can no longer open, such
  * as one whose library was made private, is G10. While the server is out of reach the offline bar
  * leads (D13), and an album it hasn't sent opens from this phone's downloads.
  */
 import { AlbumId } from "@music/commands/ids";
+import type { AlbumDetail } from "@music/commands/models";
 import { useReadSettled } from "@music/sdk/react";
 import { Option, Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ellipsis } from "lucide-react-native";
 import { Pressable, View } from "react-native";
 
+import { DetailHeader } from "@/components/browse/detail-header";
 import { ListPage } from "@/components/browse/list-page";
 import { usePlayList } from "@/components/browse/play";
 import { PlayShuffle } from "@/components/browse/play-shuffle";
@@ -27,10 +30,41 @@ import { Text } from "@/components/ui/text";
 import { albumMeta } from "@/lib/album-meta";
 import { detailStateOf } from "@/lib/detail-state";
 import { offlineAlbum } from "@/lib/offline-library";
+import { useWindowLayout } from "@/lib/window-layout";
 import { useNowPlaying } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
 const decodeId = Schema.decodeUnknownOption(AlbumId);
+
+/** The artist line centered under the phone's cover (A07), and leading in the iPad header (P05). */
+const ARTIST_LINES = {
+  phone: { variant: "bodyMedium", link: "", text: "text-center" },
+  tablet: { variant: "subtitle", link: "self-start", text: "" },
+} as const;
+
+/** The album's artist in the accent, which opens the artist (A08). */
+function ArtistLink({
+  detail,
+  layout,
+}: {
+  readonly detail: AlbumDetail;
+  readonly layout: keyof typeof ARTIST_LINES;
+}) {
+  const line = ARTIST_LINES[layout];
+
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={`Artist, ${detail.album.artist}`}
+      onPress={() => openArtist({ id: detail.album.artistId })}
+      className={`active:opacity-60 ${line.link}`}
+    >
+      <Text variant={line.variant} tone="accent" className={line.text}>
+        {detail.album.artist}
+      </Text>
+    </Pressable>
+  );
+}
 
 function Album({ albumId }: { readonly albumId: AlbumId }) {
   const state = detailStateOf(
@@ -41,6 +75,7 @@ function Album({ albumId }: { readonly albumId: AlbumId }) {
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom, playAll } = usePlayList();
   const reach = useServerReach();
+  const { tablet } = useWindowLayout();
 
   if (state.kind === "loading" && reach !== "online") {
     return (
@@ -86,34 +121,44 @@ function Album({ albumId }: { readonly albumId: AlbumId }) {
         detail === undefined ? null : (
           <View className="px-page">
             <OfflineNotice variant="bar" className="pb-4" />
-            <View className="items-center gap-2 pb-4">
-              <Artwork
-                url={detail.album.artUrl}
-                recyclingKey={detail.album.id}
-                className="size-ios-192 rounded-lg"
-              />
-              <Text variant="title" className="text-center" accessibilityRole="header">
-                {detail.album.title}
-              </Text>
-              <Pressable
-                accessibilityRole="link"
-                accessibilityLabel={`Artist, ${detail.album.artist}`}
-                onPress={() => openArtist({ id: detail.album.artistId })}
-                className="active:opacity-60"
+            {tablet ? (
+              <DetailHeader
+                art={{ url: detail.album.artUrl, recyclingKey: detail.album.id }}
+                facts={albumMeta(detail)}
+                title={detail.album.title}
+                actions={
+                  <PlayShuffle
+                    width="natural"
+                    onPlay={() => playAll(trackIds, false)}
+                    onShuffle={() => playAll(trackIds, true)}
+                  />
+                }
               >
-                <Text variant="bodyMedium" tone="accent" className="text-center">
-                  {detail.album.artist}
-                </Text>
-              </Pressable>
-              <Text variant="mono" tone="muted" className="text-center">
-                {albumMeta(detail)}
-              </Text>
-            </View>
-            <PlayShuffle
-              className="pb-3"
-              onPlay={() => playAll(trackIds, false)}
-              onShuffle={() => playAll(trackIds, true)}
-            />
+                <ArtistLink detail={detail} layout="tablet" />
+              </DetailHeader>
+            ) : (
+              <>
+                <View className="items-center gap-2 pb-4">
+                  <Artwork
+                    url={detail.album.artUrl}
+                    recyclingKey={detail.album.id}
+                    className="size-ios-192 rounded-lg"
+                  />
+                  <Text variant="title" className="text-center" accessibilityRole="header">
+                    {detail.album.title}
+                  </Text>
+                  <ArtistLink detail={detail} layout="phone" />
+                  <Text variant="mono" tone="muted" className="text-center">
+                    {albumMeta(detail)}
+                  </Text>
+                </View>
+                <PlayShuffle
+                  className="pb-3"
+                  onPlay={() => playAll(trackIds, false)}
+                  onShuffle={() => playAll(trackIds, true)}
+                />
+              </>
+            )}
           </View>
         )
       }

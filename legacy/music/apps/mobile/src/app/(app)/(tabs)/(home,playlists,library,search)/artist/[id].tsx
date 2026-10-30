@@ -3,7 +3,9 @@
  * with their name, how many of their albums and songs the library holds, Shuffle, and Play. Back
  * and the ellipsis float over it on glass. Then their top songs, numbered, and their albums in a
  * rail. Once the picture scrolls away a bar on the page color names the artist. A song plays the
- * top songs from there. An artist the viewer can no longer open is G10.
+ * top songs from there. An artist the viewer can no longer open is G10. On an iPad a full-bleed
+ * picture would crop to a strip, so the page takes the album's header instead (P05): the picture
+ * at 240pt beside the counts, the name, and Play and Shuffle, under the usual bar.
  */
 import { ArtistId } from "@music/commands/ids";
 import type { AlbumId } from "@music/commands/ids";
@@ -22,8 +24,10 @@ import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AlbumRail } from "@/components/browse/album-rail";
+import { DetailHeader, DetailHeaderPlaceholder } from "@/components/browse/detail-header";
 import { ListPage } from "@/components/browse/list-page";
 import { usePlayList } from "@/components/browse/play";
+import { PlayShuffle } from "@/components/browse/play-shuffle";
 import { openSongActions } from "@/components/browse/rows";
 import { MenuButton } from "@/components/playback/menu-button";
 import { ContentUnavailable } from "@/components/states/content-unavailable";
@@ -36,6 +40,7 @@ import { clearOf } from "@/lib/color";
 import { detailStateOf } from "@/lib/detail-state";
 import { countOf } from "@/lib/format";
 import { useThemeColor } from "@/lib/theme-color";
+import { useWindowLayout } from "@/lib/window-layout";
 import { useNowPlaying, usePlayerActions } from "@/player";
 
 const decodeId = Schema.decodeUnknownOption(ArtistId);
@@ -267,6 +272,7 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
   const { playFrom, playAll } = usePlayList();
   const { playNext } = usePlayerActions();
   const insets = useSafeAreaInsets();
+  const { tablet } = useWindowLayout();
   const [collapsed, setCollapsed] = useState(false);
 
   if (state.kind === "unavailable" || state.kind === "failed") {
@@ -288,29 +294,67 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
     if (next !== collapsed) setCollapsed(next);
   };
 
+  const menu =
+    trackIds.length === 0 ? null : (
+      <MenuButton
+        label="More"
+        items={[
+          {
+            title: "Play next",
+            icon: "text.line.first.and.arrowtriangle.forward",
+            onPress: () => void playNext(trackIds),
+          },
+          { title: "Shuffle", icon: "shuffle", onPress: () => playAll(trackIds, true) },
+        ]}
+      />
+    );
+
+  const top = tablet ? (
+    <View className="px-page">
+      {detail === undefined ? (
+        <DetailHeaderPlaceholder />
+      ) : (
+        <DetailHeader
+          art={{ url: detail.artist.artUrl, recyclingKey: detail.artist.id }}
+          facts={statsOf(detail).toLocaleUpperCase("en-US")}
+          title={detail.artist.name}
+          actions={
+            tracks.length === 0 ? null : (
+              <PlayShuffle
+                width="natural"
+                onPlay={() => playAll(trackIds, false)}
+                onShuffle={() => playAll(trackIds, true)}
+              />
+            )
+          }
+        />
+      )}
+    </View>
+  ) : detail === undefined ? (
+    <View className="h-ios-440 bg-art" />
+  ) : (
+    <Hero detail={detail} onPlay={(shuffle) => playAll(trackIds, shuffle)} />
+  );
+
   return (
     <View className="flex-1 bg-canvas">
       <ListPage
-        bar={null}
+        bar={tablet ? { trailing: menu } : null}
         data={tracks}
         extraData={playingId}
         keyExtractor={(track) => track.id}
-        onScroll={onScroll}
-        scrollEventThrottle={16}
-        contentInsetAdjustmentBehavior="never"
+        onScroll={tablet ? undefined : onScroll}
+        scrollEventThrottle={tablet ? undefined : 16}
+        contentInsetAdjustmentBehavior={tablet ? undefined : "never"}
         header={
-          detail === undefined ? (
-            <View className="h-ios-440 bg-art" />
-          ) : (
-            <>
-              <Hero detail={detail} onPlay={(shuffle) => playAll(trackIds, shuffle)} />
-              {tracks.length === 0 ? null : (
-                <View className="px-page pt-1">
-                  <SectionHeader title="Top songs" />
-                </View>
-              )}
-            </>
-          )
+          <>
+            {top}
+            {tracks.length === 0 ? null : (
+              <View className="px-page pt-1">
+                <SectionHeader title="Top songs" />
+              </View>
+            )}
+          </>
         }
         footer={
           detail === undefined || detail.albums.length === 0 ? null : (
@@ -330,25 +374,9 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
           />
         )}
       />
-      <TopBar
-        name={detail?.artist.name ?? ""}
-        collapsed={collapsed}
-        menu={
-          trackIds.length === 0 ? null : (
-            <MenuButton
-              label="More"
-              items={[
-                {
-                  title: "Play next",
-                  icon: "text.line.first.and.arrowtriangle.forward",
-                  onPress: () => void playNext(trackIds),
-                },
-                { title: "Shuffle", icon: "shuffle", onPress: () => playAll(trackIds, true) },
-              ]}
-            />
-          )
-        }
-      />
+      {tablet ? null : (
+        <TopBar name={detail?.artist.name ?? ""} collapsed={collapsed} menu={menu} />
+      )}
     </View>
   );
 }

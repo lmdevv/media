@@ -9,6 +9,8 @@ import { useThemeLength } from "./theme-color";
 export interface WindowLayout {
   readonly width: number;
   readonly widthClass: WidthClass;
+  /** Whether an iPad layout runs, `tablet` or `wide`, rather than the phone's. */
+  readonly tablet: boolean;
   readonly edge: number;
 }
 
@@ -20,6 +22,7 @@ export const useWindowLayout = (): WindowLayout => {
   const phoneEdge = useThemeLength("--spacing-mobile-edge");
   const tabletEdge = useThemeLength("--spacing-tablet-edge");
   const widthClass = widthClassOf(width, { tablet, wide });
+  const phone = widthClass === "phone";
 
-  return { width, widthClass, edge: widthClass === "phone" ? phoneEdge : tabletEdge };
+  return { width, widthClass, tablet: !phone, edge: phone ? phoneEdge : tabletEdge };
 };

@@ -1,12 +1,15 @@
 /**
- * Paper's Play and Shuffle pair (C02, C03) and C11's Play and Add songs: two equal pills 12pt
- * apart. Playing goes through the player, which replaces the queue and plays on this phone (or
+ * Paper's Play and Shuffle pair (C02, C03) and C11's Play and Add songs: two pills 12pt apart,
+ * which split the row on a phone and keep their own width, at least 160pt, in an iPad header
+ * (P05). Playing goes through the player, which replaces the queue and plays on this phone (or
  * adds to the host's queue in someone else's Jam).
  */
 import type { TrackId } from "@music/commands/ids";
 import { Play, Plus, Shuffle } from "lucide-react-native";
 import { View } from "react-native";
 
+import { PAIR_ROWS, PAIR_WIDTHS } from "@/components/browse/play-shuffle";
+import type { PairWidth } from "@/components/browse/play-shuffle";
 import { Button } from "@/components/ui/button";
 import { usePlayer, usePlayerActions } from "@/player";
 
@@ -34,22 +37,23 @@ export interface PlayButtonsProps {
   readonly second:
     | { readonly kind: "shuffle" }
     | { readonly kind: "add"; readonly onPress: () => void };
+  readonly width?: PairWidth;
   readonly className?: string;
 }
 
 /** Play from the top, then Shuffle or Add songs. */
-export function PlayButtons({ trackIds, second, className }: PlayButtonsProps) {
+export function PlayButtons({ trackIds, second, width = "fill", className }: PlayButtonsProps) {
   const playList = usePlayList();
   const empty = trackIds.length === 0;
 
   return (
-    <View className={`flex-row gap-3 ${className ?? ""}`}>
+    <View className={`${PAIR_ROWS[width]} ${className ?? ""}`}>
       <Button
         label="Play"
         icon={Play}
         iconFilled
         disabled={empty}
-        className="flex-1"
+        className={PAIR_WIDTHS[width]}
         onPress={() => void playList(trackIds, { shuffle: false, index: 0 })}
       />
       {second.kind === "shuffle" ? (
@@ -58,7 +62,7 @@ export function PlayButtons({ trackIds, second, className }: PlayButtonsProps) {
           icon={Shuffle}
           variant="secondary"
           disabled={empty}
-          className="flex-1"
+          className={PAIR_WIDTHS[width]}
           onPress={() => void playList(trackIds, { shuffle: true })}
         />
       ) : (
@@ -66,7 +70,7 @@ export function PlayButtons({ trackIds, second, className }: PlayButtonsProps) {
           label="Add songs"
           icon={Plus}
           variant="secondary"
-          className="flex-1"
+          className={PAIR_WIDTHS[width]}
           onPress={second.onPress}
         />
       )}

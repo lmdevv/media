@@ -1,14 +1,15 @@
 /**
  * Text in Paper's iOS type scale (page 12 · 04): Inter at 34/40 for large titles, 22/28 for
- * section headings, 16/24 for body and rows, 14/20 for labels, 13/18 for secondary lines, and
- * Geist Mono 12/16 for metadata. Each weight is its own font file, so weight lives in the variant.
+ * section headings, 20/28 under an iPad header's title, 16/24 for body and rows, 14/20 for
+ * labels, 13/18 for secondary lines, and Geist Mono 12/16 for metadata. Each weight is its own
+ * font file, so weight lives in the variant.
  */
 import type { ReactNode } from "react";
 import { Text as NativeText } from "react-native";
 import type { TextProps as NativeTextProps } from "react-native";
 
 const VARIANTS = {
-  /** Welcome's display headline (E01): 40/44 heavy, display tracking. */
+  /** Welcome's headline (E01) and an iPad header's title (P05): 40/44 heavy, display tracking. */
   display: "font-sans-heavy text-2xl leading-2xl tracking-display",
   /** Tab root titles and entry heroes: 34/40 heavy, display tracking. */
   largeTitle: "font-sans-heavy text-mobile-title leading-mobile-title tracking-display",
@@ -26,6 +27,8 @@ const VARIANTS = {
   navTitle: "font-sans-heavy text-mobile-section leading-mobile-section tracking-display",
   /** Now Playing's song title: 22/28 heavy, with no tracking (B01). */
   songTitle: "font-sans-heavy text-mobile-section leading-mobile-section",
+  /** The line under an iPad header's title, such as the album's artist (P05): 20/28 medium. */
+  subtitle: "font-sans-medium text-lg leading-lg",
   /** Section headers and sheet titles: 22/28 heavy, tight tracking. */
   section: "font-sans-heavy text-mobile-section leading-mobile-section tracking-tight",
   /** A heading inside a sheet, such as the queue's "Playing Next" (B03): 16/24 heavy. */
