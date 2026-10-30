@@ -14,6 +14,7 @@ import type {
 } from "@music/sdk/downloads";
 import { Match } from "effect";
 
+import type { DeviceFamily } from "./device-family";
 import { countOf, formatBytes } from "./format";
 
 /** The page's filter chips. */
@@ -85,10 +86,10 @@ export const downloadedSummary = (
     .toLocaleUpperCase();
 
 /** The sentence under the summary, with the free space when iOS reports it. */
-export const downloadedNote = (usage: DownloadUsage): string =>
+export const downloadedNote = (usage: DownloadUsage, family: DeviceFamily): string =>
   usage.freeBytes === null
     ? "Plays with no connection to your server."
-    : `Plays with no connection to your server. ${formatBytes(usage.freeBytes)} still free on this iPhone.`;
+    : `Plays with no connection to your server. ${formatBytes(usage.freeBytes)} still free on this ${family}.`;
 
 /** The line under a download's title, the glyph before it, and its color. */
 export interface DownloadedLine {
@@ -173,8 +174,8 @@ export const downloadedDetail = (usage: DownloadUsage, offline: boolean): string
 };
 
 /** Library's line under its title while offline, such as `55 songs on this iPhone` (D11). */
-export const onThisPhone = (usage: DownloadUsage): string =>
-  `${countOf(usage.tracks, "song")} on this iPhone`;
+export const onThisDevice = (usage: DownloadUsage, family: DeviceFamily): string =>
+  `${countOf(usage.tracks, "song")} on this ${family}`;
 
 /** D10c's mono line over its songs, such as `3 SONGS`. */
 export const ownSongsSummary = (songs: DownloadedSongs): string =>

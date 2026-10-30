@@ -8,11 +8,12 @@ import { useState } from "react";
 import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { useDownloadSettings } from "@/downloads";
 import { removeAllCopy } from "@/lib/download-control";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 export default function RemoveAllDownloads() {
   const { usage, removeAll } = useDownloadSettings();
   // Worded once: the sheet must not change its words while it closes over the removal.
-  const [copy] = useState(() => removeAllCopy(usage));
+  const [copy] = useState(() => removeAllCopy(usage, DEVICE_FAMILY));
 
   return (
     <ConfirmSheet

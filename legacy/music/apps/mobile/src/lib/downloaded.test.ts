@@ -25,7 +25,7 @@ import {
   downloadedSummary,
   downloadsSettingsLine,
   entriesFor,
-  onThisPhone,
+  onThisDevice,
   ownSongLine,
   ownSongsLine,
   ownSongsQueue,
@@ -102,10 +102,13 @@ describe("Downloaded", () => {
     const all = [playlist, album, song];
 
     expect(downloadedSummary(usage, all)).toBe("55 SONGS · 1 ALBUM · 1 PLAYLIST");
-    expect(downloadedNote(usage)).toBe(
+    expect(downloadedNote(usage, "iPhone")).toBe(
       "Plays with no connection to your server. 41 GB still free on this iPhone.",
     );
-    expect(downloadedNote({ ...usage, freeBytes: null })).toBe(
+    expect(downloadedNote(usage, "iPad")).toBe(
+      "Plays with no connection to your server. 41 GB still free on this iPad.",
+    );
+    expect(downloadedNote({ ...usage, freeBytes: null }, "iPad")).toBe(
       "Plays with no connection to your server.",
     );
   });
@@ -136,8 +139,9 @@ describe("Downloaded", () => {
   it("gives the space on the Library row and the songs under its title while offline", () => {
     expect(downloadedDetail(usage, true)).toBe("2.4 GB");
     expect(downloadedDetail({ tracks: 0, bytes: 0, freeBytes: null }, true)).toBeNull();
-    expect(onThisPhone(usage)).toBe("55 songs on this iPhone");
-    expect(onThisPhone({ ...usage, tracks: 1 })).toBe("1 song on this iPhone");
+    expect(onThisDevice(usage, "iPhone")).toBe("55 songs on this iPhone");
+    expect(onThisDevice({ ...usage, tracks: 1 }, "iPhone")).toBe("1 song on this iPhone");
+    expect(onThisDevice(usage, "iPad")).toBe("55 songs on this iPad");
   });
 });
 

@@ -14,6 +14,7 @@ import { Notice } from "@/components/ui/notice";
 import { Page } from "@/components/ui/page";
 import { Text } from "@/components/ui/text";
 import { jamCodeFrom } from "@/lib/jam";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useConnection } from "@/session/connection";
 
 export default function JoinJam() {
@@ -60,7 +61,7 @@ export default function JoinJam() {
       <Notice
         icon={Info}
         title="Have a QR code?"
-        body="Scan the code on the host’s screen with this iPhone."
+        body={`Scan the code on the host’s screen with this ${DEVICE_FAMILY}.`}
         className="mt-5"
       />
       <View className="pt-3">

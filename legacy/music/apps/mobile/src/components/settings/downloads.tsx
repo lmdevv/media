@@ -18,6 +18,7 @@ import { useDownloadSettings } from "@/downloads";
 import type { DownloadQuality } from "@/downloads";
 import { storageLine } from "@/lib/downloaded";
 import { formatBytes } from "@/lib/format";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 /** What each quality downloads, with Paper's rough size of a song. */
 const QUALITIES = [
@@ -75,7 +76,7 @@ export function DownloadSettings() {
           )}
         </View>
         <Text variant="secondary" tone="muted">
-          Stored on this iPhone, outside iCloud backups.
+          {`Stored on this ${DEVICE_FAMILY}, outside iCloud backups.`}
         </Text>
       </View>
       <Pressable

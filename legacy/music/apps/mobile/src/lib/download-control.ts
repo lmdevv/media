@@ -7,6 +7,7 @@ import type { DownloadTarget } from "@music/commands/models";
 import type { DownloadStatus, DownloadUsage } from "@music/sdk/downloads";
 import { Match } from "effect";
 
+import type { DeviceFamily } from "./device-family";
 import { countOf, formatBytes } from "./format";
 
 /** What the ring draws. */
@@ -33,7 +34,11 @@ const WAITING = { kind: "waiting" } as const;
 const DOWNLOADED = { kind: "downloaded" } as const;
 
 /** The control for a download in `status`; `canToggle` is false while it can't change. */
-export const downloadControl = (status: DownloadStatus, canToggle: boolean): DownloadControl => {
+export const downloadControl = (
+  status: DownloadStatus,
+  canToggle: boolean,
+  family: DeviceFamily,
+): DownloadControl => {
   const control = Match.value(status).pipe(
     Match.discriminatorsExhaustive("kind")({
       none: (): DownloadControl => ({
@@ -52,7 +57,7 @@ export const downloadControl = (status: DownloadStatus, canToggle: boolean): Dow
         label:
           reason === "offline"
             ? "Cancel download, waiting for a connection to the server"
-            : "Cancel download, waiting for space on this iPhone",
+            : `Cancel download, waiting for space on this ${family}`,
       }),
       downloading: ({ done, total }): DownloadControl => ({
         ring: { kind: "downloading", progress: total === 0 ? 0 : done / total },
@@ -101,14 +106,14 @@ export interface RemoveCopy {
 }
 
 /** D17's Remove all downloads sheet, for the songs and space downloads take now. */
-export const removeAllCopy = (usage: DownloadUsage): RemoveCopy =>
+export const removeAllCopy = (usage: DownloadUsage, family: DeviceFamily): RemoveCopy =>
   usage.tracks === 0
     ? {
-        body: "Downloads still to come stop, and nothing is kept on this iPhone. Nothing changes on your server, and you can download them again any time.",
+        body: `Downloads still to come stop, and nothing is kept on this ${family}. Nothing changes on your server, and you can download them again any time.`,
         confirmLabel: "Remove all downloads",
       }
     : {
-        body: `${countOf(usage.tracks, "song")} and ${formatBytes(usage.bytes)} leave this iPhone. Nothing changes on your server, and you can download them again any time.`,
+        body: `${countOf(usage.tracks, "song")} and ${formatBytes(usage.bytes)} leave this ${family}. Nothing changes on your server, and you can download them again any time.`,
         confirmLabel: `Remove ${formatBytes(usage.bytes)}`,
       };
 
@@ -123,19 +128,20 @@ export const removeDownloadCopy = (
   title: string,
   kind: DownloadTarget["kind"],
   { bytes, freedBytes }: DownloadSpace,
+  family: DeviceFamily,
 ): RemoveCopy => {
   const freed = formatBytes(freedBytes);
 
   const leaving =
     freedBytes === bytes
       ? bytes > 0
-        ? `${title} and the ${freed} it takes leave this iPhone.`
-        : `${title} leaves this iPhone.`
+        ? `${title} and the ${freed} it takes leave this ${family}.`
+        : `${title} leaves this ${family}.`
       : freedBytes > 0
-        ? `${title} leaves your downloads and frees ${freed}. Songs your other downloads keep stay on this iPhone.`
+        ? `${title} leaves your downloads and frees ${freed}. Songs your other downloads keep stay on this ${family}.`
         : kind === "track"
-          ? `${title} leaves your downloads, and stays on this iPhone with your other downloads.`
-          : `${title} leaves your downloads. Its songs stay on this iPhone with your other downloads.`;
+          ? `${title} leaves your downloads, and stays on this ${family} with your other downloads.`
+          : `${title} leaves your downloads. Its songs stay on this ${family} with your other downloads.`;
 
   return {
     body: `${leaving} Nothing changes on your server, and you can download it again any time.`,

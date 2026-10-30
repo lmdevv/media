@@ -17,13 +17,14 @@ import { Text } from "@/components/ui/text";
 import { useDownloadsLibrary } from "@/downloads";
 import type { Unavailable } from "@/lib/detail-state";
 import type { OfflineCollection } from "@/lib/offline-library";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useNowPlaying } from "@/player";
 
 import { LocalSongRow } from "./local-song-row";
 
 const NOT_HERE: Unavailable = {
   kind: "failed",
-  message: "It isn’t on this iPhone, and the server is out of reach.",
+  message: `It isn’t on this ${DEVICE_FAMILY}, and the server is out of reach.`,
 };
 
 /** Props for `OfflineCollectionPage`. */

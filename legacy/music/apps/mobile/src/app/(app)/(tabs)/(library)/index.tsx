@@ -30,8 +30,9 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { TabRoot } from "@/components/ui/tab-root";
 import { Text } from "@/components/ui/text";
 import { useDownloadSettings } from "@/downloads";
-import { downloadedDetail, onThisPhone } from "@/lib/downloaded";
+import { downloadedDetail, onThisDevice } from "@/lib/downloaded";
 import { librarySummary } from "@/lib/format";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useServerReach } from "@/session/server-reach";
 
 /** Libraries by who hears them: shared with everyone, some people, or only the owner. */
@@ -84,7 +85,7 @@ export default function Library() {
     <TabRoot title="Library">
       {offline ? (
         <Text variant="callout" tone="muted">
-          {onThisPhone(usage)}
+          {onThisDevice(usage, DEVICE_FAMILY)}
         </Text>
       ) : home === undefined ? (
         <LinePlaceholder />

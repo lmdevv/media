@@ -10,6 +10,7 @@ import { Pressable } from "react-native";
 import { useSave } from "@/components/states/save-failure";
 import { useDownload } from "@/downloads";
 import { downloadControl } from "@/lib/download-control";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 import { DownloadRingGlyph } from "./download-glyphs";
 import { openRemoveDownload } from "./remove-download";
@@ -29,7 +30,7 @@ export function DownloadButton({
 }) {
   const download = useDownload(target);
   const save = useSave();
-  const control = downloadControl(download.status, download.canToggle);
+  const control = downloadControl(download.status, download.canToggle, DEVICE_FAMILY);
 
   const press = () => {
     if (control.press === "confirm-remove") {

@@ -40,6 +40,7 @@ import {
   removableSongs,
 } from "@/lib/downloaded";
 import type { DownloadedFilter } from "@/lib/downloaded";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useNowPlaying } from "@/player";
 
 type Cell =
@@ -95,7 +96,7 @@ function Summary({
       <StorageSummary
         line={downloadedSummary(usage, downloads)}
         bytes={usage.bytes}
-        note={downloadedNote(usage)}
+        note={downloadedNote(usage, DEVICE_FAMILY)}
       />
     </View>
   );

@@ -11,6 +11,7 @@ import { CircleArrowDown, CircleCheck, CircleMinus, RotateCw } from "lucide-reac
 import { useDownload } from "@/downloads";
 import { downloadRows } from "@/lib/download-row";
 import type { DownloadRowLabel } from "@/lib/download-row";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 import { Row } from "../ui/row";
 import type { TextTone } from "../ui/text";
@@ -49,7 +50,14 @@ export function DownloadRow({
     }
   };
 
-  return downloadRows(download.status, download.canToggle, download.freedBytes).map((label) => {
+  const labels = downloadRows(
+    download.status,
+    download.canToggle,
+    download.freedBytes,
+    DEVICE_FAMILY,
+  );
+
+  return labels.map((label) => {
     const leading = { kind: "icon", icon: ICONS[label.icon], tone } as const;
     const onPress = label.action === "none" ? undefined : () => void press(label);
 

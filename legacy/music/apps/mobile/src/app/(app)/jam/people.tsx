@@ -20,6 +20,7 @@ import { Row, RowChevron } from "@/components/ui/row";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Text } from "@/components/ui/text";
 import { jamPeople, memberStatus } from "@/lib/jam";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useNowPlaying } from "@/player";
 
 /** Someone waiting: their row, then Let in and Decline. */
@@ -101,7 +102,9 @@ function People({ jam }: { readonly jam: Jam }) {
       <SectionHeader title="In this Jam" />
       <Row
         title={host ? "You" : jam.host.name}
-        subtitle={host && role.kind === "local" ? "Host · Playing on this iPhone" : "Host"}
+        subtitle={
+          host && role.kind === "local" ? `Host · Playing on this ${DEVICE_FAMILY}` : "Host"
+        }
         leading={{ kind: "icon", icon: Smartphone, tone: "muted" }}
       />
       {joined.map((member) => (

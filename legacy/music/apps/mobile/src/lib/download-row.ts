@@ -6,6 +6,7 @@
 import type { DownloadStatus } from "@music/sdk/downloads";
 import { Match } from "effect";
 
+import type { DeviceFamily } from "./device-family";
 import { formatBytes } from "./format";
 
 /** What pressing a row does. */
@@ -38,6 +39,7 @@ export const downloadRows = (
   status: DownloadStatus,
   canToggle: boolean,
   freedBytes: number,
+  family: DeviceFamily,
 ): ReadonlyArray<DownloadRowLabel> =>
   Match.value(status).pipe(
     Match.discriminatorsExhaustive("kind")({
@@ -57,7 +59,7 @@ export const downloadRows = (
         cancel(
           reason === "offline"
             ? "Waiting for a connection to the server"
-            : "Waiting for space on this iPhone",
+            : `Waiting for space on this ${family}`,
         ),
       ],
       failed: ({ failed, total }): ReadonlyArray<DownloadRowLabel> => [
@@ -76,10 +78,10 @@ export const downloadRows = (
           title: "Remove download",
           subtitle:
             freedBytes > 0
-              ? `Frees ${formatBytes(freedBytes)} on this iPhone`
+              ? `Frees ${formatBytes(freedBytes)} on this ${family}`
               : bytes > 0
-                ? "Stays on this iPhone with your other downloads"
-                : "Takes no space on this iPhone",
+                ? `Stays on this ${family} with your other downloads`
+                : `Takes no space on this ${family}`,
         },
       ],
       unavailable: (): ReadonlyArray<DownloadRowLabel> => [

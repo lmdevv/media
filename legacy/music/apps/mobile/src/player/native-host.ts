@@ -16,6 +16,7 @@ import { deviceName, modelName } from "expo-device";
 import * as SecureStore from "expo-secure-store";
 import { AppState } from "react-native";
 
+import { DEVICE_FAMILY } from "../lib/this-device";
 import type { NativeEngine } from "./native-engine";
 import { parseQuality } from "./player-state";
 
@@ -35,10 +36,10 @@ const storage: KeyValueStorage = {
 export const loadPhoneId = (): DeviceId => loadDeviceId(storage, randomUUID);
 
 /**
- * How this phone names itself in the device list: its name in Settings where iOS shares it, else
- * the model ("iPhone 17").
+ * How this device names itself in the device list: its name in Settings where iOS shares it, else
+ * the model ("iPhone 17"), else what it is ("iPad").
  */
-export const phoneName = (): string => deviceName ?? modelName ?? "iPhone";
+export const phoneName = (): string => deviceName ?? modelName ?? DEVICE_FAMILY;
 
 export const loadQuality = (): StreamQuality => parseQuality(readItem(storage, QUALITY_KEY));
 

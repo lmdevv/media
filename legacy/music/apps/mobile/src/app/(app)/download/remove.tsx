@@ -15,6 +15,7 @@ import { SheetLayout } from "@/components/ui/sheet-layout";
 import { useDownload, useDownloadsLibrary } from "@/downloads";
 import { removeDownloadCopy } from "@/lib/download-control";
 import type { RemoveCopy } from "@/lib/download-control";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 const decodeTarget = Schema.decodeUnknownOption(DownloadTarget);
 
@@ -33,6 +34,7 @@ function Confirm({
     item?.title ?? title ?? "This download",
     target.kind,
     item ?? { bytes: 0, freedBytes: 0 },
+    DEVICE_FAMILY,
   );
 
   // Live until Remove is pressed, then held: the sheet must not change its words while it closes

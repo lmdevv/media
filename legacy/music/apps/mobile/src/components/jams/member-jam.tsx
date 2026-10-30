@@ -24,6 +24,7 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Text } from "@/components/ui/text";
 import { contributionsOf, listenerCount, quotaNotice } from "@/lib/jam";
 import { resolveMediaUrl } from "@/lib/media-url";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useDevices, usePlayer, usePlayerActions } from "@/player";
 import { useConnection } from "@/session/connection";
 
@@ -78,7 +79,7 @@ function ListenToggle({ jam }: { readonly jam: Jam }) {
       <Notice
         icon={Users}
         title="Playing on the host’s device"
-        body={`${jam.host.name} turned off listening along. You can still use this phone as a remote.`}
+        body={`${jam.host.name} turned off listening along. You can still use this ${DEVICE_FAMILY} as a remote.`}
         className="mt-2"
       />
     );
@@ -100,8 +101,8 @@ function ListenToggle({ jam }: { readonly jam: Jam }) {
   return (
     <View>
       <ToggleRow
-        title="Listen on this iPhone"
-        subtitle="Off uses this phone as a remote."
+        title={`Listen on this ${DEVICE_FAMILY}`}
+        subtitle={`Off uses this ${DEVICE_FAMILY} as a remote.`}
         value={pending ?? jam.listening}
         disabled={pending !== null}
         onValueChange={(on) => void change(on)}
