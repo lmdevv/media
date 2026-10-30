@@ -5,18 +5,19 @@ import { widthClassOf } from "./layout";
 import type { WidthClass } from "./layout";
 import { useThemeLength } from "./theme-color";
 
-/** The window's width in points, its layout, and the page's side margin there. */
+/** The window's width in points, its layout, whether it lies on its side, and the page's margin. */
 export interface WindowLayout {
   readonly width: number;
   readonly widthClass: WidthClass;
   /** Whether an iPad layout runs, `tablet` or `wide`, rather than the phone's. */
   readonly tablet: boolean;
+  readonly landscape: boolean;
   readonly edge: number;
 }
 
 /** The current window's layout; it changes as the iPad rotates or the app resizes in Split View. */
 export const useWindowLayout = (): WindowLayout => {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const tablet = useThemeLength("--breakpoint-tablet");
   const wide = useThemeLength("--breakpoint-wide");
   const phoneEdge = useThemeLength("--spacing-mobile-edge");
@@ -24,5 +25,11 @@ export const useWindowLayout = (): WindowLayout => {
   const widthClass = widthClassOf(width, { tablet, wide });
   const phone = widthClass === "phone";
 
-  return { width, widthClass, tablet: !phone, edge: phone ? phoneEdge : tabletEdge };
+  return {
+    width,
+    widthClass,
+    tablet: !phone,
+    landscape: width > height,
+    edge: phone ? phoneEdge : tabletEdge,
+  };
 };

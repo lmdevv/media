@@ -8,7 +8,8 @@ import { useThemeColor } from "@/lib/theme-color";
 
 import type { TextTone } from "./text";
 
-const TONE_VARIABLES = {
+/** The theme color a glyph takes in each text tone. */
+export const TONE_VARIABLES = {
   default: "--color-text",
   muted: "--color-text-muted",
   accent: "--color-accent",
