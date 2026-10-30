@@ -79,11 +79,6 @@ export interface PlayerView {
   readonly quality: StreamQuality;
   /** This phone listens along to someone else's Jam: the queue and position are the host's. */
   readonly following: boolean;
-  /**
-   * The session plays on this phone's own copy of it, as it does without the server, until it is
-   * handed back.
-   */
-  readonly ownSession: boolean;
 }
 
 /**
@@ -115,6 +110,10 @@ export const nowPlayingOf = (
     ? song
     : { ...song, artistId: entry.artistId, albumId: entry.albumId };
 };
+
+/** Whether two answers from `nowPlayingOf`, flat as they are, read the same. */
+export const sameSong = (a: NowPlaying | null, b: NowPlaying | null): boolean =>
+  JSON.stringify(a) === JSON.stringify(b);
 
 /** A queue entry as the queue shows it; `localArt` as for `nowPlayingOf`. */
 export const queueItemOf = (

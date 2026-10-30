@@ -49,6 +49,7 @@ import {
   playsOnIos,
   queueItemOf,
   roleOf,
+  sameSong,
   statusOf,
 } from "./player-state";
 import type { NowPlaying, PlayerRole, PlayerStatus, PlayerView } from "./player-state";
@@ -151,6 +152,10 @@ const ActionsContext = createContext<PlayerActions | null>(null);
 
 const DevicesContext = createContext<DevicesView | null>(null);
 
+const SongContext = createContext<NowPlaying | null>(null);
+
+const OwnSessionContext = createContext(false);
+
 const SessionRunContext = createContext<SessionRouter["run"] | null>(null);
 
 const PositionReaderContext = createContext<(() => number) | null>(null);
@@ -167,6 +172,9 @@ export const usePlayer = (): PlayerView => required(use(PlayerContext), "usePlay
 /** The song, the status, and where it plays. Changes only when one of them does. */
 export const useNowPlaying = (): NowPlayingView =>
   required(use(NowPlayingContext), "useNowPlaying");
+
+/** The song alone, for what doesn't show the status or the role. Changes only when the song does. */
+export const useSong = (): NowPlaying | null => use(SongContext);
 
 /**
  * The live position, updated four times a second. Only components that call it re-render with
@@ -186,6 +194,12 @@ export const usePositionReader = (): (() => number) =>
 /** The player's actions. Stable for the provider's lifetime, so it never re-renders a caller. */
 export const usePlayerActions = (): PlayerActions =>
   required(use(ActionsContext), "usePlayerActions");
+
+/**
+ * Whether the session plays on this phone's own copy of it, as it does without the server, until it
+ * is handed back. Changes only when that does.
+ */
+export const useOwnSession = (): boolean => use(OwnSessionContext);
 
 /** The user's devices and a move between them. */
 export const useDevices = (): DevicesView => required(use(DevicesContext), "useDevices");
@@ -444,10 +458,15 @@ export function PlayerProvider({
 
   const entry = state?.queue[state.index] ?? null;
 
-  const nowPlaying = useMemo(
+  const latestSong = useMemo(
     () => (entry === null ? null : nowPlayingOf(entry, origin, copies.find(entry.id)?.artUri)),
     [entry, origin, copies],
   );
+
+  // Every session update brings a new entry; only one that changes the song may reach its readers.
+  const [nowPlaying, setNowPlaying] = useState(latestSong);
+
+  if (!sameSong(nowPlaying, latestSong)) setNowPlaying(latestSong);
 
   const items = useMemo(
     () =>
@@ -475,9 +494,8 @@ export function PlayerProvider({
       error: local.error,
       quality: local.quality,
       following: state?.following ?? false,
-      ownSession: mode === "local",
     }),
-    [status, role, nowPlaying, items, state, local, mode],
+    [status, role, nowPlaying, items, state, local],
   );
 
   const current = useMemo(
@@ -540,9 +558,16 @@ export function PlayerProvider({
           <DevicesContext value={deviceList}>
             <PlayerContext value={player}>
               <NowPlayingContext value={current}>
-                <PositionTicker controller={controller} durationMs={nowPlaying?.durationMs ?? 0}>
-                  {children}
-                </PositionTicker>
+                <SongContext value={nowPlaying}>
+                  <OwnSessionContext value={mode === "local"}>
+                    <PositionTicker
+                      controller={controller}
+                      durationMs={nowPlaying?.durationMs ?? 0}
+                    >
+                      {children}
+                    </PositionTicker>
+                  </OwnSessionContext>
+                </SongContext>
               </NowPlayingContext>
             </PlayerContext>
           </DevicesContext>

@@ -7,6 +7,7 @@ import {
   popsToOpen,
   shellOf,
   sidebarSelectionOf,
+  tabsAreCovered,
 } from "./shell-layout";
 import type { NavigationSnapshot, Place } from "./shell-layout";
 
@@ -216,5 +217,29 @@ describe("opening a place", () => {
 
   it("has nothing to pop in a tab not yet visited", () => {
     expect(popsToOpen({ routes: [{ name: "(tabs)", state: { routes: [] } }] }, library)).toBeNull();
+  });
+});
+
+/** A navigator holding routes of these names, bottom first. */
+const stackOf = (...routes: ReadonlyArray<string>): NavigationSnapshot => ({
+  routes: routes.map((name) => ({ name })),
+});
+
+describe("tabsAreCovered", () => {
+  it("is false over the tabs alone, or a sheet on them", () => {
+    expect(tabsAreCovered(stackOf("(tabs)"))).toBe(false);
+    expect(tabsAreCovered(stackOf("(tabs)", "devices"))).toBe(false);
+    expect(tabsAreCovered(stackOf("(tabs)", "clear-queue"))).toBe(false);
+  });
+
+  it("is true under Now Playing, or a sheet of its own", () => {
+    expect(tabsAreCovered(stackOf("(tabs)", "player"))).toBe(true);
+    expect(tabsAreCovered(stackOf("(tabs)", "player", "audio"))).toBe(true);
+  });
+
+  it("is true under any page pushed over the tabs, or a sheet on it", () => {
+    expect(tabsAreCovered(stackOf("(tabs)", "settings"))).toBe(true);
+    expect(tabsAreCovered(stackOf("(tabs)", "jam/index"))).toBe(true);
+    expect(tabsAreCovered(stackOf("(tabs)", "settings", "settings/keys/[id]/revoke"))).toBe(true);
   });
 });

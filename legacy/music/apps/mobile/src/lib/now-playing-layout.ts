@@ -40,10 +40,6 @@ export type StageView =
 /** The cover, with nothing open or closing. */
 export const CLOSED: StageView = { open: false, panel: null };
 
-/** What Now Playing opens on: the panel a link names, such as the player bar's queue, or the cover. */
-export const openingView = (panel: string | string[] | undefined): StageView =>
-  panel === "queue" || panel === "lyrics" ? { open: true, panel } : CLOSED;
-
 /**
  * Now Playing's layout: the iPhone's native `sheet`; a centered `column`, which fills the iPad's
  * window at any width; or `split`, the player beside the side pane.

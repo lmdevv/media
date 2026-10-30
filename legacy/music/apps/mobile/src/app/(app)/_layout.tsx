@@ -18,38 +18,11 @@ import { useConnection } from "@/session/connection";
 
 import type { NowPlayingPresentation } from "@/lib/now-playing-layout";
 import { useSheetOptions } from "@/lib/sheet";
+import { SHEET_ROUTES } from "@/lib/shell-layout";
 import { useThemeColor } from "@/lib/theme-color";
 
 /** A link that opens a page over the tabs at launch, such as Settings, keeps the tabs under it. */
 export const unstable_settings = { anchor: "(tabs)" };
-
-/** Routes Paper draws as bottom sheets, presented as native form sheets. */
-const SHEETS = [
-  "audio",
-  "devices",
-  "song/[id]/actions",
-  "song/[id]/add-to-playlist",
-  "sort/[list]",
-  "album/[id]/actions",
-  "download/remove",
-  "playlist/[id]/actions",
-  "playlist/[id]/delete",
-  "playlist/[id]/share/[userId]",
-  "playlist/[id]/share/add",
-  "playlist/[id]/leave",
-  "jam/start",
-  "jam/manage",
-  "jam/end",
-  "jam/remove/[userId]",
-  "settings/downloads/remove-all",
-  "settings/keys/[id]/revoke",
-  "settings/admin/people/[id]/remove",
-  "settings/admin/people/[id]/suspend",
-  "settings/admin/people/[id]/transfer",
-  "settings/admin/libraries/[id]/remove",
-  "settings/admin/jobs/[id]/cancel",
-  "save-failed",
-] as const;
 
 /**
  * Now Playing on an iPhone is the native sheet the person drags down (B11). On an iPad it covers
@@ -74,7 +47,7 @@ export default function AppLayout() {
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="player" options={PLAYER_OPTIONS} />
-          {SHEETS.map((name) => (
+          {SHEET_ROUTES.map((name) => (
             <Stack.Screen key={name} name={name} options={sheet} />
           ))}
         </Stack>

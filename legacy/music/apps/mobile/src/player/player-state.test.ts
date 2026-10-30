@@ -15,6 +15,7 @@ import {
   playsOnIos,
   queueItemOf,
   roleOf,
+  sameSong,
   statusOf,
 } from "./player-state";
 
@@ -179,5 +180,22 @@ describe("player state", () => {
     expect(chooseStreamProfile("lossless", "Vorbis I", playsOnIos)).toBe("aac-320");
     expect(chooseStreamProfile("lossless", "Opus", playsOnIos)).toBe("aac-320");
     expect(chooseStreamProfile(parseQuality(null), "FLAC", playsOnIos)).toBe("aac-320");
+  });
+});
+
+describe("sameSong", () => {
+  const origin = ServerOrigin.make("https://music.example");
+
+  it("holds for a new entry that reads the same, and for nothing playing", () => {
+    expect(sameSong(nowPlayingOf(entry("a"), origin), nowPlayingOf(entry("a"), origin))).toBe(true);
+    expect(sameSong(null, null)).toBe(true);
+  });
+
+  it("fails for another song, a changed like, or nothing playing", () => {
+    const song = nowPlayingOf(entry("a"), origin);
+
+    expect(sameSong(song, nowPlayingOf(entry("b"), origin))).toBe(false);
+    expect(sameSong(song, { ...song, liked: !song.liked })).toBe(false);
+    expect(sameSong(song, null)).toBe(false);
   });
 });

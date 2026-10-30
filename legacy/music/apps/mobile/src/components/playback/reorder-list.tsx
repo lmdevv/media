@@ -26,8 +26,18 @@ import { Artwork } from "@/components/ui/artwork";
 import { Icon } from "@/components/ui/icon";
 import { SwipeToRemove } from "@/components/ui/swipe-to-remove";
 import { Text } from "@/components/ui/text";
+import { clock } from "@/lib/playback-format";
 import { dropIndex, edgeScroll, moved, shiftOf } from "@/lib/reorder";
 import type { QueueItem } from "@/player";
+
+/** Where the queue or the lyrics sit: filling Now Playing, or in the iPad's narrower panel (B1). */
+export type PanelPlace = "player" | "panel";
+
+/** Each place's side margin, which the rows draw so a swiped row's Remove reaches its edge. */
+export const QUEUE_EDGE: Readonly<Record<PanelPlace, "px-page" | "px-4">> = {
+  player: "px-page",
+  panel: "px-4",
+};
 
 /** How long the rows take to slide out of the lifted row's way. */
 const SHIFT_MS = 150;
@@ -38,6 +48,8 @@ interface Drag {
   readonly from: SharedValue<number>;
   /** Where it would drop. */
   readonly to: SharedValue<number>;
+  /** Where the finger touched down, in the window. */
+  readonly startY: SharedValue<number>;
   /** How far the finger moved since the lift. */
   readonly offset: SharedValue<number>;
   readonly scrollY: SharedValue<number>;
@@ -47,6 +59,18 @@ interface Drag {
   readonly headerHeight: SharedValue<number>;
   readonly count: SharedValue<number>;
 }
+
+/** Where the lifted row would land with the finger `travel` points from where it touched down. */
+const landing = (drag: Drag, travel: number): number => {
+  "worklet";
+
+  return dropIndex(
+    drag.from.value,
+    travel + drag.scrollY.value - drag.startScroll.value,
+    drag.rowHeight.value,
+    drag.count.value,
+  );
+};
 
 /** What a row can do. */
 interface RowActions {
@@ -71,8 +95,9 @@ function Handle({
   const pan = usePanGesture({
     minDistance: 0,
     shouldCancelWhenOutside: false,
-    onBegin: () => {
+    onBegin: (event) => {
       "worklet";
+      drag.startY.value = event.absoluteY;
       drag.from.value = index;
       drag.to.value = index;
       drag.offset.value = 0;
@@ -81,15 +106,19 @@ function Handle({
     },
     onUpdate: (event) => {
       "worklet";
-      drag.offset.value = event.translationY;
+      // Not `translationY`, which starts where the pan activated and so drops a fast finger's first move.
+      drag.offset.value = event.absoluteY - drag.startY.value;
     },
-    onFinalize: () => {
+    onFinalize: (event) => {
       "worklet";
 
       if (drag.from.value < 0) return;
-      const from = drag.from.value;
-      const to = drag.to.value;
-      scheduleOnRN(actions.onDrop, from, to);
+      // The finger's last move can arrive with the release, so this doesn't wait on `drag.to`.
+      scheduleOnRN(
+        actions.onDrop,
+        drag.from.value,
+        landing(drag, event.absoluteY - drag.startY.value),
+      );
     },
   });
 
@@ -112,13 +141,18 @@ function Handle({
   );
 }
 
-/** A queue song: 40pt art, title over artist, then the handle in a fixed 32pt lane. */
+/**
+ * A queue song: 40pt art, title over artist, the length in the iPad's panel (`timed`, B1), then
+ * the handle in a fixed 32pt lane.
+ */
 export function QueueLine({
   item,
   trailing,
+  timed = false,
 }: {
   readonly item: QueueItem;
   readonly trailing?: ReactNode;
+  readonly timed?: boolean;
 }) {
   return (
     <>
@@ -135,6 +169,11 @@ export function QueueLine({
           {item.artist}
         </Text>
       </View>
+      {timed ? (
+        <Text variant="mono" tone="muted" className="w-row shrink-0 text-right">
+          {clock(item.durationMs)}
+        </Text>
+      ) : null}
       <View className="w-8 shrink-0 items-center">{trailing}</View>
     </>
   );
@@ -147,6 +186,7 @@ function QueueRow({
   drag,
   actions,
   background,
+  place,
 }: {
   readonly item: QueueItem;
   readonly index: number;
@@ -154,6 +194,7 @@ function QueueRow({
   readonly actions: RowActions;
   /** The sheet's color, so the row covers Remove until it slides aside. */
   readonly background: string;
+  readonly place: PanelPlace;
 }) {
   const handle =
     drag === null ? (
@@ -181,9 +222,9 @@ function QueueRow({
           onPress={() => {
             if (!settle()) actions.onJump(item);
           }}
-          className="min-h-row-touch flex-row items-center gap-3 px-page py-2 active:opacity-60"
+          className={`min-h-row-touch flex-row items-center gap-3 py-2 active:opacity-60 ${QUEUE_EDGE[place]}`}
         >
-          <QueueLine item={item} trailing={handle} />
+          <QueueLine item={item} trailing={handle} timed={place === "panel"} />
         </Pressable>
       )}
     </SwipeToRemove>
@@ -239,6 +280,7 @@ export interface ReorderListProps {
   readonly header: ReactNode;
   /** Under the rows: what autoplay added. */
   readonly footer?: ReactNode;
+  readonly place?: PanelPlace;
 }
 
 /** The queue list with its header and footer. */
@@ -250,6 +292,7 @@ export function ReorderList({
   onRemove,
   header,
   footer,
+  place = "player",
 }: ReorderListProps) {
   const list = useRef<FlashListRef<QueueItem>>(null);
   // The order a drop showed, until the server's queue changes.
@@ -270,6 +313,7 @@ export function ReorderList({
   const drag: Drag = {
     from: useSharedValue(-1),
     to: useSharedValue(-1),
+    startY: useSharedValue(0),
     offset: useSharedValue(0),
     scrollY: useSharedValue(0),
     startScroll: useSharedValue(0),
@@ -284,15 +328,7 @@ export function ReorderList({
 
   // Where the lifted row would land follows the finger and the list's own scrolling.
   useAnimatedReaction(
-    () =>
-      drag.from.value < 0
-        ? -1
-        : dropIndex(
-            drag.from.value,
-            drag.offset.value + drag.scrollY.value - drag.startScroll.value,
-            drag.rowHeight.value,
-            drag.count.value,
-          ),
+    () => (drag.from.value < 0 ? -1 : landing(drag, drag.offset.value)),
     (next, previous) => {
       if (next < 0 || next === previous) return;
       drag.to.value = next;
@@ -339,6 +375,8 @@ export function ReorderList({
       const item = shown[from];
 
       if (item === undefined || from === to) return;
+      // A drop moves the row the list anchors on, which isn't content arriving: keep the offset.
+      list.current?.prepareForLayoutAnimationRender();
       setOrder({ source, items: moved(shown, from, to) });
       onMove(item, to);
     },
@@ -400,6 +438,7 @@ export function ReorderList({
               drag={drag}
               actions={actions}
               background={background}
+              place={place}
             />
           </Cell>
         )}
@@ -413,6 +452,7 @@ export function ReorderList({
               drag={null}
               actions={actions}
               background={background}
+              place={place}
             />
           </View>
         )}

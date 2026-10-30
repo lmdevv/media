@@ -2,9 +2,12 @@
  * The player bar under the iPad's content (page 26, B1's foot and A3's), in place of the iPhone's
  * mini player: the song, the transport over the scrubber, and the format, lyrics, queue, and device
  * buttons. A `wide` window has the room for the heart, shuffle, repeat, and the format; a `tablet`
- * one drops them (A3). Everything acts on whichever device plays. Only the scrubber re-renders
- * with the position. The bar is absent with nothing queued.
+ * one drops them (A3). The lyrics and queue buttons open the Now Playing panel on that tab and are
+ * lit while it shows; pressing the lit one hides it. The song itself opens full-screen Now Playing.
+ * Everything acts on whichever device plays. Only the scrubber re-renders with the position. The
+ * bar is absent with nothing queued.
  */
+import { lyricsButton } from "@music/player/lyrics";
 import { router } from "expo-router";
 import { ListMusic, MessageSquareQuote, Speaker } from "lucide-react-native";
 import { Pressable, View } from "react-native";
@@ -16,11 +19,12 @@ import { BarTransport } from "@/components/playback/transport";
 import { Artwork } from "@/components/ui/artwork";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
-import type { Panel } from "@/lib/now-playing-layout";
 import { formatBadge } from "@/lib/playback-format";
 import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useWindowLayout } from "@/lib/window-layout";
 import { useNowPlaying } from "@/player";
+
+import type { Inspector } from "./use-inspector";
 
 /** What the bar holds at each window width. */
 const BAR = {
@@ -28,12 +32,11 @@ const BAR = {
   tablet: { gap: "gap-4", song: "w-ios-240", tools: "", extras: false },
 } as const;
 
-const openPanel = (panel: Panel) => {
-  router.push({ pathname: "/player", params: { panel } });
-};
+/** Lit as Paper draws it: the accent on its wash, while the panel shows this button's tab. */
+const litClass = (lit: boolean): string => (lit ? "bg-accent/12" : "");
 
 /** The bar for what is playing; nothing with nothing queued. */
-export function PlayerBar() {
+export function PlayerBar({ inspector }: { readonly inspector: Inspector }) {
   const { nowPlaying, role } = useNowPlaying();
   const insets = useSafeAreaInsets();
   const { widthClass } = useWindowLayout();
@@ -43,6 +46,8 @@ export function PlayerBar() {
   const { gap, song, tools, extras } = widthClass === "wide" ? BAR.wide : BAR.tablet;
   const badge = extras ? formatBadge(nowPlaying) : null;
   const remote = role.kind === "remote";
+  const lit = inspector.open ? inspector.tab : null;
+  const lyrics = lyricsButton(inspector.offer, false);
 
   return (
     <View
@@ -90,15 +95,27 @@ export function PlayerBar() {
           )}
           <IconButton
             icon={MessageSquareQuote}
-            label="Lyrics"
+            label={lyrics.label}
             size="side"
-            onPress={() => openPanel("lyrics")}
+            tone={lit === "lyrics" ? "accent" : "default"}
+            disabled={lyrics.disabled}
+            loading={lyrics.loading}
+            accessibilityState={{ selected: lit === "lyrics", disabled: lyrics.disabled }}
+            className={`${litClass(lit === "lyrics")} ${lyrics.disabled ? "opacity-disabled" : ""}`}
+            onPress={() => {
+              inspector.pressPanel("lyrics");
+            }}
           />
           <IconButton
             icon={ListMusic}
             label="Queue"
             size="side"
-            onPress={() => openPanel("queue")}
+            tone={lit === "queue" ? "accent" : "default"}
+            accessibilityState={{ selected: lit === "queue" }}
+            className={litClass(lit === "queue")}
+            onPress={() => {
+              inspector.pressPanel("queue");
+            }}
           />
           <IconButton
             icon={Speaker}

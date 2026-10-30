@@ -14,11 +14,11 @@
  * wide window on its side the queue and the lyrics leave the cover for a pane beside the player,
  * with a lyrics button in the bottom row (P08, P09, P11). `partsOf` decides what each width shows.
  */
-import { lyricsAnswer, lyricsButton, lyricsOffer, offlineLyrics } from "@music/player/lyrics";
+import { lyricsButton, lyricsOffer } from "@music/player/lyrics";
 import type { LyricsAnswer, LyricsOffer } from "@music/player/lyrics";
-import { useRead, useReadSettled } from "@music/sdk/react";
+import { useRead } from "@music/sdk/react";
 import * as Haptics from "expo-haptics";
-import { router, useLocalSearchParams, useNavigation } from "expo-router";
+import { router, useNavigation } from "expo-router";
 import {
   Airplay,
   Ellipsis,
@@ -52,15 +52,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
-import { useDownloadedLyrics } from "@/downloads";
-import {
-  CLOSED,
-  defaultPanel,
-  layoutOf,
-  openingView,
-  partsOf,
-  pressedPanel,
-} from "@/lib/now-playing-layout";
+import { CLOSED, layoutOf, partsOf, pressedPanel } from "@/lib/now-playing-layout";
 import type { NowPlayingLayout, NowPlayingParts, Panel, StageView } from "@/lib/now-playing-layout";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
@@ -68,14 +60,15 @@ import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useWindowLayout } from "@/lib/window-layout";
 import { usePlayer } from "@/player";
 import type { NowPlaying, PlayerRole } from "@/player";
-import { useServerReach } from "@/session/server-reach";
 
 import { LyricsPanel } from "./lyrics";
 import { NOW_PLAYING_PRESENTATION } from "./now-playing-presentation";
 import { ModePills, QueueList } from "./queue";
+import type { PanelPlace } from "./reorder-list";
 import { Scrubber } from "./scrubber";
 import { Transport, VolumeRow } from "./transport";
 import { useArtTint } from "./use-art-tint";
+import { useSongLyrics } from "./use-song-lyrics";
 
 /** Closes Now Playing, back to the tabs underneath. */
 const close = () => {
@@ -257,13 +250,20 @@ function Handle({ onClose }: { readonly onClose: (() => void) | null }) {
  * The ellipsis beside the heart: Song actions, or Audio details for a Jam song kept private,
  * which has no song actions.
  */
-function MoreButton({ song }: { readonly song: NowPlaying }) {
+export function MoreButton({
+  song,
+  size = "nav",
+}: {
+  readonly song: NowPlaying;
+  readonly size?: "nav" | "side";
+}) {
   const sheetSong = sheetSongOf(song);
 
   return (
     <IconButton
       icon={Ellipsis}
       label={sheetSong === null ? "Audio details" : "More"}
+      size={size}
       onPress={() => {
         if (sheetSong === null) {
           router.push("/audio");
@@ -353,28 +353,41 @@ function SongRow({ song }: { readonly song: NowPlaying }) {
 }
 
 /**
- * A panel's body, in place under the song's row or in the side pane: the queue under its mode
- * pills (B03), or the song's lyrics (B12), fresh for each song.
+ * A panel's body, in place under the song's row, in the side pane, or in the iPad's panel: the queue
+ * under its mode pills (B03), or the song's lyrics (B12), fresh for each song.
  */
-function PanelBody({
+export function PanelBody({
   panel,
   song,
   lyrics,
   background,
+  place = "player",
+  paused = false,
 }: {
   readonly panel: Panel;
   readonly song: NowPlaying;
   readonly lyrics: LyricsAnswer;
   readonly background: string;
+  readonly place?: PanelPlace;
+  /** Whether something covers the body, so its lyrics stop following playback. */
+  readonly paused?: boolean;
 }) {
   if (panel === "lyrics") {
-    return <LyricsPanel key={song.trackId} lyrics={lyrics} background={background} />;
+    return (
+      <LyricsPanel
+        key={song.trackId}
+        lyrics={lyrics}
+        background={background}
+        place={place}
+        paused={paused}
+      />
+    );
   }
 
   return (
     <>
-      <ModePills />
-      <QueueList background={background} />
+      <ModePills place={place} />
+      <QueueList background={background} place={place} />
     </>
   );
 }
@@ -994,13 +1007,12 @@ function PlayerBody({
 
 /** The Now Playing screen. */
 export function NowPlayingScreen() {
-  const { nowPlaying, role, status, error, ownSession } = usePlayer();
+  const { nowPlaying, role, status, error } = usePlayer();
   const tint = useArtTint(nowPlaying?.artUrl ?? null);
   const player = useThemeColor("--color-player");
   const insets = useSafeAreaInsets();
-  const { panel: opening } = useLocalSearchParams<{ panel?: string }>();
-  const [view, setView] = useState<StageView>(() => openingView(opening));
-  const progress = useSharedValue(view.open ? 1 : 0);
+  const [view, setView] = useState<StageView>(CLOSED);
+  const progress = useSharedValue(0);
   const still = useSharedValue(0);
   const offset = useSharedValue(0);
   const reduceMotion = useReducedMotion();
@@ -1008,25 +1020,8 @@ export function NowPlayingScreen() {
   const { widthClass, landscape } = useWindowLayout();
   const layout = layoutOf(NOW_PLAYING_PRESENTATION, widthClass, landscape);
 
-  // Read while Now Playing is up, for the cover's chip as much as for the lyrics. Settled, not
-  // thrown: a failed read shows in the lyrics instead of taking Now Playing down.
-  const served = lyricsAnswer(
-    useReadSettled("lyrics.get", nowPlaying === null ? "skip" : { trackId: nowPlaying.trackId }),
-  );
-
-  // Kept lyrics are read from the vault only while the server can't be counted on.
-  const reach = useServerReach();
-  const offline = ownSession || reach !== "online";
-  const held = useDownloadedLyrics(offline ? (nowPlaying?.trackId ?? null) : null);
-  const lyrics = offline ? offlineLyrics(served, held) : served;
-  const offer = lyricsOffer(lyrics);
-
-  // The side pane's default for the last settled answer, kept while the next song's lookup runs.
-  const [settled, setSettled] = useState<Panel | null>(null);
-  const fallback = defaultPanel(offer, settled);
-
-  if (fallback !== settled) setSettled(fallback);
-
+  // Read while Now Playing is up, for the cover's chip as much as for the lyrics.
+  const { lyrics, offer, fallback } = useSongLyrics(nowPlaying?.trackId ?? null);
   const parts = partsOf(layout, view, offer, fallback);
 
   useFailureSheet(status === "failed" && role.kind !== "remote", error, nowPlaying?.itemId);

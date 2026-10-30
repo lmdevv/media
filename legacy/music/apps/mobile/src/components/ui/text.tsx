@@ -21,6 +21,8 @@ const VARIANTS = {
   title: "font-sans-heavy text-xl leading-xl",
   /** A synced lyric line in Now Playing (B12): 28/32 heavy, tight tracking. */
   lyric: "font-sans-heavy text-xl leading-xl tracking-tight",
+  /** The song and a synced lyric line in the iPad's Now Playing panel (B2): 20/28 heavy, tight. */
+  panelHeading: "font-sans-heavy text-lg leading-lg tracking-tight",
   /** Plain lyrics in Now Playing (B13): 20/28 semibold, tight tracking. */
   lyricPlain: "font-sans-semibold text-lg leading-lg tracking-tight",
   /** The inline title beside a back button: 22/28 heavy, display tracking. */
@@ -47,6 +49,8 @@ const VARIANTS = {
   label: "font-sans-semibold text-base leading-base",
   /** Row subtitles and notice bodies: 13/18 regular. */
   secondary: "font-sans text-sm leading-sm",
+  /** An unselected choice in a segmented switch (B1): 13/18 medium. */
+  secondaryMedium: "font-sans-medium text-sm leading-sm",
   /** Chip labels and text links such as See all: 13/18 semibold. */
   secondaryStrong: "font-sans-semibold text-sm leading-sm",
   /** A playlist's name in the iPad sidebar: 14/18 regular. */

@@ -189,6 +189,47 @@ export const playlistPlace = (id: string): Place => ({
   id,
 });
 
+/** The routes over the tabs that Paper draws as bottom sheets, presented as native form sheets. */
+export const SHEET_ROUTES = [
+  "audio",
+  "clear-queue",
+  "devices",
+  "song/[id]/actions",
+  "song/[id]/add-to-playlist",
+  "sort/[list]",
+  "album/[id]/actions",
+  "download/remove",
+  "playlist/[id]/actions",
+  "playlist/[id]/delete",
+  "playlist/[id]/share/[userId]",
+  "playlist/[id]/share/add",
+  "playlist/[id]/leave",
+  "jam/start",
+  "jam/manage",
+  "jam/end",
+  "jam/remove/[userId]",
+  "settings/downloads/remove-all",
+  "settings/keys/[id]/revoke",
+  "settings/admin/people/[id]/remove",
+  "settings/admin/people/[id]/suspend",
+  "settings/admin/people/[id]/transfer",
+  "settings/admin/libraries/[id]/remove",
+  "settings/admin/jobs/[id]/cancel",
+  "save-failed",
+] as const;
+
+const SHEETS: ReadonlySet<string> = new Set(SHEET_ROUTES);
+
+/**
+ * Whether a page or Now Playing covers the tabs, for the navigator that holds `(tabs)`. A sheet
+ * doesn't: the tabs stay in view around it, unless it sits on something that covers them.
+ */
+export const tabsAreCovered = (app: NavigationSnapshot): boolean => {
+  const top = app.routes.findLast((route) => !SHEETS.has(route.name));
+
+  return top !== undefined && top.name !== "(tabs)";
+};
+
 /** The tabs' state, from any navigator above them. */
 const tabsOf = (navigator: NavigationSnapshot): NavigationSnapshot | undefined => {
   for (const route of navigator.routes) {

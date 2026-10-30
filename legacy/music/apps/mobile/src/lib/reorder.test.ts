@@ -58,6 +58,23 @@ describe("edgeScroll", () => {
   it("scrolls faster closer to the edge", () => {
     expect(Math.abs(edgeScroll(5, 600))).toBeGreaterThan(Math.abs(edgeScroll(50, 600)));
   });
+
+  it("keeps a 72pt edge in a phone's list", () => {
+    expect(edgeScroll(71, 285)).toBeLessThan(0);
+    expect(edgeScroll(73, 285)).toBe(0);
+    expect(edgeScroll(214, 285)).toBeGreaterThan(0);
+    expect(edgeScroll(212, 285)).toBe(0);
+  });
+
+  it("leaves the rows of the iPad sheet's list still under a resting finger", () => {
+    expect(edgeScroll(58, 152)).toBe(0);
+    expect(edgeScroll(118, 152)).toBe(0);
+  });
+
+  it("still scrolls a short list at full speed at its edges", () => {
+    expect(edgeScroll(0, 152)).toBeCloseTo(edgeScroll(0, 285));
+    expect(edgeScroll(152, 152)).toBeCloseTo(edgeScroll(285, 285));
+  });
 });
 
 describe("moved", () => {

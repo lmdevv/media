@@ -7,6 +7,15 @@
 /** How close to an edge, in points, the finger starts the list scrolling. */
 const EDGE = 72;
 
+/**
+ * Lists this tall or less, such as the iPad sheet's, take this share for each edge instead, so their
+ * rows lift without scrolling. A phone's list is taller, and a share that left its edge at `EDGE`
+ * would still scroll under a resting finger in the sheet.
+ */
+const SHORT_LIST = 200;
+
+const SHORT_LIST_EDGE = 1 / 5;
+
 /** The fastest the list scrolls under the finger, in points per frame. */
 const MAX_SPEED = 14;
 
@@ -49,10 +58,11 @@ export const shiftOf = (index: number, from: number, to: number): -1 | 0 | 1 => 
  */
 export const edgeScroll = (y: number, height: number): number => {
   "worklet";
+  const edge = height > SHORT_LIST ? EDGE : height * SHORT_LIST_EDGE;
 
-  if (y < EDGE) return -MAX_SPEED * Math.min(1, (EDGE - y) / EDGE);
+  if (y < edge) return -MAX_SPEED * Math.min(1, (edge - y) / edge);
 
-  if (y > height - EDGE) return MAX_SPEED * Math.min(1, (y - (height - EDGE)) / EDGE);
+  if (y > height - edge) return MAX_SPEED * Math.min(1, (y - (height - edge)) / edge);
 
   return 0;
 };
