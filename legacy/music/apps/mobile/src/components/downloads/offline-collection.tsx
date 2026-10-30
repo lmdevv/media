@@ -19,7 +19,7 @@ import { useDownloadsLibrary } from "@/downloads";
 import type { Unavailable } from "@/lib/detail-state";
 import type { OfflineCollection } from "@/lib/offline-library";
 import { DEVICE_FAMILY } from "@/lib/this-device";
-import { useWindowLayout } from "@/lib/window-layout";
+import { useContentLayout } from "@/lib/window-layout";
 import { useNowPlaying } from "@/player";
 
 import { LocalSongRow } from "./local-song-row";
@@ -41,7 +41,7 @@ export function OfflineCollectionPage({ kind, find }: OfflineCollectionPageProps
   const collection = find(useDownloadsLibrary());
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom, playAll } = usePlayList();
-  const { tablet } = useWindowLayout();
+  const { tablet } = useContentLayout();
 
   if (collection === null) return <ContentUnavailable kind={kind} state={NOT_HERE} />;
 

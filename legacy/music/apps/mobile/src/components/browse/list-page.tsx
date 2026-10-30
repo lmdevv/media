@@ -51,7 +51,7 @@ export function ListPage<Item>({ bar, header, footer, ...list }: ListPageProps<I
         ListFooterComponent={
           <>
             {footer}
-            <View className="h-ios-180" />
+            <View className="h-page-foot" />
           </>
         }
       />

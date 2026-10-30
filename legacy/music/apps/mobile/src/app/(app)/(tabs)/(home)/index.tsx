@@ -3,6 +3,7 @@
  * songs played most recently, each once. Scrolled past the title it is A14: the compact bar above, and
  * the system tab bar minimized with the mini player inline. While the server is out of reach it
  * is D14: the notice, then the albums on this iPhone; a phone with none keeps what Home last showed.
+ * An iPad shows the library's totals across from the title (A1).
  */
 import type { OfflineAlbum } from "@music/sdk/downloads";
 import { useRead } from "@music/sdk/react";
@@ -17,6 +18,7 @@ import { OfflineNotice } from "@/components/states/offline-notice";
 import { SectionHeader } from "@/components/ui/section-header";
 import { TabRoot } from "@/components/ui/tab-root";
 import { useDownloadsLibrary } from "@/downloads";
+import { homeStats } from "@/lib/format";
 import { distinctSongs } from "@/lib/history";
 import { cardOf } from "@/lib/offline-library";
 import { DEVICE_FAMILY } from "@/lib/this-device";
@@ -79,7 +81,10 @@ export default function Home() {
   const onPhone = reach === "offline" || (reach === "reconnecting" && albums.length > 0);
 
   return (
-    <TabRoot title="Home">
+    <TabRoot
+      title="Home"
+      figures={home === undefined || onPhone ? undefined : homeStats(home.stats)}
+    >
       <OfflineNotice variant="card" className={onPhone ? "" : "mb-1"} />
       {onPhone ? (
         <OnThisPhone albums={albums} />

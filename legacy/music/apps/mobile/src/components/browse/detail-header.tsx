@@ -1,14 +1,17 @@
 /**
  * The iPad's horizontal header for an album, playlist, or artist (page 25 · P05, P06): 240pt art
  * on the left, and beside it, bottom-aligned, the mono facts, the title at 40/44, the page's own
- * lines (the artist, a description, whose it is), then its actions. Phones keep each page's own
- * header.
+ * lines (the artist, a description, whose it is), then its actions. Where the page is too narrow
+ * for the art beside the text, the text moves under it. Phones keep each page's own header.
  */
 import type { ReactNode } from "react";
 import { View } from "react-native";
 
 import { Artwork } from "@/components/ui/artwork";
 import { Text } from "@/components/ui/text";
+import { fitsSideBySide } from "@/lib/layout";
+import { useThemeLength } from "@/lib/theme-color";
+import { useContentLayout } from "@/lib/window-layout";
 
 /** Props for `DetailHeader`. */
 export interface DetailHeaderProps {
@@ -24,14 +27,23 @@ export interface DetailHeaderProps {
 
 /** The art beside the facts, title, the page's lines, and its actions. */
 export function DetailHeader({ art, facts, title, children, actions }: DetailHeaderProps) {
+  const { width, edge } = useContentLayout();
+  const artSize = useThemeLength("--spacing-ios-240");
+  const gap = useThemeLength("--spacing-8");
+  const button = useThemeLength("--spacing-ios-160");
+  const buttonGap = useThemeLength("--spacing-3");
+  // The text needs at least the room for Play and Shuffle side by side at their least width.
+  const text = 2 * button + buttonGap;
+  const beside = fitsSideBySide(width, edge, { art: artSize, gap, text });
+
   return (
-    <View className="flex-row items-end gap-8 pt-2 pb-6">
+    <View className={beside ? "flex-row items-end gap-8 pt-2 pb-6" : "gap-6 pt-2 pb-6"}>
       <Artwork
         url={art.url}
         recyclingKey={art.recyclingKey}
         className="size-ios-240 shrink-0 rounded-lg"
       />
-      <View className="min-w-0 flex-1 gap-4">
+      <View className={beside ? "min-w-0 flex-1 gap-4" : "gap-4"}>
         <View className="gap-1">
           {facts === undefined ? null : (
             <Text variant="mono" tone="muted">

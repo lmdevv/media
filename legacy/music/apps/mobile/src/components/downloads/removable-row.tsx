@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { View } from "react-native";
 
 import { SwipeToRemove } from "@/components/ui/swipe-to-remove";
-import { useThemeColor } from "@/lib/theme-color";
+import { useContentCanvas } from "@/lib/window-layout";
 
 /** The press and hold the row takes; a press on a swiped-open row only closes it. */
 interface RowPress {
@@ -41,7 +41,7 @@ function SwipeableRow({
   onRemove,
   children,
 }: Omit<RemovableRowProps, "onRemove"> & { readonly onRemove: () => void }) {
-  const canvas = useThemeColor("--color-canvas");
+  const canvas = useContentCanvas();
 
   return (
     <SwipeToRemove swipeBack resetKey={resetKey} background={canvas} onRemove={onRemove}>

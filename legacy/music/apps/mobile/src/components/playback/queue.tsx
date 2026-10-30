@@ -12,13 +12,12 @@ import { Pressable, View } from "react-native";
 
 import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
+import { REPEAT_LABELS } from "@/lib/playback-format";
 import { usePlayer, usePlayerActions } from "@/player";
 import type { QueueItem } from "@/player";
 
 import { EdgeFade } from "./edge-fade";
 import { QueueLine, ReorderList } from "./reorder-list";
-
-const REPEAT_LABELS = { off: "Repeat off", all: "Repeat all", one: "Repeat one" } as const;
 
 /** A mode pill: the text color with an inverse glyph when on, a faint wash of it when off. */
 function ModePill({

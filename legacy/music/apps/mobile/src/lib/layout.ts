@@ -21,6 +21,27 @@ export const widthClassOf = (width: number, { tablet, wide }: Breakpoints): Widt
 };
 
 /**
+ * The layout of a page `content` points across in a window of class `window`. A window with an iPad
+ * layout keeps one however little room its sidebar and margins leave, as `tablet:` variants do.
+ */
+export const contentClassOf = (
+  window: WidthClass,
+  content: number,
+  breakpoints: { readonly tablet: number; readonly wide: number },
+): WidthClass =>
+  window === "phone" ? "phone" : widthClassOf(Math.max(content, breakpoints.tablet), breakpoints);
+
+/**
+ * Whether an iPad header's art fits beside `text` points of text in a page `width` points across,
+ * inside its `edge`s with `gap` between them; a narrower page stacks them.
+ */
+export const fitsSideBySide = (
+  width: number,
+  edge: number,
+  { art, gap, text }: { readonly art: number; readonly gap: number; readonly text: number },
+): boolean => width - 2 * edge >= art + gap + text;
+
+/**
  * How many cards at least `min` points wide fit across `width` with `gap` between them, never
  * fewer than one. The cards then stretch to fill the row.
  */

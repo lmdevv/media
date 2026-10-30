@@ -5,6 +5,8 @@
 import type { ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 
+import { usePageBackground } from "@/lib/window-layout";
+
 import { ContentScroll } from "./content-scroll";
 import { NavBar } from "./nav-bar";
 import type { NavBarProps } from "./nav-bar";
@@ -16,8 +18,9 @@ const STICKY_BAR = [0];
 export interface PageProps extends NavBarProps {
   readonly children: ReactNode;
   /**
-   * `tabs` leaves Paper's 180pt under the content for the tab bar and mini player; `plain` leaves
-   * 40pt on pages pushed over the tabs (settings, Jams, entry), which hold settings and forms and
+   * `tabs` leaves Paper's 180pt under the content for a phone's tab bar and mini player (40pt from
+   * `tablet` up, where the player bar sits below the page); `plain` leaves 40pt on pages pushed
+   * over the tabs (settings, Jams, entry), which hold settings and forms and
    * so on an iPad keep the bar and content on a centered readable column (P10).
    */
   readonly bottom?: "tabs" | "plain";
@@ -26,6 +29,7 @@ export interface PageProps extends NavBarProps {
 /** A scrolling pushed page with Paper's nav bar. */
 export function Page({ children, bottom = "tabs", ...bar }: PageProps) {
   const readable = bottom === "plain";
+  const background = usePageBackground();
 
   return (
     <ContentScroll>
@@ -35,8 +39,8 @@ export function Page({ children, bottom = "tabs", ...bar }: PageProps) {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
         automaticallyAdjustKeyboardInsets
-        className="flex-1 bg-canvas"
-        contentContainerClassName={readable ? "pb-row" : "pb-ios-180"}
+        className={`flex-1 ${readable ? "bg-canvas" : background}`}
+        contentContainerClassName={readable ? "pb-row" : "pb-page-foot"}
       >
         <NavBar {...bar} readable={readable} />
         <View className="px-page">

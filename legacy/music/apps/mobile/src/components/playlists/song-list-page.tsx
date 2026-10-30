@@ -114,7 +114,7 @@ export function SongListPage({ bar, header, songs, onPlay, onEndReached }: SongL
         getItemType={(cell) => cell.kind}
         onEndReached={onEndReached}
         onEndReachedThreshold={1}
-        ListFooterComponent={<View className="h-ios-180" />}
+        ListFooterComponent={<View className="h-page-foot" />}
         renderItem={({ item }) => {
           if (item.kind === "bar") return <NavBar {...bar} />;
 

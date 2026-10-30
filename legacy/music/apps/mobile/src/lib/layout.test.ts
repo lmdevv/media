@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { columnsOf, rowsOf, widthClassOf } from "./layout";
+import { columnsOf, contentClassOf, fitsSideBySide, rowsOf, widthClassOf } from "./layout";
 
 const breakpoints = { tablet: 600, wide: 1024 };
 
@@ -14,6 +14,21 @@ describe("widthClassOf", () => {
     [1376, "wide"],
   ] as const)("gives a %ipt window the %s layout", (width, layout) => {
     expect(widthClassOf(width, breakpoints)).toBe(layout);
+  });
+});
+
+describe("contentClassOf", () => {
+  it("keeps an iPad layout in a 600pt window whose margins leave under 600pt", () => {
+    expect(contentClassOf("tablet", 584, breakpoints)).toBe("tablet");
+  });
+
+  it("lets the sidebar take a wide window's content down to tablet", () => {
+    expect(contentClassOf("wide", 768, breakpoints)).toBe("tablet");
+    expect(contentClassOf("wide", 1120, breakpoints)).toBe("wide");
+  });
+
+  it("keeps a phone a phone", () => {
+    expect(contentClassOf("phone", 390, breakpoints)).toBe("phone");
   });
 });
 
@@ -47,5 +62,14 @@ describe("rowsOf", () => {
 
   it("gives no rows for no albums", () => {
     expect(rowsOf([], 7)).toEqual([]);
+  });
+});
+
+describe("fitsSideBySide", () => {
+  const header = { art: 240, gap: 32, text: 332 };
+
+  it("needs the art, the gap, and the text between the page's edges", () => {
+    expect(fitsSideBySide(668, 32, header)).toBe(true);
+    expect(fitsSideBySide(667, 32, header)).toBe(false);
   });
 });

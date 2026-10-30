@@ -18,8 +18,11 @@ export interface IconButtonProps extends Omit<PressableProps, "children" | "styl
   /** What VoiceOver reads, such as `Back`. */
   readonly label: string;
   readonly tone?: TextTone;
-  /** 24 in navigation (the default), 20 for inline actions such as pause in the merged bar. */
-  readonly size?: Extract<IconSize, "nav" | "inline">;
+  /**
+   * 24 in navigation (the default), 22 in the iPad's player bar, 20 for inline actions such as
+   * pause in the merged bar.
+   */
+  readonly size?: Extract<IconSize, "nav" | "side" | "inline">;
   readonly filled?: boolean;
   /** Shows a spinner in place of the icon while what it opens is looked up. */
   readonly loading?: boolean;

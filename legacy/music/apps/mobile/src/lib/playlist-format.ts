@@ -50,6 +50,12 @@ export const playlistLine = (playlist: Playlist): string => {
     .join(" · ");
 };
 
+/** A sidebar row's subtitle (page 26): the size, marked `Shared · 87 songs` on someone else's. */
+export const sidebarLine = (playlist: Pick<Playlist, "trackCount" | "access">): string =>
+  playlist.access === "owner"
+    ? songCount(playlist.trackCount)
+    : `Shared · ${songCount(playlist.trackCount)}`;
+
 /** An add-to-playlist row's subtitle (C06): the size, plus the role on someone else's. */
 export const addTargetLine = (playlist: Pick<Playlist, "trackCount" | "access">): string =>
   playlist.access === "owner"

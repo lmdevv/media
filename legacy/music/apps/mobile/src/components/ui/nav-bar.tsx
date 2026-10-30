@@ -10,6 +10,10 @@ import type { ReactNode } from "react";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useSidebarControl } from "@/components/shell/sidebar-control";
+import { ShowSidebarButton } from "@/components/shell/top-buttons";
+import { usePageBackground } from "@/lib/window-layout";
+
 import { IconButton } from "./icon-button";
 import { Text } from "./text";
 
@@ -46,17 +50,28 @@ export function NavBar({
   // which can predate the push (a page pushed on Home showed no Back). It still covers the root
   // of a stack presented over another, such as Now Playing's.
   const stacked = useNavigationState((state) => state.index > 0);
+  const background = usePageBackground();
+  // Otherwise a page pushed under a hidden sidebar could only reach it by going Back to the root.
+  const sidebar = useSidebarControl();
 
   const back =
     onBack === undefined && (stacked || navigation.canGoBack()) ? () => router.back() : onBack;
 
   return (
-    <View style={{ paddingTop: insets.top }} className="bg-canvas px-page">
+    <View
+      style={{ paddingTop: insets.top }}
+      className={`px-page ${readable ? "bg-canvas" : background}`}
+    >
       <View
         className={`min-h-row-touch flex-row items-center pt-2 pb-3 ${
           readable ? "w-full self-center tablet:max-w-readable" : ""
         }`}
       >
+        {sidebar?.placement === "hidden" ? (
+          <View className="mr-2">
+            <ShowSidebarButton onPress={sidebar.toggle} />
+          </View>
+        ) : null}
         {back === null || back === undefined ? null : (
           <IconButton icon={ChevronLeft} label="Back" onPress={back} />
         )}

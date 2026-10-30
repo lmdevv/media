@@ -5,6 +5,7 @@ import {
   codecName,
   deviceStatus,
   fileDetails,
+  formatBadge,
   playsOn,
   progressOf,
   remainingClock,
@@ -108,5 +109,26 @@ describe("playsOn", () => {
   it("offers Pause while playing or about to, and Play otherwise", () => {
     expect(["playing", "buffering", "loading"].every(playsOn)).toBe(true);
     expect(["paused", "failed", "idle"].some(playsOn)).toBe(false);
+  });
+});
+
+describe("formatBadge", () => {
+  const file = { codec: "FLAC", lossless: true, bitrate: null, sampleRate: 96_000, bitDepth: 24 };
+
+  it("prints depth and rate for a lossless file", () => {
+    expect(formatBadge(file)).toBe("FLAC 24/96");
+    expect(formatBadge({ ...file, sampleRate: 44_100, bitDepth: 16 })).toBe("FLAC 16/44.1");
+  });
+
+  it("prints the bitrate for a lossy file", () => {
+    expect(
+      formatBadge({ ...file, codec: "MPEG 1 Layer 3", lossless: false, bitrate: 320_000 }),
+    ).toBe("MP3 320");
+  });
+
+  it("falls back on what the scanner found", () => {
+    expect(formatBadge({ ...file, bitDepth: null })).toBe("FLAC");
+    expect(formatBadge({ ...file, lossless: false, bitrate: null })).toBe("FLAC");
+    expect(formatBadge({ ...file, codec: "" })).toBeNull();
   });
 });

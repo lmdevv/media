@@ -40,7 +40,7 @@ import { clearOf } from "@/lib/color";
 import { detailStateOf } from "@/lib/detail-state";
 import { countOf } from "@/lib/format";
 import { useThemeColor } from "@/lib/theme-color";
-import { useWindowLayout } from "@/lib/window-layout";
+import { useContentLayout } from "@/lib/window-layout";
 import { useNowPlaying, usePlayerActions } from "@/player";
 
 const decodeId = Schema.decodeUnknownOption(ArtistId);
@@ -229,7 +229,7 @@ function TopBar({
         <Animated.View
           entering={FadeIn.duration(180)}
           exiting={FadeOut.duration(120)}
-          className="absolute inset-0 border-b border-border bg-canvas"
+          className="absolute inset-0 border-b border-border bg-content"
           pointerEvents="none"
         />
       ) : null}
@@ -272,7 +272,7 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
   const { playFrom, playAll } = usePlayList();
   const { playNext } = usePlayerActions();
   const insets = useSafeAreaInsets();
-  const { tablet } = useWindowLayout();
+  const { tablet } = useContentLayout();
   const [collapsed, setCollapsed] = useState(false);
 
   if (state.kind === "unavailable" || state.kind === "failed") {
@@ -337,7 +337,7 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
   );
 
   return (
-    <View className="flex-1 bg-canvas">
+    <View className="flex-1 bg-content">
       <ListPage
         bar={tablet ? { trailing: menu } : null}
         data={tracks}

@@ -6,6 +6,9 @@
  * live results by kind with filter chips (A10), or says nothing matched (G03). Clearing keeps the
  * keyboard; Cancel empties the field and returns to browsing. The tab stays mounted, so leaving
  * for another tab and coming back keeps the query and the scroll.
+ *
+ * On an iPad the tab bar is hidden: the sidebar's Search row opens this screen and focuses the
+ * field, which iOS draws in the header, and the page draws the title under it.
  */
 import type { TrackId } from "@music/commands/ids";
 import type { AlbumCard, ArtistCard, Track } from "@music/commands/models";
@@ -16,20 +19,23 @@ import { Stack, router, useFocusEffect, useNavigation } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { Search as SearchIcon } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 import type { SearchBarCommands } from "react-native-screens";
 import { useCSSVariable } from "uniwind";
 
 import { usePlayList } from "@/components/browse/play";
 import { useRecentSearches } from "@/components/browse/recent-searches-store";
-import { useOnSearchActivate } from "@/components/browse/search-activation";
+import { useFocusOnRequest, useOnSearchActivate } from "@/components/browse/search-activation";
 import { AlbumRow, ArtistRow, TrackRow, openAlbum, openArtist } from "@/components/browse/rows";
+import { ShowSidebarButton } from "@/components/shell/top-buttons";
+import { useSidebarControl } from "@/components/shell/sidebar-control";
 import { OfflineNotice, OfflineState } from "@/components/states/offline-notice";
-import { Avatar } from "@/components/ui/avatar";
+import { AccountButton } from "@/components/ui/account-button";
 import { Button } from "@/components/ui/button";
 import { ChipGroup } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SectionHeader } from "@/components/ui/section-header";
+import { Text } from "@/components/ui/text";
 import type { SectionAction } from "@/components/ui/section-header";
 import { countOf } from "@/lib/format";
 import { distinctSongs } from "@/lib/history";
@@ -38,6 +44,7 @@ import type { RecentItem } from "@/lib/recent-searches";
 import { SEARCH_FILTERS, foundNothing, searchRows } from "@/lib/search-results";
 import type { SearchFilter, SearchRow, TopResult } from "@/lib/search-results";
 import { useThemeColor } from "@/lib/theme-color";
+import { useContentCanvas } from "@/lib/window-layout";
 import { useNowPlaying } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
@@ -89,26 +96,11 @@ type PageRow =
     }
   | { readonly kind: "recent"; readonly key: string; readonly item: RecentItem };
 
-/** The account avatar in the bar; it opens Settings (F01), as on every tab root. */
-function AccountButton() {
-  const me = useRead("account.me", {});
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Settings"
-      onPress={() => router.push("/settings")}
-      className="active:opacity-60"
-    >
-      <Avatar name={me === undefined ? "" : (me.name ?? me.email)} />
-    </Pressable>
-  );
-}
-
 export default function Search() {
   const accent = useThemeColor("--color-accent");
   const text = useThemeColor("--color-text");
-  const canvas = useThemeColor("--color-canvas");
+  const canvas = useContentCanvas();
+  const sidebar = useSidebarControl();
   const heavy = String(useCSSVariable("--font-sans-heavy"));
   const semibold = String(useCSSVariable("--font-sans-semibold"));
 
@@ -132,6 +124,10 @@ export default function Search() {
       else focusOnArrival.current = true;
     }, [navigation]),
   );
+
+  const focusField = useCallback(() => field.current?.focus(), []);
+
+  useFocusOnRequest(focusField, focused);
 
   useFocusEffect(
     useCallback(() => {
@@ -295,15 +291,22 @@ export default function Search() {
       <Stack.Screen
         options={{
           headerShown: true,
-          title: "Search",
-          headerLargeTitleEnabled: true,
+          // Beside the iPad's sidebar UIKit runs a large title into its edge, so the page draws it.
+          title: sidebar === null ? "Search" : "",
+          headerLargeTitleEnabled: sidebar === null,
           headerShadowVisible: false,
           headerLargeTitleShadowVisible: false,
           headerTintColor: text,
           headerLargeTitleStyle: { fontFamily: heavy, color: text },
           headerTitleStyle: { fontFamily: semibold, color: text },
           contentStyle: { backgroundColor: canvas },
-          headerRight: () => <AccountButton />,
+          // Options merge, so these say null rather than leave a key out: rotating to a pinned
+          // sidebar must take the buttons away. Pinned, it holds the account; hidden, the page
+          // offers the way back to it (A3).
+          headerRight: () =>
+            sidebar?.placement === "beside" ? null : <AccountButton solid={sidebar !== null} />,
+          headerLeft: () =>
+            sidebar?.placement === "hidden" ? <ShowSidebarButton onPress={sidebar.toggle} /> : null,
         }}
       />
       <Stack.SearchBar
@@ -335,6 +338,11 @@ export default function Search() {
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View className="px-page">
+            {sidebar === null ? null : (
+              <Text variant="largeTitle" accessibilityRole="header" className="pt-4 pb-3">
+                Search
+              </Text>
+            )}
             {offline ? (
               <OfflineState body="Search comes back when the server answers." />
             ) : (
@@ -355,7 +363,7 @@ export default function Search() {
             {searching && results !== undefined && foundNothing(results) ? (
               <NoResults query={query} onEdit={() => field.current?.focus()} />
             ) : null}
-            <View className="h-ios-180" />
+            <View className="h-page-foot" />
           </>
         }
         renderItem={({ item }) => renderRow(item)}

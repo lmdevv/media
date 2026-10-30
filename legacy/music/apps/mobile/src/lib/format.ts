@@ -20,6 +20,10 @@ export const librarySummary = (stats: {
     countOf(stats.artists, "artist"),
   ].join(" · ");
 
+/** The totals beside Home's title on an iPad (page 26): `1,284 ALBUMS · 14,920 SONGS`. */
+export const homeStats = (stats: { readonly tracks: number; readonly albums: number }): string =>
+  `${countOf(stats.albums, "album")} · ${countOf(stats.tracks, "song")}`.toUpperCase();
+
 const tenths = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
 /** A size as iOS writes it, in decimal units: `850 KB`, `412 MB`, `1.4 GB`. */

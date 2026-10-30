@@ -1,4 +1,4 @@
-# [music] for iPhone
+# [music] for iPhone and iPad
 
 The iOS app: Expo SDK 58, Expo Router, and Uniwind (Tailwind 4 for React Native) over the shared
 `@music/sdk` and `@music/commands`. Screens follow the Paper pages **12–20 iOS** in the `[music]`
@@ -59,6 +59,19 @@ To check a download on a simulator, pin it from the CLI with the phone's device 
 (`music devices list`, then `music downloads add --device-id <id> --kind album --id <albumId>`),
 and look under the app's data container (`xcrun simctl get_app_container <udid> dev.lmdevv.music
 data`).
+
+## iPad
+
+`lib/shell-layout.ts` says what frames the tabs at each window size (Paper page 26). The native tabs
+stay mounted with their bar hidden, so every page keeps its stack, and `components/shell` draws a
+sidebar and a player bar around them; the sidebar drives the tabs by route and reads its selection
+from their navigation state. It holds library sections and playlists, which the native iPadOS
+sidebar can't: that one lists tabs only. Pinned from `wide`, it hides behind a button and opens as
+an overlay at `tablet`; below `tablet`, in narrow Split View, the phone's tab bar returns.
+
+Pages take their layout from `useContentLayout`, the room beside the sidebar, not from the window.
+A class's `tablet:` variant follows the window, which is fine for margins. The iPhone doesn't run
+this frame at all: the device picks the tree, so a resize in Split View keeps the tabs mounted.
 
 ## Tab bar
 

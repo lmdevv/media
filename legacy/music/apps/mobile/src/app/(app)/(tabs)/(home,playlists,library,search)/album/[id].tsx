@@ -30,7 +30,7 @@ import { Text } from "@/components/ui/text";
 import { albumMeta } from "@/lib/album-meta";
 import { detailStateOf } from "@/lib/detail-state";
 import { offlineAlbum } from "@/lib/offline-library";
-import { useWindowLayout } from "@/lib/window-layout";
+import { useContentLayout } from "@/lib/window-layout";
 import { useNowPlaying } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
@@ -75,7 +75,7 @@ function Album({ albumId }: { readonly albumId: AlbumId }) {
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom, playAll } = usePlayList();
   const reach = useServerReach();
-  const { tablet } = useWindowLayout();
+  const { tablet } = useContentLayout();
 
   if (state.kind === "loading" && reach !== "online") {
     return (

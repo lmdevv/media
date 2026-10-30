@@ -14,16 +14,14 @@
  * wide window on its side the queue and the lyrics leave the cover for a pane beside the player,
  * with a lyrics button in the bottom row (P08, P09, P11). `partsOf` decides what each width shows.
  */
-import type { TrackId } from "@music/commands/ids";
 import { lyricsAnswer, lyricsButton, lyricsOffer, offlineLyrics } from "@music/player/lyrics";
 import type { LyricsAnswer, LyricsOffer } from "@music/player/lyrics";
-import { useRead, useReadSettled, useRun } from "@music/sdk/react";
+import { useRead, useReadSettled } from "@music/sdk/react";
 import * as Haptics from "expo-haptics";
-import { router, useNavigation } from "expo-router";
+import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import {
   Airplay,
   Ellipsis,
-  Heart,
   List,
   MessageSquareQuote,
   Music,
@@ -47,7 +45,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
 import { openSongActions } from "@/components/browse/rows";
-import { useSave } from "@/components/states/save-failure";
+import { LikeButton } from "@/components/playback/like-button";
 import { Artwork } from "@/components/ui/artwork";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -55,7 +53,14 @@ import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { useDownloadedLyrics } from "@/downloads";
-import { CLOSED, defaultPanel, layoutOf, partsOf, pressedPanel } from "@/lib/now-playing-layout";
+import {
+  CLOSED,
+  defaultPanel,
+  layoutOf,
+  openingView,
+  partsOf,
+  pressedPanel,
+} from "@/lib/now-playing-layout";
 import type { NowPlayingLayout, NowPlayingParts, Panel, StageView } from "@/lib/now-playing-layout";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
@@ -266,47 +271,6 @@ function MoreButton({ song }: { readonly song: NowPlaying }) {
           openSongActions(sheetSong);
         }
       }}
-    />
-  );
-}
-
-/**
- * The heart: likes or unlikes the song at once, and settles on what the server keeps; a refusal
- * opens G13 to send it again.
- */
-function LikeButton({ trackId, liked }: { readonly trackId: TrackId; readonly liked: boolean }) {
-  const setLiked = useRun("likes.set");
-  const save = useSave();
-
-  const [pending, setPending] = useState<{
-    readonly trackId: TrackId;
-    readonly liked: boolean;
-  } | null>(null);
-
-  const shown = pending?.trackId === trackId ? pending.liked : liked;
-
-  const toggle = async () => {
-    const next = !shown;
-    setPending({ trackId, liked: next });
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-    await save(
-      async () => {
-        await setLiked({ trackId, liked: next });
-      },
-      next ? "This song isn’t in your liked songs." : "This song is still in your liked songs.",
-    );
-    setPending(null);
-  };
-
-  return (
-    <IconButton
-      icon={Heart}
-      label={shown ? "Unlike" : "Like"}
-      tone={shown ? "accent" : "default"}
-      filled={shown}
-      accessibilityState={{ selected: shown }}
-      onPress={() => void toggle()}
     />
   );
 }
@@ -1034,8 +998,9 @@ export function NowPlayingScreen() {
   const tint = useArtTint(nowPlaying?.artUrl ?? null);
   const player = useThemeColor("--color-player");
   const insets = useSafeAreaInsets();
-  const [view, setView] = useState<StageView>(CLOSED);
-  const progress = useSharedValue(0);
+  const { panel: opening } = useLocalSearchParams<{ panel?: string }>();
+  const [view, setView] = useState<StageView>(() => openingView(opening));
+  const progress = useSharedValue(view.open ? 1 : 0);
   const still = useSharedValue(0);
   const offset = useSharedValue(0);
   const reduceMotion = useReducedMotion();

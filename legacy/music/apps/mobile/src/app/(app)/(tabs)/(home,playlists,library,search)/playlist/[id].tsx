@@ -27,7 +27,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { IconButton } from "@/components/ui/icon-button";
 import { Page } from "@/components/ui/page";
 import { offlinePlaylist } from "@/lib/offline-library";
-import { useWindowLayout } from "@/lib/window-layout";
+import { useContentLayout } from "@/lib/window-layout";
 import { usePlayerActions } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
@@ -92,7 +92,7 @@ function Loaded({
   readonly canShare: boolean;
 }) {
   const { play } = usePlayerActions();
-  const { tablet } = useWindowLayout();
+  const { tablet } = useContentLayout();
   const { playlist } = detail;
   const owner = playlist.access === "owner";
   const canEdit = canEditPlaylistItems(playlist.access);

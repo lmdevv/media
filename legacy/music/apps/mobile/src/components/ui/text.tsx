@@ -49,6 +49,10 @@ const VARIANTS = {
   secondary: "font-sans text-sm leading-sm",
   /** Chip labels and text links such as See all: 13/18 semibold. */
   secondaryStrong: "font-sans-semibold text-sm leading-sm",
+  /** A playlist's name in the iPad sidebar: 14/18 regular. */
+  sidebarRow: "font-sans text-base leading-sm",
+  /** The wordmark at the iPad sidebar's head: Geist Mono 16/20 medium. */
+  wordmark: "font-mono-medium text-md leading-base",
   /** The mini player's artist line: 12/16 regular. */
   caption: "font-sans text-xs leading-xs",
   /** Metadata in caps, such as `FLAC · 16-BIT`: Geist Mono 12/16, mono tracking. */

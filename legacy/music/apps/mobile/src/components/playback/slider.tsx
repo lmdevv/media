@@ -31,6 +31,11 @@ export interface SliderProps {
   readonly label: string;
   /** What VoiceOver reads as the value, such as `2:18 of 5:08`. */
   readonly valueText: string;
+  /**
+   * The touch area around the track: 44pt `around` it, or `under` it, 12pt above the track's center
+   * and the rest below, for a track with a control right above it.
+   */
+  readonly touch?: "around" | "under";
 }
 
 const clamp = (value: number): number => {
@@ -39,8 +44,16 @@ const clamp = (value: number): number => {
   return Math.min(1, Math.max(0, value));
 };
 
-/** A horizontal track with a fill and a 44pt touch area. */
-export function Slider({ value, onChange, onScrub, fillClassName, label, valueText }: SliderProps) {
+/** A horizontal track with a fill and a touch area taller than it. */
+export function Slider({
+  value,
+  onChange,
+  onScrub,
+  fillClassName,
+  label,
+  valueText,
+  touch = "around",
+}: SliderProps) {
   const width = useSharedValue(0);
   const shown = useSharedValue(clamp(value));
   const start = useSharedValue(0);
@@ -108,7 +121,7 @@ export function Slider({ value, onChange, onScrub, fillClassName, label, valueTe
   return (
     <GestureDetector gesture={pan}>
       <View
-        className="h-hit-target justify-center"
+        className={touch === "around" ? "h-hit-target justify-center" : "h-row"}
         accessible
         accessibilityRole="adjustable"
         accessibilityLabel={label}
@@ -119,9 +132,11 @@ export function Slider({ value, onChange, onScrub, fillClassName, label, valueTe
           width.value = event.nativeEvent.layout.width;
         }}
       >
-        <Animated.View style={track} className="h-1 overflow-hidden rounded-full bg-border">
-          <Animated.View style={fill} className={`h-full rounded-full ${fillClassName}`} />
-        </Animated.View>
+        <View className="h-6 justify-center">
+          <Animated.View style={track} className="h-1 overflow-hidden rounded-full bg-border">
+            <Animated.View style={fill} className={`h-full rounded-full ${fillClassName}`} />
+          </Animated.View>
+        </View>
       </View>
     </GestureDetector>
   );

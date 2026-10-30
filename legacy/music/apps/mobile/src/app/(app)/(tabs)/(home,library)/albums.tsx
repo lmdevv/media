@@ -19,7 +19,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { SORT_SHEETS, albumsArriveSorted, sortAlbums } from "@/lib/browse-view";
 import { columnsOf, rowsOf } from "@/lib/layout";
 import { useThemeLength } from "@/lib/theme-color";
-import { useWindowLayout } from "@/lib/window-layout";
+import { useContentLayout } from "@/lib/window-layout";
 
 /** Albums per page: a few screens of the grid. */
 const PAGE_SIZE = 48;
@@ -29,10 +29,10 @@ const MIN_COLUMNS = 2;
 
 /**
  * How many columns the grid has: as many 168pt cards as fit between the page's edges (P03, P04),
- * 12pt apart on a phone and 16pt from `tablet` up, as the rows' gap classes draw them.
+ * in the room the sidebar leaves, 12pt apart on a phone and 16pt from `tablet` up, as the rows' gap classes draw them.
  */
 const useGridColumns = (): number => {
-  const { width, widthClass, edge } = useWindowLayout();
+  const { width, widthClass, edge } = useContentLayout();
   const card = useThemeLength("--spacing-ios-168");
   const phoneGap = useThemeLength("--spacing-3");
   const tabletGap = useThemeLength("--spacing-4");
