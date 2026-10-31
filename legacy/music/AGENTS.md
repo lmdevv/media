@@ -151,6 +151,9 @@ The example identities must be replaced with the model and tool that actually co
 - `main` requires the `check` and `stack-e2e` CI jobs. PRs matching the `paths` in
   `.github/workflows/image.yml` also run the `Image` workflow; check it too. Never merge with admin
   bypass.
+- Run `/pstack:no-comments` on the diff before `/code-review` when a PR adds or changes comments,
+  with or without `/pstack:poteto-mode`. Tell it to keep required `// SAFETY:` comments; its agent
+  does not know this repo's rule.
 - Every PR gets Codex automatic review on GitHub; address its findings before merging. Run
   Claude's `/code-review` locally before you open or merge one. Do not enable, request, or wait for
   CodeRabbit or Bugbot. Don't add a project skill named `code-review`; it shadows Claude's.
