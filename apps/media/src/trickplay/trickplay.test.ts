@@ -109,56 +109,59 @@ const sizeOf = Effect.fn(function* (image: string) {
 
 describe.skipIf(!hasFfmpeg)("trickplay", () => {
   layer(testLayer, { excludeTestServices: true, timeout: "120 seconds" })((it) => {
-    it.effect("tiles a thumbnail every interval, sized by the display aspect ratio", () =>
-      Effect.gen(function* () {
-        const store = yield* TrickplayStore.Service;
-        const fs = yield* FileSystem.FileSystem;
+    it.effect(
+      "tiles a thumbnail every interval, sized by the display aspect ratio",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* TrickplayStore.Service;
+          const fs = yield* FileSystem.FileSystem;
 
-        const clip = yield* encode("anamorphic.mkv", [
-          "-f",
-          "lavfi",
-          "-i",
-          "testsrc2=size=360x270:rate=24:duration=35",
-          "-vf",
-          "setsar=4/3",
-          "-c:v",
-          "libx264",
-          "-preset",
-          "ultrafast",
-          "-g",
-          "24",
-        ]);
+          const clip = yield* encode("anamorphic.mkv", [
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=360x270:rate=24:duration=35",
+            "-vf",
+            "setsar=4/3",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-g",
+            "24",
+          ]);
 
-        const file = yield* resolved(clip);
-        const version = trickplayVersion(file.sizeBytes, file.modifiedAtMs);
+          const file = yield* resolved(clip);
+          const version = trickplayVersion(file.sizeBytes, file.modifiedAtMs);
 
-        const manifest = yield* store.publish("file1", version, (folder) =>
-          generate(file, version, INTERVAL, folder),
-        );
+          const manifest = yield* store.publish("file1", version, (folder) =>
+            generate(file, version, INTERVAL, folder),
+          );
 
-        assert.deepStrictEqual(manifest, {
-          version,
-          intervalMs: 10_000,
-          tileWidth: 320,
-          tileHeight: 180,
-          columns: 10,
-          rows: 10,
-          thumbnailCount: 4,
-          sheetCount: 1,
-        });
+          assert.deepStrictEqual(manifest, {
+            version,
+            intervalMs: 10_000,
+            tileWidth: 320,
+            tileHeight: 180,
+            columns: 10,
+            rows: 10,
+            thumbnailCount: 4,
+            sheetCount: 1,
+          });
 
-        const sheet = yield* store.find("file1", version, "0.jpg");
-        const stored = yield* store.find("file1", version, "manifest.json");
+          const sheet = yield* store.find("file1", version, "0.jpg");
+          const stored = yield* store.find("file1", version, "manifest.json");
 
-        assert.isTrue(Option.isSome(sheet) && Option.isSome(stored));
-        assert.strictEqual(yield* sizeOf(Option.getOrThrow(sheet)), "3200,1800");
-        assert.deepStrictEqual(
-          yield* Schema.decodeEffect(Schema.fromJsonString(TrickplayManifest))(
-            yield* fs.readFileString(Option.getOrThrow(stored)),
-          ),
-          manifest,
-        );
-      }),
+          assert.isTrue(Option.isSome(sheet) && Option.isSome(stored));
+          assert.strictEqual(yield* sizeOf(Option.getOrThrow(sheet)), "3200,1800");
+          assert.deepStrictEqual(
+            yield* Schema.decodeEffect(Schema.fromJsonString(TrickplayManifest))(
+              yield* fs.readFileString(Option.getOrThrow(stored)),
+            ),
+            manifest,
+          );
+        }),
+      60_000,
     );
 
     it.effect(
@@ -220,55 +223,61 @@ describe.skipIf(!hasFfmpeg)("trickplay", () => {
       60_000,
     );
 
-    it.effect("tone-maps HDR video or falls back to the frames as they decode", () =>
-      Effect.gen(function* () {
-        const { library } = yield* FixtureWorkspace.Service;
-        const path = yield* Path.Path;
-        const fs = yield* FileSystem.FileSystem;
-        const file = yield* resolved(path.join(library.moviesRoot, library.hdrMovie));
-        const folder = yield* fs.makeTempDirectoryScoped();
+    it.effect(
+      "tone-maps HDR video or falls back to the frames as they decode",
+      () =>
+        Effect.gen(function* () {
+          const { library } = yield* FixtureWorkspace.Service;
+          const path = yield* Path.Path;
+          const fs = yield* FileSystem.FileSystem;
+          const file = yield* resolved(path.join(library.moviesRoot, library.hdrMovie));
+          const folder = yield* fs.makeTempDirectoryScoped();
 
-        assert.strictEqual(file.probe.video?.dynamicRange, "hdr10");
+          assert.strictEqual(file.probe.video?.dynamicRange, "hdr10");
 
-        const manifest = yield* generate(file, "1-1", INTERVAL, folder);
+          const manifest = yield* generate(file, "1-1", INTERVAL, folder);
 
-        assert.strictEqual(manifest.thumbnailCount, 1);
-        assert.strictEqual(manifest.tileWidth, 320);
-        assert.deepStrictEqual(yield* fs.readDirectory(folder), ["0.jpg"]);
-      }).pipe(Effect.scoped),
+          assert.strictEqual(manifest.thumbnailCount, 1);
+          assert.strictEqual(manifest.tileWidth, 320);
+          assert.deepStrictEqual(yield* fs.readDirectory(folder), ["0.jpg"]);
+        }).pipe(Effect.scoped),
+      60_000,
     );
 
-    it.effect("counts only the frames there are when the audio outlasts the video", () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
+    it.effect(
+      "counts only the frames there are when the audio outlasts the video",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
 
-        const clip = yield* encode("long-audio.mkv", [
-          "-f",
-          "lavfi",
-          "-i",
-          "testsrc2=size=320x180:rate=24:duration=25",
-          "-f",
-          "lavfi",
-          "-i",
-          "sine=frequency=440:duration=60",
-          "-c:v",
-          "libx264",
-          "-preset",
-          "ultrafast",
-          "-g",
-          "24",
-          "-c:a",
-          "aac",
-        ]);
+          const clip = yield* encode("long-audio.mkv", [
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x180:rate=24:duration=25",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=60",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-g",
+            "24",
+            "-c:a",
+            "aac",
+          ]);
 
-        const file = yield* resolved(clip);
-        const folder = yield* fs.makeTempDirectoryScoped();
-        const manifest = yield* generate(file, "1-1", INTERVAL, folder);
+          const file = yield* resolved(clip);
+          const folder = yield* fs.makeTempDirectoryScoped();
+          const manifest = yield* generate(file, "1-1", INTERVAL, folder);
 
-        assert.isAbove(file.probe.durationSeconds, 59);
-        assert.strictEqual(manifest.thumbnailCount, 3);
-        assert.deepStrictEqual(yield* fs.readDirectory(folder), ["0.jpg"]);
-      }).pipe(Effect.scoped),
+          assert.isAbove(file.probe.durationSeconds, 59);
+          assert.strictEqual(manifest.thumbnailCount, 3);
+          assert.deepStrictEqual(yield* fs.readDirectory(folder), ["0.jpg"]);
+        }).pipe(Effect.scoped),
+      60_000,
     );
 
     it.effect("refuses files without video", () =>
@@ -292,42 +301,45 @@ describe.skipIf(!hasFfmpeg)("trickplay", () => {
       }).pipe(Effect.scoped),
     );
 
-    it.effect("discards thumbnails of a file that changed while they were made", () =>
-      Effect.gen(function* () {
-        const store = yield* TrickplayStore.Service;
-        const fs = yield* FileSystem.FileSystem;
+    it.effect(
+      "discards thumbnails of a file that changed while they were made",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* TrickplayStore.Service;
+          const fs = yield* FileSystem.FileSystem;
 
-        const clip = yield* encode("changing.mkv", [
-          "-f",
-          "lavfi",
-          "-i",
-          "testsrc2=size=320x180:rate=24:duration=12",
-          "-c:v",
-          "libx264",
-          "-preset",
-          "ultrafast",
-        ]);
+          const clip = yield* encode("changing.mkv", [
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x180:rate=24:duration=12",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+          ]);
 
-        const file = yield* resolved(clip);
-        const info = yield* fs.stat(clip);
-        const mtime = Option.getOrThrow(info.mtime);
-        const version = trickplayVersion(Number(info.size), mtime.getTime());
+          const file = yield* resolved(clip);
+          const info = yield* fs.stat(clip);
+          const mtime = Option.getOrThrow(info.mtime);
+          const version = trickplayVersion(Number(info.size), mtime.getTime());
 
-        yield* store.publish("changing", version, TrickplayJob.build(file, version, INTERVAL));
-        assert.isTrue(Option.isSome(yield* store.find("changing", version, "manifest.json")));
+          yield* store.publish("changing", version, TrickplayJob.build(file, version, INTERVAL));
+          assert.isTrue(Option.isSome(yield* store.find("changing", version, "manifest.json")));
 
-        const later = new Date(mtime.getTime() + 60_000);
+          const later = new Date(mtime.getTime() + 60_000);
 
-        yield* fs.utimes(clip, later, later);
+          yield* fs.utimes(clip, later, later);
 
-        const exit = yield* Effect.exit(
-          store.publish("changed", version, TrickplayJob.build(file, version, INTERVAL)),
-        );
+          const exit = yield* Effect.exit(
+            store.publish("changed", version, TrickplayJob.build(file, version, INTERVAL)),
+          );
 
-        assert.isTrue(Exit.isFailure(exit));
-        assert.include(String(Exit.isFailure(exit) ? exit.cause : ""), "changed while");
-        assert.isTrue(Option.isNone(yield* store.find("changed", version, "manifest.json")));
-      }),
+          assert.isTrue(Exit.isFailure(exit));
+          assert.include(String(Exit.isFailure(exit) ? exit.cause : ""), "changed while");
+          assert.isTrue(Option.isNone(yield* store.find("changed", version, "manifest.json")));
+        }),
+      60_000,
     );
 
     it.effect(

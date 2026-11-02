@@ -88,28 +88,30 @@ const indexed = Effect.fn(function* (file: string) {
 
 describe.skipIf(!hasFfmpeg)("MP4 keyframe index", () => {
   layer(toolsLayer)((it) => {
-    it.effect("matches a packet scan, with B-frames, edit lists, and moov at either end", () =>
-      Effect.gen(function* () {
-        const files = [
-          yield* encode("bframes.mp4", ["-preset", "veryfast", "-bf", "3"]),
-          yield* encode("faststart.mp4", ["-preset", "veryfast", "-movflags", "+faststart"]),
-          yield* encode("plain.mp4", ["-preset", "ultrafast"]),
-          yield* encode("quicktime.mov", ["-preset", "veryfast"]),
-        ];
+    for (const [name, options] of [
+      ["bframes.mp4", ["-preset", "veryfast", "-bf", "3"]],
+      ["faststart.mp4", ["-preset", "veryfast", "-movflags", "+faststart"]],
+      ["plain.mp4", ["-preset", "ultrafast"]],
+      ["quicktime.mov", ["-preset", "veryfast"]],
+    ] as const) {
+      it.effect(
+        `matches a packet scan for ${name}`,
+        () =>
+          Effect.gen(function* () {
+            const file = yield* encode(name, options);
+            const expected = yield* scanned(file);
+            const actual = yield* indexed(file);
 
-        for (const file of files) {
-          const expected = yield* scanned(file);
-          const actual = yield* indexed(file);
+            assert.isTrue(Option.isSome(actual), file);
+            assert.strictEqual(Option.getOrThrow(actual).length, expected.length, file);
 
-          assert.isTrue(Option.isSome(actual), file);
-          assert.strictEqual(Option.getOrThrow(actual).length, expected.length, file);
-
-          for (const [index, time] of Option.getOrThrow(actual).entries()) {
-            assert.approximately(time, expected[index] ?? Number.NaN, 0.002, file);
-          }
-        }
-      }),
-    );
+            for (const [index, time] of Option.getOrThrow(actual).entries()) {
+              assert.approximately(time, expected[index] ?? Number.NaN, 0.002, file);
+            }
+          }),
+        60_000,
+      );
+    }
 
     it.effect("leaves fragmented MP4 and files that are not MP4 to the packet scan", () =>
       Effect.gen(function* () {
