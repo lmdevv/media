@@ -155,7 +155,10 @@ The example identities must be replaced with the model and tool that actually co
   (`docker pull` the `jellyfin/jellyfin:12.2@sha256:…` reference in `.github/workflows/ci.yml`)
   and set `MOVIES_JELLYFIN_DOCKER=1`; without the image the media suite skips the real-Jellyfin
   case silently, but the web migration spec starts Jellyfin anyway, pulling the image or failing.
-- Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, `pnpm test --repeats=20`.
+- Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, and for Vitest, fresh
+  processes that stop at the first failure: `(for run in $(seq 20); do pnpm test <paths> || exit; done)`.
+  Don't use Vitest's `--repeats`: `@effect/vitest` 4.0.3 counts each repeat as a finished test and
+  closes a `layer(...)` early, which fails with missing files or `ECONNREFUSED`, not a product bug.
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `react-doctor`,
   `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked. `verify-movies` is this
   repo's own: it runs disposable stacks built from the checkout and from main, drives the web app,

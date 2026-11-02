@@ -114,6 +114,11 @@ const gpuFilters = (command: EncodeSource, video: Encode, uploaded: boolean): st
  * on the finished SDR picture at the output size, after tone mapping (subtitles are SDR): in
  * software straight away, on a GPU after downloading its frames, which are then uploaded again
  * for the encoder. The subtitle's canvas (720x576 for DVD) is scaled to the picture it covers.
+ * After a seek, picture frames from before `from` still configure the graph, so trimming them
+ * comes first and they skip the rest of the work. ffmpeg appears to repeat the subtitle's current
+ * image as it reads packets, so a caption that started earlier survives trimming the subtitle's own
+ * frames to shortly before `from`. Untrimmed, memory peaked near 4 GB at 1080p, apparently scaled
+ * frames waiting on the overlay.
  */
 const videoFilters = (command: EncodeSource, video: Encode): FilterGraph => {
   const width = String(video.width);
@@ -134,7 +139,9 @@ const videoFilters = (command: EncodeSource, video: Encode): FilterGraph => {
     };
   }
 
-  const subtitleInput = subtitleReading(command).second ? "1" : "0";
+  const seeked = subtitleReading(command).seeked;
+  const pictureTrim = seeked ? `trim=start=${seconds(command.from)},` : "";
+  const subtitleTrim = seeked ? `trim=start=${seconds(command.from - SUBTITLE_MARGIN)},` : "";
 
   const [download, upload] =
     video.encoder === "software"
@@ -147,8 +154,8 @@ const videoFilters = (command: EncodeSource, video: Encode): FilterGraph => {
   return {
     kind: "complex",
     graph: [
-      `[0:${String(command.videoIndex)}]${picture}${download}[picture]`,
-      `[${subtitleInput}:${String(video.burnSubtitle)}]scale=${width}:${height}[subtitle]`,
+      `[0:${String(command.videoIndex)}]${pictureTrim}${picture}${download}[picture]`,
+      `[0:${String(video.burnSubtitle)}]${subtitleTrim}scale=${width}:${height}[subtitle]`,
       `[picture][subtitle]overlay=eof_action=pass:repeatlast=0,${upload}[video]`,
     ].join(";"),
   };
@@ -222,6 +229,7 @@ const copyBitstreamFilter = (codec: string): ReadonlyArray<string> =>
   codec === "aac" ? ["aac_adtstoasc"] : [];
 
 interface AudioTiming {
+  readonly input: 0 | 1;
   readonly copyFilters: ReadonlyArray<string>;
   readonly aac: ReadonlyArray<string>;
 }
@@ -234,7 +242,7 @@ const audioArgs = (command: EncodeSource, timing: AudioTiming): ReadonlyArray<st
 
       return [
         "-map",
-        `0:${index}`,
+        `${String(timing.input)}:${index}`,
         "-c:a",
         "copy",
         ...(filters.length === 0 ? [] : ["-bsf:a", filters.join(",")]),
@@ -242,7 +250,7 @@ const audioArgs = (command: EncodeSource, timing: AudioTiming): ReadonlyArray<st
     },
     Aac: ({ index }) => [
       "-map",
-      `0:${index}`,
+      `${String(timing.input)}:${index}`,
       ...timing.aac,
       "-c:a",
       "aac",
@@ -386,13 +394,26 @@ const hardwareInput = (command: EncodeSource): ReadonlyArray<string> => {
 
 /**
  * Subtitles that started before the seek point are still on screen there, but a seek skips
- * their packets. A burned-in subtitle therefore comes from a second reading of the file, from
- * `SUBTITLE_LEAD` earlier; timestamps line up through `-copyts`. A run from the start reads once.
+ * their packets. A run that burns one in after a seek therefore reads the picture and the subtitle
+ * together from `SUBTITLE_LEAD` earlier, and the filter graph trims the picture back to `from`;
+ * audio keeps its own reading from the seek. Picture and subtitle must share a reading: ffmpeg
+ * 8.0.1 loses a subtitle's end of file that arrives before the first picture frame, then waits on
+ * that input forever, and a reading of its own can reach the end first. A run from the start reads
+ * once.
  */
 const SUBTITLE_LEAD = 30;
 
+/**
+ * How long before `from` a burned-in subtitle's frames are kept after a seek. Trimming at `from`
+ * itself loses captions; this exceeds the frame reordering in the files tested (`-bf 8`).
+ */
+const SUBTITLE_MARGIN = 1;
+
 /** DVD subtitles carry no canvas size; without one ffmpeg sizes them to the video and crops. */
 const DVD_CANVAS = "720x576";
+
+const seekArgs = (seek: number | undefined): ReadonlyArray<string> =>
+  seek === undefined ? [] : ["-ss", seconds(seek)];
 
 const subtitleReading = (command: EncodeSource) => {
   const video = command.video;
@@ -401,8 +422,8 @@ const subtitleReading = (command: EncodeSource) => {
 
   return {
     canvas: burning && command.subtitleCodec === "dvd_subtitle" ? ["-canvas_size", DVD_CANVAS] : [],
-    second: burning && offset > 0.001,
-    lead: Math.max(0, offset - SUBTITLE_LEAD),
+    seeked: burning && offset > 0.001,
+    lead: offset - SUBTITLE_LEAD > 0.001 ? offset - SUBTITLE_LEAD : undefined,
   };
 };
 
@@ -410,6 +431,7 @@ const subtitleReading = (command: EncodeSource) => {
 export const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => {
   const start = runStart(command);
   const subtitles = subtitleReading(command);
+  const audioInput = subtitles.seeked && !AudioPlan.$is("None")(command.audio) ? 1 : 0;
 
   return [
     "-hide_banner",
@@ -418,23 +440,15 @@ export const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => {
     "-v",
     "error",
     ...hardwareInput(command),
-    // A canvas size applies to the input it precedes: the subtitle's, which is this one from 0 s.
-    ...(subtitles.second ? [] : subtitles.canvas),
-    ...(start.seek === undefined ? [] : ["-ss", seconds(start.seek)]),
+    ...subtitles.canvas,
+    ...seekArgs(subtitles.seeked ? subtitles.lead : start.seek),
     "-copyts",
     "-i",
     command.input,
-    ...(subtitles.second
-      ? [
-          ...subtitles.canvas,
-          ...(subtitles.lead > 0.001 ? ["-ss", seconds(subtitles.lead)] : []),
-          "-copyts",
-          "-i",
-          command.input,
-        ]
-      : []),
+    ...(audioInput === 1 ? [...seekArgs(start.seek), "-copyts", "-i", command.input] : []),
     ...videoArgs(command),
     ...audioArgs(command, {
+      input: audioInput,
       copyFilters: start.dropCopiedAudio === undefined ? [] : [dropFilter(start.dropCopiedAudio)],
       aac: aacTiming(start.audioStartSample),
     }),
@@ -507,7 +521,7 @@ export const mp4CommandArgs = (command: Mp4Command): ReadonlyArray<string> => {
     "-i",
     command.input,
     ...videoArgs(source),
-    ...audioArgs(source, { copyFilters: [], aac: [] }),
+    ...audioArgs(source, { input: 0, copyFilters: [], aac: [] }),
     "-map_metadata",
     "-1",
     "-map_chapters",

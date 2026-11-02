@@ -23,7 +23,9 @@ const hasFfmpeg = await ffmpegAvailable();
 
 const VOBSUB = join(import.meta.dirname, "..", "testing", "fixtures", "vobsub.mkv");
 
-const LIBRARY = LibraryId.make("picture-subtitles");
+const TRACK = "e1";
+
+const TRACK_AFTER_AUDIO = "e2";
 
 const FILM = "Picture Subtitles (2020)/Picture Subtitles (2020).mkv";
 
@@ -39,13 +41,24 @@ const chromium: ClientCapabilities = {
 
 const decodeNegotiation = Schema.decodeUnknownEffect(Schema.toCodecJson(NegotiateResponse));
 
-const addFilm = Effect.gen(function* () {
+const decodeSeek = Schema.decodeUnknownEffect(Schema.toCodecJson(SeekResponse));
+
+interface Film {
+  readonly seconds: number;
+  readonly captionsFrom: number;
+  readonly audioCodec: "aac" | "ac3" | undefined;
+}
+
+const SHORT_FILM: Film = { seconds: 8, captionsFrom: 0, audioCodec: undefined };
+
+const addFilm = Effect.fn(function* (library: string, film: Film = SHORT_FILM) {
   const workspace = yield* FixtureWorkspace.Service;
   const tools = yield* MediaTools.Service;
   const scanner = yield* LibraryScanner.Service;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const root = path.join(workspace.root, "picture-subtitles");
+  const libraryId = LibraryId.make(library);
+  const root = path.join(workspace.root, library);
   const output = path.join(root, FILM);
 
   yield* fs.makeDirectory(path.dirname(output), { recursive: true });
@@ -58,13 +71,24 @@ const addFilm = Effect.gen(function* () {
     "-f",
     "lavfi",
     "-i",
-    "color=c=0x305070:s=640x360:r=25:d=8",
+    `color=c=0x305070:s=640x360:r=25:d=${String(film.seconds)}`,
+    ...(film.audioCodec === undefined
+      ? []
+      : [
+          "-f",
+          "lavfi",
+          "-i",
+          `sine=frequency=440:sample_rate=48000:duration=${String(film.seconds)}`,
+        ]),
+    "-itsoffset",
+    String(film.captionsFrom),
     "-i",
     VOBSUB,
     "-map",
     "0:v",
-    "-map",
-    "1:s",
+    ...(film.audioCodec === undefined
+      ? ["-map", "1:s"]
+      : ["-map", "1:a", "-c:a", film.audioCodec, "-map", "2:s"]),
     "-c:v",
     "libx264",
     "-preset",
@@ -77,9 +101,9 @@ const addFilm = Effect.gen(function* () {
     "copy",
     output,
   ]);
-  yield* scanner.scan({ libraryId: LIBRARY, root, mode: "incremental" });
+  yield* scanner.scan({ libraryId, root, mode: "incremental" });
 
-  return MemoryLibrary.fileIdOf(LIBRARY, FILM);
+  return MemoryLibrary.fileIdOf(libraryId, FILM);
 });
 
 const negotiate = Effect.fn(function* (
@@ -105,19 +129,76 @@ const negotiate = Effect.fn(function* (
   );
 });
 
-const bottomOfSegment = Effect.fn(function* (playlistUrl: string, index: number) {
+const seek = Effect.fn(function* (
+  token: string,
+  streamId: string | undefined,
+  positionSeconds: number,
+) {
   const server = yield* MediaTestServer.Service;
-  const tools = yield* MediaTools.Service;
+
+  return yield* HttpClient.execute(
+    HttpClientRequest.post(`${server.baseUrl}/api/playback/seek`).pipe(
+      HttpClientRequest.bodyJsonUnsafe({ token, streamId, positionSeconds }),
+    ),
+  ).pipe(
+    Effect.flatMap((response) => response.json),
+    Effect.flatMap(decodeSeek),
+    Effect.orDie,
+  );
+});
+
+const stop = Effect.fn(function* (token: string, streamId: string | undefined) {
+  const server = yield* MediaTestServer.Service;
+
+  const response = yield* HttpClient.execute(
+    HttpClientRequest.post(`${server.baseUrl}/api/playback/stop`).pipe(
+      HttpClientRequest.bodyJsonUnsafe({ token, streamId }),
+    ),
+  ).pipe(Effect.orDie);
+
+  assert.strictEqual(response.status, 204);
+});
+
+const segmentHolding = Effect.fn(function* (playlistUrl: string, time: number) {
+  const server = yield* MediaTestServer.Service;
+  const url = new URL(playlistUrl);
+
+  const playlist = yield* HttpClient.get(`${server.baseUrl}${url.pathname}${url.search}`).pipe(
+    Effect.flatMap((response) => response.text),
+    Effect.orDie,
+  );
+
+  const durations = playlist
+    .split("\n")
+    .filter((line) => line.startsWith("#EXTINF:"))
+    .map((line) => Number.parseFloat(line.slice("#EXTINF:".length)));
+
+  let end = 0;
+
+  return durations.findIndex((duration) => {
+    end += duration;
+
+    return time < end - 0.001;
+  });
+});
+
+const joinedSegment = Effect.fn(function* (playlistUrl: string, index: number) {
+  const server = yield* MediaTestServer.Service;
   const fs = yield* FileSystem.FileSystem;
   const url = new URL(playlistUrl);
   const base = `${server.baseUrl}${url.pathname}`;
 
-  const fetch = (name: string) =>
-    HttpClient.get(new URL(`${name}${url.search}`, base).toString()).pipe(
-      Effect.flatMap((response) => response.arrayBuffer),
-      Effect.map((buffer) => new Uint8Array(buffer)),
-      Effect.orDie,
-    );
+  const fetch = Effect.fn(function* (name: string) {
+    const response = yield* HttpClient.get(new URL(`${name}${url.search}`, base).toString());
+
+    if (response.status !== 200) {
+      const body = yield* response.text;
+
+      assert.fail(`${name} answered ${String(response.status)}: ${body}`);
+    }
+
+    return new Uint8Array(yield* response.arrayBuffer);
+  }, Effect.orDie);
 
   const init = yield* fetch("init.mp4");
   const segment = yield* fetch(`${String(index)}.m4s`);
@@ -125,6 +206,13 @@ const bottomOfSegment = Effect.fn(function* (playlistUrl: string, index: number)
 
   yield* fs.writeFile(file, new Uint8Array([...init, ...segment]));
 
+  return file;
+});
+
+const bottomOfSegment = Effect.fn(function* (playlistUrl: string, index: number) {
+  const tools = yield* MediaTools.Service;
+  const fs = yield* FileSystem.FileSystem;
+  const file = yield* joinedSegment(playlistUrl, index);
   const frame = yield* fs.makeTempFileScoped({ suffix: ".gray" });
 
   yield* tools.ffmpeg([
@@ -150,63 +238,157 @@ const bottomOfSegment = Effect.fn(function* (playlistUrl: string, index: number)
 const brightSamples = (samples: Uint8Array): number =>
   samples.filter((sample) => sample > 200).length;
 
+const firstPacketTime = Effect.fn(function* (file: string, stream: "v" | "a") {
+  const tools = yield* MediaTools.Service;
+
+  const output = yield* tools.ffprobe([
+    "-v",
+    "error",
+    "-select_streams",
+    `${stream}:0`,
+    "-show_entries",
+    "packet=pts_time",
+    "-read_intervals",
+    "%+#1",
+    "-of",
+    "csv=p=0",
+    file,
+  ]);
+
+  return Number.parseFloat(output);
+});
+
 describe.skipIf(!hasFfmpeg)("image subtitles", () => {
   layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
     it.effect(
-      "lists a DVD subtitle, burns it into a transcode on request, and goes back without it",
+      "lists a DVD subtitle and plays without it until asked",
       () =>
         Effect.gen(function* () {
-          const fileId = yield* addFilm.pipe(Effect.orDie);
-          const token = signTestToken({ fid: fileId, sid: "burn-in" });
+          const fileId = yield* addFilm("listed").pipe(Effect.orDie);
+          const token = signTestToken({ fid: fileId, sid: "burn-in-listed" });
 
           const plain = yield* negotiate(token);
           const track = plain.subtitles.find((subtitle) => subtitle.kind === "bitmap");
 
           assert.strictEqual(plain.mode, "remux");
-          assert.deepInclude(track, { codec: "dvd_subtitle", source: "embedded" });
+          assert.deepInclude(track, { id: TRACK, codec: "dvd_subtitle", source: "embedded" });
           assert.isUndefined(track?.url);
           assert.isUndefined(plain.burnedInSubtitle);
 
-          const burned = yield* negotiate(token, track?.id);
+          yield* stop(token, plain.streamId);
+        }),
+      60_000,
+    );
+
+    it.effect(
+      "burns a DVD subtitle into a transcode on request",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("burned-from-start").pipe(Effect.orDie);
+          const token = signTestToken({ fid: fileId, sid: "burn-in-start" });
+
+          const burned = yield* negotiate(token, TRACK);
 
           assert.strictEqual(burned.mode, "transcode-software");
-          assert.strictEqual(burned.burnedInSubtitle, track?.id);
+          assert.strictEqual(burned.burnedInSubtitle, TRACK);
           assert.deepStrictEqual([burned.video.width, burned.video.height], [640, 360]);
 
-          const withText = yield* bottomOfSegment(burned.url, 2);
+          assert.isAbove(brightSamples(yield* bottomOfSegment(burned.url, 2)), 200);
 
-          assert.isAbove(brightSamples(withText), 200);
+          yield* stop(token, burned.streamId);
+        }),
+      60_000,
+    );
 
-          const server = yield* MediaTestServer.Service;
-          const late = yield* negotiate(token, track?.id, 7);
+    it.effect(
+      "burns a DVD subtitle into the stream a seek restarts",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("burned-after-seek").pipe(Effect.orDie);
+          const token = signTestToken({ fid: fileId, sid: "burn-in-seek" });
 
-          const moved = yield* HttpClient.execute(
-            HttpClientRequest.post(`${server.baseUrl}/api/playback/seek`).pipe(
-              HttpClientRequest.bodyJsonUnsafe({
-                token,
-                streamId: late.streamId,
-                positionSeconds: 5,
-              }),
-            ),
-          ).pipe(
-            Effect.flatMap((response) => response.json),
-            Effect.flatMap(Schema.decodeUnknownEffect(Schema.toCodecJson(SeekResponse))),
-            Effect.orDie,
-          );
+          const late = yield* negotiate(token, TRACK, 7);
+          const moved = yield* seek(token, late.streamId, 5);
 
           assert.strictEqual(moved.generation, 2);
+          assert.isAbove(brightSamples(yield* bottomOfSegment(moved.playlistUrl, 2)), 200);
 
-          const afterSeek = yield* bottomOfSegment(moved.playlistUrl, 2);
+          yield* stop(token, late.streamId);
+        }),
+      60_000,
+    );
 
-          assert.isAbove(brightSamples(afterSeek), 200);
+    it.effect(
+      "keeps burning through a replaced stream and a seek, and goes back without the subtitle",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("burned-then-replaced").pipe(Effect.orDie);
+          const token = signTestToken({ fid: fileId, sid: "burn-in-replaced" });
+
+          const burned = yield* negotiate(token, TRACK);
+
+          assert.isAbove(brightSamples(yield* bottomOfSegment(burned.url, 2)), 200);
+
+          const late = yield* negotiate(token, TRACK, 7);
+          const moved = yield* seek(token, late.streamId, 5);
+
+          assert.strictEqual(moved.generation, 2);
+          assert.isAbove(brightSamples(yield* bottomOfSegment(moved.playlistUrl, 2)), 200);
 
           const back = yield* negotiate(token);
 
           assert.strictEqual(back.mode, "remux");
           assert.isUndefined(back.burnedInSubtitle);
+
+          yield* stop(token, back.streamId);
         }),
       60_000,
     );
+
+    for (const audioCodec of ["aac", "ac3"] as const) {
+      it.effect(
+        `burns a caption that started before a distant seek, on the source timeline, with ${audioCodec} audio`,
+        () =>
+          Effect.gen(function* () {
+            const captionOffset = 38;
+            const seekInsideCaption = 44;
+            const afterCaptions = 52;
+
+            const fileId = yield* addFilm(`burned-long-${audioCodec}`, {
+              seconds: afterCaptions + 2,
+              captionsFrom: captionOffset,
+              audioCodec,
+            }).pipe(Effect.orDie);
+
+            const token = signTestToken({ fid: fileId, sid: `burn-in-long-${audioCodec}` });
+
+            const start = yield* negotiate(token, TRACK_AFTER_AUDIO);
+            const moved = yield* seek(token, start.streamId, seekInsideCaption);
+
+            assert.strictEqual(moved.generation, 2);
+
+            const seekSegment = yield* segmentHolding(moved.playlistUrl, seekInsideCaption);
+            const segment = yield* joinedSegment(moved.playlistUrl, seekSegment);
+
+            assert.closeTo(yield* firstPacketTime(segment, "v"), seekInsideCaption, 0.001);
+            assert.closeTo(yield* firstPacketTime(segment, "a"), seekInsideCaption, 0.05);
+            assert.isAbove(
+              brightSamples(yield* bottomOfSegment(moved.playlistUrl, seekSegment)),
+              200,
+            );
+
+            const clearSegment = yield* segmentHolding(moved.playlistUrl, afterCaptions);
+
+            assert.strictEqual(
+              brightSamples(yield* bottomOfSegment(moved.playlistUrl, clearSegment)),
+              0,
+            );
+
+            yield* stop(token, start.streamId);
+          }).pipe(Effect.scoped),
+        90_000,
+      );
+    }
 
     it.effect("refuses to burn in a track that is not a picture subtitle", () =>
       Effect.gen(function* () {

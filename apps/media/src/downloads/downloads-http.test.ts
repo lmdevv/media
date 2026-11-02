@@ -125,265 +125,308 @@ const probeBytes = Effect.fn(function* (data: Uint8Array) {
 
 describe.skipIf(!hasFfmpeg)("downloads over HTTP", () => {
   layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
-    it.effect("keeps a file the device plays within the quality as it is", () =>
-      Effect.gen(function* () {
-        const server = yield* MediaTestServer.Service;
-        const { library } = yield* FixtureWorkspace.Service;
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const fileId = server.fileId("movies", library.directMovie);
-        const token = signTestToken({ fid: fileId, sid: "download-direct", pur: "download" });
+    it.effect(
+      "keeps a file the device plays within the quality as it is",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const fileId = server.fileId("movies", library.directMovie);
+          const token = signTestToken({ fid: fileId, sid: "download-direct", pur: "download" });
 
-        const result = yield* readyOf(
-          yield* prepared({ token, capabilities: iphone, quality: "standard" }),
-        );
+          const result = yield* readyOf(
+            yield* prepared({ token, capabilities: iphone, quality: "standard" }),
+          );
 
-        const original = yield* fs.readFile(path.join(library.moviesRoot, library.directMovie));
+          const original = yield* fs.readFile(path.join(library.moviesRoot, library.directMovie));
 
-        assert.strictEqual(result.mode, "direct");
-        assert.strictEqual(
-          result.url,
-          `http://media.test/media/direct/${fileId}?token=${encodeURIComponent(token)}`,
-        );
-        assert.strictEqual(result.sizeBytes, original.length);
-        assert.strictEqual(result.container, "mp4");
-        assert.deepStrictEqual(result.audio, { streamIndex: 1, codec: "aac", channels: 1 });
-      }),
+          assert.strictEqual(result.mode, "direct");
+          assert.strictEqual(
+            result.url,
+            `http://media.test/media/direct/${fileId}?token=${encodeURIComponent(token)}`,
+          );
+          assert.strictEqual(result.sizeBytes, original.length);
+          assert.strictEqual(result.container, "mp4");
+          assert.deepStrictEqual(result.audio, { streamIndex: 1, codec: "aac", channels: 1 });
+        }),
+      60_000,
     );
 
-    it.effect("writes an MKV as an MP4 once, reports progress, and serves byte ranges", () =>
-      Effect.gen(function* () {
-        const server = yield* MediaTestServer.Service;
-        const { library } = yield* FixtureWorkspace.Service;
-        const fileId = server.fileId("movies", library.remuxMovie);
-        const token = signTestToken({ fid: fileId, sid: "download-remux", pur: "download" });
-        const first = yield* prepared({ token, capabilities: iphone, quality: "standard" });
+    it.effect(
+      "writes an MKV as an MP4 once, reports progress, and serves byte ranges",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const fileId = server.fileId("movies", library.remuxMovie);
+          const token = signTestToken({ fid: fileId, sid: "download-remux", pur: "download" });
+          const first = yield* prepared({ token, capabilities: iphone, quality: "standard" });
 
-        assert.isTrue(Predicate.isTagged(first, "Preparing"));
+          assert.isTrue(Predicate.isTagged(first, "Preparing"));
 
-        const { ready, answers } = yield* untilReady({
-          token,
-          capabilities: iphone,
-          quality: "standard",
-        });
-
-        for (const answer of answers.slice(0, -1)) {
-          assert.isTrue(Predicate.isTagged(answer, "Preparing"));
-        }
-
-        assert.strictEqual(ready.mode, "remux");
-        assert.strictEqual(ready.container, "mp4");
-        assert.deepStrictEqual(ready.audio, { streamIndex: 1, codec: "ac3", channels: 1 });
-        assert.match(
-          ready.url,
-          new RegExp(`/media/downloads/${fileId}/[a-f0-9]{24}\\.mp4\\?token=`),
-        );
-        assert.strictEqual(ready.subtitles.length, 3);
-
-        for (const subtitle of ready.subtitles) {
-          const vtt = yield* get(local(server.baseUrl, subtitle.url));
-
-          assert.strictEqual(vtt.status, 200);
-        }
-
-        const url = local(server.baseUrl, ready.url);
-        const partial = yield* get(url, { range: "bytes=0-99" });
-
-        assert.strictEqual(partial.status, 206);
-        assert.strictEqual(partial.headers["content-range"], `bytes 0-99/${ready.sizeBytes}`);
-        assert.strictEqual((yield* bytes(partial)).length, 100);
-
-        const whole = yield* bytes(yield* get(url));
-
-        assert.strictEqual(whole.length, ready.sizeBytes);
-        const probe = yield* probeBytes(whole);
-
-        assert.strictEqual(probe.container, "mp4");
-        assert.strictEqual(probe.video?.codec, "h264");
-        assert.deepStrictEqual(
-          probe.audio.map((track) => track.codec),
-          ["ac3"],
-        );
-        assert.approximately(probe.durationSeconds, 12, 0.5);
-
-        const again = yield* readyOf(
-          yield* prepared({
-            token: signTestToken({ fid: fileId, sid: "download-remux-2", pur: "download" }),
+          const { ready, answers } = yield* untilReady({
+            token,
             capabilities: iphone,
             quality: "standard",
-          }),
-        );
+          });
 
-        assert.strictEqual(again.sizeBytes, ready.sizeBytes);
-      }),
+          for (const answer of answers.slice(0, -1)) {
+            assert.isTrue(Predicate.isTagged(answer, "Preparing"));
+          }
+
+          assert.strictEqual(ready.mode, "remux");
+          assert.strictEqual(ready.container, "mp4");
+          assert.deepStrictEqual(ready.audio, { streamIndex: 1, codec: "ac3", channels: 1 });
+          assert.match(
+            ready.url,
+            new RegExp(`/media/downloads/${fileId}/[a-f0-9]{24}\\.mp4\\?token=`),
+          );
+          assert.strictEqual(ready.subtitles.length, 3);
+
+          for (const subtitle of ready.subtitles) {
+            const vtt = yield* get(local(server.baseUrl, subtitle.url));
+
+            assert.strictEqual(vtt.status, 200);
+          }
+
+          const url = local(server.baseUrl, ready.url);
+          const partial = yield* get(url, { range: "bytes=0-99" });
+
+          assert.strictEqual(partial.status, 206);
+          assert.strictEqual(partial.headers["content-range"], `bytes 0-99/${ready.sizeBytes}`);
+          assert.strictEqual((yield* bytes(partial)).length, 100);
+
+          const whole = yield* bytes(yield* get(url));
+
+          assert.strictEqual(whole.length, ready.sizeBytes);
+          const probe = yield* probeBytes(whole);
+
+          assert.strictEqual(probe.container, "mp4");
+          assert.strictEqual(probe.video?.codec, "h264");
+          assert.deepStrictEqual(
+            probe.audio.map((track) => track.codec),
+            ["ac3"],
+          );
+          assert.approximately(probe.durationSeconds, 12, 0.5);
+
+          const again = yield* readyOf(
+            yield* prepared({
+              token: signTestToken({ fid: fileId, sid: "download-remux-2", pur: "download" }),
+              capabilities: iphone,
+              quality: "standard",
+            }),
+          );
+
+          assert.strictEqual(again.sizeBytes, ready.sizeBytes);
+        }),
+      120_000,
     );
 
-    it.effect("keeps another audio track, and encodes down for a device that needs it", () =>
-      Effect.gen(function* () {
-        const server = yield* MediaTestServer.Service;
-        const { library } = yield* FixtureWorkspace.Service;
-        const remux = server.fileId("movies", library.remuxMovie);
+    it.effect(
+      "keeps another audio track when asked for it",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const remux = server.fileId("movies", library.remuxMovie);
 
-        const { ready: other } = yield* untilReady({
-          token: signTestToken({ fid: remux, sid: "download-audio", pur: "download" }),
-          capabilities: iphone,
-          quality: "high",
-          audioStreamIndex: 2,
-        });
+          const { ready } = yield* untilReady({
+            token: signTestToken({ fid: remux, sid: "download-audio", pur: "download" }),
+            capabilities: iphone,
+            quality: "high",
+            audioStreamIndex: 2,
+          });
 
-        assert.strictEqual(other.audio?.streamIndex, 2);
-        assert.strictEqual(other.audio?.codec, "eac3");
+          assert.strictEqual(ready.audio?.streamIndex, 2);
+          assert.strictEqual(ready.audio?.codec, "eac3");
 
-        const direct = server.fileId("movies", library.directMovie);
+          const probe = yield* probeBytes(
+            yield* bytes(yield* get(local(server.baseUrl, ready.url))),
+          );
 
-        const { ready } = yield* untilReady({
-          token: signTestToken({ fid: direct, sid: "download-encode", pur: "download" }),
-          capabilities: tinyScreen,
-          quality: "standard",
-        });
-
-        assert.strictEqual(ready.mode, "transcode-software");
-        assert.deepStrictEqual([ready.video.codec, ready.video.height], ["h264", 120]);
-        const probe = yield* probeBytes(yield* bytes(yield* get(local(server.baseUrl, ready.url))));
-
-        assert.deepStrictEqual([probe.video?.codec, probe.video?.height], ["h264", 120]);
-        assert.strictEqual(probe.audio[0]?.codec, "aac");
-      }),
+          assert.deepStrictEqual(
+            probe.audio.map((track) => track.codec),
+            ["eac3"],
+          );
+        }),
+      120_000,
     );
 
-    it.effect("stops the MP4 a download session no longer asks for", () =>
-      Effect.gen(function* () {
-        const server = yield* MediaTestServer.Service;
-        const { library } = yield* FixtureWorkspace.Service;
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const fileId = server.fileId("movies", library.remuxMovie);
-        const token = signTestToken({ fid: fileId, sid: "download-switch", pur: "download" });
-        const folder = path.join(server.transcodeDir, "downloads", fileId);
-        const listing = fs.readDirectory(folder).pipe(Effect.orElseSucceed(() => []));
-        const before = yield* listing;
+    it.effect(
+      "encodes down for a device that needs it",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const direct = server.fileId("movies", library.directMovie);
 
-        const smallerScreen: ClientCapabilities = {
-          containers: tinyScreen.containers,
-          videoCodecs: tinyScreen.videoCodecs,
-          audioCodecs: tinyScreen.audioCodecs,
-          maxWidth: tinyScreen.maxWidth,
-          maxHeight: 90,
-          hls: true,
-          mse: false,
-        };
+          const { ready } = yield* untilReady({
+            token: signTestToken({ fid: direct, sid: "download-encode", pur: "download" }),
+            capabilities: tinyScreen,
+            quality: "standard",
+          });
 
-        const first = yield* prepared({ token, capabilities: smallerScreen, quality: "standard" });
+          assert.strictEqual(ready.mode, "transcode-software");
+          assert.deepStrictEqual([ready.video.codec, ready.video.height], ["h264", 120]);
 
-        assert.isTrue(Predicate.isTagged(first, "Preparing"));
+          const probe = yield* probeBytes(
+            yield* bytes(yield* get(local(server.baseUrl, ready.url))),
+          );
 
-        const { ready } = yield* untilReady({
-          token,
-          capabilities: tinyScreen,
-          quality: "standard",
-        });
-
-        const name = new URL(ready.url).pathname.split("/").at(-1) ?? "";
-
-        assert.strictEqual(ready.video.height, 120);
-        assert.deepStrictEqual(
-          (yield* listing).toSorted(byName),
-          [...before, name].toSorted(byName),
-        );
-      }),
+          assert.deepStrictEqual([probe.video?.codec, probe.video?.height], ["h264", 120]);
+          assert.strictEqual(probe.audio[0]?.codec, "aac");
+        }),
+      120_000,
     );
 
-    it.effect("serves a download only to a token for its file", () =>
-      Effect.gen(function* () {
-        const server = yield* MediaTestServer.Service;
-        const { library } = yield* FixtureWorkspace.Service;
-        const fileId = server.fileId("movies", library.remuxMovie);
-        const token = signTestToken({ fid: fileId, sid: "download-access", pur: "download" });
+    it.effect(
+      "stops the MP4 a download session no longer asks for",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const fileId = server.fileId("movies", library.remuxMovie);
+          const token = signTestToken({ fid: fileId, sid: "download-switch", pur: "download" });
+          const folder = path.join(server.transcodeDir, "downloads", fileId);
+          const listing = fs.readDirectory(folder).pipe(Effect.orElseSucceed(() => []));
+          const before = yield* listing;
 
-        const { ready } = yield* untilReady({ token, capabilities: iphone, quality: "standard" });
-        const name = new URL(ready.url).pathname.split("/").at(-1) ?? "";
-        const other = server.fileId("movies", library.directMovie);
+          const smallerScreen: ClientCapabilities = {
+            containers: tinyScreen.containers,
+            videoCodecs: tinyScreen.videoCodecs,
+            audioCodecs: tinyScreen.audioCodecs,
+            maxWidth: tinyScreen.maxWidth,
+            maxHeight: 90,
+            hls: true,
+            mse: false,
+          };
 
-        const otherToken = encodeURIComponent(
-          signTestToken({ fid: other, sid: "download-access", pur: "download" }),
-        );
+          const first = yield* prepared({
+            token,
+            capabilities: smallerScreen,
+            quality: "standard",
+          });
 
-        const denied = yield* get(
-          `${server.baseUrl}/media/downloads/${fileId}/${name}?token=${otherToken}`,
-        );
+          assert.isTrue(Predicate.isTagged(first, "Preparing"));
 
-        assert.strictEqual(denied.status, 403);
+          const { ready } = yield* untilReady({
+            token,
+            capabilities: tinyScreen,
+            quality: "standard",
+          });
 
-        const unknown = yield* get(
-          `${server.baseUrl}/media/downloads/${fileId}/${"0".repeat(24)}.mp4?token=${encodeURIComponent(token)}`,
-        );
+          const name = new URL(ready.url).pathname.split("/").at(-1) ?? "";
 
-        assert.strictEqual(unknown.status, 404);
-
-        const unsigned = yield* prepare({
-          token: "v1.e30.AAAA",
-          capabilities: iphone,
-          quality: "standard",
-        });
-
-        assert.strictEqual(unsigned.status, 401);
-      }),
+          assert.strictEqual(ready.video.height, 120);
+          assert.deepStrictEqual(
+            (yield* listing).toSorted(byName),
+            [...before, name].toSorted(byName),
+          );
+        }),
+      120_000,
     );
 
-    it.effect("keeps download tokens to downloads and playback tokens to streaming", () =>
-      Effect.gen(function* () {
-        const server = yield* MediaTestServer.Service;
-        const { library } = yield* FixtureWorkspace.Service;
-        const fileId = server.fileId("movies", library.remuxMovie);
+    it.effect(
+      "serves a download only to a token for its file",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const fileId = server.fileId("movies", library.remuxMovie);
+          const token = signTestToken({ fid: fileId, sid: "download-access", pur: "download" });
 
-        const downloading = signTestToken({
-          fid: fileId,
-          sid: "purpose-download",
-          pur: "download",
-        });
+          const { ready } = yield* untilReady({ token, capabilities: iphone, quality: "standard" });
+          const name = new URL(ready.url).pathname.split("/").at(-1) ?? "";
+          const other = server.fileId("movies", library.directMovie);
 
-        const playing = signTestToken({ fid: fileId, sid: "purpose-play" });
+          const otherToken = encodeURIComponent(
+            signTestToken({ fid: other, sid: "download-access", pur: "download" }),
+          );
 
-        const { ready } = yield* untilReady({
-          token: downloading,
-          capabilities: iphone,
-          quality: "standard",
-        });
+          const denied = yield* get(
+            `${server.baseUrl}/media/downloads/${fileId}/${name}?token=${otherToken}`,
+          );
 
-        const refused = yield* prepare({
-          token: playing,
-          capabilities: iphone,
-          quality: "standard",
-        });
+          assert.strictEqual(denied.status, 403);
 
-        assert.deepStrictEqual(
-          [refused.status, (yield* decodeRefusal(refused.body).pipe(Effect.orDie)).reason],
-          [401, "wrong_purpose"],
-        );
+          const unknown = yield* get(
+            `${server.baseUrl}/media/downloads/${fileId}/${"0".repeat(24)}.mp4?token=${encodeURIComponent(token)}`,
+          );
 
-        const played = yield* get(
-          local(server.baseUrl, ready.url).replace(
-            encodeURIComponent(downloading),
-            encodeURIComponent(playing),
-          ),
-        );
+          assert.strictEqual(unknown.status, 404);
 
-        assert.strictEqual(played.status, 401);
+          const unsigned = yield* prepare({
+            token: "v1.e30.AAAA",
+            capabilities: iphone,
+            quality: "standard",
+          });
 
-        const streamed = yield* HttpClient.execute(
-          HttpClientRequest.post(`${server.baseUrl}/api/playback/negotiate`).pipe(
-            HttpClientRequest.bodyJsonUnsafe({ token: downloading, capabilities: iphone }),
-          ),
-        ).pipe(Effect.orDie);
+          assert.strictEqual(unsigned.status, 401);
+        }),
+      120_000,
+    );
 
-        assert.deepStrictEqual(
-          [
-            streamed.status,
-            (yield* streamed.json.pipe(Effect.flatMap(decodeRefusal), Effect.orDie)).reason,
-          ],
-          [401, "wrong_purpose"],
-        );
-      }),
+    it.effect(
+      "keeps download tokens to downloads and playback tokens to streaming",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const fileId = server.fileId("movies", library.remuxMovie);
+
+          const downloading = signTestToken({
+            fid: fileId,
+            sid: "purpose-download",
+            pur: "download",
+          });
+
+          const playing = signTestToken({ fid: fileId, sid: "purpose-play" });
+
+          const { ready } = yield* untilReady({
+            token: downloading,
+            capabilities: iphone,
+            quality: "standard",
+          });
+
+          const refused = yield* prepare({
+            token: playing,
+            capabilities: iphone,
+            quality: "standard",
+          });
+
+          assert.deepStrictEqual(
+            [refused.status, (yield* decodeRefusal(refused.body).pipe(Effect.orDie)).reason],
+            [401, "wrong_purpose"],
+          );
+
+          const played = yield* get(
+            local(server.baseUrl, ready.url).replace(
+              encodeURIComponent(downloading),
+              encodeURIComponent(playing),
+            ),
+          );
+
+          assert.strictEqual(played.status, 401);
+
+          const streamed = yield* HttpClient.execute(
+            HttpClientRequest.post(`${server.baseUrl}/api/playback/negotiate`).pipe(
+              HttpClientRequest.bodyJsonUnsafe({ token: downloading, capabilities: iphone }),
+            ),
+          ).pipe(Effect.orDie);
+
+          assert.deepStrictEqual(
+            [
+              streamed.status,
+              (yield* streamed.json.pipe(Effect.flatMap(decodeRefusal), Effect.orDie)).reason,
+            ],
+            [401, "wrong_purpose"],
+          );
+        }),
+      120_000,
     );
   });
 });
