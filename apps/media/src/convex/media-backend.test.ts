@@ -107,7 +107,6 @@ describe("media service Convex connection", () => {
 
         yield* awaitStatus(backend, "connected");
 
-        // Idle for longer than an answer stays fresh: the probes keep it fresh.
         yield* Effect.sleep(Duration.seconds(4));
         assert.strictEqual(yield* backend.status, "connected");
 

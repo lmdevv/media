@@ -147,13 +147,11 @@ class TestVideo implements NativeVideo {
   }
 }
 
-/** A monotonic clock the test moves by hand. */
 class TestClock {
   ms = 0;
   readonly now = (): number => this.ms;
 }
 
-/** Plays `video` along for `seconds` of wall time, reporting every quarter second as AVPlayer does. */
 const playFor = (video: TestVideo, clock: TestClock, seconds: number): void => {
   for (let step = 0; step < seconds * 4; step += 1) {
     clock.ms += 250;
@@ -341,7 +339,6 @@ const MINUTES_36 = 36 * 60;
 
 const EPISODE_MS = 47 * 60 * 1000;
 
-/** A port playing a 47-minute episode, ten seconds after it started playing at `seconds`. */
 const playingAt = (seconds: number) => {
   const clock = new TestClock();
   const video = new TestVideo();
@@ -381,7 +378,6 @@ describe("VideoPort when the stream vanishes", () => {
     expect(port.wantsToPlay()).toBe(true);
     expect(port.isBuffering()).toBe(true);
 
-    // Pressing play now must not start the episode over.
     await port.play();
     expect(port.positionMs()).toBe(reached);
     expect(video.currentTime).not.toBe(0);
@@ -504,7 +500,6 @@ describe("VideoPort when the stream vanishes", () => {
   });
 });
 
-/** Whether the stall watchdog recovers `port` after it stood still for the first limit. */
 const recoversAfterFirstLimit = (port: VideoPort, clock: TestClock): boolean => {
   const watch = watching(port.positionMs(), clock.ms);
 

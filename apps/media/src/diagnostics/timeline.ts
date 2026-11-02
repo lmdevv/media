@@ -590,7 +590,6 @@ const loadsSummary = (loads: ReadonlyArray<SegmentLoad>): string => {
   return `; first ${plural(loads.length, "segment load")}: median ${duration(median)}, slowest ${duration(slowest.elapsedMs)} (segment ${String(slowest.segment)})`;
 };
 
-/** The timeline entries, and whether the startup segment loads found a startup entry. */
 interface PlacedLoads {
   readonly entries: ReadonlyArray<TimelineEntry>;
   readonly placed: boolean;

@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# [movies] container entrypoint. Runs as root once per start, then becomes the unprivileged media
-# service:
-#   1. derives the Convex admin key from the backend's instance secret (never stored),
-#   2. exports a pre-upgrade backup when the image version changed,
-#   3. deploys the bundled Convex functions and configures the deployment idempotently (JWT keys,
-#      PLAYBACK_TOKEN_SECRET, the media service key, SITE_URL, MEDIA_BASE_URL),
-#   4. writes the Convex URL into a copy of the web app,
-#   5. execs the media service as PUID:PGID with the secrets in its environment only.
 set -euo pipefail
 umask 077
 

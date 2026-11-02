@@ -16,7 +16,6 @@ const hangingLayer = MediaTools.layer.pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
-/** Tools whose runs all report `pid`, as when the system hands a finished run's PID on. */
 const reusingPid = (pid: ChildProcessSpawner.ProcessId) =>
   Layer.fresh(MediaTools.layer).pipe(
     Layer.provide(testConfigLayer({ FFMPEG_PATH: "sleep" })),

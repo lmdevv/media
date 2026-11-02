@@ -257,7 +257,6 @@ export class CastPlayer implements PlayerPort {
   #reconcile(): void {
     if (this.#wanted === null || this.#toggling !== null) return;
 
-    // A receiver that is gone takes no commands; its mirror resets to paused.
     if (!this.#remote.isConnected || this.#remote.isPaused === this.#wanted) {
       this.#wanted = null;
 

@@ -38,7 +38,6 @@ export const recovery = (action: RecoveryAction, reason: string): PlayerObservat
 
 const decodeRendition = Schema.decodeOption(AudioRendition);
 
-/** A rendition with `language`, or without it when the service would refuse that tag. */
 const renditionDroppingBadLanguage = (
   codec: string,
   channels: number,
@@ -68,7 +67,6 @@ export const attached = (playback: Playback, engine: PlayerEngine): PlayerObserv
     ...Option.match(audioOf(playback), { onNone: () => ({}), onSome: (audio) => ({ audio }) }),
   });
 
-/** The renewal of `before`'s token at `now`, with how long before or after its expiry. */
 const tokenRenewal = (before: Playback, now: number): PlayerObservation => {
   const seconds = Math.round((before.started.tokenExpiresAt - now) / 1000);
 
@@ -428,7 +426,6 @@ export const reportDiagnostics = Effect.fn("PlayerDiagnostics.report")(function*
       endWait(event);
       state.played = Option.map(playbackNow(), (playback) => playback.started.sessionId);
 
-      // A held startup still needs the stages; sending it forgets them.
       if (Option.isNone(state.held)) state.trace = Option.none();
     } else if (event === "paused") {
       endWait(event);

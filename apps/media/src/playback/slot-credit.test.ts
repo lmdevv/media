@@ -18,7 +18,6 @@ import * as TranscodeSpace from "./transcode-space.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
-/** Holds the next start that checks free space, after it claimed a slot and before it registers. */
 const pending = {
   armed: false,
   holding: Promise.withResolvers<void>(),
@@ -48,7 +47,6 @@ const space = Layer.effect(
   ),
 );
 
-/** Counts the encoders running at once, and holds the first one's teardown when armed. */
 const encoders = {
   watching: false,
   started: 0,
@@ -272,15 +270,12 @@ describe.skipIf(!hasFfmpeg)("slot credit", () => {
 
           assert.isTrue(Result.isSuccess(first));
 
-          // The second replaces the first and waits for its encoder, held while stopping.
           const second = yield* Effect.forkChild(start);
           yield* Effect.promise(() => encoders.holding.promise);
 
-          // The third credits both older slots and replaces the second, which has no encoder.
           const third = yield* Effect.forkChild(start);
           yield* Effect.promise(() => encoders.thirdRegistered.promise);
 
-          // Registered, it would start its encoder at once without the wait.
           yield* Fiber.await(third).pipe(Effect.timeoutOption("1 second"));
           const whileStopping = encoders.peak;
 

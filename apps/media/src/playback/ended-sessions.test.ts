@@ -46,7 +46,6 @@ describe("ended sessions", () => {
 
       yield* convex.end("seen");
 
-      // A restore or a clock step puts the clock back, so this end is stamped before one seen.
       yield* TestClock.setTime(5_000);
       yield* convex.end("late");
 
@@ -160,7 +159,6 @@ describe("ended sessions", () => {
         assert.isTrue(yield* Fiber.join(answer));
         assert.strictEqual(asked.filter((followed) => followed === revoked).length, 1);
       }),
-    // Asks about 4096 sessions, which outlasts the default timeout on a loaded machine.
     30_000,
   );
 

@@ -208,10 +208,6 @@ const firstProfile = (session: Session) =>
     return profile.id;
   });
 
-/**
- * Runs `auth:signIn` or `auth:signOut` on the stack with the arguments and token a fake
- * deployment received, so a test can hold the answer back after the stack acted on it.
- */
 const forwardAuth = (path: "auth:signIn" | "auth:signOut", request: FakeConvex.RecordedRequest) =>
   Effect.gen(function* () {
     const args = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(request.args);
@@ -423,7 +419,6 @@ describe.skipIf(stack === undefined)("the SDK against a real stack", () => {
             sessionStatus: "Unauthenticated",
             setup: "succeeded",
           });
-          // Every refresh, the one that worked included, sent the refresh token from sign-in.
           expect(new Set(refreshedWith).size).toBe(1);
           expect(yield* sessionStatus).toBe("succeeded");
           expect(yield* auth.currentStatus).toBe("signedIn");
@@ -535,7 +530,6 @@ describe.skipIf(stack === undefined)("the SDK against a real stack", () => {
             ),
           );
 
-          // End the session behind the client's back, as signing out on another device does.
           gateway.setAuth(tokens.token);
           yield* action("auth:signOut", {});
           gateway.clearAuth();

@@ -292,10 +292,6 @@ const generationListings = {
   arrival: Promise.withResolvers<void>(),
 };
 
-/**
- * Holds each listing of a generation's folder until another listing starts, or 300 ms pass, so
- * refreshes that can overlap do overlap. `most` counts the most listings in progress at once.
- */
 const overlappingListings = (real: FileSystem.FileSystem): FileSystem.FileSystem =>
   FileSystem.FileSystem.of({
     ...real,

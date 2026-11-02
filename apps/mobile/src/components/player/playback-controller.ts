@@ -259,7 +259,6 @@ export class PlayerController {
 
     StallVerdict.$match(verdict, {
       Wait: () => {
-        // Reconnecting shows until a recovered stream has played on, through any stall before.
         if (watch.attempts === 0 && this.#snapshot.recovering) this.#update({ recovering: false });
       },
       Recover: () => {

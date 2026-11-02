@@ -164,11 +164,9 @@ const isReconnecting = (auth: Auth.Interface) =>
     Option.getOrElse(() => false),
   );
 
-/** Waits until the connection no longer runs signed out, while the clock stands still. */
 const reconnected = (auth: Auth.Interface) =>
   Stream.runHead(Stream.filter(auth.reconnecting, (waiting) => !waiting));
 
-/** Fails three refreshes 30 seconds apart, the last a minute after the first. */
 const failForAMinute = (auth: Auth.Interface) =>
   Effect.gen(function* () {
     const answers: Array<string | null> = [];
@@ -202,7 +200,6 @@ const refreshRequests = (fake: FakeConvex.FakeConvex) =>
     ),
   );
 
-/** The tokens server sign-outs carried, once `expected` arrived or after a second of waiting. */
 const serverSignOuts = (fake: FakeConvex.FakeConvex, expected: number) =>
   Effect.gen(function* () {
     for (let tries = 0; tries < 50; tries += 1) {

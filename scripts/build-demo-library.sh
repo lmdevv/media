@@ -41,12 +41,9 @@ else
   # The library's videos are hard links into the cache, so this frees only what the image leaves
   # out: the Tears of Steel archive and the Feature Test's intermediate cuts.
   rm -rf "$library/.cache"
-  # The media service reads the files as an unprivileged user.
   chmod -R a+rX "$library"
 fi
 
-# The Dockerfile copies each title by name, so check that the folder holds exactly those titles,
-# complete, before building: a title the Dockerfile doesn't name would be left out silently.
 problems=()
 expect() { [[ -e "$library/$1" ]] || problems+=("missing $1"); }
 expect CREDITS.md
@@ -61,8 +58,6 @@ count() { find "$library/$1" -maxdepth 1 -type f -name "$2" 2>/dev/null | wc -l;
 [[ "$(count "Shows/Pioneer One (2010)/Season 01" '*.mp4')" -eq 6 ]] || problems+=("Pioneer One needs 6 episodes")
 titles="$( (ls "$library/Movies"; ls "$library/Shows") 2>/dev/null | wc -l)"
 [[ "$titles" -eq 8 ]] || problems+=("expected 6 movies and 2 shows, found $titles folders")
-# demo-library.sh skips the image subtitle when spumux or fontconfig is missing; the published
-# set always carries it.
 if command -v ffprobe >/dev/null; then
   ffprobe -v error -show_entries stream=codec_name -of csv=p=0 \
     "$library/Movies/[movies] Feature Test (2010)/[movies] Feature Test (2010) {edition-Multi-Audio and Subtitles}.mkv" \

@@ -155,7 +155,6 @@ const logObservation = (
       ),
   });
 
-/** How many sessions the startup load indexes are remembered for, newest kept. */
 const TRACKED_SESSIONS = 1000;
 
 const make = Effect.gen(function* () {

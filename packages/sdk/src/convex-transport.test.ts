@@ -38,10 +38,6 @@ const mintToken = (): Reply =>
     },
   });
 
-/**
- * Signs in over a WebSocket connection to a fake Convex whose `auth:signIn` answers with
- * `signIn`, then asks a query once the first token has expired.
- */
 const askAfterFirstTokenExpires = (signIn: (request: { readonly args: unknown }) => Reply) =>
   Effect.runPromise(
     Effect.scoped(

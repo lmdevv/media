@@ -433,7 +433,6 @@ const endGap = (ends: Ends): number => ends.audio.end - ends.video.end;
 const latestEnd = (spans: ReadonlyArray<Span>): number =>
   Math.max(...spans.flatMap((each) => (Number.isNaN(each.end) ? [] : [each.end])));
 
-/** Where a run's video and audio end, which can be in different segments. */
 const runEnds = (run: Run): Ends => ({
   video: { end: latestEnd(run.segments.map((segment) => segment.video)) },
   audio: { end: latestEnd(run.segments.map((segment) => segment.audio)) },

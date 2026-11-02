@@ -32,7 +32,6 @@ const failsAfterFirstFragment = await writeFakeFfmpeg({ hlsFailsAfterFirstFragme
 
 const stallsAfterTwoFragments = await writeFakeFfmpeg({ hlsStallsAfterFragments: 2 });
 
-/** Opens of the first fragment fail this many more times, as a briefly busy disk would. */
 const unreadable = { firstFragmentOpens: 0 };
 
 const flakyFirstFragment = (real: FileSystem.FileSystem): FileSystem.FileSystem =>

@@ -117,7 +117,6 @@ const History = container({
   ),
 });
 
-/** Plex listing types: movies, shows, and episodes. */
 const LISTING_TYPES = { movie: 1, series: 2, episode: 4 } as const;
 
 const text = (value: string | null | undefined): string | null =>

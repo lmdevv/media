@@ -144,7 +144,6 @@ const make = Effect.fn("MediaBackend.make")(function* (options: Options) {
   const probeEvery = options.probeEvery ?? DEFAULT_PROBE_EVERY;
   const answeredAt = yield* Ref.make(Option.none<number>());
 
-  /** The wait between probes, then as long as a probe may wait for its answer. */
   const staleAfter = Duration.sum(probeEvery, callTimeout);
 
   const signInOnce = auth
@@ -257,7 +256,6 @@ const make = Effect.fn("MediaBackend.make")(function* (options: Options) {
     Effect.flatMap((at) => Ref.set(answeredAt, Option.some(at))),
   );
 
-  /** Asks Convex about the playback session `probeId` names, which is none, noting the answer. */
   const ask = (probeId: string) =>
     call("mediaService.sessionStatus", { sessionId: probeId }).pipe(
       // Any other failure is Convex answering: the connection works, the function does not.

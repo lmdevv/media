@@ -155,7 +155,6 @@ export const generate = Effect.fn("TrickplayGenerator.generate")(function* (
   const run = (toneMap: boolean) =>
     tools.ffmpegInBackground(thumbnailArgs(target, interval, folder, toneMap));
 
-  // A build without `zscale` fails at once; start over with untouched frames.
   yield* video.dynamicRange === "sdr"
     ? run(false)
     : run(true).pipe(

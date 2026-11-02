@@ -267,7 +267,6 @@ export const titlesByName = async (
 /** `HTMLMediaElement.HAVE_CURRENT_DATA`: the element has the frame at its position. */
 export const HAVE_CURRENT_DATA = 2;
 
-/** Every HLS segment the media service serves. */
 const SEGMENTS = /\/media\/hls\/[^/]+\/\d+\/\d+\.m4s/u;
 
 /**
@@ -453,7 +452,6 @@ export const capture = async (page: Page, name: string): Promise<void> => {
 
   if (folder === undefined || folder === "") return;
 
-  // The development server's router devtools button is no part of the app.
   await page.getByRole("button", { name: /TanStack Router/u }).evaluateAll((buttons) => {
     for (const button of buttons) {
       if (button instanceof HTMLElement) button.style.visibility = "hidden";

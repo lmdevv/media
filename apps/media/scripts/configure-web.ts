@@ -79,7 +79,6 @@ if (renames.size === 0) {
   process.exit(1);
 }
 
-// Asset names are content hashes, unique enough to rewrite as plain text everywhere.
 const replacements = [...renames].map(
   ([file, renamed]) => [basename(file), basename(renamed)] as const,
 );

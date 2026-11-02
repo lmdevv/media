@@ -1,6 +1,5 @@
 import type { WidthClass } from "./layout";
 
-/** The hero's height on an iPhone, in points (C02). */
 const PHONE_HERO_HEIGHT = 480;
 
 const HERO_SHARE = 0.56;
@@ -27,7 +26,6 @@ export interface FadeRange {
 
 const PHONE_BAR_FADE: FadeRange = { from: 150, to: 200 };
 
-/** About the height of an iPad hero's name, facts, buttons, and three-line overview. */
 const IPAD_TITLE_BLOCK = 280;
 
 const TOP_BAR_HEIGHT = 64;

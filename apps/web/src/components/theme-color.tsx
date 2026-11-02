@@ -9,10 +9,6 @@ const DESKTOP = "(width >= 48rem)";
 const readPageColor = (): string =>
   getComputedStyle(document.documentElement).getPropertyValue("--color-page").trim();
 
-/**
- * The page color, read again only when the theme class on `<html>` or the side of the desktop
- * breakpoint changes, so rendering never forces a style recalculation. Empty until subscribed.
- */
 const pageColor = (() => {
   let color = "";
 

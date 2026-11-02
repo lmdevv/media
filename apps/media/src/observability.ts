@@ -66,7 +66,6 @@ const redactInvitePath = (path: string): string => {
   return `${PATH_SEPARATOR.test(decoded.charAt(0)) ? "/" : ""}${redacted.join("/")}`;
 };
 
-/** `query` with every parameter value that holds an invite link redacted, at any depth. */
 const redactInviteQuery = (query: string): string => {
   if (!MAY_HOLD_INVITE.test(query)) return query;
   const params = [...new URLSearchParams(query)];
@@ -77,7 +76,6 @@ const redactInviteQuery = (query: string): string => {
     : new URLSearchParams(redacted).toString();
 };
 
-/** `url`, absolute or a path with its query, with invite codes redacted from its path and query. */
 const redactInviteUrl = (url: string): string => {
   if (!MAY_HOLD_INVITE.test(url)) return url;
   const [, origin = "", path = "", query, fragment = ""] = URL_PARTS.exec(url) ?? [];
@@ -86,7 +84,6 @@ const redactInviteUrl = (url: string): string => {
 };
 
 const SECRET_VALUES: ReadonlyArray<readonly [RegExp, string]> = [
-  // Credential query parameters and assignments, as in `?token=…` or `X-Plex-Token=…`.
   [
     /\b((?:access_|x-plex-|x-emby-)?token|api_?key|key|secret|password)=[^\s&"',;\\]+/gi,
     `$1=${REDACTED}`,
@@ -95,13 +92,10 @@ const SECRET_VALUES: ReadonlyArray<readonly [RegExp, string]> = [
     /(["']?)\b([\w.-]*?(?:token|secret|password|passwd|api[-_]?key|authorization|cookie|credentials?))\1(\s*[:=]\s*)(["'])(?:\\.|(?!\4)[^\\])*\4/gi,
     `$1$2$1$3$4${REDACTED}$4`,
   ],
-  // `Authorization` schemes, and Jellyfin's `Token="…"` parameter.
   [/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, `$1 ${REDACTED}`],
   [/\bToken="[^"]*"/g, `Token="${REDACTED}"`],
-  // Signed tokens with a base64url JSON header: JWTs and playback tokens.
   [/\beyJ[\w-]+\.[\w-]+(?:\.[\w-]+)?/g, REDACTED],
   [/\bmk_[\w-]{16,}/g, REDACTED],
-  // Convex admin keys: `<instance>|<hex>`.
   [/\b[\w-]+\|[0-9a-f]{32,}\b/g, REDACTED],
 ];
 

@@ -278,7 +278,6 @@ const FIRST_REFETCH_DELAY_MS = 1000;
 
 const MAX_REFETCH_DELAY_MS = 30_000;
 
-/** Resolves after `millis`, or as soon as `signal` aborts. */
 const sleep = (millis: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (signal.aborted) {
@@ -298,7 +297,6 @@ const sleep = (millis: number, signal: AbortSignal): Promise<void> =>
     signal.addEventListener("abort", wake);
   });
 
-/** What `promise` resolves to, or null as soon as `signal` aborts. */
 const unlessAborted = <A>(promise: Promise<A>, signal: AbortSignal): Promise<A | null> =>
   new Promise<A | null>((resolve, reject) => {
     if (signal.aborted) {
@@ -425,7 +423,6 @@ export const clientTokenFetchers = () => {
       if (!signal.aborted) apply(fetcher);
     })();
 
-    // A failed install fails its caller only; later installs still run.
     installing = installed.catch(() => undefined);
 
     return installed;

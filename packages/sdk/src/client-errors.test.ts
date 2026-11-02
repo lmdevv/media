@@ -35,7 +35,6 @@ interface Answer {
 
 const ACCEPTED: Answer = { status: 204, headers: {}, body: "" };
 
-/** What the fake media service answers every report with. */
 let answer: Answer = ACCEPTED;
 
 const media = createServer((request: IncomingMessage, response: ServerResponse) => {

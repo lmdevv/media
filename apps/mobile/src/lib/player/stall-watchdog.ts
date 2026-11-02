@@ -45,10 +45,8 @@ export interface StallCheck {
 /** How long playback may stand still before the first recovery; each later one waits twice as long. */
 export const STALL_AFTER_MS = 15_000;
 
-/** How far the playhead must move to count. */
 const MOVED_MS = 250;
 
-/** How far playback must play on after a recovery before the next stall starts the count again. */
 const RECOVERED_AFTER_MS = 10_000;
 
 /** A watch starting at `positionMs` at `atMs`, with no recoveries yet. */
@@ -58,7 +56,6 @@ export const watching = (positionMs: number, atMs: number): StallWatch => ({
   recoveredAtMs: null,
 });
 
-/** How long playback may stand still after `attempts` recoveries; twice that while loading. */
 const stallLimitMs = (attempts: number, loading: boolean): number =>
   STALL_AFTER_MS * 2 ** attempts * (loading ? 2 : 1);
 

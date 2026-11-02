@@ -79,7 +79,6 @@ const start = (element: DriftElement) => {
   return { observed, stop };
 };
 
-/** Lets the next sample tick come and shows a frame `aheadMs` off the media clock. */
 const sample = (element: FakeVideo, aheadMs: number): void => {
   vi.advanceTimersByTime(SAMPLE_EVERY_MS);
   element.frameAhead = aheadMs / 1000;

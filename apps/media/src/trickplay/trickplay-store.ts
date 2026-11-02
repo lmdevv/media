@@ -29,7 +29,6 @@ const storageFailed = (cause: unknown) => new TrickplayStorageFailed({ cause });
 
 const isTrickplayVersion = Schema.is(TrickplayVersion);
 
-/** Whether a folder name is a version; a plain predicate, so the other branch keeps `string`. */
 const isVersion = (name: string): boolean => isTrickplayVersion(name);
 
 /** Stored thumbnails. */

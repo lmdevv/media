@@ -85,7 +85,6 @@ const DownloadPauseStateJson = Schema.fromJsonString(
     fileUri: Schema.String,
     isDirectory: Schema.Boolean,
     headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
-    // A state without resume data (paused before any bytes arrived) cannot be resumed.
     resumeData: Schema.NonEmptyString,
   }),
 );
@@ -161,8 +160,6 @@ export class DownloadEngine {
 
     const stored = parseStore(this.#readStore());
 
-    // Transfers do not outlive the app: what was under way waits its turn again, keeping any
-    // resume data it saved.
     const settled = stored.downloads.reduce(
       (store, download) =>
         download.phase === "preparing" || download.phase === "downloading"

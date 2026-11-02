@@ -107,7 +107,6 @@ const scriptedDisk = (real: FileSystem.FileSystem): FileSystem.FileSystem =>
         ),
         Effect.andThen(real.remove(path, options)),
       ),
-    // A release keeps a generation's init segment by writing its bytes to `init-<n>.mp4.tmp`.
     writeFile: (to, bytes, options) =>
       !KEPT_INIT.test(to)
         ? real.writeFile(to, bytes, options)
@@ -163,7 +162,6 @@ const negotiate = Effect.fn(function* ({ name, file = "direct", exp, startSecond
   const sid = `${name}-${crypto.randomUUID()}`;
   const server = yield* MediaTestServer.Service;
 
-  // Convex creates a session, paused, before its player negotiates a stream.
   yield* (yield* TestConvex.Service).report(sid, "paused", 0);
   const { library } = yield* FixtureWorkspace.Service;
   const files = { direct: library.directMovie, remux: library.remuxMovie, hdr: library.hdrMovie };
@@ -305,7 +303,6 @@ const awaitLogged = (message: string, streamId: string) =>
 
 const closing = { hook: (): void => {} };
 
-/** Runs `closing.hook` as a stream starts to close, before the close decides anything. */
 const closeWatcher = Tracer.make({
   span: (options) => {
     if (options.name === "StreamSessions.close") closing.hook();
@@ -1125,7 +1122,6 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
   });
 
   describe("standalone, with Quick Sync that fails once a run restarts mid-file", () => {
-    // A failed Quick Sync run turns Quick Sync off for the server's life, so each run starts one.
     const server = MediaTestServer.layer(
       {
         FFMPEG_PATH: qsvLostOnRestart,
