@@ -58,7 +58,6 @@ const openSyncedLyrics = async (page: Page) => {
   const parts = await playBlueLines(page);
 
   await parts.nowPlaying.getByRole("button", { name: "Lyrics", exact: true }).click();
-  await expect(parts.lyrics.getByText("SYNCED LYRICS · FROM FILE")).toBeVisible();
   await expect(parts.current).toBeVisible({ timeout: 15_000 });
 
   return parts;

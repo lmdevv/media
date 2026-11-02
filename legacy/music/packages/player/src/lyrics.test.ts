@@ -8,7 +8,6 @@ import {
   lyricLineState,
   lyricsAnswer,
   lyricsButton,
-  lyricsCaption,
   lyricsMoment,
   lyricsOffer,
   offlineLyrics,
@@ -147,14 +146,6 @@ describe("lyricsButton", () => {
     for (const offer of ["ready", "loading", "failed", "none", "instrumental"] as const) {
       expect(lyricsButton(offer, true)).toMatchObject({ label: "Hide lyrics", disabled: false });
     }
-  });
-});
-
-describe("lyricsCaption", () => {
-  it("names the kind of lyrics and where they came from", () => {
-    expect(lyricsCaption("Synced", "lrclib")).toBe("SYNCED LYRICS · LRCLIB");
-    expect(lyricsCaption("Synced", "file")).toBe("SYNCED LYRICS · FROM FILE");
-    expect(lyricsCaption("Plain", "file")).toBe("LYRICS · FROM FILE");
   });
 });
 

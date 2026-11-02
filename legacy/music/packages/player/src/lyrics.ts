@@ -1,10 +1,9 @@
 /**
  * How Now Playing offers and shows a song's lyrics, the same on the web and the phone: what the
- * lyrics button says and whether it opens, the source caption, and which timed line playback is
- * in.
+ * lyrics button says and whether it opens, and which timed line playback is in.
  */
 import { offlineLyricsOf, TrackLyrics } from "@music/commands/lyrics";
-import type { LyricLine, LyricsSource, OfflineLyrics } from "@music/commands/lyrics";
+import type { LyricLine, OfflineLyrics } from "@music/commands/lyrics";
 import { commandFailure } from "@music/sdk/errors";
 
 /**
@@ -91,10 +90,6 @@ export const lyricsButton = (offer: LyricsOffer, open: boolean): LyricsButton =>
   disabled: !open && (offer === "none" || offer === "instrumental"),
   loading: offer === "loading",
 });
-
-/** The source caption under the lyrics, such as `SYNCED LYRICS · LRCLIB` or `LYRICS · FROM FILE`. */
-export const lyricsCaption = (body: "Synced" | "Plain", source: LyricsSource): string =>
-  `${body === "Synced" ? "SYNCED LYRICS" : "LYRICS"} · ${source === "lrclib" ? "LRCLIB" : "FROM FILE"}`;
 
 /**
  * Where playback stands in timed lines: `started` is the last line that has started (-1 before

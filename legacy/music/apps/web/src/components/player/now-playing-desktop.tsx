@@ -53,11 +53,10 @@ export function DesktopNowPlaying({ track, lyrics, view, onView }: DesktopNowPla
       )}
       style={background}
     >
-      <div className="flex h-row shrink-0 items-center justify-between">
+      <div className="flex h-row shrink-0 items-center">
         <DialogClose aria-label="Close Now Playing" className={cn(glassButton, "size-9")}>
           <ChevronDownIcon className="size-5" />
         </DialogClose>
-        <span className="font-mono text-md/base font-semibold text-text">[music]</span>
       </div>
 
       {beside ? (

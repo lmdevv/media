@@ -160,7 +160,7 @@ const SyncedLyricSet = Schema.Struct({ ...lyricSetFields, body: LyricBody.cases.
 
 const PlainLyricSet = Schema.Struct({ ...lyricSetFields, body: LyricBody.cases.Plain });
 
-/** Where the lyrics a client shows came from, for its source caption. */
+/** Where the lyrics a client shows came from. */
 export const LyricsSource = Schema.Literals(["file", "lrclib"]);
 
 export type LyricsSource = typeof LyricsSource.Type;

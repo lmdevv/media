@@ -1,6 +1,6 @@
 import { TrackLyrics } from "@music/commands/lyrics";
 import type { LyricLine } from "@music/commands/lyrics";
-import { lyricLineState, lyricsCaption, lyricsMoment } from "@music/player/lyrics";
+import { lyricLineState, lyricsMoment } from "@music/player/lyrics";
 import type { LyricLineState, LyricsAnswer, LyricsMoment } from "@music/player/lyrics";
 import { useLatestPlayer, usePositionReader } from "@music/player/react";
 import { Spinner } from "@music/ui/components/spinner";
@@ -78,52 +78,24 @@ function LyricsBody({
   if (lyrics === "failed") return <LyricsMessage>Couldn't load the lyrics</LyricsMessage>;
 
   return TrackLyrics.match(lyrics, {
-    Synced: ({ main, source }) => (
-      <SyncedLyrics
-        lines={main.body.lines}
-        layout={layout}
-        footer={<LyricsFooter caption={lyricsCaption("Synced", source)} />}
-      />
-    ),
-    Plain: ({ main, source }) => (
-      <PlainLyrics
-        text={main.body.text}
-        layout={layout}
-        footer={<LyricsFooter caption={lyricsCaption("Plain", source)} />}
-      />
-    ),
+    Synced: ({ main }) => <SyncedLyrics lines={main.body.lines} layout={layout} />,
+    Plain: ({ main }) => <PlainLyrics text={main.body.text} layout={layout} />,
     Pending: ({ fallback }) =>
       fallback === null ? (
         <LyricsMessage looking>Looking for lyrics…</LyricsMessage>
       ) : (
-        <PlainLyrics
-          text={fallback.body.text}
-          layout={layout}
-          footer={<LyricsFooter caption={lyricsCaption("Plain", "file")} looking />}
-        />
+        <PlainLyrics text={fallback.body.text} layout={layout} looking />
       ),
     None: () => <LyricsMessage>No lyrics for this song</LyricsMessage>,
     Instrumental: () => <LyricsMessage>Instrumental</LyricsMessage>,
   });
 }
 
-/** The source caption, and a hint while better (synced) lyrics may still be found. */
-function LyricsFooter({
-  caption,
-  looking = false,
-}: {
-  readonly caption: string;
-  readonly looking?: boolean;
-}) {
+function SyncedLyricsHint() {
   return (
-    <div className="flex shrink-0 items-center gap-3 pt-6.5">
-      <span className="font-mono text-xs/xs tracking-mono text-text-muted">{caption}</span>
-      {looking ? (
-        <span className="flex items-center gap-1.5 font-sans text-xs/xs text-text-muted">
-          <Spinner label="Looking for synced lyrics" className="size-3 text-text-muted" />
-          Looking for synced lyrics…
-        </span>
-      ) : null}
+    <div className="flex shrink-0 items-center gap-1.5 pt-6.5 font-sans text-xs/xs text-text-muted">
+      <Spinner label="Looking for synced lyrics" className="size-3" />
+      Looking for synced lyrics…
     </div>
   );
 }
@@ -149,11 +121,11 @@ function LyricsMessage({
 function PlainLyrics({
   text,
   layout,
-  footer,
+  looking = false,
 }: {
   readonly text: string;
   readonly layout: LyricsLayout;
-  readonly footer: ReactNode;
+  readonly looking?: boolean;
 }) {
   const look = LAYOUTS[layout];
 
@@ -164,7 +136,7 @@ function PlainLyrics({
         <p className={cn("shrink-0 whitespace-pre-line", look.plain)}>{text}</p>
         <div aria-hidden className="h-12 shrink-0" />
       </div>
-      {footer}
+      {looking ? <SyncedLyricsHint /> : null}
     </>
   );
 }
@@ -329,11 +301,9 @@ function useLineFollow(started: number, anchor: number) {
 function SyncedLyrics({
   lines,
   layout,
-  footer,
 }: {
   readonly lines: ReadonlyArray<LyricLine>;
   readonly layout: LyricsLayout;
-  readonly footer: ReactNode;
 }) {
   const readPosition = usePositionReader();
   const latestPlayer = useLatestPlayer();
@@ -369,51 +339,48 @@ function SyncedLyrics({
   );
 
   return (
-    <>
-      <div className="relative flex min-h-0 grow flex-col">
-        <div
-          ref={scroller}
-          className="relative flex min-h-0 grow flex-col overflow-y-auto overscroll-contain [scrollbar-width:none]"
-          onFocus={(event) => {
-            // Moving to a line by keyboard scrolls it into view; following would scroll it away.
-            if (event.target !== event.currentTarget && event.target.matches(":focus-visible")) {
-              release();
-            }
-          }}
-        >
-          <div aria-hidden className={cn("shrink-0", look.lead)} />
-          <ol ref={list} className={cn("flex shrink-0 flex-col", look.lines)}>
-            {lines.map((line, index) => {
-              const state = lyricLineState(index, moment);
+    <div className="relative flex min-h-0 grow flex-col">
+      <div
+        ref={scroller}
+        className="relative flex min-h-0 grow flex-col overflow-y-auto overscroll-contain [scrollbar-width:none]"
+        onFocus={(event) => {
+          // Moving to a line by keyboard scrolls it into view; following would scroll it away.
+          if (event.target !== event.currentTarget && event.target.matches(":focus-visible")) {
+            release();
+          }
+        }}
+      >
+        <div aria-hidden className={cn("shrink-0", look.lead)} />
+        <ol ref={list} className={cn("flex shrink-0 flex-col", look.lines)}>
+          {lines.map((line, index) => {
+            const state = lyricLineState(index, moment);
 
-              return (
-                <li key={index} className="flex">
-                  <LineButton
-                    index={index}
-                    text={line.text}
-                    startMs={line.startMs}
-                    state={state}
-                    className={cn(look.line, look.states[state])}
-                    onSeek={seek}
-                  />
-                </li>
-              );
-            })}
-          </ol>
-          <div aria-hidden className="h-1/2 shrink-0" />
-        </div>
-        {following ? null : (
-          <button
-            type="button"
-            onClick={follow}
-            className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-text/14 px-3.5 py-1.75 font-sans text-sm/xs font-medium text-text shadow-glass backdrop-blur-sm outline-none hover:bg-text/20 focus-visible:ring-2 focus-visible:ring-ring/50"
-          >
-            Back to current line
-          </button>
-        )}
+            return (
+              <li key={index} className="flex">
+                <LineButton
+                  index={index}
+                  text={line.text}
+                  startMs={line.startMs}
+                  state={state}
+                  className={cn(look.line, look.states[state])}
+                  onSeek={seek}
+                />
+              </li>
+            );
+          })}
+        </ol>
+        <div aria-hidden className="h-1/2 shrink-0" />
       </div>
-      {footer}
-    </>
+      {following ? null : (
+        <button
+          type="button"
+          onClick={follow}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-text/14 px-3.5 py-1.75 font-sans text-sm/xs font-medium text-text shadow-glass backdrop-blur-sm outline-none hover:bg-text/20 focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          Back to current line
+        </button>
+      )}
+    </div>
   );
 }
 
