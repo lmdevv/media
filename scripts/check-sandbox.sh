@@ -21,7 +21,6 @@ fail() {
   exit 1
 }
 
-# A Nix expression over the module's evaluated `config`.
 module() {
   cat <<EOF
 let
@@ -107,7 +106,6 @@ sandboxed() {
 echo "check-sandbox: ${properties[*]}"
 echo "check-sandbox: node $node_dir, ffmpeg $ffmpeg_dir"
 
-# Proves the filter is in force: chown is in @privileged, so the kernel kills node with SIGSYS.
 canary="$(mktemp -d)"
 trap 'rm -rf "$canary"' EXIT
 cat >"$canary/chown.sh" <<'EOF'

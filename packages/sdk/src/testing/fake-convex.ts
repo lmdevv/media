@@ -257,7 +257,6 @@ const AddQuery = Schema.Struct({
 
 const RemoveQuery = Schema.Struct({ type: Schema.Literal("Remove"), queryId: Schema.Int });
 
-/** The client messages the fake acts on; `Connect` and the rest decode to nothing. */
 const SyncMessage = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("Authenticate"),
@@ -300,7 +299,6 @@ const encodeTs = (ts: number): string => {
   return bytes.toString("base64");
 };
 
-/** The query result a reply becomes, or none when Convex would close the connection instead. */
 const queryModification = (queryId: number, reply: Reply): Option.Option<Schema.Json> =>
   Reply.$match(reply, {
     Success: ({ value }) =>
@@ -381,7 +379,6 @@ export const make: Effect.Effect<FakeConvex, never, Scope.Scope> = Effect.gen(fu
 
   const accepts = (token: string): boolean => !refused.has(token) && isUnexpired(token, Date.now());
 
-  /** Serves one sync connection; `head` holds any bytes that arrived with the upgrade request. */
   const openSync = (socket: Duplex, head: Buffer): void => {
     let pending: Buffer = Buffer.alloc(0);
     let queue = Promise.resolve();

@@ -6,7 +6,6 @@ dist
 build
 *.tsbuildinfo
 
-# Nix build output links
 result
 result-*
 
@@ -58,8 +57,6 @@ playwright-report
 .claude/settings.local.json
 .claude/worktrees/
 
-# Screenshots and recordings from verification runs
 /captures/
 
-# Vitest reports written by --reporter json without an output file
 .vitest/

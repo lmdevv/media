@@ -975,7 +975,6 @@ describe.skipIf(stack === undefined || !hasFfmpeg)(
       expect(job.attempts).toBe(2);
     }, 180_000);
 
-    // Last: a restore replaces every table and signs everyone out.
     it("refuses the tokens of sessions a restore ends or erases", async () => {
       const listBackups = () =>
         asOwner(Effect.flatMap(client, (movies) => movies.query("backups.list", {})));

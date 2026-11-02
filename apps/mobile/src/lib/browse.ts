@@ -325,7 +325,6 @@ export const GRID_SPACING: Readonly<Record<WidthClass, GridSpacing>> = {
   wide: { gutter: 48, gap: 12 },
 };
 
-/** The narrowest an iPad grid lets a poster get before it drops a column, in points. */
 const GRID_POSTER_MIN = 150;
 
 /**
@@ -338,7 +337,6 @@ export const gridColumns = (width: number, spacing: GridSpacing): number =>
     Math.floor((width - 2 * spacing.gutter + spacing.gap) / (GRID_POSTER_MIN + spacing.gap)),
   );
 
-/** A grid cell: a title, or a blank that keeps the last row's posters as wide as the rest. */
 type GridCell =
   | { readonly kind: "title"; readonly title: TitleCard }
   | { readonly kind: "blank"; readonly key: string };

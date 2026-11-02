@@ -533,8 +533,6 @@ layer(serverLayer, { timeout: 30_000 })("log and diagnostics routes", (it) => {
   );
 });
 
-// Its own server: the routes above leave thousands of lines in the shared log, and every read under
-// the budget scans them all, which outran the test's timeout on a busy machine.
 layer(serverLayer, { timeout: 30_000 })("diagnostics read limit", (it) => {
   it.effect("limit how often one account reads diagnostics", () =>
     Effect.gen(function* () {

@@ -155,8 +155,6 @@ describe.skipIf(!hasFfmpeg)("LibraryMonitor", () => {
           yield* fs.remove(path.join(root, library.messyMovie));
           yield* eventually((files) => files.get(library.messyMovie)?.missing === true);
         }),
-      // Each step may wait up to 15 seconds for the watcher; the default 5 second budget is
-      // shorter than one step under load.
       60_000,
     );
 

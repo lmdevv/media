@@ -11,7 +11,6 @@ import { signTestToken } from "../testing/test-config.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
-/** Holds the next negotiation that resolves `file` until released; later ones pass. */
 const gate = {
   file: "",
   entered: Promise.withResolvers<void>(),

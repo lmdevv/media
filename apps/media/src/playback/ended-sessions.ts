@@ -116,7 +116,6 @@ export const layer: Layer.Layer<Service, never, SessionReports.Service> = Layer.
           Effect.updateContext<never, never>(() => context),
         );
 
-        // Bounded here too: a session forgotten while asked about stops its own first wait.
         yield* Deferred.await(session.settled).pipe(Effect.timeoutOption(ANSWER_WAIT));
 
         return yield* Ref.get(session.ended);

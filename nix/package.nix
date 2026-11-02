@@ -114,7 +114,6 @@ stdenv.mkDerivation (finalAttrs: {
     runHook postInstall
   '';
 
-  # scripts/check-sandbox.sh runs the tests on the service's own Node.
   passthru = { inherit nodejs; };
 
   meta = {

@@ -56,7 +56,6 @@ const viewerOf = (token: string): Option.Option<Viewer> => {
     : Option.none();
 };
 
-/** How many times the routes asked Convex who a token belongs to. */
 const authorized = { count: 0 };
 
 const authLayer = Layer.succeed(
@@ -128,7 +127,6 @@ const post = (path: string, token: Option.Option<string>, body: Body) =>
 
 const ADMIN = Option.some(ADMIN_TOKEN);
 
-/** A run-unique marker, so repeated runs over the same log never read each other's records. */
 const unique = () => crypto.randomUUID().slice(0, 8);
 
 const decodeRecord = Schema.decodeUnknownSync(Schema.fromJsonString(LogRecord));

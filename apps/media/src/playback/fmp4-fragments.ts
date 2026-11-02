@@ -72,7 +72,6 @@ const headerAt = (bytes: Uint8Array, offset: number, limit: number): Box | undef
   return size32 < 8 ? undefined : { type, body: offset + 8, end: offset + size32 };
 };
 
-/** The whole boxes between `start` and `end`; a box running past `end` ends the list. */
 const boxesIn = (bytes: Uint8Array, start: number, end: number): ReadonlyArray<Box> => {
   const boxes: Array<Box> = [];
 
@@ -314,7 +313,6 @@ export const fragmentSpan = (
 
     if (offset + count * fields.length * 4 > trun.end) return undefined;
 
-    // Samples without fields of their own are alike, so one stands for all of them.
     const read = fields.length === 0 ? Math.min(count, 1) : count;
     const repeats = fields.length === 0 ? count : 1;
 

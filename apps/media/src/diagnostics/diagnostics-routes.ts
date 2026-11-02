@@ -31,7 +31,6 @@ const READ_BUDGET = { burst: 10, perSecond: 0.2 };
 
 const isAdmin = (viewer: Viewer): boolean => viewer.scopes.includes("admin");
 
-/** A record of a playback session, so the account's other records, such as error reports, never fill the read. */
 const namesSession: LogReader.Keep = (record) =>
   Predicate.isString(record.annotations["sessionId"]);
 

@@ -94,12 +94,10 @@ function HeroPage({ title, width }: { readonly title: TitleCard; readonly width:
   );
 }
 
-/** An iPad's page: the artwork alone, faded toward the details at its bottom left. */
 function BillboardPage({ title, width }: { readonly title: TitleCard; readonly width: number }) {
   const { mediaUrl } = useServer();
   const artwork = title.artwork.backdrop ?? title.artwork.poster;
   const backdrop = artworkUrl(mediaUrl, artwork, "billboard");
-  // A poster in place of a backdrop keeps its top, where faces and titles usually are.
   const position = title.artwork.backdrop === null ? "top" : "center";
   const scrim = useThemeColor("--color-scrim");
   const page = useThemeColor("--color-bg");
@@ -230,7 +228,6 @@ function PageDots({
   );
 }
 
-/** The featured title's detail once it loads, for its facts, overview, and Play. */
 const useFeaturedDetail = (title: TitleCard): TitleDetail | null => {
   const { profile } = useActiveProfile();
   const detail = useCommandQuery("titles.get", { profileId: profile.id, titleId: title.id });
@@ -238,7 +235,6 @@ const useFeaturedDetail = (title: TitleCard): TitleDetail | null => {
   return detail.status === "success" ? detail.data : null;
 };
 
-/** Play, or More Info for a title with no files, and the My List toggle. */
 function HeroActions({
   title,
   detail,
@@ -284,7 +280,6 @@ function HeroActions({
   );
 }
 
-/** An iPad's details: name, facts, overview, and actions bottom left, the page dots bottom right. */
 function BillboardDetails({
   title,
   pages,
@@ -298,7 +293,6 @@ function BillboardDetails({
   const loaded = useFeaturedDetail(title);
   const logo = artworkUrl(mediaUrl, title.artwork.logo, "card");
 
-  // The text lets touches through to the page under it, which opens the title.
   return (
     <View className="absolute inset-x-0 bottom-0 px-8 pb-10 wide:px-12" pointerEvents="box-none">
       <View className="w-full max-w-130 gap-5" pointerEvents="box-none">

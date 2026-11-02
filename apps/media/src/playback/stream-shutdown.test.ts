@@ -65,8 +65,6 @@ describe.skipIf(!hasFfmpeg)("service shutdown", () => {
             ),
           );
         }),
-      // The server and its fixture library start inside the test, which takes longer than the
-      // default five seconds when every test file runs at once.
       60_000,
     );
   });

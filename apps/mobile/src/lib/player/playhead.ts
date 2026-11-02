@@ -10,13 +10,11 @@
  * plays nothing, so a skip after it cannot pass for playing.
  */
 
-/** A position the player reported, and when, on the playing clock in milliseconds. */
 interface Sighting {
   readonly positionMs: number;
   readonly atMs: number;
 }
 
-/** Where a jump the player made on its own landed, and how far it has played on from there. */
 interface Jump {
   readonly first: Sighting;
   readonly last: Sighting;
@@ -38,13 +36,10 @@ export interface Playhead {
  */
 const BEHIND_MS = 10_000;
 
-/** How far ahead of where playing would have taken it a report may land. */
 const AHEAD_MS = 2_000;
 
-/** How long a jump must play on before it is believed. */
 const JUMP_BELIEVED_AFTER_MS = 3_000;
 
-/** The slowest speed a jump must play on at, so a player stuck at zero is never believed. */
 const SLOWEST_RATE = 0.25;
 
 /** A playhead known to be at `positionMs` at `atMs`: a new stream's start, or a seek. */
@@ -53,7 +48,6 @@ export const placed = (positionMs: number, atMs: number): Playhead => ({
   jump: null,
 });
 
-/** Whether a player that could play `reachMs` of media from `from` could have reached `positionMs`. */
 const playsOnFrom = (from: Sighting, positionMs: number, reachMs: number): boolean =>
   positionMs >= from.positionMs - BEHIND_MS && positionMs <= from.positionMs + reachMs + AHEAD_MS;
 
@@ -85,10 +79,6 @@ export const explains = (
   believes(playhead, positionMs, atMs, rate) ||
   extendedJump(playhead, { positionMs, atMs }, rate) !== null;
 
-/**
- * How much media the player could have played from `jump.first` to `atMs`, playing at `rate` since
- * its last report.
- */
 const playableTo = (jump: Jump, atMs: number, rate: number): number =>
   jump.playableMs + Math.max(0, atMs - jump.last.atMs) * rate;
 
@@ -110,7 +100,6 @@ const extendedJump = (playhead: Playhead, sighting: Sighting, rate: number): Jum
     : null;
 };
 
-/** Whether a jump moved at least the slowest speed over its playing, so it is not stuck. */
 const playsOn = (jump: Jump): boolean =>
   jump.last.positionMs - jump.first.positionMs >= (jump.last.atMs - jump.first.atMs) * SLOWEST_RATE;
 

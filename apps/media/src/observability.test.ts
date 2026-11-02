@@ -10,10 +10,6 @@ import { testConfigLayer } from "./testing/test-config.ts";
 
 const base64url = (text: string): string => Buffer.from(text, "utf8").toString("base64url");
 
-/**
- * Values that must never reach a log line or an export, in the shapes they really take. They are
- * made up; the token is built here so no token-shaped literal sits in the source.
- */
 const secrets = {
   playbackToken: `${base64url('{"aud":"media"}')}.${base64url("signature-secret")}`,
   apiKey: "mk_AbCdEfGh_0123456789abcdefghijklmnopqrstuv",

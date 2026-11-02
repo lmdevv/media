@@ -68,7 +68,6 @@ import * as StreamOwners from "./stream-owners.ts";
 import * as TranscodeSpace from "./transcode-space.ts";
 import { hlsCommandArgs } from "./transcode-command.ts";
 
-/** Who holds a transcode or remux slot: a negotiation, by its session and ticket. */
 interface Claim {
   readonly sessionId: PlaybackSessionId;
   readonly ticket: number;
@@ -125,7 +124,6 @@ export type StartError =
   | TranscodeFailed
   | KeyframeIndexFailed;
 
-/** One negotiation of a playback session's streams; see `negotiate`. */
 interface Negotiation {
   /**
    * Starts the HLS stream the negotiation chose, replacing the session's streams.
@@ -863,7 +861,6 @@ const make = Effect.gen(function* () {
     const ahead = startOf(produced.head) - startOf(requested);
     const paused = yield* Ref.get(generation.paused);
 
-    // A release can stop this run while the refresh reads its folder.
     if (isClosed(generation.scope)) return;
 
     if (!paused && ahead > pauseAhead) {
@@ -1497,7 +1494,6 @@ const make = Effect.gen(function* () {
             ),
         });
 
-        // A newer generation may have deleted the init segment chosen above.
         const info = yield* fs
           .stat(initPath)
           .pipe(

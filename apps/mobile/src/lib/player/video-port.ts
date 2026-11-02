@@ -238,7 +238,6 @@ export class VideoPort implements PlayerPort {
       currentTime !== null &&
       explains(this.#playhead, currentTime * 1000, this.#played(), this.playbackRate());
 
-    // Where it started or stopped is a sighting too, so the controls show it until the next report.
     if (currentTime !== null) this.#sight(currentTime);
     this.#nativePlaying(isPlaying);
 
@@ -370,8 +369,6 @@ export class VideoPort implements PlayerPort {
     const positionMs = reportedMs(currentTime);
     const atMs = this.#played();
 
-    // What AVPlayer played until now counts at the rate it played at. Its position is sighted only
-    // where playing explains it: reading it now is no report of where it is.
     if (positionMs !== null && explains(this.#playhead, positionMs, atMs, video.playbackRate)) {
       this.#sight(currentTime);
     } else {

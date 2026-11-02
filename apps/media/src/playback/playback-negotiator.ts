@@ -193,7 +193,6 @@ const make = Effect.gen(function* () {
     };
 
     if (PlaybackPlan.$is("Direct")(plan)) {
-      // A newer negotiation began meanwhile and reports its own mode.
       if (yield* negotiation.direct) {
         yield* reporter.report(
           PlaybackReporter.PlaybackEvent.cases.ModeChosen.make({

@@ -2,8 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { Suspense, lazy } from "react";
 
-// Like the kit gallery, the track menu bench exists only in development: in production builds the
-// condition is the constant `false`, so its module is never imported or bundled.
 const Bench = import.meta.env.DEV
   ? lazy(() =>
       import("@/dev/track-menu-bench").then((module) => ({ default: module.TrackMenuBench })),

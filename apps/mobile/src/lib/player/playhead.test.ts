@@ -56,7 +56,6 @@ describe("reported", () => {
   it("never believes a player skipping ahead faster than it plays", () => {
     let playhead = placed(2_160_000, 0);
 
-    // Each failed segment moves AVPlayer six seconds on in a few milliseconds.
     for (let segment = 1; segment <= 100; segment += 1) {
       playhead = reported(playhead, 2_160_000 + segment * 6_000, segment * 10, 1);
     }
@@ -90,7 +89,6 @@ describe("playedOnFromJumpMs", () => {
         fc.constantFrom(0.5, 1, 2),
         fc.integer({ min: 1, max: 11 }),
         (jumpMs, rate, reports) => {
-          // Far from the believed position, so each report is the jump's, not believed playing.
           const fromMs = jumpMs + 60_000;
           let playhead = reported(placed(0, 0), fromMs, REPORT_MS, rate);
 

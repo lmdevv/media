@@ -6,7 +6,6 @@ import type { GridSpacing } from "./browse";
 import { widthClassOf } from "./layout";
 import type { WidthClass } from "./layout";
 
-/** A CSS variable as Uniwind reads it. */
 type CssValue = string | number | undefined;
 
 const breakpoint = (name: string, value: CssValue): number => {

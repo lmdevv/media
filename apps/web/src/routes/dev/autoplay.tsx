@@ -2,8 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { Suspense, lazy } from "react";
 
-// Like the kit gallery, the next-episode bench exists only in development: in production builds the
-// condition is the constant `false`, so its module is never imported or bundled.
 const Bench = import.meta.env.DEV
   ? lazy(() => import("@/dev/autoplay-bench").then((module) => ({ default: module.AutoplayBench })))
   : undefined;

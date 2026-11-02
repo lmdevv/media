@@ -1,7 +1,5 @@
 name: Demo library
 
-# Builds the demo library image when what goes into it changes. On main it publishes the version
-# named in deploy/demo-library/image, once; a published version is never overwritten.
 on:
   pull_request:
     paths: &paths
@@ -24,8 +22,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # The full set is about 7.5 GB from archive.org and download.blender.org, and the Feature Test
-    # encodes an HDR10 HEVC version; both are slow on a shared runner.
     timeout-minutes: 240
     permissions:
       contents: read

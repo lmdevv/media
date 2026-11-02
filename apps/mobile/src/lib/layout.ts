@@ -18,10 +18,8 @@ export const widthClassOf = (width: number, breakpoints: WidthBreakpoints): Widt
   return width >= breakpoints.regular ? "regular" : "compact";
 };
 
-/** The share of the window's height an iPad's Home billboard takes, per Paper's layout rules. */
 const BILLBOARD_SHARE = { regular: 0.62, wide: 0.7 } as const;
 
-/** The billboard never gets shorter or taller than this on an iPad, in points. */
 const BILLBOARD_MIN = 480;
 
 const BILLBOARD_MAX = 760;

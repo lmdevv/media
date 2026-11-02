@@ -293,13 +293,10 @@ const showingSubtitle = () =>
 
 const CONGESTED_SEGMENT_DELAY_MS = 4_000;
 
-/** A stream's HLS media playlist, by stream ID. */
 const HLS_PLAYLIST = /\/media\/hls\/([^/]+)\/\d+\/index\.m3u8/u;
 
-/** One HLS segment, by stream ID and segment index. */
 const HLS_SEGMENT = /\/media\/hls\/([^/]+)\/\d+\/(\d+)\.m4s/u;
 
-/** Where a resume first lands: early in a segment, with room to play before its end. */
 const PROBE_RESUME_MS = Milliseconds.make(10_500);
 
 /**
@@ -311,17 +308,14 @@ const EDGE_MARGIN_MS = 25;
 /** How far short of its buffered end a stalled element may stop: about two frames at 12 fps. */
 const STALLED_SHORT_OF_EDGE_SECONDS = 0.2;
 
-/** The widest gap between the resume target and the buffered end that still holds the seek. */
 const EDGE_WINDOW_SECONDS = 0.05;
 
-/** One planned segment of an HLS stream, in seconds from the start of the film. */
 interface PlannedSegment {
   readonly index: number;
   readonly start: number;
   readonly end: number;
 }
 
-/** The segment of a VOD media `playlist` that holds `seconds`. */
 const segmentHolding = (playlist: string, seconds: number): PlannedSegment | undefined => {
   const durations = playlist
     .split("\n")
@@ -340,7 +334,6 @@ const segmentHolding = (playlist: string, seconds: number): PlannedSegment | und
   return undefined;
 };
 
-/** The end of the player's buffered range that holds `seconds`, or null outside every range. */
 const bufferedEnd = (target: Page, seconds: number) =>
   target.getByTestId("player-video").evaluate((element, at) => {
     if (!(element instanceof HTMLVideoElement)) throw new Error("The player is not a video");
@@ -769,8 +762,6 @@ test("a picture subtitle burns into a transcode and back out; a lower quality tr
 test("pausing while a stream moves to where it resumes keeps the position", async () => {
   const earlier = new Set((await owner.sdk.query("playback.active", {})).map(({ id }) => id));
 
-  // Leaves the player and waits for its session to end, which stops its stream and saves its
-  // position before the next resume is seeded.
   const leavePlayer = async () => {
     await leaveWithEscape(page);
     await expect
@@ -804,9 +795,6 @@ test("pausing while a stream moves to where it resumes keeps the position", asyn
 
   const profile = await adultProfile(owner.sdk);
 
-  // Resumes the 480p stream at `positionMs` with every segment after the one it starts in held,
-  // so that segment is all the element has. The plan comes from the stream's own playlist, read
-  // before the page gets it, so no layout of the generated clip is assumed.
   const resumeHeld = async (positionMs: Milliseconds) => {
     const { sessionId } = await owner.sdk.mutate("playback.createSession", {
       profileId: profile.id,
@@ -816,7 +804,6 @@ test("pausing while a stream moves to where it resumes keeps the position", asyn
 
     await owner.sdk.mutate("playback.endSession", { sessionId, positionMs });
 
-    // The segment each stream starts in, by stream ID.
     const planned = new Map<string, PlannedSegment>();
 
     const readPlan = async (route: Route) => {
@@ -863,7 +850,6 @@ test("pausing while a stream moves to where it resumes keeps the position", asyn
     };
   };
 
-  // First resume early in a segment and let it play until it stalls where that segment ends.
   const probeAt = PROBE_RESUME_MS / 1000;
   const probe = await resumeHeld(PROBE_RESUME_MS);
 
@@ -893,8 +879,6 @@ test("pausing while a stream moves to where it resumes keeps the position", asyn
   await leavePlayer();
   await probe.release();
 
-  // Then resume just short of that end. A quality switch starts its stream the same way, but from
-  // wherever the old one had got to; resuming starts it at an exact position.
   const target = Milliseconds.make(Math.round(edge * 1000) - EDGE_MARGIN_MS);
   const start = target / 1000;
   const resumed = await resumeHeld(target);
@@ -920,7 +904,6 @@ test("pausing while a stream moves to where it resumes keeps the position", asyn
   ).toBe(true);
   expect((await videoState(page)).currentTime).toBeCloseTo(start, 3);
 
-  // Notes what the element reports when its pause event arrives, after the player has heard it.
   await video.evaluate((element) => {
     element.addEventListener(
       "pause",

@@ -241,7 +241,6 @@ const REFRESH_TIMEOUT = Duration.seconds(30);
  */
 const DEFAULT_REFRESH_FAILURE_LIMIT = Duration.minutes(1);
 
-/** Failed refreshes in a row before the connection runs signed out, however long they took. */
 const REFRESH_FAILURES_BEFORE_RECONNECTING = 3;
 
 /**
@@ -251,7 +250,6 @@ const REFRESH_FAILURES_BEFORE_RECONNECTING = 3;
  */
 const RETRY_GAP_LIMIT = Duration.minutes(2);
 
-/** How often a session the server keeps failing to renew is retried, at most. */
 const renewalSchedule = Schedule.min([
   Schedule.exponential(Duration.seconds(1)),
   Schedule.spaced(Duration.seconds(30)),
@@ -288,10 +286,6 @@ export const make = Effect.fn("Auth.make")(function* (options: Options) {
 
   const refreshFailureLimit = options.refreshFailureLimit ?? DEFAULT_REFRESH_FAILURE_LIMIT;
 
-  /**
-   * The session the server has failed the last `failures` refreshes of, the time spent retrying
-   * them on the monotonic clock, and when the last one failed.
-   */
   const failing = yield* Ref.make(
     Option.none<{
       readonly session: StoredSession;
@@ -521,7 +515,6 @@ export const make = Effect.fn("Auth.make")(function* (options: Options) {
     yield* FiberHandle.run(renewal, renewInBackground(seen));
   });
 
-  /** Signs the connection in again after a renewal while it ran signed out. */
   const reconnect = Effect.gen(function* () {
     if (!(yield* SubscriptionRef.get(reconnecting))) return;
     yield* transport.setAuth(tokenSource);

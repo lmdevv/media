@@ -47,7 +47,6 @@ export function CollectionCard({
           <Text variant="railCardName" numberOfLines={1}>
             {collection.name}
           </Text>
-          {/* An iPad's rail cards carry the count under the name, as the wide cards do. */}
           <Text variant="meta" tone="muted" className="hidden regular:flex">
             {count}
           </Text>

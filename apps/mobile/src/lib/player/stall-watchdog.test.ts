@@ -7,7 +7,6 @@ import type { StallCheck, StallWatch } from "./stall-watchdog";
 
 const SECOND = 1_000;
 
-/** Runs checks once a second from `from` for `seconds`, with what `see` says at each. */
 const run = (
   start: StallWatch,
   from: number,
@@ -106,7 +105,6 @@ describe("checked", () => {
       loading: false,
     }));
 
-    // The new stream plays two seconds and stalls again.
     const second = run(first.watch, 15 * SECOND, 40, (atMs) => ({
       positionMs: STUCK_AT + Math.min(atMs - 15 * SECOND, 2 * SECOND),
       intended: true,
