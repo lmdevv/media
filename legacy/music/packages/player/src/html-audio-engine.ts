@@ -1,5 +1,11 @@
 import { delay, MAX_BUSY_RETRIES } from "./busy-retry";
-import type { EngineErrorReason, EngineEvent, EngineSource, PlayerEngine } from "./engine";
+import type {
+  EnginePlayback,
+  EngineErrorReason,
+  EngineEvent,
+  EngineSource,
+  PlayerEngine,
+} from "./engine";
 import { primeInGesture } from "./prime-audio";
 import { endedEarly, OffsetProbe, offsetUrl, probeOffset } from "./stream-offset";
 
@@ -106,6 +112,16 @@ export class HtmlAudioEngine implements PlayerEngine {
     for (const slot of this.#slots) this.#attach(slot);
   }
 
+  /** Reads the current element, or the target of a stream being reopened. */
+  samplePlayback(): EnginePlayback {
+    const slot = this.#currentSlot();
+
+    return {
+      positionMs: this.#positionOf(slot),
+      playing: slot.reopening?.play ?? (slot.source !== null && !slot.element.paused),
+    };
+  }
+
   /** Loads `source` into the current element, seeks to `startMs`, and plays when `autoplay`. */
   async load(source: EngineSource, startMs: number, autoplay: boolean): Promise<void> {
     this.#generation += 1;
@@ -131,14 +147,12 @@ export class HtmlAudioEngine implements PlayerEngine {
     if (generation !== this.#generation || !ready) return;
 
     if (slot.live && startMs >= LIVE_RESTART_MS) {
+      const reopening = { positionMs: startMs, play: autoplay, abort: new AbortController() };
+      slot.reopening = reopening;
       this.#emit({ type: "time", positionMs: startMs });
 
       if (!autoplay) this.#emit({ type: "paused" });
-      await this.#reopen(slot, {
-        positionMs: startMs,
-        play: autoplay,
-        abort: new AbortController(),
-      });
+      await this.#reopen(slot, reopening);
 
       return;
     }

@@ -1,3 +1,4 @@
+import { ControllerId } from "@music/commands/ids";
 import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { Device, Jam, QueueEntry, RepeatMode } from "@music/commands/models";
 import { makeMusicClient } from "@music/sdk/client";
@@ -220,6 +221,7 @@ const createController = (
   const sources = streamSources(client, { now: Date.now, resolveUrl: (url) => url });
 
   return new PlaybackController(serverSession(client), sources, engines, {
+    controllerId: ControllerId.make(crypto.randomUUID()),
     deviceId: loadDeviceId(storage, () => crypto.randomUUID()),
     device: describeDevice(navigator.userAgent, navigator.maxTouchPoints),
     canPlay: (mimeType) => probe.canPlayType(mimeType) !== "",

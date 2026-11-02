@@ -1,6 +1,13 @@
 import { createServer } from "node:http";
 
-import { AlbumId, ArtistId, DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
+import {
+  AlbumId,
+  ArtistId,
+  ControllerId,
+  DeviceId,
+  QueueItemId,
+  TrackId,
+} from "@music/commands/ids";
 import { StreamProfile } from "@music/commands/models";
 import type { PlaybackState, QueueEntry } from "@music/commands/models";
 import { makeMusicClient } from "@music/sdk/client";
@@ -17,6 +24,8 @@ import { streamSources } from "./source-resolver";
 import type { StreamQuality } from "./stream-quality";
 
 const deviceId = DeviceId.make("this-browser");
+
+const controllerId = ControllerId.make("this-controller");
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
@@ -45,7 +54,7 @@ const entry = (id: string, itemId: string): QueueEntry => ({
 const song = entry("song", "1");
 
 type SessionFields = Partial<
-  Pick<PlaybackState, "activeDevice" | "queue" | "index" | "positionMs">
+  Pick<PlaybackState, "activeDevice" | "queue" | "index" | "positionMs" | "control">
 >;
 
 const session = (
@@ -83,23 +92,45 @@ interface EngineRecord {
   readonly created: Array<EngineKind>;
   readonly loads: Array<Load>;
   plays: number;
+  readonly seeks: Array<number>;
 }
 
 const instantEngine = (
   kind: EngineKind,
   record: EngineRecord,
-): PlayerEngine & { readonly emit: (event: EngineEvent) => void } => {
+  ready: () => Promise<void> = async () => {},
+): PlayerEngine & {
+  readonly emit: (event: EngineEvent) => void;
+  readonly notify: (event: EngineEvent) => void;
+} => {
   const listeners = new Set<(event: EngineEvent) => void>();
-  const emit = (event: EngineEvent): void => listeners.forEach((listener) => listener(event));
+  let generation = 0;
+  let paused = true;
+  let positionMs = 0;
+  const notify = (event: EngineEvent): void => listeners.forEach((listener) => listener(event));
+
+  const emit = (event: EngineEvent): void => {
+    if (event.type === "time") positionMs = event.positionMs;
+
+    if (event.type === "playing") paused = false;
+    else if (event.type === "paused") paused = true;
+    notify(event);
+  };
 
   record.created.push(kind);
 
   return {
     emit,
+    notify,
+    samplePlayback: () => ({ positionMs, playing: !paused }),
     load: async (source, startMs, autoplay) => {
+      const loading = ++generation;
       record.loads.push({ kind, url: source.url, startMs });
+      await ready();
 
-      if (autoplay) emit({ type: "playing" });
+      if (loading !== generation) return;
+      positionMs = startMs;
+      emit({ type: autoplay ? "playing" : "paused" });
     },
     preload: () => {},
     play: async () => {
@@ -107,9 +138,16 @@ const instantEngine = (
       emit({ type: "playing" });
     },
     pause: () => emit({ type: "paused" }),
-    seek: () => {},
+    seek: (target) => {
+      record.seeks.push(target);
+      emit({ type: "time", positionMs: target });
+    },
     setVolume: () => {},
-    unload: () => {},
+    unload: () => {
+      generation += 1;
+      paused = true;
+      positionMs = 0;
+    },
     subscribe: (listener) => {
       listeners.add(listener);
 
@@ -207,6 +245,7 @@ const testHost = (
 
 const setup = async (options: {
   readonly gapless: boolean;
+  readonly loadReady?: () => Promise<void>;
   readonly quality?: StreamQuality;
   readonly serverAheadMs?: number;
   readonly ttlMs?: number;
@@ -215,7 +254,7 @@ const setup = async (options: {
   const media = await fakeMediaService();
   const mutations: Array<Mutation> = [];
   const clock = { now: 1_000_000, monotonic: 0 };
-  const record: EngineRecord = { created: [], loads: [], plays: 0 };
+  const record: EngineRecord = { created: [], loads: [], plays: 0, seeks: [] };
   const engines: Array<ReturnType<typeof instantEngine>> = [];
   const host = testHost(options.resolveUrl);
 
@@ -234,7 +273,7 @@ const setup = async (options: {
     {
       mse: options.gapless ? { flac: true, changeType: true } : null,
       create: (kind) => {
-        const engine = instantEngine(kind, record);
+        const engine = instantEngine(kind, record, options.loadReady);
 
         engines.push(engine);
 
@@ -243,6 +282,7 @@ const setup = async (options: {
     },
     {
       deviceId,
+      controllerId,
       device: { name: "Test", kind: "web" },
       canPlay: () => true,
       now: () => clock.now,
@@ -277,6 +317,264 @@ const setup = async (options: {
 };
 
 describe("PlaybackController", () => {
+  it("samples current output when an older playing callback arrives after pause", async () => {
+    const { controller, mutations, engine, stop } = await setup({ gapless: false });
+
+    try {
+      controller.sync(session(true, 1));
+      await vi.waitFor(() => expect(reports(mutations)).toHaveLength(1));
+      controller.sync(session(false, 2));
+      engine().notify({ type: "playing" });
+
+      expect(reports(mutations).at(-1)).toMatchObject({ playing: false });
+      expect(controller.getSnapshot().engineStatus).toBe("paused");
+    } finally {
+      stop();
+    }
+  });
+
+  it("samples current output when an older paused callback arrives after resume", async () => {
+    const { controller, mutations, engine, stop } = await setup({ gapless: false });
+
+    try {
+      controller.sync(session(true, 1));
+      await vi.waitFor(() => expect(reports(mutations)).toHaveLength(1));
+      controller.sync(session(false, 2));
+      controller.sync(session(true, 3));
+      engine().notify({ type: "paused" });
+
+      expect(reports(mutations).at(-1)).toMatchObject({ playing: true });
+      expect(controller.getSnapshot().engineStatus).toBe("playing");
+    } finally {
+      stop();
+    }
+  });
+
+  it("keeps a sent measurement stamped with the control it followed", async () => {
+    const { controller, mutations, engine, stop } = await setup({ gapless: false });
+
+    try {
+      controller.sync(session(true, 1, false, { control: { revision: 1, seek: 1, transport: 1 } }));
+      await vi.waitFor(() => expect(reports(mutations)).toHaveLength(1));
+      const held = reports(mutations)[0];
+      controller.sync(
+        session(false, 2, false, { control: { revision: 2, seek: 1, transport: 2 } }),
+      );
+      engine().notify({ type: "playing" });
+
+      expect(held).toMatchObject({ playing: true, controlRevision: 1 });
+      expect(reports(mutations).at(-1)).toMatchObject({ playing: false, controlRevision: 2 });
+    } finally {
+      stop();
+    }
+  });
+
+  it("catches up a genuine output stop after a concurrent seek without resuming it", async () => {
+    const { controller, mutations, engine, record, clock, stop } = await setup({ gapless: false });
+
+    try {
+      controller.sync(
+        session(true, clock.now, false, { control: { revision: 1, seek: 1, transport: 1 } }),
+      );
+      await vi.waitFor(() => expect(reports(mutations)).toHaveLength(1));
+      engine().emit({ type: "paused" });
+      controller.sync(
+        session(true, clock.now, false, {
+          positionMs: 3000,
+          control: { revision: 2, seek: 2, transport: 1 },
+        }),
+      );
+
+      expect(record.plays).toBe(0);
+      expect(reports(mutations).at(-1)).toMatchObject({
+        playing: false,
+        positionMs: 3000,
+        controlRevision: 2,
+      });
+      const count = reports(mutations).length;
+      controller.sync(
+        session(true, clock.now, false, {
+          positionMs: 3000,
+          control: { revision: 2, seek: 2, transport: 1 },
+        }),
+      );
+      expect(reports(mutations)).toHaveLength(count);
+    } finally {
+      stop();
+    }
+  });
+
+  it.each([
+    { name: "pause", playing: false, positionMs: 0, seek: 1, transport: 2 },
+    { name: "seek", playing: true, positionMs: 3000, seek: 2, transport: 1 },
+  ])("applies a newer $name while an engine load waits for audio", async (target) => {
+    const ready = Promise.withResolvers<void>();
+
+    const { controller, mutations, record, engine, clock, stop } = await setup({
+      gapless: false,
+      loadReady: () => ready.promise,
+    });
+
+    try {
+      controller.sync(
+        session(true, clock.now, false, { control: { revision: 1, seek: 1, transport: 1 } }),
+      );
+      await vi.waitFor(() => expect(record.loads).toHaveLength(1));
+      expect(reports(mutations)).toEqual([]);
+      controller.sync(
+        session(target.playing, clock.now, false, {
+          positionMs: target.positionMs,
+          control: { revision: 2, seek: target.seek, transport: target.transport },
+        }),
+      );
+      await vi.waitFor(() => expect(record.loads).toHaveLength(target.name === "pause" ? 1 : 2));
+      ready.resolve();
+      await vi.waitFor(() => expect(reports(mutations)).toHaveLength(1));
+
+      expect(engine().samplePlayback().playing).toBe(target.playing);
+      expect(reports(mutations)[0]).toMatchObject({
+        controlRevision: 2,
+        playing: target.playing,
+        positionMs: target.positionMs,
+      });
+    } finally {
+      ready.resolve();
+      stop();
+    }
+  });
+
+  it("keeps a local seek target through loading and its own echo", async () => {
+    const ready = Promise.withResolvers<void>();
+
+    const { controller, record, mutations, clock, stop } = await setup({
+      gapless: false,
+      loadReady: () => ready.promise,
+    });
+
+    try {
+      controller.sync(
+        session(true, clock.now, false, { control: { revision: 1, seek: 1, transport: 1 } }),
+      );
+      await vi.waitFor(() => expect(record.loads).toHaveLength(1));
+      await controller.seek(3000);
+      expect(mutations).toContainEqual({
+        name: "playback.seek",
+        args: { positionMs: 3000, appliedBy: controllerId },
+      });
+      await vi.waitFor(() => expect(record.loads).toHaveLength(2));
+      controller.sync(
+        session(true, clock.now, false, {
+          positionMs: 3000,
+          control: { revision: 2, seek: 2, transport: 1, appliedBy: controllerId },
+        }),
+      );
+      ready.resolve();
+      await vi.waitFor(() => expect(reports(mutations)).toHaveLength(1));
+      expect(record.loads).toHaveLength(2);
+      expect(reports(mutations)[0]).toMatchObject({
+        positionMs: 3000,
+        playing: true,
+        controlRevision: 2,
+      });
+    } finally {
+      ready.resolve();
+      stop();
+    }
+  });
+
+  it("applies another controller's seek when both controllers share a device ID", async () => {
+    const { controller, mutations, record, clock, stop } = await setup({ gapless: false });
+
+    try {
+      controller.sync(
+        session(false, clock.now, false, { control: { revision: 1, seek: 1, transport: 1 } }),
+      );
+      await vi.waitFor(() => expect(reports(mutations)).toHaveLength(1));
+      controller.sync(
+        session(false, clock.now, false, {
+          positionMs: 60_000,
+          control: {
+            revision: 2,
+            seek: 2,
+            transport: 1,
+            appliedBy: ControllerId.make("this-browser"),
+          },
+        }),
+      );
+
+      expect(record.seeks).toEqual([60_000]);
+      expect(controller.positionMs()).toBe(60_000);
+    } finally {
+      stop();
+    }
+  });
+
+  it("keeps local seek echoes from seeking twice or undoing newer optimistic seeks", async () => {
+    const { controller, mutations, record, clock, stop } = await setup({ gapless: false });
+
+    try {
+      controller.sync(
+        session(false, clock.now, false, { control: { revision: 1, seek: 1, transport: 1 } }),
+      );
+      await vi.waitFor(() => expect(reports(mutations)).toHaveLength(1));
+      await controller.seek(5000);
+      await controller.seek(5500);
+      controller.sync(
+        session(false, clock.now, false, {
+          positionMs: 5000,
+          control: { revision: 2, seek: 2, transport: 1, appliedBy: controllerId },
+        }),
+      );
+      controller.sync(
+        session(false, clock.now, false, {
+          positionMs: 5500,
+          control: { revision: 3, seek: 3, transport: 1, appliedBy: controllerId },
+        }),
+      );
+      expect(record.seeks).toEqual([5000, 5500]);
+      controller.sync(
+        session(false, clock.now, false, {
+          positionMs: 5000,
+          control: { revision: 4, seek: 4, transport: 1 },
+        }),
+      );
+      expect(record.seeks).toEqual([5000, 5500, 5000]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("does not publish a paused measurement when a load fails", async () => {
+    const { controller, engine, mutations, clock, stop } = await setup({ gapless: false });
+
+    try {
+      engine().load = async () =>
+        engine().notify({ type: "error", reason: "network", message: "offline" });
+      controller.sync(
+        session(true, clock.now, false, { control: { revision: 1, seek: 1, transport: 1 } }),
+      );
+      await vi.waitFor(() => expect(controller.getSnapshot().engineStatus).toBe("error"));
+      expect(reports(mutations)).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("keeps an error visible when output pauses", async () => {
+    const { controller, engine, mutations, stop } = await setup({ gapless: false });
+
+    try {
+      controller.sync(session(true, 1));
+      await vi.waitFor(() => expect(reports(mutations)).toHaveLength(1));
+      await controller.attempt(Promise.reject(new Error("refused transfer")));
+      const error = controller.getSnapshot().error;
+      engine().emit({ type: "paused" });
+      expect(controller.getSnapshot().error).toBe(error);
+    } finally {
+      stop();
+    }
+  });
+
   it("plays a stream from the URL the host resolves the signed one to", async () => {
     const { controller, media, record, stop } = await setup({
       gapless: false,
@@ -364,7 +662,7 @@ describe("PlaybackController", () => {
     const media = await fakeMediaService();
     const mutations: Array<Mutation> = [];
     const recording = recordingTransport(mutations, media.base, () => 1000);
-    const record: EngineRecord = { created: [], loads: [], plays: 0 };
+    const record: EngineRecord = { created: [], loads: [], plays: 0, seeks: [] };
 
     const client = makeMusicClient({
       query: (reference, args) => recording.query(reference, args),
@@ -386,6 +684,7 @@ describe("PlaybackController", () => {
       { mse: null, create: (kind) => instantEngine(kind, record) },
       {
         deviceId,
+        controllerId,
         device: { name: "Test", kind: "web" },
         canPlay: () => true,
         now: () => 1000,
@@ -413,7 +712,7 @@ describe("PlaybackController", () => {
   it("reports a pause the browser causes before the server confirms a Play", async () => {
     const { controller, engine, mutations, stop } = await setup({ gapless: false });
     controller.sync(session(false, 1));
-    await vi.waitFor(() => expect(engine()).toBeDefined());
+    await vi.waitFor(() => expect(controller.getSnapshot().engineStatus).toBe("paused"));
     await controller.togglePlay();
     expect(controller.getSnapshot().engineStatus).toBe("playing");
 
@@ -427,7 +726,7 @@ describe("PlaybackController", () => {
     const media = await fakeMediaService();
     const mutations: Array<Mutation> = [];
     const recording = recordingTransport(mutations, media.base, () => 1000);
-    const record: EngineRecord = { created: [], loads: [], plays: 0 };
+    const record: EngineRecord = { created: [], loads: [], plays: 0, seeks: [] };
     let heartbeats = 0;
 
     const flaky: CommandTransport = {
@@ -451,6 +750,7 @@ describe("PlaybackController", () => {
       { mse: null, create: (kind) => instantEngine(kind, record) },
       {
         deviceId,
+        controllerId,
         device: { name: "Test", kind: "web" },
         canPlay: () => true,
         now: () => 1000,

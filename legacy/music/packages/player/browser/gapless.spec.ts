@@ -257,6 +257,56 @@ test.describe("MseEngine", () => {
     await open(page, "mse");
   });
 
+  test("keeps the autoplay sample playing across a codec reset without changeType", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Reflect.deleteProperty(SourceBuffer.prototype, "changeType");
+    });
+    await open(page, "mse");
+    expect(await supportsChangeType(page)).toBe(false);
+    const files = ["song-1.flac?p=fmp4-flac", "song-2.mp3?p=fmp4-aac"] as const;
+
+    const sampled = await page.evaluate(async ([first, second]) => {
+      const harness = window.harness;
+
+      if (harness === undefined) throw new Error("Missing engine");
+
+      const advanced = new Promise<boolean>((resolve) => {
+        const unsubscribe = harness.engine.subscribe((event) => {
+          if (event.type === "advanced") {
+            unsubscribe();
+            resolve(harness.engine.samplePlayback().playing);
+          }
+        });
+      });
+
+      harness.preload(second);
+      await harness.load(first, 87_000, true);
+
+      return advanced;
+    }, files);
+
+    expect(sampled).toBe(true);
+    await waitForEvent(page, "playing", 2);
+    expect(await page.evaluate(() => window.harness?.engine.samplePlayback().playing)).toBe(true);
+  });
+
+  test("samples current output while paused and while a seek lands", async ({ page }) => {
+    await page.evaluate(() => window.harness?.load("song-1.flac?p=fmp4-flac", 0, false));
+    expect(await page.evaluate(() => window.harness?.engine.samplePlayback().playing)).toBe(false);
+    await page.evaluate(() => window.harness?.engine.play());
+    expect(await page.evaluate(() => window.harness?.engine.samplePlayback().playing)).toBe(true);
+    expect(
+      await page.evaluate(() => {
+        window.harness?.engine.pause();
+        window.harness?.engine.seek(3000);
+
+        return window.harness?.engine.samplePlayback();
+      }),
+    ).toEqual({ positionMs: 3000, playing: false });
+  });
+
   test("starts at a position, then seeks inside and far outside the buffer", async ({
     page,
     browserName,

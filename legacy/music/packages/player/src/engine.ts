@@ -64,11 +64,19 @@ export type EngineEvent =
   | { readonly type: "ended" }
   | { readonly type: "error"; readonly message: string; readonly reason: EngineErrorReason };
 
+/** A fresh observation of the current output, including a seek target still landing. */
+export interface EnginePlayback {
+  readonly positionMs: number;
+  readonly playing: boolean;
+}
+
 /**
  * Plays one source at a time through an audio element. `MseEngine` plays gaplessly through Media
  * Source Extensions; `HtmlAudioEngine` is the plain HTML audio fallback.
  */
 export interface PlayerEngine {
+  /** Samples current output rather than replaying a possibly delayed event. */
+  samplePlayback(): EnginePlayback;
   /** Replaces whatever is loaded and starts at `startMs`. Resolves once playback can begin. */
   load(source: EngineSource, startMs: number, autoplay: boolean): Promise<void>;
   /** Queues the next source so it starts without a gap when the current one ends. */

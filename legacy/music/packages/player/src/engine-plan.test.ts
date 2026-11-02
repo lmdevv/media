@@ -33,6 +33,7 @@ const a = track("a");
 const b = track("b");
 
 const view = (overrides: Partial<SessionView> = {}): SessionView => ({
+  ownSeek: false,
   active: true,
   index: 0,
   track: a,
@@ -45,14 +46,46 @@ const view = (overrides: Partial<SessionView> = {}): SessionView => ({
 });
 
 const loaded = (trackId: string, positionMs = 0, reportedMs: number | null = null) => ({
+  itemId: QueueItemId.make(`item-${trackId}`),
   trackId: TrackId.make(trackId),
   positionMs,
   reportedMs,
 });
 
-const unloaded = { trackId: null, positionMs: 0, reportedMs: null };
+const unloaded = { itemId: null, trackId: null, positionMs: 0, reportedMs: null };
 
 describe("planEngine", () => {
+  it("applies a small explicit seek even when it equals an earlier report", () => {
+    const before = { ...view({ playing: false }), control: { revision: 1, seek: 1, transport: 1 } };
+
+    const after = {
+      ...view({ playing: false, positionMs: 3000 }),
+      control: { revision: 2, seek: 2, transport: 1 },
+    };
+
+    expect(planEngine(before, after, loaded("a", 2500, 3000), 1000)).toEqual([
+      EngineCommand.Seek({ positionMs: 3000 }),
+    ]);
+  });
+
+  it("reapplies a resume even when pause and resume coalesced to the same value", () => {
+    const before = { ...view(), control: { revision: 1, seek: 1, transport: 1 } };
+    const after = { ...view(), control: { revision: 3, seek: 1, transport: 3 } };
+
+    expect(planEngine(before, after, loaded("a"), 1000)).toEqual([EngineCommand.Play()]);
+  });
+
+  it("does not seek an already advanced entry to the prior entry's position", () => {
+    const before = { ...view(), control: { revision: 1, seek: 1, transport: 1 } };
+
+    const after = {
+      ...view({ playing: false, positionMs: 40_000 }),
+      control: { revision: 2, seek: 1, transport: 2 },
+    };
+
+    expect(planEngine(before, after, loaded("b", 100), 1000)).toEqual([EngineCommand.Pause()]);
+  });
+
   it("loads the current entry at the live position on the first snapshot", () => {
     expect(planEngine(null, view({ positionMs: 5000, updatedAt: 1000 }), unloaded, 3000)).toEqual([
       EngineCommand.SetVolume({ volume: 1 }),
@@ -181,6 +214,7 @@ describe("planEngine", () => {
     .map(([id, durationMs]) => track(id, durationMs));
 
   const sessionArbitrary: fc.Arbitrary<SessionView> = fc.record({
+    ownSeek: fc.boolean(),
     active: fc.boolean(),
     index: fc.integer({ min: 0, max: 20 }),
     track: fc.option(trackArbitrary, { nil: null }),
@@ -192,6 +226,10 @@ describe("planEngine", () => {
   });
 
   const localArbitrary = fc.record({
+    itemId: fc.option(
+      fc.constantFrom("item-a", "item-b", "item-c").map((id) => QueueItemId.make(id)),
+      { nil: null },
+    ),
     trackId: fc.option(
       fc.constantFrom("a", "b", "c").map((id) => TrackId.make(id)),
       { nil: null },
@@ -226,7 +264,13 @@ describe("planEngine", () => {
         nowArbitrary,
         (session, positionMs, now) => {
           if (session.track === null) return;
-          const local = { trackId: session.track.id, positionMs, reportedMs: null };
+
+          const local = {
+            itemId: session.track.itemId,
+            trackId: session.track.id,
+            positionMs,
+            reportedMs: null,
+          };
 
           expect(planEngine(session, session, local, now)).toEqual(
             session.active ? [] : [EngineCommand.Unload()],

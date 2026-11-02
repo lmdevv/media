@@ -37,6 +37,12 @@ const messageOf = (result: Result.Result<WireArgs, UsageError>): string =>
   Result.match(result, { onSuccess: () => "", onFailure: (error) => error.message });
 
 describe("deriveFlags", () => {
+  it("keeps player-only seek metadata out of flags", () => {
+    expect(deriveFlags(commands["playback.seek"].args).flags.map((flag) => flag.key)).toEqual([
+      "positionMs",
+    ]);
+  });
+
   it("derives one flag per field kind", () => {
     const Sample = Schema.Struct({
       title: Schema.String,

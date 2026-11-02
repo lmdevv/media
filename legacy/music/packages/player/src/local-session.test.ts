@@ -62,6 +62,70 @@ const session = fc
     })),
   );
 
+describe("local control ordering", () => {
+  it("keeps a natural advance when an older stamped report arrives afterward", () => {
+    const context = contextOf(["a", "b"]);
+    const initial = seedLocal(server(["a", "b"]), phone.id);
+    const held = { ...report(initial, 0, 100), controlRevision: 0 };
+
+    const advanced = run(
+      "playback.report",
+      initial,
+      { ...report(initial, 1, 145), controlRevision: 0 },
+      context,
+    );
+
+    const afterOld = run("playback.report", advanced, held, context);
+
+    expect(afterOld).toMatchObject({ index: 1, positionMs: 145 });
+
+    const fresh = run(
+      "playback.report",
+      afterOld,
+      { ...report(afterOld, 1, 400), controlRevision: afterOld.control?.revision ?? 0 },
+      context,
+    );
+
+    expect(fresh).toMatchObject({ index: 1, positionMs: 400 });
+    expect(fresh.plays).toEqual([{ trackId: TrackId.make("b"), playedAt: context.now }]);
+  });
+
+  it("fences a delayed report after a local pause and seek, then accepts a fresh sample", () => {
+    const context = contextOf(["a"]);
+    const initial = seedLocal(server(["a"]), phone.id);
+    const paused = run("playback.pause", initial, {}, context);
+    const sought = run("playback.seek", paused, { positionMs: 3000 }, context);
+
+    const args = {
+      deviceId: phone.id,
+      index: 0,
+      positionMs: 145,
+      playing: true,
+      controlRevision: 0,
+    };
+
+    const afterOld = run("playback.report", sought, args, context);
+
+    expect(localView(afterOld, phone)).toMatchObject({ positionMs: 3000, playing: false });
+
+    const fresh = run(
+      "playback.report",
+      afterOld,
+      {
+        ...args,
+        controlRevision: 2,
+        positionMs: 3100,
+        playing: false,
+      },
+      context,
+    );
+
+    expect(localView(fresh, phone)).toMatchObject({ positionMs: 3100, playing: false });
+    const { control: _control, ...legacy } = initial;
+    expect(Schema.decodeSync(LocalSessionState)(legacy).control).toBeUndefined();
+  });
+});
+
 describe("next and previous on this device", () => {
   it("next lands on the first following song this device holds, and stops when none is left", () => {
     fc.assert(
@@ -229,7 +293,13 @@ describe("taking over and handing back", () => {
       fc.property(session, ({ queue, index, repeat, positionMs, playing }) => {
         const before = server(queue, { index, repeat, positionMs, playing });
         const after = localView(seedLocal(before, phone.id), phone);
-        const loaded = { trackId: before.queue[index]?.id ?? null, positionMs, reportedMs: null };
+
+        const loaded = {
+          itemId: before.queue[index]?.itemId ?? null,
+          trackId: before.queue[index]?.id ?? null,
+          positionMs,
+          reportedMs: null,
+        };
 
         expect(
           planEngine(sessionView(before, phone.id), sessionView(after, phone.id), loaded, 45_000),
@@ -256,6 +326,7 @@ describe("taking over and handing back", () => {
     const state = run("playback.volume", skipped, { volume: 0.4 }, contextOf(["a", "c"], 50_000));
 
     expect(offlineResume(state, 52_000)).toEqual({
+      control: { revision: 1, seek: 1, transport: 1 },
       items: [
         { trackId: "a", itemId: "1" },
         { trackId: "b", itemId: "2" },

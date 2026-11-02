@@ -213,7 +213,7 @@ describe("handing the queue back", () => {
 
     const state = await listener.music.read("playback.state", {});
 
-    expect(result).toEqual({ adopted: true });
+    expect(result).toMatchObject({ adopted: true });
     expect(state.queue.map((entry) => entry.id)).toEqual(songs);
 
     expect({
@@ -233,6 +233,33 @@ describe("handing the queue back", () => {
     });
   });
 
+  it("fences local measurements across adoption without reapplying controls already heard", async () => {
+    const { listener, rock } = await setup();
+    await listener.music.run("playback.play", { trackIds: rock, deviceId: PHONE });
+    const localControl = { revision: 50, seek: 49, transport: 50 };
+    const resume = resumeOf(rock, { playing: false, positionMs: 3000, control: localControl });
+
+    expect(await reconcile(listener, [], resume)).toEqual({ adopted: true, controlRevision: 51 });
+    const state = await listener.music.read("playback.state", {});
+    expect(state.control).toEqual({ revision: 51, seek: 49, transport: 50 });
+    await listener.music.run("playback.report", {
+      deviceId: PHONE,
+      controlRevision: 50,
+      index: 0,
+      positionMs: 145,
+      playing: true,
+    });
+    expect((await listener.music.read("playback.position", {})).positionMs).toBe(3000);
+    await listener.music.run("playback.report", {
+      deviceId: PHONE,
+      controlRevision: 51,
+      index: 0,
+      positionMs: 3100,
+      playing: false,
+    });
+    expect((await listener.music.read("playback.position", {})).positionMs).toBe(3100);
+  });
+
   it("adopts a device that still plays although another device took over", async () => {
     const { listener, rock } = await setup();
     await listener.music.run("playback.play", { trackIds: [...rock], deviceId: PHONE });
@@ -246,7 +273,7 @@ describe("handing the queue back", () => {
 
     const state = await listener.music.read("playback.state", {});
 
-    expect(result).toEqual({ adopted: true });
+    expect(result).toMatchObject({ adopted: true });
     expect(state.queue.map((entry) => entry.id)).toEqual([at(rock, 1), at(rock, 2)]);
     expect(state.index).toBe(1);
     expect(state.playing).toBe(true);
@@ -264,11 +291,17 @@ describe("handing the queue back", () => {
     const result = await reconcile(
       listener,
       [play],
-      resumeOf([at(rock, 4)], { positionMs: 30_000 }),
+      resumeOf([at(rock, 4)], {
+        positionMs: 30_000,
+        control: { revision: 50, seek: 49, transport: 50 },
+      }),
     );
 
     expect(result).toEqual({ adopted: false });
-    expect(await listener.music.read("playback.state", {})).toEqual(before);
+    expect(await listener.music.read("playback.state", {})).toEqual({
+      ...before,
+      control: { revision: 51, seek: 2, transport: 2 },
+    });
     expect(before.activeDevice?.id).toBe(LAPTOP);
     expect(await history(listener)).toEqual([play]);
   });
@@ -311,7 +344,7 @@ describe("handing the queue back", () => {
 
     const state = await listener.music.read("playback.state", {});
 
-    expect(result).toEqual({ adopted: true });
+    expect(result).toMatchObject({ adopted: true });
     expect(state.queue.map((entry) => entry.id)).toEqual([at(rock, 0), at(rock, 2)]);
     expect(state.index).toBe(1);
   });
@@ -324,11 +357,17 @@ describe("handing the queue back", () => {
     const result = await reconcile(
       listener,
       [],
-      resumeOf([at(secret, 0), TrackId.make("not-a-song")], { playing: true }),
+      resumeOf([at(secret, 0), TrackId.make("not-a-song")], {
+        playing: true,
+        control: { revision: 50, seek: 49, transport: 50 },
+      }),
     );
 
     expect(result).toEqual({ adopted: false });
-    expect(await listener.music.read("playback.state", {})).toEqual(before);
+    expect(await listener.music.read("playback.state", {})).toEqual({
+      ...before,
+      control: { revision: 51, seek: 1, transport: 1 },
+    });
   });
 
   it("counts the current song once, offline, and not again on the device's next report", async () => {
@@ -452,7 +491,7 @@ describe("what the device changed", () => {
     const { listener, rock } = await setup();
     await listener.music.run("playback.play", { trackIds: [...rock], deviceId: PHONE });
 
-    expect(await reconcile(listener, [], resumeOf([]))).toEqual({ adopted: true });
+    expect(await reconcile(listener, [], resumeOf([]))).toMatchObject({ adopted: true });
 
     const state = await listener.music.read("playback.state", {});
 

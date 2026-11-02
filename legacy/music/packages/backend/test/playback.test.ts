@@ -79,8 +79,17 @@ const mixed = async () => {
   return { ...fixture, jazz, items };
 };
 
-const report = (user: User, index: number, positionMs: number, playing = true) =>
-  user.music.run("playback.report", { deviceId: DEVICE, index, positionMs, playing });
+const report = async (user: User, index: number, positionMs: number, playing = true) => {
+  const state = await user.music.read("playback.state", {});
+
+  return user.music.run("playback.report", {
+    controlRevision: state.control?.revision ?? 0,
+    deviceId: DEVICE,
+    index,
+    positionMs,
+    playing,
+  });
+};
 
 const documentsRead = async (
   user: User,
@@ -573,6 +582,186 @@ describe("position reports and history", () => {
     await report(admin, 0, 30_000, false);
     await report(admin, 0, 30_000);
 
+    expect(await history(admin)).toEqual([at(0, rock)]);
+  });
+});
+
+const captureReport = async (user: User, positionMs: number, playing: boolean) => {
+  const state = await user.music.read("playback.state", {});
+  const entry = state.queue[state.index];
+
+  if (entry === undefined) throw new Error("No playing entry");
+
+  return {
+    controlRevision: state.control?.revision ?? 0,
+    deviceId: DEVICE,
+    index: state.index,
+    trackId: entry.id,
+    itemId: entry.itemId,
+    positionMs,
+    playing,
+  };
+};
+
+describe("controls delivered before older telemetry", () => {
+  it("keeps a paused seek when an older paused measurement arrives", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });
+    await admin.music.run("playback.pause", {});
+    const held = await captureReport(admin, 145, false);
+
+    await admin.music.run("playback.seek", { positionMs: 3000 });
+    await admin.music.run("playback.report", held);
+    expect(await admin.music.read("playback.position", {})).toMatchObject({
+      positionMs: 3000,
+      playing: false,
+    });
+  });
+
+  it("keeps a pause when an older playing measurement arrives", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });
+    const held = await captureReport(admin, 145, true);
+
+    await admin.music.run("playback.pause", {});
+    await admin.music.run("playback.report", held);
+    expect((await admin.music.read("playback.position", {})).playing).toBe(false);
+    expect(await history(admin)).toEqual([]);
+  });
+
+  it("keeps a resume when an older paused measurement arrives", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });
+    await admin.music.run("playback.pause", {});
+    const held = await captureReport(admin, 145, false);
+
+    await admin.music.run("playback.resume", {});
+    await admin.music.run("playback.report", held);
+    expect((await admin.music.read("playback.position", {})).playing).toBe(true);
+  });
+
+  it("rejects the old device report after transfer away and back", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });
+    const held = await captureReport(admin, 145, true);
+    const other = DeviceId.make("other-device");
+    await admin.music.run("devices.heartbeat", { deviceId: other, name: "Phone", kind: "phone" });
+
+    await admin.music.run("playback.transfer", { deviceId: other });
+    await admin.music.run("playback.transfer", { deviceId: DEVICE });
+    await admin.music.run("playback.seek", { positionMs: 3000 });
+    await admin.music.run("playback.report", held);
+
+    expect((await admin.music.read("playback.position", {})).positionMs).toBe(3000);
+  });
+
+  it("accepts a measured natural advance after applying a concurrent pause", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });
+    const state = await admin.music.read("playback.state", {});
+    const next = state.queue[1];
+
+    if (next === undefined) throw new Error("No next entry");
+
+    const held = {
+      controlRevision: state.control?.revision ?? 0,
+      deviceId: DEVICE,
+      index: 1,
+      trackId: next.id,
+      itemId: next.itemId,
+      positionMs: 145,
+      playing: true,
+    };
+
+    await admin.music.run("playback.pause", {});
+    await admin.music.run("playback.report", held);
+    expect((await admin.music.read("playback.position", {})).playing).toBe(false);
+
+    const applied = await captureReport(admin, 145, false);
+    await admin.music.run("playback.report", {
+      ...applied,
+      index: 1,
+      trackId: next.id,
+      itemId: next.itemId,
+    });
+
+    expect((await admin.music.read("playback.state", {})).index).toBe(1);
+    expect((await admin.music.read("playback.position", {})).positionMs).toBe(145);
+    await admin.music.run("playback.resume", {});
+    await admin.music.run("playback.report", await captureReport(admin, 400, true));
+    expect(await history(admin)).toEqual([next.id]);
+  });
+
+  it("keeps a natural advance when another connection delivers an older stamped report", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });
+    const held = await captureReport(admin, 100, true);
+    const next = (await admin.music.read("playback.state", {})).queue[1];
+
+    if (next === undefined) throw new Error("No next entry");
+
+    await admin.music.run("playback.report", {
+      ...held,
+      index: 1,
+      trackId: next.id,
+      itemId: next.itemId,
+      positionMs: 145,
+    });
+    await admin.music.run("playback.report", held);
+
+    expect(await admin.music.read("playback.state", {})).toMatchObject({
+      index: 1,
+      positionMs: 145,
+    });
+    await admin.music.run("playback.report", await captureReport(admin, 400, true));
+    expect((await admin.music.read("playback.position", {})).positionMs).toBe(400);
+    expect(await history(admin)).toEqual([next.id]);
+  });
+
+  it("keeps a stamped report valid when another queue entry is removed", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });
+    const measured = await captureReport(admin, 1234, true);
+
+    await admin.music.run("queue.remove", { itemId: await itemAt(admin, 2) });
+    await admin.music.run("playback.report", measured);
+
+    expect((await admin.music.read("playback.position", {})).positionMs).toBe(1234);
+    expect(await history(admin)).toEqual([at(0, rock)]);
+  });
+
+  it("retains the unstamped legacy player protocol during upgrades", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });
+    await admin.music.run("playback.pause", {});
+    vi.setSystemTime(START + 4000);
+    await admin.music.run("playback.report", {
+      deviceId: DEVICE,
+      index: 1,
+      positionMs: 321,
+      playing: true,
+    });
+
+    expect(await admin.music.read("playback.state", {})).toMatchObject({
+      index: 1,
+      positionMs: 321,
+      playing: true,
+    });
+  });
+
+  it("accepts a fresh measurement after applying the seek and resume", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });
+    await admin.music.run("playback.pause", {});
+    await admin.music.run("playback.seek", { positionMs: 3000 });
+    await admin.music.run("playback.resume", {});
+    const fresh = await captureReport(admin, 3456, true);
+
+    await admin.music.run("playback.report", fresh);
+    expect(await admin.music.read("playback.position", {})).toMatchObject({
+      positionMs: 3456,
+      playing: true,
+    });
     expect(await history(admin)).toEqual([at(0, rock)]);
   });
 });

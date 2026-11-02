@@ -1,8 +1,10 @@
+import type { Buffer } from "node:buffer";
+
 import { JobId, LibraryId } from "@music/commands/ids";
 import { Device, Job, PlaybackState } from "@music/commands/models";
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
-import { Schema } from "effect";
+import type { Page, WebSocketRoute } from "@playwright/test";
+import { Option, Schema } from "effect";
 
 import {
   ADMIN,
@@ -20,7 +22,7 @@ import {
 
 test.describe.configure({ mode: "serial" });
 
-let apiKey = "";
+let apiKey = process.env["MUSIC_E2E_KEY"] ?? "";
 
 const decodeDevices = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Device)));
 
@@ -917,6 +919,7 @@ test("data saver plays through HTML audio, starts a first play at once, and seek
   const bar = page.getByRole("region", { name: "Player" });
   await bar.getByRole("button", { name: "Pause", exact: true }).click();
   await expect.poll(() => isPlayingAudio(page)).toBe(false);
+  await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).playing).toBe(false);
   cli(apiKey, ["playback", "seek", "--position-ms", "3000"]);
   await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).positionMs).toBe(3000);
 
@@ -924,4 +927,112 @@ test("data saver plays through HTML audio, starts a first play at once, and seek
   await bar.getByRole("button", { name: "Play", exact: true }).click();
   await expect.poll(dataSaverAt, { intervals: [50] }).toBeGreaterThanOrEqual(3);
   expect(Date.now() - resumedAt).toBeLessThan(2000);
+});
+
+test("newer controls survive delayed browser measurements", async ({ page }) => {
+  const decodeReport = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({
+        requestId: Schema.Int,
+        args: Schema.Tuple([
+          Schema.Struct({
+            name: Schema.Literal("playback.report"),
+            args: Schema.Struct({ playing: Schema.Boolean }),
+          }),
+        ]),
+      }),
+    ),
+  );
+
+  const decodeResponse = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({
+        type: Schema.Literal("MutationResponse"),
+        requestId: Schema.Int,
+        success: Schema.Boolean,
+      }),
+    ),
+  );
+
+  const held: Array<{
+    readonly server: WebSocketRoute;
+    readonly message: string | Buffer;
+    readonly requestId: number | null;
+  }> = [];
+
+  const responses = new Map<number, boolean>();
+  let holdPlaying: boolean | null = null;
+
+  await page.routeWebSocket(/\/api\/[^/]+\/sync$/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const report = decodeReport(message.toString());
+      const matches = Option.isSome(report) && report.value.args[0].args.playing === holdPlaying;
+
+      if (matches || held.length > 0) {
+        held.push({
+          server,
+          message,
+          requestId: Option.isSome(report) ? report.value.requestId : null,
+        });
+      } else server.send(message);
+    });
+    server.onMessage((message) => {
+      const response = decodeResponse(message.toString());
+
+      if (Option.isSome(response)) responses.set(response.value.requestId, response.value.success);
+      socket.send(message);
+    });
+  });
+
+  const release = async (): Promise<void> => {
+    holdPlaying = null;
+    const delayed = held.splice(0);
+
+    for (const frame of delayed) frame.server.send(frame.message);
+
+    await Promise.all(
+      delayed.flatMap(({ requestId }) =>
+        requestId === null ? [] : [expect.poll(() => responses.get(requestId)).toBe(true)],
+      ),
+    );
+  };
+
+  await signIn(page);
+  await page.goto("/settings/playback");
+  await page.getByRole("radio", { name: "Data saver", exact: true }).click();
+  await openFirstAlbum(page);
+  const bar = page.getByRole("region", { name: "Player" });
+  holdPlaying = true;
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expect.poll(() => held.length).toBeGreaterThan(0);
+  await expect.poll(() => isPlayingAudio(page)).toBe(true);
+  cli(apiKey, ["pause"]);
+  await expect.poll(() => isPlayingAudio(page)).toBe(false);
+  await release();
+  expect(decodeState(cli(apiKey, ["now", "--json"])).playing).toBe(false);
+  expect(await isPlayingAudio(page)).toBe(false);
+
+  await bar.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(() => isPlayingAudio(page)).toBe(true);
+  holdPlaying = false;
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect.poll(() => held.length).toBeGreaterThan(0);
+  await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).playing).toBe(false);
+  cli(apiKey, ["playback", "seek", "--position-ms", "3000"]);
+  expect(decodeState(cli(apiKey, ["now", "--json"])).positionMs).toBe(3000);
+  await release();
+  expect(decodeState(cli(apiKey, ["now", "--json"])).positionMs).toBe(3000);
+
+  cli(apiKey, ["resume"]);
+  await expect.poll(() => isPlayingAudio(page)).toBe(true);
+  holdPlaying = false;
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect.poll(() => held.length).toBeGreaterThan(0);
+  await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).playing).toBe(false);
+  cli(apiKey, ["resume"]);
+  await expect.poll(() => isPlayingAudio(page)).toBe(true);
+  await release();
+  expect(decodeState(cli(apiKey, ["now", "--json"])).playing).toBe(true);
+  expect(await isPlayingAudio(page)).toBe(true);
 });

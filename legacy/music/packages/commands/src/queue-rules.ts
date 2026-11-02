@@ -1,4 +1,49 @@
-import type { RepeatMode } from "./models";
+import { Match } from "effect";
+
+import type { ControllerId } from "./ids";
+import type { PlaybackControl, RepeatMode } from "./models";
+
+/** Control markers for sessions stored before playback ordering was recorded. */
+export const INITIAL_PLAYBACK_CONTROL: PlaybackControl = { revision: 0, seek: 0, transport: 0 };
+
+/** Advances explicit controls without turning telemetry into a seek or play/pause command. */
+export const nextPlaybackControl = (
+  current: PlaybackControl | undefined,
+  kind: "seek" | "transport" | "restart" | "fence" | "reconcile",
+  after?: PlaybackControl,
+  appliedBy?: ControllerId,
+): PlaybackControl => {
+  const revision = Math.max(current?.revision ?? 0, after?.revision ?? 0) + 1;
+
+  const markers =
+    kind === "reconcile"
+      ? {
+          revision,
+          seek: after?.seek ?? revision,
+          transport: after?.transport ?? revision,
+        }
+      : {
+          revision,
+          seek: kind === "seek" || kind === "restart" ? revision : (current?.seek ?? 0),
+          transport:
+            kind === "transport" || kind === "restart" ? revision : (current?.transport ?? 0),
+        };
+
+  const origin = Match.value(kind).pipe(
+    Match.when("seek", () => appliedBy),
+    Match.when("reconcile", () => after?.appliedBy),
+    Match.when("restart", () => undefined),
+    Match.orElse(() => current?.appliedBy),
+  );
+
+  return origin === undefined ? markers : { ...markers, appliedBy: origin };
+};
+
+/** Unstamped clients retain the legacy protocol; stamped samples must follow current controls. */
+export const isCurrentReport = (
+  measured: number | undefined,
+  current: Pick<PlaybackControl, "revision"> | undefined,
+): boolean => measured === undefined || measured === (current?.revision ?? 0);
 
 /** Longest queue kept; Convex arrays and query reads stay well inside limits. */
 export const MAX_QUEUE = 1000;

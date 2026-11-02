@@ -103,12 +103,18 @@ export const deriveFlags = (args: Schema.Top): FlagSet => {
 
   if (!SchemaAST.isObjects(ast)) return { flags: [], positional: null };
 
-  const flags = ast.propertySignatures.map((property): FlagSpec => ({
-    key: String(property.name),
-    flag: kebabCase(String(property.name)),
-    type: flagTypeOf(property.type),
-    required: !SchemaAST.isOptional(property.type),
-  }));
+  const flags = ast.propertySignatures.flatMap((property): ReadonlyArray<FlagSpec> =>
+    property.type.context?.annotations?.["music/playerOnly"] === true
+      ? []
+      : [
+          {
+            key: String(property.name),
+            flag: kebabCase(String(property.name)),
+            type: flagTypeOf(property.type),
+            required: !SchemaAST.isOptional(property.type),
+          },
+        ],
+  );
 
   const positionalCandidates = flags.filter(
     (spec) =>

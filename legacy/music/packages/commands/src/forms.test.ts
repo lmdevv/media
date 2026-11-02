@@ -6,6 +6,10 @@ import { fieldsOf, missingFields, offeredCommands, outcomeOf, rawArgs } from "./
 import type { Role } from "./models";
 import { commands, isCommandName } from "./registry";
 
+it("keeps seek application metadata out of user command forms", () => {
+  expect(fieldsOf("playback.seek")?.map((field) => field.name)).toEqual(["positionMs"]);
+});
+
 describe("fieldsOf", () => {
   it("reads literal unions as choices", () => {
     expect(fieldsOf("playback.repeat")).toEqual([

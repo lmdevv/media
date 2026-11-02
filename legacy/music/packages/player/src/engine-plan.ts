@@ -1,4 +1,4 @@
-import type { DeviceId, TrackId } from "@music/commands/ids";
+import type { ControllerId, DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { PlaybackState, QueueEntry, RepeatMode } from "@music/commands/models";
 import { Data } from "effect";
 
@@ -14,6 +14,8 @@ export const FOLLOW_DRIFT_MS = 1000;
 
 /** The session as one device sees it. */
 export interface SessionView {
+  readonly control?: PlaybackState["control"];
+  readonly ownSeek: boolean;
   /** True when this device is the session's active device. */
   readonly active: boolean;
   readonly index: number;
@@ -31,7 +33,13 @@ export interface SessionView {
 }
 
 /** Projects the session onto one device. */
-export const sessionView = (state: PlaybackState, deviceId: DeviceId): SessionView => ({
+export const sessionView = (
+  state: PlaybackState,
+  deviceId: DeviceId,
+  controllerId?: ControllerId,
+): SessionView => ({
+  control: state.control,
+  ownSeek: controllerId !== undefined && state.control?.appliedBy === controllerId,
   active: state.activeDevice?.id === deviceId,
   index: state.index,
   track: state.queue[state.index] ?? null,
@@ -44,6 +52,7 @@ export const sessionView = (state: PlaybackState, deviceId: DeviceId): SessionVi
 
 /** What the engine holds right now. */
 export interface LocalPlayback {
+  readonly itemId: QueueItemId | null;
   /** The track the engine loaded (or is loading), or null when unloaded. */
   readonly trackId: TrackId | null;
   /** The engine's last reported position. */
@@ -125,13 +134,25 @@ export const planEngine = (
     (previous.positionMs !== next.positionMs || previous.updatedAt !== next.updatedAt) &&
     next.positionMs !== local.reportedMs;
 
+  const seekOrdered =
+    next.control !== undefined && next.control.seek !== (previous.control?.seek ?? 0);
+
+  const transportOrdered =
+    next.control !== undefined && next.control.transport !== (previous.control?.transport ?? 0);
+
+  const sameEntry = entryChanged || local.itemId === next.track.itemId;
   const threshold = next.following ? FOLLOW_DRIFT_MS : SEEK_THRESHOLD_MS;
 
-  if (positionWritten && Math.abs(target - local.positionMs) > threshold) {
+  if (
+    sameEntry &&
+    (seekOrdered
+      ? !next.ownSeek
+      : positionWritten && Math.abs(target - local.positionMs) > threshold)
+  ) {
     commands.push(EngineCommand.Seek({ positionMs: target }));
   }
 
-  if (previous.playing !== next.playing) {
+  if (transportOrdered || previous.playing !== next.playing) {
     commands.push(next.playing ? EngineCommand.Play() : EngineCommand.Pause());
   }
 

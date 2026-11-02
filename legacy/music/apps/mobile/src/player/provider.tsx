@@ -1,3 +1,4 @@
+import { ControllerId } from "@music/commands/ids";
 import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { DeviceKind, PlaybackState } from "@music/commands/models";
 import { PlaybackController } from "@music/player/playback-controller";
@@ -8,6 +9,7 @@ import type { StreamQuality } from "@music/player/stream-quality";
 import { makeMusicClient } from "@music/sdk/client";
 import { useRead } from "@music/sdk/react";
 import { useConvex } from "convex/react";
+import { randomUUID } from "expo-crypto";
 import type { ConvexReactClient } from "convex/react";
 import {
   createContext,
@@ -244,6 +246,7 @@ const createPhone = (
     sources,
     { mse: null, create: () => engine },
     {
+      controllerId: ControllerId.make(randomUUID()),
       deviceId: id,
       device: { name, kind: "phone" },
       canPlay: playsOnIos,

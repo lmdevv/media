@@ -175,6 +175,8 @@ export const fieldsOf = (name: CommandName): ReadonlyArray<FieldSpec> | null => 
 
   for (const property of ast.propertySignatures) {
     const key = String(property.name);
+
+    if (property.type.context?.annotations?.["music/playerOnly"] === true) continue;
     const field = fieldOf(name, key, property.type);
 
     if (field === null) return null;

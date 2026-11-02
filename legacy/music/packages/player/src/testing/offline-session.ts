@@ -125,6 +125,10 @@ interface Ran {
   readonly args: unknown;
 }
 
+interface ReconcileReceipt {
+  controlRevision: number | undefined;
+}
+
 /**
  * A Convex deployment as a device meets it. Commands run in the order they were sent, and none
  * runs or is answered while the connection is down or the server is held up; they wait and run
@@ -136,6 +140,7 @@ export const recordingServer = () => {
   const waiting: Array<() => void> = [];
   const listeners = new Set<() => void>();
   const state = { connected: true, held: false, adopt: true, failures: 0 };
+  const receipt: ReconcileReceipt = { controlRevision: undefined };
 
   const flush = (): void => {
     while (state.connected && !state.held) {
@@ -170,7 +175,12 @@ export const recordingServer = () => {
             return;
           }
 
-          if (name === "devices.reconcile") resolve({ adopted: state.adopt });
+          if (name === "devices.reconcile")
+            resolve(
+              receipt.controlRevision === undefined
+                ? { adopted: state.adopt }
+                : { adopted: state.adopt, controlRevision: receipt.controlRevision },
+            );
           else if (name === "queue.add") resolve({ ok: true, itemIds: [] });
           else resolve({ ok: true });
         });
@@ -201,6 +211,7 @@ export const recordingServer = () => {
     names: (): ReadonlyArray<string> => ran.map(({ name }) => name),
     /** What `devices.reconcile` answers, and how many calls fail first. */
     state,
+    receipt,
     setConnected: (connected: boolean): void => {
       state.connected = connected;
 

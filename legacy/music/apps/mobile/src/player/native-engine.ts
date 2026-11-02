@@ -1,6 +1,7 @@
 import { delay, MAX_BUSY_RETRIES } from "@music/player/busy-retry";
 import type {
   EngineErrorReason,
+  EnginePlayback,
   EngineEvent,
   EngineSource,
   PlayerEngine,
@@ -40,6 +41,8 @@ export interface LockScreenInfo {
 
 /** One native player holding one opened stream. */
 export interface AudioOutput {
+  /** Reads native output now, independently of a queued status callback. */
+  readonly samplePlayback: () => Pick<OutputStatus, "positionMs" | "control">;
   readonly play: () => void;
   readonly pause: () => void;
   /** Moves to `positionMs` in this stream. */
@@ -171,6 +174,18 @@ export class NativeEngine implements PlayerEngine {
     this.#open = open;
   }
 
+  /** Samples the current native output, preserving an outstanding seek or reopening target. */
+  samplePlayback(): EnginePlayback {
+    const slot = this.#currentSlot();
+
+    return {
+      positionMs: this.#positionOf(slot),
+      playing:
+        slot.reopening?.play ??
+        (slot.stream !== null && slot.stream.output.samplePlayback().control !== "paused"),
+    };
+  }
+
   async load(source: EngineSource, startMs: number, autoplay: boolean): Promise<void> {
     this.#generation += 1;
     const generation = this.#generation;
@@ -206,14 +221,12 @@ export class NativeEngine implements PlayerEngine {
     if (early) return;
 
     if (isLive(stream) && startMs >= LIVE_RESTART_MS) {
+      const reopening = { positionMs: startMs, play: autoplay, abort: new AbortController() };
+      slot.reopening = reopening;
       this.#emit({ type: "time", positionMs: startMs });
 
       if (!autoplay) this.#reportPaused(stream);
-      await this.#reopen(slot, {
-        positionMs: startMs,
-        play: autoplay,
-        abort: new AbortController(),
-      });
+      await this.#reopen(slot, reopening);
 
       return;
     }
@@ -474,13 +487,20 @@ export class NativeEngine implements PlayerEngine {
   }
 
   #positionOf(slot: Slot): number {
+    if (slot.reopening !== null) return slot.reopening.positionMs;
     const stream = slot.stream;
 
-    return (
-      slot.reopening?.positionMs ??
-      stream?.seeking?.positionMs ??
-      (stream === null ? 0 : stream.startMs + Math.round(stream.status?.positionMs ?? 0))
-    );
+    if (stream === null) return 0;
+
+    if (stream.seeking !== null) return stream.seeking.positionMs;
+    const measured = stream.output.samplePlayback().positionMs;
+
+    const positionMs =
+      stream.status?.finished === true && isLive(stream)
+        ? Math.max(measured, stream.status.positionMs)
+        : measured;
+
+    return stream.startMs + Math.round(positionMs);
   }
 
   #reportPaused(stream: Stream): void {
@@ -489,8 +509,16 @@ export class NativeEngine implements PlayerEngine {
     this.#emit({ type: "paused" });
   }
 
-  #onStatus(slot: Slot, stream: Stream, status: OutputStatus): void {
+  #onStatus(slot: Slot, stream: Stream, reported: OutputStatus): void {
     if (slot.stream !== stream) return;
+    const measured = stream.output.samplePlayback();
+
+    const status: OutputStatus = {
+      ...reported,
+      positionMs: measured.positionMs,
+      control: measured.control,
+    };
+
     const previous = stream.status;
     const wasLoaded = previous?.loaded === true;
 

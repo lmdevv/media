@@ -4,6 +4,7 @@ import {
   AlbumId,
   ApiKeyId,
   ArtistId,
+  ControllerId,
   DeviceId,
   DownloadPinId,
   InviteId,
@@ -435,11 +436,24 @@ export const RepeatMode = Schema.Literals(["off", "all", "one"]);
 
 export type RepeatMode = typeof RepeatMode.Type;
 
-/**
- * Where the user's playback is. `positionMs` was true at `updatedAt`; while `playing`, the live
- * position is `positionMs + (now - updatedAt)`. It changes with every position report.
- */
+/** A monotonically increasing playback control marker. */
+export const ControlRevision = Count;
+
+/** Orders controls independently of position telemetry and records which engine actions changed. */
+export const PlaybackControl = Schema.Struct({
+  revision: ControlRevision,
+  seek: ControlRevision,
+  transport: ControlRevision,
+  /** The controller that applied this seek before sending it, so its echo does not seek again. */
+  appliedBy: Schema.optionalKey(ControllerId),
+});
+
+/** Control ordering, with separate markers for position and play/pause application. */
+export interface PlaybackControl extends Schema.Schema.Type<typeof PlaybackControl> {}
+
+/** Position at `updatedAt`; while playing, add elapsed time to get the live position. */
 export const PlaybackPosition = Schema.Struct({
+  control: Schema.optionalKey(PlaybackControl),
   activeDevice: Schema.NullOr(Device),
   positionMs: Millis,
   playing: Schema.Boolean,
@@ -513,6 +527,7 @@ const OfflineEntry = Schema.Struct({ trackId: TrackId, itemId: QueueItemId });
  * the server still holds under the same ID keeps who added it and whether autoplay did.
  */
 export const OfflineResume = Schema.Struct({
+  control: Schema.optionalKey(PlaybackControl),
   items: Schema.Array(OfflineEntry).check(Schema.isMaxLength(2000)),
   index: Count,
   positionMs: Millis,

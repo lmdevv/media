@@ -54,6 +54,11 @@ export const DeviceId = Schema.NonEmptyString.pipe(Schema.brand("DeviceId"));
 
 export type DeviceId = typeof DeviceId.Type;
 
+/** Ephemeral identity of one player controller, distinct from its persistent device. */
+export const ControllerId = Schema.NonEmptyString.pipe(Schema.brand("ControllerId"));
+
+export type ControllerId = typeof ControllerId.Type;
+
 /** A Jam: a shared live listening session hosted from someone's playback. */
 export const JamId = Schema.NonEmptyString.pipe(Schema.brand("JamId"));
 

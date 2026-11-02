@@ -1,4 +1,4 @@
-import { TrackId } from "@music/commands/ids";
+import { ControllerId, TrackId } from "@music/commands/ids";
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineEvent, PlayerEngine } from "./engine";
@@ -21,12 +21,21 @@ const instantEngine = () => {
   const listeners = new Set<(event: EngineEvent) => void>();
   const loads: Array<string> = [];
 
+  let playing = false;
+  let positionMs = 0;
+
   const emit = (event: EngineEvent): void => {
+    if (event.type === "playing") playing = true;
+    else if (event.type === "paused") playing = false;
+    else if (event.type === "time") positionMs = event.positionMs;
+
     for (const listener of listeners) listener(event);
   };
 
   const engine: PlayerEngine = {
-    load: async (source, _startMs, autoplay) => {
+    samplePlayback: () => ({ positionMs, playing }),
+    load: async (source, startMs, autoplay) => {
+      positionMs = startMs;
       loads.push(source.url);
 
       if (autoplay) emit({ type: "playing" });
@@ -38,7 +47,7 @@ const instantEngine = () => {
     pause: () => {
       emit({ type: "paused" });
     },
-    seek: () => {},
+    seek: (target) => emit({ type: "time", positionMs: target }),
     setVolume: () => {},
     unload: () => {},
     subscribe: (listener) => {
@@ -94,6 +103,7 @@ const setup = (queue: ReadonlyArray<SongId>, downloaded: ReadonlyArray<SongId>) 
     { mse: null, create: () => output.engine },
     {
       deviceId: phone.id,
+      controllerId: ControllerId.make("offline-controller"),
       device: { name: phone.name, kind: phone.kind },
       canPlay: () => true,
       now: clock.now,
@@ -142,6 +152,29 @@ const setup = (queue: ReadonlyArray<SongId>, downloaded: ReadonlyArray<SongId>) 
 };
 
 describe("playing without a connection", () => {
+  it("stops when the last downloaded song fails instead of repeating next forever", async () => {
+    const { router, server, output, controller, stop } = setup(["a"], ["a"]);
+    await vi.waitFor(() => expect(output.loads).toEqual([fileOf("a")]));
+    server.setConnected(false);
+    let changes = 0;
+
+    const unsubscribe = router.subscribe(() => {
+      changes += 1;
+
+      if (changes > 10) stop();
+    });
+
+    try {
+      output.emit({ type: "error", reason: "decode", message: "damaged" });
+      await vi.waitFor(() => expect(controller.getSnapshot().error).not.toBeNull());
+      expect(changes).toBeLessThanOrEqual(2);
+      expect(router.getSnapshot().state?.playing).toBe(false);
+    } finally {
+      unsubscribe();
+      stop();
+    }
+  });
+
   it("plays the next downloaded song from its file when a song ends", async () => {
     const { router, server, output, stop } = setup(["a", "b", "c"], ["a", "b", "c"]);
 

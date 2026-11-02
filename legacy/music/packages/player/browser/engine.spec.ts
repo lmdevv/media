@@ -35,6 +35,38 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
 });
 
+test("samples current output across play, pause, seek, and natural advance", async ({ page }) => {
+  await page.evaluate(() => window.harness?.load("tone-a.wav", 400, false));
+  expect(await page.evaluate(() => window.harness?.engine.samplePlayback())).toEqual({
+    positionMs: 400,
+    playing: false,
+  });
+  await page.evaluate(() => window.harness?.engine.play());
+  expect(
+    await page.evaluate(() => {
+      window.harness?.engine.pause();
+
+      return window.harness?.engine.samplePlayback().playing;
+    }),
+  ).toBe(false);
+  expect(
+    await page.evaluate(() => {
+      window.harness?.engine.seek(1000);
+
+      return window.harness?.engine.samplePlayback();
+    }),
+  ).toEqual({ positionMs: 1000, playing: false });
+  await page.evaluate(async () => {
+    window.harness?.preload("tone-b.wav");
+    await window.harness?.engine.play();
+    window.harness?.engine.seek(2900);
+  });
+  await waitForEvent(page, "advanced");
+  await expect
+    .poll(() => page.evaluate(() => window.harness?.engine.samplePlayback().playing))
+    .toBe(true);
+});
+
 test("plays and reports time at least four times a second", async ({ page }) => {
   await page.evaluate(() => window.harness?.load("tone-c.flac", 0, true));
   await waitForEvent(page, "playing");

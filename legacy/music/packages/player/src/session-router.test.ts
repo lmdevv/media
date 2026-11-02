@@ -85,7 +85,13 @@ describe("taking the session over", () => {
     expect(router.mode()).toBe("local");
     expect(shown).toBeDefined();
 
-    const loaded = { trackId: TrackId.make("a"), positionMs: 5000, reportedMs: null };
+    const loaded = {
+      itemId: playing.queue[playing.index]?.itemId ?? null,
+      trackId: TrackId.make("a"),
+      positionMs: 5000,
+      reportedMs: null,
+    };
+
     const before = sessionView(playing, phone.id);
 
     expect(
@@ -281,6 +287,28 @@ describe("a command the server doesn't answer", () => {
 });
 
 describe("handing the session back", () => {
+  it("keeps local playback until a snapshot reaches the adoption receipt", async () => {
+    const { router, server } = setup();
+    router.offerServer(sessionOf(["a"], { control: { revision: 10, seek: 10, transport: 10 } }));
+    server.setConnected(false);
+    await router.run("playback.seek", { positionMs: 3000 });
+    server.hold();
+    server.receipt.controlRevision = 12;
+    server.setConnected(true);
+    await vi.waitFor(() => expect(router.getSnapshot().reconciling).toBe(true));
+    router.offerServer(sessionOf(["a"], { control: { revision: 10, seek: 10, transport: 10 } }));
+    server.release();
+    await vi.waitFor(() => expect(router.mode()).toBe("server"));
+    expect(router.getSnapshot().state).toMatchObject({
+      positionMs: 3000,
+      control: { revision: 11 },
+    });
+    router.offerServer(
+      sessionOf(["a"], { positionMs: 3000, control: { revision: 12, seek: 11, transport: 10 } }),
+    );
+    expect(router.getSnapshot().state?.control?.revision).toBe(12);
+  });
+
   it("sends the offline plays and the queue once, then follows the server's next snapshot", async () => {
     const { router, server, clock, memory } = setup();
 
@@ -300,6 +328,7 @@ describe("handing the session back", () => {
           deviceId: "phone",
           plays: [{ trackId: "b", playedAt: 1_010_000 }],
           resume: {
+            control: { revision: 1, seek: 0, transport: 0 },
             items: [
               { trackId: "a", itemId: "1" },
               { trackId: "b", itemId: "2" },

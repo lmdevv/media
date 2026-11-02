@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_QUEUE,
+  nextPlaybackControl,
   addedOrder,
   nextIndex,
   playOrder,
@@ -145,5 +146,32 @@ describe("adding to the queue", () => {
 
     expect(ids(order.items)).toEqual(["2", "4", "1", "3"]);
     expect(order.unshuffled).toEqual(["1", "2", "4", "3"]);
+  });
+});
+
+describe("playback control markers", () => {
+  const control = fc.nat({ max: 100_000 }).chain((revision) =>
+    fc.record({
+      revision: fc.constant(revision),
+      seek: fc.nat({ max: revision }),
+      transport: fc.nat({ max: revision }),
+    }),
+  );
+
+  it("keeps every control after both lineages with bounded application markers", () => {
+    fc.assert(
+      fc.property(
+        control,
+        control,
+        fc.constantFrom("seek", "transport", "restart", "fence", "reconcile"),
+        (current, handed, kind) => {
+          const next = nextPlaybackControl(current, kind, handed);
+          expect(next.revision).toBeGreaterThan(current.revision);
+          expect(next.revision).toBeGreaterThan(handed.revision);
+          expect(next.seek).toBeLessThanOrEqual(next.revision);
+          expect(next.transport).toBeLessThanOrEqual(next.revision);
+        },
+      ),
+    );
   });
 });

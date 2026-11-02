@@ -612,6 +612,14 @@ export default defineSchema({
    * this row, and nothing that reads the queue runs again.
    */
   playbackSessions: defineTable({
+    control: v.optional(
+      v.object({
+        revision: v.number(),
+        seek: v.number(),
+        transport: v.number(),
+        appliedBy: v.optional(v.string()),
+      }),
+    ),
     userId: v.id("users"),
     activeDeviceId: v.optional(v.string()),
     positionMs: v.number(),

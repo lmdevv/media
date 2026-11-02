@@ -301,7 +301,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music playback shuffle (--on | --no-on)`: Turn shuffle on or off.
 - `music playback repeat <off|all|one>`: Set repeat to off, all, or one.
 - `music playback volume <volume>`: Set the volume from 0 to 1.
-- `music playback report --device-id <id> --index <int> [--track-id <id>] [--item-id <id>] --position-ms <number> (--playing | --no-playing)`: Report the active device's position (sent by players).
+- `music playback report [--control-revision <int>] --device-id <id> --index <int> [--track-id <id>] [--item-id <id>] --position-ms <number> (--playing | --no-playing)`: Report the active device's position (sent by players).
 - `music stream url --track-id <id> --profile <original|aac-320|aac-128|fmp4-flac|fmp4-aac> [--requested-at <number>]`: Get a signed stream URL for a song.
 - `music lyrics get <track-id>`: Get a song's lyrics, timed line by line when its lyrics are synced.
 

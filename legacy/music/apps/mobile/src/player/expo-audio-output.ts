@@ -64,23 +64,41 @@ export const openExpoOutput = (url: string): AudioOutput => {
   );
 
   let wantsPlay = false;
+  let starting = false;
+  let measuredMs = 0;
   let released = false;
   let seeking: Promise<void> = Promise.resolve();
 
   return {
+    samplePlayback: () => {
+      const currentTime = player.currentTime;
+
+      if (Number.isFinite(currentTime)) measuredMs = currentTime * 1000;
+
+      return {
+        positionMs: measuredMs,
+        control: starting ? "waiting" : controlOf(player.currentStatus),
+      };
+    },
     play: () => {
       wantsPlay = true;
+      starting = true;
 
       const start = async (): Promise<void> => {
-        await Promise.all([audioSession(), seeking]);
+        try {
+          await Promise.all([audioSession(), seeking.catch(() => undefined)]);
 
-        if (wantsPlay && !released) player.play();
+          if (wantsPlay && !released) player.play();
+        } finally {
+          starting = false;
+        }
       };
 
       void start();
     },
     pause: () => {
       wantsPlay = false;
+      starting = false;
       player.pause();
     },
     seek: (positionMs) => {

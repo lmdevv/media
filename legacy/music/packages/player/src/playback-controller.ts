@@ -1,4 +1,4 @@
-import type { DeviceId, TrackId } from "@music/commands/ids";
+import type { ControllerId, DeviceId, TrackId } from "@music/commands/ids";
 import type { PlaybackState, QueueEntry, StreamProfile, Track } from "@music/commands/models";
 import { errorMessage } from "@music/sdk/errors";
 import { Effect, Exit, Fiber, Result } from "effect";
@@ -80,6 +80,7 @@ export interface NowPlayingControls {
 
 /** What the controller needs from its host besides the server and the engine. */
 export interface ControllerEnvironment {
+  readonly controllerId: ControllerId;
   readonly deviceId: DeviceId;
   readonly device: DeviceDescription;
   /** Answers `audio.canPlayType(mimeType) !== ""`. */
@@ -148,7 +149,9 @@ export class PlaybackController {
   #mseFailed = false;
   #renewed: TrackId | null = null;
   #volume = 1;
-  #sessionPaused = false;
+  #appliedControl: PlaybackState["control"];
+  #applying = false;
+  #loading = false;
   #unsubscribeEngine: (() => void) | null = null;
   #registered: Promise<boolean> = Promise.resolve(false);
   #healthFiber: Fiber.Fiber<void, unknown> | null = null;
@@ -210,7 +213,7 @@ export class PlaybackController {
     }, HEARTBEAT_MS);
 
     const reports = setInterval(() => {
-      if (this.#snapshot.engineStatus === "playing") void this.#report(true);
+      if (this.#snapshot.engineStatus === "playing") void this.#report();
     }, REPORT_MS);
 
     const follow = setInterval(() => {
@@ -261,35 +264,67 @@ export class PlaybackController {
 
   /** Brings the engine in line with a new session snapshot. */
   sync(state: PlaybackState): void {
-    if (
-      state.following &&
-      this.#state?.following === true &&
-      state.updatedAt !== this.#state.updatedAt
-    ) {
-      this.#clockSamples = withClockSample(this.#clockSamples, this.#env.now() - state.updatedAt);
+    const controlChanged =
+      state.control !== undefined && state.control.revision !== this.#state?.control?.revision;
+
+    const view = sessionView(state, this.deviceId, this.#env.controllerId);
+    this.#applying = true;
+
+    try {
+      const seekChanged =
+        state.control !== undefined &&
+        state.control.seek !== (this.#state?.control?.seek ?? 0) &&
+        !view.ownSeek;
+
+      if (seekChanged && this.#loading) {
+        this.#unload();
+        this.#view = null;
+        this.#update({ engineStatus: "idle" });
+      }
+
+      if (
+        state.following &&
+        this.#state?.following === true &&
+        state.updatedAt !== this.#state.updatedAt
+      ) {
+        this.#clockSamples = withClockSample(this.#clockSamples, this.#env.now() - state.updatedAt);
+      }
+
+      this.#state = state;
+
+      const commands = planEngine(
+        this.#view,
+        view,
+        {
+          itemId: this.#loaded?.track.itemId ?? null,
+          trackId: this.#loaded?.track.id ?? null,
+          positionMs: this.#livePositionMs(),
+          reportedMs: this.#reportedMs,
+        },
+        this.#serverNow(state),
+      );
+
+      this.#view = view;
+
+      for (const command of commands) this.#runCommand(command);
+
+      this.#appliedControl = state.control;
+    } finally {
+      this.#applying = false;
     }
-
-    this.#state = state;
-    const view = sessionView(state, this.deviceId);
-
-    const commands = planEngine(
-      this.#view,
-      view,
-      {
-        trackId: this.#loaded?.track.id ?? null,
-        positionMs: this.#livePositionMs(),
-        reportedMs: this.#reportedMs,
-      },
-      this.#serverNow(state),
-    );
-
-    this.#view = view;
-
-    for (const command of commands) this.#runCommand(command);
 
     this.#dropStalePreload();
     this.#showNowPlaying();
     this.#update({ pendingPlaying: null, pendingVolume: null });
+
+    if (
+      controlChanged &&
+      !this.#loading &&
+      (this.#engine.samplePlayback().playing !== view.playing ||
+        this.#loaded?.track.itemId !== view.track?.itemId)
+    ) {
+      void this.#report();
+    }
   }
 
   /**
@@ -373,14 +408,32 @@ export class PlaybackController {
   /** Seeks the engine at once (when playing here) and the session. */
   async seek(positionMs: number): Promise<void> {
     const target = Math.max(0, Math.round(positionMs));
+    const view = this.#view;
+    const loaded = this.#loaded;
+    const appliedHere = view?.active === true && loaded !== null;
 
-    if (this.#view?.active === true && this.#loaded !== null) {
-      if (!this.#reloadIfExpired(target, this.#isAudible())) this.#engine.seek(target);
+    if (appliedHere) {
+      if (this.#loading) {
+        this.#unload();
+        void this.#load(
+          loaded.track,
+          loaded.index,
+          target,
+          this.#snapshot.pendingPlaying ?? view.playing,
+        );
+      } else if (!this.#reloadIfExpired(target, this.#isAudible())) this.#engine.seek(target);
       this.#setPosition(target);
       this.#showNowPlaying();
     }
 
-    await this.capture(this.#session.run("playback.seek", { positionMs: target }));
+    await this.capture(
+      this.#session.run(
+        "playback.seek",
+        appliedHere
+          ? { positionMs: target, appliedBy: this.#env.controllerId }
+          : { positionMs: target },
+      ),
+    );
   }
 
   /** Sets the volume here at once (when playing here) and in the session. */
@@ -559,22 +612,36 @@ export class PlaybackController {
     return this.#env.now() - (state.following ? clockOffset(this.#clockSamples) : 0);
   }
 
-  async #report(playing: boolean): Promise<void> {
+  async #report(): Promise<void> {
     const loaded = this.#loaded;
 
-    if (this.#view?.active !== true || this.#view.following || loaded === null) return;
+    if (
+      this.#applying ||
+      this.#loading ||
+      this.#view?.active !== true ||
+      this.#view.following ||
+      loaded === null
+    )
+      return;
     const positionMs = Math.max(0, Math.round(this.#livePositionMs()));
     this.#reportedMs = positionMs;
 
+    const args = {
+      deviceId: this.deviceId,
+      index: loaded.index,
+      trackId: loaded.track.id,
+      itemId: loaded.track.itemId,
+      positionMs,
+      playing: this.#engine.samplePlayback().playing,
+    };
+
     await this.#quietly(
-      this.#session.run("playback.report", {
-        deviceId: this.deviceId,
-        index: loaded.index,
-        trackId: loaded.track.id,
-        itemId: loaded.track.itemId,
-        positionMs,
-        playing,
-      }),
+      this.#session.run(
+        "playback.report",
+        this.#appliedControl === undefined
+          ? args
+          : { ...args, controlRevision: this.#appliedControl.revision },
+      ),
     );
   }
 
@@ -604,7 +671,6 @@ export class PlaybackController {
         if (!this.#reloadIfExpired(this.#livePositionMs(), true)) void this.#engine.play();
       },
       Pause: () => {
-        this.#sessionPaused = this.#isAudible();
         this.#engine.pause();
       },
       Seek: ({ positionMs }) => {
@@ -640,6 +706,7 @@ export class PlaybackController {
 
   #unload(): void {
     this.#generation += 1;
+    this.#loading = false;
     this.#engine.unload();
     this.#loaded = null;
     this.#preloaded = null;
@@ -663,51 +730,81 @@ export class PlaybackController {
 
   async #load(track: QueueEntry, index: number, startMs: number, autoplay: boolean): Promise<void> {
     this.#generation += 1;
+    this.#loading = true;
     const generation = this.#generation;
-    const plannedAt = this.#env.now();
 
-    const preloaded =
-      this.#preloaded?.track.id === track.id && !this.#isExpired(this.#preloaded.renewAt)
-        ? this.#preloaded
-        : null;
+    try {
+      const plannedAt = this.#env.now();
 
-    this.#loaded = { track, index, origin: null, profile: null, url: null, renewAt: null };
-    this.#preloaded = null;
-    this.#stamp(startMs, false);
-    this.#reportedMs = null;
-    const engine = this.#wantedEngine();
+      const preloaded =
+        this.#preloaded?.track.id === track.id && !this.#isExpired(this.#preloaded.renewAt)
+          ? this.#preloaded
+          : null;
 
-    const plan =
-      preloaded !== null && engine === this.#snapshot.engine
-        ? SourcePlan.Ready({ resolved: preloaded })
-        : this.#sources.resolve(track, this.#profileFor(track, engine));
+      this.#loaded = { track, index, origin: null, profile: null, url: null, renewAt: null };
+      this.#preloaded = null;
 
-    if (SourcePlan.$is("Unreachable")(plan)) {
-      this.#skipUnreachable();
+      this.#stamp(startMs, false);
+      this.#reportedMs = null;
+      const engine = this.#wantedEngine();
 
-      return;
+      const plan =
+        preloaded !== null && engine === this.#snapshot.engine
+          ? SourcePlan.Ready({ resolved: preloaded })
+          : this.#sources.resolve(track, this.#profileFor(track, engine));
+
+      if (SourcePlan.$is("Unreachable")(plan)) {
+        this.#loading = false;
+        this.#skipUnreachable();
+
+        return;
+      }
+
+      if (!this.#snapshot.mediaOnline && !isLocal(plan)) return;
+      this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false });
+      this.#useEngine(engine);
+      const resolved = SourcePlan.$is("Ready")(plan) ? plan.resolved : await this.#sign(plan.sign);
+
+      if (generation !== this.#generation || resolved === null) return;
+
+      this.#loaded = {
+        track,
+        index,
+        origin: resolved.origin,
+        profile: resolved.profile,
+        url: resolved.source.url,
+        renewAt: resolved.renewAt,
+      };
+
+      const elapsed = autoplay ? this.#env.now() - plannedAt : 0;
+      const start = Math.min(startMs + elapsed, Math.max(0, track.durationMs - 1000));
+      this.#setPosition(start);
+      await this.#engine.load(
+        resolved.source,
+        start,
+        this.#snapshot.pendingPlaying ?? this.#view?.playing ?? autoplay,
+      );
+
+      if (
+        generation !== this.#generation ||
+        (this.#snapshot.engineStatus !== "playing" && this.#snapshot.engineStatus !== "paused")
+      )
+        return;
+      const wanted = this.#snapshot.pendingPlaying ?? this.#view?.playing ?? autoplay;
+
+      if (!this.#snapshot.autoplayBlocked && this.#engine.samplePlayback().playing !== wanted) {
+        if (wanted) await this.#engine.play();
+        else this.#engine.pause();
+      }
+    } finally {
+      if (generation === this.#generation) this.#loading = false;
     }
 
-    if (!this.#snapshot.mediaOnline && !isLocal(plan)) return;
-    this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false });
-    this.#useEngine(engine);
-    const resolved = SourcePlan.$is("Ready")(plan) ? plan.resolved : await this.#sign(plan.sign);
+    const status = this.getSnapshot().engineStatus;
 
-    if (generation !== this.#generation || resolved === null) return;
-
-    this.#loaded = {
-      track,
-      index,
-      origin: resolved.origin,
-      profile: resolved.profile,
-      url: resolved.source.url,
-      renewAt: resolved.renewAt,
-    };
-
-    const elapsed = autoplay ? this.#env.now() - plannedAt : 0;
-    const start = Math.min(startMs + elapsed, Math.max(0, track.durationMs - 1000));
-    this.#setPosition(start);
-    await this.#engine.load(resolved.source, start, autoplay);
+    if (generation === this.#generation && (status === "playing" || status === "paused")) {
+      void this.#report();
+    }
   }
 
   #skipUnreachable(): void {
@@ -792,29 +889,24 @@ export class PlaybackController {
   #onEngineEvent = (event: EngineEvent): void => {
     switch (event.type) {
       case "time": {
-        this.#setPosition(event.positionMs);
+        this.#setPosition(this.#engine.samplePlayback().positionMs);
         void this.#preloadFollowing();
         break;
       }
 
-      case "playing": {
-        this.#setMoving(true);
-        this.#sessionPaused = false;
-        this.#renewed = null;
-        this.#update({ engineStatus: "playing", error: null, autoplayBlocked: false });
-        this.#showNowPlaying();
-        void this.#report(true);
-        break;
-      }
-
+      case "playing":
       case "paused": {
-        this.#setMoving(false);
-        const ordered = this.#sessionPaused;
-        this.#sessionPaused = false;
-        this.#update({ engineStatus: "paused" });
-        this.#showNowPlaying();
+        const { playing } = this.#engine.samplePlayback();
+        this.#setMoving(playing);
 
-        if (!ordered) void this.#report(false);
+        if (playing) this.#renewed = null;
+        this.#update(
+          playing
+            ? { engineStatus: "playing", error: null, autoplayBlocked: false }
+            : { engineStatus: "paused" },
+        );
+        this.#showNowPlaying();
+        void this.#report();
         break;
       }
 
@@ -837,6 +929,7 @@ export class PlaybackController {
 
       case "error": {
         this.#setMoving(false);
+        this.#update({ engineStatus: "error" });
         void this.#onError(event.reason, event.message);
         break;
       }
@@ -860,7 +953,7 @@ export class PlaybackController {
     this.#preloaded = null;
     this.#setPosition(0);
     this.#showNowPlaying();
-    void this.#report(true);
+    void this.#report();
   }
 
   #onEnded(): void {
@@ -889,7 +982,7 @@ export class PlaybackController {
         error: AUTOPLAY_BLOCKED_MESSAGE,
       });
 
-      await this.#report(false);
+      await this.#report();
 
       return;
     }

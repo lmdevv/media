@@ -113,6 +113,31 @@ test.beforeEach(async ({ page }) => {
   await page.locator("body").click();
 });
 
+test("keeps the requested position visible while a live load reopens", async ({
+  page,
+  request,
+}) => {
+  await coldCache(request);
+
+  const positions = await page.evaluate(async (file) => {
+    const harness = window.harness;
+
+    if (harness === undefined) throw new Error("Harness is not ready");
+    const samples: Array<number> = [];
+
+    const unsubscribe = harness.engine.subscribe((event) => {
+      if (event.type === "time") samples.push(harness.engine.samplePlayback().positionMs);
+    });
+
+    await harness.load(file, 45_000, false, 90_000);
+    unsubscribe();
+
+    return samples;
+  }, `${SONG}?p=aac-128`);
+
+  expect(positions[0]).toBe(45_000);
+});
+
 for (const profile of ["aac-320", "aac-128"]) {
   test(`starts an uncached ${profile} song while it is transcoded`, async ({ page, request }) => {
     const responses = songResponses(page);
