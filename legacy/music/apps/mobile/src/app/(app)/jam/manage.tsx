@@ -1,7 +1,3 @@
-/**
- * D09 · Manage your Jam, the host's sheet: a new invite link (the old one stops working), remove a
- * person (People, D03), or end the Jam (D10).
- */
 import { errorMessage } from "@music/sdk/errors";
 import { useRun } from "@music/sdk/react";
 import { router } from "expo-router";

@@ -1,10 +1,3 @@
-/**
- * The download glyphs of Paper's downloads proposal: the 24pt header ring beside More (D01, D04,
- * D18) and the 12pt glyph before a song row's subtitle (D01, D05, D06). Drawn rather than taken
- * from Lucide, since the ring fills by progress. Light follows Apple Music, where a downloaded song
- * is a quiet grey arrow; dark follows Spotify, where it is green, and the ring's track sits on the
- * raised surface (D18).
- */
 import type { TrackDownloadState } from "@music/sdk/downloads";
 import { useEffect } from "react";
 import Animated, {
@@ -22,18 +15,14 @@ import { useUniwind } from "uniwind";
 import type { DownloadRing } from "@/lib/download-control";
 import { useThemeColor } from "@/lib/theme-color";
 
-/** Paper's ring: radius 10 on the 24-unit grid, 2 wide, starting at 12 o'clock. */
 const RING_RADIUS = 10;
 
 const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
 
-/** The arrow inside the idle and downloaded rings. */
 const ARROW = "M12 7.5v8.5M8.5 12.75 12 16.25l3.5-3.5";
 
-/** Paper's row glyph: radius 5 on a 12-unit grid, 1.5 wide; a downloading arc covers 60%. */
 const ROW_LENGTH = 2 * Math.PI * 5;
 
-/** The colors that differ between the two themes. */
 const useDownloadColors = () => {
   const dark = useUniwind().theme === "dark";
 
@@ -82,7 +71,6 @@ export function DownloadRingGlyph({ ring }: { readonly ring: DownloadRing }) {
       {ring.kind === "downloading" ? (
         <>
           <Circle cx={12} cy={12} r={RING_RADIUS} stroke={track} strokeWidth={2} />
-          {/* A round cap would draw an empty arc as a dot. */}
           {ring.progress > 0 ? (
             <Circle
               cx={12}
@@ -114,10 +102,6 @@ export function DownloadRingGlyph({ ring }: { readonly ring: DownloadRing }) {
   );
 }
 
-/**
- * The 12pt arc of a song downloading. A song's own bytes aren't tracked, so the arc turns rather
- * than fills; it holds still when Reduce Motion is on.
- */
 function DownloadingArc() {
   const { track } = useDownloadColors();
   const accent = useThemeColor("--color-accent");

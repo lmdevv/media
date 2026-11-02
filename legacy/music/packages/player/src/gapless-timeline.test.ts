@@ -106,7 +106,6 @@ describe("placeTrack", () => {
           samples += timing.durationSamples / timing.sampleRate;
         }
 
-        // Accumulated float error stays far below one sample at 192 kHz (5.2 µs).
         expect(Math.abs(start - samples)).toBeLessThan(1e-7);
       }),
     );

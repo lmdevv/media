@@ -1,8 +1,3 @@
-/**
- * The Now Playing panel in the iPad's frame (page 26): a rounded pane beside the content in a wide
- * window on its side (B1, B2), or a sheet above the player bar otherwise (B3). It holds the song,
- * its like and actions, and a switch between the queue, the lyrics, and About, on the player's tint.
- */
 import { ChevronRight, Disc3, MicVocal, PanelRight, Settings2 } from "lucide-react-native";
 import { lyricsButton } from "@music/player/lyrics";
 import { router } from "expo-router";
@@ -39,7 +34,6 @@ const TABS: ReadonlyArray<{ readonly tab: InspectorTab; readonly label: string }
   { tab: "about", label: "About" },
 ];
 
-/** Paper's segmented switch; Lyrics dims for a song with none. */
 function TabSwitch({ inspector }: { readonly inspector: Inspector }) {
   return (
     <View accessibilityRole="tablist" className="shrink-0 flex-row rounded-md bg-text/8 p-ios-2">
@@ -69,7 +63,6 @@ function TabSwitch({ inspector }: { readonly inspector: Inspector }) {
   );
 }
 
-/** "Now Playing", or `children` where the title needs their room, and the button that hides the panel. */
 function Header({
   onHide,
   children,
@@ -95,7 +88,6 @@ function Header({
   );
 }
 
-/** The song's title, over its artist and album. */
 function SongText({ song }: { readonly song: NowPlaying }) {
   return (
     <View className="min-w-0 flex-1">
@@ -109,7 +101,6 @@ function SongText({ song }: { readonly song: NowPlaying }) {
   );
 }
 
-/** The heart, and the song's actions, which Paper doesn't draw but the panel must keep reachable. */
 function SongActions({ song }: { readonly song: NowPlaying }) {
   return (
     <View className="flex-row items-center">
@@ -119,7 +110,6 @@ function SongActions({ song }: { readonly song: NowPlaying }) {
   );
 }
 
-/** About: where the song comes from, then what the sheet says of its audio. */
 function About({ song, background }: { readonly song: NowPlaying; readonly background: string }) {
   const { albumId, artistId } = song;
 
@@ -163,7 +153,6 @@ function About({ song, background }: { readonly song: NowPlaying; readonly backg
   );
 }
 
-/** The tab's body. */
 function Body({
   song,
   inspector,
@@ -189,7 +178,6 @@ function Body({
   );
 }
 
-/** The player's color behind the panel: the tint of the cover, once it has been read. */
 const usePanelColor = (song: NowPlaying): string => {
   const tint = useArtTint(song.artUrl);
   const player = useThemeColor("--color-player");

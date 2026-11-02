@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { convexLogger } from "./convex-logger";
 import type { LogSink } from "./convex-logger";
 
-/** A sink that records what reaches each console method. */
 const recordingSink = () => {
   const lines: Array<readonly [level: string, args: ReadonlyArray<unknown>]> = [];
 

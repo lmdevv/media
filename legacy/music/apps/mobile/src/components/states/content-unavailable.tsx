@@ -1,8 +1,3 @@
-/**
- * G10 · Content · access removed: a playlist, album, or artist that was deleted, unshared, or
- * moved out of the viewer's libraries while they had it open. The copy stays deliberately vague,
- * so it never says whether the record exists.
- */
 import { router } from "expo-router";
 import { CircleAlert, Lock } from "lucide-react-native";
 

@@ -1,9 +1,3 @@
-/**
- * A11 · Song actions: play next, add to the queue, download, add to a playlist, like, go to the
- * album or the artist, or copy a link, and for the song playing now, its audio details (B09).
- * Queueing, downloading, and liking close the sheet once done; a failure stays in the sheet with
- * the server's reason. Copying says so in the row, since iOS shows no toast.
- */
 import { errorMessage } from "@music/sdk/errors";
 import { useReadOnce, useRun } from "@music/sdk/react";
 import * as Clipboard from "expo-clipboard";
@@ -37,7 +31,6 @@ import type { SheetSong } from "@/lib/song-sheet";
 import { useNowPlaying, useSessionRun } from "@/player";
 import { useConnection } from "@/session/connection";
 
-/** One action: its icon and label, filled for the transport glyph. */
 function ActionRow({
   icon,
   label,
@@ -48,7 +41,6 @@ function ActionRow({
   readonly icon: LucideIcon;
   readonly label: string;
   readonly filled?: boolean;
-  /** Shows a check in the trailing lane, such as after copying. */
   readonly done?: boolean;
   readonly onPress: () => void;
 }) {
@@ -62,10 +54,6 @@ function ActionRow({
   );
 }
 
-/**
- * Closes the sheet, and Now Playing when the sheet opened over it, then opens `open` in the tab
- * underneath; pushed from Now Playing, the page would land inside the player's sheet.
- */
 const leaveFor = (open: () => void) => {
   router.dismissAll();
   open();
@@ -73,18 +61,14 @@ const leaveFor = (open: () => void) => {
 
 function Actions({ song }: { readonly song: SheetSong }) {
   const { origin } = useConnection();
-  // The command itself, not the player's actions, which never reject: a refusal keeps the sheet
-  // open with the reason instead of closing as if the song were queued.
   const run = useSessionRun();
   const setLike = useRun("likes.set");
   const readLink = useReadOnce("links.get");
   const [failure, setFailure] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  // Audio details only knows the song playing now.
   const { nowPlaying } = useNowPlaying();
   const playing = nowPlaying?.trackId === song.id ? nowPlaying : null;
 
-  /** Runs `action`, then closes the sheet; a failure keeps it open with the reason. */
   const finish = async (action: () => Promise<void>) => {
     setFailure(null);
 

@@ -57,7 +57,6 @@ function Page<Item>({
   onReport,
 }: {
   readonly cursor: string | null;
-  /** Where the next page starts, once it exists. */
   readonly end: string | null;
   readonly last: boolean;
   readonly usePage: (cursor: string | null, end: string | null) => PageResult<Item> | undefined;
@@ -66,8 +65,6 @@ function Page<Item>({
   readonly onMore: (cursor: string) => void;
   readonly onReport: (cursor: string | null, page: PageResult<unknown>) => void;
 }) {
-  // A page gets `end` once the page after it loads, which re-subscribes it; the previous result
-  // stays meanwhile so the list doesn't flash.
   const page = useHeld(usePage(cursor, end));
   useReportPage(cursor, page, onReport);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -92,7 +89,6 @@ function Page<Item>({
 
   if (page === undefined) return <>{skeleton}</>;
 
-  // An empty page renders only its sentinel, which stays in view and loads the next one.
   return (
     <>
       {page.items.map(renderItem)}

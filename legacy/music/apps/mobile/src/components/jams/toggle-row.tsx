@@ -1,13 +1,8 @@
-/**
- * Paper's toggle row (D04, D08): a 72pt row with a title over a muted line and the 48×28 switch,
- * over a hairline.
- */
 import { View } from "react-native";
 
 import { Switch } from "@/components/ui/switch";
 import { Text } from "@/components/ui/text";
 
-/** Props for `ToggleRow`. */
 export interface ToggleRowProps {
   readonly title: string;
   readonly subtitle: string;

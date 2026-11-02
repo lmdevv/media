@@ -17,7 +17,6 @@ import type { Route } from "./catalog";
 import { browseItems, cliOf, searchItems } from "./items";
 import type { Item } from "./items";
 
-/** Most liked songs "Shuffle liked songs" reads; the queue keeps 1,000 of them. */
 const SHUFFLE_LIMIT = 2000;
 
 /** The menu's rows for the current query. */
@@ -47,12 +46,9 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
   const readLikes = useReadOnce("likes.page");
   const playTracks = usePlayTracks();
   const search = useRead("search", query.length === 0 ? "skip" : { query, limit: 6 });
-  // Until the account loads, offer only what everyone may do.
   const role = me?.role ?? "guest";
 
-  // While a new query loads, the previous results stay on screen.
   const results = useHeld(search);
-  // The actions only change with whether something plays, not with each queue or position update.
   const hasTrack = player.track !== null;
 
   const actions = useMemo((): ReadonlyArray<Item> => {

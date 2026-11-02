@@ -1,7 +1,3 @@
-/**
- * G17 · Account suspended: the server ended this session because an admin suspended the account.
- * The token is already gone; Sign out forgets why, and the root stack moves to Sign in.
- */
 import { Lock } from "lucide-react-native";
 
 import { Button } from "@/components/ui/button";

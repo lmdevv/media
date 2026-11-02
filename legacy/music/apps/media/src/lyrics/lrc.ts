@@ -1,7 +1,3 @@
-/**
- * LRC lyrics, including enhanced LRC: `[mm:ss.xx]` line stamps, `<mm:ss.xx>` word stamps (A2),
- * `[offset:±ms]`, and singer prefixes (`v1:`, and Walaoke's `M:`, `F:`, `D:`).
- */
 import { type Lang, LyricBody, type LyricLine, type LyricWord } from "@music/commands/lyrics";
 import { Array as Arr, Result } from "effect";
 
@@ -16,7 +12,6 @@ import {
   timedBody,
 } from "./lyric-body.ts";
 
-/** `[mm:ss]`, `[mm:ss.x]`, `[mm:ss.xx]`, `[mm:ss.xxx]`, and `[mm:ss:xx]`; minutes may pass 59. */
 const LINE_STAMP = /^\[(\d+):([0-5]?\d)(?:[.:](\d{1,3}))?\]/u;
 
 const WORD_STAMP = /<(\d+):([0-5]?\d)(?:[.:](\d{1,3}))?>/gu;
@@ -27,7 +22,6 @@ const OFFSET = /^[+-]?\d+$/u;
 
 const VOICE = /^(v\d+|[MFD]):\s*/u;
 
-/** A line that starts with a stamp: what decides whether text is LRC. */
 const STAMPED_LINE = /^\s*\[\d+:[0-5]?\d(?:[.:]\d{1,3})?\]/mu;
 
 const stampMs = (minutes: string, seconds: string, fraction: string | undefined): number => {
@@ -36,10 +30,8 @@ const stampMs = (minutes: string, seconds: string, fraction: string | undefined)
   return Number(minutes) * 60_000 + Number(seconds) * 1000 + fractionMs;
 };
 
-/** Whether text holds LRC stamps, as lyrics pasted into a plain lyrics tag often do. */
 const looksLikeLrc = (text: string): boolean => STAMPED_LINE.test(text);
 
-/** Most word stamps one line may carry; a line with more is not lyrics, so the set is not read. */
 const MAX_LINE_WORDS = 500;
 
 /** An A2 line's text split at its `<stamp>`s: text before the first, then each stamp's text. */
@@ -48,12 +40,6 @@ interface LineWords {
   readonly timed: Arr.NonEmptyReadonlyArray<{ readonly text: string; readonly atMs: number }>;
 }
 
-/**
- * Splits an A2 line at its word stamps, once per source line: a line stamped many times would
- * otherwise be split again for every repeat.
- *
- * @returns The line's words, null without word stamps, or `too-long` past `MAX_LINE_WORDS`.
- */
 const lineWordsOf = (text: string): Result.Result<LineWords | null, LyricsParseError> => {
   const stamps: Array<RegExpExecArray> = [];
 
@@ -80,10 +66,6 @@ const lineWordsOf = (text: string): Result.Result<LineWords | null, LyricsParseE
   return Result.succeed({ lead: text.slice(0, stamps[0]?.index), timed });
 };
 
-/**
- * The words of an A2 line. Each stamp starts the text after it and ends the word before it; text
- * before the first stamp starts with the line. A trailing stamp only ends the last word.
- */
 const wordsOf = (
   { lead, timed }: LineWords,
   lineStartMs: number,
@@ -100,7 +82,6 @@ const wordsOf = (
     const last = words.at(-1);
 
     if (segment.text.trim() === "") {
-      // Space timed on its own belongs to the word before it; before the first word it is dropped.
       if (last !== undefined) {
         words[words.length - 1] = {
           text: last.text + segment.text,
@@ -120,7 +101,6 @@ const wordsOf = (
   return Arr.isReadonlyArrayNonEmpty(words) ? words : null;
 };
 
-/** The lines with a repeat of the same text at the same time dropped. */
 const distinctLines = (lines: ReadonlyArray<LyricLine>): ReadonlyArray<LyricLine> => {
   const seen = new Set<string>();
 
@@ -135,11 +115,6 @@ const distinctLines = (lines: ReadonlyArray<LyricLine>): ReadonlyArray<LyricLine
   });
 };
 
-/**
- * A file that times every line twice, the second a translation of the first, as files from some
- * players (NetEase) do: the lines split into the song's words and their translation, each kept
- * with its own timing. Null when any stamp holds one line or more than two.
- */
 const pairedSets = (
   lines: ReadonlyArray<LyricLine>,
 ): {
@@ -172,11 +147,6 @@ const pairedSets = (
   return { main, translation };
 };
 
-/**
- * Lines that share a start become one line, their texts one under the other: LRC has no end
- * stamps, so a second line at the same time could never show. Word timing is dropped from a
- * merged line, since it covered only one of its texts.
- */
 const mergeSameStart = (lines: ReadonlyArray<LyricLine>): ReadonlyArray<LyricLine> => {
   const merged: Array<LyricLine> = [];
 
@@ -205,7 +175,6 @@ const mergeSameStart = (lines: ReadonlyArray<LyricLine>): ReadonlyArray<LyricLin
   return merged;
 };
 
-/** An empty stamped line ends the line before it, when that line has no end of its own. */
 const withEndMarkers = (lines: ReadonlyArray<LyricLine>): ReadonlyArray<LyricLine> =>
   lines.flatMap((line, index): ReadonlyArray<LyricLine> => {
     const next = lines[index + 1];
@@ -285,7 +254,6 @@ export const parseLrc = (
     if (Result.isFailure(lineWords)) return Result.fail(lineWords.failure);
     const lineText = rest.replaceAll(WORD_STAMP, "");
 
-    // Checked before any words are built, so a line stamped thousands of times fails at once.
     if (lineText.trim() !== "") lyricLines += stamps.length;
 
     if (lyricLines > MAX_LYRIC_LINES) {
@@ -294,7 +262,6 @@ export const parseLrc = (
       );
     }
 
-    // Word stamps are absolute, so they fall in one repeat: the last to start at or before them.
     const firstWordMs = lineWords.success?.timed[0].atMs ?? -1;
 
     const carrier = stamps.indexOf(
@@ -332,7 +299,6 @@ export const parseLrc = (
       .toSorted((a, b) => a.startMs - b.startMs),
   );
 
-  // Constant stamps are judged before lines merge: merged, they would leave one line, which has timing.
   return Result.flatMap(timedBody(lines), (whole) => {
     if (LyricBody.guards.Plain(whole)) return Result.succeed(mainSet(lang)(whole));
     const pairs = pairedSets(lines);

@@ -1,8 +1,3 @@
-/**
- * Song lyrics as every client reads them: the lyric sets a track's files and tags hold, what
- * LRCLIB returned for it, and the one answer `lyrics.get` gives after weighing the two. Pure, so
- * the server, the media service, and a phone holding downloads resolve lyrics the same way.
- */
 import { Data, Option, Schema } from "effect";
 
 import { TrackId } from "./ids";
@@ -36,7 +31,6 @@ export const parseLang = (tag: string): Lang | null => {
   try {
     [canonical] = Intl.getCanonicalLocales(candidate);
   } catch {
-    // Intl throws a RangeError for a well-formed but invalid tag, such as a repeated variant.
     return null;
   }
 
@@ -281,7 +275,6 @@ const bestPlain = (sets: ReadonlyArray<LyricSet>): PlainSet | undefined =>
     .filter(isPlain)
     .toSorted((a, b) => originRank(a.origin) - originRank(b.origin))[0];
 
-/** Every set from the winner's source except the winner, losing main sets included. */
 const extrasOf = (sets: ReadonlyArray<LyricSet>, main: LyricSet): ReadonlyArray<LyricSet> =>
   sets.filter((set) => set !== main);
 
@@ -368,22 +361,13 @@ const SINGLE_QUOTES = /[‘’‚‛′ʼ]/gu;
 
 const DOUBLE_QUOTES = /[“”„‟″]/gu;
 
-/**
- * `(feat. X)`, `[ft X]`, or a trailing `feat. X` / `ft. X` / `featuring X`. Trailing, the dot is
- * required: without it `feat` and `ft` are as likely words, as in "A Feat of Clay".
- */
 const FEATURING =
   /\s*[([]\s*(?:feat\.?|ft\.?|featuring)\s[^)\]]*[)\]]|\s+(?:feat\.|ft\.|featuring)\s.*$/gu;
 
-/** A remaster label: `Remastered`, `2011 Remaster`, `Remastered 2011 Version`, `Digital Remaster`. */
 const REMASTER_LABEL = String.raw`(?:\d{4}\s+)?(?:digital(?:ly)?\s+)?remaster(?:ed)?(?:\s+(?:version|\d{4})){0,2}`;
 
 const QUALIFIER_SEPARATOR = String.raw`\s*[-–—/,;]\s*`;
 
-/**
- * Remaster labels with the separator that set them apart, and the brackets they leave empty.
- * Other text beside one stays, so `Song (Live - 2011 Remaster)` keeps `(live)`.
- */
 const REMASTER: ReadonlyArray<readonly [RegExp, string]> = [
   [new RegExp(String.raw`\s*[([]\s*${REMASTER_LABEL}\s*[)\]]`, "gu"), ""],
   [new RegExp(String.raw`([([])\s*${REMASTER_LABEL}${QUALIFIER_SEPARATOR}`, "gu"), "$1"],

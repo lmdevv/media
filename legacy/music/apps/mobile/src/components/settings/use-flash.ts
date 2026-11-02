@@ -1,7 +1,5 @@
-/** Paper's quiet confirmation: a label that says `Copied` or `Saved` for a moment, then reverts. */
 import { useEffect, useState } from "react";
 
-/** How long a quiet confirmation stays. */
 const SHOWN_MS = 2000;
 
 /** Whether the confirmation shows, and the function that shows it again. */

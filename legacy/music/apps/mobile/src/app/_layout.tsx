@@ -1,8 +1,3 @@
-/**
- * The root: providers, then one stack whose screens are grouped by session phase. Changing phase
- * (connecting, signing in, finishing setup, signing out) sends the stack to the first screen the
- * new phase allows, so no screen navigates on those events itself.
- */
 import "../global.css";
 
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
@@ -33,7 +28,6 @@ void SplashScreen.preventAutoHideAsync();
 
 export { ErrorBoundary } from "expo-router";
 
-/** React Navigation's colors from the theme tokens, so native transitions and sheets match. */
 function NavigationTheme({ children }: { readonly children: ReactNode }) {
   const { theme } = useUniwind();
   const background = useThemeColor("--color-canvas");
@@ -55,10 +49,6 @@ function NavigationTheme({ children }: { readonly children: ReactNode }) {
   );
 }
 
-/**
- * Each phase's first screen, where the stack goes when the screen on show leaves the phase.
- * Without it the router picks the shortest allowed route name, so Connect hid Welcome at launch.
- */
 const FIRST_SCREEN = {
   disconnected: "/welcome",
   signedOut: "/sign-in",
@@ -71,7 +61,6 @@ const FIRST_SCREEN = {
   ready: "/",
 } as const satisfies Record<SettledPhase["kind"], string>;
 
-/** Every screen outside the signed-in app, grouped by the phase that may show it. */
 function RootStack({ phase }: { readonly phase: SettledPhase["kind"] }) {
   const canvas = useThemeColor("--color-canvas");
   const first = FIRST_SCREEN[phase];
@@ -94,7 +83,6 @@ function RootStack({ phase }: { readonly phase: SettledPhase["kind"] }) {
       <Stack.Protected guard={phase === "needsOwner"} redirectTo={first}>
         <Stack.Screen name="(entry)/setup/owner" options={{ animation: "fade" }} />
       </Stack.Protected>
-      {/* After each phase's own first screen: Back on Sign in and on Create account opens it. */}
       <Stack.Protected guard={phase === "signedOut" || phase === "needsOwner"} redirectTo={first}>
         <Stack.Screen name="(entry)/change-server" />
       </Stack.Protected>
@@ -107,7 +95,6 @@ function RootStack({ phase }: { readonly phase: SettledPhase["kind"] }) {
       <Stack.Protected guard={phase === "unreachable"} redirectTo={first}>
         <Stack.Screen name="unreachable" options={{ animation: "fade" }} />
       </Stack.Protected>
-      {/* Offline it opens on the downloads, and stays mounted as the server answers (D11). */}
       <Stack.Protected guard={phase === "ready" || phase === "offline"} redirectTo={first}>
         <Stack.Screen name="(app)" options={{ animation: "fade" }} />
       </Stack.Protected>
@@ -123,11 +110,9 @@ function HideSplash() {
   return null;
 }
 
-/** The app on a connected server: the splash until the server first answers, then its phase. */
 function ConnectedApp() {
   const phase = useSettledPhase();
 
-  // Shown only right after connecting, when the splash is already gone: a blank page, not a flash.
   if (phase === null) return <View className="flex-1 bg-canvas" />;
 
   return (
@@ -164,10 +149,6 @@ function App() {
   );
 }
 
-/**
- * The status bar in the app's theme, which can differ from the system's. The app-wide style is
- * what iOS uses here: the app doesn't opt into per-screen status bar styles.
- */
 function ThemedStatusBar() {
   const { theme } = useUniwind();
 

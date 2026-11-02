@@ -19,9 +19,6 @@ import { PhoneChrome } from "./phone-chrome";
 import { Sidebar } from "./sidebar";
 import { UiStateProvider, useUi } from "./ui-state";
 
-// The surfaces the shell opens on demand load as their own chunks: the command menu with its
-// catalog and forms, Now Playing, the queue, the Jam panel with its QR encoder, and the New
-// playlist dialog. None of them is on screen when a page first loads.
 const surfaces = {
   commandMenu: lazyChunk(
     async () => (await import("@/components/command/command-menu")).CommandMenu,
@@ -44,17 +41,11 @@ const JamPanel = surfaces.jamPanel.Component;
 
 const NewPlaylistDialog = surfaces.newPlaylist.Component;
 
-/**
- * Loads the surfaces' chunks once the first screen has settled, so the first ⌘K or tap on the mini
- * player opens at once instead of waiting for the network.
- */
 const usePreloadSurfaces = (): void => {
   useEffect(
     () =>
       whenSettled(() => {
         for (const { preload } of Object.values(surfaces)) {
-          // A chunk that fails here is asked for again when its surface opens; if that fails too,
-          // the surface says so (browsers may keep a failed module until the page reloads).
           preload().catch(() => undefined);
         }
       }),
@@ -62,25 +53,18 @@ const usePreloadSurfaces = (): void => {
   );
 };
 
-/** Renders nothing in place of a surface whose code didn't load; any other error goes on up. */
 function NoSurface({ error }: ErrorComponentProps): ReactNode {
   if (!(error instanceof ChunkLoadError)) throw error;
 
   return null;
 }
 
-/**
- * A lazily loaded surface. A chunk that fails to load closes the surface and says so, rather than
- * reaching the route's error screen, which would replace the shell and stop the music. A bug in a
- * loaded surface still reaches that screen. A new `attempt` tries the chunk again.
- */
 function Loaded({
   attempt,
   onFailed,
   children,
 }: {
   readonly attempt: number;
-  /** Closes the surface, so the shell (and its shortcuts) don't wait on one that isn't there. */
   readonly onFailed: () => void;
   readonly children: ReactNode;
 }) {
@@ -102,10 +86,6 @@ function Loaded({
   );
 }
 
-/**
- * Mounts a lazily loaded surface the first time it opens, and keeps it for its close animation.
- * Each opening is a new attempt, so a surface that failed to load tries again.
- */
 function OnDemand({
   open,
   onFailed,
@@ -140,8 +120,6 @@ function OnDemand({
 export function AppShell({ children }: { readonly children: ReactNode }) {
   return (
     <UiStateProvider>
-      {/* Only the signed-in app has tooltips, so their provider (and code) stays out of the
-          sign-in and setup screens. */}
       <TooltipProvider>
         <Frame>{children}</Frame>
         <KeyboardShortcuts />
@@ -151,19 +129,15 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
   );
 }
 
-/** The dialogs and sheets the shell opens over every page. */
 function Surfaces() {
   const ui = useUi();
   const { commandOpen, setCommandOpen, newPlaylist, closeNewPlaylist } = ui;
   const { nowPlaying, setNowPlaying, jamOpen, setJamOpen } = ui;
-  // Only whether a song is loaded: play, pause, buffering, and position reports don't reach them.
   const hasTrack = useHasTrack();
   const { pathname } = useLocation();
 
   usePreloadSurfaces();
 
-  // Going to another page closes Now Playing. It lives here, not in Now Playing, which mounts
-  // only once opened and would close itself on mount.
   useEffect(() => {
     setNowPlaying(null);
   }, [pathname, setNowPlaying]);

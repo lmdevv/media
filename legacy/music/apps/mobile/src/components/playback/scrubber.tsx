@@ -1,10 +1,3 @@
-/**
- * Now Playing's scrubber (B01): the progress track over elapsed and remaining times in Geist Mono.
- * It is the only part of the screen that re-renders with the position. While dragging, the times
- * follow the finger; the seek is sent once, on release. The iPad's player bar (page 26) draws it
- * `inline`: the times either side of the track, 4pt under the transport as Paper spaces them. Its
- * touch area starts where the transport ends and runs on down into the bar's foot.
- */
 import * as Haptics from "expo-haptics";
 import { useState } from "react";
 import { View } from "react-native";
@@ -60,8 +53,6 @@ export function Scrubber({ inline = false }: { readonly inline?: boolean }) {
   return (
     <View>
       {slider}
-      {/* The 44pt touch area centers the track 20pt below the title row, as Paper's padding does;
-          the times sit Paper's 8pt under the track, inside the touch area's lower half. */}
       <View className="-mt-3 flex-row justify-between" pointerEvents="none">
         <Text variant="mono" tone="muted">
           {clock(shownMs)}

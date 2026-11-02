@@ -1,7 +1,3 @@
-/**
- * Links the server opens in a browser or the app: `<origin>/invite/<code>` and
- * `<origin>/reset/<token>`, as the web app and the CLI print them.
- */
 import type { ServerOrigin } from "./server";
 
 /** The one-time link that signs someone up with an invite code. */

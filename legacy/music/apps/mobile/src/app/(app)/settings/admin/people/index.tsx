@@ -1,4 +1,3 @@
-/** F09 · People. */
 import { PeopleList } from "@/components/admin/people-list";
 import { RequireAccess } from "@/components/settings/access";
 

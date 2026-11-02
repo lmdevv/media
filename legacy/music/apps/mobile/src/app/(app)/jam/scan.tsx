@@ -1,7 +1,3 @@
-/**
- * Scans a host's Jam QR code (D12) with the camera and opens its invite (D05). Without camera
- * access it asks for it, or, once refused, points to Settings and back to typing the code.
- */
 import { CameraView, useCameraPermissions } from "expo-camera";
 import type { BarcodeScanningResult } from "expo-camera";
 import * as Haptics from "expo-haptics";
@@ -23,11 +19,9 @@ const typeInstead = (
   <Button label="Enter a code instead" variant="secondary" onPress={() => router.back()} />
 );
 
-/** The camera, reading QR codes until one is a Jam link for this server. */
 function Scanner() {
   const { origin } = useConnection();
   const [failure, setFailure] = useState<string | null>(null);
-  // The camera reports the same code many times a second; only the first good one opens.
   const opened = useRef(false);
 
   const scanned = ({ data }: BarcodeScanningResult) => {

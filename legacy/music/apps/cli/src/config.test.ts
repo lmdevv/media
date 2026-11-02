@@ -115,7 +115,6 @@ describe("config files", () => {
     const paths = pathsFor(home);
     const remote = { server: "http://nas.lan:8080/convex", key: "mk_old-cli-key" };
 
-    // A config written by a CLI from before --insecure.
     await makeDir(paths.dir, 0o700);
     await writeText(paths.config, JSON.stringify(remote));
 

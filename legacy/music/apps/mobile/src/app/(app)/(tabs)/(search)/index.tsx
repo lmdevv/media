@@ -1,15 +1,3 @@
-/**
- * A09, A10, A13, A16, G03 · Search. iOS draws the field: selecting the Search tab turns the tab
- * bar into it beside a return button and focuses it, so searching starts at once (A13, A17); it
- * rises above the keyboard with a Cancel circle while the tabs and mini player hide (A13, A16). Before typing the page offers what was played
- * lately; focused with nothing typed it lists what was opened from Search before. Typing shows
- * live results by kind with filter chips (A10), or says nothing matched (G03). Clearing keeps the
- * keyboard; Cancel empties the field and returns to browsing. The tab stays mounted, so leaving
- * for another tab and coming back keeps the query and the scroll.
- *
- * On an iPad the tab bar is hidden: the sidebar's Search row opens this screen and focuses the
- * field, which iOS draws in the header, and the page draws the title under it.
- */
 import type { TrackId } from "@music/commands/ids";
 import type { AlbumCard, ArtistCard, Track } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
@@ -48,19 +36,14 @@ import { useContentCanvas } from "@/lib/window-layout";
 import { useNowPlaying } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
-/** How long typing pauses before the search runs. */
 const DEBOUNCE_MS = 250;
 
-/** Results of each kind the server returns at most. */
 const RESULT_LIMIT = 50;
 
-/** Recently played songs offered before typing (A09). */
 const RECENTLY_PLAYED = 3;
 
-/** Plays read to find them, since one song often plays several times in a row. */
 const PLAYS_READ = 50;
 
-/** `text` once it has stopped changing for a moment, trimmed. */
 const useSettled = (text: string): string => {
   const [settled, setSettled] = useState(text.trim());
 
@@ -73,10 +56,6 @@ const useSettled = (text: string): string => {
   return settled;
 };
 
-/**
- * `value`, or the last value that wasn't undefined while it is, so results stay on screen while
- * the next query loads rather than flashing empty.
- */
 const useHeld = <Value,>(value: Value | undefined): Value | undefined => {
   const [held, setHeld] = useState(value);
 
@@ -106,7 +85,6 @@ export default function Search() {
 
   const field = useRef<SearchBarCommands>(null);
   const list = useRef<FlashListRef<PageRow>>(null);
-  // The bar's height with its title collapsed; iOS insets the list by it.
   const barHeight = useHeaderHeight();
   const [typed, setTyped] = useState("");
   const [focused, setFocused] = useState(false);
@@ -114,8 +92,6 @@ export default function Search() {
   const query = useSettled(typed);
 
   const navigation = useNavigation();
-  // Set when the Search tab is selected while another tab is on screen; the field focuses once
-  // this screen is.
   const focusOnArrival = useRef(false);
 
   useOnSearchActivate(
@@ -146,20 +122,15 @@ export default function Search() {
   const { recents, remember, clear } = useRecentSearches();
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom } = usePlayList();
-  // A launch that never reached the server has nothing to search.
   const offline = useServerReach() === "offline";
 
   const searching = query !== "" && typed.trim() !== "";
   const played = distinctSongs(plays ?? [], RECENTLY_PLAYED);
   const browsing = !searching && !(focused && recents.length > 0);
 
-  // Which page the list shows; a new one starts from its top.
   const page = searching ? `results:${filter}:${query}` : browsing ? "browse" : "recents";
   const shownPage = useRef<string | null>(null);
 
-  // Under the collapsed bar, once the new rows lay out (scrolling before that lands short). A
-  // point inside the collapsed range, since exactly at its edge UIKit can leave the large title
-  // open with the rows under it. The first page keeps the large title open.
   useEffect(() => {
     const previous = shownPage.current;
 
@@ -170,7 +141,6 @@ export default function Search() {
     list.current?.scrollToOffset({ offset: 1 - barHeight, animated: false });
   }, [page, barHeight]);
 
-  /** The songs a song row plays from: the results while searching, else the recent plays. */
   const songs: ReadonlyArray<Track> = searching ? (results?.tracks ?? []) : played;
   const songIds: ReadonlyArray<TrackId> = songs.map((track) => track.id);
 
@@ -291,7 +261,6 @@ export default function Search() {
       <Stack.Screen
         options={{
           headerShown: true,
-          // Beside the iPad's sidebar UIKit runs a large title into its edge, so the page draws it.
           title: sidebar === null ? "Search" : "",
           headerLargeTitleEnabled: sidebar === null,
           headerShadowVisible: false,
@@ -300,9 +269,6 @@ export default function Search() {
           headerLargeTitleStyle: { fontFamily: heavy, color: text },
           headerTitleStyle: { fontFamily: semibold, color: text },
           contentStyle: { backgroundColor: canvas },
-          // Options merge, so these say null rather than leave a key out: rotating to a pinned
-          // sidebar must take the buttons away. Pinned, it holds the account; hidden, the page
-          // offers the way back to it (A3).
           headerRight: () =>
             sidebar?.placement === "beside" ? null : <AccountButton solid={sidebar !== null} />,
           headerLeft: () =>
@@ -327,7 +293,6 @@ export default function Search() {
       />
       <FlashList
         ref={list}
-        // React Native clamps scrolling at zero, but iOS insets the list for the bar above it.
         scrollToOverflowEnabled
         data={offline ? [] : rows}
         extraData={playingId}
@@ -372,7 +337,6 @@ export default function Search() {
   );
 }
 
-/** The result "All" leads with, as the row its kind uses. */
 function TopResultRow({
   top,
   playingId,
@@ -402,7 +366,6 @@ function TopResultRow({
   );
 }
 
-/** An artist found: "Artist · 6 albums" as the top result, the album count in the list. */
 function ArtistResult({
   artist,
   top,
@@ -423,7 +386,6 @@ function ArtistResult({
   );
 }
 
-/** Something opened from Search before (A16). */
 function RecentRow({
   item,
   active,
@@ -452,7 +414,6 @@ function RecentRow({
   );
 }
 
-/** G03: the search found nothing; Edit search brings the keyboard back to the query. */
 function NoResults({ query, onEdit }: { readonly query: string; readonly onEdit: () => void }) {
   return (
     <View className="px-page">

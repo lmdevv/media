@@ -22,7 +22,6 @@ export const usePrimary = (
 ): void => {
   const latest = useRef(run);
 
-  // Declared first, so the registration below sees this render's action.
   useEffect(() => {
     latest.current = run;
   });

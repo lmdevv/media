@@ -1,9 +1,3 @@
-/**
- * Which of Paper's layouts a window gets (page 25). The phone design runs below `tablet`, which
- * covers every iPhone and an iPad app in narrow Split View; the iPad design runs from `tablet`;
- * from `wide` (iPad landscape, the 13-inch in portrait) two panes fit side by side.
- */
-
 /** The layout a window width gets. */
 export type WidthClass = "phone" | "tablet" | "wide";
 

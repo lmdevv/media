@@ -1,8 +1,3 @@
-/**
- * Can't play right now (G06): playback failed, here, on this phone. The queue and the position
- * stay as they were; the sheet says what failed and offers to load the song again or to keep
- * browsing, which still works while only the media service is down.
- */
 import { router } from "expo-router";
 import { Server } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -23,7 +18,6 @@ export function PlaybackFailed() {
   const { origin } = useConnection();
   const [retrying, setRetrying] = useState(false);
 
-  // A retry that plays closes the sheet; one that fails again keeps it, with the new reason.
   useEffect(() => {
     if (!retrying) return;
 

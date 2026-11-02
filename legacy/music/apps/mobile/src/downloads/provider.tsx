@@ -1,9 +1,3 @@
-/**
- * Downloads on this iPhone. `DownloadsProvider` opens the signed-in account's vault, runs a
- * `DownloadSync` over it, and feeds it what the server says: this phone's downloads, each one's
- * manifest, and whether the server answers. Screens use the hooks below and never see pins,
- * manifests, revisions, or files.
- */
 import type { DeviceId, DownloadPinId, TrackId, UserId } from "@music/commands/ids";
 import type { HeldLyrics } from "@music/commands/lyrics";
 import type { DownloadTarget } from "@music/commands/models";
@@ -91,23 +85,16 @@ interface DownloadSettings {
 
 interface Downloads {
   readonly sync: DownloadSync | null;
-  /** Stable for the provider's lifetime, whichever vault is open. */
   readonly copies: DownloadedCopies;
   readonly quality: DownloadQuality;
   readonly setQuality: (quality: DownloadQuality) => void;
-  /** The account's session store; a new one when the account changes. */
   readonly sessions: SessionStore;
 }
 
-/** What a session store holds when no vault is open. */
 const NOTHING_STORED: StoredSessions = { local: null, server: null };
 
 const DownloadsContext = createContext<Downloads | null>(null);
 
-/**
- * How to stop each server's sync and close its vault, so a wipe never races a fetch still
- * writing. Kept until the shutdown has ended, so a wipe that starts meanwhile waits for it.
- */
 const shutdowns = new Map<ServerOrigin, () => Promise<void>>();
 
 /**
@@ -123,12 +110,10 @@ const subscribeToNothing = (): (() => void) => () => undefined;
 
 const emptySnapshot = (): DownloadsSnapshot => EMPTY_DOWNLOADS;
 
-/** The profile each new download is fetched in. */
 const policyFor = (quality: DownloadQuality): SyncPolicy => ({
   profileFor: (track) => chooseStreamProfile(quality, track.codec, playsOnIos),
 });
 
-/** Reads one download's manifest and hands it to the sync. Renders nothing. */
 function PinWatcher({
   sync,
   pinId,
@@ -136,7 +121,6 @@ function PinWatcher({
   readonly sync: DownloadSync;
   readonly pinId: DownloadPinId;
 }) {
-  // Settled: a download removed elsewhere answers `not_found` until the list catches up.
   const manifest = useReadSettled("downloads.manifest", { pinId });
 
   useEffect(() => {
@@ -146,7 +130,6 @@ function PinWatcher({
   return null;
 }
 
-/** Reads how one batch of kept songs' lyrics changed and hands it to the sync. Renders nothing. */
 function LyricsWatcher({
   sync,
   held,
@@ -163,10 +146,6 @@ function LyricsWatcher({
   return null;
 }
 
-/**
- * Feeds `sync` this phone's downloads, the manifest of each, and how their songs' lyrics changed.
- * Renders nothing visible, and again only when the downloads or the lyrics questions change.
- */
 function ServerFeed({
   sync,
   deviceId,
@@ -210,17 +189,12 @@ function ServerFeed({
   );
 }
 
-/**
- * The account whose downloads this phone opens: the one signed in, else the one last signed in to
- * this server, so a launch with no connection still opens its downloads. Signing out forgets it.
- */
 const useDownloadsAccount = (origin: ServerOrigin): UserId | null => {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const account = useReadSettled("account.me", isAuthenticated ? {} : "skip");
   const signedIn = account === undefined || account instanceof Error ? null : account.id;
   const signedOut = !isLoading && !isAuthenticated;
   const [known, setKnown] = useState(() => loadAccount(origin));
-  // Signed out, the account is gone: whoever signs in next waits for the server to say who.
   const next = signedOut ? null : (signedIn ?? known);
 
   if (next !== known) setKnown(next);
@@ -246,14 +220,10 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   const deviceId = useMemo(() => loadPhoneId(), []);
   const [sync, setSync] = useState<DownloadSync | null>(null);
   const [quality, setStoredQuality] = useState(loadDownloadQuality);
-  // The sync reads the policy at every plan, so a new quality applies from the next fetch.
   const chosen = useRef(quality);
   const current = useRef<DownloadSync | null>(null);
-  // Each account's vault while it is open, so a session store reaches only its own account's.
   const vaults = useRef(new Map<UserId, Promise<ExpoVault>>());
 
-  // A layout effect, so the vault is opening before any child's effect (the player's session
-  // router) asks it for the session it stored.
   useLayoutEffect(() => {
     if (userId === null) return undefined;
     let closed = false;
@@ -262,7 +232,6 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     const opening = openVault(origin, userId);
     vaults.current.set(userId, opening);
 
-    /** Stops the sync, waiting for its fetches to end, then closes the vault. Once. */
     const shutdown = (): Promise<void> => {
       shutting ??= (async () => {
         closed = true;
@@ -284,7 +253,6 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
       try {
         vault = await opening;
       } catch (error) {
-        // The phone streams as before; downloads come back when the app opens the vault again.
         const reason = error instanceof Error ? error.message : "unknown error";
         console.warn(`Downloads are unavailable: the vault didn't open (${reason}).`);
 
@@ -335,8 +303,6 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     setStoredQuality(next);
   }, []);
 
-  // Bound to this account: a player built for it, even one left running past a sign-out, never
-  // reads or writes another account's session. Without a vault open, nothing is stored.
   const sessions = useMemo((): SessionStore => {
     const vault = async (): Promise<ExpoVault | null> => {
       const opening = userId === null ? undefined : vaults.current.get(userId);
@@ -380,7 +346,6 @@ const useDownloads = (hook: string): Downloads => {
   return downloads;
 };
 
-/** The current snapshot; the empty one until the vault opens. */
 const useSnapshot = (sync: DownloadSync | null): DownloadsSnapshot =>
   useSyncExternalStore(sync?.subscribe ?? subscribeToNothing, sync?.getSnapshot ?? emptySnapshot);
 

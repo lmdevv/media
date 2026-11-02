@@ -1,4 +1,3 @@
-/** F07 · Revoke key?. */
 import { RevokeKey } from "@/components/settings/keys";
 import { SheetAccess } from "@/components/settings/sheet-access";
 

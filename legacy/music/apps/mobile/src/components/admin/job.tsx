@@ -1,8 +1,3 @@
-/**
- * F19 · Library scan: one job, live. While it waits or runs it shows its progress, time left, and
- * Cancel scan; once done, what the scanner reported. A failed or cancelled scan is G09: what was
- * kept, why it stopped, and a way to scan again.
- */
 import type { JobId } from "@music/commands/ids";
 import type { Job, Library } from "@music/commands/models";
 import { useRead, useRun } from "@music/sdk/react";
@@ -58,14 +53,11 @@ export function JobPage({ id }: { readonly id: JobId | null }) {
   return <ScanProgress job={job} library={library ?? null} />;
 }
 
-/** Props for a job's page once the job has loaded. */
 interface ScanProps {
   readonly job: Job;
-  /** Its library, or null when it is gone or hidden from the caller. */
   readonly library: Library | null;
 }
 
-/** F19: a waiting, running, or finished scan. */
 function ScanProgress({ job, library }: ScanProps) {
   const now = useNow(5000);
   const progress = jobProgress(job);
@@ -119,7 +111,6 @@ function ScanProgress({ job, library }: ScanProps) {
   );
 }
 
-/** G09: a scan that failed or was cancelled. The music it read stays. */
 function StoppedScan({ job, library }: ScanProps) {
   const scan = useRun("libraries.scan");
   const action = useAction();

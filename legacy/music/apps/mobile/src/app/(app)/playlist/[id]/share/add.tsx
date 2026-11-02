@@ -1,7 +1,3 @@
-/**
- * Add people (C09's Add): everyone on the server the playlist isn't shared with yet, then C10's
- * role choice for the one picked, in the same sheet.
- */
 import { PlaylistId } from "@music/commands/ids";
 import type { DirectoryPerson } from "@music/commands/models";
 import { roleLabel } from "@music/commands/permissions";

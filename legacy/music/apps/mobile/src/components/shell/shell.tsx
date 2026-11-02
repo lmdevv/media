@@ -1,14 +1,3 @@
-/**
- * The iPad's frame around the tabs (page 26, direction B): the sidebar, the tabs' pages, and the
- * player bar. The native tabs stay mounted underneath with their bar hidden, so each page keeps
- * its own stack, and rotating or resizing never loses it; the sidebar drives them by route. In
- * Split View narrower than `tablet` the frame steps aside for the phone's tab bar.
- *
- * `shellOf` says what the window gets. Pinned, the sidebar sits beside the pages until its button
- * hides it; at `tablet` it stays hidden behind a button on the page and opens over everything,
- * with a scrim that closes it, as does choosing anything in it. The Now Playing panel sits beside
- * the pages as a pane, or above the bar as a sheet; the pages take what room it leaves.
- */
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
@@ -29,7 +18,6 @@ import { useInspector } from "./use-inspector";
 
 const noop = () => undefined;
 
-/** The sidebar over everything, on a scrim; VoiceOver stays inside it until it closes. */
 function SidebarOverlay({ onClose }: { readonly onClose: () => void }) {
   const insets = useSafeAreaInsets();
 
@@ -81,7 +69,6 @@ export function Shell({
   const [overlaid, setOverlaid] = useState(false);
   const [lastSidebar, setLastSidebar] = useState(layout.sidebar);
 
-  // An overlay left open would come back open on the next rotation to this size.
   if (lastSidebar !== layout.sidebar) {
     setLastSidebar(layout.sidebar);
     setOverlaid(false);

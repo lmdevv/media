@@ -1,7 +1,3 @@
-/**
- * Talks to a real [music] Convex backend the way clients do: Convex Auth sign-in actions, the
- * typed command client from `@music/sdk`, and the media service functions with the shared secret.
- */
 import type { CommandArgs, MutationName, QueryName } from "@music/commands/registry";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
 import { commandFailure, type CommandFailure } from "@music/sdk/errors";
@@ -162,10 +158,6 @@ export const resetPassword = async (
   return withTokens(url, tokens);
 };
 
-/**
- * Claims a library's folder as the media service does before a scan: at the path it was added
- * with, under a made-up identity no other library shares.
- */
 const claimFolder = async (url: string, secret: string, libraryId: string) => {
   const { convex } = anonymous(url);
   const libraries = await convex.query(librariesQuery, { secret });

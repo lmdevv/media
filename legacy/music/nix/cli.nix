@@ -1,7 +1,3 @@
-# The `music` CLI, bundled by esbuild into one file and run with Node.
-#
-#   nix run github:lmdevv/music#cli -- login --server https://music.example.com/convex
-#
 # Dependencies come from pnpm-lock.yaml through fetchPnpmDeps. When the lockfile changes, update
 # `hash` below: set it to "" and copy the hash from the error `nix build .#cli` prints.
 {

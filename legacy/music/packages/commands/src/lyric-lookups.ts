@@ -1,11 +1,3 @@
-/**
- * The life of an LRCLIB lookup, as Convex (`lyricLookups`) and the media service's in-memory
- * backend both run it. A lookup moves queued -> leased (the media service asking LRCLIB) -> found,
- * instrumental, or miss. A try that failed on its own record waits and queues again, and the fifth
- * is a miss. A try that found LRCLIB unavailable puts the lookup back as it was: an outage pauses
- * every lookup and costs none of them a try. Found and instrumental answers are kept for good; a
- * miss queues again when a song asks after `MISS_RETRY_MS`.
- */
 import { Match } from "effect";
 
 /** How urgently a song's lyrics are wanted: it is playing, it was downloaded, or a backfill. */
@@ -57,16 +49,13 @@ export type LookupOutcome =
 /** Queued lookups the media service sees at once. */
 export const LYRIC_QUEUE_SIZE = 10;
 
-/** How long the media service holds a lookup before it counts as stalled. */
 const LOOKUP_LEASE_MS = 60_000;
 
-/** Failed tries after which a lookup is a miss. */
 const MAX_LOOKUP_ATTEMPTS = 5;
 
 /** How long a miss stands before a song asking for it queues it again. */
 export const MISS_RETRY_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** The wait after the first, second, third, and fourth failed try. */
 const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 60 * 60_000] as const;
 
 const rank = (priority: LookupPriority): number => PRIORITIES.indexOf(priority);
@@ -129,7 +118,6 @@ export const leased = (state: QueuedState, workerId: string, now: number): Lease
   leaseUntil: now + LOOKUP_LEASE_MS,
 });
 
-/** A failed try: waiting until the retry delay passed, or a miss after `MAX_LOOKUP_ATTEMPTS`. */
 const failedTry = (state: LeasedState, now: number): LookupState => {
   const attempts = state.attempts + 1;
   const delay = RETRY_DELAYS_MS[attempts - 1];

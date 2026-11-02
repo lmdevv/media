@@ -25,7 +25,6 @@ function LikedPage() {
   const tracks = liked?.tracks;
   const total = (tracks ?? []).reduce((sum, track) => sum + track.durationMs, 0);
 
-  // Past the songs kept live, the count says there are more.
   const count =
     liked === undefined || liked.done
       ? plural(tracks?.length ?? 0, "song")

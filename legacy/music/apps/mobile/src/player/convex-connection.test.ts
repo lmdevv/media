@@ -15,7 +15,6 @@ const DOWN: ConnectionState = {
   inflightActions: 0,
 };
 
-/** A Convex client's connection state that a test moves by hand. */
 const fakeClient = () => {
   let state = DOWN;
   const listeners = new Set<(next: ConnectionState) => void>();

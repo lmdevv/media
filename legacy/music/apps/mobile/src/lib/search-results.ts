@@ -1,8 +1,3 @@
-/**
- * Search results as A10 lays them out. "All" leads with the top result, then a few songs, albums,
- * and artists, each with See all when there are more; a filter chip shows one kind in full. The
- * screen renders the rows in one recycled list, so the layout is a flat array of typed rows.
- */
 import type { AlbumCard, ArtistCard, SearchResults, Track } from "@music/commands/models";
 import { foldSearchText } from "@music/commands/search-text";
 
@@ -17,7 +12,6 @@ export const SEARCH_FILTERS = [
 /** Which kinds of result show. */
 export type SearchFilter = (typeof SEARCH_FILTERS)[number]["value"];
 
-/** How many of each kind "All" shows before See all. */
 const ALL_LIMITS = { songs: 4, albums: 3, artists: 3 } as const;
 
 /** The result "All" leads with. */
@@ -70,7 +64,6 @@ export type SearchRow =
   | { readonly kind: "album"; readonly key: string; readonly album: AlbumCard }
   | { readonly kind: "artist"; readonly key: string; readonly artist: ArtistCard };
 
-/** The key the top result's own row would have in its section, so it isn't listed twice. */
 const rowKeyOf = (top: TopResult): string => {
   if (top.kind === "artist") return `artist:${top.artist.id}`;
 
@@ -92,7 +85,6 @@ const albumRows = (albums: ReadonlyArray<AlbumCard>): Array<SearchRow> =>
 const artistRows = (artists: ReadonlyArray<ArtistCard>): Array<SearchRow> =>
   artists.map((artist) => ({ kind: "artist", key: `artist:${artist.id}`, artist }));
 
-/** A titled section of at most `limit` rows, with See all when it holds more. */
 const section = <Item>(
   title: string,
   filter: SearchFilter,

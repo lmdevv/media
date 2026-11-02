@@ -1,9 +1,3 @@
-/**
- * Live, cursor-paginated lists for the recycled browse lists (Songs, Albums, Artists): one Convex
- * subscription per page, joined into a single array a FlashList renders. The next page loads when
- * the list nears its end, or at once while a list needs every row (an order the server doesn't
- * page in). A page that re-subscribes with its new end keeps its rows on screen meanwhile.
- */
 import { AlbumPage, ArtistPage, PageArgs, TrackPage } from "@music/commands/models";
 import type { AlbumCard, ArtistCard, Track } from "@music/commands/models";
 import type { QueryName } from "@music/commands/registry";
@@ -25,9 +19,7 @@ import type { ChainStatus, Cursors, PageResult } from "@/lib/page-chain";
 
 const encodePageArgs = Schema.encodeSync(PageArgs);
 
-/** A page as last decoded, with the wire object it came from, so it decodes once per change. */
 interface HeldPage<Item> {
-  /** The value Convex returned, compared by identity only. */
   readonly wire: unknown;
   readonly page: PageResult<Item>;
 }
@@ -57,7 +49,6 @@ const usePages = <Item>(
   const [held, setHeld] = useState<ReadonlyMap<string, HeldPage<Item>>>(new Map());
   const decode = Schema.decodeUnknownResult(schema);
 
-  // `useQueries` re-subscribes whenever the request object changes identity.
   const queries = useMemo(
     () =>
       Object.fromEntries(
@@ -74,8 +65,6 @@ const usePages = <Item>(
 
   const results = useQueries(queries);
 
-  // Each page decodes once per new wire value, held during render (as `useHeld` does on the web),
-  // so a page re-subscribing with its new end keeps showing its rows.
   let changed: Map<string, HeldPage<Item>> | null = null;
 
   for (const cursor of cursors) {

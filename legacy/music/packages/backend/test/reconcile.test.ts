@@ -78,7 +78,6 @@ const reconcile = (
   deviceId: DeviceId = PHONE,
 ) => user.music.run("devices.reconcile", { deviceId, plays, resume });
 
-/** A device's queue of `songs`, all of them entries it made, with autoplay off as in `setup`. */
 const resumeOf = (
   songs: ReadonlyArray<TrackId>,
   overrides: Partial<OfflineResume> = {},

@@ -46,14 +46,9 @@ export type TrackListVariant = "album" | "list";
 
 const headerCell = "font-mono text-xs/xs tracking-mono text-text-muted";
 
-/**
- * A row's height. The rows and the probe that measures a row's height for windowing share it, so
- * the estimate for rows not yet on the page follows the stylesheet.
- */
 const rowHeightClassName = (variant: TrackListVariant): string =>
   variant === "album" ? "h-12 lg:h-row" : "h-12 lg:h-13";
 
-/** The row box both playable and unavailable songs use, so the two stay the same size. */
 const rowClassName = (variant: TrackListVariant): string =>
   cn(
     "group/row relative flex shrink-0 items-center rounded-sm select-none",
@@ -76,25 +71,16 @@ interface NowPlaying {
   readonly playing: boolean;
 }
 
-/** Renders the row for the song at `index`. */
 type RenderRow = (track: Track, index: number, now: NowPlaying) => ReactNode;
 
-/** How many songs the list holds, for the reorder controls' "Position 3 of 40". */
 const ListLengthContext = createContext(0);
 
-/** The track number column of the album variant. */
 const numberCell = "w-7.5 shrink-0 lg:w-7";
 
-/** A song's cover in the list variant. */
 const coverClassName = "size-11 rounded-xs lg:size-row";
 
-/** The format column of the list variant. */
 const formatCell = "hidden w-27.5 shrink-0 font-mono text-xs/xs text-text-muted lg:block";
 
-/**
- * Plays a song from a list on double click (desktop) or tap (phone), queueing the list's songs
- * that can play. Stable while the list is, so unchanged rows skip re-rendering.
- */
 const useRowPlay = (
   tracks: ReadonlyArray<Track>,
   unavailable: ((index: number) => string | null) | undefined,
@@ -190,15 +176,11 @@ export function TrackList({
     [mode, rowProps, moveBy],
   );
 
-  // The row a drag started from stays on the page, so its drag can end.
   const dragging = reorder?.reorder.dragging ?? null;
   const [probe, setProbe] = useState<HTMLElement | null>(null);
   const rowHeight = useRowHeight(probe);
   const scrolledTo = useRef<TrackId | null>(null);
 
-  // A shared song link opens the list scrolled to the song: once per song, after the row height is
-  // read and a frame later, so the empty blocks above have their heights. Found by its index (its
-  // block is pinned), so an unavailable row counts too, and tried again when the songs arrive.
   useEffect(() => {
     if (highlight === undefined || highlight === null || highlightIndex === -1) return undefined;
 
@@ -294,16 +276,8 @@ export function TrackList({
   );
 }
 
-/** Rows per block of a long list; blocks far from view keep only their height. */
 const BLOCK_ROWS = 100;
 
-/**
- * The rows of a list in blocks of {@link BLOCK_ROWS}, rendered only near the visible part of the
- * list, so a 1,000-song playlist mounts a few hundred rows instead of all of them. The first block
- * renders at once, and so do the blocks holding a `pinned` row (a row to scroll to, or the row being
- * dragged). A list of one block always renders unless `pinOneBlock` is off. Short lists use the
- * same blocks, so a list growing past one block keeps its rows (and their menus and focus).
- */
 function WindowedRows({
   tracks,
   renderRow,
@@ -313,10 +287,8 @@ function WindowedRows({
 }: {
   readonly tracks: ReadonlyArray<Track>;
   readonly renderRow: RenderRow;
-  /** Row indexes whose blocks always render; -1 for none. */
   readonly pinned: ReadonlyArray<number>;
   readonly pinOneBlock: boolean;
-  /** One row's height, from the probe; null before it has been read. */
   readonly rowHeight: number | null;
 }) {
   const starts = Array.from(
@@ -340,15 +312,8 @@ function WindowedRows({
   ));
 }
 
-/**
- * The height of `probe`, an empty element with a row's height classes: read before the first paint
- * and again whenever it changes (the layout crossing the desktop breakpoint), so it is always a real
- * row's height and never a measurement of an empty block.
- */
 const useRowHeight = (probe: HTMLElement | null): number | null => {
   const [height, setHeight] = useState<number | null>(null);
-  // Read again in the same commit that crosses the breakpoint, before paint: the probe's resize
-  // observer reports a frame later, when blocks would already have used the old height.
   const desktop = useIsDesktop();
 
   useLayoutEffect(() => {
@@ -402,7 +367,6 @@ function RowBlock({
     <div
       ref={windowed.ref}
       role="rowgroup"
-      // Before the row height is read (the same frame, before paint) an empty block is flat.
       style={windowed.shown ? undefined : { height: windowed.height ?? 0 }}
     >
       {windowed.shown ? (
@@ -412,10 +376,6 @@ function RowBlock({
   );
 }
 
-/**
- * The rows of a block on the page. Only these follow the playing song, so a list's empty blocks (and
- * a Songs page far from view) don't re-render on play, pause, or a new song.
- */
 function ShownRows({
   tracks,
   start,
@@ -427,7 +387,6 @@ function ShownRows({
   readonly count: number;
   readonly renderRow: RenderRow;
 }) {
-  // Only the current song and status: a position report or queue change re-renders no rows.
   const { trackId, status } = useCurrentTrack();
   const now = { trackId, playing: status === "playing" || status === "buffering" };
 
@@ -436,7 +395,6 @@ function ShownRows({
     .map((track, offset) => renderRow(track, start + offset, now));
 }
 
-/** The drag handle (desktop) or up/down buttons (phone reorder mode) of a movable row. */
 function RowMover({
   reorder,
   label,
@@ -446,10 +404,8 @@ function RowMover({
   readonly reorder: RowReorder | undefined;
   readonly label: string;
   readonly index: number;
-  /** The handle sits before the row; the buttons go before the row's menu. */
   readonly place: "start" | "end";
 }) {
-  // Read here, not passed to the rows, so a song added or removed re-renders only the movers.
   const count = useContext(ListLengthContext);
 
   if (reorder === undefined) return null;
@@ -479,16 +435,11 @@ function RowMover({
   return null;
 }
 
-/** Drag props and the drop line for a movable row. */
 const movable = (reorder: RowReorder | undefined, index: number, dropSide: DropSide | null) =>
   reorder?.mode === "drag"
     ? { props: reorder.rowProps(index), line: dropLine(dropSide) }
     : { props: {}, line: null };
 
-/**
- * One song row. Memoized: a block's shown rows re-render when the current song changes, and only
- * the rows whose props changed (the old and new current song) render again.
- */
 const TrackRow = memo(function TrackRow({
   track,
   index,
@@ -514,11 +465,8 @@ const TrackRow = memo(function TrackRow({
   readonly byline: string | null;
   readonly highlighted: boolean;
   readonly reorder: RowReorder | undefined;
-  /** Where a dragged row would land relative to this one, for its drop line. */
   readonly dropSide: DropSide | null;
-  /** Plays the list from the row at `index`. */
   readonly onPlay: (index: number) => void;
-  /** Builds the row menu's extra items; called here so a stable function keeps the row memoized. */
   readonly menuExtra: ((track: Track, index: number) => ReactNode) | undefined;
 }) {
   const number = track.trackNumber ?? index + 1;
@@ -549,8 +497,6 @@ const TrackRow = memo(function TrackRow({
         event.stopPropagation();
         playRow();
       }}
-      // Transparent until hovered or focused, never display:none, so keyboards and screen readers
-      // reach it.
       className="absolute inset-0 flex items-center justify-center rounded-xs outline-none pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       <PlayIcon className="size-3.5 text-text" fill="currentColor" strokeWidth={0} />
@@ -611,8 +557,6 @@ const TrackRow = memo(function TrackRow({
           variant === "album" ? "grow" : "grow lg:grow-2 lg:basis-0",
         )}
       >
-        {/* Phones tap anywhere on the row to play. The cell isn't positioned, so the button covers
-            the row while staying inside a cell, as the table role requires. */}
         <button
           type="button"
           aria-label={`Play ${track.title}`}
@@ -681,11 +625,6 @@ const TrackRow = memo(function TrackRow({
   );
 });
 
-/**
- * A song that can't play here, greyed out like Spotify's unavailable songs: its file is gone, or
- * it is in a library you can't listen to. Its menu keeps the actions that still work, such as
- * removing it from the playlist.
- */
 function UnavailableRow({
   track,
   number,

@@ -1,7 +1,3 @@
-/**
- * A row of Downloaded (D10): a cover, a title, the line that says where the download stands, and
- * the space it takes in mono.
- */
 import { View } from "react-native";
 
 import { Row } from "@/components/ui/row";
@@ -32,7 +28,6 @@ export function DownloadedRow({
   /** Opens the Remove download sheet; none for the Songs row. */
   readonly onRemove?: (() => void) | undefined;
 }) {
-  // Empty until its first song arrives, so every row drops the trailing lane alike.
   const size = bytes > 0 ? formatBytes(bytes) : null;
 
   const label = [title, line.text, size].filter((part) => part !== null).join(", ");

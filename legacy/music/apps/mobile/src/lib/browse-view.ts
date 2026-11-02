@@ -1,8 +1,3 @@
-/**
- * How the browse lists are sorted and laid out (A12 · Sort and view): albums by date added, title,
- * or artist, as a grid or a list; songs by title or artist. The server pages albums newest first
- * and songs by title, so any other order is applied here, over the whole list.
- */
 import type { AlbumCard, Track } from "@music/commands/models";
 import { foldSearchText } from "@music/commands/search-text";
 import { compareText } from "@music/commands/text-order";
@@ -97,10 +92,8 @@ export const SORT_SHEETS = {
   readonly songs: SortSheet<SongSort>;
 };
 
-/** Sorting keys, compared in order; folded so case and accents don't split the alphabet. */
 type SortKeys = readonly [string, string];
 
-/** `items` ordered by `keys`, computed once per item. */
 const orderBy = <Item>(
   items: ReadonlyArray<Item>,
   keys: (item: Item) => SortKeys,
@@ -111,7 +104,6 @@ const orderBy = <Item>(
     return { item, first: foldSearchText(first), second: foldSearchText(second) };
   });
 
-  // Sorted in place: `keyed` is this function's own copy, and Hermes has no `toSorted`.
   keyed.sort(
     (left, right) => compareText(left.first, right.first) || compareText(left.second, right.second),
   );

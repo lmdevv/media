@@ -4,8 +4,6 @@
  * promise rejects (no source, or interrupted by the pause) and that is expected.
  */
 export const primeInGesture = (element: HTMLAudioElement): void => {
-  element.play().catch(() => {
-    // Expected: there is no source, and the pause below interrupts the play.
-  });
+  element.play().catch(() => {});
   element.pause();
 };

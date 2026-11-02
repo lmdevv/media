@@ -10,7 +10,6 @@ describe("focusMove", () => {
   });
 
   it("waits while the list still shows the song, even if it changed for another reason", () => {
-    // Another device added a song while the removal was landing: the length didn't drop.
     expect(
       focusMove(removal, { now: 10_100, trackIds: ["a", "b", "c", "d"], focusFree: true }),
     ).toBe("wait");

@@ -1,9 +1,3 @@
-/**
- * A pushed page whose body is a long list of songs (C02, C03, C11): Paper's nav bar stuck to the
- * top, the page's own header (hero, privacy row, Play and Shuffle), then one row per song in a
- * FlashList, so a playlist of two thousand songs scrolls as lightly as one of twenty. The list is
- * the page's content, so scrolling it minimizes the system tab bar.
- */
 import { FlashList } from "@shopify/flash-list";
 import type { ReactNode } from "react";
 import { View } from "react-native";
@@ -36,10 +30,8 @@ type Cell =
   | { readonly kind: "header" }
   | { readonly kind: "song"; readonly entry: SongEntry; readonly playIndex: number };
 
-/** The bar is the list's first cell, and stays at the top. */
 const STICKY_BAR = [0];
 
-/** Props for `SongListPage`. */
 export interface SongListPageProps {
   readonly bar: NavBarProps;
   /** Everything between the bar and the first song. */
@@ -51,7 +43,6 @@ export interface SongListPageProps {
   readonly onEndReached?: () => void;
 }
 
-/** One song row; a song that can't play is dimmed and does nothing. */
 function SongRow({
   entry,
   active,
@@ -93,7 +84,6 @@ export function SongListPage({ bar, header, songs, onPlay, onEndReached }: SongL
   const { nowPlaying } = useNowPlaying();
   const playingId = nowPlaying?.trackId ?? null;
 
-  // Tapping a song plays the playable songs from it, so it counts only the playable ones above it.
   const cells: Array<Cell> = [{ kind: "bar" }, { kind: "header" }];
   let playable = 0;
 

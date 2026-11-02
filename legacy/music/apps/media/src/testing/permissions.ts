@@ -1,7 +1,3 @@
-/**
- * Test helpers that change folder permissions, kept free of Effect so they can use `node:fs`
- * directly. Tests use them to make part of a library unreadable to the scanner.
- */
 import { chmod } from "node:fs/promises";
 
 /** Removes every permission from `path`. */

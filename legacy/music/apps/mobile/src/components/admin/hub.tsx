@@ -1,7 +1,3 @@
-/**
- * F08 · Administration: which server this is and the caller's standing on it, then People,
- * Libraries, Jobs, and Server settings with their live counts.
- */
 import type { User } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
 import { router } from "expo-router";

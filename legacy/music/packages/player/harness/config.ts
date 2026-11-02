@@ -1,7 +1,3 @@
-/**
- * Settings shared by the harness scripts, the media stub, and the Playwright tests. Values come
- * from `apps/media/.env.local`, which `scripts/dev-backend.sh <name> <port>` writes.
- */
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";

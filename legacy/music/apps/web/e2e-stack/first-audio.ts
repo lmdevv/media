@@ -29,15 +29,10 @@ const chromiumPath = process.env["CHROMIUM_PATH"];
 
 if (chromiumPath !== undefined) launchOptions.executablePath = chromiumPath;
 
-/**
- * Taps the play button of the song in row `index` and resolves with the milliseconds until a
- * media element plays a new source past its first 20 ms.
- */
 const timeToFirstAudio = (page: Page, index: number): Promise<number> =>
   page.evaluate(async (target) => {
     const before = new Map([...(window.musicTestMedia ?? [])].map((media) => [media, media.src]));
 
-    // One button per row: the album's own play button can share a song's label.
     const button = [...document.querySelectorAll("main [role=row]")]
       .flatMap((row) => row.querySelector<HTMLButtonElement>("button[aria-label^='Play ']") ?? [])
       .at(target);
@@ -67,7 +62,6 @@ const browser = await chromium.launch(launchOptions);
 
 const page = await browser.newPage({ baseURL: baseUrl, viewport: { width: 1440, height: 900 } });
 
-// Plain JavaScript run before the app: remembers every media element that starts playing.
 await page.addInitScript({
   content: `
     window.musicTestMedia = new Set();
@@ -120,7 +114,6 @@ const rows = page.locator("main [role=row]").filter({
 
 const count = await rows.count();
 
-/** Plays the songs one after another, from row `index` on. */
 const measureFrom = async (
   index: number,
   results: ReadonlyArray<number>,
@@ -138,7 +131,6 @@ const measureFrom = async (
 
 const results = await measureFrom(0, []);
 
-// The upper median: the value with half of the others below it.
 const median =
   results.find(
     (value) =>

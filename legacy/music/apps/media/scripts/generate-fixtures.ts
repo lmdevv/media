@@ -91,7 +91,6 @@ const PLANS: ReadonlyArray<AlbumPlan> = [
   },
 ];
 
-/** Root frequencies of the chords each track plays, in hertz. */
 const ROOTS = [261.63, 293.66, 329.63, 349.23, 392];
 
 const EXTENSIONS: Record<Format, string> = {
@@ -114,7 +113,6 @@ const ffmpeg = async (args: ReadonlyArray<string>): Promise<void> => {
   ]);
 };
 
-/** A major chord on `root` with a soft attack and release. */
 const chord = (root: number, sampleRate: number): string => {
   const envelope = `min(1,t*4)*min(1,(${SECONDS}-t)*2)`;
   const tones = [1, 1.25, 1.5].map((ratio) => `sin(2*PI*${(root * ratio).toFixed(2)}*t)`).join("+");
@@ -122,7 +120,6 @@ const chord = (root: number, sampleRate: number): string => {
   return `aevalsrc=exprs='0.2*${envelope}*(${tones})':s=${sampleRate}:d=${SECONDS}`;
 };
 
-/** Draws a square cover in `color` with the album title, or a plain square without fonts. */
 const drawCover = async (path: string, color: string, title: string): Promise<void> => {
   const source = `color=c=${color}:s=600x600:d=1`;
   const text = title.replaceAll(/[':\\]/g, "");

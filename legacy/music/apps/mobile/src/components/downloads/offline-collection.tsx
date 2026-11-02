@@ -1,9 +1,3 @@
-/**
- * An album or playlist the server can't load while it is out of reach (a launch that never reached
- * it has nothing cached), drawn from this phone's downloads: the offline bar, its cover, title, and
- * artist or owner, then Play and Shuffle over the songs this phone holds; an iPad lays them out in
- * its horizontal header (P05). One this phone doesn't hold is G10's failure, saying why.
- */
 import type { OfflineLibrary } from "@music/sdk/downloads";
 import { View } from "react-native";
 
@@ -29,7 +23,6 @@ const NOT_HERE: Unavailable = {
   message: `It isn’t on this ${DEVICE_FAMILY}, and the server is out of reach.`,
 };
 
-/** Props for `OfflineCollectionPage`. */
 export interface OfflineCollectionPageProps {
   readonly kind: "album" | "playlist";
   /** Picks the album or playlist out of what this phone holds. */

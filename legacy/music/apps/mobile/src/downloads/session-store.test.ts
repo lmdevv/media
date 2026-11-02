@@ -45,10 +45,8 @@ const server: PlaybackState = {
   autoplay: true,
 };
 
-/** The server's session, `positionMs` into its song. */
 const serverAt = (positionMs: number): PlaybackState => Struct.assign(server, { positionMs });
 
-/** A database holding the session table in memory, answering the store's three statements. */
 const memoryDatabase = () => {
   const rows = new Map<string, string>();
 

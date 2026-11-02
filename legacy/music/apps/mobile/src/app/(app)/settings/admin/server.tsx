@@ -1,4 +1,3 @@
-/** F20 · Server settings. */
 import { ServerSettingsForm } from "@/components/admin/server-settings";
 import { RequireAccess } from "@/components/settings/access";
 

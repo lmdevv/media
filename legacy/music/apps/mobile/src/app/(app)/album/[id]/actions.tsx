@@ -1,8 +1,3 @@
-/**
- * D03b · Album actions, from the ellipsis in an album's header: download it (or cancel or remove
- * the download), play it next, add it to the queue, go to its artist, or copy its link. Queueing
- * and copying confirm in the row, then close.
- */
 import { AlbumId } from "@music/commands/ids";
 import type { AlbumDetail } from "@music/commands/models";
 import { errorMessage } from "@music/sdk/errors";
@@ -25,10 +20,8 @@ import { usePlayerActions } from "@/player";
 
 const decodeId = Schema.decodeUnknownOption(AlbumId);
 
-/** How long the sheet stays after a quiet confirmation such as Link copied. */
 const CONFIRM_MS = 700;
 
-/** The rows that finish in place, then say so. */
 type QuietKey = "next" | "later" | "copy";
 
 const QUIET_ACTIONS = {
@@ -45,7 +38,6 @@ const QUIET_ACTIONS = {
   }
 >;
 
-/** `Massive Attack · 1991 · 9 songs`. */
 const subtitleOf = ({ album, tracks }: AlbumDetail): string =>
   [album.artist, album.year === null ? null : String(album.year), countOf(tracks.length, "song")]
     .filter((part) => part !== null)

@@ -1,8 +1,3 @@
-/**
- * A horizontal rail of album cards under a section header (A01): two cards and a bit of the third
- * visible at 390pt, scrolling sideways. The rail runs edge to edge while its cards start on the
- * page's edge. Cards sit 12pt apart on a phone and 16pt on an iPad, which just shows more (P01).
- */
 import { FlatList, View } from "react-native";
 
 import { SectionHeader } from "@/components/ui/section-header";
@@ -11,7 +6,6 @@ import type { CardAlbum } from "@/lib/offline-library";
 
 import { AlbumCard } from "./album-card";
 
-/** Props for `AlbumRail`. */
 export interface AlbumRailProps {
   readonly title: string;
   readonly albums: ReadonlyArray<CardAlbum>;

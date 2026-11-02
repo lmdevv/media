@@ -54,7 +54,6 @@ const server = process.env["MUSIC_SECURITY_E2E_SERVER"] ?? "";
 
 const mediaSecret = process.env["MUSIC_SECURITY_E2E_MEDIA_SECRET"] ?? "";
 
-/** One file as the media service reports it. */
 interface ScannedSong {
   readonly path: string;
   readonly size: number;
@@ -72,10 +71,8 @@ interface ScannedSong {
   readonly lyrics: ReadonlyArray<never>;
 }
 
-/** No lyric files and no lyrics, from no lyrics reader. */
 const NO_LYRICS = { lyricsFiles: "", lyricsReader: 0, lyrics: [] } as const;
 
-/** The one song of the cover test, with the art the media service found for it. */
 const coverSong = (artHash: string, folderArt: string): ScannedSong => ({
   path: "Album/song.flac",
   size: 1234,
@@ -91,7 +88,6 @@ const coverSong = (artHash: string, folderArt: string): ScannedSong => ({
   ...NO_LYRICS,
 });
 
-/** A song of the cover test's album at `path`, with the art the media service found for it. */
 const canvasSong = (
   path: string,
   art: Pick<ScannedSong, "artHash" | "folderArt">,
@@ -155,21 +151,16 @@ const RACERS = ["race-a@music.test", "race-b@music.test"] as const;
 
 const id = runId();
 
-/** Every track title, album, and artist carries this token, so search finds this run's catalog. */
 const TOKEN = `run${id}`;
 
 type Track = CommandResult<"search">["tracks"][number];
 
 interface Fixture {
-  /** Outcome of the two concurrent first sign-ups, when the server started empty. */
   readonly race: { readonly fulfilled: number; readonly codes: ReadonlyArray<string> } | null;
   readonly usersAfterRace: number;
-  /** The owner: the first account. Owns the shared library and the private library `alpha`. */
   readonly adminA: Session;
-  /** A second admin who owns the private library `beta`. */
   readonly adminB: Session;
   readonly member: Session;
-  /** Added to no library to begin with. */
   readonly guest: Session;
   readonly shared: { readonly libraryId: LibraryId; readonly track: Track };
   readonly alpha: { readonly libraryId: LibraryId; readonly jobId: JobId; readonly track: Track };
@@ -185,11 +176,9 @@ const findTrack = async (session: Session, title: string): Promise<Track> => {
   return track;
 };
 
-/** This run's names that carry an accent or ß; earlier runs on the same server match too. */
 const accentedOnly = (names: ReadonlyArray<string>): ReadonlyArray<string> =>
   names.filter((name) => /[äöüß]/u.test(name) && name.endsWith(TOKEN));
 
-/** Every page of a paginated list command, flattened. */
 const allPages = async <Item>(
   read: (cursor: string | undefined) => Promise<{
     readonly items: ReadonlyArray<Item>;
@@ -307,11 +296,6 @@ const setup = async (): Promise<Fixture> => {
   };
 };
 
-/**
- * Checks that `viewer` cannot hear or use anything in the library `hidden`, through every command
- * that lists, searches, or takes an ID of library-owned data. An admin manages every library, so
- * they see that it exists (unreadable) and its jobs, and nothing in it.
- */
 const expectInvisible = async (
   viewer: Session,
   hidden: Fixture["alpha"],
@@ -324,7 +308,6 @@ const expectInvisible = async (
 
   expect(libraries.map((library) => library.id)).toContain(visible.libraryId);
 
-  // Admins see that it exists; only the server's owner, who manages it, sees its folder.
   if (can(role, "owner")) expect(listed).toMatchObject({ readable: false, manageable: true });
   else if (can(role, "admin")) {
     expect(listed).toMatchObject({ readable: false, manageable: false, path: null });
@@ -393,10 +376,6 @@ const expectInvisible = async (
   await expectReadFailure(viewer, "jobs.get", { jobId: hidden.jobId }, "not_found");
 };
 
-/**
- * Claims a library's real folder, as the media service does before every scan, with the folder's
- * identity and its parents' (made up here; the media service reads them with `stat`).
- */
 const claimRoot = (
   libraryId: string,
   realPath: string,
@@ -425,10 +404,6 @@ const pause = (ms: number) =>
     setTimeout(resolve, ms);
   });
 
-/**
- * Waits until `sessions` holds at least `count`, so a race starts once the sign-ins are really
- * landing, however slow the machine; gives up after about 30 seconds.
- */
 const opened = async (
   sessions: ReadonlyArray<unknown>,
   count: number,
@@ -441,18 +416,8 @@ const opened = async (
   return opened(sessions, count, attemptsLeft - 1);
 };
 
-/**
- * Sign-ins at once in `raceSignIns`. Each checks a password with scrypt inside a Convex
- * mutation, so a small CI runner keeps up with about 8; 24, as the security review ran it, shows
- * the old OCC failures on a workstation (`MUSIC_SIGN_IN_LOOPS=24 scripts/backend-e2e.sh security`).
- */
 const SIGN_IN_LOOPS = Number(process.env["MUSIC_SIGN_IN_LOOPS"] ?? "8");
 
-/**
- * Signs in as `email` with `PASSWORD` from `SIGN_IN_LOOPS` loops at once, the way a script hammering sign-in
- * would; once sign-ins are landing, runs `act` against them, then stops the loops, even when
- * `act` fails. Returns what `act` returned and every session that opened.
- */
 const raceSignIns = async <A>(
   email: string,
   act: () => Promise<A>,
@@ -491,7 +456,6 @@ const raceSignIns = async <A>(
   }
 };
 
-/** The outcome of reading as each of `sessions`: a set of one code when they all agree. */
 const endedEverywhere = async (sessions: ReadonlyArray<Session>) =>
   new Set(await Promise.all(sessions.map((one) => failureCode(one.music.read("account.me", {})))));
 
@@ -528,7 +492,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     await expectInvisible(adminB, alpha, shared);
     await expectInvisible(adminA, beta, shared);
 
-    // An admin manages only libraries they can hear: everything else about it is not found.
     const unheard = { libraryId: alpha.libraryId };
 
     await expectRunFailure(
@@ -548,7 +511,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     await expectRunFailure(adminB, "jobs.cancel", { jobId: alpha.jobId }, "not_found");
     await expectReadFailure(adminB, "jobs.get", { jobId: alpha.jobId }, "not_found");
 
-    // The delete-and-re-add takeover: remove the folder, add it back as one's own, scan it.
     await expectRunFailure(adminB, "libraries.delete", unheard, "not_found");
 
     const readded = await failureCode(
@@ -557,7 +519,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     expect(readded).toBe("conflict");
 
-    // Had it worked, the scan would index the same files into a library the attacker owns.
     const stolen = await adminB.music.read("search", { query: `Alpha ${TOKEN}`, limit: 50 });
 
     expect(stolen.tracks.map((found) => found.id)).not.toContain(alpha.track.id);
@@ -583,7 +544,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     await upsertTracks(server, mediaSecret, shared.libraryId, [accented("Open")]);
     await upsertTracks(server, mediaSecret, alpha.libraryId, [accented("Alpha")]);
 
-    // Search matches any word, so the run's other names come back too; keep the accented ones.
     const search = async (session: Session, query: string) => {
       const results = await session.music.read("search", { query: `${query} ${TOKEN}`, limit: 50 });
 
@@ -772,7 +732,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
   it("keeps a song's likes and playlist entries when the media service moves its file", async () => {
     const { adminA } = fixture;
-    // The media service's connection: no user, only the shared secret.
     const media = anonymous(server).convex;
 
     const { libraryId } = await adminA.music.run("libraries.create", {
@@ -908,7 +867,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     expect(known.files).toEqual([expect.objectContaining({ folderArt: "Album/cover.jpg:20:2" })]);
 
-    // A second song of the album gets a picture of its own: the album keeps its cover.
     const picture = createHash("sha256").update(`picture ${id}`).digest("hex");
 
     const upsert = (song: ScannedSong) =>
@@ -922,7 +880,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     );
     expect(await albumArt()).toContain(`/art/${newHash}?`);
 
-    // The cover is removed: the album takes the art its other song still has, then none.
     await upsert(canvasSong("Album/song.flac", {}));
     expect(await albumArt()).toContain(`/art/${picture}?`);
     expect(await artInUse()).not.toContain(newHash);
@@ -1098,11 +1055,9 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
   it("gives each role exactly the commands its capabilities allow", async () => {
     const { adminA, adminB, member, guest, shared } = fixture;
-    // IDs of the wrong table: allowed callers get `not_found` and change nothing.
     const nobody = UserId.make(shared.libraryId);
     const noLibrary = LibraryId.make(shared.track.id);
 
-    /** Each gated command, called so that it changes nothing; resolves the failure code. */
     const calls = {
       "libraries.create": ({ music }) =>
         failureCode(
@@ -1129,7 +1084,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       "people.list": ({ music }) => failureCode(music.read("people.list", {})),
       "people.directory": ({ music }) => failureCode(music.read("people.directory", {})),
       "server.settings": ({ music }) => failureCode(music.read("server.settings", {})),
-      // No change asked for: checks who may, without turning guest accounts on.
       "server.update": ({ music }) => failureCode(music.run("server.update", {})),
       "playlists.visibility": ({ music }) =>
         failureCode(
@@ -1158,13 +1112,11 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       "invites.create": ({ music }) => failureCode(music.run("invites.create", { role: "guest" })),
       "invites.revoke": ({ music }) =>
         failureCode(music.run("invites.revoke", { inviteId: InviteId.make(shared.libraryId) })),
-      // Queues lookups only; nothing in this suite runs the media service that would send them.
       "lyrics.backfill": ({ music }) => failureCode(music.run("lyrics.backfill", {})),
     } satisfies Record<string, (session: Session) => Promise<string>>;
 
     const attempts = new Map(Object.entries(calls));
 
-    // Every command that needs more than a signed-in user is in the matrix.
     const gated = Object.keys(commands)
       .filter(isCommandName)
       .filter((name) => commands[name].access !== "user");
@@ -1266,7 +1218,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     await expectInvisible(member, hidden, shared);
 
-    // Another admin sees that it exists, without hearing or managing it.
     const managed = (await adminB.music.read("libraries.list", {})).find(
       (library) => library.id === gamma.libraryId,
     );
@@ -1279,7 +1230,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       "not_found",
     );
 
-    // Only its owner lets people in.
     await expectRunFailure(
       adminB,
       "libraries.grant",
@@ -1310,7 +1260,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     await adminA.music.run("libraries.revoke", { libraryId: gamma.libraryId, userId: memberId });
     await expectInvisible(member, hidden, shared);
 
-    // Its owner opens it up; then the other admin hears it, and may rename it.
     await adminA.music.run("libraries.update", {
       libraryId: gamma.libraryId,
       visibility: "shared",
@@ -1326,7 +1275,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       ),
     ).toMatchObject({ name: `Gamma for all ${id}`, readable: true });
 
-    // Private puts it back with its owner alone: another admin still sees it, unheard and shut.
     await adminA.music.run("libraries.update", {
       libraryId: gamma.libraryId,
       visibility: "private",
@@ -1379,7 +1327,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     await adminB.music.run("people.unsuspend", { userId });
 
-    // Unsuspending lets them sign in again; it does not bring old sessions back.
     await expectReadFailure(person, "account.me", {}, "unauthenticated");
     await expectReadFailure(cli, "account.me", {}, "unauthenticated");
 
@@ -1395,7 +1342,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     const admin = await adminB.music.read("account.me", {});
     const { id: memberId } = await member.music.read("account.me", {});
 
-    // Nobody reaches the owner, and the owner cannot leave the server without one.
     await Promise.all(
       [adminB, adminA].flatMap((session) => [
         expectRunFailure(session, "people.role", { userId: owner.id, role: "member" }, "forbidden"),
@@ -1405,7 +1351,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       ]),
     );
 
-    // The last admin besides the owner cannot step down or lock themselves out either.
     await expectRunFailure(
       adminB,
       "people.role",
@@ -1448,7 +1393,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     await adminB.music.run("people.role", { userId, role: "guest" });
 
-    // A guest still listens, but their keys stop signing in and the sessions they opened end.
     expect((await person.music.read("account.me", {})).role).toBe("guest");
     await expectReadFailure(person, "keys.list", {}, "forbidden");
     expect(await keySignIn()).toBeNull();
@@ -1458,11 +1402,8 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     await adminB.music.run("people.role", { userId, role: "admin" });
     expect((await person.music.read("people.list", {})).map((found) => found.id)).toContain(userId);
-    // Revoked, not just refused: a promotion does not bring the key back.
     await expect.poll(keySignIn).toBeNull();
 
-    // Only the owner manages admins, so another admin can't reset or demote them into reach of
-    // their private libraries.
     await expectRunFailure(adminB, "people.reset", { userId }, "forbidden");
     await expectRunFailure(adminB, "people.role", { userId, role: "member" }, "forbidden");
     await expectRunFailure(adminB, "people.suspend", { userId }, "forbidden");
@@ -1493,7 +1434,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     await adminA.music.run("people.role", { userId: keeperId, role: "member" });
 
-    // A member can't invite anyone, so neither invite they sent works any more.
     expect(
       await failureCode(
         signUp(server, {
@@ -1507,9 +1447,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       state: "invalid",
     });
 
-    // Their private library is still theirs to hear. Another admin can't touch it. The server's
-    // owner manages it, and may let fewer people in, never more: they could otherwise demote an
-    // admin, let themselves in, and promote them again.
     expect(await listed()).toMatchObject({ readable: false, path: null });
     await expectRunFailure(
       adminB,
@@ -1550,7 +1487,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     async () => {
       const { adminA } = fixture;
 
-      // Suspension, with sign-ins racing it.
       const busy = `busy-${id}@music.test`;
       const busyPerson = await invite(adminA, busy, "member");
       const { id: busyId } = await busyPerson.music.read("account.me", {});
@@ -1563,7 +1499,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       expect(suspension.sessions.length).toBeGreaterThan(0);
       expect(await endedEverywhere(suspension.sessions)).toEqual(new Set(["unauthenticated"]));
 
-      // A password reset, with sign-ins on the old password racing it.
       const rushed = `rushed-${id}@music.test`;
       const rushedPerson = await invite(adminA, rushed, "member");
       const { id: rushedId } = await rushedPerson.music.read("account.me", {});
@@ -1617,7 +1552,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       leaverId,
     );
 
-    // Ownership moves in the batched clean-up right after the removal.
     const listedTo = async (session: Session) =>
       (await session.music.read("libraries.list", {})).find(
         (library) => library.id === delta.libraryId,
@@ -1626,7 +1560,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     await expect
       .poll(() => listedTo(adminA))
       .toMatchObject({ ownerId, visibility: "private", readable: true });
-    // Now the owner's private library: other admins see it exists, and can't touch it.
     expect(await listedTo(adminB)).toMatchObject({ readable: false, path: null });
     await expectRunFailure(
       adminB,
@@ -1635,7 +1568,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       "not_found",
     );
 
-    // The email can join again, as someone new with nothing of the old account.
     const again = await invite(adminA, email, "member");
 
     expect((await again.music.read("account.me", {})).id).not.toBe(leaverId);
@@ -1698,7 +1630,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     await adminA.music.run("people.role", { userId: risingId, role: "admin" });
 
-    // Otherwise adminB could take over an admin and reach their private libraries.
     expect(await failureCode(resetPassword(server, token, "taken-over-2"))).toBe("invalid_args");
     expect(await failureCode(passwordSignIn(server, `rising-${id}@music.test`, PASSWORD))).toBe(
       "succeeded",
@@ -1715,7 +1646,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       generic,
     );
 
-    // Without a valid invite, sign-up answers every email alike, so it can't tell which exist.
     const withoutInvite = await Promise.all(
       [`member-${id}@music.test`, `nobody-${id}@music.test`].map((email) =>
         failureCode(signUp(server, { email, password: PASSWORD })),
@@ -1724,8 +1654,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     expect(withoutInvite).toEqual(["signup_closed", "signup_closed"]);
 
-    // With one, sign-up over an existing account is refused before any password check, which
-    // would have no rate limit there.
     const { code } = await fixture.adminA.music.run("invites.create", {});
 
     expect(
@@ -1737,12 +1665,10 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
   it("keeps a library's files from a second library under another name for the folder", async () => {
     const { adminA, adminB, alpha } = fixture;
 
-    // The media service resolves each library's folder before a scan and claims it.
     expect(
       await claimRoot(alpha.libraryId, `/security-${id}/alpha`, [`${id}:alpha`, `${id}:top`]),
     ).toEqual({ ok: true });
 
-    // A link (or /proc/self/root, or a bind mount) names the folder around it differently.
     const alias = await adminB.music.run("libraries.create", {
       name: `Alias ${id}`,
       path: `/elsewhere-${id}/link`,
@@ -1751,15 +1677,12 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     const refused = await claimRoot(alias.libraryId, `/security-${id}`, [`${id}:top`]);
 
     expect(refused.ok).toBe(false);
-    // The refusal is the job's error, which the alias's owner reads: it names no folder.
     expect(refused.error).not.toMatch(/security-/u);
 
-    // A bind mount keeps the folder's identity, so a path that says nothing of it is refused too.
     expect(
       await claimRoot(alias.libraryId, `/elsewhere-${id}/link`, [`${id}:alpha`, `${id}:mnt`]),
     ).toMatchObject({ ok: false });
 
-    // A refused claim stops its library streaming until a claim succeeds again.
     const play = () =>
       failureCode(
         adminA.music.read("stream.url", { trackId: alpha.track.id, profile: "original" }),
@@ -1773,8 +1696,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     ).toEqual({ ok: true });
     expect(await play()).toBe("succeeded");
 
-    // Only a library's own owner or the server's owner removes it: an admin added to it could
-    // otherwise remove it and add its folder back as their own.
     const shared = await adminA.music.run("libraries.create", {
       name: `Lent ${id}`,
       path: `/security-${id}/lent`,
@@ -1792,7 +1713,6 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     );
     await adminB.music.run("libraries.update", { libraryId: shared.libraryId, name: `Lent ${id}` });
 
-    // An overlap with a library the admin can't hear names neither folder.
     expect(
       await failure(
         adminB.music.run("libraries.create", { name: "Probe", path: `/security-${id}/alpha/x` }),

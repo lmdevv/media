@@ -1,7 +1,3 @@
-/**
- * The player as screens see it, derived from the Convex playback session and this phone's
- * controller. Pure: `PlayerProvider` feeds it and memoizes the parts.
- */
 import type { AlbumId, ArtistId, DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type {
   Device,

@@ -3,11 +3,6 @@ import { cn } from "@music/ui/lib/utils";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 
-/**
- * Pill buttons from the Paper components page. `primary` is the accent Play button, `solid` the
- * neutral dark pill used for most confirmations, `secondary` the surface pill, `outline` and
- * `danger` the bordered pills, and `ghost` the quiet text button.
- */
 const buttonVariants = cva(
   "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full font-sans font-semibold whitespace-nowrap transition-colors outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-(--opacity-disabled) aria-busy:pointer-events-none aria-busy:opacity-(--opacity-muted) [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {

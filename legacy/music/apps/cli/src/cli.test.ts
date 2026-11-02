@@ -10,14 +10,11 @@ import { Input } from "./input";
 import { Output, lineOutput } from "./output";
 import { makeTempDir, packageRoot, readText, removeDir } from "./testing/process";
 
-/** What a script or a person at a terminal supplies on stdin. */
 interface Stdin {
   readonly piped?: string;
-  /** What the user types at the prompt; the prompt is only offered when this is set. */
   readonly typed?: string;
 }
 
-/** Stdin as a pipe or a terminal, recording each prompt shown. */
 const stdinOf = (stdin: Stdin, prompts: Array<string>) =>
   Input.of({
     interactive: Effect.succeed(stdin.typed !== undefined),
@@ -30,7 +27,6 @@ const stdinOf = (stdin: Stdin, prompts: Array<string>) =>
       }),
   });
 
-/** Runs the CLI in-process with recorded output and only the given environment. */
 const invoke = async (
   argv: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
@@ -40,7 +36,6 @@ const invoke = async (
   const stdout: Array<string> = [];
   const stderr: Array<string> = [];
 
-  // The real line writer, which guards every line, into arrays instead of the process streams.
   const output = lineOutput({
     out: (line) => stdout.push(line.slice(0, -1)),
     err: (line) => stderr.push(line.slice(0, -1)),
@@ -65,7 +60,6 @@ const decodeError = Schema.decodeSync(ErrorOutput);
 
 const decodeAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }));
 
-/** A stand-in server that records each request body and answers like a Convex that is down. */
 interface Recording {
   readonly url: string;
   readonly bodies: Array<string>;
@@ -147,7 +141,6 @@ describe("music (in-process)", () => {
 
     expect(plain.stderr).toContain(String.raw`\u001b]0;pwned\u0007\u009b2J`);
     expect(/\p{Cc}/u.test(plain.stderr.replaceAll("\n", ""))).toBe(false);
-    // Still JSON, and it decodes to the message as the CLI made it.
     expect(/\p{Cc}/u.test(json.stderr)).toBe(false);
     expect(decodeError(json.stderr).error.message).toContain(hostile);
   });
@@ -296,8 +289,6 @@ describe("music (in-process)", () => {
   });
 
   describe("plain http to another machine", () => {
-    // 0.0.0.0 reaches this machine without being a loopback name, so it stands in for a remote
-    // server while the request still lands on the recording server.
     let server: Recording = { url: "", bodies: [], close: () => Promise.resolve() };
 
     beforeAll(async () => {
@@ -344,7 +335,6 @@ describe("music (in-process)", () => {
       expect(refused.code).toBe(2);
       expect(refused.stderr).toContain("MUSIC_INSECURE=1");
 
-      // An empty or unrecognized value leaves it off rather than breaking every command.
       const offs = await Promise.all(
         ["", "nope"].map((off) => invoke(["whoami"], { ...env, MUSIC_INSECURE: off })),
       );
@@ -364,7 +354,6 @@ describe("music (in-process)", () => {
   });
 
   it("explains a server URL that is not the Convex URL", async () => {
-    // The web app's address: its proxy answers Convex API calls with an empty 405.
     const server = createServer((_request, response) => {
       response.writeHead(405).end();
     });
@@ -387,7 +376,6 @@ describe("music (in-process)", () => {
   });
 
   it("doesn't blame a /convex URL when the server behind it answers with an empty error", async () => {
-    // Caddy answers 502 with an empty body while Convex starts or after it crashed.
     const server = createServer((_request, response) => {
       response.writeHead(502).end();
     });

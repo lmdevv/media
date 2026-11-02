@@ -1,9 +1,3 @@
-/**
- * D10c · Songs: the songs downloaded on their own that no downloaded album or playlist holds,
- * opened from Downloaded's Songs row. Each says where it stands and the space it takes. A tap plays
- * the songs on this phone from that one, or a song still coming on its own; a swipe left uncovers
- * Remove (D10d).
- */
 import { targetKey } from "@music/sdk/downloads";
 import { CircleArrowDown } from "lucide-react-native";
 import { View } from "react-native";

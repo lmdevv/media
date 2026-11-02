@@ -1,8 +1,3 @@
-/**
- * Lyric files beside a song: the song's file name with a lyrics extension (`Song.lrc` for
- * `Song.flac`), or with a language before it (`Song.de.lrc`), and Lyricsfile's compound
- * `Song.lyricsfile.yaml`.
- */
 import { basename, dirname } from "node:path";
 
 import {
@@ -30,10 +25,6 @@ const FORMATS: ReadonlyMap<string, LyricsFormat> = new Map([
 
 const LYRICSFILE_INFIX = /\.lyricsfile$/iu;
 
-/**
- * ISO 639-1 language codes. A language in a file name must start with one: three-letter names
- * such as `alt`, `bak`, `new`, and `old` are file name words far more often than ISO 639-2 codes.
- */
 const ISO_639_1 = new Set(
   (
     "aa ab ae af ak am an ar as av ay az ba be bg bh bi bm bn bo br bs ca ce ch co cr cs cu cv " +
@@ -46,18 +37,12 @@ const ISO_639_1 = new Set(
   ).split(" "),
 );
 
-/** A language with an optional script and region, as canonical BCP 47 spells them. */
 const NAME_LANG = /^[a-z]{2}(?:-([A-Z][a-z]{3}))?(?:-([A-Z]{2}|\d{3}))?$/u;
 
 const SCRIPTS = new Intl.DisplayNames(["en"], { type: "script", fallback: "none" });
 
 const REGIONS = new Intl.DisplayNames(["en"], { type: "region", fallback: "none" });
 
-/**
- * The language a lyric file's name carries after the song's name (`de`, `zh-Hant`, `pt-BR`), or
- * null. Only a known script and region may follow the language, so `en-live`, `en-notes`, and
- * `no-lyrics` name versions of the lyrics, not languages.
- */
 const nameLang = (suffix: string): Lang | null => {
   const [primary = ""] = suffix.split(/[-_]/u);
 
@@ -87,7 +72,6 @@ export interface LyricsSidecar {
 
 const withoutExtension = (name: string): string => name.slice(0, name.lastIndexOf("."));
 
-/** A lyric file's name without its extension, and without `.lyricsfile` before `.yaml`. */
 const stemOf = (name: string, format: LyricsFormat): string => {
   const stem = withoutExtension(name);
 
@@ -107,10 +91,6 @@ export const lyricsSidecarMatcher = (
 ): ((audioPath: string) => ReadonlyArray<LyricsSidecar>) => {
   const songs = new Set<string>();
 
-  /**
-   * Lyric files under `folder/prefix` for every dot-separated prefix of their stem, so a song
-   * reads only the files named after it: `Song.de.lrc` is under `Song` and `Song.de`.
-   */
   const sidecars = new Map<
     string,
     Array<{ readonly file: WalkedFile; readonly format: LyricsFormat; readonly stem: string }>

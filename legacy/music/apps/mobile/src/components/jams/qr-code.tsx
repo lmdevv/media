@@ -1,7 +1,3 @@
-/**
- * The Jam link's QR code (D02, H09): Paper's 192pt square, in the text color on the page color,
- * so it inverts in dark mode like Paper draws it.
- */
 import { View } from "react-native";
 import Svg, { Path, Rect } from "react-native-svg";
 

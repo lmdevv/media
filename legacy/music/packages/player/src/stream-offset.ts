@@ -1,13 +1,7 @@
-/**
- * Streams that start part-way into a song: the media service's `&start=<ms>` on a transcoded
- * profile, which encodes from that point at once instead of making a seek wait for the whole
- * transcode. See `StreamTimingHeader.start` for the timeline.
- */
 import { Data } from "effect";
 
 import { retryAfterMs } from "./busy-retry";
 
-/** The query parameter that starts a transcoded stream at an offset, in milliseconds. */
 const START_PARAMETER = "start";
 
 /**
@@ -23,11 +17,6 @@ export const offsetUrl = (url: string, startMs: number): string => {
   return parsed.toString();
 };
 
-/**
- * A stream that ends this far before the song's catalogued length was cut off rather than
- * finished. Catalogued lengths of some files (VBR MP3 without a header) are estimates, so a
- * stream that ends a little early counts as the end.
- */
 const EARLY_END_MS = 1500;
 
 /** True when a stream that ended at `positionMs` stopped short of a song `durationMs` long. */
@@ -51,7 +40,6 @@ export type OffsetProbe = Data.TaggedEnum<{
 /** Constructors and matchers for `OffsetProbe`. */
 export const OffsetProbe = Data.taggedEnum<OffsetProbe>();
 
-/** How long `probeOffset` waits for the start of an answer. */
 const PROBE_TIMEOUT_MS = 10_000;
 
 /**
@@ -86,7 +74,6 @@ export const probeOffset = async (url: string, signal: AbortSignal): Promise<Off
     }
 
     if (!response.ok || response.body === null) {
-      // Like the branches above, release the connection rather than leave it to the collector.
       void response.body?.cancel().catch(() => undefined);
 
       return OffsetProbe.Failed();

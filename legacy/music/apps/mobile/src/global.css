@@ -1,10 +1,6 @@
 @import "tailwindcss";
 @import "uniwind";
 
-/* Tokens from the [music] Paper file (01M4KQQQ46CWH4S1JGX96NPA0T), names unchanged, as in
-   packages/ui plus the iOS tokens Paper adds. Paper keeps each color's light role and a `dark-`
-   twin; the themes below put the twin in the role, so components only use role names.
-   React Native loads one font file per weight, so each weight is its own family. */
 @theme {
   --color-dark-bg: #121212;
   --color-dark-surface: #1f1f1f;
@@ -140,9 +136,6 @@
   --radius-full: 9999px;
 }
 
-/* iPad layouts (Paper page 25): at `tablet` the window is wide enough for the iPad design
-   (iPhone and narrow Split View stay below it), and at `wide` two panes fit side by side. Static,
-   so `useWindowLayout` can read the breakpoints, which variants inline rather than reference. */
 @theme static {
   --breakpoint-tablet: 600px;
   --breakpoint-wide: 1024px;
@@ -158,9 +151,6 @@
   --opacity-disabled: 40%;
 }
 
-/* Light follows Apple Music (red on white), dark follows Spotify (green on a black canvas). The
-   canvas is the screen background: `bg` in light, true black in dark, where `bg` is the sheet
-   and fade color. The player tint is Paper's Blue Lines preview until it follows the artwork. */
 @layer theme {
   :root {
     @variant light {
@@ -201,8 +191,6 @@
   }
 }
 
-/* The page's side margin: Paper's 20pt edge on a phone, 32pt from `tablet` up. `bleed-page`
-   pulls a sideways rail out to the window's edges while its first card keeps the margin. */
 @utility px-page {
   padding-inline: var(--spacing-mobile-edge);
   @variant tablet {
@@ -217,8 +205,6 @@
   }
 }
 
-/* The color behind a page in the tabs: the canvas, or from `tablet` up in dark mode the raised
-   panel B1 dark draws on the black canvas. `useContentCanvas` gives the same color as a value. */
 @utility bg-content {
   background-color: var(--color-canvas);
   @variant tablet {
@@ -228,8 +214,6 @@
   }
 }
 
-/* The room a page leaves under its content: Paper's 180pt for a phone's tab bar and mini player.
-   From `tablet` up the player bar sits below the page rather than over it, so 40pt is enough. */
 @utility pb-page-foot {
   padding-bottom: var(--spacing-ios-180);
   @variant tablet {
@@ -244,9 +228,6 @@
   }
 }
 
-/* Settings and forms (P10): the whole page on a phone; from `tablet` a column at most
-   --container-readable wide, centered between the page's edges, with the phone's 20pt edge inside
-   so its rows match the phone. A readable nav bar's row spans the column without that edge. */
 @utility readable {
   width: 100%;
   align-self: center;

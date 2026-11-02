@@ -1,4 +1,3 @@
-/** The playing song's lyrics, for Now Playing and the iPad's panel. */
 import type { TrackId } from "@music/commands/ids";
 import { lyricsAnswer, lyricsOffer, offlineLyrics } from "@music/player/lyrics";
 import type { LyricsAnswer, LyricsOffer } from "@music/player/lyrics";
@@ -30,7 +29,6 @@ export const useSongLyrics = (trackId: TrackId | null): SongLyrics => {
     useReadSettled("lyrics.get", trackId === null ? "skip" : { trackId }),
   );
 
-  // Kept lyrics are read from the vault only while the server can't be counted on.
   const reach = useServerReach();
   const offline = ownSession || reach !== "online";
   const held = useDownloadedLyrics(offline ? trackId : null);

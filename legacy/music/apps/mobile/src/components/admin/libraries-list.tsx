@@ -1,7 +1,3 @@
-/**
- * F14 · Libraries: every folder the caller can see, with its path, who listens, and its size, and
- * the way to add one. With none yet it is G01's empty state.
- */
 import type { User } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
 import { router } from "expo-router";

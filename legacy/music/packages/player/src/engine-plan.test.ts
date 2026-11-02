@@ -99,7 +99,6 @@ describe("planEngine", () => {
   });
 
   it("keeps a gapless advance the server has not confirmed yet", () => {
-    // The engine moved on to b; a heartbeat re-ran the query before the report landed.
     expect(planEngine(view(), view(), loaded("b", 300), 200_500)).toEqual([]);
   });
 
@@ -137,7 +136,6 @@ describe("planEngine", () => {
   });
 
   it("never seeks to its own report, even with a skewed clock", () => {
-    // The device clock runs 5 s ahead of the server, so the echo looks 5 s off.
     const before = view({ positionMs: 10_000, updatedAt: 1000 });
     const after = view({ positionMs: 25_000, updatedAt: 16_000 });
 
@@ -154,13 +152,10 @@ describe("planEngine", () => {
   });
 
   it("does not undo an optimistic pause when an unrelated write re-runs the query", () => {
-    // The engine paused locally; the server still says playing until the mutation lands.
     expect(planEngine(view(), view(), loaded("a", 4000), 5000)).toEqual([]);
   });
 
   it("keeps a device listening along within a second of the host", () => {
-    // The host reports 1.2 s further on than this device plays: a remote device would let it be,
-    // one listening along seeks back in step.
     const before = view({ positionMs: 10_000, updatedAt: 1000 });
     const after = view({ positionMs: 21_200, updatedAt: 12_000 });
 

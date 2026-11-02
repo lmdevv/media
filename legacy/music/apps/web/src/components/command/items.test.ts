@@ -185,15 +185,12 @@ describe("searchItems", () => {
   it("shows only matching actions while library results load", () => {
     const items = searchItems({ query: "speaker", results: undefined, playlists: [], actions });
 
-    // "speaker" is only in the devices action's detail.
     expect(ids(items)).toEqual(["devices"]);
   });
 
   it("ranks a title prefix over a word prefix over a match anywhere", () => {
     const items = searchItems({ query: "pla", results: undefined, playlists: [], actions });
 
-    // "Play on another device…" and "Playlists" start with the query; "New playlist" and the
-    // command's "Create a playlist" only have a word that does. Ties keep their order.
     expect(ids(items)).toEqual(["devices", "go-playlists", "new-playlist", "cmd-playlists.create"]);
   });
 

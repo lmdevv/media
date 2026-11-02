@@ -33,7 +33,6 @@ export const useAction = <Args extends ReadonlyArray<unknown>, Result>(
   const [pending, setPending] = useState(false);
   const latest = useRef(options);
 
-  // Read when the action finishes, which is always after the render that started it committed.
   useEffect(() => {
     latest.current = options;
   });

@@ -1,10 +1,3 @@
-/**
- * Text that people type and others read: names and descriptions of playlists, Jams, libraries,
- * devices, keys, and people. Decoding drops control and invisible format characters
- * (`CONTROL_CHARACTER`), so none can be stored on any path. A terminal acts on them when the CLI prints the text, which would let one
- * person rewrite what another sees. Line breaks and tabs become spaces, since every field is one
- * line, and the result is trimmed.
- */
 import { Schema, SchemaGetter } from "effect";
 
 const WHITESPACE_CONTROLS = new Set(["\t", "\n", "\v", "\f", "\r", "\u0085", "\u2028", "\u2029"]);

@@ -1,8 +1,3 @@
-/**
- * A stand-in for LRCLIB over real HTTP on a local port. Each test says how it answers, and it
- * records every request it received with the time it arrived, and how many the client hung up on
- * before the answer ended.
- */
 import { createServer } from "node:http";
 
 import { Effect, Schema } from "effect";

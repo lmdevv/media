@@ -1,7 +1,3 @@
-/**
- * References to the public Convex functions clients call, typed from the command registry rather
- * than from the backend source, so clients never compile Convex server code.
- */
 import type { CommandResultEncoded, MutationName, QueryName } from "@music/commands/registry";
 import { makeFunctionReference } from "convex/server";
 import type { Schema } from "effect";

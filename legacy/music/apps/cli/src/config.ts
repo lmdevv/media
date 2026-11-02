@@ -1,14 +1,3 @@
-/**
- * Credentials and the cached session token, stored under `$XDG_CONFIG_HOME/music/`.
- *
- * - `config.json` holds `{ server, key }` written by `music login` (mode 0600).
- * - `session.json` caches the JWT the key signs in to, with its expiry, so most commands skip the
- *   sign-in round trip. It is keyed by server and a hash of the key, so switching either drops it.
- *
- * `MUSIC_SERVER` and `MUSIC_API_KEY` override the file field by field. A plain `http://` server on
- * another machine would carry the key unencrypted, so `music login` refuses one unless given
- * `--insecure`, and `MUSIC_SERVER` is refused unless `MUSIC_INSECURE` is set.
- */
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
@@ -36,10 +25,6 @@ const nonEmpty = (name: string): Config.Config<Option.Option<string>> =>
     Config.map(Option.filter((value) => value.trim().length > 0)),
   );
 
-/**
- * Whether an opt-in variable is switched on. Anything else, including a typo, leaves it off: the
- * safe side for `MUSIC_INSECURE`, and no reason to fail every command.
- */
 const isTruthy = (value: string): boolean =>
   ["1", "true", "yes", "y", "on"].includes(value.trim().toLowerCase());
 
@@ -115,11 +100,9 @@ export const cleartextError = (
     command,
   });
 
-/** What `music login` stores. */
 const StoredConfig = Schema.Struct({
   server: ServerUrl,
   key: Schema.String.check(Schema.isMinLength(1)),
-  /** Set by `music login --insecure`: the user chose a plain http:// server on another machine. */
   insecure: Schema.optionalKey(Schema.Boolean),
 });
 
@@ -198,8 +181,6 @@ export const loadCredentials = Effect.fn("Config.loadCredentials")(function* (en
   if (!env.insecure && sendsKeyInCleartext(server)) {
     if (Option.isSome(env.server)) return yield* cleartextError(server, "MUSIC_INSECURE=1", null);
 
-    // `music login --insecure` records the choice. A config without it was written by a CLI that
-    // did not ask, so the key would go out unencrypted without anyone having agreed to it.
     if (file?.insecure !== true) {
       return yield* cleartextError(server, "music login --insecure (or MUSIC_INSECURE=1)", "login");
     }
@@ -250,7 +231,6 @@ export const saveSession = (
 export const clearAll = (paths: ConfigPaths): Effect.Effect<void, ConfigFileError> =>
   Effect.all([remove(paths.config), remove(paths.session)], { discard: true });
 
-/** Tokens are refreshed this long before they expire, so a request never races the expiry. */
 const expirySkewMs = 60_000;
 
 /** Whether a cached session can authenticate `credentials` at `now`. */

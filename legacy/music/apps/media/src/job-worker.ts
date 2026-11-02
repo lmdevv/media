@@ -1,13 +1,3 @@
-/**
- * Runs scan jobs from Convex. The worker subscribes to pending jobs, claims one at a time,
- * renews its lease while the scan runs, stops when the job is cancelled, and reports the result.
- * Claims are guarded by Convex and scans are idempotent, so a job that runs twice is harmless.
- *
- * It also deletes the artwork nothing uses any more: all of it at startup and a while after a
- * library is deleted (Convex purges its songs in the background), and after a scan the artwork
- * that scan stopped using. Collections and jobs take turns, so no scan of this worker is storing
- * artwork meanwhile.
- */
 import { hostname } from "node:os";
 
 import type { JobId } from "@music/commands/ids";
@@ -35,13 +25,8 @@ import type { MediaConfig } from "./media-config.ts";
 import { claimRoot } from "./root-claim.ts";
 import { describeScan, LibraryUnavailable, scanLibrary, type ScanSummary } from "./scan.ts";
 
-/** How often a running job reports progress; well inside the 60 second lease. */
 const HEARTBEAT = "5 seconds";
 
-/**
- * How long after a library is deleted its artwork is collected: Convex purges the library's
- * songs in batches meanwhile. Art a slower purge leaves goes at a later collection.
- */
 const PURGE_WAIT = "5 minutes";
 
 type JobEnd = Data.TaggedEnum<{
@@ -59,10 +44,6 @@ const outcomeOf = (end: JobEnd): JobOutcome | undefined =>
     Cancelled: () => undefined,
   });
 
-/**
- * Deletes the artwork scans released that nothing uses any more. Hashes too new to delete yet,
- * and all of them when Convex cannot be asked, stay in `releasedArt` for the next try.
- */
 const collectReleased = (releasedArt: Ref.Ref<HashSet.HashSet<string>>) =>
   Ref.get(releasedArt).pipe(
     Effect.flatMap(collectReleasedArt),
@@ -84,7 +65,6 @@ const runJob = Effect.fn("JobWorker.runJob")(
 
     yield* Effect.logInfo("JobWorker.started");
 
-    // The scan reads the real folder Convex accepted, not the path the library was added with.
     const scan = claimRoot(library).pipe(
       Effect.catchTag("FileError", (cause) =>
         Effect.fail(new LibraryUnavailable({ libraryId: library.id, path: library.path, cause })),
@@ -99,7 +79,6 @@ const runJob = Effect.fn("JobWorker.runJob")(
         RootRefused: (error) => Effect.succeed(JobEnd.Failed({ error: error.message })),
         BackendError: (error) => Effect.succeed(JobEnd.Failed({ error: error.message })),
       }),
-      // A defect in one scan must not stop the worker; record it on the job instead.
       Effect.catchCauseIf(
         (cause) => !Cause.hasInterrupts(cause),
         (cause) =>
@@ -126,19 +105,15 @@ const runJob = Effect.fn("JobWorker.runJob")(
 
     if (outcome === undefined) {
       yield* Effect.logInfo("JobWorker.cancelled");
-      // Batches saved before the cancel may have released artwork.
       yield* collectReleased(releasedArt);
 
       return;
     }
 
-    // The last heartbeat may predate the end of the scan; leave the final counts on the job.
     yield* reportOnce;
     yield* backend.finishJob(jobId, workerId, outcome);
     yield* Effect.logInfo("JobWorker.finished").pipe(Effect.annotateLogs({ outcome }));
 
-    // Artwork only falls out of use where songs changed, and Convex says where. A failed scan
-    // still saved the batches before the failure.
     yield* collectReleased(releasedArt);
   },
   (effect, jobId) => effect.pipe(Effect.annotateLogs({ jobId })),
@@ -149,9 +124,7 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
   Effect.gen(function* () {
     const backend = yield* MediaBackend;
     const workerId = `${hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
-    // Jobs and collections take turns: a scan stores artwork before it stores the songs using it.
     const turns = yield* Semaphore.make(1);
-    // Artwork scans released and not yet deleted, kept across jobs.
     const releasedArt = yield* Ref.make(HashSet.empty<string>());
 
     const collect = turns.withPermits(1)(
@@ -198,7 +171,6 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
       Effect.retry(resubscribeSchedule),
     );
 
-    // Artwork that went out of use while the service was down (a deleted library) goes first.
     yield* collect.pipe(
       Effect.andThen(runJobs),
       Effect.annotateLogs({ workerId }),

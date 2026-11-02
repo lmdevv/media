@@ -1,7 +1,3 @@
-/**
- * The playback state machine through the real command dispatcher: play, next, previous, jump,
- * repeat, shuffle, the queue commands, position reports, and history, against convex-test.
- */
 import { DeviceId, QueueItemId } from "@music/commands/ids";
 import type { TrackId } from "@music/commands/ids";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,7 +25,6 @@ const START = 1_800_000_000_000;
 interface Fixture {
   readonly backend: Backend;
   readonly admin: User;
-  /** Five songs, `Rock 0001` to `Rock 0005`, in title order. */
   readonly rock: ReadonlyArray<TrackId>;
 }
 
@@ -45,7 +40,6 @@ const setup = async (): Promise<Fixture> => {
 const queueIds = async (user: User): Promise<ReadonlyArray<TrackId>> =>
   (await user.music.read("playback.state", {})).queue.map((track) => track.id);
 
-/** The ID of the queue entry at `position`, as a client reads it from the queue. */
 const itemAt = async (user: User, position: number): Promise<QueueItemId> => {
   const entry = (await user.music.read("queue.list", {})).queue[position];
 
@@ -71,7 +65,6 @@ const at = (index: number, list: ReadonlyArray<TrackId>): TrackId => {
   return id;
 };
 
-/** Rock and Jazz songs interleaved, playing the third entry (a Jazz song). */
 const mixed = async () => {
   const fixture = await setup();
   const { backend, admin, rock } = fixture;
@@ -89,7 +82,6 @@ const mixed = async () => {
 const report = (user: User, index: number, positionMs: number, playing = true) =>
   user.music.run("playback.report", { deviceId: DEVICE, index, positionMs, playing });
 
-/** Documents a handler reads, minus those every command spends loading the viewer. */
 const documentsRead = async (
   user: User,
   run: (ctx: Parameters<(typeof playbackQueries)["queue.list"]>[0]) => Promise<object>,
@@ -106,7 +98,6 @@ const documentsRead = async (
   return (await measure(run)) - viewerOnly;
 };
 
-/** A session with the queue on the session row, as versions before `playbackQueues` saved it. */
 const legacy = async () => {
   const fixture = await setup();
   const { backend, admin, rock } = fixture;
@@ -167,7 +158,6 @@ describe("play, next, and previous", () => {
   it("plays on the online player when none is named, reading only online devices", async () => {
     const { backend, admin, rock } = await setup();
 
-    // A month of closed tabs, each still a device row, all long silent.
     await backend.run(async (ctx) => {
       await Promise.all(
         Array.from({ length: 100 }, (_, index) =>
@@ -194,8 +184,6 @@ describe("play, next, and previous", () => {
     });
 
     expect((await admin.music.read("playback.state", {})).activeDevice?.id).toBe(DEVICE);
-    // The five songs, the session and queue rows (read, then read by their writes), and the one
-    // online device: none of the hundred silent ones.
     expect(read).toBeLessThan(20);
   });
 
@@ -279,7 +267,6 @@ describe("the queue", () => {
       throw new Error("Seed missing");
     }
 
-    // Autoplay would follow the cleared queue with songs of its own.
     await admin.music.run("queue.autoplay", { on: false });
     await admin.music.run("playback.play", { trackIds: [first, second], deviceId: DEVICE });
     await admin.music.run("queue.add", { trackIds: [at(2, rock)], next: true });
@@ -415,7 +402,6 @@ describe("songs whose file is gone", () => {
     await markMissing(backend, library?.id ?? "", ["Rock/0002.flac"]);
     await admin.music.run("playback.next", {});
 
-    // The file may come back; the player skips it if it can't stream.
     expect(await queueIds(admin)).toEqual(rock);
     expect(await current(admin)).toBe(at(3, rock));
   });
@@ -427,7 +413,6 @@ describe("after a library is deleted", () => {
     const state = await admin.music.read("playback.state", {});
 
     expect(state.queue.map((track) => track.id)).toEqual(rock.slice(0, 3));
-    // The playing Jazz song is gone; the song after it plays instead.
     expect(state.index).toBe(2);
   });
 
@@ -462,7 +447,6 @@ describe("after a library is deleted", () => {
     await admin.music.run("playback.play", { trackIds: queue, index: 3, deviceId: DEVICE });
     await admin.music.run("libraries.delete", { libraryId: jazzLibrary.libraryId });
 
-    // The player still shows the old queue: the song it plays was at index 3.
     await admin.music.run("playback.report", {
       deviceId: DEVICE,
       index: 3,
@@ -477,7 +461,6 @@ describe("after a library is deleted", () => {
 
   it("refuses an entry whose song was dropped", async () => {
     const { admin, items } = await mixed();
-    // The second entry was a Jazz song.
     const dropped = items[1];
 
     if (dropped === undefined) throw new Error("Seed missing");
@@ -532,7 +515,6 @@ describe("position reports and history", () => {
     await admin.music.run("playback.play", { trackIds: [jingle], deviceId: DEVICE });
     await admin.music.run("playback.repeat", { mode: "one" });
 
-    // The engine reports each time the song starts over, six seconds apart.
     await [0, 1, 2].reduce(async (previous, loop) => {
       await previous;
       vi.setSystemTime(START + loop * 6000);
@@ -547,7 +529,6 @@ describe("position reports and history", () => {
     await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
 
     await report(admin, 0, 100);
-    // The first song ends and the player moves on to the next by itself.
     vi.setSystemTime(START + 180_000);
     await report(admin, 1, 100);
     await admin.music.run("playback.report", {
@@ -566,7 +547,6 @@ describe("position reports and history", () => {
     await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
     await report(admin, 0, 100);
 
-    // Someone skips from another device while this player's report for song one is in flight.
     vi.setSystemTime(START + 15_000);
     await admin.music.run("playback.next", {});
     await admin.music.run("playback.report", {
@@ -580,7 +560,6 @@ describe("position reports and history", () => {
     expect(await current(admin)).toBe(at(1, rock));
     expect(await history(admin)).toEqual([at(0, rock)]);
 
-    // Once the player plays the new song, its reports land as usual.
     vi.setSystemTime(START + 16_000);
     await report(admin, 1, 900);
     expect(await history(admin)).toEqual([at(1, rock), at(0, rock)]);
@@ -611,22 +590,18 @@ describe("what a position report costs", () => {
       deviceId: DEVICE,
     });
 
-    // The position reads the session and its device, never the queue's songs.
     expect(
       await documentsRead(admin, async (ctx) =>
         playbackQueries["playback.position"](ctx, await loadViewer(ctx)),
       ),
     ).toBe(2);
 
-    // The queue reads its own row, its songs, and who added them (one person here), never the
-    // session the reports rewrite.
     expect(
       await documentsRead(admin, async (ctx) =>
         playbackQueries["queue.list"](ctx, await loadViewer(ctx)),
       ),
     ).toBe(1 + 1000 + 1);
 
-    // A periodic report rewrites only the session, and reads the queue row and one song.
     const [first] = tracks;
 
     if (first === undefined) throw new Error("Seed missing");
@@ -658,11 +633,8 @@ describe("what a position report costs", () => {
       };
     });
 
-    // The session (read, then read again by its patch), the queue row (read to locate the song,
-    // then to save), and the one song: never the other 999.
     expect(cost).toEqual({ read: 5, written: 1 });
 
-    // A player that names no song (the CLI) costs the same while it reports the current one.
     const unnamed = await admin.as.mutation(async (ctx) => {
       const viewer = await loadViewer(ctx);
       const before = await ctx.meta.getTransactionMetrics();
@@ -704,11 +676,9 @@ describe("liked songs in a long queue", () => {
         track.liked ? [track.id] : [],
       );
 
-    // A few likes are read in one go.
     await likeAll(ids.slice(10, 13));
     expect(await likedInQueue()).toEqual(ids.slice(10, 13));
 
-    // More than one read takes are looked up song by song.
     await likeAll(ids.slice(0, 210));
     expect(await likedInQueue()).toEqual(ids.slice(0, 210));
   });

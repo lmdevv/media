@@ -1,7 +1,3 @@
-/**
- * A playlist's name and description fields, as New playlist (C04) and Edit (C07) draw them, with
- * the server's length limits.
- */
 import { Field } from "@/components/ui/field";
 
 /** The name and description being typed. */
@@ -10,7 +6,6 @@ export interface PlaylistText {
   readonly description: string;
 }
 
-/** Props for `PlaylistFields`. */
 export interface PlaylistFieldsProps {
   readonly value: PlaylistText;
   readonly onChange: (value: PlaylistText) => void;

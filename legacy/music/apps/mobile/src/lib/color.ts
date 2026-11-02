@@ -1,9 +1,3 @@
-/**
- * Fully clear versions of theme colors, for gradients that fade a color out. Fading to plain
- * `transparent` (clear black) passes through gray on a light page, so a fade ends on the same
- * color at zero alpha.
- */
-
 const HEX = /^#(?<digits>[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/iu;
 
 /** `color` with zero alpha: `#ffffff` becomes `#ffffff00`. Anything but hex fades to clear. */

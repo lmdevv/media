@@ -1,9 +1,3 @@
-/**
- * C07's editable rows, like iOS edit mode: a red remove button leading each row and a grip
- * trailing it. Dragging a grip lifts the row and slides the rows it passes out of its way, all on
- * the UI thread; dragging near the top or bottom edge scrolls the page. Dropping reports one move
- * (`from`, `to`); the parent reorders its list, and the rows settle into their new places.
- */
 import type { ReactNode } from "react";
 import { useLayoutEffect, useRef } from "react";
 import { Pressable, View, useWindowDimensions } from "react-native";
@@ -23,13 +17,10 @@ import { Equal, X } from "lucide-react-native";
 
 import { Icon } from "@/components/ui/icon";
 
-/** How close to an edge of the screen, in points, a dragged row starts scrolling the page. */
 const EDGE = 96;
 
-/** The fastest the page scrolls under a dragged row, in points per frame. */
 const MAX_SPEED = 14;
 
-/** How long the rows a drag passes take to slide aside, in milliseconds. */
 const SLIDE_MS = 160;
 
 /** The drag in progress, shared by every row on the UI thread. */
@@ -50,24 +41,20 @@ interface Drag {
   readonly rowHeight: SharedValue<number>;
 }
 
-/** Where the dragged row lands for an offset: the slot its middle is over. */
 const slotFor = (from: number, offset: number, height: number, count: number): number => {
   "worklet";
 
   return Math.max(0, Math.min(count - 1, from + Math.round(offset / Math.max(1, height))));
 };
 
-/** Props for one reorderable row. */
 interface RowProps {
   readonly index: number;
   readonly count: number;
   readonly drag: Drag;
   readonly scroll: SharedValue<number>;
   readonly label: string;
-  /** Draws the row's content around the grip it is given for its trailing lane. */
   readonly render: (grip: ReactNode) => ReactNode;
   readonly onLift: () => void;
-  /** The finger left the grip, whether or not this row was being dragged. */
   readonly onRelease: () => void;
   readonly onRemove: () => void;
   readonly onDrop: (from: number, to: number) => void;
@@ -112,8 +99,6 @@ function ReorderRow({
       if (drag.from.value !== index) return;
       const to = drag.to.value;
 
-      // Settle into the slot first, then hand the move to React, which redraws the new order. A
-      // settle cut short by the next drag hands nothing over.
       drag.offset.value = withTiming(
         (to - index) * drag.rowHeight.value,
         { duration: 120 },
@@ -173,7 +158,6 @@ function ReorderRow({
   );
 }
 
-/** Props for `ReorderList`. */
 export interface ReorderListProps<Item> {
   readonly items: ReadonlyArray<Item>;
   readonly keyOf: (item: Item) => string;
@@ -204,8 +188,6 @@ export function ReorderList<Item>({
   maxScroll,
 }: ReorderListProps<Item>) {
   const { height: screen } = useWindowDimensions();
-  // Set by a drop; the next new order clears the drag. A list that changes under a drag, as when a
-  // collaborator adds a song, leaves the drag alone.
   const dropped = useRef(false);
 
   const drag: Drag = {
@@ -220,7 +202,6 @@ export function ReorderList<Item>({
 
   const count = items.length;
 
-  // Once React has drawn the dropped order, the rows drop their offsets.
   useLayoutEffect(() => {
     if (!dropped.current) return;
     dropped.current = false;
@@ -228,7 +209,6 @@ export function ReorderList<Item>({
     drag.offset.set(0);
   }, [items, drag.from, drag.offset]);
 
-  // Near an edge, scroll the page and carry the dragged row along with it, only while dragging.
   const edgeScroll = useFrameCallback(() => {
     if (drag.from.value === -1) return;
     const finger = drag.finger.value;

@@ -1,19 +1,3 @@
-/**
- * Now Playing (B01 local, B02 remote, H05 dark): the cover, the song, the scrubber, the controls,
- * the volume, and where the music plays. The background takes the cover's color. Tapping the
- * cover opens the lyrics (B12, H13) when the song has them, and the queue button opens the queue
- * (B03, H06), in place, as Apple Music does: the cover shrinks into the corner of a row with the
- * song's title, and the queue or the lyrics rise under it. The queue keeps every control below
- * it; the lyrics keep only the scrubber and the transport (B12–B14). One of the two shows at a
- * time. With nothing queued it says so (G14).
- *
- * On an iPhone it is a native sheet over the tabs that the person drags down to dismiss (B11); the
- * sliders keep their own drags. On an iPad it fills the window at every width (Paper page 25) and
- * the app owns the dismissal: dragging the handle or the player down, tapping the handle, or
- * VoiceOver's escape. There the player is a centered column with a larger cover (P07), and in a
- * wide window on its side the queue and the lyrics leave the cover for a pane beside the player,
- * with a lyrics button in the bottom row (P08, P09, P11). `partsOf` decides what each width shows.
- */
 import { lyricsButton, lyricsOffer } from "@music/player/lyrics";
 import type { LyricsAnswer, LyricsOffer } from "@music/player/lyrics";
 import { useRead } from "@music/sdk/react";
@@ -70,18 +54,15 @@ import { Transport, VolumeRow } from "./transport";
 import { useArtTint } from "./use-art-tint";
 import { useSongLyrics } from "./use-song-lyrics";
 
-/** Closes Now Playing, back to the tabs underneath. */
 const close = () => {
   router.back();
 };
 
-/** Leaves Now Playing for a page in the tabs underneath. */
 const leaveTo = (go: () => void) => {
   router.dismiss();
   go();
 };
 
-/** The song as Song actions takes it; null for a Jam song kept private, with no album or artist. */
 const sheetSongOf = (song: NowPlaying): SheetSong | null =>
   song.artistId === undefined || song.albumId === undefined
     ? null
@@ -95,25 +76,19 @@ const sheetSongOf = (song: NowPlaying): SheetSong | null =>
         liked: song.liked,
       };
 
-/** The cover's move between the full cover and the song's row: a soft spring with no bounce. */
 const MORPH = { duration: 450, dampingRatio: 0.9 } as const;
 
-/** The cover's offset from the top of the stage. */
 const STAGE_TOP = "--spacing-2";
 
-/** The gap between the cover and the title under it. */
 const STAGE_GAP = "--spacing-6";
 
-/** The stage's size. */
 interface Box {
   readonly width: number;
   readonly height: number;
 }
 
-/** The largest cover a layout draws: B01's 326pt, P07's column, or P08's 520pt. */
 type CoverLimit = "--spacing-ios-326" | "--container-dialog" | "--spacing-ios-520";
 
-/** Each layout's largest cover, and how wide its player column grows. */
 const COLUMN: Readonly<
   Record<NowPlayingLayout, { readonly cover: CoverLimit; readonly width: string }>
 > = {
@@ -122,12 +97,6 @@ const COLUMN: Readonly<
   split: { cover: "--spacing-ios-520", width: "max-w-ios-520" },
 };
 
-/**
- * The chip on the cover's corner, which says the cover opens the lyrics: their `glyph`, a
- * `spinner` while they are looked up (B16), or none for a song with no lyrics or an instrumental
- * (B15), whose cover is only a picture. Looked up, the lyrics open too, on the song's own words
- * or "Looking for lyrics…"; failed, they open to say so.
- */
 type LyricsChipLook = "glyph" | "spinner" | null;
 
 const LYRICS_CHIP: Readonly<Record<LyricsOffer, LyricsChipLook>> = {
@@ -138,7 +107,6 @@ const LYRICS_CHIP: Readonly<Record<LyricsOffer, LyricsChipLook>> = {
   instrumental: null,
 };
 
-/** What tapping the cover does: shows it again over an open panel, opens the lyrics, or nothing. */
 type CoverTap = "close" | "lyrics" | "none";
 
 const COVER_TAP: Readonly<
@@ -166,20 +134,8 @@ const coverTap = (open: boolean, chip: LyricsChipLook): CoverTap => {
   return chip === null ? "none" : "lyrics";
 };
 
-/**
- * A drag down closes when let go past this share of the window's height, unless the finger is
- * moving back up faster than `drift` points a second, or at any length flicked down faster than
- * `flick`; it claims the touch only after `slop` points down, so taps, the sliders' drags, and
- * sideways swipes keep theirs.
- */
 const DISMISS = { share: 0.25, drift: 100, flick: 800, slop: 12 } as const;
 
-/**
- * Over the whole window (P07) the app closes Now Playing itself, as the native sheet does on a
- * phone (B11): dragging `children` down moves Now Playing by `drag`, and past `DISMISS` closes
- * it; short of that it springs back. With no `drag`, on a phone, `children` render alone and the
- * native sheet owns the drag.
- */
 function DragToClose({
   drag,
   enabled = true,
@@ -219,10 +175,6 @@ function DragToClose({
   return <GestureDetector gesture={pan}>{children}</GestureDetector>;
 }
 
-/**
- * The drag handle Paper draws in place of a close button. Over the whole window it is a button
- * too (`onClose`), since no system sheet closes Now Playing there.
- */
 function Handle({ onClose }: { readonly onClose: (() => void) | null }) {
   const bar = <View className="h-1 w-row rounded-full bg-text-muted opacity-muted" />;
 
@@ -275,7 +227,6 @@ export function MoreButton({
   );
 }
 
-/** The artist under the title: a link to the artist, or plain for a song kept private. */
 function ArtistLink({
   song,
   variant,
@@ -312,7 +263,6 @@ function ArtistLink({
   );
 }
 
-/** The song's title, its artist, the heart, and the ellipsis (B01). */
 function TitleRow({ song }: { readonly song: NowPlaying }) {
   return (
     <View className="flex-row items-center gap-3">
@@ -330,10 +280,6 @@ function TitleRow({ song }: { readonly song: NowPlaying }) {
   );
 }
 
-/**
- * The song as a row over the queue (B03) or the lyrics (B12): room for the 64pt cover, which the
- * morph moves into place, then title over artist, the heart, and the ellipsis.
- */
 function SongRow({ song }: { readonly song: NowPlaying }) {
   return (
     <View className="min-h-16 flex-row items-center gap-3 py-2">
@@ -392,7 +338,6 @@ export function PanelBody({
   );
 }
 
-/** Where the music plays: this device in muted text, another device in the accent (B02). */
 function DeviceButton({ role }: { readonly role: PlayerRole }) {
   const remote = role.kind === "remote";
   const label = remote ? `Playing on ${role.device.name}` : `This ${DEVICE_FAMILY}`;
@@ -413,10 +358,6 @@ function DeviceButton({ role }: { readonly role: PlayerRole }) {
   );
 }
 
-/**
- * Opens the Jam: Start a Jam (D01) over Now Playing when there is none, or the Jam itself over
- * the tabs, in the accent while one is on.
- */
 function JamButton() {
   const jam = useRead("jam.get", {});
   const inJam = jam !== undefined && jam !== null;
@@ -439,11 +380,6 @@ function JamButton() {
   );
 }
 
-/**
- * The lyrics in the bottom row beside the side pane (P08), where they leave the cover: dimmed for
- * a song with none, a spinner in place of the glyph while they are looked up, on a faint wash
- * while the pane shows them.
- */
 function LyricsButton({
   offer,
   selected,
@@ -468,10 +404,6 @@ function LyricsButton({
   );
 }
 
-/**
- * Jam, the playing device, and the queue (B01), with the lyrics before the queue beside the side
- * pane (`lyrics`, P08). The `selected` panel's button sits on a faint wash.
- */
 function ActionRow({
   role,
   selected,
@@ -515,10 +447,6 @@ function ActionRow({
   );
 }
 
-/**
- * Presents the playback failure sheet (G06) once per failure, while Now Playing is on top. The
- * queue and the position stay as they were; the sheet says why.
- */
 const useFailureSheet = (failed: boolean, error: string | null, itemId: string | undefined) => {
   const navigation = useNavigation();
   const shown = useRef<string | null>(null);
@@ -537,10 +465,6 @@ const useFailureSheet = (failed: boolean, error: string | null, itemId: string |
   }, [key, navigation]);
 };
 
-/**
- * G14: the player opened with nothing queued. Over the whole window it sits in the middle, as
- * wide as P07's column, and drags down to close (`drag`).
- */
 function NothingPlaying({ drag }: { readonly drag: SharedValue<number> | null }) {
   const empty = (
     <EmptyState
@@ -571,11 +495,6 @@ function NothingPlaying({ drag }: { readonly drag: SharedValue<number> | null })
   );
 }
 
-/**
- * Paper's chip on the cover's corner, saying the cover opens the lyrics: their glyph, or a
- * spinner while they are looked up. Paper blurs behind it; the app has no blur, so it is the
- * scrim alone.
- */
 function LyricsChip({
   loading,
   progress,
@@ -585,7 +504,6 @@ function LyricsChip({
 }) {
   const white = useThemeColor("--color-dark-text");
 
-  // Gone before the cover is small, so it never shows on the row's 64pt cover.
   const fade = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 0.3], [1, 0], Extrapolation.CLAMP),
   }));
@@ -607,13 +525,6 @@ function LyricsChip({
   );
 }
 
-/**
- * Everything above the controls: the cover over the song's title, or the queue or the lyrics
- * under the song's row. `progress` runs from 0 (cover) to 1 (row), and one cover moves between
- * the two places, so it reads as the same picture shrinking into the row. Tapped, the cover opens
- * the lyrics (`onOpenLyrics`) when the song has them and they open from the cover (`lyricsFrom`),
- * or shows itself again over a panel. Beside the side pane the stage always shows the cover.
- */
 function Stage({
   song,
   view,
@@ -646,9 +557,6 @@ function Stage({
   const chip = lyricsFrom === "cover" ? LYRICS_CHIP[offer] : null;
   const tap = COVER_TAP[coverTap(open, chip)];
 
-  // While the lyrics fold the controls away the stage grows. The cover keeps the height the stage
-  // had when the fold started, so the morph starts where the cover is. Mounted folded, there is
-  // no such height, so it takes the stage's own.
   const [live, setLive] = useState<Box | null>(null);
 
   const [fold, setFold] = useState<{ readonly folds: boolean; readonly held: Box | null }>({
@@ -670,7 +578,6 @@ function Stage({
   const coverRadius = useThemeLength("--radius-mobile-card");
   const rowRadius = useThemeLength("--radius-md");
 
-  // The cover fills the width up to the layout's largest, leaving room for the title under it.
   const width = box?.width ?? 0;
 
   const size = Math.max(
@@ -680,8 +587,6 @@ function Stage({
 
   const left = (width - size) / 2;
 
-  // The cover keeps its full size and scales from its top left corner, so the picture and its
-  // frame move as one; the corner radius is set before scaling, so it lands on Paper's radius.
   const measured = box !== null;
 
   const cover = useAnimatedStyle(() => {
@@ -716,9 +621,6 @@ function Stage({
       onLayout={(event) => {
         const { width: nextWidth, height } = event.nativeEvent.layout;
 
-        // At the width the fold started at, the stage's growth is skipped and the box set back to
-        // the one it had, since the fold's end brings no layout of its own. After a new width, as
-        // when Split View narrows the window, it takes every layout until the fold ends.
         if (folds && held !== null && held.width === nextWidth) {
           if (live?.width !== held.width || live.height !== held.height) setLive(held);
 
@@ -768,13 +670,6 @@ function Stage({
   );
 }
 
-/**
- * The scrubber and the transport, then `children`, the rows the lyrics fold away (`folds`). They
- * fold with the cover's morph (`progress`), so the stage grows into their room as the cover
- * shrinks: the rows fade and slide out under the bottom edge, and the transport tightens to B12's
- * spacing. Folded, the rows take no touches. `onHeight` hears the height they all take unfolded,
- * folded or not.
- */
 function Controls({
   folds,
   folded,
@@ -791,7 +686,6 @@ function Controls({
   const rowsHeight = useSharedValue(0);
   const tighten = useThemeLength("--spacing-2");
 
-  // Each part's own height, which the fold's margins leave alone.
   const heights = useRef({ scrubber: 0, transport: 0, rows: 0 });
 
   const measure = (part: keyof typeof heights.current, height: number) => {
@@ -848,13 +742,6 @@ function Controls({
   );
 }
 
-/**
- * The player: the stage over the controls, whose `children` are the rows the lyrics fold away. On
- * an iPhone it fills the sheet as B01 draws it. On an iPad it is a column no wider than the
- * layout lets it grow and no taller than its content at the largest cover, so the room around it
- * centers it (P07, P08). Folding the rows for the lyrics keeps that height, so the stage grows
- * into their room as it does on a phone.
- */
 function PlayerColumn({
   layout,
   song,
@@ -936,13 +823,8 @@ function PlayerColumn({
   );
 }
 
-/** How far down each panel starts in the side pane, so the lyrics' lines sit where P08 draws them. */
 const SIDE_TOP: Readonly<Record<Panel, string>> = { queue: "pt-8", lyrics: "pt-2" };
 
-/**
- * The 440pt pane beside the player in a wide window on its side (P08, P09): the lyrics, or the
- * queue under its mode pills.
- */
 function SidePane({
   panel,
   song,
@@ -965,11 +847,6 @@ function SidePane({
   );
 }
 
-/**
- * Where the player sits in each layout: filling the sheet (B01), which the system drags down,
- * centered in the window (P07), or beside the side pane (P08). Over the whole window the player
- * drags down to close, except while a panel scrolls in its place.
- */
 function PlayerBody({
   layout,
   side,
@@ -1020,7 +897,6 @@ export function NowPlayingScreen() {
   const { widthClass, landscape } = useWindowLayout();
   const layout = layoutOf(NOW_PLAYING_PRESENTATION, widthClass, landscape);
 
-  // Read while Now Playing is up, for the cover's chip as much as for the lyrics.
   const { lyrics, offer, fallback } = useSongLyrics(nowPlaying?.trackId ?? null);
   const parts = partsOf(layout, view, offer, fallback);
 
@@ -1031,7 +907,6 @@ export function NowPlayingScreen() {
   const windowed = NOW_PLAYING_PRESENTATION === "window";
   const drag = windowed ? offset : null;
 
-  // Once the closing morph ends, unless a panel opened again meanwhile.
   const unmountClosed = () => {
     setView((current) => (current.open ? current : CLOSED));
   };
@@ -1039,14 +914,11 @@ export function NowPlayingScreen() {
   const show = (panel: Panel | null) => {
     void Haptics.selectionAsync();
 
-    // Beside the side pane nothing morphs, but the stage moves at once all the same, so turning
-    // the iPad narrow finds the panel open in place.
     const instant = reduceMotion || layout === "split";
 
     if (panel !== null) {
       setView({ open: true, panel });
 
-      // A stage held on the cover may have the morph left at the row; it opens from the cover.
       if (!parts.morphs) progress.value = 0;
       progress.value = instant ? 1 : withSpring(1, MORPH);
     } else if (instant) {

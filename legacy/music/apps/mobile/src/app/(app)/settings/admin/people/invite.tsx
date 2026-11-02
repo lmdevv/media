@@ -1,4 +1,3 @@
-/** F10 · Invite someone. */
 import { InviteForm } from "@/components/admin/invite-form";
 import { RequireAccess } from "@/components/settings/access";
 

@@ -1,7 +1,3 @@
-/**
- * Library folders as the administration screens word them (F08, F14–F17): row subtitles, who can
- * listen, which visibility choices someone may make, and who can still be added.
- */
 import type {
   AccessControl,
   Library,
@@ -18,7 +14,6 @@ import { countOf } from "./format";
 export const libraryOwner = (library: Library, meId: string): string =>
   library.ownerId === meId ? "you" : (library.ownerName ?? "its owner");
 
-/** Who can listen, as a short label (F14): `Shared`, `Restricted`, `Only you`, `Only Sam`. */
 const visibilityLabel = (visibility: LibraryVisibility, owner: string): string => {
   if (visibility === "private") return `Only ${owner}`;
 

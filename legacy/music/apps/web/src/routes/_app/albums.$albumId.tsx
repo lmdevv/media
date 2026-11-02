@@ -22,7 +22,6 @@ const MISSING: MissingCopy = {
   back: { to: "/albums", label: "Back to albums" },
 };
 
-/** `?track=` highlights a song: shared song links open its album this way. */
 const AlbumSearch = Schema.Struct({ track: Schema.optionalKey(TrackId) });
 
 export const Route = createFileRoute("/_app/albums/$albumId")({

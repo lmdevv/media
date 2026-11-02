@@ -1,4 +1,3 @@
-/** The native form sheet Paper's bottom sheets become: grabber, 28pt corners, sized to content. */
 import type { NativeStackNavigationOptions } from "expo-router";
 import { useCSSVariable } from "uniwind";
 
@@ -10,7 +9,6 @@ import { useThemeColor } from "./theme-color";
  */
 export const useSheetOptions = (): NativeStackNavigationOptions => {
   const background = useThemeColor("--color-bg");
-  // Native sheets take the radius in points; the token is `28px`.
   const radius = Number.parseFloat(String(useCSSVariable("--radius-sheet")));
 
   return {

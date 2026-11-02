@@ -1,8 +1,3 @@
-/**
- * The download ring in an album's or playlist's header, beside More (Paper's downloads proposal,
- * variant A, D01 and D04): tap to download, tap the stop square to cancel, and tap a finished
- * download to be asked before it is removed.
- */
 import type { AlbumId, PlaylistId } from "@music/commands/ids";
 import * as Haptics from "expo-haptics";
 import { Pressable } from "react-native";
@@ -41,7 +36,6 @@ export function DownloadButton({
 
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    // Cancelling fails only when this phone can't record it; adding also needs the server.
     void save(
       download.toggle,
       control.press === "cancel" ? `${title} is still downloading.` : `${title} isn’t downloading.`,

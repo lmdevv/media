@@ -86,7 +86,6 @@ function Thumb({ item }: { readonly item: Item }) {
   }
 }
 
-/** The "now playing" row's subtitle: the only part of the list that follows the position. */
 function NowSubtitle({ artist }: { readonly artist: string }) {
   const player = usePlayer();
   const position = usePlayerPosition();

@@ -1,7 +1,3 @@
-/**
- * The media HTTP API under `/media`: health, signed audio streams, and signed artwork. Every
- * handler turns its failures into a response; access is decided only by Convex's signatures.
- */
 import { resolve } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
@@ -39,7 +35,6 @@ const decodeTrackId = Schema.decodeUnknownOption(TrackId);
 const text = (status: number, body: string): Response =>
   new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 
-/** Every offset run is taken: a brief condition, so the client may retry shortly. */
 const busy = (): Response => {
   const response = text(503, "Too many seeks are transcoding; retry shortly");
   response.headers.set("Retry-After", "2");
@@ -47,34 +42,20 @@ const busy = (): Response => {
   return response;
 };
 
-/** Offsets up to about eleven days, in whole milliseconds. */
 const START_MS = /^\d{1,9}$/u;
 
-/**
- * The `start` query parameter: milliseconds into the song a transcoded stream begins at, 0 when
- * absent, and none when malformed. It selects a position, not a resource: the signature covers
- * the track, profile, and expiry, and none of them depend on it.
- */
 const parseStart = (raw: string | null): Option.Option<number> => {
   if (raw === null) return Option.some(0);
 
   return START_MS.test(raw) ? Option.some(Number(raw)) : Option.none();
 };
 
-/**
- * The `finished` query parameter: true for `1`, false when absent, and none for anything else, so
- * a misspelt flag is refused rather than answered with a live stream.
- */
 const parseFinished = (raw: string | null): Option.Option<boolean> => {
   if (raw === null) return Option.some(false);
 
   return raw === "1" ? Option.some(true) : Option.none();
 };
 
-/**
- * Answers once the client behind `signal` has gone away, with a response nobody receives. Raced
- * against a handler, it interrupts the handler, which then releases what it holds.
- */
 const clientGone = (signal: AbortSignal): Effect.Effect<Response> =>
   Effect.callback<Response>((resume) => {
     const gone = () => {
@@ -89,10 +70,6 @@ const clientGone = (signal: AbortSignal): Effect.Effect<Response> =>
     });
   });
 
-/**
- * Joins a library-relative path onto its root, refusing paths that escape the root and the root
- * itself. A library at `/` holds every absolute path but itself.
- */
 const resolveInside = (root: string, relative: string): Option.Option<string> => {
   const base = resolve(root);
   const absolute = resolve(base, relative);
@@ -114,7 +91,6 @@ export const makeHttpApp = Effect.gen(function* () {
   const config = yield* MediaConfig;
   const transcoder = yield* Transcoder;
 
-  // Found sources are reused for a minute; misses and failures are looked up again every time.
   const sources = yield* Cache.makeWith((trackId: TrackId) => backend.trackSource(trackId), {
     capacity: 10_000,
     timeToLive: (exit) =>
@@ -133,7 +109,6 @@ export const makeHttpApp = Effect.gen(function* () {
 
       if (Option.isNone(finished)) return text(400, "Invalid finished");
 
-      // A finished file is the whole song, so it has no offset to start from.
       if (
         Option.isNone(startMs) ||
         (startMs.value > 0 && (profile.value === "original" || finished.value))
@@ -157,8 +132,6 @@ export const makeHttpApp = Effect.gen(function* () {
       const lexical = resolveInside(source.libraryPath, source.path);
 
       if (Option.isNone(lexical)) return text(404, "Track not found");
-      // The file may have become a symlink since the scan; serve only what still resolves inside
-      // the library, and open the resolved path.
       const absolute = yield* Files.resolveWithin(source.libraryPath, lexical.value);
 
       if (Option.isNone(absolute)) return text(404, "Track not found");
@@ -176,7 +149,6 @@ export const makeHttpApp = Effect.gen(function* () {
         codec: source.codec,
       };
 
-      // A download falls back to nothing: it asked for this profile's file, not a playable one.
       if (finished.value) {
         return yield* finishedResponse(request, input).pipe(
           Effect.catchTag("TranscodeError", (error) =>
@@ -187,7 +159,6 @@ export const makeHttpApp = Effect.gen(function* () {
         );
       }
 
-      // The original cannot start mid-way, so a seek that fails has nothing to fall back to.
       if (startMs.value > 0) {
         // An offset is a fresh encode that only a reading GET may own: Hono drops a HEAD body
         // unread, which would leave its ffmpeg run blocked and its permit taken.
@@ -207,8 +178,6 @@ export const makeHttpApp = Effect.gen(function* () {
 
       const response = yield* transcodedResponse(request, input).pipe(
         Effect.catchTag("TranscodeError", (error) =>
-          // The gapless engine cannot append original bytes, so fragmented profiles never fall
-          // back; the player switches to HTML audio on the error instead.
           !isFragmentedProfile(transcodeProfile) && isBrowserPlayable(source.codec, source.path)
             ? Effect.logWarning("Http.transcode_fallback", error).pipe(Effect.andThen(original))
             : Effect.logError("Http.transcode_failed", error).pipe(
@@ -299,8 +268,6 @@ export const makeHttpApp = Effect.gen(function* () {
     );
   });
 
-  // A handler runs only while its client is there: `@hono/node-server` neither reads nor cancels
-  // the response of a client that left early, so anything it holds would never be released.
   const respond = (request: Request, handler: Effect.Effect<Response, never, Services>) =>
     run(Effect.raceFirst(handler, clientGone(request.signal)));
 
@@ -324,7 +291,6 @@ export const makeHttpApp = Effect.gen(function* () {
     }),
   );
 
-  // Access log without query strings: signatures stay out of the logs.
   app.use("*", async (c, next) => {
     const started = await run(Clock.currentTimeMillis);
     await next();

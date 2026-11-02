@@ -1,7 +1,3 @@
-/**
- * The pending and failure state of a screen's mutations: one runs at a time, a rejection shows the
- * server's message, and the form stays as it was so the person can retry.
- */
 import { errorMessage } from "@music/sdk/errors";
 import { useRef, useState } from "react";
 

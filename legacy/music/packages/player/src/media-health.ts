@@ -1,10 +1,5 @@
-/**
- * Media service reachability. The player marks the media service offline when a stream fails to
- * load, then probes `<media base>/health` with backoff until it answers.
- */
 import { Effect, Schedule, Schema } from "effect";
 
-/** How long one health probe may take before it counts as a failure. */
 const PROBE_TIMEOUT = "5 seconds";
 
 /**
@@ -76,7 +71,6 @@ export const isStreamRefused = (streamUrl: string): Effect.Effect<boolean> =>
     Effect.withSpan("MediaHealth.isStreamRefused"),
   );
 
-/** Retry delays between probes: 1 s, 2 s, 4 s, ... capped at 30 s, with jitter. */
 const healthRetrySchedule = Schedule.min([
   Schedule.exponential("1 second"),
   Schedule.spaced("30 seconds"),

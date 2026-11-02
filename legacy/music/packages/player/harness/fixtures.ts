@@ -1,7 +1,3 @@
-/**
- * Short generated audio files for the browser tests. Sine tones have no silence of their own, so
- * any silence in the captured output is a gap the player introduced.
- */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,7 +21,6 @@ const encoders = new Map([
   ["opus", ["-c:a", "libopus", "-b:a", "128k"]],
 ]);
 
-/** Engine test tones: WAV for the gap measurement, plus one file per common codec. */
 const engineFixtures: ReadonlyArray<Fixture> = [
   {
     file: "tone-a.wav",
@@ -122,10 +117,6 @@ const gaplessEncoders: Readonly<Record<GaplessSource, ReadonlyArray<string>>> = 
   m4a: ["-c:a", "aac", "-b:a", "192k"],
 };
 
-/**
- * Real length of the first audio stream of `path`, in samples: ffmpeg's decoded frame count, or
- * for an `.m4a` its edit list length (ffmpeg 6 decodes AAC in MP4 with its end padding).
- */
 const realSamples = (path: string): number => {
   if (path.endsWith(".m4a")) {
     return Number(
@@ -264,7 +255,6 @@ const generateTruncated = (): void => {
     whole,
   ]);
 
-  // A constant bitrate: half the bytes hold half the audio. The Xing header still counts all of it.
   const bytes = readFileSync(whole);
 
   writeFileSync(

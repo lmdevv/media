@@ -12,7 +12,6 @@ import {
   totalLength,
 } from "./playlist-format";
 
-/** The playlist Paper draws, with the fields a test changes. */
 const playlist = (
   changes: Partial<
     Pick<Playlist, "trackCount" | "access" | "owner" | "visibility" | "sharedWithPeople">

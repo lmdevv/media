@@ -1,8 +1,3 @@
-/**
- * F15 · Library: rename it, see its folder, choose who can listen, open its access list, save,
- * scan it again, or remove it. The name and visibility are drafts until Save changes sends only
- * what changed; untouched, they follow the saved library live.
- */
 import type { LibraryId } from "@music/commands/ids";
 import type { Library, LibraryVisibility, User } from "@music/commands/models";
 import { canRemoveLibrary } from "@music/commands/permissions";
@@ -56,7 +51,6 @@ export function LibraryPage({ me, id }: { readonly me: User; readonly id: Librar
   return <LibraryEditor me={me} library={library} />;
 }
 
-/** Who can listen besides the owner, in the `People with access` row. */
 const accessLine = (
   library: Library,
   owner: string,
@@ -71,7 +65,6 @@ const accessLine = (
   return names.length === 0 ? `Only ${owner}` : joinNames(names);
 };
 
-/** The changes Save changes sends: only what differs from the saved library. */
 interface LibraryChanges {
   libraryId: LibraryId;
   name?: string;
@@ -88,7 +81,6 @@ function LibraryEditor({ me, library }: { readonly me: User; readonly library: L
   const [visibility, setVisibility] = useState<LibraryVisibility | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
-  // The access list is only for a library's managers, and a private library has none.
   const members = useRead(
     "libraries.people",
     library.visibility === "private" ? "skip" : { libraryId: library.id },

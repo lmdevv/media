@@ -28,7 +28,6 @@ const { values: flags, positionals } = parseArgs({
 
 const START = "<!-- verify-music:start -->";
 const END = "<!-- verify-music:end -->";
-// GitHub's limits for an attachment: 10 MB for an image, and 10 MB for a video on a free plan.
 const LIMIT = 10 * 1024 * 1024;
 const IMAGE = new Set([".png", ".jpg", ".jpeg", ".gif"]);
 const VIDEO = new Set([".mp4", ".mov", ".webm", ".m4v"]);
@@ -48,7 +47,6 @@ const kind = (file) => {
   return fail(`${file} is neither an image (png, jpg, gif) nor a video (mp4, mov, webm)`);
 };
 
-// Paths are stored relative to the repo root, as `gh --attach` and the PR body reference them.
 const fromRoot = (file) => {
   const path = resolve(process.cwd(), file);
   if (!existsSync(path)) fail(`${file} does not exist`);
@@ -90,7 +88,6 @@ const ffmpeg = (input, output, filter, crf) =>
     "-pix_fmt", "yuv420p", "-movflags", "+faststart", output,
   ]);
 
-// H.264 MP4 plays in every browser GitHub supports; WebM from Playwright does not play in Safari.
 const toMp4 = (file, index, side) => {
   const out = join(flags.evidence, "pr", `${String(index).padStart(2, "0")}-${side}.mp4`);
   mkdirSync(join(flags.evidence, "pr"), { recursive: true });
@@ -122,10 +119,6 @@ const block = (items) => {
   }
   for (const item of videos) {
     lines.push(`**${item.label}**`, "");
-    // `gh --attach` rewrites only a reference such as `![alt](./file)`; it appends an asset whose
-    // bare path it doesn't recognize to the end of the description. So a video goes in as a
-    // reference on its own line, and `publish` then turns the uploaded reference into a bare
-    // asset URL, which GitHub renders as a player.
     if (item.before) lines.push("Before:", "", ref(item.before, `Before: ${item.label}`), "");
     if (item.after) lines.push("After:", "", ref(item.after, `After: ${item.label}`), "");
   }
@@ -134,8 +127,6 @@ const block = (items) => {
 };
 
 const gh = (args, input) => execFileSync("gh", args, { cwd: root, encoding: "utf8", input });
-// `--jq` ends its output with a newline. Writing that back would grow the description by a line on
-// every publish, so bodies are read and written without trailing whitespace.
 const readBody = () => gh(["pr", "view", flags.pr, "--json", "body", "--jq", ".body"]).trimEnd();
 
 const publish = () => {
@@ -172,8 +163,6 @@ const publish = () => {
 
   gh(["pr", "edit", flags.pr, "--body-file", bodyFile, ...files.flatMap((file) => ["--attach", `./${file}`])]);
 
-  // Read the body back: every local reference must now be an uploaded asset, and a video must be
-  // a bare URL on its own line, which is the form GitHub plays inline.
   let published = readBody();
   const videoImages = /!\[[^\]]*\]\((https:\/\/github\.com\/user-attachments\/assets\/[^)\s]+)\)/g;
   const section = published.slice(published.indexOf(START), published.indexOf(END));
@@ -191,8 +180,6 @@ const publish = () => {
   console.log(gh(["pr", "view", flags.pr, "--json", "url", "--jq", ".url"]).trim());
 };
 
-// The manifest outlives `down`, and a run is named for its checkout, so a later PR from the same
-// worktree starts from the last one's pairs until they're cleared. The captured files stay.
 const clear = () => {
   rmSync(manifest, { force: true });
   console.log(`cleared ${relative(root, manifest)}`);

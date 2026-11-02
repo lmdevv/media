@@ -80,7 +80,6 @@ export const joinAsNewMember = async (admin: Page, browser: Browser): Promise<Pa
 /** A name no earlier run used, for things tests create. */
 export const unique = (prefix: string): string => `${prefix} ${Date.now().toString(36)}`;
 
-/** The password of everyone tests invite. */
 const PASSWORD = "password123";
 
 /** A fresh email address no earlier run used. */

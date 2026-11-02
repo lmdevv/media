@@ -31,7 +31,6 @@ test("first run: create the admin, add a library folder, and scan it", async ({ 
   await expect(page.getByRole("heading", { name: "Reading your library" })).toBeVisible();
   await expect(page.getByText("WAITING FOR THE SCANNER")).toBeVisible();
 
-  // The media service claims the scan; the seed script stands in for it.
   seed(true);
 
   await expect(page.getByRole("heading", { name: "Your library is ready" })).toBeVisible();

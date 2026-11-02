@@ -29,19 +29,13 @@ import type { LocalLyrics } from "./sync";
 import { applyChange, emptyVault, VaultChange } from "./vault";
 import type { KeptLyrics, VaultRows, VaultStore } from "./vault";
 
-/** A vault whose rows live in memory and whose files live in a real directory. */
 class DirectoryVault implements VaultStore {
   view: VaultRows;
-  /** The lyrics themselves, by song, which `view` lists without them. */
   readonly bodies = new Map<TrackId, KeptLyrics | "unreadable">();
-  /** Songs whose lyrics were read, in order. */
   readonly lyricsReads: Array<TrackId> = [];
   free: number | null = 64 * 1024 ** 3;
-  /** Loads that fail before one works, as an unreadable database would. */
   failingLoads = 0;
-  /** Song rows refused before one is written, as a full disk would. */
   failingCopies = 0;
-  /** Holds a change until the returned promise settles, as a slow disk would; null lets it pass. */
   hold: (change: VaultChange) => Promise<void> | null = () => null;
   readonly #dir: string;
 
@@ -144,7 +138,6 @@ const ALBUM: DownloadPin = {
   artHash: "cover",
 };
 
-/** How long a sync may take to settle: real HTTP and files, while other suites load the machine. */
 const SETTLE = { timeout: 10_000 };
 
 const SAFE = song("t1", "Safe from Harm");
@@ -186,11 +179,9 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-/** What a test changes about the sync it starts. */
 interface SyncSetup {
   readonly transfer?: Transfer;
   readonly now?: () => number;
-  /** Mutations the server never answers, as while offline. */
   readonly unanswered?: ReadonlySet<string>;
 }
 
@@ -211,7 +202,6 @@ const started = (vault: VaultStore, setup: SyncSetup = {}): DownloadSync => {
   return sync;
 };
 
-/** A transfer with no network behind it: downloads break, or once `hang` is set, wait until aborted. */
 const brokenTransfer = (state: { hang: boolean }): Transfer => ({
   head: () =>
     Promise.resolve(new Response(null, { status: 200, headers: { "Content-Type": "audio/mp4" } })),
@@ -229,7 +219,6 @@ const brokenTransfer = (state: { hang: boolean }): Transfer => ({
       : Promise.resolve(DownloadResult.Broken({ message: "connection reset" })),
 });
 
-/** How many snapshots `sync` publishes in `ms` of real time. An idle sync publishes about none. */
 const publishesIn = async (sync: DownloadSync, ms: number): Promise<number> => {
   let count = 0;
 
@@ -246,7 +235,6 @@ const publishesIn = async (sync: DownloadSync, ms: number): Promise<number> => {
   return count;
 };
 
-/** How many times the media service sent the file of `trackId`. */
 const fetchesOf = (trackId: string): number =>
   media.seen.filter(({ method, url }) => method === "GET" && url.includes(`/${trackId}?`)).length;
 
@@ -256,7 +244,6 @@ const exists = async (file: string): Promise<boolean> =>
     () => false,
   );
 
-/** A sync holding the album, and the URI of its first song's copy. */
 const holdingAlbum = async () => {
   const vault = new DirectoryVault(dir);
   const sync = started(vault);
@@ -271,11 +258,9 @@ const holdingAlbum = async () => {
   return { sync, vault, uri: sync.localCopy(SAFE.id)?.uri ?? "" };
 };
 
-/** The songs and revisions `sync` asks the server about. */
 const asked = (sync: DownloadSync) =>
   sync.getSnapshot().lyricsQuestions.flatMap((question) => question.held);
 
-/** The lyrics `sync` keeps for `trackId`, once it read them. */
 const readLyrics = async (sync: DownloadSync, trackId: TrackId): Promise<LocalLyrics> => {
   sync.loadLyrics(trackId);
 
@@ -448,7 +433,6 @@ describe("DownloadSync", () => {
       expect(await exists("audio/t1.r1.aac-320.m4a")).toBe(false);
     }, SETTLE);
 
-    // iOS kills the app before the server ever heard of the removal.
     stops.pop()?.();
     const fetched = fetchesOf("t1");
     mutations.length = 0;
@@ -558,7 +542,6 @@ describe("DownloadSync", () => {
 
       expect(sync.getSnapshot().ready).toBe(false);
       await vi.advanceTimersByTimeAsync(30_000);
-      // The second open lists the vault's files on disk, which fake timers don't drive.
       vi.useRealTimers();
 
       await vi.waitFor(() => {
@@ -587,7 +570,6 @@ describe("DownloadSync", () => {
   describe("with a retry due", () => {
     const ONE_SONG: DownloadManifest = { pin: ALBUM, entries: MANIFEST.entries.slice(0, 1) };
 
-    /** A sync whose only song failed once, its retry due by the clock it reads. */
     const failedOnce = async (state: { hang: boolean }) => {
       const clock = { now: 1_000_000 };
       const vault = new DirectoryVault(dir);
@@ -644,7 +626,6 @@ describe("DownloadSync", () => {
         ),
       download: ({ signal }) =>
         new Promise((resolve) => {
-          // The platform takes a moment to cancel, as an iOS download task does.
           signal.addEventListener(
             "abort",
             () => {
@@ -781,7 +762,6 @@ describe("DownloadSync", () => {
 
       const read: Array<LocalLyrics> = [];
 
-      // One after another, as songs play.
       await ids.reduce(async (previous, trackId) => {
         await previous;
         read.push(await readLyrics(sync, trackId));
@@ -845,7 +825,6 @@ describe("DownloadSync", () => {
 
       const read = vault.lyrics;
 
-      // As when l2 replaces l1 under the read, which finds no row and answers once l2 is kept.
       vault.lyrics = async () => {
         vault.lyrics = read;
         sync.offerLyrics([changed("l2")]);

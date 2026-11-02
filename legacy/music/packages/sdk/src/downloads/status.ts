@@ -1,7 +1,3 @@
-/**
- * What a screen shows for one song, album, or playlist on this device, read from a
- * `DownloadsSnapshot`. Pure, so every platform's screens agree.
- */
 import type { TrackId } from "@music/commands/ids";
 import type { DownloadTarget } from "@music/commands/models";
 
@@ -47,7 +43,6 @@ export const holdersOf = (snapshot: DownloadsSnapshot): ReadonlyMap<TrackId, Hol
   return holders;
 };
 
-/** `included` when an album or playlist download holds `trackId`, else `none`. */
 const includedStatus = (snapshot: DownloadsSnapshot, trackId: TrackId): DownloadStatus => {
   const by = holdersOf(snapshot).get(trackId);
 
@@ -75,7 +70,6 @@ export const progressOf = (
       continue;
     }
 
-    // A song gone from the server, or in a library that's away, has nothing to fetch.
     if (member.state !== "fetchable") continue;
     total += 1;
 

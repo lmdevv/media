@@ -6,11 +6,9 @@ import { createInvite, freshEmail, join, seed, signIn, unique } from "./support"
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(() => {
-  // Idempotent: ensures the owner, the /music library, and its songs.
   seed();
 });
 
-/** Opens the actions menu of someone on the People screen and picks `item`. */
 const personAction = async (page: Page, name: string, item: string): Promise<void> => {
   await page.getByRole("button", { name: `Actions for ${name}` }).click();
   await page.getByRole("menuitem", { name: item }).click();
@@ -26,7 +24,6 @@ test("an admin invites a guest, changes their role, resets, suspends, and remove
   const email = freshEmail("guest");
   const guest = await join(browser, await createInvite(page, "Guest"), email, name);
 
-  // A guest hears nothing until added to a library, and has no API keys or server settings.
   await expect(guest.getByText("No library folder is shared with you yet")).toBeVisible();
   await guest.goto("/settings/account");
   await expect(guest.getByText(`${name} · Guest`)).toBeVisible();
@@ -49,7 +46,6 @@ test("an admin invites a guest, changes their role, resets, suspends, and remove
   await page.getByRole("button", { name: "Save role" }).click();
   await expect(row.getByText("Member", { exact: true })).toBeVisible();
 
-  // A reset link sets a new password, signs in, and ends the other sessions.
   await personAction(page, name, "Create password reset link…");
   await expect(page.getByText(/also turns off this person's API keys/)).toBeVisible();
   await page.getByRole("button", { name: "Create link" }).click();
@@ -68,7 +64,6 @@ test("an admin invites a guest, changes their role, resets, suspends, and remove
   await resetter.getByRole("button", { name: "Set password and sign in" }).click();
   await expect(resetter.getByRole("navigation", { name: "Library" })).toBeVisible();
 
-  // The open tab notices at once: its reads fail and it offers to sign in again.
   await expect(guest.getByRole("heading", { name: "You're signed out" })).toBeVisible();
 
   await resetter.goto(resetLink);
@@ -78,12 +73,10 @@ test("an admin invites a guest, changes their role, resets, suspends, and remove
   await resetter.goto("/settings/account");
   await expect(resetter.getByText(`${name} · Member`)).toBeVisible();
 
-  // Suspension locks them out at once, with a clear message at sign-in.
   await personAction(page, name, "Suspend…");
   await page.getByRole("button", { name: "Suspend", exact: true }).click();
   await expect(row.getByText("Suspended", { exact: true })).toBeVisible();
 
-  // The open tab notices at once.
   await expect(resetter.getByRole("heading", { name: "You're signed out" })).toBeVisible();
   await resetter.getByRole("button", { name: "Sign in again" }).click();
   await resetter.getByLabel("Email").fill(email);
@@ -136,7 +129,6 @@ test("an admin shares a library with specific people, then opens it to everyone 
     await dialog.getByRole("button", { name: "Specific people" }).click();
     await expect(dialog.getByText("Only the people below")).toBeVisible();
 
-    // Restricted, without the member: their home empties without a reload.
     await expect(member.getByText("No library folder is shared with you yet")).toBeVisible();
 
     await dialog.getByRole("button", { name: "Add someone" }).click();
@@ -155,7 +147,6 @@ test("an admin shares a library with specific people, then opens it to everyone 
     await page.getByRole("button", { name: "Save" }).click();
     await expect(card.getByText(renamed)).toBeVisible();
   } finally {
-    // The other specs expect /music shared with everyone under its usual name.
     await page.keyboard.press("Escape");
     await card.getByRole("button", { name: /^Who can listen to \/music/ }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Everyone" }).click();
@@ -175,8 +166,6 @@ test("an admin shares a library with specific people, then opens it to everyone 
   await expect(member.getByText("Recently added", { exact: true }).first()).toBeVisible();
 });
 
-// https://github.com/lmdevv/music/pull/27#discussion_r4274008577: the access dialog read the
-// access list of a library the viewer can't manage, whose not_found took the screen down.
 test("an admin sees another admin's private library read-only, and the screen stays up", async ({
   page,
   browser,
@@ -189,7 +178,6 @@ test("an admin sees another admin's private library read-only, and the screen st
   await page.goto("/settings/libraries?add=1");
   await page.getByRole("textbox", { name: "Library folder" }).fill(`/${folder}`);
   await page.getByRole("button", { name: "Only me" }).click();
-  // The server's owner manages every library, so nobody else can rename or rescan this one.
   await expect(page.getByText("Only you.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Add and scan" }).click();
 
@@ -200,7 +188,6 @@ test("an admin sees another admin's private library read-only, and the screen st
   try {
     await admin.goto("/settings/libraries");
 
-    // Listed by name, without its folder, actions, or access list.
     const theirs = admin.getByRole("region", { name: folder });
 
     await expect(theirs).toBeVisible();
@@ -212,7 +199,6 @@ test("an admin sees another admin's private library read-only, and the screen st
     const dialog = admin.getByRole("dialog", { name: "Who can listen" });
 
     await expect(dialog.getByText(/can change who listens to this folder/)).toBeVisible();
-    // It offers nothing the admin can't do here.
     await expect(
       dialog.getByText(/Only the server's owner manages a library you can't hear/),
     ).toBeVisible();

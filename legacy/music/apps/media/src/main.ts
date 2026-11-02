@@ -1,7 +1,3 @@
-/**
- * Media service entrypoint: wires configuration, Convex, the transcoder, and the long-running
- * processes, then runs until SIGINT or SIGTERM interrupts it and every layer has shut down.
- */
 import { Cause, Effect, Exit, Layer, Logger } from "effect";
 
 import * as HttpServer from "./http-server.ts";
@@ -33,7 +29,6 @@ const main = Layer.launch(processes).pipe(
   Effect.provideService(Logger.CurrentLoggers, new Set([Logger.consoleJson])),
 );
 
-// `NodeRuntime.runMain` is marked unstable in Effect 4.0.2, so the entrypoint owns signals itself.
 const fiber = Effect.runFork(main);
 
 const stop = (): void => {

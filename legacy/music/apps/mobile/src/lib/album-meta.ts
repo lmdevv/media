@@ -1,4 +1,3 @@
-/** The mono line under an album's title (A07): year, genre, song count, and length, in caps. */
 import type { AlbumDetail } from "@music/commands/models";
 
 import { countOf } from "./format";

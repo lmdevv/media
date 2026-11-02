@@ -1,9 +1,3 @@
-/**
- * Actions (F26): every command this person may run, searched and grouped, generated from the
- * command registry. Rows show the registry's summary over the command's name, the same name the
- * CLI and agents use. With no match the list gives way to G18; the search field stays above it so
- * the query can be edited, not only cleared.
- */
 import { commands } from "@music/commands/registry";
 import { router } from "expo-router";
 import { Command } from "lucide-react-native";

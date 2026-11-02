@@ -1,7 +1,3 @@
-/**
- * API keys (F04 to F07, G16, H11): the person's keys with when each was last used, creating one
- * and showing its secret once, and revoking one. A key acts with its owner's permissions.
- */
 import type { ApiKey } from "@music/commands/models";
 import { ApiKeyId } from "@music/commands/ids";
 import { isBlank } from "@music/commands/text";
@@ -33,7 +29,6 @@ import { useFlash } from "./use-flash";
 import { useNow } from "./use-now";
 import { ValueField } from "./value-field";
 
-/** A key row's subtitle: `Used 12 minutes ago · mk_3f9a2c1…`. The server keeps only the prefix. */
 const keyLine = (key: ApiKey, now: number): string =>
   `${key.lastUsedAt === null ? "Never used" : `Used ${ago(key.lastUsedAt, now)}`} · ${key.prefix}…`;
 

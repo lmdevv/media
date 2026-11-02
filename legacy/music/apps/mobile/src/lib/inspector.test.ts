@@ -49,7 +49,6 @@ describe("shownTab", () => {
   });
 });
 
-/** The tab after each lyrics answer in turn, with the song's `defaultPanel` carried between them. */
 const tabsThrough = (
   picked: InspectorTab | null,
   offers: ReadonlyArray<LyricsOffer>,

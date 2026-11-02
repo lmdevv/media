@@ -1,9 +1,3 @@
-/**
- * The server is out of reach (D11 to D14; G04 on a phone with nothing downloaded). A tab root shows
- * the card under its title, a pushed page the one-line bar over its content; neither blocks, since
- * what is on screen and what was downloaded keep working. Convex reconnects on its own, and the
- * notice goes once it does. Playlists and Search, which hold nothing offline, show `OfflineState`.
- */
 import { router } from "expo-router";
 import { WifiOff } from "lucide-react-native";
 import { useEffect } from "react";
@@ -34,21 +28,17 @@ import { useNowPlaying } from "@/player";
 import { useConnection } from "@/session/connection";
 import { useNoticeReach } from "@/session/server-reach";
 
-/** Player states in which music is coming out of this phone, or about to. */
 const SOUNDING = new Set(["loading", "playing", "buffering"]);
 
-/** Paper's spinner arc: radius 8.5 on the 24-unit grid, a quarter turn long. */
 const ARC_RADIUS = 8.5;
 
 const ARC_LENGTH = 2 * Math.PI * ARC_RADIUS;
 
-/** The notice for now, and the way to try the server again. */
 interface OfflineNoticeView {
   readonly notice: Notice | null;
   readonly retry: () => void;
 }
 
-/** Where the app stands with its server, as the notice words it. */
 const useOfflineNotice = (): OfflineNoticeView => {
   const reach = useNoticeReach();
   const hasDownloads = useHasDownloads();
@@ -66,7 +56,6 @@ const useOfflineNotice = (): OfflineNoticeView => {
   };
 };
 
-/** D14's turning arc while Convex calls the server again; still under Reduce Motion. */
 function Spinner({ size }: { readonly size: number }) {
   const track = useThemeColor("--color-border");
   const muted = useThemeColor("--color-text-muted");
@@ -102,7 +91,6 @@ function Spinner({ size }: { readonly size: number }) {
   );
 }
 
-/** Try again, in accent. */
 function RetryLink({ onPress }: { readonly onPress: () => void }) {
   return (
     <Pressable
@@ -119,7 +107,6 @@ function RetryLink({ onPress }: { readonly onPress: () => void }) {
   );
 }
 
-/** Props for `OfflineNotice`. */
 export interface OfflineNoticeProps {
   /** The card under a tab root's title (D11, D14), or the bar atop a pushed page (D12, D13). */
   readonly variant: "card" | "bar";

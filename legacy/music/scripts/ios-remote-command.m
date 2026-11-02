@@ -1,7 +1,3 @@
-// Sends a media remote command (what a lock screen, Control Center, or AirPods press sends) to
-// the simulator's now-playing app, so remote commands can be checked without a hand on the
-// simulator. Built and run by `scripts/ios-mac.sh remote`. MediaRemote is private; this is a dev
-// tool and never ships in the app.
 #import <Foundation/Foundation.h>
 #include <dlfcn.h>
 

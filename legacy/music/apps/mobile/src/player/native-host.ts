@@ -1,7 +1,3 @@
-/**
- * What `PlaybackController` needs from the iPhone: its device identity, the saved qualities (for
- * streaming and for downloads), the lock screen, and the app's return to the foreground.
- */
 import type { DeviceId } from "@music/commands/ids";
 import type { Track } from "@music/commands/models";
 import { loadDeviceId, readItem, writeItem } from "@music/player/device-identity";
@@ -24,7 +20,6 @@ const QUALITY_KEY = "music.streamQuality";
 
 const DOWNLOAD_QUALITY_KEY = "music.downloadQuality";
 
-/** The keychain, read and written synchronously: the controller needs its device ID at once. */
 const storage: KeyValueStorage = {
   getItem: (key) => SecureStore.getItem(key),
   setItem: (key, value) => {
@@ -47,7 +42,6 @@ export const saveQuality = (quality: StreamQuality): void => {
   writeItem(storage, QUALITY_KEY, quality);
 };
 
-/** The quality songs download in: AAC 320 kbps, or the original file when this iPhone plays it. */
 const DownloadQuality = Schema.Literals(["high", "lossless"]);
 
 export type DownloadQuality = typeof DownloadQuality.Type;
@@ -74,7 +68,6 @@ export const onForeground = (listener: () => void): (() => void) => {
   };
 };
 
-/** Presses of next and previous from outside the app, from `modules/remote-commands`. */
 const remoteCommands =
   requireNativeModule<EventEmitter<{ nextTrack: () => void; previousTrack: () => void }>>(
     "RemoteCommands",
@@ -82,7 +75,6 @@ const remoteCommands =
 
 const nothingToStop = (): void => {};
 
-/** Sends next and previous presses to `handlers` until the returned function runs. */
 const listenForTrackCommands = (handlers: {
   readonly next: () => void;
   readonly previous: () => void;

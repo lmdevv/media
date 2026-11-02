@@ -1,11 +1,3 @@
-/**
- * The iPad's sidebar (page 26): the wordmark and the button that hides it, Search, Home, the
- * library's places, the playlists with their covers, and the account at the foot. The rows
- * between the search field and the account scroll when they don't fit. It holds playlists and
- * library sections, so it is drawn here: the native iPadOS sidebar can only list the tabs.
- *
- * With no server it keeps what opens anyway, and dims the places that would have nothing to show.
- */
 import type { Playlist } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
 import { router } from "expo-router";
@@ -47,7 +39,6 @@ import { useServerReach } from "@/session/server-reach";
 import { useOpenPlace } from "./open-place";
 import { useOpenSearch } from "./top-buttons";
 
-/** Each row's glyph; the headings have none. */
 const ICONS = {
   home: House,
   albums: SquareDot,
@@ -58,7 +49,6 @@ const ICONS = {
   history: History,
 } as const satisfies Partial<Record<DestinationKey, LucideIcon>>;
 
-/** A row of the Library section or Home: glyph and label, on the accent's wash while selected. */
 function PlaceRow({
   place,
   selection,
@@ -98,7 +88,6 @@ function PlaceRow({
   );
 }
 
-/** A section's heading, which opens its root, with room for a trailing action. */
 function Heading({
   place,
   selection,
@@ -131,7 +120,6 @@ function Heading({
   );
 }
 
-/** A playlist with its cover, its name, and its size. */
 function PlaylistRow({
   playlist,
   selection,
@@ -171,7 +159,6 @@ function PlaylistRow({
   );
 }
 
-/** Who is signed in; opens Settings, and works before the server has said who. */
 function AccountRow({ onDone }: { readonly onDone: () => void }) {
   const me = useRead("account.me", {});
   const name = me === undefined ? "" : (me.name ?? me.email);

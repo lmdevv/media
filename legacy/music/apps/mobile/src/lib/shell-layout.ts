@@ -1,9 +1,3 @@
-/**
- * The app's frame at each window size (Paper page 26, direction B), and where the iPad's sidebar
- * goes. A phone keeps the system tab bar and its mini player. From `tablet` up a sidebar replaces
- * the tabs and a player bar sits under the content; the sidebar is pinned once the window is
- * `wide`, and the Now Playing inspector becomes a pane only when the window is also on its side.
- */
 import type { Href } from "expo-router";
 
 import type { WidthClass } from "./layout";
@@ -230,7 +224,6 @@ export const tabsAreCovered = (app: NavigationSnapshot): boolean => {
   return top !== undefined && top.name !== "(tabs)";
 };
 
-/** The tabs' state, from any navigator above them. */
 const tabsOf = (navigator: NavigationSnapshot): NavigationSnapshot | undefined => {
   for (const route of navigator.routes) {
     if (route.name === "(tabs)") return route.state;

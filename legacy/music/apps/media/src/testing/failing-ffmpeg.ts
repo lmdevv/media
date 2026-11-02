@@ -1,7 +1,3 @@
-/**
- * An ffmpeg that fails part-way, for tests of a transcode that dies after its first bytes: a
- * shell script standing in for `FFMPEG_PATH`. Effect-free so it can use `node:fs` directly.
- */
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 

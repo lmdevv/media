@@ -1,5 +1,3 @@
-/** Top-level MP4 boxes of a whole file, for tests that compare stream layouts. */
-
 /** One top-level box: its type and where it sits in the file. */
 export interface TopLevelBox {
   readonly type: string;

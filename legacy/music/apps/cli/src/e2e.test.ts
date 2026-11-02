@@ -1,13 +1,3 @@
-/**
- * Runs the built `music` binary as a subprocess against a real [music] server. Set
- * MUSIC_E2E_SERVER to a Convex URL (for example from `scripts/dev-backend.sh cli 3610`) to run;
- * without it the suite is skipped. The first run signs up the server's first user, which becomes
- * the owner, so point it at a fresh backend or reuse MUSIC_E2E_EMAIL / MUSIC_E2E_PASSWORD.
- *
- * With MUSIC_E2E_MEDIA_SECRET (the server's MEDIA_SERVICE_SECRET) set as well, a fake media
- * service completes a library scan with a small catalog, which covers `--wait` success, `play`,
- * `now`, and likes against real data.
- */
 import { join } from "node:path";
 
 import { commands } from "@music/commands/registry";
@@ -144,7 +134,6 @@ const sleep = (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
-/** Polls for the next pending job, as the real service's subscription would deliver it. */
 const nextPendingJob = async (
   client: ConvexHttpClient,
   secret: string,
@@ -161,10 +150,6 @@ const nextPendingJob = async (
   return nextPendingJob(client, secret, attemptsLeft - 1);
 };
 
-/**
- * Stands in for the media service: waits for the next scan job, reports progress, upserts a small
- * catalog, and finishes the job, through the same Convex functions the real service calls.
- */
 const completeNextScan = async (url: string, secret: string): Promise<void> => {
   const client = new ConvexHttpClient(url, { logger: false });
   const workerId = "e2e-fake-media";
@@ -175,7 +160,6 @@ const completeNextScan = async (url: string, secret: string): Promise<void> => {
 
   const progress = { secret, jobId, workerId, total: catalogTracks.length };
 
-  // The real service claims the library's folder before reading it; the identity is made up.
   const root = await client.mutation(claimRoot, {
     secret,
     libraryId: claimed.library.id,
@@ -214,7 +198,6 @@ const completeNextScan = async (url: string, secret: string): Promise<void> => {
   await client.mutation(finishJob, { secret, jobId, workerId, status: "done" });
 };
 
-/** Signs up a member through an admin invite and returns an API key for them. */
 const createMemberKey = async (url: string, adminKey: string): Promise<string> => {
   const admin = new ConvexHttpClient(url, { logger: false });
 
@@ -253,7 +236,6 @@ const createMemberKey = async (url: string, adminKey: string): Promise<string> =
   return created.key;
 };
 
-/** Signs in (or, on a fresh server, signs up) the admin and creates an API key for the CLI. */
 const createAdminKey = async (url: string): Promise<string> => {
   const client = new ConvexHttpClient(url, { logger: false });
 
@@ -395,7 +377,6 @@ describe.skipIf(server === undefined)("music against a real server", () => {
   });
 
   it("explains where the key comes from when none is given and nobody is at a terminal", async () => {
-    // Stdin is a pipe, so a prompt would wait for nobody.
     const result = await music(["login", "--server", url]);
 
     expect(result.code).toBe(2);
@@ -457,7 +438,6 @@ describe.skipIf(server === undefined)("music against a real server", () => {
     ]);
 
     expect(result.code).toBe(1);
-    // Without a media service the scan never starts; with one it fails on the missing path.
     expect(["timeout", "job_failed"]).toContain(errorOf(result).code);
 
     const jobs = parse(JobList, (await music(["jobs", "list", "--json"])).stdout);
@@ -471,7 +451,6 @@ describe.skipIf(server === undefined)("music against a real server", () => {
     const now = await music(["now"]);
 
     expect(now.code).toBe(0);
-    // A fresh server has nothing playing; a reused one may still hold an earlier session.
     expect(now.stdout).toMatch(/^(Nothing is playing\.|[▶⏸] )/u);
 
     const catalog = parse(CatalogOutput, (await music(["commands", "--json"])).stdout);
@@ -498,7 +477,6 @@ describe.skipIf(server === undefined)("music against a real server", () => {
 
       await scanner;
 
-      // Polling can skip intermediate states, but the last progress line is the finished job.
       expect(created.stderr.trim().split("\n").at(-1)).toBe("Scan E2E catalog: done 5/5");
       expect(created.code).toBe(0);
       expect(created.stdout).toContain("status: done");
@@ -535,7 +513,6 @@ describe.skipIf(server === undefined)("music against a real server", () => {
         (await music(["likes", "list", "--json"])).stdout,
       );
 
-      // Newest like first.
       expect(likes[0]?.id).toBe(current?.id);
 
       expect((await music(["pause"])).stdout).toBe("Paused.\n");
@@ -546,7 +523,6 @@ describe.skipIf(server === undefined)("music against a real server", () => {
     60_000,
   );
 
-  /** The IDs of the songs on an album, by title, from the catalog the fake scan saved. */
   const albumSongs = async (title: string) => {
     const albums = parse(
       commands["albums.list"].result,
@@ -587,7 +563,6 @@ describe.skipIf(server === undefined)("music against a real server", () => {
       expect(last?.itemId).toBe(added.itemIds[0]);
       expect(before.autoplay).toBe(false);
 
-      // Move the last entry right after the first; the song playing stays put.
       expect(
         (await music(["queue", "move", last?.itemId ?? "", "--after-item-id", first?.itemId ?? ""]))
           .code,
@@ -717,7 +692,6 @@ describe.skipIf(server === undefined)("music against a real server", () => {
         (await music(["jam", "start", "--json"])).stdout,
       );
 
-      // A whole link works as well as the code.
       const joined = await music(
         ["jam", "join", `https://music.example.com/jam/${code}`, "--json"],
         asMember,
@@ -729,18 +703,15 @@ describe.skipIf(server === undefined)("music against a real server", () => {
           ?.role,
       ).toBe("member");
 
-      // The member's queue is the host's: what they add, the host sees, credited to them.
       expect((await music(["queue", "add", song?.id ?? ""], asMember)).code).toBe(0);
       expect((await music(["queue", "list"])).stdout).toContain("E2E Member");
       expect((await music(["jam", "members"])).stdout).toContain("E2E Member");
 
-      // Only the host steers playback by default.
       const steer = await music(["pause", "--json"], asMember);
 
       expect(steer.code).toBe(3);
       expect(errorOf(steer).code).toBe("forbidden");
 
-      // Removed: that link won't let them back; a new one would.
       expect((await music(["jam", "remove", "--user-id", member.id])).code).toBe(0);
       expect((await music(["jam", "join", code, "--json"], asMember)).code).toBe(3);
 

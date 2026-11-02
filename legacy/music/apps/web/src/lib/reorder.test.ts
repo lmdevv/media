@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 
 import { afterIdFor, dragPositions, dropIndex, moveItem, orderToMoveFrom } from "./reorder";
 
-/** Applies a move the way the server does: take the entry out, put it after `after`. */
 const applyMove = (
   ids: ReadonlyArray<string>,
   from: number,
@@ -54,9 +53,7 @@ describe("orderToMoveFrom", () => {
     const once = moveItem(start, 3, 2);
     const twice = moveItem(once, 2, 1);
 
-    // Two presses before any refresh: the second starts where the first is heading.
     expect(orderToMoveFrom(start, [start, once])).toEqual(once);
-    // The server shows the first move: the second is still on its way.
     expect(orderToMoveFrom(once, [start, once, twice])).toEqual(twice);
     expect(orderToMoveFrom(twice, [start, once, twice])).toEqual(twice);
   });
@@ -81,7 +78,6 @@ describe("dragPositions", () => {
   const drag = { id: "c", over: { id: "e", side: "after" } } as const;
 
   it("follows the dragged and hovered entries when the list shifts under the drag", () => {
-    // The song playing ends and the head of the queue moves up; or the person's previous move lands.
     expect(dragPositions(["a", "b", "c", "d", "e"], drag)).toEqual({
       from: 2,
       over: { index: 4, side: "after" },

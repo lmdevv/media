@@ -1,7 +1,3 @@
-/**
- * Paper's section header: a 22/28 heavy title with tight tracking and either a 20pt chevron (the
- * whole row opens the section) or an accent text action such as See all or Manage.
- */
 import { ChevronRight } from "lucide-react-native";
 import { Pressable, View } from "react-native";
 
@@ -13,7 +9,6 @@ export type SectionAction =
   | { readonly kind: "chevron"; readonly onPress: () => void }
   | { readonly kind: "link"; readonly label: string; readonly onPress: () => void };
 
-/** Props for `SectionHeader`. */
 export interface SectionHeaderProps {
   readonly title: string;
   readonly action?: SectionAction | undefined;

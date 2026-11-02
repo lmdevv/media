@@ -18,7 +18,6 @@ import { useAction } from "@/lib/action";
 import { copyText } from "@/lib/copy-text";
 import { formatAgo, formatDate } from "@/lib/format";
 
-/** The URL the CLI signs in to: the Convex URL, not the web app's address. */
 const serverUrl = resolveConvexUrl();
 
 const insecure = needsInsecure(serverUrl);

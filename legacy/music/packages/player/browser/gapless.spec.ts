@@ -1,9 +1,3 @@
-/**
- * MseEngine in a real browser: sample-accurate gapless playback measured on a continuous sine cut
- * into three songs, plus loading, seeking, preloading, and failures. The media stub serves the
- * songs through the media service's real transcoder, so the streams and their timing headers are
- * exactly what production sends. Runs in Chromium, Firefox, and WebKit (`gapless-*` projects).
- */
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 
@@ -41,11 +35,6 @@ const lastPosition = async (page: Page): Promise<number> => {
   return last?.type === "time" ? last.positionMs : -1;
 };
 
-/**
- * Page script for a browser whose buffer quota holds twenty seconds: an append to a buffer that
- * holds that much already fails as a real one over its byte quota does. Plain JavaScript, as it
- * replaces a built-in method in the page.
- */
 const QUOTA_OF_TWENTY_SECONDS = `
   const append = SourceBuffer.prototype.appendBuffer;
   SourceBuffer.prototype.appendBuffer = function (data) {
@@ -58,7 +47,6 @@ const QUOTA_OF_TWENTY_SECONDS = `
   };
 `;
 
-/** Where the audio the engine has buffered ends, in seconds; 0 before anything is buffered. */
 const bufferedEnd = async (page: Page): Promise<number> =>
   Math.max(
     0,
@@ -70,12 +58,10 @@ const keysOf = (list: ReadonlyArray<TimedEvent>): ReadonlyArray<string> =>
 
 const media = `http://127.0.0.1:${mediaPort}`;
 
-/** Makes the stub forget its transcodes: every song's next request is a live first play. */
 const coldCache = async (request: APIRequestContext): Promise<void> => {
   expect((await request.post(`${media}/control/cold`)).ok()).toBe(true);
 };
 
-/** Fetches each song in full, so the next requests are served from finished transcodes. */
 const warmCache = (request: APIRequestContext, files: ReadonlyArray<string>) =>
   Promise.all(
     files.map(async (file) => {
@@ -89,11 +75,9 @@ const warmCache = (request: APIRequestContext, files: ReadonlyArray<string>) =>
 const open = async (page: Page, engine: "mse" | "html"): Promise<void> => {
   await page.goto(`/engine.html?media=${mediaPort}&engine=${engine}`);
   await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
-  // A real click: WebKit keeps the AudioContext suspended until a user gesture.
   await page.locator("body").click();
 };
 
-/** Plays three parts back to back (preloading each next one) and analyzes the recording. */
 const playSequence = async (page: Page, files: ReadonlyArray<string>): Promise<GapAnalysis> => {
   const [first = "", second = "", third = ""] = files;
 
@@ -143,17 +127,10 @@ const report = (label: string, analysis: GapAnalysis): void => {
 const supportsChangeType = (page: Page): Promise<boolean> =>
   page.evaluate(() => "SourceBuffer" in window && "changeType" in SourceBuffer.prototype);
 
-/** Longest a seek far ahead of a running transcode may take to play. */
 const SEEK_AHEAD_LIMIT_MS = 1500;
 
-/** Largest boundary offset and total length error, in samples, that still count as gapless. */
 const TOLERANCE_SAMPLES = 2;
 
-/**
- * Playwright's WebKit on Linux (WPE with GStreamer) loses audio between a media element and Web
- * Audio: even HTML audio on the original files records seconds short. The recording cannot measure
- * a gap there, so the gap tests are expected to fail; Safari itself is not covered.
- */
 const LOSSY_CAPTURE = "WebKit on Linux drops audio between the media element and Web Audio";
 
 const sequences: ReadonlyArray<{
@@ -197,10 +174,6 @@ const sequences: ReadonlyArray<{
 const fileFor = ([source, profile]: readonly [GaplessSource, Profile], part: number): string =>
   `${gaplessFile(source, part)}?p=${profile}`;
 
-/**
- * Each sequence plays as a first play, streamed while the media service transcodes it (estimated
- * length, held-back end, exact timing fetched at the end), and again from finished transcodes.
- */
 const deliveries = ["first play", "cached"] as const;
 
 test.describe("gapless playback", () => {
@@ -224,7 +197,6 @@ test.describe("gapless playback", () => {
         const analysis = await playSequence(page, files);
 
         report(name, analysis);
-        // A first play streams each song live and asks for its exact length at the end.
         expect(exactTimings).toHaveLength(delivery === "first play" ? files.length : 0);
         expect(await ofType(page, "error")).toEqual([]);
         expect(keysOf(await ofType(page, "advanced"))).toEqual(files.slice(1));
@@ -236,8 +208,6 @@ test.describe("gapless playback", () => {
           expect(Math.abs(boundary.offsetSamples)).toBeLessThanOrEqual(TOLERANCE_SAMPLES);
         }
 
-        // Lossless joins are clean to the noise floor; AAC adds a coding transient at each cut,
-        // which ffmpeg's own decode of the same files shows too.
         if (sequence.parts.every(([, profile]) => profile === "fmp4-flac")) {
           for (const boundary of analysis.boundaries) {
             expect(boundary.residual).toBeLessThanOrEqual(analysis.noiseFloor * 4);
@@ -263,7 +233,6 @@ test.describe("gapless playback", () => {
     expect(await ofType(page, "error")).toEqual([]);
     expect(keysOf(await ofType(page, "advanced"))).toEqual(files.slice(1));
 
-    // Without changeType the engine resets the MediaSource at each switch: it plays on, with a gap.
     if (changeType) {
       expect(Math.abs(analysis.sampleError)).toBeLessThanOrEqual(TOLERANCE_SAMPLES);
 
@@ -303,7 +272,6 @@ test.describe("MseEngine", () => {
     await page.waitForTimeout(600);
     expect(await lastPosition(page)).toBeGreaterThan(45_000);
 
-    // Behind the start position: never downloaded, so the engine refetches from that fragment.
     await page.evaluate(() => {
       window.harness?.resetGap();
       window.harness?.engine.seek(5000);
@@ -312,14 +280,12 @@ test.describe("MseEngine", () => {
     await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(5200);
     expect(await lastPosition(page)).toBeLessThan(9000);
 
-    // Ahead by more than the buffer: another range request.
     await page.evaluate(() => {
       window.harness?.engine.seek(80_000);
     });
 
     await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(80_200);
 
-    // Inside what is buffered: just moves the playhead.
     await page.evaluate(() => {
       window.harness?.engine.seek(80_500);
     });
@@ -328,7 +294,6 @@ test.describe("MseEngine", () => {
     expect(await lastPosition(page)).toBeGreaterThan(80_500);
     expect(await ofType(page, "error")).toEqual([]);
 
-    // Sound reached the speakers after the seeks (WebKit's recording path loses audio; see above).
     if (browserName !== "webkit") {
       const gap = await page.evaluate(() => window.harness?.gap());
 
@@ -343,8 +308,6 @@ test.describe("MseEngine", () => {
     const song = "song-1.flac?p=fmp4-flac";
 
     await warmCache(request, [song]);
-    // A browser whose buffer holds twenty seconds of the song, as Firefox's does for hi-res FLAC:
-    // an append to a buffer that holds that much fails like a real one over its byte quota.
     await page.addInitScript({ content: QUOTA_OF_TWENTY_SECONDS });
 
     await open(page, "mse");
@@ -353,7 +316,6 @@ test.describe("MseEngine", () => {
     await expect.poll(() => bufferedEnd(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(19);
     await page.waitForTimeout(500);
 
-    // Just before the end of what fits: under a second to play, twenty seconds behind.
     const end = await bufferedEnd(page);
 
     await page.evaluate(
@@ -380,7 +342,6 @@ test.describe("MseEngine", () => {
     await page.evaluate((file) => window.harness?.load(file, 0, true, 90_000), song);
     await waitForEvent(page, "playing");
 
-    // Hours later, the signed URL has expired; a seek outside the buffer fetches again.
     expect((await request.post(`${media}/control/expire-urls`)).ok()).toBe(true);
 
     try {
@@ -400,7 +361,6 @@ test.describe("MseEngine", () => {
     page,
     request,
   }) => {
-    // Ninety seconds of MP3 to AAC: the transcode runs for about a second.
     const song = "song-2.mp3?p=fmp4-aac";
 
     const live: Array<boolean> = [];
@@ -412,13 +372,11 @@ test.describe("MseEngine", () => {
     });
 
     await coldCache(request);
-    // Past the engine's 30-second look-ahead, with no index to jump there.
     await page.evaluate((file) => window.harness?.load(file, 45_000, true), song);
     await waitForEvent(page, "playing");
     expect(live[0]).toBe(true);
     await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(45_200);
 
-    // Behind the start: the song is fetched again from the start (live or finished).
     await page.evaluate(() => {
       window.harness?.engine.seek(5000);
     });
@@ -426,7 +384,6 @@ test.describe("MseEngine", () => {
     await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(5200);
     expect(await lastPosition(page)).toBeLessThan(9000);
 
-    // Far ahead, into what the first stream may not have reached.
     await page.evaluate(() => {
       window.harness?.engine.seek(80_000);
     });
@@ -463,14 +420,11 @@ test.describe("MseEngine", () => {
       if (delivery === "cached") {
         await warmCache(request, [first, second, third]);
       } else {
-        // The first song comes from the cache; the second is transcoded slowly enough that the
-        // seek lands far ahead of the encoder.
         await warmCache(request, [first]);
         expect((await request.post(`${media}/control/slow`)).ok()).toBe(true);
       }
 
       try {
-        // The second song is appended behind the first on one timeline.
         await page.evaluate(
           async ([one, two]) => {
             window.harness?.preload(two);
@@ -485,8 +439,6 @@ test.describe("MseEngine", () => {
         }, third);
         await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(1000);
 
-        // Far past what the look-ahead appended of the second song: the media source's duration
-        // still ends there.
         const seekedAt = await page.evaluate(() => {
           window.harness?.engine.seek(85_000);
 
@@ -496,10 +448,8 @@ test.describe("MseEngine", () => {
         await expect.poll(() => lastPosition(page), { timeout: 30_000 }).toBeGreaterThan(85_200);
         expect(keysOf(await ofType(page, "advanced"))).toEqual([second]);
         expect(live.at(-1)).toBe(delivery === "still transcoding");
-        // Ahead of the encoder the song streams from the target; a finished file is jumped in.
         expect(urls.at(-1)?.includes("start=85000")).toBe(delivery === "still transcoding");
 
-        // Every position reported for the second song since the seek is at or past the target.
         await waitForEvent(page, "advanced", 2);
         const since = (await events(page)).slice(seekedAt);
         const advance = since.findIndex((event) => event.type === "advanced");
@@ -527,7 +477,6 @@ test.describe("MseEngine", () => {
       });
 
       await coldCache(request);
-      // The full transcode runs at eight times real time, so the target stays far ahead of it.
       expect((await request.post(`${media}/control/slow`)).ok()).toBe(true);
 
       try {
@@ -541,8 +490,6 @@ test.describe("MseEngine", () => {
           return performance.now();
         });
 
-        // Playing again: the first position reported past the target (an upper bound, by up to one
-        // tick of the position updates).
         await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(80_000);
 
         const resumed = (await ofType(page, "time")).find(
@@ -557,7 +504,6 @@ test.describe("MseEngine", () => {
         expect(offsets).toHaveLength(1);
         expect(offsets[0]).toContain("start=80000");
 
-        // It plays out the rest, cut at the exact end the finished transcode reports.
         await waitForEvent(page, "ended", 1, 20_000);
         expect(await lastPosition(page)).toBeGreaterThan(89_000);
         expect(await ofType(page, "error")).toEqual([]);
@@ -593,8 +539,6 @@ test.describe("MseEngine", () => {
         await waitForEvent(page, "playing");
         await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(500);
 
-        // Between the real end and the estimate, and past the look-ahead: an offset stream, which
-        // brings an init segment (for AAC, with padding) but none of the song.
         const target = (TRUNCATED_REAL_MS + TRUNCATED_DECLARED_MS) / 2;
 
         await page.evaluate((position) => {
@@ -610,7 +554,6 @@ test.describe("MseEngine", () => {
         expect(offsets).toEqual([expect.stringContaining(`start=${target}`)]);
         expect(await ofType(page, "error")).toEqual([]);
 
-        // The song ends at its real end, not at the estimate the seek was clamped to, and once.
         if (!queued) {
           expect(Math.abs((await lastPosition(page)) - TRUNCATED_REAL_MS)).toBeLessThan(1000);
         }
@@ -632,7 +575,6 @@ test.describe("MseEngine", () => {
     });
 
     await coldCache(request);
-    // The full transcode runs at eight times real time, so the target stays far ahead of it.
     expect((await request.post(`${media}/control/slow`)).ok()).toBe(true);
 
     try {
@@ -640,7 +582,6 @@ test.describe("MseEngine", () => {
       await waitForEvent(page, "playing");
       await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(500);
 
-      // Every seek transcode is taken for a moment: the seek's stream answers 503, Retry-After: 1.
       expect((await request.post(`${media}/control/busy?ms=1500`)).ok()).toBe(true);
       await page.evaluate(() => {
         window.harness?.engine.seek(80_000);
@@ -666,14 +607,12 @@ test.describe("MseEngine", () => {
       });
 
       await coldCache(request);
-      // About eight seconds of AAC at 256 kbps, then the stream stops short of the 90 s song.
       const cut = await request.post(`${media}/control/cut?bytes=256000&mode=${mode}`);
 
       expect(cut.ok()).toBe(true);
       await page.evaluate((file) => window.harness?.load(file, 0, true), song);
       await waitForEvent(page, "playing");
 
-      // It plays on past the cut from where the appends stopped, without skipping the song.
       await expect.poll(() => lastPosition(page), { timeout: 30_000 }).toBeGreaterThan(15_000);
       expect(offsets.length).toBeGreaterThan(0);
       expect(await ofType(page, "ended")).toEqual([]);
@@ -689,7 +628,6 @@ test.describe("MseEngine", () => {
     await waitForEvent(page, "playing");
     const started = (await ofType(page, "waiting")).length;
 
-    // Long enough for the look-ahead to fill the quota (Firefox stops near 14 MB, ~24 s ahead).
     await expect.poll(() => lastPosition(page), { timeout: 20_000 }).toBeGreaterThan(12_000);
     expect((await ofType(page, "waiting")).length).toBe(started);
 
@@ -750,7 +688,6 @@ test.describe("MseEngine", () => {
 
     expect(position).toBeGreaterThan(0);
     expect(position).toBeLessThan(1500);
-    // Playing out the rest of song 2 ends the queue.
     await waitForEvent(page, "ended");
     expect(await ofType(page, "error")).toEqual([]);
   });

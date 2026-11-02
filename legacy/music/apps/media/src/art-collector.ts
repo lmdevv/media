@@ -1,9 +1,3 @@
-/**
- * Deletes stored artwork nothing uses any more: the old cover of an album whose cover was
- * replaced, or the art of songs that are gone from every library. Convex lists the hashes its
- * tracks, albums, and artists use; everything else in the art store goes, once it is old enough
- * that no scan still on its way to Convex can be about to use it.
- */
 import { ART_IN_USE_MAX } from "@music/commands/media-limits";
 import { Clock, Duration, Effect } from "effect";
 
@@ -11,10 +5,8 @@ import { deleteArt, sweepArt } from "./art-store.ts";
 import { type ArtHashPage, type ArtworkTable, MediaBackend } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
 
-/** `artInUse` calls in flight at once while collecting what scans released. */
 const CHECK_CONCURRENCY = 4;
 
-/** Artwork younger than this stays: a scan may have saved it and not stored its songs yet. */
 const GRACE = Duration.minutes(10);
 
 const TABLES: ReadonlyArray<ArtworkTable> = ["tracks", "albums", "artists"];

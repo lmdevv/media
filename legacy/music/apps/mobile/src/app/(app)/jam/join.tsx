@@ -1,7 +1,3 @@
-/**
- * D12 · Join a Jam by its link or code, typed or pasted, or by scanning the host's QR code. A good
- * code opens its invite (D05), which says when the Jam can't be joined (G11, G12).
- */
 import { router } from "expo-router";
 import { Info, QrCode } from "lucide-react-native";
 import { useState } from "react";

@@ -1,4 +1,3 @@
-/** Reads one lyric file's text in any supported format into the lyric sets it holds. */
 import type { Lang, LyricsFormat } from "@music/commands/lyrics";
 import { type Array as Arr, Match, Result } from "effect";
 

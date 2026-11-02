@@ -1,8 +1,3 @@
-/**
- * Who is signed in, and a gate for screens only some roles may open. The settings hub hides admin
- * and owner rows from everyone else; this gate covers a deep link or a role that changed while the
- * screen was open. The server still refuses what the role may not do.
- */
 import type { User } from "@music/commands/models";
 import { can, forbiddenMessage } from "@music/commands/permissions";
 import type { Capability } from "@music/commands/permissions";
@@ -16,7 +11,6 @@ import { Page } from "@/components/ui/page";
 /** The signed-in account, or undefined while it loads. */
 export const useMe = (): User | undefined => useRead("account.me", {});
 
-/** Props for `RequireAccess`. */
 export interface RequireAccessProps {
   readonly capability: Capability;
   /** The page title, kept while the account loads or when access is refused. */

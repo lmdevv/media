@@ -1,13 +1,3 @@
-/**
- * Who may do what with a playlist, and where its entries sort. The rules themselves live in
- * `@music/commands/permissions` (`canEditPlaylistItems`, `canManagePlaylist`); this module finds
- * the viewer's access from the database.
- *
- * Access comes from ownership, then from a share naming the viewer, then from the playlist's
- * visibility (`shared` lets anyone signed in view it, except guest accounts made from a Jam link,
- * which anyone with that link can create). A playlist the viewer has no access to reads as not
- * found, so a link never tells someone what a private playlist is called.
- */
 import type { PlaylistAccess } from "@music/commands/models";
 import { can, canEditPlaylistItems, canManagePlaylist } from "@music/commands/permissions";
 
@@ -107,7 +97,6 @@ export const openPlaylist = async (
 /** Gap between the sort keys of entries appended one after another. */
 export const POSITION_STEP = 1;
 
-/** Below this gap a key between two neighbours loses precision, so the playlist is renumbered. */
 const MIN_GAP = 1e-6;
 
 /**

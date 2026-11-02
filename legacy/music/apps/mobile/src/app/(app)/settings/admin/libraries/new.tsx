@@ -1,4 +1,3 @@
-/** F17 · Add library. */
 import { NewLibraryForm } from "@/components/admin/new-library";
 import { RequireAccess } from "@/components/settings/access";
 

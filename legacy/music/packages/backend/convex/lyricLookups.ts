@@ -1,8 +1,3 @@
-/**
- * Background work on LRCLIB lookups (see `lib/lyricLookups.ts`): the songs of a download pin and
- * the admin backfill, a page at a time, retries coming due, the end of a pause, and leases that
- * ran out.
- */
 import { expiredLease, retried } from "@music/commands/lyric-lookups";
 import { v } from "convex/values";
 import { Match } from "effect";
@@ -13,7 +8,6 @@ import { requestLyrics, requestLyricsFor } from "./lib/lyricLookups";
 import { readServerSettings } from "./lib/serverSettings";
 import { pinTarget } from "./schema";
 
-/** Songs one mutation requests lyrics for at most. */
 const REQUEST_PAGE = 200;
 
 const cursorArg = v.union(v.string(), v.null());

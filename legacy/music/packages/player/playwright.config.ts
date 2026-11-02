@@ -4,13 +4,10 @@ import { harnessPort, mediaPort } from "./harness/config.ts";
 
 const chromiumPath = process.env["CHROMIUM_PATH"];
 
-/** Browser args for the engine tests, which start audio without a click. */
 const autoplay = ["--autoplay-policy=no-user-gesture-required"];
 
-/** Desktop Chrome's real policy; headless Chromium otherwise allows audio without a gesture. */
 const desktopAutoplay = ["--autoplay-policy=document-user-activation-required"];
 
-/** Firefox's equivalent of `autoplay`, for the gapless and transcoded tests. */
 const firefoxAutoplay = {
   "media.autoplay.default": 0,
   "media.autoplay.block-webaudio": false,
@@ -74,8 +71,6 @@ export default defineConfig({
     {
       name: "session",
       testMatch: "session.spec.ts",
-      // A handoff meets the same autoplay rules as in a real browser. Tracing stays off: its
-      // snapshots run script in every page, which grants the user activation under test.
       use: {
         ...devices["Desktop Chrome"],
         launchOptions: launch(desktopAutoplay),

@@ -1,8 +1,3 @@
-/**
- * Paper's pushed nav bar (pages 13, 17, 19): a 44pt back button, the title left-aligned right
- * after it at 22/28 heavy, and an optional 44pt trailing action. The native stack keeps its edge
- * swipe back; this bar only draws the chrome Paper asks for.
- */
 import { router, useNavigation } from "expo-router";
 import { useNavigationState } from "expo-router/react-navigation";
 import { ChevronLeft } from "lucide-react-native";
@@ -17,7 +12,6 @@ import { usePageBackground } from "@/lib/window-layout";
 import { IconButton } from "./icon-button";
 import { Text } from "./text";
 
-/** Props for `NavBar`. */
 export interface NavBarProps {
   /** The page title; empty on pages whose content carries it, such as an album. */
   readonly title?: string;
@@ -45,13 +39,8 @@ export function NavBar({
 }: NavBarProps & { readonly readable?: boolean }) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  // A visible page is the top of its stack, so a stack holding more than one route can pop it.
-  // Read from the live state: `canGoBack()` answers from the state the page first rendered with,
-  // which can predate the push (a page pushed on Home showed no Back). It still covers the root
-  // of a stack presented over another, such as Now Playing's.
   const stacked = useNavigationState((state) => state.index > 0);
   const background = usePageBackground();
-  // Otherwise a page pushed under a hidden sidebar could only reach it by going Back to the root.
   const sidebar = useSidebarControl();
 
   const back =

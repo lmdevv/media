@@ -1,7 +1,3 @@
-/**
- * What changing or removing a person does beyond their own row, shared by the people handlers and
- * by Jams, whose guest accounts go when the Jam does.
- */
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
@@ -94,7 +90,6 @@ export const removeAccount = async (
   await endHostedJam(ctx, user._id);
 
   await Promise.all([
-    // Deleting the account frees the email for a new invite.
     ...[...accounts, ...codes.flat()].map((doc) => ctx.db.delete(doc._id)),
     ...[playback, queue].flatMap((row) => (row === null ? [] : [ctx.db.delete(row._id)])),
   ]);
@@ -105,10 +100,6 @@ export const removeAccount = async (
   await ctx.scheduler.runAfter(0, internal.people.purgeRemovedUser, { userId: user._id, heir });
 };
 
-/**
- * Whether `user` is a guest account a link to `jam` made, which goes with that Jam. One an admin
- * has since promoted stays.
- */
 const isGuestOf = (user: Doc<"users">, jam: Doc<"jams">): boolean =>
   user.joinedViaJam === jam._id && roleOf(user) === "guest";
 
@@ -125,6 +116,5 @@ export const removeJamGuest = async (
 
   if (user === null || !isGuestOf(user, jam)) return;
 
-  // A guest owns no libraries; the heir only has to exist.
   await removeAccount(ctx, user, (await findOwner(ctx))?._id ?? jam.hostId);
 };

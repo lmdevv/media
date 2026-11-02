@@ -1,7 +1,3 @@
-/**
- * Where the first scan of a new server stands (E06, E07, G09), from the libraries and their scan
- * jobs. Every library's latest job counts, so folders added together read as one scan.
- */
 import type { LibraryId } from "@music/commands/ids";
 import type { Job, Library } from "@music/commands/models";
 
@@ -25,7 +21,6 @@ type ScanJob = Pick<Job, "libraryId" | "status" | "done" | "total" | "createdAt"
 
 const MINUTE_MS = 60_000;
 
-/** Each library's newest job, if it has one. */
 const latestJobs = (
   libraries: ReadonlyArray<ScanLibrary>,
   jobs: ReadonlyArray<ScanJob>,
@@ -41,10 +36,6 @@ const latestJobs = (
     return latest === null ? [] : [latest];
   });
 
-/**
- * `ABOUT 2 MIN LEFT` from the rate so far, or null until there is enough to estimate. Jobs still
- * waiting for the scanner, or still counting what to read, say so instead.
- */
 const timeLeft = (
   jobs: ReadonlyArray<ScanJob>,
   done: number,

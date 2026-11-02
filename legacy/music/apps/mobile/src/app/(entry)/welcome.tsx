@@ -1,7 +1,3 @@
-/**
- * E01 · Welcome: the first launch, with no server yet. One action, connecting to a server (E02);
- * an invite link opened from Messages or Mail goes straight to accepting it (E08).
- */
 import { router } from "expo-router";
 import { ArrowRight, Info } from "lucide-react-native";
 import { ScrollView, View } from "react-native";

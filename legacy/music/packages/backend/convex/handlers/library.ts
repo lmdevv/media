@@ -14,24 +14,14 @@ import type { QueryHandlers } from "./types";
 
 const emptyPage = { items: [], cursor: "", done: true } as const;
 
-/**
- * Keeps the rows of one page that the viewer may read. Lists read only readable libraries' index
- * ranges, so this drops only rows of a library deleted moments ago that its purge has not reached.
- */
 const readable = <Row extends { readonly libraryId: Id<"libraries"> }>(
   viewer: Viewer,
   rows: ReadonlyArray<Row>,
 ): Array<Row> => rows.filter((row) => canRead(viewer, row.libraryId));
 
-/**
- * The index ranges a list reads: one global range when the viewer reads every library, else one
- * range per library they read, merged by `mergedPage`. A member who reads a small shared library
- * then never pages through another user's large private one.
- */
 const listScopes = (viewer: Viewer): ReadonlyArray<Id<"libraries"> | null> =>
   viewer.readsEveryLibrary ? [null] : [...viewer.libraryIds];
 
-/** Albums with songs, newest first, from one library or all of them. */
 const albumSource =
   (ctx: QueryCtx, libraryId: Id<"libraries"> | null): Source<Doc<"albums">> =>
   async ({ start, end }, limit) => {
@@ -68,7 +58,6 @@ const albumSource =
       .take(limit);
   };
 
-/** Artists with albums, by name, from one library or all of them. */
 const artistSource =
   (ctx: QueryCtx, libraryId: Id<"libraries"> | null): Source<Doc<"artists">> =>
   async ({ start, end }, limit) => {
@@ -104,7 +93,6 @@ const artistSource =
       .take(limit);
   };
 
-/** Playable songs by title, from one library or all of them. */
 const trackSource =
   (ctx: QueryCtx, libraryId: Id<"libraries"> | null): Source<Doc<"tracks">> =>
   async ({ start, end }, limit) => {
@@ -151,7 +139,6 @@ export const libraryQueries = {
     const present = makePresenter(ctx, viewer);
     const scopes = listScopes(viewer);
 
-    // Newest albums over the readable libraries' indexes, as `albums.list` reads them.
     const recent = await mergedPage(
       scopes.map((libraryId) => albumSource(ctx, libraryId)),
       (album) => album.addedAt,
@@ -313,7 +300,6 @@ export const libraryQueries = {
   },
 
   search: async (ctx, viewer, args) => {
-    // Stored search text is folded, so the query must be too: "doppelganger" finds "Doppelgänger".
     const text = foldSearchText(args.query).trim();
 
     if (text.length === 0) return { tracks: [], albums: [], artists: [] };

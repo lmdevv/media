@@ -1,9 +1,3 @@
-/**
- * E02 · Connect: the server's address, as people open it in a browser. Connect checks the server
- * and hands it to `onConnected`; remembering it moves the root stack on by itself, to sign in
- * (E03) or to set up a new server (E04). A pasted invite or reset link connects to its server and
- * then opens it. A failure stays here with the address kept and a line saying what went wrong.
- */
 import { Airplay, Info, Lock } from "lucide-react-native";
 import { useState } from "react";
 import { View } from "react-native";
@@ -20,7 +14,6 @@ import { parseEntryLink } from "@/lib/entry-link";
 import { describeConnectFailure, discoverServer } from "@/lib/server";
 import type { ServerConnection } from "@/lib/server";
 
-/** Props for `ConnectForm`. */
 export interface ConnectFormProps {
   /** What Back does; see `NavBar`. */
   readonly onBack: () => void;
@@ -39,7 +32,6 @@ export function ConnectForm({ onBack, onConnected }: ConnectFormProps) {
     setPending(true);
     setFailure(null);
 
-    // A pasted invite or reset link connects to its server, then opens there.
     const link = parseEntryLink(address);
     const result = await discoverServer(link?.server ?? address, fetch);
 

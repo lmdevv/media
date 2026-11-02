@@ -1,4 +1,3 @@
-/** Runtime configuration of the media service, read once from the environment at startup. */
 import { isAbsolute, resolve } from "node:path";
 
 import { Config, Context, Duration, Effect, Layer, type Redacted, Schema } from "effect";

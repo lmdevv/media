@@ -60,7 +60,6 @@ const results = (
 describe("matchScore", () => {
   it("ranks exact titles above prefixes above substrings", () => {
     expect(matchScore("Discovery", "Discovery", "Daft Punk")).toBe(5);
-    // Folded like the server's search text, so what the server matched also ranks here.
     expect(matchScore("strasse", "Straße", null)).toBe(5);
     expect(matchScore("doppelganger", "Doppelgänger", null)).toBe(5);
     expect(matchScore("aeon", "Æon", null)).toBe(5);

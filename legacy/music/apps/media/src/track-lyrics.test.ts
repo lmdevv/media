@@ -17,7 +17,6 @@ import { readTrackLyrics } from "./track-lyrics.ts";
 
 const encoder = new TextEncoder();
 
-/** `count` LRC lines half a second apart, each about 100 characters long. */
 const lrc = (count: number): string =>
   Array.from({ length: count }, (_, index) => {
     const ms = index * 500;

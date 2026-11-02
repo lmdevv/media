@@ -94,7 +94,6 @@ convex.setAuth(() => Promise.resolve(token));
 
 const root = document.querySelector("#root");
 
-/** Records every audio element the engines make, so tests can see which device outputs sound. */
 const audioElements = new Set<HTMLMediaElement>();
 
 window.audioElements = audioElements;

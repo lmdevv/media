@@ -1,12 +1,7 @@
-/**
- * Media URLs from the server (artwork, streams) come back relative to its origin, such as
- * `/media/art/<id>?sig=…`, because the image serves them from the same address people type.
- */
 import type { ServerOrigin } from "./server";
 
 const absolute = /^https?:\/\//iu;
 
-/** A file on this phone, such as a downloaded cover. */
 const local = /^file:\/\//iu;
 
 /**

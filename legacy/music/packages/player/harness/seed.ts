@@ -1,7 +1,3 @@
-/**
- * Puts the generated songs into the dev backend: an admin user, a library on the fixtures folder,
- * and one track per session fixture. Safe to run again.
- */
 import { statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -85,7 +81,6 @@ export const seedSession = async (): Promise<ReadonlyArray<TrackId>> => {
     libraries.find((library) => library.path === fixturesDir)?.id ??
     (await music.run("libraries.create", { name: "Player fixtures", path: fixturesDir })).libraryId;
 
-  // The media service claims a library's folder before a scan; nothing streams without it.
   await http.mutation(claimRoot, {
     secret: mediaSecret,
     libraryId,

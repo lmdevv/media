@@ -1,7 +1,3 @@
-/**
- * F13, F21, F22 · The confirmations for removing, suspending, and making someone the owner, with
- * Paper's copy and the person's name.
- */
 import type { UserId } from "@music/commands/ids";
 import type { Person, User } from "@music/commands/models";
 import { useRead, useRun } from "@music/sdk/react";
@@ -20,10 +16,6 @@ export interface PersonSheetProps {
   readonly id: UserId | null;
 }
 
-/**
- * The person a sheet confirms an action on, kept once the action removes them, and the sheet
- * to show while they load or when they were never there.
- */
 const useSubject = (id: UserId | null): Person | null | undefined => useLastKnown(usePerson(id));
 
 function Missing() {

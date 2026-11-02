@@ -1,7 +1,3 @@
-/**
- * The storage summary over a Downloaded list (D10, D10c): a mono count and the space it takes on one
- * baseline, then a muted sentence.
- */
 import { View } from "react-native";
 
 import { Text } from "@/components/ui/text";

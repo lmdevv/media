@@ -1,4 +1,3 @@
-/** Serves the media HTTP API on `PORT` for the lifetime of the layer. */
 import { serve } from "@hono/node-server";
 import { Effect, Layer } from "effect";
 

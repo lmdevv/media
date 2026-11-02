@@ -5,7 +5,6 @@ import { concatBytes } from "./fmp4";
 import { addToTail, holdTail, releaseAll, TailStep } from "./held-tail";
 import type { HeldTail, Piece } from "./held-tail";
 
-/** A top-level box with a 32-bit size, or a 64-bit one (`size` field 1) when `wide`. */
 const box = (type: string, payload: number, wide: boolean): Uint8Array<ArrayBuffer> => {
   const header = wide ? 16 : 8;
   const bytes = new Uint8Array(header + payload).fill(0xab, header);
@@ -19,7 +18,6 @@ const box = (type: string, payload: number, wide: boolean): Uint8Array<ArrayBuff
   return bytes;
 };
 
-/** The media part of a live stream: fragments of `moof` then `mdat`, and where each starts. */
 const streamArbitrary = fc
   .array(
     fc.record({
@@ -50,7 +48,6 @@ const streamArbitrary = fc
     };
   });
 
-/** Cut points that split `length` bytes into consecutive chunks. */
 const chunksOf = (bytes: Uint8Array, cuts: ReadonlyArray<number>): ReadonlyArray<Uint8Array> => {
   const points = [
     ...new Set([0, ...cuts.map((cut) => cut % (bytes.length + 1)), bytes.length]),
@@ -59,7 +56,6 @@ const chunksOf = (bytes: Uint8Array, cuts: ReadonlyArray<number>): ReadonlyArray
   return points.slice(1).map((end, index) => bytes.subarray(points[index] ?? 0, end));
 };
 
-/** Feeds chunks in order; returns every release and the final tail. */
 const feed = (
   offset: number,
   chunks: ReadonlyArray<Uint8Array>,

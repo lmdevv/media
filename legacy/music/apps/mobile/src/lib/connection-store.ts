@@ -1,4 +1,3 @@
-/** The server connection this install remembers, kept in the keychain. */
 import { Option, Schema } from "effect";
 
 import { readValue, writeValue } from "./secure-storage";

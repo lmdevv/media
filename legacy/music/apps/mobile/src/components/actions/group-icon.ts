@@ -1,4 +1,3 @@
-/** The glyph each command group shows on its Actions rows and in its form's callout. */
 import type { CommandGroup } from "@music/commands/command";
 import {
   Download,

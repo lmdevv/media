@@ -1,9 +1,3 @@
-/**
- * Paper's thumbless 4pt track (B01's scrubber and volume): drag anywhere along it to move the
- * value by the distance dragged, as iOS Music does. The drag claims the touch at once, so a
- * vertical wobble on the track never pulls the Now Playing sheet down (B11). The value changes
- * on release; `onScrub` reports it live, for a label that follows the finger.
- */
 import { useEffect } from "react";
 import { View } from "react-native";
 import type { AccessibilityActionEvent } from "react-native";
@@ -11,13 +5,10 @@ import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 
-/** How long a released value holds before the player's reports take over again. */
 const SETTLE_MS = 1200;
 
-/** How far one VoiceOver swipe moves the value. */
 const STEP = 0.05;
 
-/** Props for `Slider`. */
 export interface SliderProps {
   /** From 0 to 1, as the player reports it. */
   readonly value: number;

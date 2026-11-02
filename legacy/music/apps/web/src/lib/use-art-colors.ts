@@ -4,7 +4,6 @@ import { placeholderColors } from "./art";
 
 const SAMPLE = 8;
 
-/** Averages a loaded image to one CSS color, or null when the image is cross-origin tainted. */
 const averageColor = (image: HTMLImageElement): string | null => {
   const canvas = document.createElement("canvas");
   canvas.width = SAMPLE;
@@ -48,7 +47,6 @@ export const useArtColors = (url: string | null, seed: string): readonly [string
     if (url === null) return undefined;
 
     const image = new Image();
-    // A cover that loads after the song changed is not sampled.
     const loading = new AbortController();
     image.crossOrigin = "anonymous";
     image.decoding = "async";

@@ -1,7 +1,3 @@
-/**
- * One person, invite, or library looked up in its live list. Each is undefined while the list
- * loads and null once it has loaded without it (removed, used, or never there).
- */
 import type { InviteId, LibraryId, UserId } from "@music/commands/ids";
 import type { Invite, Library, Person } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";

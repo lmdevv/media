@@ -1,7 +1,3 @@
-/**
- * Closing a sheet a moment after a quiet confirmation ("Link copied", "Added"), unless the person
- * closed it first: a late close would otherwise pop the page under it.
- */
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
 

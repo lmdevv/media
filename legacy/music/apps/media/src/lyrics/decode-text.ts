@@ -1,4 +1,3 @@
-/** Turns the bytes of a lyric file into text, whatever encoding its editor saved it in. */
 import { Result } from "effect";
 
 import { LyricsParseError, withinSizeLimit } from "./lyric-body.ts";
@@ -12,10 +11,6 @@ const BYTE_ORDER_MARKS = [
 const startsWith = (bytes: Uint8Array, prefix: ReadonlyArray<number>): boolean =>
   prefix.every((byte, index) => bytes[index] === byte);
 
-/**
- * UTF-16 saved without a byte order mark: ASCII-range text puts a zero in every other byte, low
- * byte first for little-endian. Null when the zeros fall on neither side.
- */
 const utf16WithoutMark = (bytes: Uint8Array): "utf-16le" | "utf-16be" | null => {
   let even = 0;
   let odd = 0;
@@ -40,7 +35,6 @@ const decodeAs = (encoding: string, bytes: Uint8Array): string | null => {
   try {
     return new TextDecoder(encoding, { fatal: true }).decode(bytes);
   } catch {
-    // A fatal decoder throws a TypeError on the first invalid sequence.
     return null;
   }
 };

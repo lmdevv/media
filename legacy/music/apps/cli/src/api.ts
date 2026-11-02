@@ -1,7 +1,3 @@
-/**
- * The connection to a [music] server: signs in with the API key, caches the session token, and
- * runs registry commands through the shared SDK client with typed failures.
- */
 import { argsDecoder } from "@music/commands/codec";
 import { commands } from "@music/commands/registry";
 import type {
@@ -24,7 +20,6 @@ import { AuthError, CommandFailed, ServerError, UsageError } from "./errors";
 import type { WireArgs } from "./flags";
 import { deriveFlags, describeIssue } from "./flags";
 
-/** `auth:signIn` from Convex Auth. Its result is decoded below rather than trusted. */
 const signInAction = makeFunctionReference<
   "action",
   { provider: "apikey"; params: { key: string } },
@@ -41,18 +36,15 @@ const JwtClaims = Schema.Struct({ exp: Schema.Finite });
 
 const decodeJwtClaims = Schema.decodeUnknownOption(Schema.fromJsonString(JwtClaims));
 
-/** Convex reports HTTP-level failures, such as a rejected token, as a JSON message body. */
 const HttpFailure = Schema.Struct({ code: Schema.String, message: Schema.String });
 
 const decodeHttpFailure = Schema.decodeUnknownOption(Schema.fromJsonString(HttpFailure));
 
-/** Used when a token carries no readable `exp`; Convex Auth tokens last an hour. */
 const fallbackLifetimeMs = 5 * 60_000;
 
 /** Every failure a server call can produce. */
 export type CallError = AuthError | CommandFailed | ServerError | ConfigFileError;
 
-/** Translates whatever the Convex client threw into a typed CLI failure. */
 const classify = (server: string, cause: unknown): AuthError | CommandFailed | ServerError => {
   if (cause instanceof InvalidResultError) {
     return new ServerError({ server, message: cause.message, cause });
@@ -85,9 +77,6 @@ const classify = (server: string, cause: unknown): AuthError | CommandFailed | S
 
   if (Option.isSome(http)) return new ServerError({ server, message: http.value.message, cause });
 
-  // Something answered with an empty error body. Without /convex that is usually the web app's
-  // address, whose proxy refuses Convex API calls; with it, the proxy is up but Convex behind it
-  // is not (starting, or down), and the URL is right.
   if (cause.message.trim() === "") {
     return new ServerError({
       server,

@@ -29,7 +29,6 @@ interface Screen {
   readonly icon: LucideIcon;
 }
 
-/** Query commands open the screen that shows them. */
 const SCREENS: ReadonlyArray<Screen> = [
   { name: "library.home", title: "Home", to: "/", icon: HomeIcon },
   { name: "search", title: "Search", to: "/search", icon: SearchIcon },

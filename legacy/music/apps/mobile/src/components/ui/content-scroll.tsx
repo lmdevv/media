@@ -1,10 +1,3 @@
-/**
- * The root of every page in the tabs. iOS minimizes the tab bar and moves the mini player inline
- * as the page's content scrolls (A14, A15, A17), but finds that content by guessing, and misses a
- * list under a floating bar or a hero. `modules/content-scroll` names the first scroll view inside
- * this view as the page's content instead, so every page that scrolls morphs the bar, not only
- * Home.
- */
 import { requireNativeView } from "expo";
 import type { ReactNode } from "react";
 import { StyleSheet } from "react-native";

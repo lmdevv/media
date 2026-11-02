@@ -1,8 +1,3 @@
-/**
- * Human-readable output. Results are rendered by walking the command's result schema next to the
- * value, so lists of known models become compact tables and everything else becomes key-value
- * lines. `--json` bypasses this module.
- */
 import {
   LyricBody,
   LyricOrigin,
@@ -36,7 +31,6 @@ import { escapeControlCharacters } from "./escape";
 
 type Json = Schema.Json;
 
-/** One table column: a header and how to read its cell from a row. */
 interface Column {
   readonly header: string;
   readonly cell: (row: Schema.JsonObject) => string;
@@ -78,7 +72,6 @@ const formatNumber = (key: string, value: number): string => {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 };
 
-/** Formats a scalar by its field name: durations, timestamps, booleans, and nulls. */
 const formatScalar = (key: string, value: Json): string => {
   if (value === null) return "-";
 
@@ -91,7 +84,6 @@ const formatScalar = (key: string, value: Json): string => {
   return escapeControlCharacters(JSON.stringify(value));
 };
 
-/** The value at `path` in a row; null once a step is null (a withheld song shows `-`). */
 const at = (row: Schema.JsonObject, path: ReadonlyArray<string>): Json | undefined => {
   let current: Json | undefined = row;
 
@@ -124,10 +116,6 @@ const REASONS = new Map([
   ["no_access", "no access"],
 ]);
 
-/**
- * Marks a playlist entry that can't play: its file is gone, or it is in a library you can't
- * listen to. It stays listed so it can be removed.
- */
 const unavailable: Column = {
   header: "STATUS",
   cell: (row) => {
@@ -138,13 +126,11 @@ const unavailable: Column = {
   },
 };
 
-/** When someone joined a Jam, or asked to. */
 const since: Column = {
   header: "SINCE",
   cell: (row) => (Predicate.isNumber(row["since"]) ? formatTimestamp(row["since"]) : ""),
 };
 
-/** Marks a queue entry autoplay added. */
 const autoplayed: Column = {
   header: "FROM",
   cell: (row) => (row["autoplay"] === true ? "autoplay" : ""),
@@ -335,7 +321,6 @@ const clip = (text: string): string => {
   return flat.length > maxCell ? `${flat.slice(0, maxCell - 1)}…` : flat;
 };
 
-/** Renders rows as an aligned table with an uppercase header. */
 const table = (
   columns: ReadonlyArray<Column>,
   rows: ReadonlyArray<Schema.JsonObject>,
@@ -357,7 +342,6 @@ const table = (
   return [line(columns.map((column) => column.header)), ...cells.map(line)];
 };
 
-/** `trackCount` → `track count`, `durationMs` → `duration`. */
 const label = (key: string): string =>
   key
     .replace(/Ms$/u, "")
@@ -376,7 +360,6 @@ const genericColumns = (rows: ReadonlyArray<Schema.JsonObject>): ReadonlyArray<C
     .map(([key]) => field(label(key).toUpperCase(), key));
 };
 
-/** Strips `NullOr` and other unions down to the member that describes a present value. */
 const presentMember = (ast: SchemaAST.AST): SchemaAST.AST => {
   if (!SchemaAST.isUnion(ast)) return ast;
 
@@ -426,7 +409,6 @@ const renderObject = (ast: SchemaAST.AST, value: Schema.JsonObject): ReadonlyArr
   return lines;
 };
 
-/** A cursor page (`items`, `cursor`, `done`) prints as its table plus the flag for the next page. */
 const renderPage = (ast: SchemaAST.AST, value: Schema.JsonObject): string | null => {
   const { items, cursor, done } = value;
 
@@ -439,7 +421,6 @@ const renderPage = (ast: SchemaAST.AST, value: Schema.JsonObject): string | null
   return [...lines, ...(done ? [] : [`More: --cursor ${cursor}`])].join("\n");
 };
 
-/** `62_340` → `[01:02.34]`, the line stamps of an LRC file. */
 const lyricStamp = (ms: number): string => {
   const minutes = Math.floor(ms / 60_000);
   const hundredths = Math.floor((ms % 60_000) / 10);
@@ -459,7 +440,6 @@ const originLabel = LyricOrigin.match({
 });
 
 const bodyLines = LyricBody.match({
-  // A subtitle cue with several rows is one line with `\n` between them: one row per output line.
   Synced: ({ lines }) =>
     lines.flatMap((line) => {
       const stamp = lyricStamp(line.startMs);
@@ -474,7 +454,6 @@ const bodyLines = LyricBody.match({
   Plain: ({ text }) => text.split("\n").map(escapeControlCharacters),
 });
 
-/** `translation (de) from Song.de.lrc` for each set beside the one shown. */
 const extraLines = (extras: ReadonlyArray<LyricSet>): ReadonlyArray<string> =>
   extras.length === 0
     ? []
@@ -489,7 +468,6 @@ const extraLines = (extras: ReadonlyArray<LyricSet>): ReadonlyArray<string> =>
         }),
       ];
 
-/** Lyrics as the player captions them, then their lines, each synced one with its time. */
 const renderLyrics = TrackLyrics.match({
   None: () => "No lyrics",
   Instrumental: () => "Instrumental",
@@ -519,10 +497,6 @@ const renderLyrics = TrackLyrics.match({
 
 const decodeLyrics = Schema.decodeUnknownSync(TrackLyrics);
 
-/**
- * Results printed their own way rather than as tables and key-value lines, by the schema the
- * command returns. A value that does not decode as that schema is a bug, so it throws.
- */
 const customRenderers: ReadonlyMap<Schema.Top, (value: Json) => string> = new Map([
   [TrackLyrics, (value: Json) => renderLyrics(decodeLyrics(value))],
 ]);

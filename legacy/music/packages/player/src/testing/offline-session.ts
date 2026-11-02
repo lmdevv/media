@@ -1,9 +1,3 @@
-/**
- * Test doubles for a device that plays its own session: a small library, the device, a clock you
- * move by hand, a Convex deployment that runs commands in the order they were sent and answers
- * nothing while the connection is down or the server is held up, and a store that keeps sessions
- * as JSON and parses them back.
- */
 import { AlbumId, ArtistId, DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import { PlaybackState, StreamProfile } from "@music/commands/models";
 import type { QueueEntry, Track } from "@music/commands/models";
@@ -62,7 +56,6 @@ export const holding =
     return held.has(trackId) ? (library.get(trackId) ?? null) : null;
   };
 
-/** The queue entry for `id` at `position`, as the server lists it. */
 const queueEntry = (id: SongId, position: number): QueueEntry =>
   Struct.assign(song(id), {
     itemId: QueueItemId.make(String(position + 1)),

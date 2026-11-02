@@ -1,8 +1,3 @@
-/**
- * People management at a scale one mutation cannot hold: someone who signed in, made keys, or
- * liked songs without limit can still be suspended and removed, and the rest is cleaned up in
- * batches. Runs in memory with Convex's transaction limits tightened.
- */
 import { UserId } from "@music/commands/ids";
 import { describe, expect, it, vi } from "vitest";
 
@@ -12,13 +7,10 @@ import { drainScheduled, makeBackend, signUp } from "./backend";
 import type { Backend } from "./backend";
 import { failureCode } from "./harness";
 
-/** Writes per mutation in these tests: far fewer than the rows each person owns. */
 const LIMIT = 150;
 
-/** Rows each person gets, several times what one mutation may write. */
 const MANY = 400;
 
-/** Inserts `count` rows, a limit-sized batch per transaction. */
 const insertMany = async (
   backend: Backend,
   count: number,
@@ -167,8 +159,6 @@ describe("people management at scale", () => {
       });
     });
 
-    // Removing someone schedules their clean-up with the owner of the moment as heir. Before it
-    // runs, ownership moves on and that owner is removed in turn, and their clean-up runs first.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
     try {
@@ -196,8 +186,6 @@ describe("people management at scale", () => {
     const backend = makeBackend();
     const person = await signUp(backend, "member");
 
-    // More sessions than a page holds; the first, on the first page, has more refresh tokens
-    // than a pass deletes per session.
     await insertMany(backend, 150, async (ctx) => {
       await ctx.db.insert("authSessions", {
         userId: person.id,
@@ -206,7 +194,6 @@ describe("people management at scale", () => {
       });
     });
 
-    // The first of them (signing up opened one before, which stays).
     const first = await backend.run(async (ctx) =>
       ctx.db
         .query("authSessions")
@@ -224,7 +211,6 @@ describe("people management at scale", () => {
       });
     });
 
-    // Every one of them ended.
     await backend.run(async (ctx) => {
       await ctx.db.patch(person.id, { sessionGeneration: 1 });
     });

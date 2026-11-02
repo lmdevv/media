@@ -1,8 +1,3 @@
-/**
- * D01 · Start a Jam, a sheet over Now Playing: what a Jam is, the song it starts from, and Start.
- * Starting closes Now Playing and opens the new Jam (D02) over the tabs. Joining someone else's
- * Jam (D12) starts here too, since Paper draws no other way in.
- */
 import { errorMessage } from "@music/sdk/errors";
 import { useRun } from "@music/sdk/react";
 import { router } from "expo-router";
@@ -20,11 +15,9 @@ import type { PlayerRole } from "@/player";
 
 import { DEVICE_FAMILY } from "@/lib/this-device";
 
-/** Where the song plays, after its artist. */
 const whereLine = (role: PlayerRole): string =>
   role.kind === "remote" ? `Playing on ${role.device.name}` : `Playing on this ${DEVICE_FAMILY}`;
 
-/** The song the Jam starts from: Paper's row without the hairline. */
 function StartingSong() {
   const { nowPlaying, role } = useNowPlaying();
 

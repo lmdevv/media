@@ -7,8 +7,6 @@ import { useState } from "react";
 export const useHeld = <Value>(value: Value | undefined): Value | undefined => {
   const [held, setHeld] = useState(value);
 
-  // Updating state while rendering, as React documents for values that follow a prop: the render
-  // restarts at once, with no effect and no extra frame.
   if (value !== undefined && value !== held) setHeld(value);
 
   return value ?? held;

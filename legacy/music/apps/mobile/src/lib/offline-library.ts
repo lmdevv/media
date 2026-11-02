@@ -1,7 +1,3 @@
-/**
- * What the pages read from this phone's downloads while the server is out of reach: Home's rail
- * of downloaded albums (D14), and an album or playlist page the server can't load.
- */
 import type { AlbumId, PlaylistId } from "@music/commands/ids";
 import type { AlbumCard } from "@music/commands/models";
 import type { LocalCopy, OfflineAlbum, OfflineLibrary } from "@music/sdk/downloads";

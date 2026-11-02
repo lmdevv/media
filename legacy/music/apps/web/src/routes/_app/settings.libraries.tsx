@@ -86,7 +86,6 @@ function Libraries({ me }: { readonly me: User }) {
               key={library.id}
               library={library}
               me={me}
-              // Jobs come newest first, so this is the folder's latest scan.
               latest={(jobs ?? []).find((job) => job.libraryId === library.id)}
             />
           ))}
@@ -106,7 +105,6 @@ function Libraries({ me }: { readonly me: User }) {
   );
 }
 
-/** The server setting that lets the media service find lyrics on LRCLIB for songs that have none. */
 function RemoteLyricsSetting() {
   const settings = useRead("server.settings", {});
   const update = useRun("server.update");
@@ -165,7 +163,6 @@ function LibraryCard({
 }: {
   readonly library: Library;
   readonly me: User;
-  /** The folder's most recent scan job, if any. */
   readonly latest: Job | undefined;
 }) {
   const job = latest?.status === "running" || latest?.status === "pending" ? latest : undefined;
@@ -177,7 +174,6 @@ function LibraryCard({
   const busy = job !== undefined || library.scanning;
   const myId = me.id;
   const owner = library.ownerId === myId ? "you" : (library.ownerName ?? "its owner");
-  // Removing a library frees its folder, so only its owner or the server's owner may.
   const removable = canRemoveLibrary(me, library);
 
   const [rescan, rescanning] = useAction(() => scan({ libraryId: library.id }), {
@@ -193,7 +189,6 @@ function LibraryCard({
   );
 
   const percent = job === undefined ? null : jobPercent(job);
-  // Only a library's managers see its folder; everyone else knows it by name.
   const label = library.path ?? library.name;
 
   return (
@@ -336,7 +331,6 @@ function LibraryCard({
   );
 }
 
-/** The visibility pill: who besides the owner can listen. */
 const visibilityLabel = (visibility: LibraryVisibility, owner: string): string =>
   ({
     shared: "Everyone",
@@ -352,7 +346,6 @@ function RenameForm({
   readonly onDone: () => void;
 }) {
   const update = useRun("libraries.update");
-  // Untouched, the field shows the current name, including a rename made elsewhere meanwhile.
   const [edited, setName] = useState<string | null>(null);
   const name = edited ?? library.name;
   const trimmed = name.trim();
@@ -404,11 +397,6 @@ function RenameForm({
   );
 }
 
-/**
- * Who hears a private library, said to its owner. It is hidden from other members and admins,
- * not from the server's owner, who runs the machine: they may rename or rescan it, and could
- * remove it and add the folder again as their own, which its owner would see.
- */
 const privateHint = (serverOwner: boolean): string =>
   serverOwner
     ? "Only you."
@@ -423,11 +411,6 @@ const VISIBILITY_HINTS: Readonly<
   private: (owner, serverOwner) => (owner === "you" ? privateHint(serverOwner) : `Only ${owner}.`),
 };
 
-/**
- * Why the viewer can change who listens only partly, or not at all, and what they may still do.
- * Only the library's owner, while an admin, lets people in; once they aren't one, the server's
- * owner may only take people out or make it more private.
- */
 const accessNote = (
   control: Exclude<AccessControl, "full">,
   owner: string,
@@ -439,7 +422,6 @@ const accessNote = (
       "people, or make it more private. Only they, as an admin again, can let anyone in."
     : `Only ${owner} can change who listens to this folder. ${stillCan(library, removable)}`;
 
-/** What a viewer who doesn't own a library may still do with it, for the access dialog. */
 const stillCan = (library: Library, removable: boolean): string => {
   if (removable) return "You can still rename, rescan, or remove it.";
 
@@ -448,7 +430,6 @@ const stillCan = (library: Library, removable: boolean): string => {
     : "Only the server's owner manages a library you can't hear.";
 };
 
-/** Who can listen to a library: its visibility and the people added to it. */
 function AccessForm({
   library,
   owner,
@@ -458,24 +439,15 @@ function AccessForm({
   onDone,
 }: {
   readonly library: Library;
-  /** How to name the owner: "you", or their name. */
   readonly owner: string;
-  /**
-   * How the viewer may change who listens (`libraryAccessControl`): the library's owner, while an
-   * admin, any way; the server's owner, once its owner isn't one, only to let fewer people in.
-   */
   readonly control: AccessControl;
-  /** Whether the viewer owns the server, and so manages every library. */
   readonly serverOwner: boolean;
-  /** Whether the viewer may remove the library (`canRemoveLibrary`). */
   readonly removable: boolean;
   readonly onDone: () => void;
 }) {
   const update = useRun("libraries.update");
   const grant = useRun("libraries.grant");
   const revoke = useRun("libraries.revoke");
-  // Only a library's managers may read its access list (anyone else gets not_found, which would
-  // take the whole screen down), and only who may change access adds people.
   const people = useRead("people.list", control === "full" ? {} : "skip");
 
   const added = useRead(
@@ -494,7 +466,6 @@ function AccessForm({
   const [remove] = useAction((userId: UserId) => revoke({ libraryId: library.id, userId }));
   const addedIds = new Set((added ?? []).map((person) => person.id));
 
-  // Shared folders already reach everyone but guests, so only guests are worth adding.
   const candidates = (people ?? []).filter(
     (person) =>
       person.id !== library.ownerId &&
@@ -606,7 +577,6 @@ function AddLibraryDialog({
 }: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  /** Whether the viewer owns the server, and so manages every library. */
   readonly serverOwner: boolean;
 }) {
   const create = useRun("libraries.create");

@@ -1,8 +1,3 @@
-/**
- * The pickers for ID fields in a generated form (F27): one per kind of record, each reading only
- * its own list, all drawing the same selectable rows with the accent check on what is chosen.
- * Songs, albums, and artists come from search, since a library is too large to list.
- */
 import type { Entity, FieldSpec, FormValues } from "@music/commands/forms";
 import { PlaylistId } from "@music/commands/ids";
 import type { Role, SearchResults } from "@music/commands/models";
@@ -51,14 +46,12 @@ export interface PickerProps {
   readonly onChange: (value: FormValues[string]) => void;
 }
 
-/** One record a picker offers. */
 interface EntityOption {
   readonly key: string;
   readonly label: string;
   readonly detail?: string;
 }
 
-/** Lists longer than this get a filter field above them. */
 const FILTER_FROM = 12;
 
 const WITHHELD = "A song you can't play";
@@ -73,7 +66,6 @@ function Note({ children }: { readonly children: string }) {
   );
 }
 
-/** Selectable rows for `options`; undefined while they load. */
 function OptionRows({
   spec,
   value,
@@ -209,10 +201,6 @@ function InvitePicker(props: PickerProps) {
   );
 }
 
-/**
- * People on the server. Admins read the full list; Jam hosts who aren't admins (approve, remove)
- * get the directory, since the full list would refuse them. Guests have neither.
- */
 function PersonPicker(props: PickerProps) {
   const admin = can(props.role, "admin");
   const people = useRead("people.list", admin ? {} : "skip");
@@ -235,7 +223,6 @@ function PersonPicker(props: PickerProps) {
   return <OptionRows {...props} icon={User} options={options} />;
 }
 
-/** People to share a playlist with. Guests may leave a playlist but can't read the directory. */
 function ShareePicker(props: PickerProps) {
   const allowed = can(props.role, "share");
   const directory = useRead("people.directory", allowed ? {} : "skip");
@@ -257,10 +244,6 @@ function ShareePicker(props: PickerProps) {
   );
 }
 
-/**
- * Your playlists, then the ones shared with you: a collaborator adds, removes, and moves songs in
- * those, and anyone may leave one. The server refuses owner-only commands on the shared ones.
- */
 function PlaylistPicker(props: PickerProps) {
   const own = useRead("playlists.list", {});
   const shared = useRead("playlists.shared", {});
@@ -321,7 +304,6 @@ function QueueItemPicker(props: PickerProps) {
   );
 }
 
-/** Entries of the playlist chosen above; nothing until one is. */
 function PlaylistItemPicker(props: PickerProps) {
   const playlistId = Option.getOrNull(decodePlaylistId(props.values["playlistId"]));
   const playlist = useRead("playlists.get", playlistId === null ? "skip" : { playlistId });
@@ -341,7 +323,6 @@ function PlaylistItemPicker(props: PickerProps) {
   );
 }
 
-/** How a search picker reads its kind of record out of the results. */
 const SEARCH_KINDS = {
   track: {
     icon: Music,
@@ -371,13 +352,8 @@ const SEARCH_KINDS = {
   },
 } as const;
 
-/** The longest query `search` accepts. */
 const QUERY_LIMIT = 200;
 
-/**
- * Songs, albums, or artists found by typing. What is chosen stays listed first while the search
- * changes, so a list of songs can be built from several searches.
- */
 function SearchPicker({
   kind,
   spec,
@@ -385,7 +361,6 @@ function SearchPicker({
   onChange,
 }: PickerProps & { readonly kind: keyof typeof SEARCH_KINDS }) {
   const [query, setQuery] = useState("");
-  // Labels of the records picked so far, which the current results may no longer include.
   const [picked, setPicked] = useState<Readonly<Record<string, EntityOption>>>({});
   const text = query.trim().slice(0, QUERY_LIMIT);
   const results = useRead("search", text === "" ? "skip" : { query: text, limit: 20 });

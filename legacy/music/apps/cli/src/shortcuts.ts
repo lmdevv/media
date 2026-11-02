@@ -1,6 +1,3 @@
-/**
- * Shortcuts people and agents reach for most, built only from registry commands.
- */
 import type { DeviceId, TrackId } from "@music/commands/ids";
 import { foldSearchText } from "@music/commands/search-text";
 import type {
@@ -26,10 +23,6 @@ export type PlayChoice = Data.TaggedEnum<{
 
 export const PlayChoice = Data.taggedEnum<PlayChoice>();
 
-/**
- * Folded the way the server folds search text (so "strasse" ranks "Straße" as the server matched
- * it), compatibility characters such as ligatures included, and punctuation folded to spaces.
- */
 const normalize = (text: string): string =>
   foldSearchText(text.normalize("NFKC"))
     .replaceAll(/[^\p{L}\p{N}]+/gu, " ")
@@ -182,7 +175,6 @@ export const describePlayback = (state: PlaybackState, now: number): string => {
 
   if (current === undefined) return "Nothing is playing.";
 
-  // Names come from file tags and other people: written out, they can't fake more lines.
   const device =
     state.activeDevice === null
       ? "no active device"

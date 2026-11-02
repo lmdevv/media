@@ -1,8 +1,3 @@
-/**
- * Who may do what. Every command names the capability it needs (`access` in the registry), and
- * the backend, the web app, the command menu, and the CLI all ask this module, so a rule changed
- * here changes everywhere at once.
- */
 import type {
   AccessControl,
   AssignableRole,
@@ -36,10 +31,8 @@ const CAPABILITIES: Readonly<Record<Role, ReadonlySet<Capability>>> = {
 export const can = (role: Role, capability: Capability): boolean =>
   CAPABILITIES[role].has(capability);
 
-/** Roles from least to most trusted. */
 const RANK: Readonly<Record<Role, number>> = { guest: 0, member: 1, admin: 2, owner: 3 };
 
-/** Every role an invite or a role change can give, most trusted first. */
 const ASSIGNABLE: ReadonlyArray<AssignableRole> = ["admin", "member", "guest"];
 
 /**
@@ -64,7 +57,6 @@ export const canManagePerson = (actor: PersonRef, target: PersonRef): boolean =>
   can(actor.role, "admin") &&
   actor.id !== target.id &&
   target.role !== "owner" &&
-  // An admin who could reset or demote another admin could take over their private libraries.
   (target.role !== "admin" || can(actor.role, "owner"));
 
 /**
@@ -115,7 +107,6 @@ export const libraryAccessControl = (
   return can(actor.role, "owner") && !ownerRunsLibraries ? "narrow" : "none";
 };
 
-/** How many people a visibility lets in, least first. */
 const REACH: Readonly<Record<LibraryVisibility, number>> = { private: 0, restricted: 1, shared: 2 };
 
 /**
@@ -168,10 +159,6 @@ const ROLE_LABELS: Readonly<Record<Role, string>> = {
 /** A role as people read it. */
 export const roleLabel = (role: Role): string => ROLE_LABELS[role];
 
-/**
- * What someone may do with a playlist: change it (`owner`), add, remove, and reorder its songs
- * (`collaborator`), or view and play it (`viewer`). Only the owner renames, shares, or deletes it.
- */
 const PLAYLIST_RANK: Readonly<Record<PlaylistAccess, number>> = {
   viewer: 0,
   collaborator: 1,

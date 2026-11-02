@@ -90,7 +90,6 @@ describe("permissions", () => {
   });
 });
 
-/** The default settings, with the given ones changed. */
 const jam = ({
   membersCanAdd = true,
   addLimit = 5,

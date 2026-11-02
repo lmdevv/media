@@ -1,16 +1,7 @@
-/**
- * Selecting the Search tab opens its field with the keyboard up (A13, A17 · 03), as Apple Music
- * does: the tab bar becomes the search field and searching starts at once. The tab bar reports the
- * selection here and the Search screen focuses its field, so the field's close circle leaves the
- * results on screen rather than returning to the previous tab, as UISearchTab's own activation
- * does. On an iPad the sidebar's Search row asks instead, and may do so before the Search tab has
- * ever mounted, so its request waits, and the screen's field opens focused.
- */
 import { useIsFocused } from "expo-router";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-/** How often, and how many times, a focus waiting for the field is tried. */
 const FOCUS_RETRY_MS = 100;
 
 const FOCUS_TRIES = 20;

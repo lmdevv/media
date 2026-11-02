@@ -1,4 +1,3 @@
-/** Server-shaped records for tests, decoded through the real schemas so their IDs are branded. */
 import { AlbumCard, ArtistCard, Track } from "@music/commands/models";
 import { Schema } from "effect";
 

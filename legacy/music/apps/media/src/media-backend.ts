@@ -1,7 +1,3 @@
-/**
- * The media service's view of Convex: the `media:*` functions, called with the shared service
- * secret. Convex owns all product state; this module only moves data in and out.
- */
 import type { FolderChain } from "@music/commands/folder-ids";
 import { JobId, LibraryId, type TrackId } from "@music/commands/ids";
 import type { LookupOutcome } from "@music/commands/lyric-lookups";
@@ -42,9 +38,7 @@ export interface PendingJob extends Schema.Schema.Type<typeof PendingJob> {}
 const LibraryFolder = Schema.Struct({
   id: LibraryId,
   path: Schema.String,
-  /** Whether its folder is claimed, with identities (`media:claimRoot`), so its songs stream. */
   claimed: Schema.Boolean,
-  /** The boot its claim's identities were read in (`Files.readBootId`); null without one. */
   bootId: Schema.NullOr(Schema.String),
 });
 
@@ -65,15 +59,10 @@ const Fingerprint = Schema.Struct({
   size: Schema.Finite,
   mtimeMs: Schema.Finite,
   missing: Schema.Boolean,
-  /** The folder artwork the last scan saw beside the file (see `ScannedTrack.folderArt`). */
   folderArt: Schema.optional(Schema.String),
-  /** The lyric files the last scan read beside the file (see `ScannedLyrics`). */
   lyricsFiles: Schema.optional(Schema.String),
-  /** The lyrics reader that read them; absent before scans read lyrics. */
   lyricsReader: Schema.optional(Schema.Finite),
-  /** The size of the lyric sets Convex keeps for the file, as JSON; absent when it has none. */
   lyricsBytes: Schema.optional(Schema.Finite),
-  /** Length and tags, for telling a moved file from a new one (see `moved-files.ts`). */
   durationMs: Schema.optional(Schema.Finite),
   title: Schema.optional(Schema.String),
   artist: Schema.optional(Schema.String),
@@ -124,10 +113,6 @@ const RootClaim = Schema.Union([
 /** Whether Convex accepted a library's real folder, and why not. */
 export type RootClaim = Schema.Schema.Type<typeof RootClaim>;
 
-/**
- * The artwork a batch stopped using somewhere. Convex versions before it was reported send none,
- * so their art is left to the full collection at startup.
- */
 const Released = Schema.optional(Schema.Array(Schema.String));
 
 const BatchResult = Schema.Struct({ released: Released });
@@ -215,7 +200,6 @@ const LookupQuery = Schema.Struct({
   artist: Schema.String,
   title: Schema.String,
   album: Schema.String,
-  /** The song's length in whole seconds. */
   durationS: Schema.Finite,
 });
 
@@ -498,7 +482,6 @@ const call = <A>(operation: string, run: () => Promise<A>): Effect.Effect<A, Bac
 const decodeFailure = (operation: string) => (cause: Schema.SchemaError) =>
   new BackendError({ operation, cause });
 
-/** Builds `MediaBackend` on a `ConvexClient` that lives as long as the layer. */
 const make = Effect.gen(function* () {
   const config = yield* MediaConfig;
 

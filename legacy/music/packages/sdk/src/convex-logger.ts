@@ -14,7 +14,6 @@ const SIGN_IN_ACTION = /^\[CONVEX A\(auth:signIn\)\] /;
 
 const decodeLine = Schema.decodeUnknownOption(Schema.String);
 
-/** A sign-in rejected for its email or password, which the sign-in screen already reports. */
 const isWrongCredentials = (line: string): boolean =>
   SIGN_IN_ACTION.test(line) && mentionsWrongCredentials(line);
 

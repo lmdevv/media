@@ -1,11 +1,3 @@
-/**
- * The play queue. Every reader and writer goes through `loadQueue`, which drops songs the viewer
- * can no longer read (their library was deleted or hidden) and moves the index with them.
- *
- * Each entry has its own ID, unique within the queue and never reused, so commands name the entry
- * they mean: a remove or move sent from one device while another device changed the queue still
- * reaches the right row, or fails when that row is gone.
- */
 import { keptOrder, nextIndex } from "@music/commands/queue-rules";
 
 import type { Doc, Id } from "../_generated/dataModel";
@@ -288,7 +280,6 @@ const sameItems = (
     );
   });
 
-/** The songs playing and up next in `queue`, which lyrics are looked up for. */
 const playingTrackIds = (
   queue: Pick<StoredQueue, "items" | "index" | "repeat">,
 ): ReadonlyArray<TrackId> => {
@@ -318,7 +309,6 @@ export const saveQueue = async (
   next: StoredQueue,
 ): Promise<void> => {
   const fields = {
-    // Convex leaves out fields set to `undefined`, so entries store only what they have.
     items: next.items.map((item) => ({
       id: item.id,
       trackId: item.trackId,

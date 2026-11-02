@@ -41,7 +41,6 @@ const itemClassName =
 
 const activeClassName = "bg-bg font-semibold text-text dark:bg-surface-raised";
 
-/** One playlist in the sidebar: its cover, name, and a short detail line. */
 function PlaylistLink({
   playlist,
   detail,

@@ -1,21 +1,14 @@
-/**
- * Paper's segmented chips (Yours / Shared, sort chips, search filters): full-radius pills with
- * 13/18 semibold labels. The selected chip is the text color with inverse label; the others sit on
- * the surface. A group allows exactly one selection.
- */
 import * as Haptics from "expo-haptics";
 import { Pressable, ScrollView, View } from "react-native";
 
 import { Text } from "./text";
 
-/** Props for `Chip`. */
 interface ChipProps {
   readonly label: string;
   readonly selected: boolean;
   readonly onPress: () => void;
 }
 
-/** One selectable pill. */
 function Chip({ label, selected, onPress }: ChipProps) {
   return (
     <Pressable
@@ -38,7 +31,6 @@ interface ChipOption<Value extends string> {
   readonly label: string;
 }
 
-/** Props for `ChipGroup`. */
 export interface ChipGroupProps<Value extends string> {
   readonly options: ReadonlyArray<ChipOption<Value>>;
   readonly value: Value;

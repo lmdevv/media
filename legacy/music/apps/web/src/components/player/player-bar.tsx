@@ -155,8 +155,6 @@ export function PlayerBar() {
               </Tooltip>
             </>
           )}
-          {/* In every state, and in the same place so it stays mounted: moving playback to
-              another device matters most when this browser can't play. */}
           <DevicePickerButton />
           {tools === "tools" ? <Volume /> : null}
         </div>
@@ -166,11 +164,6 @@ export function PlayerBar() {
   );
 }
 
-/**
- * The speaker button and its "Play on" popover. Below the desktop width the player bar is hidden
- * and `DeviceSheet` shows "Play on" instead (ADS-106). While mounted it lets "Play on" open here;
- * when it goes away (the queue empties) an open popover closes, so nothing reopens by itself.
- */
 function DevicePickerButton() {
   const { playOn, openPlayOn, closePlayOn, setPlayOnPopoverMounted } = useUi();
 
@@ -213,7 +206,6 @@ function DevicePickerButton() {
   );
 }
 
-/** The accent band under the player bar while another device plays. */
 function RemoteBand() {
   const player = usePlayer();
   const remote = useIsRemote();

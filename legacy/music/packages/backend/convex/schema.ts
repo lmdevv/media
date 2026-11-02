@@ -2,7 +2,6 @@ import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
-/** See `Role` in `@music/commands/models` and `permissions.ts`. */
 const role = v.union(
   v.literal("owner"),
   v.literal("admin"),
@@ -10,7 +9,6 @@ const role = v.union(
   v.literal("guest"),
 );
 
-/** Ownership only moves by transfer, so no invite gives it. */
 const inviteRole = v.union(v.literal("admin"), v.literal("member"), v.literal("guest"));
 
 const visibility = v.union(v.literal("shared"), v.literal("restricted"), v.literal("private"));
@@ -399,8 +397,6 @@ export default defineSchema({
     .index("by_artist", ["artistId"])
     .index("by_added", ["addedAt"])
     .index("by_library_added", ["libraryId", "addedAt"])
-    // Autoplay picks songs of the same genre, then of albums from around the same year, in each
-    // library the listener can read.
     .index("by_library_genre", ["libraryId", "genre", "year"])
     .index("by_library_year", ["libraryId", "year"])
     .index("by_art", ["artHash"])
@@ -476,8 +472,6 @@ export default defineSchema({
     .index("by_artist", ["artistId"])
     .index("by_title", ["missing", "titleKey"])
     .index("by_library_title", ["libraryId", "missing", "titleKey"])
-    // Where an album or artist finds other art when its own goes, in a few reads however many
-    // songs it has, and whether any song still uses a cover.
     .index("by_album_art", ["albumId", "missing", "artHash"])
     .index("by_artist_art", ["artistId", "missing", "artHash"])
     .index("by_art", ["artHash"])
@@ -516,7 +510,6 @@ export default defineSchema({
     state: lookupState,
   })
     .index("by_key", ["key"])
-    // The media service takes queued rows by priority, oldest first.
     .index("by_state", ["state.status", "state.priority", "state.requestedAt"]),
 
   /**
@@ -611,7 +604,6 @@ export default defineSchema({
     target: pinTarget,
   })
     .index("by_user_device", ["userId", "deviceId", "target.kind", "target.id"])
-    // A retag that empties an album moves its pins to the album its songs went to.
     .index("by_target", ["target.kind", "target.id"]),
 
   /**

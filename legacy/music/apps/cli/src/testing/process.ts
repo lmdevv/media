@@ -1,8 +1,3 @@
-/**
- * Test helpers that touch processes and files. They import nothing from Effect: Effect's
- * `FileSystem` and `ChildProcess` services are unstable, and the repo's lint rejects both them
- * and raw Node I/O inside Effect modules.
- */
 import { execFileSync, spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -39,7 +34,6 @@ export const runMusic = (
       env: { PATH: process.env["PATH"] ?? "", ...env },
     });
 
-    // A run that exits before reading stdin closes the pipe; that EPIPE is not a test failure.
     child.stdin.on("error", () => {});
     child.stdin.end(stdin);
 

@@ -7,14 +7,6 @@ const chromiumPath = process.env["CHROMIUM_PATH"];
 
 if (chromiumPath !== undefined) launchOptions.executablePath = chromiumPath;
 
-/**
- * End-to-end tests against a running [music] container: real Convex, real media service, real
- * audio. Start a fresh container with a library mounted at /music, then:
- *
- *   MUSIC_URL=http://localhost:8090 pnpm --filter web test:stack
- *
- * See e2e-stack/README.md.
- */
 export default defineConfig({
   testDir: "./e2e-stack",
   fullyParallel: false,

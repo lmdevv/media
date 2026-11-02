@@ -1,28 +1,11 @@
-/**
- * Measures how cleanly a player joined the parts of one continuous sine. Any inserted silence,
- * lost audio, or repeated audio at a song boundary shifts the tone's phase there, so fitting the
- * phase on both sides gives the error in samples, with sub-sample precision.
- *
- * Pure: the harness page records the engine's output through Web Audio and analyzes it here.
- */
-
-/** Below this the output counts as silent. The tones peak at 0.5. */
 const SILENCE = 0.001;
 
-/** Above this the output counts as sound when finding where the tone starts and stops. */
 const SOUND = 0.01;
 
-/** Samples on each side of a boundary that the phase fits use. */
 const FIT_WINDOW = 6000;
 
-/**
- * Samples next to a boundary the fits skip. A lossy codec smears the cut over up to one 2048
- * sample transform window; closer fits read that smear as a shift of a sample or two even in
- * ffmpeg's own decode of the files.
- */
 const FIT_GUARD = 3000;
 
-/** Samples on each side of a boundary searched for the largest residual. */
 const RESIDUAL_WINDOW = 64;
 
 /** What happened at one song boundary. */
@@ -57,7 +40,6 @@ export interface GapAnalysis {
   readonly boundaries: ReadonlyArray<BoundaryReading>;
 }
 
-/** Phase of the best-fitting `a cos(ωn) + b sin(ωn)` over `[from, to)`, as `atan2(-b, a)`. */
 const phaseOver = (samples: Float32Array, from: number, to: number, omega: number): number => {
   let cc = 0;
   let cs = 0;
@@ -118,8 +100,6 @@ export const analyzeTone = (
     }
   }
 
-  // The tone starts and ends on a rising zero crossing; fit the phase near each end and take the
-  // crossing closest to where the output passes SOUND.
   const period = sampleRate / frequency;
 
   const crossingNear = (estimate: number, from: number, to: number): number => {

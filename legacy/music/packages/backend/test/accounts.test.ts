@@ -1,7 +1,3 @@
-/**
- * Sign-in, sign-up, password reset links, and library access rules, through the real Convex Auth
- * action and command dispatcher in memory. Each case is a security review finding on PR #22.
- */
 import { UserId } from "@music/commands/ids";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
 import { sessionEnd } from "@music/sdk/errors";
@@ -22,7 +18,6 @@ const INVALID = { code: "unauthenticated", message: "Invalid email or password" 
 
 beforeAll(enableAuth);
 
-/** A server with its owner, an admin, and a member who has a password, ready for resets. */
 const household = async (): Promise<{
   readonly backend: Backend;
   readonly owner: User;
@@ -42,7 +37,6 @@ const household = async (): Promise<{
   return { backend, owner, admin, member };
 };
 
-/** Signs in with an API key, as the CLI does; null when the key no longer works. */
 const keySignIn = async (backend: Backend, key: string): Promise<MusicClient | null> => {
   const result = await backend.action(api.auth.signIn, { provider: "apikey", params: { key } });
   const token = result.tokens?.token;
@@ -59,7 +53,6 @@ const keySignIn = async (backend: Backend, key: string): Promise<MusicClient | n
 const redeem = (backend: Backend, token: string) =>
   passwordFlow(backend, { flow: "reset", token, newPassword: "a-new-password-1" });
 
-/** Why the server refused `call`'s session, or what happened instead. */
 const endedBy = async (call: Promise<unknown>): Promise<string> => {
   try {
     await call;
@@ -130,7 +123,6 @@ describe("password reset links", () => {
     const { backend, admin, member } = await household();
     const { token } = await admin.music.run("people.reset", { userId: member.userId });
 
-    // Behind the handlers' back, as an old deployment or a direct data edit could leave it.
     await backend.run(async (ctx) => {
       await ctx.db.patch(admin.id, { role: "member" });
     });
@@ -149,8 +141,6 @@ describe("password reset links", () => {
     const { backend, admin, member } = await household();
     const { token } = await admin.music.run("people.reset", { userId: member.userId });
 
-    // Another account under the same email can't exist alongside, but the account is found by
-    // the person, not by the email, so the password lands on theirs alone.
     const { userId } = await backend.mutation(internal.passwordResets.redeem, {
       hash: await sha256Hex(token),
       provider: "password",
@@ -188,7 +178,6 @@ describe("password reset links", () => {
     if (account?.secret === undefined) throw new Error("The member has no password");
     const checked = { accountId: account._id, secret: account.secret };
 
-    // A sign-in that checked the old password and opened its session just before the reset.
     const before = await backend.mutation(internal.users.openPasswordSession, checked);
 
     if (before.kind !== "open") throw new Error("The session did not open");
@@ -197,8 +186,6 @@ describe("password reset links", () => {
 
     expect(await failureCode(redeem(backend, token))).toBe("succeeded");
 
-    // That session ended with the reset, and one that checked the old password before the reset
-    // but opens its session after it opens none.
     const raced = backend.withIdentity({ subject: `${member.id}|${before.sessionId}` });
 
     await expect(raced.query(api.commands.read, { name: "account.me", args: {} })).rejects.toThrow(
@@ -214,8 +201,6 @@ describe("password reset links", () => {
     const { token } = await admin.music.run("people.reset", { userId: member.userId });
     const back = await redeem(backend, token);
 
-    // The cutoff time and the new session's can be the same instant (one transaction, one
-    // clock); the session still counts, by its generation.
     await backend.run(async (ctx) => {
       const sessions = await ctx.db
         .query("authSessions")
@@ -247,13 +232,11 @@ describe("password reset links", () => {
 
     await owner.music.run("people.suspend", { userId: member.userId });
 
-    // A link made before the suspension, by an admin.
     expect(await backend.query(api.setup.passwordReset, { token: made.token })).toEqual({
       state: "invalid",
     });
     expect(await failureCode(redeem(backend, made.token))).toBe("invalid_args");
 
-    // An operator's link (`createForEmail`) for someone already suspended.
     const { path } = await backend.mutation(internal.passwordResets.createForEmail, {
       email: "member@music.test",
     });
@@ -276,7 +259,6 @@ describe("password reset links", () => {
   });
 });
 
-/** A restricted library of the owner's that the admin is not on, with `member` added. */
 const restricted = async (owner: User, memberId: UserId) => {
   const { libraryId } = await owner.music.run("libraries.create", {
     name: "Kept",
@@ -334,21 +316,15 @@ describe("password resets around library access", () => {
   });
 });
 
-/** How each kind of account from before owners is stored. */
 const LEGACY_ROWS = {
   admin: { role: "admin" },
   "suspended admin": { role: "admin", suspendedAt: 1 },
   member: { role: "member" },
 } as const;
 
-/**
- * A server from before owners, with accounts of `kinds` in creation order, after its migrations
- * ran: each account's role and whether it is suspended.
- */
 const migrateLegacy = async (kinds: ReadonlyArray<keyof typeof LEGACY_ROWS>) => {
   const backend = makeBackend();
 
-  // Inserted in one transaction, in order, so creation order follows `kinds`.
   const ids = await backend.run(async (ctx) =>
     Promise.all(
       kinds.map(async (kind, index) =>
@@ -387,7 +363,6 @@ describe("the promoteOwner migration", () => {
   });
 });
 
-/** Lists `libraryId` as `user` sees it. */
 const listedAs = async (user: User, libraryId: string) =>
   (await user.music.read("libraries.list", {})).find((library) => library.id === libraryId);
 
@@ -402,7 +377,6 @@ describe("access to a library whose owner doesn't run libraries", () => {
       visibility: "private",
     });
 
-    // While its owner is an admin, the server's owner can't change who listens at all.
     expect((await listedAs(owner, libraryId))?.accessControl).toBe("none");
 
     await owner.music.run("people.role", { userId: adminId, role: "member" });
@@ -450,7 +424,6 @@ describe("access to a library whose owner doesn't run libraries", () => {
 
     await owner.music.run("people.role", { userId: adminId, role: "member" });
 
-    // Narrowing: take someone out, make it private.
     expect(
       await failureCode(
         owner.music.run("libraries.revoke", { libraryId: one, userId: member.userId }),
@@ -461,14 +434,12 @@ describe("access to a library whose owner doesn't run libraries", () => {
         owner.music.run("libraries.update", { libraryId: one, visibility: "private" }),
       ),
     ).toBe("succeeded");
-    // Another admin manages nothing of it.
     expect(
       await failureCode(
         other.music.run("libraries.revoke", { libraryId: two, userId: member.userId }),
       ),
     ).not.toBe("succeeded");
 
-    // Suspended rather than demoted, the same holds.
     await owner.music.run("people.role", { userId: adminId, role: "admin" });
     await owner.music.run("people.suspend", { userId: adminId });
     expect((await listedAs(owner, two))?.accessControl).toBe("narrow");
@@ -495,7 +466,6 @@ describe("API keys around a password reset", () => {
 
     const { token } = await admin.music.run("people.reset", { userId: member.userId });
 
-    // The batches that revoke the key rows wait: the key is off at once regardless.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
     try {
@@ -523,13 +493,11 @@ describe("API keys around a demotion to guest", () => {
 
     expect(await failureCode(cli.read("account.me", {}))).toBe("succeeded");
 
-    // The batches that revoke the keys wait until the end.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
     try {
       await owner.music.run("people.role", { userId: member.userId, role: "guest" });
       expect(await failureCode(cli.read("account.me", {}))).toBe("unauthenticated");
-      // A guest still listens through their password session.
       expect(await failureCode(member.music.read("account.me", {}))).toBe("succeeded");
 
       await owner.music.run("people.role", { userId: member.userId, role: "member" });
@@ -539,7 +507,6 @@ describe("API keys around a demotion to guest", () => {
       vi.useRealTimers();
     }
 
-    // Keys made after the promotion work.
     const fresh = await member.music.run("keys.create", { name: "New CLI" });
 
     expect(await keySignIn(backend, fresh.key)).not.toBeNull();
@@ -574,8 +541,6 @@ describe("password sign-up and sign-in", () => {
       [0, 1].map(async () => (await owner.music.run("invites.create", {})).code),
     );
 
-    // Both start before either account exists, each with an invite of its own and the same
-    // password: the second must not come back signed in to the account the first made.
     const attempts = await Promise.all(
       codes.map(async (inviteCode) =>
         failure(
@@ -694,7 +659,6 @@ describe("library access", () => {
 
     if (goneId === null) throw new Error("The library was not created");
 
-    // Far more leftovers than anyone holds grants, so the reader looks each library up.
     await backend.run(async (ctx) => {
       await Promise.all(
         Array.from({ length: 300 }, async () =>
@@ -721,8 +685,6 @@ describe("library access", () => {
   it("finds a grant however many a removed library left behind", async () => {
     const { backend, owner, member } = await household();
 
-    // Libraries created first sort first in the grants index; removed without their purge
-    // having run, their grants stay a while.
     const gone = await Promise.all(
       ["gone-1", "gone-2", "gone-3"].map(async (name) =>
         owner.music.run("libraries.create", {
@@ -803,7 +765,6 @@ describe("library access", () => {
       ].map(failureCode),
     );
 
-    // An admin who can't hear the library can't manage it at all, so it is not found.
     expect(refused).toEqual(["not_found", "not_found", "not_found", "not_found"]);
 
     await owner.music.run("libraries.grant", { libraryId, userId: member.userId });
@@ -826,7 +787,6 @@ describe("library access", () => {
       visibility: "private",
     });
 
-    // The admin's own: listed with its folder, and theirs to manage.
     expect(
       (await admin.music.read("libraries.list", {})).find(
         (library) => library.id === own.libraryId,
@@ -838,7 +798,6 @@ describe("library access", () => {
       ),
     ).toBe("succeeded");
 
-    // The owner's private one: no folder, and every management action is not found.
     const unheard = { libraryId: theirs.libraryId };
 
     const refused = await Promise.all(
@@ -856,7 +815,6 @@ describe("library access", () => {
       "not_found",
     );
 
-    // The server's owner manages every library, the admin's private one included.
     expect(await failureCode(owner.music.run("libraries.scan", { libraryId: own.libraryId }))).toBe(
       "succeeded",
     );
@@ -882,7 +840,6 @@ describe("library access", () => {
       (library) => library.id === libraryId,
     );
 
-    // 1. The folder isn't shown. 2. Deleting it fails. 3. Adding its folder again fails too.
     expect(listed?.path).toBeNull();
     expect(await failureCode(admin.music.run("libraries.delete", { libraryId }))).toBe("not_found");
     expect(
@@ -891,7 +848,6 @@ describe("library access", () => {
       ),
     ).toBe("conflict");
 
-    // 4. So nothing of it becomes searchable to the admin.
     const found = await admin.music.read("search", { query: "Private Song", limit: 10 });
 
     expect(found.tracks).toEqual([]);
@@ -946,7 +902,6 @@ describe("names given at sign-up", () => {
         }),
       ),
     ).toBe("invalid_args");
-    // Straight to the dispatcher: the SDK would refuse it before sending.
     expect(
       await failureCode(
         owner.as.mutation(api.commands.run, {

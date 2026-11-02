@@ -1,8 +1,3 @@
-/**
- * Small values this install keeps between launches, in the iOS keychain through Expo SecureStore:
- * the server it connects to, the Convex Auth tokens for each server, and the appearance. Reads
- * are synchronous so the first frame can decide what to show.
- */
 import type { TokenStorage } from "@convex-dev/auth/react";
 import * as SecureStore from "expo-secure-store";
 
@@ -25,9 +20,7 @@ export const readValue = (key: string): string | null => {
 export const writeValue = (key: string, value: string | null): void => {
   try {
     SecureStore.setItem(key, value ?? "");
-  } catch {
-    // The keychain can refuse writes while the device is locked; the app keeps working in memory.
-  }
+  } catch {}
 };
 
 /**

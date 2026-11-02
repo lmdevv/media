@@ -1,4 +1,3 @@
-/** HTTP `Range` header handling for single byte ranges (RFC 9110 section 14). */
 import { Data } from "effect";
 
 /** What to send for a request against a file of a known size. `end` is inclusive. */

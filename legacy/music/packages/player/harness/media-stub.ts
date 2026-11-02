@@ -54,7 +54,6 @@ type TranscodeProfile = (typeof transcodeProfiles)[number];
 const transcodeProfile = (value: string | null): TranscodeProfile | null =>
   transcodeProfiles.find((profile) => profile === value) ?? null;
 
-/** The scanner's codec name for a fixture, from its extension. */
 const fixtureCodecs = new Map([
   [".flac", "flac"],
   [".mp3", "mp3"],
@@ -94,13 +93,10 @@ let failFragmented = false;
 
 let failAac = false;
 
-/** Every stream URL is refused like an expired one; see `/control/expire-urls`. */
 let refuseUrls = false;
 
-/** Until when (`Date.now()`) streams from an offset get a busy answer; see `/control/busy`. */
 let busyUntil = 0;
 
-/** Answers `response` as busy when `url` asks for an offset while `/control/busy` is on. */
 const answeredBusy = (url: URL, response: ServerResponse): boolean => {
   if (Number(url.searchParams.get("start") ?? "0") <= 0 || Date.now() >= busyUntil) return false;
   response.writeHead(503, { ...cors, "Retry-After": "1" }).end("Busy");
@@ -108,11 +104,6 @@ const answeredBusy = (url: URL, response: ServerResponse): boolean => {
   return true;
 };
 
-/**
- * How the next streamed transcode stops early, after `bytes`: `abort` drops the connection (a
- * proxy timing out, or ffmpeg dying), `end` ends the response cleanly as if the song were over,
- * and `hang` keeps the connection open with nothing more on it.
- */
 interface Cut {
   readonly bytes: number;
   readonly mode: "abort" | "end" | "hang";
@@ -120,10 +111,8 @@ interface Cut {
 
 let nextCut: Cut | null = null;
 
-/** How long a cut stream sits silent before it is aborted or ended. */
 const CUT_AFTER_MS = 2000;
 
-/** The cut for the response being sent now, if any; each cut applies once. */
 const takeCut = (): Cut | null => {
   const cut = nextCut;
 
@@ -134,18 +123,15 @@ const takeCut = (): Cut | null => {
 
 const cutModes = ["abort", "end", "hang"] as const;
 
-/** While this file exists, ffmpeg reads its input at the rate in it (see `throttled-ffmpeg.sh`). */
 const readRateFile = join(fixturesDir, ".readrate");
 
 process.env["MUSIC_STUB_READRATE_FILE"] = readRateFile;
 
-/** Makes later transcodes read their source at `rate` times real time, or at full speed. */
 const throttleTranscodes = (rate: number | null): void => {
   if (rate === null) rmSync(readRateFile, { force: true });
   else writeFileSync(readRateFile, String(rate));
 };
 
-/** Sends `file` honouring a single `Range: bytes=start-end` request header. */
 const sendFile = (
   file: string,
   range: string | undefined,
@@ -189,10 +175,8 @@ const sendFile = (
   createReadStream(file, { start, end }).pipe(response);
 };
 
-/** The request headers a transcoded response depends on. */
 const forwardedHeaders = ["range", "if-range", "if-none-match"] as const;
 
-/** Sends `file` transcoded to `profile` through the media service's own response code. */
 const sendTranscoded = async (
   key: string,
   file: string,
@@ -226,13 +210,11 @@ const sendTranscoded = async (
     return;
   }
 
-  // Only a streamed response (live or from an offset) is cut; a finished file has a length.
   const cut = transcoded.headers.has("Content-Length") ? null : takeCut();
 
   await pump(transcoded.body, response, cut);
 };
 
-/** Resolves once `response` can take more bytes, or `closed` settles. */
 const writable = (response: ServerResponse, closed: Promise<void>): Promise<void> =>
   Promise.race([
     new Promise<void>((resolve) => {
@@ -243,10 +225,6 @@ const writable = (response: ServerResponse, closed: Promise<void>): Promise<void
     closed,
   ]);
 
-/**
- * Sends `body` with backpressure. A body that fails midway (a live transcode whose ffmpeg died)
- * drops the connection. With `cut`, the response stops after `cut.bytes`: see `Cut`.
- */
 const pump = async (
   body: ReadableStream<Uint8Array>,
   response: ServerResponse,
@@ -261,7 +239,6 @@ const pump = async (
     });
   });
 
-  /** Sends the body from `sent` bytes on, one chunk per step. */
   const step = async (sent: number): Promise<void> => {
     const next = await reader.read();
 
@@ -274,14 +251,11 @@ const pump = async (
     if (cut !== null && sent + next.value.length >= cut.bytes) {
       response.write(next.value.subarray(0, cut.bytes - sent));
       await reader.cancel();
-      // Stalled for a while first, as a proxy sees a client that stopped reading: long enough
-      // for the element to have started on what it got.
       await new Promise((resolve) => setTimeout(resolve, CUT_AFTER_MS));
 
       if (cut.mode === "abort") response.destroy();
       else if (cut.mode === "end") response.end();
 
-      // `hang`: the connection stays open with nothing more on it until the client leaves.
       return;
     }
 
@@ -351,7 +325,6 @@ const streamTrack = async (url: URL, incoming: IncomingMessage, response: Server
 
 generateFixtures();
 
-// A run that stopped mid-test may have left transcodes slow.
 throttleTranscodes(null);
 
 const server = createServer((request, response) => {
@@ -393,7 +366,6 @@ const server = createServer((request, response) => {
   }
 
   if (down) {
-    // The real outage case is a refused connection; a 503 exercises the same player path.
     response.writeHead(503, cors).end("Down");
 
     return;

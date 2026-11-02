@@ -1,7 +1,3 @@
-/**
- * Maps a UTF-16 code unit so that comparing mapped units orders strings by code point: surrogates
- * (U+D800 to U+DFFF, the halves of characters beyond U+FFFF) move above U+E000 to U+FFFF.
- */
 const codePointRank = (unit: number): number =>
   unit >= 0xe000 ? unit - 0x800 : unit >= 0xd800 ? unit + 0x2000 : unit;
 

@@ -1,9 +1,3 @@
-/**
- * Paper's Play and Shuffle pair (C02, C03) and C11's Play and Add songs: two pills 12pt apart,
- * which split the row on a phone and keep their own width, at least 160pt, in an iPad header
- * (P05). Playing goes through the player, which replaces the queue and plays on this phone (or
- * adds to the host's queue in someone else's Jam).
- */
 import type { TrackId } from "@music/commands/ids";
 import { Play, Plus, Shuffle } from "lucide-react-native";
 import { View } from "react-native";
@@ -13,7 +7,6 @@ import type { PairWidth } from "@/components/browse/play-shuffle";
 import { Button } from "@/components/ui/button";
 import { usePlayer, usePlayerActions } from "@/player";
 
-/** Plays `trackIds` from `index`, or shuffled from a random song, turning shuffle on or off first. */
 const usePlayList = (): ((
   trackIds: ReadonlyArray<TrackId>,
   mode: { readonly shuffle: boolean; readonly index?: number },
@@ -30,7 +23,6 @@ const usePlayList = (): ((
   };
 };
 
-/** Props for `PlayButtons`. */
 export interface PlayButtonsProps {
   readonly trackIds: ReadonlyArray<TrackId>;
   /** Shuffle beside Play, or Add songs for a collaborator (C11). */

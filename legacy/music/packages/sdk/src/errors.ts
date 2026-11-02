@@ -41,7 +41,6 @@ export const sessionEnd = (error: Error): SessionEnd | null => {
 
   return Option.match(decodeRefusedData(error.data), {
     onNone: () => null,
-    // A reason this client doesn't know still means the session is over.
     onSome: ({ reason }) => (reason === "suspended" || reason === "removed" ? reason : "ended"),
   });
 };

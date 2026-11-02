@@ -1,4 +1,3 @@
-/** The shell's hold on the Now Playing panel. Nothing here follows the position, so it re-renders by song. */
 import type { TrackId } from "@music/commands/ids";
 import type { LyricsAnswer, LyricsOffer } from "@music/player/lyrics";
 import { useNavigationState } from "expo-router/react-navigation";

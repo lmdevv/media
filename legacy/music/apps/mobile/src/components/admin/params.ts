@@ -1,8 +1,3 @@
-/**
- * The `[id]` segment of an administration route, parsed into its ID type at the route boundary.
- * Null when the segment is missing, so a screen shows its "not found" state instead of asking the
- * server about nothing.
- */
 import { InviteId, JobId, LibraryId, UserId } from "@music/commands/ids";
 import { Option, Schema } from "effect";
 import { useLocalSearchParams } from "expo-router";

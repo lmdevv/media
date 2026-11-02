@@ -38,7 +38,6 @@ const tfdt = (version: 0 | 1, time: bigint): Uint8Array => {
   return box("tfdt", payload);
 };
 
-/** A fragmented MP4 like ffmpeg's: `ftyp`, `moov`, then `moof` + `mdat` per fragment. */
 const stream = (version: 0 | 1, times: ReadonlyArray<bigint>, mdatBytes: number): Uint8Array => {
   const parts = [
     box("ftyp", new Uint8Array(12)),
@@ -61,7 +60,6 @@ const stream = (version: 0 | 1, times: ReadonlyArray<bigint>, mdatBytes: number)
   return Buffer.concat(parts);
 };
 
-/** Feeds `bytes` through the shift in pieces cut at `cuts`. */
 const shiftInPieces = (
   bytes: Uint8Array,
   cuts: ReadonlyArray<number>,
@@ -115,7 +113,6 @@ describe("shiftTimeline", () => {
 
           const first = times[0] ?? 0n;
 
-          // Only the decode times change.
           expect(shifted).toEqual(
             stream(
               version,

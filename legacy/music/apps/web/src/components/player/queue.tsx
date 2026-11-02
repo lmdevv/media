@@ -63,20 +63,13 @@ export const useClearQueue = (): readonly [
 
 type Tone = "plain" | "glass";
 
-/** Reordering for one row: its place in the list and how to move it. */
 interface RowReorder {
   readonly index: number;
   readonly count: number;
   readonly reorder: Reorder;
-  /** Phones show up/down buttons in reorder mode instead of the drag handle. */
   readonly mode: "drag" | "buttons";
 }
 
-/**
- * One queued song. Click to play it; the remove button appears on hover or focus. `tone="glass"`
- * draws it for the art-tinted Now Playing background. `addedBy` names who queued it when that is
- * someone else.
- */
 function QueueRow({
   entry,
   tone = "plain",
@@ -90,7 +83,6 @@ function QueueRow({
   readonly current?: boolean;
   readonly showAddedBy?: boolean;
   readonly reorder?: RowReorder;
-  /** Removes the entry from the queue; a row without it has no remove button. */
   readonly onRemove?: () => void;
 }) {
   const player = usePlayer();
@@ -152,7 +144,6 @@ const queueRowClassName = (glass: boolean, current: boolean): string =>
     glass && current && "bg-text/8",
   );
 
-/** A queue row's title, and its artist with who added it when that is worth saying. */
 function QueueRowText({
   entry,
   glass,
@@ -164,7 +155,6 @@ function QueueRowText({
   readonly current: boolean;
   readonly showAddedBy: boolean;
 }) {
-  // A song autoplay picked for the Jam's host from a library shared with them alone.
   const title = entry.withheld === true ? WITHHELD_TITLE : entry.title;
   const artist = entry.withheld === true ? WITHHELD_ARTIST : entry.artist;
 
@@ -191,10 +181,6 @@ function QueueRowText({
   );
 }
 
-/**
- * The end of a queue row: playing bars on the current song, up/down buttons in reorder mode, and
- * otherwise the length (Now Playing) and the remove button.
- */
 function QueueRowEnd({
   entry,
   glass,
@@ -250,10 +236,6 @@ function QueueRowEnd({
   );
 }
 
-/**
- * Whether entries should say who added them: always in a Jam, and otherwise only when someone
- * other than you added any.
- */
 const useShowAddedBy = (entries: ReadonlyArray<QueueEntry>): boolean => {
   const me = useRead("account.me", {});
   const { jam } = usePlayer();
@@ -264,23 +246,13 @@ const useShowAddedBy = (entries: ReadonlyArray<QueueEntry>): boolean => {
   );
 };
 
-/**
- * Removing queue entries one at a time, moving focus to the row that takes a removed one's place,
- * or to the new last row, instead of dropping it to the page (ADS-107); with no rows left, the
- * list itself takes focus. Returns the list's ref and the remove handler for a row.
- */
 const useQueueRemoval = (entries: ReadonlyArray<QueueEntry>) => {
   const player = usePlayer();
   const list = useRef<HTMLDivElement>(null);
-  // Set once a removal has landed (a failure shows as the player error and sets nothing). The
-  // queue can reach this view a render later, so focus moves when the list no longer shows it.
   const [removed, setRemoved] = useState<LandedRemoval | null>(null);
   const handled = useRef<LandedRemoval | null>(null);
   const signature = entries.map((entry) => entry.itemId).join(" ");
 
-  // A layout effect, so focus moves in the commit that unmounts the removed row's button. Focus
-  // left on the page for a moment would be taken by Now Playing's dialog, which moves it to itself
-  // again a frame later, after any passive effect has run.
   useLayoutEffect(() => {
     const element = list.current;
 
@@ -288,7 +260,6 @@ const useQueueRemoval = (entries: ReadonlyArray<QueueEntry>) => {
 
     const active = document.activeElement;
 
-    // Entry IDs are unique, so "the song's count dropped" means this entry is gone.
     const move = focusMove(removed, {
       now: Date.now(),
       trackIds: signature.length === 0 ? [] : signature.split(" "),
@@ -306,7 +277,6 @@ const useQueueRemoval = (entries: ReadonlyArray<QueueEntry>) => {
     (buttons[Math.min(removed.position, buttons.length - 1)] ?? element).focus();
   }, [removed, signature]);
 
-  // One removal at a time: a second click before the first lands would act on a stale list.
   const removing = useRef(false);
 
   const remove = async (itemId: QueueItemId, position: number): Promise<void> => {
@@ -393,7 +363,6 @@ export function UpcomingQueue({
   );
 }
 
-/** "Autoplay · similar in your library", with its toggle. Off hides the songs it would add. */
 function AutoplaySection({
   tone,
   entries,
@@ -455,7 +424,6 @@ export function QueuePanel() {
   const { current, queued, source } = useUpNext();
   const [clear, clearing] = useClearQueue();
 
-  // Esc closes the panel, unless a dialog or menu above it already handled the key.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;

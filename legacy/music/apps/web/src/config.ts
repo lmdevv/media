@@ -1,11 +1,9 @@
 import { Option, Schema } from "effect";
 
-/** The global that `/config.js` sets; the container image serves that script before the app. */
 const RUNTIME_CONFIG = "__MUSIC_CONFIG__";
 
 declare global {
   interface Window {
-    /** Runtime configuration from `/config.js`; null or absent outside the container image. */
     [RUNTIME_CONFIG]?: { readonly convexUrl?: string } | null | undefined;
   }
 }

@@ -1,8 +1,3 @@
-/**
- * Add songs (C05's Add songs, C02's plus, C07's Add): every song, or search results while typing,
- * each with a plus that adds it to the playlist at once and turns into a check. Paper doesn't draw
- * this picker; it is built from the Songs list and Search.
- */
 import { PlaylistId } from "@music/commands/ids";
 import type { TrackId } from "@music/commands/ids";
 import type { PlaylistDetail, Track } from "@music/commands/models";
@@ -23,10 +18,8 @@ import { NavBar } from "@/components/ui/nav-bar";
 import { Row, RowCheck } from "@/components/ui/row";
 import { Text } from "@/components/ui/text";
 
-/** Search results to show at most. */
 const SEARCH_LIMIT = 50;
 
-/** The search field, stuck under the bar. */
 function SearchField({
   query,
   onChange,
@@ -98,7 +91,6 @@ function Picker({ detail }: { readonly detail: PlaylistDetail }) {
     }
   };
 
-  // The field sits above the list rather than in it, so recycling never touches the focused input.
   return (
     <View className="flex-1 bg-canvas">
       <NavBar title={`Add to ${detail.playlist.name}`} />

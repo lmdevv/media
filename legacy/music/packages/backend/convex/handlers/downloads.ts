@@ -42,7 +42,6 @@ const findDevice = (
     .withIndex("by_user_device", (q) => q.eq("userId", userId).eq("deviceId", deviceId))
     .unique();
 
-/** Every pin `userId` has on a device. */
 const pinsOn = (
   ctx: ReadCtx,
   userId: Id<"users">,
@@ -63,7 +62,6 @@ export const downloadQueries = {
             .take(LISTED_PINS)
         : await pinsOn(ctx, viewer.id, args.deviceId);
 
-    // The device asked for is listed even when it keeps nothing, so a device can watch its list.
     const deviceIds = [
       ...new Set([
         ...(args.deviceId === undefined ? [] : [args.deviceId]),
@@ -114,7 +112,6 @@ export const downloadMutations = {
     const target = parseTarget(ctx, args.kind, args.id);
     const held = await pinsOn(ctx, viewer.id, args.deviceId);
 
-    // A device that keeps downloads stays the person's even once its row is pruned.
     if (held.length === 0 && (await findDevice(ctx, viewer.id, args.deviceId)) === null) {
       return fail("not_found", "That device isn't one of yours");
     }
@@ -141,7 +138,6 @@ export const downloadMutations = {
       target,
     });
 
-    // Downloads often play with no connection, so their lyrics are looked up ahead of time.
     if ((await readServerSettings(ctx)).remoteLyrics) {
       await ctx.scheduler.runAfter(0, internal.lyricLookups.requestPinned, {
         target,

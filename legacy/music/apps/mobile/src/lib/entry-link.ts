@@ -1,10 +1,3 @@
-/**
- * Links that open an entry screen: an invite (E08), a password reset (E09), or a Jam (D05, D07).
- * The server shares them as web links, `<origin>/invite/<code>`, `<origin>/reset/<token>`, and
- * `<origin>/jam/<code>`, which name the server too; the app's own `music://invite/<code>` and the
- * like name none and belong to the connected server, unless they carry `?server=<address>`. Parsed with patterns rather than
- * `URL`, whose query support React Native only partly implements.
- */
 import { originCandidates } from "./server";
 import type { ServerOrigin } from "./server";
 
@@ -37,7 +30,6 @@ const decode = (text: string): string | null => {
   }
 };
 
-/** The `server` query parameter's value, if present. */
 const serverParam = (query: string | undefined): string | null => {
   for (const pair of (query ?? "").split("&")) {
     const [key = "", ...rest] = pair.split("=");
@@ -84,10 +76,6 @@ export const parseEntryLink = (text: string): EntryLink | null => {
   return originCandidates(base) === null ? null : makeLink(groups, base);
 };
 
-/**
- * Each link's screen signed out and signed in. Invites and resets are for people signed out; a Jam
- * link opens its guest screen (D07) signed out, and its invite (D05) signed in.
- */
 const SCREENS = {
   invite: { signedOut: "/invite/", signedIn: null },
   reset: { signedOut: "/reset/", signedIn: null },

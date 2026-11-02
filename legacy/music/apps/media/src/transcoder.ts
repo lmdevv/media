@@ -1,22 +1,3 @@
-/**
- * Transcodes tracks into a size-bounded cache under `MEDIA_DATA_DIR/cache`: fast-start AAC for
- * `<audio>`, and fragmented MP4 (FLAC or AAC) for the gapless MSE engine. A fragmented output has
- * a `.json` sidecar with its measured sample timing, written before the media file appears and
- * evicted with it.
- *
- * A transcode can be read while ffmpeg writes it: ffmpeg also writes a streamable copy (the
- * fragmented stream without its index, or ADTS for the AAC profiles) to a pipe the transcoder
- * copies into a "live" file beside the output, and readers follow that file as it grows.
- * Concurrent requests for the same output share one ffmpeg run, at most two ffmpeg runs happen at
- * once, a run that nobody waits for any more stops, and the least recently served files are
- * evicted when the cache grows past its limit.
- *
- * A seek ahead of a running transcode gets its own ffmpeg run from that point (`openAt`), which
- * streams straight to the one listener and is never cached.
- *
- * A download asks for the finished file without reading the live one (`prepare`): its transcode
- * runs detached from the request, in a lane of its own beside the shared runs.
- */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
@@ -70,10 +51,6 @@ import { declaredLength, estimatedLength, measureTiming, SampleTiming } from "./
 
 const MAX_CONCURRENT_TRANSCODES = 2;
 
-/**
- * Detached runs (`prepare`) encode in their own lane, beside the shared runs: a device downloading
- * a whole library never takes a listener's ffmpeg slot.
- */
 const PREPARE_RUNS = 1;
 
 /**
@@ -83,7 +60,6 @@ const PREPARE_RUNS = 1;
  */
 export const PREPARE_HOLD = Duration.minutes(2);
 
-/** How soon a client waiting for a detached run should ask again. */
 const PREPARE_RETRY = Duration.seconds(2);
 
 /** How long the failure of a detached run is reported; asking after that starts a new run. */
@@ -95,24 +71,16 @@ export const PREPARE_FAILURE_TTL = Duration.minutes(1);
  */
 export const MAX_CONCURRENT_OFFSET_RUNS = 8;
 
-/** How long one ffmpeg run may take, from when it gets its slot (waiting for one is not counted). */
 const TRANSCODE_TIMEOUT = Duration.minutes(10);
 
-/**
- * How long a transcode keeps running after its last reader left. A listener who skips ahead frees
- * the ffmpeg slot for the next song; one who seeks in a live stream fetches it again at once and
- * finds the run still going.
- */
 const ABANDON_GRACE = Duration.seconds(1);
 
 const PROFILES: ReadonlyArray<TranscodeProfile> = ["aac-320", "aac-128", "fmp4-flac", "fmp4-aac"];
 
 const SIDECAR_SUFFIX = ".json";
 
-/** Temporary and live files end with this; eviction skips them and startup removes them. */
 const PARTIAL_SUFFIX = ".part";
 
-/** Largest piece a live reader reads from the live file at once. */
 const LIVE_CHUNK_BYTES = 256 * 1024;
 
 const sidecarOf = (output: string): string => `${output}${SIDECAR_SUFFIX}`;
@@ -300,44 +268,27 @@ export class Transcoder extends Context.Service<Transcoder, Interface>()(
   "@music/media/Transcoder",
 ) {}
 
-/** Builds the `TranscodeError` for `input` from its cause. */
 const failure = (input: TranscodeInput) => (cause: TranscodeError["cause"]) =>
   new TranscodeError({ trackId: input.trackId, profile: input.profile, cause });
 
-/** How far one transcode has come; live readers follow it. */
 type Progress = Data.TaggedEnum<{
-  /** Waiting for a transcode slot, or probing the source. */
   Queued: {};
-  /**
-   * ffmpeg is running; the first `written` bytes of the live file are final. `timing` is the
-   * expected timing of a fragmented profile.
-   */
   Writing: { readonly timing: Option.Option<SampleTiming>; readonly written: number };
-  /** The output is in the cache; the live file holds `written` bytes (0 without one). */
   Finished: { readonly transcoded: Transcoded; readonly written: number };
   Failed: { readonly error: TranscodeError };
 }>;
 
 const Progress = Data.taggedEnum<Progress>();
 
-/** One running transcode. */
 interface Job {
   readonly output: string;
-  /** The slots its ffmpeg run takes one of: the shared ones, or the prepare lane. */
   readonly lane: Semaphore.Semaphore;
-  /** Where the live copy goes. */
   readonly live: string;
   readonly progress: SubscriptionRef.SubscriptionRef<Progress>;
-  /**
-   * Readers holding the live file, and whether the job has settled. The live file is deleted
-   * once both say it is no longer needed.
-   */
   readonly holds: Ref.Ref<{ readonly readers: number; readonly settled: boolean }>;
-  /** The fiber running ffmpeg, to stop it once nobody reads. */
   readonly fiber: Deferred.Deferred<Fiber.Fiber<void>>;
 }
 
-/** One read of a live file: the bytes, and where the next read starts (none at the end). */
 type LivePage = readonly [ReadonlyArray<Uint8Array>, Option.Option<number>];
 
 const writtenOf = (progress: Progress): number =>
@@ -348,10 +299,6 @@ const writtenOf = (progress: Progress): number =>
     Failed: () => 0,
   });
 
-/**
- * Waits until `select` passes on the job's progress (checked now and on every change), then runs
- * what it selected.
- */
 const awaitProgress = <A, E>(
   job: Job,
   select: (progress: Progress) => Result.Result<Effect.Effect<A, E>, Progress>,
@@ -359,17 +306,9 @@ const awaitProgress = <A, E>(
   SubscriptionRef.changes(job.progress).pipe(
     Stream.filterMap(select),
     Stream.runHead,
-    // `changes` never ends, so the stream only stops once something was selected.
     Effect.flatMap(Option.getOrThrow),
   );
 
-/**
- * Deletes the least recently used files until the cache fits in `maxBytes`. `lastUsed` holds the
- * serve times seen by this process; older files fall back to their modification time. Files are
- * never touched to record use, because their modification time feeds the `ETag` players send
- * back in `If-Range`. Entries of `lastUsed` for files no longer in the cache are dropped, so it
- * never outgrows the cache.
- */
 const evict = Effect.fn("Transcoder.evict")(function* (
   cacheDir: string,
   maxBytes: number,
@@ -380,7 +319,6 @@ const evict = Effect.fn("Transcoder.evict")(function* (
     Files.listFiles(join(cacheDir, profile)),
   );
 
-  // Sidecars go with their media file, so only media files are candidates.
   const files = listed
     .flat()
     .filter((file) => !file.path.endsWith(PARTIAL_SUFFIX) && !file.path.endsWith(SIDECAR_SUFFIX));
@@ -411,7 +349,6 @@ const evict = Effect.fn("Transcoder.evict")(function* (
   }
 });
 
-/** The cached output of `input`, when its media file (and sidecar, if any) are complete. */
 const cached = (output: string, input: TranscodeInput): Effect.Effect<Option.Option<Transcoded>> =>
   Effect.gen(function* () {
     yield* Files.statPath(output);
@@ -426,7 +363,6 @@ const cached = (output: string, input: TranscodeInput): Effect.Effect<Option.Opt
     return Option.some({ path: output, timing: Option.some(timing) });
   }).pipe(Effect.orElseSucceed(() => Option.none()));
 
-/** Builds the transcoder from configuration. */
 const make = Effect.gen(function* () {
   const config = yield* MediaConfig;
   const scope = yield* Effect.scope;
@@ -434,14 +370,10 @@ const make = Effect.gen(function* () {
   const permits = yield* Semaphore.make(MAX_CONCURRENT_TRANSCODES);
   const prepareLane = yield* Semaphore.make(PREPARE_RUNS);
   const offsetRuns = yield* Semaphore.make(MAX_CONCURRENT_OFFSET_RUNS);
-  /** Serve times by cached file, updated in place: copying it on every serve would cost O(n). */
   const lastUsed = new Map<string, number>();
-  /** Running jobs by output path. Changes, and holds taken on a job, happen under `registry`. */
   const jobs = yield* Ref.make<ReadonlyMap<string, Job>>(new Map());
   const registry = yield* Semaphore.make(1);
-  /** Jobs held for `prepare` by output, with when someone last asked. Changed under `registry`. */
   const preparing = new Map<string, { readonly job: Job; readonly askedAt: number }>();
-  /** Failures of held jobs by output, reported until `until`. Changed under `registry`. */
   const failures = new Map<string, { readonly error: TranscodeError; readonly until: number }>();
 
   const markUsed = (output: string, at: number): Effect.Effect<void> =>
@@ -459,7 +391,6 @@ const make = Effect.gen(function* () {
       const directory = join(cacheDir, profile);
       yield* Files.makeDirectory(directory);
 
-      // Leftovers of runs that a crash or restart cut short.
       const partial = (yield* Files.listFiles(directory)).filter((file) =>
         file.path.endsWith(PARTIAL_SUFFIX),
       );
@@ -469,7 +400,6 @@ const make = Effect.gen(function* () {
   ).pipe(Effect.orDie);
   yield* evictNow("");
 
-  /** Copies one piece of ffmpeg's live output into the live file and lets readers see it. */
   const appendLive = (job: Job, chunk: Uint8Array) =>
     Files.appendToFile(job.live, chunk).pipe(
       Effect.andThen(
@@ -484,16 +414,11 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  /** Creates the live file and lets readers follow it from now on. */
   const startLive = (job: Job, timing: Option.Option<SampleTiming>) =>
     Files.appendToFile(job.live, new Uint8Array()).pipe(
       Effect.andThen(SubscriptionRef.set(job.progress, Progress.Writing({ timing, written: 0 }))),
     );
 
-  /**
-   * Writes a fragmented transcode to `temporary` (and its live copy) and measures its timing.
-   * Readers can follow the live copy from the moment the source probe gives its expected timing.
-   */
   const encodeFragmented = Effect.fn("Transcoder.encodeFragmented")(function* (
     job: Job,
     input: TranscodeInput,
@@ -554,8 +479,6 @@ const make = Effect.gen(function* () {
 
     if (Option.isNone(timing)) return yield* Effect.fail("timing" as const);
 
-    // Live readers already trimmed with the expected priming and rate. The finished file keeps
-    // what was measured either way; a live reader that later sees different numbers gives up.
     if (
       timing.value.primingSamples !== expected.primingSamples ||
       timing.value.sampleRate !== expected.sampleRate
@@ -568,7 +491,6 @@ const make = Effect.gen(function* () {
     return timing.value;
   });
 
-  /** Runs ffmpeg for `job` and moves the result into the cache. */
   const produce = Effect.fn("Transcoder.produce")(function* (job: Job, input: TranscodeInput) {
     const temporary = `${job.output}.${randomUUID()}${PARTIAL_SUFFIX}`;
     const profile = input.profile;
@@ -581,7 +503,6 @@ const make = Effect.gen(function* () {
         const measured = yield* encodeFragmented(job, input, profile, temporary);
         const json = yield* encodeSidecar(measured);
 
-        // The sidecar lands first: a media file without one is never served as finished.
         yield* Files.writeFileAtomic(
           sidecarOf(job.output),
           new TextEncoder().encode(json),
@@ -590,7 +511,6 @@ const make = Effect.gen(function* () {
 
         timing = Option.some(measured);
       } else {
-        // Nothing to probe first: readers can follow the ADTS copy at once.
         yield* startLive(job, Option.none());
         yield* runToolPiped(
           config.ffmpegPath,
@@ -611,7 +531,6 @@ const make = Effect.gen(function* () {
 
       return { path: job.output, timing };
     }).pipe(
-      // Inside the permit: a run that waited for a slot behind two long ones still gets its time.
       Effect.timeoutOrElse({
         duration: TRANSCODE_TIMEOUT,
         orElse: () => Effect.fail("timeout" as const),
@@ -631,7 +550,6 @@ const make = Effect.gen(function* () {
   const deleteLive = (job: Job): Effect.Effect<void> =>
     Files.removePath(job.live).pipe(Effect.ignore);
 
-  /** Takes a job out of the registry, unless a newer job for its output took its place. */
   const unregister = (job: Job): Effect.Effect<void> =>
     Ref.update(jobs, (current) => {
       if (current.get(job.output) !== job) return current;
@@ -641,15 +559,10 @@ const make = Effect.gen(function* () {
       return next;
     });
 
-  /**
-   * Retires a job once ffmpeg is done: new requests find the cached file (or start over after a
-   * failure), readers learn the outcome, and the live file goes once no reader holds it.
-   */
   const settle = (job: Job, input: TranscodeInput, exit: Exit.Exit<Transcoded, TranscodeError>) =>
     Effect.gen(function* () {
       yield* registry.withPermits(1)(unregister(job));
 
-      // Settled before readers hear the outcome, so the last one to leave deletes the live file.
       const unused = yield* Ref.modify(job.holds, (holds) => [
         holds.readers === 0,
         { ...holds, settled: true },
@@ -672,7 +585,6 @@ const make = Effect.gen(function* () {
       );
     });
 
-  /** Lets go of a job; the last reader of a settled job deletes its live file. */
   const release = (job: Job) =>
     Ref.modify(job.holds, (holds) => {
       const readers = holds.readers - 1;
@@ -691,10 +603,6 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  /**
-   * Stops a running job that still has no readers: new requests start over, and ffmpeg is
-   * killed, which frees its slot and lets `settle` clean up.
-   */
   const stopIfAbandoned = (job: Job) =>
     registry
       .withPermits(1)(
@@ -712,14 +620,12 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  /** Holds a job, running and with its live file, until the scope closes. Call under `registry`. */
   const hold = (job: Job) =>
     Effect.acquireRelease(
       Ref.update(job.holds, (holds) => ({ ...holds, readers: holds.readers + 1 })),
       () => release(job),
     );
 
-  /** Registers a new job on `lane` and starts it in the background. Call under `registry`. */
   const start = Effect.fn("Transcoder.start")(function* (
     input: TranscodeInput,
     output: string,
@@ -736,7 +642,6 @@ const make = Effect.gen(function* () {
 
     yield* Ref.update(jobs, (current) => new Map(current).set(output, job));
 
-    // The job belongs to the transcoder, not to a request: requests come and go as readers.
     const fiber = yield* produce(job, input).pipe(
       Effect.mapError(failure(input)),
       Effect.onExit((exit) => settle(job, input, exit)),
@@ -749,7 +654,6 @@ const make = Effect.gen(function* () {
     return job;
   });
 
-  /** The live file's bytes from `position` on, as far as they are written. */
   const readLive = (job: Job, input: TranscodeInput, position: number, available: number) =>
     Files.readAt(job.live, position, Math.min(LIVE_CHUNK_BYTES, available - position)).pipe(
       Effect.flatMap((bytes) =>
@@ -767,7 +671,6 @@ const make = Effect.gen(function* () {
       Effect.mapError(failure(input)),
     );
 
-  /** Every byte of the live file, following it until the job settles. */
   const liveBytes = (job: Job, input: TranscodeInput): Stream.Stream<Uint8Array, TranscodeError> =>
     Stream.paginate(0, (position: number) =>
       awaitProgress<LivePage, TranscodeError>(job, (progress) =>
@@ -854,7 +757,6 @@ const make = Effect.gen(function* () {
     );
   });
 
-  /** Waits until nobody has asked `prepare` about `job` for `PREPARE_HOLD`. */
   const quietFor = (job: Job): Effect.Effect<void> =>
     Clock.currentTimeMillis.pipe(
       Effect.flatMap((now) => {
@@ -869,7 +771,6 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  /** Forgets that `prepare` holds `job`, and remembers how it failed, if it did. */
   const unprepare = (job: Job, failed: Option.Option<TranscodeError>) =>
     Clock.currentTimeMillis.pipe(
       Effect.flatMap((now) =>
@@ -889,10 +790,6 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  /**
-   * Notes that someone asked `prepare` about `job` at `now`. The first ask holds the job until it
-   * settles or `quietFor` passes, like a reader that stays. Call under `registry`.
-   */
   const holdForPrepare = (job: Job, now: number) =>
     Effect.gen(function* () {
       const held = preparing.get(job.output)?.job === job;
@@ -956,7 +853,6 @@ const make = Effect.gen(function* () {
     return prepared;
   });
 
-  /** The rates and expected length an offset transcode of `input` has. */
   const offsetTiming = Effect.fn("Transcoder.offsetTiming")(function* (input: TranscodeInput) {
     if (!isFragmentedProfile(input.profile)) {
       return {
@@ -993,8 +889,6 @@ const make = Effect.gen(function* () {
   });
 
   const openAt = Effect.fn("Transcoder.openAt")(function* (input: TranscodeInput, startMs: number) {
-    // One step: a client that leaves (which interrupts this) between taking the permit and
-    // registering its release would otherwise lose the permit for good.
     const admitted = yield* Effect.uninterruptible(
       Semaphore.takeIfAvailable(offsetRuns, 1).pipe(
         Effect.tap((taken) =>
@@ -1009,7 +903,6 @@ const make = Effect.gen(function* () {
       input,
     ).pipe(Effect.mapError(failure(input)));
 
-    // A whole sample, so the seek and the timeline agree exactly.
     const startSamples = Math.round((startMs * sampleRate) / 1000);
 
     const encoded = streamTool(
@@ -1029,7 +922,6 @@ const make = Effect.gen(function* () {
         : encoded
     ).pipe(Stream.mapError(failure(input)));
 
-    // The first bytes come before the response, so a run that fails at once is an error status.
     const [first, rest] = yield* Stream.peel(bytes, Sink.head());
 
     return {

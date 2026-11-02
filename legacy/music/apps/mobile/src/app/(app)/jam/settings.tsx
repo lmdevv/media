@@ -1,7 +1,3 @@
-/**
- * D04 · Jam settings, the host's: who can join, adding songs and how many, controlling playback,
- * editing the queue, and listening along. Changes are a draft until the check saves them.
- */
 import type { JamEditScope, JamJoinPolicy } from "@music/commands/models";
 import { errorMessage } from "@music/sdk/errors";
 import { useRead, useRun } from "@music/sdk/react";
@@ -34,10 +30,8 @@ const EDIT_OPTIONS: ReadonlyArray<{ readonly value: JamEditScope; readonly label
   { value: "any", label: "Any song" },
 ];
 
-/** Labels for the limits, in the order the action sheet lists them. */
 const LIMIT_LABELS = ADD_LIMITS.map((limit) => (limit === null ? "No limit" : String(limit)));
 
-/** Songs per person: Paper's row, opening the native action sheet of limits. */
 function AddLimitRow({
   value,
   onChange,
@@ -72,7 +66,6 @@ function AddLimitRow({
   );
 }
 
-/** The settings form over the saved settings. */
 function SettingsForm({
   saved,
   approvalAfterRemoval,

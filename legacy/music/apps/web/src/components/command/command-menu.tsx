@@ -25,11 +25,9 @@ const decodeArtistId = Schema.decodeUnknownOption(ArtistId);
 
 const decodePlaylistId = Schema.decodeUnknownOption(PlaylistId);
 
-/** What the screen behind the menu shows, from the current route's parameters. */
 const useMenuContext = (): MenuContext => {
   const { albumId, artistId, playlistId } = useParams({ strict: false });
 
-  // The same object while the route is, so the preview pane skips renders while typing.
   return useMemo(
     () => ({
       albumId: Option.getOrNull(decodeAlbumId(albumId)),
@@ -46,7 +44,6 @@ const useMenuContext = (): MenuContext => {
  */
 export function CommandMenu() {
   const { commandOpen, setCommandOpen } = useUi();
-  // Stable, so the menu's actions aren't rebuilt each time the shell's UI state changes.
   const close = useCallback(() => setCommandOpen(false), [setCommandOpen]);
 
   return (
@@ -74,21 +71,15 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   const [detail, setDetail] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  /** Where the pointer last was over the list, or null before it first moved there. */
   const pointer = useRef<{ readonly x: number; readonly y: number } | null>(null);
 
-  // The menu exists to type into, so focus starts in the field.
   useEffect(() => {
     input.current?.focus();
   }, []);
 
-  // A row clicked while another was selected: it runs once its own preview registers.
   const [runWhenShown, setRunWhenShown] = useState<string | null>(null);
   const [selectionQuery, setSelectionQuery] = useState(deferred);
 
-  // State that follows the query and the results is updated while rendering, as React documents,
-  // rather than in effects: each effect cost the menu another render and commit per keystroke.
-  // A new query starts with nothing selected and the list showing.
   if (selectionQuery !== deferred) {
     setSelectionQuery(deferred);
     setActiveId(null);
@@ -96,8 +87,6 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     setRunWhenShown(null);
   }
 
-  // Once results for the query settle, the selection follows its item, so results arriving later
-  // never move what Enter runs.
   const [first] = items;
 
   if (selectionQuery === deferred && activeId === null && !searching && first !== undefined) {
@@ -117,7 +106,6 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  // The shown preview's primary action, tagged with its row so a stale one never runs.
   const [primary, setPrimary] = useState<{ readonly id: string; readonly run: () => void } | null>(
     null,
   );
@@ -139,8 +127,6 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   useEffect(() => {
     if (runWhenShown === null) return;
 
-    // The selection moved off the clicked row before its preview registered: nothing runs, and
-    // coming back to that row later doesn't run it either.
     if (runWhenShown !== currentId) {
       setRunWhenShown(null);
 
@@ -153,8 +139,6 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     primary.run();
   }, [currentId, primary, runWhenShown]);
 
-  // The rows' handlers stay the same while the results do, so moving the selection or typing
-  // re-renders only the rows that change. They read the selection when they run.
   const latest = useRef({ active, runPrimary });
 
   useEffect(() => {
@@ -163,9 +147,6 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
   const onRowHover = useCallback(
     (index: number, event: MouseEvent<HTMLDivElement>) => {
-      // Browsers report rows moving under a resting pointer (the list filling in or scrolling to
-      // the selection) as mouse movement. Only a pointer that moved selects, so a resting mouse
-      // never takes the row the keyboard chose.
       const last = pointer.current;
       pointer.current = { x: event.clientX, y: event.clientY };
 
@@ -184,7 +165,6 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
       if (item.kind === "command" && item.fields.length > 0) setDetail(true);
       else if (item.kind === "now") setDetail(true);
-      // A tap can select and click in one go; the old row's action must not run.
       else if (index === latest.current.active) latest.current.runPrimary?.();
       else setRunWhenShown(item.id);
     },
@@ -202,7 +182,6 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
     if (key === "next") select(Math.min(active + 1, items.length - 1));
     else if (key === "previous") select(Math.max(active - 1, 0));
-    // While a new query's results load, the rows are the previous query's, so Enter waits.
     else if (!searching) runPrimary?.();
   };
 

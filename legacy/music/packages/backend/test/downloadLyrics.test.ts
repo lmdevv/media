@@ -1,8 +1,3 @@
-/**
- * `downloads.lyrics` through the real dispatcher: the lyrics a device keeps with its downloads,
- * sent only when their revision moved, as songs' own lyrics and LRCLIB's answers change, to
- * people who can read the songs, and in pages that stay inside Convex's read limits.
- */
 import { DeviceId, type TrackId } from "@music/commands/ids";
 import { LyricsChange } from "@music/commands/lyrics";
 import type { HeldLyrics, LyricsRevision, TrackLyrics } from "@music/commands/lyrics";
@@ -59,7 +54,6 @@ const SONGS: ReadonlyArray<SeedFile> = [
   { path: "none.flac", title: "None" },
 ];
 
-/** Creates a library as `owner` holding `files`; returns its ID. */
 const libraryOf = async (
   backend: Backend,
   owner: User,
@@ -105,17 +99,14 @@ const setup = async (files: ReadonlyArray<SeedFile> = SONGS) => {
 const changesFor = (user: User, held: ReadonlyArray<HeldLyrics>) =>
   user.music.read("downloads.lyrics", { held: [...held] });
 
-/** What a device keeps for `trackIds` before it has any lyrics. */
 const nothingHeld = (trackIds: ReadonlyArray<TrackId>): ReadonlyArray<HeldLyrics> =>
   trackIds.map((trackId) => ({ trackId, rev: null }));
 
-/** A change without its revision, which is opaque; null lyrics for a removal. */
 interface Content {
   readonly trackId: TrackId;
   readonly lyrics: TrackLyrics | null;
 }
 
-/** What `changes` say without their revisions. */
 const contents = (changes: ReadonlyArray<LyricsChange>): ReadonlyArray<Content> =>
   changes.map((change) =>
     LyricsChange.match(change, {
@@ -124,7 +115,6 @@ const contents = (changes: ReadonlyArray<LyricsChange>): ReadonlyArray<Content> 
     }),
   );
 
-/** The revisions a device keeps once it applied `changes` over `held`. */
 const applied = (
   held: ReadonlyArray<HeldLyrics>,
   changes: ReadonlyArray<LyricsChange>,
@@ -140,7 +130,6 @@ const applied = (
     };
   });
 
-/** The revision `changes` give `trackId`. */
 const revisionIn = (changes: ReadonlyArray<LyricsChange>, trackId: TrackId): LyricsRevision => {
   const change = changes.find((each) => each.trackId === trackId);
 
@@ -151,7 +140,6 @@ const revisionIn = (changes: ReadonlyArray<LyricsChange>, trackId: TrackId): Lyr
   return change.rev;
 };
 
-/** Claims and answers the lookup `trackId`'s tags make, as the media service does. */
 const answerLookup = async (
   backend: Backend,
   trackId: TrackId,
@@ -250,7 +238,6 @@ describe("downloads.lyrics", () => {
     await member.music.run("downloads.add", { deviceId: PHONE, kind: "track", id: id("Own") });
     await drainScheduled(backend);
 
-    // Both lookups are queued: the song without lyrics keeps none, the other its own words.
     const held = nothingHeld([id("Remote"), id("Own")]);
     const pending = await changesFor(member, held);
 
@@ -280,7 +267,6 @@ describe("downloads.lyrics", () => {
     ]);
     expect(revisionIn(found, id("Own"))).not.toBe(revisionIn(pending, id("Own")));
 
-    // New lyrics never fetch the song again.
     expect(await member.music.read("downloads.manifest", { pinId })).toEqual(manifest);
   });
 
@@ -295,7 +281,6 @@ describe("downloads.lyrics", () => {
     const held = nothingHeld([id("Song")]);
     const kept = applied(held, await changesFor(member, held));
 
-    // The file moves beside a lyric file with the same name, size, and time, holding other words.
     await backend.mutation(api.media.moveTracks, {
       secret: MEDIA_SECRET,
       libraryId,
@@ -326,7 +311,6 @@ describe("downloads.lyrics", () => {
   });
 
   it("keeps a song's revision when LRCLIB answers, as its own synced lyrics win", async () => {
-    // Tags that fold alike: both songs share one LRCLIB lookup.
     const tags = { artist: "Band", album: "Album", durationMs: 200_000 };
 
     const { backend, member, id } = await setup([
@@ -364,7 +348,6 @@ describe("downloads.lyrics", () => {
 
     expect(owned).toHaveLength(1);
 
-    // Another person's phone asking with the owner's revision learns only that it holds none.
     expect(contents(await changesFor(member, applied(nothingHeld([hidden]), owned)))).toEqual([
       { trackId: hidden, lyrics: null },
     ]);
@@ -376,7 +359,6 @@ describe("downloads.lyrics", () => {
   });
 });
 
-/** About 600 KB of lyrics, as large lyric files can hold. */
 const large = (index: number): StoredLyricSet => ({
   kind: "main",
   lang: null,
@@ -384,7 +366,6 @@ const large = (index: number): StoredLyricSet => ({
   body: { _tag: "Plain", text: `${index} ${"la ".repeat(200_000)}` },
 });
 
-/** About 600 KB of lyrics from LRCLIB. */
 const largeAnswer = (index: number): typeof LRCLIB => ({
   kind: "main",
   lang: null,
@@ -392,10 +373,8 @@ const largeAnswer = (index: number): typeof LRCLIB => ({
   body: { _tag: "Plain", text: `${index} ${"la ".repeat(200_000)}` },
 });
 
-/** How much one `downloads.lyrics` read sends at most, unless its one song's lyrics are more. */
 const PAGE_BYTES = 8 * 1024 ** 2;
 
-/** One read's answer: how many songs it sent, and their size as JSON. */
 interface Page {
   readonly songs: number;
   readonly bytes: number;
@@ -406,7 +385,6 @@ const pageOf = (changes: ReadonlyArray<LyricsChange>): Page => ({
   bytes: changes.reduce((total, change) => total + JSON.stringify(change).length, 0),
 });
 
-/** Asks `downloads.lyrics` until nothing changed; the revisions kept, and each page it sent. */
 const allPages = async (
   user: User,
   held: ReadonlyArray<HeldLyrics>,
@@ -419,7 +397,6 @@ const allPages = async (
     : allPages(user, applied(held, changes), [...pages, pageOf(changes)]);
 };
 
-/** Every song's lyrics arrived over several pages, none past `PAGE_BYTES`. */
 const expectPaged = (
   { held, pages }: { held: ReadonlyArray<HeldLyrics>; pages: ReadonlyArray<Page> },
   songs: number,
@@ -430,7 +407,6 @@ const expectPaged = (
   expect(pages.filter((page) => page.songs > 1 && page.bytes > PAGE_BYTES)).toEqual([]);
 };
 
-/** Thirty song paths, in the order a scan lists them. */
 const PATHS = Array.from({ length: 30 }, (_, index) => `${String(index).padStart(2, "0")}.flac`);
 
 describe("downloads.lyrics with large lyrics", () => {
@@ -439,7 +415,6 @@ describe("downloads.lyrics with large lyrics", () => {
     const owner = await signUp(backend, "owner");
     const libraryId = await libraryOf(backend, owner, "Crowded", "shared", []);
 
-    // Three songs a write: their lyrics are about as much as one write may send.
     await Array.from({ length: PATHS.length / 3 }, (_, batch) => batch * 3).reduce(
       async (previous, start) => {
         await previous;

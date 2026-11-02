@@ -1,8 +1,3 @@
-/**
- * Playlist sharing through the real dispatcher: who can open, play, edit, and manage a playlist
- * (owners, collaborators, viewers, anyone with the link, guests, strangers, and people whose share
- * was revoked), collaborator edits and their attribution, reordering, and share links.
- */
 import { PlaylistId, PlaylistItemId, UserId } from "@music/commands/ids";
 import type { PlaylistId as PlaylistIdType, TrackId } from "@music/commands/ids";
 import { describe, expect, it } from "vitest";
@@ -36,7 +31,6 @@ const setup = async () => {
 
 const userId = (user: User) => UserId.make(user.id);
 
-/** Every playlist action, each run as `user` against `playlistId`; resolves to its outcome. */
 const attempts = (user: User, playlistId: PlaylistIdType, song: TrackId) => ({
   get: () => user.music.read("playlists.get", { playlistId }),
   add: () => user.music.run("playlists.add", { playlistId, trackIds: [song] }),
@@ -69,12 +63,10 @@ const ACTIONS: ReadonlyArray<Action> = [
   "delete",
 ];
 
-/** The outcome of every action, in `ACTIONS` order. Destructive ones run last. */
 const outcomes = async (user: User, playlistId: PlaylistIdType, song: TrackId) => {
   const run = attempts(user, playlistId, song);
   const results: Array<string> = [];
 
-  // One after another: later actions see what earlier ones changed, as a person would.
   await ACTIONS.reduce(async (previous, action) => {
     await previous;
     results.push(await failureCode(run[action]()));
@@ -161,7 +153,6 @@ describe("who can do what with a playlist", () => {
     await owner.music.run("playlists.visibility", { playlistId, visibility: "shared" });
 
     await owner.music.run("playlists.unshare", { playlistId, userId: userId(other) });
-    // Revoked by name, but the link still lets them view it.
     expect(await failureCode(other.music.read("playlists.get", { playlistId }))).toBe(ok);
     expect(
       await failureCode(
@@ -198,7 +189,6 @@ describe("who can do what with a playlist", () => {
     expect(await failureCode(member.music.read("playlists.get", { playlistId }))).toBe("not_found");
     expect(await failureCode(other.music.read("playlists.get", { playlistId }))).toBe(ok);
 
-    // Someone who only has the link has nothing to leave, and is told so.
     await owner.music.run("playlists.visibility", { playlistId, visibility: "shared" });
     expect(
       await failureCode(
@@ -240,10 +230,8 @@ describe("guests", () => {
       owner.id,
     ]);
 
-    // A guest hears no library until added to it: every song is an unavailable row.
     const { items } = await guest.music.read("playlists.get", { playlistId });
 
-    // Nothing about the song shows, not even its IDs: only its place and length.
     const lengths = new Set((await allTracks(owner)).map((track) => track.durationMs));
 
     expect(items.map((item) => [item.available, item.reason, item.track])).toEqual([
@@ -293,7 +281,6 @@ describe("collaborating", () => {
       await failureCode(member.music.run("playlists.add", { playlistId, trackIds: [secret] })),
     ).toBe("not_found");
 
-    // The owner adds a song from their private library: the collaborator sees it, unavailable.
     await owner.music.run("playlists.add", { playlistId, trackIds: [secret] });
     const { items } = await member.music.read("playlists.get", { playlistId });
 
@@ -321,12 +308,10 @@ describe("collaborating", () => {
 
     if (a === undefined || b === undefined || c === undefined) throw new Error("Seed missing");
 
-    // The owner moves c to the top while the collaborator, from the same view, moves a after b.
     await owner.music.run("playlists.move", { playlistId, itemId: c });
     await member.music.run("playlists.move", { playlistId, itemId: a, afterItemId: b });
     expect(await order()).toEqual([c, b, a]);
 
-    // Moving after an entry someone just removed fails instead of guessing.
     await owner.music.run("playlists.remove", { playlistId, itemId: b });
     expect(
       await failureCode(
@@ -354,7 +339,6 @@ describe("collaborating", () => {
 
     if (a === undefined || b === undefined || c === undefined) throw new Error("Seed missing");
 
-    // Each move halves the gap after `a`; past the precision limit the playlist renumbers.
     await Array.from({ length: 60 }).reduce<Promise<void>>(async (previous, _, round) => {
       await previous;
       await owner.music.run("playlists.move", {
@@ -418,7 +402,6 @@ describe("lists and links", () => {
     expect(
       await failureCode(member.music.read("links.get", { kind: "playlist", id: playlistId })),
     ).toBe("not_found");
-    // An ID of another kind names nothing of this one.
     expect(await failureCode(member.music.read("links.get", { kind: "album", id: song.id }))).toBe(
       "not_found",
     );
@@ -439,7 +422,6 @@ describe("lists and links", () => {
     await member.music.run("playlists.visibility", { playlistId, visibility: "shared" });
     await owner.music.run("people.remove", { userId: userId(member) });
 
-    // No batch has run: the playlist is still stored, and nobody can open or list it.
     expect(await failureCode(friend.music.read("playlists.get", { playlistId }))).toBe("not_found");
     expect(await failureCode(owner.music.read("playlists.get", { playlistId }))).toBe("not_found");
     expect(await friend.music.read("playlists.shared", {})).toEqual([]);

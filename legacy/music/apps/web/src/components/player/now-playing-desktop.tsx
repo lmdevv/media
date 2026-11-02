@@ -20,7 +20,6 @@ import { LyricsPane } from "./lyrics-view";
 import { nowPlayingBackground } from "./now-playing-background";
 import { UpcomingQueue, useClearQueue, useUpNext } from "./queue";
 
-/** Translucent white fills on the always-dark Now Playing; `text` is white inside `.dark`. */
 const glassButton =
   "flex shrink-0 items-center justify-center rounded-full bg-text/10 text-text outline-none hover:bg-text/16 focus-visible:ring-2 focus-visible:ring-ring/50";
 
@@ -44,13 +43,7 @@ export function DesktopNowPlaying({ track, lyrics, view, onView }: DesktopNowPla
 
   return (
     <div
-      className={cn(
-        "flex flex-col px-12 pt-7 pb-row",
-        // Only the queue or the lyrics scroll, so the player column stays put beside them (05 ·
-        // 01c, 01b). Below 688px the whole view scrolls instead, with the column at its smallest
-        // art.
-        beside ? "h-full min-h-172" : "min-h-full",
-      )}
+      className={cn("flex flex-col px-12 pt-7 pb-row", beside ? "h-full min-h-172" : "min-h-full")}
       style={background}
     >
       <div className="flex h-row shrink-0 items-center">
@@ -60,10 +53,7 @@ export function DesktopNowPlaying({ track, lyrics, view, onView }: DesktopNowPla
       </div>
 
       {beside ? (
-        // The column and the queue or lyrics are centred as one group, so a wide window keeps them
-        // together in the middle instead of leaving the right side empty (ADS-165).
         <div className="flex min-h-0 grow justify-center gap-24 px-6 py-6">
-          {/* Sized to the window height, so the whole column fits beside the scrolling list. */}
           <div className="flex w-now-playing-queue-art shrink-0 flex-col gap-5.5 self-center-safe">
             <Artwork
               url={track.artUrl}
@@ -122,7 +112,6 @@ export function DesktopNowPlaying({ track, lyrics, view, onView }: DesktopNowPla
             </h2>
             <span className="font-sans text-md/base text-text-muted">{track.artist}</span>
           </div>
-          {/* A fixed width, not the cover's, so a short window doesn't squeeze the slider away. */}
           <div className="flex w-140 max-w-full items-center gap-4">
             <Progress
               remaining
@@ -145,10 +134,6 @@ export function DesktopNowPlaying({ track, lyrics, view, onView }: DesktopNowPla
   );
 }
 
-/**
- * Lyrics and queue toggles; with both off, Now Playing shows the cover. The lyrics toggle is dimmed
- * for a song without lyrics, unless they are open (they went away while shown).
- */
 function ViewToggles({
   view,
   offer,
@@ -218,7 +203,6 @@ function ViewButton({
     </button>
   );
 
-  // A disabled button gets no pointer events, so its tooltip hangs on a wrapper.
   return <Tooltip label={label}>{disabled ? <span>{button}</span> : button}</Tooltip>;
 }
 

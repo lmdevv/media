@@ -1,4 +1,3 @@
-/** F06 · Save your key. */
 import { RequireAccess } from "@/components/settings/access";
 import { CreatedKey } from "@/components/settings/keys";
 

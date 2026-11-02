@@ -1,12 +1,3 @@
-/**
- * A08b, A08c · Artist: their picture full bleed under the status bar, darkened toward the bottom,
- * with their name, how many of their albums and songs the library holds, Shuffle, and Play. Back
- * and the ellipsis float over it on glass. Then their top songs, numbered, and their albums in a
- * rail. Once the picture scrolls away a bar on the page color names the artist. A song plays the
- * top songs from there. An artist the viewer can no longer open is G10. On an iPad a full-bleed
- * picture would crop to a strip, so the page takes the album's header instead (P05): the picture
- * at 240pt beside the counts, the name, and Play and Shuffle, under the usual bar.
- */
 import { ArtistId } from "@music/commands/ids";
 import type { AlbumId } from "@music/commands/ids";
 import type { ArtistDetail, Track } from "@music/commands/models";
@@ -45,16 +36,13 @@ import { useNowPlaying, usePlayerActions } from "@/player";
 
 const decodeId = Schema.decodeUnknownOption(ArtistId);
 
-/** The hero's height, Paper's 440pt. */
 const HERO_HEIGHT = 440;
 
-/** Paper's two scrims over the picture: a long one under the name, a short one at the foot. */
 const SCRIM_STOPS = [
   { from: 0.38, to: 0.72 },
   { from: 0.55, to: 1 },
 ] as const;
 
-/** "6 albums · 61 songs": the albums the library holds, and the songs on them. */
 const statsOf = (detail: ArtistDetail): string =>
   [
     countOf(detail.artist.albumCount, "album"),
@@ -64,7 +52,6 @@ const statsOf = (detail: ArtistDetail): string =>
     ),
   ].join(" · ");
 
-/** A 44pt glass circle over the picture: Back, the ellipsis's look, and Shuffle. */
 function GlassButton({
   icon,
   label,
@@ -88,7 +75,6 @@ function GlassButton({
   );
 }
 
-/** The picture with the name, the counts, Shuffle, and Play. */
 function Hero({
   detail,
   onPlay,
@@ -147,7 +133,6 @@ function Hero({
   );
 }
 
-/** A top song: its rank, 44pt cover, title over album and year, and its actions. */
 function TopSong({
   track,
   rank,
@@ -204,10 +189,6 @@ function TopSong({
   );
 }
 
-/**
- * The floating top: Back and the ellipsis on glass, and once the picture has scrolled away the
- * page color behind them with the artist's name.
- */
 function TopBar({
   name,
   collapsed,
@@ -287,7 +268,6 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
     (detail?.albums ?? []).map((album) => [album.id, album.year]),
   );
 
-  // The bar takes over once the picture's foot passes under it.
   const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const next = event.nativeEvent.contentOffset.y > HERO_HEIGHT - insets.top - 60;
 

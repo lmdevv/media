@@ -13,13 +13,8 @@ import {
 } from "@/lib/reorder";
 import type { DragState, DropSide } from "@/lib/reorder";
 
-/**
- * How long without a dragover before a pointer event counts as the drag being over. Browsers send
- * dragover about every 50 ms during a drag.
- */
 const DRAG_IDLE_MS = 500;
 
-/** No drag in progress. */
 const NO_DRAG = { id: null, over: null } as const;
 
 /** Props that make a row a drag source and drop target. */
@@ -61,24 +56,16 @@ export const useReorder = <Id extends string>(
   const [drag, setDrag] = useState<DragState<Id>>(NO_DRAG);
   const positions = dragPositions(ids, drag);
 
-  // The dragged entry left the list (removed elsewhere): the drag ends, so its block unpins and a
-  // later drop can't move anything. Set while rendering, as React documents for derived state.
   if (drag.id !== null && positions === null) setDrag(NO_DRAG);
 
-  // Orders the list should pass through while moves are in flight; see `orderToMoveFrom`.
   const expected = useRef<ReadonlyArray<ReadonlyArray<Id>>>([]);
 
-  // What the stable handlers read when they run: the list, the drag, and the move callback as of
-  // the latest commit.
   const latest = useRef({ ids, anchor, onMove, drag });
 
   useLayoutEffect(() => {
     latest.current = { ids, anchor, onMove, drag };
   });
 
-  // A drag whose source row remounted (it moved to another block of a windowed list) never gets
-  // its dragend. While a drag is live the browser sends dragover every few dozen milliseconds, even
-  // with the pointer still; a pointer event long after the last one means the drag is over.
   const dragging = drag.id !== null;
   const lastDragOver = useRef(0);
 
@@ -107,11 +94,9 @@ export const useReorder = <Id extends string>(
   }, [dragging]);
 
   const handlers = useMemo(() => {
-    /** Moves `id` to `to` in the order the list is heading to. */
     const move = (id: Id, to: (from: number, base: ReadonlyArray<Id>) => number) => {
       const { ids: current, anchor: top, onMove: report } = latest.current;
 
-      // The server reached the last order expected: nothing is in flight any more.
       if (sameOrder(expected.current.at(-1) ?? [], current)) expected.current = [];
 
       const base = orderToMoveFrom(current, expected.current);
@@ -123,7 +108,6 @@ export const useReorder = <Id extends string>(
         ...(base === current ? [current] : expected.current),
         moveItem(base, from, target),
       ];
-      // A failed move never reaches the server, so the orders after it never will either.
       report(id, afterIdFor(base, from, target, top)).catch(() => {
         expected.current = [];
       });
@@ -149,8 +133,6 @@ export const useReorder = <Id extends string>(
         const box = event.currentTarget.getBoundingClientRect();
         const side = event.clientY < box.top + box.height / 2 ? "before" : "after";
 
-        // From the latest state, not the last commit: several dragovers can arrive before React
-        // renders, and an unchanged drop line must not schedule another render.
         setDrag((current) =>
           current.id === null || (current.over?.id === id && current.over.side === side)
             ? current
@@ -161,8 +143,6 @@ export const useReorder = <Id extends string>(
         event.preventDefault();
         const { id, over } = latest.current.drag;
 
-        // Next to the entry the person saw the drop line on, in the order the list is heading to
-        // (an earlier move may still be on its way to the server).
         if (id !== null && over !== null) {
           move(id, (from, base) => {
             const target = base.indexOf(over.id);
@@ -196,7 +176,6 @@ export const useReorder = <Id extends string>(
   };
 };
 
-/** How far each arrow key moves an entry. */
 const KEY_STEPS = new Map([
   ["ArrowUp", -1],
   ["ArrowDown", 1],

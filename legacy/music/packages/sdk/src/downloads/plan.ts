@@ -1,11 +1,3 @@
-/**
- * What a device does to hold what its downloads mean now. Pure: `DownloadSync` feeds it the
- * server's pins and manifests and the vault's rows, applies the steps, and plans again. Planning
- * after any prefix of the steps was applied yields the rest, so a crash at any point converges.
- *
- * Absence of data is not absence of a thing: before the server lists the pins, no pin is
- * forgotten, and a pin whose manifest hasn't arrived keeps every song it held and fetches none.
- */
 import type { DownloadPinId, TrackId } from "@music/commands/ids";
 import { HELD_LYRICS_LIMIT, LyricsChange, OfflineLyrics } from "@music/commands/lyrics";
 import type { HeldLyrics, LyricsRevision } from "@music/commands/lyrics";
@@ -140,21 +132,12 @@ export const SyncStep = Data.taggedEnum<SyncStep>();
 /** A download's song, album, or playlist as one string, for sets and maps. */
 export const targetKey = (target: DownloadTarget): string => `${target.kind}:${target.id}`;
 
-/**
- * Whether two versions of a song's details match, leaving out the cover's URL: its signature
- * rotates weekly, while `artHash` says whether the cover itself changed.
- */
 const sameDetails = (left: OfflineTrack, right: OfflineTrack): boolean =>
   Equal.equals(Struct.omit(left, ["artUrl"]), Struct.omit(right, ["artUrl"]));
 
-/** The members a manifest gives its pin. */
 const membersOf = (manifest: DownloadManifest): ReadonlyArray<StoredMember> =>
   manifest.entries.map((entry) => ({ trackId: entry.track.id, state: entry.state }));
 
-/**
- * The pins this device keeps now, minus those it is removing: the server's list once it
- * answered, else the vault's.
- */
 const keptPins = (desired: Desired, vault: VaultView): ReadonlyArray<DownloadPin> => {
   const listed = Option.getOrElse(desired.pins, () =>
     Array.from(vault.pins.values(), (stored) => stored.pin),
@@ -163,7 +146,6 @@ const keptPins = (desired: Desired, vault: VaultView): ReadonlyArray<DownloadPin
   return listed.filter((pin) => !desired.removing.has(targetKey(pin.target)));
 };
 
-/** Whether a stored pin goes: the server stopped listing it, or this device is removing it. */
 const forgotten = (desired: Desired, stored: StoredPin): boolean =>
   desired.removing.has(targetKey(stored.pin.target)) ||
   Option.match(desired.pins, {
@@ -171,10 +153,6 @@ const forgotten = (desired: Desired, stored: StoredPin): boolean =>
     onSome: (pins) => !pins.some((pin) => pin.id === stored.pin.id),
   });
 
-/**
- * The songs this device keeps: those of each kept pin's manifest, or the songs a pin held while
- * its manifest is unknown.
- */
 const keptSongs = (desired: Desired, vault: VaultView): ReadonlySet<TrackId> => {
   const kept = new Set<TrackId>();
 
@@ -197,10 +175,6 @@ const encodeLyrics = Schema.encodeSync(OfflineLyrics);
 export const lyricsBytes = (lyrics: OfflineLyrics): number =>
   new TextEncoder().encode(JSON.stringify(encodeLyrics(lyrics))).length;
 
-/**
- * Lyrics steps: keep each new revision `downloads.lyrics` sent for a kept song, and delete the
- * lyrics of songs that have none now or that no download keeps.
- */
 const lyricsSteps = (
   desired: Desired,
   vault: VaultView,
@@ -232,7 +206,6 @@ const lyricsSteps = (
   return steps;
 };
 
-/** FNV-1a of a string: spreads songs over buckets the same way on every device and launch. */
 const bucketHash = (text: string): number => {
   let hash = 0x81_1c_9d_c5;
 
@@ -243,10 +216,6 @@ const bucketHash = (text: string): number => {
   return hash >>> 0;
 };
 
-/**
- * Buckets for `songs` songs: a power of two, so each holds about half of `HELD_LYRICS_LIMIT` and
- * rarely passes it, and the count changes only when the songs double or halve.
- */
 const bucketCount = (songs: number): number => {
   let count = 1;
 
@@ -279,7 +248,6 @@ export const lyricsQuestions = (
 
   const ordered = Array.from(buckets);
 
-  // Sorted in place: the arrays are this function's own, and Hermes has no `toSorted`.
   ordered.sort(([left], [right]) => left - right);
 
   return ordered.flatMap(([bucket, held]) => {
@@ -302,14 +270,11 @@ export const planSync = (
   policy: SyncPolicy,
 ): ReadonlyArray<SyncStep> => {
   const pins = keptPins(desired, vault);
-  // Songs to hold at a revision, and songs whose copy stays whatever its revision.
   const wanted = new Map<TrackId, ManifestEntry>();
   const kept = keptSongs(desired, vault);
-  // The newest details known for each kept song.
   const details = new Map<TrackId, ManifestEntry>();
   const covers = new Map<string, string | null>();
 
-  // A cover known from a held copy only has no URL to fetch it from; a manifest's adds one.
   const cover = (hash: string | null, url: string | null): void => {
     if (hash !== null && (covers.get(hash) ?? null) === null) covers.set(hash, url);
   };
@@ -354,13 +319,11 @@ export const planSync = (
 
     const entry = wanted.get(trackId) ?? details.get(trackId);
 
-    // Kept by a pin whose manifest hasn't arrived: as it is, cover included.
     if (entry === undefined) {
       cover(copy.artHash, null);
       continue;
     }
 
-    // A new revision replaces the copy, details and cover included.
     if (wanted.has(trackId) && entry.rev !== copy.rev) continue;
 
     cover(entry.artHash, entry.track.artUrl);

@@ -1,8 +1,3 @@
-/**
- * F20 · Server settings: whether a Jam link may create a guest account, and whether lyrics are
- * looked up on LRCLIB for songs without them. The switches are drafts until Save settings (or the
- * nav check) sends the ones the person changed, then the page closes.
- */
 import type { ServerSettings } from "@music/commands/models";
 import { useRead, useRun } from "@music/sdk/react";
 import { router } from "expo-router";
@@ -25,7 +20,6 @@ import { useConnection } from "@/session/connection";
 import { Failure } from "@/components/settings/failure";
 import { useAction } from "@/components/settings/use-action";
 
-/** A setting's switch with its title and the line that explains it. */
 function SettingSwitch({
   title,
   body,
@@ -58,7 +52,6 @@ export function ServerSettingsForm() {
   const settings = useRead("server.settings", {});
   const update = useRun("server.update");
   const action = useAction();
-  // Untouched, a switch follows the saved value, including a change made elsewhere meanwhile.
   const [chosen, setChosen] = useState<Partial<ServerSettings>>({});
   const host = hostOf(origin);
 

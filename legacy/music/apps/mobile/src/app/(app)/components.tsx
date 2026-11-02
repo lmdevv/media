@@ -1,9 +1,3 @@
-/**
- * The design system on one page, as Paper's "04 · Mobile components and tokens" board lays it out,
- * for checking components against Paper and both themes on a device. Not linked from the app:
- * open `music:///components` (for example with `xcrun simctl openurl`). A Release build sends the
- * link home instead.
- */
 import { Check, Info, Play, Shuffle } from "lucide-react-native";
 import { Redirect } from "expo-router";
 import { useRef, useState } from "react";
@@ -37,13 +31,11 @@ const SCOPES = [
   { value: "shared", label: "Shared" },
 ] as const;
 
-/** Waits, then fails, to show the pending and failure states of a form. */
 const failSoon = () =>
   new Promise<void>((_, reject) => {
     setTimeout(() => reject(new Error("Couldn’t save changes")), 1200);
   });
 
-/** A one-tap save the server refuses, to open G13: Try again fails once more, then lands. */
 function FailedSaveDemo() {
   const save = useSave();
   const tries = useRef(0);

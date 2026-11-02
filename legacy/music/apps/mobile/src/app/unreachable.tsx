@@ -1,8 +1,3 @@
-/**
- * G05 · Server unreachable: the remembered server hasn't answered since launch. Try again opens a
- * fresh connection to it and waits on it here; Server address goes back to Connect to change it.
- * The root stack leaves this screen by itself once the server answers.
- */
 import { Wifi } from "lucide-react-native";
 
 import { Button } from "@/components/ui/button";
@@ -16,8 +11,6 @@ export default function Unreachable() {
   const { origin, reconnect, disconnect } = useConnection();
   const { attempt } = useConnectionControls();
   const silent = useSilentServer();
-  // After Try again, the new connection gets the same wait as launch before it counts as out of
-  // reach again. At launch the wait is already over when this screen appears.
   const trying = attempt > 0 && !silent;
 
   return (

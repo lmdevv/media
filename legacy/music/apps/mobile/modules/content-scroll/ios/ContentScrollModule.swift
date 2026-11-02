@@ -21,7 +21,6 @@ public final class ContentScrollModule: Module {
 final class ContentScrollView: ExpoView {
   private static let edges: NSDirectionalRectEdge = [.top, .bottom]
 
-  /// The scroll view this view last set, and the controllers it set it on.
   private weak var registered: UIScrollView?
   private var controllers: [WeakController] = []
 
@@ -44,7 +43,6 @@ final class ContentScrollView: ExpoView {
   }
 
   private func register() {
-    // A scroll view that went away leaves nothing for UIKit to watch.
     guard let scrollView = firstScrollView(in: self) else {
       unregister()
       return
@@ -61,7 +59,6 @@ final class ContentScrollView: ExpoView {
     }
   }
 
-  /// Clears what this view set, unless another page has set its own since.
   private func unregister() {
     for weak in controllers {
       guard let controller = weak.controller else { continue }
@@ -87,7 +84,6 @@ final class ContentScrollView: ExpoView {
     return nil
   }
 
-  /// The first scroll view under `view`, breadth first, so a list beats the rails inside it.
   private func firstScrollView(in view: UIView) -> UIScrollView? {
     var queue = view.subviews[...]
 

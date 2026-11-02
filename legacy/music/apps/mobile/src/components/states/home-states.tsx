@@ -1,9 +1,3 @@
-/**
- * Home's states around its rails: static placeholders until the first answer (Library's totals
- * use one too), the scan notice and placeholders while a library is being read (G02), and the
- * empty collection (G01), which offers admins a folder to add and tells everyone else what they
- * are waiting on.
- */
 import { can } from "@music/commands/permissions";
 import { useRead } from "@music/sdk/react";
 import { router } from "expo-router";
@@ -16,11 +10,9 @@ import { Notice } from "@/components/ui/notice";
 import { SectionHeader } from "@/components/ui/section-header";
 import { countOf } from "@/lib/format";
 
-/** Whether any library this account hears is being scanned, or undefined while that loads. */
 const useScanning = (): boolean | undefined =>
   useRead("libraries.list", {})?.some((library) => library.scanning);
 
-/** A static surface where content will be; Paper draws no shimmer. */
 function Placeholder({ className }: { readonly className: string }) {
   return <View className={`rounded-lg bg-surface ${className}`} />;
 }

@@ -25,24 +25,16 @@ import type { ReadCtx, Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
 
-/** How long a stream URL works for someone who can read the song's library. */
 const STREAM_TTL_MS = 6 * 60 * 60 * 1000;
 
-/**
- * How long a stream URL works for someone who hears the song only through a Jam. A URL can't be
- * taken back once signed, so leaving or being removed from the Jam ends their access this soon;
- * the player signs a new one as it needs to.
- */
 const JAM_STREAM_TTL_MS = 5 * 60 * 1000;
 
-/** Most likes `likes.list` returns; `likes.page` reads any number. */
 const MAX_LIKES = 1000;
 
 const LIKES_PAGE = 50;
 
 const MAX_PLAYLIST = PLAYLIST_LIMIT;
 
-/** Most shares one playlist lists, and most playlists "Shared with you" lists. */
 const MAX_SHARES = 500;
 
 const readableTracks = async (
@@ -82,7 +74,6 @@ const appendTracks = async (
   const first = (last?.position ?? 0) + POSITION_STEP;
   const tracks = await Promise.all(ids.map((id) => ctx.db.get(tableId(ctx, "tracks", id))));
 
-  // People add only what they can read themselves, collaborators included.
   const readable = tracks.filter(
     (track): track is Doc<"tracks"> => track !== null && canRead(viewer, track.libraryId),
   );
@@ -134,17 +125,12 @@ const updatePlaylist = async (
   return ok;
 };
 
-/** A playlist summary for someone who opened it with `opened.access`. */
 const summary = async (ctx: ReadCtx, viewer: Viewer, present: Presenter, opened: OpenedPlaylist) =>
   presentPlaylist(ctx, viewer, present, opened.playlist, {
     access: opened.access,
     sharedWithPeople: await isSharedWithPeople(ctx, opened.playlist._id),
   });
 
-/**
- * One playlist entry as the viewer sees it. A song in a library they can't read still shows, so
- * everyone sees the same playlist, but greyed out and without its cover or file details.
- */
 const presentEntry = async (
   viewer: Viewer,
   present: Presenter,
@@ -159,9 +145,6 @@ const presentEntry = async (
   return {
     itemId: item._id,
     addedAt: item._creationTime,
-    // A song in a library the viewer can't read is withheld whole: no name, cover, file detail,
-    // or ID, so neither sharing a playlist nor a library's access narrowing later shows what the
-    // library holds. The entry keeps its place and length.
     track: readable ? await present.track(track) : null,
     durationMs: track.durationMs,
     available: reason === null,
@@ -170,9 +153,7 @@ const presentEntry = async (
   };
 };
 
-/** Deletes a playlist with its entries and shares. */
 const deletePlaylist = async (ctx: MutationCtx, playlist: Doc<"playlists">): Promise<void> => {
-  // Adding stops at these limits, so they bound what a playlist holds.
   const [items, shares] = await Promise.all([
     ctx.db
       .query("playlistItems")
@@ -190,10 +171,6 @@ const deletePlaylist = async (ctx: MutationCtx, playlist: Doc<"playlists">): Pro
 
 const unavailableLink = () => fail("not_found", "That isn't available to you");
 
-/**
- * Builds a link to something the viewer can open. Albums, artists, and songs need a library they
- * can read; a playlist needs access to it. A song opens its album, highlighted.
- */
 type LinkBuilders = {
   readonly [Kind in LinkKind]: (
     ctx: QueryCtx,
@@ -262,8 +239,6 @@ export const collectionQueries = {
         numItems: args.limit ?? LIKES_PAGE,
       });
 
-    // A song you can no longer read, or whose file is gone, is left out, so a page can come back
-    // short while `done` is false.
     const tracks = await readableTracks(
       ctx,
       viewer,
@@ -334,13 +309,11 @@ export const collectionQueries = {
       const playlist = playlists[index];
       const owner = owners[index];
 
-      // A removed owner's playlists go with them; a guest's are theirs alone (`playlistAccess`).
       return playlist === undefined || playlist === null || !ownerShares(owner ?? null)
         ? []
         : [{ playlist, access: share.role }];
     });
 
-    // Each of these is shared with the viewer, so none needs looking up.
     const listed = await Promise.all(
       opened.map((open) =>
         presentPlaylist(ctx, viewer, present, open.playlist, {
@@ -412,8 +385,6 @@ export const collectionQueries = {
       return fail("not_found", "Track not found");
     }
 
-    // No token for a library whose folder no scan has claimed, or whose claim was refused: the
-    // media service would refuse it anyway (`media:trackSource`), so fail here, plainly.
     if (!isClaimed(await ctx.db.get(track.libraryId))) {
       return fail("not_found", "Track not found");
     }
@@ -462,7 +433,6 @@ export const collectionMutations = {
     const playlistId = await ctx.db.insert("playlists", {
       ownerId: viewer.id,
       name: args.name,
-      // Cleaned and trimmed by its schema; empty means none, as `playlists.update` treats it.
       description:
         args.description === undefined || args.description.length === 0
           ? undefined
@@ -482,7 +452,6 @@ export const collectionMutations = {
     return { playlistId };
   },
 
-  // Kept for clients from before `playlists.update`; it is that command with only a name.
   "playlists.rename": async (ctx, viewer, args) => updatePlaylist(ctx, viewer, args),
 
   "playlists.update": updatePlaylist,
@@ -540,7 +509,6 @@ export const collectionMutations = {
     const rest = items.filter((item) => item._id !== moving._id);
     const after = afterId === null ? -1 : rest.findIndex((item) => item._id === afterId);
 
-    // The entry it should follow was removed meanwhile; moving anyway would guess the place.
     if (after === -1 && args.afterItemId !== undefined) {
       return fail("not_found", "The entry to move it after is no longer in this playlist");
     }
@@ -550,7 +518,6 @@ export const collectionMutations = {
     if (position !== null) {
       await ctx.db.patch(moving._id, { position });
     } else {
-      // Moved between the same two entries many times over: renumber the whole playlist.
       const order = [...rest.slice(0, after + 1), moving, ...rest.slice(after + 1)];
 
       await Promise.all(
@@ -578,15 +545,12 @@ export const collectionMutations = {
 
     if (person._id === viewer.id) return fail("invalid_args", "You already own this playlist");
 
-    // The directory leaves suspended people out; a share made by ID can't reach them either.
     if (person.suspendedAt !== undefined) return fail("not_found", "Person not found");
 
     const existing = await findShare(ctx, playlist._id, person._id);
-    // Sharing again without a role keeps theirs, so it never quietly takes edit rights away.
     const role = args.role ?? existing?.role ?? "viewer";
 
     if (existing === null) {
-      // Lists of shares stop at this many, so a share past it could never be seen or left.
       const [onPlaylist, toPerson] = await Promise.all([
         ctx.db
           .query("playlistShares")
@@ -625,11 +589,9 @@ export const collectionMutations = {
     const { playlist, access } = await openPlaylist(ctx, viewer, args.playlistId, "view");
     const userId = args.userId === undefined ? null : tableId(ctx, "users", args.userId);
 
-    // Anyone a playlist is shared with can leave it.
     if (userId === viewer.id && access !== "owner") {
       const share = await findShare(ctx, playlist._id, viewer.id);
 
-      // Opened by its link only: there is no share to leave, and access stays.
       if (share === null) return fail("not_found", "This playlist isn't shared with you by name");
       await ctx.db.delete(share._id);
 
@@ -648,8 +610,6 @@ export const collectionMutations = {
       return ok;
     }
 
-    // Stop sharing at all: nobody but the owner can open it from now on. Sharing stops at
-    // `MAX_SHARES`, so this takes them all.
     const shares = await ctx.db
       .query("playlistShares")
       .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))

@@ -1,8 +1,3 @@
-/**
- * The command dispatcher. Every client (web, command menu, CLI, agents) calls `read` for query
- * commands and `run` for mutation commands; arguments and results are checked against the shared
- * registry in `@music/commands`.
- */
 import { argsDecoder, resultDecoder } from "@music/commands/codec";
 import { can, forbiddenMessage } from "@music/commands/permissions";
 import { commands, isCommandName } from "@music/commands/registry";

@@ -9,13 +9,11 @@ import { useUi } from "@/components/shell/ui-state";
 
 import { AvatarStack } from "./avatars";
 
-/** Everyone in a Jam: the host, then the people who joined. */
 const peopleIn = (jam: Jam): ReadonlyArray<Contributor> => [
   jam.host,
   ...jam.members.filter((member) => member.status === "joined").map((member) => member.person),
 ];
 
-/** What the band says about the viewer's Jam. */
 const bandText = (jam: Jam, listeningHere: boolean): string => {
   if (jam.status === "ended") return "The Jam ended";
 
@@ -30,7 +28,6 @@ const bandText = (jam: Jam, listeningHere: boolean): string => {
   return `${jam.host.name}'s Jam${listeningHere ? " · listening along here" : ""}`;
 };
 
-/** The band's button label. */
 const actionLabel = (jam: Jam): string => {
   if (jam.status === "ended") return "Back to your music";
 
@@ -86,7 +83,6 @@ export function JamButton({
   const me = useRead("account.me", {});
   const idle = jam === null || jam.status === "ended";
 
-  // Guests can't start a Jam (its link could make accounts); in one, they still open it.
   if (idle && (me === undefined || me.role === "guest")) return null;
 
   return (

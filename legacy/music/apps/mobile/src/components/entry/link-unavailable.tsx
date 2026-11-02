@@ -1,8 +1,3 @@
-/**
- * An invite or reset link that can't be used (G08 and its siblings): expired, already used, or
- * not valid. Paper draws the expired invite; the others follow it with their own words. Sign in
- * goes back to Sign in, which every entry link opens over.
- */
 import { router } from "expo-router";
 import { Clock, Info, KeyRound, Link2Off, UserCheck } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
@@ -69,13 +64,11 @@ const TITLES = {
   reset: "Reset password",
 } as const satisfies Record<AccountLink, string>;
 
-/** Back to Sign in, under this screen, or in its place when the link opened at the root. */
 const toSignIn = (): void => {
   if (router.canGoBack()) router.back();
   else router.replace("/sign-in");
 };
 
-/** Props for `LinkUnavailable`. */
 export interface LinkUnavailableProps {
   readonly kind: AccountLink;
   readonly state: Unavailable;

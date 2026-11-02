@@ -18,7 +18,6 @@ describe("jobEta", () => {
     expect(jobEta({ status: "running", done: 5, total: 10, startedAt: null }, MINUTE)).toBeNull();
   });
 
-  // Setup's last step showed "100% · UNDER A MINUTE LEFT" once the scan had finished.
   it("has nothing left once the job finished or read everything", () => {
     const finished = { done: 20_000, total: 20_000, startedAt: 0 } as const;
 

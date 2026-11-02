@@ -32,7 +32,6 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-/** A request for `SONG`, signed afresh each time, into `dir`. */
 const request = (overrides: Partial<FinishedFileRequest> = {}): FinishedFileRequest => {
   let signatures = 0;
 

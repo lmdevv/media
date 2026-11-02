@@ -1,8 +1,3 @@
-/**
- * F09 · People: everyone on the server with their role, then the invites that still work. The
- * list stays in the page's scroll: it is a household's accounts, each row is a plain view with no
- * subscription of its own, and capping it would hide people an admin must reach.
- */
 import type { User } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
 import { router } from "expo-router";

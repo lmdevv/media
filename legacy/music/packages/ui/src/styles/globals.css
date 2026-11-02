@@ -6,8 +6,6 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Tokens from the [music] Paper file (01M4KQQQ46CWH4S1JGX96NPA0T), names unchanged.
-   Re-export with the Paper MCP `get_tokens` (tailwind format) when the design changes. */
 @theme {
   --color-bg: #ffffff;
   --color-surface: #f5f5f7;
@@ -83,8 +81,6 @@
   --radius-full: 9999px;
 }
 
-/* Tokens the code needed that the Paper file doesn't name yet. They keep Paper's naming (a light
-   role, plus a `dark-` twin where dark mode differs) so the owner can add them to Paper as-is. */
 @theme {
   --color-shadow: #1d1d1f;
   --color-shadow-cover: color-mix(in oklab, #1d1d1f 22%, transparent);
@@ -102,7 +98,6 @@
   --text-phone-title: 22px;
   --text-phone-card: 24px;
   --text-phone-large-title: 34px;
-  /* Synced lyrics lines: desktop Now Playing (Paper 05 · 01b) and the phone's (05 · 04b). */
   --text-lyric: 36px;
   --text-phone-lyric: 30px;
   --tracking-snug: -0.01em;
@@ -126,8 +121,6 @@
   --spacing-dvh-message: 60dvh;
   --spacing-dvh-device-list: min(440px, 60dvh);
   --spacing-now-playing-cover: min(560px, 58vh);
-  /* The desktop queue view's art: the window height less the rest of its column, its padding,
-     and the top bar (448px), down to 240px at the view's 688px minimum height. */
   --spacing-now-playing-queue-art: clamp(240px, calc(100dvh - 448px), 380px);
   --container-vw-inset: calc(100vw - 2rem);
   --shadow-dialog: 0 32px 80px color-mix(in oklab, var(--color-shadow) 24%, transparent);
@@ -148,8 +141,6 @@
   --shadow-now-playing-thumb: 0 6px 14px rgb(0 0 0 / 35%);
 }
 
-/* Dark mode: each dark token replaces its light role. --color-dark-canvas and the
-   --color-dark-hero-* stops have no light role. */
 .dark {
   --color-bg: var(--color-dark-bg);
   --color-surface: var(--color-dark-surface);
@@ -168,7 +159,6 @@
   --color-shadow-glass: var(--color-dark-shadow-glass);
 }
 
-/* shadcn's semantic names resolve to Paper roles, so components follow the tokens. */
 @theme inline {
   --color-background: var(--color-bg);
   --color-foreground: var(--color-text);
@@ -202,7 +192,6 @@
   body {
     @apply bg-background text-foreground;
   }
-  /* Lucide icons draw at the Paper stroke weight; transport glyphs set their own fill. */
   .lucide {
     stroke-width: 1.75;
   }
@@ -212,9 +201,6 @@
   }
 }
 
-/* Reduced motion: overlays, sheets, and hover effects appear and change at once instead of
-   sliding, zooming, or fading, and skeletons stop pulsing. Spinners keep turning, since they are
-   the only sign that work is still going on. */
 @media (prefers-reduced-motion: reduce) {
   *:not(.animate-spin),
   *::before,

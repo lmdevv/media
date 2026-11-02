@@ -1,8 +1,3 @@
-/**
- * The media service's real transcoder and stream responses, for the media stub: transcoded
- * profiles come out of the exact ffmpeg pipeline, timing measurement, and live streaming
- * production uses, cached under the fixtures folder.
- */
 import { join } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
@@ -13,7 +8,6 @@ import { Duration, Layer, ManagedRuntime, Redacted } from "effect";
 
 import { fixturesDir } from "./config.ts";
 
-/** Where the stub's transcodes go. */
 const dataDir = join(fixturesDir, ".media-data");
 
 const config = Layer.succeed(
@@ -26,7 +20,6 @@ const config = Layer.succeed(
     port: 0,
     cacheMaxBytes: 1024 * 1024 * 1024,
     rescanInterval: Duration.hours(1),
-    // ffmpeg itself, slowed down while the stub's `slow` control is on.
     ffmpegPath: join(import.meta.dirname, "throttled-ffmpeg.sh"),
     ffprobePath: "ffprobe",
     musicRoots: null,
@@ -49,7 +42,6 @@ export const transcodedStream = (
   codec: string,
   mtimeMs: number,
 ): Promise<Response> => {
-  // The transcoder only uses the ID in cache file names and logs.
   const input = { trackId: TrackId.make(key), profile, source, mtimeMs, codec };
   const startMs = Number(new URL(request.url).searchParams.get("start") ?? "0");
 
@@ -58,11 +50,6 @@ export const transcodedStream = (
     : runtime.runPromise(transcodedResponse(request, input));
 };
 
-/**
- * Added to every source's modification time in cache keys. `POST /control/cold` moves it to a
- * value no earlier transcode used, in this run or a previous one, so the next request for each
- * source misses the cache and streams live.
- */
 let generation = 0;
 
 /** Makes every later request miss the transcodes cached so far. */

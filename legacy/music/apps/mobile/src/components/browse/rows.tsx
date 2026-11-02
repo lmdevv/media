@@ -1,8 +1,3 @@
-/**
- * The browse rows (A04–A10): a song with its ellipsis menu, an album, and an artist, on Paper's
- * 64pt row. Rows sit on the page's 20pt edge themselves, since a recycled list has no padded
- * container to put them in.
- */
 import type { AlbumCard, ArtistCard } from "@music/commands/models";
 import { router } from "expo-router";
 import { View } from "react-native";

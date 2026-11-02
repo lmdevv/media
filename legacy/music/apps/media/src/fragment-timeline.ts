@@ -8,7 +8,6 @@ import { Data, Option, Result } from "effect";
 
 const HEADER = 8;
 
-/** Boxes on the way from `moof` down to `tfdt`. */
 const CONTAINERS: ReadonlySet<string> = new Set(["moof", "traf"]);
 
 /** The stream is not the fragmented MP4 it should be, or its times do not fit the shift. */
@@ -40,7 +39,6 @@ export const timelineStart: TimelineState = {
 const typeAt = (bytes: Uint8Array, at: number): string =>
   String.fromCodePoint(...bytes.subarray(at + 4, at + HEADER));
 
-/** The box size at `at`, or none when the header is not all there yet; 0 means "to the end". */
 const sizeAt = (bytes: Uint8Array, at: number): Option.Option<number> => {
   if (bytes.length - at < HEADER) return Option.none();
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -53,10 +51,6 @@ const sizeAt = (bytes: Uint8Array, at: number): Option.Option<number> => {
   return Option.some(Number(view.getBigUint64(at + HEADER)));
 };
 
-/**
- * Rewrites the `tfdt` boxes inside one complete `moof` in place, setting the shift from the
- * first one when it is still unknown. Returns the shift used.
- */
 const shiftMoof = (
   moof: Uint8Array,
   target: bigint,
@@ -149,7 +143,6 @@ export const shiftTimeline =
 
       if (Option.isNone(size)) break;
 
-      // A box that runs to the end of the stream is never a `moof`.
       if (size.value === 0) {
         passthrough = Number.POSITIVE_INFINITY;
         continue;
@@ -165,7 +158,6 @@ export const shiftTimeline =
       }
 
       if (bytes.length - at < size.value) break;
-      // A copy: the chunk may be a view the caller still holds.
       const moof = bytes.slice(at, at + size.value);
       const shifted = shiftMoof(moof, target, shift);
 

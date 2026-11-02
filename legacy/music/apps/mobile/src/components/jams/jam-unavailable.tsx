@@ -1,8 +1,3 @@
-/**
- * A Jam link that can't be joined: the host paused new joins (G11), the link was replaced or never
- * worked (G12), or the Jam is over. Signed in, the way out is the person's own music; signed out
- * (D07's route), it is Sign in.
- */
 import type { JamPreview } from "@music/sdk/functions";
 import { router } from "expo-router";
 import { Info, Lock, Music, Users } from "lucide-react-native";
@@ -17,7 +12,6 @@ import { Page } from "@/components/ui/page";
 
 import { backToMyMusic } from "./jam-home";
 
-/** Paper's decorative info glyph in the nav bar of page 19's states. */
 const infoGlyph = (
   <View className="size-hit-target items-center justify-center">
     <Icon icon={Info} />
@@ -55,13 +49,11 @@ const COPY = {
 export const unavailableOf = (preview: JamPreview): Unavailable | null =>
   preview.state === "open" || preview.state === "approval" ? null : preview.state;
 
-/** Back to Sign in, under this screen, or in its place when the link opened at the root. */
 const toSignIn = (): void => {
   if (router.canGoBack()) router.back();
   else router.replace("/sign-in");
 };
 
-/** Props for `JamUnavailable`. */
 export interface JamUnavailableProps {
   readonly state: Unavailable;
   readonly hostName: string;
@@ -90,7 +82,6 @@ export function JamUnavailable({ state, hostName, signedIn, retry }: JamUnavaila
     />
   );
 
-  // G11 retries and G12 offers a code before the way home; otherwise home is the only way out.
   let primary: ReactNode = null;
 
   if (state === "locked" && retry !== undefined) primary = retry;

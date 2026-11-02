@@ -1,20 +1,12 @@
-/**
- * A media service with every seek transcode taken answers `503` with `Retry-After` (seconds): a
- * brief condition. Both engines wait that long and ask again, a bounded number of times.
- */
-
 /** Waits for a busy media service in a row before the stream counts as failed. */
 export const MAX_BUSY_RETRIES = 4;
 
-/** The wait when `Retry-After` is missing or not a number of seconds. */
 const DEFAULT_RETRY_MS = 2000;
 
-/** Bounds on the wait, whatever the header says. */
 const MIN_RETRY_MS = 250;
 
 const MAX_RETRY_MS = 10_000;
 
-/** A `Retry-After` in whole seconds; the media service never sends the HTTP-date form. */
 const SECONDS = /^\d{1,6}$/u;
 
 /**

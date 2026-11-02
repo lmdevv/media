@@ -1,10 +1,3 @@
-/**
- * The queue inside Now Playing (B03, B04, H06), as Apple Music shows it: shuffle, repeat, and
- * autoplay as three pills, then "Playing Next" with the songs queued after the current one, which
- * drag to reorder and swipe left to remove. Songs autoplay added follow under "Continue Playing",
- * as on the web. The rows fade out above the controls. The iPad's panel (B1) shows the same list
- * under Paper's smaller heading, closer to its edges.
- */
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import type { LucideIcon } from "lucide-react-native";
@@ -21,16 +14,11 @@ import { EdgeFade } from "./edge-fade";
 import { QUEUE_EDGE, QueueLine, ReorderList } from "./reorder-list";
 import type { PanelPlace } from "./reorder-list";
 
-/**
- * What differs by place: how far the list reaches past its parent's margin, the Clear sheet's route,
- * and the mode pills' shape, which in the panel matches its tab switch.
- */
 const PLACES = {
   player: { bleed: "bleed-page", clear: "/player/clear-queue", pill: "h-ios-36 rounded-full" },
   panel: { bleed: "-mx-4", clear: "/clear-queue", pill: "h-8 rounded-md" },
 } as const;
 
-/** A mode pill: the text color with an inverse glyph when on, a faint wash of it when off. */
 function ModePill({
   icon,
   label,
@@ -92,7 +80,6 @@ export function ModePills({ place = "player" }: { readonly place?: PanelPlace })
   );
 }
 
-/** "Playing Next" and Clear, or what an empty queue says. */
 function PlayingNext({ empty, place }: { readonly empty: boolean; readonly place: PanelPlace }) {
   const panel = place === "panel";
 
@@ -129,7 +116,6 @@ function PlayingNext({ empty, place }: { readonly empty: boolean; readonly place
   );
 }
 
-/** What autoplay added after the queued songs; tapping one plays it. */
 function ContinuePlaying({
   items,
   place,
@@ -183,7 +169,6 @@ export function QueueList({
   const added = upcoming.filter((item) => item.autoplay);
 
   return (
-    // The rows run to the sheet's edges, so a swiped row's Remove reaches the side of the screen.
     <View className={`min-h-0 flex-1 overflow-hidden ${PLACES[place].bleed}`}>
       <ReorderList
         items={queued}

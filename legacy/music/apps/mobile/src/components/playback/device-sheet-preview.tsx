@@ -1,8 +1,3 @@
-/**
- * Play on's in-between states for the components gallery: a move in progress (B06) and a failed
- * one (B07). On a live server a move lands in well under a second, so these are hard to catch
- * otherwise. Sample devices, drawn by the same body as the real sheet.
- */
 import { DeviceId } from "@music/commands/ids";
 import { View } from "react-native";
 

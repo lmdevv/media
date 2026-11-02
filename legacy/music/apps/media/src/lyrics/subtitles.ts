@@ -1,25 +1,18 @@
-/**
- * Subtitle files used as lyrics: WebVTT and SubRip. Each cue is one line, timed from its start to
- * its end; a cue's text lines stay together, one under the other.
- */
 import type { LyricBody, LyricLine, LyricWord } from "@music/commands/lyrics";
 import { Array as Arr, Result } from "effect";
 
 import { LyricsParseError, textLines, timedBody } from "./lyric-body.ts";
 
-/** `hh:mm:ss.ttt` or `mm:ss.ttt`; SubRip writes a comma before the milliseconds. */
 const CUE_TIME = /^(?:(\d+):)?([0-5]\d):([0-5]\d)[.,](\d{1,3})$/u;
 
 const CUE_TIMING = /^\s*(\S+)\s+-->\s+(\S+)/u;
 
-/** A WebVTT timestamp inside a cue, `<00:01.500>`, which starts the text after it. */
 const INLINE_TIME = /<((?:\d+:)?[0-5]\d:[0-5]\d\.\d{3})>/gu;
 
 const VOICE_TAG = /<v(?:\.[^\s>]*)?\s+([^>]+)>/u;
 
 const TAG = /<[^>]*>/gu;
 
-/** SubRip files often carry SSA override blocks such as `{\an8}`. */
 const SSA_OVERRIDE = /\{\\[^}]*\}/gu;
 
 const ENTITIES: ReadonlyMap<string, string> = new Map([
@@ -43,7 +36,6 @@ const codePointOf = (decimal: string | undefined, hex: string | undefined): numb
   return hex === undefined ? null : Number.parseInt(hex, 16);
 };
 
-/** Numeric references past the last Unicode code point name no character, so they stay as written. */
 const decodeEntities = (text: string): string =>
   text.replaceAll(ENTITY, (whole, decimal?: string, hex?: string, name?: string) => {
     const code = codePointOf(decimal, hex);
@@ -70,10 +62,6 @@ const cueTimeMs = (value: string): number | null => {
 const cleanText = (text: string): string =>
   decodeEntities(text.replaceAll(TAG, "").replaceAll(SSA_OVERRIDE, ""));
 
-/**
- * Words from WebVTT inline timestamps: text before the first one starts with the cue, and each
- * word ends where the next starts or, for the last, where the cue ends.
- */
 const inlineWords = (
   payload: string,
   startMs: number,
@@ -101,7 +89,6 @@ interface Cue {
   readonly payload: ReadonlyArray<string>;
 }
 
-/** Splits text into blocks at blank lines and reads the cue of each block with a timing line. */
 const cuesOf = (text: string): ReadonlyArray<Cue> => {
   const blocks: Array<Array<string>> = [[]];
 

@@ -1,9 +1,3 @@
-/**
- * Whether an invite or reset link can still be used. The server's lookup says `open` as of its
- * last change, so a link that expired while the screen was open still reads `open`; the clock
- * decides that.
- */
-
 /** What a link allows: `open` shows the form, the others explain why not. */
 export type LinkState = "open" | "expired" | "used" | "invalid";
 

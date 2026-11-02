@@ -14,7 +14,6 @@ export const readPages = async <Item>(
   ): Promise<ReadonlyArray<Item>> => {
     const page = await read(cursor);
 
-    // A page that says more follow must move the cursor, or this would ask for it forever.
     if (!page.done && page.cursor === cursor) {
       throw new Error("The list stopped advancing; load it again");
     }

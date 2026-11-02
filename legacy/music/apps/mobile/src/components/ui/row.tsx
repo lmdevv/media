@@ -1,9 +1,3 @@
-/**
- * Paper's list row (pages 12 · 04 and 13): at least 56pt tall (64pt with 48pt art), a fixed leading
- * lane (48pt art or a 32pt icon slot), title over subtitle, and a fixed 32pt trailing lane, with a
- * full-width hairline under every row. The lanes keep their width when empty, so columns line up across rows.
- * The whole row is one touch target, except a `trailingAction`, which keeps its own press.
- */
 import { Check, ChevronRight, Ellipsis } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import type { ReactNode } from "react";
@@ -38,7 +32,6 @@ type RowTrailing =
       readonly trailingAction?: ReactNode;
     };
 
-/** Props for `Row`. */
 export type RowProps = RowTrailing & {
   readonly title: string;
   readonly subtitle?: string;
@@ -146,8 +139,6 @@ export function Row({
     <View
       className={`min-h-row-touch flex-row border-b border-border ${dimmed ? "opacity-disabled" : ""}`}
     >
-      {/* One element whether or not the row presses, so gaining or losing a handler doesn't remount
-          it and drop VoiceOver focus; an inert row lets touches through to its parent. */}
       <Pressable
         accessibilityRole={pressable ? "button" : "none"}
         accessibilityLabel={label}

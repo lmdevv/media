@@ -1,7 +1,3 @@
-/**
- * The Jam's link on this server, with the native share sheet and a copy that says it worked: the
- * button reads "Copied" for a moment, Paper's quiet confirmation.
- */
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { useEffect, useState } from "react";
@@ -12,7 +8,6 @@ import { useConnection } from "@/session/connection";
 
 const COPIED_MS = 2000;
 
-/** Copies `text`, then confirms with a haptic and `done`. */
 const copyText = async (text: string, done: () => void): Promise<void> => {
   await Clipboard.setStringAsync(text);
   void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

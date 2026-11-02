@@ -1,8 +1,3 @@
-/**
- * Artwork placeholders. Paper draws covers as two-stop gradients; without art files the app uses
- * the same family, chosen deterministically from the item's ID so a cover never changes between
- * screens. These colors stand in for artwork content, so they are not theme tokens.
- */
 const PLACEHOLDERS: ReadonlyArray<readonly [from: string, to: string]> = [
   ["oklab(41.7% -0.018 -0.091)", "oklab(23.8% -0.009 -0.057)"],
   ["oklab(83.4% 0.005 0.117)", "oklab(78.1% 0.068 0.107)"],
@@ -27,7 +22,6 @@ const hash = (seed: string): number => {
     value = Math.imul(value, 16777619);
   }
 
-  // Final avalanche so IDs that differ only in their last characters spread across the palette.
   value ^= value >>> 16;
   value = Math.imul(value, 2246822507);
   value ^= value >>> 13;

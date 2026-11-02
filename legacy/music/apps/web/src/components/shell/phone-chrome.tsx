@@ -101,7 +101,6 @@ function MiniPlayer() {
 
   const playing = player.status === "playing";
 
-  // Another device plays: say where, in the accent like the desktop remote banner.
   const device =
     remote && player.activeDevice !== null
       ? { name: player.activeDevice.name, Icon: deviceIcon(player.activeDevice.kind) }
@@ -198,14 +197,12 @@ function Tab({
   );
 }
 
-/** The search screen exists to type into its field, so the field takes focus on arrival. */
 const focusOnMount = (input: HTMLInputElement | null): void => {
   input?.focus({ preventScroll: true });
 };
 
 function PhoneSearchField() {
   const navigate = useNavigate();
-  // The search route's own parsed search; this field only shows on that route.
   const query = useSearch({ from: "/_app/search", shouldThrow: false })?.q ?? "";
 
   return (

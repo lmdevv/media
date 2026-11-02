@@ -1,7 +1,3 @@
-/**
- * Paginated lists: albums, artists, and songs page over the libraries the viewer reads, and liked
- * songs page too, against convex-test.
- */
 import type { TrackId } from "@music/commands/ids";
 import { describe, expect, it } from "vitest";
 
@@ -16,7 +12,6 @@ interface Page<Item> {
   readonly done: boolean;
 }
 
-/** Every page of a list, in order. */
 const pages = async <Item>(
   read: (cursor: string | null) => Promise<Page<Item>>,
 ): Promise<ReadonlyArray<ReadonlyArray<Item>>> => {
@@ -33,7 +28,6 @@ const pages = async <Item>(
   return collect(null, []);
 };
 
-/** Songs with repeated titles, in a folder of their own. */
 const files = (prefix: string) =>
   ["Intro", "Intro", "Outro", "Intro", "Bridge"].map((title, index) => ({
     path: `${prefix}/${index}.flac`,
@@ -45,13 +39,11 @@ const titles = (user: User, limit: number) =>
     all.map((page) => page.map((track) => track.title)),
   );
 
-/** A member, and an admin with a small shared library between two large private ones. */
 const setup = async () => {
   const backend = makeBackend();
   const admin = await signUp(backend, "admin");
   const member = await signUp(backend, "member");
 
-  // The admin's private library sorts before and after the shared one, by title and by date.
   await seedLibrary(backend, admin, { name: "Aaa", count: 150, visibility: "private" });
   await seedLibrary(backend, admin, { name: "Shared", count: 12 });
   await seedLibrary(backend, admin, { name: "Zzz", count: 150, visibility: "private" });
@@ -81,7 +73,6 @@ describe("lists for a member who reads only part of the catalog", () => {
       return (await ctx.meta.getTransactionMetrics()).documentsRead.used - before;
     });
 
-    // The library list, the page's songs and one more, and their likes: never the 300 others.
     expect(read).toBeLessThan(20);
   });
 
@@ -182,7 +173,6 @@ describe("lists for a viewer who reads every library", () => {
 
       const first = await admin.music.read("albums.list", { limit: 1 });
 
-      // A scan adds 1,001 newer albums while the first page is on screen with `end`.
       await Array.from({ length: 11 }, (_, batch) =>
         Array.from({ length: batch === 10 ? 1 : 100 }, (__, index) => {
           const name = `New ${batch * 100 + index}`;
@@ -229,7 +219,6 @@ describe("liked songs", () => {
     await seedLibrary(backend, admin, { name: "Many", count: 1100 });
     const many = trackIds(await allTracks(admin), "Many");
 
-    // Liked in title order, straight into the table: 1,100 `likes.set` calls take too long here.
     await backend.run(async (ctx) => {
       await many.reduce(async (previous, trackId) => {
         await previous;
@@ -239,7 +228,6 @@ describe("liked songs", () => {
       }, Promise.resolve());
     });
 
-    // And one through the command, which lands first.
     const [first] = many;
 
     if (first === undefined) throw new Error("Seed missing");

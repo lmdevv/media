@@ -97,7 +97,6 @@ const keywordsOf = (item: Item): string => {
   return "";
 };
 
-/** Ranks how well `query` matches: whole-title prefix, then a word prefix, then anywhere. */
 const score = (item: Item, query: string): number => {
   const title = titleOf(item).toLowerCase();
 

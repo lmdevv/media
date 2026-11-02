@@ -1,8 +1,3 @@
-/**
- * C09 · Sharing: the owner chooses whether the link opens for everyone on the server, sees who
- * has access and in which role, adds people (C10), and copies the link. Only the owner gets here;
- * the server refuses everyone else.
- */
 import { PlaylistId } from "@music/commands/ids";
 import type { Playlist, PlaylistSharing, PlaylistVisibility } from "@music/commands/models";
 import { errorMessage } from "@music/sdk/errors";
@@ -43,7 +38,6 @@ const LINK_NOTICES = {
   },
 } as const satisfies Record<PlaylistVisibility, { readonly title: string; readonly body: string }>;
 
-/** How long Copy playlist link says it copied. */
 const COPIED_MS = 2000;
 
 function Sharing({
@@ -55,7 +49,6 @@ function Sharing({
 }) {
   const setVisibility = useRun("playlists.visibility");
   const copyLink = useCopyLink();
-  // The choice shows at once; the server's answer replaces it, or a failure puts it back.
   const [choice, setChoice] = useState<PlaylistVisibility | null>(null);
   const [copied, setCopied] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);

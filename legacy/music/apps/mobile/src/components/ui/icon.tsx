@@ -1,7 +1,3 @@
-/**
- * Lucide glyphs at Paper's 1.75 stroke, colored by a text role so they follow the theme. Paper
- * draws its content icons on lucide's 24-unit grid; native chrome (tabs, menus) uses SF Symbols.
- */
 import type { LucideIcon } from "lucide-react-native";
 
 import { useThemeColor } from "@/lib/theme-color";
@@ -20,15 +16,6 @@ export const TONE_VARIABLES = {
   overArt: "--color-dark-text",
 } as const satisfies Record<TextTone, `--color-${string}`>;
 
-/**
-/**
- * Glyph sizes as Paper draws them: 16 beside inline metadata (a playlist's lock); 18 in the iPad
- * sidebar's search field and heading; 20 in buttons, fields, notices, and trailing row slots; 22
- * in the iPad sidebar's rows and the player bar's buttons; 24 in navigation, tabs, and leading row
- * slots; 26 for the player bar's previous and next; 32 for Now Playing's previous and next; 48 for
- * entry heroes and Now Playing's play button; 64 for empty states. Lucide takes a point size, so
- * the scale lives here rather than in CSS.
- */
 const SIZES = {
   meta: 16,
   field: 18,
@@ -44,7 +31,6 @@ const SIZES = {
 /** A step of the glyph size scale. */
 export type IconSize = keyof typeof SIZES;
 
-/** Props for `Icon`. */
 export interface IconProps {
   readonly icon: LucideIcon;
   readonly tone?: TextTone;

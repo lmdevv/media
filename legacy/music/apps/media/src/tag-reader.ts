@@ -1,4 +1,3 @@
-/** Reads audio tags, technical details, and embedded lyrics from one file with `music-metadata`. */
 import type { LocalLyricSet } from "@music/commands/lyrics";
 import { Effect, Schema } from "effect";
 import { parseFile, selectCover } from "music-metadata";
@@ -6,7 +5,6 @@ import { parseFile, selectCover } from "music-metadata";
 import { normalizeCodec } from "./audio-format.ts";
 import { embeddedLyrics } from "./lyrics/embedded.ts";
 
-/** A file's tags could not be read. */
 class TagReadError extends Schema.TaggedError<TagReadError>()("TagReadError", {
   path: Schema.String,
   cause: Schema.Defect(),
@@ -49,7 +47,6 @@ const positive = (value: number | null | undefined): number | undefined =>
     ? undefined
     : value;
 
-/** Parses the tags of the file at `path`, its pictures too when `covers` is set. */
 const parseTags = (path: string, options: { readonly covers: boolean }) =>
   Effect.tryPromise({
     try: () => parseFile(path, { duration: false, skipCovers: !options.covers }),
@@ -62,7 +59,6 @@ export const readTrackTags = Effect.fn("TagReader.read")(function* (path: string
 
   const { common, format } = metadata;
 
-  // music-metadata accepts some junk files; without a codec there is nothing to play.
   if (format.codec === undefined) {
     return yield* new TagReadError({ path, cause: new Error("No audio stream found") });
   }

@@ -1,8 +1,3 @@
-/**
- * The download control in an album's or playlist's header (Paper's downloads proposal, variant A,
- * D01 and D04): a ring beside More that downloads, shows progress by songs, cancels, and asks
- * before it removes what is already here.
- */
 import type { DownloadTarget } from "@music/commands/models";
 import type { DownloadStatus, DownloadUsage } from "@music/sdk/downloads";
 import { Match } from "effect";
@@ -64,8 +59,6 @@ export const downloadControl = (
         press: "cancel",
         label: `Cancel download, ${String(done)} of ${String(total)} songs downloaded`,
       }),
-      // Paper's D05: an album with some songs here stays downloaded, and its rows say which songs
-      // to retry. With none here it isn't downloaded, so it waits for its retries instead.
       failed: ({ failed, total }): DownloadControl =>
         failed < total
           ? {

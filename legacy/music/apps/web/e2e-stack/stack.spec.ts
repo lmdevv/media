@@ -28,22 +28,18 @@ const decodeState = Schema.decodeUnknownSync(Schema.fromJsonString(PlaybackState
 
 const decodeJob = Schema.decodeUnknownSync(Schema.fromJsonString(Job));
 
-/** A row of `convex data users --format jsonl`. */
 const decodeUserRow = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Struct({ _id: Schema.String, email: Schema.optionalKey(Schema.String) }),
   ),
 );
 
-/** A row of `convex data devices --format jsonl`. */
 const decodeDeviceRow = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ deviceId: Schema.String })),
 );
 
-/** The time `days` days ago, in epoch milliseconds. */
 const daysAgo = (days: number): number => Date.now() - days * 24 * 60 * 60 * 1000;
 
-/** The JSON rows of `convex data` output. */
 const rows = <Row>(decode: (line: string) => Row, output: string): ReadonlyArray<Row> =>
   output
     .split("\n")
@@ -68,7 +64,6 @@ const openFirstAlbum = async (page: Page): Promise<string> => {
   const name = (await card.getAttribute("aria-label")) ?? (await card.textContent()) ?? "";
   await card.click();
   await expect(page).toHaveURL(/\/albums\/[^/]+$/);
-  // The URL changes before the album page renders, so wait for its heading to replace the list's.
   const heading = page.getByRole("heading", { level: 1 }).first();
   await expect(heading).not.toHaveText("Albums");
   const title = (await heading.textContent()) ?? name;
@@ -124,16 +119,11 @@ test("Ctrl+J and Ctrl+P move through the command menu", async ({ page }) => {
   await signIn(page);
   await page.keyboard.press("ControlOrMeta+k");
   const menu = page.getByRole("dialog", { name: "Command menu" });
-  // With no query, a "Now playing" row can arrive after the first row was selected, and the
-  // selection stays put. A query selects its first result once the search settles; wait for that
-  // result, or Ctrl+J can land on the list from before the query.
   const options = menu.getByRole("option");
   const third = await options.nth(2).boundingBox();
 
   if (third === null) throw new Error("The command menu has fewer than three rows");
   const rest = { x: third.x + third.width / 2, y: third.y + third.height / 2 };
-  // The mouse rests over the list. Chromium reports rows moving under a resting pointer as a
-  // move to the same spot, which must not take the row the keyboard picked.
   await page.mouse.move(rest.x, rest.y);
 
   const press = async (key: string): Promise<void> => {
@@ -206,7 +196,6 @@ test("a playlist deleted from the CLI while open shows its deleted state and the
   await expectAudioPast(page, 1);
 
   const created = decodeCreatedPlaylist(cli(apiKey, ["playlists", "create", "Doomed", "--json"]));
-  // Navigate inside the app: a page load would stop the audio this test is about.
   await page
     .getByRole("navigation", { name: "Library" })
     .getByRole("link", { name: /Doomed/ })
@@ -263,18 +252,15 @@ const decodeJam = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ code: Schema.String })),
 );
 
-/** `jam get --json`: the Jam's status, or null outside any. */
 const decodeJamState = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.NullOr(Schema.Struct({ status: Schema.String }))),
 );
 
-/** A stream URL a page asked for, and when. */
 interface StreamRequest {
   readonly url: URL;
   readonly at: number;
 }
 
-/** Records every stream request `page` makes from now on. */
 const recordStreams = (page: Page): Array<StreamRequest> => {
   const streams: Array<StreamRequest> = [];
 
@@ -287,7 +273,6 @@ const recordStreams = (page: Page): Array<StreamRequest> => {
   return streams;
 };
 
-/** Refuses the next stream request `page` makes, as the media service refuses an expired URL. */
 const refuseNextStream = async (page: Page): Promise<{ refused: boolean }> => {
   const state = { refused: false };
 
@@ -312,17 +297,13 @@ test("a Jam member listens along with real audio, in step with the host", async 
   test.setTimeout(180_000);
   cli(apiKey, ["playback", "repeat", "all"]);
 
-  // Later tests share this admin's playback: put repeat back and end the Jam however this ends.
   try {
-    // The host plays an album in this browser and starts a Jam.
     await signIn(page);
     await openFirstAlbum(page);
     await page.getByRole("button", { name: "Play", exact: true }).first().click();
     await expectAudioPast(page, 1);
     const { code } = decodeJam(cli(apiKey, ["jam", "start", "--json"]));
 
-    // A friend with a guest account, who hears no library of their own, opens the link in
-    // another browser and joins.
     const invite = decodeInvite(cli(apiKey, ["invites", "create", "--role", "guest", "--json"]));
     const other = await browser.newContext();
     const friend = await other.newPage();
@@ -340,18 +321,14 @@ test("a Jam member listens along with real audio, in step with the host", async 
       const [host, member] = await Promise.all([playedSeconds(page), playedSeconds(friend)]);
       const state = decodeState(cli(apiKey, ["now", "--json"]));
       const length = (state.queue[state.index]?.durationMs ?? 0) / 1000;
-      // Fixture songs are a few seconds long: compare around the loop too.
       const gap = Math.abs(host - member);
 
       return host > 0 && member > 0 && Math.min(gap, length - gap) < 2;
     };
 
-    // Real audio plays on the friend's browser too, within a couple of seconds of the host's.
     await expectAudioPast(friend, 0.5);
     await expect.poll(inStep, { timeout: 30_000 }).toBe(true);
 
-    // The friend hears these songs only through the Jam, so each URL lasts five minutes, not
-    // hours. Refused once, as an expired URL is, the player signs a new one and stays in step.
     const lifetimes = streams.map(({ url, at }) => Number(url.searchParams.get("exp")) - at);
 
     expect(lifetimes.length).toBeGreaterThan(0);
@@ -368,7 +345,6 @@ test("a Jam member listens along with real audio, in step with the host", async 
     await expect.poll(() => isPlayingAudio(friend), { timeout: 30_000 }).toBe(true);
     await expect.poll(inStep, { timeout: 30_000 }).toBe(true);
 
-    // The host ends the Jam: the friend's player stops, back to their own (empty) queue.
     cli(apiKey, ["jam", "end"]);
     await expect.poll(() => isPlayingAudio(friend), { timeout: 30_000 }).toBe(false);
     await expect(friend.getByRole("status", { name: "Jam" })).toContainText("The Jam ended");
@@ -425,7 +401,6 @@ test("playlists: create with N, add from a song's menu, remove, rename, and dele
   await signIn(page);
   await openFirstAlbum(page);
 
-  // The name field has focus when the dialog opens, so typing and Enter create the playlist.
   await page.keyboard.press("n");
   await expect(page.getByRole("dialog", { name: "New playlist" })).toBeVisible();
   await page.keyboard.type("Road trip");
@@ -541,7 +516,6 @@ test("the song menu's Q, Shift+Enter, and L keys do what the menu shows", async 
   await signIn(page);
   await openFirstAlbum(page);
 
-  // The first song row (any library has one); its menu button names the song.
   const row = page
     .locator("main [role=row]")
     .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
@@ -553,7 +527,6 @@ test("the song menu's Q, Shift+Enter, and L keys do what the menu shows", async 
   const title = label.replace(/^More actions for /, "");
   expect(title.length).toBeGreaterThan(0);
 
-  // Keys reach the menu once it has focus, as after any click.
   const openMenu = async (): Promise<void> => {
     await row.hover();
     await menu.click();
@@ -616,7 +589,6 @@ test("phone queue keeps the transport on screen and the device list fits", async
 
   await expect(list.getByRole("menuitemradio", { name: /Old laptop 11/ })).toBeAttached();
 
-  // The sheet slides in; poll until it settles.
   await expect
     .poll(async () => {
       const box = await list.boundingBox();
@@ -638,7 +610,6 @@ test("Esc closes the desktop queue panel", async ({ page }) => {
 });
 
 test("the sign-in screen shows the release version", async ({ page }) => {
-  // Every package carries the release version; the CLI prints its own.
   const version = cli(apiKey, ["--version"]).trim();
 
   expect(version).toMatch(/^\d+\.\d+\.\d+/);
@@ -663,8 +634,6 @@ test("album cards and song rows expose their play buttons", async ({ page }) => 
 
   await page.goto("/songs");
 
-  // The playing song shows its bars instead of a play button, and the album just played can hold
-  // the first song by title, so pick the first song that isn't playing.
   const menu = page
     .locator("main [role=row]:not([aria-current=true])")
     .getByRole("button", { name: /^More actions for / })
@@ -676,8 +645,6 @@ test("album cards and song rows expose their play buttons", async ({ page }) => 
     .locator("main [role=row]")
     .filter({ has: page.getByRole("button", { name: menuLabel, exact: true }) });
 
-  // No hover: role queries skip display:none, so finding it proves screen readers can, and
-  // focusing it and pressing Enter is how a keyboard plays the song.
   const play = row.getByRole("button", { name: /^Play / });
 
   await expect(play).toHaveCount(1);
@@ -687,12 +654,9 @@ test("album cards and song rows expose their play buttons", async ({ page }) => 
 });
 
 test("the last song in the queue stops at its end instead of starting over", async ({ page }) => {
-  // Its waits (audio start, reaching the end, and a stopped window past one report) can add up
-  // to more than the default 120 seconds on a slow machine.
   test.setTimeout(180_000);
   cli(apiKey, ["playback", "shuffle", "--no-on"]);
   cli(apiKey, ["playback", "repeat", "off"]);
-  // Autoplay would follow the last song with more; this test is about the queue running out.
   cli(apiKey, ["queue", "autoplay", "--no-on"]);
 
   await signIn(page);
@@ -719,13 +683,10 @@ test("the last song in the queue stops at its end instead of starting over", asy
   expect(playing.index).toBe(playing.queue.length - 1);
   cli(apiKey, ["playback", "seek", "--position-ms", String(Math.max(0, durationMs - 3000))]);
 
-  // The song reaches its end and playback stops there.
   await expect
     .poll(() => decodeState(cli(apiKey, ["now", "--json"])).playing, { timeout: 60_000 })
     .toBe(false);
 
-  // The player reports its position every 15 seconds; a report that still says "playing" would
-  // restart the song, so it must stay stopped past one.
   const stoppedAt = Date.now();
 
   await expect
@@ -766,14 +727,12 @@ test("autoplay keeps the music going after the last song", async ({ page }) => {
   await last.getByRole("button", { name: `Play ${title}`, exact: true }).click();
   await expectAudioPast(page, 1);
 
-  // Playing the album's last song lines up autoplay's songs after it.
   const playing = decodeState(cli(apiKey, ["now", "--json"]));
   const durationMs = playing.queue[playing.index]?.durationMs ?? 0;
 
   expect(playing.queue.slice(playing.index + 1).some((entry) => entry.autoplay)).toBe(true);
   cli(apiKey, ["playback", "seek", "--position-ms", String(Math.max(0, durationMs - 3000))]);
 
-  // The song ends and an autoplay song plays next, with sound.
   await expect
     .poll(
       () => {
@@ -785,7 +744,6 @@ test("autoplay keeps the music going after the last song", async ({ page }) => {
     )
     .toBe(true);
 
-  // The last song played past one second already; the autoplay song must play on from here.
   const autoplayBaseline = await page.evaluate(() =>
     Math.max(
       0,
@@ -801,14 +759,11 @@ test("autoplay keeps the music going after the last song", async ({ page }) => {
 test("the command menu rescans the only library folder with Enter", async ({ page }) => {
   await signIn(page);
   await page.keyboard.press("Control+k");
-  // A query no song, album, or artist matches, so the command is the top row once results settle.
   await page.getByRole("combobox").fill("Rescan");
 
   const menu = page.getByRole("dialog");
 
-  // Enter waits while results load (the rows would still be the previous query's).
   await expect(menu.getByRole("img", { name: "Searching" })).toHaveCount(0);
-  // The only folder is already picked, so Enter runs the command.
   await expect(
     menu.getByRole("option", { name: /^Rescan a library folder/, selected: true }),
   ).toBeVisible();
@@ -834,7 +789,6 @@ test("adding a folder that doesn't exist shows the failed scan and keeps open li
       .poll(() => decodeJob(cli(apiKey, ["jobs", "get", created.jobId, "--json"])).status)
       .toBe("failed");
 
-    // Every open list re-ran with the new folder in your libraries; none may fail.
     await expect(page.getByText("This screen didn't load")).toHaveCount(0);
     await expect(page.locator("main a[href^='/albums/']").first()).toBeVisible();
 
@@ -843,7 +797,6 @@ test("adding a folder that doesn't exist shows the failed scan and keeps open li
     await expect(card.getByText("Scan failed")).toBeVisible();
     await expect(card.getByText(/unavailable/)).toBeVisible();
   } finally {
-    // A failed cleanup must not hide the assertion that failed first; report it instead.
     try {
       cli(apiKey, ["libraries", "delete", created.libraryId]);
     } catch (cause) {
@@ -885,14 +838,12 @@ test("devices silent for a day leave Play on, and the daily prune deletes old on
   const ancient = { deviceId: "00000000-0000-4000-9000-000000000002", name: "Ancient laptop" };
   const speaker = { deviceId: "00000000-0000-4000-9000-000000000003", name: "Paused speaker" };
 
-  // Heartbeats always record the current time, so the long-silent devices are imported.
   convexImport("devices", [
     { ...closed, userId: admin._id, kind: "web", lastSeenAt: daysAgo(2) },
     { ...ancient, userId: admin._id, kind: "web", lastSeenAt: daysAgo(40) },
     { ...speaker, userId: admin._id, kind: "web", lastSeenAt: daysAgo(40) },
   ]);
 
-  // A paused session stays on the speaker, which keeps it listed and kept however old it is.
   cli(apiKey, ["playback", "pause"]);
   cli(apiKey, ["playback", "transfer", speaker.deviceId]);
 
@@ -902,7 +853,6 @@ test("devices silent for a day leave Play on, and the daily prune deletes old on
   expect(names()).toContain(speaker.name);
   expect(names()).not.toContain(closed.name);
   expect(names()).not.toContain(ancient.name);
-  // The device asking is listed however long it was silent.
   expect(names(["--device-id", closed.deviceId])).toContain(closed.name);
 
   await signIn(page);
@@ -941,10 +891,6 @@ test("data saver plays through HTML audio, starts a first play at once, and seek
   await expect(dataSaver).toHaveAttribute("aria-checked", "true");
   await openFirstAlbum(page);
 
-  /**
-   * Where in the song the playing data saver stream is, in seconds, or -1 while none plays. A
-   * stream opened part-way (`&start=<ms>`) starts its own time at that offset.
-   */
   const dataSaverAt = (): Promise<number> =>
     page.evaluate(() =>
       Math.max(
@@ -960,7 +906,6 @@ test("data saver plays through HTML audio, starts a first play at once, and seek
       ),
     );
 
-  // No song has played at 128 kbps yet, so this one is transcoded as it plays.
   const tappedAt = Date.now();
   await page.getByRole("button", { name: "Play", exact: true }).first().click();
   await expect.poll(dataSaverAt, { intervals: [50] }).toBeGreaterThan(0.02);
@@ -975,7 +920,6 @@ test("data saver plays through HTML audio, starts a first play at once, and seek
   cli(apiKey, ["playback", "seek", "--position-ms", "3000"]);
   await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).positionMs).toBe(3000);
 
-  // Playing on from where it paused would take more than two seconds to get there.
   const resumedAt = Date.now();
   await bar.getByRole("button", { name: "Play", exact: true }).click();
   await expect.poll(dataSaverAt, { intervals: [50] }).toBeGreaterThanOrEqual(3);

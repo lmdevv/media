@@ -1,14 +1,3 @@
-/**
- * LRCLIB (https://lrclib.net/docs) as the lyrics worker asks it. Requests go out one at a time
- * across the whole service, with a gap between them. Each lookup tries `/api/get` with the song's
- * tags and length, then `/api/search`, whose results count only when the title, artist, and
- * length match.
- *
- * Failures come in two kinds. LRCLIB being unavailable (no connection, a timeout, a 5xx, a 429,
- * or any other refusal but 404) is no fault of the song: it pauses every request, for as long as
- * `Retry-After` says or for a backoff that doubles with each failure in a row, up to an hour in
- * production. A record LRCLIB returned that cannot be read is that song's failure alone.
- */
 import { Buffer } from "node:buffer";
 
 import { normalizeLyricsTag } from "@music/commands/lyrics";
@@ -100,30 +89,22 @@ export class LrclibClient extends Context.Service<LrclibClient, Interface>()(
 /** The User-Agent LRCLIB asks clients to send: the app, its version, and where it lives. */
 export const USER_AGENT = `music/${packageJson.version} (+https://github.com/lmdevv/music)`;
 
-/** LRCLIB's `/api/get` matches lengths within this many seconds; search results must too. */
 const DURATION_TOLERANCE_S = 2;
 
-/** What one request got back, read no further than its status needs. */
 type Fetched = Data.TaggedEnum<{
-  /** A 200 and its body. */
   Body: { readonly text: string };
-  /** A 200 whose body is larger than `maxBodyBytes`. */
   TooLarge: {};
-  /** A 404: LRCLIB has no such record. */
   NotFound: {};
-  /** Any other status, with its `Retry-After`; the body is never read. */
   Refused: { readonly status: number; readonly retryAfter: string | null };
 }>;
 
 const Fetched = Data.taggedEnum<Fetched>();
 
-/** A request that got no answer. */
 class NoAnswer extends Data.TaggedError("NoAnswer")<{
   readonly reason: "network" | "timeout";
   readonly cause: unknown;
 }> {}
 
-/** `Retry-After` as seconds or an HTTP date, in milliseconds from `now`. */
 const retryAfterOf = (value: string, now: number): number | null => {
   const seconds = Number(value.trim());
 
@@ -133,7 +114,6 @@ const retryAfterOf = (value: string, now: number): number | null => {
   return Number.isNaN(at) ? null : Math.max(0, at - now);
 };
 
-/** Reads `body` to its end, or gives up and returns null once it passes `limit` bytes. */
 const readBounded = async (
   body: ReadableStream<Uint8Array> | null,
   limit: number,
@@ -161,10 +141,6 @@ const readBounded = async (
   return (await read(0)) ? new TextDecoder().decode(Buffer.concat(chunks)) : null;
 };
 
-/**
- * One GET to LRCLIB. Its status decides at once whether the body is read at all, and the request
- * and the reading of its body share one abort signal, so a timeout hangs up on both.
- */
 const fetchOnce = (options: Options, path: string, urlParams: Record<string, string>) =>
   Effect.tryPromise({
     try: async (signal): Promise<Fetched> => {
@@ -211,12 +187,6 @@ const decodeSearch = Schema.decodeUnknownResult(
 
 const decodeSearchResult = Schema.decodeUnknownResult(SearchResult);
 
-/**
- * Whether a search result is the queried song: the same title and artist once normalized, and a
- * length within `DURATION_TOLERANCE_S`. Live, acoustic, and edit labels stay in titles, so those
- * recordings never match the studio song. Artists compare whole, featured artists aside:
- * punctuation inside a name, as in `AC/DC` or `Earth, Wind & Fire`, is no list of artists.
- */
 const isStrictMatch = (
   query: LookupQuery,
   result: { readonly trackName: string; readonly artistName: string; readonly duration: number },
@@ -225,13 +195,11 @@ const isStrictMatch = (
   normalizeLyricsTag(result.trackName) === normalizeLyricsTag(query.title) &&
   normalizeLyricsTag(result.artistName) === normalizeLyricsTag(query.artist);
 
-/** Reads a record LRCLIB returned. Text it cannot read is a failure, never a miss. */
 const parseRecord = (path: string, json: string) =>
   Effect.fromResult(parseLrclibRecord(json)).pipe(
     Effect.mapError((cause) => new LrclibMalformed({ path, cause })),
   );
 
-/** The search results that are the queried song, with synced lyrics first; none unreadable. */
 const searchMatches = (query: LookupQuery, text: string) => {
   const results = decodeSearch(text);
 
@@ -261,9 +229,7 @@ const searchMatches = (query: LookupQuery, text: string) => {
 export const make = (options: Options) =>
   Effect.gen(function* () {
     const permit = yield* Semaphore.make(1);
-    // When the next request may start, in epoch milliseconds.
     const nextAt = yield* Ref.make(0);
-    // Requests in a row that found LRCLIB unavailable.
     const failures = yield* Ref.make(0);
 
     const untilTurn = Effect.gen(function* () {
@@ -279,7 +245,6 @@ export const make = (options: Options) =>
       Effect.andThen(holdFor(Duration.toMillis(options.gap))),
     );
 
-    /** Pauses every request after LRCLIB was unavailable, and says for how long. */
     const unavailable = (
       reason: LrclibUnavailable["reason"],
       status: number | null,
@@ -303,7 +268,6 @@ export const make = (options: Options) =>
         return yield* new LrclibUnavailable({ reason, status, pauseMs, cause });
       });
 
-    /** One request in turn: the body of a 200, or none for a 404. */
     const paced = (path: string, urlParams: Record<string, string>) =>
       permit.withPermits(1)(
         Effect.gen(function* () {

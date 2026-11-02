@@ -37,8 +37,6 @@ sync() {
   on_mac "cd ${remote} && pnpm install --frozen-lockfile --ignore-scripts"
 }
 
-# Regenerates ios/ only when the inputs that shape it change, unless --clean. A local module's
-# file list counts, since pods pick up its sources when they install.
 prebuild() {
   on_mac "cd ${app} && hash=\$( (cat app.json package.json ../../pnpm-lock.yaml assets/fonts/*.ttf assets/icon/*.png \
         assets/splash/*.png modules/*/expo-module.config.json modules/*/ios/*.podspec; find modules -type f | sort) \
@@ -65,8 +63,6 @@ open_client() {
     && xcrun simctl openurl ${udid} 'music://expo-development-client/?url=${url}'"
 }
 
-# What a lock screen, Control Center, or headphone press sends, delivered through the simulator's
-# media remote service. See scripts/ios-remote-command.m.
 remote_command() {
   local udid="$1" command="$2"
   ssh "$host" "mkdir -p music-ios/tools"

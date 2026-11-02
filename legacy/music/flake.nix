@@ -32,7 +32,6 @@
         default = cli;
       });
 
-      # `nix run github:lmdevv/music#cli -- whoami`
       apps = forAllSystems (
         pkgs:
         let
@@ -50,7 +49,6 @@
 
       nixosModules.default = import ./nix/module.nix;
 
-      # Evaluates the module in a minimal system so `nix flake check` catches option errors.
       checks = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (
         system:
         {
@@ -78,9 +76,7 @@
               container = evaluated: evaluated.config.virtualisation.oci-containers.containers.music;
               expect = condition: message: if condition then true else throw "module check: ${message}";
 
-              # The list form mounts each folder at /music/<folder name>, as every earlier install did.
               listed = evaluate { musicDirs = [ "/srv/music" ]; };
-              # The attrset form names each mount, so folders with the same name can coexist.
               named = evaluate {
                 musicDirs = {
                   rock = "/a/music";
@@ -88,14 +84,12 @@
                 };
                 pull = "newer";
               };
-              # Two folders named `music` would both mount at /music/music.
               clashing = evaluate {
                 musicDirs = [
                   "/a/music"
                   "/b/music"
                 ];
               };
-              # Docker, extra variables, and the update timer.
               tuned = evaluate {
                 backend = "docker";
                 image = "ghcr.io/lmdevv/music:latest";
@@ -105,7 +99,6 @@
                   PUID = "5";
                 };
               };
-              # A host that already runs its oci-containers with Docker, as earlier versions allowed.
               inherited = nixpkgs.lib.nixosSystem {
                 inherit system;
                 modules = [
@@ -119,7 +112,6 @@
                 ];
               };
               inherit (nixpkgs.lib.importJSON ./package.json) version;
-              # Every workspace package (apps/* and packages/*, the CLI included) and its version.
               workspaceVersions =
                 nixpkgs.lib.concatMap
                   (
@@ -134,7 +126,6 @@
                     "packages"
                   ];
               strayVersions = builtins.filter (package: package.version != version) workspaceVersions;
-              # The container's Convex and Caddy ids, which init refuses at start.
               reservedUid = evaluate { uid = 901; };
               reservedGid = evaluate { gid = 902; };
               refusesReserved =
@@ -144,8 +135,6 @@
             assert expect (
               refusesReserved reservedUid && refusesReserved reservedGid
             ) "uid or gid 901/902 is not refused: ${toString (failed reservedUid)}";
-            # One release version everywhere: the image is published under it, the image and the CLI
-            # report it, and the module's default image is derived from it.
             assert expect (builtins.length workspaceVersions >= 9 && strayVersions == [ ])
               "package.json is ${version} but ${
                 nixpkgs.lib.concatMapStringsSep ", " (
@@ -214,10 +203,8 @@
               }
             );
 
-          # Builds the CLI, so a stale pnpm dependency hash fails `nix flake check`.
           inherit (self.packages.${system}) cli;
         }
-        # A VM booting the module with a real image. Needs KVM, which CI has.
         // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
           vm = import ./nix/vm-test.nix {
             pkgs = nixpkgs.legacyPackages.${system};

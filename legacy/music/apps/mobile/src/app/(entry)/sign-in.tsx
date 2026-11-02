@@ -1,9 +1,3 @@
-/**
- * E03 · Sign in, and its error variant G07. Signing in flips the session phase, and the root
- * stack moves to the app by itself. A refusal keeps both fields and says so under the form
- * without blaming either field (G07); the server's own explanations (a suspended account, too
- * many attempts) show as it words them.
- */
 import { useAuthActions } from "@convex-dev/auth/react";
 import { commandFailure } from "@music/sdk/errors";
 import { signInFailure } from "@music/sdk/sign-in";
@@ -31,7 +25,6 @@ const FAILURE_LINES = {
   server: "Couldn’t sign in. The server reported an error.",
 } as const satisfies Record<SignInFailure, string>;
 
-/** The line under the form for a failed sign-in. */
 const failureLine = (cause: Error | null): string => {
   if (cause === null) return FAILURE_LINES.server;
 
@@ -118,7 +111,6 @@ export default function SignIn() {
           onPress={() => void submit()}
         />
       </View>
-      {/* After a refusal the hint turns to the reset link itself (G07). */}
       <Notice
         icon={Key}
         title={failure === null ? "Need to reset your password?" : "Need a reset link?"}

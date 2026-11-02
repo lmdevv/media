@@ -1,7 +1,3 @@
-/**
- * Round icon actions with Paper's 44pt hit target: the back chevron, a nav bar's trailing glyph,
- * a sheet's close button. The label is required: VoiceOver reads it, and tests select by it.
- */
 import type { LucideIcon } from "lucide-react-native";
 import { ActivityIndicator, Pressable } from "react-native";
 import type { PressableProps } from "react-native";
@@ -12,7 +8,6 @@ import { Icon, TONE_VARIABLES } from "./icon";
 import type { IconSize } from "./icon";
 import type { TextTone } from "./text";
 
-/** Props for `IconButton`. */
 export interface IconButtonProps extends Omit<PressableProps, "children" | "style"> {
   readonly icon: LucideIcon;
   /** What VoiceOver reads, such as `Back`. */

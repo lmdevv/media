@@ -1,4 +1,3 @@
-/** F04, G16, H11 · API keys. */
 import { RequireAccess } from "@/components/settings/access";
 import { KeyList } from "@/components/settings/keys";
 

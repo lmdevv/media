@@ -1,4 +1,3 @@
-/** The window's layout from Paper's breakpoints, for what a class can't change, such as columns. */
 import { createContext, use } from "react";
 import { useWindowDimensions } from "react-native";
 import { useUniwind } from "uniwind";

@@ -1,9 +1,3 @@
-/**
- * Batched clean-up behind people management. Suspending, demoting, or removing someone must never
- * fail because they own too many rows (anyone can sign in, like, or create keys without limit), so
- * the handlers in `handlers/people.ts` change only the account in their own mutation, which takes
- * effect at once, and schedule these to tidy the rest a bounded batch at a time.
- */
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
@@ -16,15 +10,10 @@ import { endSession, isStale } from "./lib/sessions";
 
 const PURGE_BATCH = 100;
 
-/** Guest accounts removed per run: each is a few reads and deletes, and schedules its purge. */
 const GUEST_BATCH = 10;
 
 const cursor = v.union(v.string(), v.null());
 
-/**
- * Refresh tokens deleted per session in one `purgeSessions` batch; a session with more keeps its
- * row, and the rest of its tokens, for the next batch.
- */
 const TOKENS_PER_SESSION = 10;
 
 /**
@@ -49,7 +38,6 @@ export const purgeSessions = internalMutation({
 
     const ended = page.page.filter((session) => user === null || isStale(session, user));
 
-    // Whether each session went; one with more tokens than a batch deletes stays a pass longer.
     const gone = await Promise.all(
       ended.map(async (session) => {
         const tokens = await ctx.db
@@ -67,8 +55,6 @@ export const purgeSessions = internalMutation({
       }),
     );
 
-    // A session kept on any page of this pass means another pass, from the start, once this
-    // one is through.
     const kept = leftover || gone.includes(false);
 
     if (!page.isDone) {
@@ -187,11 +173,6 @@ export const revokeKeys = internalMutation({
   },
 });
 
-/**
- * Who a removed person's libraries go to when a batch runs: the server's owner at that moment
- * (ownership may have moved, and the old owner been removed, since the removal), or, on a server
- * from before owners, `fallback` (whoever removed them) while that account still exists.
- */
 const heirOf = async (ctx: MutationCtx, fallback: Id<"users">): Promise<Id<"users"> | null> => {
   const owner = await ctx.db
     .query("users")
@@ -256,14 +237,10 @@ export const purgeRemovedUser = internalMutation({
         .take(PURGE_BATCH),
     ]);
 
-    // A Jam they host ends at once, so its people get their own playback back.
     const hosted = await hostedJam(ctx, userId);
 
     if (hosted !== null) await endJam(ctx, hosted, "host");
 
-    // Their libraries leave the `by_owner` range as they move, so each batch takes the next ones.
-    // With nobody to take them (no owner, and the remover gone too) they stay for an owner's
-    // later removal of someone, or a rerun, to move.
     const to = await heirOf(ctx, heir);
 
     const libraries =
@@ -276,7 +253,6 @@ export const purgeRemovedUser = internalMutation({
 
     await Promise.all([
       ...owned.flat().map((doc) => ctx.db.delete(doc._id)),
-      // Private libraries stay private, now to the heir; nothing on disk changes.
       ...libraries.map((library) => ctx.db.patch(library._id, { ownerId: to ?? heir })),
     ]);
 

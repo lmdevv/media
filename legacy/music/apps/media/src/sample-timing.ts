@@ -1,12 +1,6 @@
-/**
- * Sample-exact timing of a fragmented MP4 transcode: how many priming samples its timeline starts
- * with and how many real samples follow. The gapless player trims with these numbers, so they are
- * measured from ffmpeg's output rather than assumed per codec.
- */
 import { StreamTimingHeader } from "@music/commands/models";
 import { Option, Schema } from "effect";
 
-/** More priming than this means the measurement went wrong (AAC uses 1024, FLAC none). */
 const MAX_PRIMING_SAMPLES = 16_384;
 
 const Samples = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
@@ -59,7 +53,6 @@ export const measureTiming = (
   return Option.some({ primingSamples, durationSamples: realSamples, sampleRate });
 };
 
-/** Containers whose declared stream length is exact (sample tables and edit lists). */
 const EXACT_LENGTH_FORMATS = /\b(?:mov|mp4)\b/u;
 
 const TIME_BASE = /^(\d+)\/(\d+)$/u;

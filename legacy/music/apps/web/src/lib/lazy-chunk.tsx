@@ -23,7 +23,6 @@ export interface LazyChunk<Props extends object> {
 export const lazyChunk = <Props extends object>(
   load: () => Promise<ComponentType<Props>>,
 ): LazyChunk<Props> => {
-  // The loaded component, kept for the page's life like the module it comes from.
   let ready: ComponentType<Props> | null = null;
 
   const pending = () => lazy(async () => ({ default: await loadReady() }));
@@ -44,8 +43,6 @@ export const lazyChunk = <Props extends object>(
 
   return {
     Component: (props) => {
-      // Chosen once per mount: switching from `Pending` to the loaded component later would be a
-      // different element type, and React would remount it and lose its state.
       const [Shown] = useState(() => ready ?? Pending);
 
       return <Shown {...props} />;

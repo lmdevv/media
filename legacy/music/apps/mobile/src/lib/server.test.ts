@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { connectionFor, discoverServer, displayHost, originCandidates } from "./server";
 import type { Fetch } from "./server";
 
-/** A network where each origin answers its health check one way, and the rest is unreachable. */
 const network =
   (answers: Readonly<Record<string, () => Response>>): Fetch =>
   async (url) => {
@@ -113,7 +112,6 @@ describe("displayHost", () => {
   });
 });
 
-/** The single origin typed text with a scheme names. */
 function originAt(text: string) {
   const [origin] = originCandidates(text) ?? [];
 

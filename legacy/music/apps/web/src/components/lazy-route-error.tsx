@@ -5,13 +5,10 @@ import type { ReactNode } from "react";
 
 import { ChunkLoadError, lazyChunk } from "@/lib/lazy-chunk";
 
-// Not TanStack's `lazyRouteComponent`: on a missing module it reloads the page, which stops the
-// music and, offline, lands on the browser's error page instead of this app's.
 const RouteError = lazyChunk(async () => (await import("./route-error")).RouteError).Component;
 
 const PageNotFound = lazyChunk(async () => (await import("./route-error")).PageNotFound).Component;
 
-/** The plain message, in the entry chunk, for when an error or not-found screen can't show. */
 function PlainMessage({ description }: { readonly description: string }) {
   return (
     <div className="flex min-h-dvh-message flex-col items-start justify-center gap-3 px-6 lg:px-12">
@@ -32,12 +29,6 @@ function PlainMessage({ description }: { readonly description: string }) {
 
 const UNREACHABLE = "[music] can't reach the server. Check the connection, then reload the page.";
 
-/**
- * In place of an error or not-found screen that failed: its code couldn't load (offline, or the
- * server was upgraded under an open tab), or it threw. It never rethrows: the next boundary up is
- * the signed-in layout's, which would replace the shell and stop the music, and above the root
- * nothing would catch it at all. React still logs the error.
- */
 function Unloaded({ error }: ErrorComponentProps): ReactNode {
   return (
     <PlainMessage

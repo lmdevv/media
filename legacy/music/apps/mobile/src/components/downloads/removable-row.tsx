@@ -1,8 +1,3 @@
-/**
- * A Downloaded row that can remove its download without opening it (Paper's D10d): swipe it left
- * to uncover Remove as the queue does (B04), or hold it. VoiceOver offers Remove download as an
- * action on the row.
- */
 import type { ReactNode } from "react";
 import { View } from "react-native";
 
@@ -15,7 +10,6 @@ interface RowPress {
   readonly onLongPress: (() => void) | undefined;
 }
 
-/** Props for `RemovableRow`. */
 export interface RemovableRowProps {
   /** What VoiceOver reads for the row, which it reaches as one element. */
   readonly label: string;

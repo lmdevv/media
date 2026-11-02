@@ -21,8 +21,6 @@ export function NowPlaying() {
   const desktop = useIsDesktop();
   const trackId = nowPlaying === null ? null : (player.track?.id ?? null);
 
-  // While open, for the lyrics button's state as much as for the lyrics view. Settled, not
-  // thrown: a failed read shows in the lyrics view instead of taking Now Playing down.
   const lyrics = lyricsAnswer(
     useReadSettled("lyrics.get", trackId === null ? "skip" : { trackId }),
   );

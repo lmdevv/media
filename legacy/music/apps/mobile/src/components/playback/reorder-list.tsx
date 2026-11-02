@@ -1,10 +1,3 @@
-/**
- * The upcoming queue with drag to reorder (B03) and swipe to remove (B04). Holding a row's handle
- * lifts a copy of the row that follows the finger, the rows between slide apart to show where it
- * will land, and the list scrolls while the finger rests near an edge. The drag runs on the UI
- * thread; only the drop crosses into React, which shows the new order at once and sends one move.
- * Swiping a row left uncovers Remove; VoiceOver offers the same as a row action.
- */
 import { FlashList } from "@shopify/flash-list";
 import type { FlashListRef } from "@shopify/flash-list";
 import * as Haptics from "expo-haptics";
@@ -39,7 +32,6 @@ export const QUEUE_EDGE: Readonly<Record<PanelPlace, "px-page" | "px-4">> = {
   panel: "px-4",
 };
 
-/** How long the rows take to slide out of the lifted row's way. */
 const SHIFT_MS = 150;
 
 /** The drag in progress, shared between the cells and the lifted copy. */
@@ -60,7 +52,6 @@ interface Drag {
   readonly count: SharedValue<number>;
 }
 
-/** Where the lifted row would land with the finger `travel` points from where it touched down. */
 const landing = (drag: Drag, travel: number): number => {
   "worklet";
 
@@ -80,7 +71,6 @@ interface RowActions {
   readonly onRemove: (item: QueueItem) => void;
 }
 
-/** The three-line handle Paper draws; holding it lifts the row. */
 function Handle({
   index,
   title,
@@ -106,14 +96,12 @@ function Handle({
     },
     onUpdate: (event) => {
       "worklet";
-      // Not `translationY`, which starts where the pan activated and so drops a fast finger's first move.
       drag.offset.value = event.absoluteY - drag.startY.value;
     },
     onFinalize: (event) => {
       "worklet";
 
       if (drag.from.value < 0) return;
-      // The finger's last move can arrive with the release, so this doesn't wait on `drag.to`.
       scheduleOnRN(
         actions.onDrop,
         drag.from.value,
@@ -179,7 +167,6 @@ export function QueueLine({
   );
 }
 
-/** A queue row: tap to play it, hold the handle to move it, swipe left to uncover Remove (B04). */
 function QueueRow({
   item,
   index,
@@ -192,7 +179,6 @@ function QueueRow({
   readonly index: number;
   readonly drag: Drag | null;
   readonly actions: RowActions;
-  /** The sheet's color, so the row covers Remove until it slides aside. */
   readonly background: string;
   readonly place: PanelPlace;
 }) {
@@ -231,7 +217,6 @@ function QueueRow({
   );
 }
 
-/** A cell that slides out of the lifted row's way, and hides while it is the one lifted. */
 function Cell({
   index,
   drag,
@@ -266,7 +251,6 @@ function Cell({
   );
 }
 
-/** Props for `ReorderList`. */
 export interface ReorderListProps {
   /** The songs after the current one that the listener queued. */
   readonly items: ReadonlyArray<QueueItem>;
@@ -295,7 +279,6 @@ export function ReorderList({
   place = "player",
 }: ReorderListProps) {
   const list = useRef<FlashListRef<QueueItem>>(null);
-  // The order a drop showed, until the server's queue changes.
 
   const [order, setOrder] = useState<{
     readonly source: string;
@@ -326,7 +309,6 @@ export function ReorderList({
     drag.count.value = shown.length;
   }, [drag.count, shown.length]);
 
-  // Where the lifted row would land follows the finger and the list's own scrolling.
   useAnimatedReaction(
     () => (drag.from.value < 0 ? -1 : landing(drag, drag.offset.value)),
     (next, previous) => {
@@ -337,7 +319,6 @@ export function ReorderList({
     },
   );
 
-  // While a row is lifted and the finger rests near an edge, the list scrolls under it.
   useEffect(() => {
     if (lifted === null) return undefined;
 
@@ -375,7 +356,6 @@ export function ReorderList({
       const item = shown[from];
 
       if (item === undefined || from === to) return;
-      // A drop moves the row the list anchors on, which isn't content arriving: keep the offset.
       list.current?.prepareForLayoutAnimationRender();
       setOrder({ source, items: moved(shown, from, to) });
       onMove(item, to);
@@ -391,7 +371,6 @@ export function ReorderList({
     opacity: drag.from.value < 0 ? 0 : 1,
     transform: [
       {
-        // The copy stays under the finger: where the row sat at the lift, plus the finger's travel.
         translateY:
           drag.headerHeight.value +
           Math.max(0, drag.from.value) * drag.rowHeight.value -

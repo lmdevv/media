@@ -11,7 +11,6 @@ import { MseEngine } from "../src/mse-engine";
 import { analyzeTone } from "../src/testing/gap-analysis";
 import type { TimedEvent } from "./globals";
 
-/** Silence threshold. The fixture tones peak at 0.125; one sample near a zero crossing is ~0.007. */
 const SILENCE = 0.001;
 
 const worklet = `
@@ -58,7 +57,6 @@ const params = new URLSearchParams(location.search);
 
 const context = new AudioContext();
 
-// WebKit keeps the context suspended until a user gesture; tests click the page first.
 document.addEventListener("click", () => {
   void context.resume();
 });
@@ -73,10 +71,8 @@ meter.connect(context.destination);
 
 const mediaBase = `http://127.0.0.1:${params.get("media") ?? "4300"}`;
 
-/** `?capture=0` leaves the elements on their default output, as in production. */
 const capture = params.get("capture") !== "0";
 
-/** Every audio element the engine was given, for reading what they buffered. */
 const elements: Array<HTMLAudioElement> = [];
 
 const audioElement = (): HTMLAudioElement => {
@@ -97,7 +93,6 @@ const engine: PlayerEngine =
     ? new MseEngine(audioElement())
     : new HtmlAudioEngine(audioElement);
 
-/** Chunks of the first output channel while recording. */
 const recorded: Array<Float32Array> = [];
 
 meter.port.addEventListener("message", (event: MessageEvent) => {
@@ -116,10 +111,6 @@ engine.subscribe((event) => {
 
 const MeterReading = Schema.Struct({ longest: Schema.Finite, sound: Schema.Finite });
 
-/**
- * A fixture source; `file` may carry a profile query (`gapless-flac-1.flac?p=fmp4-flac`). Most
- * fixtures are three-second tones; pass the length of a longer one.
- */
 const fixture = (file: string, durationMs = 3000): EngineSource => ({
   key: file,
   url: `${mediaBase}/fixtures/${file}`,
@@ -131,7 +122,6 @@ const toMs = (frames: number): number => (frames / context.sampleRate) * 1000;
 
 const isReading = Schema.is(MeterReading);
 
-/** Resolves with the next worklet message that passes `accept`. */
 const nextMessage = <A>(accept: (data: unknown) => data is A): Promise<A> =>
   new Promise((resolve) => {
     const listener = (event: MessageEvent): void => {

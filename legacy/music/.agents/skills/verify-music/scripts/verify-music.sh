@@ -32,7 +32,6 @@ demo_image="$(<"$root/deploy/demo-library/image")"
 die() { echo "verify-music: $*" >&2; exit 1; }
 say() { echo "verify-music: $*" >&2; }
 
-# Pulls a leading --side out of the arguments; the rest stay in `args`.
 side="after"
 args=()
 take_side() {
@@ -57,8 +56,6 @@ free_port() {
     console.log(s.address().port); s.close(); });'
 }
 
-# The revision of what the image is built from. `.dockerignore` leaves out `.agents` and `.claude`,
-# so a commit that only edits a skill keeps the revision and the after side stays current.
 checkout_rev() {
   local tree dirty
   tree="$(git -C "$root" ls-tree HEAD | grep -vE $'\t\\.(agents|claude)$' | sha1sum | cut -c1-12)"
@@ -104,7 +101,6 @@ start_browser() {
   die "the browser host did not start; see $state/browser.log"
 }
 
-# ---------------------------------------------------------------------------------------------- up
 
 cmd_up() {
   take_side "$@"
@@ -140,8 +136,6 @@ cmd_up() {
   write_state image_id "$(docker image inspect -f '{{.Id}}' "$image")"
   write_state rev "$(checkout_rev)"
 
-  # The demo library is a data-only image that every run on this machine mounts read-only, so
-  # Docker keeps one copy of it. Other libraries are folders bind-mounted read-only.
   local music
   library="${library:-demo}"
   if [[ "$library" == demo ]]; then
@@ -159,7 +153,6 @@ cmd_up() {
       node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
     fi
     library="$(cd "$library" && pwd)"
-    # The media service runs unprivileged in the container and must read every folder and file.
     if [[ -n "$(find "$library" \( \( -type d \! -perm -o+rx \) -o \( -type f \! -perm -o+r \) \) -print -quit)" ]]; then
       if [[ "$library" == "$state/fixtures" ]]; then chmod -R a+rX "$library"
       else die "$library is not readable by others; run chmod -R a+rX on it"; fi
@@ -170,8 +163,6 @@ cmd_up() {
 
   port="${port:-$(free_port)}"
   write_state port "$port"
-  # PUBLIC_URL must be the address clients use: sign-in tokens are issued for it. localhost works
-  # for the browser here and, through `ios up`'s ssh forward, for the simulator on the Mac.
   docker run -d --name "$name" --label "music.verify.run=$run" --label "music.verify.side=$side" \
     -p "127.0.0.1:$port:8080" -v "$name-data:/data" --mount "$music" -e TZ=UTC \
     -e PUBLIC_URL="http://localhost:$port" "$image" >/dev/null
@@ -193,7 +184,6 @@ cmd_up() {
   echo "ready: $(url) (run $run, side $side, container $name, image $image, library $library, evidence $evidence)"
 }
 
-# ------------------------------------------------------------------------------------------ doctor
 
 cmd_doctor() {
   take_side "$@"
@@ -222,7 +212,6 @@ cmd_doctor() {
   return "$failed"
 }
 
-# -------------------------------------------------------------------------------- browser, cli, logs
 
 cmd_browser() {
   take_side "$@"
@@ -231,7 +220,6 @@ cmd_browser() {
     local pid tries=0
     pid="$(read_state browser.pid)"
     kill "$pid" 2>/dev/null || true
-    # The old host removes browser.port as it exits, so wait for it before the new host writes one.
     while kill -0 "$pid" 2>/dev/null; do
       (( ++tries <= 300 )) || die "the browser host $pid did not stop"
       sleep 0.1
@@ -244,7 +232,6 @@ cmd_browser() {
   browser "${args[@]}"
 }
 
-# `as` picks whose key the CLI uses: empty for the admin, or a seeded member such as `mateo`.
 as=""
 cmd_cli_raw() {
   MUSIC_SERVER="$(url)/convex" MUSIC_API_KEY="$(read_state "key${as:+.$as}")" \
@@ -288,7 +275,6 @@ cmd_status() {
   echo "evidence: $evidence_root"
 }
 
-# --------------------------------------------------------------------------------------------- ios
 
 on_mac() { ssh "$mac" "export PATH=/opt/homebrew/bin:\$PATH LANG=en_US.UTF-8; set -euo pipefail; $1"; }
 
@@ -299,7 +285,6 @@ udid() {
   echo "$id"
 }
 
-# Prints the UI tree of the booted app as one "label | type | frame" line per element.
 ios_tree() {
   on_mac "$axe describe-ui --udid $(udid)" | node -e '
     const roots = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
@@ -321,9 +306,6 @@ ios_wait() {
   die "\"$label\" did not appear on the simulator within ${seconds}s"
 }
 
-# Prints the centre of the element labeled $1 as "x y". A field's label can carry its error after a
-# comma, so a label that starts with "$1," matches too. Text that only names a field, such as the
-# caption above it, loses to the field, a button, or another control with the same label.
 ios_find() {
   on_mac "$axe describe-ui --udid $(udid)" | node -e '
     const [label] = process.argv.slice(1);
@@ -355,7 +337,6 @@ ios_type() {
   on_mac "$axe key-combo --modifiers 227 --key 4 --udid $(udid) && $axe key-combo --modifiers 227 --key 25 --udid $(udid)" >/dev/null
 }
 
-# Taps whichever of the given labels is on screen; returns 1 when none is.
 ios_tap_any() {
   local label point
   for label in "$@"; do
@@ -367,7 +348,6 @@ ios_tap_any() {
   return 1
 }
 
-# A main checkout for the before side's Metro, so the simulator runs main's JavaScript.
 before_source() {
   local src="$state/src"
   if [[ ! -d "$src" ]]; then
@@ -407,8 +387,6 @@ cmd_ios_up() {
   [[ "$side" == before ]] && src="$(before_source)"
   say "starting Metro for $src on port $metro"
   # Not CI=1: that turns off file watching and the app keeps serving the first bundle.
-  # Its own session, so `ios down` stops pnpm, Expo, and Metro's workers as one process group. The
-  # log takes all its output, so nothing that reads this script's output waits on it.
   setsid bash -c 'cd "$1" && REACT_NATIVE_PACKAGER_HOSTNAME=127.0.0.1 exec pnpm --filter mobile exec \
     expo start --port "$2"' metro "$src" "$metro" < /dev/null > "$state/metro.log" 2>&1 &
   write_state metro_pid "$!"
@@ -424,7 +402,6 @@ cmd_ios_up() {
   on_mac "xcrun simctl boot $id && xcrun simctl bootstatus $id -b >/dev/null"
   ((dark)) && on_mac "xcrun simctl ui $id appearance dark"
 
-  # One dev client per run, built from this checkout; JavaScript comes from each side's Metro.
   local app="\$HOME/music-ios/dd-verify-$run/Build/Products/Debug-iphonesimulator/music.app"
   if on_mac "test -d $app"; then
     on_mac "xcrun simctl install $id $app"
@@ -432,15 +409,12 @@ cmd_ios_up() {
     say "building the iOS dev client on $mac (minutes on a cold build)"
     MUSIC_IOS_NAME="verify-$run" "$root/scripts/ios-mac.sh" build-sim "$id" >&2
   fi
-  # Keep the dev client's own UI out of the evidence: no introduction over the app at first
-  # launch, no floating button over the screens, and no gesture that opens its menu mid-recording.
   local key
   for key in IsOnboardingFinished:YES ShowsAtLaunch:NO ShowFloatingActionButton:NO \
     MotionGestureEnabled:NO TouchGestureEnabled:NO; do
     on_mac "xcrun simctl spawn $id defaults write dev.lmdevv.music EXDevMenu${key%%:*} -bool ${key#*:}"
   done
   "$root/scripts/ios-mac.sh" open "$id" "http://127.0.0.1:$metro" >/dev/null
-  # iOS asks once whether to open the link in the app. Tap only that prompt's button.
   local tree
   for _ in $(seq 1 90); do
     tree="$(ios_tree 2>/dev/null || true)"
@@ -471,8 +445,6 @@ ios_sign_in() {
   ios_tap_label "Sign in"
   for _ in $(seq 1 60); do
     if ios_tree 2>/dev/null | grep -q 'Tab Bar'; then
-      # The first touch after signing in is dropped (seen every run, cause unknown), so spend it
-      # on the page title, which does nothing when tapped.
       ios_tap_label "Home"
       return 0
     fi
@@ -555,13 +527,11 @@ ios_down() {
   rm -f "$state/ios_udid" "$state/metro_pid" "$state/metro_port" "$state/forward_pid" "$state/ios_record"
 }
 
-# ----------------------------------------------------------------------------------------- evidence
 
 cmd_evidence() {
   node "$scripts/evidence.mjs" "$@" --root "$root" --run "$run" --evidence "$evidence_root"
 }
 
-# --------------------------------------------------------------------------------------------- down
 
 side_down() {
   take_side --side "$1"

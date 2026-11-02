@@ -1,7 +1,3 @@
-/**
- * F03 · Playback and appearance (H10 in dark): the theme on this iPhone, the streaming quality
- * this iPhone asks for, and autoplay, which the server keeps per account.
- */
 import type { StreamQuality } from "@music/player/stream-quality";
 import { router } from "expo-router";
 import { Check, Info, Music } from "lucide-react-native";
@@ -33,10 +29,6 @@ const APPEARANCE_NOTES = {
   system: `Follows this ${DEVICE_FAMILY}. Now Playing uses the album’s colors.`,
 } as const satisfies Record<Appearance, string>;
 
-/**
- * What each setting streams on iPhone. High is AAC at 320 kbps here: the phone plays progressive
- * AAC, not the web's gapless 256 kbps fragments.
- */
 const QUALITIES = [
   { value: "lossless", title: "Lossless", detail: "FLAC for lossless files" },
   { value: "high", title: "High", detail: "AAC · 320 kbps" },

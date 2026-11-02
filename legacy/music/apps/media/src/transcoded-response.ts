@@ -1,9 +1,3 @@
-/**
- * The HTTP response for a transcoded stream profile. A profile that is not in the cache yet
- * streams while ffmpeg writes it: playback starts after the first frames instead of after the
- * whole encode. Everything else is served from the finished file, with byte ranges. A download
- * asks for the finished file only, and polls while it is prepared.
- */
 import { StreamTimingHeader } from "@music/commands/models";
 import { type Context, Duration, Effect, Exit, Option, Scope, Stream } from "effect";
 
@@ -19,19 +13,8 @@ import {
   type TranscodeInput,
 } from "./transcoder.ts";
 
-/**
- * The ranges a media element opens a source with: `bytes=0-` (Chromium, Firefox) and Safari's
- * probe `bytes=0-1`. Other ranges want the finished file's bytes at those offsets.
- */
 const OPENING_RANGE = /^bytes=0-1?$/u;
 
-/**
- * True for a request a live transcode can answer: a `GET` without validators, for the whole
- * stream or with a media element's opening range. The element takes the `200` without
- * `Accept-Ranges` as a stream it cannot seek in by bytes. Other ranges and validators refer to
- * the finished file, whose bytes differ, and `HEAD` asks for the finished file's headers (the
- * exact timing), so those wait for the transcode to finish.
- */
 const wantsWholeStream = (request: Request): boolean => {
   const range = request.headers.get("Range");
 
@@ -42,7 +25,6 @@ const wantsWholeStream = (request: Request): boolean => {
   );
 };
 
-/** Answers `request` from a finished transcode, with byte ranges and validators. */
 const finishedFile = (request: Request, { path, timing }: Transcoded) =>
   fileResponse(request, path, {
     contentType: "audio/mp4",
@@ -73,11 +55,8 @@ export const transcodedResponse = Effect.fn("TranscodedResponse.make")(function*
   if (!wantsWholeStream(request)) return yield* serveFinished();
 
   const context = yield* Effect.context();
-  // Holds the live transcode for as long as the response body streams it.
   const scope = yield* Scope.make();
 
-  // Until the response owns the scope, a failure or an interruption (the client went away)
-  // closes it here.
   return yield* transcoder.open(input).pipe(
     Scope.provide(scope),
     Effect.flatMap(
@@ -131,12 +110,6 @@ export const finishedResponse = Effect.fn("TranscodedResponse.finished")(functio
   });
 });
 
-/**
- * Closes `scope` once the client behind `signal` goes away. The response body closes it when it
- * ends or is cancelled, but `@hono/node-server` neither reads nor cancels the body of a client
- * that left before the body started streaming, so the body alone would hold the scope forever.
- * Closing an already closed scope does nothing, so the scope still closes exactly once.
- */
 const closeWhenAborted = (signal: AbortSignal, scope: Scope.Closeable): Effect.Effect<void> => {
   if (signal.aborted) return Scope.close(scope, Exit.void);
 
@@ -154,10 +127,6 @@ const closeWhenAborted = (signal: AbortSignal, scope: Scope.Closeable): Effect.E
   );
 };
 
-/**
- * A `200` that streams `bytes` with `Cache-Control: no-store` and no length, and closes `scope`
- * once the body ends or the client goes away. A failure after the first byte aborts it.
- */
 const streamedResponse = (
   request: Request,
   input: TranscodeInput,
@@ -169,7 +138,6 @@ const streamedResponse = (
   closeWhenAborted(request.signal, scope).pipe(
     Effect.map(() => {
       const body = bytes.pipe(
-        // Once the client has gone, closing the scope may stop ffmpeg under a read: not a failure.
         Stream.tapError((error) =>
           request.signal.aborted
             ? Effect.void
@@ -207,11 +175,8 @@ export const offsetResponse = Effect.fn("TranscodedResponse.offset")(function* (
 ) {
   const transcoder = yield* Transcoder;
   const context = yield* Effect.context();
-  // Holds the ffmpeg run for as long as the response body streams it.
   const scope = yield* Scope.make();
 
-  // Until the response owns the scope, a failure or an interruption (the client went away)
-  // closes it here.
   return yield* transcoder.openAt(input, startMs).pipe(
     Scope.provide(scope),
     Effect.flatMap((opened) =>

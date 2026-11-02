@@ -28,13 +28,11 @@ const options: BuildOptions = {
   format: "esm",
   sourcemap: true,
   logLevel: "info",
-  // Some CommonJS dependencies call `require` for Node built-ins, which an ESM bundle lacks.
   banner: {
     js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
   },
 };
 
-// `dist/` stays runnable when copied on its own, for example into a container image.
 await mkdir(new URL("../dist", import.meta.url), { recursive: true });
 
 await writeFile(
@@ -45,7 +43,6 @@ await writeFile(
 if (values.watch) {
   const builder = await context(options);
 
-  // A broken first build is reported by esbuild; keep watching so the next save can fix it.
   await builder.rebuild().catch(() => undefined);
   await builder.watch();
 

@@ -1,4 +1,3 @@
-/** A loopback host: the CLI sends the key to it over plain http:// without asking. */
 const isLoopbackHost = (host: string): boolean =>
   host === "localhost" ||
   host.endsWith(".localhost") ||
@@ -18,7 +17,6 @@ export const needsInsecure = (server: string): boolean => {
   return url.protocol === "http:" && !isLoopbackHost(url.hostname);
 };
 
-/** `value` as one shell word: single-quoted, with any single quote in it escaped. */
 const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
 /** `music login --server <server>`, quoted for a shell, with `--insecure` where the CLI needs it. */

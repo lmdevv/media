@@ -1,4 +1,3 @@
-/** F16 · Library access. */
 import { LibraryAccessPage } from "@/components/admin/library-access";
 import { useLibraryParam } from "@/components/admin/params";
 import { RequireAccess } from "@/components/settings/access";

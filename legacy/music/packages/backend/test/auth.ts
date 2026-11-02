@@ -1,7 +1,3 @@
-/**
- * Convex Auth sign-in in the in-memory backend: the real `auth:signIn` action with the password
- * provider, signing tokens with a key made for the test run.
- */
 import type { InviteId, UserId } from "@music/commands/ids";
 import { makeMusicClient } from "@music/sdk/client";
 import { decodeJwt, exportJWK, exportPKCS8, generateKeyPair } from "jose";
@@ -37,7 +33,6 @@ export const passwordFlow = async (backend: Backend, params: PasswordParams): Pr
   const token = result.tokens?.token;
 
   if (token === undefined) throw new Error("The sign-in returned no tokens");
-  // The token's subject is `<userId>|<sessionId>`, as `loadViewer` reads it.
   const subject = decodeJwt(token).sub ?? "";
   const signedIn = backend.withIdentity({ subject });
   const [userId = ""] = subject.split("|");

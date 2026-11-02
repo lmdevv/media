@@ -1,7 +1,3 @@
-/**
- * Whether the Convex socket is up, as the session router follows it: it moves the session onto
- * the phone when the socket drops while the phone plays it, and hands it back once the socket is up.
- */
 import type { ConnectionSignal } from "@music/player/session-router";
 import type { ConvexReactClient } from "convex/react";
 

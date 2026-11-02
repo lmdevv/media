@@ -1,7 +1,3 @@
-/**
- * The Media Session API adapter: lock screen, notification, and hardware media keys. Browsers
- * without the API (or without some actions) are skipped silently.
- */
 import type { Track } from "@music/commands/models";
 
 /** What the system media controls can ask the player to do. */
@@ -23,9 +19,7 @@ const setHandler = (
 ): void => {
   try {
     media.setActionHandler(action, handler);
-  } catch {
-    // This browser does not support the action; the rest still work.
-  }
+  } catch {}
 };
 
 /** Routes system media controls to `handlers`, or detaches them when `handlers` is null. */
@@ -87,7 +81,5 @@ export const showNowPlaying = (track: Track | null, playing: boolean, positionMs
       position: Math.min(Math.max(0, positionMs), track.durationMs) / 1000,
       playbackRate: 1,
     });
-  } catch {
-    // Older browsers lack setPositionState; the metadata still shows.
-  }
+  } catch {}
 };

@@ -1,7 +1,3 @@
-/**
- * How the playlist screens (page 15) word a playlist: its size, who can open it, and what the
- * viewer may do with it.
- */
 import type { Playlist, PlaylistAccess, PlaylistRole } from "@music/commands/models";
 
 import { countOf } from "./format";
@@ -24,7 +20,6 @@ const REACH_LABELS = {
 /** The privacy line under a playlist's hero (C02): `Only you`, `Shared by link`. */
 export const reachLabel = (reach: PlaylistReach): string => REACH_LABELS[reach];
 
-/** A playlist's size, or `No songs yet` for an empty one (C06). */
 const songCount = (count: number): string =>
   count === 0 ? "No songs yet" : countOf(count, "song");
 

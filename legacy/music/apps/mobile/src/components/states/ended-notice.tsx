@@ -1,7 +1,3 @@
-/**
- * Why Sign in is on show when the server removed the account it was signed in with: an admin
- * removed it, or it was a Jam guest's account, which goes when its Jam ends.
- */
 import { UserX, Users } from "lucide-react-native";
 
 import { Notice } from "@/components/ui/notice";

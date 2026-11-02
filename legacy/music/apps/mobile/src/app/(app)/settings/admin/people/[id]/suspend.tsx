@@ -1,4 +1,3 @@
-/** F21 · Suspend person? */
 import { usePersonParam } from "@/components/admin/params";
 import { SuspendPersonSheet } from "@/components/admin/person-sheets";
 import { SheetAccess } from "@/components/settings/sheet-access";

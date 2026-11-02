@@ -1,7 +1,3 @@
-/**
- * The round buttons at the top of a page while the iPad's sidebar is hidden (A3): show it, and
- * Search, which the sidebar would otherwise hold.
- */
 import { PanelLeft, Search } from "lucide-react-native";
 import { useCallback } from "react";
 

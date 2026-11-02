@@ -1,7 +1,3 @@
-/**
- * Song lists the server pages through (liked songs, every song), kept live page by page: the
- * web's Liked songs reads them the same way.
- */
 import { encodeArgs, resultDecoder } from "@music/commands/codec";
 import type { Track } from "@music/commands/models";
 import { InvalidResultError } from "@music/sdk/client";
@@ -12,10 +8,8 @@ import { useEffect, useState } from "react";
 
 import { splitChain } from "@/lib/page-chain";
 
-/** Songs per page. */
 const PAGE_SIZE = 200;
 
-/** Most songs kept live at once. */
 const SONG_LIMIT = 5000;
 
 /** The queries that page through songs. */
@@ -80,7 +74,6 @@ export const useTrackPages = (
     return decoded.success;
   });
 
-  // A page that outgrew its size ends early; the page that starts there goes in between.
   const chain = pages.reduce<ReadonlyArray<string | null>>(
     (list, page, index) =>
       page === undefined ? list : splitChain(list, cursors[index] ?? null, page.cursor),
@@ -101,7 +94,6 @@ export const useTrackPages = (
     if (next !== null) setCursors((list) => (list.includes(next) ? list : [...list, next]));
   };
 
-  // The next cursor exists only once the page before it arrives, so it is requested after render.
   useEffect(() => {
     if (eager && next !== null)
       setCursors((list) => (list.includes(next) ? list : [...list, next]));

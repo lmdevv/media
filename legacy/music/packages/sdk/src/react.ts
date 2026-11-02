@@ -17,7 +17,6 @@ export const useRead = <Name extends QueryName>(
 ): CommandResult<Name> | undefined => {
   const wireArgs = args === "skip" ? "skip" : { name, args: encodeArgs(name, args) };
   const key = wireArgs === "skip" ? "skip" : JSON.stringify(wireArgs.args);
-  // Re-create the args object only when its JSON changes, so the subscription stays stable.
   const stableArgs = useMemo(() => wireArgs, [name, key]);
   const wire = useQuery(readCommand, stableArgs);
 

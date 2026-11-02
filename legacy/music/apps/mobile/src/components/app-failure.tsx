@@ -1,9 +1,3 @@
-/**
- * The signed-in app's error boundary, below the server session so a failed read never closes the
- * Convex client. Signing out clears the token while screens are still subscribed, so a read can
- * fail `unauthenticated` just before the session phase moves to Sign in; that case says so and
- * offers the way back in. Anything else offers Try again.
- */
 import { commandFailure, errorMessage } from "@music/sdk/errors";
 import type { ErrorBoundaryProps } from "expo-router";
 import { CircleAlert, LogIn } from "lucide-react-native";

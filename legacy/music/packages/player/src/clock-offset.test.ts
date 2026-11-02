@@ -6,7 +6,6 @@ const none: ReadonlyArray<number> = [];
 
 describe("clockOffset", () => {
   it("takes the sample that waited least, over the recent ones", () => {
-    // A clock 1.5 s fast, with deliveries taking 80 to 400 ms.
     const samples = [1900, 1580, 1650, 1720].reduce(withClockSample, none);
 
     expect(clockOffset(samples)).toBe(1580);

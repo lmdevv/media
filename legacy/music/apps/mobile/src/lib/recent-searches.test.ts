@@ -12,7 +12,6 @@ import {
 } from "./recent-searches";
 import { albumOf, artistOf, trackOf } from "./test-fixtures";
 
-/** A song whose snapshot is long enough that eight of them outgrow a keychain value. */
 const long = (index: number) =>
   recentTrack(trackOf(`${"Long title ".repeat(12)}${String(index)}`, "Somebody", "x".repeat(80)));
 

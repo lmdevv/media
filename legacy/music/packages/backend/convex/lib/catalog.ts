@@ -42,12 +42,6 @@ interface ArtChange {
   readonly coverChanged: boolean;
 }
 
-/**
- * The artwork an album or artist keeps when one of its tracks changes art. One that has none
- * takes the track's. One whose art is the track's old art takes the new art when the folder cover
- * was replaced (every song of the folder follows), and when the track lost its art, the art
- * of another of its tracks, or none. A new embedded picture on a single track leaves it alone.
- */
 const keptArt = async (
   current: string | undefined,
   change: ArtChange,
@@ -64,11 +58,6 @@ const keptArt = async (
   return change.coverChanged ? change.next : current;
 };
 
-/**
- * The art of a playable track other than `except` that has some, from an index range of playable
- * tracks with art (`by_album_art` or `by_artist_art`): two reads at most, however many songs the
- * album or artist has.
- */
 const firstArtOf = async (
   tracks: Promise<ReadonlyArray<Doc<"tracks">>>,
   except: Id<"tracks"> | undefined,
@@ -148,7 +137,6 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
   const albums = new Map<string, Doc<"albums">>();
   const deltas = new Map<Id<"albums">, AlbumDelta>();
   const released = new Set<string>();
-  /** For each album songs left in this batch, how many went to each other album. */
   const moves = new Map<Id<"albums">, Map<Id<"albums">, number>>();
 
   const noteMove = (from: Id<"albums">, to: Id<"albums">): void => {
@@ -158,11 +146,6 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
     moves.set(from, counts);
   };
 
-  /**
-   * The album that took the most of `albumId`'s songs in this batch, the first one on a tie, or
-   * none when no song left it. An album re-tagged across two batches is judged by the moves of
-   * the batch that emptied it.
-   */
   const successorOf = (albumId: Id<"albums">): Id<"albums"> | undefined =>
     [...(moves.get(albumId) ?? [])].toSorted(([, left], [, right]) => right - left)[0]?.[0];
 
@@ -378,7 +361,6 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
     await replaceLocalLyrics(ctx, existing._id, scanned.lyrics);
     release(existing.artHash, scanned.artHash);
 
-    // Still in the same album: only the length changes, so the album never looks empty midway.
     if (!existing.missing && existing.albumId === album._id) {
       adjust(album._id, 0, scanned.durationMs - existing.durationMs);
 
@@ -420,7 +402,6 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
     const artistSteps = new Map<Id<"artists">, number>();
     const vanished: Array<Id<"albums">> = [];
 
-    // Albums are independent; their artists' counts are summed here and written below.
     await Promise.all(
       [...deltas].map(async ([albumId, delta]) => {
         const album = await ctx.db.get(albumId);
@@ -467,9 +448,6 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
       await bumpLibraryCounts(ctx, libraryId, library);
     }
 
-    // Every write of the batch is done, so an album no song points at any more (a retag moved its
-    // songs) goes now, and its art is released only once no row holds it. Its downloads follow
-    // its songs. One after another: two albums of one artist may both be its last.
     await inOrder(vanished, async (albumId) => {
       for (const hash of await deleteEmptyAlbum(ctx, albumId)) release(hash, undefined);
       const successor = successorOf(albumId);

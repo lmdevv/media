@@ -1,8 +1,3 @@
-/**
- * LRCLIB lookups (`lyricLookups`): which songs' lyrics get asked for, and what LRCLIB is known to
- * hold for a song. How a lookup moves from state to state is `@music/commands/lyric-lookups`,
- * which the media service's in-memory backend runs too.
- */
 import {
   newestFirst,
   pauseEnd,
@@ -65,7 +60,6 @@ const requestOne = async (
     return;
   }
 
-  // A miss asked again takes the tags of the song asking now.
   await (row.state.status === "miss"
     ? ctx.db.patch(row._id, { state, query: queryOf(track) })
     : ctx.db.patch(row._id, { state }));
@@ -86,8 +80,6 @@ export const requestLyrics = async (
   if (!(await readServerSettings(ctx)).remoteLyrics) return;
   const now = Date.now();
 
-  // One after another: two songs with the same tags share one lookup. Songs asked for together
-  // keep their order in a newest-first queue: each counts as asked a millisecond after the next.
   await inOrder(tracks, (track, position) =>
     requestOne(ctx, track, priority, newestFirst(priority) ? now - position : now),
   );

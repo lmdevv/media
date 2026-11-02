@@ -1,7 +1,3 @@
-/**
- * D02 and H09 · the host's Jam: the link as a QR code, Share and Copy, and who is in the Jam or
- * waiting to join. The rows open People (D03); the gear opens the settings (D04).
- */
 import type { Jam } from "@music/commands/models";
 import { router } from "expo-router";
 import { Settings, Share as ShareIcon, Users } from "lucide-react-native";
@@ -20,7 +16,6 @@ import type { PlayerRole } from "@/player";
 import { QrCode } from "./qr-code";
 import { useJamLink } from "./use-jam-link";
 
-/** Where the host's music plays, after "Host". */
 const hostLine = (role: PlayerRole): string => {
   if (role.kind === "local") return `Host · This ${DEVICE_FAMILY}`;
 

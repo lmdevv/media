@@ -1,8 +1,3 @@
-/**
- * The vault's rows in its SQLite database: the tables, and reading and writing them as the rows
- * `DownloadSync` works with. Every row is parsed when read; one that doesn't parse is deleted.
- * Lyrics are listed without the lyrics themselves, which are read one song at a time to show them.
- */
 import { DownloadPinId, TrackId } from "@music/commands/ids";
 import { LyricsRevision, OfflineLyrics } from "@music/commands/lyrics";
 import {
@@ -36,13 +31,8 @@ export interface VaultDatabase {
   readonly runAsync: (sql: string, params: SqlParams) => Promise<object>;
 }
 
-/** Lyrics rows one statement writes or deletes, well under SQLite's limit on parameters. */
 const LYRICS_PER_STATEMENT = 100;
 
-/**
- * The vault's tables. Each is created when missing, so a vault an older app made gains the tables
- * added since (lyrics) when it opens, keeping what it holds.
- */
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
 CREATE TABLE IF NOT EXISTS copies (
@@ -110,14 +100,12 @@ const lyricsFields = {
 
 const LyricsRow = Schema.Struct(lyricsFields);
 
-/** A lyrics row as the vault lists it, without the lyrics. */
 const LyricsListing = Schema.Struct({
   track_id: lyricsFields.track_id,
   rev: lyricsFields.rev,
   bytes: lyricsFields.bytes,
 });
 
-/** A lyrics row as it is read to show it. */
 const LyricsBody = Schema.Struct({ rev: lyricsFields.rev, lyrics: lyricsFields.lyrics });
 
 const decodeCopy = Schema.decodeUnknownOption(CopyRow);
@@ -143,7 +131,6 @@ const encodeLyrics = Schema.encodeSync(LyricsRow);
 /** Creates the tables a vault lacks. Run each time the vault opens. */
 export const prepareVault = (db: VaultDatabase): Promise<void> => db.execAsync(SCHEMA);
 
-/** Rows read with `decode`; a row that doesn't parse is deleted, and its file swept later. */
 const readRows = async <Row>(
   db: VaultDatabase,
   table: "copies" | "pins" | "art" | "removals" | "lyrics",
@@ -235,13 +222,11 @@ export const readLyrics = async (
   });
 };
 
-/** `items` in runs of `LYRICS_PER_STATEMENT`. */
 const statementsOf = <Item>(items: ReadonlyArray<Item>): ReadonlyArray<ReadonlyArray<Item>> =>
   Array.from({ length: Math.ceil(items.length / LYRICS_PER_STATEMENT) }, (_, index) =>
     items.slice(index * LYRICS_PER_STATEMENT, (index + 1) * LYRICS_PER_STATEMENT),
   );
 
-/** Writes songs' lyrics, a statement per `LYRICS_PER_STATEMENT` songs. */
 const putLyrics = async (db: VaultDatabase, lyrics: ReadonlyArray<NewLyrics>): Promise<void> => {
   await statementsOf(lyrics).reduce(async (previous, part) => {
     await previous;
@@ -264,7 +249,6 @@ const putLyrics = async (db: VaultDatabase, lyrics: ReadonlyArray<NewLyrics>): P
   }, Promise.resolve());
 };
 
-/** Deletes songs' lyrics, a statement per `LYRICS_PER_STATEMENT` songs. */
 const deleteLyrics = async (db: VaultDatabase, trackIds: ReadonlyArray<TrackId>): Promise<void> => {
   await statementsOf(trackIds).reduce(async (previous, part) => {
     await previous;

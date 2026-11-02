@@ -1,7 +1,3 @@
-/**
- * Paper's empty-state block (page 19): a 64pt muted outline icon, a 28/32 heavy title, a 16/24
- * muted body, all centered, then a full-width primary action and an optional secondary one.
- */
 import type { LucideIcon } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { View } from "react-native";
@@ -9,7 +5,6 @@ import { View } from "react-native";
 import { Icon } from "./icon";
 import { Text } from "./text";
 
-/** Props for `EmptyState`. */
 export interface EmptyStateProps {
   readonly icon: LucideIcon;
   readonly title: string;

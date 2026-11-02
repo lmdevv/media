@@ -1,16 +1,10 @@
-/**
- * Effect operations over the file system for the media service, with typed failures. The Node
- * calls live in `platform/node-files.ts`; this module translates their rejections.
- */
 import { Effect, Option, Schema } from "effect";
 
 import { type Mount, parseMountinfo } from "./mounts.ts";
 import * as NodeFiles from "./platform/node-files.ts";
 
-/** The mount table of the service's own mount namespace. */
 const MOUNTINFO = "/proc/self/mountinfo";
 
-/** The kernel's identity for this boot. */
 const BOOT_ID = "/proc/sys/kernel/random/boot_id";
 
 /** A file system operation failed. `missing` is true when the path does not exist. */

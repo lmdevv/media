@@ -4,13 +4,11 @@ import { describe, expect, it } from "vitest";
 import { anchorTop, followLines, lineDirection, LINES_WAITING } from "./lyrics-follow";
 import type { FollowScroll, LineFollow, LineFollowEvent, LinesLayout } from "./lyrics-follow";
 
-/** Where following stands after some events, with every scroll it asked the lines to make. */
 interface Run {
   readonly state: LineFollow;
   readonly scrolls: ReadonlyArray<FollowScroll>;
 }
 
-/** Runs `events` from `state`. */
 const run = (state: LineFollow, events: ReadonlyArray<LineFollowEvent>): Run =>
   events.reduce<Run>(
     (at, event) => {
@@ -51,7 +49,6 @@ describe("followLines", () => {
   });
 
   it("stops following as soon as something else moves the lines, even while paused", () => {
-    // A tap on the status bar or VoiceOver's three-finger scroll: no drag, no new line.
     const moved = run(placedAt(300), [{ type: "scrolled", offset: 0 }]);
 
     expect(moved.state.kind).toBe("released");
@@ -84,7 +81,6 @@ describe("followLines", () => {
       { type: "scrollSettled" },
     ]);
 
-    // The scroll ended short of 420: something else stopped it, so the lines are the person's.
     expect(landed.state.kind).toBe("released");
 
     const reached = run(placedAt(300), [
@@ -94,7 +90,6 @@ describe("followLines", () => {
       { type: "scrolled", offset: 0 },
     ]);
 
-    // Settled, a later scroll nobody asked for is seen as one.
     expect(reached.state.kind).toBe("released");
   });
 
@@ -130,7 +125,6 @@ describe("followLines", () => {
   });
 
   it("repositions on an explicit follow even when the line and following have not changed", () => {
-    // The line moved (Dynamic Type) before the next frame's layout pass put it back.
     const again = run(placedAt(300), [{ type: "follow", top: 340 }]);
 
     expect(again.scrolls).toEqual([{ top: 340, animated: true }]);
@@ -165,10 +159,8 @@ describe("followLines", () => {
   });
 });
 
-/** B12's measures: a 24pt lead before the first line, a 24pt gap between lines, 32pt rows. */
 const B12 = { lead: 24, gap: 24, row: 32 } as const;
 
-/** Lines of `rows` rows each, laid out from the lead, with a viewport-tall room under the last. */
 const linesOf = (rows: ReadonlyArray<number>, viewport = 320): LinesLayout => {
   let y = B12.lead;
 
@@ -182,7 +174,6 @@ const linesOf = (rows: ReadonlyArray<number>, viewport = 320): LinesLayout => {
   return { viewport, content: y + viewport, lines };
 };
 
-/** The rows each line shows in from the top of the lyrics, or null for one out of view. */
 const shownFrom = (layout: LinesLayout, top: number) =>
   layout.lines.map((box) => (box === undefined || box.y < top ? null : box.y - top));
 

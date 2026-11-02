@@ -1,9 +1,4 @@
 /**
- * Folders no library may be, one rule for Convex (`libraries.create`, `media:claimRoot`) and the
- * media service (before it claims a folder), so they never disagree.
- */
-
-/**
  * Kernel file systems: `/proc/self/root/...` is the whole file system again under another name,
  * and `/sys` and `/dev` hold no music.
  */

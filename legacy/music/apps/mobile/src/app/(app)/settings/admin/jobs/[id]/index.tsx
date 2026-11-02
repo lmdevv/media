@@ -1,4 +1,3 @@
-/** F19 · Library scan, and G09 when the scan stopped. */
 import { JobPage } from "@/components/admin/job";
 import { useJobParam } from "@/components/admin/params";
 import { RequireAccess } from "@/components/settings/access";

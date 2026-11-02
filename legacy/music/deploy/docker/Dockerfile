@@ -1,7 +1,4 @@
 # syntax=docker/dockerfile:1.7
-# [music] all-in-one image: self-hosted Convex, the media service, the web app, and Caddy,
-# supervised by s6-overlay. Build from the repo root:
-#   docker build -f deploy/docker/Dockerfile -t music .
 
 # Base images are pinned by the digest of their multi-arch index; the tag each digest was taken
 # from is in the comment above it. Update both together.
@@ -16,9 +13,6 @@ FROM ${CONVEX_IMAGE} AS convex
 
 FROM ${CADDY_IMAGE} AS caddy
 
-# The LD_PRELOAD shim that keeps the Convex instance secret off command lines (see its source).
-# Compiled on the build machine, with a cross compiler when the target CPU differs, so no part of
-# it runs under emulation.
 FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS argv-secret
 ARG TARGETARCH
 COPY deploy/docker/argv-secret.c /src/
@@ -50,15 +44,9 @@ RUN pnpm install --frozen-lockfile --ignore-scripts --os=linux --cpu=x64 --cpu=a
 # The install adds binaries for both target CPUs, so skip pnpm's re-install check before runs.
 RUN pnpm --config.verify-deps-before-run=false --filter web build \
  && pnpm --config.verify-deps-before-run=false --filter @music/media build
-# Standalone package directories with production node_modules.
 RUN pnpm --filter @music/backend deploy --prod --legacy /out/backend \
  && pnpm --filter @music/media deploy --prod --legacy /out/media \
  && cp -r apps/web/dist /out/web
-# The build identity: a hash of everything that decides what init deploys to Convex, and of the
-# Convex backend itself. Init exports a backup before deploying whenever it differs from the one
-# recorded in /data, so a change to functions, schema, or migrations is backed up first, on :main
-# as much as on a release. It errs towards backing up: any lockfile change also changes it. A
-# failure anywhere in the pipeline fails the build rather than hashing a partial list.
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 RUN files="$(find packages/backend/convex packages/backend/package.json packages/commands \
       pnpm-lock.yaml -type f -not -path '*/node_modules/*' | LC_ALL=C sort)"; \

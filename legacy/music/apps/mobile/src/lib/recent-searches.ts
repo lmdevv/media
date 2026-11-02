@@ -1,8 +1,3 @@
-/**
- * A16 · Recently searched: the results this person opened from Search, newest first, kept on this
- * device. Each is a snapshot of what its row shows, so the list draws without asking the server.
- * The keychain holds about 2 KB per value, so the oldest entries go first when it would overflow.
- */
 import { AlbumId, ArtistId, TrackId } from "@music/commands/ids";
 import type { AlbumCard, ArtistCard, Track } from "@music/commands/models";
 import { Option, Schema } from "effect";
@@ -42,7 +37,6 @@ export const RecentItem = Schema.Union([
 /** An opened song, album, or artist. */
 export type RecentItem = typeof RecentItem.Type;
 
-/** Recently searched, as the keychain stores it. */
 const StoredRecents = Schema.fromJsonString(Schema.Array(RecentItem));
 
 const decodeStored = Schema.decodeUnknownOption(StoredRecents);
@@ -54,7 +48,6 @@ export const encodeRecents = Schema.encodeSync(StoredRecents);
 export const decodeRecents = (stored: string | null): ReadonlyArray<RecentItem> =>
   Option.getOrElse(decodeStored(stored), () => []);
 
-/** How many entries A16 keeps. */
 const MAX_RECENTS = 8;
 
 /** Bytes one keychain value may hold before SecureStore refuses it. */

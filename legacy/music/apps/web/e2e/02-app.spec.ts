@@ -4,10 +4,8 @@ import { Schema } from "effect";
 
 import { ADMIN, joinAsNewMember, seed, seedDevice, signIn, unique } from "./support";
 
-/** Any other fields, kept so a rewritten message still says everything the server sent. */
 const Rest = [Schema.Record(Schema.String, Schema.Unknown)] as const;
 
-/** One query change in a Convex sync-protocol message. */
 const QueryChange = Schema.StructWithRest(
   Schema.Struct({
     type: Schema.String,
@@ -17,7 +15,6 @@ const QueryChange = Schema.StructWithRest(
   Rest,
 );
 
-/** The parts of a Convex sync-protocol message the retry test reads. */
 const SocketMessage = Schema.StructWithRest(
   Schema.Struct({
     type: Schema.String,
@@ -31,7 +28,6 @@ const decodeSocketMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Socke
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(() => {
-  // Idempotent: ensures the admin, the /music library, and its songs.
   seed();
 });
 
@@ -46,7 +42,6 @@ test("a wrong password shows the sign-in error and logs nothing", async ({ page 
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("alert")).toHaveText("Invalid email or password");
   await expect(page.getByLabel("Password")).toHaveAttribute("aria-invalid", "true");
-  // A wrong password is an expected outcome, not a server error (ADS-109).
   expect(errors).toEqual([]);
 });
 
@@ -54,7 +49,6 @@ test("Play on opens with nothing loaded, and never pops up by itself later", asy
   page: admin,
   browser,
 }) => {
-  // A new member has never played anything, so the desktop player bar and its speaker are absent.
   const page = await joinAsNewMember(admin, browser);
   const bar = page.getByRole("region", { name: "Player" });
   const popover = page.getByText(/DEVICES? ONLINE/);
@@ -85,7 +79,6 @@ test("Play on opens with nothing loaded, and never pops up by itself later", asy
 });
 
 test("Play on opens while the media service is unreachable", async ({ page }) => {
-  // This browser can't reach the media service, which is when moving playback elsewhere matters.
   await page.route(/\/media\/(health|stream)/, (route) => route.abort());
   await signIn(page);
   await page
@@ -171,7 +164,6 @@ test("create a playlist and add a song to it", async ({ page }) => {
   await page.getByRole("button", { name: "More actions for Glory Box" }).last().click();
   await page.getByRole("menuitem", { name: "Add to playlist" }).hover();
   await page.getByRole("menuitem", { name }).click();
-  // The toast from the first add can still be on screen with the same text, so take the newest.
   await expect(page.getByText(`Added to ${name}`).last()).toBeVisible();
 
   await page.getByRole("navigation", { name: "Library" }).getByRole("link", { name }).click();
@@ -210,7 +202,6 @@ test("a playlist deleted in another session shows that, and the player keeps goi
   await expect(page.getByRole("heading", { name: "You can't open this playlist" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
   await expect(bar.getByRole("button", { name: "Safe From Harm", exact: true })).toBeVisible();
-  // The stand-in streams a tone, so the song is still playing; the stack suite checks real audio.
   await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "Back to playlists" }).click();
@@ -237,9 +228,6 @@ test("links to missing screens show a not-found state inside the app", async ({ 
 });
 
 test("Try again subscribes again after a screen's data failed to load", async ({ page }) => {
-  // Fails the album screen's results on the Convex socket, as a server error would, until the
-  // test lets them through. The boundary also resets when the route's match changes, so failing
-  // only the first result could let the screen recover before "Try again" is pressed.
   const albumQueries = new Set<number>();
   let failing = true;
 
@@ -331,7 +319,6 @@ test("removing a queue row from the keyboard keeps focus in the queue", async ({
 
   await remove.first().focus();
   await page.keyboard.press("Enter");
-  // ADS-107: focus moves to the row that took the removed one's place, not to the page.
   await expect(page.getByRole("button", { name: second, exact: true })).toBeFocused();
   await bar.getByRole("button", { name: "Pause", exact: true }).click();
 });
@@ -358,10 +345,8 @@ test("removing a row in the Now Playing queue keeps focus there, and Play on ope
 
   await remove.first().focus();
   await page.keyboard.press("Enter");
-  // Focus moves to the next row before Now Playing's dialog can take it.
   await expect(nowPlaying.getByRole("button", { name: second, exact: true })).toBeFocused();
 
-  // The player bar's speaker is under Now Playing, so Play on opens as a dialog above it.
   await page.keyboard.press("d");
   await expect(page.getByRole("dialog", { name: "Play on" })).toBeVisible();
   await expect(page.getByText(/DEVICES? ONLINE/)).toHaveCount(0);
@@ -374,7 +359,6 @@ test("the phone Now Playing opens the one shared Play on sheet", async ({ browse
   const phone = await browser.newContext({ hasTouch: true });
   const page = await phone.newPage();
 
-  // Sign in at desktop width (the helper waits for the sidebar), then use the phone layout.
   await signIn(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: /^Open Now Playing/ }).click();
@@ -387,7 +371,6 @@ test("the phone Now Playing opens the one shared Play on sheet", async ({ browse
   const sheet = page.getByRole("dialog", { name: "Play on" });
 
   await expect(sheet).toHaveCount(1);
-  // A tap inside the sheet is not an outside press for Now Playing underneath, which stays open.
   await sheet.getByRole("menuitemradio").nth(1).tap();
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
@@ -451,7 +434,6 @@ test("the command menu runs a registry command with arguments", async ({ page })
   const shuffle = page
     .getByRole("region", { name: "Player" })
     .getByRole("button", { name: "Shuffle", exact: true });
-  // Play starts the album in order, so shuffle is off.
 
   await expect(shuffle).toHaveAttribute("aria-pressed", "false");
 
@@ -503,7 +485,6 @@ test("remote control mode shows where music plays and controls it", async ({ pag
       .getByRole("button", { name: "Pause", exact: true }),
   ).toBeVisible();
 
-  // Another signed-in device takes over playback.
   seedDevice("Lucía's iPhone");
 
   await expect(

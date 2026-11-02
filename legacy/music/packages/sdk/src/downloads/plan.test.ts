@@ -135,7 +135,6 @@ const policy: SyncPolicy = {
   profileFor: (song): StreamProfile => (song.lossless ? "original" : "aac-320"),
 };
 
-/** What `DownloadSync` makes of each step, as far as the plan can see. */
 const apply = (vault: VaultView, step: SyncStep): VaultView => {
   const copies = new Map(vault.copies);
   const pins = new Map(vault.pins);
@@ -166,7 +165,6 @@ const apply = (vault: VaultView, step: SyncStep): VaultView => {
   return { copies, pins, art, lyrics };
 };
 
-/** The kinds of the steps that touch songs or pins, without covers and lyrics. */
 const songSteps = (steps: ReadonlyArray<SyncStep>): ReadonlyArray<string> =>
   steps.flatMap((step) =>
     SyncStep.$match(step, {
@@ -182,7 +180,6 @@ const songSteps = (steps: ReadonlyArray<SyncStep>): ReadonlyArray<string> =>
     }),
   );
 
-/** The lyrics steps, as `[kind, track, revision]`. */
 const lyricsStepsOf = (steps: ReadonlyArray<SyncStep>): ReadonlyArray<ReadonlyArray<string>> =>
   steps.flatMap((step) => {
     if (SyncStep.$is("SaveLyrics")(step)) {
@@ -384,14 +381,12 @@ describe("planSync for lyrics", () => {
   });
 });
 
-/** `count` songs with IDs that sort as they were made. */
 const songs = (count: number): ReadonlyArray<TrackId> =>
   Array.from({ length: count }, (_, index) => TrackId.make(`t${String(index).padStart(4, "0")}`));
 
 describe("lyricsQuestions", () => {
   const album = pin(DownloadPinId.make("p1"));
 
-  /** The questions for an album of `ids`, with no lyrics kept. */
   const questionsFor = (ids: ReadonlyArray<TrackId>) =>
     lyricsQuestions(
       desiredOf(
@@ -436,7 +431,6 @@ describe("lyricsQuestions", () => {
   it("moves only one read's question when one more song is kept", () => {
     fc.assert(
       fc.property(
-        // More songs than one read asks about, and still as many reads with one more.
         fc.integer({ min: HELD_LYRICS_LIMIT + 1, max: 2 * HELD_LYRICS_LIMIT - 1 }),
         fc.stringMatching(/^[a-z0-9]{1,8}$/u),
         (count, name) => {

@@ -1,9 +1,3 @@
-/**
- * D08 · someone's Jam from a member's phone: who hosts, what plays, listening along here or using
- * the phone as a remote, the member's own songs coming up, and Leave. Only what the host allows
- * shows: pause when members control playback, Add songs when they may add, and removing a song
- * when they may edit it.
- */
 import type { QueueItemId } from "@music/commands/ids";
 import type { Jam, QueueEntry } from "@music/commands/models";
 import { errorMessage } from "@music/sdk/errors";
@@ -31,7 +25,6 @@ import { useConnection } from "@/session/connection";
 import { ToggleRow } from "./toggle-row";
 import { useJamLink } from "./use-jam-link";
 
-/** What plays, with pause or play when the host lets members control playback. */
 function NowPlayingRow({ canControl }: { readonly canControl: boolean }) {
   const { nowPlaying, status } = usePlayer();
   const { toggle } = usePlayerActions();
@@ -67,7 +60,6 @@ function NowPlayingRow({ canControl }: { readonly canControl: boolean }) {
   );
 }
 
-/** Listening along on this iPhone, or using it as a remote. */
 function ListenToggle({ jam }: { readonly jam: Jam }) {
   const listen = useRun("jam.listen");
   const { thisDevice } = useDevices();
@@ -116,7 +108,6 @@ function ListenToggle({ jam }: { readonly jam: Jam }) {
   );
 }
 
-/** One of the member's songs coming up; removable when the host lets members edit their own. */
 function ContributionRow({
   entry,
   origin,
@@ -154,7 +145,6 @@ function ContributionRow({
   );
 }
 
-/** The member's songs coming up, and how many more they may add. */
 function Contributions({ jam }: { readonly jam: Jam }) {
   const { origin } = useConnection();
   const me = useRead("account.me", {});
@@ -211,7 +201,6 @@ function Contributions({ jam }: { readonly jam: Jam }) {
   );
 }
 
-/** Props for `MemberJam`. */
 export interface MemberJamProps {
   readonly jam: Jam;
   /** Leaves the Jam, then goes back to the person's own music. */

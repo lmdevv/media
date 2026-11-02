@@ -13,7 +13,6 @@ const massive: SearchResults = {
   artists: [artistOf("Massive Attack", 6)],
 };
 
-/** What a row shows, as one line. */
 const lineOf = (row: SearchRow): string => {
   if (row.kind === "section") return `# ${row.title}${row.more === null ? "" : " (See all)"}`;
 

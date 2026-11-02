@@ -1,14 +1,9 @@
-/**
- * Lyricsfile 1.0 (https://github.com/tranxuanthang/lyricsfile): YAML with timed lines, optional
- * word timing, and a separate plain text version. LRCLIB serves it too.
- */
 import { type Lang, LyricBody, type LyricLine, parseLang } from "@music/commands/lyrics";
 import { Array as Arr, Result, Schema } from "effect";
 import { parseDocument } from "yaml";
 
 import { LyricsParseError, plainBody, timedBody } from "./lyric-body.ts";
 
-/** Aliases a document may expand; the format asks writers to use none. */
 const MAX_ALIASES = 50;
 
 const Ms = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));

@@ -1,4 +1,3 @@
-/** Counts and labels as Paper words them, such as `1,248 songs · 126 albums · 84 artists`. */
 const grouped = new Intl.NumberFormat("en-US");
 
 /** A count grouped as Paper writes it: `1,248`. */

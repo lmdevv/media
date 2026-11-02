@@ -1,7 +1,3 @@
-/**
- * The command tree: registry commands mapped to CLI paths, the built-in commands, help text, and
- * the machine-readable catalog behind `music commands`.
- */
 import type { Capability } from "@music/commands/permissions";
 import { capabilityLabel } from "@music/commands/permissions";
 import type { CommandGroup } from "@music/commands/command";
@@ -105,14 +101,12 @@ const positionalUsage = (spec: FlagSpec): string =>
     Json: () => `<${spec.flag}>`,
   });
 
-/** Required flags read as-is, optional ones in brackets, and boolean pairs in parentheses. */
 const synopsisPart = (spec: FlagSpec): string => {
   if (!spec.required) return `[${flagUsage(spec)}]`;
 
   return FlagType.$is("Boolean")(spec.type) ? `(${flagUsage(spec)})` : flagUsage(spec);
 };
 
-/** `music playlists get <playlist-id>`, `music playlists create --name <text> [...]` */
 const synopsis = (entry: RegistryEntry): string => {
   const { flags, positional } = entry.flags;
 
@@ -248,7 +242,6 @@ export type CatalogEntry = {
   readonly args: Schema.Json;
 };
 
-/** JSON Schema generation only emits JSON values; a mismatch is a defect. */
 const toJson = Schema.decodeUnknownSync(Schema.Json);
 
 const dialect = "https://json-schema.org/draft/2020-12/schema";
@@ -302,7 +295,6 @@ export const catalog = (): ReadonlyArray<CatalogEntry> =>
     };
   });
 
-/** Who may run a command, as the skill reference marks it; commands for anyone are unmarked. */
 const ACCESS_NOTES: Readonly<Record<Capability, string | null>> = {
   user: null,
   keys: "not guests",

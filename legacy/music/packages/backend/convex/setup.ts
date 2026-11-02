@@ -69,12 +69,8 @@ export const jam = query({
 
     if (found.status !== "active") return { state: "ended" as const };
 
-    // Anyone holding the link sees this, signed in or not: whose Jam it is and how to get in,
-    // nothing of what plays or who listens.
     const [host, settings] = await Promise.all([ctx.db.get(found.hostId), readServerSettings(ctx)]);
 
-    // The policy in effect, so the page offers what will happen: after a removal an open Jam
-    // asks the host, which anyone with the link can then tell.
     const policy = joinPolicy(found);
 
     return {
@@ -110,8 +106,6 @@ export const passwordReset = query({
 
     if (found.expiresAt < Date.now()) return { state: "expired" as const, ...details };
 
-    // Redeeming refuses a suspended account, so its link shows as unusable rather than as a form
-    // that can't succeed.
     if (user.suspendedAt !== undefined || !(await resetStillAllowed(ctx, found, user))) {
       return { state: "invalid" as const };
     }

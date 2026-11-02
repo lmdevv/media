@@ -1,10 +1,3 @@
-/**
- * A cursor-paginated list read as a chain of live pages, as the web reads it: each page starts at
- * a cursor and, once the page after it exists, ends where that one starts (`end`), so a row added
- * while the list is open lands in exactly one page. These are the pure rules; the hook that
- * subscribes to the pages lives with the screens.
- */
-
 /** One page of a cursor-paginated command. */
 export interface PageResult<Item> {
   readonly items: ReadonlyArray<Item>;
@@ -116,7 +109,6 @@ export const readPages = async <Item>(
   ): Promise<ReadonlyArray<Item>> => {
     const page = await read(cursor);
 
-    // A page that says more follow must move the cursor, or this would ask for it forever.
     if (!page.done && page.cursor === cursor) {
       throw new Error("The list stopped advancing; load it again");
     }

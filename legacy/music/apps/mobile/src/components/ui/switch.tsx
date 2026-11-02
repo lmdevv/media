@@ -1,12 +1,7 @@
-/**
- * Paper's 48×28 switch: on is the text color with a page-colored knob at the end, so it reads in
- * both themes without the accent. Off is the hairline track with a muted knob at the start.
- */
 import * as Haptics from "expo-haptics";
 import { Pressable } from "react-native";
 import Animated, { LinearTransition } from "react-native-reanimated";
 
-/** Props for `Switch`. */
 export interface SwitchProps {
   readonly value: boolean;
   readonly onValueChange: (value: boolean) => void;

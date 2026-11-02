@@ -1,8 +1,3 @@
-/**
- * The Download rows of a sheet (A11 song actions, C08 playlist actions): Download, Cancel
- * download, or Remove download, by where the download stands on this iPhone, and Retry download
- * above Cancel download once songs failed.
- */
 import type { DownloadTarget } from "@music/commands/models";
 import { errorMessage } from "@music/sdk/errors";
 import * as Haptics from "expo-haptics";

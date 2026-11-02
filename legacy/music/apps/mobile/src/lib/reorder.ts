@@ -1,22 +1,9 @@
-/**
- * The arithmetic of dragging a queue row (B03, B04): where the lifted row would land, how the
- * rows between make room, and how fast the list scrolls while the finger rests near an edge.
- * These run as worklets on the UI thread during the drag, and as plain functions in tests.
- */
-
-/** How close to an edge, in points, the finger starts the list scrolling. */
 const EDGE = 72;
 
-/**
- * Lists this tall or less, such as the iPad sheet's, take this share for each edge instead, so their
- * rows lift without scrolling. A phone's list is taller, and a share that left its edge at `EDGE`
- * would still scroll under a resting finger in the sheet.
- */
 const SHORT_LIST = 200;
 
 const SHORT_LIST_EDGE = 1 / 5;
 
-/** The fastest the list scrolls under the finger, in points per frame. */
 const MAX_SPEED = 14;
 
 /**

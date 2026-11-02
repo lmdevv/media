@@ -1,7 +1,3 @@
-/**
- * F02 · Account: who is signed in, their display name to change, the email they sign in with,
- * and Sign out. Signing out ends the session; the root stack then shows Sign in on its own.
- */
 import type { User } from "@music/commands/models";
 import { roleLabel } from "@music/commands/permissions";
 import { isBlank } from "@music/commands/text";
@@ -24,7 +20,6 @@ import { Failure } from "./failure";
 import { useAction } from "./use-action";
 import { useFlash } from "./use-flash";
 
-/** The account form, once the account has loaded. */
 function AccountForm({ me }: { readonly me: User }) {
   const { origin } = useConnection();
   const signOut = useSignOut();

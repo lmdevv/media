@@ -30,14 +30,12 @@ export const Route = createFileRoute("/_app/search")({
 
 const DEBOUNCE_MS = 120;
 
-/** The search screen exists to type into its field, so the field takes focus on arrival. */
 const focusOnMount = (input: HTMLInputElement | null): void => {
   input?.focus({ preventScroll: true });
 };
 
 const LIMIT = 24;
 
-/** The value after it stops changing for `delayMs`. */
 const useDebounced = (value: string, delayMs: number): string => {
   const [settled, setSettled] = useState(value);
 
@@ -50,14 +48,12 @@ const useDebounced = (value: string, delayMs: number): string => {
   return settled;
 };
 
-/** Search results as shown: the last results while new ones load, and the query they match. */
 interface ShownSearch {
   readonly results: SearchResults | null;
   readonly updating: boolean;
   readonly forQuery: string;
 }
 
-/** Results for the settled query, keeping the previous results visible while new ones load. */
 const useSearch = (query: string): ShownSearch => {
   const settled = useDebounced(query.trim(), DEBOUNCE_MS);
   const live = useRead("search", settled.length === 0 ? "skip" : { query: settled, limit: LIMIT });
@@ -169,10 +165,6 @@ type TopResult =
   | { readonly kind: "album"; readonly album: Album }
   | { readonly kind: "track"; readonly track: Track };
 
-/**
- * How many of the query's words a name contains, ignoring case and accents as the server's search
- * does; ties keep artist, album, song order.
- */
 const overlap = (name: string, query: string): number => {
   const folded = foldSearchText(name);
 

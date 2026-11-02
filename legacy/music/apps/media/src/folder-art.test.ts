@@ -46,7 +46,6 @@ describe("folderArtLookup", () => {
       expect(lookup(`Album/${other}`)).toBeUndefined();
     }
 
-    // A disc folder with artwork of its own keeps it.
     expect(lookup("Boxed/CD2")?.relativePath).toBe("Boxed/CD2/cover.png");
     expect(lookup("Boxed/CD1")).toBeUndefined();
   });

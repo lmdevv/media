@@ -1,14 +1,3 @@
-/**
- * Tells a moved or renamed file from a new one. A scan that finds a file at a path Convex does
- * not know, while a known file has gone, treats them as one file that moved when exactly one
- * gone track matches it: the same size in bytes and the same length in milliseconds, and either
- * the same modification time (a rename or move keeps it, even when the new name changes the
- * title of an untagged file) or the same title, artist, and album (a copy that kept its tags).
- *
- * Size and length together already single out a file in practice; the time or tags rule out
- * the rest. Hashing contents would be stronger, but Convex keeps no hash of the gone files, and
- * reading every candidate in full would make large moves slow.
- */
 import type { Fingerprint, ScannedTrack } from "./media-backend.ts";
 
 const isSameSong = (gone: Fingerprint, found: ScannedTrack): boolean =>

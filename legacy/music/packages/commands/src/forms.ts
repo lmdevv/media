@@ -1,8 +1,3 @@
-/**
- * Command forms derived from the registry: which commands a person may run by hand, the fields
- * each one's arguments need, and what its result means. The web command menu and the iOS Actions
- * screens both build on this, so a command added to the registry shows up in both.
- */
 import { Option, Schema, SchemaAST } from "effect";
 
 import { JobId, PlaylistId } from "./ids";
@@ -50,7 +45,6 @@ export interface FieldSpec {
   readonly field: FieldKind;
 }
 
-/** ID argument names and the records they point at. */
 const ENTITIES = new Map<string, Entity>([
   ["trackId", "track"],
   ["trackIds", "track"],
@@ -66,10 +60,6 @@ const ENTITIES = new Map<string, Entity>([
   ["userId", "person"],
 ]);
 
-/**
- * The record an ID argument points at. `itemId` names a playlist entry in playlist commands and a
- * queue entry elsewhere; people to share with come from the directory, which members can read.
- */
 const entityOf = (command: CommandName, name: string): Entity | undefined => {
   const group = commands[command].group;
 
@@ -82,7 +72,6 @@ const entityOf = (command: CommandName, name: string): Entity | undefined => {
   return ENTITIES.get(name);
 };
 
-/** Labels for fields whose names read poorly when split. */
 const LABELS = new Map<string, string>([
   ["trackId", "Song"],
   ["trackIds", "Songs"],
@@ -103,7 +92,6 @@ const LABELS = new Map<string, string>([
   ["next", "Play next instead of at the end"],
 ]);
 
-/** `positionMs` → `Position ms`, for fields without a hand-written label. */
 const humanize = (name: string): string => {
   const words = name.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
 
@@ -119,7 +107,6 @@ const Representation = Schema.Struct({
 
 const decodeRepresentation = Schema.decodeUnknownOption(Representation);
 
-/** The built-in checks on a node, as `effect/schema/isBetween`-style IDs and their payloads. */
 const checksOf = (
   ast: SchemaAST.AST,
 ): ReadonlyArray<{
@@ -245,7 +232,6 @@ export const missingFields = (
     return Array.isArray(value) ? value.length === 0 : String(value).trim() === "";
   });
 
-/** Commands that only players send; people never run them by hand. */
 const INTERNAL: ReadonlySet<CommandName> = new Set([
   "devices.heartbeat",
   "devices.reconcile",
@@ -253,7 +239,6 @@ const INTERNAL: ReadonlySet<CommandName> = new Set([
   "stream.url",
 ]);
 
-/** Commands that need something playing. */
 const NEEDS_TRACK: ReadonlySet<CommandName> = new Set([
   "playback.pause",
   "playback.resume",
@@ -268,7 +253,6 @@ const NEEDS_TRACK: ReadonlySet<CommandName> = new Set([
   "playback.volume",
 ]);
 
-/** Narrows a command name to one that changes state. */
 const isMutation = (name: CommandName): name is MutationName => commands[name].kind === "mutation";
 
 /**

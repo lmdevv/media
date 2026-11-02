@@ -1,8 +1,3 @@
-/**
- * A03 · Albums: every album, recently added first or A–Z by title or artist, as a grid (two
- * columns on a phone, as many as fit on an iPad: P03, P04) or a list (A12 sets both; the chips change the order in place). A card opens the album (A07).
- * Pages load as the grid nears its end, or all at once for an order the server doesn't page in.
- */
 import type { AlbumCard as Album } from "@music/commands/models";
 import { router } from "expo-router";
 import { Ellipsis, Library } from "lucide-react-native";
@@ -21,16 +16,10 @@ import { columnsOf, rowsOf } from "@/lib/layout";
 import { useThemeLength } from "@/lib/theme-color";
 import { useContentLayout } from "@/lib/window-layout";
 
-/** Albums per page: a few screens of the grid. */
 const PAGE_SIZE = 48;
 
-/** A03 keeps two columns on every phone, even a 375pt one where two 168pt cards don't fit. */
 const MIN_COLUMNS = 2;
 
-/**
- * How many columns the grid has: as many 168pt cards as fit between the page's edges (P03, P04),
- * in the room the sidebar leaves, 12pt apart on a phone and 16pt from `tablet` up, as the rows' gap classes draw them.
- */
 const useGridColumns = (): number => {
   const { width, widthClass, edge } = useContentLayout();
   const card = useThemeLength("--spacing-ios-168");
@@ -41,10 +30,6 @@ const useGridColumns = (): number => {
   return Math.max(MIN_COLUMNS, columnsOf(width - 2 * edge, card, gap));
 };
 
-/**
- * One row of the grid: `columns` cards stretched to fill the page between its edges. A short last
- * row keeps the cards' width by filling the rest with empty slots.
- */
 function GridRow({
   albums,
   columns,

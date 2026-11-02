@@ -1,7 +1,3 @@
-/**
- * Content-addressed artwork under `MEDIA_DATA_DIR/art/<sha256>`. A hash names exactly one image,
- * so files are written once and served as immutable.
- */
 import { createHash, randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 

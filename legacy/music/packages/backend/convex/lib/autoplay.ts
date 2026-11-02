@@ -1,14 +1,3 @@
-/**
- * Autoplay: what plays when the queue runs out. The rule is meant to be easy to explain, and cheap
- * enough to run inside a playback command:
- *
- * 1. songs by the same artist (in any library the listener can read), then
- * 2. songs from albums of the same genre, then
- * 3. songs from albums released within `YEAR_RANGE` years,
- *
- * leaving out songs already in the queue, songs played recently, and songs whose file is missing.
- * Within each step the songs come in random order, so autoplay doesn't replay one album in order.
- */
 import { shuffled } from "@music/commands/queue-rules";
 
 import type { Doc, Id } from "../_generated/dataModel";
@@ -18,40 +7,24 @@ import type { ReadCtx, Viewer } from "./viewer";
 /** Songs autoplay adds each time the queue runs out. */
 export const AUTOPLAY_BATCH = 10;
 
-/** Recent plays autoplay avoids. */
 const RECENT_PLAYS = 100;
 
-/**
- * Albums the genre and era steps each read at most, shared out among the libraries the listener
- * reads. With `SONGS_PER_ALBUM` this bounds a step at 600 songs however many libraries there
- * are, well inside a playback command's read limits.
- */
 const ALBUMS_PER_STEP = 24;
 
-/** Same-artist entries read at most (one per library the artist appears in). */
 const ARTIST_ENTRIES = 12;
 
-/** Songs the same-artist step reads at most, shared out among the artist's entries. */
 const SONGS_PER_ARTIST = 300;
 
-/** Songs read per album at most, so a huge compilation can't blow the read limits. */
 const SONGS_PER_ALBUM = 25;
 
-/** `budget` shared out among `parts`, at least one each. */
 const share = (budget: number, parts: number): number =>
   Math.max(1, Math.floor(budget / Math.max(1, parts)));
 
-/** A library a step reads, and how many of its albums. */
 interface StepLibrary {
   readonly library: Doc<"libraries">;
   readonly albums: number;
 }
 
-/**
- * The libraries a step reads albums from, within `ALBUMS_PER_STEP`: half for the seed album's
- * library, where the likeliest neighbours are (all of it when the listener reads no other), and
- * the rest shared among the others, as many as get at least one album each.
- */
 const stepLibraries = (
   viewer: Viewer,
   seedLibraryId: Id<"libraries"> | undefined,
@@ -112,7 +85,6 @@ const sameArtist = async (
 
   if (artist === null) return [];
 
-  // The same artist has one entry per library; the key merges their spellings.
   const entries = await ctx.db
     .query("artists")
     .withIndex("by_key", (q) => q.eq("key", artist.key))
@@ -133,12 +105,6 @@ const sameArtist = async (
   return songs.flat().filter((track) => playable(picker, track));
 };
 
-/**
- * Albums of the seed's genre in one library, the closest in time first: half from the seed's
- * year on, half from before it. Reading per library keeps a library the listener can't read from
- * using up the step, and starting at the seed's year keeps the step from always drawing the
- * oldest albums.
- */
 const genreAlbums = async (
   ctx: ReadCtx,
   libraryId: Id<"libraries">,
@@ -245,7 +211,6 @@ export const autoplaySongs = async (
     () => sameEra(ctx, picker, album),
   ];
 
-  // One step at a time: a later step only runs when the earlier ones came up short.
   const pick = async (
     remaining: ReadonlyArray<() => Promise<Array<Doc<"tracks">>>>,
     picked: ReadonlyArray<Id<"tracks">>,

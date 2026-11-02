@@ -1,7 +1,3 @@
-/**
- * F23 · Password reset link: the one-time link F12 just made, to send privately. The token only
- * lives in this page's route; the server keeps its hash, so leaving loses it.
- */
 import type { UserId } from "@music/commands/ids";
 import { Key, Lock, Share } from "lucide-react-native";
 import { View } from "react-native";
@@ -55,11 +51,9 @@ export function ResetLinkPage({ id }: { readonly id: UserId | null }) {
   );
 }
 
-/** Props for `ResetLinkBody`. */
 interface ResetLinkBodyProps {
   readonly link: string;
   readonly name: string;
-  /** How long until it expires: `in 24 hours`. */
   readonly left: string;
   readonly copied: boolean;
   readonly onCopied: () => void;

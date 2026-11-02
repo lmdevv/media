@@ -14,8 +14,6 @@ import { parseArgs } from "node:util";
 
 const ADMIN = { name: "Lucía", email: "admin@music.local", password: "password123" };
 
-// Runs in every page before the app: records each media element that plays, including detached
-// ones such as `new Audio()`, so `audio` reports real playback rather than what the UI shows.
 const TRACK_MEDIA = `(() => {
   window.musicVerifyMedia = new Set();
   const play = HTMLMediaElement.prototype.play;
@@ -133,7 +131,6 @@ async function serve(state, base) {
     });
     await context.addInitScript({ content: TRACK_MEDIA });
     const page = await context.newPage();
-    // Screencast frames come at this size; the device's pixel ratio, up to 2, keeps text sharp.
     const scale = Math.min(device?.deviceScaleFactor ?? 1, 2);
     const frame = { width: viewport.width * scale, height: viewport.height * scale };
     const entry = { context, page, viewport: frame, recording: null };
@@ -189,12 +186,6 @@ async function serve(state, base) {
       };
     });
 
-  // Screencast frames go to the system ffmpeg as H.264 MP4, the format GitHub plays in every
-  // browser. Frames arrive only when the page changes, so the host paces them itself: it writes
-  // the latest frame at a constant FPS for the time that has passed, and a still page holds its
-  // last frame until the stop. ffmpeg's wallclock timestamps can't do this: they drop a still
-  // tail, its `fps` filter pads the last frame by the gap before it, and probing restamps small
-  // frames, so clips ran too short or too long.
   const FPS = 30;
   const pump = (recording) => {
     if (!recording.last || recording.ffmpeg.stdin.destroyed) return;
@@ -212,8 +203,6 @@ async function serve(state, base) {
     ], { stdio: ["pipe", "ignore", "pipe"] });
     let errors = "";
     ffmpeg.stderr.on("data", (chunk) => (errors += chunk));
-    // A missing ffmpeg or one that exits early must fail this recording, not crash the host and
-    // lose every signed-in page. Its exit code reports a broken pipe, so stdin errors are dropped.
     ffmpeg.stdin.on("error", () => {});
     const done = new Promise((resolveDone, rejectDone) => {
       ffmpeg.on("error", (error) => rejectDone(new Error(`ffmpeg failed to start: ${error.message}`)));
@@ -230,7 +219,6 @@ async function serve(state, base) {
         size: entry.viewport,
         quality: 90,
         onFrame: ({ data }) => {
-          // The clip starts at the first frame; each later frame replaces the one being held.
           if (!recording.last) recording.started = performance.now();
           pump(recording);
           recording.last = data;
@@ -260,13 +248,7 @@ async function serve(state, base) {
     return path;
   };
 
-  // Covers load lazily and decode off the main thread, so a screenshot taken right after a page
-  // renders shows their placeholder gradients. Wait until every image the screenshot covers has
-  // loaded, decoded, and painted. For a full-page shot that's every image, so lazy ones below the
-  // fold are told to load now; otherwise it's the ones in view, since lazy ones elsewhere never start.
   const settleImages = async (page, options) => {
-    // One function evaluated in the page: a string predicate, as `waitForFunction` polls it, needs
-    // the eval that the app's Content-Security-Policy blocks.
     const settled = await page.evaluate(
       async ([full, ms]) => {
         const covered = () =>
@@ -350,7 +332,6 @@ async function serve(state, base) {
     },
     async screenshot({ page }, options) {
       const path = output(options, options.path);
-      // An element below the fold scrolls into view first, so its covers count as in view.
       if (hasLocator(options)) await locate(page, options).scrollIntoViewIfNeeded();
       await settleImages(page, options);
       if (hasLocator(options)) await locate(page, options).screenshot({ path });
@@ -409,7 +390,6 @@ async function serve(state, base) {
     async join({ page }, options) {
       if (!options.code || !options.name || !options.email) throw new Error("join needs --code, --name, and --email");
       await page.goto(`/invite/${options.code}`);
-      // An invite made for an address shows it read-only.
       const email = page.getByLabel("Email");
       await email.waitFor({ timeout: timeout(options) });
       if (await email.isEditable()) await email.fill(options.email);
@@ -451,8 +431,6 @@ async function serve(state, base) {
   };
 
   const server = createServer((request, response) => {
-    // A JSON content type makes a browser preflight a cross-origin request, which this host never
-    // answers, so a web page open elsewhere can't drive the signed-in verification pages.
     if (request.method !== "POST" || request.headers["content-type"] !== "application/json") {
       response.writeHead(415).end();
       return;

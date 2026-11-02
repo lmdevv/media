@@ -1,7 +1,3 @@
-/**
- * A12 · Sort and view: how a browse list is ordered, and for albums whether it shows as a grid or
- * a list. Choices apply at once, behind the sheet; Done closes it.
- */
 import { Option, Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { Library } from "lucide-react-native";
@@ -22,7 +18,6 @@ const LAYOUTS = [
   { value: "list", label: "List" },
 ] as const satisfies ReadonlyArray<{ readonly value: AlbumLayout; readonly label: string }>;
 
-/** One order to pick, checked when it is the current one. */
 function SortRow({
   label,
   selected,
@@ -45,12 +40,10 @@ function SortRow({
 
 const done = <Button label="Done" onPress={() => router.back()} />;
 
-/** Changes the albums' order or layout. */
 const setAlbums = (change: { readonly sort?: AlbumSort; readonly layout?: AlbumLayout }) => {
   updateBrowseView((view) => ({ ...view, albums: { ...view.albums, ...change } }));
 };
 
-/** Changes the songs' order. */
 const setSongSort = (sort: SongSort) => {
   updateBrowseView((view) => ({ ...view, songs: { sort } }));
 };

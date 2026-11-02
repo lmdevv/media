@@ -19,8 +19,6 @@ while (($#)); do
   esac
 done
 
-# Push only when the registry says the tag doesn't exist. Any other failure, such as the registry
-# being unreachable, stops here rather than risk replacing a published version.
 if ((push)); then
   if found="$(docker buildx imagetools inspect "$image" 2>&1)"; then
     echo "$image is already published; bump the version in deploy/demo-library/image to change it"
@@ -33,7 +31,6 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 [[ -n "$from" ]] && cp -a "$from/." "$work/"
 "$root/scripts/download-demo-music.sh" "$work" >/dev/null
-# The media service reads the files as an unprivileged user.
 chmod -R a+rX "$work"
 tracks="$(find "$work" -type f \( -name '*.mp3' -o -name '*.flac' \) | wc -l)"
 [[ "$tracks" -eq 28 && -s "$work/CREDITS.md" ]] ||

@@ -1,7 +1,3 @@
-/**
- * Times as the settings screens word them: `Used 12 minutes ago`, `Expires in 5 days`,
- * `Completed · Today`. Each takes `now` so a test can pin the clock.
- */
 const MINUTE = 60_000;
 
 const HOUR = 60 * MINUTE;
@@ -10,7 +6,6 @@ const DAY = 24 * HOUR;
 
 const dates = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
 
-/** `1 minute` or `12 minutes`. */
 const units = (count: number, unit: string): string =>
   `${String(count)} ${count === 1 ? unit : `${unit}s`}`;
 

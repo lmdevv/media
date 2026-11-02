@@ -65,7 +65,6 @@ __attribute__((constructor)) static void replace_placeholder(int argc, char **ar
     argv[index] = secret;
   }
 
-  /* Child processes need neither the shim nor the path. */
   unsetenv("ARGV_SECRET_FILE");
   unsetenv("LD_PRELOAD");
 }

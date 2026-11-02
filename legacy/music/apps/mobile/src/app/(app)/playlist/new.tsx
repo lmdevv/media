@@ -1,7 +1,3 @@
-/**
- * C04 · New playlist: a name, an optional description, and Create. Opened from a song's Add to
- * playlist (C06), it starts with that song. It opens the new playlist (C05, or C02 with the song).
- */
 import { TrackId } from "@music/commands/ids";
 import { errorMessage } from "@music/sdk/errors";
 import { useRun } from "@music/sdk/react";

@@ -1,7 +1,3 @@
-/**
- * A pushed page: the nav bar stuck to the top of a scroll view that is the page's content, so the
- * system tab bar minimizes as the page scrolls. Content sits on Paper's 20pt edge.
- */
 import type { ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 
@@ -11,10 +7,8 @@ import { ContentScroll } from "./content-scroll";
 import { NavBar } from "./nav-bar";
 import type { NavBarProps } from "./nav-bar";
 
-/** The nav bar is the scroll view's first child, and stays at the top. */
 const STICKY_BAR = [0];
 
-/** Props for `Page`. */
 export interface PageProps extends NavBarProps {
   readonly children: ReactNode;
   /**

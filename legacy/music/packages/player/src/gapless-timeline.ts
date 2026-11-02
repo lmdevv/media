@@ -1,9 +1,3 @@
-/**
- * Where each song sits on the MSE engine's single timeline. Songs are laid end to end: a song's
- * first real sample starts exactly where the previous song's last real sample ended. The
- * `SourceBuffer` maps each fragmented file onto that spot with `timestampOffset` (shifted back by
- * the encoder's priming samples) and cuts priming and padding with the append window. Pure.
- */
 import { StreamTimingHeader } from "@music/commands/models";
 
 import type { Fragment, SegmentIndex } from "./fmp4";

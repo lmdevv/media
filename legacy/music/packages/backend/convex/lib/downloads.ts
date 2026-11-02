@@ -1,9 +1,3 @@
-/**
- * Download pins: what someone keeps on a device, and what each pin holds for them now. The device
- * owns the files and decides when to fetch; this module only says what a pin means at this moment,
- * so every device (phone, desktop, CLI) reads one answer to re-tags, re-encodes, missing files, and
- * lost access.
- */
 import {
   LyricsChange,
   LyricsRevision,
@@ -114,11 +108,6 @@ export const openTarget = (
     }),
   );
 
-/**
- * What a device does with a song it may read. A library whose folder no scan has claimed (a NAS
- * that hasn't remounted) says nothing reliable about its files, so its songs are held whether or
- * not they are marked missing: a device never deletes on what the server can't see.
- */
 const stateOf = (
   claimed: ReadonlySet<Id<"libraries">>,
   track: Doc<"tracks">,
@@ -128,17 +117,11 @@ const stateOf = (
   return track.missing ? "missing" : "fetchable";
 };
 
-/**
- * The songs an opened target holds that the viewer can read, in album or playlist order. An album
- * leaves out songs whose file is gone, as `albums.get` does; a playlist and a single song keep
- * them as `missing`. A song a playlist lists twice is held once, at its first place.
- */
 const songsOf = async (
   ctx: ReadCtx,
   viewer: Viewer,
   opened: OpenedTarget,
 ): Promise<ReadonlyArray<PinnedSong>> => {
-  // Every song the viewer can read is in one of these libraries.
   const claimed = new Set(viewer.libraries.filter(isClaimed).map((library) => library._id));
   const song = (track: Doc<"tracks">): PinnedSong => ({ track, state: stateOf(claimed, track) });
 
@@ -179,18 +162,12 @@ const songsOf = async (
   );
 };
 
-/** A pin's name and cover. */
 interface ShownAs {
   readonly title: string;
   readonly subtitle: string;
   readonly artHash: string | undefined;
 }
 
-/**
- * How an opened target is named on its pin. A playlist's cover is the first one among `songs`,
- * the songs it holds when a manifest has read them; `downloads.list` reads none, which keeps a
- * list of hundreds of playlist pins within one query's reads.
- */
 const shownAs = (
   ctx: ReadCtx,
   opened: OpenedTarget,
@@ -290,7 +267,6 @@ export const repointAlbumPins = async (
 
   const target = { kind: "album", id: to } as const;
 
-  // A device keeps an album once, so no two of these pins land on the same row.
   await Promise.all(
     pins.map(async (pin) => {
       const kept = await findPin(ctx, pin.userId, pin.deviceId, target);
@@ -308,15 +284,10 @@ export const repointAlbumPins = async (
  */
 const LYRICS_PAGE_BYTES = 8 * 1024 ** 2;
 
-/** Raised when the rules that resolve offline lyrics change, so every device fetches them again. */
 const OFFLINE_LYRICS_VERSION = "v2";
 
 const encodeChange = Schema.encodeSync(LyricsChange);
 
-/**
- * What LRCLIB's answer contributes to a revision, read from the lookup's state: a found answer by
- * when it was stored, as storing new lyrics always moves `fetchedAt`; never a pending one.
- */
 const answerPart = (lookup: Doc<"lyricLookups"> | null): string => {
   if (lookup?.state.status === "found") return `found:${lookup._id}:${lookup.state.fetchedAt}`;
 
@@ -325,16 +296,10 @@ const answerPart = (lookup: Doc<"lyricLookups"> | null): string => {
   return "";
 };
 
-/**
- * The revision of a song's offline lyrics, read from the song and its lookup without their
- * lyrics: the content revision of its own lyrics (`tracks.lyricsHash`) and of LRCLIB's answer.
- * Null when there is nothing to keep: no lyrics of its own and no answer from LRCLIB.
- */
 const revisionOf = async (
   track: Doc<"tracks">,
   lookup: Doc<"lyricLookups"> | null,
 ): Promise<LyricsRevision | null> => {
-  // Lyrics read before hashes were kept are unchanged since: every scan that writes them hashes them.
   const own = track.lyricsBytes === undefined ? "" : (track.lyricsHash ?? "unhashed");
   const answer = answerPart(lookup);
 
@@ -369,7 +334,6 @@ export const lyricsChanges = async (
       return;
     }
 
-    // A song's own synced lyrics always win, so LRCLIB's answer can't change what it shows.
     const lookup = track.lyricsSynced === true ? null : await lookupRowOf(ctx, track);
     const current = await revisionOf(track, lookup);
 

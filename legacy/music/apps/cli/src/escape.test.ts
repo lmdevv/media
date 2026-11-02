@@ -11,7 +11,6 @@ describe("escaping control characters", () => {
       String.raw`a\u001b[2J\u000a\u0009b\u009b\u007f`,
     );
     expect(terminalSafe("a\u001b[2J\n\tb\u009b")).toBe("a\\u001b[2J\n\tb\\u009b");
-    // Format characters and separators too, a character beyond U+FFFF as its two code units.
     expect(escapeControlCharacters("x\u202Ey\u2028z\u{E0041}👩\u200D💻")).toBe(
       String.raw`x\u202ey\u2028z\udb40\udc41` + "👩\u200D💻",
     );

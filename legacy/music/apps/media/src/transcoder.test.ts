@@ -39,10 +39,6 @@ const transcoderWith = (dataDir: string, cacheMaxBytes?: number, ffmpegPath?: st
     Transcoder.layer.pipe(Layer.provide(testConfig(dataDir, cacheMaxBytes, ffmpegPath))),
   ).pipe(Effect.flatMap((context) => Transcoder.Transcoder.pipe(Effect.provideContext(context))));
 
-/**
- * Asks `prepare` about `input`, pausing between asks, until it is no longer pending. The pause is
- * separate so a test on a `TestClock` can wait in real time while `prepare` reads the test clock.
- */
 const settledPrepare = (
   transcoder: Transcoder.Transcoder["Service"],
   input: Transcoder.TranscodeInput,
@@ -55,11 +51,9 @@ const settledPrepare = (
     ),
   );
 
-/** Repeats `count` until `until` passes, in real time. */
 const eventually = <A>(count: Effect.Effect<A>, until: (value: A) => boolean) =>
   count.pipe(Effect.repeat({ schedule: Schedule.spaced("20 millis"), until, times: 250 }));
 
-/** An `aac-128` transcode of `source`, a song with ID `id`. */
 const aacInput = (id: string, source: string): Transcoder.TranscodeInput => ({
   trackId: TrackId.make(id),
   profile: "aac-128",
@@ -131,7 +125,6 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             codec: "flac",
           });
 
-        // Measure the three outputs, then size the cache so any two fit and three do not.
         const measuring = yield* transcoderWith(
           yield* temporaryDirectory("measure"),
           512 * 1024 * 1024,
@@ -144,7 +137,6 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           ),
         );
 
-        // The largest pair is everything except the smallest file.
         const limit = sizes.reduce((sum, size) => sum + size, 0) - Math.min(...sizes);
         const dataDir = yield* temporaryDirectory("data");
         const transcoder = yield* transcoderWith(dataDir, limit);
@@ -153,7 +145,6 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* Effect.sleep("5 millis");
         yield* transcodeWith(transcoder, "b");
         yield* Effect.sleep("5 millis");
-        // Serving A again makes B the least recently used entry.
         yield* transcodeWith(transcoder, "a");
         yield* Effect.sleep("5 millis");
         yield* transcodeWith(transcoder, "c");
@@ -169,7 +160,6 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
     runScoped(
       Effect.gen(function* () {
         const scratch = yield* temporaryDirectory("sine");
-        // Four minutes: long enough that ffmpeg is still busy when the first bytes are out.
         const source = yield* sineSegment(scratch, "long", "mp3", 0, 48_000 * 240);
         const dataDir = yield* temporaryDirectory("data");
         const transcoder = yield* transcoderWith(dataDir, 512 * 1024 * 1024);
@@ -202,19 +192,16 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
               concurrency: 2,
             });
 
-            // `equals`, because `toEqual` diffs megabytes byte by byte.
             expect(two.equals(one)).toBe(true);
 
             return [{ bytes: one, timing: first.timing }, yield* first.finished] as const;
           }),
         );
 
-        // The stream is the finished file without its index, byte for byte.
         expect(live.bytes.equals(withoutIndex(yield* Files.readWholeFile(finished.path)))).toBe(
           true,
         );
 
-        // Priming and rate are exact up front; the length is the source's estimate.
         const measured = Option.getOrThrow(finished.timing);
         const expected = Option.getOrThrow(live.timing);
 
@@ -224,7 +211,6 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           measured.sampleRate / 10,
         );
 
-        // Once its readers are done, the live copy is gone and a new request finds the file.
         expect((yield* Files.listNames(cacheDir)).toSorted()).toEqual([
           "long-1.m4a",
           "long-1.m4a.json",
@@ -269,7 +255,6 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           }),
         );
 
-        // The stream carries exactly the finished file's frames, each behind an ADTS header.
         const file = yield* Files.readWholeFile(finished.path);
 
         expect(indexOfAtom(file, "moov")).toBeLessThan(indexOfAtom(file, "mdat"));
@@ -322,7 +307,6 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
               ),
             );
 
-          // Two songs whose ffmpeg never finishes take both slots.
           const stuck = yield* Effect.forEach(["hang-a", "hang-b"], (name) =>
             sineSegment(library, name, "mp3", 0, 48_000).pipe(
               Effect.flatMap((source) => transcoder.transcode(aacInput(name, source))),
@@ -338,12 +322,9 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             .transcode(aacInput("next", source))
             .pipe(Effect.forkScoped);
 
-          // The third waits for a slot.
           yield* clock.withLive(Effect.sleep("300 millis"));
           expect(yield* started).toBe(2);
 
-          // Ten minutes on, the stuck ones time out and free their slots. The third has not run
-          // yet, so its own ten minutes start now.
           yield* clock.adjust("10 minutes");
 
           for (const exit of yield* Fiber.joinAll(stuck)) {
@@ -400,12 +381,10 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(yield* firstChunk).toHaveLength(1);
         const running = yield* liveFiles;
 
-        // Back within the grace period: the same run (with the same live file) goes on.
         expect(running).toHaveLength(1);
         expect(yield* firstChunk).toHaveLength(1);
         expect(yield* liveFiles).toEqual(running);
 
-        // Gone for longer: ffmpeg stops and leaves nothing behind.
         yield* Effect.sleep("1500 millis");
         expect(yield* Files.listNames(cacheDir)).toEqual([]);
 
@@ -432,7 +411,6 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             Effect.map((source) => aacInput(name, source)),
           );
 
-        // Listeners stuck in both shared slots do not hold up a download.
         const listened = yield* transcoderWith(
           yield* temporaryDirectory("data"),
           undefined,
@@ -455,8 +433,6 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(probed.streams).toMatchObject([{ codec_name: "aac" }]);
         expect(yield* listened.prepare(wanted)).toEqual(ready);
 
-        // A download stuck in the prepare lane leaves both shared slots to listeners, and the
-        // next download waits for the lane without starting ffmpeg.
         const downloaded = yield* transcoderWith(
           yield* temporaryDirectory("data"),
           undefined,
@@ -514,14 +490,12 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             running: 1,
           });
 
-          // Asked again within the hold, the same run goes on past it.
           yield* clock.adjust(almostHold);
           expect(yield* transcoder.prepare(input)).toMatchObject({ _tag: "Pending" });
           yield* clock.adjust(almostHold);
           yield* clock.withLive(Effect.sleep("200 millis"));
           expect(yield* runs).toEqual({ started: 1, running: 1 });
 
-          // Unasked for the whole hold, it stops once a stream nobody reads would.
           yield* clock.adjust("2 seconds");
           yield* clock.withLive(Effect.sleep("100 millis"));
           yield* clock.adjust("1 second");
@@ -530,7 +504,6 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             running: 0,
           });
 
-          // A later ask starts over.
           expect(yield* transcoder.prepare(input)).toMatchObject({ _tag: "Pending" });
           expect(yield* clock.withLive(eventually(runs, ({ running }) => running === 1))).toEqual({
             started: 2,

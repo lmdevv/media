@@ -1,12 +1,3 @@
-/**
- * A07 · Album: the cover, title, artist (which opens the artist, A08), and a line of facts, then
- * Play and Shuffle over the songs; on an iPad the cover sits left of the facts, title, artist,
- * and Play and Shuffle (P05, P06). A song plays the album from there; its ellipsis opens Song
- * actions (A11). The playing song's title is the accent. The bar holds the download ring (D01)
- * and the ellipsis that opens Album actions (D03b). An album the viewer can no longer open, such
- * as one whose library was made private, is G10. While the server is out of reach the offline bar
- * leads (D13), and an album it hasn't sent opens from this phone's downloads.
- */
 import { AlbumId } from "@music/commands/ids";
 import type { AlbumDetail } from "@music/commands/models";
 import { useReadSettled } from "@music/sdk/react";
@@ -36,13 +27,11 @@ import { useServerReach } from "@/session/server-reach";
 
 const decodeId = Schema.decodeUnknownOption(AlbumId);
 
-/** The artist line centered under the phone's cover (A07), and leading in the iPad header (P05). */
 const ARTIST_LINES = {
   phone: { variant: "bodyMedium", link: "", text: "text-center" },
   tablet: { variant: "subtitle", link: "self-start", text: "" },
 } as const;
 
-/** The album's artist in the accent, which opens the artist (A08). */
 function ArtistLink({
   detail,
   layout,

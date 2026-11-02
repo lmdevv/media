@@ -1,7 +1,3 @@
-/**
- * C01 · Playlists: the playlists you made and the ones people shared with you, behind Yours and
- * Shared with you chips, with Liked songs first and New playlist in the title row.
- */
 import type { Playlist } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
 import { router } from "expo-router";
@@ -27,12 +23,10 @@ const SHELVES = [
   { value: "shared", label: "Shared with you" },
 ] as const;
 
-/** How many likes the first page reads; past it the count says `200+`. */
 const LIKES_PAGE = 200;
 
 const openNew = () => router.push("/playlist/new");
 
-/** Liked songs, in accent, with how many there are. */
 function LikedRow() {
   const page = useRead("likes.page", { limit: LIKES_PAGE });
   const count = page === undefined ? null : page.items.length;
@@ -109,7 +103,6 @@ function Shared() {
 export default function Playlists() {
   const [shelf, setShelf] = useState<Shelf>("yours");
 
-  // A launch that never reached the server has no playlists to show, and can't make one.
   if (useServerReach() === "offline") {
     return (
       <TabRoot title="Playlists">

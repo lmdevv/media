@@ -1,7 +1,3 @@
-/**
- * Where the app stands with its server: what screens dim and swap for, and what the notice says.
- */
-
 /** How the app stands with its server. */
 export type ServerReach =
   | "online"

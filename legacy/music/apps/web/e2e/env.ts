@@ -5,7 +5,6 @@ const webEnv = fileURLToPath(new URL("../.env.local", import.meta.url));
 
 const mediaEnv = fileURLToPath(new URL("../../media/.env.local", import.meta.url));
 
-/** The value of `name=` in an env file, if the file and the line exist. */
 const envValue = (file: string, name: string): string | undefined =>
   existsSync(file)
     ? readFileSync(file, "utf8")
@@ -21,7 +20,6 @@ const envValue = (file: string, name: string): string | undefined =>
  */
 export const e2eMediaPort = (): number => Number(envValue(mediaEnv, "PORT") ?? "4100");
 
-/** The default `scripts/dev-backend.sh` backend, used when nothing else is configured. */
 const DEV_BACKEND = "http://127.0.0.1:3210";
 
 /**

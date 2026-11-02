@@ -1,8 +1,3 @@
-/**
- * The playback session a phone keeps across launches, in its vault's database: the session it
- * played without the server and has not handed back yet, and the server's session as it last saw
- * it, which a launch with no connection starts from. Signing out wipes the vault, and with it these.
- */
 import { PlaybackState } from "@music/commands/models";
 import { LocalSessionState } from "@music/player/local-session";
 import type { SessionStore } from "@music/player/session-router";
@@ -51,8 +46,6 @@ const save = async (db: SessionDatabase, key: SessionKey, state: string | null):
  * damaged file, reads as nothing stored.
  */
 export const vaultSessions = (db: SessionDatabase): SessionStore => {
-  // The server's session changes with every position report: one write at a time, and while one
-  // runs only the newest snapshot waits for the next.
   let writing: Promise<void> | null = null;
   let waiting: PlaybackState | null = null;
 
@@ -67,7 +60,6 @@ export const vaultSessions = (db: SessionDatabase): SessionStore => {
 
     waiting = null;
 
-    // A failed write still lets a newer snapshot through; the failure reaches the callers after.
     let failure: Error | null = null;
 
     try {

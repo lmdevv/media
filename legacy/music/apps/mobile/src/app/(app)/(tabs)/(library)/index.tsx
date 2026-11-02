@@ -1,11 +1,3 @@
-/**
- * A02 · Library: the totals, the ways into the collection (albums, artists, songs, liked songs,
- * what this iPhone downloaded with its song count (D09), history), and the libraries this account
- * hears, each a plain title without a subtitle. Admins also get Manage, and the libraries they
- * manage open their settings. Scrolled past the title it is A15. On a launch that never reached the
- * server it is D11: the songs on this iPhone, the offline card, and Downloaded first with its size,
- * over the rest dimmed.
- */
 import { can } from "@music/commands/permissions";
 import { useRead } from "@music/sdk/react";
 import type { Href } from "expo-router";
@@ -35,25 +27,18 @@ import { librarySummary } from "@/lib/format";
 import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useServerReach } from "@/session/server-reach";
 
-/** Libraries by who hears them: shared with everyone, some people, or only the owner. */
 const VISIBILITY_ICONS = { shared: Folder, restricted: Users, private: Lock } as const;
 
-/** What VoiceOver says of who hears a library, which the row shows only as its icon. */
 const VISIBILITY_LABELS = {
   shared: "Shared",
   restricted: "Some people",
   private: "Only you",
 } as const;
 
-/** One way into the collection. */
 interface Category {
   readonly title: string;
   readonly icon: LucideIcon;
   readonly href: Href;
-  /**
-   * `phone`: what this iPhone downloaded, which opens with no server and leads the list then.
-   * `server`: dimmed while the server has never answered.
-   */
   readonly source: "phone" | "server";
 }
 
@@ -66,7 +51,6 @@ const CATEGORIES: ReadonlyArray<Category> = [
   { title: "Listening history", icon: Clock, href: "/history", source: "server" },
 ];
 
-/** D11's order: what plays with no server first. */
 const OFFLINE_CATEGORIES: ReadonlyArray<Category> = [
   ...CATEGORIES.filter((category) => category.source === "phone"),
   ...CATEGORIES.filter((category) => category.source === "server"),

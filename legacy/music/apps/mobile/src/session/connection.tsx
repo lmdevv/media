@@ -1,8 +1,3 @@
-/**
- * The server connection for the whole app. Screens before connecting read and change it with
- * `useConnectionControls`; once connected, everything below reads the server with
- * `useConnection`.
- */
 import { createContext, useContext, useState } from "react";
 import type { ReactNode } from "react";
 

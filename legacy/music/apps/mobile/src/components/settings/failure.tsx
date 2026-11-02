@@ -1,4 +1,3 @@
-/** The danger line under a form or a list of actions when the server refused the last one. */
 import { useEffect } from "react";
 import { AccessibilityInfo } from "react-native";
 

@@ -1,7 +1,5 @@
-/** F19's progress bar: an 8pt hairline-colored track with an accent fill. */
 import { View } from "react-native";
 
-/** Props for `ProgressBar`. */
 export interface ProgressBarProps {
   /** How full the bar is, from 0 to 100. */
   readonly percent: number;

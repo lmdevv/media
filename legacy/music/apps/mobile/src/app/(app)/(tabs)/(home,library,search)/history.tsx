@@ -1,7 +1,3 @@
-/**
- * A06 · History: every play, newest first, under a heading for each day. A row plays the history
- * from that song; its ellipsis opens Song actions (A11).
- */
 import { useRead } from "@music/sdk/react";
 import { Clock } from "lucide-react-native";
 import { View } from "react-native";
@@ -14,7 +10,6 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { historyRows } from "@/lib/history";
 import { useNowPlaying } from "@/player";
 
-/** The most plays `history.list` returns. */
 const HISTORY_LIMIT = 200;
 
 export default function History() {

@@ -1,4 +1,3 @@
-/** Password sign-in against the dev backend, shared by the seed (Node) and the session page. */
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import { Schema } from "effect";

@@ -25,8 +25,6 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 base="${BASE_PORT:-3810}"
 e2e_port="${E2E_PORT:-3002}"
 suites=("$@")
-# Docker names allow letters, digits, `_`, `.`, and `-`. A name that needed changing gets a
-# suffix from the name as given, so two names that clean up the same still differ.
 prefix="${E2E_NAME:-e2e-$(basename "$root")}"
 if [[ "$prefix" =~ [^a-zA-Z0-9_.-] ]]; then
   prefix="${prefix//[^a-zA-Z0-9_.-]/-}-$(printf '%s' "$prefix" | cksum | cut -d' ' -f1)"
@@ -35,8 +33,6 @@ fi
 started=()
 results="$(mktemp -d)"
 
-# dev-backend.sh points these at the backend it starts. Put back whatever a developer had, so
-# their own backend keeps working after a run.
 env_files=(packages/backend/.env.local apps/web/.env.local apps/media/.env.local)
 for file in "${env_files[@]}"; do
   if [[ -f "$root/$file" ]]; then
@@ -63,7 +59,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Starts an empty backend called $prefix-$1 on port $2 and points the .env.local files at it.
 fresh_backend() {
   local name="$prefix-$1"
   "$root/scripts/dev-backend.sh" stop "$name" >/dev/null 2>&1 || true
@@ -74,7 +69,6 @@ fresh_backend() {
 
 convex_env() { (cd "$root/packages/backend" && pnpm exec convex env get "$1"); }
 
-# Runs one Vitest file and fails if any of its tests did not run.
 vitest_all() {
   local report
   report="$results/$(basename "$1").json"
@@ -90,7 +84,6 @@ vitest_all() {
   ' "$report" "$1"
 }
 
-# Runs one suite against the backend fresh_backend just started.
 run_suite() {
   case "$1" in
     security)
@@ -110,8 +103,6 @@ run_suite() {
         vitest_all apps/media/src/media.e2e.test.ts
       ;;
     web)
-      # The Playwright suite and its seed script read the backend from the .env.local files
-      # dev-backend.sh writes, and 01-setup.spec.ts needs an empty backend.
       cd "$root" && E2E_PORT="$e2e_port" pnpm --filter web exec playwright test
       ;;
   esac
@@ -125,11 +116,9 @@ for suite in "${suites[@]}"; do
   fi
 done
 
-# Every suite runs even when an earlier one fails, so one run reports all of them.
 failed=()
 for suite in "${suites[@]}"; do
   echo "::group::$suite"
-  # A backend that fails to start fails its suite, not the run.
   if ! fresh_backend "$suite" "$((base + ports[$suite]))"; then
     failed+=("$suite")
     echo "::endgroup::"

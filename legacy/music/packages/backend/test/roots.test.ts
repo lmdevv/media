@@ -1,7 +1,3 @@
-/**
- * Library folders: the real-folder claims that keep two libraries off the same files whatever
- * their paths say, who may remove a library, and what an overlap error may reveal.
- */
 import { type LibraryId, type TrackId, UserId } from "@music/commands/ids";
 import { describe, expect, it } from "vitest";
 
@@ -33,11 +29,6 @@ const libraryDoc = async (backend: Backend, libraryId: LibraryId) => {
   return library;
 };
 
-/**
- * Claims a library's folder as the media service does. `rootIds` is the folder's identity and
- * its parents' (see `@music/commands/folder-ids`); by default one no other folder shares, so only
- * the paths can overlap.
- */
 const claim = async (
   backend: Backend,
   libraryId: LibraryId,
@@ -58,7 +49,6 @@ const claim = async (
   });
 };
 
-/** What the media service would be told about a track, and whether a user gets a stream URL. */
 const playable = async (backend: Backend, user: User, trackId: TrackId) => ({
   source: (await backend.query(api.media.trackSource, { secret: MEDIA_SECRET, trackId })) !== null,
   url: await failureCode(user.music.read("stream.url", { trackId, profile: "original" })),
@@ -80,12 +70,10 @@ describe("real folder claims", () => {
       visibility: "private",
     });
 
-    // Not claimed yet: its added path still counts.
     const legacy = await owner.music.run("libraries.create", { name: "Old", path: "/data/old" });
 
     expect(await claim(backend, kept.libraryId, "/srv/x/owner-private")).toEqual({ ok: true });
 
-    // A link elsewhere whose text says nothing of /srv/x.
     const alias = await admin.music.run("libraries.create", { name: "Alias", path: "/home/link" });
 
     const overlapping = await Promise.all(
@@ -104,8 +92,6 @@ describe("real folder claims", () => {
 
     expect(system.map((result) => result.ok)).toEqual([false, false, false, false]);
 
-    // Nothing was stored for the refused claims; a folder of its own is fine, and claiming it
-    // again is too.
     expect(await claim(backend, alias.libraryId, "/srv/y")).toEqual({ ok: true });
     expect(await claim(backend, alias.libraryId, "/srv/y")).toEqual({ ok: true });
     expect(await claim(backend, legacy.libraryId, "/data/old")).toEqual({ ok: true });
@@ -126,7 +112,6 @@ describe("real folder claims", () => {
     const owner = await signUp(backend, "owner");
     const admin = await signUp(backend, "admin");
 
-    // Identities as `stat` reports them: `/`, then /srv, /srv/x, and the owner's folder.
     const [top, srv, x, mine] = ["1:2", "1:10", "1:11", "1:12"];
 
     const kept = await owner.music.run("libraries.create", {
@@ -143,26 +128,20 @@ describe("real folder claims", () => {
 
     expect(stored.rootIds).toEqual([mine, x, srv, top]);
 
-    // Bind mounts under /mnt: paths that say nothing of /srv/x, and that realpath keeps.
     const alias = await admin.music.run("libraries.create", { name: "Alias", path: "/mnt/b" });
     const mnt = "1:30";
 
     const refused = await Promise.all(
       [
-        // /srv/x/owner-private itself, mounted at /mnt/b.
         [mine, mnt, top],
-        // A folder inside it: /srv/x/owner-private mounted at /mnt/b, scanning /mnt/b/a.
         ["1:13", mine, mnt, top],
-        // The folder around it: /srv/x mounted at /mnt/b.
         [x, mnt, top],
       ].map((chain) => claim(backend, alias.libraryId, "/mnt/b", chain)),
     );
 
     expect(refused).toEqual(Array.from({ length: 3 }, () => ({ ok: false, error: OVERLAP })));
-    // The error names no folder or identity.
     expect(OVERLAP).not.toMatch(/srv|1:/u);
 
-    // A folder of its own on the same disk, beside the owner's, is fine.
     expect(await claim(backend, alias.libraryId, "/mnt/b", ["1:31", mnt, top])).toEqual({
       ok: true,
     });
@@ -181,8 +160,6 @@ describe("real folder claims", () => {
 
     const other = await admin.music.run("libraries.create", { name: "Other", path: "/music/b" });
 
-    // After a reboot the same numbers can name another folder: an identity from another boot
-    // refuses nothing.
     expect(
       await claim(
         backend,
@@ -195,7 +172,6 @@ describe("real folder claims", () => {
     ).toEqual({ ok: true });
     expect((await libraryDoc(backend, kept.libraryId)).realPath).toBe("/music/a");
 
-    // In the same boot, the same identity is the same folder.
     await claim(backend, kept.libraryId, "/music/a", ["8:5", "8:1", "0:1"], "8:1:/a", "boot-new");
     expect(
       await claim(
@@ -208,7 +184,6 @@ describe("real folder claims", () => {
       ),
     ).toEqual({ ok: false, error: OVERLAP });
 
-    // Paths count in any boot.
     expect(
       await claim(backend, other.libraryId, "/music/a/sub", ["9:9"], null, "boot-other"),
     ).toEqual({ ok: false, error: OVERLAP });
@@ -229,18 +204,14 @@ describe("real folder claims", () => {
       await claim(backend, kept.libraryId, "/music/a", ["8:1", "8:0", "0:1"], "8:1:/srv/a"),
     ).toEqual({ ok: true });
 
-    // /srv/a/sub bound at /music/x: walking up from it never passes /music/a, so the identity
-    // chains share nothing, but on the file system it is inside A.
     const bound = await admin.music.run("libraries.create", { name: "Bound", path: "/music/x" });
 
     expect(
       await claim(backend, bound.libraryId, "/music/x", ["8:7", "0:2", "0:1"], "8:1:/srv/a/sub"),
     ).toEqual({ ok: false, error: OVERLAP });
-    // And the folder around it, bound the other way.
     expect(
       await claim(backend, bound.libraryId, "/music/x", ["8:9", "0:2", "0:1"], "8:1:/srv"),
     ).toEqual({ ok: false, error: OVERLAP });
-    // A folder beside it, or one on another file system, is fine.
     expect(
       await claim(backend, bound.libraryId, "/music/x", ["8:8", "0:2", "0:1"], "8:1:/srv/b"),
     ).toEqual({ ok: true });
@@ -260,7 +231,6 @@ describe("real folder claims", () => {
       path: "/srv/mine",
     });
 
-    // Indexed and claimed, as a scan does.
     await upsertFiles(backend, libraryId, [{ path: "/srv/mine/a.flac", title: "A" }]);
     const [track] = await allTracks(owner);
 
@@ -268,7 +238,6 @@ describe("real folder claims", () => {
 
     expect(await playable(backend, owner, track.id)).toEqual(PLAYS);
 
-    // A refusal by the service itself (outside MUSIC_ROOTS, say) drops the claim.
     const mine = await libraryDoc(backend, libraryId);
 
     await backend.mutation(api.media.refuseRoot, { secret: MEDIA_SECRET, libraryId: mine._id });
@@ -276,8 +245,6 @@ describe("real folder claims", () => {
     expect(await claim(backend, libraryId, "/srv/mine", ["7:1", "7:0"])).toEqual({ ok: true });
     expect(await playable(backend, owner, track.id)).toEqual(PLAYS);
 
-    // So does a refusal by Convex after an earlier claim succeeded: Elder, added first, holds
-    // the folder Mine now names by a bind mount.
     expect(await claim(backend, elder.libraryId, "/srv/elder", ["4:1", "4:0"])).toEqual({
       ok: true,
     });
@@ -308,8 +275,6 @@ describe("real folder claims", () => {
 
     if (track === undefined) throw new Error("The song was not indexed");
 
-    // Mine has no claim, as an older version left it; an admin's newer library on the same
-    // folder through a bind mount scans first, and is claimed.
     const mine = await libraryDoc(backend, libraryId);
 
     await backend.run(async (ctx) => {
@@ -320,7 +285,6 @@ describe("real folder claims", () => {
 
     expect(await claim(backend, other.libraryId, "/mnt/m", ["9:1", "9:0"])).toEqual({ ok: true });
 
-    // Mine's scan takes the folder back, and the admin's library stops streaming.
     expect(await claim(backend, libraryId, "/srv/mine", ["9:1", "8:0"])).toEqual({ ok: true });
     expect(await playable(backend, owner, track.id)).toEqual(PLAYS);
     expect((await libraryDoc(backend, other.libraryId)).realPath).toBeUndefined();
@@ -349,8 +313,6 @@ describe("real folder claims", () => {
 
     if (track === undefined) throw new Error("The song was not indexed");
 
-    // As an older version left them: one never claimed, one claimed before identities were
-    // recorded. Their creation scans already ran.
     await backend.run(async (ctx) => {
       const libraries = await ctx.db.query("libraries").collect();
       const jobs = await ctx.db.query("jobs").collect();
@@ -368,12 +330,10 @@ describe("real folder claims", () => {
 
     expect(await playable(backend, owner, track.id)).toEqual(SILENT);
 
-    // The media service sees which libraries need a claim and claims them before any scan.
     const listed = await backend.query(api.media.libraries, { secret: MEDIA_SECRET });
 
     expect(listed.map((library) => library.claimed)).toEqual([false, false]);
 
-    // The upgrade's migration asks the media service to scan both too, which claims them again.
     await backend.mutation(internal.migrations.run, {});
     await drainScheduled(backend);
 
@@ -415,7 +375,6 @@ describe("removing and overlapping libraries", () => {
 
     await owner.music.run("libraries.grant", { libraryId, userId: UserId.make(admin.id) });
 
-    // The admin hears it, so may rename and rescan it, but not remove it and re-add its folder.
     expect(await failureCode(admin.music.run("libraries.update", { libraryId, name: "R" }))).toBe(
       "succeeded",
     );

@@ -1,9 +1,4 @@
 /**
- * Library folder paths. Two libraries must not overlap: a folder inside another library's folder
- * would index the same files twice, as two catalogs.
- */
-
-/**
  * The canonical form of an absolute folder path: single slashes, no `.` or `..` segments, and no
  * trailing slash (except the root itself). Returns null for a relative path.
  */

@@ -1,8 +1,3 @@
-/**
- * The Download rows of the song (A11) and playlist (C08) sheets, per Paper's downloads proposal:
- * Download, Cancel download while songs are still coming, Remove download once they're here, and
- * Retry download above Cancel download once songs failed.
- */
 import type { DownloadStatus } from "@music/sdk/downloads";
 import { Match } from "effect";
 
@@ -23,7 +18,6 @@ export interface DownloadRowLabel {
   readonly subtitle: string | null;
 }
 
-/** Cancel download, with what is happening to the songs still to come. */
 const cancel = (subtitle: string | null): DownloadRowLabel => ({
   action: "remove",
   icon: "remove",

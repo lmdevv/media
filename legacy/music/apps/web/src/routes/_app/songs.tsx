@@ -84,8 +84,6 @@ function SongsPage() {
 
 function FilteredSongs({ query }: { readonly query: string }) {
   const results = useRead("search", { query, limit: 50 });
-  // The previous results stay while a new query loads, held during render (an effect cost an
-  // extra render and commit per result).
   const shown = useHeld(results);
 
   if (shown === undefined) return <TrackListSkeleton />;
@@ -128,10 +126,6 @@ function AllSongs() {
   );
 }
 
-/**
- * One live page of the Songs list. Memoized, so loading the next page doesn't re-render the pages
- * above it; its list is windowed, so pages far from view keep only their height.
- */
 const SongPage = memo(function SongPage({
   cursor,
   end,
@@ -141,9 +135,7 @@ const SongPage = memo(function SongPage({
   onReport,
 }: {
   readonly cursor: string | null;
-  /** Where the next page starts, once it exists. */
   readonly end: string | null;
-  /** The first page that shows songs carries the list's column header. */
   readonly header: boolean;
   readonly last: boolean;
   readonly onMore: (cursor: string) => void;
@@ -173,11 +165,9 @@ const SongPage = memo(function SongPage({
 
   if (page === undefined) return <TrackListSkeleton />;
 
-  // An empty page renders only its sentinel, which stays in view and loads the next one.
   return (
     <>
       {page.items.length === 0 ? null : (
-        // The list windows this page's rows itself, even though they fit one block.
         <TrackList
           tracks={page.items}
           variant="list"

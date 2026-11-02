@@ -1,7 +1,3 @@
-/**
- * The browse lists' order and layout, shared by the lists and the Sort and view sheet (A12) and
- * kept on this device, so Albums opens the way it was left.
- */
 import { useSyncExternalStore } from "react";
 
 import { decodeView, encodeView } from "@/lib/browse-view";

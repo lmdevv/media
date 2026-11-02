@@ -1,8 +1,3 @@
-/**
- * A song's own lyrics as a scan reads them: the lyric files beside it, read from inside the
- * library and no larger than a lyric source may be, together with the lyrics in its tags, kept
- * within what Convex stores for one song.
- */
 import { Buffer } from "node:buffer";
 import { join } from "node:path";
 
@@ -33,10 +28,8 @@ import type { ScannedLyrics } from "./media-backend.ts";
  */
 export const LYRICS_READER_VERSION = 1;
 
-/** Most bytes of lyric sets, as JSON, kept for one song: well inside Convex's 1 MiB a document. */
 const MAX_STORED_BYTES = 768 * 1024;
 
-/** Most values Convex keeps in one array, here the words of one line. */
 const CONVEX_ARRAY_MAX = 8192;
 
 const fitsConvexArrays = LyricBody.match({
@@ -44,10 +37,6 @@ const fitsConvexArrays = LyricBody.match({
   Synced: ({ lines }) => lines.every((line) => (line.words?.length ?? 0) <= CONVEX_ARRAY_MAX),
 });
 
-/**
- * One lyric file's sets, or none when it may not or cannot be read or holds no readable lyrics.
- * Either way it is in the song's fingerprint, so a later scan reads it again only once it changes.
- */
 const readSidecar = (libraryRoot: string, sidecar: LyricsSidecar): Effect.Effect<ReadSidecar> =>
   Effect.gen(function* () {
     const inside = yield* Files.resolveWithin(
@@ -55,14 +44,12 @@ const readSidecar = (libraryRoot: string, sidecar: LyricsSidecar): Effect.Effect
       join(libraryRoot, sidecar.file.relativePath),
     );
 
-    // A lyric file that links out of the library would publish an outside file's text.
     if (Option.isNone(inside)) {
       yield* Effect.logWarning("Scan.lyrics_outside_library");
 
       return { sidecar, sets: [] };
     }
 
-    // One byte past the limit is enough to tell a file is too large without reading it all.
     const bytes = yield* Files.readHead(inside.value, MAX_LYRICS_SIZE + 1);
 
     const parsed = Result.flatMap(decodeLyricsText(bytes), (text) =>
@@ -83,10 +70,6 @@ const readSidecar = (libraryRoot: string, sidecar: LyricsSidecar): Effect.Effect
     Effect.annotateLogs({ path: sidecar.file.relativePath }),
   );
 
-/**
- * `sets` in the order a song shows them: the main set `resolveLyrics` picks, then the one it
- * picks from the rest, and so on, then the translations and pronunciations in their order.
- */
 const byPrecedence = (sets: ReadonlyArray<LocalLyricSet>): ReadonlyArray<LocalLyricSet> => {
   const shown = resolveLyrics(sets, LyricsLookup.None(), { remoteLookups: "off" });
 
@@ -98,15 +81,8 @@ const byPrecedence = (sets: ReadonlyArray<LocalLyricSet>): ReadonlyArray<LocalLy
   return main === undefined ? sets : [main, ...byPrecedence(sets.filter((set) => set !== main))];
 };
 
-/**
- * `sets` as Convex can store them, in their order: the sets the song shows first are kept
- * first (`byPrecedence`), and any set that would take the song past `MAX_STORED_BYTES`, or that
- * has a line of more words than an array may hold, is left out. A set holds at most 2,000 lines,
- * so only a line's words can grow that long.
- */
 const storable = (sets: ReadonlyArray<LocalLyricSet>) => {
   const kept = new Set<LocalLyricSet>();
-  // The array's brackets, then each set's JSON and the comma before all but the first.
   let bytes = 2;
 
   for (const set of byPrecedence(sets)) {

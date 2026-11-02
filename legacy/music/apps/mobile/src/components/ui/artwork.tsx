@@ -1,8 +1,3 @@
-/**
- * Album and track artwork from the server: Expo Image, cached in memory and on disk, on Paper's
- * `--color-art` placeholder until it loads or when there is no art. URLs come back relative to the
- * server, so this resolves them against the connected origin.
- */
 import { Image as ExpoImage } from "expo-image";
 import { View } from "react-native";
 import { withUniwind } from "uniwind";
@@ -12,7 +7,6 @@ import { useConnection } from "@/session/connection";
 
 const Image = withUniwind(ExpoImage);
 
-/** Props for `Artwork`. */
 export interface ArtworkProps {
   /** The art URL as the server returns it, or null when the item has none. */
   readonly url: string | null;

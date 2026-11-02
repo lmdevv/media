@@ -37,7 +37,6 @@ function SetupPage() {
   const status = useQuery(setupStatus, {});
   const { isLoading, isAuthenticated } = useConvexAuth();
   const search = Route.useSearch();
-  // Sign-up creates the user before the session is ready; keep the form until it is.
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {

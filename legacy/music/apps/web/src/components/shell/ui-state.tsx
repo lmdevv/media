@@ -60,25 +60,20 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
   const [jamOpen, setJamOpen] = useState(false);
   const [newPlaylist, setNewPlaylist] = useState<UiState["newPlaylist"]>(null);
 
-  // Stable, so the speaker button's mount effect runs once, not on every UI state change.
   const setPlayOnPopoverMounted = useCallback((mounted: boolean) => {
     setPopoverMounted(mounted);
 
     if (!mounted) setPlayOn((opened) => (opened === "popover" ? null : opened));
   }, []);
 
-  // Now Playing covers the player bar on desktop, so a "Play on" popover open under it closes.
   const setNowPlaying = useCallback((view: NowPlayingView | null) => {
     setNowPlayingView(view);
 
     if (view !== null) setPlayOn((opened) => (opened === "popover" ? null : opened));
   }, []);
 
-  // Openers stay the same function for the provider's life, so menus and lists that hold them
-  // don't rebuild when some other part of the UI opens or closes.
   const surface = useRef({ playOnPopoverMounted, nowPlayingOpen: nowPlaying !== null });
 
-  // Right after the commit, before another event can call the openers.
   useLayoutEffect(() => {
     surface.current = { playOnPopoverMounted, nowPlayingOpen: nowPlaying !== null };
   }, [playOnPopoverMounted, nowPlaying]);

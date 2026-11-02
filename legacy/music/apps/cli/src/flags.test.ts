@@ -18,7 +18,6 @@ import {
   tokenize,
 } from "./flags";
 
-/** Parses argv for a registry command the way the CLI does, without validating. */
 const argsFor = (
   name: CommandName,
   argv: ReadonlyArray<string>,

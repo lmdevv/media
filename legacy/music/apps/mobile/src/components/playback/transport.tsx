@@ -1,9 +1,3 @@
-/**
- * Now Playing's controls (B01, B02): previous, play or pause, and next, then the session volume.
- * They act on whichever device plays, so on B02 they steer the remote device. Shuffle and repeat
- * live in the queue's mode pills (B03). The iPad's player bar (page 26) has its own smaller row,
- * with shuffle and repeat beside the transport when it has the room.
- */
 import * as Haptics from "expo-haptics";
 import type { LucideIcon } from "lucide-react-native";
 import {
@@ -26,7 +20,6 @@ import { usePlayer, usePlayerActions } from "@/player";
 
 import { Slider } from "./slider";
 
-/** Previous and next: 32pt filled glyphs in 44pt targets. */
 function SkipButton({
   icon,
   label,
@@ -73,7 +66,6 @@ export function Transport() {
   );
 }
 
-/** Previous and next in the bar: 26pt filled glyphs, 44pt wide on the row's 36pt height. */
 function BarSkipButton({
   icon,
   label,
@@ -95,7 +87,6 @@ function BarSkipButton({
   );
 }
 
-/** A mode in the bar: a muted glyph, in the accent while on. */
 function BarMode({
   icon,
   label,

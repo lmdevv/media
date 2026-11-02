@@ -1,9 +1,3 @@
-/**
- * Lyrics inside Now Playing (B12–B16, H13), as Apple Music shows them: under the song's row,
- * synced lines that follow playback and seek when tapped, plain text, or what there is to say
- * instead. The cover opens them. The rule for the sung line is the web's, from
- * `@music/player/lyrics`.
- */
 import type { LyricLine } from "@music/commands/lyrics";
 import { TrackLyrics } from "@music/commands/lyrics";
 import { lyricLineState, lyricsMoment } from "@music/player/lyrics";
@@ -31,7 +25,6 @@ import { usePlayerActions, usePositionReader } from "@/player";
 import { EdgeFade } from "./edge-fade";
 import type { PanelPlace } from "./reorder-list";
 
-/** How lyrics read in each place: Now Playing's B12, or the iPad panel's smaller B2. */
 const LINES: Readonly<
   Record<
     PanelPlace,
@@ -110,7 +103,6 @@ function LyricsMessage({
   );
 }
 
-/** Untimed lyrics to read and scroll (B13), a stanza to each blank-line-separated block. */
 function PlainLyrics({
   text,
   background,
@@ -140,15 +132,8 @@ function PlainLyrics({
   );
 }
 
-/** How long a follow scroll may take to land before following counts it as over. */
 const SETTLE_MS = 1000;
 
-/**
- * Keeps line `started` at the anchor by wiring the lines' scroll view to `followLines`: it
- * measures the lines, reports every scroll, drag, and scroll end, and makes the scrolls following
- * asks for, without animating under Reduce Motion (`animate` false). Released, it tracks which way
- * the sung line is, for "Back to current line".
- */
 function useLineFollow(started: number, animate: boolean) {
   const scroller = useRef<ScrollViewInstance>(null);
   const [following, setFollowing] = useState(true);
@@ -226,7 +211,6 @@ function useLineFollow(started: number, animate: boolean) {
     [],
   );
 
-  /** After any layout change, puts the line back on the next frame, once per frame. */
   const laidOut = useCallback((): void => {
     if (relayout.current !== null) return;
 
@@ -298,12 +282,6 @@ function useLineFollow(started: number, animate: boolean) {
   };
 }
 
-/**
- * Timed lines that follow playback (B12). Each frame reads the live position and re-renders only
- * when another line starts or the sung one ends. The last line to start stays at the anchor
- * (`useLineFollow`) until anything else moves the lines; "Back to current line" (B14), or tapping
- * a line, follows again. Reduce Motion moves the lines without animating.
- */
 function SyncedLyrics({
   lines,
   background,
@@ -378,7 +356,6 @@ function SyncedLyrics({
             onBox={onLineLayout}
           />
         ))}
-        {/* Room under the last line, so it can reach the anchor too. */}
         <View style={{ height: follow.height }} />
       </ScrollView>
       <EdgeFade edge="top" background={background} />
@@ -388,14 +365,12 @@ function SyncedLyrics({
   );
 }
 
-/** B12 dims past and upcoming lines alike, to `--opacity-disabled`; only the sung line is bright. */
 const LINE_LOOK: Readonly<Record<LyricLineState, string>> = {
   past: "opacity-disabled",
   active: "",
   upcoming: "opacity-disabled",
 };
 
-/** One timed line: bright while sung, dimmed otherwise; tapping it seeks to where it starts. */
 const Line = memo(function Line({
   index,
   text,
@@ -435,10 +410,6 @@ const Line = memo(function Line({
   );
 });
 
-/**
- * B14's pill over the lines once the person scrolled away: follows the sung line again. Its arrow
- * points to the sung line, up past it (B14) or down above it (B14b).
- */
 function BackToLine({
   direction,
   onPress,

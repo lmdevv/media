@@ -1,13 +1,8 @@
-/**
- * Paper's command search pill (F26): a 20pt search glyph and 16/24 text on a full-radius surface.
- * The form's song picker uses it too.
- */
 import { Search } from "lucide-react-native";
 import { TextInput, View } from "react-native";
 
 import { Icon } from "@/components/ui/icon";
 
-/** Props for `SearchField`. */
 export interface SearchFieldProps {
   readonly value: string;
   readonly onChangeText: (text: string) => void;

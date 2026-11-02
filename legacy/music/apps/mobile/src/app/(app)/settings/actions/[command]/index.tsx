@@ -1,4 +1,3 @@
-/** F27 · Action: the generated form for the command named in the route. */
 import { useLocalSearchParams } from "expo-router";
 
 import { ActionFormScreen } from "@/components/actions/action-form";

@@ -1,11 +1,3 @@
-/**
- * The player screens build on. `PlayerProvider` registers this iPhone as one of the user's
- * devices, plays the Convex playback session here while it is the active device, mirrors it while
- * another device plays, and moves playback between devices. Without the server it plays its own
- * session over the downloads, and hands it back when the server answers (`SessionRouter`). The protocol and the decisions live
- * in `PlaybackController` from `@music/player`, shared with the web; this file only adapts it to
- * React Native and to the contract in `player-api.md`.
- */
 import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { DeviceKind, PlaybackState } from "@music/commands/models";
 import { PlaybackController } from "@music/player/playback-controller";
@@ -61,7 +53,6 @@ import { mediaUrl, resolveMediaUrl } from "../lib/media-url";
 import type { ServerOrigin } from "../lib/server";
 import { useServerReach } from "../session/server-reach";
 
-/** How often `usePlaybackPosition` updates. */
 const POSITION_INTERVAL_MS = 250;
 
 const REFUSED_MESSAGE = "Couldn't move playback there. Try again.";
@@ -212,10 +203,8 @@ export const useDevices = (): DevicesView => required(use(DevicesContext), "useD
 export const useSessionRun = (): SessionRouter["run"] =>
   required(use(SessionRunContext), "useSessionRun");
 
-/** The controller of this iPhone, with its identity. Built once per server. */
 interface Phone {
   readonly controller: PlaybackController;
-  /** Where every playback and queue command goes: the server, or this phone's own session. */
   readonly session: SessionRouter;
   readonly id: DeviceId;
   readonly name: string;
@@ -244,7 +233,6 @@ const createPhone = (
     inJam,
   });
 
-  // A downloaded song plays from its file, online too; anything else streams.
   const sources = localFirst(
     copies,
     streamSources(client, { now: Date.now, resolveUrl: (url) => mediaUrl(origin, url) }),
@@ -301,7 +289,6 @@ const createActions = (
 
   return {
     play: async (trackIds, index) => {
-      // In someone else's Jam the host's queue plays: "play" adds the song tapped to it.
       if (latest.current.listeningAlong) {
         const picked = trackIds[index ?? 0];
 
@@ -350,7 +337,6 @@ const createActions = (
   };
 };
 
-/** Re-renders only the position's consumers, four times a second. */
 function PositionTicker({
   controller,
   durationMs,
@@ -391,7 +377,6 @@ export function PlayerProvider({
   const convex = useConvex();
   const copies = useLocalCopies();
   const store = useSessionStore();
-  // Whether the account is in a Jam, as the server last said; the router reads it when it decides.
   const inJam = useRef(false);
 
   const phone = useMemo(
@@ -401,8 +386,6 @@ export function PlayerProvider({
 
   const { controller, session } = phone;
 
-  // Separate subscriptions, so a position report re-runs only the small one. Convex delivers a
-  // client's subscriptions from one database snapshot, so the two always agree.
   const position = useRead("playback.position", {});
   const queue = useRead("queue.list", {});
   const jam = useRead("jam.get", {}) ?? null;
@@ -417,7 +400,6 @@ export function PlayerProvider({
     [position, queue],
   );
 
-  // A launch that never reached the server plays this phone's own session from the start.
   const offline = useServerReach() === "offline";
 
   useEffect(() => session.start(), [session]);
@@ -430,7 +412,6 @@ export function PlayerProvider({
     if (offline) void session.startLocal();
   }, [session, offline]);
 
-  // The session the router says plays: the server's, or this phone's own while it is offline.
   const { state, mode } = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const local = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
 
@@ -463,7 +444,6 @@ export function PlayerProvider({
     [entry, origin, copies],
   );
 
-  // Every session update brings a new entry; only one that changes the song may reach its readers.
   const [nowPlaying, setNowPlaying] = useState(latestSong);
 
   if (!sameSong(nowPlaying, latestSong)) setNowPlaying(latestSong);
@@ -505,7 +485,6 @@ export function PlayerProvider({
 
   const latest = useRef<Latest>({ state, playing, listeningAlong });
 
-  // Updated right after the commit, before another touch can run an action on stale state.
   useLayoutEffect(() => {
     latest.current = { state, playing, listeningAlong };
   }, [state, playing, listeningAlong]);

@@ -7,10 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NativeEngine } from "./native-engine";
 import type { AudioOutput, LockScreenInfo, OutputStatus } from "./native-engine";
 
-/**
- * A stand-in for one AVPlayer behind expo-audio. Like AVPlayer it opens paused, waits for data
- * when told to play before it can, ignores seeks in a live stream, and reports every change.
- */
 class FakeOutput implements AudioOutput {
   readonly url: string;
   wantsPlay = false;
@@ -19,7 +15,6 @@ class FakeOutput implements AudioOutput {
   durationMs = 0;
   positionMs = 0;
   released = false;
-  /** While set, each seek waits for the test to land it, as AVPlayer's lands a moment later. */
   holdSeeks = false;
   lockScreen: { readonly info: LockScreenInfo | null; readonly live: boolean } | null = null;
   readonly #listeners = new Set<(status: OutputStatus) => void>();
@@ -66,7 +61,6 @@ class FakeOutput implements AudioOutput {
     this.released = true;
   };
 
-  /** The stream opened: a live one has no length. */
   ready(live: boolean, durationMs = 200_000): void {
     this.loaded = true;
     this.live = live;
@@ -74,22 +68,16 @@ class FakeOutput implements AudioOutput {
     this.#report();
   }
 
-  /** Plays on by `ms`. */
   advance(ms: number): void {
     this.positionMs += ms;
     this.#report();
   }
 
-  /** The stream played to its end. Like expo-audio, a live stream reports its end at 0. */
   finish(): void {
     this.wantsPlay = false;
     this.#report({ finished: true, positionMs: this.live ? 0 : this.durationMs });
   }
 
-  /**
-   * Lands the held seeks newest first, and each seek the engine asks for meanwhile, until none is
-   * left. Nothing makes a player land its seeks in the order they were asked for.
-   */
   async landSeeksNewestFirst(): Promise<void> {
     const held = this.#heldSeeks.pop();
 
@@ -99,16 +87,11 @@ class FakeOutput implements AudioOutput {
     await this.landSeeksNewestFirst();
   }
 
-  /** Fails the oldest held seek, as AVPlayer can when a seek is interrupted. */
   async refuseOldestSeek(): Promise<void> {
     this.#heldSeeks.shift()?.refuse();
     await settled();
   }
 
-  /**
-   * Reports the end it reached before a seek moved it back, as AVPlayer can once the seek has
-   * landed: paused (an item that ends pauses), where the seek took it.
-   */
   reportEndLate(): void {
     this.wantsPlay = false;
     this.#report({ finished: true });
@@ -135,14 +118,8 @@ class FakeOutput implements AudioOutput {
 
 const ListeningAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }));
 
-/** What the media service answers an offset stream (`&start=`) with. */
 type OffsetAnswer = "audio" | "busy" | "expired" | "empty";
 
-/**
- * A local media service. A request for the first byte of the finished file waits for
- * `finished` (a song still transcoding); offset streams answer as `offsets` says, in order, the
- * last answer repeating.
- */
 const mediaService = async () => {
   const offsets: Array<OffsetAnswer> = ["audio"];
   const state = { finished: Promise.resolve(), offsets, finishedAsks: 0 };
@@ -192,13 +169,11 @@ const mediaService = async () => {
   };
 };
 
-/** Resolves once the engine has handled everything already settled. */
 const settled = () =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, 0);
   });
 
-/** A deferred the test settles by hand. */
 const deferred = () => Promise.withResolvers<void>();
 
 const setup = async () => {
@@ -463,7 +438,6 @@ describe("NativeEngine", () => {
     output(0).ready(true);
     await loaded;
     await vi.waitFor(() => expect(media.state.finishedAsks).toBe(1));
-    // The answer is in once the request settles; give its continuation a turn.
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     engine.seek(90_000);
@@ -510,7 +484,6 @@ describe("NativeEngine", () => {
   it("opens and preloads downloaded files at once, asking the media service nothing", async () => {
     const { engine, media, outputs, output } = await setup();
     const downloaded = (key: string): EngineSource => ({ ...media.source(key), finished: true });
-    // Any question about a finished file would wait here for good.
     media.state.finished = deferred().promise;
     const loaded = engine.load(downloaded("a"), 0, true);
     output(0).ready(false);

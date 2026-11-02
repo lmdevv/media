@@ -19,7 +19,6 @@ export interface MenuContext {
   readonly playlistId: PlaylistId | null;
 }
 
-/** One choice in an ID picker: the wire value, or a list of them for multi-song fields. */
 interface EntityOption {
   readonly key: string;
   readonly value: string | ReadonlyArray<string>;
@@ -27,10 +26,6 @@ interface EntityOption {
   readonly detail?: string;
 }
 
-/**
- * The records an ID argument can point at, drawn from what is on screen and in your library:
- * the playing song and queue, the album or playlist in view, your playlists, devices, and so on.
- */
 const useEntityOptions = (
   entity: Entity,
   many: boolean,
@@ -86,7 +81,6 @@ const useEntityOptions = (
         });
       }
 
-      // Songs whose file is gone can't play, so the option leaves them out.
       const playable = playableTracks(playlist?.items ?? []).map((track) => track.id);
 
       if (many && playlist !== undefined && playable.length > 0) {
@@ -197,7 +191,6 @@ const useEntityOptions = (
       }));
 
     case "library":
-      // Every library command needs a library you manage; the others have no folder to show.
       return (libraries ?? []).flatMap((library) =>
         library.path === null
           ? []
@@ -248,7 +241,6 @@ const useEntityOptions = (
   }
 };
 
-/** The current value of a field as a number string, for number inputs. */
 const asText = (value: FormValues[string]): string =>
   value === undefined || value === true || value === false || Array.isArray(value)
     ? ""

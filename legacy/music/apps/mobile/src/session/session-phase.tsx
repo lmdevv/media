@@ -1,7 +1,3 @@
-/**
- * The live session phase: what the connected server says about setup, auth, the account, and
- * its libraries, folded by `sessionPhase` and held on screen by `settle`.
- */
 import { setupStatus } from "@music/sdk/functions";
 import { sessionEnd } from "@music/sdk/errors";
 import type { SessionEnd } from "@music/sdk/errors";
@@ -59,7 +55,6 @@ export interface EndedSession {
   readonly guest: boolean;
 }
 
-/** The ended session, and the ways the phase and G17 move it. */
 interface SessionEnding {
   readonly ended: EndedSession | null;
   readonly setEnded: (next: EndedSession | null) => void;
@@ -97,10 +92,6 @@ export const useEndedSession = (): EndedSessionControls => {
   return { ended: ending.ended, forget: () => ending.setEnded(null) };
 };
 
-/**
- * Why the server refused a settled read's session, given the read's failure if it failed. A
- * failure for any other reason is thrown.
- */
 const refusalOf = (failure: Error | undefined): SessionEnd | null => {
   if (failure === undefined) return null;
 
@@ -111,15 +102,9 @@ const refusalOf = (failure: Error | undefined): SessionEnd | null => {
   return end;
 };
 
-/** A settled read's value, or undefined while it loads or once it failed. */
 const valueOf = <Value,>(read: Value | Error | undefined): Value | undefined =>
   read instanceof Error ? undefined : read;
 
-/**
- * When the server stops honoring the session (signed out elsewhere, suspended, or removed), the
- * token is dropped at once, and the reason is kept for the screens that explain it. A session the
- * server accepts again forgets it.
- */
 const useSessionEnding = (refusal: SessionEnd | null, role: Role | undefined): void => {
   const signOut = useSignOut();
   const ending = useContext(SessionEndContext);
@@ -145,15 +130,12 @@ const useSessionEnding = (refusal: SessionEnd | null, role: Role | undefined): v
   }, [accepted, ended, setEnded]);
 };
 
-/** The phase of the connected app, from what the server has said so far. */
 const useLivePhase = (): SessionPhase => {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const hasDownloads = useHasDownloads();
   const silent = useSilentServer(hasDownloads ? OFFLINE_AFTER_MS : SILENT_AFTER_MS);
   const token = isLoading ? "loading" : isAuthenticated ? "signedIn" : "signedOut";
   const setup = useQuery(setupStatus, {});
-  // Settled reads: a session the server refused must not throw past every error boundary and
-  // close the client, whether it ended here (signing out) or on the server.
   const meRead = useReadSettled("account.me", token === "signedIn" ? {} : "skip");
   const librariesRead = useReadSettled("libraries.list", token === "signedIn" ? {} : "skip");
 
@@ -188,8 +170,6 @@ export const useSettledPhase = (): SettledPhase | null => {
   const live = useLivePhase();
   const { attempt, retriedFrom } = useConnectionControls();
 
-  // Try again opens a new session; the screens it was pressed on stay on show while it waits,
-  // not a blank page.
   const [shown, setShown] = useState<SettledPhase | null>(
     attempt > 0 ? { kind: retriedFrom } : null,
   );

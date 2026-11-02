@@ -1,8 +1,3 @@
-/**
- * The iPhone's `PlayerEngine`: native audio players (AVPlayer through expo-audio, behind
- * `AudioOutput`), one per opened stream. It plays what `PlaybackController` from `@music/player`
- * tells it to, the way `HtmlAudioEngine` does in a browser.
- */
 import { delay, MAX_BUSY_RETRIES } from "@music/player/busy-retry";
 import type {
   EngineErrorReason,
@@ -63,19 +58,12 @@ export interface AudioOutput {
 /** Opens `url` on a new native player, paused. */
 export type OpenOutput = (url: string) => AudioOutput;
 
-/**
- * A stream of unknown length starts from its beginning instead of from an offset when asked for a
- * position this close to it.
- */
 const LIVE_RESTART_MS = 2000;
 
-/** How long a stream may take to become playable before it counts as failed. */
 const OPEN_TIMEOUT_MS = 15_000;
 
-/** Reopenings in a row that may fail to get playback going again before the engine gives up. */
 const MAX_RECOVERIES = 3;
 
-/** Playback this far past where a recovery reopened the stream means it worked. */
 const RECOVERED_MS = 2000;
 
 /** A seek in a stream that can seek, from when it is asked for until the player lands it. */
@@ -137,11 +125,6 @@ interface Slot {
   retries: number;
 }
 
-/**
- * Asks the media service for the first byte of the finished file at `url`. A range other than a
- * player's opening one waits for a running transcode to finish, so the answer arrives once the
- * file exists. Resolves whether it does.
- */
 const fetchFinished = async (url: string, signal: AbortSignal): Promise<boolean> => {
   try {
     const response = await fetch(url, { headers: { Range: "bytes=0-0" }, signal });
@@ -157,7 +140,6 @@ const fetchFinished = async (url: string, signal: AbortSignal): Promise<boolean>
 const isLive = (stream: Stream): boolean =>
   stream.startMs > 0 || (stream.status?.loaded === true && stream.status.durationMs === null);
 
-/** Where a stream for position `positionMs` should start: the song's start near it. */
 const streamStartFor = (positionMs: number): number =>
   positionMs < LIVE_RESTART_MS ? 0 : positionMs;
 
@@ -183,7 +165,6 @@ export class NativeEngine implements PlayerEngine {
   #current = 0;
   #volume = 1;
   #lockScreen: LockScreenInfo | null = null;
-  /** Bumped by every `load` and `unload`, so a superseded load stops quietly. */
   #generation = 0;
 
   constructor(open: OpenOutput) {
@@ -195,7 +176,6 @@ export class NativeEngine implements PlayerEngine {
     const generation = this.#generation;
     const idle = this.#idleSlot();
 
-    // The listener skipped ahead to the song that was already preloaded: reuse its player.
     if (idle.source?.url === source.url) {
       this.#release(this.#currentSlot());
       this.#current = 1 - this.#current;
@@ -210,8 +190,6 @@ export class NativeEngine implements PlayerEngine {
     const stream = slot.stream ?? this.#openStream(slot, source.url, 0);
     this.#showLockScreen();
 
-    // Most loads start a song from the top (give or take the moment its URL took to arrive):
-    // start the player before it has data, to save a round trip.
     const early = autoplay && startMs < LIVE_RESTART_MS;
 
     if (early) stream.output.play();
@@ -220,7 +198,6 @@ export class NativeEngine implements PlayerEngine {
     if (generation !== this.#generation || slot.stream !== stream) return;
 
     if (!ready) {
-      // A failure the player reported is handled as its status arrives; this one never opened.
       if (stream.status?.error == null) this.#onFailure(slot, stream);
 
       return;
@@ -267,8 +244,6 @@ export class NativeEngine implements PlayerEngine {
     const finished = this.#askFinished(source);
     idle.finished = finished;
 
-    // Open it once the finished file exists (or the question failed): a player opened earlier
-    // would get the live stream, which cannot seek and has no length for the lock screen.
     const openWhenFinished = async (): Promise<void> => {
       await finished.settled;
 
@@ -377,10 +352,6 @@ export class NativeEngine implements PlayerEngine {
     for (const listener of this.#listeners) listener(event);
   }
 
-  /**
-   * Asks the media service in the background whether the finished file for `source` exists. A
-   * finished source (a downloaded file) is one already, and nothing is asked.
-   */
   #askFinished(source: EngineSource): Finished {
     const abort = new AbortController();
 
@@ -397,7 +368,6 @@ export class NativeEngine implements PlayerEngine {
     return finished;
   }
 
-  /** Opens `url`, a stream starting `startMs` into the song, as the slot's stream. */
   #openStream(slot: Slot, url: string, startMs: number): Stream {
     this.#releaseStream(slot);
     const output = this.#open(url);
@@ -446,10 +416,6 @@ export class NativeEngine implements PlayerEngine {
     slot.retries = 0;
   }
 
-  /**
-   * Resolves true once `stream` can play, or false when it failed, was released, or did not open
-   * within `ms`, or once `signal` aborts.
-   */
   #whenReady(stream: Stream, ms: number, signal: AbortSignal | null): Promise<boolean> {
     if (stream.status?.loaded === true) return Promise.resolve(true);
 
@@ -474,11 +440,6 @@ export class NativeEngine implements PlayerEngine {
     });
   }
 
-  /**
-   * Seeks in a stream that can seek, holding its position at `positionMs` until the player lands
-   * there. One native seek runs at a time: a seek asked for meanwhile moves the target, and the
-   * player seeks again once the running one lands, so the latest target wins.
-   */
   async #seekStream(slot: Slot, stream: Stream, positionMs: number): Promise<void> {
     if (stream.seeking !== null) {
       stream.seeking.positionMs = positionMs;
@@ -498,14 +459,12 @@ export class NativeEngine implements PlayerEngine {
     if (seeking.ended && slot.stream === stream) this.#onFinished(slot, stream, seeking.positionMs);
   }
 
-  /** Seeks the player to the seek's target, and again while a newer target arrives meanwhile. */
   async #land(slot: Slot, stream: Stream, seeking: Seeking): Promise<void> {
     const target = seeking.positionMs;
 
     try {
       await stream.output.seek(target);
     } catch (error) {
-      // A newer target still needs landing even when the seek it replaced failed.
       if (slot.stream !== stream || seeking.positionMs === target) throw error;
     }
 
@@ -524,7 +483,6 @@ export class NativeEngine implements PlayerEngine {
     );
   }
 
-  /** Reports a pause for `stream` once, however many paused statuses follow. */
   #reportPaused(stream: Stream): void {
     if (stream.reported === "paused") return;
     stream.reported = "paused";
@@ -536,7 +494,6 @@ export class NativeEngine implements PlayerEngine {
     const previous = stream.status;
     const wasLoaded = previous?.loaded === true;
 
-    // At its end a live stream reports position 0 (its length is unknown): keep where it got to.
     stream.status =
       status.finished && previous !== null && isLive(stream)
         ? { ...status, positionMs: Math.max(status.positionMs, previous.positionMs) }
@@ -546,7 +503,6 @@ export class NativeEngine implements PlayerEngine {
       for (const settle of stream.waiters) settle(status.loaded);
     }
 
-    // The idle slot only preloads, and a reopening waits for its stream itself.
     if (!this.#isCurrent(slot) || slot.source === null || slot.reopening !== null) return;
 
     if (status.loaded && !wasLoaded) this.#showLockScreen();
@@ -559,8 +515,6 @@ export class NativeEngine implements PlayerEngine {
 
     const seeking = stream.seeking;
 
-    // The player reached the song's end while a seek was landing: where the seek lands decides
-    // whether the song ended, and nothing reported until then is news.
     if (seeking !== null && (status.finished || seeking.ended)) {
       seeking.ended = true;
 
@@ -576,8 +530,6 @@ export class NativeEngine implements PlayerEngine {
     const positionMs = this.#positionOf(slot);
 
     if (status.control !== stream.reported) {
-      // A player opens paused; only a pause after playing (the lock screen, a call, unplugged
-      // headphones) is news.
       if (status.control === "paused") {
         if (stream.reported === null) return;
         this.#emit({ type: "time", positionMs });
@@ -596,7 +548,6 @@ export class NativeEngine implements PlayerEngine {
     this.#emit({ type: "time", positionMs });
   }
 
-  /** The current stream failed: a live one opens again where it stopped, else the song fails. */
   #onFailure(slot: Slot, stream: Stream): void {
     if (isLive(stream)) {
       void this.#recover(slot, stream.reported !== "paused");
@@ -607,19 +558,15 @@ export class NativeEngine implements PlayerEngine {
     this.#fail("unsupported", stream.status?.error ?? "The stream did not start");
   }
 
-  /** The player stopped at the end of `stream`, and is at `positionMs` in the song by now. */
   #onFinished(slot: Slot, stream: Stream, positionMs: number): void {
-    // A seek moved the player back from the end since (an item that ends pauses): play on there.
     if (!isLive(stream) && endedEarly(positionMs, stream.status?.durationMs ?? 0)) {
       if (stream.reported !== "paused") stream.output.play();
 
       return;
     }
 
-    // The end of the song: nothing reports this stop as a pause.
     stream.reported = "paused";
 
-    // A live stream that ends before the song does was cut off: carry on from there.
     if (isLive(stream) && endedEarly(positionMs, slot.source?.durationMs ?? 0)) {
       void this.#recover(slot, true);
 
@@ -633,7 +580,6 @@ export class NativeEngine implements PlayerEngine {
     this.#emit({ type: "error", reason, message });
   }
 
-  /** The current song ended: start the preloaded one at once, or report the end. */
   #advance(finished: Slot): void {
     const next = this.#idleSlot();
     const source = next.source;
@@ -645,7 +591,6 @@ export class NativeEngine implements PlayerEngine {
       return;
     }
 
-    // Start first, bookkeeping second: every statement before play() adds to the gap.
     (next.stream ?? this.#openStream(next, source.url, 0)).output.play();
     this.#current = 1 - this.#current;
     this.#showLockScreen();
@@ -654,14 +599,12 @@ export class NativeEngine implements PlayerEngine {
     this.#release(finished);
   }
 
-  /** Reopens a live stream that stopped before the song did, where it stopped. */
   async #recover(slot: Slot, play: boolean): Promise<void> {
     if (slot.reopening !== null || slot.source === null) return;
     const positionMs = this.#positionOf(slot);
     const reopening = { positionMs, play, abort: new AbortController() };
 
     if (slot.recoveries >= MAX_RECOVERIES) {
-      // It opened every time but never got going: audio there is no reason to try again.
       await this.#settleFailure(slot, reopening, false);
 
       return;
@@ -672,12 +615,6 @@ export class NativeEngine implements PlayerEngine {
     await this.#reopen(slot, reopening);
   }
 
-  /**
-   * The stream at `reopening.positionMs` could not be played: asks the media service what it has
-   * there. No audio means the song is over, and a refused URL is reported as `expired`. A busy
-   * service is asked again after its `Retry-After`, and with `retryAudio`, a stream it has audio
-   * for is opened again at once, once. Anything else fails the song.
-   */
   async #settleFailure(slot: Slot, reopening: Reopening, retryAudio: boolean): Promise<void> {
     const source = slot.source;
 
@@ -734,10 +671,6 @@ export class NativeEngine implements PlayerEngine {
     });
   }
 
-  /**
-   * Opens the song again at `reopening.positionMs`: from the finished file when it exists, else
-   * from that offset (or from the start, near it). Plays or stays paused as `play` says by then.
-   */
   async #reopen(slot: Slot, reopening: Reopening): Promise<void> {
     const source = slot.source;
 
@@ -752,7 +685,6 @@ export class NativeEngine implements PlayerEngine {
       ? this.#openStream(slot, source.url, 0)
       : this.#openStream(slot, offsetUrl(source.url, target), target);
 
-    // The reopening reports for itself; the new stream starts from there.
     stream.reported = reopening.play ? "waiting" : "paused";
     const ready = await this.#whenReady(stream, OPEN_TIMEOUT_MS, reopening.abort.signal);
 
@@ -767,8 +699,6 @@ export class NativeEngine implements PlayerEngine {
 
     const wanted = streamStartFor(reopening.positionMs);
 
-    // The song's own URL answered live after all (the finished file is gone), or a seek moved the
-    // target while a live stream opened somewhere else.
     if (isLive(stream) && wanted !== stream.startMs) {
       if (slot.finished !== null) slot.finished.ready = false;
       await this.#reopen(slot, reopening);
@@ -790,7 +720,6 @@ export class NativeEngine implements PlayerEngine {
     else this.#emit({ type: "time", positionMs: this.#positionOf(slot) });
   }
 
-  /** Puts the current stream on the lock screen with the song's details, once per change. */
   #showLockScreen(): void {
     const stream = this.#currentSlot().stream;
 

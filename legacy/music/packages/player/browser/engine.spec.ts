@@ -1,7 +1,3 @@
-/**
- * HtmlAudioEngine in a real browser against generated audio served with byte ranges. The page
- * routes the engine's output through a Web Audio worklet that measures silence between sounds.
- */
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -19,7 +15,6 @@ const waitForEvent = (page: Page, type: TimedEvent["type"], count = 1): Promise<
     .poll(async () => (await ofType(page, type)).length, { timeout: 15_000 })
     .toBeGreaterThanOrEqual(count);
 
-/** The latest `time` position the engine reported. */
 const lastPosition = async (page: Page): Promise<number> => {
   const times = await ofType(page, "time");
   const last = times.at(-1);
@@ -27,7 +22,6 @@ const lastPosition = async (page: Page): Promise<number> => {
   return last?.type === "time" ? last.positionMs : -1;
 };
 
-/** Milliseconds from the first `advanced` (the old song's `ended`) to the next `playing`. */
 const eventGap = async (page: Page): Promise<number> => {
   const all = await events(page);
   const advanced = all.findIndex((event) => event.type === "advanced");
@@ -120,7 +114,6 @@ test("advances to the preloaded song with a measured gap", async ({ page }) => {
 
   expect(await ofType(page, "ended")).toEqual([]);
   expect(gap?.soundMs ?? 0).toBeGreaterThan(6000);
-  // The HTML audio engine is "nearly gapless": a small but nonzero gap is expected.
   expect(gap?.longestGapMs ?? Number.POSITIVE_INFINITY).toBeLessThan(250);
 });
 

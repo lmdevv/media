@@ -1,4 +1,3 @@
-/** What every lyric parser ends with: size limits, line order, and stamps that carry no timing. */
 import {
   type Lang,
   LyricBody,
@@ -83,11 +82,6 @@ export const plainBody = (text: string): Result.Result<LyricBody, LyricsParseErr
   return Result.succeed(LyricBody.cases.Plain.make({ text: joined }));
 };
 
-/**
- * A word list kept only when its stamps fit the line: starts in order and inside the line's
- * interval. The first word's leading and the last word's trailing spaces are trimmed, as the
- * line's text is, so the words spell the line.
- */
 const wordsWithin = (
   words: Arr.NonEmptyReadonlyArray<LyricWord>,
   line: { readonly startMs: number; readonly endMs: number | null },

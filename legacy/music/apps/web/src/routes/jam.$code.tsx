@@ -19,10 +19,6 @@ const MIN_PASSWORD = 8;
 
 const GUEST_EMAIL_KEY = "music.jamGuestEmail";
 
-/**
- * The email of the guest who signed up on this page, kept for this tab. Storage can throw (cookies
- * blocked, Safari private mode); the page then just doesn't remember the guest.
- */
 const guestEmail = {
   read: (): string | null => {
     try {
@@ -35,13 +31,10 @@ const guestEmail = {
     try {
       if (email === null) window.sessionStorage.removeItem(GUEST_EMAIL_KEY);
       else window.sessionStorage.setItem(GUEST_EMAIL_KEY, email);
-    } catch {
-      // Not remembered; the page offers the regular join instead.
-    }
+    } catch {}
   },
 };
 
-/** What a Jam link shows: whose Jam, what plays, how many are in, and how to join. */
 function JamPage() {
   const { code } = Route.useParams();
   const preview = useQuery(jamPreview, { code });
@@ -90,7 +83,6 @@ function JamPage() {
   );
 }
 
-/** Signed in: one button, which also makes this browser listen along. */
 function JoinJam({
   code,
   preview,
@@ -101,8 +93,6 @@ function JoinJam({
   const join = useRun("jam.join");
   const navigate = useNavigate();
   const me = useRead("account.me", {});
-  // Set by the guest sign-up on this page; shown only to that guest, so a later account in the
-  // same tab never sees it.
   const stored = guestEmail.read();
   const signedUpHere = stored !== null && stored === me?.email ? stored : null;
 
@@ -142,7 +132,6 @@ function JoinJam({
   );
 }
 
-/** Signed out: sign in, or make a guest account when the server allows it. */
 function SignedOutJoin({
   code,
   guestAccounts,
@@ -166,11 +155,6 @@ function SignedOutJoin({
   );
 }
 
-/**
- * A guest account for this Jam: a name and a password. Guests hear nothing outside the Jams they
- * join, and the account goes when this Jam ends. The sign-in address is made up from the name and
- * shown, so they can come back meanwhile.
- */
 function GuestAccount({ code }: { readonly code: string }) {
   const { signIn } = useAuthActions();
   const [name, setName] = useState("");

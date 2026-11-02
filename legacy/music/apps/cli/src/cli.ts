@@ -1,7 +1,3 @@
-/**
- * The `music` entry point: resolves argv to a registry or built-in command, runs it, prints the
- * result, and turns every failure into stderr output and an exit code.
- */
 import type { ParseArgsOptionsConfig } from "node:util";
 
 import { DeviceId, JobId } from "@music/commands/ids";
@@ -48,7 +44,6 @@ import { now, play } from "./shortcuts";
 
 const version = packageJson.version;
 
-/** Where argv leads. */
 type Route = Data.TaggedEnum<{
   Root: {};
   Version: {};
@@ -69,7 +64,6 @@ const topWords = [
   ...registryEntries.flatMap((entry) => (entry.path.includes(" ") ? [] : [entry.path])),
 ];
 
-/** Suggests commands that extend the typed word or that the word extends: `playlist` → `playlists`. */
 const suggest = (word: string): string => {
   const close = topWords
     .filter((candidate) => candidate.startsWith(word) || word.startsWith(candidate))
@@ -78,7 +72,6 @@ const suggest = (word: string): string => {
   return close.length > 0 ? `; did you mean ${close.join(", ")}?` : "; run music --help";
 };
 
-/** Resolves the command path, keeping leading global flags for the command's own parser. */
 const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> => {
   const firstWord = argv.findIndex((token) => !leadingGlobals.has(token));
   const globals = firstWord === -1 ? argv : argv.slice(0, firstWord);
@@ -202,7 +195,6 @@ const runRegistry = Effect.fn("Cli.runRegistry")(function* (
     onSome: (raw) => decodeTimeout(raw, entry.path),
   });
 
-  // Validate before connecting so a bad command line fails fast, offline, with exit code 2.
   yield* Effect.fromResult(validateArgs(entry.name, args, entry.path));
 
   const api = yield* session();
@@ -230,11 +222,6 @@ const nonBlank = (key: Redacted.Redacted): Option.Option<Redacted.Redacted> => {
 
 const missingKey = (message: string): UsageError => new UsageError({ message, command: "login" });
 
-/**
- * The key `music login` verifies, from the first source given: `--key-stdin`, `--key`,
- * `MUSIC_API_KEY`, or a prompt when a person is at the terminal. `--key` lands in shell history
- * and the process list, so the others are what the docs recommend.
- */
 const loginKey = Effect.fn("Cli.loginKey")(function* (tokens: ParsedTokens, env: Environment) {
   const input = yield* Input;
   const flag = stringFlag(tokens, "key");
@@ -242,8 +229,6 @@ const loginKey = Effect.fn("Cli.loginKey")(function* (tokens: ParsedTokens, env:
   if (isTrue(tokens, "key-stdin")) {
     if (Option.isSome(flag)) return yield* missingKey("Use --key or --key-stdin, not both");
 
-    // Nothing is piped when stdin is the terminal: reading it to its end would echo the key and
-    // wait for Ctrl-D, so ask with the hidden prompt instead.
     const piped = nonBlank(
       yield* (yield* input.interactive) ? input.promptSecret("API key: ") : input.readAll,
     );
@@ -261,7 +246,6 @@ const loginKey = Effect.fn("Cli.loginKey")(function* (tokens: ParsedTokens, env:
     return typed.value;
   }
 
-  // Already trimmed, and absent when blank.
   if (Option.isSome(env.key)) return env.key.value;
 
   if (!(yield* input.interactive)) {
@@ -297,7 +281,6 @@ const login = Effect.fn("Cli.login")(function* (tokens: ParsedTokens, json: bool
     });
   }
 
-  // Checked before asking for the key, so nobody types a key that would then go out in cleartext.
   if (!isTrue(tokens, "insecure") && !env.insecure && sendsKeyInCleartext(server.value)) {
     return yield* cleartextError(server.value, "--insecure", "login");
   }
@@ -306,7 +289,6 @@ const login = Effect.fn("Cli.login")(function* (tokens: ParsedTokens, json: bool
   const credentials = { server: server.value, key };
   const fresh = yield* signIn(credentials);
 
-  // Reaching here with a cleartext server means the user allowed it; remember that they did.
   yield* saveCredentials(env.paths, credentials, sendsKeyInCleartext(credentials.server));
   yield* saveSession(env.paths, fresh);
 
@@ -484,12 +466,6 @@ const program = (argv: ReadonlyArray<string>): Effect.Effect<void, CliError, Out
     });
   });
 
-/**
- * An error message as stderr lines. Messages can quote the server, file tags, or the command line:
- * every control character is written out, and lines after the first are indented, so no message
- * can pass a line of its own off as the CLI's. JSON output keeps the message as it was; `Output`
- * escapes what a terminal would act on there.
- */
 const messageLines = (message: string): string =>
   message.split("\n").map(escapeControlCharacters).join("\n  ");
 

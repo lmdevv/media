@@ -1,9 +1,3 @@
-/**
- * Actions (F26–F28, G18): every registry command a person may run by hand, grouped and searched
- * as the iOS screens show them, plus the pieces of the generated form that need no React Native.
- * The commands, fields, and outcomes themselves come from `@music/commands/forms`, which the web
- * command menu shares.
- */
 import type { CommandGroup } from "@music/commands/command";
 import { rawArgs } from "@music/commands/forms";
 import type { CommandOutcome, FieldSpec, FormValues, offeredCommands } from "@music/commands/forms";
@@ -21,7 +15,6 @@ const grouped = new Intl.NumberFormat("en-US");
 /** One command the Actions list offers, with its form fields. */
 export type Action = ReturnType<typeof offeredCommands>[number];
 
-/** The headings Actions groups commands under, in display order. */
 const SECTIONS = ["Listening", "Playlists", "Account", "Administration"] as const;
 
 /** A heading on the Actions list. */
@@ -95,7 +88,6 @@ export const actionSections = (
   });
 };
 
-/** `a`, `a and b`, `a, b, and c`. */
 const listOf = (words: ReadonlyArray<string>): string =>
   words.length <= 2
     ? words.join(" and ")
@@ -218,7 +210,6 @@ export const formArgs = (fields: ReadonlyArray<FieldSpec>, values: FormValues) =
     ),
   );
 
-/** What the result screen shows, from its route parameters. Secrets never travel here. */
 const ResultRoute = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("job"), jobId: JobId }),
   Schema.Struct({ kind: Schema.Literal("key") }),

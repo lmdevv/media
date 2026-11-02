@@ -1,11 +1,3 @@
-/**
- * How Now Playing is presented on each device, and what it shows at each window width (Paper page
- * 25). On a phone (B01) and in the iPad's single column (P07) the queue (B03) and the lyrics (B12)
- * open in place of the cover. In a `wide` window on its side (P08, P09) the cover stays, and a
- * side pane beside the player holds one of the two: the one the person opened, else the lyrics
- * when the song has them, else the queue. One stage view serves every width, so rotating or
- * resizing keeps what the person opened.
- */
 import { lyricsButton } from "@music/player/lyrics";
 import type { LyricsOffer } from "@music/player/lyrics";
 

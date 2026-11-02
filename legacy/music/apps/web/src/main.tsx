@@ -20,12 +20,9 @@ const convex = new ConvexReactClient(resolveConvexUrl(), { logger: convexLogger(
 const router = createRouter({
   routeTree,
   defaultPreload: "intent",
-  // Every route gets its own boundaries, so a failing or missing screen under `/_app` renders inside
-  // the shell and leaves the player (and its audio) mounted.
   defaultErrorComponent: LazyRouteError,
   defaultNotFoundComponent: LazyPageNotFound,
   scrollRestoration: true,
-  // Search values stay plain strings; each route parses its own with a schema.
   parseSearch,
   stringifySearch,
   Wrap: function Providers({ children }: { readonly children: ReactNode }) {
@@ -49,9 +46,6 @@ createRoot(rootElement).render(
   </StrictMode>,
 );
 
-// The error screens are a chunk of their own, off the first screen's path. Load it once the page
-// settles, so a screen that fails later (or offline) still has its message ready. If this fails,
-// the error screen tries again when needed and falls back to a plain message.
 whenSettled(() => {
   import("./components/route-error").catch(() => undefined);
 });

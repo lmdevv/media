@@ -1,12 +1,9 @@
-/** B10 · Clear the queue? Everything after the current song goes; the song keeps playing. */
 import { router } from "expo-router";
 
 import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { useSessionRun } from "@/player";
 
 export default function Screen() {
-  // The command itself, not the player's action, which never rejects: a refusal keeps the sheet
-  // open with the reason instead of closing as if the queue were cleared.
   const run = useSessionRun();
 
   return (

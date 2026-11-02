@@ -1,8 +1,3 @@
-/**
- * The rules the account forms share: creating the owner (E04), accepting an invite (E08), and
- * setting a password from a reset link (E09). The server checks them too; these say so before a
- * round trip, and word the server's refusals for the form.
- */
 import { commandFailure } from "@music/sdk/errors";
 import { mentionsWrongCredentials } from "@music/sdk/sign-in";
 

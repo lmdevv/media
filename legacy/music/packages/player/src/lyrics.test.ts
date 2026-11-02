@@ -166,8 +166,6 @@ describe("lyricsMoment", () => {
   });
 
   it("sings no line in a gap after a line's own end", () => {
-    // `[00:01]First\n[00:02]\n[00:10]Next` as the LRC parser reads it: the empty line ends
-    // "First" and is dropped.
     const gapLines = decodeLines([
       { text: "First", startMs: 1000, endMs: 2000, words: null, voice: null },
       { text: "Next", startMs: 10_000, endMs: null, words: null, voice: null },

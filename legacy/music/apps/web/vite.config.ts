@@ -4,13 +4,8 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import type { Plugin } from "vite";
 
-/** The body font's Latin subset, as `@fontsource-variable/inter` names it. */
 const BODY_FONT = /^assets\/inter-latin-wght-normal-[\w-]+\.woff2$/;
 
-/**
- * Preloads the body font from `index.html`. The stylesheet only asks for it once text is laid out,
- * after the scripts ran, so text first painted in a fallback font and moved when Inter arrived.
- */
 const preloadBodyFont = (): Plugin => ({
   name: "music:preload-body-font",
   apply: "build",

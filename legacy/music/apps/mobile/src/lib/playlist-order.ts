@@ -1,9 +1,3 @@
-/**
- * Playlist order as the server changes it: `playlists.move` puts one entry right after another,
- * or at the top when it names none. Editing (C07) reorders a local draft freely; saving turns the
- * draft into the fewest such moves.
- */
-
 /** One `playlists.move`: put `itemId` right after `afterItemId`, or first when that is null. */
 export interface PlaylistMove<Id> {
   readonly itemId: Id;
@@ -38,9 +32,7 @@ export const applyMove = <Id>(
   return rest.toSpliced(after + 1, 0, move.itemId);
 };
 
-/** Indexes into `values` of one longest strictly increasing run, in order. */
 const longestIncreasing = (values: ReadonlyArray<number>): ReadonlySet<number> => {
-  // tails[k] is the index of the smallest value ending an increasing run of length k + 1.
   const tails: Array<number> = [];
   const previous: Array<number> = Array.from({ length: values.length }, () => -1);
 

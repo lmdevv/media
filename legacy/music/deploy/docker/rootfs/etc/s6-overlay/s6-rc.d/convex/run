@@ -9,13 +9,10 @@ umask 077
 data="${MUSIC_DATA:-/data}"
 mkdir -p "$data/convex/storage" "$data/convex/tmp" "$data/secrets"
 chmod 700 "$data/secrets" "$data/convex"
-# The backend's user passes through /data (without listing it) to reach /data/convex, which a
-# bind mount created under a strict umask would not allow. Init does the same for the media user.
 chmod o+x "$data"
 if [ ! -s "$data/secrets/instance_secret" ]; then
   node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' > "$data/secrets/instance_secret"
 fi
-# The database and file storage belong to the backend's user. Installs from before ran it as root.
 find "$data/convex" \( \! -user convex -o \! -group convex \) -exec chown -h convex:convex {} +
 install -d -m 700 -o convex -g convex /run/convex
 install -m 400 -o convex -g convex "$data/secrets/instance_secret" /run/convex/instance_secret

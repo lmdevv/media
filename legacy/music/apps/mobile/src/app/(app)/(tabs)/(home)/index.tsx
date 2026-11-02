@@ -1,10 +1,3 @@
-/**
- * A01 · Home: albums back in rotation and recently added, as rails under the large title, then the
- * songs played most recently, each once. Scrolled past the title it is A14: the compact bar above, and
- * the system tab bar minimized with the mini player inline. While the server is out of reach it
- * is D14: the notice, then the albums on this iPhone; a phone with none keeps what Home last showed.
- * An iPad shows the library's totals across from the title (A1).
- */
 import type { OfflineAlbum } from "@music/sdk/downloads";
 import { useRead } from "@music/sdk/react";
 import { router } from "expo-router";
@@ -25,13 +18,10 @@ import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useNowPlaying } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
-/** How many recently played songs Home lists; History has the rest. */
 const RECENT_SONGS = 5;
 
-/** Plays read to find them, since one song often plays several times in a row. */
 const PLAYS_READ = 50;
 
-/** A14's "Recently played": the latest songs, each once, playing from the one tapped. */
 function RecentlyPlayed() {
   const plays = useRead("history.list", { limit: PLAYS_READ });
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
@@ -63,7 +53,6 @@ function RecentlyPlayed() {
   );
 }
 
-/** D14's rail of the albums this iPhone holds; its chevron opens Downloaded. */
 function OnThisPhone({ albums }: { readonly albums: ReadonlyArray<OfflineAlbum> }) {
   return (
     <AlbumRail

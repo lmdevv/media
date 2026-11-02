@@ -1,10 +1,3 @@
-/**
- * The top of a playlist page, down to its Play button. Its owner sees Paper's hero (C02): 128pt
- * art, the name at 28/32, the description, the mono size line, then who can open it with Share
- * and Add, then Play and Shuffle. Everyone else sees C11: whose playlist it is, what they may do
- * with it, then Play and Shuffle or Add songs. On an iPad both lay out like the album's header
- * (P05): the art on the left, and the size, the name, and the rest beside it.
- */
 import type { TrackId } from "@music/commands/ids";
 import type { Playlist } from "@music/commands/models";
 import { canEditPlaylistItems } from "@music/commands/permissions";
@@ -36,7 +29,6 @@ const REACH_ICONS = { private: Lock, people: Users, link: Link } as const;
 export const openAddSongs = (playlist: Pick<Playlist, "id">): void =>
   router.push({ pathname: "/playlist/[id]/add", params: { id: playlist.id } });
 
-/** C02's privacy row: who can open it, Share for people who may share, and Add. */
 function ReachRow({
   playlist,
   canShare,
@@ -130,7 +122,6 @@ export function OwnerHeader({
   );
 }
 
-/** C11's note on what a collaborator or viewer may do. */
 function AccessNotice({ playlist }: { readonly playlist: Playlist }) {
   const ownerName = playlist.owner?.name ?? "The owner";
 

@@ -1,9 +1,3 @@
-/**
- * E05 · Add your music (setup 2 of 3): the server folders to read and who may listen. Start
- * scanning adds each folder as a library; the first one moves the root stack on to the scan
- * (E06), which stays on screen until the owner leaves it. Add another folder adds a field, so
- * every folder is checked before any library exists. A refusal keeps the form.
- */
 import { useRun } from "@music/sdk/react";
 import { Folder } from "lucide-react-native";
 import { useState } from "react";
@@ -76,8 +70,6 @@ export default function AddFolder() {
       return;
     }
 
-    // The first library puts the scan on screen, so a refusal of a later one can't be shown here;
-    // the scan screen lists only the folders that were added.
     await Promise.allSettled(
       rest.map((folder) => createLibrary({ ...folder, visibility: listeners })),
     );

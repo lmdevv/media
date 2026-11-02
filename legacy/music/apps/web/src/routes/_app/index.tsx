@@ -282,8 +282,6 @@ function PhoneHome({
                   seed={album.id}
                   className="flex h-80 w-62.5 flex-col justify-end rounded-phone-card p-4"
                 >
-                  {/* Paper's placeholder art is dark; real covers can be light, so the white
-                      title gets a scrim to stay readable. */}
                   <span
                     aria-hidden
                     className="absolute inset-x-0 bottom-0 h-1/2 bg-linear-to-t from-dark-canvas/65 to-transparent"

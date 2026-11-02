@@ -15,7 +15,6 @@ import { perform } from "./player-actions";
 /** Which Now Playing shows the lyrics: desktop (Paper 05 · 01b) or phone (05 · 04b). */
 export type LyricsLayout = "desktop" | "phone";
 
-/** The look of each layout, from Paper. */
 const LAYOUTS = {
   desktop: {
     line: "font-sans text-lyric leading-2xl font-heavy tracking-tight",
@@ -23,7 +22,6 @@ const LAYOUTS = {
     states: { past: "text-text/28", active: "text-text", upcoming: "text-text/45" },
     plain: "font-sans text-xl/xl font-heavy tracking-tight text-text",
     plainLead: "h-12",
-    /** The space above the first line; the sung line sits at `anchor` of the pane's height. */
     lead: "h-1/2",
     anchor: 0.5,
   },
@@ -38,7 +36,6 @@ const LAYOUTS = {
   },
 } as const;
 
-/** Keys that scroll the lyrics when focus is inside them. */
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 
 const prefersReducedMotion = (): boolean =>
@@ -141,19 +138,13 @@ function PlainLyrics({
   );
 }
 
-/** How far (in CSS pixels) the scroll may sit from where following put it and still count as there. */
 const SCROLL_SLACK_PX = 2;
 
-/**
- * Where following last put the lines: nowhere yet (`initial`, placed at once), nowhere since the
- * user took over (`released`), or at `top`, `settling` while a smooth scroll there may still run.
- */
 type Placement =
   | { readonly kind: "initial" }
   | { readonly kind: "released" }
   | { readonly kind: "placed"; readonly top: number; readonly settling: boolean };
 
-/** The scroll position that puts line `started` at `anchor` of the pane's height (the top before the first). */
 const followTop = (element: HTMLElement, started: number, anchor: number): number => {
   const line = started < 0 ? null : element.querySelector<HTMLElement>(`[data-line="${started}"]`);
 
@@ -163,13 +154,6 @@ const followTop = (element: HTMLElement, started: number, anchor: number): numbe
   return Math.min(Math.max(0, top), element.scrollHeight - element.clientHeight);
 };
 
-/**
- * Keeps line `started` in place while following. The lines are the user's as soon as they scroll
- * them: a wheel, touch, or scroll key stops a running follow scroll where it is before the user's
- * scroll starts, and a scroll no handler saw shows as the lines no longer being where following
- * put them, which stops following instead of scrolling back over it. A resize or a late font puts
- * the line back in place at once.
- */
 function useLineFollow(started: number, anchor: number) {
   const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLOListElement>(null);
@@ -261,8 +245,6 @@ function useLineFollow(started: number, anchor: number) {
       if (SCROLL_KEYS.has(event.key)) release();
     };
 
-    // Not passive, only while following: the browser applies the wheel's scroll after this runs,
-    // so a follow scroll already under way stops first instead of overriding it.
     element.addEventListener("wheel", release, { passive: false });
     element.addEventListener("touchstart", settle, { passive: true });
     element.addEventListener("touchmove", release, { passive: true });
@@ -280,8 +262,6 @@ function useLineFollow(started: number, anchor: number) {
     const element = scroller.current;
     const placed = placement.current;
 
-    // Choosing a line takes the lines on from wherever they are, even moved by a scroll no
-    // handler saw; a follow scroll still under way keeps its own target.
     if (element !== null && placed.kind === "placed" && !placed.settling) {
       placement.current = { ...placed, top: element.scrollTop };
     }
@@ -292,12 +272,6 @@ function useLineFollow(started: number, anchor: number) {
   return { scroller, list, following, follow, release };
 }
 
-/**
- * Timed lines that follow playback. Each animation frame reads the live position and re-renders
- * only when another line starts or the sung one ends. The last line to start stays in place
- * (`useLineFollow`) until the user scrolls the lines; "Back to current line", or choosing a line,
- * follows again.
- */
 function SyncedLyrics({
   lines,
   layout,
@@ -344,7 +318,6 @@ function SyncedLyrics({
         ref={scroller}
         className="relative flex min-h-0 grow flex-col overflow-y-auto overscroll-contain [scrollbar-width:none]"
         onFocus={(event) => {
-          // Moving to a line by keyboard scrolls it into view; following would scroll it away.
           if (event.target !== event.currentTarget && event.target.matches(":focus-visible")) {
             release();
           }
@@ -384,7 +357,6 @@ function SyncedLyrics({
   );
 }
 
-/** One timed line: choosing it (click, Enter, or Space) seeks to where it starts. */
 const LineButton = memo(function LineButton({
   index,
   text,

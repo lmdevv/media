@@ -1,7 +1,3 @@
-/**
- * Paper's Play and Shuffle pair (A05, A07): accent Play and surface Shuffle, which split the row
- * on a phone and keep their own width, at least 160pt, in an iPad header (P05).
- */
 import { Play, Shuffle } from "lucide-react-native";
 import { View } from "react-native";
 

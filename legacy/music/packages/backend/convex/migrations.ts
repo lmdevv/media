@@ -27,10 +27,8 @@ import {
 } from "./lib/queue";
 import { hasLegacyCounts, splitLegacyCounts } from "./lib/stats";
 
-/** Rows per batch: a track is well under 2 KB, so a batch stays far below the read limits. */
 const BATCH = 256;
 
-/** `localLyrics` rows per batch: each may near 1 MiB, so a batch stays below the read limit. */
 const LYRICS_BATCH = 8;
 
 interface Batch {
@@ -38,11 +36,9 @@ interface Batch {
   readonly isDone: boolean;
 }
 
-/** Rewrites the batch of rows after `cursor` and reports where the next batch starts. */
 type Migration = (ctx: MutationCtx, cursor: string | null) => Promise<Batch>;
 
 const MIGRATIONS = {
-  /** Track search text predates accent folding. */
   foldTrackSearchText: async (ctx, cursor) => {
     const page = await ctx.db.query("tracks").paginate({ cursor, numItems: BATCH });
 
@@ -56,7 +52,6 @@ const MIGRATIONS = {
 
     return page;
   },
-  /** Album search text predates accent folding. */
   foldAlbumSearchText: async (ctx, cursor) => {
     const page = await ctx.db.query("albums").paginate({ cursor, numItems: BATCH });
 
@@ -70,7 +65,6 @@ const MIGRATIONS = {
 
     return page;
   },
-  /** Artists were searched by their raw name and have no search text yet. */
   foldArtistSearchText: async (ctx, cursor) => {
     const page = await ctx.db.query("artists").paginate({ cursor, numItems: BATCH });
 
@@ -84,10 +78,6 @@ const MIGRATIONS = {
 
     return page;
   },
-  /**
-   * The queue moved off the session into its own row, so position reports stop re-running
-   * queries that read the queue. A user whose queue a write already moved is skipped.
-   */
   splitPlaybackQueues: async (ctx, cursor) => {
     const page = await ctx.db.query("playbackSessions").paginate({ cursor, numItems: BATCH });
 
@@ -98,7 +88,6 @@ const MIGRATIONS = {
           .withIndex("by_user", (q) => q.eq("userId", session.userId))
           .unique();
 
-        // Without a row, saving creates it and clears the session; with one, the row is newer.
         if (row === null) await saveQueue(ctx, session.userId, legacyQueue(session));
         else await ctx.db.patch(session._id, clearedLegacyQueue);
       }),
@@ -106,11 +95,6 @@ const MIGRATIONS = {
 
     return page;
   },
-  /**
-   * Libraries from before real folders were claimed (`media:claimRoot`) have no claim, or one
-   * without folder identities, and stream nothing until claimed; a scan for each makes the media
-   * service claim it now rather than at its next periodic scan.
-   */
   claimLibraryRoots: async (ctx, cursor) => {
     const page = await ctx.db.query("libraries").paginate({ cursor, numItems: BATCH });
 
@@ -122,11 +106,6 @@ const MIGRATIONS = {
 
     return page;
   },
-  /**
-   * Queues stored song IDs before each entry had its own ID. Readers number such entries the
-   * same way every time (see `itemsFromTrackIds`), so an ID a client saw before this batch ran
-   * still names the same entry after it.
-   */
   queueItems: async (ctx, cursor) => {
     const page = await ctx.db.query("playbackQueues").paginate({ cursor, numItems: BATCH });
 
@@ -136,12 +115,6 @@ const MIGRATIONS = {
 
     return page;
   },
-  /**
-   * Servers from before owners have admins only; the earliest-created admin who is not suspended
-   * becomes the owner. A suspended admin is never picked, nor unsuspended: with no admin left to
-   * pick, the server stays without an owner, as one with no admins at all does, until the next
-   * run finds one. One batch: the `by_role` index finds the rows directly.
-   */
   promoteOwner: async (ctx) => {
     const done = { continueCursor: "", isDone: true };
 
@@ -152,7 +125,6 @@ const MIGRATIONS = {
 
     if (owner !== null) return done;
 
-    // Within one role the index orders by creation time, so this is the first active admin.
     const admin = await ctx.db
       .query("users")
       .withIndex("by_role", (q) => q.eq("role", "admin"))
@@ -163,10 +135,6 @@ const MIGRATIONS = {
 
     return done;
   },
-  /**
-   * Library counters moved off the library row into `libraryStats`, so the counts a scan bumps
-   * with every batch stop re-running every query that reads the libraries.
-   */
   splitLibraryStats: async (ctx, cursor) => {
     const page = await ctx.db.query("libraries").paginate({ cursor, numItems: BATCH });
 
@@ -176,11 +144,6 @@ const MIGRATIONS = {
 
     return page;
   },
-  /**
-   * Songs scanned before `tracks.lyricsSynced` existed are not marked when their own lyrics are
-   * synced, so LRCLIB would be asked for them. A batch reads a few lyric rows, which can each
-   * come near Convex's 1 MiB document limit.
-   */
   trackLyricsSynced: async (ctx, cursor) => {
     const page = await ctx.db.query("localLyrics").paginate({ cursor, numItems: LYRICS_BATCH });
 
@@ -197,7 +160,6 @@ const MIGRATIONS = {
 
     return page;
   },
-  /** Songs scanned before lyrics were looked up on LRCLIB have no lookup key. */
   trackLookupKeys: async (ctx, cursor) => {
     const page = await ctx.db.query("tracks").paginate({ cursor, numItems: BATCH });
 

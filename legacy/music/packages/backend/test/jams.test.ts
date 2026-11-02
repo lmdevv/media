@@ -1,8 +1,3 @@
-/**
- * Jams through the real dispatcher: joining under each join policy, what people in a Jam may do
- * under every host setting, streaming only the Jam's songs, listening along, the expiry cron, and
- * guest accounts made from Jam links.
- */
 import { DeviceId, UserId } from "@music/commands/ids";
 import type { TrackId } from "@music/commands/ids";
 import type { CommandArgs } from "@music/commands/registry";
@@ -44,14 +39,11 @@ interface Fixture {
   readonly backend: Backend;
   readonly host: User;
   readonly member: User;
-  /** Songs everyone can read. */
   readonly rock: ReadonlyArray<TrackId>;
-  /** Songs only the host can read. */
   readonly secret: ReadonlyArray<TrackId>;
   readonly code: string;
 }
 
-/** A host playing five shared songs and one private one, in a Jam a member joined. */
 const setup = async (settings: CommandArgs<"jam.settings"> = {}, join = true): Promise<Fixture> => {
   const backend = makeBackend();
   const host = await signUp(backend, "owner");
@@ -91,7 +83,6 @@ const entryIds = async (user: User) =>
 
 beforeAll(enableAuth);
 
-/** Puts the test clock at `time`; `drainScheduled` hands the clock back to real time. */
 const clockAt = (time: number): void => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(time);
@@ -118,14 +109,12 @@ describe("joining", () => {
       kind: "phone",
     });
 
-    // The member had their own queue going before.
     await member.music.run("playback.play", { trackIds: [pick(rock, 2)], deviceId: MEMBER_DEVICE });
     const own = await queueTitles(member);
 
     await host.music.run("queue.add", { trackIds: rock.slice(0, 2) });
     const { code } = await host.music.run("jam.start", {});
 
-    // A whole link works as well as the bare code.
     expect(
       await member.music.run("jam.join", { code: `https://music.example.com/jam/${code}?x=1` }),
     ).toMatchObject({ status: "joined" });
@@ -149,12 +138,10 @@ describe("joining", () => {
     const other = await signUp(backend, "member");
 
     expect((await member.music.read("jam.get", {}))?.role).toBe("pending");
-    // While waiting, they still play their own queue.
     expect(await queueTitles(member)).toEqual([]);
     expect((await host.music.read("jam.members", {})).map((row) => row.status)).toEqual([
       "pending",
     ]);
-    // People waiting don't see the link.
     expect((await member.music.read("jam.get", {}))?.code).toBe("");
 
     await host.music.run("jam.approve", { userId: UserId.make(member.id), approve: true });
@@ -164,7 +151,6 @@ describe("joining", () => {
     await host.music.run("jam.approve", { userId: UserId.make(other.id), approve: false });
     expect(await failureCode(other.music.run("jam.join", { code }))).toBe("forbidden");
 
-    // A new link lets them ask again.
     const { code: fresh } = await host.music.run("jam.relink", {});
 
     expect(await other.music.run("jam.join", { code: fresh })).toMatchObject({
@@ -212,7 +198,6 @@ describe("joining", () => {
     expect((await member.music.read("jam.get", {}))?.host.id).toBe(otherHost.id);
     expect(await host.music.read("jam.members", {})).toEqual([]);
 
-    // A host must end their own Jam before joining another.
     expect(await failureCode(otherHost.music.run("jam.join", { code }))).toBe("conflict");
     expect(await failureCode(host.music.run("jam.join", { code }))).toBe("conflict");
   });
@@ -222,7 +207,6 @@ describe("joining", () => {
     const otherHost = await signUp(backend, "member");
     const { code: other } = await otherHost.music.run("jam.start", {});
 
-    // All in one go, as fast as one mutation's clock: B, then A, then B again.
     await member.music.run("jam.join", { code: other });
     await member.music.run("jam.join", { code });
 
@@ -307,10 +291,8 @@ describe("adding songs", () => {
     expect(await failureCode(member.music.run("queue.add", { trackIds: [pick(rock, 0)] }))).toBe(
       "conflict",
     );
-    // The host is never limited.
     expect(await failureCode(host.music.run("queue.add", { trackIds: [pick(rock, 0)] }))).toBe(ok);
 
-    // Once one of theirs has played, there is room again.
     await host.music.run("playback.jump", { itemId: pick(await entryIds(host), 4) });
     expect(await failureCode(member.music.run("queue.add", { trackIds: [pick(rock, 1)] }))).toBe(
       ok,
@@ -321,7 +303,6 @@ describe("adding songs", () => {
     const { host, member, rock } = await setup({ addLimit: 2 });
 
     await member.music.run("queue.add", { trackIds: [pick(rock, 3), pick(rock, 4)] });
-    // Both of theirs reach the front: one played, one playing.
     await host.music.run("playback.jump", { itemId: pick(await entryIds(host), 5) });
     await member.music.run("queue.add", { trackIds: [pick(rock, 0), pick(rock, 1)] });
 
@@ -332,7 +313,6 @@ describe("adding songs", () => {
     expect(
       await failureCode(member.music.run("queue.move", { itemId: played, afterItemId: playing })),
     ).toBe("conflict");
-    // Moving it among the played songs adds nothing.
     expect(await failureCode(member.music.run("queue.move", { itemId: played }))).toBe(ok);
   });
 
@@ -347,7 +327,6 @@ describe("adding songs", () => {
   });
 
   it("only takes songs the host can play too", async () => {
-    // Here the owner joins a member's Jam, with a private library the member host can't hear.
     const backend = makeBackend();
     const owner = await signUp(backend, "owner");
     const host = await signUp(backend, "member");
@@ -383,7 +362,6 @@ describe("adding songs", () => {
   });
 });
 
-/** A Jam where the host queued the first entries and the member added the last one. */
 const mixed = async (scope: "none" | "own" | "any") => {
   const fixture = await setup({ membersCanEdit: scope });
   const { member, rock } = fixture;
@@ -431,17 +409,13 @@ describe("streaming", () => {
     const url = (trackId: TrackId) =>
       failureCode(member.music.read("stream.url", { trackId, profile: "original" }));
 
-    // In the Jam's queue but in a library the member can't read: the host chose to play it.
     expect(await url(pick(secret, 0))).toBe(ok);
-    // In a library the member can't read and not in the queue.
     expect(await url(pick(secret, 1))).toBe("not_found");
 
     await member.music.run("jam.leave", {});
     expect(await url(pick(secret, 0))).toBe("not_found");
-    // Readable songs stream as always.
     expect(await url(pick(rock, 0))).toBe(ok);
 
-    // And not after the Jam ended.
     const { code } = await host.music.run("jam.relink", {});
     await member.music.run("jam.join", { code });
     await host.music.run("jam.end", {});
@@ -470,7 +444,6 @@ describe("volume", () => {
   });
 });
 
-/** A song by the artist both libraries share, on an album of its own. */
 const song = (path: string, title: string) => ({
   path,
   title,
@@ -495,7 +468,6 @@ describe("autoplay in a Jam", () => {
       song("Beta/b2.flac", "Beta song 2"),
     ]);
 
-    // The second admin keeps Beta to themselves and the owner.
     await admin.music.run("libraries.update", {
       libraryId: beta.libraryId,
       visibility: "restricted",
@@ -523,10 +495,8 @@ describe("autoplay in a Jam", () => {
       deviceId: HOST_DEVICE,
     });
 
-    // Alone, the owner's autoplay may pick from Beta.
     expect(await queueTitles(owner)).toContain("Beta song 1");
 
-    // Hosting a Jam, it may not: the songs it picked go, and no new ones come from Beta.
     const { code } = await owner.music.run("jam.start", {});
 
     await member.music.run("jam.join", { code });
@@ -535,7 +505,6 @@ describe("autoplay in a Jam", () => {
     const stream = (trackId: TrackId) =>
       failureCode(member.music.read("stream.url", { trackId, profile: "original" }));
 
-    // An autoplay entry from Beta left from before this rule doesn't stream to the member.
     await backend.run(async (ctx) => {
       const row = await ctx.db
         .query("playbackQueues")
@@ -552,7 +521,6 @@ describe("autoplay in a Jam", () => {
     });
     expect(await stream(idOf("Beta song 2"))).toBe("not_found");
 
-    // The host's own choice of a Beta song plays for everyone.
     await owner.music.run("queue.add", { trackIds: [idOf("Beta song 1")] });
     expect(await stream(idOf("Beta song 1"))).toBe(ok);
   });
@@ -562,14 +530,11 @@ describe("a Jam started on an autoplay song from a library shared with the host 
   it("moves on to a song it may share, and shows people none of what it held", async () => {
     const backend = makeBackend();
     const owner = await signUp(backend, "owner");
-    // The host owns nothing; Delta is granted to them alone.
     const host = await signUp(backend, "member");
     const member = await signUp(backend, "member");
     const alpha = await seedLibrary(backend, owner, { name: "Alpha", count: 0 });
     const delta = await seedLibrary(backend, owner, { name: "Delta", count: 0 });
 
-    // The seed shares its artist with Delta's songs only, so autoplay picks those first; Alpha's
-    // other songs share its genre, for after.
     await upsertFiles(backend, alpha.libraryId, [
       song("Alpha/0.flac", "Alpha song 0"),
       ...Array.from({ length: 12 }, (_, index) => ({
@@ -608,7 +573,6 @@ describe("a Jam started on an autoplay song from a library shared with the host 
       deviceId: HOST_DEVICE,
     });
 
-    // Autoplay queued Delta songs, and the host skips to one.
     const queued = (await host.music.read("queue.list", {})).queue;
     const deltaEntry = queued.find((entry) => entry.autoplay && entry.title.startsWith("Delta"));
 
@@ -622,12 +586,10 @@ describe("a Jam started on an autoplay song from a library shared with the host 
     const seen = await member.music.read("playback.state", {});
     const current = seen.queue[seen.index];
 
-    // The Jam plays a song it may share.
     expect(current?.withheld).toBeUndefined();
     expect(current?.title.startsWith("Alpha")).toBe(true);
     expect(seen.playing).toBe(true);
 
-    // The Delta entry it moved past shows as withheld: nothing about the song, not even its IDs.
     const hidden = seen.queue.find((entry) => entry.itemId === deltaEntry.itemId);
 
     expect(hidden).toMatchObject({
@@ -641,7 +603,6 @@ describe("a Jam started on an autoplay song from a library shared with the host 
     expect(hidden?.albumId).not.toBe(deltaEntry.albumId);
     expect(seen.queue.some((entry) => entry.title.startsWith("Delta"))).toBe(false);
 
-    // The host still sees their own queue whole.
     expect((await host.music.read("queue.list", {})).queue.map((entry) => entry.title)).toContain(
       deltaEntry.title,
     );
@@ -663,7 +624,6 @@ describe("listening along", () => {
       0.3,
     ]);
 
-    // The member's player never moves the host's playback by reporting.
     await member.music.run("playback.report", {
       deviceId: MEMBER_DEVICE,
       index: 2,
@@ -704,7 +664,6 @@ describe("listening along", () => {
   });
 });
 
-/** Runs the expiry cron and reads why the fixture's Jam ended, if it did. */
 const expire = async (fixture: Fixture) => {
   await fixture.backend.mutation(internal.maintenance.expireJams, {});
 
@@ -751,11 +710,9 @@ describe("ending", () => {
     const idle = await setup();
     const lively = await setup();
 
-    // 31 minutes without a heartbeat from the host.
     vi.setSystemTime(START + 31 * 60 * 1000);
     expect(await expire(offline)).toBe("host_offline");
 
-    // The host's laptop keeps beating, but playback was paused over 4 hours ago.
     await idle.host.music.run("playback.pause", {});
     vi.setSystemTime(START + 31 * 60 * 1000 + 4 * 60 * 60 * 1000 + 60_000);
     await idle.host.music.run("devices.heartbeat", {
@@ -765,7 +722,6 @@ describe("ending", () => {
     });
     expect(await expire(idle)).toBe("idle");
 
-    // Playing with the host online: it goes on.
     await lively.host.music.run("devices.heartbeat", {
       deviceId: HOST_DEVICE,
       name: "Laptop",
@@ -793,7 +749,6 @@ describe("ending", () => {
       );
     });
 
-    // 20 minutes in, the host plays something from a terminal: still here.
     vi.setSystemTime(START + 20 * 60 * 1000);
     await host.music.run("queue.add", { trackIds: [pick(rock, 4)] });
     await host.music.run("playback.next", {});
@@ -801,21 +756,18 @@ describe("ending", () => {
     await backend.mutation(internal.maintenance.expireJams, {});
     expect((await member.music.read("jam.get", {}))?.status).toBe("active");
 
-    // Nothing for over half an hour after that: gone.
     vi.setSystemTime(START + 51 * 60 * 1000);
     await backend.mutation(internal.maintenance.expireJams, {});
     expect((await member.music.read("jam.get", {}))?.endedReason).toBe("host_offline");
   });
 });
 
-/** Lets Jam links on the fixture's server make guest accounts. */
 const guestsAllowed = async (fixture: Fixture): Promise<Fixture> => {
   await fixture.host.music.run("server.update", { jamGuestAccounts: true });
 
   return fixture;
 };
 
-/** Signs up from a Jam link through Convex Auth, as the landing page does, and signs in. */
 const joinAsGuest = (backend: Backend, jamCode: string): Promise<User> =>
   passwordFlow(backend, {
     flow: "signUp",
@@ -825,7 +777,6 @@ const joinAsGuest = (backend: Backend, jamCode: string): Promise<User> =>
     jamCode,
   });
 
-/** Which of these accounts still exist. */
 const accountsLeft = (backend: Backend, ids: ReadonlyArray<Id<"users">>) =>
   backend.run(async (ctx) => {
     const users = await Promise.all(ids.map((id) => ctx.db.get(id)));
@@ -833,7 +784,6 @@ const accountsLeft = (backend: Backend, ids: ReadonlyArray<Id<"users">>) =>
     return users.flatMap((user) => (user === null ? [] : [user._id]));
   });
 
-/** The sign-in sessions these people still have. */
 const sessionsOf = (backend: Backend, ids: ReadonlyArray<Id<"users">>) =>
   backend.run(async (ctx) => {
     const sessions = await Promise.all(
@@ -848,7 +798,6 @@ const sessionsOf = (backend: Backend, ids: ReadonlyArray<Id<"users">>) =>
     return sessions.flat().map((session) => session._id);
   });
 
-/** How many guest accounts Jam links have made. */
 const guestCount = (backend: Backend) =>
   backend.run(
     async (ctx) =>
@@ -856,7 +805,6 @@ const guestCount = (backend: Backend) =>
         .length,
   );
 
-/** Signs up a guest from a Jam link, as the password provider does; resolves to the outcome. */
 const createGuest = (backend: Backend, jamCode: string) =>
   failureCode(
     backend.mutation(internal.users.createFromSignUp, {
@@ -900,7 +848,6 @@ describe("guest accounts from Jam links", () => {
 
     expect((await inOpen.music.read("jam.get", {}))?.role).toBe("member");
     expect((await waiting.music.read("jam.get", {}))?.role).toBe("pending");
-    // Nothing of the host's plays for them until they are let in.
     expect(await queueTitles(waiting)).toEqual([]);
 
     const queue = await approval.host.music.read("jam.members", {});
@@ -957,7 +904,6 @@ describe("guest accounts from Jam links", () => {
       jamCode: code,
     });
 
-    // Signing in opens a session of the current generation, in the password check's transaction.
     const fromSignIn = await passwordFlow(backend, { flow: "signIn", ...account });
 
     await host.music.run("jam.end", {});
@@ -1002,7 +948,6 @@ describe("guest accounts from Jam links", () => {
     expect([ended?.status, ended?.endedReason]).toEqual(["ended", "host"]);
     expect(await accountsLeft(backend, [guest.id])).toEqual([]);
     expect(await createGuest(backend, otherCode)).toBe("signup_closed");
-    // The admin's own Jam goes on.
     expect((await host.music.read("jam.get", {}))?.code).toBe(code);
   });
 
@@ -1011,7 +956,6 @@ describe("guest accounts from Jam links", () => {
     const otherHost = await signUp(backend, "member");
     const otherCode = (await otherHost.music.run("jam.start", {})).code;
 
-    // Made a guest behind the handlers' back, as an old deployment could leave it.
     await backend.run(async (ctx) => {
       await ctx.db.patch(otherHost.id, { role: "guest" });
     });
@@ -1033,11 +977,9 @@ describe("guest accounts from Jam links", () => {
         userId: UserId.make(otherHost.id),
       });
 
-      // At once, not when the cron next looks.
       expect((await member.music.read("jam.get", {}))?.endedReason).toBe("host");
       await drainScheduled(backend);
       expect(await accountsLeft(backend, [guest.id, member.id])).toEqual([member.id]);
-      // The host's own Jam is untouched.
       expect((await host.music.read("jam.get", {}))?.code).toBe(code);
     },
   );
@@ -1053,7 +995,6 @@ describe("guest accounts from Jam links", () => {
     );
     expect(await createGuest(backend, code)).toBe("rate_limited");
 
-    // The allowance comes back over the hour, up to the Jam's cap.
     clockAt(START + 60 * 60 * 1000);
     expect(await guests(GUESTS_PER_JAM_PER_HOUR)).toContain(ok);
     clockAt(START + 3 * 60 * 60 * 1000);
@@ -1077,7 +1018,6 @@ describe("guest accounts from Jam links", () => {
     const codes = [code, ...others];
     const perJam = GUESTS_PER_HOUR / GUESTS_PER_JAM_PER_HOUR;
 
-    // Each Jam within its own limit, until the server's runs out.
     const made = await Promise.all(
       codes
         .slice(0, perJam)
@@ -1096,7 +1036,6 @@ describe("guest accounts from Jam links", () => {
 
     await host.music.run("jam.remove", { userId: UserId.make(removed.id) });
 
-    // The same link now asks the host about everyone new: a new guest, and anyone else.
     const again = await joinAsGuest(backend, code);
 
     expect((await again.music.read("jam.get", {}))?.role).toBe("pending");
@@ -1107,7 +1046,6 @@ describe("guest accounts from Jam links", () => {
       settings: { join: "open" },
     });
 
-    // A new link lets people straight in again.
     const { code: fresh } = await host.music.run("jam.relink", {});
     const newcomer = await joinAsGuest(backend, fresh);
 
@@ -1125,7 +1063,6 @@ describe("guest accounts from Jam links", () => {
 
     expect((await again.music.read("jam.get", {}))?.role).toBe("pending");
     expect((await host.music.read("jam.get", {}))?.approvalAfterRemoval).toBe(true);
-    // The flag that explains the host's settings is the host's alone, waiting or let in.
     expect((await again.music.read("jam.get", {}))?.approvalAfterRemoval).toBe(false);
     await host.music.run("jam.approve", { userId: UserId.make(again.id), approve: true });
     expect(await again.music.read("jam.get", {})).toMatchObject({
@@ -1151,7 +1088,6 @@ describe("guest accounts from Jam links", () => {
     const guest = await joinAsGuest(backend, code);
     const invitedGuest = await signUp(backend, "guest");
 
-    // Nor can a guest an admin invited: only members and admins hand out links that make accounts.
     expect(await failureCode(guest.music.run("jam.start", {}))).toBe("forbidden");
     expect(await failureCode(invitedGuest.music.run("jam.start", {}))).toBe("forbidden");
   });
@@ -1176,7 +1112,6 @@ describe("guest accounts from Jam links", () => {
 
     expect(await opens(guest, everyone)).toBe("not_found");
     expect(await opens(guest, named)).toBe(ok);
-    // A guest an admin invited is a person they know, and sees what's shared with everyone.
     expect(await opens(invitedGuest, everyone)).toBe(ok);
   });
 
@@ -1184,7 +1119,6 @@ describe("guest accounts from Jam links", () => {
     const { backend, host, code } = await setup();
     const preview = await backend.query(api.setup.jam, { code });
 
-    // Whose Jam and how to get in; nothing of what plays or who listens.
     const { name: hostName } = await host.music.read("account.me", {});
 
     expect(preview).toEqual({ state: "open", hostName, guestAccounts: false });

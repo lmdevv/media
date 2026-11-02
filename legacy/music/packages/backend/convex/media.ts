@@ -1,7 +1,3 @@
-/**
- * Functions for the media service. Each takes the shared `MEDIA_SERVICE_SECRET`; none of them
- * decides user access. Convex never calls the media service; the service subscribes here.
- */
 import { chainsOverlap, fsPathsOverlap } from "@music/commands/folder-ids";
 import {
   LYRIC_QUEUE_SIZE,
@@ -109,7 +105,6 @@ export const claimJob = mutation({
       workerId,
       leaseUntil: now + LEASE_MS,
       startedAt: job.startedAt ?? now,
-      // Progress is this lease's own: a lease that ends before it reports any is a stall.
       done: 0,
       total: undefined,
     });
@@ -122,7 +117,6 @@ export const claimJob = mutation({
   },
 });
 
-/** The message of a refused root claim. It names no folder: the job's viewer may not read the other library. */
 const OVERLAP_MESSAGE =
   "This folder is the same as, inside, or around another library's folder (through a link or a " +
   "mount), so it was not scanned. Add a folder that holds only this library's music.";
@@ -164,7 +158,6 @@ export const claimRoot = mutation({
       (other) =>
         other._id !== libraryId &&
         (firstOverlap([other], real) !== null ||
-          // Identities read in another boot may name other folders now; paths still count.
           ((other.bootId ?? null) === bootId &&
             ((other.rootIds !== undefined && chainsOverlap(other.rootIds, rootIds)) ||
               (fsPath !== null &&
@@ -172,9 +165,6 @@ export const claimRoot = mutation({
                 fsPathsOverlap(other.fsPath, fsPath))))),
     );
 
-    // The library added first keeps a folder two libraries name, whichever scan claims it first:
-    // an older library that had no claim yet (from before claims, say) takes its folder back from
-    // a newer one on another path to it, such as a bind mount, which stops streaming.
     if (overlapping.some((other) => other._creationTime < library._creationTime)) {
       await unclaim(ctx, library);
 
@@ -198,10 +188,6 @@ export const claimRoot = mutation({
   },
 });
 
-/**
- * Drops a library's claim, so none of its songs stream (`trackSource`, `stream.url`) until a scan
- * claims its folder again. Its songs stay indexed, for when the folder is put right.
- */
 const unclaim = async (ctx: MutationCtx, library: Doc<"libraries">): Promise<void> => {
   if (library.realPath !== undefined || library.rootIds !== undefined) {
     await ctx.db.patch(library._id, {
@@ -319,7 +305,6 @@ export const fingerprints = query({
         lyricsFiles: track.lyricsFiles,
         lyricsReader: track.lyricsReader,
         lyricsBytes: track.lyricsBytes,
-        // What a scan matches a new file against to tell a moved file from a new one.
         durationMs: track.durationMs,
         title: track.title,
         artist: track.artistName,
@@ -448,7 +433,6 @@ export const artInUse = query({
       return fail("invalid_args", `Check at most ${ART_IN_USE_MAX} hashes at once`);
     }
 
-    // Tracks first: they hold most art, and a hash a track uses needs no other look.
     const used = await Promise.all(
       hashes.map(async (hash) => {
         const track = await ctx.db
@@ -512,13 +496,10 @@ export const trackSource = query({
     if (track === null || track.missing) return null;
     const library = await ctx.db.get(track.libraryId);
 
-    // Nothing streams from a folder no scan has claimed (`claimRoot`): a library refused since it
-    // was indexed, or one from before claims whose next scan hasn't run yet.
     if (!isClaimed(library)) return null;
 
     return {
       path: track.path,
-      // The folder the last scan claimed: a link retargeted since must not change what plays.
       libraryPath: library.realPath,
       codec: track.codec,
       lossless: track.lossless,
@@ -536,7 +517,6 @@ export const libraries = query({
     requireService(secret);
     const all = await ctx.db.query("libraries").collect();
 
-    // `claimed` lets the service claim new and upgraded libraries at once, before any scan.
     return all.map((library) => ({
       id: library._id,
       path: library.path,
@@ -620,11 +600,6 @@ export const claimLookup = mutation({
 
 const decodeLrclibSets = Schema.decodeUnknownResult(Schema.NonEmptyArray(LrclibLyricSet));
 
-/**
- * Stores lyrics LRCLIB found for a lookup and returns the outcome to save: found, with the size
- * of what it stored, or a miss when they break the `LrclibLyricSet` schema or are too large to
- * store, since asking again would get the same record.
- */
 const storeFound = async (
   ctx: MutationCtx,
   lookupId: Id<"lyricLookups">,

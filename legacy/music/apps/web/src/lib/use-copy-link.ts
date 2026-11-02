@@ -10,7 +10,6 @@ export interface LinkTarget {
   readonly id: string;
 }
 
-/** A link's title and full URL, on this page's address. */
 interface ResolvedLink {
   readonly title: string;
   readonly url: string;
@@ -67,7 +66,6 @@ export const useCopyLink = (): ((target: LinkTarget) => void) => {
     try {
       await writeToClipboard(pending);
     } catch (cause) {
-      // A link the server refused fails the write too; its reason says more.
       await pending;
       throw cause;
     }

@@ -1,16 +1,3 @@
-/**
- * An in-memory `MediaBackend` that follows the `media:*` Convex contract closely enough for
- * scans, streams, and the job worker to run without a deployment: fingerprints come from earlier
- * upserts, claims and reports are guarded by worker and status, and scan requests collapse into a
- * library's pending or running job. `MemoryMediaBackendControl` adds libraries and inspects state,
- * including the catalog writes each call made. Lyrics lookups are queued by tests and move from
- * state to state by the rules Convex runs (`@music/commands/lyric-lookups`): the queue lists ten
- * at most, most urgent first, and hides while LRCLIB is paused. What Convex schedules (a retry
- * coming due, the end of a pause) waits until a test runs it with `runScheduled`.
- *
- * It keeps tracks only: albums and artists, whose artwork Convex takes from their tracks, list no
- * artwork of their own, so a batch releases a track's old art only.
- */
 import { chainsOverlap, type FolderChain, fsPathsOverlap } from "@music/commands/folder-ids";
 import { JobId, LibraryId, TrackId } from "@music/commands/ids";
 import {
@@ -99,10 +86,6 @@ interface Claim {
   readonly bootId: string | null;
 }
 
-/**
- * Whether two claims are the same folder, or one is inside the other, by either identity; only
- * identities read in the same boot are compared, as `media:claimRoot` does.
- */
 const claimsOverlap = (left: Claim, right: Claim): boolean =>
   left.bootId === right.bootId &&
   (chainsOverlap(left.rootIds, right.rootIds) ||
@@ -315,7 +298,6 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
         for (const path of paths) yield* markOneMissing(libraryId, path);
         yield* record({ operation: "markMissing", paths });
 
-        // Missing tracks keep their art, so marking them releases none.
         const released: ReadonlyArray<string> = [];
 
         return released;
@@ -351,7 +333,6 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
                   .map(({ lookup }) => ({ lookupId: lookup.id, query: lookup.query }))
               : [],
           ),
-          // A Convex subscription sends a query's result again only when it changed.
           Stream.changesWith(
             (left, right) =>
               left.length === right.length &&

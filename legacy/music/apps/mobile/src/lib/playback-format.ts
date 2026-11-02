@@ -1,8 +1,3 @@
-/**
- * Playback words and numbers as Paper prints them: scrubber times (B01 "2:18" and "−2:50"), audio
- * file details (B09 "FLAC · 16-bit / 44.1 kHz"), and device status lines (B05 "Online").
- */
-
 /** The listener's streaming quality setting on this phone. */
 type Quality = "lossless" | "high" | "data-saver";
 
@@ -47,7 +42,6 @@ const CODEC_NAMES: ReadonlyArray<readonly [RegExp, string]> = [
 export const codecName = (codec: string): string =>
   CODEC_NAMES.find(([pattern]) => pattern.test(codec))?.[1] ?? codec;
 
-/** A sample rate in hertz as kilohertz, with no needless decimal: `44.1`, `96`. */
 const kilohertz = (sampleRate: number): string =>
   (sampleRate / 1000).toFixed(1).replace(/\.0$/, "");
 

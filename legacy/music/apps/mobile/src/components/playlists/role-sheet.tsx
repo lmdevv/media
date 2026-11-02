@@ -1,7 +1,3 @@
-/**
- * C10 · Share with someone: Viewer or Collaborator as a single-select list with an accent check,
- * then Share playlist, and Remove access for someone it is already shared with.
- */
 import type { PlaylistId, UserId } from "@music/commands/ids";
 import type { PlaylistRole } from "@music/commands/models";
 import { errorMessage } from "@music/sdk/errors";
@@ -30,7 +26,6 @@ const ROLES: ReadonlyArray<{
 /** Which request is running, so only its button shows progress. */
 type Pending = "share" | "remove" | null;
 
-/** Props for `RoleSheet`. */
 export interface RoleSheetProps {
   readonly playlistId: PlaylistId;
   readonly person: { readonly id: UserId; readonly name: string };

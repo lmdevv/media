@@ -1,7 +1,3 @@
-/**
- * People and invites as the settings screens word them (F01, F08–F13, F21–F23): row subtitles,
- * the hub's counts, what each role may do, and why a person can't be managed.
- */
 import type { AssignableRole, Invite, Person, Role } from "@music/commands/models";
 import { can, roleLabel } from "@music/commands/permissions";
 import type { PersonRef } from "@music/commands/permissions";
@@ -67,7 +63,6 @@ export const ROLE_ACCESS: Readonly<Record<AssignableRole, Callout>> = {
   },
 };
 
-/** The order Paper shows invite roles in (F10): the usual choice first. */
 const INVITE_ORDER: ReadonlyArray<AssignableRole> = ["member", "admin", "guest"];
 
 /** The roles to offer on an invite, from those the actor may give, in Paper's order. */

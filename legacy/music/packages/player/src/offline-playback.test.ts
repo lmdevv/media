@@ -209,9 +209,7 @@ describe("playing without a connection", () => {
 
     await vi.waitFor(() => expect(output.loads).toEqual([fileOf("a")]));
     server.setConnected(false);
-    // Near the end of "a", the controller preloads "b" for a gapless start.
     output.emit({ type: "time", positionMs: 179_000 });
-    // Playing the same songs again gives every entry a new ID; "a" plays on from the top.
     await controller.playTracks(["a", "b", "c"].map((id) => TrackId.make(id)));
     clock.advance(179_000);
     output.emit({ type: "time", positionMs: 179_000 });

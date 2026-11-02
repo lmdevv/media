@@ -1,8 +1,3 @@
-/**
- * The Jam screen for whoever opens it: the host's (D02), a member's (D08), waiting to be let in
- * (D06), ended under a member (D11), or turned away. It follows `jam.get` live, so being let in,
- * turned away, or the host ending the Jam changes the screen on its own.
- */
 import type { Jam } from "@music/commands/models";
 import { errorMessage } from "@music/sdk/errors";
 import { useRead, useRun } from "@music/sdk/react";
@@ -33,7 +28,6 @@ export const backToMyMusic = (): void => {
   router.dismissAll();
 };
 
-/** A Jam state with one way out: an icon, two lines, and a button that runs `action`. */
 function JamState({
   title,
   icon,
@@ -101,12 +95,10 @@ export function JamHome() {
   const [last, setLast] = useState<Jam | null>(null);
   const [leaving, setLeaving] = useState(false);
 
-  // The last Jam seen, so a Jam that disappears can say why (turned away or removed).
   if (jam !== undefined && jam !== null && jam !== last) setLast(jam);
 
   const screen = jamScreen(jam, last, leaving);
 
-  /** Leaves the Jam, then goes back to the person's own music. */
   const leaveJam = async () => {
     setLeaving(true);
 

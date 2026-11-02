@@ -1,7 +1,3 @@
-/**
- * The vault: where a device keeps its downloads, as rows (songs, pins, covers, lyrics) and files.
- * Each platform implements `VaultStore`; `DownloadSync` is its one writer.
- */
 import type { DownloadPinId, TrackId } from "@music/commands/ids";
 import type { LyricsRevision, OfflineLyrics } from "@music/commands/lyrics";
 import type { DownloadTarget, StreamProfile } from "@music/commands/models";
@@ -138,10 +134,6 @@ export const emptyVault: VaultRows = {
   removals: new Map(),
 };
 
-/**
- * The file extension the platform's player needs for each type the media service sends. A
- * player opening a local file goes by its name, not its bytes.
- */
 const EXTENSIONS = new Map([
   ["audio/mp4", "m4a"],
   ["audio/flac", "flac"],
@@ -151,7 +143,6 @@ const EXTENSIONS = new Map([
   ["audio/aiff", "aiff"],
 ]);
 
-/** What the server's IDs, revisions, and hashes look like; anything else never names a file. */
 const NAME_PART = /^[\w-]+$/u;
 
 /**

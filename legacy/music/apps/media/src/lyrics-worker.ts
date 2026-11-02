@@ -1,11 +1,3 @@
-/**
- * Looks up lyrics on LRCLIB for the lookups Convex queues (`media:lyricQueue`), one at a time and
- * apart from scans. The worker keeps the latest queue Convex sent. It waits for its turn with
- * LRCLIB first and only then takes the most urgent lookup, so a lease is never spent waiting out
- * a pause and a song that started playing meanwhile goes first. It then asks LRCLIB and saves
- * what it learned under the lease. Convex drops a save whose lease ran out, and the lookup is
- * asked again, so a crash or a stall costs one more request at most.
- */
 import { hostname } from "node:os";
 
 import { Effect, Layer, Option, Ref, Stream, SubscriptionRef } from "effect";
@@ -20,7 +12,6 @@ import {
   resubscribeSchedule,
 } from "./media-backend.ts";
 
-/** The wait before trying again after Convex failed `failures` times in a row: 1 s up to 30 s. */
 const backendRetryMs = (failures: number): number => Math.min(1000 * 2 ** (failures - 1), 30_000);
 
 const answerOf = (lyrics: Option.Option<LrclibLyrics>): LookupAnswer =>
@@ -76,7 +67,6 @@ export const layer: Layer.Layer<never, never, MediaBackend | LrclibClient> = Lay
     const lrclib = yield* LrclibClient;
     const workerId = `${hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
     const latest = yield* SubscriptionRef.make<ReadonlyArray<QueuedLookup>>([]);
-    // The queue the last lookup came from, or null to take one from the latest queue again.
     const taken = yield* Ref.make<ReadonlyArray<QueuedLookup> | null>(null);
     const failures = yield* Ref.make(0);
 

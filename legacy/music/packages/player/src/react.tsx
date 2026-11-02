@@ -1,7 +1,3 @@
-/**
- * The player contract the web app builds on. `PlayerProvider` mirrors the user's Convex playback
- * session, plays audio when this browser is the active device, and reports position back.
- */
 import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { Device, Jam, QueueEntry, RepeatMode } from "@music/commands/models";
 import { makeMusicClient } from "@music/sdk/client";
@@ -37,7 +33,6 @@ import { streamSources } from "./source-resolver";
 import { parseStreamQuality } from "./stream-quality";
 import type { StreamQuality } from "./stream-quality";
 
-/** How often `usePlayerPosition` updates. */
 const POSITION_INTERVAL_MS = 250;
 
 const QUALITY_KEY = "music.streamQuality";
@@ -192,10 +187,6 @@ export const useLatestPlayer = (): (() => Player) => useReaders().player;
  */
 export const usePositionReader = (): (() => number) => useReaders().positionMs;
 
-/**
- * The engines the provider switches between. A fixed `engine` disables the switching (and is
- * reported as `html`); otherwise the gapless MSE engine plays where the browser supports it.
- */
 const engineFactory = (
   engine: (() => PlayerEngine) | undefined,
   audioElement: (() => HTMLAudioElement) | undefined,
@@ -218,7 +209,6 @@ const engineFactory = (
 export const thisBrowserDeviceId = (): DeviceId =>
   loadDeviceId(browserStorage(), () => crypto.randomUUID());
 
-/** Builds the controller from browser globals. Runs once per provider mount. */
 const createController = (
   convex: ReturnType<typeof useConvex>,
   engines: EngineFactory,
@@ -227,7 +217,6 @@ const createController = (
   const probe = document.createElement("audio");
   const client = makeMusicClient(convex);
 
-  // The browser resolves the server's relative stream URLs against the page.
   const sources = streamSources(client, { now: Date.now, resolveUrl: (url) => url });
 
   return new PlaybackController(serverSession(client), sources, engines, {
@@ -255,7 +244,6 @@ const createController = (
   });
 };
 
-/** Re-renders only its position consumers, about four times a second. */
 function PositionTicker({
   controller,
   children,
@@ -308,9 +296,6 @@ export function PlayerProvider({
     [convex, engine, audioElement],
   );
 
-  // The position and the queue are separate subscriptions, so a position report re-runs only the
-  // small one. Convex delivers every subscription of a client from one database snapshot, so the
-  // two always agree.
   const position = useRead("playback.position", {});
   const queue = useRead("queue.list", {});
   const jam = useRead("jam.get", {}) ?? null;
@@ -372,8 +357,6 @@ export function PlayerProvider({
       engine: local.engine,
       jam,
       following: state?.following ?? false,
-      // In someone else's Jam the host's queue plays: "play" adds the song tapped to it instead
-      // (one song, so a whole album doesn't run into the host's limit on upcoming songs).
       playTracks: (ids, index) => {
         const picked = ids[index ?? 0];
 
@@ -412,8 +395,6 @@ export function PlayerProvider({
 
   const latest = useRef(player);
 
-  // Updated right after the commit, before the browser can dispatch another event, so a handler
-  // never reads the player from the render before.
   useLayoutEffect(() => {
     latest.current = player;
   }, [player]);

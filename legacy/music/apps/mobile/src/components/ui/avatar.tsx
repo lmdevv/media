@@ -1,12 +1,7 @@
-/**
- * The account's initial in a surface circle, as Paper draws "L" beside large titles. The iPad's
- * chrome draws it solid in the text color, in the sidebar's foot and the top of a page (page 26).
- */
 import { View } from "react-native";
 
 import { Text } from "./text";
 
-/** The first letter of a display name, or of the email when there is no name. */
 const initialOf = (name: string): string => (name.trim().at(0) ?? "?").toLocaleUpperCase();
 
 const LOOKS = {

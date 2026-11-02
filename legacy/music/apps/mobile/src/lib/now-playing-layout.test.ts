@@ -24,7 +24,6 @@ const views = fc.oneof(fc.constant(CLOSED), panels.map(open), panels.map(closing
 
 const offers = fc.constantFrom<LyricsOffer>("ready", "loading", "failed", "none", "instrumental");
 
-/** The side pane's default after each answer in turn, starting undecided. */
 const defaultsAfter = (answers: readonly LyricsOffer[]): ReadonlyArray<Panel | null> => {
   const shown: Array<Panel | null> = [];
   let previous: Panel | null = null;

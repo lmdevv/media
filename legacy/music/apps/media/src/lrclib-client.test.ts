@@ -1,7 +1,3 @@
-/**
- * The LRCLIB client against a stand-in over real HTTP: which failures are LRCLIB's and which are
- * one record's, and that a slow or oversized answer never holds the client past its bounds.
- */
 import { describe, expect, it } from "vitest";
 import { Clock, Duration, Effect } from "effect";
 
@@ -36,7 +32,6 @@ const client = (handler: FakeLrclibHandler, options: Partial<LrclibClient.Option
     return { lrclib, client: made };
   });
 
-/** How long `effect` took, with its result or failure. */
 const timed = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.gen(function* () {
     const start = yield* Clock.currentTimeMillis;

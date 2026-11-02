@@ -1,8 +1,3 @@
-/**
- * An in-memory [music] backend for tests: `convex-test` runs the real Convex functions, schema,
- * and dispatcher, and the helpers here sign users in and seed a catalog the way the media service
- * does.
- */
 import type { LibraryId, TrackId } from "@music/commands/ids";
 import type { Role, Track } from "@music/commands/models";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
@@ -83,7 +78,6 @@ export const signUp = async (
 /** What a scan reports for a file with no lyrics of its own, from no lyrics reader. */
 export const NO_LYRICS = { lyricsFiles: "", lyricsReader: 0, lyrics: [] };
 
-/** The cover every seeded file carries unless it names its own. */
 const DEFAULT_ART = "0".repeat(64);
 
 /** One file as the media service reports it; tags not given get defaults. */
@@ -100,10 +94,6 @@ export interface SeedFile {
   readonly lyrics?: ReadonlyArray<StoredLyricSet>;
 }
 
-/**
- * Claims a library's folder as the media service does before a scan (`media:claimRoot`): at the
- * path it was added with, under a made-up identity no other library shares.
- */
 const claimFolder = async (backend: Backend, libraryId: string): Promise<void> => {
   const library = await backend.run(async (ctx) => {
     const id = ctx.db.normalizeId("libraries", libraryId);
@@ -197,12 +187,10 @@ export const seedLibrary = async (
     (_, index) => `${options.name}/${String(index + 1).padStart(4, "0")}.flac`,
   );
 
-  // Batches of 100, as the media service sends them.
   const batches = Array.from({ length: Math.ceil(paths.length / 100) }, (_, batch) =>
     paths.slice(batch * 100, batch * 100 + 100),
   );
 
-  // One batch after another: each one updates the same album and library counters.
   await batches.reduce(async (previous, batch) => {
     await previous;
     await upsertFiles(

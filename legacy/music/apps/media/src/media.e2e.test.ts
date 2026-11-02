@@ -1,11 +1,3 @@
-/**
- * End-to-end test against a real Convex deployment. Runs only when `MEDIA_E2E_CONVEX_URL`,
- * `MEDIA_E2E_SERVICE_SECRET`, and `MEDIA_E2E_SIGNING_KEY` are set, for example from the values in
- * `apps/media/.env.local` written by `scripts/dev-backend.sh`. It signs in as
- * `MEDIA_E2E_EMAIL` / `MEDIA_E2E_PASSWORD` (signing up when the account does not exist, which
- * makes it the admin on a fresh deployment), adds the fixture library, lets the real job worker
- * scan it, and plays every album's art and first track in every profile through signed URLs.
- */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
@@ -65,7 +57,6 @@ const signedInClient = Effect.fn("E2E.signIn")(function* (url: string) {
 
 const PROFILES = ["original", "aac-320", "aac-128", "fmp4-flac", "fmp4-aac"] as const;
 
-/** The codec each transcoding profile delivers. */
 const PROFILE_CODECS = {
   "aac-320": "aac",
   "aac-128": "aac",
@@ -158,7 +149,6 @@ describe.skipIf(convexUrl === undefined || serviceSecret === undefined || signin
 
             if (first === undefined) expect.unreachable(`${album.title} has no tracks`);
 
-            // A download of the track: 503 while its file is prepared, then the finished MP4.
             const signed = yield* call(() =>
               client.read("stream.url", { trackId: first.id, profile: "aac-320" }),
             );
@@ -281,7 +271,6 @@ describe.skipIf(convexUrl === undefined || serviceSecret === undefined || signin
           expect(owner.job.status).toBe("done");
           expect(owner.library?.trackCount).toBe(10);
 
-          // A link to the folder around it: a different path, the same files.
           yield* Files.makeSymlink(join(root, ".."), join(links, "around"));
           const alias = yield* scan(`Alias${suffix}`, join(links, "around"));
 
@@ -289,13 +278,11 @@ describe.skipIf(convexUrl === undefined || serviceSecret === undefined || signin
           expect(alias.job.error).toMatch(/another library's folder/u);
           expect(alias.library?.trackCount).toBe(0);
 
-          // /proc/self/root names the whole file system again; such a folder is never added.
           const proc = yield* call(() =>
             client
               .run("libraries.create", { name: `Proc${suffix}`, path: `/proc/self/root${root}` })
               .then(
                 () => "added",
-                // The Convex client rejects with a ConvexError, which is an Error.
                 (error: Error) => error.message,
               ),
           );

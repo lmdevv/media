@@ -1,14 +1,3 @@
-/**
- * Claims a library's real folder before a scan reads it. A link or a bind mount can give one
- * folder two names (`/proc/self/root/srv/music` is `/srv/music`), so Convex's check of the path a
- * library was added with is not enough to keep two libraries off the same files. The service
- * resolves the folder through every link, refuses one outside the allowed roots (`MUSIC_ROOTS`)
- * or in /proc, /sys, or /dev, and reports it to Convex (`media:claimRoot`) with the identity of
- * the folder and each one above it, which a bind mount can't change. Convex refuses a folder that
- * overlaps another library's by path or by identity. Nothing is indexed unless the claim
- * succeeds, and a refusal stops the library streaming; it runs again at every scan, since a
- * link's target can change.
- */
 import type { LibraryId } from "@music/commands/ids";
 import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
 import { Effect, FiberMap, Layer, Ref, Schema, Semaphore, Stream } from "effect";
@@ -21,7 +10,6 @@ import { MediaConfig } from "./media-config.ts";
 import { fsPathOf, type Mount } from "./mounts.ts";
 import * as NodeFiles from "./platform/node-files.ts";
 
-/** The library's folder may not be scanned. The message is safe to show on the job. */
 class RootRefused extends Schema.TaggedError<RootRefused>()("RootRefused", {
   libraryId: Schema.String,
   reason: Schema.String,
@@ -55,7 +43,6 @@ export const claimRoot = Effect.fn("RootClaim.claim")(function* (
   const backend = yield* MediaBackend;
   const { musicRoots } = yield* MediaConfig;
 
-  // Refused here, before Convex sees it: drop any earlier claim too, so it stops streaming.
   const refuse = (reason: string) =>
     backend
       .refuseRoot(library.id)
@@ -68,7 +55,6 @@ export const claimRoot = Effect.fn("RootClaim.claim")(function* (
   if (isSystemFolder(real)) return yield* refuse(SYSTEM_FOLDER_MESSAGE);
 
   if (musicRoots !== null) {
-    // The allowed roots resolve too, so a root that is itself a link still allows its target.
     const roots = yield* Effect.forEach(musicRoots, (root) =>
       Files.realPath(root).pipe(Effect.orElseSucceed(() => root)),
     );
@@ -90,13 +76,10 @@ export const claimRoot = Effect.fn("RootClaim.claim")(function* (
   return real;
 });
 
-/** Libraries claimed at once, side by side, when many need it (after an upgrade, say). */
 const CLAIM_CONCURRENCY = 4;
 
-/** Backoff for a claim that failed but wasn't refused: from half a second, capped at a minute. */
 const RETRY_SCHEDULE = cappedBackoff("500 millis", "1 minute");
 
-/** A claim still failing is a warning on its first failure and every this many after. */
 const WARN_EVERY = 10;
 
 const claimKey = (library: LibraryFolder): string => `${library.id}:${library.path}`;
@@ -113,18 +96,13 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
   Effect.gen(function* () {
     const backend = yield* MediaBackend;
     const config = yield* MediaConfig;
-    // Folders whose claim succeeded or was refused; only those are not tried again.
     const settled = yield* Ref.make<ReadonlySet<string>>(new Set());
     const claims = yield* FiberMap.make<string>();
     const listed = yield* Ref.make<ReadonlySet<string>>(new Set());
     const permits = yield* Semaphore.make(CLAIM_CONCURRENCY);
 
-    // Folder identities from another boot mean nothing now; a library claimed in one is
-    // claimed again, which refreshes them.
     const bootId = yield* Files.readBootId;
 
-    // A claim that failed for another reason (the folder not mounted yet, Convex unreachable)
-    // is tried again with backoff until it succeeds or is refused.
     const claimOnce = (library: LibraryFolder, host: Host) =>
       Effect.gen(function* () {
         const failures = yield* Ref.make(0);
@@ -158,7 +136,6 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
         Effect.provideService(MediaConfig, config),
       );
 
-    /** Whether a library needs a claim: none yet, or one whose identities are from another boot. */
     const unclaimed = (library: LibraryFolder): boolean =>
       !library.claimed || library.bootId !== bootId;
 
@@ -168,7 +145,6 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
       const done = yield* Ref.get(settled);
       const wanted = new Map(libraries.map((library) => [claimKey(library), library]));
 
-      // A library removed, or moved to another folder, stops its claim in flight.
       const previous = yield* Ref.getAndSet(listed, new Set(wanted.keys()));
 
       yield* Effect.forEach(
@@ -183,7 +159,6 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
 
       if (fresh.length === 0) return;
 
-      // One read of the mount table for the whole batch.
       const host: Host = { mounts: yield* Files.readMounts, bootId };
 
       yield* Effect.forEach(

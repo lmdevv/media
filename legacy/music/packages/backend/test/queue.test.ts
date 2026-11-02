@@ -1,7 +1,3 @@
-/**
- * Queue entries with their own IDs, through the real dispatcher: moves, edits from two devices at
- * once, queues stored before entries had IDs, and autoplay.
- */
 import { DeviceId, QueueItemId } from "@music/commands/ids";
 import type { TrackId } from "@music/commands/ids";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,7 +24,6 @@ const setup = async () => {
   const admin = await signUp(backend, "admin");
   await seedLibrary(backend, admin, { name: "Rock", count: 5 });
   await admin.music.run("devices.heartbeat", { deviceId: DEVICE, name: "Laptop", kind: "web" });
-  // These tests are about the queue people build; autoplay has its own.
   await admin.music.run("queue.autoplay", { on: false });
 
   return { backend, admin, rock: trackIds(await allTracks(admin), "Rock") };
@@ -85,7 +80,6 @@ describe("moving entries", () => {
 
     await admin.music.run("queue.move", { itemId: await itemAt(admin, 1) });
     expect(await songs(admin)).toEqual([1, 0, 4, 2, 3].map((position) => pick(rock, position)));
-    // The playing entry moved to the top; it still plays.
     expect(await current(admin)).toBe(pick(rock, 1));
     expect((await admin.music.read("queue.list", {})).index).toBe(0);
   });
@@ -111,7 +105,6 @@ describe("moving entries", () => {
     await admin.music.run("playback.shuffle", { on: true });
     const moved = pick(await songs(admin), 4);
 
-    // "Play this right after the current song", made in the shuffled order.
     await admin.music.run("queue.move", {
       itemId: await itemAt(admin, 4),
       afterItemId: await itemAt(admin, 0),
@@ -131,11 +124,9 @@ describe("two devices editing the queue at once", () => {
     const { admin, rock } = await setup();
     await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
 
-    // The phone shows the queue and the user picks the fourth song to remove...
     const phoneSaw = await entries(admin);
     const target = pick(phoneSaw, 3);
 
-    // ...while the laptop adds a song to play next, shifting every index after the first.
     await admin.music.run("queue.add", { trackIds: [pick(rock, 4)], next: true });
     await admin.music.run("queue.remove", { itemId: target.itemId });
 
@@ -193,7 +184,6 @@ describe("two devices editing the queue at once", () => {
   });
 });
 
-/** A queue row as versions before entry IDs stored it: song IDs only. */
 const legacyRow = async (backend: Backend, admin: User, rock: ReadonlyArray<TrackId>) => {
   await backend.run(async (ctx) => {
     const ids = rock.flatMap((id) => {
@@ -238,11 +228,9 @@ describe("a queue stored before entries had IDs", () => {
     ]);
     expect((await entries(admin)).map((entry) => entry.itemId)).toEqual(before);
 
-    // The ID a client read before the migration still names the same entry.
     await admin.music.run("queue.remove", { itemId: QueueItemId.make("3") });
     expect(await songs(admin)).toEqual([0, 1, 3, 4].map((position) => pick(rock, position)));
 
-    // The old unshuffled order still applies.
     await admin.music.run("playback.shuffle", { on: false });
     expect(await songs(admin)).toEqual([4, 3, 1, 0].map((position) => pick(rock, position)));
   });
@@ -266,11 +254,6 @@ const file = (path: string, artist: string, album: string, genre: string, year: 
   year,
 });
 
-/**
- * A library where "Seed" has two songs on a rock album from 1999 and one on a jazz album from
- * 2010, "Genre Mate" shares the rock genre, "Era Mate" was released a year later in another
- * genre, and "Stranger" shares nothing.
- */
 const catalog = async () => {
   const backend = makeBackend();
   const admin = await signUp(backend, "admin");
@@ -331,7 +314,6 @@ describe("autoplay", () => {
     await admin.music.run("playback.next", {});
     expect((await autoplayTitles(admin)).length).toBeGreaterThan(0);
 
-    // A song added "to the end" plays before autoplay's.
     await admin.music.run("queue.add", { trackIds: [id("seed-2")] });
     const queue = await entries(admin);
     const firstAutoplay = queue.findIndex((entry) => entry.autoplay);
@@ -344,7 +326,6 @@ describe("autoplay", () => {
 
     await admin.music.run("queue.autoplay", { on: false });
     await admin.music.run("playback.play", { trackIds: [id("seed-1")], deviceId: DEVICE });
-    // seed-2 was played a moment ago.
     await admin.music.run("playback.play", { trackIds: [id("seed-2")], deviceId: DEVICE });
     await admin.music.run("playback.report", {
       deviceId: DEVICE,
@@ -380,8 +361,6 @@ describe("autoplay", () => {
   it("has a song ready after the current one however the queue was changed by hand", async () => {
     const { admin, id } = await catalog();
 
-    // Added to an empty queue: the player can preload what comes after it. The result still
-    // says `ok`, as clients from before entry IDs read it.
     expect(await admin.music.run("queue.add", { trackIds: [id("seed-1")] })).toMatchObject({
       ok: true,
     });
@@ -390,7 +369,6 @@ describe("autoplay", () => {
     await admin.music.run("queue.clear", {});
     expect((await autoplayTitles(admin)).length).toBeGreaterThan(0);
 
-    // Removing the songs after the current one leaves it last.
     await admin.music.run("playback.play", {
       trackIds: [id("seed-1"), id("stranger-1")],
       deviceId: DEVICE,
@@ -404,7 +382,6 @@ describe("autoplay", () => {
     const backend = makeBackend();
     const admin = await signUp(backend, "admin");
 
-    // 24 libraries with nothing alike come first, then the seed's.
     await Array.from({ length: 24 }, (_, index) => index).reduce(async (previous, index) => {
       await previous;
       await seedLibrary(backend, admin, { name: `Empty${String(index)}`, count: 0 });
@@ -458,7 +435,6 @@ describe("autoplay", () => {
       visibility: "private",
     });
 
-    // More same-genre albums than one library step reads, all in a library the member can't read.
     await upsertFiles(
       backend,
       libraryId,
@@ -467,7 +443,6 @@ describe("autoplay", () => {
       ),
     );
     await member.music.run("devices.heartbeat", { deviceId: DEVICE, name: "Phone", kind: "web" });
-    // A rock song whose artist has nothing else, so autoplay reaches the genre step.
     await member.music.run("playback.play", { trackIds: [id("genre-1")], deviceId: DEVICE });
 
     const titles = await autoplayTitles(member);

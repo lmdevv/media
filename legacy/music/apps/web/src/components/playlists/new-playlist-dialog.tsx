@@ -51,8 +51,6 @@ function NewPlaylistForm({
 
   const [seedShown, setSeedShown] = useState(seed);
 
-  // New songs to start with (the dialog reopened from another selection) pick them again, set
-  // while rendering rather than in an effect that rendered the old choice first.
   if (seed !== seedShown) {
     setSeedShown(seed);
     setStartWith(seed.length > 0 ? "selection" : "nothing");

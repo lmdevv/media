@@ -30,7 +30,6 @@ const DAWN = "Aurora Tones/First Light/01 Dawn.flac";
 
 const encoder = new TextEncoder();
 
-/** `lines` lines of LRC, half a second apart, each about `width` characters long. */
 const lrc = (lines: number, width = 20): string =>
   Array.from({ length: lines }, (_, index) => {
     const ms = index * 500;
@@ -58,11 +57,9 @@ const setup = Effect.gen(function* () {
       Effect.map((tracks) => tracks.find((track) => track.scanned.path === path)),
     );
 
-  /** The lyric sets stored for the song at `path`. */
   const lyricsAt = (path: string) =>
     trackAt(path).pipe(Effect.map((track) => track?.scanned.lyrics ?? []));
 
-  /** What `lyrics.get` would answer for the song at `path` from its own lyrics. */
   const shownAt = (path: string) =>
     lyricsAt(path).pipe(
       Effect.map((sets) => resolveLyrics(sets, LyricsLookup.None(), { remoteLookups: "off" })),
@@ -73,7 +70,6 @@ const setup = Effect.gen(function* () {
 
   const write = (path: string, text: string) => writeBytes(path, encoder.encode(text));
 
-  /** The writes `run` made, as operation and paths. */
   const writesOf = <A, E>(run: Effect.Effect<A, E>) =>
     Effect.gen(function* () {
       const before = (yield* control.writes).length;
@@ -85,11 +81,9 @@ const setup = Effect.gen(function* () {
   return { ...library, control, scan, trackAt, lyricsAt, shownAt, write, writeBytes, writesOf };
 });
 
-/** A song's lyric file under its own name and a German one. */
 const twoSidecarsOf = (song: string): ReadonlyArray<string> =>
   [".lrc", ".de.lrc"].map((name) => song.replace(/\.\w+$/u, name));
 
-/** A one-second FLAC at `path` whose Vorbis `LYRICS` tag holds `lyrics`. */
 const taggedFlac = (path: string, lyrics: string) =>
   runTool("ffmpeg", [
     "-v",
@@ -201,7 +195,6 @@ describe("scanLibrary lyrics", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* scan;
         const before = yield* control.tracks;
 
-        // Tracks a scan stored before it read lyrics have no lyrics reader.
         yield* control.forgetLyricsReader;
         const upgrade = yield* writesOf(scan);
 
@@ -257,7 +250,6 @@ describe("scanLibrary lyrics", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           Uint8Array.of(0, 1, 2, 0, 255, 0),
         );
         yield* write("Aurora Tones/Night Drive/02 Overpass.ttml", "<tt><body><div><p>open");
-        // Past the 256 KiB a lyric file may hold.
         yield* write("Aurora Tones/Night Drive/03 Doppelgänger.lrc", lrc(2000, 150));
         yield* write("Aurora Tones/First Light/01 Dawn.lrc", "[00:01.00]Readable");
 
@@ -267,7 +259,6 @@ describe("scanLibrary lyrics", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(yield* lyricsAt(DOPPELGANGER)).toEqual([]);
         expect(yield* lyricsAt(DAWN)).toMatchObject([{ body: { lines: [{ text: "Readable" }] } }]);
 
-        // An unreadable lyric file is read again only once it changes.
         expect(yield* scan).toMatchObject({ updated: 0 });
       }),
     ));
@@ -319,7 +310,6 @@ describe("scanLibrary lyrics", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const large = lrc(2000, 100);
         const songs = albums.flatMap((album) => album.tracks.map((track) => track.path));
 
-        // About 700 KiB of lyric sets for each song.
         for (const song of songs) {
           for (const sidecar of twoSidecarsOf(song)) yield* write(sidecar, large);
         }
@@ -333,7 +323,6 @@ describe("scanLibrary lyrics", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           ]),
         );
 
-        // Half the songs lose only their lyric files; the others change their audio too.
         for (const [index, song] of songs.entries()) {
           for (const sidecar of twoSidecarsOf(song)) yield* Files.removePath(join(root, sidecar));
 
@@ -369,10 +358,8 @@ describe("scanLibrary lyrics", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const large = lrc(2000, 100);
         const songs = albums.flatMap((album) => album.tracks.map((track) => track.path));
 
-        // About 350 KiB of lyric sets each: seven of them are more than one write may send.
         for (const song of songs.slice(0, 7)) yield* write(song.replace(/\.\w+$/u, ".lrc"), large);
 
-        // Three such files beside one song are more than Convex keeps for one.
         const crowded = songs[7] ?? "";
 
         for (const name of [".lrc", ".de.lrc", ".fr.lrc"]) {

@@ -23,7 +23,6 @@ export const Route = createFileRoute("/sign-in")({
 
 const host = window.location.host;
 
-/** Only same-app paths are followed after sign-in. */
 const safeRedirect = (target: string | undefined): string =>
   target !== undefined && target.startsWith("/") && !target.startsWith("//") ? target : "/";
 
@@ -41,13 +40,11 @@ function SignInPage() {
   return <SignInForm />;
 }
 
-/** What the sign-in form says after a failure, and whether it blames the credentials. */
 interface Failed {
   readonly message: string;
   readonly credentials: boolean;
 }
 
-/** Messages for failures the server did not explain itself (see `signInFailure`). */
 const describeSignInFailure = (failure: SignInFailure): string =>
   Match.value(failure).pipe(
     Match.when("credentials", () => "That email and password don't match."),
@@ -56,11 +53,6 @@ const describeSignInFailure = (failure: SignInFailure): string =>
     Match.exhaustive,
   );
 
-/**
- * Reads a failed sign-in: the password provider's own refusals carry a code and a message meant
- * for people (wrong credentials, too many attempts, a suspended account); anything else is
- * classified by `signInFailure`.
- */
 const failedFrom = (cause: Error | null): Failed => {
   const failure = cause === null ? null : commandFailure(cause);
 
@@ -78,8 +70,6 @@ function SignInForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
-  // The server explains refusals it means (a suspended account, too many attempts); anything
-  // else is classified here, and wrong passwords stay generic.
   const [failed, setFailed] = useState<Failed | null>(null);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {

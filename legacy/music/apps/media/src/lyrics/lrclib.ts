@@ -1,4 +1,3 @@
-/** Reads an LRCLIB lyrics record (https://lrclib.net/docs) through the same parsers as files. */
 import {
   type LrclibLyricSet,
   LrclibRecordId,
@@ -22,7 +21,6 @@ const LrclibRecord = Schema.Struct({
   instrumental: Schema.Boolean,
   plainLyrics: Schema.NullOr(Schema.String),
   syncedLyrics: Schema.NullOr(Schema.String),
-  // Newer than the rest of the record: an LRCLIB that predates it leaves the key out.
   lyricsfile: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
@@ -46,7 +44,6 @@ export const LrclibLyrics = Data.taggedEnum<LrclibLyrics>();
 
 type Candidate = Arr.NonEmptyReadonlyArray<ParsedLyricSet>;
 
-/** One of the record's lyric versions, read; null when the record leaves it blank. */
 const candidate = (
   text: string | null | undefined,
   parse: (text: string) => Result.Result<Candidate, LyricsParseError>,
@@ -91,8 +88,6 @@ const readRecord = (json: string): Result.Result<LrclibLyrics, LyricsParseError>
         );
       }
 
-      // Text without lyrics (only ID tags, or a Lyricsfile marked instrumental) is a miss. Text
-      // that cannot be read is a failure, so a caller never caches it as one.
       const [unreadable] = read.flatMap((version) =>
         Result.isFailure(version) && version.failure.reason !== "empty" ? [version.failure] : [],
       );

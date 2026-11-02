@@ -54,8 +54,6 @@ export function PhoneNowPlaying({ track, lyrics, view, onView }: PhoneNowPlaying
     <div
       className={cn(
         "flex flex-col px-5 pt-safe-top-sm pb-safe-bottom-lg",
-        // The queue and the lyrics scroll inside the screen so the bottom row stays pinned (05 ·
-        // 04c, 04b).
         view === "player" ? "min-h-full" : "h-full",
       )}
       style={background}
@@ -101,7 +99,6 @@ export function PhoneNowPlaying({ track, lyrics, view, onView }: PhoneNowPlaying
   );
 }
 
-/** The full player (05 · 04): the cover, the song, the seek bar, the transport, and volume. */
 function PhonePlayer({ track }: { readonly track: Track }) {
   const remote = useIsRemote();
 
@@ -163,7 +160,6 @@ function PhonePlayer({ track }: { readonly track: Track }) {
   );
 }
 
-/** The queue (05 · 04c): shuffle and repeat, what plays next, and the transport under it. */
 function PhoneQueue({ track }: { readonly track: Track }) {
   const player = usePlayer();
 
@@ -192,10 +188,6 @@ function PhoneQueue({ track }: { readonly track: Track }) {
   );
 }
 
-/**
- * The playing song's art, title, and artist above the queue and the lyrics, with its menu; Paper
- * shows the like button too above the lyrics (05 · 04b).
- */
 function TrackHeader({ track, showLike }: { readonly track: Track; readonly showLike: boolean }) {
   return (
     <div className="flex items-center gap-3 px-2">
@@ -224,7 +216,6 @@ function TrackHeader({ track, showLike }: { readonly track: Track; readonly show
   );
 }
 
-/** Opens and closes the lyrics; dimmed for a song without lyrics unless they are open. */
 function LyricsButton({
   offer,
   open,
@@ -257,7 +248,6 @@ function LyricsButton({
   );
 }
 
-/** The AirPlay-style button; it opens the shared "Play on" sheet (`DeviceSheet`). */
 function PlayOnButton({
   deviceName,
   showName,

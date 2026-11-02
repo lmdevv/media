@@ -1,4 +1,3 @@
-/** Opening a place from the iPad's frame, which sits outside the stacks it drives. */
 import { router, useNavigationContainerRef } from "expo-router";
 import { StackActions } from "expo-router/react-navigation";
 import { useCallback } from "react";

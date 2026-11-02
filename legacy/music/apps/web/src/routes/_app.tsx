@@ -18,8 +18,6 @@ function AppLayout() {
   if (!status.hasUsers) return <Redirect href="/setup" />;
 
   if (!isAuthenticated) {
-    // While the sign-in navigation is pending this layout still renders with the new location;
-    // only the first, in-app location becomes the redirect target.
     if (location.pathname === "/sign-in") return <div className="min-h-dvh bg-bg" />;
 
     return <Redirect href={`/sign-in?redirect=${encodeURIComponent(location.href)}`} />;

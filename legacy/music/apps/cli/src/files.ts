@@ -1,10 +1,3 @@
-/**
- * File access for the config directory.
- *
- * Effect's `FileSystem` service is marked `@stability unstable`, and the repo's lint rejects
- * unstable APIs, so this adapter owns `node:fs` directly and imports nothing from Effect.
- * `config.ts` wraps every call and turns rejections into typed `ConfigFileError`s.
- */
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -34,7 +27,6 @@ export const writePrivateFile = async (path: string, text: string): Promise<void
   const temporary = `${path}.${String(process.pid)}.tmp`;
 
   await writeFile(temporary, text, { encoding: "utf8", mode: 0o600 });
-  // The process umask can widen the creation mode; set it explicitly.
   await chmod(temporary, 0o600);
   await rename(temporary, path);
 };

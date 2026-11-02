@@ -44,7 +44,6 @@ export interface DevicesState {
 export const useDevices = (): DevicesState => {
   const player = usePlayer();
 
-  // Naming this browser keeps it listed even before its first heartbeat after a long sleep.
   const devices = useRead(
     "devices.list",
     player.deviceId === null ? {} : { deviceId: player.deviceId },
@@ -78,8 +77,6 @@ export const useDevices = (): DevicesState => {
 
     setPending(target);
 
-    // A refused move clears the spinner at once and says so; one that landed clears it when the
-    // session shows the new device.
     const move = async () => {
       const landed = await (target === "here" ? player.playHere() : player.transferTo(target));
 
@@ -170,8 +167,6 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
   );
 
   return (
-    // Closed browsers stay listed as idle for a day, so the list scrolls instead of outgrowing
-    // the screen.
     <div
       role="menu"
       aria-label="Play on"

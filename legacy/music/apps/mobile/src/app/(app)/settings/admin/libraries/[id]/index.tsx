@@ -1,4 +1,3 @@
-/** F15 · Library. */
 import { LibraryPage } from "@/components/admin/library";
 import { useLibraryParam } from "@/components/admin/params";
 import { RequireAccess } from "@/components/settings/access";

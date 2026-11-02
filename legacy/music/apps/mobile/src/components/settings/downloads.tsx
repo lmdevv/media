@@ -1,8 +1,3 @@
-/**
- * D16 · Downloads settings: the quality new downloads use, the space downloads take on this iPhone,
- * and Remove all downloads (D17). Paper's "Download over cellular" switch is left out: the app
- * can't tell cellular from Wi-Fi yet.
- */
 import { router } from "expo-router";
 import { Check, Info, Music, Trash2 } from "lucide-react-native";
 import { Pressable, View } from "react-native";
@@ -20,7 +15,6 @@ import { storageLine } from "@/lib/downloaded";
 import { formatBytes } from "@/lib/format";
 import { DEVICE_FAMILY } from "@/lib/this-device";
 
-/** What each quality downloads, with Paper's rough size of a song. */
 const QUALITIES = [
   { value: "lossless", title: "Lossless", detail: "Original file · ~35 MB a song" },
   { value: "high", title: "High", detail: "AAC · 320 kbps · ~10 MB a song" },
@@ -33,7 +27,6 @@ const QUALITIES = [
 /** Quality, storage, and removing everything. A choice applies as it is made. */
 export function DownloadSettings() {
   const { quality, setQuality, usage, downloads } = useDownloadSettings();
-  // A download still waiting for its first song holds no songs, but Remove all still removes it.
   const empty = downloads === 0 && usage.tracks === 0;
 
   return (

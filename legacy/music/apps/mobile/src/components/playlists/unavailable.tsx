@@ -1,4 +1,3 @@
-/** A playlist sheet's G10: the playlist went away, or access ended, while the sheet was open. */
 import { SheetLayout } from "@/components/ui/sheet-layout";
 import type { Unavailable } from "@/lib/detail-state";
 

@@ -11,14 +11,12 @@ import { describe, expect, it } from "vitest";
 import { commitVault, loadVault, prepareVault, readLyrics } from "./vault-rows";
 import type { VaultDatabase } from "./vault-rows";
 
-/** Rows as expo-sqlite returns them: the vault stores only text, integers, and nulls. */
 const decodeRows = Schema.decodeUnknownSync(
   Schema.Array(
     Schema.Record(Schema.String, Schema.NullOr(Schema.Union([Schema.String, Schema.Finite]))),
   ),
 );
 
-/** A real SQLite database in memory, behind the calls expo-sqlite answers. */
 const sqlite = () => {
   const raw = new DatabaseSync(":memory:");
 
@@ -33,7 +31,6 @@ const sqlite = () => {
   return { raw, db };
 };
 
-/** The tables of a vault made before downloads kept lyrics. */
 const BEFORE_LYRICS = `
 CREATE TABLE copies (
   track_id TEXT PRIMARY KEY NOT NULL,
@@ -101,7 +98,6 @@ const LYRICS: NewLyrics = {
   bytes: 321,
 };
 
-/** How the vault lists `kept`: without the lyrics themselves. */
 const listed = ({ trackId, rev, bytes }: NewLyrics) =>
   new Map([[trackId, { trackId, rev, bytes }]]);
 

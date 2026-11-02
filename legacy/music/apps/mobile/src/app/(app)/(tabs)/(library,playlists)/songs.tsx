@@ -1,8 +1,3 @@
-/**
- * A05 · Songs: every song in the library, by title or by artist, with Play and Shuffle for all of
- * them. A row plays the list from that song; its ellipsis opens Song actions (A11), and the bar's
- * ellipsis opens Sort and view (A12). Pages load as the list nears its end.
- */
 import { useRead, useReadOnce } from "@music/sdk/react";
 import { router } from "expo-router";
 import { Ellipsis, Music } from "lucide-react-native";
@@ -23,10 +18,8 @@ import { countOf } from "@/lib/format";
 import { readPages } from "@/lib/page-chain";
 import { useNowPlaying } from "@/player";
 
-/** Songs per page; one page holds a small library whole. */
 const PAGE_SIZE = 100;
 
-/** The most songs one queue takes, as `playback.play` allows. */
 const QUEUE_LIMIT = 2000;
 
 export default function Songs() {
@@ -42,7 +35,6 @@ export default function Songs() {
   const trackIds = tracks.map((track) => track.id);
   const done = pages.status.kind === "done";
 
-  // Play and Shuffle take the whole library, so read the pages not scrolled to yet.
   const playLibrary = async (shuffle: boolean) => {
     if (done) {
       playAll(trackIds, shuffle);

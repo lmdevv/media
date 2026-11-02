@@ -1,10 +1,3 @@
-/**
- * Reading secrets from the process's standard input, for `music login`.
- *
- * Like `files.ts`, this adapter owns the Node stream APIs and imports nothing from Effect;
- * `input.ts` wraps it in the `Input` service and types its failures.
- */
-
 /** Whether stdin is an interactive terminal, where a prompt can ask for the key. */
 export const stdinIsTerminal = (): boolean => process.stdin.isTTY;
 
@@ -44,7 +37,6 @@ export const promptHidden = (question: string): Promise<string> =>
       input.off("close", onEnd);
       input.off("error", onError);
 
-      // A hung-up terminal is no longer a TTY, and setRawMode would throw.
       if (input.isTTY) input.setRawMode(false);
 
       input.pause();

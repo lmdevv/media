@@ -1,7 +1,3 @@
-/**
- * Checks signed media URLs. Convex signs `exp` and `sig` for a resource; the media service only
- * verifies them and never decides access itself.
- */
 import { type SignedResource, verifyResource } from "@music/commands/signed-url";
 import { Clock, Effect, Redacted } from "effect";
 

@@ -1,12 +1,3 @@
-/**
- * Jams: a live listening session shared from its host's playback. The Jam *is* the host's session
- * and queue; people who join see and steer that playback (within the host's settings) instead of
- * their own, which stays as it was and comes back when they leave.
- *
- * Every playback command resolves a `Playback` first: whose session and queue it acts on (the
- * owner), who is acting, and the Jam around them, if any. The rules for what people in a Jam may
- * do live in `@music/commands/permissions` (`canControlJam`, `canEditJamEntry`, `jamAddsLeft`).
- */
 import type { JamEndReason, JamJoinPolicy, JamSettings } from "@music/commands/models";
 import { canControlJam, canEditJamEntry, jamAddsLeft } from "@music/commands/permissions";
 
@@ -42,10 +33,6 @@ export const HOST_OFFLINE_MS = 30 * 60 * 1000;
 /** A Jam ends after nothing has played for this long. */
 export const IDLE_MS = 4 * 60 * 60 * 1000;
 
-/**
- * How often a host's commands refresh `jams.hostActiveAt`: often enough for the 30-minute
- * offline rule, rarely enough that a host's heartbeats don't wake every member's subscription.
- */
 const HOST_ACTIVITY_STEP_MS = 60 * 1000;
 
 /** Guest accounts one Jam's link makes at most, while they last (they go when the Jam ends). */
@@ -208,7 +195,6 @@ export const resolvePlayback = async (ctx: ReadCtx, viewer: Viewer): Promise<Pla
   if (joined === null) return { kind: "own", owner: viewer, actor: viewer };
   const host = await ctx.db.get(joined.jam.hostId);
 
-  // A host whose account is gone takes the Jam with them; the cron ends it.
   if (host === null) return { kind: "own", owner: viewer, actor: viewer };
 
   return {
@@ -238,10 +224,8 @@ export const inJamQueue = async (
 
   if (entries.length === 0) return false;
 
-  // Someone in the Jam chose it (the host, or a person who can read it): it plays for all.
   if (entries.some((item) => !item.autoplay)) return true;
 
-  // Autoplay chose it: only from a library the Jam may share, for entries from before that rule.
   const library = await ctx.db.get(track.libraryId);
 
   return library !== null && jamShareable(library, playback.owner.id);

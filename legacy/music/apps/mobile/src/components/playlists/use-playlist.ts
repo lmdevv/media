@@ -1,4 +1,3 @@
-/** One playlist, kept live; a playlist the viewer can't open is a state (G10), never a throw. */
 import type { PlaylistId } from "@music/commands/ids";
 import type { PlaylistDetail } from "@music/commands/models";
 import { useReadSettled } from "@music/sdk/react";

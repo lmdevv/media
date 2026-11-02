@@ -1,8 +1,3 @@
-/**
- * The lyrics a song's own files hold (`localLyrics`), as the media service reads them during
- * scans. Sets are decoded with the shared `LocalLyricSet` schema when written and when read,
- * since the table's validator checks their shape but not the schema's refinements.
- */
 import { LocalLyricSet } from "@music/commands/lyrics";
 import type { Infer } from "convex/values";
 import { Predicate, Result, Schema } from "effect";

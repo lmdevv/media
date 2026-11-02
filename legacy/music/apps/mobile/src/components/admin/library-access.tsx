@@ -1,9 +1,3 @@
-/**
- * F16 · Library access: the owner and the people added to a library. Its owner (`full` control)
- * adds people from an inline list and takes them off; the server's owner standing in (`narrow`)
- * only takes them off. Paper draws a per-person page for revoking; the phone puts Remove on the
- * row instead.
- */
 import type { LibraryId, UserId } from "@music/commands/ids";
 import type { Library, LibraryVisibility, User } from "@music/commands/models";
 import { roleLabel } from "@music/commands/permissions";
@@ -60,7 +54,6 @@ export function LibraryAccessPage({
   return <AccessList me={me} library={library} />;
 }
 
-/** What the callout under the nav bar says each visibility lets in. */
 const REACH: Readonly<Record<LibraryVisibility, (owner: string) => string>> = {
   shared: () => "Shared · Every member can listen, and the guests below.",
   restricted: () => "Restricted · People below can listen to this library.",

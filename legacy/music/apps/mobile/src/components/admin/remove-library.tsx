@@ -1,4 +1,3 @@
-/** F24 · Remove a library from the index; its files stay on the server. */
 import type { LibraryId } from "@music/commands/ids";
 import { useRun } from "@music/sdk/react";
 import { router } from "expo-router";

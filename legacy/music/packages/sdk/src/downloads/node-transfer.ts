@@ -1,4 +1,3 @@
-/** Test support: HTTP over Node's fetch, writing bodies to files, as a desktop downloader would. */
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 

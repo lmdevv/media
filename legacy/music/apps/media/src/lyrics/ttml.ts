@@ -1,10 +1,3 @@
-/**
- * TTML lyrics as Apple Music and the tools that export it write them: one `<p>` per line, timed
- * `<span>`s for words or syllables, `ttm:agent` for the singer, and translations and
- * transliterations keyed to lines by `itunes:key`. Times resolve as TTML defines them, against
- * the parent's start, or in a `seq` container the previous sibling's end. Apple's files, which
- * declare the iTunes namespace, are the exception: they give every element its own song time.
- */
 import {
   type Lang,
   type LyricBody,
@@ -29,7 +22,6 @@ const TEXT_NODE = 3;
 
 const CDATA_NODE = 4;
 
-/** A DTD can declare entities, which is how XML external entity attacks start. TTML needs none. */
 const DTD = /<!(?:DOCTYPE|ENTITY)/iu;
 
 const OFFSET_TIME = /^(\d+(?:\.\d+)?)(h|ms|m|s|f|t)$/u;
@@ -53,10 +45,6 @@ const OFFSET_UNIT_MS: ReadonlyMap<string, (base: TimeBase) => number> = new Map(
   ["t", (base: TimeBase) => 1000 / base.tickRate],
 ]);
 
-/**
- * A TTML time expression in ms: offset time (`12.3s`, `450ms`, `30f`) or clock time
- * (`hh:mm:ss.fff`, `hh:mm:ss:frames`), plus the shorter `mm:ss.fff` and bare seconds Apple writes.
- */
 const parseTime = (value: string | null, base: TimeBase): number | null => {
   if (value === null) return null;
   const trimmed = value.trim();
@@ -91,11 +79,6 @@ const elementsNamed = (root: Element, name: string): ReadonlyArray<Element> =>
 
 const children = (node: Node): ReadonlyArray<Node> => Array.from(node.childNodes);
 
-/**
- * An element's interval in song time. `begin` is null when nothing times the element: it names
- * no `begin` of its own and is not in a `seq` container. `start` is the time its children
- * resolve against, which an untimed element inherits from its parent.
- */
 interface Interval {
   readonly begin: number | null;
   readonly start: number | null;
@@ -104,10 +87,6 @@ interface Interval {
 
 const DOCUMENT_START: Interval = { begin: null, start: 0, end: null };
 
-/**
- * Resolves `begin`, `end`, and `dur` against `reference`, the time the element's container
- * starts it from. With both `end` and `dur`, the earlier end wins.
- */
 const intervalOf = (
   element: Element,
   reference: number | null,
@@ -137,11 +116,9 @@ const intervalOf = (
 
 interface TimedNode {
   readonly node: Node;
-  /** The node's interval when it is an element; otherwise its parent's. */
   readonly interval: Interval;
 }
 
-/** A node's children with their intervals, each element resolved against its container. */
 const timedChildren = (
   parent: Node,
   interval: Interval,
@@ -165,14 +142,12 @@ const timedChildren = (
   return timed;
 };
 
-/** A run of a line's text, timed when it is a span with its own `begin`. */
 interface Piece {
   readonly text: string;
   readonly startMs: number | null;
   readonly endMs: number | null;
 }
 
-/** Background vocals, which Apple marks on a span inside the line they echo. */
 const isBackground = (element: Element): boolean =>
   attribute(element, TTM_NS, "role", "ttm") === "x-bg";
 
@@ -180,7 +155,6 @@ const piecesOf = (node: Node, interval: Interval, base: TimeBase): ReadonlyArray
   timedChildren(node, interval, base).flatMap(
     ({ node: child, interval: own }): ReadonlyArray<Piece> => {
       if (child.nodeType === TEXT_NODE || child.nodeType === CDATA_NODE) {
-        // XML's default white space handling: a run of spaces and line breaks is one space.
         return [
           { text: (child.nodeValue ?? "").replaceAll(/\s+/gu, " "), startMs: null, endMs: null },
         ];
@@ -210,10 +184,6 @@ interface LineText {
   readonly words: Arr.NonEmptyReadonlyArray<LyricWord> | null;
 }
 
-/**
- * A line's text and its timed words. Untimed text between spans (usually the spaces) joins the
- * word before it, so the words still spell the line; `<br/>` breaks the line.
- */
 const lineText = (node: Element, interval: Interval, base: TimeBase): LineText => {
   const pieces = piecesOf(node, interval, base);
   const words: Array<LyricWord> = [];
@@ -259,10 +229,6 @@ const bodyOf = (lines: ReadonlyArray<KeyedLine>): Result.Result<LyricBody, Lyric
     : plainBody(lines.map((entry) => entry.text).join("\n"));
 };
 
-/**
- * Translations (`<translation>`) and transliterations (`<transliteration>`) from Apple's
- * metadata, one set per language, each line taking the timing of the main line it translates.
- */
 const extraSets = (
   root: Element,
   main: ReadonlyArray<KeyedLine>,
@@ -320,10 +286,8 @@ const extraSets = (
   );
 };
 
-/** Deepest element nesting read. Lyrics need a handful of levels; the bound keeps reading safe. */
 const MAX_DEPTH = 32;
 
-/** Whether any node sits deeper than `MAX_DEPTH`, found without recursion. */
 const tooDeep = (root: Node): boolean => {
   const pending: Array<readonly [Node, number]> = [[root, 1]];
 
@@ -368,7 +332,6 @@ const parseXml = (text: string): Result.Result<Element, LyricsParseError> => {
   return Result.succeed(root);
 };
 
-/** A `<p>`: its line when something times it, and its text either way. */
 const keyedLine = (p: Element, interval: Interval, base: TimeBase): KeyedLine => {
   const spoken = lineText(p, interval, base);
 
@@ -388,7 +351,6 @@ const keyedLine = (p: Element, interval: Interval, base: TimeBase): KeyedLine =>
   };
 };
 
-/** Every `<p>` under `node`, in document order, timed through the containers above it. */
 const linesOf = (node: Node, interval: Interval, base: TimeBase): ReadonlyArray<KeyedLine> =>
   timedChildren(node, interval, base).flatMap(({ node: child, interval: own }) => {
     if (!(child instanceof Element)) return [];

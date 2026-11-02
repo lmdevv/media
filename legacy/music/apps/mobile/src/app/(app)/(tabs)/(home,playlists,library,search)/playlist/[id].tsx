@@ -1,12 +1,3 @@
-/**
- * C02, C05, C11, H08 · Playlist. Its owner sees the hero, who can open it, Share, Add, and Play
- * and Shuffle (C02), or "Make it yours." while it is empty (C05). A collaborator sees whose it is
- * and may add songs (C11); a viewer may only play. On an iPad the header lays out horizontally
- * (P05) and carries the name, so the bar doesn't repeat it. The song list's bar holds the
- * download ring beside the ellipsis (D06). A playlist the viewer can't open is G10. While the
- * server is out of reach the offline bar leads (D13), and a playlist it hasn't sent opens from
- * this phone's downloads.
- */
 import { PlaylistId } from "@music/commands/ids";
 import type { PlaylistDetail, PlaylistEntry } from "@music/commands/models";
 import { can, canEditPlaylistItems } from "@music/commands/permissions";
@@ -36,7 +27,6 @@ const REASONS = {
   no_access: "In a library you can’t open",
 } as const;
 
-/** A playlist entry as a song row; one that can't play keeps its place and says why. */
 const songOf = (entry: PlaylistEntry): SongEntry => ({
   key: entry.itemId,
   song: entry.track,
@@ -47,7 +37,6 @@ const songOf = (entry: PlaylistEntry): SongEntry => ({
   playable: entry.available && entry.track !== null,
 });
 
-/** The ellipsis that opens the playlist's actions (C08). */
 function ActionsButton({ id }: { readonly id: PlaylistId }) {
   return (
     <IconButton
@@ -58,7 +47,6 @@ function ActionsButton({ id }: { readonly id: PlaylistId }) {
   );
 }
 
-/** C05: an empty playlist's invitation to add songs, for people who may add them. */
 function Empty({
   detail,
   canEdit,

@@ -1,8 +1,3 @@
-/**
- * The inside of Paper's bottom sheets, for routes presented as native form sheets (the system
- * draws the grabber, the scrim, and the 28pt corners): a 22/28 heavy title with a 44pt close
- * button, an optional 14/20 muted subtitle, the body, and the actions stacked under it.
- */
 import { router } from "expo-router";
 import { X } from "lucide-react-native";
 import type { ReactNode } from "react";
@@ -11,7 +6,6 @@ import { View } from "react-native";
 import { IconButton } from "./icon-button";
 import { Text } from "./text";
 
-/** Props for `SheetLayout`. */
 export interface SheetLayoutProps {
   readonly title: string;
   readonly subtitle?: string;

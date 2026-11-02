@@ -1,7 +1,3 @@
-/**
- * What a command did (F28): the job it started, followed live; a key, invite link, or reset link
- * to keep; a new playlist to open; or a plain done. One switch on the outcome's kind draws it.
- */
 import type { JobId, PlaylistId } from "@music/commands/ids";
 import { commands, isCommandName } from "@music/commands/registry";
 import type { CommandName } from "@music/commands/registry";
@@ -30,7 +26,6 @@ import { useConnection } from "@/session/connection";
 
 import { useHeldSecret } from "@/components/settings/secret-slot";
 
-/** The nav title for each kind of outcome. */
 const TITLES = {
   job: "Job started",
   key: "Save your key",
@@ -40,12 +35,10 @@ const TITLES = {
   none: "Done",
 } as const satisfies Record<ResultRoute["kind"], string>;
 
-/** Commands whose job is a scan, which Paper titles "Scan started". */
 const SCANS: ReadonlySet<CommandName> = new Set(["libraries.scan", "libraries.create"]);
 
 const backToActions = () => router.dismissTo("/settings/actions");
 
-/** Props for `ActionResultScreen`. */
 export interface ActionResultScreenProps {
   /** The command name from the route. */
   readonly command: string;
@@ -105,7 +98,6 @@ function Outcome({ name, route }: { readonly name: CommandName; readonly route: 
   }
 }
 
-/** Paper's result hero (F28): a 64pt accent check over a 34/40 headline. */
 function ResultHero({ headline }: { readonly headline: string }) {
   return (
     <View className="gap-2 pt-12 pb-6">
@@ -147,7 +139,6 @@ function JobOutcome({ jobId }: { readonly jobId: JobId }) {
   );
 }
 
-/** A copy button that says Copied once the clipboard has the text. */
 function CopyButton({
   label,
   text,
@@ -174,7 +165,6 @@ function CopyButton({
   );
 }
 
-/** A new API key, shown once; null once it has been. */
 function KeyOutcome({ secret: key }: { readonly secret: string | null }) {
   if (key === null) {
     return (
@@ -205,7 +195,6 @@ function KeyOutcome({ secret: key }: { readonly secret: string | null }) {
   );
 }
 
-/** How an invite or reset link is presented (F11, F23). */
 const LINKS = {
   invite: {
     build: inviteLink,

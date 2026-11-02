@@ -1,8 +1,3 @@
-/**
- * Removing a person leaves no row that names them. The tables come from the schema: a new table
- * with a `userId` field fails to compile here until it has a seeder, and fails the test until the
- * removal deletes its rows.
- */
 import { DeviceId, UserId } from "@music/commands/ids";
 import type { LibraryId, TrackId } from "@music/commands/ids";
 import { describe, expect, it } from "vitest";
@@ -13,14 +8,12 @@ import { inOrder } from "../convex/lib/sequence";
 import { allTracks, drainScheduled, makeBackend, signUp, upsertFiles } from "./backend";
 import type { Backend, User } from "./backend";
 
-/** Tables whose rows belong to the person their `userId` names. */
 type PersonTable = {
   [Table in TableNames]: "userId" extends keyof DataModel[Table]["document"] ? Table : never;
 }[TableNames];
 
 type Ctx = Parameters<Parameters<Backend["run"]>[0]>[0];
 
-/** What every seeder may use: the person, someone else on the server, and their catalog. */
 interface World {
   readonly backend: Backend;
   readonly person: User;
@@ -32,12 +25,10 @@ interface World {
 
 const DEVICE = DeviceId.make("person-phone");
 
-/** Gives the person at least one row in a table, the way the app would where that is cheap. */
 type Seeders = {
   readonly [Table in PersonTable]: (world: World) => Promise<void>;
 };
 
-/** Writes rows straight to the database as the person, for tables no cheap command fills. */
 const insert = async (
   world: World,
   write: (ctx: Ctx, userId: Id<"users">) => Promise<void>,
@@ -45,7 +36,6 @@ const insert = async (
   await world.backend.run(async (ctx) => write(ctx, world.person.id));
 };
 
-/** The person's song as a document. */
 const songOf = async (ctx: Ctx, world: World): Promise<Doc<"tracks">> => {
   const id = ctx.db.normalizeId("tracks", world.trackId);
   const track = id === null ? null : await ctx.db.get(id);
@@ -56,7 +46,6 @@ const songOf = async (ctx: Ctx, world: World): Promise<Doc<"tracks">> => {
 };
 
 const SEEDERS: Seeders = {
-  // `signUp` opened a session already.
   authSessions: async () => {},
   authAccounts: (world) =>
     insert(world, async (ctx, userId) => {
@@ -113,7 +102,6 @@ const SEEDERS: Seeders = {
   playbackSessions: async (world) => {
     await world.person.music.run("playback.play", { trackIds: [world.trackId], deviceId: DEVICE });
   },
-  // `playback.play` saved their queue too.
   playbackQueues: async () => {},
   jamMembers: async (world) => {
     await world.person.music.run("jam.join", { code: world.jamCode });
@@ -127,7 +115,6 @@ const SEEDERS: Seeders = {
   },
 };
 
-/** The tables the schema gives a `userId` field, read from its validators. */
 const personTables = (): ReadonlyArray<string> =>
   Object.entries(schema.tables).flatMap(([name, table]) =>
     "userId" in table.validator.fields ? [name] : [],
@@ -135,7 +122,6 @@ const personTables = (): ReadonlyArray<string> =>
 
 const isPersonTable = (name: string): name is PersonTable => Object.hasOwn(SEEDERS, name);
 
-/** How many rows of each person table name `userId`. */
 const rowsOf = (backend: Backend, userId: Id<"users">) =>
   backend.run(async (ctx) =>
     Object.fromEntries(
@@ -157,7 +143,6 @@ describe("removing a person", () => {
     const owner = await signUp(backend, "owner");
     const person = await signUp(backend, "member");
 
-    // Restricted, so granting the person access writes a row.
     const { libraryId } = await owner.music.run("libraries.create", {
       name: "Rock",
       path: "/music/rock",

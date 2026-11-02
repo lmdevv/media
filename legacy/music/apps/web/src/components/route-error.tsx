@@ -13,7 +13,6 @@ interface BackLink {
   readonly label: string;
 }
 
-/** The heading, explanation, and one action every failed or missing screen shows. */
 function ScreenMessage({
   title,
   description,
@@ -45,7 +44,6 @@ function BackButton({ back }: { readonly back: BackLink }) {
  * shell, so the sidebar and the player (and its audio) stay.
  */
 export function RouteError({ error, reset }: ErrorComponentProps) {
-  // A session ended elsewhere (signed out, suspended, removed) fails every read; offer sign-in.
   if (error instanceof Error && commandFailure(error)?.code === "unauthenticated") {
     return <SignedOut message={describeFailure(error)} />;
   }

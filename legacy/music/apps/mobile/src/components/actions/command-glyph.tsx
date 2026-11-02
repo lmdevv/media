@@ -1,4 +1,3 @@
-/** The ⌘ glyph in the Actions nav bars (F26, F27): it marks the screen, and does nothing. */
 import { Command } from "lucide-react-native";
 import { View } from "react-native";
 

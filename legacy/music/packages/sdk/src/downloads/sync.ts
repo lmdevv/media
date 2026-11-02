@@ -1,9 +1,3 @@
-/**
- * `DownloadSync` keeps one device's vault in line with its downloads: the one writer of the
- * vault. Hosts offer it what the server says (the pins, each pin's manifest, whether the server
- * answers); it plans, applies the cheap steps at once, and fetches up to two files at a time,
- * retrying failures with backoff. Screens read its snapshot.
- */
 import type { DeviceId, DownloadPinId, TrackId } from "@music/commands/ids";
 import type { LyricsChange, LyricsRevision, OfflineLyrics } from "@music/commands/lyrics";
 import type {
@@ -32,24 +26,18 @@ import type {
 import { applyChange, artFile, audioFile, emptyVault, VaultChange } from "./vault";
 import type { VaultRows, VaultStore } from "./vault";
 
-/** Files fetched at once. Prepares on the server run one at a time anyway. */
 const MAX_TRANSFERS = 2;
 
-/** Fetching waits while the device has less free space than this. */
 const MIN_FREE_BYTES = 1024 ** 3;
 
-/** How often fetching checks again for free space while it waits for some. */
 const SPACE_RECHECK_MS = 60_000;
 
-/** The first wait after a failed fetch; each failure in a row doubles it. */
 const FIRST_RETRY_MS = 10_000;
 
 const MAX_RETRY_MS = 10 * 60_000;
 
-/** The wait after a vault write failed (a full disk, say) before planning again. */
 const VAULT_RETRY_MS = 30_000;
 
-/** Songs whose lyrics stay read from the vault: the one playing and those just before it. */
 const LYRICS_CACHE_SIZE = 4;
 
 /** A song this device can play from its own storage. */
@@ -156,7 +144,6 @@ export const EMPTY_DOWNLOADS: DownloadsSnapshot = {
   lyricsQuestions: [],
 };
 
-/** Resolves after `ms`, or at once when `signal` aborts. */
 const delay = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (signal.aborted) {
@@ -176,7 +163,6 @@ const delay = (ms: number, signal: AbortSignal): Promise<void> =>
     signal.addEventListener("abort", done, { once: true });
   });
 
-/** The next failure after `previous`, given whether trying again could help. */
 const nextFailure = (
   previous: Failure | undefined,
   message: string,
@@ -189,7 +175,6 @@ const nextFailure = (
   return { attempts, retryAt: retryable ? now + wait : null, message };
 };
 
-/** Whether a failed fetch may run again now. */
 const due = (failure: Failure | undefined, now: number): boolean =>
   failure === undefined || (failure.retryAt !== null && failure.retryAt <= now);
 
@@ -204,32 +189,24 @@ export class DownloadSync {
   #lowSpace = false;
   #pins: Option.Option<ReadonlyArray<DownloadPin>> = Option.none();
   readonly #manifests = new Map<DownloadPinId, DownloadManifest>();
-  /** The newest lyrics change the server sent for each song, until the vault holds it. */
   readonly #lyrics = new Map<TrackId, LyricsChange>();
   #questions: ReadonlyArray<LyricsQuestion> = [];
-  /** Lyrics read from the vault, oldest first, at most `LYRICS_CACHE_SIZE`. */
   readonly #readLyrics = new Map<
     TrackId,
     { readonly rev: LyricsRevision; readonly lyrics: OfflineLyrics | null }
   >();
   readonly #readingLyrics = new Set<TrackId>();
-  /**
-   * Files of copies that failed to play, not offered again in this session. A whole file stays
-   * on disk, since playing may have failed for a passing reason; a broken one is fetched again.
-   */
   readonly #discarded = new Set<string>();
   readonly #fetching = new Map<TrackId, { readonly rev: string; readonly stop: AbortController }>();
   readonly #fetchingArt = new Map<string, AbortController>();
   readonly #trackFailures = new Map<TrackId, Failure & { readonly rev: string }>();
   readonly #artFailures = new Map<string, Failure>();
-  /** The songs the last plan fetches. */
   #wanted: ReadonlySet<TrackId> = new Set();
   #planning = false;
   #replan = false;
   #wake: ReturnType<typeof setTimeout> | null = null;
   #snapshot: DownloadsSnapshot = EMPTY_DOWNLOADS;
   readonly #listeners = new Set<() => void>();
-  /** Plans, fetches, and checks still running: what `stop` waits for. */
   readonly #work = new Set<Promise<void>>();
 
   constructor(options: DownloadSyncOptions) {
@@ -385,7 +362,6 @@ export class DownloadSync {
       this.#readingLyrics.delete(trackId);
 
       if (kept === null) {
-        // Newer lyrics were kept while this read found none, so read those instead.
         if (this.#view.lyrics.get(trackId)?.rev !== stored.rev) {
           this.loadLyrics(trackId);
 
@@ -399,7 +375,6 @@ export class DownloadSync {
       }
 
       this.#rememberLyrics(trackId, kept.rev, kept.lyrics);
-      // The lyrics changed while they were read: read the new ones.
       this.loadLyrics(trackId);
     };
 
@@ -436,7 +411,6 @@ export class DownloadSync {
     const check = async (): Promise<void> => {
       if ((await vault.size(copy.file)) === copy.bytes) return;
       await this.#drop(copy);
-      // The next copy has the same name; it is offered once it lands.
       this.#discarded.delete(copy.file);
       this.#plan();
     };
@@ -487,12 +461,10 @@ export class DownloadSync {
     this.#ready = true;
     this.#clearConfirmedRemovals();
 
-    // Removals the app was killed before the server heard of: tell it again.
     for (const target of this.#view.removals.values()) this.#sendRemoval(target);
     this.#plan();
   }
 
-  /** Tells the server this device no longer keeps `target`; a refusal brings the download back. */
   #sendRemoval(target: DownloadTarget): void {
     const key = targetKey(target);
 
@@ -512,7 +484,6 @@ export class DownloadSync {
     void send().catch(() => undefined);
   }
 
-  /** Forgets removals the server confirmed by no longer listing their download. */
   #clearConfirmedRemovals(): void {
     if (!this.#ready) return;
 
@@ -530,7 +501,6 @@ export class DownloadSync {
     }
   }
 
-  /** Opens the vault, and tries again later when it can't be read (a full disk, say). */
   #tryOpen(): void {
     void this.#open().catch(() => {
       if (this.#stopped) return;
@@ -578,11 +548,6 @@ export class DownloadSync {
       });
   }
 
-  /**
-   * Plans once: applies the cheap steps together, then starts the fetches there is room for. Once
-   * every step applied, the lyrics changes it planned from leave the inbox: the vault holds them,
-   * or they were for songs no download keeps, which are asked about again if one keeps them.
-   */
   async #planOnce(): Promise<void> {
     const desired = this.#desired();
     const offered = new Map(this.#lyrics);
@@ -598,8 +563,6 @@ export class DownloadSync {
       if (SyncStep.$is("DropLyrics")(step)) dropped.push(step.trackId);
     }
 
-    // Each step writes its own row and file, so they don't wait on one another. Lyrics go in
-    // one write each way, so the questions they answer move once.
     await Promise.all([
       ...steps.map((step) =>
         SyncStep.$match(step, {
@@ -635,7 +598,6 @@ export class DownloadSync {
     this.#scheduleWake();
   }
 
-  /** Keeps lyrics read from the vault, forgetting the oldest past `LYRICS_CACHE_SIZE`. */
   #rememberLyrics(trackId: TrackId, rev: LyricsRevision, lyrics: OfflineLyrics | null): void {
     this.#readLyrics.delete(trackId);
     this.#readLyrics.set(trackId, { rev, lyrics });
@@ -648,14 +610,12 @@ export class DownloadSync {
     this.#notify();
   }
 
-  /** Recomputes what to ask `downloads.lyrics`, keeping the same array while nothing changed. */
   #askAgain(): void {
     const questions = lyricsQuestions(this.#desired(), this.#view);
 
     if (!Equal.equals(questions, this.#questions)) this.#questions = questions;
   }
 
-  /** What the server wants this device to hold, as far as it has heard. */
   #desired(): Desired {
     return {
       pins: this.#pins,
@@ -665,7 +625,6 @@ export class DownloadSync {
     };
   }
 
-  /** Stops fetches the plan no longer wants and forgets their failures. */
   #follow(fetches: ReadonlyArray<FetchStep>, covers: ReadonlyArray<FetchArtStep>): void {
     const revs = new Map(fetches.map(({ entry }) => [entry.track.id, entry.rev]));
     const hashes = new Set(covers.map(({ hash }) => hash));
@@ -696,7 +655,6 @@ export class DownloadSync {
       const failure = this.#artFailures.get(cover.hash);
 
       if (!this.#fetchingArt.has(cover.hash) && due(failure, now)) {
-        // The retry is under way: it no longer waits for its time.
         if (failure !== undefined) this.#artFailures.set(cover.hash, { ...failure, retryAt: null });
         void this.#track(this.#fetchArt(cover));
       }
@@ -709,7 +667,6 @@ export class DownloadSync {
       const failure = this.#trackFailures.get(trackId);
 
       if (!this.#fetching.has(trackId) && due(failure, now)) {
-        // The retry is under way: it no longer waits for its time.
         if (failure !== undefined) this.#trackFailures.set(trackId, { ...failure, retryAt: null });
         void this.#track(this.#fetchTrack(fetch));
       }
@@ -724,7 +681,6 @@ export class DownloadSync {
     this.#fetching.set(trackId, { rev: entry.rev, stop });
     this.#publish();
 
-    /** Records a fetch that didn't land and deletes what it wrote, which no row names. */
     const fail = async (message: string, retryable: boolean): Promise<void> => {
       const failure = nextFailure(this.#trackFailures.get(trackId), message, retryable, now());
       this.#trackFailures.set(trackId, { ...failure, rev: entry.rev });
@@ -749,7 +705,6 @@ export class DownloadSync {
 
       await FetchOutcome.$match(outcome, {
         Fetched: async ({ bytes }) => {
-          // A stopped sync's vault is closing; the next start's sweep deletes the file.
           if (this.#stopped || written.file === null) return;
           const previous = this.#view.copies.get(trackId);
 
@@ -772,17 +727,14 @@ export class DownloadSync {
         Gone: () => fail("The song is no longer on the server", true),
         Failed: ({ message, retryable }) => fail(message, retryable),
         Stopped: () => {
-          // Stopped for a new revision, a removal, or the vault closing: no retry is owed.
           this.#trackFailures.delete(trackId);
 
           return this.#removeQuietly(written.file);
         },
       });
     } catch (error) {
-      // The vault refused the row (a full disk, say): try again later, as after a failed fetch.
       await fail(error instanceof Error ? error.message : "Couldn’t keep the song", true);
     } finally {
-      // Held until the copy is in the vault, so no plan in between fetches it again.
       this.#fetching.delete(trackId);
       this.#plan();
     }
@@ -835,7 +787,6 @@ export class DownloadSync {
     }
   }
 
-  /** Counts `work` as running until it ends, for `stop`. */
   #track(work: Promise<void>): Promise<void> {
     this.#work.add(work);
 
@@ -848,7 +799,6 @@ export class DownloadSync {
     return work;
   }
 
-  /** Deletes a vault file if there is one; a file left behind goes with the next start's sweep. */
   async #removeQuietly(file: string | null): Promise<void> {
     if (file === null) return;
 
@@ -871,11 +821,6 @@ export class DownloadSync {
     this.#publish();
   }
 
-  /**
-   * Wakes the sync for the next retry that could start then, and to check space again while it is
-   * low. A retry that is due waits for nothing while no fetch can start (offline, low on space,
-   * both slots busy): the connection coming back or a fetch ending plans again.
-   */
   #scheduleWake(): void {
     const now = this.#options.now();
 
@@ -923,7 +868,6 @@ export class DownloadSync {
     };
   }
 
-  /** The downloads this device keeps, as screens list them. */
   #pinViews(): ReadonlyArray<PinView> {
     const listed = Option.getOrElse(this.#pins, () =>
       Array.from(this.#view.pins.values(), (stored) => stored.pin),

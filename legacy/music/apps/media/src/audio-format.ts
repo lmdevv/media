@@ -1,8 +1,3 @@
-/**
- * Audio file kinds the library accepts, how browsers name them, and which ones browsers can play
- * without a transcode.
- */
-
 const AUDIO_EXTENSIONS: ReadonlySet<string> = new Set([
   "flac",
   "mp3",
@@ -33,7 +28,6 @@ const CONTENT_TYPES: ReadonlyMap<string, string> = new Map([
   ["wma", "audio/x-ms-wma"],
 ]);
 
-/** Codecs that current Chrome, Firefox, and Safari all decode natively. */
 const BROWSER_CODECS: ReadonlySet<string> = new Set([
   "mp3",
   "aac",

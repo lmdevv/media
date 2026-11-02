@@ -12,7 +12,6 @@ import { runScoped } from "./testing/run.ts";
 
 const options = { contentType: "audio/flac", cacheControl: STREAM_CACHE_CONTROL };
 
-/** A four megabyte file, more than one read of a file stream. */
 const largeFile = Effect.gen(function* () {
   const path = join(yield* temporaryDirectory("files"), "song.flac");
 
@@ -24,7 +23,6 @@ const largeFile = Effect.gen(function* () {
 const descriptors = (path: string): Effect.Effect<number> =>
   Effect.promise(() => openDescriptors(path));
 
-/** Polls until nothing holds `path` open, for up to two seconds, and returns the last count. */
 const settledDescriptors = (path: string): Effect.Effect<number> =>
   descriptors(path).pipe(
     Effect.repeat({
@@ -34,7 +32,6 @@ const settledDescriptors = (path: string): Effect.Effect<number> =>
     }),
   );
 
-/** A request from a client that can go away, as `@hono/node-server` aborts its signal then. */
 const clientRequest = (headers: Readonly<Record<string, string>> = {}) => {
   const client = new AbortController();
 
@@ -56,8 +53,6 @@ describe.skipIf(!canCountOpenFiles())("fileResponse", () => {
           const response = yield* fileResponse(request, path, options);
 
           expect(response.status).toBe(range === undefined ? 200 : 206);
-          // The body opened the file and nobody reads or cancels it, as with a server that never
-          // started sending it.
           yield* descriptors(path).pipe(
             Effect.repeat({
               schedule: Schedule.spaced("10 millis"),
@@ -98,7 +93,6 @@ describe.skipIf(!canCountOpenFiles())("fileResponse", () => {
           async () => new Uint8Array(await response.arrayBuffer()),
         );
 
-        // Compared as one buffer: a deep comparison of four megabytes takes seconds.
         expect(Buffer.from(body).equals(yield* Files.readWholeFile(path))).toBe(true);
         expect(yield* settledDescriptors(path)).toBe(0);
       }),

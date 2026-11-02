@@ -19,7 +19,6 @@ export const SEARCH_INPUT_ID = "search-input";
  */
 export function KeyboardShortcuts() {
   const player = usePlayer();
-  // Read when a seek key is pressed, so the shortcuts don't re-render with every position tick.
   const positionMs = usePositionReader();
   const ui = useUi();
   const navigate = useNavigate();

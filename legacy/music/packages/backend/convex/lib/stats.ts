@@ -1,10 +1,3 @@
-/**
- * A library's counters live in their own `libraryStats` row. Every request reads every library
- * row to decide what the viewer may read, so counters on that row made every open query of every
- * user run again with each batch a scan saved. Older versions kept the counters on the library;
- * readers fall back to those until the first count change or the `splitLibraryStats` migration
- * moves them.
- */
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import type { ReadCtx } from "./viewer";
@@ -89,7 +82,6 @@ const applied = (counts: LibraryCounts, delta: CountsDelta): LibraryCounts => ({
   durationMs: Math.max(0, counts.durationMs + delta.durationMs),
 });
 
-/** Gives a library whose counters are on its own row (as older versions kept them) a stats row. */
 const moveLegacyCounts = async (
   ctx: MutationCtx,
   library: Doc<"libraries">,

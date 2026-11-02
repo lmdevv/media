@@ -1,8 +1,3 @@
-/**
- * C08 · Playlist actions. Everyone may queue, download, and copy a link to the playlist. Its owner
- * also edits, shares, and deletes it; a collaborator edits its songs; anyone it was shared with by
- * name may leave it. The server enforces each of these again.
- */
 import type { TrackId } from "@music/commands/ids";
 import { PlaylistId } from "@music/commands/ids";
 import type { Playlist, PlaylistDetail } from "@music/commands/models";
@@ -45,10 +40,6 @@ interface Context {
   readonly sharedByName: boolean;
 }
 
-/**
- * What a row does: queue songs, keep the playlist on this iPhone (a row that words itself by the
- * download's state), copy the link, or go to another screen.
- */
 type Effect =
   | { readonly kind: "queue"; readonly next: boolean }
   | { readonly kind: "download" }
@@ -59,13 +50,11 @@ type Effect =
       readonly over: "sheet" | "page";
     };
 
-/** One row of the sheet and who sees it. */
 interface Action {
   readonly key: string;
   readonly label: (context: Context) => string;
   readonly icon: LucideIcon;
   readonly filled?: boolean;
-  /** The row's quiet confirmation, for actions that finish in place. */
   readonly done?: string;
   readonly when: (context: Context) => boolean;
   readonly effect: Effect;
@@ -153,7 +142,6 @@ const ACTIONS: ReadonlyArray<Action> = [
   },
 ];
 
-/** How long the sheet stays after a quiet confirmation such as Link copied. */
 const CONFIRM_MS = 700;
 
 function Sheet({
@@ -199,7 +187,6 @@ function Sheet({
       return;
     }
 
-    // A sheet takes this one's place; a page opens once this sheet is gone.
     if (effect.over === "sheet") {
       router.replace(effect.href(playlist.id));
 

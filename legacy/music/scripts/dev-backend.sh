@@ -12,7 +12,6 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-# The same Convex backend the image ships, pinned by digest in the Dockerfile.
 image="$(sed -n 's/^ARG CONVEX_IMAGE=//p' "${root}/deploy/docker/Dockerfile")"
 if [[ "$image" != ghcr.io/convex/convex-backend@sha256:* ]]; then
   echo "could not read the pinned CONVEX_IMAGE from deploy/docker/Dockerfile" >&2

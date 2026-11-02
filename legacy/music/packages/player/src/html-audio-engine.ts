@@ -3,31 +3,18 @@ import type { EngineErrorReason, EngineEvent, EngineSource, PlayerEngine } from 
 import { primeInGesture } from "./prime-audio";
 import { endedEarly, OffsetProbe, offsetUrl, probeOffset } from "./stream-offset";
 
-/** How often the engine emits `time` while playing (5 Hz; the contract asks for at least 4). */
 const TIME_INTERVAL_MS = 200;
 
-/**
- * A live stream starts from its beginning instead of from an offset when asked for a position
- * this close to it: a load that took a moment, or a seek back to the start.
- */
 const LIVE_RESTART_MS = 2000;
 
-/**
- * A playing stream whose time has not moved for this long, while the element says it has data,
- * is stuck: Safari keeps "playing" in silence at the end of a stream that was cut off.
- */
 const STALL_MS = 3000;
 
-/** The same, while the element waits for data, which a slow network explains for a while. */
 const WAITING_STALL_MS = 8000;
 
-/** How long a reopened stream may take to become playable before it counts as failed. */
 const REOPEN_TIMEOUT_MS = 15_000;
 
-/** Reopenings in a row that may fail to get playback going again before the engine gives up. */
 const MAX_RECOVERIES = 3;
 
-/** Playback this far past where a recovery reopened the stream means it worked. */
 const RECOVERED_MS = 2000;
 
 /** A reopening of the stream at another position, waiting for it to play. */
@@ -70,11 +57,6 @@ interface Slot {
   retries: number;
 }
 
-/**
- * True when `element` plays a stream of unknown length: a transcode the media service sends while
- * ffmpeg still writes it, or one from an offset. Browsers cannot seek in one (Firefox and Safari
- * ignore the seek).
- */
 const isLive = (element: HTMLAudioElement): boolean =>
   element.readyState >= HTMLMediaElement.HAVE_METADATA &&
   element.duration === Number.POSITIVE_INFINITY;
@@ -110,10 +92,8 @@ export class HtmlAudioEngine implements PlayerEngine {
   readonly #listeners = new Set<(event: EngineEvent) => void>();
   #current = 0;
   #volume = 1;
-  /** Bumped by every `load` and `unload`, so a superseded load stops quietly. */
   #generation = 0;
   #ticker: ReturnType<typeof setInterval> | null = null;
-  /** Settles the pending `load` as superseded. */
   #cancelLoad: (() => void) | null = null;
 
   /**
@@ -133,7 +113,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     const generation = this.#generation;
     const idle = this.#idleSlot();
 
-    // The listener skipped ahead to the song that was already preloaded: reuse its buffer.
     if (idle.source?.url === source.url) {
       this.#release(this.#currentSlot());
       this.#current = 1 - this.#current;
@@ -217,7 +196,6 @@ export class HtmlAudioEngine implements PlayerEngine {
       return;
     }
 
-    // The element is paused already, so it reports nothing.
     if (!reopening.play) return;
     reopening.play = false;
     this.#emit({ type: "time", positionMs: reopening.positionMs });
@@ -309,14 +287,9 @@ export class HtmlAudioEngine implements PlayerEngine {
     slot.retries = 0;
     slot.element.pause();
     slot.element.removeAttribute("src");
-    // Loading an empty source aborts the download and frees the decoder.
     slot.element.load();
   }
 
-  /**
-   * Resolves true once `element` can start, or false when it failed or a newer load won, and with
-   * `limit`, after `limit.ms` or once `limit.signal` aborts.
-   */
   #whenReady(
     element: HTMLAudioElement,
     limit?: { readonly ms: number; readonly signal: AbortSignal },
@@ -374,7 +347,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     this.#ticker = null;
   }
 
-  /** Checks that a playing live stream still makes progress, and recovers one that stopped. */
   #watch(slot: Slot): void {
     const { element } = slot;
 
@@ -406,7 +378,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     const { element } = slot;
 
     element.addEventListener("loadedmetadata", () => {
-      // A stream from an offset is live even when all of it arrived before its metadata.
       slot.live = slot.startMs > 0 || isLive(element);
     });
 
@@ -423,8 +394,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     });
 
     element.addEventListener("pause", () => {
-      // `ended` also pauses the element; that case is reported as ended or advanced instead. A
-      // reopening pauses it too, and reports for itself.
       if (!this.#isCurrent(slot) || slot.source === null || slot.reopening !== null) return;
 
       if (element.ended) return;
@@ -436,7 +405,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     element.addEventListener("ended", () => {
       if (!this.#isCurrent(slot) || slot.source === null || slot.reopening !== null) return;
 
-      // A live stream that ends before the song does was cut off: carry on from there.
       if (slot.live && endedEarly(this.#positionOf(slot), slot.source.durationMs)) {
         void this.#recover(slot, true);
 
@@ -447,8 +415,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     });
 
     element.addEventListener("error", () => {
-      // A failed preload surfaces when the engine advances to it, not while the current song
-      // plays. A reopening handles its own failure.
       if (!this.#isCurrent(slot) || slot.source === null || slot.reopening !== null) return;
 
       if (slot.live) {
@@ -462,7 +428,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     });
   }
 
-  /** Reports the current song as failed with `error`, the element's, when it has one. */
   #fail(error: MediaError | null): void {
     this.#emit({
       type: "error",
@@ -471,7 +436,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     });
   }
 
-  /** The current element ended: start the preloaded one at once, or report the end. */
   #advance(finished: Slot): void {
     const next = this.#idleSlot();
     const source = next.source;
@@ -484,8 +448,6 @@ export class HtmlAudioEngine implements PlayerEngine {
       return;
     }
 
-    // Start first, bookkeeping second: every statement before play() adds to the gap.
-    // `#start` calls play() synchronously before its first await.
     void this.#start(next);
     this.#current = 1 - this.#current;
     this.#emit({ type: "advanced", key: source.key });
@@ -493,14 +455,12 @@ export class HtmlAudioEngine implements PlayerEngine {
     this.#release(finished);
   }
 
-  /** Reopens a live stream that stopped before the song did, where it stopped. */
   async #recover(slot: Slot, play: boolean): Promise<void> {
     if (slot.reopening !== null || slot.source === null) return;
     const positionMs = this.#positionOf(slot);
 
     if (slot.recoveries >= MAX_RECOVERIES) {
       this.#stopTicker();
-      // It opened every time but never got going: audio there is no reason to try again.
       await this.#settleFailure(
         slot,
         { positionMs, play, abort: new AbortController() },
@@ -516,17 +476,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     await this.#reopen(slot, { positionMs, play, abort: new AbortController() });
   }
 
-  /**
-   * The stream at `reopening.positionMs` could not be played (the element failed with `error`, or
-   * never got going): asks the media service what it has there. No audio means the song is over
-   * (an offset past its real end), and a refused URL is reported as `expired`. A busy service is
-   * asked again after its `Retry-After`, and
-   * with `retryAudio`, a stream it has audio for is opened again at once, once (the element may
-   * have met a busy answer that has cleared since; failing again, the element can't play it).
-   * Busy answers are retried up to `MAX_BUSY_RETRIES` times in a row.
-   * Anything else fails the song. The reopening stays on the slot meanwhile, so seeks, `play`,
-   * and `pause` still apply, and a load, an unload, or an advance cancels it.
-   */
   async #settleFailure(
     slot: Slot,
     reopening: Reopening,
@@ -578,11 +527,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     } else this.#fail(error);
   }
 
-  /**
-   * Opens a live stream again at `reopening.positionMs`: from an offset (or from the start, near
-   * it), and plays or stays paused as `play` says by then. A load, an unload, or an advance
-   * cancels it by releasing the slot.
-   */
   async #reopen(slot: Slot, reopening: Reopening): Promise<void> {
     const source = slot.source;
 
@@ -608,7 +552,6 @@ export class HtmlAudioEngine implements PlayerEngine {
 
     if (slot.reopening !== reopening) return;
 
-    // A seek moved the target while the stream opened live somewhere else.
     const wanted = reopening.positionMs < LIVE_RESTART_MS ? 0 : reopening.positionMs;
 
     if (ready && slot.live && wanted !== slot.startMs) {
@@ -620,8 +563,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     if (!ready) {
       const { error } = slot.element;
 
-      // A load that timed out is still going: stop it, so the media service can end its encode
-      // and the load's late events start nothing.
       if (error === null) this.#stopLoading(slot);
       await this.#settleFailure(slot, reopening, error, true);
 
@@ -631,14 +572,12 @@ export class HtmlAudioEngine implements PlayerEngine {
     slot.reopening = null;
     slot.retries = 0;
 
-    // The song's own URL answered with the finished file, which seeks by itself.
     if (!slot.live) slot.element.currentTime = reopening.positionMs / 1000;
 
     if (reopening.play) await this.#start(slot);
     else this.#emit({ type: "time", positionMs: this.#positionOf(slot) });
   }
 
-  /** Stops the slot's element loading its stream, which then reports nothing more. */
   #stopLoading(slot: Slot): void {
     slot.live = false;
     slot.watch = null;
@@ -646,10 +585,6 @@ export class HtmlAudioEngine implements PlayerEngine {
     slot.element.load();
   }
 
-  /**
-   * Points the slot's element at `url`, a stream starting `startMs` into the song. Whether it is
-   * live is known once its metadata loads.
-   */
   #openAt(slot: Slot, url: string, startMs: number): void {
     slot.startMs = startMs;
     slot.live = false;
@@ -658,14 +593,12 @@ export class HtmlAudioEngine implements PlayerEngine {
     slot.element.load();
   }
 
-  /** Calls `play()` on the slot's element and turns its rejection into an engine event. */
   async #start(slot: Slot): Promise<void> {
     try {
       await slot.element.play();
     } catch (error) {
       if (!(error instanceof DOMException)) throw error;
 
-      // A later load or pause interrupted this play; that caller owns the outcome.
       if (error.name === "AbortError") return;
 
       if (error.name === "NotAllowedError") {
@@ -678,7 +611,6 @@ export class HtmlAudioEngine implements PlayerEngine {
         return;
       }
 
-      // Source failures also arrive through the element's error event, which classifies them.
       if (slot.element.error === null) {
         this.#emit({ type: "error", reason: "unsupported", message: error.message });
       }

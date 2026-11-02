@@ -1,8 +1,3 @@
-/**
- * What the pages in the tabs know of the iPad's sidebar: whether it sits beside them, in which
- * case they drop their own chrome (A1), or is hidden behind a button they draw (A3). There is no
- * sidebar on an iPhone, so its pages see null and keep theirs.
- */
 import { createContext, use } from "react";
 
 /** The sidebar as pages see it. */

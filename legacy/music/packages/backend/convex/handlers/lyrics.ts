@@ -18,7 +18,6 @@ export const lyricsQueries = {
   "lyrics.get": async (ctx, viewer, args) => {
     const track = await ctx.db.get(tableId(ctx, "tracks", args.trackId));
 
-    // People in a Jam read the lyrics of the songs they hear in it, as they stream them.
     if (
       track === null ||
       (!canRead(viewer, track.libraryId) && !(await inJamQueue(ctx, viewer, track)))

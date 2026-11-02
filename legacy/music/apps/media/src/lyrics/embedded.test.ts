@@ -19,7 +19,6 @@ import { embeddedLyrics } from "./embedded.ts";
 
 const LRC = "[00:01.00]Hello\n[00:02.50]<00:02.50>Wor<00:02.80>ld<00:03.20>";
 
-/** A one-second sine in `name`, encoded by ffmpeg with `metadata` as `key=value` tags. */
 const encode = (dir: string, name: string, codec: string, metadata: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const path = join(dir, name);
@@ -62,7 +61,6 @@ const concat = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
   return bytes;
 };
 
-/** An ID3v2.4 frame with UTF-8 text (encoding byte 3). */
 const frame = (id: string, body: ReadonlyArray<Uint8Array>): Uint8Array => {
   const content = concat(body);
 
@@ -77,10 +75,6 @@ const uslt = (language: string, text: string) =>
     encoder.encode(text),
   ]);
 
-/**
- * `SYLT` with `format` 1 (MPEG frames) or 2 (milliseconds), and ID3 content type 1 (lyrics)
- * unless `contentType` names another.
- */
 const sylt = (
   language: string,
   format: 1 | 2,
@@ -100,7 +94,6 @@ const sylt = (
     }),
   ]);
 
-/** An MP3 whose ID3v2.4 tag holds `frames`; ffmpeg cannot write `USLT` or `SYLT` itself. */
 const mp3WithFrames = (dir: string, frames: ReadonlyArray<Uint8Array>) =>
   Effect.gen(function* () {
     const bare = yield* encode(dir, "bare.mp3", "libmp3lame", []);
@@ -366,7 +359,6 @@ describe("embeddedLyrics", { timeout: MEDIA_TEST_TIMEOUT }, () => {
     ));
 });
 
-/** What `music-metadata` reports for a tag format it maps only to common `lyrics`, such as APE. */
 const commonOnly = (lyrics: Array<ILyricsTag>, native: IAudioMetadata["native"] = {}) =>
   embeddedLyrics({
     common: {

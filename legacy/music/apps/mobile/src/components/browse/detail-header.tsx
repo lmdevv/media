@@ -1,9 +1,3 @@
-/**
- * The iPad's horizontal header for an album, playlist, or artist (page 25 · P05, P06): 240pt art
- * on the left, and beside it, bottom-aligned, the mono facts, the title at 40/44, the page's own
- * lines (the artist, a description, whose it is), then its actions. Where the page is too narrow
- * for the art beside the text, the text moves under it. Phones keep each page's own header.
- */
 import type { ReactNode } from "react";
 import { View } from "react-native";
 
@@ -13,7 +7,6 @@ import { fitsSideBySide } from "@/lib/layout";
 import { useThemeLength } from "@/lib/theme-color";
 import { useContentLayout } from "@/lib/window-layout";
 
-/** Props for `DetailHeader`. */
 export interface DetailHeaderProps {
   readonly art: { readonly url: string | null; readonly recyclingKey?: string };
   /** The mono line over the title, such as `1991 · TRIP-HOP · 9 SONGS · 45 MIN`. */
@@ -32,7 +25,6 @@ export function DetailHeader({ art, facts, title, children, actions }: DetailHea
   const gap = useThemeLength("--spacing-8");
   const button = useThemeLength("--spacing-ios-160");
   const buttonGap = useThemeLength("--spacing-3");
-  // The text needs at least the room for Play and Shuffle side by side at their least width.
   const text = 2 * button + buttonGap;
   const beside = fitsSideBySide(width, edge, { art: artSize, gap, text });
 

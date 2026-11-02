@@ -63,14 +63,9 @@ const activeJob = async (ctx: QueryCtx, libraryId: Id<"libraries">): Promise<Doc
     .withIndex("by_library_status", (q) => q.eq("libraryId", libraryId).eq("status", "pending"))
     .first());
 
-/**
- * Whether the viewer may see a library's jobs: to listen to it, or to manage it. Admins also see
- * that other libraries exist (`libraries.list`), but not their jobs, folders, or contents.
- */
 const canSee = (viewer: Viewer, library: Doc<"libraries">): boolean =>
   canRead(viewer, library._id) || canManage(viewer, library);
 
-/** A library the viewer manages (see `canManage`), or `not_found`. */
 const managedLibrary = async (
   ctx: QueryCtx,
   viewer: Viewer,
@@ -85,18 +80,12 @@ const managedLibrary = async (
   return library;
 };
 
-/** What `libraryAccessControl` reads of a library and its owner. */
 const accessOf = (library: Doc<"libraries">, owner: Doc<"users"> | null) => ({
   ownerId: library.ownerId,
   ownerRole: owner === null ? null : roleOf(owner),
   ownerSuspended: owner?.suspendedAt !== undefined,
 });
 
-/**
- * Fails unless the viewer may make this change to who listens to `library`: its owner, while an
- * admin, any change; the server's owner, once the library's owner isn't one, only a change that
- * lets fewer people in (`libraryAccessControl`).
- */
 const checkAccessChange = async (
   ctx: QueryCtx,
   viewer: Viewer,
@@ -118,7 +107,6 @@ const checkAccessChange = async (
   );
 };
 
-/** A job on a library the viewer can see. */
 const visibleJob = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise<Doc<"jobs">> => {
   const job = await ctx.db.get(tableId(ctx, "jobs", id));
   const library = job === null ? null : await ctx.db.get(job.libraryId);
@@ -130,21 +118,12 @@ const visibleJob = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise<Do
   return job;
 };
 
-/**
- * Fails unless `path` (normalised) stays clear of every library's folder: the same folder, one
- * inside another, or one containing another would index the same files twice. A library the
- * viewer can't see is named only as "another library".
- */
 const checkNoOverlap = async (ctx: QueryCtx, viewer: Viewer, path: string): Promise<void> => {
-  // Every folder must be compared, and an install has a handful of libraries (`loadViewer` reads
-  // them all on every request too).
   const found = firstOverlap(await ctx.db.query("libraries").collect(), path);
 
   if (found === null) return;
   const { library, overlap } = found;
 
-  // Neither path is said for a library the viewer can't hear: not even the one they typed, which
-  // would confirm a guess at where it lives.
   if (!canRead(viewer, library._id))
     return fail("conflict", "This folder overlaps another library");
   const name = `${library.name} (${normaliseLibraryPath(library.path) ?? library.path})`;
@@ -182,7 +161,6 @@ export const enqueueScan = async (
 
 export const adminQueries = {
   "libraries.list": async (ctx, viewer) => {
-    // Members see what they can hear; admins also see what they manage but cannot hear.
     const listed = can(viewer.role, "admin")
       ? await ctx.db.query("libraries").collect()
       : viewer.libraries;
@@ -224,7 +202,6 @@ export const adminQueries = {
   "jobs.list": async (ctx, viewer) => {
     const jobs = await ctx.db.query("jobs").order("desc").take(RECENT_JOBS);
 
-    // Recent jobs share a few libraries; each library and its visibility is read once.
     const seen = new Map<Id<"libraries">, Promise<Doc<"libraries"> | null>>();
 
     const visibleLibrary = (libraryId: Id<"libraries">): Promise<Doc<"libraries"> | null> => {
@@ -273,8 +250,6 @@ export const adminQueries = {
     const invites = await ctx.db.query("invites").order("desc").take(100);
     const now = Date.now();
 
-    // Unused invites, open and expired: an expired one can't be used, but stays listed (as
-    // `expired`) until an admin removes it or the cleanup cron deletes it.
     return invites
       .filter((invite) => !invite.revoked && invite.acceptedBy === undefined)
       .map((invite) => presentInvite(invite, now));
@@ -373,7 +348,6 @@ export const adminMutations = {
   "libraries.delete": async (ctx, viewer, args) => {
     const library = await managedLibrary(ctx, viewer, args.libraryId);
 
-    // Whoever removes a library could add its folder back as their own; only its owner may.
     if (!canRemoveLibrary(viewer, library)) {
       return fail("forbidden", "Only the library's owner or the server's owner can remove it");
     }
@@ -383,7 +357,6 @@ export const adminMutations = {
 
     if (stats !== null) await ctx.db.delete(stats._id);
 
-    // A library has at most one pending and one running job (`enqueueScan`).
     const open = await Promise.all(
       (["pending", "running"] as const).map((status) =>
         ctx.db
@@ -401,7 +374,6 @@ export const adminMutations = {
         .map((job) => ctx.db.patch(job._id, { status: "cancelled", finishedAt: Date.now() })),
     );
 
-    // Its songs and its grants, of which there may be many, go in batches after.
     await ctx.scheduler.runAfter(0, internal.maintenance.purgeLibrary, {
       libraryId: library._id,
     });

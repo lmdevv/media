@@ -1,8 +1,3 @@
-/**
- * F01 · Settings: the account, then personal settings (playback, and downloads on this iPhone,
- * D15), Actions, joining a Jam, and, for admins and the owner only, server administration. Rows a
- * role may not use are left out, not disabled.
- */
 import { can } from "@music/commands/permissions";
 import { router } from "expo-router";
 import {

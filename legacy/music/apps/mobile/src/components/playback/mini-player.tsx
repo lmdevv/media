@@ -1,10 +1,3 @@
-/**
- * The mini player in the tab bar's bottom accessory. iOS shows the accessory above the tabs
- * (`regular`, A01: 40pt art, title over artist, play or pause and next) and moves it into the
- * minimized tab bar as the page scrolls (`inline`, A14: 32pt art, artist over title, play or pause
- * only). Both copies render at once, so everything here reads the player and keeps no state of
- * its own. The system draws the glass capsule. Tapping the song opens Now Playing (B01).
- */
 import { router } from "expo-router";
 import { NativeTabs } from "expo-router/native-tabs";
 import { FastForward, Pause, Play } from "lucide-react-native";
@@ -16,7 +9,6 @@ import { Artwork } from "@/components/ui/artwork";
 import { playsOn, progressOf } from "@/lib/playback-format";
 import { useNowPlaying, usePlaybackPosition, usePlayerActions } from "@/player";
 
-/** A hairline of progress under the song; the only part that re-renders with the position. */
 function Progress() {
   const { positionMs, durationMs } = usePlaybackPosition();
 

@@ -1,7 +1,3 @@
-/**
- * D03 · People in the Jam. The host lets people waiting in or turns them away, and opens a member
- * to remove them; plus shares the link. A member sees who is in it.
- */
 import type { UserId } from "@music/commands/ids";
 import type { Jam, JamMember } from "@music/commands/models";
 import { errorMessage } from "@music/sdk/errors";
@@ -23,7 +19,6 @@ import { jamPeople, memberStatus } from "@/lib/jam";
 import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useNowPlaying } from "@/player";
 
-/** Someone waiting: their row, then Let in and Decline. */
 function Request({ member }: { readonly member: JamMember }) {
   const approve = useRun("jam.approve");
   const [pending, setPending] = useState<"in" | "out" | null>(null);
@@ -78,7 +73,6 @@ function Request({ member }: { readonly member: JamMember }) {
   );
 }
 
-/** The people list for the Jam the person is in. */
 function People({ jam }: { readonly jam: Jam }) {
   const { role } = useNowPlaying();
   const { share } = useJamLink(jam.code);

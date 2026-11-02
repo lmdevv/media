@@ -1,22 +1,4 @@
 #!/usr/bin/env bash
-# Proves an upgrade and a rollback on one data volume, as a homelab would do them:
-#
-#   1. A released image (OLD_IMAGE, default ghcr.io/lmdevv/music:0.1.0; CI also runs 0.2.0, the
-#      release before this one) starts on an empty
-#      volume; an admin signs up, adds the fixture library, waits for its scan, makes a
-#      playlist, and queues songs on a device.
-#   2. The new image (IMAGE, built from this checkout unless set) starts on the same volume. It
-#      must back up before deploying, run the data migrations (0.1.0 predates accent-folded
-#      search, so "doppelganger" only finds "Doppelgänger" once they ran, and stored the queue on
-#      the playback session, which splitPlaybackQueues moves to a row of its own), claim the
-#      library's folder so its songs stream again, and keep every account, song, playlist, and
-#      queue, with the same password still signing in.
-#   3. Going back without restoring is refused: with /data/version newer than the image, init
-#      stops before exporting or deploying anything.
-#   4. The documented rollback: /app/bin/restore puts back the pre-upgrade backup while the new
-#      image runs and records the version that wrote it, then the old image must come up healthy
-#      with the same data.
-#
 #   scripts/upgrade-e2e.sh
 #   IMAGE=music:dev PORT=8091 scripts/upgrade-e2e.sh
 #
@@ -29,9 +11,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 source "$root/scripts/lib/stack.sh"
 port="${PORT:-8090}"
 name="${NAME:-music-upgrade-e2e}"
-# The 0.1.0 release, pinned by digest like nix/vm-test.nix.
 old_image="${OLD_IMAGE:-ghcr.io/lmdevv/music:0.1.0@sha256:8eeaa3b3808b72ab97ac787cf547b69359bd214f0dd5cc86b216cc76f9c152eb}"
-# The old release's version, from its tag (ghcr.io/lmdevv/music:0.2.0@sha256:… gives 0.2.0).
 old_version="${old_image#*music:}"
 old_version="${old_version%%@*}"
 [[ "$old_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
@@ -69,7 +49,6 @@ fail() {
 }
 
 start() {
-  # Stopped the way an upgrade would stop it, so Convex shuts down cleanly first.
   docker stop -t 60 "$name" >/dev/null 2>&1 || true
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker run -d --name "$name" -p "127.0.0.1:${port}:8080" -v "$name-data:/data" \
@@ -85,7 +64,6 @@ start() {
   fail "$1 did not become healthy"
 }
 
-# Prints the JSON field path $2 (like .value.tokens.token) of the JSON on stdin.
 field() {
   node -e '
     let value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
@@ -95,7 +73,6 @@ field() {
   ' "$1"
 }
 
-# Calls the Convex HTTP API: kind (query, mutation, action), function path, JSON args.
 call() {
   curl -fsS -X POST "$url/convex/api/$1" -H 'Content-Type: application/json' \
     ${token:+-H "Authorization: Bearer $token"} \
@@ -115,7 +92,6 @@ snapshot() {
 }
 
 
-# The signed-in user's queue as `<track ids>@<index>`, the same in every version's playback.state.
 queue_of() {
   run_command query read playback.state '{}' | field .value |
     node -pe 'const s = JSON.parse(require("node:fs").readFileSync(0, "utf8")); `${s.queue.map((t) => t.id).join(",")}@${s.index}`'
@@ -126,7 +102,6 @@ search_titles() {
     node -pe 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).map((t) => t.title).join(",")'
 }
 
-# 1. The released image, with an admin, a scanned library, and a playlist.
 start "$old_image"
 token="$(sign_in signUp)"
 job="$(run_command mutation run libraries.create '{"name":"Music","path":"/music"}' | field .value.jobId)"
@@ -140,8 +115,6 @@ done
 tracks="$(run_command query read tracks.list '{"limit":3}' | field .value.items)"
 track_ids="$(node -pe 'JSON.stringify(JSON.parse(process.argv[1]).map((t) => t.id))' "$tracks")"
 run_command mutation run playlists.create "{\"name\":\"Before the upgrade\",\"trackIds\":$track_ids}" >/dev/null
-# A queue on a device: 0.1.0 stores it on the playback session row, which the
-# splitPlaybackQueues migration moves into a playbackQueues row of its own.
 run_command mutation run devices.heartbeat \
   '{"deviceId":"upgrade-e2e","name":"Upgrade test","kind":"web"}' >/dev/null
 run_command mutation run playback.play \
@@ -157,7 +130,6 @@ before="$(snapshot)"
 echo "before the upgrade: $before"
 [[ "$before" != *"tracks=0"* && "$before" == *"playlists=1"* ]] || fail "the old image did not set up"
 
-# 2. The new image on the same volume.
 start "$image"
 mapfile -t backups < <(docker exec "$name" sh -c 'ls -1t /data/backups | grep "^pre-.*\.zip$"' || true)
 echo "backups: ${backups[*]:-none}"
@@ -177,7 +149,6 @@ echo "search doppelganger: ${found:-nothing}"
 [[ "$found" == *"Doppelgänger"* ]] || fail "the accent-folding migration did not run"
 [[ "$(run_command query read playlists.list '{}' | field .value)" == *"Before the upgrade"* ]] ||
   fail "the playlist is gone"
-# The migrations run in the background after the deploy: wait for the queue to move.
 for _ in $(seq 1 30); do
   [[ "$(convex_rows playbackQueues)" == 1 ]] && ! convex_data playbackSessions | grep -q '"queue"' && break
   sleep 2
@@ -188,8 +159,6 @@ convex_data playbackSessions | grep -q '"queue"' && fail "the session still hold
 queue_after="$(queue_of)"
 echo "queue after the upgrade: $queue_after"
 [[ "$queue_after" == "$queue_before" ]] || fail "the queue changed in the upgrade: $queue_after"
-# The library claims its folder after the upgrade (a quick pass ahead of any scan), and only then
-# streams: a signed URL must come back and the media service must serve it.
 first_track="$(node -pe 'JSON.parse(process.argv[1])[0]' "$track_ids")"
 for _ in $(seq 1 30); do
   stream="$(run_command query read stream.url "{\"trackId\":\"$first_track\",\"profile\":\"original\",\"requestedAt\":$(date +%s%3N)}" 2>/dev/null | field .value.url 2>/dev/null || true)"
@@ -204,8 +173,6 @@ echo "stream after the upgrade: ${stream:+served}"
 new_version="$(docker exec "$name" cat /data/version)"
 [[ "${backups[0]}" == *"-from-$old_version-"* ]] || fail "the backup does not record the version it came from"
 
-# 3. Older code over newer data is refused. A newer release than this image is emulated by
-#    writing its version, as starting it would; init must stop before it exports or deploys.
 docker exec "$name" sh -c 'echo 99.0.0 > /data/version'
 docker restart "$name" >/dev/null
 for _ in $(seq 1 60); do
@@ -221,13 +188,9 @@ echo "after starting on newer data: container stopped; backups and /data/version
 if docker logs "$name" 2>&1 | grep -q "refusing to start"; then
   docker logs "$name" 2>&1 | grep "refusing to start" | tail -n 1
 fi
-# The newer release starting again (emulated) puts its version back, and this image, which
-# equals it, starts.
 docker run --rm -v "$name-data:/data" --entrypoint sh "$image" -c "echo $new_version > /data/version"
 start "$image"
 
-# 4. Roll back as documented: restore the pre-upgrade backup while the new image runs, which
-#    also records that its data is the old release's, then run the old image again.
 docker exec "$name" /app/bin/restore "/data/backups/${backups[0]}" | grep "\[restore\]"
 [[ "$(docker exec "$name" cat /data/version)" == "$old_version" ]] ||
   fail "restore did not record the backup's version"

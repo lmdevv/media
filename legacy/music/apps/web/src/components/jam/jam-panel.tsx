@@ -23,7 +23,6 @@ import { useIsDesktop } from "@/lib/use-media";
 import { Avatar } from "./avatars";
 import { QrCode } from "./qr-code";
 
-/** The link people open to join, on this server's address. */
 const jamLink = (code: string): string =>
   new URL(`/jam/${code}`, window.location.origin).toString();
 
@@ -54,7 +53,6 @@ function Section({ title, children }: { readonly title: string; readonly childre
   );
 }
 
-/** A labelled switch row. */
 function Toggle({
   label,
   checked,
@@ -72,7 +70,6 @@ function Toggle({
   );
 }
 
-/** No Jam yet: what one is, and the button to start it. */
 function StartJam() {
   const start = useRun("jam.start");
   const [run, pending] = useAction(() => start({}), { success: () => "Jam started" });
@@ -91,7 +88,6 @@ function StartJam() {
   );
 }
 
-/** The link to send, with Copy and a QR code to scan from a phone. */
 function ShareJam({ jam }: { readonly jam: Jam }) {
   const link = jamLink(jam.code);
   const relink = useRun("jam.relink");
@@ -100,7 +96,6 @@ function ShareJam({ jam }: { readonly jam: Jam }) {
     success: () => "New link made; the old one no longer works",
   });
 
-  // Without a clipboard (a plain-http address) or when the browser refuses, show the link instead.
   const copy = async () => {
     if (await copyText(link)) toast.success("Link copied");
     else toast("Jam link", { description: link });
@@ -133,12 +128,10 @@ function ShareJam({ jam }: { readonly jam: Jam }) {
   );
 }
 
-/** Confirms a host action with a toast, or shows why it failed. */
 const act = (call: Promise<unknown>, message: string): void => {
   call.then(() => toast.success(message)).catch(toastFailure);
 };
 
-/** Who is in the Jam; the host lets people in, turns them away, and removes them. */
 function People({ jam }: { readonly jam: Jam }) {
   const approve = useRun("jam.approve");
   const remove = useRun("jam.remove");
@@ -223,11 +216,6 @@ function People({ jam }: { readonly jam: Jam }) {
   );
 }
 
-/**
- * The limit on each person's upcoming songs (0 for none). It keeps what is typed as a draft and
- * saves it on blur or Enter, so typing "12" doesn't save 1 first, and clearing the field to type
- * doesn't save "no limit".
- */
 function AddLimitField({
   saved,
   onSave,
@@ -275,7 +263,6 @@ function AddLimitField({
   );
 }
 
-/** What people in the Jam may do; only the host sees and changes these. */
 function HostSettings({
   settings,
   approvalAfterRemoval,
@@ -314,7 +301,6 @@ function HostSettings({
       />
       {settings.membersCanAdd ? (
         <AddLimitField
-          // A new limit from the server starts a fresh draft.
           key={settings.addLimit ?? 0}
           saved={settings.addLimit ?? 0}
           onSave={(addLimit) => change({ addLimit })}
@@ -346,11 +332,9 @@ function HostSettings({
   );
 }
 
-/** Someone in the Jam: listen along here or use it as a remote, and leave. */
 function MemberControls({ jam }: { readonly jam: Jam }) {
   const player = usePlayer();
   const listen = useRun("jam.listen");
-  // People add songs they can hear themselves; a guest from a Jam link hears no library.
   const libraries = useRead("libraries.list", {});
   const canAddAny = libraries?.some((library) => library.readable) ?? true;
   const here = player.following && player.isThisDevice;
@@ -387,7 +371,6 @@ function MemberControls({ jam }: { readonly jam: Jam }) {
   );
 }
 
-/** The panel's body for whatever state the viewer's Jam is in. */
 function JamBody({ onDone }: { readonly onDone: () => void }) {
   const { jam } = usePlayer();
   const end = useRun("jam.end");

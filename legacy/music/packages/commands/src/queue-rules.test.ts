@@ -23,7 +23,6 @@ const queue = entries("q").chain((items) =>
     : fc.nat({ max: items.length - 1 }).map((index) => ({ items, index })),
 );
 
-/** A source of numbers in `[0, 1)` that replays generated draws, so a shuffle shrinks. */
 const random = fc
   .array(fc.double({ min: 0, max: 1, maxExcluded: true, noNaN: true }), { minLength: 1 })
   .map((draws) => {

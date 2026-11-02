@@ -12,7 +12,6 @@ import type { StreamHeader } from "./fmp4";
 
 const encoder = new TextEncoder();
 
-/** One MP4 box with a 32-bit size. */
 const box = (type: string, ...payload: ReadonlyArray<Uint8Array>): Uint8Array => {
   const size = 8 + payload.reduce((sum, part) => sum + part.length, 0);
   const bytes = new Uint8Array(size);
@@ -37,7 +36,6 @@ const u32 = (...values: ReadonlyArray<number>): Uint8Array => {
   return bytes;
 };
 
-/** A moov whose first sample entry has type `entry`. */
 const moov = (entry: string): Uint8Array =>
   box(
     "moov",
@@ -52,7 +50,6 @@ interface Reference {
   readonly duration: number;
 }
 
-/** A version 0 sidx with `references`, starting `firstOffset` bytes after itself. */
 const sidx = (
   timescale: number,
   earliest: number,
@@ -183,7 +180,6 @@ describe("readHeader on the media service's real output", () => {
         source,
       ]);
 
-      // File descriptor 3 receives the live copy: the same stream without an index.
       const run = spawnSync("ffmpeg", fragmentedArgs(source, output, profile, "flac", 48_000), {
         stdio: ["ignore", "ignore", "inherit", "pipe"],
       });
@@ -202,12 +198,10 @@ describe("readHeader on the media service's real output", () => {
       expect(header?.codec).toBe(profile === "fmp4-flac" ? "flac" : "aac");
       expect(fragments.length).toBeGreaterThanOrEqual(4);
 
-      // Every indexed offset lands on a moof, and the fragments cover the whole file.
       for (const fragment of fragments) {
         expect(readBoxType(bytes, fragment.offset)).toBe("moof");
       }
 
-      // The fragments run to the end of the file, apart from ffmpeg's trailing `mfra` index.
       const end = (last?.offset ?? 0) + (last?.size ?? 0);
 
       expect(end === bytes.length || readBoxType(bytes, end) === "mfra").toBe(true);
@@ -217,7 +211,6 @@ describe("readHeader on the media service's real output", () => {
 });
 
 describe("codecMimeType", () => {
-  // Safari's MediaSource accepts only the sample entry type; Chromium and Firefox accept both.
   it("names FLAC by its sample entry type, which Safari requires", () => {
     expect(codecMimeType("flac")).toBe('audio/mp4; codecs="fLaC"');
     expect(codecMimeType("aac")).toBe('audio/mp4; codecs="mp4a.40.2"');

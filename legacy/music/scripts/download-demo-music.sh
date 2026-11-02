@@ -8,8 +8,6 @@ set -euo pipefail
 root="${1:-./demo-music}"
 mkdir -p "$root"
 
-# Each source filename is retained; nested artwork is flattened to its basename.
-# Percent-encode the characters present in this particular file manifest.
 download_album() {
   local artist="$1" album="$2" item="$3" cover="$4"
   shift 4
@@ -27,7 +25,6 @@ download_album() {
       mv -- "$dir/$filename.part" "$dir/$filename"
     fi
   done
-  # Let scanners recognize the original cover without renaming it.
   ln -sfn -- "${cover##*/}" "$dir/cover.jpg"
 }
 

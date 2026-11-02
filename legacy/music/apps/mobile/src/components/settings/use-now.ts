@@ -1,4 +1,3 @@
-/** The clock for times a screen words relative to now, such as `Started 3 minutes ago`. */
 import { useEffect, useState } from "react";
 
 /** The current time, updated every `everyMs`. */

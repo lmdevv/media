@@ -1,8 +1,3 @@
-/**
- * Scan jobs as the administration screens word them (F18, F19, G09): which phase a job is in, its
- * progress and time left, and the status lines under its rows. Each takes `now` so a test can pin
- * the clock.
- */
 import type { Job, JobStatus } from "@music/commands/models";
 
 import { countOf } from "./format";
@@ -48,7 +43,6 @@ export interface JobProgress {
 export const jobProgress = (job: Pick<Job, "status" | "done" | "total">): JobProgress => {
   if (job.status === "pending") return { stat: "0%", caption: "Waiting for the scanner", fill: 0 };
 
-  // A rescan that found nothing changed finishes with nothing counted.
   if (job.status === "done" && job.done === 0) {
     return { stat: "100%", caption: "Nothing new to read", fill: 100 };
   }
@@ -85,11 +79,9 @@ export const jobEta = (
   return minutes <= 1 ? "Less than a minute left" : `About ${countOf(minutes, "minute")} left`;
 };
 
-/** When a job last changed state: its finish, else its start, else when it was queued. */
 const lastChange = (job: Pick<Job, "createdAt" | "startedAt" | "finishedAt">): number =>
   job.finishedAt ?? job.startedAt ?? job.createdAt;
 
-/** A running job's row: its counts once the scanner has them, its own words before. */
 const runningLine = (job: Job): string => {
   const percent = jobPercent(job);
 
@@ -98,10 +90,6 @@ const runningLine = (job: Job): string => {
   return `${grouped.format(job.done)} / ${countOf(job.total, "file")} · ${String(percent)}%`;
 };
 
-/**
- * A job row's subtitle per status (F18): `804 / 1,248 files · 64%`, `Completed · 142 files ·
- * Today`, `Failed · Folder unavailable · Yesterday`, `Cancelled · Today`.
- */
 const LINES: Readonly<Record<JobStatus, (job: Job, day: string) => string>> = {
   pending: () => "Waiting for the scanner",
   running: runningLine,
@@ -115,10 +103,6 @@ const LINES: Readonly<Record<JobStatus, (job: Job, day: string) => string>> = {
 export const jobLine = (job: Job, now: number): string =>
   LINES[job.status](job, dayOf(lastChange(job), now));
 
-/**
- * The status under a job's title on its own page, per status (F19): `Running · Started 3 minutes
- * ago`, `Waiting · Queued just now`, `Done · Finished yesterday`.
- */
 const STATUS_LINES: Readonly<Record<JobStatus, (job: Job, now: number) => string>> = {
   pending: (job, now) => `Waiting · Queued ${ago(job.createdAt, now)}`,
   running: (job, now) => `Running · Started ${ago(job.startedAt ?? job.createdAt, now)}`,

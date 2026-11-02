@@ -22,7 +22,6 @@ import {
 } from "./testing/memory-media-backend.ts";
 import { runScoped } from "./testing/run.ts";
 
-/** A job worker over the in-memory backend, with `musicRoots` as `MUSIC_ROOTS`. */
 const worker = (dataDir: string, musicRoots: ReadonlyArray<string> | null = null) =>
   Effect.gen(function* () {
     const services = Layer.merge(
@@ -37,7 +36,6 @@ const worker = (dataDir: string, musicRoots: ReadonlyArray<string> | null = null
     return yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
   });
 
-/** The claim pass alone over the in-memory backend: no job worker, so nothing is scanned. */
 const claimPass = (dataDir: string) =>
   Effect.gen(function* () {
     const services = Layer.merge(layerMemory, testConfig(dataDir));
@@ -49,7 +47,6 @@ const claimPass = (dataDir: string) =>
     return yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
   });
 
-/** Waits until `libraryId` is claimed, or gives up after about ten seconds. */
 const claimedSoon = (control: MemoryMediaBackendControl["Service"], libraryId: string) =>
   control.claimed.pipe(
     Effect.map((ids) => ids.includes(LibraryId.make(libraryId))),
@@ -79,7 +76,6 @@ describe("root claims", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const control = yield* worker(yield* temporaryDirectory("data"));
         const links = yield* temporaryDirectory("links");
 
-        // The same folder, and the folder around it, by other names.
         yield* Files.makeSymlink(root, join(links, "same"));
         yield* Files.makeSymlink(dirname(root), join(links, "around"));
 
@@ -113,7 +109,6 @@ describe("root claims", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* Files.makeDirectory(inner);
         yield* Files.makeDirectory(beside);
 
-        // Each chain is the folder, then each folder above it up to `/`.
         const [innerIds, musicIds, topIds] = yield* Effect.all([
           Files.folderIds(inner),
           Files.folderIds(music),
@@ -123,7 +118,6 @@ describe("root claims", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(innerIds.slice(1)).toEqual(musicIds);
         expect(innerIds.at(-1)).toBe(topIds[0]);
 
-        // The in-memory backend compares identities only, never paths.
         const control = yield* worker(yield* temporaryDirectory("data"));
         const first = yield* scanOf(control, music);
 
@@ -153,16 +147,13 @@ describe("root claims", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         yield* Effect.forEach(folders, (folder) => Files.copyTree(root, folder), { discard: true });
 
-        // As after an upgrade: libraries indexed by an older version, none of them claimed.
         const ids = yield* Effect.forEach(folders, (folder) => control.addLibrary(folder));
 
         const claimed = yield* Effect.forEach(ids, (id) => claimedSoon(control, id));
 
         expect(claimed).toEqual([true, true, true]);
-        // Claimed without a single scan: they stream again before their full scans run.
         expect(yield* control.jobs).toEqual([]);
 
-        // A folder inside a claimed one is still refused, and claims nothing.
         const inner = join(folders[0] ?? base, "inner");
 
         yield* Files.makeDirectory(inner);
@@ -179,7 +170,6 @@ describe("root claims", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       Effect.gen(function* () {
         const { root } = yield* fixtureLibrary;
         const control = yield* claimPass(yield* temporaryDirectory("data"));
-        // Not mounted yet when the library appears, as a drive that comes up after the service.
         const later = join(yield* temporaryDirectory("later"), "music");
         const libraryId = yield* control.addLibrary(later);
 

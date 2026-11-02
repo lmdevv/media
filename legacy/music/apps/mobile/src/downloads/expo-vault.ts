@@ -1,8 +1,3 @@
-/**
- * The iPhone's vault: rows in SQLite and files beside them, in Application Support (which iOS
- * never purges, unlike Caches) and excluded from backup. One per server and account:
- * `<Application Support>/downloads/<server>/<account>/{vault.db, audio/, art/}`.
- */
 import type { UserId } from "@music/commands/ids";
 import type { SessionStore } from "@music/player/session-router";
 import type { VaultStore } from "@music/sdk/downloads";
@@ -15,27 +10,19 @@ import { SESSION_TABLE, vaultSessions } from "./session-store";
 import { commitVault, loadVault, prepareVault, readLyrics } from "./vault-rows";
 import type { ServerOrigin } from "../lib/server";
 
-/**
- * Marks a directory, and so everything in it, excluded from backup (`modules/vault-files`). Looked
- * up when a vault opens, so a build without the module fails downloads, not the app's start.
- */
 const excludeFromBackup = (directory: Directory): void => {
   requireNativeModule<{ excludeFromBackup: (uri: string) => void }>("VaultFiles").excludeFromBackup(
     directory.uri,
   );
 };
 
-/** The vault's subdirectories for files. */
 const FILE_DIRECTORIES = ["audio", "art"] as const;
 
-/** A wiped server's directory is renamed to this prefix, then deleted. */
 const WIPED = "wiped-";
 
-/** Every download on this iPhone, for all servers. */
 const downloadsDirectory = (): Directory =>
   new Directory(Paths.document.parentDirectory, "Library", "Application Support", "downloads");
 
-/** A directory name for a server: its origin's hash, so any origin makes a safe name. */
 const serverDirectory = async (origin: ServerOrigin): Promise<Directory> => {
   const hash = await digestStringAsync(CryptoDigestAlgorithm.SHA256, origin);
 
@@ -49,22 +36,15 @@ export interface ExpoVault extends VaultStore {
   readonly close: () => Promise<void>;
 }
 
-/** A vault file as `File`; vault files are named `<directory>/<name>`. */
 const fileIn = (vault: Directory, file: string): File => new File(vault, ...file.split("/"));
 
-/**
- * Deletes servers' directories a wipe renamed but didn't finish deleting. Each is tried on its
- * own; one that can't go yet is tried again at the next open or wipe.
- */
 const sweepWiped = (downloads: Directory): void => {
   for (const entry of downloads.list()) {
     if (!(entry instanceof Directory) || !entry.name.startsWith(WIPED)) continue;
 
     try {
       entry.delete();
-    } catch {
-      // Left for the next sweep.
-    }
+    } catch {}
   }
 };
 
@@ -97,7 +77,6 @@ export const openVault = async (origin: ServerOrigin, account: UserId): Promise<
     load: () => loadVault(db),
     lyrics: (trackId) => readLyrics(db, trackId),
     commit: (change) => commitVault(db, change),
-    // Async, so a file system error rejects rather than throwing at the caller.
     files: async () =>
       FILE_DIRECTORIES.flatMap((name) =>
         new Directory(vault, name)
@@ -131,7 +110,6 @@ export const wipeVaults = async (origin: ServerOrigin): Promise<void> => {
   const server = await serverDirectory(origin);
 
   if (!server.exists) return;
-  // A unique name: an earlier wipe's directory may still be waiting to be deleted.
   server.rename(`${WIPED}${server.name}-${randomUUID()}`);
   sweepWiped(downloadsDirectory());
 };

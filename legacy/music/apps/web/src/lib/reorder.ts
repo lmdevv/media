@@ -1,8 +1,3 @@
-/**
- * Moves in an ordered list, said the way the server takes them: "put this entry just after that
- * one". Naming the neighbour by ID rather than an index means a move made while someone else
- * changed the list still lands next to the entry the person saw, or fails when it is gone.
- */
 import { cn } from "@music/ui/lib/utils";
 
 /**

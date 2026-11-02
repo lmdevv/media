@@ -1,8 +1,3 @@
-/**
- * Lyrics embedded in a song's tags, read from `music-metadata`'s native tags: its common
- * `lyrics` loses which frame they came from, flattens LRC into lines without word timing, and
- * does not map Vorbis `SYNCEDLYRICS`. The common field is read only for other tag formats.
- */
 import {
   type EmbeddedLyricsTag,
   type Lang,
@@ -45,7 +40,6 @@ const syncedFields = {
 
 const SyncedLyrics = Schema.Struct(syncedFields);
 
-/** `music-metadata`'s common lyrics: synchronized text, plain text, or both. */
 const CommonLyrics = Schema.Struct({ ...syncedFields, text: Schema.optionalKey(Schema.String) });
 
 const decodeUnsynced = Schema.decodeUnknownOption(UnsyncedLyrics);
@@ -62,24 +56,15 @@ const VORBIS_FIELDS: ReadonlyMap<string, EmbeddedLyricsTag> = new Map([
   ["SYNCEDLYRICS", "vorbis:SYNCEDLYRICS"],
 ]);
 
-/** `TXXX` frames some taggers (and ffmpeg) use instead of `USLT`: `LYRICS`, `lyrics-eng`. */
 const ID3_USER_LYRICS = /^TXXX:(?:UN)?(?:SYNCED)?LYRICS(?:-([a-z]{3}))?$/iu;
 
 type SyncedLyrics = typeof SyncedLyrics.Type;
 
 type SyltEntry = SyncedLyrics["syncText"][number];
 
-/**
- * Whether `SYLT` content is words sung or spoken: ID3's lyrics and text transcription types,
- * not chords, events, trivia, or links.
- */
 const isLyricContent = (contentType: number): boolean =>
   contentType === LyricsContentType.lyrics || contentType === LyricsContentType.text;
 
-/**
- * `SYLT` text, which taggers write one entry per line or one per syllable, a new line then
- * starting with a line break. Syllables become the words of their line; their end is unknown.
- */
 const syltLines = (entries: ReadonlyArray<SyltEntry>): ReadonlyArray<LyricLine> => {
   const perSyllable = entries.slice(1).some((entry) => /^[\r\n]/u.test(entry.text));
   const groups: Array<Array<SyltEntry>> = [];
@@ -120,7 +105,6 @@ const syltLines = (entries: ReadonlyArray<SyltEntry>): ReadonlyArray<LyricLine> 
 const syltBody = (sylt: SyncedLyrics): Result.Result<LyricBody, LyricsParseError> => {
   const lines = syltLines(sylt.syncText);
 
-  // MPEG frame numbers need the frame rate to become time, so they read as plain text.
   return sylt.timeStampFormat === TimestampFormat.milliseconds
     ? timedBody(lines)
     : plainBody(lines.map((line) => line.text).join("\n"));

@@ -1,7 +1,3 @@
-/**
- * What Save settings sends from the server settings form (F20): only the settings the person
- * changed, so saving one never overwrites a change another admin made to the other meanwhile.
- */
 import type { ServerSettings } from "@music/commands/models";
 
 /** The settings `server.update` changes; one it leaves out keeps its saved value. */

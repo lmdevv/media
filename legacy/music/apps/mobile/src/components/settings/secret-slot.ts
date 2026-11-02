@@ -1,9 +1,3 @@
-/**
- * Hands a secret shown once (a new API key, an invite code, a password reset token) from the
- * screen that made it to the screen that shows it: F05 to F06, F12 to F23, F27 to F28. Route
- * parameters can land in navigation state, deep-link logs, and crash reports, so secrets never
- * travel in them; one waits here, in memory, in a single slot.
- */
 import { useEffect, useState } from "react";
 
 let slot: string | null = null;

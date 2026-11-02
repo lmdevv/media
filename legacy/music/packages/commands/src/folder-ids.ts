@@ -32,7 +32,6 @@ export const chainsOverlap = (left: FolderChain, right: FolderChain): boolean =>
   );
 };
 
-/** A file system path's file system and its path there; null when it isn't one. */
 const splitFsPath = (fsPath: string): { readonly device: string; readonly path: string } | null => {
   const at = fsPath.indexOf(":/");
 

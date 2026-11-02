@@ -1,13 +1,7 @@
-/**
- * A field that shows a value instead of taking one: a new API key (F06), an invite link (F11), a
- * reset link (F23). It looks like Paper's filled field; the text is selectable so it can be copied
- * by hand too.
- */
 import { View } from "react-native";
 
 import { Text } from "@/components/ui/text";
 
-/** Props for `ValueField`. */
 export interface ValueFieldProps {
   readonly label: string;
   readonly value: string;

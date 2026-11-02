@@ -1,8 +1,3 @@
-/**
- * Now Playing's background color for the current cover. Expo Image reduces the cover to a 1×1
- * BlurHash, whose first component is the cover's average color, so no pixels cross into
- * JavaScript and no native module is added. Each cover's color is remembered for the session.
- */
 import { Image } from "expo-image";
 import { useEffect, useState } from "react";
 
@@ -10,7 +5,6 @@ import { artKey, blurhashAverage, parseHex, playerTint } from "@/lib/art-tint";
 import type { Rgb } from "@/lib/art-tint";
 import { useThemeColor } from "@/lib/theme-color";
 
-/** Average colors by cover. A cover that failed to load is not remembered, so it is read again. */
 const averages = new Map<string, Rgb>();
 
 /**

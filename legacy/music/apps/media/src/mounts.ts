@@ -1,12 +1,3 @@
-/**
- * Where a folder really is on its file system, whatever mount shows it. A bind mount shows a
- * folder of one file system at another path; `/proc/self/mountinfo` says, for every mount, which
- * file system (`major:minor`) it shows and which folder of it (its root). A path's file system
- * path is that root joined with the rest of the path below the mount point, so two libraries on
- * one file system compare by those paths, which no bind mount can disguise
- * (`@music/commands/folder-ids`, `fsPathsOverlap`).
- */
-
 /** One mount: the file system it shows, the folder of it, and where it is mounted. */
 export interface Mount {
   readonly device: string;
@@ -14,7 +5,6 @@ export interface Mount {
   readonly mountPoint: string;
 }
 
-/** Undoes mountinfo's octal escapes (`\040` for a space, `\134` for a backslash). */
 const unescapeField = (field: string): string =>
   field.replaceAll(/\\([0-7]{3})/g, (_, octal: string) =>
     String.fromCodePoint(Number.parseInt(octal, 8)),

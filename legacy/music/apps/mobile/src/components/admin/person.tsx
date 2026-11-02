@@ -1,8 +1,3 @@
-/**
- * F12 · Person: who they are, their role, and what an admin may do to their account. A role chip
- * changes the role at once; the reset link is made on press, never on arrival. Everything the
- * caller may not do is hidden, with a note saying why.
- */
 import type { UserId } from "@music/commands/ids";
 import type { AssignableRole, Person, User } from "@music/commands/models";
 import {
@@ -58,7 +53,6 @@ export function PersonPage({ me, id }: { readonly me: User; readonly id: UserId 
   return <PersonControls me={me} person={person} />;
 }
 
-/** The person's role and account controls, once they have loaded. */
 function PersonControls({ me, person }: { readonly me: User; readonly person: Person }) {
   const changeRole = useRun("people.role");
   const createReset = useRun("people.reset");
@@ -66,7 +60,6 @@ function PersonControls({ me, person }: { readonly me: User; readonly person: Pe
   const roleChange = useAction();
   const reset = useAction();
   const restore = useAction();
-  // The chip someone just picked, shown while the change runs; the saved role otherwise.
   const [picked, setPicked] = useState<AssignableRole | null>(null);
   const name = personName(person);
   const role = picked ?? assignedRole(person.role);

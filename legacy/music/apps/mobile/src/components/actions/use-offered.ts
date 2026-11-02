@@ -1,8 +1,3 @@
-/**
- * The commands this person may run from Actions right now: filtered by their role, and by whether
- * anything is playing anywhere. Playing comes from the server's playback state, not this phone's
- * player, so a remote that controls another device still offers Pause and Skip.
- */
 import { offeredCommands } from "@music/commands/forms";
 import type { User } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";

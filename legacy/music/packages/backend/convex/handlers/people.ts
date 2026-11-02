@@ -1,8 +1,3 @@
-/**
- * People management for admins: roles, suspension, password reset links, removal, and ownership
- * transfer. Who may do what comes from `@music/commands/permissions`; this module adds the rules
- * that need the database, such as never leaving the server without an active admin.
- */
 import {
   assignableRoles,
   can,
@@ -30,19 +25,10 @@ import type { Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
 
-/**
- * People `people.directory` reads at most. A server is a household or a small group; this bounds a
- * query any member can run, and a server past it lists its first accounts.
- */
 const DIRECTORY_LIMIT = 1000;
 
-/** How long a password reset link works. */
 const RESET_TTL_MS = 24 * 60 * 60 * 1000;
 
-/**
- * The latest sign of life: a sign-in, a player heartbeat, a playback change, or an API key use.
- * Each comes from an index on the person, so this reads a few rows per person.
- */
 const lastActiveAt = async (ctx: QueryCtx, userId: Id<"users">): Promise<number | null> => {
   const [device, session, key, playback] = await Promise.all([
     ctx.db
@@ -50,13 +36,11 @@ const lastActiveAt = async (ctx: QueryCtx, userId: Id<"users">): Promise<number 
       .withIndex("by_user_last_seen", (q) => q.eq("userId", userId))
       .order("desc")
       .first(),
-    // Within one person the index orders sessions by creation, so this is the latest sign-in.
     ctx.db
       .query("authSessions")
       .withIndex("userId", (q) => q.eq("userId", userId))
       .order("desc")
       .first(),
-    // Keys never used sort first, so the last one is the most recently used.
     ctx.db
       .query("apiKeys")
       .withIndex("by_user_last_used", (q) => q.eq("userId", userId))
@@ -86,7 +70,6 @@ const presentPerson = async (ctx: QueryCtx, doc: Doc<"users">) => ({
   joinedViaJam: doc.joinedViaJam !== undefined,
 });
 
-/** A person the viewer may manage (see `canManagePerson`), or a `forbidden` failure saying why. */
 const managedPerson = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise<Doc<"users">> => {
   const user = await loadPerson(ctx, id);
 
@@ -104,11 +87,6 @@ const managedPerson = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise
   );
 };
 
-/**
- * Fails unless someone other than `leaving` can still run the server: an owner or admin who is
- * not suspended. The owner can never be demoted, suspended, or removed, so this only matters
- * on a server that predates owners, until its migration names one.
- */
 const keepAnAdmin = async (ctx: QueryCtx, leaving: Doc<"users">): Promise<void> => {
   if (roleOf(leaving) !== "admin" || (await findOwner(ctx)) !== null) return;
 
@@ -166,8 +144,6 @@ export const peopleQueries = {
     return Promise.all(users.map((user) => presentPerson(ctx, user)));
   },
 
-  // Names and roles only: sharing a playlist with someone should not show members each other's
-  // email addresses.
   "people.directory": async (ctx, viewer) => {
     const users = await ctx.db.query("users").take(DIRECTORY_LIMIT);
 
@@ -190,9 +166,6 @@ export const peopleMutations = {
 
     if (args.role !== "admin") await keepAnAdmin(ctx, user);
 
-    // Guests have no API keys: every key made so far stops at once, with the sessions it opened
-    // (`keysValidAfter`), and stays stopped after a later promotion, while the batches below
-    // revoke the rows.
     await ctx.db.patch(
       user._id,
       args.role === "guest" ? { role: args.role, keysValidAfter: Date.now() } : { role: args.role },
@@ -200,16 +173,11 @@ export const peopleMutations = {
     await revokeLapsedInvites(ctx, user._id);
     await voidResets(ctx, user._id);
 
-    // Guests have no API keys. Key sign-in refuses guests at once; the keys are revoked, and the
-    // sessions they opened ended, in batches, so a promotion does not revive them. Password
-    // sessions stay: a guest still listens.
     if (args.role === "guest") {
       await ctx.scheduler.runAfter(0, internal.people.revokeKeys, {
         userId: user._id,
         cursor: null,
       });
-      // Guests can't host a Jam, whose link can make accounts: theirs ends, with its guests, as
-      // on suspension or removal.
       await endHostedJam(ctx, user._id);
     }
 
@@ -225,10 +193,7 @@ export const peopleMutations = {
     await revokeLapsedInvites(ctx, user._id);
     await voidResets(ctx, user._id);
 
-    // API keys stay, refusing to sign in until the person is unsuspended. Stream URLs already
-    // signed keep working until they expire, as after any revocation.
     await endUserSessions(ctx, user._id);
-    // A Jam they host ends now, rather than when the cron next notices, and its guests go.
     await endHostedJam(ctx, user._id);
 
     return ok;
@@ -239,8 +204,6 @@ export const peopleMutations = {
 
     if (user.suspendedAt === undefined) return ok;
 
-    // A sign-in that raced the suspension made a session after it ended the others; it must not
-    // come back to life with the account.
     await endUserSessions(ctx, user._id);
     await ctx.db.patch(user._id, { suspendedAt: undefined });
 
@@ -250,7 +213,6 @@ export const peopleMutations = {
   "people.reset": async (ctx, viewer, args) => {
     const user = await managedPerson(ctx, viewer, args.userId);
 
-    // A reset link hands over the account, and with it every library the person can hear.
     if (!can(viewer.role, "owner") && (await listensBeyond(ctx, viewer.user, user))) {
       return fail(
         "forbidden",
@@ -268,7 +230,6 @@ export const peopleMutations = {
 
     await keepAnAdmin(ctx, user);
 
-    // A server from before owners has none until its migration runs; the remover takes over.
     const heir = (await findOwner(ctx))?._id ?? viewer.id;
 
     await removeAccount(ctx, user, heir);

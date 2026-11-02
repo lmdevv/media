@@ -1,4 +1,3 @@
-/** F22 · Transfer ownership? */
 import { usePersonParam } from "@/components/admin/params";
 import { TransferOwnershipSheet } from "@/components/admin/person-sheets";
 import { SheetAccess } from "@/components/settings/sheet-access";

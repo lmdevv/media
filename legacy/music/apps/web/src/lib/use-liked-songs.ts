@@ -6,10 +6,8 @@ import { useQueries } from "convex/react";
 import { Result } from "effect";
 import { useEffect, useMemo, useState } from "react";
 
-/** Liked songs per page; pages load one after another until the list ends. */
 const PAGE_SIZE = 200;
 
-/** Most liked songs the page keeps live at once. */
 const LIKED_LIMIT = 5000;
 
 const decodePage = resultDecoder("likes.page");

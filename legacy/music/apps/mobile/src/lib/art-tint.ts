@@ -1,10 +1,3 @@
-/**
- * Now Playing's background follows the artwork (B01, H05): the theme's player color keeps its
- * lightness, and takes the hue and a little of the chroma of the cover's average color. Paper's
- * `--color-player-light` and `--color-dark-player` are this tint for Blue Lines, so a cover with
- * no color (or none loaded yet) falls back to them.
- */
-
 /** An sRGB color, 0 to 255 per channel. */
 export interface Rgb {
   readonly r: number;
@@ -21,7 +14,6 @@ interface Oklch {
 const BASE83 =
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~";
 
-/** How much of the cover's chroma the tint keeps, and the most it may reach. */
 const CHROMA_SHARE = 0.15;
 
 const MAX_CHROMA = 0.016;
@@ -98,7 +90,6 @@ const fromOklch = ({ l: lightness, c, h }: Oklch): Rgb => {
 
 const hex = (channel: number): string => channel.toString(16).padStart(2, "0");
 
-/** `#rrggbb` for a color. */
 const toHex = ({ r, g, b }: Rgb): string => `#${hex(r)}${hex(g)}${hex(b)}`;
 
 /** The color of a `#rrggbb` or `#rrggbbaa` string, ignoring alpha; null for anything else. */

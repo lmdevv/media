@@ -12,7 +12,6 @@ import type { Browser, Page } from "@playwright/test";
 import { mediaPort } from "../harness/config.ts";
 import { harnessClient, seedSession } from "../harness/seed.ts";
 
-/** True when any recorded element is playing with its clock moving. */
 const outputsAudio = (page: Page): Promise<boolean> =>
   page.evaluate(async () => {
     const elements = [...(window.audioElements ?? [])];
@@ -42,7 +41,6 @@ const openDevice = async (browser: Browser, tracks: ReadonlyArray<string>): Prom
   return page;
 };
 
-/** Presses "Play all" and waits until this page is the active device and outputs audio. */
 const playAllHere = async (page: Page): Promise<void> => {
   await page.getByRole("button", { name: "Play all" }).click();
   await expect(field(page, "this-device")).toHaveText("true");
@@ -96,7 +94,6 @@ test("hands playback from one device to another near the same position", async (
   expect(await b.evaluate(() => navigator.mediaSession.metadata?.title)).toBe("Song One");
   expect(await a.evaluate(() => navigator.mediaSession.playbackState)).toBe("none");
 
-  // Remote control: pausing on A pauses the audio on B.
   await a.getByRole("button", { name: "Toggle" }).click();
   await expect(field(b, "status")).toHaveText("paused");
   await expect.poll(() => outputsAudio(b)).toBe(false);
@@ -110,8 +107,6 @@ test("asks for a tap when the browser blocks audio after a handoff", async ({ br
   const a = await openDevice(browser, tracks);
   const client = await harnessClient();
 
-  // B must never get a user gesture before the handoff, and every Playwright read of a page
-  // grants one. So B gets a known device ID and the test watches it through the server.
   const deviceB = `harness-b-${Date.now()}`;
   const context = await browser.newContext();
 
@@ -127,12 +122,8 @@ test("asks for a tap when the browser blocks audio after a handoff", async ({ br
     .toBe(true);
 
   await playAllHere(a);
-  // The transfer comes from a third device (the server client, as the CLI would send it). In
-  // headless Chromium a click in context A also grants user activation to context B, which no
-  // real pair of devices would share.
   await client.run("playback.transfer", { deviceId: DeviceId.make(deviceB) });
 
-  // B took over, the browser refused to start audio, and B reported itself paused.
   await expect
     .poll(async () => {
       const state = await client.read("playback.state", {});
@@ -181,10 +172,8 @@ test("preloads the next song, advances without reloading, and reports it", async
 
   const second = streamRequests.find((request) => request.track === tracks[1]);
 
-  // The second song was fetched ahead of time, not after the first one ended.
   expect(second).toBeDefined();
   expect(changedAt - (second?.at ?? changedAt)).toBeGreaterThan(2000);
-  // The gapless engine plays through one element; HTML audio alternates between two.
   const engine = await field(a, "engine").textContent();
 
   expect(await a.evaluate(() => window.audioElements?.size)).toBe(engine === "mse" ? 1 : 2);
@@ -235,7 +224,6 @@ test("plays through the gapless MSE engine and switches to HTML audio for data s
   await expect(field(a, "engine")).toHaveText("mse");
   await expect.poll(() => outputsAudio(a)).toBe(true);
 
-  // Quality changes apply from the next song, which then plays through HTML audio.
   await a.evaluate(() => {
     window.player?.setQuality("data-saver");
   });

@@ -1,12 +1,5 @@
-/**
- * How synced lyrics follow playback in Now Playing (B12, B14): the sung line sits at the anchor
- * until anything other than following moves the lines (a drag, a tap on the status bar,
- * VoiceOver's three-finger scroll, even while paused), and from then on the lines are the
- * person's until they ask to follow again ("Back to current line", or tapping a line).
- */
 import { Match } from "effect";
 
-/** How far (in points) the lines may sit from where following put them and still count as there. */
 const SCROLL_SLACK = 2;
 
 /**
@@ -56,10 +49,6 @@ export interface LineFollowStep {
 
 const near = (a: number, b: number): boolean => Math.abs(a - b) <= SCROLL_SLACK;
 
-/**
- * Takes the lines to `top`. Already there, they are placed; a scroll still under way toward
- * somewhere else is stopped there with a scroll that is not animated.
- */
 const moveTo = (state: LineFollow, top: number, animated: boolean): LineFollowStep => {
   const { offset } = state;
 
@@ -77,7 +66,6 @@ const moveTo = (state: LineFollow, top: number, animated: boolean): LineFollowSt
 export const followLines = (state: LineFollow, event: LineFollowEvent): LineFollowStep =>
   Match.value(event).pipe(
     Match.discriminatorsExhaustive("type")({
-      // Following moves the lines with an animation; a first placement or a new layout does not.
       started: ({ top }): LineFollowStep =>
         state.kind === "released" || top === null
           ? { state }
@@ -100,7 +88,6 @@ export const followLines = (state: LineFollow, event: LineFollowEvent): LineFoll
         return { state: { ...state, offset } };
       },
       dragged: (): LineFollowStep => ({ state: { kind: "released", offset: state.offset } }),
-      // A follow scroll that has not reached its target by now was stopped by something else.
       scrollSettled: (): LineFollowStep => {
         if (state.kind !== "moving") return { state };
 

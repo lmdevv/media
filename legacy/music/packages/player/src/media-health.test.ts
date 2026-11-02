@@ -7,7 +7,6 @@ import { isStreamRefused, mediaBaseUrl, probeMediaHealth, waitForMedia } from ".
 
 const ListeningAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }));
 
-/** A local HTTP server whose `/media/health` fails `failures` times, then answers 200. */
 const flakyMediaService = async (failures: number) => {
   let hits = 0;
 

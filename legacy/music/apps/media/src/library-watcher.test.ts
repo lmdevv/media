@@ -9,7 +9,6 @@ import { MEDIA_TEST_TIMEOUT, temporaryDirectory, testConfig } from "./testing/fi
 import { layerMemory, MemoryMediaBackendControl } from "./testing/memory-media-backend.ts";
 import { runScoped } from "./testing/run.ts";
 
-/** The message of a watch that failed with the Node error `code`. */
 const failedWith = (code: string): string =>
   new LibraryWatcher.WatchError({
     path: "/music",
@@ -22,7 +21,6 @@ describe("LibraryWatcher", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       Effect.gen(function* () {
         const parent = yield* temporaryDirectory("parent");
         const dataDir = yield* temporaryDirectory("data");
-        // Not there yet, as a drive that is mounted after the service started.
         const root = join(parent, "library");
         const services = Layer.merge(layerMemory, testConfig(dataDir));
 
@@ -48,8 +46,6 @@ describe("LibraryWatcher", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         if (startup === undefined) expect.unreachable("no scan was requested at startup");
         yield* control.cancelJob(startup.id);
 
-        // The watch failed to start on the missing folder; once the folder is there, the watch
-        // starts again and asks for a scan of what it could not see.
         yield* Files.makeDirectory(root);
         const [restarted] = yield* waitForPending;
 
@@ -64,7 +60,6 @@ describe("LibraryWatcher", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(changed.id).not.toBe(restarted.id);
         yield* control.cancelJob(changed.id);
 
-        // The folder goes away (a drive unmounted) and comes back: the watch follows it.
         yield* Files.removePath(root);
         yield* Effect.sleep("500 millis");
         yield* Files.makeDirectory(root);

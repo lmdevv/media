@@ -6,14 +6,9 @@ import { createInvite, freshEmail, join, seed, seedDevice, signIn, unique } from
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(() => {
-  // Idempotent: ensures the owner, the /music library, and its songs.
   seed();
 });
 
-/**
- * Set `JAM_VIDEO_DIR` to record both browsers. The Jam link and its QR code are blurred in the
- * recording: they let anyone in.
- */
 const videoDir = process.env["JAM_VIDEO_DIR"];
 
 const recording = (): BrowserContextOptions =>
@@ -38,7 +33,6 @@ const hideSecrets = async (page: Page): Promise<void> => {
   });
 };
 
-/** A new browser for `page`'s signed-in person, recorded when asked, so setup stays off camera. */
 const reopen = async (browser: Browser, page: Page): Promise<Page> => {
   const context = await browser.newContext({
     ...recording(),
@@ -56,7 +50,6 @@ const bar = (page: Page) => page.getByRole("region", { name: "Player" });
 
 const band = (page: Page) => page.getByRole("status", { name: "Jam" });
 
-/** Opens the Jam link as someone signed in and joins. */
 const joinJam = async (page: Page, link: string): Promise<void> => {
   await page.goto(link);
   await page.getByRole("button", { name: "Join", exact: true }).click();
@@ -70,7 +63,6 @@ test("a Jam from link to end: join, add a song, follow a skip, remove, end", asy
   test.setTimeout(120_000);
   const friend = unique("Noor");
 
-  // Off camera: the host signs in and invites a friend, who makes an account.
   await signIn(page);
 
   const invited = await join(
@@ -85,7 +77,6 @@ test("a Jam from link to end: join, add a song, follow a skip, remove, end", asy
 
   await invited.context().close();
 
-  // The host plays an album on their kitchen speaker and starts a Jam from the queue panel.
   await host.goto("/albums");
   await host.getByRole("link", { name: "Blue Lines" }).first().click();
   await host.getByRole("button", { name: "Play", exact: true }).first().click();
@@ -104,7 +95,6 @@ test("a Jam from link to end: join, add a song, follow a skip, remove, end", asy
   expect(link).toMatch(/\/jam\/[a-z0-9]+$/u);
   await host.keyboard.press("Escape");
 
-  // The friend opens the link: the landing page names the host, then they're in, listening along.
   await member.goto(link);
   await expect(member.getByRole("heading", { name: /Jam$/u })).toBeVisible();
   await joinJam(member, link);
@@ -113,7 +103,6 @@ test("a Jam from link to end: join, add a song, follow a skip, remove, end", asy
     bar(member).getByRole("button", { name: "Safe From Harm", exact: true }),
   ).toBeVisible();
 
-  // They add a song; the host's queue says who added it.
   await member.goto("/albums");
   await member.getByRole("link", { name: "Moon Safari" }).first().click();
   await member.getByRole("row").filter({ hasText: "Sexy Boy" }).hover();
@@ -126,22 +115,18 @@ test("a Jam from link to end: join, add a song, follow a skip, remove, end", asy
     }),
   ).toContainText(`Added by ${friend}`);
 
-  // The host skips; the friend's player follows.
   await bar(host).getByRole("button", { name: "Next", exact: true }).click();
   await expect(bar(member).getByRole("button", { name: "One Love", exact: true })).toBeVisible();
 
-  // The host removes them: the band goes, their own player is back, and the link won't let them in.
   await band(host).getByRole("button", { name: "Manage" }).click();
   await host.getByRole("button", { name: `Remove ${friend} from the Jam` }).click();
   await expect(band(member)).toHaveCount(0);
   await expect(bar(member).getByRole("button", { name: "One Love", exact: true })).toHaveCount(0);
-  // Until a new link, nobody new comes straight in, so they can't return as someone new either.
   await expect(host.getByText("New people need your OK because you removed someone")).toBeVisible();
   await member.goto(link);
   await member.getByRole("button", { name: "Ask to join", exact: true }).click();
   await expect(member.getByText("The host removed you from this Jam")).toBeVisible();
 
-  // A new link lets them back; then the host ends the Jam and they get their own player back.
   await host.getByRole("button", { name: "New link" }).click();
   await expect(host.getByTestId("jam-link")).not.toHaveValue(link);
   const fresh = await host.getByTestId("jam-link").inputValue();

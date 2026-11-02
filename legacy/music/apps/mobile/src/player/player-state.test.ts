@@ -82,7 +82,6 @@ const local = (patch: Partial<ControllerSnapshot> = {}): ControllerSnapshot => (
   ...patch,
 });
 
-/** The server's `queue.move`: the entry goes right after `afterItemId`, or first without one. */
 const serverMove = (
   ids: ReadonlyArray<string>,
   itemId: string,

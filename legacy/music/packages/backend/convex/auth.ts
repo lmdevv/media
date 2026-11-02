@@ -13,11 +13,6 @@ import { SUSPENDED_MESSAGE } from "./lib/viewer";
 /** The provider ID stored on every password account; it must never change. */
 const PASSWORD = "password";
 
-/**
- * A new account's email, cleaned like any typed text: an account without a name shows the part
- * before the `@`. Sign-in looks an email up as typed (`Email`), so an account made before the
- * cleaning still finds its own.
- */
 const NewEmail = Text.check(Schema.isMinLength(3));
 
 const Email = Schema.Trimmed.check(Schema.isMinLength(3));
@@ -59,7 +54,6 @@ const ApiKeyCredentials = Schema.Struct({ key: Schema.String.check(Schema.isMinL
 
 const decodeApiKeyCredentials = Schema.decodeUnknownResult(ApiKeyCredentials);
 
-/** The stored password hash of an account `retrieveAccount` returned. */
 const decodeSecret = Schema.decodeUnknownResult(Schema.String);
 
 const invalid = (message: string): never => {
@@ -70,7 +64,6 @@ const checkPassword = (password: string): void => {
   if (password.length < 8) invalid("Use at least 8 characters for the password");
 };
 
-/** Empty optional fields from a form mean "not given". */
 const given = (value: string | undefined): string | undefined =>
   value === undefined || value.length === 0 ? undefined : value;
 
@@ -97,7 +90,6 @@ const dummyHash = (): Promise<string> => {
   return dummy.hash;
 };
 
-/** What every failed password sign-in says, whether the email or the password was wrong. */
 const INVALID_CREDENTIALS = "Invalid email or password";
 
 const RATE_LIMITED_MESSAGE = "Too many failed sign-ins. Wait a few minutes and try again.";
@@ -154,7 +146,6 @@ const password = ConvexCredentials<DataModel>({
     }
 
     if (input.flow === "signIn") {
-      // Sign-up keeps an email cleaned (`NewEmail`); one made before that keeps it as typed.
       const typed = input.email.toLowerCase();
 
       const id = await ctx.runQuery(internal.users.signInAccountId, {
@@ -163,7 +154,6 @@ const password = ConvexCredentials<DataModel>({
         cleaned: cleanText(typed),
       });
 
-      // Fails on a wrong password before anything reveals that the account is suspended.
       const { account, user } = await retrieveAccount(ctx, {
         provider: PASSWORD,
         account: { id, secret: input.password },
@@ -174,8 +164,6 @@ const password = ConvexCredentials<DataModel>({
           throw new ConvexError({ code: "rate_limited", message: RATE_LIMITED_MESSAGE });
         }
 
-        // An unknown email costs the same hash check as a wrong password, so timing does not
-        // tell them apart either.
         if (reason === "InvalidAccountId") await scrypt.verify(await dummyHash(), input.password);
 
         return invalidCredentials();
@@ -185,11 +173,8 @@ const password = ConvexCredentials<DataModel>({
         throw new ConvexError({ code: "forbidden", message: SUSPENDED_MESSAGE });
       }
 
-      // The session opens in its own transaction with a second look at the password, rather than
-      // in Convex Auth's later one, so a reset landing after the check leaves no session behind.
       const secret = decodeSecret(account.secret);
 
-      // A password account always has a secret; one without can't have passed the check.
       if (Result.isFailure(secret)) return invalidCredentials();
 
       const opened = await ctx.runMutation(internal.users.openPasswordSession, {
@@ -208,9 +193,6 @@ const password = ConvexCredentials<DataModel>({
 
     checkPassword(input.newPassword);
 
-    // One transaction checks the link and who may use it, sets the password on the person's own
-    // account, ends their sessions, and opens the one this sign-in gets, so nothing can change
-    // in between.
     return ctx.runMutation(internal.passwordResets.redeem, {
       hash: await sha256Hex(input.token),
       provider: PASSWORD,

@@ -1,4 +1,3 @@
-/** F23 · Password reset link. */
 import { usePersonParam } from "@/components/admin/params";
 import { ResetLinkPage } from "@/components/admin/reset-link";
 import { RequireAccess } from "@/components/settings/access";

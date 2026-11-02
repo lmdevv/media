@@ -8,8 +8,6 @@ import { useState } from "react";
 export const useOpenedOnce = (open: boolean): boolean => {
   const [opened, setOpened] = useState(open);
 
-  // Updating state while rendering, as React documents for values that follow a prop: the render
-  // restarts at once, with no effect and no extra frame.
   if (open && !opened) setOpened(true);
 
   return opened || open;

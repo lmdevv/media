@@ -1,8 +1,3 @@
-/**
- * F18 · Jobs: scans still going, then recent ones, each with its state as a glyph and words. The
- * list is live, so Paper's refresh glyph only names the screen. The server returns at most 30
- * recent jobs, so they stay in the page's scroll.
- */
 import type { Job } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
 import { router } from "expo-router";
@@ -20,17 +15,14 @@ import type { JobPhase } from "@/lib/jobs";
 import { NavGlyph } from "@/components/settings/nav-glyph";
 import { useNow } from "@/components/settings/use-now";
 
-/** The glyph for each phase: refresh while going, a check when done, info when stopped. */
 const GLYPHS: Readonly<Record<JobPhase, LucideIcon>> = {
   active: RotateCw,
   done: Check,
   stopped: Info,
 };
 
-/** Props for `JobRow`. */
 interface JobRowProps {
   readonly job: Job;
-  /** The library's name, or the job's own label when the library is gone. */
   readonly name: string;
   readonly now: number;
 }

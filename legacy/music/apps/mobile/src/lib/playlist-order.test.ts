@@ -13,12 +13,10 @@ import { describe, expect, it } from "vitest";
 
 import { applyMove, moveIndex, planMoves, reconcileOrder } from "./playlist-order";
 
-/** Distinct entries and a shuffled copy of them. */
 const reordering = uniqueArray(integer({ min: 0, max: 500 }), { maxLength: 40 }).chain((list) =>
   tuple(constant(list), shuffledSubarray(list, { minLength: list.length })),
 );
 
-/** Length of the longest increasing subsequence, the slow and obvious way. */
 const longestRun = (values: ReadonlyArray<number>): number => {
   const best = values.map(() => 1);
 

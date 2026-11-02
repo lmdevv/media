@@ -1,8 +1,3 @@
-/**
- * The area beside the iPad's sidebar. Pages inside it take their layout from its width
- * (`useContentLayout`). Beside a sidebar it starts below the status bar, so to the pages in it the
- * screen has no insets; in dark mode it is a rounded panel on the black canvas (B1 dark).
- */
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { View } from "react-native";

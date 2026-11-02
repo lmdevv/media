@@ -1,8 +1,3 @@
-/**
- * Counts this process's open file descriptors on a file, from `/proc/self/fd`. Kept free of
- * Effect so it can use `node:fs` directly. Tests use it to prove that responses close the files
- * they stream.
- */
 import { existsSync } from "node:fs";
 import { readdir, readlink, realpath } from "node:fs/promises";
 

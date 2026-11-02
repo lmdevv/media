@@ -33,7 +33,6 @@ const stop = text.indexOf(end);
 if (start === -1 || stop < start)
   throw new Error(`${skill} is missing the ${begin} and ${end} markers`);
 
-// The blank line before the end marker matches what oxfmt writes, so formatting never drifts.
 await writeFile(
   skill,
   `${text.slice(0, start + begin.length)}\n${reference}\n\n${text.slice(stop)}`,

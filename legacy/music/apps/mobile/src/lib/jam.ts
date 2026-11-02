@@ -1,8 +1,3 @@
-/**
- * What the Jam screens show, decided from `jam.get` alone: which screen the person is on, the
- * summaries the host's rows read, and the settings a save changes. Pure, so it is tested without
- * a phone.
- */
 import type { UserId } from "@music/commands/ids";
 import type { Jam, JamMember, JamSettings, QueueEntry } from "@music/commands/models";
 
@@ -25,14 +20,12 @@ export type JamScreen =
   | { readonly kind: "declined"; readonly hostName: string }
   | { readonly kind: "removed"; readonly hostName: string };
 
-/** The screen each place in an active Jam shows. */
 const ROLE_SCREENS = {
   host: "host",
   member: "member",
   pending: "waiting",
 } as const satisfies Record<Jam["role"], JamScreen["kind"]>;
 
-/** The screen for an active or ended Jam, by the viewer's place in it. */
 const screenOf = (jam: Jam): JamScreen =>
   jam.status === "ended" ? { kind: "ended", jam } : { kind: ROLE_SCREENS[jam.role], jam };
 

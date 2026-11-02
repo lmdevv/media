@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { scrollRootOf } from "./scroll-root";
 import { useIsDesktop } from "./use-media";
 
-/** How far past the visible part of the list a block stays rendered, as a share of its height. */
 const WINDOW_MARGIN = "150% 0px";
 
 /** Whether a block of a long list is rendered, and the height it keeps while it isn't. */
@@ -82,7 +81,6 @@ export const useWindowed = ({
     return () => observer.disconnect();
   }, [node]);
 
-  // Measured only while the rows are there; an empty box keeps the last rendered height.
   useEffect(() => {
     if (node === null || !shown) return undefined;
 

@@ -39,7 +39,6 @@ export const useCommandDefaults = (
     ),
     Match.when("playback.jump", () => ({ index: String(player.index) })),
     Match.when("account.rename", () => ({ name: me?.name ?? undefined })),
-    // With one folder there is nothing to choose; removing one is left to an explicit pick.
     Match.when("libraries.scan", () =>
       libraries?.length === 1 && libraries[0] !== undefined ? { libraryId: libraries[0].id } : {},
     ),

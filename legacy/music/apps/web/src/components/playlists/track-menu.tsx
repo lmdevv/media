@@ -141,7 +141,6 @@ function PlaylistSubmenu({ tracks }: { readonly tracks: ReadonlyArray<Track> }) 
   );
 }
 
-/** A file's tags and format, shown from "File info". */
 function FileInfoDialog({
   track,
   open,
@@ -235,8 +234,6 @@ export function TrackMenu({
   const infoMounted = useOpenedOnce(info);
   const [open, setOpen] = useState(false);
 
-  // The keys the menu shows: ⇧↵ play next, Q add to queue, L like. Captured before the menu's own
-  // handlers so Shift+Enter does not also activate the highlighted item.
   const onShortcut = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.metaKey || event.ctrlKey || event.altKey || isTyping(event.nativeEvent)) return;
 
@@ -320,7 +317,6 @@ export function TrackMenu({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-      {/* A list renders one menu per row, so the dialog mounts the first time it opens. */}
       {infoMounted ? <FileInfoDialog track={track} open={info} onOpenChange={setInfo} /> : null}
     </>
   );

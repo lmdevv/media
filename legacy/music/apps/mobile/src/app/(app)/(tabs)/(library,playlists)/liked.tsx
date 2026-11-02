@@ -1,7 +1,3 @@
-/**
- * C03 · Liked songs: every song you liked, newest first, with Play and Shuffle. With none yet it
- * is G15, which points to the songs list.
- */
 import { router } from "expo-router";
 import { Heart, Music } from "lucide-react-native";
 import { View } from "react-native";

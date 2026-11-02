@@ -1,13 +1,3 @@
-# NixOS VM test: boots a machine with services.music, the image loaded from `imageFile`, and
-# checks that the web app, the Convex API, the media service, and /healthz answer through the
-# published port, that a library folder is mounted where the module says, and that the data
-# survives a service restart.
-#
-#   nix build -L .#checks.x86_64-linux.vm     # needs KVM; CI runs it
-#   nix build .#checks.x86_64-linux.vm.driver # builds the VM without running it
-#
-# The image is the 0.2.0 release, pulled by digest so the test is reproducible; it exercises the
-# module, while scripts/stack-e2e.sh exercises the image of each commit.
 { pkgs, module }:
 let
   image = pkgs.dockerTools.pullImage {

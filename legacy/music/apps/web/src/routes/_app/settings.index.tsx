@@ -6,7 +6,6 @@ import { useIsDesktop } from "@/lib/use-media";
 
 export const Route = createFileRoute("/_app/settings/")({ component: SettingsIndex });
 
-/** Phones list the sections; desktop opens Account beside the section navigation. */
 function SettingsIndex() {
   const desktop = useIsDesktop();
 

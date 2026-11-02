@@ -1,7 +1,3 @@
-/**
- * The job lifecycle the media service drives, and the crons that keep the database tidy, against
- * convex-test.
- */
 import { DeviceId } from "@music/commands/ids";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -172,7 +168,6 @@ describe("the scan job lifecycle", () => {
       vi.setSystemTime(START + attempt * 10 * 60_000);
       expect(await claim(backend, job)).not.toBeNull();
 
-      // The worker compared every file and found none changed, so it has nothing to save.
       if (total !== undefined) {
         await backend.mutation(api.media.reportJob, {
           secret: MEDIA_SECRET,
@@ -196,7 +191,6 @@ describe("the scan job lifecycle", () => {
 
     expect(unchanged).toEqual(["pending", "pending", "pending", "pending", "pending"]);
 
-    // A lease that compared nothing does not count the last one's total as its own progress.
     const stalled = await [6, 7, 8].reduce<Promise<ReadonlyArray<string>>>(
       async (previous, attempt) => [...(await previous), await restart(attempt, undefined)],
       Promise.resolve([]),
@@ -216,7 +210,6 @@ describe("the scan job lifecycle", () => {
       { path: "b.flac", album: "Kept", artist: "Band" },
     ]);
 
-    // A retag moves the song to another album and artist; a deleted file only goes missing.
     await upsertFiles(backend, libraryId, [{ path: "a.flac", album: "Debut", artist: "Band" }]);
     await markMissing(backend, libraryId, ["b.flac"]);
 

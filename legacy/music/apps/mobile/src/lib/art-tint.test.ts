@@ -9,7 +9,6 @@ const PLAYER_DARK = parseHex("#211b16");
 
 if (PLAYER_LIGHT === null || PLAYER_DARK === null) throw new Error("the Paper tokens must parse");
 
-/** A tan, red-diamond cover like Blue Lines, which Paper's player tokens were drawn from. */
 const BLUE_LINES: Rgb = { r: 190, g: 130, b: 100 };
 
 const distance = (a: string, b: Rgb): number => {
@@ -30,7 +29,6 @@ const spread = (color: string): number => {
 
 describe("blurhashAverage", () => {
   it("reads the mean color from a BlurHash", () => {
-    // The example hash from the BlurHash README: a mostly grey photo.
     expect(blurhashAverage("LEHV6nWB2yk8pyo0adR*.7kCMdnj")).toEqual({ r: 151, g: 150, b: 149 });
     expect(blurhashAverage("00Rh?C")).not.toBeNull();
   });

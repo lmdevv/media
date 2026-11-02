@@ -1,7 +1,3 @@
-/**
- * Test support: a media service over real HTTP that serves finished files the way `&finished=1`
- * does (503 + Retry-After while preparing), and a server that signs URLs on it.
- */
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 

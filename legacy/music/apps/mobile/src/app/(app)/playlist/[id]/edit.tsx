@@ -1,8 +1,3 @@
-/**
- * C07 · Edit playlist: the owner renames and describes it; the owner and collaborators reorder
- * songs by their grips and remove them with the red buttons. Nothing changes until the check
- * saves the draft; Back discards it. Saving sends the fewest moves that reach the new order.
- */
 import { PlaylistId } from "@music/commands/ids";
 import type { PlaylistItemId } from "@music/commands/ids";
 import type { PlaylistDetail, PlaylistEntry } from "@music/commands/models";
@@ -30,10 +25,8 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Text } from "@/components/ui/text";
 import { moveIndex, planMoves, reconcileOrder } from "@/lib/playlist-order";
 
-/** The nav bar is the scroll view's first child, and stays at the top. */
 const STICKY_BAR = [0];
 
-/** The edit in progress: new text, and the songs in their new order without the removed ones. */
 interface Draft {
   readonly text: PlaylistText;
   readonly order: ReadonlyArray<PlaylistItemId>;
@@ -62,7 +55,6 @@ function Editor({ detail }: { readonly detail: PlaylistDetail }) {
   const owner = canManagePlaylist(playlist.access);
   const ready = (!owner || isSavable(draft.text)) && !pending;
 
-  // The server's entries by ID; the draft keeps its order, and shows what the server still has.
   const entries = new Map(detail.items.map((entry) => [entry.itemId, entry]));
 
   const shown = reconcileOrder(
@@ -101,7 +93,6 @@ function Editor({ detail }: { readonly detail: PlaylistDetail }) {
         .map((entry) => entry.itemId)
         .filter((itemId) => !draft.removed.has(itemId));
 
-      // Each move places an entry after one an earlier move placed, so they run in order.
       await planMoves(
         current,
         shown.map((entry) => entry.itemId),
@@ -228,7 +219,6 @@ export default function EditPlaylist() {
 
   if (state.kind !== "ready") return <ContentUnavailable kind="playlist" state={state} />;
 
-  // A viewer reaching this page by a link can't change anything here.
   if (!canEditPlaylistItems(state.detail.playlist.access)) {
     return <ContentUnavailable kind="playlist" state={{ kind: "unavailable" }} />;
   }

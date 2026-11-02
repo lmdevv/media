@@ -1,4 +1,3 @@
-/** Temporary folders, the generated fixture library, configuration, and ffprobe for tests. */
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,8 +35,6 @@ const templates = new Map<
   Promise<{ readonly root: string; readonly albums: ReadonlyArray<FixtureAlbum> }>
 >();
 
-// Vitest isolates modules per test file, so each file generates its templates once and removes
-// them when it finishes.
 afterAll(async () => {
   const roots = await Promise.all(
     [...templates.values()].map(async (pending) => (await pending).root),
@@ -48,10 +45,6 @@ afterAll(async () => {
   );
 });
 
-/**
- * Generates each fixture variant once per test file, so the tests in a file do not each start a
- * dozen ffmpeg processes; every test then works on its own copy.
- */
 const template = (albumSuffix: string) => {
   let pending = templates.get(albumSuffix);
 

@@ -1,4 +1,3 @@
-/** The account avatar at the top of a tab root; it opens Settings (F01). */
 import { useRead } from "@music/sdk/react";
 import { router } from "expo-router";
 import { Pressable } from "react-native";

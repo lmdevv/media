@@ -1,8 +1,3 @@
-/**
- * Listening history as the screens show it: Home's "Recently played" lists each song once, most
- * recent first (a song played three times in a row is one row), and History (A06) lists every
- * play under its day: Today, Yesterday, the weekday within a week, then the date.
- */
 import type { Track } from "@music/commands/models";
 
 /** One play, as `history.list` returns it, newest first. */
@@ -35,7 +30,6 @@ export type HistoryRow =
 
 const DAY_MS = 86_400_000;
 
-/** Local midnight at the start of the day `at` falls in. */
 const dayOf = (at: number): number => {
   const date = new Date(at);
 
@@ -55,7 +49,6 @@ const dayWithYear = new Intl.DateTimeFormat("en-US", {
 /** What the heading over the plays of the day starting at `day` says, seen from `now`. */
 export const dayLabel = (day: number, now: number): string => {
   const today = dayOf(now);
-  // Rounded, so a day that is 23 or 25 hours long across a clock change still counts as one.
   const daysAgo = Math.round((today - day) / DAY_MS);
 
   if (daysAgo <= 0) return "Today";

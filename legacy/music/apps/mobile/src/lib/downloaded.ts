@@ -1,7 +1,3 @@
-/**
- * The words of Library → Downloaded (Paper's D09 and D10): the category's count, the page's
- * filters and storage summary, and each download's line under its title.
- */
 import type { TrackId } from "@music/commands/ids";
 import type {
   DownloadedEntry,

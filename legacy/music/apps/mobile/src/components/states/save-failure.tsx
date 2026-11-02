@@ -1,10 +1,3 @@
-/**
- * G13 · A save that failed without losing anything: the screen keeps what it showed (an optimistic
- * change rolls back to what the server kept), and a sheet says so with Try again, which sends the
- * same save again, and Cancel. Forms don't need it: they keep their fields and show the server's
- * reason under them, and their own button is the retry. This is for one-tap saves, which have no
- * form to hold a message.
- */
 import { router } from "expo-router";
 import { createContext, useContext, useState } from "react";
 import type { ReactNode } from "react";

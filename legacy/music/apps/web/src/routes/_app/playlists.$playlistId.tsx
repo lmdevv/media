@@ -53,7 +53,6 @@ const REASONS: Readonly<Record<UnavailableReason, string>> = {
   no_access: "No access",
 };
 
-/** A 2×2 mosaic of the first covers, one cover, or the empty surface tile. */
 function PlaylistCover({
   playlist,
   className,
@@ -86,7 +85,6 @@ function PlaylistCover({
   );
 }
 
-/** How a playlist is shared, for the header badge; null when it is private. */
 const sharingLabel = (playlist: Playlist): string | null => {
   if (playlist.access === "collaborator") return "Collaborative";
 
@@ -95,17 +93,12 @@ const sharingLabel = (playlist: Playlist): string | null => {
   return playlist.sharedWithPeople ? "Shared" : null;
 };
 
-/**
- * "Added by" under each song, once someone besides the owner added any: a playlist only you
- * edit doesn't need it.
- */
 const useBylines = (
   playlist: Playlist,
   items: ReadonlyArray<PlaylistEntry>,
 ): ((index: number) => string | null) | undefined => {
   const ownerId = playlist.owner?.id;
 
-  // The same function while the songs are, so the rows stay memoized.
   return useMemo(() => {
     const mixed = items.some((item) => item.addedBy !== null && item.addedBy.id !== ownerId);
 
@@ -195,20 +188,14 @@ function PlaylistView({
   );
 }
 
-/** Whether the viewer may share this playlist: its owner, unless they are a guest. */
 const useCanShare = (playlist: Playlist): boolean => {
   const me = useRead("account.me", {});
 
   return canManagePlaylist(playlist.access) && me !== undefined && can(me.role, "share");
 };
 
-/** The dialogs a playlist's menu opens. */
 type PlaylistDialog = "edit" | "share" | "delete" | "leave";
 
-/**
- * The playlist's own items in its "…" menu: the owner edits, shares, or deletes it; someone it was
- * shared with by name can leave it. One opened only by link has nothing to leave.
- */
 function PlaylistMenuItems({
   playlist,
   open,
@@ -271,10 +258,6 @@ function PlaylistDialogs({
   );
 }
 
-/**
- * The playlist's songs. Owners and collaborators can remove and reorder them: drag on desktop,
- * arrow keys on a row's handle, or Reorder mode with up/down buttons on phones.
- */
 function PlaylistSongs({
   playlist,
   items,
@@ -305,12 +288,10 @@ function PlaylistSongs({
     },
   );
 
-  // The same values while the playlist is, so its rows skip re-rendering when nothing changed.
   const tracks = useMemo(() => items.map(entryTrack), [items]);
 
   const withheld = useCallback((index: number) => items[index]?.track === null, [items]);
 
-  // Rows keyed by entry, so a move doesn't remount the rows between its old and new places.
   const rowKey = useCallback(
     (index: number) => items[index]?.itemId ?? `missing-${String(index)}`,
     [items],
@@ -455,7 +436,6 @@ function AddResults({ playlist, query }: { readonly playlist: Playlist; readonly
   );
 }
 
-/** Name and description, which only the owner changes. */
 function EditDialog({
   playlist,
   open,
@@ -554,7 +534,6 @@ function DeleteDialog({
   const [submit, pending] = useAction(
     async () => {
       onOpenChange(false);
-      // Leave first: this page's live query fails with "not found" once the playlist is gone.
       await navigate({ to: "/playlists" });
       await remove({ playlistId: playlist.id });
     },
@@ -586,7 +565,6 @@ function PlaylistError(props: ErrorComponentProps) {
   return <DetailError {...props} copy={MISSING} />;
 }
 
-/** Leaving a playlist someone shared with you; they can share it again. */
 function LeaveDialog({
   playlist,
   me,

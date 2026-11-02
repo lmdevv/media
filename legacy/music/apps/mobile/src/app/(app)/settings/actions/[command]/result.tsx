@@ -1,4 +1,3 @@
-/** F28 · Result: what the command did, read from the route's parameters. */
 import { useLocalSearchParams } from "expo-router";
 
 import { ActionResultScreen } from "@/components/actions/action-result";

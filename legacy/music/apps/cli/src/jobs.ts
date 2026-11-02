@@ -7,7 +7,6 @@ import { JobError } from "./errors";
 import { escapeControlCharacters } from "./escape";
 import { Output } from "./output";
 
-/** Polling starts fast for quick jobs and backs off to one request every five seconds. */
 const pollSchedule = Schedule.exponential("250 millis", 1.5).pipe(
   Schedule.modifyDelay(({ duration }) =>
     Effect.succeed(Duration.min(duration, Duration.seconds(5))),
@@ -23,7 +22,6 @@ export const progressLine = (job: Job): string => {
   const note = job.error ?? job.message;
   const detail = note === null ? "" : ` (${escapeControlCharacters(note)})`;
 
-  // The label names a library, and the note can quote a file's name or an error from disk.
   return `${escapeControlCharacters(job.label)}: ${job.status} ${count}${detail}`;
 };
 

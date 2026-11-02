@@ -1,14 +1,9 @@
-/**
- * Paper's quiet notice: a surface card with a muted 20pt icon, a 14/20 semibold title, and a 13/18
- * muted body. Success and failure look the same; the words carry the meaning (page 12 · 04).
- */
 import type { LucideIcon } from "lucide-react-native";
 import { View } from "react-native";
 
 import { Icon } from "./icon";
 import { Text } from "./text";
 
-/** Props for `Notice`. */
 export interface NoticeProps {
   readonly icon: LucideIcon;
   readonly title: string;

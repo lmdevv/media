@@ -1,9 +1,3 @@
-/**
- * Paper's pill buttons: 48pt tall, full radius, 16/24 semibold labels with an optional 20pt
- * leading icon. Primary is the accent fill, secondary the surface, destructive the surface with a
- * danger label (Paper never fills red). While an action runs the button shows its pending label
- * and ignores presses, so a form is never sent twice.
- */
 import * as Haptics from "expo-haptics";
 import type { LucideIcon } from "lucide-react-native";
 import { Pressable } from "react-native";
@@ -22,7 +16,6 @@ const VARIANTS = {
 /** How a button looks. */
 type ButtonVariant = keyof typeof VARIANTS;
 
-/** Props for `Button`. */
 export interface ButtonProps extends Omit<PressableProps, "children" | "style"> {
   readonly label: string;
   readonly variant?: ButtonVariant;

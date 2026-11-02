@@ -1,8 +1,3 @@
-/**
- * Incoming links. Invite and reset links are not routed directly: their server may need
- * connecting first, which `EntryLinksProvider` does before it opens the screen. Routing keeps the
- * current screen meanwhile, or the first one at launch.
- */
 import { parseEntryLink } from "@/lib/entry-link";
 
 export const redirectSystemPath = ({

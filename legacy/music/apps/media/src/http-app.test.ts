@@ -62,13 +62,11 @@ const artUrl = (hash: string): Effect.Effect<string> => {
   ).pipe(Effect.map((sig) => `/media/art/${hash}?exp=${expiresAt}&sig=${sig}`));
 };
 
-/** Changes the last character of a signed URL, which is always part of the signature. */
 const tamper = (url: string): string => `${url.slice(0, -1)}${url.endsWith("A") ? "B" : "A"}`;
 
 const bytes = (response: Response): Effect.Effect<Uint8Array> =>
   Effect.promise(async () => new Uint8Array(await response.arrayBuffer()));
 
-/** Serves `app` through `@hono/node-server` on a free local port until the scope closes. */
 const listen = (app: Hono) =>
   Effect.acquireRelease(
     Effect.callback<{ readonly server: ReturnType<typeof serve>; readonly port: number }>(
@@ -86,10 +84,6 @@ const listen = (app: Hono) =>
       }),
   ).pipe(Effect.map(({ port }) => port));
 
-/**
- * A `GET` whose client goes away `afterMs` in, or as soon as the response starts when that comes
- * first.
- */
 const abandonedGet = (port: number, path: string, afterMs: number): Effect.Effect<void> =>
   Effect.callback<void>((resume) => {
     const request = get({ host: "127.0.0.1", port, path });
@@ -106,7 +100,6 @@ const abandonedGet = (port: number, path: string, afterMs: number): Effect.Effec
     request.on("error", leave);
   });
 
-/** A `GET` whose client goes away once the first piece of the body has arrived. */
 const abandonedMidBody = (port: number, path: string): Effect.Effect<void> =>
   Effect.callback<void>((resume) => {
     const request = get({ host: "127.0.0.1", port, path });
@@ -123,7 +116,6 @@ const abandonedMidBody = (port: number, path: string): Effect.Effect<void> =>
     request.on("error", leave);
   });
 
-/** The whole body of a `GET` through a real socket. */
 const fetchWhole = (port: number, path: string): Effect.Effect<Uint8Array> =>
   Effect.promise(async () => {
     const response = await fetch(`http://127.0.0.1:${port}${path}`);
@@ -131,14 +123,11 @@ const fetchWhole = (port: number, path: string): Effect.Effect<Uint8Array> =>
     return new Uint8Array(await response.arrayBuffer());
   });
 
-/** A `GET` through a real socket. */
 const fetchAt = (port: number, path: string): Effect.Effect<Response> =>
   Effect.promise(() => fetch(`http://127.0.0.1:${port}${path}`));
 
-/** `url` asking for the finished file, as a download does. */
 const finishedUrl = (url: string): string => `${url}&${FINISHED_PARAM}=1`;
 
-/** Repeats `send` while it answers 503, as a download polls a file that is being prepared. */
 const untilPrepared = (send: Effect.Effect<Response>): Effect.Effect<Response> =>
   send.pipe(
     Effect.repeat({
@@ -148,7 +137,6 @@ const untilPrepared = (send: Effect.Effect<Response>): Effect.Effect<Response> =
     }),
   );
 
-/** The app on a fresh fixture library, with `ffmpegPath` as its ffmpeg. */
 const setupWith = Effect.fn("Test.setup")(function* (ffmpegPath: string) {
   const { root } = yield* fixtureLibrary;
   const dataDir = yield* temporaryDirectory("data");
@@ -245,7 +233,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(response.headers.get("Access-Control-Expose-Headers")).toContain("Content-Range");
         expect(yield* bytes(response)).toEqual(file);
 
-        // A download stores the file's revision and resumes with it as the validator.
         const { size, mtimeMs } = yield* Files.statPath(join(root, DAWN));
         const etag = response.headers.get("ETag") ?? "";
 
@@ -339,7 +326,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       Effect.gen(function* () {
         const { dataDir, trackId, request } = yield* setup;
         const url = yield* streamUrl(trackId(DAWN), "aac-320");
-        // HEAD waits for the finished file.
         const head = yield* request(url, { method: "HEAD" });
 
         expect(head.status).toBe(200);
@@ -358,8 +344,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         ]);
         expect(Number(probed.format.duration)).toBeCloseTo(4, 0);
 
-        // Serving again marks the cache entry used without changing its validators, so a player
-        // that seeks with If-Range keeps getting partial content.
         const etag = response.headers.get("ETag") ?? "";
 
         expect(head.headers.get("ETag")).toBe(etag);
@@ -368,7 +352,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(ranged.status).toBe(206);
         expect(ranged.headers.get("ETag")).toBe(etag);
 
-        // A media element's opening ranges get the finished file's bytes too.
         const opening = yield* request(url, { headers: { Range: "bytes=0-1" } });
 
         expect(opening.status).toBe(206);
@@ -383,13 +366,11 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       Effect.gen(function* () {
         const { root, dataDir, scan, findTrackId, request } = yield* setup;
 
-        // Two minutes of tone: ffmpeg is still encoding when the responses start.
         yield* sineSegment(root, "long", "mp3", 0, 48_000 * 120);
         yield* scan;
         const id = yield* findTrackId("long.mp3");
         const url = yield* streamUrl(id, "aac-128");
 
-        // Chromium and Firefox open a source with `bytes=0-`, Safari with `bytes=0-1`.
         const [plain, safari] = yield* Effect.all(
           [
             request(url, { headers: { Range: "bytes=0-" } }),
@@ -412,7 +393,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         expect(Buffer.from(one).equals(two)).toBe(true);
 
-        // Once the bodies end, the finished file answers, and it holds the same frames.
         const finished = yield* request(url);
 
         expect(finished.status).toBe(200);
@@ -453,7 +433,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           expect(exposed).toContain(name);
         }
 
-        // Ranged requests carry the timing too, so a seek can re-read it.
         const ranged = yield* request(yield* streamUrl(trackId(NEON), "fmp4-aac"), {
           headers: { Range: "bytes=0-99" },
         });
@@ -468,7 +447,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       Effect.gen(function* () {
         const { root, dataDir, scan, findTrackId, request } = yield* setup;
 
-        // Two minutes of tone: ffmpeg is still encoding when the response starts.
         yield* sineSegment(root, "long", "mp3", 0, 48_000 * 120);
         yield* scan;
         const url = yield* streamUrl(yield* findTrackId("long.mp3"), "fmp4-aac");
@@ -490,7 +468,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(Math.abs(estimate - 48_000 * 120)).toBeLessThan(4800);
         const streamed = yield* bytes(live);
 
-        // Once the body ends, the finished file answers with the exact length.
         const head = yield* request(url, { method: "HEAD" });
 
         expect(head.status).toBe(200);
@@ -529,8 +506,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         const first = yield* Effect.promise(() => reader.read());
 
-        // Like a paused or fully buffered media element: the client reads nothing more, and
-        // the transcode still finishes into the cache.
         const cacheDir = join(dataDir, "cache", "aac-128");
 
         const cached = Files.listNames(cacheDir).pipe(
@@ -543,7 +518,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         expect(yield* cached).toHaveLength(1);
 
-        // Then the client reads on and gets the whole stream.
         const rest: Array<Uint8Array> = [first.value ?? new Uint8Array()];
 
         for (;;) {
@@ -566,7 +540,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const ffmpeg = yield* Effect.promise(() => ffmpegFailingOnce(scratch, 0.5));
         const { root, dataDir, scan, findTrackId, request } = yield* setupWith(ffmpeg);
 
-        // Six minutes: ffmpeg is killed long before it finishes.
         yield* sineSegment(root, "long", "mp3", 0, 48_000 * 360);
         yield* scan;
         const url = yield* streamUrl(yield* findTrackId("long.mp3"), "aac-128");
@@ -575,7 +548,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(live.status).toBe(200);
         expect(live.headers.get("Content-Type")).toBe("audio/aac");
 
-        // The body fails instead of ending as if the song were over.
         const read = yield* Effect.promise(() =>
           live.arrayBuffer().then(
             () => "ended",
@@ -588,7 +560,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         expect(yield* Files.listNames(cacheDir)).toEqual([]);
 
-        // Nothing half-done is cached: the next request starts a new transcode and gets it all.
         const again = yield* request(url);
 
         expect(again.headers.get("Content-Type")).toBe("audio/aac");
@@ -634,7 +605,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(fragmented.headers.get("X-Music-Start-Samples")).toBe(start);
         expect(fragmentDecodeTimes(yield* bytes(fragmented))[0]).toBe(BigInt(start));
 
-        // Offset streams are never cached.
         for (const profile of ["aac-128", "fmp4-aac"]) {
           expect(yield* Files.listNames(join(dataDir, "cache", profile))).toEqual([]);
         }
@@ -648,7 +618,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const id = trackId(NEON);
         const valid = yield* streamUrl(id, "aac-128");
 
-        // The offset does not widen what a signature grants: the same track, profile, and expiry.
         expect((yield* request(`${tamper(valid)}&start=1000`)).status).toBe(403);
         const expired = yield* streamUrl(id, "aac-128", Date.now() - 1000);
 
@@ -661,7 +630,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           expect((yield* request(`${valid}&start=${start}`)).status).toBe(400);
         }
 
-        // The original cannot start part-way; a zero offset is the plain request.
         const original = yield* streamUrl(id, "original");
 
         expect((yield* request(`${original}&start=1000`)).status).toBe(400);
@@ -679,10 +647,8 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const id = trackId(NEON);
         const url = `${yield* streamUrl(id, "aac-128")}&start=1000`;
 
-        // A HEAD body is never read, so an offset run started for it would never finish.
         expect((yield* request(url, { method: "HEAD" })).status).toBe(405);
 
-        // Unread bodies hold their runs; one past the cap is turned away at once.
         const held = yield* Effect.forEach(
           Array.from({ length: Transcoder.MAX_CONCURRENT_OFFSET_RUNS }),
           () => request(url),
@@ -695,7 +661,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(refused.headers.get("Retry-After")).toBe("2");
         expect(refused.headers.get("Access-Control-Expose-Headers")).toContain("Retry-After");
 
-        // Ending one stream frees its run.
         yield* Effect.promise(async () => held[0]?.body?.cancel());
         yield* Effect.sleep(Duration.millis(200));
         const next = yield* request(url);
@@ -800,13 +765,11 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const body = yield* bytes(response);
 
         expect(response.headers.get("Content-Length")).toBe(String(body.length));
-        // An MP4 with its index first, not the ADTS a live stream of this profile sends.
         const boxes = topLevelBoxes(body).map((box) => box.type);
 
         expect(boxes[0]).toBe("ftyp");
         expect(boxes.indexOf("moov")).toBeLessThan(boxes.indexOf("mdat"));
 
-        // A download resumes with a range and the validator it was given.
         const etag = response.headers.get("ETag") ?? "";
 
         expect(etag).not.toBe("");
@@ -882,7 +845,6 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const url = `${yield* streamUrl(yield* findTrackId("junk.mp3"), "aac-128")}&${FINISHED_PARAM}=1`;
 
         expect((yield* untilPrepared(request(url))).status).toBe(502);
-        // Remembered for a while, so every poller hears it.
         expect((yield* request(url)).status).toBe(502);
       }),
     ));
@@ -964,24 +926,19 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       Effect.gen(function* () {
         const { app, root, dataDir, scan, findTrackId } = yield* setup;
 
-        // Two minutes of tone: ffmpeg is still encoding while the clients come and go.
         yield* sineSegment(root, "long", "mp3", 0, 48_000 * 120);
         yield* scan;
         const url = yield* streamUrl(yield* findTrackId("long.mp3"), "aac-128");
         const port = yield* listen(app);
 
-        // Most leave while the transcode starts, before its body streams; the rest once it has.
         yield* Effect.forEach(
           [5, 10, 15, 20, 30, 50, 200, 400],
           (afterMs) => abandonedGet(port, url, afterMs),
           { concurrency: "unbounded" },
         );
 
-        // A client that stays reads the transcode to its end.
         expect((yield* fetchWhole(port, url)).length).toBeGreaterThan(0);
 
-        // With no reader left, the live copy goes. A hold kept by a client that went away would
-        // keep it, and its ffmpeg, forever.
         const liveFiles = Files.listNames(join(dataDir, "cache", "aac-128")).pipe(
           Effect.map((names) => names.filter((name) => name.includes(".live"))),
         );
@@ -1005,8 +962,6 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         Effect.gen(function* () {
           const { app, root, dataDir, scan, findTrackId } = yield* setup;
 
-          // Two minutes of tone: more than a socket buffers, so a client that leaves mid-way
-          // leaves the rest of the file unread.
           yield* sineSegment(root, "long", "flac", 0, 48_000 * 120);
           yield* scan;
           const id = yield* findTrackId("long.flac");
@@ -1014,7 +969,6 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           const finished = yield* streamUrl(id, "aac-320");
           const port = yield* listen(app);
 
-          // HEAD waits for the finished transcode, which a GET then serves as a file.
           yield* Effect.promise(() =>
             fetch(`http://127.0.0.1:${port}${finished}`, { method: "HEAD" }),
           );
@@ -1031,7 +985,6 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             { concurrency: "unbounded" },
           );
 
-          // And some while the body streams, after its first bytes.
           yield* Effect.forEach(
             [original, finished, original, finished],
             (url) => abandonedMidBody(port, url),
@@ -1060,7 +1013,6 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const ffmpeg = yield* Effect.promise(() => ffmpegHangingOnName(scratch));
         const { app, root, scan, findTrackId, trackId } = yield* setupWith(ffmpeg.path);
 
-        // A song whose encode never ends: it holds the prepare lane for the whole test.
         yield* sineSegment(root, "hang-download", "mp3", 0, 48_000);
         yield* scan;
         const port = yield* listen(app);
@@ -1069,21 +1021,16 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const started = Effect.promise(ffmpeg.started);
         const before = yield* started;
 
-        // One ask starts the run; the clients after it leave at every point of their request.
         expect((yield* fetchAt(port, download)).status).toBe(503);
         yield* Effect.forEach([0, 1, 5, 20], (afterMs) => abandonedGet(port, download, afterMs), {
           concurrency: "unbounded",
         });
 
-        // Past the second a stream nobody reads is given, the one run still goes, and asking
-        // again joins it.
         yield* Effect.sleep("1500 millis");
         expect(yield* Effect.promise(ffmpeg.running)).toBe(1);
         expect((yield* fetchAt(port, download)).status).toBe(503);
         expect(yield* started).toBe(before + 1);
 
-        // A second download waits for the lane without starting ffmpeg, while a listener streams
-        // the same song at once, and the download then finds the listener's finished file.
         const dawn = yield* streamUrl(trackId(DAWN), "aac-320");
 
         expect((yield* fetchAt(port, finishedUrl(dawn))).status).toBe(503);
@@ -1104,13 +1051,11 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const ffmpeg = yield* Effect.promise(() => ffmpegRecordingRuns(scratch));
         const { app, root, scan, findTrackId } = yield* setupWith(ffmpeg.path);
 
-        // Two minutes of tone: an unread offset run fills its pipe and blocks long before the end.
         yield* sineSegment(root, "long", "mp3", 0, 48_000 * 120);
         yield* scan;
         const url = `${yield* streamUrl(yield* findTrackId("long.mp3"), "aac-128")}&start=1000`;
         const port = yield* listen(app);
 
-        // As many seeks as there are runs, each left while ffprobe and ffmpeg start.
         yield* Effect.forEach(
           Array.from(
             { length: Transcoder.MAX_CONCURRENT_OFFSET_RUNS },
@@ -1120,7 +1065,6 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           { concurrency: "unbounded" },
         );
 
-        // Every ffmpeg they started is stopped.
         const running = yield* Effect.promise(ffmpeg.running).pipe(
           Effect.repeat({
             until: (pids) => pids.length === 0,
@@ -1131,7 +1075,6 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         expect(running).toEqual([]);
 
-        // And every run is free again: the next seek gets one instead of a 503.
         const next = yield* Effect.promise(() => fetch(`http://127.0.0.1:${port}${url}`)).pipe(
           Effect.repeat({
             until: (response) => response.status !== 503,

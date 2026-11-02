@@ -19,8 +19,6 @@ function AccountSettings() {
   const rename = useRun("account.rename");
   const { signOut } = useAuthActions();
   const navigate = useNavigate();
-  // What the person typed, or null to show the saved name. Copying the saved name into state in
-  // an effect overwrote the field whenever the account updated while they typed.
   const [draft, setDraft] = useState<string | null>(null);
   const name = draft ?? me?.name ?? "";
 
@@ -29,8 +27,6 @@ function AccountSettings() {
       const submitted = name.trim();
 
       await rename({ name: submitted });
-      // The saved name shows again, so a later rename elsewhere isn't hidden behind this draft,
-      // unless the person kept typing while it saved.
       setDraft((current) => (current?.trim() === submitted ? null : current));
     },
     { success: () => "Saved your name" },

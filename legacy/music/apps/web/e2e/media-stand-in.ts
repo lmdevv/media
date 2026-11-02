@@ -1,14 +1,3 @@
-/**
- * A stand-in for the media service's HTTP API, for the Playwright suite. That suite's catalog
- * comes from `packages/backend/scripts/seed.ts`, which has no audio files, while the app only lets
- * people play once `<media>/health` answers and plays what `<media>/stream/:id` returns. So this
- * answers the health check, and serves every track's original profile as the same minute of a
- * quiet tone (a WAV, with byte ranges). Transcoded profiles answer 404, as for a profile the
- * server cannot make, so the player falls back to HTML audio. The real media service, with real
- * files and signatures checked, is covered by the stack suite (`apps/web/e2e-stack`).
- *
- *   node e2e/media-stand-in.ts <port>
- */
 import { createServer } from "node:http";
 import type { ServerResponse } from "node:http";
 
@@ -18,7 +7,6 @@ const SAMPLE_RATE = 8000;
 
 const SECONDS = 60;
 
-/** 16-bit mono PCM in a RIFF/WAVE container. */
 const tone = (): Buffer => {
   const samples = SAMPLE_RATE * SECONDS;
   const data = samples * 2;

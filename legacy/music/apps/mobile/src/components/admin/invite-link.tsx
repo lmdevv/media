@@ -1,7 +1,3 @@
-/**
- * F11 · Share the invite: the one-time link for an open invite, to share or copy, and a way to
- * revoke it. Paper doesn't draw Revoke; the web app offers it, so the phone does too.
- */
 import type { InviteId } from "@music/commands/ids";
 import { useRun } from "@music/sdk/react";
 import { router } from "expo-router";
@@ -29,7 +25,6 @@ import { useAction } from "@/components/settings/use-action";
 import { useFlash } from "@/components/settings/use-flash";
 import { useNow } from "@/components/settings/use-now";
 
-/** F11's chrome: the title, and the check that closes the page. */
 function InvitePage({ children }: { readonly children?: ReactNode }) {
   return (
     <Page
@@ -50,8 +45,6 @@ export function InviteLink({ id }: { readonly id: InviteId | null }) {
   const action = useAction();
   const now = useNow(60_000);
   const [copied, flashCopied] = useFlash();
-  // Revoking takes the invite off the list before this page closes; show nothing meanwhile
-  // rather than "gone".
   const [leaving, setLeaving] = useState(false);
   const left = invite === undefined || invite === null ? null : until(invite.expiresAt, now);
 

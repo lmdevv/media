@@ -11,7 +11,6 @@
 # Each folder in musicDirs is mounted read-only at /music/<folder name>; add that path as a
 # library in the web app. Two folders with the same name need the attrset form, which names each
 # mount: musicDirs = { rock = "/a/music"; jazz = "/b/music"; } mounts /music/rock and /music/jazz.
-# A native build with systemd units per service is planned.
 {
   config,
   lib,
@@ -20,18 +19,14 @@
 let
   cfg = config.services.music;
 
-  # The release version, which is also the image tag CI publishes for it (without a "v").
   inherit (lib.importJSON ../package.json) version;
 
   defaultImage = "ghcr.io/lmdevv/music:${version}";
 
   serviceName = config.virtualisation.oci-containers.containers.music.serviceName;
 
-  # The runtime in use: `backend`, or the host's oci-containers backend when that is unset.
   runtime = config.virtualisation.oci-containers.backend;
 
-  # { name, path } for each folder: the list form names a mount after the folder, which is how
-  # every install before the attrset form named them, so existing libraries keep their paths.
   mounts =
     if builtins.isList cfg.musicDirs then
       map (path: {
@@ -60,7 +55,6 @@ let
     || lib.hasInfix ":" mount.name
   ) mounts;
 
-  # The ids of the container's Convex and Caddy users (deploy/docker/Dockerfile).
   reservedIds = [
     901
     902
@@ -260,7 +254,6 @@ in
         message = "services.music.autoUpdate pulls from the registry, so it cannot be used with imageFile.";
       }
       {
-        # The container's init refuses these at start, which would crash-loop the service.
         assertion = !(builtins.elem cfg.uid reservedIds || builtins.elem cfg.gid reservedIds);
         message = "services.music.uid and gid cannot be 901 or 902 (got uid ${toString cfg.uid}, gid ${toString cfg.gid}): the container's Convex and Caddy users have those ids, and sharing one would let the media service read the database.";
       }
@@ -269,8 +262,6 @@ in
     # A host-wide setting: a different explicit value elsewhere is reported as a conflict.
     virtualisation.oci-containers.backend = lib.mkIf (cfg.backend != null) cfg.backend;
 
-    # Traversable, not listable: the media user reaches dataDir/media; everything else in
-    # dataDir is root's alone.
     systemd.tmpfiles.rules = [ "d ${cfg.dataDir} 0711 root root -" ];
 
     virtualisation.oci-containers.containers.music = {
@@ -289,8 +280,6 @@ in
 
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
 
-    # Pulls the tag and restarts the container only when that brought a different image, so a
-    # check without an update costs no downtime.
     systemd.services.music-update = lib.mkIf cfg.autoUpdate.enable {
       description = "Update the [music] container image";
       after = [ "network-online.target" ];

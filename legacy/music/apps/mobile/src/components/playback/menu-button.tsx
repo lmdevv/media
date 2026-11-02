@@ -1,7 +1,3 @@
-/**
- * Paper's ellipsis, opening a native iOS menu on tap. Paper draws the ellipsis on Now Playing and
- * the queue but not what it opens; a system menu is the iOS answer, so its items use SF Symbols.
- */
 import { Button, Host, Menu, RNHostView } from "@expo/ui/swift-ui";
 import { accessibilityLabel } from "@expo/ui/swift-ui/modifiers";
 import { Ellipsis } from "lucide-react-native";

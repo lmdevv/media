@@ -1,9 +1,3 @@
-/**
- * Where the player's commands go. The playback session normally lives on the server; a device
- * that loses the server mid-song carries on with a session of its own (`local-session.ts`) and
- * hands it back when the server answers again. The controller and the player's actions send every
- * command through a `SessionPort` and never learn which one runs.
- */
 import type { DeviceId, TrackId } from "@music/commands/ids";
 import type { OfflinePlay, PlaybackState } from "@music/commands/models";
 import type { CommandArgs, CommandResult, MutationName } from "@music/commands/registry";
@@ -56,19 +50,12 @@ export const serverSession = (client: Pick<MusicClient, "run">): SessionPort => 
  */
 export const ACK_DEADLINE_MS = 4000;
 
-/**
- * Offline plays sent per `devices.reconcile`. Well under the server's check of a user's latest
- * 500 plays, so a batch sent again after its answer was lost is still recognised, even with plays
- * from other devices in between.
- */
 const PLAYS_PER_RECONCILE = 200;
 
-/** The first wait before a failed hand-back is tried again; it doubles up to the longest. */
 const RETRY_FIRST_MS = 1000;
 
 const RETRY_LONGEST_MS = 30_000;
 
-/** Stands in for a callback until the real one is set. */
 const doNothing = (): void => {};
 
 /** Whether the server's connection is up, from the host's Convex client. */
@@ -181,21 +168,13 @@ export class SessionRouter implements SessionPort {
   readonly #ackDeadlineMs: number;
   readonly #inJam: () => boolean;
   readonly #listeners = new Set<() => void>();
-  /** In the order they were sent, which is the order the session takes them in. */
   readonly #outstanding = new Set<Outstanding>();
 
-  /** This device's own session; null while the session runs on the server. */
   #local: LocalSessionState | null = null;
   #server: PlaybackState | null = null;
-  /** Counts server snapshots, so a hand-back can tell one arrived after it was sent. */
   #offers = 0;
-  /** Counts changes to the local session other than a hand-back's, so one can tell it moved. */
   #revision = 0;
   #reconciling = false;
-  /**
-   * `start`'s stop ran. The client may outlive this device's account (signing out keeps the
-   * connection), so nothing more is sent or stored for it: no hand-back, retry, or store write.
-   */
   #stopped = false;
   #retryMs = RETRY_FIRST_MS;
   #cancelRetry: (() => void) | null = null;
@@ -271,7 +250,6 @@ export class SessionRouter implements SessionPort {
 
     this.#takeStored(stored);
 
-    // Even with the socket up: a server that answers takes the session straight back.
     if (this.mode() === "local") return;
     const now = this.#clock.now();
     const server = this.#server ?? stored?.server ?? null;
@@ -290,11 +268,6 @@ export class SessionRouter implements SessionPort {
     return this.#local === null ? this.#runOnServer(name, args) : this.#runHere(name, args);
   };
 
-  /**
-   * Sends a session command to the server. If the session moves here before the server answers,
-   * the command runs here, in the order it was sent, and the server's late answer is ignored: the
-   * server still runs it, and the hand-back that follows it replaces what it did.
-   */
   async #runOnServer<Name extends SessionMutation>(
     name: Name,
     args: CommandArgs<Name>,
@@ -316,7 +289,6 @@ export class SessionRouter implements SessionPort {
 
         const { result } = stepped.success;
 
-        // The server still gets a report it was sent, and counts its play there.
         const after = isPlayReport(name)
           ? { ...stepped.success.state, plays: state.plays }
           : stepped.success.state;
@@ -339,7 +311,6 @@ export class SessionRouter implements SessionPort {
     sent: Promise<A>,
     here: Promise<Result.Result<A, LocalRefusal>>,
   ): Promise<A> {
-    // Handles a rejection too, so one the caller no longer waits for is never left unhandled.
     const answered = sent.then(
       () => "answered" as const,
       () => "answered" as const,
@@ -353,8 +324,6 @@ export class SessionRouter implements SessionPort {
       });
     });
 
-    // `here` comes first: when the session moved here as the server answered, the command ran
-    // here, and that is the answer.
     const first = await Promise.race([here, answered, late]);
 
     if (first === "late") this.#takeOver(command);
@@ -379,7 +348,6 @@ export class SessionRouter implements SessionPort {
     if (local === null) return this.#client.run(name, args);
     const stepped = stepLocal(name, local, args, this.#context());
 
-    // The same failure the server sends, so the player shows it like any refused command.
     if (Result.isFailure(stepped)) {
       const { code, message } = refusalFailure(stepped.failure);
 
@@ -391,14 +359,6 @@ export class SessionRouter implements SessionPort {
     return stepped.success.result;
   }
 
-  /**
-   * Moves the session onto this device, from the session the player shows, with every command
-   * still out with the server run here first, in the order sent; each caller is answered from
-   * here, a refusal included. On a dropped connection (`needed` null) only while this device plays
-   * the session; for a command past its deadline also while nothing plays it or when the command
-   * plays songs here outside a Jam (another device may still be named), and only when that
-   * command runs here, or it keeps waiting for the server. Returns whether the session moved.
-   */
   #takeOver(needed: Outstanding | null): boolean {
     const shown = this.#snapshot.state;
 
@@ -440,11 +400,6 @@ export class SessionRouter implements SessionPort {
     this.#takeStored(await this.#loadStored());
   }
 
-  /**
-   * Takes up the session this device stored and did not hand back, once, paused: nothing plays
-   * at launch. When a session already moved here since launch, it keeps that one and adds the
-   * stored plays before its own, so none is lost.
-   */
   #takeStored(stored: StoredSessions | null): void {
     const previous = stored?.local ?? null;
 
@@ -471,7 +426,6 @@ export class SessionRouter implements SessionPort {
     try {
       return await this.#store.load();
     } catch {
-      // An unreadable store holds nothing to resume.
       return null;
     }
   }
@@ -493,10 +447,6 @@ export class SessionRouter implements SessionPort {
     this.#publish(localView(state, this.#device));
   }
 
-  /**
-   * Hands this device's own session back, one hand-back at a time and only while connected. A
-   * session stored at an earlier launch goes back with it. A failure is tried again later.
-   */
   async #reconcile(): Promise<void> {
     if (
       this.#stopped ||
@@ -524,11 +474,6 @@ export class SessionRouter implements SessionPort {
     }
   }
 
-  /**
-   * Sends the plays a batch at a time, dropping each once the server has it, and the session with
-   * the last batch. Again while the session changed meanwhile; otherwise the session runs on the
-   * server from the answer on, with no await between the check and the switch.
-   */
   async #handBack(): Promise<void> {
     const local = this.#local;
 
@@ -563,12 +508,6 @@ export class SessionRouter implements SessionPort {
     this.#setLocal({ ...local, plays: local.plays.filter((play) => !sent.has(play)) });
   }
 
-  /**
-   * The session runs on the server again. When the server kept its own, that shows now. When it
-   * took this device's back, its snapshot shows once one arrived after the hand-back with this
-   * device playing the same song; until then the player keeps showing the session it plays, so
-   * the engine sees no change.
-   */
   #finishHandBack(adopted: boolean, handed: LocalSessionState, offersAtSend: number): void {
     const server = this.#server;
 
@@ -584,11 +523,6 @@ export class SessionRouter implements SessionPort {
     this.#publish(shows ? server : this.#snapshot.state);
   }
 
-  /**
-   * Clears the stored session once the server took it back. A clear that fails is tried again:
-   * a stored session left behind would be handed back again at the next launch. A session that
-   * moved here meanwhile writes over the row itself.
-   */
   #clearStored(): void {
     if (this.#stopped) return;
 
@@ -620,7 +554,6 @@ export class SessionRouter implements SessionPort {
     };
   }
 
-  /** A store write that failed leaves the last good row; the next change writes again. */
   #save(write: Promise<void>): void {
     void write.catch(() => {});
   }
@@ -643,11 +576,6 @@ export class SessionRouter implements SessionPort {
   }
 }
 
-/**
- * Whether a command plays songs on `device`, which may take the session over from another device
- * that last played it. Moving playback here doesn't: the session would come over paused, at the
- * other device's last report, while that device may still be playing.
- */
 const playsOn = <Name extends SessionMutation>(
   name: Name,
   args: CommandArgs<Name>,

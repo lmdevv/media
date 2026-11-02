@@ -49,7 +49,6 @@ interface SeedTrack {
   readonly lyrics: SeedLyrics["lyrics"];
 }
 
-/** A seeded song's lyric files and the lyric sets they hold, as `LocalLyricSet` encodes them. */
 type SeedLyrics = (typeof seedLyrics)[keyof typeof seedLyrics];
 
 type Format = "flac-24-96" | "flac-16-44" | "alac-24-48" | "mp3-320";
@@ -262,21 +261,12 @@ const ALBUMS: ReadonlyArray<SeedAlbum> = [
   },
 ];
 
-/**
- * The lyrics of the seeded songs that have any, as the media service sends them: a synced file
- * beside the first song of Blue Lines and plain lyrics in the tags of the first song of
- * Mezzanine, in made-up words. Within the first minute, the length of the stand-in's tone, synced
- * lines start every 2.5 seconds from 0:01 to 0:43; that last one ends at 0:46, and a line of two
- * rows follows a gap at 0:50. Every other song has none.
- */
 const SEED_LYRICS: ReadonlyMap<string, SeedLyrics> = new Map(Object.entries(seedLyrics));
 
-/** The lyrics fields of the seeded song at `path` (relative to the library folder). */
 const lyricsOf = (path: string): Pick<SeedTrack, "lyricsFiles" | "lyricsReader" | "lyrics"> => ({
   lyricsFiles: "",
   lyrics: [],
   ...SEED_LYRICS.get(path),
-  // From no reader: a real scan of these files reads their lyrics again.
   lyricsReader: 0,
 });
 
@@ -425,7 +415,6 @@ const serviceSecret = (): string =>
     encoding: "utf8",
   }).trim();
 
-/** Claims every pending scan job and fills its library with the synthetic catalog. */
 const finishPendingJobs = async (client: ConvexHttpClient, secret: string): Promise<number> => {
   const jobs = await client.query(pendingJobs, { secret });
   const tracks = catalog();
@@ -437,14 +426,12 @@ const finishPendingJobs = async (client: ConvexHttpClient, secret: string): Prom
 
   let finished = 0;
 
-  // Writes stay in order: each batch updates the album and library counters the next one reads.
   await inOrder(jobs, async ({ jobId }) => {
     const claim = await client.mutation(claimJob, { secret, jobId, workerId });
 
     if (claim === null) return;
     const prefix = claim.library.path.replace(/\/$/, "");
 
-    // The media service claims a library's folder before a scan; nothing streams without it.
     await client.mutation(claimRoot, {
       secret,
       libraryId: claim.library.id,
@@ -517,7 +504,6 @@ if (values.pending) {
 
   await finishPendingJobs(client, secret);
 
-  // A library scanned before the seeded songs had lyrics gets them without a new scan.
   const seeded = await client.query(readCommand, { name: "libraries.list", args: {} });
   const library = seeded.find((entry) => entry.path === LIBRARY.path);
 
@@ -535,7 +521,6 @@ if (values.pending) {
     console.log(`saved the lyrics of ${saved} song(s)`);
   }
 
-  // A stand-in phone for remote-control testing: it checks in and playback moves to it.
   if (values.device !== undefined) {
     const deviceId = "seed-phone";
 

@@ -1,8 +1,3 @@
-/**
- * What the Play on sheet shows (B05 to B08), derived from the user's devices and the move in
- * progress. One sheet route renders every state, so a move that starts, lands, or fails changes
- * the sheet in place instead of stacking new ones.
- */
 import type { DeviceId } from "@music/commands/ids";
 import type { DeviceKind } from "@music/commands/models";
 
@@ -77,8 +72,6 @@ export const deviceSheet = ({
   const listed = devices.find((device) => device.id === thisDevice.id);
   const nobodyPlays = !devices.some((device) => device.active);
 
-  // This phone is listed before its first heartbeat lands; with no device playing, it is where
-  // playback starts, so it counts as current.
   const phone: DeviceRow = {
     id: thisDevice.id,
     name: `This ${family}`,
@@ -95,7 +88,6 @@ export const deviceSheet = ({
     thisPhone: true,
   };
 
-  // Playing first, then online, then the rest, each in the server's order (most recent first).
   const others = [0, 1, 2]
     .flatMap((group) =>
       devices.filter((device) => device.id !== thisDevice.id && rank(device) === group),

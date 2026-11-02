@@ -1,8 +1,3 @@
-/**
- * The lyrics worker against a stand-in LRCLIB over real HTTP and the in-memory backend: how it
- * matches songs, what it saves, how it paces requests, how an LRCLIB outage pauses every lookup
- * without costing any of them a try, and that a save after a lost lease is dropped.
- */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
 
@@ -50,10 +45,6 @@ const found = (id: number, extra: Partial<Parameters<typeof record>[0]> = {}): F
     }),
   );
 
-/**
- * Starts the worker against a stand-in answering with `handler`, and returns the backend's test
- * controls and the stand-in.
- */
 const start = (handler: FakeLrclibHandler, options: Partial<LrclibClient.Options> = {}) =>
   Effect.gen(function* () {
     const lrclib = yield* fakeLrclib(handler);
@@ -90,10 +81,6 @@ const lookupOf = (control: Control, lookupId: MemoryLookup["id"]) =>
 
 const ANSWERED: ReadonlySet<string> = new Set(["found", "instrumental", "miss"]);
 
-/**
- * Waits until the lookup has an answer, running the backend's scheduled retries and pause ends as
- * soon as they are scheduled, as if their time had come.
- */
 const answerOf = (control: Control, lookupId: MemoryLookup["id"]) =>
   control.runScheduled.pipe(
     Effect.andThen(lookupOf(control, lookupId)),
@@ -104,7 +91,6 @@ const answerOf = (control: Control, lookupId: MemoryLookup["id"]) =>
     }),
   );
 
-/** Waits until `ready` holds for the stand-in's requests. */
 const requestsUntil = (
   lrclib: { readonly requests: () => ReadonlyArray<unknown> },
   ready: (count: number) => boolean,
@@ -193,7 +179,6 @@ describe("LyricsWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         const lookup = yield* answerOf(control, yield* control.queueLookup(SYMPATHY));
 
-        // Of the two that match, the one with synced lyrics wins.
         expect(lookup?.answer).toMatchObject({ kind: "found", recordId: 4 });
         expect(paths(lrclib.requests())).toEqual(["/api/get", "/api/search"]);
         expect(lrclib.requests()[1]?.params).toEqual({
@@ -318,7 +303,6 @@ describe("LyricsWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* requestsUntil(lrclib, (count) => count >= 1);
         yield* Effect.sleep("150 millis");
 
-        // The outage paused the queue for both lookups, and cost neither a try.
         expect(lrclib.requests()).toHaveLength(1);
         expect(yield* control.pausedUntil).not.toBeNull();
         expect((yield* control.lookups).map((lookup) => lookup.state)).toEqual([
@@ -574,7 +558,6 @@ describe("LyricsWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const lookup = yield* answerOf(control, lookupId);
 
         expect(yield* control.droppedSaves).toEqual([lookupId]);
-        // The second try answered it.
         expect(lookup).toMatchObject({
           state: { status: "found" },
           answer: { kind: "found", recordId: 2 },

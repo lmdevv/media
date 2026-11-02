@@ -1,7 +1,3 @@
-/**
- * F10 · Invite someone: an optional email that limits who can use the link, and the role it
- * gives. Creating it replaces this page with the link to share (F11), so Back goes to People.
- */
 import type { AssignableRole, User } from "@music/commands/models";
 import { assignableRoles, roleLabel } from "@music/commands/permissions";
 import { useRun } from "@music/sdk/react";
@@ -22,7 +18,6 @@ import { ROLE_ACCESS, inviteRoles } from "@/lib/people";
 import { NavGlyph } from "@/components/settings/nav-glyph";
 import { useAction } from "@/components/settings/use-action";
 
-/** Something that reads as an email address; the server checks the rest. */
 const EMAIL = /^[^\s@]+@[^\s@]+$/u;
 
 /** The new-invite form. */

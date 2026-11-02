@@ -1,8 +1,3 @@
-/**
- * The song a Song actions sheet (A11) is about, carried in its route params: there is no command
- * that reads one song, and params keep the route a plain link. `liked` is the list's live value
- * when the sheet opened; `likes.set` sets rather than toggles, so a stale value can't flip a like.
- */
 import { AlbumId, ArtistId, TrackId } from "@music/commands/ids";
 import type { Track } from "@music/commands/models";
 import { Option, Schema } from "effect";

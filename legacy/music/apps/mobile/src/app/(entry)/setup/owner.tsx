@@ -1,8 +1,3 @@
-/**
- * E04 · Create the owner on a server with nobody on it yet (setup 1 of 3). The server counts its
- * first person before sign-up returns, so the session holds this screen until the new owner is
- * signed in; the root stack then moves on to adding music (E05). A refusal keeps the form.
- */
 import { useAuthActions } from "@convex-dev/auth/react";
 import { router } from "expo-router";
 import { Info } from "lucide-react-native";

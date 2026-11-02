@@ -8,7 +8,6 @@ const page = (items: number, done = false) => ({ items, done });
 describe("summarizeChain", () => {
   it("is empty only when every loaded page is empty and the last is done", () => {
     expect(summarizeChain([page(0, true)]).empty).toBe(true);
-    // Rows in libraries the viewer can't read leave pages empty while more follow.
     expect(summarizeChain([page(0), page(0)]).empty).toBe(false);
     expect(summarizeChain([page(0), page(0), page(0, true)]).empty).toBe(true);
     expect(summarizeChain([page(0), page(3, true)]).empty).toBe(false);

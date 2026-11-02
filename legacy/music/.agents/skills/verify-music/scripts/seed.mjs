@@ -19,15 +19,12 @@ const { values: flags } = parseArgs({
   },
 });
 
-// Lucía is the owner that setup created. Everyone signs in with the same password. Sam is a
-// guest, and guests can't make API keys, so Sam has no CLI.
 const PEOPLE = [
   { handle: "mateo", name: "Mateo", email: "mateo@music.local", role: "member" },
   { handle: "aiko", name: "Aiko", email: "aiko@music.local", role: "member" },
   { handle: "sam", name: "Sam", email: "sam@music.local", role: "guest" },
 ];
 
-// The admin's key is `key` and the CLI's config is `cli-config`, as verify-music.sh expects.
 const keyFile = (handle) => join(flags.state, handle === "lucia" ? "key" : `key.${handle}`);
 const configDir = (handle) => join(flags.state, handle === "lucia" ? "cli-config" : `cli-config.${handle}`);
 
@@ -68,7 +65,6 @@ for (const person of PEOPLE) {
 const people = new Map(music("lucia", "people", "list").map((person) => [person.email, person.id]));
 const user = (handle) => people.get(PEOPLE.find((person) => person.handle === handle).email);
 
-// The library is shared, which members can play. A guest plays only what they're granted.
 const library = music("lucia", "libraries", "list").find((folder) => folder.path === "/music");
 music("lucia", "libraries", "grant", "--library-id", library.id, "--user-id", user("sam"));
 

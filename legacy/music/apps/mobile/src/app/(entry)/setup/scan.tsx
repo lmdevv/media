@@ -1,9 +1,3 @@
-/**
- * E06, E07, G09 · The first scan (setup 3 of 3). It shows live progress while the folders are
- * read, celebrates when they all are, and offers a way on when a scan stops. The session keeps
- * this screen up after the scan ends, until the owner opens the library; Open my library leaves
- * before it ends, and Home then shows the scan still running (G02).
- */
 import type { LibraryId } from "@music/commands/ids";
 import type { AlbumCard, Home } from "@music/commands/models";
 import { useRead, useRun } from "@music/sdk/react";
@@ -25,10 +19,8 @@ import type { FirstScan } from "@/lib/first-scan";
 import { countOf, formatCount } from "@/lib/format";
 import { useSetupProgress } from "@/session/session-phase";
 
-/** How often the time left is estimated again between progress updates. */
 const TICK_MS = 5000;
 
-/** The time now, a few seconds fresh. */
 const useNow = (): number => {
   const [now, setNow] = useState(Date.now);
 
@@ -67,7 +59,6 @@ export default function Scan() {
   return <Stopped scan={scan} onUse={leave} />;
 }
 
-/** One of E06's three totals. */
 function Stat({
   value,
   noun,
@@ -87,7 +78,6 @@ function Stat({
   );
 }
 
-/** E06 · The scan in progress. */
 function Reading({
   scan,
   stats,
@@ -151,7 +141,6 @@ function Reading({
   );
 }
 
-/** E07 · Every folder read: the first covers, the totals, and on to Home. */
 function Ready({
   stats,
   albums,
@@ -201,7 +190,6 @@ function Ready({
   );
 }
 
-/** G09 · A folder's scan stopped: resume it, or go on with what was read. */
 function Stopped({
   scan,
   onUse,
@@ -221,7 +209,6 @@ function Stopped({
     setFailure(null);
 
     try {
-      // A removed folder leaves no library behind, so the stack goes back to Add your music.
       if (action === "resume") await rescan({ libraryId });
       else await remove({ libraryId });
     } catch (cause) {

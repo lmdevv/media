@@ -1,13 +1,3 @@
-/**
- * Scans one library folder into Convex: list audio files, skip the ones Convex already has with
- * the same size and modification time (and the same folder artwork and lyric files beside them),
- * read tags and lyrics for the rest, upsert them in batches, and mark files that disappeared as
- * missing. A file whose only change is its lyrics (a lyric file added, edited, or removed, or a
- * newer lyrics reader) has only its lyrics read and saved, leaving its tags and artwork alone. A
- * new file that is a gone one moved or renamed (see `moved-files.ts`) moves that track instead,
- * keeping its likes, plays, and playlist entries. Every write is keyed by library and relative
- * path, so running a scan twice is safe.
- */
 import { Buffer } from "node:buffer";
 import { basename, dirname, join } from "node:path";
 
@@ -39,23 +29,16 @@ import { LYRICS_READER_VERSION, readTrackLyrics } from "./track-lyrics.ts";
 
 const UPSERT_BATCH = 100;
 
-/** Most bytes of lyrics one write sends; lyric files make some songs far larger than others. */
 const BATCH_LYRICS_BYTES = 2 * 1024 * 1024;
 
 const MISSING_BATCH = 200;
 
 const TAG_CONCURRENCY = 8;
 
-/**
- * Files found on disk per fingerprint range, below Convex's page of 1000 so a range with a few
- * known files gone from disk still fits one page.
- */
 const FINGERPRINT_RANGE = 800;
 
-/** Fingerprint ranges read at once. */
 const FINGERPRINT_CONCURRENCY = 4;
 
-/** The message of an unreadable folder somewhere in an error's cause chain, if any. */
 const unreadableReason = (cause: Error | undefined, depth = 0): string | null => {
   if (cause === undefined || depth > 4) return null;
 
@@ -133,10 +116,6 @@ const chunks = <A>(items: ReadonlyArray<A>, size: number): ReadonlyArray<Readonl
     items.slice(index * size, (index + 1) * size),
   );
 
-/**
- * Splits one read batch into writes that each send or replace at most `BATCH_LYRICS_BYTES` of
- * lyrics, as `lyricsBytesOf` sizes an item; one song never holds more than a batch may send.
- */
 const byLyricsSize = <A>(
   items: ReadonlyArray<A>,
   lyricsBytesOf: (item: A) => number,
@@ -172,11 +151,6 @@ type Read =
   | { readonly read: "file"; readonly track: ScannedTrack }
   | { readonly read: "lyrics"; readonly lyrics: ScannedLyrics };
 
-/**
- * What a scan reads of a file: nothing when Convex has it with the same size, modification time,
- * folder artwork, lyric files, and lyrics reader; only its lyrics when just the lyric files or
- * the reader differ; all of it otherwise.
- */
 const readNeeded = (
   known: Fingerprint | undefined,
   file: { size: number; mtimeMs: number },
@@ -213,12 +187,6 @@ export const pathRanges = (
   return [undefined, ...bounds].map((from, index) => ({ from, to: bounds[index] }));
 };
 
-/**
- * Every file Convex knows in the library. A query's cost on the self-hosted backend grows with
- * the size of the index range it reads, however few rows it takes, so paging through the whole
- * library one cursor after another reads most of it again for every page. Ranges of about a
- * page each, cut at the paths found on disk, read side by side, cost one page each instead.
- */
 const knownFingerprints = Effect.fn("Scan.knownFingerprints")(function* (
   libraryId: LibraryId,
   paths: ReadonlyArray<string>,
@@ -303,22 +271,18 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     return read === null ? [] : [{ read, file }];
   });
 
-  // A total of 0 tells Convex this lease made all the progress an unchanged library can make, so
-  // it is reported only at the end, once missing files are marked too (`releaseExpiredLeases`).
   yield* Ref.set(progress, {
     done: 0,
     total: changed.length > 0 ? changed.length : undefined,
     message: `Found ${files.length} files, ${changed.length} changed`,
   });
 
-  // Artwork hashes by library-relative artwork file, so each cover is read once per scan.
   const folderArt = yield* Cache.make({
     capacity: 100_000,
     lookup: (relativePath: string) =>
       Effect.gen(function* () {
         const inside = yield* Files.resolveWithin(library.path, join(library.path, relativePath));
 
-        // A cover that links out of the library would publish an outside file as artwork.
         if (Option.isNone(inside)) return undefined;
         const bytes = yield* Files.readWholeFile(inside.value);
 
@@ -400,12 +364,9 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     .toArray();
 
   const movedFrom = movedFileMatcher(vanished);
-  // Gone paths a found file took over: moved, or stored anew with the old one marked missing.
   const claimed = new Set<string>();
   let moved = 0;
 
-  // A batch's write and the art it released are recorded together: a cancel between the two
-  // would lose that art until the next full collection.
   const saved = <E>(write: Effect.Effect<ReadonlyArray<string>, E>) =>
     write.pipe(
       Effect.tap((hashes) =>
@@ -416,10 +377,6 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
       Effect.uninterruptible,
     );
 
-  /**
-   * What writing `read`'s lyrics over the track Convex keeps at `path` costs: Convex reads the
-   * lyrics it replaces as well as storing the new ones, so the larger of the two counts.
-   */
   const lyricsBytes = (path: string, read: ScannedLyrics): number =>
     Math.max(Buffer.byteLength(JSON.stringify(read.lyrics)), known.get(path)?.lyricsBytes ?? 0);
 
@@ -476,7 +433,6 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     });
   });
 
-  // Tags for the next batch are read while Convex stores the last one.
   yield* Stream.fromIterable(chunks(changed, UPSERT_BATCH)).pipe(
     Stream.mapEffect((batch) => Effect.forEach(batch, readOne, { concurrency: TAG_CONCURRENCY })),
     Stream.buffer({ capacity: 1 }),

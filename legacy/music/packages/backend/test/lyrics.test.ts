@@ -1,8 +1,3 @@
-/**
- * The lyrics the media service stores for each song, and `lyrics.get` through the real
- * dispatcher: what it answers, who may read it, and how stored lyrics follow scans, moves, and
- * removed libraries.
- */
 import { DeviceId, LibraryId, type TrackId } from "@music/commands/ids";
 import { makeFunctionReference } from "convex/server";
 import { describe, expect, it } from "vitest";
@@ -61,7 +56,6 @@ const PLAIN: StoredLyricSet = {
   body: { _tag: "Plain", text: "Just words\nMore words" },
 };
 
-/** Creates a library as `admin` holding `files`, each titled with its path. */
 const libraryWith = async (
   backend: Backend,
   admin: User,
@@ -83,7 +77,6 @@ const libraryWith = async (
   return id;
 };
 
-/** The ID of the track titled `title` among those `user` can read. */
 const trackTitled = async (user: User, title: string): Promise<TrackId> => {
   const track = (await allTracks(user)).find((candidate) => candidate.title === title);
 
@@ -92,7 +85,6 @@ const trackTitled = async (user: User, title: string): Promise<TrackId> => {
   return track.id;
 };
 
-/** A file as `media:upsertTracks` and `media:moveTracks` take it, as `upsertFiles` seeds them. */
 const scanned = (path: string, lyrics: Array<StoredLyricSet>) => ({
   path,
   size: 1000,
@@ -218,7 +210,6 @@ describe("stored lyrics", () => {
         ],
       });
 
-    // A retried batch writes the same lyrics again.
     await save([PLAIN]);
     await save([PLAIN]);
     const after = await trackDoc();
@@ -231,7 +222,6 @@ describe("stored lyrics", () => {
       lyricsHash: after?.lyricsHash,
       lyricsSynced: false,
     });
-    // The content revision moves with the lyrics.
     expect(after?.lyricsHash).toMatch(/^[\da-f]{64}$/u);
     expect(after?.lyricsHash).not.toBe(before?.lyricsHash);
     expect(await lyricsOf(member, trackId)).toMatchObject({ _tag: "Plain", main: PLAIN });
@@ -315,7 +305,6 @@ describe("stored lyrics", () => {
   it("refuse lyric sets from LRCLIB as a song's own", async () => {
     const { backend, libraryId } = await setup();
 
-    // Called by name, as a client that does not share the backend's types would.
     const saveLocalLyrics = makeFunctionReference<
       "mutation",
       { secret: string; libraryId: string; tracks: ReadonlyArray<unknown> }
@@ -346,7 +335,6 @@ describe("stored lyrics", () => {
   });
 });
 
-/** About 600 KB of lyrics, as many large lyric files beside one song can hold. */
 const large = (index: number): StoredLyricSet => ({
   kind: "main",
   lang: null,
@@ -354,14 +342,12 @@ const large = (index: number): StoredLyricSet => ({
   body: { _tag: "Plain", text: `${index} ${"la ".repeat(200_000)}` },
 });
 
-/** Runs `run` for each of `items`, one after another. */
 const eachInOrder = <A, B>(items: ReadonlyArray<A>, run: (item: A) => Promise<B>): Promise<void> =>
   items.reduce<Promise<void>>(async (previous, item) => {
     await previous;
     await run(item);
   }, Promise.resolve());
 
-/** A library of 30 songs, each with about 600 KB of lyrics, seeded three songs at a time. */
 const crowdedLibrary = async () => {
   const backend = makeBackend();
   const owner = await signUp(backend, "owner");
@@ -370,7 +356,6 @@ const crowdedLibrary = async () => {
   const libraryId = await libraryWith(backend, owner, "Crowded", "shared", []);
   const starts = Array.from({ length: paths.length / 3 }, (_, batch) => batch * 3);
 
-  // Three songs a write: their lyrics are about as much as one write may send.
   await eachInOrder(starts, (start) =>
     upsertFiles(
       backend,
@@ -403,7 +388,6 @@ describe("large stored lyrics", () => {
       ]),
     );
 
-    // As a scan sends them: writes that replace at most 2 MiB of stored lyrics each.
     const batches: Array<Array<string>> = [];
     let bytes = Infinity;
 

@@ -32,6 +32,5 @@ export const resetStillAllowed = async (
 
   if (!canManagePerson(creatorRef, { id: user._id, role: roleOf(user) })) return false;
 
-  // Someone who has since been let into a library the maker can't hear is the owner's to reset.
   return can(creatorRef.role, "owner") || !(await listensBeyond(ctx, creator, user));
 };

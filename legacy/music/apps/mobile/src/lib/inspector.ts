@@ -1,9 +1,3 @@
-/**
- * The iPad's Now Playing panel (Paper page 26, B1 to B3): which tab it shows and whether it is open.
- * Its Up next and Lyrics are Now Playing's panels. Until the person picks a tab it shows the queue,
- * then follows Now Playing's `defaultPanel`, so a song's lyrics take over once they are ready and a
- * new song's lookup doesn't flip the tab.
- */
 import { lyricsButton } from "@music/player/lyrics";
 import type { LyricsOffer } from "@music/player/lyrics";
 

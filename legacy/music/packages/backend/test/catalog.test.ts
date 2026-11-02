@@ -1,7 +1,3 @@
-/**
- * What scan batches cost and write: the catalog writer's reads per batch, artwork that falls out
- * of use, and the library counters' own row, against convex-test.
- */
 import { describe, expect, it } from "vitest";
 
 import { api, internal } from "../convex/_generated/api";
@@ -23,7 +19,6 @@ const COVER = "c".repeat(64);
 
 const OTHER_COVER = "d".repeat(64);
 
-/** A scanned file of the album `Big` by `Band`, with the given art. */
 const song = (index: number, artHash?: string): ScannedTrack => ({
   path: `Band/Big/${String(index).padStart(4, "0")}.flac`,
   size: 1000 + index,
@@ -47,7 +42,6 @@ const libraryOf = async (backend: Backend, id: string): Promise<Id<"libraries">>
   return library;
 };
 
-/** Writes `tracks` through one catalog batch and returns what that cost. */
 const writeBatch = (backend: Backend, libraryId: Id<"libraries">, tracks: Array<ScannedTrack>) =>
   backend.mutation(async (ctx: MutationCtx) => {
     const before = await ctx.meta.getTransactionMetrics();
@@ -76,11 +70,8 @@ describe("a scan batch", () => {
 
     const first = await writeBatch(backend, libraryId, songs);
 
-    // The new artist and album, each read back after its insert, then read and patched once for
-    // its counts, and the library's counters row, read and patched: not a read per song.
     expect(first.read).toBe(8);
 
-    // Rescanning the same files changes no count, so no album, artist, or counter is touched.
     const again = await writeBatch(backend, libraryId, songs);
 
     expect(again.read).toBe(100 + 2 + 100);
@@ -98,7 +89,6 @@ describe("a scan batch", () => {
     const created = await admin.music.run("libraries.create", { name: "Big", path: "/big" });
     const libraryId = await libraryOf(backend, created.libraryId);
 
-    // One song has a cover, which the album and artist take; 300 others have none.
     await writeBatch(backend, libraryId, [song(0, COVER)]);
 
     await inOrder([1, 101, 201], async (start) => {
@@ -111,7 +101,6 @@ describe("a scan batch", () => {
 
     expect(await art(backend)).toEqual({ albums: [COVER], artists: [COVER] });
 
-    // The song loses its cover: no other song has art, which takes a look, not 300 reads.
     const lost = await writeBatch(backend, libraryId, [song(0)]);
 
     expect(lost.read).toBeLessThan(12);
@@ -127,7 +116,6 @@ describe("a scan batch", () => {
 
     await writeBatch(backend, libraryId, [song(1, COVER), song(2, COVER)]);
 
-    // One song gets its own picture: the album keeps the cover the other song still has.
     const changed = await writeBatch(backend, libraryId, [song(1, OTHER_COVER)]);
 
     expect(changed.released).toEqual([COVER]);
@@ -139,7 +127,6 @@ describe("a scan batch", () => {
       inUse: [COVER, OTHER_COVER],
     });
 
-    // The last song with the old cover gets the new one too, and the folder cover changed.
     await backend.mutation(api.media.upsertTracks, {
       secret: MEDIA_SECRET,
       libraryId,
@@ -160,7 +147,6 @@ describe("an album a retag empties", () => {
 
     await writeBatch(backend, libraryId, [song(1, COVER)]);
 
-    // The album's only song is retagged into another album by another artist, with new art.
     const moved = await writeBatch(backend, libraryId, [
       { ...song(1, OTHER_COVER), album: "Other", artist: "Someone" },
     ]);
@@ -190,7 +176,6 @@ describe("library counters", () => {
       expect.objectContaining({ libraryId: id, trackCount: 3, albumCount: 1, artistCount: 1 }),
     ]);
 
-    // The library's row is as `libraries.create` wrote it: queries reading it never re-ran.
     expect(rows.library?._creationTime).toBeDefined();
     expect((await admin.music.read("libraries.list", {}))[0]?.trackCount).toBe(3);
 
@@ -233,7 +218,6 @@ describe("library counters", () => {
   });
 });
 
-/** A library with its counters on its own row, as versions before `libraryStats` stored it. */
 const legacyLibrary = (backend: Backend, ownerId: Id<"users">) =>
   backend.run(async (ctx) =>
     ctx.db.insert("libraries", {

@@ -1,7 +1,3 @@
-/**
- * Paper's confirmation sheet (B10, C12, D10, F07, F13, F21, F24, F25): a title, what will happen,
- * the confirm action, and Cancel. Paper draws these as sheets, so they are never `Alert.alert`.
- */
 import { errorMessage } from "@music/sdk/errors";
 import { router } from "expo-router";
 import { useState } from "react";
@@ -11,7 +7,6 @@ import { Button } from "./button";
 import { SheetLayout } from "./sheet-layout";
 import { Text } from "./text";
 
-/** Props for `ConfirmSheet`. */
 export interface ConfirmSheetProps {
   readonly title: string;
   readonly body: string;

@@ -6,7 +6,6 @@ const RATE = 48_000;
 
 const FREQUENCY = 110;
 
-/** 990 whole cycles of the tone, like the browser fixtures. */
 const CUTS = [0, 150_001, 306_337, 432_000];
 
 const PAD = 1000;
@@ -16,7 +15,6 @@ const tone = (from: number, to: number): Float32Array =>
     Math.fround(0.5 * Math.sin((2 * Math.PI * FREQUENCY * (from + index)) / RATE)),
   );
 
-/** Silence, the parts with `edits` applied at their starts, then silence. */
 const played = (edits: ReadonlyArray<(part: Float32Array, index: number) => Float32Array>) => {
   const parts = CUTS.slice(1).map((cut, index) => {
     const part = tone(CUTS[index] ?? 0, cut);
@@ -51,7 +49,6 @@ const dropStart =
   (part: Float32Array, index: number): Float32Array =>
     index === partIndex ? part.slice(samples) : part;
 
-/** Plays the last 3 samples of part 1 again at the start of part 2. */
 const repeatEnd = (part: Float32Array, index: number): Float32Array => {
   if (index !== 1) return part;
   const edited = new Float32Array(part.length + 3);

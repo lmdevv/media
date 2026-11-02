@@ -1,9 +1,3 @@
-/**
- * Play on (B05 to B08, H07): where the music plays, and moving it to another of the person's
- * devices. One sheet shows every state of a move: the list, the move in progress with the playing
- * device still shown, and a failed move, which leaves the music where it was. A move that lands
- * closes the sheet, and Now Playing then says where the music plays (B02).
- */
 import type { DeviceKind } from "@music/commands/models";
 import { router } from "expo-router";
 import type { LucideIcon } from "lucide-react-native";
@@ -31,7 +25,6 @@ const KIND_ICONS = {
   cli: SquareTerminal,
 } as const satisfies Record<DeviceKind, LucideIcon>;
 
-/** Moves the music to `row`'s device: this phone through `playHere`, which also wakes its audio. */
 const useMoveTo = () => {
   const { transferTo, playHere } = usePlayerActions();
 
@@ -40,7 +33,6 @@ const useMoveTo = () => {
   };
 };
 
-/** B06's subtitle: the song and where it is, the only part that follows the position. */
 function MovingSubtitle() {
   const { nowPlaying } = useNowPlaying();
   const { positionMs } = usePlaybackPosition();
@@ -52,7 +44,6 @@ function MovingSubtitle() {
   );
 }
 
-/** A device to pick: the current one in the accent with a check, the others with a chevron. */
 function DeviceOption({ row, onPick }: { readonly row: DeviceRow; readonly onPick: () => void }) {
   return (
     <Row
@@ -200,7 +191,6 @@ export function DeviceSheet() {
     now,
   });
 
-  // A move that lands closes the sheet; one that fails stays to say so.
   const previous = useRef(transfer.state);
 
   useEffect(() => {
@@ -208,7 +198,6 @@ export function DeviceSheet() {
     previous.current = transfer.state;
   }, [transfer.state]);
 
-  // Closing a failed move's sheet keeps the music here, as "Stay here" does.
   const failed = useRef(false);
 
   useEffect(() => {

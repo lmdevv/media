@@ -131,12 +131,9 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           .update(yield* Files.readWholeFile(cover))
           .digest("hex");
 
-        // Art nothing uses that this scan did not stop using waits for the next full collection:
-        // a scan asks Convex only about the art it changed.
         const orphan = createHash("sha256").update("orphan").digest("hex");
         yield* Files.writeFileAtomic(join(art, orphan), new Uint8Array([0xff, 0xd8, 0xff]), "x");
 
-        // An hour later, the album's cover is replaced.
         for (const name of [...before, orphan]) {
           yield* Effect.promise(() => setFileTime(join(art, name), Date.now() - 60 * 60 * 1000));
         }
@@ -187,14 +184,12 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           .update(yield* Files.readWholeFile(cover))
           .digest("hex");
 
-        // The cover is replaced minutes after it was saved: a scan may still be about to use it.
         const replaced = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...randomBytes(64)]);
         yield* Files.writeFileAtomic(cover, replaced, "x");
         yield* untilSettled(control, yield* control.enqueueScan(libraryId));
 
         expect(yield* Files.listNames(art)).toContain(oldCover);
 
-        // Later, a scan that changed nothing tries again and deletes it.
         yield* Effect.promise(() => setFileTime(join(art, oldCover), Date.now() - 60 * 60 * 1000));
         yield* untilSettled(control, yield* control.enqueueScan(libraryId));
 
@@ -219,7 +214,6 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(services));
         const worker = JobWorker.layer.pipe(Layer.provide(Layer.succeedContext(services)));
 
-        // A first run scans the library.
         yield* Effect.scoped(
           Effect.gen(function* () {
             yield* Layer.build(worker);
@@ -230,7 +224,6 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           }),
         );
 
-        // Meanwhile a library was deleted: its art stays behind, unused for an hour.
         const orphan = join(dataDir, "art", "0".repeat(64));
 
         yield* Files.writeFileAtomic(orphan, new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), "w");
@@ -260,14 +253,12 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const clock = yield* TestClock.make();
         const { root } = yield* fixtureLibrary;
 
-        // Stored artwork carries real file times, which the collector compares with the clock.
         yield* clock.setTime(Date.now());
         const other = yield* temporaryDirectory("other");
         const dataDir = yield* temporaryDirectory("data");
         const art = join(dataDir, "art");
         const services = Layer.merge(layerMemory, testConfig(dataDir));
 
-        // A second library keeps a cover of its own in use.
         yield* Files.copyTree(
           join(root, "The Sine Waves/Folder Art/01 Brushes.m4a"),
           join(other, "song.m4a"),
@@ -301,7 +292,6 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             yield* Effect.promise(() => setFileTime(join(art, name), Date.now() - 60 * 60 * 1000));
           }
 
-          // Adding a library collects nothing, not even art no song uses: only a deletion does.
           const orphan = join(art, "0".repeat(64));
 
           yield* Files.writeFileAtomic(orphan, new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), "w");
@@ -345,7 +335,6 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(memory));
         const backend = yield* MediaBackend.pipe(Effect.provideContext(memory));
 
-        // Cancels each job right after the worker claims it, as an admin would mid-scan.
         const cancelling = Layer.succeed(
           MediaBackend,
           MediaBackend.of({

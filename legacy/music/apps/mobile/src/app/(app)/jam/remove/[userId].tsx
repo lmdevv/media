@@ -1,4 +1,3 @@
-/** D03 → D09 · Remove someone from the Jam: the host confirms in a sheet. */
 import { useRead, useRun } from "@music/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 

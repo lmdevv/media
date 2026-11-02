@@ -1,4 +1,3 @@
-/** Library folder paths: normalising them, and refusing a library that overlaps another. */
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
@@ -8,7 +7,6 @@ import { makeBackend, signUp } from "./backend";
 
 const segment = fc.stringMatching(/^[a-z0-9 ._-]{1,8}$/u).filter((part) => !/^\.+$/u.test(part));
 
-/** An absolute, normalised path of zero or more plain segments. */
 const plainPath = fc.array(segment, { maxLength: 5 }).map((parts) => `/${parts.join("/")}`);
 
 describe("normaliseLibraryPath", () => {
@@ -84,12 +82,10 @@ describe("libraries.create", () => {
     expect(await create("/srv")).toBe("conflict");
     expect(await create("/srv/music2")).toBe("succeeded");
 
-    // Another admin's private library stays anonymous: neither folder is named.
     await expect(
       admin.music.run("libraries.create", { name: "New", path: "/srv/secret/x" }),
     ).rejects.toThrow(/"message":"This folder overlaps another library"\}/u);
 
-    // The other admin's private library is listed, unreadable and without its folder.
     expect(
       (await admin.music.read("libraries.list", {})).map((library) => [
         library.path,

@@ -19,10 +19,6 @@ import type { ReadCtx } from "./lib/viewer";
 
 const TOO_MANY = "Too many people joined as guests just now. Try again in a few minutes.";
 
-/**
- * Makes a guest account from a Jam link, within the limits above, and puts it in the Jam: let in
- * at once when the Jam is open, or waiting for the host when it asks for approval.
- */
 const createJamGuest = async (
   ctx: MutationCtx,
   jam: Doc<"jams">,
@@ -38,7 +34,6 @@ const createJamGuest = async (
     return fail("signup_closed", "This Jam has as many guests as it can take. Ask for an invite.");
   }
 
-  // Server-wide first: one busy Jam must not use up the others' share.
   if (!(await takeAttempt(ctx, "jam-guests", GUESTS_PER_HOUR))) {
     return fail("rate_limited", TOO_MANY);
   }
@@ -65,19 +60,11 @@ const createJamGuest = async (
   return userId;
 };
 
-/**
- * What lets a sign-up in: being the first account, an open invite for this email, or, where an
- * admin allows it, the link of an active Jam that lets people in (a guest account).
- */
 type SignUpPass =
   | { readonly kind: "first" }
   | { readonly kind: "invite"; readonly invite: Doc<"invites"> }
   | { readonly kind: "jam"; readonly jam: Doc<"jams"> };
 
-/**
- * A Jam link as a pass: only while an admin lets Jam links make guest accounts, and only for an
- * active Jam that is letting people in.
- */
 const jamPass = async (ctx: ReadCtx, code: string): Promise<SignUpPass> => {
   if (!(await readServerSettings(ctx)).jamGuestAccounts) {
     return fail("signup_closed", "This server doesn't make accounts from Jam links");
@@ -92,8 +79,6 @@ const jamPass = async (ctx: ReadCtx, code: string): Promise<SignUpPass> => {
     return fail("signup_closed", "This Jam link doesn't work any more");
   }
 
-  // Only members and admins may hand out a link that makes accounts. Their Jam ends when they stop
-  // being one; this holds meanwhile, and for any Jam that slipped past.
   const host = await ctx.db.get(jam.hostId);
 
   if (host === null || host.suspendedAt !== undefined || roleOf(host) === "guest") {
@@ -103,11 +88,6 @@ const jamPass = async (ctx: ReadCtx, code: string): Promise<SignUpPass> => {
   return { kind: "jam", jam };
 };
 
-/**
- * Checks that `email` may sign up, or fails with `signup_closed` saying why. The first account
- * needs nothing; every later one needs an open invite that its sender may still give, or a Jam
- * link as above.
- */
 const signUpPass = async (
   ctx: ReadCtx,
   email: string,
@@ -143,10 +123,6 @@ const signUpPass = async (
   return { kind: "invite", invite };
 };
 
-/**
- * Adds the person a sign-up lets in, using up their invite. The first account is the owner; a Jam
- * link makes a guest who hears nothing but that Jam.
- */
 const insertSignedUp = async (
   ctx: MutationCtx,
   pass: SignUpPass,
@@ -168,12 +144,6 @@ const insertSignedUp = async (
   return userId;
 };
 
-/**
- * Creates the person and the password account for a sign-up, in one transaction: fails with
- * `signup_closed` unless the email may sign up, and only then returns null when a password
- * account already uses it. Sign-up has no rate limit, so without a valid invite every email gets
- * the same answer, and nobody learns which have accounts. `secret` is the password's hash.
- */
 /**
  * The account ID to sign in with, for an email as typed and as sign-up cleans it: the typed one
  * when an account has it (one made before the cleaning), otherwise the cleaned one (where sign-up

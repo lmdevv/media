@@ -33,7 +33,6 @@ const PositiveCount = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGre
 
 const Options = Schema.Struct({ sample: PositiveCount, seed: PositiveCount });
 
-/** `--sample` or `--seed` is not a positive whole number. */
 class BadOption extends Schema.TaggedError<BadOption>()("BadOption", {
   cause: Schema.Defect(),
 }) {
@@ -55,7 +54,6 @@ const TrackPage = Schema.Struct({
   done: Schema.Boolean,
 });
 
-/** The `music` CLI could not list the library's songs. */
 class CliFailed extends Schema.TaggedError<CliFailed>()("CliFailed", {
   stderr: Schema.String,
   cause: Schema.Defect(),
@@ -65,7 +63,6 @@ class CliFailed extends Schema.TaggedError<CliFailed>()("CliFailed", {
   }
 }
 
-/** The `music` CLI listed songs, but its output was not a page of them. */
 class CliOutputUnreadable extends Schema.TaggedError<CliOutputUnreadable>()("CliOutputUnreadable", {
   cause: Schema.Defect(),
 }) {
@@ -80,7 +77,6 @@ type Song = (typeof TrackPage.Type)["items"][number];
 
 const cli = process.env["MUSIC_CLI"] ?? "music";
 
-/** One page of the songs the CLI's login can read, by title. */
 const songPage = (cursor: string | null) =>
   Effect.tryPromise({
     try: (signal) =>
@@ -109,7 +105,6 @@ const songPage = (cursor: string | null) =>
     ),
   );
 
-/** Every song the CLI's login can read. */
 const allSongs = (
   cursor: string | null,
   seen: ReadonlyArray<Song>,
@@ -122,7 +117,6 @@ const allSongs = (
     ),
   );
 
-/** A small seeded generator (mulberry32), so a sample can be drawn again. */
 const seeded = (seed: number) => {
   let state = seed >>> 0;
 

@@ -1,7 +1,3 @@
-/**
- * Serves a file over HTTP with validators and single byte ranges: `ETag`, `Last-Modified`,
- * `If-None-Match`, `If-Range`, `Range` (206 and 416), and bodiless `HEAD`.
- */
 import { fileRevision } from "@music/commands/revision";
 import { Effect } from "effect";
 

@@ -1,9 +1,3 @@
-/**
- * E09 · Choose a new password from an admin's one-time reset link (`EntryLinksProvider`), or why
- * the link can't be used. Setting it signs the person in, and the root stack moves to the app by
- * itself. The server marks the link used before sign-in ends, so the form stays up while it does;
- * a refusal keeps the form.
- */
 import { useAuthActions } from "@convex-dev/auth/react";
 import { passwordResetLookup } from "@music/sdk/functions";
 import type { PasswordResetDetails } from "@music/sdk/functions";
@@ -55,7 +49,6 @@ export default function ResetPassword() {
   return <LinkUnavailable kind="reset" state={state} />;
 }
 
-/** The E09 form. */
 function ResetForm({
   token,
   reset,

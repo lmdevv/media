@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 
 import { compareText } from "./text-order";
 
-/** The sign of comparing two strings code point by code point, the obvious way. */
 const byCodePoints = (left: string, right: string): number => {
   const leftPoints = Array.from(left, (character) => character.codePointAt(0) ?? 0);
   const rightPoints = Array.from(right, (character) => character.codePointAt(0) ?? 0);
@@ -20,7 +19,6 @@ const byCodePoints = (left: string, right: string): number => {
 
 describe("compareText", () => {
   it("orders by code point, as Convex orders index keys", () => {
-    // UTF-16 puts the emoji (a surrogate pair from U+D83D) before U+FF01; code points don't.
     expect(["！", "😀"].toSorted()).toEqual(["😀", "！"]);
     expect(compareText("😀", "！")).toBeGreaterThan(0);
     expect(compareText("abc", "abd")).toBeLessThan(0);

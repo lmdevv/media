@@ -1,7 +1,3 @@
-/**
- * A QR code as one SVG path of unit squares, encoded with `uqr` (MIT, pure JavaScript) as the web
- * does, with medium error correction so a phone camera reads it off a screen.
- */
 import { encode } from "uqr";
 
 /** The code's side in modules, quiet border included, and the path of its dark modules. */

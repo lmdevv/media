@@ -31,22 +31,13 @@ type ArtistOut = (typeof ArtistCard)["Encoded"];
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-/**
- * Lists of at least this many songs (a queue) look up the viewer's likes in one read when they
- * have at most `LIKES_AT_ONCE`, instead of one index lookup per song.
- */
 const LIKES_AT_ONCE_FROM = 100;
 
-/** Most likes read in one go. Every like is an index row the read covers, needed or not. */
 const LIKES_AT_ONCE = 200;
 
 /** A device that has not sent a heartbeat for this long is offline. */
 export const DEVICE_ONLINE_MS = 75_000;
 
-/**
- * Artwork URLs expire on weekly boundaries so the same cover keeps the same URL for a week and
- * the browser can cache it.
- */
 const artExpiry = (now: number): number => Math.ceil(now / WEEK_MS) * WEEK_MS + WEEK_MS;
 
 /** Sorts album tracks by disc, then track number, then title: the order an album lists them. */
@@ -96,7 +87,6 @@ export const makePresenter = (ctx: ReadCtx, viewer: Viewer): Presenter => {
     return like !== null;
   };
 
-  /** Every song the viewer likes, or null when they like more than `LIKES_AT_ONCE`. */
   const fewLikes = async (): Promise<ReadonlySet<Id<"tracks">> | null> => {
     const likes = await ctx.db
       .query("likes")
@@ -106,7 +96,6 @@ export const makePresenter = (ctx: ReadCtx, viewer: Viewer): Presenter => {
     return likes.length > LIKES_AT_ONCE ? null : new Set(likes.map((like) => like.trackId));
   };
 
-  /** The cover of the artist's newest readable album that has one, for artists without art. */
   const newestAlbumArt = async (artistId: Id<"artists">): Promise<string | undefined> => {
     const albums = await ctx.db
       .query("albums")
@@ -232,7 +221,6 @@ export const presentLibrary = (
 ): (typeof Library)["Encoded"] => ({
   id: doc._id,
   name: doc.name,
-  // A folder path is how a library is found and indexed again, so only its managers see it.
   path: manageable ? doc.path : null,
   manageable,
   accessControl,

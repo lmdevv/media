@@ -1,8 +1,3 @@
-/**
- * How a play queue moves and orders itself: where next and previous go, what counts as a new
- * play, where added songs land, and how shuffle reorders. Pure, so the server's playback commands
- * and a device's own session while it plays without the server follow the same rules.
- */
 import type { RepeatMode } from "./models";
 
 /** Longest queue kept; Convex arrays and query reads stay well inside limits. */
@@ -10,14 +5,8 @@ export const MAX_QUEUE = 1000;
 
 const RESTART_THRESHOLD_MS = 3000;
 
-/**
- * A report this close to the start of the song history last recorded, after the session had
- * played this much further, is the same song starting again (repeat one, or a seek back to the
- * start), so it counts as another play.
- */
 const REPLAY_GAP_MS = 10_000;
 
-/** How long after a command moves the queue a report naming another entry counts as stale. */
 const MOVE_GRACE_MS = 3000;
 
 /** One queue entry as the rules see it: its own ID, and whether autoplay added it. */
@@ -75,7 +64,6 @@ export const isNewPlay = (
   last: { readonly trackId: string | null; readonly livePositionMs: number },
   durationMs: number,
 ): boolean => {
-  // A short song loops sooner than the gap, so its gap is half its length.
   const gap = Math.min(REPLAY_GAP_MS, durationMs / 2);
 
   const startedAgain =

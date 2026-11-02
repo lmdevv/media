@@ -141,7 +141,6 @@ describe("offeredCommands", () => {
     );
     expect(names("member", false)).not.toContain("playback.pause");
     expect(names("member", false)).not.toContain("queue.clear");
-    // Starting playback needs nothing loaded.
     expect(names("member", false)).toContain("playback.play");
   });
 });

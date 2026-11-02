@@ -1,9 +1,3 @@
-/**
- * Limits on how often something may happen, kept in Convex Auth's `authRateLimits` table with
- * its algorithm: each identifier has a bucket of `perHour` attempts that refills steadily. Convex
- * Auth keys its sign-in limits by account (an email address); the identifiers here are prefixed
- * and never contain `@`, so the two never share a bucket.
- */
 import type { MutationCtx } from "../_generated/server";
 
 const HOUR_MS = 60 * 60 * 1000;

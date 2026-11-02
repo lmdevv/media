@@ -1,7 +1,3 @@
-/**
- * Paper's labeled field: a 14/20 semibold label over a 56pt surface input with 16pt text, an
- * optional muted helper, and the form's error line. The field itself never turns red (G07).
- */
 import { useEffect } from "react";
 import type { ComponentRef, Ref } from "react";
 import { AccessibilityInfo, TextInput, View } from "react-native";
@@ -9,7 +5,6 @@ import type { TextInputProps } from "react-native";
 
 import { Text } from "./text";
 
-/** Props for `Field`. */
 export interface FieldProps extends Omit<TextInputProps, "style" | "className"> {
   readonly label: string;
   /** A muted line under the field, such as what the address is for. */
@@ -21,8 +16,6 @@ export interface FieldProps extends Omit<TextInputProps, "style" | "className"> 
 
 /** A labeled single-line field with its helper and error line. */
 export function Field({ label, helper, error = null, ref, ...props }: FieldProps) {
-  // iOS has no live regions: VoiceOver hears a refusal when it appears, and again in the field's
-  // label when it lands on the field.
   useEffect(() => {
     if (error !== null) AccessibilityInfo.announceForAccessibility(error);
   }, [error]);

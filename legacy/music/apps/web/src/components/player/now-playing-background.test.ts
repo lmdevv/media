@@ -36,7 +36,6 @@ describe("nowPlayingBackground", () => {
           const { backgroundImage } = nowPlayingBackground(colors, layout);
           const [light, deep] = colors;
 
-          // Strip the two cover tints; whatever is left is the builder's own CSS.
           const rest = (backgroundImage ?? "")
             .replace(`oklch(from ${light} min(l, 0.46) c h)`, "")
             .replace(`oklch(from ${deep} min(l, 0.27) c h)`, "");

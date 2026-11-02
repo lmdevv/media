@@ -1,10 +1,3 @@
-/**
- * Opens invite (E08), password reset (E09), and Jam (D05, D07) links, from Messages, Mail,
- * Safari, or pasted into Connect. A link that names a server connects to it first when the app
- * has none; a link for another server asks before switching. The link then waits until its server
- * shows Sign in, and opens over it, so Back from the invite or reset returns to Sign in. A Jam
- * link opens in the app when someone is signed in, and can also wait for them to sign in.
- */
 import * as Linking from "expo-linking";
 import { router, usePathname } from "expo-router";
 import { createContext, use, useEffect, useEffectEvent, useRef, useState } from "react";
@@ -63,7 +56,6 @@ export const useHoldJamForSignIn = (): Pick<PendingLink, "holdForSignIn" | "drop
   return { holdForSignIn, drop };
 };
 
-/** Finds the link's server and connects to it, or says why it can't. */
 const connectTo = async (
   server: string,
   connectedMeanwhile: () => boolean,
@@ -93,7 +85,6 @@ export function EntryLinksProvider({ children }: { readonly children: ReactNode 
     setHeld({ link, after: "connect" });
   };
 
-  // Discovery takes a moment; whoever connects meanwhile wins over the link.
   const latest = useRef(connection);
 
   useEffect(() => {
@@ -115,7 +106,6 @@ export function EntryLinksProvider({ children }: { readonly children: ReactNode 
     }
 
     if (server === null) {
-      // No server yet and the link names none: it opens on whichever server Connect finds.
       setLink(opened);
       router.push("/connect");
 
@@ -142,8 +132,6 @@ export function EntryLinksProvider({ children }: { readonly children: ReactNode 
     );
   });
 
-  // Every opening counts, even of the same link twice, so this listens rather than reading the
-  // latest URL.
   useEffect(() => {
     void Linking.getInitialURL().then(open);
     const subscription = Linking.addEventListener("url", ({ url }) => void open(url));
@@ -175,7 +163,6 @@ const SIGNED_IN = {
   jam: "Finish setting up your server first, then open the Jam link again.",
 } as const satisfies Record<EntryLink["kind"], string>;
 
-/** Opens a held link in the signed-in app, or says why there is nothing to open. */
 const openSignedIn = (held: HeldLink): void => {
   const path = entryPath(held.link, true);
 
@@ -209,8 +196,6 @@ export function OpenEntryLink({ phase }: { readonly phase: SettledPhase["kind"] 
 
     switch (phase) {
       case "signedOut": {
-        // A stack that just mounted is still at "/" until it moves to Sign in, which would
-        // replace a link opened before then.
         const path = entryPath(link, false);
 
         if (pathname === "/" || held.after === "signIn" || path === null) return;
@@ -222,8 +207,6 @@ export function OpenEntryLink({ phase }: { readonly phase: SettledPhase["kind"] 
       }
 
       case "ready":
-        // Right after signing in, the screen on show is still the one signed out until the
-        // stack moves to Home; the link opens over Home.
         if (held.after === "signIn" && pathname !== "/") return;
 
         drop();

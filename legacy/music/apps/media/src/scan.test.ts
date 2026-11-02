@@ -110,7 +110,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           trackNumber: 1,
         });
 
-        // Embedded covers: one image per album, stored once under its hash.
         const morning = yield* trackAt("Aurora Tones/First Light/02 Morning Haze.flac");
         const embedded = dawn?.scanned.artHash ?? "";
 
@@ -123,7 +122,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           imageContentType(yield* Files.readHead(artPath(dataDir, mp3?.scanned.artHash ?? ""), 16)),
         ).toBe("image/jpeg");
 
-        // Folder art: the album without embedded pictures uses its cover.jpg.
         const cover = yield* Files.readWholeFile(join(root, "The Sine Waves/Folder Art/cover.jpg"));
 
         expect(m4a?.scanned.artHash).toBe(createHash("sha256").update(cover).digest("hex"));
@@ -190,7 +188,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* Files.makeDirectory(join(root, "Moved"));
         yield* Files.renameFile(join(root, album), join(root, "Moved/Night Drive"));
 
-        // Dawn, and the three songs of Night Drive.
         expect(yield* scan).toEqual({
           files: 10,
           updated: 0,
@@ -256,12 +253,10 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* scan;
         const tracks = (yield* control.tracks).length;
 
-        // The original stays, so its copy is a song of its own.
         yield* Files.copyTree(join(root, dawn), join(root, "Third Dawn.flac"));
         expect(yield* scan).toMatchObject({ updated: 1, moved: 0 });
         expect(yield* control.tracks).toHaveLength(tracks + 1);
 
-        // Two identical songs gone and one found: it could be either, so it is new.
         yield* Files.removePath(join(root, "Dawn copy.flac"));
         yield* Files.removePath(join(root, "Dawn again.flac"));
         yield* Files.removePath(join(root, "Third Dawn.flac"));
@@ -330,7 +325,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* Files.makeSymlink(root, join(root, "Loop"));
         yield* Files.makeSymlink(join(root, dawn), join(root, "inside.flac"));
 
-        // A folder whose only artwork is a link to an image outside the library.
         yield* Files.makeDirectory(join(root, "Bare"));
         yield* Files.copyTree(join(folderArt, "01 Brushes.m4a"), join(root, "Bare", "song.m4a"));
         yield* Files.makeSymlink(join(outside, "cover.jpg"), join(root, "Bare", "cover.jpg"));
@@ -362,7 +356,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* scan;
         const before = (yield* trackAt(path))?.scanned.artHash;
 
-        // Another JPEG: the art store only checks an image's first bytes.
         const replaced = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...randomBytes(64)]);
 
         yield* Files.writeFileAtomic(
@@ -373,7 +366,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const summary = yield* scan;
         const after = (yield* trackAt(path))?.scanned.artHash;
 
-        // Both songs of the album, Brushes and Walking Bass.
         expect(summary).toMatchObject({ updated: 2, missing: 0, failed: 0 });
         expect(after).toBe(createHash("sha256").update(replaced).digest("hex"));
         expect(after).not.toBe(before);
@@ -468,7 +460,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const { root, control, scan } = yield* setup;
 
         yield* scan;
-        // An unmounted share: the mount point is there and reads fine, with nothing in it.
 
         for (const name of yield* Files.listNames(root)) yield* Files.removePath(join(root, name));
 
@@ -551,7 +542,6 @@ describe("pathRanges", () => {
   });
 
   it("orders by code point, as Convex keeps paths", () => {
-    // UTF-16 order would put the emoji first and leave "！" in no range.
     expect(pathRanges(["！", "😀"], 1)).toEqual([
       { from: undefined, to: "😀" },
       { from: "😀", to: undefined },

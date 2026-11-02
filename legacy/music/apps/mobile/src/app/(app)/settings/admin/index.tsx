@@ -1,4 +1,3 @@
-/** F08 · Administration. */
 import { AdminHub } from "@/components/admin/hub";
 import { RequireAccess } from "@/components/settings/access";
 

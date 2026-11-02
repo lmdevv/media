@@ -1,7 +1,3 @@
-/**
- * How Now Playing offers and shows a song's lyrics, the same on the web and the phone: what the
- * lyrics button says and whether it opens, and which timed line playback is in.
- */
 import { offlineLyricsOf, TrackLyrics } from "@music/commands/lyrics";
 import type { LyricLine, OfflineLyrics } from "@music/commands/lyrics";
 import { commandFailure } from "@music/sdk/errors";

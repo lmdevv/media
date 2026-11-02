@@ -44,10 +44,6 @@ export interface Page<Row> {
 
 const DEFAULT_LIMIT = 50;
 
-/**
- * Most rows a page with an `end` returns. Pages grow when rows land in their range; past this the
- * page ends at its last row and reports that as its cursor, so the client inserts a page there.
- */
 const MAX_SPAN = 1000;
 
 const invalidCursor = (): never =>
@@ -61,7 +57,6 @@ export const numberKey = (bound: Bound): number =>
 export const textKey = (bound: Bound): string =>
   Predicate.isString(bound.key) ? bound.key : invalidCursor();
 
-/** A cursor on the wire: the JSON pair `[key, creation time]`. */
 const Cursor = Schema.fromJsonString(
   Schema.Tuple([Schema.Union([Schema.String, Schema.Finite]), Schema.Finite]),
 );
@@ -70,10 +65,8 @@ const decodeWire = Schema.decodeUnknownOption(Cursor);
 
 const encodeWire = Schema.encodeSync(Cursor);
 
-/** Encodes where a page ended. */
 const encodeCursor = (bound: Bound): string => encodeWire([bound.key, bound.time]);
 
-/** Parses a cursor from a client; an empty or missing one means the start of the list. */
 const decodeCursor = (cursor: string | null | undefined): Bound | null => {
   if (cursor === undefined || cursor === null || cursor === "") return null;
 
@@ -88,7 +81,6 @@ const compareKeys = (left: string | number, right: string | number): number =>
     ? compareText(left, right)
     : Number(left) - Number(right);
 
-/** Orders rows by key, then creation time, ascending or descending. */
 const comparing =
   <Row extends { readonly _creationTime: number }>(
     keyOf: (row: Row) => string | number,
@@ -115,15 +107,12 @@ export const mergedPage = async <Row extends { readonly _creationTime: number }>
 ): Promise<Page<Row>> => {
   const range = { start: decodeCursor(request.cursor), end: decodeCursor(request.end) };
   const limit = range.end === null ? (request.limit ?? DEFAULT_LIMIT) : MAX_SPAN;
-  // One more than the page holds tells whether anything follows it.
   const read = await Promise.all(sources.map((source) => source(range, limit + 1)));
   const merged = read.flat().toSorted(comparing(keyOf, direction));
   const items = merged.slice(0, limit);
   const last = items.at(-1);
 
   if (range.end !== null) {
-    // A page that outgrew `MAX_SPAN` ends at its last row instead, and the client puts a page
-    // starting there in front of the one at `end`.
     return {
       items,
       cursor:

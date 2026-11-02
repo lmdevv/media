@@ -32,13 +32,11 @@ import type { PreviewProps } from "./preview-frame";
 
 const listFormat = new Intl.ListFormat("en", { type: "conjunction" });
 
-/** The outcome shown in the preview after a command that has one worth showing. */
 type Outcome =
   | { readonly kind: "job"; readonly jobId: JobId; readonly title: string }
   | { readonly kind: "key"; readonly key: string }
   | { readonly kind: "invite" | "reset"; readonly link: string };
 
-/** How the preview presents a secret a command returned once. */
 const SECRET_COPY = {
   key: { title: "Copy your new key", meta: "This is the only time it's shown." },
   invite: { title: "Share the invite link", meta: "It works once and expires in 7 days." },
@@ -50,7 +48,6 @@ const SECRET_COPY = {
   },
 } as const;
 
-/** What {@link CommandPreview} takes. */
 type CommandPreviewProps = PreviewProps & {
   readonly name: MutationName;
   readonly fields: ReadonlyArray<FieldSpec>;
@@ -69,10 +66,6 @@ export function CommandPreview(props: CommandPreviewProps) {
   );
 }
 
-/**
- * The seek command's preview. Only it follows the playback position (several updates a second),
- * so its default target stays current without re-rendering any other command's form.
- */
 function SeekPreview(props: CommandPreviewProps) {
   const position = usePlayerPosition();
 
@@ -92,7 +85,6 @@ function CommandForm({
   const client = useMemo(() => makeMusicClient(convex), [convex]);
   const navigate = useNavigate();
   const defaults = useCommandDefaults(name, fields, positionMs);
-  // Only fields the person changed are kept; the rest follow live defaults such as the current song.
   const [edits, setEdits] = useState<FormValues>({});
   const values: FormValues = { ...defaults, ...edits };
   const [error, setError] = useState<string | null>(null);

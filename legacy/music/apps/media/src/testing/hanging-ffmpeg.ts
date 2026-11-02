@@ -1,7 +1,3 @@
-/**
- * An ffmpeg that never finishes some runs, for tests of the transcode slots and their timeout: a
- * shell script standing in for `FFMPEG_PATH`. Effect-free so it can use `node:fs` directly.
- */
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -24,7 +20,6 @@ export const ffmpegHangingOnName = async (
   const runs = join(dir, "runs");
 
   await mkdir(runs);
-  // `exec` keeps the process ID, so the recorded one is that of the sleep or of ffmpeg.
   await writeFile(
     path,
     [

@@ -41,10 +41,8 @@ import { useNow } from "@/lib/use-now";
 
 export const Route = createFileRoute("/_app/settings/people")({ component: PeopleSettings });
 
-/** The shareable sign-up link for an invite code. */
 const inviteLink = (code: string): string => `${window.location.origin}/invite/${code}`;
 
-/** The one-time link that lets someone choose a new password. */
 const resetLink = (token: string): string => `${window.location.origin}/reset/${token}`;
 
 const copyLink = async (link: string, what: string): Promise<void> => {
@@ -52,7 +50,6 @@ const copyLink = async (link: string, what: string): Promise<void> => {
   else toast.error(`Couldn't copy. The link is ${link}`);
 };
 
-/** What each role means, shown where a role is picked. */
 const ROLE_HINTS: Readonly<Record<AssignableRole, string>> = {
   admin: "Runs the server: people, invites, libraries, and scans.",
   member: "Listens, and keeps their own playlists, likes, and API keys.",
@@ -72,7 +69,6 @@ function PeopleSettings() {
 const rowClassName =
   "flex min-h-16 shrink-0 items-center gap-3.5 border-b border-border px-3 py-2.5";
 
-/** A change to one person that needs a dialog. */
 type PersonAction = {
   readonly kind: "role" | "suspend" | "reset" | "remove" | "transfer";
   readonly person: Person;
@@ -122,10 +118,6 @@ function People({ me }: { readonly me: User }) {
   );
 }
 
-/**
- * How people get accounts: invites always; and, when an admin turns it on, Jam links, which make
- * guest accounts that hear only the Jam. Such guests are marked "joined via Jam" above.
- */
 function SignUpSettings() {
   const settings = useRead("server.settings", {});
   const update = useRun("server.update");
@@ -219,7 +211,6 @@ function PersonRow({
   );
 }
 
-/** What the viewer may do to one person; nothing renders when that is nothing. */
 function PersonMenu({
   me,
   person,
@@ -285,7 +276,6 @@ function PersonMenu({
   );
 }
 
-/** The dialog for whichever change to a person is open. */
 function PersonDialog({
   me,
   action,
@@ -412,7 +402,6 @@ function ResetForm({ person, onDone }: { readonly person: Person; readonly onDon
   );
 }
 
-/** What each confirmed change says and does. */
 const CONFIRM = {
   suspend: {
     title: (name: string) => `Suspend ${name}?`,
@@ -480,7 +469,6 @@ function ConfirmForm({
 
 function InviteRow({ invite }: { readonly invite: Invite }) {
   const revoke = useRun("invites.revoke");
-  // The server's status is as of the last change to the list; the clock moves on without one.
   const now = useNow(60_000);
   const expired = invite.status === "expired" || invite.expiresAt <= now;
 

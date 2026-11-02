@@ -1,8 +1,3 @@
-/**
- * F17 · Add library: a name, a folder the server can read, and who can listen. Adding it starts
- * the first scan, and this page is replaced by that scan's progress (F19). A refusal keeps the
- * form as typed, with the server's reason.
- */
 import type { LibraryVisibility } from "@music/commands/models";
 import { useRun } from "@music/sdk/react";
 import { router } from "expo-router";

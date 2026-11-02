@@ -24,7 +24,6 @@ describe("shellOf", () => {
   });
 });
 
-/** The app's state with `tab` focused and its stack holding `stack`, bottom first. */
 const on = (tab: string, stack: NavigationSnapshot["routes"], index = 0): NavigationSnapshot => ({
   index: 0,
   routes: [
@@ -106,7 +105,6 @@ describe("sidebarSelectionOf", () => {
 
 type Stack = NavigationSnapshot["routes"];
 
-/** The root navigator's state, as the container reports it, with `tab`'s stack holding `stack`. */
 const rooted = (tab: string, stack: Stack): NavigationSnapshot => ({
   routes: [
     {
@@ -128,10 +126,6 @@ const rooted = (tab: string, stack: Stack): NavigationSnapshot => ({
   ],
 });
 
-/**
- * The stack after opening `place` as the sidebar does: the pops, then a `navigate`, which by the
- * stack router's rule reuses a route only if it is the one on top, and otherwise pushes.
- */
 const opened = (stack: Stack, place: Place): Stack => {
   const count = popsToOpen(rooted(place.tab, stack), place)?.count ?? 0;
   const left = stack.slice(0, stack.length - count);
@@ -220,7 +214,6 @@ describe("opening a place", () => {
   });
 });
 
-/** A navigator holding routes of these names, bottom first. */
 const stackOf = (...routes: ReadonlyArray<string>): NavigationSnapshot => ({
   routes: routes.map((name) => ({ name })),
 });

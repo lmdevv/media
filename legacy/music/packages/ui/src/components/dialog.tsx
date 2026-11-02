@@ -61,7 +61,6 @@ export function DialogContent({
           )}
         </div>
         {children}
-        {/* Last in the DOM so opening the dialog focuses its first field or action, not Close. */}
         {showClose ? (
           <DialogPrimitive.Close
             aria-label="Close"

@@ -1,7 +1,3 @@
-/**
- * The songs, albums, and playlists this device holds, as a Downloaded library lists them. Pure,
- * read from a `DownloadsSnapshot`: what plays without the server, and the downloads that keep it.
- */
 import type { AlbumId, TrackId } from "@music/commands/ids";
 import type { DownloadPin, DownloadTarget } from "@music/commands/models";
 
@@ -91,7 +87,6 @@ export interface OfflineLibrary {
   readonly usage: DownloadUsage;
 }
 
-/** Disc, then number; songs without one go last. */
 const byDiscAndNumber = (left: LocalCopy, right: LocalCopy): number =>
   (left.track.discNumber ?? Infinity) - (right.track.discNumber ?? Infinity) ||
   (left.track.trackNumber ?? Infinity) - (right.track.trackNumber ?? Infinity) ||
@@ -100,7 +95,6 @@ const byDiscAndNumber = (left: LocalCopy, right: LocalCopy): number =>
 const keptTracks = ({ pin, members }: PinView): ReadonlyArray<TrackId> =>
   pin.target.kind === "track" ? [pin.target.id] : (members ?? []).map((member) => member.trackId);
 
-/** The songs a download lists, which syncing keeps for it; none until its first manifest. */
 const listed = ({ members }: PinView): ReadonlySet<TrackId> =>
   new Set((members ?? []).map((member) => member.trackId));
 
@@ -124,7 +118,6 @@ const heldCopies = (snapshot: DownloadsSnapshot, view: PinView): ReadonlyArray<L
 const sizeOf = (held: ReadonlyArray<{ readonly bytes: number }>): number =>
   held.reduce((total, { bytes }) => total + bytes, 0);
 
-/** The space of `held` that leaves with `view`: the songs no other download lists. */
 const freedBy = (
   view: PinView,
   held: ReadonlyArray<LocalCopy>,
@@ -150,7 +143,6 @@ interface Kept {
   readonly members: PinView["members"];
 }
 
-/** Each download a snapshot keeps, with where it stands and what it holds here. */
 const keptDownloads = (snapshot: DownloadsSnapshot): ReadonlyArray<Kept> => {
   const keepers = keeperCounts(snapshot);
 

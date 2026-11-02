@@ -37,7 +37,6 @@ describe("describeDevice", () => {
   });
 });
 
-/** A `Storage` held in memory, as `localStorage` behaves within one page. */
 class MemoryStorage implements Storage {
   readonly #items = new Map<string, string>();
 
@@ -95,8 +94,6 @@ describe("loadDeviceId", () => {
 });
 
 describe("browserStorage", () => {
-  // With cookies blocked, Chrome throws on the `localStorage` getter itself, before any
-  // `getItem` that `readItem` could catch.
   it("is null when reading localStorage throws", () => {
     const previous = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 

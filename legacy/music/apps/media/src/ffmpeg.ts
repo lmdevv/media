@@ -1,4 +1,3 @@
-/** Runs ffmpeg and ffprobe. Process spawning lives in `platform/node-process.ts`. */
 import type { StreamProfile } from "@music/commands/models";
 import { Effect, Result, Schema, Stream } from "effect";
 
@@ -59,7 +58,6 @@ export const runToolPiped = <E, R>(
 
       return { controller, child: spawnPiped(command, args, controller.signal, onStdout) };
     }),
-    // Kills the tool when the run stops early; a no-op once it has exited.
     ({ controller }) =>
       Effect.sync(() => {
         controller.abort();
@@ -110,8 +108,6 @@ export const streamTool = (
         const controller = new AbortController();
         const child = spawnPiped(command, args, controller.signal);
 
-        // Settled into a value at once: the output may end (or fail) before anyone awaits the
-        // exit, and a rejection nobody handles yet would take the process down.
         const exit = child.exit.then(
           (result) => Result.succeed(result),
           (cause: unknown) =>
@@ -167,7 +163,6 @@ const BITRATES: Record<Exclude<TranscodeProfile, FragmentedProfile>, string> = {
   "aac-128": "128k",
 };
 
-/** Backslash-escapes what the tee muxer would read as syntax in an output name. */
 const teeEscape = (name: string): string => name.replaceAll(/[\\'|[\]]/gu, String.raw`\$&`);
 
 /**
@@ -216,7 +211,6 @@ export const transcodeArgs = (
  */
 export const AAC_TAIL_PADDING = 2048;
 
-/** Sample rates AAC LC supports up to 48 kHz; the gapless profile keeps these. */
 const AAC_SAMPLE_RATES: ReadonlySet<number> = new Set([
   48_000, 44_100, 32_000, 24_000, 22_050, 16_000, 12_000, 11_025, 8000,
 ]);
@@ -242,7 +236,6 @@ export const FRAGMENTED_PRIMING: Readonly<Record<FragmentedProfile, number>> = {
   "fmp4-aac": 1024,
 };
 
-/** Fragment length: playback can start once the first second of audio has arrived. */
 const FRAGMENT_MICROSECONDS = "1000000";
 
 const FRAGMENT_FLAGS = "+frag_keyframe+empty_moov+default_base_moof";
@@ -262,7 +255,6 @@ const teeOutputs = (destination: string): ReadonlyArray<string> => [
     `[f=mp4:movflags=${FRAGMENT_FLAGS}+skip_trailer:frag_duration=${FRAGMENT_MICROSECONDS}]pipe:3`,
 ];
 
-/** Writes every decoded frame's sample count to standard output, one line per frame. */
 const COUNT_OUTPUT = ["-c:a", "pcm_s32le", "-f", "framecrc", "-"];
 
 /**
@@ -339,7 +331,6 @@ export const AAC_PROFILE_RATE = 44_100;
  */
 const OFFSET_PREROLL_SECONDS = 0.5;
 
-/** Seconds as ffmpeg reads them: microseconds are its finest unit. */
 const ffmpegSeconds = (seconds: number): string => seconds.toFixed(6);
 
 /**

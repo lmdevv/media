@@ -1,7 +1,3 @@
-/**
- * C06 · Add to playlist, from a song's actions (A11): New playlist starts one with this song;
- * tapping one of your playlists, or one you collaborate on, adds the song and closes the sheet.
- */
 import { TrackId } from "@music/commands/ids";
 import type { Playlist } from "@music/commands/models";
 import { canEditPlaylistItems } from "@music/commands/permissions";
@@ -25,7 +21,6 @@ type Progress =
   | { readonly kind: "adding"; readonly playlistId: string }
   | { readonly kind: "added"; readonly playlistId: string };
 
-/** How long the added check shows before the sheet closes. */
 const ADDED_MS = 500;
 
 export default function AddToPlaylist() {

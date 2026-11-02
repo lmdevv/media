@@ -1,6 +1,4 @@
 #!/command/with-contenv sh
-# Media service, as the unprivileged `music` user (see init): it reads its env from
-# /run/music/media.env, which init writes for that user only.
 set -e
 cd /app/media
 exec s6-setuidgid music sh -c 'set -a; . /run/music/media.env; set +a; exec node dist/main.js'

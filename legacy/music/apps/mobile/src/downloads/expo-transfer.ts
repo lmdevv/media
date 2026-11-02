@@ -1,14 +1,7 @@
-/**
- * HTTP for downloads on the iPhone. `HEAD` goes through `fetch`; a body goes through an
- * expo-file-system download task, which writes it to a temporary file and moves it into place
- * only once it is whole, so a broken transfer leaves no partial file behind. The task hides the
- * response's status, except in the message of the error it fails with.
- */
 import { DownloadResult } from "@music/sdk/downloads";
 import type { Transfer } from "@music/sdk/downloads";
 import { File } from "expo-file-system";
 
-/** How expo-file-system reports an error status: "…server returned HTTP 403". */
 const HTTP_STATUS = /HTTP (\d{3})/u;
 
 export const expoTransfer: Transfer = {

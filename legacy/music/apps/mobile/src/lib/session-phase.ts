@@ -1,7 +1,3 @@
-/**
- * Where the app stands with its server. The root stack shows only the screens of the current
- * phase, so signing in, finishing setup, or signing out moves to the right place by itself.
- */
 import { can } from "@music/commands/permissions";
 import type { Role } from "@music/commands/models";
 import type { SessionEnd } from "@music/sdk/errors";
@@ -111,7 +107,6 @@ export const sessionPhase = (inputs: PhaseInputs): SessionPhase => {
 /** A phase the root stack has screens for. */
 export type SettledPhase = Exclude<SessionPhase, { readonly kind: "connecting" }>;
 
-/** A server that hasn't answered since launch: out of reach, or offline with downloads. */
 const isSilent = (phase: SessionPhase): boolean =>
   phase.kind === "unreachable" || phase.kind === "offline";
 
@@ -126,7 +121,6 @@ export const settle = (next: SessionPhase, shown: SettledPhase | null): SettledP
 
   const answered = shown !== null && shown.kind !== "disconnected" && !isSilent(shown);
 
-  // The downloads stay on show once they are, even when the last one goes: G05 would close them.
   const offline = shown?.kind === "offline" && next.kind === "unreachable";
 
   return (isSilent(next) && answered) || offline ? shown : next;

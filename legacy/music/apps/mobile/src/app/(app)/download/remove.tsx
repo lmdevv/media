@@ -1,9 +1,3 @@
-/**
- * Remove download?: asked from a finished download's ring (Paper's D04, "same sheet as C12"), and
- * from a Downloaded row's Remove or hold (D10d), for an album, a playlist, or a song, finished or
- * not. Its files leave this iPhone at once, less the songs another download keeps; the server's
- * library is untouched.
- */
 import { DownloadTarget } from "@music/commands/models";
 import { targetKey } from "@music/sdk/downloads";
 import { Option, Schema } from "effect";
@@ -37,8 +31,6 @@ function Confirm({
     DEVICE_FAMILY,
   );
 
-  // Live until Remove is pressed, then held: the sheet must not change its words while it closes
-  // over the removal.
   const [frozen, setFrozen] = useState<RemoveCopy | null>(null);
   const copy = frozen ?? live;
 
@@ -53,10 +45,8 @@ function Confirm({
         setFrozen(live);
 
         try {
-          // Toggling a download that is already gone would start it again.
           if (download.status.kind !== "none") await download.toggle();
         } catch (cause) {
-          // The sheet stays open to try again, so it follows the library again.
           setFrozen(null);
           throw cause;
         }

@@ -54,14 +54,9 @@ export const redeem = internalMutation({
     await ctx.db.patch(account._id, { secret });
     await ctx.db.patch(reset._id, { usedAt: Date.now() });
 
-    // Whoever had the account may have made API keys: every key made so far stops at once, with
-    // the sessions it opened (`keysValidAfter`); the rows are revoked in batches. Keys made
-    // after this work.
     await ctx.db.patch(user._id, { keysValidAfter: Date.now() });
     await ctx.scheduler.runAfter(0, internal.people.revokeKeys, { userId: user._id, cursor: null });
 
-    // Every session ends, and the one the reset signs in with opens in the new generation, here,
-    // so it is the only one left.
     const generation = await endUserSessions(ctx, user._id);
     const sessionId = await openSession(ctx, user, generation);
 

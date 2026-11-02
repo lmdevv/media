@@ -20,7 +20,6 @@ export const useIsRemote = (): boolean => {
   return player.activeDevice !== null && !player.isThisDevice;
 };
 
-/** The icon for a device kind. */
 const DEVICE_ICONS: Readonly<Record<DeviceKind, LucideIcon>> = {
   web: LaptopIcon,
   phone: SmartphoneIcon,

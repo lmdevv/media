@@ -1,8 +1,3 @@
-/**
- * Where the player gets the bytes for a song: a copy on this device, or a stream the server signs.
- * The controller asks for a plan each time it loads or buffers a song and never learns why one
- * was chosen; the web streams everything, and a phone with downloads plays its copies first.
- */
 import type { TrackId } from "@music/commands/ids";
 import type { StreamProfile, Track } from "@music/commands/models";
 import type { MusicClient } from "@music/sdk/client";
@@ -12,11 +7,6 @@ import { Data, Result } from "effect";
 import type { EngineSource } from "./engine";
 import type { SessionPort } from "./session-router";
 
-/**
- * A stream URL this close to its expiry counts as expired: it is signed again before playback
- * resumes or seeks, which would otherwise send a request it may no longer cover. Also absorbs a
- * device clock a few minutes off the server's.
- */
 const RENEW_MARGIN_MS = 5 * 60_000;
 
 /** A source the engine can load, and how long it stays usable. */
@@ -86,7 +76,6 @@ export const streamSources = (
     try {
       const requestedAt = env.now();
       const stream = await client.read("stream.url", { trackId: track.id, profile, requestedAt });
-      // A short-lived URL (a Jam member's lasts minutes) is renewed halfway through instead.
       const margin = Math.min(RENEW_MARGIN_MS, (stream.expiresAt - requestedAt) / 2);
       const renewAt = stream.expiresAt - margin;
 

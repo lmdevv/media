@@ -1,4 +1,3 @@
-/** Copying and sharing what a settings screen shows once: keys, invite links, reset links. */
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { Share } from "react-native";

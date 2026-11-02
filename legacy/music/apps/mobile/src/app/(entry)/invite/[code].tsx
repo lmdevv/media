@@ -1,9 +1,3 @@
-/**
- * E08 · Accept an invite and create an account, from an invite link (`EntryLinksProvider`), or
- * G08 and its siblings when the link can't be used. Signing up flips the session phase and the
- * root stack moves to the app by itself. The server marks the invite used before sign-in ends, so
- * the form stays up while it does; a refusal keeps the form.
- */
 import { useAuthActions } from "@convex-dev/auth/react";
 import { inviteLookup } from "@music/sdk/functions";
 import type { InviteDetails } from "@music/sdk/functions";
@@ -58,7 +52,6 @@ export default function Invite() {
   return <LinkUnavailable kind="invite" state={state} />;
 }
 
-/** The E08 form. */
 function AcceptInvite({
   code,
   invite,
@@ -134,7 +127,6 @@ function AcceptInvite({
         label="Email"
         value={email}
         onChangeText={setEmail}
-        // The invite was made for this address; the server accepts no other.
         editable={invite.email === null}
         keyboardType="email-address"
         textContentType="username"

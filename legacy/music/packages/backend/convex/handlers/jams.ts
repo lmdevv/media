@@ -1,7 +1,3 @@
-/**
- * Starting, joining, and running Jams, and the server setting that lets Jam links make guest
- * accounts. What a Jam does to playback lives in `lib/jams.ts` and the playback handlers.
- */
 import type { Jam, JamMember, JamRole } from "@music/commands/models";
 
 import type { Doc, Id } from "../_generated/dataModel";
@@ -28,12 +24,10 @@ import type { ReadCtx, Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
 
-/** People one Jam lists at most. */
 const MAX_MEMBERS = 200;
 
 const GONE = "This Jam link doesn't work any more. Ask for a new one.";
 
-/** The people in a Jam the viewer may see: joined, and for the host also those waiting. */
 const membersOf = async (
   ctx: ReadCtx,
   jam: Doc<"jams">,
@@ -65,7 +59,6 @@ const membersOf = async (
   });
 };
 
-/** A Jam as `viewer` sees it in their `role`. */
 const presentJam = async (
   ctx: ReadCtx,
   jam: Doc<"jams">,
@@ -81,8 +74,6 @@ const presentJam = async (
     status: jam.status,
     endedReason: jam.endedReason ?? null,
     settings: jam.settings,
-    // The host's panel explains their settings with it. Others can tell the Jam asks anyway
-    // (the link's page says Ask to join); they aren't told why.
     approvalAfterRemoval: role === "host" && approvalAfterRemoval(jam),
     role,
     listening,
@@ -91,10 +82,6 @@ const presentJam = async (
   };
 };
 
-/**
- * The Jam the viewer hosts, is in, or waits to join, or the one that ended under them until they
- * leave it; null otherwise.
- */
 const currentJam = async (
   ctx: ReadCtx,
   viewer: Viewer,
@@ -120,11 +107,9 @@ const currentJam = async (
   };
 };
 
-/** The active Jam the viewer hosts, or a `forbidden` failure for anyone else. */
 const ownJam = async (ctx: ReadCtx, viewer: Viewer): Promise<Doc<"jams">> =>
   (await hostedJam(ctx, viewer.id)) ?? fail("forbidden", "Only the host of a Jam can do that");
 
-/** Leaves whatever Jam the viewer is in or waiting for, other than `except`. */
 const leaveOtherJams = async (
   ctx: MutationCtx,
   viewer: Viewer,
@@ -141,7 +126,6 @@ const leaveOtherJams = async (
   }
 };
 
-/** Someone's membership in the host's Jam, for the host's approve and remove. */
 const membershipOf = async (
   ctx: MutationCtx,
   jam: Doc<"jams">,
@@ -170,13 +154,11 @@ export const jamQueries = {
 
 export const jamMutations = {
   "jam.start": async (ctx, viewer) => {
-    // A Jam link can make guest accounts, so only members and admins hand one out.
     if (viewer.role === "guest") return fail("forbidden", "Guests can't start a Jam");
 
     const hosted = await hostedJam(ctx, viewer.id);
 
     if (hosted !== null) return { jamId: hosted._id, code: hosted.code };
-    // A person is in at most one Jam, so hosting leaves any other.
     await leaveOtherJams(ctx, viewer, null);
     const code = newJamCode();
 
@@ -187,7 +169,6 @@ export const jamMutations = {
       settings: DEFAULT_JAM_SETTINGS,
     });
 
-    // Autoplay's songs so far may come from libraries granted to the host alone.
     await refreshJamAutoplay(ctx, viewer);
 
     return { jamId, code };
@@ -223,7 +204,6 @@ export const jamMutations = {
         await listenAlong(ctx, jam, existing, args.deviceId);
       }
 
-      // A guest's sign-up put them in the queue without a device; once let in, they listen here.
       if (existing.status === "pending" && args.deviceId !== undefined) {
         await ctx.db.patch(existing._id, { deviceId: args.deviceId });
       }
@@ -326,8 +306,6 @@ export const jamMutations = {
 
     if (member.status !== "pending") return fail("conflict", "They aren't waiting to join");
 
-    // Turned away like someone removed: this link won't ask again; a new link can. Let in,
-    // they listen along on the device they asked from, as they would joining an open Jam.
     await ctx.db.patch(member._id, {
       status: args.approve ? "joined" : "removed",
       listening: args.approve && jam.settings.listenAlong && member.deviceId !== undefined,
@@ -335,8 +313,6 @@ export const jamMutations = {
       updatedAt: Date.now(),
     });
 
-    // A guest account this Jam's link made has nothing else to do; a new one would need the
-    // host's approval again.
     if (!args.approve) {
       await ctx.db.patch(jam._id, { removedUnderCode: jam.code });
       await removeJamGuest(ctx, jam, member.userId);
@@ -349,8 +325,6 @@ export const jamMutations = {
     const jam = await ownJam(ctx, viewer);
     const member = await membershipOf(ctx, jam, args.userId);
 
-    // Someone who left can be removed too: the link stops letting them back, and a guest
-    // account it made goes.
     if (member.status === "removed") return fail("conflict", "They aren't in this Jam");
 
     await ctx.db.patch(member._id, {
@@ -360,8 +334,6 @@ export const jamMutations = {
       updatedAt: Date.now(),
     });
 
-    // A guest account this Jam's link made goes with them, and until a new link everyone new
-    // needs the host's OK, so they can't come straight back as a new guest either.
     await ctx.db.patch(jam._id, { removedUnderCode: jam.code });
     await removeJamGuest(ctx, jam, member.userId);
 

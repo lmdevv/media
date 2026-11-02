@@ -1,11 +1,3 @@
-/**
- * Node file system primitives for the media service.
- *
- * Effect's `FileSystem` service is marked unstable in Effect 4.0.2, and the lint policy rejects
- * unstable Effect APIs while also rejecting `node:fs` inside Effect modules. These primitives
- * therefore live in this Effect-free leaf. Every function here may reject; `files.ts` is the
- * only caller and translates each rejection into a typed error.
- */
 import { createReadStream } from "node:fs";
 import {
   appendFile,
@@ -126,7 +118,6 @@ export const makeSymlink = (target: string, path: string): Promise<void> => syml
 /** The canonical absolute path of an existing file or directory, with every symlink resolved. */
 export const realPath = (path: string): Promise<string> => realpath(path);
 
-/** `path` and each folder above it, up to `/`. */
 const foldersUp = (path: string): ReadonlyArray<string> => {
   const parent = dirname(path);
 
@@ -192,7 +183,6 @@ export interface WalkedFile extends FileStat {
 export const isWithin = (root: string, path: string): boolean =>
   path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 
-/** Folders a filesystem creates for itself. They are unreadable to non-root users and never hold music. */
 const systemFolders: ReadonlySet<string> = new Set(["lost+found"]);
 
 /**
@@ -209,7 +199,6 @@ export const walkTree = async (
 ): Promise<ReadonlyArray<WalkedFile>> => {
   const found: Array<WalkedFile> = [];
 
-  // The root itself must exist; a missing root is an error the caller reports.
   const rootInfo = await stat(root);
 
   if (!rootInfo.isDirectory()) throw new Error(`Not a directory: ${root}`);
@@ -259,7 +248,6 @@ export const walkTree = async (
   return found;
 };
 
-/** A folder in a library that the media service is not allowed to read. */
 class UnreadableFolder extends Error {
   override readonly name = "UnreadableFolder";
 

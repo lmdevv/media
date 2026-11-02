@@ -1,4 +1,3 @@
-/** F25 · Stop a running scan; what it already read stays in the library. */
 import type { JobId } from "@music/commands/ids";
 import { useRun } from "@music/sdk/react";
 import { router } from "expo-router";

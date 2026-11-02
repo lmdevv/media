@@ -1,8 +1,3 @@
-/**
- * Keeps showing what a confirmation sheet is about once it is gone from its list. Removing a
- * person removes them from `people.list` before the sheet closes; without this the sheet would
- * flash "not found" on its way out.
- */
 import { useState } from "react";
 
 /**

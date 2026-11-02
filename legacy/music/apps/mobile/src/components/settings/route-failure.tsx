@@ -1,8 +1,3 @@
-/**
- * What a settings route shows when a read throws, such as a job whose library was removed while
- * its page sat lower in the stack. Exported as a route's `ErrorBoundary`, it keeps the failure on
- * that page; without it the error reaches the root boundary, which takes the server session down.
- */
 import { errorMessage } from "@music/sdk/errors";
 import { router } from "expo-router";
 import type { ErrorBoundaryProps } from "expo-router";

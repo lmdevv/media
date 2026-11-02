@@ -1,12 +1,3 @@
-/**
- * The player bar under the iPad's content (page 26, B1's foot and A3's), in place of the iPhone's
- * mini player: the song, the transport over the scrubber, and the format, lyrics, queue, and device
- * buttons. A `wide` window has the room for the heart, shuffle, repeat, and the format; a `tablet`
- * one drops them (A3). The lyrics and queue buttons open the Now Playing panel on that tab and are
- * lit while it shows; pressing the lit one hides it. The song itself opens full-screen Now Playing.
- * Everything acts on whichever device plays. Only the scrubber re-renders with the position. The
- * bar is absent with nothing queued.
- */
 import { lyricsButton } from "@music/player/lyrics";
 import { router } from "expo-router";
 import { ListMusic, MessageSquareQuote, Speaker } from "lucide-react-native";
@@ -26,13 +17,11 @@ import { useNowPlaying } from "@/player";
 
 import type { Inspector } from "./use-inspector";
 
-/** What the bar holds at each window width. */
 const BAR = {
   wide: { gap: "gap-6", song: "w-ios-320", tools: "w-ios-320", extras: true },
   tablet: { gap: "gap-4", song: "w-ios-240", tools: "", extras: false },
 } as const;
 
-/** Lit as Paper draws it: the accent on its wash, while the panel shows this button's tab. */
 const litClass = (lit: boolean): string => (lit ? "bg-accent/12" : "");
 
 /** The bar for what is playing; nothing with nothing queued. */

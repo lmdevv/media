@@ -1,7 +1,3 @@
-/**
- * Copying a playlist's or album's link: the server names the path (`/playlists/<id>`), and the
- * link opens on the same address people type to reach the server, in a browser or in this app.
- */
 import type { LinkKind } from "@music/commands/models";
 import { useReadOnce } from "@music/sdk/react";
 import * as Clipboard from "expo-clipboard";

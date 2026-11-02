@@ -28,7 +28,6 @@ const browserName = (userAgent: string): string => {
 const platformName = (userAgent: string, maxTouchPoints: number): string => {
   if (/iPhone|iPod/u.test(userAgent)) return "iPhone";
 
-  // iPadOS 13+ reports a Mac user agent; touch support gives it away.
   if (/iPad/u.test(userAgent) || (/Macintosh/u.test(userAgent) && maxTouchPoints > 1)) {
     return "iPad";
   }
@@ -107,7 +106,5 @@ export const readItem = (storage: KeyValueStorage | null, key: string): string |
 export const writeItem = (storage: KeyValueStorage | null, key: string, value: string): void => {
   try {
     storage?.setItem(key, value);
-  } catch {
-    // Storage is full or blocked; the caller keeps the value in memory.
-  }
+  } catch {}
 };

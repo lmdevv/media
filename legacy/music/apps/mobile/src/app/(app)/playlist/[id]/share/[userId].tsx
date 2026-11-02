@@ -1,7 +1,3 @@
-/**
- * C10 · Choose a role, for someone the playlist is shared with (or, through a link, someone on the
- * server it isn't shared with yet).
- */
 import { PlaylistId } from "@music/commands/ids";
 import { useRead } from "@music/sdk/react";
 import { useLocalSearchParams } from "expo-router";

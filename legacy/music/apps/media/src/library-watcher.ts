@@ -1,13 +1,3 @@
-/**
- * Requests scans when library folders change. Each library gets a recursive `fs.watch`, debounced
- * so a burst of changes becomes one scan, plus a periodic rescan for file systems that send no
- * change events (SMB, NFS). The first periodic scan runs at startup to catch changes made while
- * the service was down. Convex collapses requests into the library's pending or running job.
- *
- * A watch that fails to start (the folder is missing, or the system's inotify limits are reached)
- * or stops later is started again with backoff, and requests a scan once it runs again, for the
- * changes it missed meanwhile.
- */
 import { Cause, Effect, FiberMap, Layer, Queue, Ref, Schedule, Schema, Stream } from "effect";
 
 import { cappedBackoff } from "./backoff.ts";
@@ -18,7 +8,6 @@ import { watchTree } from "./platform/node-watch.ts";
 
 const DEBOUNCE = "5 seconds";
 
-/** Backoff for starting a failed watch again: exponential from one second, capped at a minute. */
 const RESTART_SCHEDULE = cappedBackoff("1 second", "1 minute");
 
 const errorCode = (cause: unknown): string =>
@@ -63,10 +52,6 @@ export class WatchError extends Schema.TaggedError<WatchError>()("WatchError", {
 const isHidden = (relativePath: string): boolean =>
   relativePath.split(/[\\/]/).some((segment) => segment.startsWith("."));
 
-/**
- * Emits once for every visible change under `path`, and once as soon as the watch runs when
- * `started` (run then) says so. Fails when the watch cannot start or stops.
- */
 const folderChanges = (
   path: string,
   started: Effect.Effect<boolean>,
@@ -127,11 +112,7 @@ const watchLibrary = Effect.fn("LibraryWatcher.watch")(
         ),
       );
 
-    // Failures since the watch last ran: a watch that starts again after one scans for what it
-    // missed, and only the first failure in a row is a warning.
     const failures = yield* Ref.make(0);
-    // The real folder at the last start. A scan claims the folder anew (`root-claim.ts`), so one
-    // whose link now points elsewhere is checked again before anything is read from it.
     const lastReal = yield* Ref.make<string | null>(null);
 
     const retargeted = Files.realPath(library.path).pipe(

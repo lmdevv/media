@@ -19,12 +19,10 @@ const host = window.location.host;
 
 const MIN_PASSWORD = 8;
 
-/** The page a password reset link opens: set a new password, then land signed in. */
 function ResetPage() {
   const { token } = Route.useParams();
   const lookup = useQuery(passwordResetLookup, { token });
   const [resetting, setResetting] = useState(false);
-  // The lookup says `open` as of its last change; expiry needs the clock.
   const now = useNow(60_000);
 
   if (lookup === undefined) return <div className="min-h-dvh bg-bg" />;
@@ -33,7 +31,6 @@ function ResetPage() {
     return <ResetUnavailable state="expired" />;
   }
 
-  // Once used, the lookup flips to `used` while the new session starts; keep the form up.
   if (lookup.state === "open" || (resetting && lookup.state === "used")) {
     return <ResetForm token={token} reset={lookup} onResetting={setResetting} />;
   }

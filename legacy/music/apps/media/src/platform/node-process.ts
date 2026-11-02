@@ -1,8 +1,3 @@
-/**
- * Runs a child process to completion. Effect's `ChildProcess` module is marked unstable in Effect
- * 4.0.2 and the lint policy rejects unstable Effect APIs and `node:child_process` in Effect
- * modules, so this Effect-free leaf owns the spawn. `ffmpeg.ts` translates its rejections.
- */
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 
@@ -114,7 +109,6 @@ export const spawnPiped = (
   return { output: bytesOf(outputPipe), exit };
 };
 
-/** The chunks of a byte stream (one opened without an encoding, so every chunk is a `Buffer`). */
 async function* chunksOf(stream: Readable): AsyncGenerator<Uint8Array, void> {
   for await (const chunk of stream.iterator()) {
     if (chunk instanceof Uint8Array) yield chunk;

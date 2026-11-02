@@ -1,8 +1,3 @@
-/**
- * Folder artwork: the `cover.jpg` (or `folder`, `front`; JPEG, PNG, or WebP) beside a song that
- * has no picture of its own. A song in a disc folder (`Album/CD1/`, `Album/Disc 2/`) uses the
- * album folder's artwork when its own folder has none.
- */
 import { basename, dirname } from "node:path";
 
 import type { WalkedFile } from "./platform/node-files.ts";
@@ -11,7 +6,6 @@ const FOLDER_ART = /^(cover|folder|front)\.(jpe?g|png|webp)$/iu;
 
 const FOLDER_ART_ORDER = ["cover", "folder", "front"];
 
-/** `CD1`, `CD 2`, `Disc 01`, `disk-3`, `Disc 2 - Bonus`: one disc of a multi-disc album. */
 const DISC_FOLDER = /^(?:cd|dis[ck])[\s._-]*\d+\b/iu;
 
 /** True when a file name is one of the folder artwork names. */

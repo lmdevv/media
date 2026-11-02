@@ -1,4 +1,3 @@
-/** The heart on Now Playing and the iPad's player bar. */
 import type { TrackId } from "@music/commands/ids";
 import { useRun } from "@music/sdk/react";
 import * as Haptics from "expo-haptics";

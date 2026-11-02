@@ -29,7 +29,6 @@ const LINKS: ReadonlyArray<{
   { to: "/liked", label: "Liked songs", icon: HeartIcon },
 ];
 
-/** The phone Library tab: iOS-style rows into each part of the library, then recent albums. */
 function LibraryPage() {
   const home = useRead("library.home", {});
   const shared = useRead("playlists.shared", {});

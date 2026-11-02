@@ -18,8 +18,6 @@ jobs="$(nproc 2>/dev/null || echo 4)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-# One short source per format, re-muxed with each track's tags: copying the stream is far cheaper
-# than encoding 20,000 files.
 make_sources() {
   ffmpeg -v error -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.5" \
     -ac 2 -c:a flac "$work/source.flac"
@@ -27,7 +25,6 @@ make_sources() {
     -ac 2 -c:a libmp3lame -b:a 128k "$work/source.mp3"
 }
 
-# Writes one track: tab-separated source, target, title, artist, album, track number, year, genre.
 write_track() {
   local source="$1" target="$2" title="$3" artist="$4" album="$5" number="$6" year="$7" genre="$8"
   ffmpeg -v error -y -i "$source" -map 0:a -c copy \
@@ -38,7 +35,6 @@ write_track() {
 }
 export -f write_track
 
-# Gives one existing file a new title, keeping its audio, pictures, and other tags.
 retitle_track() {
   local target="$1" title="$2"
   ffmpeg -v error -y -i "$target" -map 0 -c copy -metadata title="$title" \
@@ -59,7 +55,6 @@ generate() {
   : >"$work/covers.tsv"
   for ((album = 0; album < albums; album++)); do
     artist=$((album % artists))
-    # Spread the tracks evenly: the first `tracks % albums` albums get one more.
     count=$((tracks / albums + (album < tracks % albums ? 1 : 0)))
     format=$([[ $((album % 2)) == 0 ]] && echo flac || echo mp3)
     year=$((1960 + album % 60))
@@ -77,7 +72,6 @@ generate() {
     done
   done
 
-  # A distinct 16x16 cover per album, so each album has artwork of its own.
   tr '\t\n' '\0\0' <"$work/covers.tsv" | xargs -0 -r -n 2 -P "$jobs" bash -c \
     'ffmpeg -v error -y -f lavfi -i "color=c=0x$(printf %06x $(( ($0 * 2654435761) % 16777216 ))):s=16x16" -frames:v 1 "$1"'
   tr '\t\n' '\0\0' <"$work/tracks.tsv" | xargs -0 -r -n 8 -P "$jobs" bash -c 'write_track "$0" "$@"'

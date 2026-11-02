@@ -1,4 +1,3 @@
-/** Theme colors as strings, for native props that take a color rather than a class. */
 import { useCSSVariable } from "uniwind";
 
 /** A color role from the theme, such as `--color-accent`, following the current theme. */

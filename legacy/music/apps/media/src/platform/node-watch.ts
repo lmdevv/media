@@ -1,19 +1,9 @@
-/**
- * Recursive directory watching with `fs.watch`. Effect's `FileSystem.watch` is marked unstable in
- * Effect 4.0.2 and the lint policy rejects both unstable Effect APIs and `node:fs` inside Effect
- * modules, so this Effect-free leaf owns the watcher. `library-watcher.ts` adapts it to a stream.
- */
 import { statSync, watch } from "node:fs";
 
-/**
- * The reason `path` is no longer a watchable folder (gone, replaced, or unreadable), or null
- * while it is one.
- */
 const folderGone = (path: string): Error | null => {
   try {
     if (statSync(path, { throwIfNoEntry: false })?.isDirectory() === true) return null;
   } catch (error) {
-    // Unreadable now, such as a share that went away under the mount point (`EACCES`, `EIO`).
     return error instanceof Error ? error : new Error(String(error));
   }
 
@@ -43,8 +33,6 @@ export const watchTree = (
   }
 
   const watcher = watch(root, { recursive: true, persistent: false }, (_event, filename) => {
-    // An event without a name is about the root itself. A root that went away takes the watch
-    // with it: the watch reports nothing more, even once the folder is back.
     const gone = filename === null || filename === "" ? folderGone(root) : null;
 
     if (gone !== null) {

@@ -1,7 +1,5 @@
 name: Demo library
 
-# Builds the demo library image when what goes into it changes. On main it publishes the version
-# named in deploy/demo-library/image, once; a published version is never overwritten.
 on:
   pull_request:
     paths: &paths

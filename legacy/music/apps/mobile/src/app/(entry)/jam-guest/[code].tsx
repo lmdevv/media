@@ -1,9 +1,3 @@
-/**
- * D07 · a Jam link opened signed out. When the server allows guest accounts, a name and a password
- * make one that only works for this Jam: signing up puts the guest in the Jam, and once the app
- * opens it joins on this iPhone (D06 or D08). Otherwise, or to use an account, Sign in instead;
- * the link opens again once signed in (D05). A link that can't be joined says why (G11, G12).
- */
 import { useAuthActions } from "@convex-dev/auth/react";
 import { jamPreview } from "@music/sdk/functions";
 import { useQuery } from "convex/react";
@@ -25,7 +19,6 @@ import { Page } from "@/components/ui/page";
 import { accountFailureLine, passwordProblem } from "@/lib/account-form";
 import { guestEmail } from "@/lib/jam";
 
-/** Back to Sign in, keeping the link to open once signed in. */
 const useSignInInstead = (code: string) => {
   const { holdForSignIn } = useHoldJamForSignIn();
 
@@ -37,11 +30,9 @@ const useSignInInstead = (code: string) => {
   };
 };
 
-/** A random suffix for the guest's made-up sign-in address. */
 const randomSuffix = (): string =>
   Array.from(Crypto.getRandomBytes(4), (byte) => byte.toString(36).padStart(2, "0")).join("");
 
-/** The guest account form. */
 function GuestForm({ code, host }: { readonly code: string; readonly host: string }) {
   const { signIn } = useAuthActions();
   const { holdForSignIn, drop } = useHoldJamForSignIn();
@@ -64,7 +55,6 @@ function GuestForm({ code, host }: { readonly code: string; readonly host: strin
 
     setPending(true);
     setFailure(null);
-    // Signing up moves the app to the signed-in stack, which then opens the Jam to join it here.
     holdForSignIn({ kind: "jam", secret: code, server: null }, "join");
 
     try {
@@ -134,7 +124,6 @@ function GuestForm({ code, host }: { readonly code: string; readonly host: strin
   );
 }
 
-/** No guest accounts on this server: sign in to join. */
 function SignInToJoin({ code, host }: { readonly code: string; readonly host: string }) {
   const signInInstead = useSignInInstead(code);
 

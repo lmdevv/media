@@ -1,7 +1,3 @@
-/**
- * Whether the connected server answers, for the session phase and for the screens that change
- * while it is out of reach (D11 to D14).
- */
 import { useConvexConnectionState } from "convex/react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -37,13 +33,8 @@ export const useSilentServer = (afterMs: number = SILENT_AFTER_MS): boolean => {
   return silent;
 };
 
-/**
- * How long the connection may be down, or a request unanswered, before the app says it lost the
- * server (G04): a blip or a return from the background recovers sooner, without a flash.
- */
 const RECONNECTING_AFTER_MS = 5000;
 
-/** Whether `waiting` has held for `RECONNECTING_AFTER_MS`. */
 const useLate = (waiting: boolean): boolean => {
   const [late, setLate] = useState(false);
 

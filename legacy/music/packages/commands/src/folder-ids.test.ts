@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { chainsOverlap, fsPathsOverlap } from "./folder-ids";
 
-// Chains as the media service builds them: the folder first, then each parent up to `/`.
 const [root, srv, music, rock, jazz] = ["1:2", "1:10", "1:11", "1:12", "1:13"];
 
-// The same folder as `music`, reached through a bind mount at another path.
 const bound = [music, "1:20", root];
 
 describe("chainsOverlap", () => {

@@ -1,8 +1,3 @@
-/**
- * Download pins and their manifests against convex-test: what a pin holds as the library changes
- * under it (missing files, in-place changes, re-encodes, re-tags, unclaimed folders, lost access),
- * and the rules for adding, removing, listing, pruning, and purging pins.
- */
 import { DeviceId, LibraryId, TrackId, UserId } from "@music/commands/ids";
 import type { DownloadPinId } from "@music/commands/ids";
 import { DOWNLOAD_PIN_LIMIT } from "@music/commands/models";
@@ -42,7 +37,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** A file of `album` by Band as a scan reports it; its path is its title. */
 const file = (
   title: string,
   album: string,
@@ -72,7 +66,6 @@ interface Setup {
   readonly trackAt: (path: string) => Promise<Doc<"tracks">>;
 }
 
-/** A backend with a claimed, shared library and an admin whose phone has sent a heartbeat. */
 const setup = async (): Promise<Setup> => {
   const backend = makeBackend();
   const admin = await signUp(backend, "admin");
@@ -83,7 +76,6 @@ const setup = async (): Promise<Setup> => {
     visibility: "shared",
   });
 
-  // Claims the folder, as the media service does before its first batch.
   await upsertFiles(backend, created.libraryId, []);
 
   const libraryId = await backend.run(async (ctx) =>
@@ -130,7 +122,6 @@ const pin = async (
 const manifest = (user: User, pinId: DownloadPinId): Promise<DownloadManifest> =>
   user.music.read("downloads.manifest", { pinId });
 
-/** Each entry's title and state, in order. */
 const entries = async (user: User, pinId: DownloadPinId) =>
   (await manifest(user, pinId)).entries.map((entry) => [entry.track.title, entry.state]);
 
@@ -166,7 +157,6 @@ describe("an album's manifest", () => {
       rev: fileRevision(one.size, one.mtimeMs),
       artHash: COVER,
     });
-    // A like never changes a manifest, so a download's songs carry none.
     expect(held.entries[0]?.track).not.toHaveProperty("liked");
 
     await markMissing(backend, libraryId, ["Kind/Two.flac"]);
@@ -193,7 +183,6 @@ describe("an album's manifest", () => {
     expect(after.entries[0]?.rev).toBe(fileRevision(5000, 1_700_000_100_000));
     expect(after.entries[0]?.rev).not.toBe(before.entries[0]?.rev);
 
-    // Re-encoded under a new name: a new song, and the old one's file is gone.
     await scan([file("One", "Kind", 1, { path: "Kind/One.m4a", codec: "aac", lossless: false })]);
     await markMissing(backend, libraryId, ["Kind/One.flac"]);
     const reencoded = await trackAt("Kind/One.m4a");
@@ -251,7 +240,6 @@ describe("a playlist's manifest", () => {
     const sharedPin = (await manifest(member, shared)).pin;
 
     expect(sharedPin).toMatchObject({ available: true, title: "Road", artHash: COVER });
-    // Named for its owner, whom `signUp` names after their email.
     expect(sharedPin.available ? sharedPin.subtitle : null).toMatch(/^admin-/u);
   });
 });
@@ -327,7 +315,6 @@ describe("a pin whose target can't be read", () => {
       [false, []],
     ]);
 
-    // A deleted playlist makes its pin unavailable too.
     const { playlistId } = await admin.music.run("playlists.create", { name: "Gone" });
     const playlist = await pin(admin, "playlist", playlistId);
 
@@ -358,7 +345,6 @@ describe("a retag that empties an album", () => {
 
     const pinId = await pin(admin, "album", before[0]?.albumId ?? "");
 
-    // The files keep their paths; the tags send two songs to one album and the last to another.
     await scan([
       file("One", "New", 1, { path: "Old/One.flac" }),
       file("Two", "New", 2, { path: "Old/Two.flac" }),
@@ -431,7 +417,6 @@ describe("downloads.add", () => {
     await scan([file("One", "Kind", 1)]);
     const one = await trackAt("Kind/One.flac");
 
-    // The admin's phone is not the member's, and nobody has a device that never checked in.
     expect(await failureCode(pin(member, "track", one._id, PHONE))).toBe("not_found");
     expect(await failureCode(pin(admin, "track", one._id, DeviceId.make("nowhere")))).toBe(
       "not_found",
@@ -505,7 +490,6 @@ describe("downloads.add", () => {
     expect(await failureCode(pin(admin, "track", tracks[DOWNLOAD_PIN_LIMIT]?._id ?? ""))).toBe(
       "conflict",
     );
-    // Adding one it already keeps still answers with that pin.
     expect(await failureCode(pin(admin, "track", tracks[0]?._id ?? ""))).toBe("succeeded");
     expect(
       await backend.run(async (ctx) => (await ctx.db.query("downloadPins").collect()).length),
@@ -568,7 +552,6 @@ describe("downloads.list", () => {
     const { admin, backend, scan, trackAt } = await setup();
     const owner = await signUp(backend, "member");
 
-    // Songs without art, so a list that looked for playlist covers would read every one.
     await scan(
       Array.from({ length: 8 }, (_, index) =>
         file(String(index), "Mix", index + 1, { artHash: undefined }),
@@ -579,7 +562,6 @@ describe("downloads.list", () => {
       Array.from({ length: 8 }, (_, index) => trackAt(`Mix/${String(index)}.flac`)),
     );
 
-    // Someone else's shared playlists cost the most to list: their owner and shares are read too.
     await inOrder(
       Array.from({ length: DOWNLOAD_PIN_LIMIT / 100 }, (_, batch) => batch),
       async () => {

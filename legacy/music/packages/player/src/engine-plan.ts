@@ -1,20 +1,9 @@
-/**
- * What the audio engine should do when the Convex playback session changes. Pure: the provider
- * feeds it the previous and next session snapshots plus what the engine has loaded, then runs the
- * returned commands in order.
- *
- * Changes are edge-triggered: the engine follows a field only when the server value changed
- * between snapshots. The session query also re-runs for unrelated writes (device heartbeats,
- * shuffle), and level-triggered rules would undo optimistic local changes (a pause still in
- * flight) or a gapless advance the server has not heard about yet.
- */
 import type { DeviceId, TrackId } from "@music/commands/ids";
 import type { PlaybackState, QueueEntry, RepeatMode } from "@music/commands/models";
 import { Data } from "effect";
 
 import { livePosition } from "./live-position";
 
-/** A server position more than this far from the engine's counts as a seek. */
 const SEEK_THRESHOLD_MS = 1500;
 
 /**

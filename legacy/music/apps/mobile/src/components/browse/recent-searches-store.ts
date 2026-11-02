@@ -1,7 +1,3 @@
-/**
- * Recently searched (A16), kept in the keychain per account, so another person signing in on
- * this phone, or the same person on another server, starts with their own list.
- */
 import { useRead } from "@music/sdk/react";
 import { useSyncExternalStore } from "react";
 

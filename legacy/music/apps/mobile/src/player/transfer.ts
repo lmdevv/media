@@ -1,8 +1,3 @@
-/**
- * Moving playback to another device, as the device list shows it. The server moves the session
- * at once; the move counts as done when the session names the new device, and as failed when the
- * server refuses it or the session does not follow within `TRANSFER_TIMEOUT_MS`.
- */
 import type { DeviceId } from "@music/commands/ids";
 
 /** How long a move may wait for the session to name its device. */

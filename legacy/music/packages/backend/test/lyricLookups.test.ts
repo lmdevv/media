@@ -1,8 +1,3 @@
-/**
- * LRCLIB lookups through the real functions: which songs playback, downloads, and backfills ask
- * for, how the media service claims and answers them, the remote lyrics setting, and what
- * `lyrics.get` answers while a lookup runs and after.
- */
 import { DeviceId, type QueueItemId, TrackId, UserId } from "@music/commands/ids";
 import { MISS_RETRY_MS } from "@music/commands/lyric-lookups";
 import { UNKNOWN_ARTIST } from "@music/commands/models";
@@ -68,7 +63,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** A library of `files` an owner and a member can read, with the member's laptop registered. */
 const setup = async (files: ReadonlyArray<SeedFile>) => {
   const backend = makeBackend();
   const owner = await signUp(backend, "owner");
@@ -130,7 +124,6 @@ const queue = (backend: Backend) => backend.query(api.media.lyricQueue, { secret
 const claim = (backend: Backend, lookupId: Id<"lyricLookups">, workerId = "worker-1") =>
   backend.mutation(api.media.claimLookup, { secret: MEDIA_SECRET, lookupId, workerId });
 
-/** What the media service saves for a lookup. */
 type Answer =
   | { kind: "found"; recordId: number; sets: Array<StoredLrclibSet> }
   | { kind: "instrumental"; recordId: number }
@@ -145,7 +138,6 @@ const save = (
   workerId = "worker-1",
 ) => backend.mutation(api.media.saveLookup, { secret: MEDIA_SECRET, lookupId, workerId, answer });
 
-/** Claims and answers the lookup for `trackId`, as the media service does. */
 const answer = async (backend: Backend, trackId: TrackId, reply: Answer): Promise<void> => {
   const { _id } = await lookupFor(backend, trackId);
 
@@ -193,7 +185,6 @@ describe("requesting lyrics", () => {
     await play(member, [id("Alpha"), id("Beta"), id("Gamma")]);
     const { queue: entries } = await member.music.read("queue.list", {});
 
-    // Alpha played to its end.
     clockAt(START + 180_000);
 
     await member.music.run("playback.report", {
@@ -252,7 +243,6 @@ describe("requesting lyrics", () => {
 
     await owner.music.run("lyrics.backfill", {});
     await drainScheduled(backend);
-    // Two files with the same tags share one lookup.
     expect(await lookups(backend)).toHaveLength(3);
 
     await play(member, [id("Beta")]);
@@ -365,7 +355,6 @@ describe("queue changes that ask for lyrics", () => {
     expect(await lookupTitles(backend)).toEqual(["Alpha", "Beta"]);
 
     await member.music.run("playback.resume", {});
-    // Alpha played to its end.
     clockAt(START + 180_000);
     await member.music.run("playback.report", {
       deviceId: DEVICE,
@@ -418,7 +407,6 @@ describe("queue changes that ask for lyrics", () => {
     const alpha = await seedLibrary(backend, owner, { name: "Alpha", count: 0 });
     const delta = await seedLibrary(backend, owner, { name: "Delta", count: 0 });
 
-    // Autoplay picks Delta's songs first, for their artist, then Alpha's, for their genre.
     await upsertFiles(backend, alpha.libraryId, [
       song("Alpha/0.flac", "Alpha song 0"),
       ...Array.from({ length: 6 }, (_, index) =>
@@ -443,8 +431,6 @@ describe("queue changes that ask for lyrics", () => {
     const alphaSong = tracks.find((track) => track.title === "Alpha song 0");
 
     if (alphaSong === undefined) throw new Error("No Alpha song 0");
-    // Off until the Jam starts, so only the Jam can have asked for the song it moves on to: the
-    // Jam picks its autoplay songs afresh, and may pick the one that was next before it.
     await owner.music.run("server.update", { remoteLyrics: false });
     await play(host, [alphaSong.id]);
 
@@ -498,7 +484,6 @@ describe("queue changes that ask for lyrics", () => {
     expect((await trackDoc(backend, id("Own")))?.lyricsSynced).toBe(true);
     expect((await trackDoc(backend, id("Plain")))?.lyricsSynced).toBe(false);
 
-    // A song scanned before the flag existed.
     await backend.run(async (ctx) => {
       const track = ctx.db.normalizeId("tracks", id("Own"));
 
@@ -638,7 +623,6 @@ describe("the media service", () => {
 
     const requeue = () => backend.mutation(internal.lyricLookups.requeue, { lookupId: _id });
 
-    // A retry that runs early, as a stale one could, leaves the lookup waiting.
     await requeue();
     expect((await lookupFor(backend, id("Alpha"))).state.status).toBe("waiting");
 
@@ -682,7 +666,6 @@ describe("the media service", () => {
         job.name.includes("endPause") && job.state.kind === "pending" ? [job.scheduledTime] : [],
       );
 
-    // LRCLIB stays down for longer than a lookup has tries.
     await [1, 2, 3, 4, 5, 6].reduce(async (previous, round) => {
       await previous;
       expect(await claim(backend, alpha)).not.toBeNull();
@@ -701,7 +684,6 @@ describe("the media service", () => {
 
       expect(await scheduledEnds()).toContain(pausedUntil);
 
-      // A service restarted mid-pause still sees nothing to claim.
       clockAt(pausedUntil - 1);
       await backend.mutation(internal.lyricLookups.endPause, {});
       expect(await queue(backend)).toEqual([]);
@@ -745,7 +727,6 @@ describe("the media service", () => {
     expect(await queue(backend)).toEqual([]);
     expect(await claim(backend, (await lookupFor(backend, id("Beta")))._id)).toBeNull();
     expect(await lyricsOf(member, id("Alpha"))).toMatchObject({ _tag: "Synced", source: "lrclib" });
-    // Beta is still queued, but nothing will ask for it while lookups are off.
     expect(await lyricsOf(member, id("Beta"))).toEqual({ _tag: "None" });
 
     await owner.music.run("server.update", { remoteLyrics: true });
@@ -802,7 +783,6 @@ describe("lyrics.get with LRCLIB", () => {
       main: lrclibSynced(3),
       extras: [],
     });
-    // The same tags share the lookup, but the song's own synced lyrics win.
     expect(await lyricsOf(member, syncedId)).toMatchObject({ _tag: "Synced", source: "file" });
   });
 

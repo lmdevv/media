@@ -1,7 +1,3 @@
-/**
- * The catalog's counters, playlists, and deleting a library, through the real dispatcher and the
- * media service functions, against convex-test.
- */
 import { DeviceId } from "@music/commands/ids";
 import type { CommandArgsEncoded, CommandResult, MutationName } from "@music/commands/registry";
 import { decodeCommandResult } from "@music/sdk/client";
@@ -56,7 +52,6 @@ describe("catalog counters", () => {
       ["Rock Album", 2],
     ]);
 
-    // The file coming back puts it back.
     await upsertFiles(backend, libraryId, [
       { path: "Other/1.flac", title: "Other 1", album: "Other", artist: "Someone" },
     ]);
@@ -141,8 +136,6 @@ describe("playlists", () => {
       (await member.music.read("playlists.get", { playlistId })).playlist.artUrls,
     ).toHaveLength(1);
 
-    // The owner makes the library private: the member keeps the playlist, and the song stays in
-    // it as an unavailable row, without its cover.
     await backend.run(async (ctx) => {
       const id = ctx.db.normalizeId("libraries", libraryId);
 
@@ -194,7 +187,6 @@ describe("deleting a library", () => {
     await admin.music.run("libraries.delete", { libraryId: rockLibrary.libraryId });
     await drainScheduled(backend);
 
-    // The song playing was deleted, so the next one starts from the top.
     const now = await member.music.read("playback.state", {});
 
     expect(now.queue[now.index]?.id).toBe(jazz[0]);
@@ -253,7 +245,6 @@ describe("deleting a library", () => {
       const backend = makeBackend({ documentsWritten: 1000 });
       const admin = await signUp(backend, "admin");
 
-      // One song per album, so the library holds as many albums as songs.
       const { libraryId } = await admin.music.run("libraries.create", {
         name: "Singles",
         path: "/music/singles",
@@ -286,7 +277,6 @@ describe("deleting a library", () => {
   );
 });
 
-/** Runs a command straight through the dispatcher, past the SDK, which cleans text as it encodes. */
 const raw = async <Name extends MutationName>(
   user: User,
   name: Name,
@@ -325,7 +315,6 @@ describe("typed names and descriptions", () => {
     const backend = makeBackend();
     const owner = await signUp(backend, "owner");
 
-    // Alone, and with the other checks failing too: no leading slash, or a trailing space.
     const outcomes = await Promise.all(
       ["/music/\u001b]0;pwned\u0007", "music/\u001b]0;pwned\u0007", "/music/\u001b]0;pwned "].map(
         (path) => failure(raw(owner, "libraries.create", { name: "Vinyl", path })),

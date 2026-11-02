@@ -1,4 +1,3 @@
-/** How long after the page's load event the deferred work runs if nobody has touched the page. */
 const SETTLE_MS = 2000;
 
 const FIRST_INPUT = ["pointerdown", "keydown", "touchstart"] as const;

@@ -1,7 +1,3 @@
-/**
- * Light, dark, or following the system (F03). The choice is kept on this device and applied
- * before the first frame, so the app never flashes the other theme.
- */
 import { Option, Schema } from "effect";
 import { Uniwind } from "uniwind";
 

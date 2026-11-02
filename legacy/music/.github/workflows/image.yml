@@ -1,10 +1,5 @@
 name: Image
 
-# On pull requests that can change the image: builds it for amd64, and builds and boots it for
-# arm64 natively on an arm64 runner, so an arm64-only break shows up before merge. Each platform
-# is built once, with its own cache scope (`amd64`, shared with CI's stack-e2e, and `arm64`).
-# Nothing is pushed here: CI's `publish` job builds both platforms and pushes once every check
-# has passed on main or a release tag.
 on:
   pull_request:
     paths:

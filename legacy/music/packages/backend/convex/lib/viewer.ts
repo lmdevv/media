@@ -62,20 +62,13 @@ export const listenable = async (
   return { all, libraries: await listenableIn(ctx, all, user) };
 };
 
-/** Whether `user`'s access to `library` turns on its access list rather than its visibility. */
 const turnsOnGrant = (library: Doc<"libraries">, user: Doc<"users">): boolean =>
   library.ownerId !== user._id &&
   (library.visibility === "restricted" ||
     (library.visibility === "shared" && roleOf(user) === "guest"));
 
-/**
- * Grants read at once for a person. A person has at most one per library, plus any a removed
- * library left until its purge runs (`maintenance:purgeLibraryAccess`), so this covers every
- * real case in one range read; past it, grants are looked up library by library.
- */
 const GRANT_READ = 256;
 
-/** The libraries among `all` whose access list grants `user`, read as `listenableIn` says. */
 const grantedIn = async (
   ctx: ReadCtx,
   all: ReadonlyArray<Doc<"libraries">>,
@@ -89,13 +82,11 @@ const grantedIn = async (
   const deciding = all.filter((library) => turnsOnGrant(library, user));
 
   if (grants.length <= GRANT_READ) {
-    // Grants of libraries that are gone match nothing here.
     const held = new Set(grants.map((grant) => grant.libraryId));
 
     return new Set(deciding.flatMap((library) => (held.has(library._id) ? [library._id] : [])));
   }
 
-  // More grants than any real person holds: removed libraries left many. Look each one up.
   const found = await Promise.all(
     deciding.map(async (library) =>
       (await ctx.db
@@ -110,10 +101,6 @@ const grantedIn = async (
   return new Set(found.flat());
 };
 
-/**
- * The libraries of `all` that `user` can listen to: one bounded read of their grants, which
- * stale grants of removed libraries can't crowd a real one out of (`grantedIn`).
- */
 const listenableIn = async (
   ctx: ReadCtx,
   all: ReadonlyArray<Doc<"libraries">>,
@@ -155,16 +142,12 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
 
   if (userId === null) return fail("unauthenticated", "Sign in first");
 
-  // Removing or suspending someone ends their sessions too, so the person is checked before the
-  // session: their token, signed for them, then hears why it stopped working.
   const user = await ctx.db.get(userId);
 
   if (user === null) return failEnded("removed", "This account no longer exists");
 
   if (user.suspendedAt !== undefined) return failEnded("suspended", SUSPENDED_MESSAGE);
 
-  // A token outlives sign-out and key revocation by up to its one-hour lifetime unless the
-  // session it names is checked here; ending a session must end its tokens at once.
   const sessionId = ctx.db.normalizeId("authSessions", (await getAuthSessionId(ctx)) ?? "");
   const session = sessionId === null ? null : await ctx.db.get(sessionId);
 
@@ -172,9 +155,6 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
     return fail("unauthenticated", "This session has ended; sign in again");
   }
 
-  // A session an API key opened ends with the key's right to work: at once for a guest, who has
-  // no keys, and for keys made before a demotion to guest, which a promotion doesn't revive.
-  // Others pay no extra read.
   if (!can(roleOf(user), "keys") || user.keysValidAfter !== undefined) {
     const key = await ctx.db
       .query("apiKeys")

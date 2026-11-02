@@ -1,4 +1,3 @@
-/** F12 · Person. */
 import { usePersonParam } from "@/components/admin/params";
 import { PersonPage } from "@/components/admin/person";
 import { RequireAccess } from "@/components/settings/access";

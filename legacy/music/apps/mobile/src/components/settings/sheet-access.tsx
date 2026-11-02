@@ -1,7 +1,3 @@
-/**
- * `RequireAccess` for confirmation sheets: the sheet stays empty while the account loads and says
- * why not to a role without the capability, in the sheet's own layout rather than a page.
- */
 import type { User } from "@music/commands/models";
 import { can, forbiddenMessage } from "@music/commands/permissions";
 import type { Capability } from "@music/commands/permissions";
@@ -10,7 +6,6 @@ import type { ReactNode } from "react";
 import { useMe } from "./access";
 import { SheetLayout } from "@/components/ui/sheet-layout";
 
-/** Props for `SheetAccess`. */
 export interface SheetAccessProps {
   readonly capability: Capability;
   readonly children: (me: User) => ReactNode;

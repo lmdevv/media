@@ -1,10 +1,3 @@
-/**
- * D10 · Downloaded: what this iPhone keeps. Chips pick all downloads, albums, playlists, or every
- * song here; a summary says how many songs, albums, and playlists take how much space, and how much
- * is still free. A download still coming says how far it got. Albums and playlists open their own
- * pages; songs downloaded on their own share one Songs row (D10b), which opens them (D10c). While
- * the server is out of reach the offline bar sits over the chips (D12).
- */
 import type {
   DownloadedCollection,
   DownloadedEntry,
@@ -79,7 +72,6 @@ function CollectionRow({ item }: { readonly item: DownloadedCollection }) {
   );
 }
 
-/** The chips, then the storage summary, over the list. */
 function Summary({
   library: { downloads, usage },
   filter,

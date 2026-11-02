@@ -75,23 +75,16 @@ export interface FinishedFileRequest {
   readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
-/** The wait when `Retry-After` is missing or not whole seconds. */
 const DEFAULT_RETRY_MS = 3000;
 
 const MIN_RETRY_MS = 1000;
 
 const MAX_RETRY_MS = 30_000;
 
-/**
- * Answers the server may send while it prepares a file before the fetch gives up for now: about
- * twenty minutes at the server's usual pace, longer than any encode of one song.
- */
 const MAX_ROUNDS = 400;
 
-/** A `Retry-After` in whole seconds; the media service never sends the HTTP-date form. */
 const SECONDS = /^\d{1,6}$/u;
 
-/** How long a `503` asks to wait, within bounds. */
 const retryAfterMs = (response: Response): number => {
   const header = response.headers.get("Retry-After")?.trim() ?? "";
 
@@ -100,18 +93,15 @@ const retryAfterMs = (response: Response): number => {
   return Math.min(MAX_RETRY_MS, Math.max(MIN_RETRY_MS, Number(header) * 1000));
 };
 
-/** The announced length, or null without one. */
 const contentLength = (response: Response): number | null => {
   const header = response.headers.get("Content-Length")?.trim() ?? "";
 
   return /^\d+$/u.test(header) ? Number(header) : null;
 };
 
-/** `url` asking for the finished file. Signed URLs always carry a query. */
 const finishedUrl = (url: string): string =>
   `${url}${url.includes("?") ? "&" : "?"}${FINISHED_PARAM}=1`;
 
-/** The outcome of an error status, other than `403` and `503`, which the fetch handles itself. */
 const refusal = (status: number): FetchOutcome =>
   status === 404
     ? FetchOutcome.Gone()
@@ -120,10 +110,6 @@ const refusal = (status: number): FetchOutcome =>
         retryable: status >= 500 || status === 408 || status === 429,
       });
 
-/**
- * What signing failed with, given the server's refusal if it refused: a refusal stays, a lost
- * connection passes.
- */
 const signingFailed = (failure: CommandFailure | null): FetchOutcome =>
   failure === null
     ? FetchOutcome.Failed({ message: "Couldn’t reach the server", retryable: true })
@@ -139,7 +125,6 @@ export const fetchFinishedFile = async (
   request: FinishedFileRequest,
 ): Promise<FetchOutcome> => {
   const { signal } = request;
-  // A function, not `signal.aborted`, which the compiler would still think false after awaits.
   const stopped = (): boolean => signal.aborted;
   let resigned = false;
   let url: string;
@@ -150,7 +135,6 @@ export const fetchFinishedFile = async (
     return signingFailed(cause instanceof Error ? commandFailure(cause) : null);
   }
 
-  /** Signs once more after a refusal; null when that worked. */
   const resign = async (): Promise<FetchOutcome | null> => {
     if (resigned) {
       return FetchOutcome.Failed({
@@ -170,7 +154,6 @@ export const fetchFinishedFile = async (
     }
   };
 
-  /** Downloads the file the media service has ready; null to ask again. */
   const download = async (response: Response): Promise<FetchOutcome | null> => {
     const contentType = response.headers.get("Content-Type");
     const destination = request.destination(contentType);
@@ -198,7 +181,6 @@ export const fetchFinishedFile = async (
               }),
         ),
       Refused: async ({ status }) => {
-        // The cached file went between the two requests: ask again until it is back.
         if (status === 503) {
           await request.sleep(DEFAULT_RETRY_MS, signal);
 
@@ -211,7 +193,6 @@ export const fetchFinishedFile = async (
     });
   };
 
-  /** One question to the media service, then whatever its answer calls for. */
   const ask = async (round: number): Promise<FetchOutcome> => {
     if (round >= MAX_ROUNDS) {
       return FetchOutcome.Failed({
@@ -247,7 +228,6 @@ export const fetchFinishedFile = async (
   try {
     return await ask(0);
   } catch (cause) {
-    // A platform transfer or destination that threw, rather than answering with a result.
     return stopped()
       ? FetchOutcome.Stopped()
       : FetchOutcome.Failed({

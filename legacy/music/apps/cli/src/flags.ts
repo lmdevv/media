@@ -1,8 +1,3 @@
-/**
- * Turns a registry command's `args` schema into command-line flags and turns parsed flags back
- * into wire arguments. Flags are derived from the schema AST at runtime, so a field added to the
- * registry shows up in the CLI without touching this package.
- */
 import type { ParseArgsOptionDescriptor, ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
 
@@ -78,7 +73,6 @@ const flagTypeOf = (ast: SchemaAST.AST): FlagType => {
 
     const [only] = members;
 
-    // `NullOr(X)` takes X on the command line; null is only reachable through `--args`.
     if (members.length === 1 && only !== undefined) return flagTypeOf(only);
   }
 
@@ -129,7 +123,6 @@ export const deriveFlags = (args: Schema.Top): FlagSet => {
   };
 };
 
-/** Fields named `fooId` or `fooIds` hold opaque IDs from earlier results. */
 const isIdField = (key: string): boolean => /Ids?$/u.test(key);
 
 /** How a flag reads in help: `--limit <int>`, `--playlist-id <id>`. */
@@ -306,7 +299,6 @@ const rawStrings = (value: ParsedValues[string]): ReadonlyArray<string> => {
   return value.filter(Predicate.isString);
 };
 
-/** Converts one flag's parsed value, or `undefined` when the flag was not given. */
 const convertFlag = (
   spec: FlagSpec,
   value: ParsedValues[string],
@@ -349,7 +341,6 @@ const assignPositionals = (
 
   const converted = FlagType.$match(spec.type, {
     List: ({ item }) => convertList(spec, item, positionals, command),
-    // Free text such as a search query may span several shell words.
     Text: () => Result.succeed<Schema.Json>(positionals.join(" ")),
     Number: () => single(spec, positionals, command),
     Choice: () => single(spec, positionals, command),

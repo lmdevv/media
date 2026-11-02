@@ -48,7 +48,6 @@ export type HeaderRead = Data.TaggedEnum<{
 /** Constructors and matchers for `HeaderRead`. */
 export const HeaderRead = Data.taggedEnum<HeaderRead>();
 
-/** Sample entry types (in `stsd`) of the codecs the engine plays. */
 const SAMPLE_ENTRIES: ReadonlyMap<string, AudioCodec> = new Map([
   ["fLaC", "flac"],
   ["mp4a", "aac"],
@@ -87,11 +86,6 @@ const view = (bytes: Uint8Array): DataView =>
 const fourCC = (bytes: Uint8Array, at: number): string =>
   String.fromCodePoint(...bytes.subarray(at, at + 4));
 
-/**
- * The box starting at `at` within `[at, limit)`, or null when its header or body runs past
- * `limit`. Sizes 0 ("to the end") are only valid for the last box and are reported as invalid
- * here, because the header boxes the engine reads always have explicit sizes.
- */
 const boxAt = (bytes: Uint8Array, at: number, limit: number): Box | null | "invalid" => {
   if (at + 8 > limit) return null;
   const data = view(bytes);
@@ -112,7 +106,6 @@ const boxAt = (bytes: Uint8Array, at: number, limit: number): Box | null | "inva
   return at + size32 > limit ? null : { type, start: at, body: at + 8, end: at + size32 };
 };
 
-/** The children of a container box, all of which must lie inside it. */
 const childrenOf = (bytes: Uint8Array, parent: Box): ReadonlyArray<Box> | null => {
   const children: Array<Box> = [];
 
@@ -127,7 +120,6 @@ const childrenOf = (bytes: Uint8Array, parent: Box): ReadonlyArray<Box> | null =
   return children;
 };
 
-/** The first sample entry type in `moov/trak/mdia/minf/stbl/stsd`, or null. */
 const sampleEntryType = (bytes: Uint8Array, moov: Box): string | null => {
   const path = ["trak", "mdia", "minf", "stbl", "stsd"];
   let current: Box = moov;
@@ -139,13 +131,11 @@ const sampleEntryType = (bytes: Uint8Array, moov: Box): string | null => {
     current = next;
   }
 
-  // stsd: version and flags (4), entry count (4), then sample entries (size, type, ...).
   const entry = current.body + 8;
 
   return entry + 8 <= current.end ? fourCC(bytes, entry + 4) : null;
 };
 
-/** Parses a `sidx` box into absolute fragment offsets and media times. */
 const parseSidx = (bytes: Uint8Array, sidx: Box): SegmentIndex | null => {
   const data = view(bytes);
   const version = data.getUint8(sidx.body);
@@ -171,7 +161,6 @@ const parseSidx = (bytes: Uint8Array, sidx: Box): SegmentIndex | null => {
   for (let index = 0; index < count; index += 1) {
     const reference = data.getUint32(at + index * 12);
 
-    // A set top bit points at another sidx; the media service never nests them.
     if (reference >>> 31 !== 0) return null;
     const size = reference & 0x7f_ff_ff_ff;
     const duration = data.getUint32(at + index * 12 + 4);

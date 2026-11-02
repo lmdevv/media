@@ -1,8 +1,3 @@
-/**
- * Audio details (B09): the current song's file, gapless playback, and this phone's streaming
- * quality, read-only, with a way to the Playback settings. Paper draws no way in on Now Playing;
- * it opens from Song actions on the playing song, or the ellipsis for a private Jam song.
- */
 import { router, useNavigation } from "expo-router";
 import { Music, Repeat, Settings } from "lucide-react-native";
 
@@ -13,10 +8,6 @@ import { codecName, fileDetails, qualityName } from "@/lib/playback-format";
 import { usePlayer } from "@/player";
 import type { NowPlaying } from "@/player";
 
-/**
- * Closes this sheet, and Now Playing when it is under it, then opens the Playback settings over
- * what the person was on, such as a Jam page.
- */
 const useOpenPlaybackSettings = () => {
   const navigation = useNavigation();
 

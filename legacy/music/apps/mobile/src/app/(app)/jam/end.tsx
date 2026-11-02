@@ -1,7 +1,3 @@
-/**
- * D10 · End this Jam? Ending sends everyone back to their own music and removes the guest
- * accounts it made; the host goes back to the tabs, and members see D11.
- */
 import { useRun } from "@music/sdk/react";
 
 import { backToMyMusic } from "@/components/jams/jam-home";
