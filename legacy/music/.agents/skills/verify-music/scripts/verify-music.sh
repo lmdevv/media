@@ -143,7 +143,7 @@ cmd_up() {
     if ! docker image inspect "$library" >/dev/null 2>&1; then
       say "pulling $library"
       docker pull -q "$library" >/dev/null ||
-        die "could not pull $library; build it with scripts/build-demo-library.sh"
+        die "could not pull $library; check Docker and access to ghcr.io, then retry"
     fi
     music="type=image,source=$library,target=/music"
   else

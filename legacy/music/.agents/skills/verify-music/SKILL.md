@@ -57,7 +57,8 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/music:main
 1. It builds `music:verify-<run>` from the checkout, or pulls the main image for `before`. A warm
    Docker cache builds in about 50 seconds; a cold one takes several minutes.
 2. It mounts the library read-only at `/music`. The default is the demo library image named in
-   `deploy/demo-library/image` (see [Demo data](#demo-data)), which `up` pulls once per machine.
+   `deploy/demo-library/image`, pinned by version and digest (see [Demo data](#demo-data)), which
+   `up` pulls once per machine.
 3. It starts the container and waits until `/healthz` reports `"ok":true`, which needs Caddy, the
    media service, and Convex.
 4. It starts the browser host and runs first-run setup through the web app. Setup creates the
@@ -69,7 +70,7 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/music:main
 The side is ready only after a line like this prints:
 
 ```text
-ready: http://localhost:39513 (run verify-music, side after, container music-verify-verify-music-after, image music:verify-verify-music, library ghcr.io/lmdevv/music-demo-library:v1, evidence …)
+ready: http://localhost:39513 (run verify-music, side after, container music-verify-verify-music-after, image music:verify-verify-music, library ghcr.io/lmdevv/music-demo-library:v1@sha256:f62a095b34212379307a6c298588cec3461498b083d805c2922ec1b20480eddb, evidence …)
 ```
 
 | Flag                           | Use                                                              |
@@ -90,12 +91,13 @@ touch `.agents/` don't count, since the image leaves them out.
 Every side starts from the same data, so evidence from any machine looks alike and shows nothing
 personal or unlicensed.
 
-- **Music.** `ghcr.io/lmdevv/music-demo-library:v1` holds the five Creative Commons releases of
-  `scripts/download-demo-music.sh` (28 songs, 520 MB, two FLAC EPs) and their `CREDITS.md`. It's a
-  data-only image that every container mounts read-only, so Docker keeps one copy per machine. A
-  published version never changes; `scripts/build-demo-library.sh` builds it, and the Demo library
-  workflow publishes the version in `deploy/demo-library/image`. When the pull fails, build it
-  locally with `scripts/build-demo-library.sh`.
+- **Music.** The image pinned by version and digest in `deploy/demo-library/image` holds the five
+  Creative Commons releases of `scripts/download-demo-music.sh` (28 songs, 520 MB, two FLAC EPs)
+  and their `CREDITS.md`. It's a data-only image that every container mounts read-only, so Docker
+  keeps one copy per machine. A published version never changes. Rebuilding and publishing are
+  manual maintainer operations, described in `docs/demo-music.md`. If the pull fails, check Docker
+  and access to GHCR, then retry.
+  Verification has no rebuild or Internet Archive fallback.
 - **People.** Everyone's password is `password123`:
 
   | Who   | Email               | Role   | CLI          |

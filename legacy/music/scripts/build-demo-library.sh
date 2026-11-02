@@ -1,28 +1,30 @@
 #!/usr/bin/env bash
-# Builds the demo library image, tagged with the name in deploy/demo-library/image. A published
-# version is never overwritten: change the files, then bump the version there.
+# Builds a new demo library version. A published version is never overwritten.
 #
-#   scripts/build-demo-library.sh [--from DIR]   # build it into the local Docker
-#   scripts/build-demo-library.sh --push         # build linux/amd64 and linux/arm64 and push it
+#   scripts/build-demo-library.sh --version vN [--from DIR]   # build into local Docker
+#   scripts/build-demo-library.sh --version vN --push         # publish amd64 and arm64
 #
 # --from reuses a download of scripts/download-demo-music.sh instead of fetching it again.
 # Needs Docker, curl, and ffmpeg.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-image="$(<"$root/deploy/demo-library/image")"
-from="" push=0
+version="" from="" push=0
 while (($#)); do
   case "$1" in
-    --from) from="$2"; shift 2 ;;
+    --version) version="${2:?--version requires vN}"; shift 2 ;;
+    --from) from="${2:?--from requires a directory}"; shift 2 ;;
     --push) push=1; shift ;;
-    *) echo "usage: $0 [--from DIR] [--push]" >&2; exit 2 ;;
+    *) echo "usage: $0 --version vN [--from DIR] [--push]" >&2; exit 2 ;;
   esac
 done
+[[ "$version" =~ ^v[1-9][0-9]*$ ]] ||
+  { echo "--version must be vN, where N is a positive integer" >&2; exit 2; }
+image="ghcr.io/lmdevv/music-demo-library:$version"
 
 if ((push)); then
   if found="$(docker buildx imagetools inspect "$image" 2>&1)"; then
-    echo "$image is already published; bump the version in deploy/demo-library/image to change it"
-    exit 0
+    echo "$image is already published; choose a new --version" >&2
+    exit 1
   fi
   [[ "$found" == *": not found"* ]] || { echo "could not check $image: $found" >&2; exit 1; }
 fi

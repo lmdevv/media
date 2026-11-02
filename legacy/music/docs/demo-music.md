@@ -3,21 +3,39 @@
 The demo and the screenshots use five Creative Commons releases from the Internet Archive:
 28 tracks, two of them lossless FLAC EPs, about 520 MB.
 
-They ship as a data-only image, `ghcr.io/lmdevv/music-demo-library:v1`, that a server mounts
-read-only (Docker 28 or later). Docker pulls it once per machine, and every container shares it:
+They ship as a data-only image pinned by version and digest in `deploy/demo-library/image`.
+A server mounts the image read-only (Docker 28 or later). Docker pulls it once per machine,
+and every container shares it:
 
 ```sh
+demo_image="$(cat deploy/demo-library/image)"
 docker run -d -p 8080:8080 -v music-data:/data \
-  --mount type=image,source=ghcr.io/lmdevv/music-demo-library:v1,target=/music \
+  --mount "type=image,source=$demo_image,target=/music" \
   ghcr.io/lmdevv/music:main
 ```
 
-`scripts/download-demo-music.sh <dir>` fetches the same files into a folder instead. It keeps the
-original file names, adds tags to the one release that ships without them, links each release's
-artwork as `cover.jpg`, and writes the credits below to `CREDITS.md` next to the music.
-`scripts/build-demo-library.sh` builds the image from it, and the Demo library workflow publishes
-the version named in `deploy/demo-library/image`. A published version never changes: bump the
-version to change the files.
+The Demo library workflow runs `scripts/check-demo-library.sh` on pull requests and pushes to
+validate the pinned GHCR image, all 28 audio streams, five covers, and credits. Routine checks and
+verification runs consume this image. Ordinary demo, CI, and verification runs never contact the
+Internet Archive. If a pull fails, check Docker and access to GHCR, then retry.
+
+## Publish a new version
+
+Rebuilding is a maintainer operation. Run the **Publish demo library** workflow manually with a
+new, unused version such as `v2`. It runs `scripts/build-demo-library.sh --version v2 --push`;
+published versions cannot be overwritten. For a local build, omit `--push`. The version is
+required and independent of the consumer pin.
+
+The builder uses `scripts/download-demo-music.sh <dir>` to fetch the releases from the Internet
+Archive. It keeps the original file names, adds tags to the one release that ships without them,
+links each release's artwork as `cover.jpg`, and writes the credits below to `CREDITS.md` next to
+the music. Pass `--from DIR` to reuse an existing download.
+
+After publishing, inspect the actual registry index with
+`docker buildx imagetools inspect ghcr.io/lmdevv/music-demo-library:v2`. Copy its `Digest` into
+`deploy/demo-library/image` with the version, in the form
+`ghcr.io/lmdevv/music-demo-library:v2@sha256:<index-digest>`. Submit that pin change in a reviewed
+PR and run `scripts/check-demo-library.sh` against it. Publishing alone does not update consumers.
 
 ## Credits
 
