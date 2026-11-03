@@ -76,7 +76,8 @@ for (const [name, [certification, ageRating]] of Object.entries(RATINGS)) {
 // Mateo, Aiko, and Sam: an invite link each from Admin, Users, accepted in their own browser.
 for (const person of PEOPLE) {
   const code = browser("invite", "--invite-role", person.role);
-  browser("join", "--page", person.handle, "--code", code, "--name", person.name, "--email", person.email);
+  // One flag word: an invite code can start with a dash, which parseArgs refuses as a separate value.
+  browser("join", "--page", person.handle, `--code=${code}`, "--name", person.name, "--email", person.email);
   browser("close-page", "--page", person.handle);
   mkdirSync(join(flags.state, "cli", person.handle), { recursive: true });
   const login = run(
