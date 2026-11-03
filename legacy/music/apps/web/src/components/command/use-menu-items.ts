@@ -14,7 +14,7 @@ import { useHeld } from "@/lib/use-held";
 
 import { offeredScreens } from "./catalog";
 import type { Route } from "./catalog";
-import { browseItems, cliOf, searchItems } from "./items";
+import { browseItems, searchItems } from "./items";
 import type { Item } from "./items";
 
 const SHUFFLE_LIMIT = 2000;
@@ -134,7 +134,8 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
       id: `go-${screen.name}`,
       section: "Go to",
       title: screen.title,
-      detail: `Open ${screen.title} · ${cliOf(screen.name)}`,
+      detail: `Open ${screen.title}`,
+      keywords: screen.name,
       icon: screen.icon,
       label: "Open",
       run: go(screen.to),

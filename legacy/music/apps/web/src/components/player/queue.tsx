@@ -379,22 +379,13 @@ function AutoplaySection({
       <div
         className={cn("flex items-center justify-between gap-3 pb-1.5", glass ? "px-3" : "px-2")}
       >
-        <span className="flex min-w-0 flex-col">
-          <span
-            className={cn(
-              "truncate font-mono text-xs/xs tracking-mono uppercase",
-              glass ? "text-text/55" : "text-text-muted",
-            )}
-          >
-            Autoplay · similar in your library
-          </span>
-          {player.autoplay ? (
-            <span
-              className={cn("font-sans text-xs/xs", glass ? "text-text/45" : "text-text-muted")}
-            >
-              Same artist, then genre, then era
-            </span>
-          ) : null}
+        <span
+          className={cn(
+            "truncate font-mono text-xs/xs tracking-mono uppercase",
+            glass ? "text-text/55" : "text-text-muted",
+          )}
+        >
+          Autoplay
         </span>
         <Switch
           aria-label="Autoplay"

@@ -1,5 +1,5 @@
 import { argsDecoder } from "@music/commands/codec";
-import { missingFields, outcomeOf } from "@music/commands/forms";
+import { commandTitle, missingFields, outcomeOf } from "@music/commands/forms";
 import type { FieldSpec, FormValues } from "@music/commands/forms";
 import type { Role } from "@music/commands/models";
 import { capabilityLabel } from "@music/commands/permissions";
@@ -25,7 +25,6 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Switch } from "@/components/ui/switch";
 import { Text } from "@/components/ui/text";
 import {
-  actionTitle,
   editField,
   formArgs,
   outcomeSecret,
@@ -52,7 +51,7 @@ const DEFAULT_CHOICE = "";
 export function ActionFormScreen({ command }: { readonly command: string }) {
   const offered = useOffered();
   const name = isCommandName(command) ? command : null;
-  const title = name === null ? "Action" : actionTitle(commands[name].summary);
+  const title = name === null ? "Action" : commandTitle(commands[name].summary);
   const action = offered?.offered.find((entry) => entry.name === name);
 
   if (offered !== undefined && action !== undefined)
@@ -125,7 +124,7 @@ function ActionForm({ action, role }: { readonly action: Action; readonly role: 
   };
 
   return (
-    <Page title={actionTitle(command.summary)} bottom="plain" trailing={<CommandGlyph />}>
+    <Page title={commandTitle(command.summary)} bottom="plain" trailing={<CommandGlyph />}>
       <Notice
         icon={GROUP_ICON[command.group]}
         title={name}

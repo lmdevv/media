@@ -28,12 +28,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 
-import {
-  AdminOnly,
-  SecretLink,
-  SettingsHeader,
-  TerminalHint,
-} from "@/components/settings/settings-ui";
+import { AdminOnly, SecretLink, SettingsHeader } from "@/components/settings/settings-ui";
 import { useAction } from "@/lib/action";
 import { copyText } from "@/lib/copy-text";
 import { formatAgo, formatUntil, initial } from "@/lib/format";
@@ -106,7 +101,6 @@ function People({ me }: { readonly me: User }) {
         </div>
       )}
       <SignUpSettings />
-      <TerminalHint label="From a terminal" command="music people list · music people --help" />
       <InviteDialog role={me.role} open={inviting} onOpenChange={setInviting} />
       <PersonDialog
         me={me}

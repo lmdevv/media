@@ -1,5 +1,4 @@
 import { AlbumId, ArtistId, PlaylistId } from "@music/commands/ids";
-import { usePlayer } from "@music/player/react";
 import { Dialog, DialogBackdrop, DialogPopup, DialogPortal } from "@music/ui/components/dialog";
 import { Kbd } from "@music/ui/components/kbd";
 import { Spinner } from "@music/ui/components/spinner";
@@ -14,8 +13,8 @@ import { useUi } from "@/components/shell/ui-state";
 
 import type { MenuContext } from "./args-form";
 import { ItemRow } from "./item-row";
-import { primaryLabel } from "./items";
-import { menuKeyOf } from "./menu-keys";
+import { CHORD_LABELS, menuKeyOf, runnableAction } from "./menu-keys";
+import type { Chord, ChordActions } from "./menu-keys";
 import { Preview } from "./previews";
 import { useMenuItems } from "./use-menu-items";
 
@@ -62,7 +61,6 @@ export function CommandMenu() {
 }
 
 function Menu({ onClose }: { readonly onClose: () => void }) {
-  const player = usePlayer();
   const context = useMenuContext();
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query.trim());
@@ -106,20 +104,43 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  const [primary, setPrimary] = useState<{ readonly id: string; readonly run: () => void } | null>(
-    null,
-  );
+  const registered = useRef<{ readonly id: string; readonly actions: ChordActions } | null>(null);
+
+  const [footer, setFooter] = useState<{
+    readonly id: string;
+    readonly label: string | null;
+  } | null>(null);
 
   const currentId = current?.id ?? null;
-  const runPrimary = primary !== null && primary.id === currentId ? primary.run : null;
+  const footerLabel = footer !== null && footer.id === currentId ? footer.label : null;
 
-  const registerPrimary = useCallback(
-    (run: (() => void) | null) => {
+  const registerActions = useCallback(
+    (next: ChordActions | null) => {
       if (currentId === null) return;
 
-      setPrimary((previous) =>
-        run === null ? (previous?.id === currentId ? null : previous) : { id: currentId, run },
+      if (next === null) {
+        if (registered.current?.id === currentId) registered.current = null;
+
+        return;
+      }
+
+      registered.current = { id: currentId, actions: next };
+      const label = next.enter?.label ?? null;
+
+      setFooter((previous) =>
+        previous?.id === currentId && previous.label === label
+          ? previous
+          : { id: currentId, label },
       );
+    },
+    [currentId],
+  );
+
+  const run = useCallback(
+    (chord: Chord) => {
+      const shown = registered.current;
+
+      if (shown !== null && shown.id === currentId) runnableAction(shown.actions, chord)?.run();
     },
     [currentId],
   );
@@ -133,17 +154,17 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
       return;
     }
 
-    if (primary?.id !== runWhenShown) return;
+    if (footer?.id !== runWhenShown) return;
 
     setRunWhenShown(null);
-    primary.run();
-  }, [currentId, primary, runWhenShown]);
+    run("enter");
+  }, [currentId, footer, run, runWhenShown]);
 
-  const latest = useRef({ active, runPrimary });
+  const latest = useRef({ active, run });
 
   useEffect(() => {
-    latest.current = { active, runPrimary };
-  }, [active, runPrimary]);
+    latest.current = { active, run };
+  }, [active, run]);
 
   const onRowHover = useCallback(
     (index: number, event: MouseEvent<HTMLDivElement>) => {
@@ -165,7 +186,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
       if (item.kind === "command" && item.fields.length > 0) setDetail(true);
       else if (item.kind === "now") setDetail(true);
-      else if (index === latest.current.active) latest.current.runPrimary?.();
+      else if (index === latest.current.active) latest.current.run("enter");
       else setRunWhenShown(item.id);
     },
     [items, select],
@@ -180,9 +201,9 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
     event.preventDefault();
 
-    if (key === "next") select(Math.min(active + 1, items.length - 1));
-    else if (key === "previous") select(Math.max(active - 1, 0));
-    else if (!searching) runPrimary?.();
+    if (key.kind === "next") select(Math.min(active + 1, items.length - 1));
+    else if (key.kind === "previous") select(Math.max(active - 1, 0));
+    else if (!searching) run(key.chord);
   };
 
   const empty = items.length === 0 && !searching;
@@ -197,18 +218,24 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
         )}
         <input
           ref={input}
-          aria-label="Search your library or type a command"
+          aria-label="Search your library"
           aria-activedescendant={current === undefined ? undefined : `command-${current.id}`}
           aria-controls="command-list"
           role="combobox"
           aria-expanded
-          placeholder="Search your library or type a command…"
+          placeholder="Search your library…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
           className="h-full min-w-0 grow bg-transparent font-sans text-lg/md text-text outline-none placeholder:text-text-muted"
         />
-        <button type="button" onClick={onClose} className="shrink-0" aria-label="Close">
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={onClose}
+          className="shrink-0"
+          aria-label="Close"
+        >
           <Kbd>ESC</Kbd>
         </button>
       </div>
@@ -231,6 +258,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
             ref={list}
             id="command-list"
             role="listbox"
+            tabIndex={-1}
             aria-label="Results and commands"
             className={cn(
               "flex w-full shrink-0 flex-col gap-px overflow-y-auto p-2 lg:w-90 lg:border-r lg:border-border",
@@ -264,7 +292,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
                 context={context}
                 onClose={onClose}
                 onBack={back}
-                registerPrimary={registerPrimary}
+                registerActions={registerActions}
               />
             )}
           </div>
@@ -273,10 +301,10 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
       <div className="hidden h-11 shrink-0 items-center gap-3.5 border-t border-border bg-surface pr-3 pl-5 lg:flex">
         <span className="grow font-mono text-xs/xs font-semibold text-text-muted">[music]</span>
-        {current === undefined ? null : (
+        {footerLabel === null ? null : (
           <span className="flex items-center gap-2 font-sans text-sm/xs font-medium text-text">
-            {primaryLabel(current, player.status === "playing")}
-            <Kbd>↵</Kbd>
+            {footerLabel}
+            <Kbd>{CHORD_LABELS.enter}</Kbd>
           </span>
         )}
         <span aria-hidden className="h-4 w-px bg-border" />

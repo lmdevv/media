@@ -6,10 +6,9 @@ import type {
 } from "@music/commands/models";
 import { usePlayer, usePlayerPosition } from "@music/player/react";
 import { useRead } from "@music/sdk/react";
-import { Button } from "@music/ui/components/button";
 import { useNavigate } from "@tanstack/react-router";
 import { memo } from "react";
-import { PauseIcon, PlayIcon, ShuffleIcon, SkipForwardIcon } from "lucide-react";
+import { PauseIcon, PlayIcon } from "lucide-react";
 
 import { ProgressBar } from "@/components/auth/scan-progress";
 import { Artwork } from "@/components/library/artwork";
@@ -23,12 +22,14 @@ import { playableTracks } from "@/lib/playlist-entries";
 import type { MenuContext } from "./args-form";
 import { CommandPreview } from "./command-preview";
 import type { Item } from "./items";
-import { PreviewFrame, PreviewTitle, previewArt, usePrimary } from "./preview-frame";
+import { PreviewActions, PreviewFrame, PreviewTitle, previewArt } from "./preview-frame";
 import type { PreviewProps } from "./preview-frame";
+
+const playIcon = <PlayIcon fill="currentColor" strokeWidth={0} />;
 
 /**
  * The preview pane for the selected row: artwork, detail, and buttons for library records, the
- * form for commands. It registers its primary action so Enter and the footer run it. Memoized,
+ * form for commands. It registers its actions so their chords and the footer run them. Memoized,
  * so typing in the search field doesn't re-render it until the selection changes.
  */
 export const Preview = memo(function Preview({
@@ -36,7 +37,7 @@ export const Preview = memo(function Preview({
   context,
   onClose,
   onBack,
-  registerPrimary,
+  registerActions,
 }: PreviewProps & {
   readonly item: Item;
   readonly context: MenuContext;
@@ -48,7 +49,7 @@ export const Preview = memo(function Preview({
           track={item.track}
           onClose={onClose}
           onBack={onBack}
-          registerPrimary={registerPrimary}
+          registerActions={registerActions}
         />
       );
     case "album":
@@ -57,7 +58,7 @@ export const Preview = memo(function Preview({
           album={item.album}
           onClose={onClose}
           onBack={onBack}
-          registerPrimary={registerPrimary}
+          registerActions={registerActions}
         />
       );
     case "artist":
@@ -66,7 +67,7 @@ export const Preview = memo(function Preview({
           artist={item.artist}
           onClose={onClose}
           onBack={onBack}
-          registerPrimary={registerPrimary}
+          registerActions={registerActions}
         />
       );
     case "track":
@@ -76,7 +77,7 @@ export const Preview = memo(function Preview({
           tracks={item.tracks}
           onClose={onClose}
           onBack={onBack}
-          registerPrimary={registerPrimary}
+          registerActions={registerActions}
         />
       );
     case "playlist":
@@ -85,7 +86,7 @@ export const Preview = memo(function Preview({
           playlist={item.playlist}
           onClose={onClose}
           onBack={onBack}
-          registerPrimary={registerPrimary}
+          registerActions={registerActions}
         />
       );
     case "command":
@@ -96,78 +97,83 @@ export const Preview = memo(function Preview({
           context={context}
           onClose={onClose}
           onBack={onBack}
-          registerPrimary={registerPrimary}
+          registerActions={registerActions}
         />
       );
     case "action":
-      return <ActionPreview item={item} onBack={onBack} registerPrimary={registerPrimary} />;
+      return <ActionPreview item={item} onBack={onBack} registerActions={registerActions} />;
     default:
       return null;
   }
 });
 
+function NowProgress({ durationMs }: { readonly durationMs: number }) {
+  const position = usePlayerPosition();
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <ProgressBar
+        percent={Math.min(100, (position / Math.max(1, durationMs)) * 100)}
+        label="Position"
+        className="h-1 [&>div]:bg-text"
+      />
+      <div className="flex justify-between font-mono text-xs/xs text-text-muted">
+        <span>{formatDuration(position)}</span>
+        <span>{formatDuration(durationMs)}</span>
+      </div>
+    </div>
+  );
+}
+
 function NowPreview({
   track,
   onClose,
   onBack,
-  registerPrimary,
+  registerActions,
 }: PreviewProps & { readonly track: Track }) {
   const player = usePlayer();
-  const position = usePlayerPosition();
   const ui = useUi();
   const playing = player.status === "playing";
-  const upNext = player.queue.slice(player.index + 1, player.index + 4);
-
-  usePrimary(registerPrimary, () => perform(player.togglePlay()));
+  const upNext = player.queue.slice(player.index + 1, player.index + 3);
 
   return (
     <PreviewFrame onBack={onBack}>
       <Artwork url={track.artUrl} seed={track.albumId} className={previewArt} />
       <PreviewTitle title={track.title} meta={`${track.artist} · ${track.album}`} />
-      <div className="flex flex-col gap-1.5">
-        <ProgressBar
-          percent={Math.min(100, (position / Math.max(1, player.durationMs)) * 100)}
-          label="Position"
-          className="h-1 [&>div]:bg-text"
-        />
-        <div className="flex justify-between font-mono text-xs/xs text-text-muted">
-          <span>{formatDuration(position)}</span>
-          <span>{formatDuration(player.durationMs)}</span>
-        </div>
-      </div>
+      <NowProgress durationMs={player.durationMs} />
       {upNext.length === 0 ? null : (
-        <div className="flex flex-col gap-1.5">
-          <span className="font-sans text-xs/xs font-semibold text-text-muted">Up next</span>
-          <span className="font-sans text-sm/xs text-text">
-            {upNext.map((next) => next.title).join(" · ")}
-          </span>
+        <div className="flex flex-col">
+          <span className="pb-1.5 font-sans text-xs/xs font-semibold text-text-muted">Up next</span>
+          {upNext.map((next) => (
+            <div
+              key={next.itemId}
+              className="flex h-7.5 items-center gap-2.5 border-t border-border"
+            >
+              <span className="grow truncate font-sans text-sm/xs text-text">{next.title}</span>
+              <span className="max-w-1/2 shrink-0 truncate font-sans text-sm/xs text-text-muted">
+                {next.artist}
+              </span>
+            </div>
+          ))}
         </div>
       )}
-      <div className="flex gap-2">
-        <Button
-          variant="solid"
-          size="sm"
-          className="pl-3"
-          onClick={() => perform(player.togglePlay())}
-        >
-          {playing ? (
-            <PauseIcon fill="currentColor" strokeWidth={0} />
-          ) : (
-            <PlayIcon fill="currentColor" strokeWidth={0} />
-          )}
-          {playing ? "Pause" : "Resume"}
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            onClose();
-            ui.setNowPlaying("queue");
-          }}
-        >
-          Open queue
-        </Button>
-      </div>
+      <PreviewActions
+        registerActions={registerActions}
+        actions={{
+          enter: {
+            label: playing ? "Pause" : "Resume",
+            icon: playing ? <PauseIcon fill="currentColor" strokeWidth={0} /> : playIcon,
+            run: () => perform(player.togglePlay()),
+          },
+          "mod+enter": {
+            label: "Open queue",
+            run: () => {
+              onClose();
+              ui.setNowPlaying("queue");
+            },
+          },
+        }}
+      />
     </PreviewFrame>
   );
 }
@@ -176,7 +182,7 @@ function AlbumPreview({
   album,
   onClose,
   onBack,
-  registerPrimary,
+  registerActions,
 }: PreviewProps & { readonly album: Album }) {
   const detail = useRead("albums.get", { albumId: album.id });
   const playAlbum = usePlayAlbum();
@@ -188,16 +194,17 @@ function AlbumPreview({
     void playAlbum(album.id, shuffle);
   };
 
-  usePrimary(registerPrimary, () => play(false));
+  const open = () => {
+    onClose();
+    void navigate({ to: "/albums/$albumId", params: { albumId: album.id } });
+  };
 
   return (
     <PreviewFrame onBack={onBack}>
       <button
         type="button"
-        onClick={() => {
-          onClose();
-          void navigate({ to: "/albums/$albumId", params: { albumId: album.id } });
-        }}
+        tabIndex={-1}
+        onClick={open}
         className="w-fit"
         aria-label={`Open ${album.title}`}
       >
@@ -216,7 +223,7 @@ function AlbumPreview({
       />
       {detail === undefined ? null : (
         <div className="flex flex-col">
-          {detail.tracks.slice(0, 3).map((track, index) => (
+          {detail.tracks.slice(0, 2).map((track, index) => (
             <div key={track.id} className="flex h-7.5 items-center gap-2.5 border-t border-border">
               <span className="w-4 shrink-0 font-mono text-xs/xs text-text-muted">
                 {track.trackNumber ?? index + 1}
@@ -229,23 +236,21 @@ function AlbumPreview({
           ))}
         </div>
       )}
-      <div className="flex gap-2 pt-1">
-        <Button variant="solid" size="sm" className="pl-3" onClick={() => play(false)}>
-          <PlayIcon fill="currentColor" strokeWidth={0} />
-          Play
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => play(true)}>
-          Shuffle
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={detail === undefined}
-          onClick={() => detail !== undefined && playNext(detail.tracks)}
-        >
-          Play next
-        </Button>
-      </div>
+      <PreviewActions
+        registerActions={registerActions}
+        actions={{
+          enter: { label: "Open", run: open },
+          "mod+enter": { label: "Play", icon: playIcon, run: () => play(false) },
+          "shift+enter": { label: "Shuffle", run: () => play(true) },
+          "alt+enter": {
+            label: "Play next",
+            disabled: detail === undefined,
+            run: () => {
+              if (detail !== undefined) playNext(detail.tracks);
+            },
+          },
+        }}
+      />
     </PreviewFrame>
   );
 }
@@ -254,55 +259,34 @@ function ArtistPreview({
   artist,
   onClose,
   onBack,
-  registerPrimary,
+  registerActions,
 }: PreviewProps & { readonly artist: Artist }) {
   const playArtist = usePlayArtist();
   const navigate = useNavigate();
 
-  usePrimary(registerPrimary, () => {
+  const play = (shuffle: boolean) => {
     onClose();
-    void playArtist(artist.id);
-  });
+    void playArtist(artist.id, shuffle);
+  };
 
   return (
     <PreviewFrame onBack={onBack}>
       <Artwork url={artist.artUrl} seed={artist.id} round className="size-37" />
       <PreviewTitle title={artist.name} meta={`Artist · ${plural(artist.albumCount, "album")}`} />
-      <div className="flex gap-2">
-        <Button
-          variant="solid"
-          size="sm"
-          className="pl-3"
-          onClick={() => {
-            onClose();
-            void playArtist(artist.id);
-          }}
-        >
-          <PlayIcon fill="currentColor" strokeWidth={0} />
-          Play
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            onClose();
-            void playArtist(artist.id, true);
-          }}
-        >
-          <ShuffleIcon />
-          Shuffle
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            onClose();
-            void navigate({ to: "/artists/$artistId", params: { artistId: artist.id } });
-          }}
-        >
-          Open
-        </Button>
-      </div>
+      <PreviewActions
+        registerActions={registerActions}
+        actions={{
+          enter: {
+            label: "Open",
+            run: () => {
+              onClose();
+              void navigate({ to: "/artists/$artistId", params: { artistId: artist.id } });
+            },
+          },
+          "mod+enter": { label: "Play", icon: playIcon, run: () => play(false) },
+          "shift+enter": { label: "Shuffle", run: () => play(true) },
+        }}
+      />
     </PreviewFrame>
   );
 }
@@ -312,7 +296,7 @@ function TrackPreview({
   tracks,
   onClose,
   onBack,
-  registerPrimary,
+  registerActions,
 }: PreviewProps & { readonly track: Track; readonly tracks: ReadonlyArray<Track> }) {
   const play = usePlayTracks();
   const { playNext, addToQueue } = useQueueActions();
@@ -322,8 +306,6 @@ function TrackPreview({
     void play(tracks, { index: Math.max(0, tracks.indexOf(track)) });
   };
 
-  usePrimary(registerPrimary, start);
-
   return (
     <PreviewFrame onBack={onBack}>
       <Artwork url={track.artUrl} seed={track.albumId} className={previewArt} />
@@ -331,19 +313,14 @@ function TrackPreview({
         title={track.title}
         meta={`${track.artist} · ${track.album} · ${formatDuration(track.durationMs)}`}
       />
-      <div className="flex flex-wrap gap-2">
-        <Button variant="solid" size="sm" className="pl-3" onClick={start}>
-          <PlayIcon fill="currentColor" strokeWidth={0} />
-          Play
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => playNext([track])}>
-          <SkipForwardIcon />
-          Play next
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => addToQueue([track])}>
-          Add to queue
-        </Button>
-      </div>
+      <PreviewActions
+        registerActions={registerActions}
+        actions={{
+          enter: { label: "Play", icon: playIcon, run: start },
+          "shift+enter": { label: "Add to queue", run: () => addToQueue([track]) },
+          "alt+enter": { label: "Play next", run: () => playNext([track]) },
+        }}
+      />
     </PreviewFrame>
   );
 }
@@ -352,7 +329,7 @@ function PlaylistPreview({
   playlist,
   onClose,
   onBack,
-  registerPrimary,
+  registerActions,
 }: PreviewProps & { readonly playlist: Playlist }) {
   const navigate = useNavigate();
   const detail = useRead("playlists.get", { playlistId: playlist.id });
@@ -363,7 +340,12 @@ function PlaylistPreview({
     void navigate({ to: "/playlists/$playlistId", params: { playlistId: playlist.id } });
   };
 
-  usePrimary(registerPrimary, open);
+  const entries = detail === undefined ? [] : playableTracks(detail.items);
+
+  const start = (shuffle: boolean) => {
+    onClose();
+    void play(entries, { shuffle });
+  };
 
   return (
     <PreviewFrame onBack={onBack}>
@@ -372,24 +354,23 @@ function PlaylistPreview({
         title={playlist.name}
         meta={`Playlist · ${plural(playlist.trackCount, "song")}${playlist.trackCount > 0 ? ` · ${formatTotal(playlist.durationMs)}` : ""}`}
       />
-      <div className="flex gap-2">
-        <Button
-          variant="solid"
-          size="sm"
-          className="pl-3"
-          disabled={detail === undefined || detail.items.length === 0}
-          onClick={() => {
-            onClose();
-            void play(playableTracks(detail?.items ?? []));
-          }}
-        >
-          <PlayIcon fill="currentColor" strokeWidth={0} />
-          Play
-        </Button>
-        <Button variant="secondary" size="sm" onClick={open}>
-          Open playlist
-        </Button>
-      </div>
+      <PreviewActions
+        registerActions={registerActions}
+        actions={{
+          enter: { label: "Open", run: open },
+          "mod+enter": {
+            label: "Play",
+            icon: playIcon,
+            disabled: entries.length === 0,
+            run: () => start(false),
+          },
+          "shift+enter": {
+            label: "Shuffle",
+            disabled: entries.length === 0,
+            run: () => start(true),
+          },
+        }}
+      />
     </PreviewFrame>
   );
 }
@@ -397,21 +378,18 @@ function PlaylistPreview({
 function ActionPreview({
   item,
   onBack,
-  registerPrimary,
+  registerActions,
 }: Omit<PreviewProps, "onClose"> & { readonly item: Extract<Item, { kind: "action" }> }) {
-  usePrimary(registerPrimary, item.run);
-
   return (
     <PreviewFrame onBack={onBack}>
       <span className="flex size-12 items-center justify-center rounded-lg bg-surface">
         <item.icon aria-hidden className="size-6" />
       </span>
       <PreviewTitle title={item.title} meta={item.detail} />
-      <div className="flex gap-2">
-        <Button variant="solid" size="sm" onClick={item.run}>
-          {item.label}
-        </Button>
-      </div>
+      <PreviewActions
+        registerActions={registerActions}
+        actions={{ enter: { label: item.label, run: item.run } }}
+      />
     </PreviewFrame>
   );
 }

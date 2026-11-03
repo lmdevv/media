@@ -9,7 +9,6 @@ import {
   actionSections,
   editField,
   formArgs,
-  actionTitle,
   formDefaults,
   jobLine,
   missingMessage,
@@ -228,23 +227,6 @@ describe("result route", () => {
     expect(parseResultRoute({ kind: "job" })).toBeNull();
     expect(parseResultRoute({ kind: "playlist", playlistId: "" })).toBeNull();
     expect(parseResultRoute({ kind: "launch" })).toBeNull();
-  });
-});
-
-describe("actionTitle", () => {
-  it("keeps a summary's first clause, before the CLI details", () => {
-    expect(actionTitle(commands["queue.add"].summary)).toBe("Add songs to the queue");
-    expect(actionTitle(commands["jam.join"].summary)).toBe("Join a Jam by its code or link");
-    expect(actionTitle(commands["libraries.delete"].summary)).toBe(
-      "Remove a library folder from the index",
-    );
-    expect(actionTitle(commands["libraries.scan"].summary)).toBe("Rescan a library folder");
-  });
-
-  it("titles every offered command with words", () => {
-    for (const { name } of offeredCommands({ role: "owner", playing: true })) {
-      expect(actionTitle(commands[name].summary).length).toBeGreaterThan(3);
-    }
   });
 });
 

@@ -443,11 +443,42 @@ test("the command menu runs a registry command with arguments", async ({ page })
   await page.keyboard.type("shuffle on or off");
   await menu.getByRole("option", { name: /Turn shuffle on or off/ }).click();
   await expect(menu.getByRole("heading", { name: "Turn shuffle on or off" })).toBeVisible();
-  await expect(menu.getByText("music playback shuffle").first()).toBeVisible();
   await menu.getByRole("button", { name: "Run" }).click();
 
   await expect(menu).toBeHidden();
   await expect(shuffle).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the command menu opens an album with Enter and plays it with the command key", async ({
+  page,
+}) => {
+  await signIn(page);
+  const menu = page.getByRole("dialog", { name: "Command menu" });
+  const album = menu.getByRole("option", { name: /^Blue Lines\s*Album/ });
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await menu.getByRole("combobox").fill("blue lines");
+  await album.hover({ position: { x: 4, y: 4 } });
+  await album.hover();
+  await expect(album).toHaveAttribute("aria-selected", "true");
+  await expect(menu.getByRole("button", { name: "Open", exact: true })).toBeVisible();
+  await menu.getByRole("combobox").press("Enter");
+
+  await expect(menu).toBeHidden();
+  await expect(page).toHaveURL(/\/albums\//);
+  await expect(page.getByRole("heading", { name: "Blue Lines" }).first()).toBeVisible();
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await menu.getByRole("combobox").fill("blue lines");
+  await album.hover({ position: { x: 4, y: 4 } });
+  await album.hover();
+  await expect(album).toHaveAttribute("aria-selected", "true");
+  await menu.getByRole("combobox").press("ControlOrMeta+Enter");
+
+  await expect(menu).toBeHidden();
+  const bar = page.getByRole("region", { name: "Player" });
+  await expect(bar.getByRole("button", { name: "Safe From Harm", exact: true })).toBeVisible();
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
 });
 
 test("an admin invites someone who joins with the link", async ({ page, browser }) => {

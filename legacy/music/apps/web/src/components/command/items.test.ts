@@ -4,7 +4,7 @@ import { Schema } from "effect";
 import { HeartIcon } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
-import { browseItems, cliOf, primaryLabel, searchItems, titleOf } from "./items";
+import { browseItems, groupOf, searchItems, titleOf } from "./items";
 import type { Item } from "./items";
 
 const track = (id: string, title: string): Track =>
@@ -77,15 +77,15 @@ const command = (name: "playlists.create"): Item => ({
 
 const ids = (items: ReadonlyArray<Item>) => items.map((item) => item.id);
 
-describe("cliOf", () => {
-  it("spells a command the way the CLI takes it", () => {
-    expect(cliOf("playlists.create")).toBe("music playlists create");
-    expect(cliOf("search")).toBe("music search");
+describe("groupOf", () => {
+  it("names a command's group as a word", () => {
+    expect(groupOf("playlists.create")).toBe("Playlists");
+    expect(groupOf("people.role")).toBe("People");
   });
 });
 
-describe("titleOf and primaryLabel", () => {
-  it("names each kind of row and what Enter does to it", () => {
+describe("titleOf", () => {
+  it("names each kind of row", () => {
     const song = track("t1", "Sinnerman");
 
     expect(titleOf({ kind: "now", id: "now", section: "Now playing", track: song })).toBe(
@@ -94,12 +94,13 @@ describe("titleOf and primaryLabel", () => {
     expect(titleOf({ kind: "artist", id: "ar", section: "", artist: artist("ar1", "Nina") })).toBe(
       "Nina",
     );
-    expect(primaryLabel({ kind: "now", id: "now", section: "", track: song }, true)).toBe("Pause");
-    expect(primaryLabel({ kind: "now", id: "now", section: "", track: song }, false)).toBe(
-      "Resume",
-    );
-    expect(primaryLabel(command("playlists.create"), false)).toBe("Run");
-    expect(primaryLabel(action("a", "Shuffle liked songs", ""), false)).toBe("Open");
+    expect(titleOf(action("a", "Shuffle liked songs", ""))).toBe("Shuffle liked songs");
+  });
+
+  it("titles a command without the CLI details in its summary", () => {
+    expect(
+      titleOf({ kind: "command", id: "cmd", section: "", name: "queue.add", fields: [] }),
+    ).toBe("Add songs to the queue");
   });
 });
 
@@ -194,9 +195,27 @@ describe("searchItems", () => {
     expect(ids(items)).toEqual(["devices", "go-playlists", "new-playlist", "cmd-playlists.create"]);
   });
 
+  it("finds an action by its hidden keywords without showing them", () => {
+    const songs: Item = {
+      kind: "action",
+      id: "go-tracks.list",
+      section: "Go to",
+      title: "Songs",
+      detail: "Open Songs",
+      keywords: "tracks.list",
+      icon: HeartIcon,
+      label: "Open",
+      run: () => undefined,
+    };
+
+    expect(
+      ids(searchItems({ query: "tracks", results: undefined, playlists: [], actions: [songs] })),
+    ).toEqual(["go-tracks.list"]);
+  });
+
   it("needs every word of the query somewhere in the title or keywords", () => {
     expect(
-      ids(searchItems({ query: "music playlists", results: undefined, playlists: [], actions })),
+      ids(searchItems({ query: "playlists create", results: undefined, playlists: [], actions })),
     ).toEqual(["cmd-playlists.create"]);
     expect(
       ids(searchItems({ query: "new speaker", results: undefined, playlists: [], actions })),

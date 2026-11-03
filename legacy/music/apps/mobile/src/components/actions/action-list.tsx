@@ -1,3 +1,4 @@
+import { commandTitle } from "@music/commands/forms";
 import { commands } from "@music/commands/registry";
 import { router } from "expo-router";
 import { Command } from "lucide-react-native";
@@ -9,7 +10,7 @@ import { Notice } from "@/components/ui/notice";
 import { Page } from "@/components/ui/page";
 import { Row, RowChevron } from "@/components/ui/row";
 import { SectionHeader } from "@/components/ui/section-header";
-import { actionSections, actionTitle } from "@/lib/actions";
+import { actionSections } from "@/lib/actions";
 import type { ActionSection } from "@/lib/actions";
 
 import { CommandGlyph } from "./command-glyph";
@@ -62,7 +63,7 @@ function SectionGroup({
       {actions.map(({ name }) => (
         <Row
           key={name}
-          title={actionTitle(commands[name].summary)}
+          title={commandTitle(commands[name].summary)}
           subtitle={name}
           leading={{ kind: "icon", icon: GROUP_ICON[commands[name].group], tone: "muted" }}
           trailing={<RowChevron />}

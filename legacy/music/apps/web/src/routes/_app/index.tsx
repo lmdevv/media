@@ -201,24 +201,14 @@ function EmptyLibrary({ admin }: { readonly admin: boolean }) {
         </p>
       </div>
       {admin ? (
-        <>
-          <Link
-            to="/settings/libraries"
-            search={{ add: "1" }}
-            className={buttonClassName({ variant: "solid", className: "pl-4" })}
-          >
-            <FolderIcon aria-hidden />
-            Add a library folder
-          </Link>
-          <div className="flex items-center gap-3 rounded-md border border-border px-3.5 py-2.5">
-            <span className="font-mono text-xs/xs tracking-mono text-text-muted">
-              OR FROM A TERMINAL
-            </span>
-            <code className="font-mono text-sm/xs text-text">
-              music libraries create --name Music --path /music
-            </code>
-          </div>
-        </>
+        <Link
+          to="/settings/libraries"
+          search={{ add: "1" }}
+          className={buttonClassName({ variant: "solid", className: "pl-4" })}
+        >
+          <FolderIcon aria-hidden />
+          Add a library folder
+        </Link>
       ) : null}
     </div>
   );

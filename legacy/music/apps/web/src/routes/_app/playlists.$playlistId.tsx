@@ -386,10 +386,6 @@ function EmptyPlaylist({ playlist }: { readonly playlist: Playlist }) {
         start={<SearchIcon aria-hidden />}
       />
       {deferred.length > 0 ? <AddResults playlist={playlist} query={deferred} /> : null}
-      <div className="flex w-fit max-w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border px-3.5 py-2.5">
-        <span className="font-mono text-xs/xs tracking-mono text-text-muted">OR ASK AN AGENT</span>
-        <code className="font-mono text-sm/xs text-text">music playlists add --help</code>
-      </div>
     </section>
   );
 }

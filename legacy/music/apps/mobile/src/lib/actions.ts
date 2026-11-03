@@ -38,14 +38,6 @@ const SECTION_OF = {
   server: "Administration",
 } as const satisfies Record<CommandGroup, Section>;
 
-/**
- * A command's short title on a phone: its summary up to the first colon, semicolon, or
- * parenthesis, where the registry starts explaining CLI flags. `Add songs to the queue: --next …`
- * reads `Add songs to the queue`; the whole summary stays on the command's own page.
- */
-export const actionTitle = (summary: string): string =>
-  summary.split(/[:;]| \(/u)[0]?.trim() ?? summary;
-
 /** Whether every word of `query` appears in `text`, ignoring case and accents. */
 export const matchesQuery = (text: string, query: string): boolean => {
   const haystack = foldSearchText(text);

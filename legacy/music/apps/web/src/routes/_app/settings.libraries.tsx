@@ -24,7 +24,7 @@ import type { FormEvent, ReactNode } from "react";
 
 import { ProgressBar } from "@/components/auth/scan-progress";
 import { jobPercent } from "@/lib/job-progress";
-import { AdminOnly, SettingsHeader, TerminalHint } from "@/components/settings/settings-ui";
+import { AdminOnly, SettingsHeader } from "@/components/settings/settings-ui";
 import { describeFailure, useAction } from "@/lib/action";
 import { formatAgo, formatCount } from "@/lib/format";
 
@@ -92,10 +92,6 @@ function Libraries({ me }: { readonly me: User }) {
         </div>
       )}
       <RemoteLyricsSetting />
-      <TerminalHint
-        label="From a terminal"
-        command="music libraries list · music libraries scan --help"
-      />
       <AddLibraryDialog
         open={adding}
         onOpenChange={setAdding}

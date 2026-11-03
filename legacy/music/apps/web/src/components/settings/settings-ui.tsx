@@ -27,22 +27,6 @@ export function SettingsHeader({
   );
 }
 
-/** A mono label beside a terminal command, used for CLI hints. */
-export function TerminalHint({
-  label,
-  command,
-}: {
-  readonly label: string;
-  readonly command: string;
-}) {
-  return (
-    <div className="flex w-fit max-w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-surface px-3.5 py-2.5">
-      <span className="font-mono text-xs/xs tracking-mono text-text-muted uppercase">{label}</span>
-      <code className="font-mono text-sm/xs break-all text-text">{command}</code>
-    </div>
-  );
-}
-
 /** A one-time link to hand over (invite, password reset) with a copy button. */
 export function SecretLink({ link, testId }: { readonly link: string; readonly testId: string }) {
   const [copied, setCopied] = useState(false);

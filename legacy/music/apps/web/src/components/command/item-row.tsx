@@ -25,7 +25,7 @@ import type { MouseEvent, ReactNode } from "react";
 import { Artwork } from "@/components/library/artwork";
 import { formatDuration, plural } from "@/lib/format";
 
-import { cliOf, titleOf } from "./items";
+import { groupOf, titleOf } from "./items";
 import type { Item } from "./items";
 
 const GROUP_ICONS: Readonly<Record<CommandGroup, LucideIcon>> = {
@@ -131,7 +131,7 @@ export const ItemRow = memo(function ItemRow({
       case "playlist":
         return `Playlist · ${plural(item.playlist.trackCount, "song")}`;
       case "command":
-        return cliOf(item.name);
+        return groupOf(item.name);
       case "action":
         return null;
     }

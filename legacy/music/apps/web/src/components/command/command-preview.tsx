@@ -1,6 +1,6 @@
 import { argsDecoder } from "@music/commands/codec";
 import type { JobId } from "@music/commands/ids";
-import { missingFields, outcomeOf, rawArgs } from "@music/commands/forms";
+import { commandTitle, missingFields, outcomeOf, rawArgs } from "@music/commands/forms";
 import type { FieldSpec, FormValues } from "@music/commands/forms";
 import { capabilityLabel } from "@music/commands/permissions";
 import { commands } from "@music/commands/registry";
@@ -25,9 +25,9 @@ import { formatCount } from "@/lib/format";
 import { ArgsForm } from "./args-form";
 import type { MenuContext } from "./args-form";
 import { useCommandDefaults } from "./command-defaults";
-import { cliOf } from "./items";
+import { groupOf } from "./items";
 import { jobMeta } from "./outcome";
-import { PreviewFrame, PreviewTitle, usePrimary } from "./preview-frame";
+import { PreviewActions, PreviewFrame, PreviewTitle } from "./preview-frame";
 import type { PreviewProps } from "./preview-frame";
 
 const listFormat = new Intl.ListFormat("en", { type: "conjunction" });
@@ -55,7 +55,7 @@ type CommandPreviewProps = PreviewProps & {
 };
 
 /**
- * A registry command's preview: its form, the same command for a terminal, and Run. After a run
+ * A registry command's preview: its group, title, form, and Run. After a run
  * it shows the job, key, or invite the command returned, opens a new playlist, or closes the menu.
  */
 export function CommandPreview(props: CommandPreviewProps) {
@@ -78,7 +78,7 @@ function CommandForm({
   context,
   onClose,
   onBack,
-  registerPrimary,
+  registerActions,
   positionMs,
 }: CommandPreviewProps & { readonly positionMs: number | null }) {
   const convex = useConvex();
@@ -118,7 +118,7 @@ function CommandForm({
 
       switch (result.kind) {
         case "job":
-          setOutcome({ kind: "job", jobId: result.jobId, title: command.summary });
+          setOutcome({ kind: "job", jobId: result.jobId, title: commandTitle(command.summary) });
           break;
         case "key":
           setOutcome({ kind: "key", key: result.key });
@@ -141,7 +141,7 @@ function CommandForm({
           onClose();
 
           if (command.group !== "playback" && command.group !== "queue")
-            toast.success(`Done: ${command.summary}`);
+            toast.success(`Done: ${commandTitle(command.summary)}`);
 
           break;
       }
@@ -152,8 +152,6 @@ function CommandForm({
     }
   };
 
-  usePrimary(registerPrimary, () => void run());
-
   if (outcome !== null)
     return <OutcomePreview outcome={outcome} onClose={onClose} onBack={onBack} />;
 
@@ -161,11 +159,11 @@ function CommandForm({
     <PreviewFrame onBack={onBack}>
       <div className="flex flex-col gap-1">
         <span className="font-mono text-xs/xs tracking-mono text-text-muted uppercase">
-          {command.group}
+          {groupOf(name)}
           {command.access === "user" ? "" : ` · ${capabilityLabel(command.access)}`}
         </span>
         <h2 className="font-sans text-xl/xl font-heavy tracking-tight text-text">
-          {command.summary}
+          {commandTitle(command.summary)}
         </h2>
       </div>
       {fields.length === 0 ? null : (
@@ -189,17 +187,12 @@ function CommandForm({
           {error}
         </p>
       )}
-      <div className="flex flex-col gap-1.5 rounded-md bg-surface px-3.5 py-3">
-        <span className="font-sans text-xs/xs font-semibold text-text-muted">
-          Same command in a terminal
-        </span>
-        <code className="font-mono text-sm/xs text-text">{cliOf(name)}</code>
-      </div>
-      <div className="flex gap-2">
-        <Button variant="solid" size="sm" pending={pending} onClick={() => void run()}>
-          {pending ? "Running…" : "Run"}
-        </Button>
-      </div>
+      <PreviewActions
+        registerActions={registerActions}
+        actions={{
+          enter: { label: pending ? "Running…" : "Run", pending, run: () => void run() },
+        }}
+      />
     </PreviewFrame>
   );
 }

@@ -1,3 +1,4 @@
+import { commandTitle } from "@music/commands/forms";
 import type { FieldSpec } from "@music/commands/forms";
 import type {
   AlbumCard as Album,
@@ -7,7 +8,7 @@ import type {
   Track,
 } from "@music/commands/models";
 import { commands } from "@music/commands/registry";
-import type { CommandName, MutationName } from "@music/commands/registry";
+import type { MutationName } from "@music/commands/registry";
 import { foldSearchText } from "@music/commands/search-text";
 import type { LucideIcon } from "lucide-react";
 
@@ -50,16 +51,22 @@ export type Item =
       readonly section: string;
       readonly title: string;
       readonly detail: string;
+      /** More words search matches, never shown, such as a screen's command name. */
+      readonly keywords?: string;
       readonly icon: LucideIcon;
       readonly shortcut?: string;
       readonly label: string;
       readonly run: () => void;
     };
 
-/** `playlists.create` → `music playlists create`, the CLI spelling of a command. */
-export const cliOf = (name: CommandName): string => `music ${name.split(".").join(" ")}`;
+/** A command's group as a word for people, `playlists.create` → `Playlists`. */
+export const groupOf = (name: MutationName): string => {
+  const { group } = commands[name];
 
-/** The row's main line: the record's name, the command's summary, or the action's title. */
+  return `${group.charAt(0).toUpperCase()}${group.slice(1)}`;
+};
+
+/** The row's main line: the record's name, the command's short title, or the action's title. */
 export const titleOf = (item: Item): string => {
   switch (item.kind) {
     case "now":
@@ -72,7 +79,7 @@ export const titleOf = (item: Item): string => {
     case "playlist":
       return item.playlist.name;
     case "command":
-      return commands[item.name].summary;
+      return commandTitle(commands[item.name].summary);
     case "action":
       return item.title;
     default:
@@ -83,9 +90,9 @@ export const titleOf = (item: Item): string => {
 const keywordsOf = (item: Item): string => {
   switch (item.kind) {
     case "command":
-      return `${item.name} ${commands[item.name].group} ${cliOf(item.name)}`;
+      return `${item.name} ${commands[item.name].group} ${commands[item.name].summary}`;
     case "action":
-      return item.detail;
+      return `${item.detail} ${item.keywords ?? ""}`;
     case "now":
     case "album":
     case "artist":
@@ -112,32 +119,6 @@ const score = (item: Item, query: string): number => {
   if (title.startsWith(query.toLowerCase())) return 3;
 
   return title.split(/\s+/).some((word) => words.some((part) => word.startsWith(part))) ? 2 : 1;
-};
-
-/**
- * What Enter does to the row, as the footer names it.
- *
- * @param playing - Whether something is playing now, which turns "Resume" into "Pause".
- */
-export const primaryLabel = (item: Item, playing: boolean): string => {
-  switch (item.kind) {
-    case "now":
-      return playing ? "Pause" : "Resume";
-    case "album":
-      return "Play album";
-    case "artist":
-      return "Play artist";
-    case "track":
-      return "Play";
-    case "playlist":
-      return "Open playlist";
-    case "command":
-      return "Run";
-    case "action":
-      return item.label;
-    default:
-      return "Open";
-  }
 };
 
 /**

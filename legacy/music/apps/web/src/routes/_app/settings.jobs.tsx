@@ -9,7 +9,7 @@ import { useState } from "react";
 
 import { ProgressBar } from "@/components/auth/scan-progress";
 import { jobPercent } from "@/lib/job-progress";
-import { SettingsHeader, TerminalHint } from "@/components/settings/settings-ui";
+import { SettingsHeader } from "@/components/settings/settings-ui";
 import { useAction } from "@/lib/action";
 import { formatAgo, formatCount } from "@/lib/format";
 
@@ -62,7 +62,6 @@ function JobsSettings() {
           ))}
         </div>
       )}
-      <TerminalHint label="From a terminal" command="music jobs list · music jobs cancel --help" />
     </div>
   );
 }

@@ -2,7 +2,14 @@ import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { argsDecoder } from "./codec";
-import { fieldsOf, missingFields, offeredCommands, outcomeOf, rawArgs } from "./forms";
+import {
+  commandTitle,
+  fieldsOf,
+  missingFields,
+  offeredCommands,
+  outcomeOf,
+  rawArgs,
+} from "./forms";
 import type { Role } from "./models";
 import { commands, isCommandName } from "./registry";
 
@@ -209,5 +216,32 @@ describe("outcomeOf", () => {
     const result = Schema.decodeSync(commands["playback.pause"].result)({ ok: true });
 
     expect(outcomeOf(result)).toEqual({ kind: "none" });
+  });
+});
+
+describe("commandTitle", () => {
+  it("keeps a summary's first clause, before the CLI details", () => {
+    expect(commandTitle(commands["queue.add"].summary)).toBe("Add songs to the queue");
+    expect(commandTitle(commands["jam.join"].summary)).toBe("Join a Jam by its code or link");
+    expect(commandTitle(commands["libraries.delete"].summary)).toBe(
+      "Remove a library folder from the index",
+    );
+    expect(commandTitle(commands["libraries.scan"].summary)).toBe("Rescan a library folder");
+  });
+
+  it("drops asides without cutting the sentence short", () => {
+    expect(commandTitle(commands["libraries.update"].summary)).toBe(
+      "Rename a library folder, or change who can listen to it",
+    );
+    expect(commandTitle(commands["jam.approve"].summary)).toBe(
+      "Let someone waiting into your Jam, or turn them away",
+    );
+  });
+
+  it("titles every offered command with words", () => {
+    for (const { name } of offeredCommands({ role: "owner", playing: true })) {
+      expect(commandTitle(commands[name].summary).length).toBeGreaterThan(3);
+      expect(commandTitle(commands[name].summary)).not.toContain("--");
+    }
   });
 });
