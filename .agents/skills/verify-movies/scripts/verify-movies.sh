@@ -331,11 +331,13 @@ cmd_doctor() {
   check "the entrypoint deployed this image's functions" \
     "[[ \$(docker exec $m cat /data/version) == \$(docker exec $m sh -c 'echo \$(node -p \"require(\\\"/app/backend/package.json\\\").version\")+\$(cat /app/backend/.functions-hash)') ]]"
   check "browser host answers" "browser url"
-  local network browser_pid
+  local network browser_pid browser_ns host_ns
   read -r network browser_pid <<<"$(browser network 2>/dev/null || true)"
+  browser_ns="$( [[ -n "$browser_pid" ]] && readlink "/proc/$browser_pid/ns/net" 2>/dev/null || true)"
+  host_ns="$(readlink /proc/self/ns/net 2>/dev/null || true)"
   case "$network" in
     isolated) check "the browser has its own network namespace" \
-      "[[ -n '$browser_pid' && \$(readlink /proc/$browser_pid/ns/net) != \$(readlink /proc/self/ns/net) ]]" ;;
+      "[[ -n '$browser_ns' && -n '$host_ns' && '$browser_ns' != '$host_ns' ]]" ;;
     host) echo "info  the browser shares the host network, where Docker network changes can fail its requests" ;;
     *) echo "FAIL  the browser host does not report its network"; failed=1 ;;
   esac

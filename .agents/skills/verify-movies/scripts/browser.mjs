@@ -24,6 +24,9 @@ const OWNER = { name: "Lucía", email: "admin@movies.local", password: "password
 // holds at most 107 bytes, which a long TMPDIR and run name can pass.
 const SOCKETS = { control: "browser.sock", web: "web.sock", convex: "convex.sock", proxy: "proxy.sock" };
 const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
+// A relay must carry each direction's end on its own: a client may finish its request and still
+// wait for the response.
+const HALF_OPEN = { allowHalfOpen: true };
 
 // Runs in every page before the app: records each media element that plays, including detached
 // ones, so `video` reports real playback rather than what the player's buttons show.
@@ -177,7 +180,8 @@ async function serve(options) {
 // HTTPS to the internet for the Cast SDK, TMDB images, and trailers.
 async function isolate(base, convex) {
   if (process.platform !== "linux") throw new Error("MOVIES_VERIFY_BROWSER_NETWORK=isolated needs Linux");
-  const toHost = (port) => createTcpServer((client) => pipe(client, connect(port, "127.0.0.1")));
+  const toHost = (port) =>
+    createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, port, host: "127.0.0.1" })));
   const proxy = createServer((request, response) => {
     response.writeHead(501).end("this proxy carries HTTPS only\n");
   });
@@ -232,7 +236,7 @@ async function isolate(base, convex) {
 
 async function serveInside(options) {
   process.chdir(options.state);
-  const toSocket = (socket) => createTcpServer((client) => pipe(client, connect(socket)));
+  const toSocket = (socket) => createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, path: socket })));
   await listen(toSocket(SOCKETS.web), portOf(options.base, "base"), "127.0.0.1");
   await listen(toSocket(SOCKETS.convex), portOf(options.convex, "convex"), "127.0.0.1");
   const proxy = await listen(toSocket(SOCKETS.proxy), 0, "127.0.0.1");
