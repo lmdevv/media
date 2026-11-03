@@ -7,10 +7,11 @@
 //   node browser.mjs serve --state <dir> --base <url> --convex <url>
 //   node browser.mjs <command> --state <dir> [flags]
 //
-// On Linux the browser runs in a private network namespace (see `isolate`), because Chromium
-// cancels its queued requests whenever any host interface gains or loses an address, which every
-// Docker container start and stop does. MOVIES_VERIFY_BROWSER_NETWORK=host keeps it on the host.
-import { spawn } from "node:child_process";
+// Where the host allows it, the browser runs in a private network namespace (see `isolate`),
+// because Chromium cancels its queued requests whenever any host interface gains or loses an
+// address, which every Docker container start and stop does. MOVIES_VERIFY_BROWSER_NETWORK picks
+// `auto` (the default: isolated when possible), `isolated` (or fail), or `host`.
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import { connect, createServer as createTcpServer } from "node:net";
@@ -24,6 +25,8 @@ const OWNER = { name: "Lucía", email: "admin@movies.local", password: "password
 // holds at most 107 bytes, which a long TMPDIR and run name can pass.
 const SOCKETS = { control: "browser.sock", web: "web.sock", convex: "convex.sock", proxy: "proxy.sock" };
 const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
+const PRIVATE_NETWORK = fileURLToPath(new URL("../../../../scripts/private-network.sh", import.meta.url));
+const NETWORKS = ["auto", "isolated", "host"];
 // A relay must carry each direction's end on its own: a client may finish its request and still
 // wait for the response.
 const HALF_OPEN = { allowHalfOpen: true };
@@ -162,24 +165,38 @@ function portOf(url, name) {
   return port;
 }
 
+// Why this host can't give the browser a private network namespace, or null when it can.
+function namespaceUnavailable() {
+  if (process.platform !== "linux") return `${process.platform} has no network namespaces`;
+  const probe = spawnSync(PRIVATE_NETWORK, ["true"], { encoding: "utf8" });
+  if (probe.error) return `scripts/private-network.sh did not run (${probe.error.message})`;
+  if (probe.status === 0) return null;
+  return `scripts/private-network.sh failed (${probe.stderr.trim() || `exit ${probe.status}`})`;
+}
+
 async function serve(options) {
   if (!options.base || !options.convex) throw new Error("serve needs --base and --convex");
-  const network = process.env.MOVIES_VERIFY_BROWSER_NETWORK || (process.platform === "linux" ? "isolated" : "host");
-  if (network !== "isolated" && network !== "host") {
-    throw new Error(`MOVIES_VERIFY_BROWSER_NETWORK must be isolated or host, not "${network}"`);
+  const requested = process.env.MOVIES_VERIFY_BROWSER_NETWORK || "auto";
+  if (!NETWORKS.includes(requested)) {
+    throw new Error(`MOVIES_VERIFY_BROWSER_NETWORK must be ${NETWORKS.join(", ")}, not "${requested}"`);
+  }
+  const unavailable = requested === "host" ? "MOVIES_VERIFY_BROWSER_NETWORK=host" : namespaceUnavailable();
+  if (unavailable && requested === "isolated") {
+    throw new Error(`MOVIES_VERIFY_BROWSER_NETWORK=isolated, but ${unavailable}`);
   }
   process.chdir(options.state);
   // A host that was killed leaves its sockets behind, and a socket path that exists can't be bound.
   for (const socket of Object.values(SOCKETS)) rmSync(socket, { force: true });
-  if (network === "host") return drive(options.base, "host", []);
-  return isolate(options.base, options.convex);
+  if (!unavailable) return isolate(options.base, options.convex);
+  // verify-movies.sh shows this line at `up` and in `doctor`.
+  console.error(`browser: ${unavailable}, so the browser shares the host network, where Docker network changes can fail its requests`);
+  return drive(options.base, "host", []);
 }
 
 // Pathname Unix sockets cross network namespaces, so the relays use them. Web and Convex keep
 // their port numbers inside, so every origin stays `http://localhost:<port>`. The proxy carries
 // HTTPS to the internet for the Cast SDK, TMDB images, and trailers.
 async function isolate(base, convex) {
-  if (process.platform !== "linux") throw new Error("MOVIES_VERIFY_BROWSER_NETWORK=isolated needs Linux");
   const toHost = (port) =>
     createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, port, host: "127.0.0.1" })));
   const proxy = createServer((request, response) => {
@@ -207,7 +224,7 @@ async function isolate(base, convex) {
   // The wrapper execs down to node, so the child is the browser host itself. Its stdin is a pipe
   // from this process, which closes if this process dies, and the host then stops too.
   const host = spawn(
-    fileURLToPath(new URL("../../../../scripts/private-network.sh", import.meta.url)),
+    PRIVATE_NETWORK,
     [process.execPath, fileURLToPath(import.meta.url), "serve-inside", "--state", ".", "--base", base, "--convex", convex],
     { stdio: ["pipe", "inherit", "inherit"] },
   );
@@ -218,12 +235,7 @@ async function isolate(base, convex) {
     for (const relay of relays) relay.close();
     for (const socket of [SOCKETS.web, SOCKETS.convex, SOCKETS.proxy]) rmSync(socket, { force: true });
     if (code !== 0 && !existsSync(SOCKETS.control)) {
-      console.error(
-        "the browser host stopped before it was ready (see above). If unshare or ip failed, this " +
-          "host can't give the browser a private network namespace, and " +
-          "MOVIES_VERIFY_BROWSER_NETWORK=host runs it on the host network instead, where any Docker " +
-          "container starting or stopping can fail its requests.",
-      );
+      console.error("the browser host stopped before it was ready (see above)");
     }
     process.exit(code);
   };

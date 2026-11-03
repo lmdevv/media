@@ -159,10 +159,6 @@ The example identities must be replaced with the model and tool that actually co
   processes that stop at the first failure: `(for run in $(seq 20); do pnpm test <paths> || exit; done)`.
   Don't use Vitest's `--repeats`: `@effect/vitest` 4.0.3 counts each repeat as a finished test and
   closes a `layer(...)` early, which fails with missing files or `ECONNREFUSED`, not a product bug.
-- Chromium on this host fails requests still waiting for a connection with
-  `net::ERR_NETWORK_CHANGED` whenever any Docker container starts or stops. Run the `kit` project
-  in a private network namespace, which needs no stack:
-  `scripts/private-network.sh pnpm --filter web exec playwright test --project=kit`.
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `react-doctor`,
   `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked. `verify-movies` is this
   repo's own: it runs disposable stacks built from the checkout and from main, drives the web app,

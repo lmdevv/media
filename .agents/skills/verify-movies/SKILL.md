@@ -34,7 +34,7 @@ two runs on their own. Each side of a run owns these resources and nothing else:
 | Volumes    | `movies-verify-<run>-<side>_convex-data`, `_movies-data`, `_movies-transcode`, and its network |
 | Image      | `movies:verify-<run>`, built by `up` for the after side                                 |
 | Ports      | Two free loopback ports chosen at `up`: the web app and Convex, with `MOVIES_PUBLIC_URL` and `CONVEX_PUBLIC_URL` at `http://localhost:<port>` |
-| Network    | The browser host's own network namespace on Linux, reached through Unix sockets in the state folder (see [Network view](#network-view)) |
+| Network    | The browser host's own network namespace where the host allows it, reached through Unix sockets in the state folder (see [Network view](#network-view)) |
 | State      | `${TMPDIR:-/tmp}/movies-verify/<run>/<side>/`: ports, pids, logs, sockets, and each person's CLI config |
 | Simulator  | `movies-verify-<run>-<side>` on `darwin`, made by `ios up`                              |
 | Evidence   | `captures/verify/<run>/`, gitignored and kept after `down`                              |
@@ -55,7 +55,7 @@ that starts or stops on a bridge network does that, so another agent's `up`, `do
 container fails requests in a browser on the host with `net::ERR_NETWORK_CHANGED`: a module, a
 poster, or data goes missing from the page.
 
-On Linux the browser host therefore runs in a private user and network namespace
+Where the host allows it, the browser host therefore runs in a private user and network namespace
 (`scripts/private-network.sh` at the repo root), with the same Chromium, Node, fonts, ffmpeg, and
 files. Its loopback has only these, relayed over Unix sockets in the state folder:
 
@@ -69,17 +69,26 @@ command fails, naming the requests, when Chromium cancelled any with `net::ERR_N
 since the page's last command: open the page again before you trust it. In the namespace that
 should never happen.
 
-The namespace needs unprivileged user namespaces, util-linux's `unshare`, and iproute2's `ip`.
-When it can't be made, the browser host stops and says so; it never falls back to the host
-network on its own. `MOVIES_VERIFY_BROWSER_NETWORK=host` at `up` or `browser restart` runs the
-browser on the host network, as it does on macOS, and `doctor` then says so.
+The namespace needs Linux with unprivileged user namespaces, util-linux's `unshare`, and
+iproute2's `ip`. Some hosts lack one, such as macOS, or Ubuntu 24.04, whose AppArmor policy
+blocks unprivileged user namespaces by default. `MOVIES_VERIFY_BROWSER_NETWORK`, read at `up` and
+`browser restart`, picks what happens:
+
+| Value            | Browser network                                                              |
+| ---------------- | ---------------------------------------------------------------------------- |
+| `auto` (default) | The namespace when a quick check can make one; otherwise the host network    |
+| `isolated`       | The namespace, or the browser host stops and says why                        |
+| `host`           | The host network                                                             |
+
+On the host network, `up` and `doctor` print why, and Docker network changes elsewhere on the
+host can fail the browser's requests; the command that saw them fails rather than hide it.
 
 ## Launch
 
 Prerequisites: Docker 28 or later (image mounts), Node 24, pnpm, `pnpm install` done in this
 checkout, and ffmpeg for recordings. On NixOS the helper uses the system Chromium on its own,
-since Playwright's bundled one does not run there. On Linux the browser host also needs
-unprivileged user namespaces (see [Network view](#network-view)).
+since Playwright's bundled one does not run there. The browser gets its own network namespace
+where the host allows it (see [Network view](#network-view)).
 
 ```sh
 $S up                  # the after side: build the image from this checkout
@@ -95,7 +104,7 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/movies:main
    `deploy/compose/compose.demo.yaml`; `up` pulls it once per machine.
 3. It starts the Compose project and waits until `/api/health` reports
    `"backend":"connected"`, which needs Convex, the deployed functions, and the media service.
-4. It starts the browser host, in its own network namespace on Linux, and runs first-run setup
+4. It starts the browser host, in its own network namespace where it can, and runs first-run setup
    through the web app, as an owner does:
    the owner `admin@movies.local` (Lucía) with password `password123`, the `Movies` library at
    `/media/library/Movies` and its first scan, then the `Shows` library at
@@ -184,8 +193,7 @@ one line per check, and exits non-zero on any `FAIL`:
   functions hash.
 - The browser host answers.
 - The browser has its own network namespace: its Chromium's `/proc/<pid>/ns/net` differs from
-  the helper's. With `MOVIES_VERIFY_BROWSER_NETWORK=host`, or off Linux, an `info` line says the
-  browser shares the host network instead.
+  the helper's. When the browser shares the host network instead, an `info` line says why.
 - Lucía's CLI is signed in.
 - For the after side, the image matches the checkout.
 

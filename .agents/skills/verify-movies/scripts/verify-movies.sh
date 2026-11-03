@@ -127,7 +127,10 @@ start_browser() {
     --base "$(url)" --convex "$(convex_url)" > "$state/browser.log" 2>&1 &
   write_state browser.pid "$!"
   for _ in $(seq 1 100); do
-    [[ -S "$state/browser.sock" ]] && return 0
+    if [[ -S "$state/browser.sock" ]]; then
+      sed -n 's/^browser: /verify-movies: /p' "$state/browser.log" >&2
+      return 0
+    fi
     kill -0 "$(read_state browser.pid)" 2>/dev/null || { cat "$state/browser.log" >&2; die "the browser host exited"; }
     sleep 0.2
   done
@@ -338,7 +341,7 @@ cmd_doctor() {
   case "$network" in
     isolated) check "the browser has its own network namespace" \
       "[[ -n '$browser_ns' && -n '$host_ns' && '$browser_ns' != '$host_ns' ]]" ;;
-    host) echo "info  the browser shares the host network, where Docker network changes can fail its requests" ;;
+    host) echo "info  $(sed -n 's/^browser: //p' "$state/browser.log" | tail -1)" ;;
     *) echo "FAIL  the browser host does not report its network"; failed=1 ;;
   esac
   if [[ -n "$(read_state people)" ]]; then
