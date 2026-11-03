@@ -107,6 +107,12 @@ settings:
 
 catalogs:
   default:
+    '@tanstack/hotkeys':
+      specifier: 0.22.1
+      version: 0.22.1
+    '@tanstack/react-hotkeys':
+      specifier: 0.20.2
+      version: 0.20.2
     '@types/node':
       specifier: ^26.4.1
       version: 26.6.5
@@ -447,6 +453,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      '@tanstack/react-hotkeys':
+        specifier: 'catalog:'
+        version: 0.20.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-router':
         specifier: ^1.170.32
         version: 1.170.41(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -658,6 +667,9 @@ importers:
       '@base-ui/react':
         specifier: ^1.8.0
         version: 1.9.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tanstack/hotkeys':
+        specifier: 'catalog:'
+        version: 0.22.1
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -2731,6 +2743,17 @@ packages:
   '@tanstack/history@1.162.4':
     resolution: {integrity: sha512-utTS5L2OkeYUzXGohL1Z8sefu1GLNOJcxe8Hd6iIdc/Xo1K1nDB2JEp4iSFhvYh33xKC9V91TxrS8qfrpoKobQ==}
     engines: {node: '>=20.19'}
+
+  '@tanstack/hotkeys@0.22.1':
+    resolution: {integrity: sha512-NG7ISGKnbm95BRVU6p16r7tiI4SfEu8awZN4SXJpXs/oIyHHh3LZ1x7YJsrmF+pE09owfOsPXi1E1oJpThB1tg==}
+    engines: {node: '>=20'}
+
+  '@tanstack/react-hotkeys@0.20.2':
+    resolution: {integrity: sha512-vCto+S97KYRqYnnflzxLa5euyhZbce8OUbWM0SSA3Yo9QNzzZr/MZHUMYs9ECpVYGxwgIhR8P4z7O3+6HZ14Wg==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
 
   '@tanstack/react-router@1.170.41':
     resolution: {integrity: sha512-Mpvw8Wm5MGDbTqI8Yc9flLKxbOHwoWocv0H2aGKcgw2a017oK5nZWqa954P+DrUx/8fI98YNywnHP5XcD3tQ9w==}
@@ -8062,6 +8085,14 @@ snapshots:
       vite: 8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
 
   '@tanstack/history@1.162.4': {}
+
+  '@tanstack/hotkeys@0.22.1': {}
+
+  '@tanstack/react-hotkeys@0.20.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+    dependencies:
+      '@tanstack/hotkeys': 0.22.1
+      react: 19.3.0
+      react-dom: 19.3.0(react@19.3.0)
 
   '@tanstack/react-router@1.170.41(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:

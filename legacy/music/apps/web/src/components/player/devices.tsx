@@ -4,13 +4,16 @@ import { usePlayer, usePlayerPosition } from "@music/player/react";
 import { useRead } from "@music/sdk/react";
 import { Spinner } from "@music/ui/components/spinner";
 import { cn } from "@music/ui/lib/utils";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { MonitorIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { JamButton } from "@/components/jam/jam-band";
 import { PlayingBars } from "@/components/library/artwork";
+import { useUi } from "@/components/shell/ui-state";
 import { formatAgo, formatDuration } from "@/lib/format";
+import { HOTKEYS } from "@/lib/hotkeys";
 
 import { deviceIcon } from "./player-actions";
 
@@ -106,7 +109,13 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
   const player = usePlayer();
   const position = usePlayerPosition();
   const { others, self, pending, transfer } = useDevices();
+  const { closePlayOn } = useUi();
+  const list = useRef<HTMLDivElement>(null);
   const now = Date.now();
+
+  // TanStack leaves letters inside an ARIA menu to its typeahead, so the global D can't close
+  // this list while focus is in it. Binding D on the list itself can.
+  useHotkey(HOTKEYS["devices.toggle"], closePlayOn, { target: list });
   const activeId = player.activeDevice?.id ?? null;
   const playing = player.status === "playing";
 
@@ -168,6 +177,7 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
 
   return (
     <div
+      ref={list}
       role="menu"
       aria-label="Play on"
       className="flex max-h-dvh-device-list flex-col gap-0.5 overflow-y-auto overscroll-contain"

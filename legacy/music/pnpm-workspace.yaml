@@ -17,6 +17,8 @@ catalog:
   "@types/react": ^19.2.18
   "@types/react-dom": ^19.2.7
   tailwindcss: ^4.3.3
+  "@tanstack/hotkeys": 0.22.1
+  "@tanstack/react-hotkeys": 0.20.2
 minimumReleaseAgeExclude:
   - "@effect/vitest@4.0.3"
   - "@expo/cli@58.1.14"

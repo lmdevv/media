@@ -6,8 +6,9 @@ import { useRead, useRun } from "@music/sdk/react";
 import { Switch } from "@music/ui/components/switch";
 import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { XIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Artwork, PlayingBars } from "@/components/library/artwork";
@@ -17,6 +18,7 @@ import type { Reorder } from "@/components/library/reorder";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure, useAction } from "@/lib/action";
 import { formatDuration } from "@/lib/format";
+import { HOTKEYS } from "@/lib/hotkeys";
 import { WITHHELD_ARTIST, WITHHELD_TITLE } from "@/lib/playlist-entries";
 import { dropLine } from "@/lib/reorder";
 
@@ -415,19 +417,19 @@ export function QueuePanel() {
   const { current, queued, source } = useUpNext();
   const [clear, clearing] = useClearQueue();
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
+  // On window, after Base UI's document listeners, so an Escape that already closed one of its
+  // popups (and so was prevented) leaves the panel open.
+  useHotkey(
+    HOTKEYS["queue.close"],
+    (event) => {
+      if (event.defaultPrevented) return;
 
       if (document.querySelector("[role=dialog], [role=menu], [role=listbox]") !== null) return;
 
       setQueueOpen(false);
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setQueueOpen]);
+    },
+    { target: window, preventDefault: false },
+  );
 
   return (
     <aside

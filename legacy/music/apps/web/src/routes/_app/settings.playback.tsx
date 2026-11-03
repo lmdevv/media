@@ -1,12 +1,13 @@
 import { usePlayer } from "@music/player/react";
 import type { StreamQuality } from "@music/player/stream-quality";
-import { Kbd } from "@music/ui/components/kbd";
+import { Keys } from "@music/ui/components/keys";
 import { Segmented } from "@music/ui/components/segmented";
+import { useAppHotkeyList } from "@tanstack/react-hotkeys";
 import { createFileRoute } from "@tanstack/react-router";
 import { useTheme } from "next-themes";
 
 import { SettingsHeader } from "@/components/settings/settings-ui";
-import { MOD } from "@/lib/keys";
+import { GLOBAL_GROUP } from "@/lib/hotkeys";
 
 export const Route = createFileRoute("/_app/settings/playback")({ component: PlaybackSettings });
 
@@ -33,20 +34,13 @@ const QUALITY_NOTES: Record<StreamQuality, string> = {
 const toChoice = (theme: string | undefined): ThemeChoice =>
   THEMES.find((option) => option.value === theme)?.value ?? "system";
 
-const SHORTCUTS: ReadonlyArray<readonly [keys: ReadonlyArray<string>, action: string]> = [
-  [["Space"], "Play or pause"],
-  [["←", "→"], "Seek 10 seconds back or forward"],
-  [["⇧ ←", "⇧ →"], "Previous or next song"],
-  [["L"], "Like or unlike the playing song"],
-  [["/"], "Search"],
-  [[`${MOD}K`], "Command menu: search and run any command"],
-  [["N"], "New playlist"],
-  [["D"], "Play on another device"],
-];
-
 function PlaybackSettings() {
   const { theme, setTheme } = useTheme();
   const { quality, setQuality, engine } = usePlayer();
+
+  const shortcuts = useAppHotkeyList().filter(
+    ({ appHotkey }) => appHotkey.meta?.group === GLOBAL_GROUP,
+  );
 
   return (
     <div className="flex max-w-180 flex-col gap-7">
@@ -88,17 +82,13 @@ function PlaybackSettings() {
       <div className="flex flex-col gap-3">
         <span className="font-sans text-base/sm font-semibold text-text">Keyboard shortcuts</span>
         <dl className="flex flex-col">
-          {SHORTCUTS.map(([keys, action]) => (
+          {shortcuts.map(({ appHotkey }) => (
             <div
-              key={action}
+              key={appHotkey.id}
               className="flex h-row items-center justify-between gap-4 border-b border-border"
             >
-              <dt className="font-sans text-base/sm text-text">{action}</dt>
-              <dd className="flex gap-1.5">
-                {keys.map((key) => (
-                  <Kbd key={key}>{key}</Kbd>
-                ))}
-              </dd>
+              <dt className="font-sans text-base/sm text-text">{appHotkey.meta?.name}</dt>
+              <dd>{appHotkey.hotkey === null ? null : <Keys hotkey={appHotkey.hotkey} />}</dd>
             </div>
           ))}
         </dl>

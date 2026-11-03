@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { usePlayTracks } from "@/components/library/cards";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
+import { HOTKEYS } from "@/lib/hotkeys";
 import { readPages } from "@/lib/read-pages";
 import { useHeld } from "@/lib/use-held";
 
@@ -90,7 +91,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         title: "Play on another device…",
         detail: "Move playback to your phone, another browser, or a speaker",
         icon: SpeakerIcon,
-        shortcut: "D",
+        shortcut: HOTKEYS["devices.toggle"].defaultHotkey,
         label: "Choose",
         run: () => {
           onClose();
@@ -104,7 +105,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         title: "New playlist",
         detail: "Create a playlist, empty or from the queue or liked songs",
         icon: PlusIcon,
-        shortcut: "N",
+        shortcut: HOTKEYS["playlists.new"].defaultHotkey,
         label: "Create",
         run: () => {
           onClose();

@@ -1,19 +1,21 @@
 import { AlbumId, ArtistId, PlaylistId } from "@music/commands/ids";
 import { Dialog, DialogBackdrop, DialogPopup, DialogPortal } from "@music/ui/components/dialog";
-import { Kbd } from "@music/ui/components/kbd";
+import { Keys } from "@music/ui/components/keys";
 import { Spinner } from "@music/ui/components/spinner";
 import { cn } from "@music/ui/lib/utils";
+import { useHotkeys } from "@tanstack/react-hotkeys";
 import { useParams } from "@tanstack/react-router";
 import { Option, Schema } from "effect";
 import { SearchIcon } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { MouseEvent } from "react";
 
 import { useUi } from "@/components/shell/ui-state";
+import { HOTKEYS } from "@/lib/hotkeys";
 
 import type { MenuContext } from "./args-form";
 import { ItemRow } from "./item-row";
-import { CHORD_LABELS, menuKeyOf, runnableAction } from "./menu-keys";
+import { CHORDS, runnableAction } from "./menu-keys";
 import type { Chord, ChordActions } from "./menu-keys";
 import { Preview } from "./previews";
 import { useMenuItems } from "./use-menu-items";
@@ -125,7 +127,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
       }
 
       registered.current = { id: currentId, actions: next };
-      const label = next.enter?.label ?? null;
+      const label = next["command-menu.enter"]?.label ?? null;
 
       setFooter((previous) =>
         previous?.id === currentId && previous.label === label
@@ -157,7 +159,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     if (footer?.id !== runWhenShown) return;
 
     setRunWhenShown(null);
-    run("enter");
+    run("command-menu.enter");
   }, [currentId, footer, run, runWhenShown]);
 
   const latest = useRef({ active, run });
@@ -186,7 +188,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
       if (item.kind === "command" && item.fields.length > 0) setDetail(true);
       else if (item.kind === "now") setDetail(true);
-      else if (index === latest.current.active) latest.current.run("enter");
+      else if (index === latest.current.active) latest.current.run("command-menu.enter");
       else setRunWhenShown(item.id);
     },
     [items, select],
@@ -194,17 +196,23 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
   const back = useCallback(() => setDetail(false), []);
 
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    const key = menuKeyOf(event.nativeEvent);
+  const moveDown = () => select(Math.min(active + 1, items.length - 1));
+  const moveUp = () => select(Math.max(active - 1, 0));
 
-    if (key === null) return;
-
-    event.preventDefault();
-
-    if (key.kind === "next") select(Math.min(active + 1, items.length - 1));
-    else if (key.kind === "previous") select(Math.max(active - 1, 0));
-    else if (!searching) run(key.chord);
-  };
+  useHotkeys(
+    [
+      { hotkey: "ArrowDown", callback: moveDown },
+      { hotkey: "Control+J", callback: moveDown },
+      { hotkey: "ArrowUp", callback: moveUp },
+      { hotkey: "Control+P", callback: moveUp },
+      ...CHORDS.map((chord) => ({
+        hotkey: HOTKEYS[chord],
+        callback: () => run(chord),
+        options: { enabled: !searching },
+      })),
+    ],
+    { target: input },
+  );
 
   const empty = items.length === 0 && !searching;
 
@@ -226,7 +234,6 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
           placeholder="Search your library…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={onKeyDown}
           className="h-full min-w-0 grow bg-transparent font-sans text-lg/md text-text outline-none placeholder:text-text-muted"
         />
         <button
@@ -236,7 +243,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
           className="shrink-0"
           aria-label="Close"
         >
-          <Kbd>ESC</Kbd>
+          <Keys hotkey="Escape" />
         </button>
       </div>
 
@@ -304,13 +311,13 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
         {footerLabel === null ? null : (
           <span className="flex items-center gap-2 font-sans text-sm/xs font-medium text-text">
             {footerLabel}
-            <Kbd>{CHORD_LABELS.enter}</Kbd>
+            <Keys hotkey={HOTKEYS["command-menu.enter"].defaultHotkey} />
           </span>
         )}
         <span aria-hidden className="h-4 w-px bg-border" />
         <span className="flex items-center gap-2 font-sans text-sm/xs text-text-muted">
           Close
-          <Kbd>ESC</Kbd>
+          <Keys hotkey="Escape" />
         </span>
       </div>
     </>

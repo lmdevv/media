@@ -10,6 +10,7 @@ import type {
 import { commands } from "@music/commands/registry";
 import type { MutationName } from "@music/commands/registry";
 import { foldSearchText } from "@music/commands/search-text";
+import type { Hotkey } from "@tanstack/react-hotkeys";
 import type { LucideIcon } from "lucide-react";
 
 /**
@@ -54,7 +55,7 @@ export type Item =
       /** More words search matches, never shown, such as a screen's command name. */
       readonly keywords?: string;
       readonly icon: LucideIcon;
-      readonly shortcut?: string;
+      readonly shortcut?: Hotkey;
       readonly label: string;
       readonly run: () => void;
     };

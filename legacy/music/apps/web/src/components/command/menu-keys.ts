@@ -1,68 +1,19 @@
 import type { ReactNode } from "react";
 
-import { ALT, MOD, hasMod } from "../../lib/keys";
+import type { HOTKEYS } from "@/lib/hotkeys";
 
 /**
- * A key combination that runs one of the selected row's actions. `mod` is the platform's command
- * key: ⌘ on Apple devices, Ctrl elsewhere.
+ * The `HOTKEYS` ids of the key combinations that run the selected row's actions, in the order a
+ * preview lays out its buttons: Enter, or Enter with ⌘ (Ctrl elsewhere), Shift, or Alt.
  */
-export type Chord = "enter" | "mod+enter" | "shift+enter" | "alt+enter";
+export const CHORDS = [
+  "command-menu.enter",
+  "command-menu.mod-enter",
+  "command-menu.shift-enter",
+  "command-menu.alt-enter",
+] as const satisfies ReadonlyArray<keyof typeof HOTKEYS>;
 
-/** Every chord, in the order a preview lays out its buttons. */
-export const CHORDS: ReadonlyArray<Chord> = ["enter", "mod+enter", "shift+enter", "alt+enter"];
-
-type MenuKey =
-  | { readonly kind: "next" }
-  | { readonly kind: "previous" }
-  | { readonly kind: "run"; readonly chord: Chord };
-
-/** How each chord is drawn on a keycap. */
-export const CHORD_LABELS: Readonly<Record<Chord, string>> = {
-  enter: "↵",
-  "mod+enter": `${MOD}↵`,
-  "shift+enter": "⇧↵",
-  "alt+enter": `${ALT}↵`,
-};
-
-type KeyPress = Pick<
-  KeyboardEvent,
-  "key" | "ctrlKey" | "altKey" | "metaKey" | "shiftKey" | "isComposing"
->;
-
-const chordOf = (event: KeyPress): Chord | null => {
-  const held = [event.ctrlKey, event.metaKey, event.altKey, event.shiftKey].filter(Boolean).length;
-
-  if (held === 0) return "enter";
-
-  if (held > 1) return null;
-
-  if (hasMod(event)) return "mod+enter";
-
-  if (event.shiftKey) return "shift+enter";
-
-  if (event.altKey) return "alt+enter";
-
-  return null;
-};
-
-/**
- * Maps a key press in the search field to a list move or to an action chord, or null for keys the
- * field should handle as typing. A chord matches only with exactly its modifiers held, and Enter
- * while an IME composes text is typing.
- */
-export const menuKeyOf = (event: KeyPress): MenuKey | null => {
-  const ctrl = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
-
-  if (event.key === "ArrowDown" || (ctrl && event.key === "j")) return { kind: "next" };
-
-  if (event.key === "ArrowUp" || (ctrl && event.key === "p")) return { kind: "previous" };
-
-  if (event.key !== "Enter" || event.isComposing) return null;
-
-  const chord = chordOf(event);
-
-  return chord === null ? null : { kind: "run", chord };
-};
+export type Chord = (typeof CHORDS)[number];
 
 /** One button in a preview, run by clicking it or by pressing its chord in the search field. */
 export interface PreviewAction {

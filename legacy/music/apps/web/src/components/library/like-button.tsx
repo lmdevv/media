@@ -1,6 +1,7 @@
 import type { Track } from "@music/commands/models";
 import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
+import type { Hotkey } from "@tanstack/react-hotkeys";
 import { HeartIcon } from "lucide-react";
 
 import { useLike } from "@/lib/use-like";
@@ -15,7 +16,7 @@ export function LikeButton({
   readonly track: Pick<Track, "id" | "liked" | "title">;
   readonly className?: string;
   readonly iconClassName?: string;
-  readonly shortcut?: string | undefined;
+  readonly shortcut?: Hotkey | undefined;
 }) {
   const { liked, toggle } = useLike(track);
   const label = liked ? "Unlike" : "Like";

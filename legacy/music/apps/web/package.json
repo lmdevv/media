@@ -21,6 +21,7 @@
     "@music/sdk": "workspace:*",
     "@music/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-hotkeys": "catalog:",
     "@tanstack/react-router": "^1.170.32",
     "convex": "catalog:",
     "effect": "catalog:",

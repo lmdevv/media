@@ -1,11 +1,13 @@
 import { Button } from "@music/ui/components/button";
-import { Kbd } from "@music/ui/components/kbd";
+import { Keys } from "@music/ui/components/keys";
 import { cn } from "@music/ui/lib/utils";
 import { ArrowLeftIcon } from "lucide-react";
 import { useLayoutEffect } from "react";
 import type { ReactNode } from "react";
 
-import { CHORDS, CHORD_LABELS } from "./menu-keys";
+import { HOTKEYS } from "@/lib/hotkeys";
+
+import { CHORDS } from "./menu-keys";
 import type { ChordActions } from "./menu-keys";
 
 /** Classes for the large artwork at the top of a preview. */
@@ -53,10 +55,12 @@ export function PreviewActions({
 
         if (action === undefined) return null;
 
+        const main = chord === "command-menu.enter";
+
         return (
           <Button
             key={chord}
-            variant={chord === "enter" ? "solid" : "secondary"}
+            variant={main ? "solid" : "secondary"}
             size="sm"
             className={cn(action.icon !== undefined && "pl-3", "lg:pr-2")}
             disabled={action.disabled === true}
@@ -65,12 +69,12 @@ export function PreviewActions({
           >
             {action.icon}
             {action.label}
-            <Kbd
+            <Keys
               aria-hidden
-              className="border-current/40 bg-transparent text-current opacity-(--opacity-muted) max-lg:hidden"
-            >
-              {CHORD_LABELS[chord]}
-            </Kbd>
+              hotkey={HOTKEYS[chord].defaultHotkey}
+              tone={main ? "inverse" : "default"}
+              className="max-lg:hidden"
+            />
           </Button>
         );
       })}

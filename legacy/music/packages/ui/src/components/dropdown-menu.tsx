@@ -1,5 +1,7 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
+import { Keys } from "@music/ui/components/keys";
 import { cn } from "@music/ui/lib/utils";
+import type { Hotkey } from "@tanstack/hotkeys";
 import { ChevronRightIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 
@@ -43,7 +45,6 @@ export function DropdownMenuContent({
 const itemClassName =
   "flex h-8.5 shrink-0 cursor-pointer items-center gap-2.5 rounded-sm px-2.5 font-sans text-base/sm text-text outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-(--opacity-disabled) data-highlighted:bg-surface [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
 
-/** One action in a menu. `shortcut` shows its key on the right, in mono. */
 export function DropdownMenuItem({
   className,
   children,
@@ -51,7 +52,7 @@ export function DropdownMenuItem({
   tone = "default",
   ...props
 }: MenuPrimitive.Item.Props & {
-  readonly shortcut?: string;
+  readonly shortcut?: Hotkey;
   readonly tone?: "default" | "danger";
 }) {
   return (
@@ -60,9 +61,7 @@ export function DropdownMenuItem({
       {...props}
     >
       {children}
-      {shortcut === undefined ? null : (
-        <span className="ml-auto font-mono text-xs/xs text-text-muted">{shortcut}</span>
-      )}
+      {shortcut === undefined ? null : <Keys hotkey={shortcut} className="ml-auto" />}
     </MenuPrimitive.Item>
   );
 }

@@ -160,12 +160,12 @@ function NowPreview({
       <PreviewActions
         registerActions={registerActions}
         actions={{
-          enter: {
+          "command-menu.enter": {
             label: playing ? "Pause" : "Resume",
             icon: playing ? <PauseIcon fill="currentColor" strokeWidth={0} /> : playIcon,
             run: () => perform(player.togglePlay()),
           },
-          "mod+enter": {
+          "command-menu.mod-enter": {
             label: "Open queue",
             run: () => {
               onClose();
@@ -239,10 +239,10 @@ function AlbumPreview({
       <PreviewActions
         registerActions={registerActions}
         actions={{
-          enter: { label: "Open", run: open },
-          "mod+enter": { label: "Play", icon: playIcon, run: () => play(false) },
-          "shift+enter": { label: "Shuffle", run: () => play(true) },
-          "alt+enter": {
+          "command-menu.enter": { label: "Open", run: open },
+          "command-menu.mod-enter": { label: "Play", icon: playIcon, run: () => play(false) },
+          "command-menu.shift-enter": { label: "Shuffle", run: () => play(true) },
+          "command-menu.alt-enter": {
             label: "Play next",
             disabled: detail === undefined,
             run: () => {
@@ -276,15 +276,15 @@ function ArtistPreview({
       <PreviewActions
         registerActions={registerActions}
         actions={{
-          enter: {
+          "command-menu.enter": {
             label: "Open",
             run: () => {
               onClose();
               void navigate({ to: "/artists/$artistId", params: { artistId: artist.id } });
             },
           },
-          "mod+enter": { label: "Play", icon: playIcon, run: () => play(false) },
-          "shift+enter": { label: "Shuffle", run: () => play(true) },
+          "command-menu.mod-enter": { label: "Play", icon: playIcon, run: () => play(false) },
+          "command-menu.shift-enter": { label: "Shuffle", run: () => play(true) },
         }}
       />
     </PreviewFrame>
@@ -316,9 +316,9 @@ function TrackPreview({
       <PreviewActions
         registerActions={registerActions}
         actions={{
-          enter: { label: "Play", icon: playIcon, run: start },
-          "shift+enter": { label: "Add to queue", run: () => addToQueue([track]) },
-          "alt+enter": { label: "Play next", run: () => playNext([track]) },
+          "command-menu.enter": { label: "Play", icon: playIcon, run: start },
+          "command-menu.shift-enter": { label: "Add to queue", run: () => addToQueue([track]) },
+          "command-menu.alt-enter": { label: "Play next", run: () => playNext([track]) },
         }}
       />
     </PreviewFrame>
@@ -357,14 +357,14 @@ function PlaylistPreview({
       <PreviewActions
         registerActions={registerActions}
         actions={{
-          enter: { label: "Open", run: open },
-          "mod+enter": {
+          "command-menu.enter": { label: "Open", run: open },
+          "command-menu.mod-enter": {
             label: "Play",
             icon: playIcon,
             disabled: entries.length === 0,
             run: () => start(false),
           },
-          "shift+enter": {
+          "command-menu.shift-enter": {
             label: "Shuffle",
             disabled: entries.length === 0,
             run: () => start(true),
@@ -388,7 +388,7 @@ function ActionPreview({
       <PreviewTitle title={item.title} meta={item.detail} />
       <PreviewActions
         registerActions={registerActions}
-        actions={{ enter: { label: item.label, run: item.run } }}
+        actions={{ "command-menu.enter": { label: item.label, run: item.run } }}
       />
     </PreviewFrame>
   );

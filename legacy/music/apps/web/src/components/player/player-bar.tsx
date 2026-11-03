@@ -12,6 +12,7 @@ import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
 import { useUi } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
+import { HOTKEYS } from "@/lib/hotkeys";
 import { useIsDesktop } from "@/lib/use-media";
 
 import {
@@ -91,7 +92,9 @@ export function PlayerBar() {
               </Link>
             )}
           </div>
-          {failed || offline ? null : <LikeButton track={track} shortcut="L" />}
+          {failed || offline ? null : (
+            <LikeButton track={track} shortcut={HOTKEYS["player.like"].defaultHotkey} />
+          )}
         </div>
 
         {offline ? (
@@ -182,7 +185,7 @@ function DevicePickerButton() {
       open={shown === "popover"}
       onOpenChange={(open) => (open ? openPlayOn() : closePlayOn())}
     >
-      <Tooltip label="Play on another device" shortcut="D">
+      <Tooltip label="Play on another device" shortcut={HOTKEYS["devices.toggle"].defaultHotkey}>
         <PopoverTrigger
           aria-label="Play on another device"
           className="rounded-full text-text outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-popup-open:text-accent"

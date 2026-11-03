@@ -1,5 +1,6 @@
 import { useHasTrack } from "@music/player/react";
 import { TooltipProvider } from "@music/ui/components/tooltip";
+import { HotkeysProvider } from "@tanstack/react-hotkeys";
 import { CatchBoundary, useLocation } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Suspense, useEffect, useState } from "react";
@@ -9,6 +10,7 @@ import { toast } from "sonner";
 import { JamBand } from "@/components/jam/jam-band";
 import { DeviceSheet } from "@/components/player/device-sheet";
 import { PlayerBar } from "@/components/player/player-bar";
+import { HOTKEYS } from "@/lib/hotkeys";
 import { ChunkLoadError, lazyChunk } from "@/lib/lazy-chunk";
 import { useOpenedOnce } from "@/lib/use-opened-once";
 import { whenSettled } from "@/lib/when-settled";
@@ -120,11 +122,13 @@ function OnDemand({
 export function AppShell({ children }: { readonly children: ReactNode }) {
   return (
     <UiStateProvider>
-      <TooltipProvider>
-        <Frame>{children}</Frame>
-        <KeyboardShortcuts />
-        <Surfaces />
-      </TooltipProvider>
+      <HotkeysProvider appHotkeys={HOTKEYS}>
+        <TooltipProvider>
+          <Frame>{children}</Frame>
+          <KeyboardShortcuts />
+          <Surfaces />
+        </TooltipProvider>
+      </HotkeysProvider>
     </UiStateProvider>
   );
 }

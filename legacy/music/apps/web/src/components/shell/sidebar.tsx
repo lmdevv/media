@@ -1,6 +1,6 @@
 import type { Playlist } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
-import { Kbd } from "@music/ui/components/kbd";
+import { Keys } from "@music/ui/components/keys";
 import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
@@ -19,7 +19,7 @@ import type { LucideIcon } from "lucide-react";
 
 import { Artwork } from "@/components/library/artwork";
 import { initial, plural } from "@/lib/format";
-import { MOD } from "@/lib/keys";
+import { HOTKEYS } from "@/lib/hotkeys";
 
 import { useUi } from "./ui-state";
 
@@ -84,13 +84,17 @@ export function Sidebar() {
         <Link to="/" className="font-mono text-md/base font-semibold tracking-snug text-text">
           [music]
         </Link>
-        <Tooltip label="Search and commands" shortcut={`${MOD}K`} side="right">
+        <Tooltip
+          label="Search and commands"
+          shortcut={HOTKEYS["command-menu.toggle"].defaultHotkey}
+          side="right"
+        >
           <button
             type="button"
             aria-label="Open the command menu"
             onClick={() => setCommandOpen(true)}
           >
-            <Kbd className="bg-transparent text-xs/xs">{MOD}K</Kbd>
+            <Keys hotkey={HOTKEYS["command-menu.toggle"].defaultHotkey} />
           </button>
         </Tooltip>
       </div>
@@ -111,7 +115,7 @@ export function Sidebar() {
       <div className="flex min-h-0 grow flex-col gap-0.5">
         <div className="flex items-center justify-between px-2.5 pb-1.5">
           <span className="font-mono text-xs/xs tracking-mono text-text-muted">PLAYLISTS</span>
-          <Tooltip label="New playlist" shortcut={"N"}>
+          <Tooltip label="New playlist" shortcut={HOTKEYS["playlists.new"].defaultHotkey}>
             <button
               type="button"
               aria-label="New playlist"

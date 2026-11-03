@@ -190,7 +190,11 @@ function CommandForm({
       <PreviewActions
         registerActions={registerActions}
         actions={{
-          enter: { label: pending ? "Running…" : "Run", pending, run: () => void run() },
+          "command-menu.enter": {
+            label: pending ? "Running…" : "Run",
+            pending,
+            run: () => void run(),
+          },
         }}
       />
     </PreviewFrame>

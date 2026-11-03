@@ -60,6 +60,8 @@
   --leading-display: 64px;
   --opacity-muted: 60%;
   --opacity-disabled: 40%;
+  --opacity-tint: 8%;
+  --opacity-tint-strong: 18%;
   --breakpoint-phone: 390px;
   --breakpoint-desktop: 1440px;
   --container-sidebar: 240px;

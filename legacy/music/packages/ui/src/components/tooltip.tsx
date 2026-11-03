@@ -1,5 +1,7 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
+import { Keys } from "@music/ui/components/keys";
 import { cn } from "@music/ui/lib/utils";
+import type { Hotkey } from "@tanstack/hotkeys";
 import type { ReactElement, ReactNode } from "react";
 
 /** Shares hover delays between tooltips. Wrap the app once. */
@@ -22,7 +24,7 @@ export function Tooltip({
   children,
 }: {
   readonly label: string;
-  readonly shortcut?: string | undefined;
+  readonly shortcut?: Hotkey | undefined;
   readonly side?: "top" | "bottom" | "left" | "right";
   readonly children: ReactElement;
 }) {
@@ -37,11 +39,7 @@ export function Tooltip({
             )}
           >
             {label}
-            {shortcut === undefined ? null : (
-              <span className="font-mono text-xs/xs text-text-inverse/(--opacity-muted)">
-                {shortcut}
-              </span>
-            )}
+            {shortcut === undefined ? null : <Keys hotkey={shortcut} tone="inverse" />}
           </TooltipPrimitive.Popup>
         </TooltipPrimitive.Positioner>
       </TooltipPrimitive.Portal>

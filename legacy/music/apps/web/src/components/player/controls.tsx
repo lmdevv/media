@@ -18,6 +18,7 @@ import {
 import { useState } from "react";
 
 import { formatDuration } from "@/lib/format";
+import { HOTKEYS } from "@/lib/hotkeys";
 
 import { NEXT_REPEAT, perform } from "./player-actions";
 
@@ -47,7 +48,7 @@ export function PlayPauseButton({
   }
 
   return (
-    <Tooltip label={playing ? "Pause" : "Play"} shortcut="Space">
+    <Tooltip label={playing ? "Pause" : "Play"} shortcut={HOTKEYS["player.toggle"].defaultHotkey}>
       <button
         type="button"
         aria-label={playing ? "Pause" : "Play"}
@@ -89,7 +90,10 @@ export function SkipButton({
   const label = direction === "previous" ? "Previous" : "Next";
 
   return (
-    <Tooltip label={label} shortcut={direction === "previous" ? "⇧←" : "⇧→"}>
+    <Tooltip
+      label={label}
+      shortcut={HOTKEYS[direction === "previous" ? "player.previous" : "player.next"].defaultHotkey}
+    >
       <button
         type="button"
         aria-label={label}

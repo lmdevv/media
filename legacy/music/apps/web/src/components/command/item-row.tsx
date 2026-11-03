@@ -1,6 +1,7 @@
 import type { CommandGroup } from "@music/commands/command";
 import { commands } from "@music/commands/registry";
 import { usePlayer, usePlayerPosition } from "@music/player/react";
+import { Keys } from "@music/ui/components/keys";
 import { cn } from "@music/ui/lib/utils";
 import {
   DiscIcon,
@@ -24,6 +25,7 @@ import type { MouseEvent, ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
 import { formatDuration, plural } from "@/lib/format";
+import { HOTKEYS } from "@/lib/hotkeys";
 
 import { groupOf, titleOf } from "./items";
 import type { Item } from "./items";
@@ -180,11 +182,9 @@ export const ItemRow = memo(function ItemRow({
           )}
         </span>
         {item.kind === "action" && item.shortcut !== undefined ? (
-          <span className="shrink-0 font-mono text-2xs leading-3.5 text-text-muted">
-            {item.shortcut}
-          </span>
+          <Keys hotkey={item.shortcut} />
         ) : active ? (
-          <span className="shrink-0 font-mono text-2xs leading-3.5 text-text-muted">↵</span>
+          <Keys hotkey={HOTKEYS["command-menu.enter"].defaultHotkey} />
         ) : null}
       </div>
     </>
