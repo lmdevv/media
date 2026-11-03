@@ -122,12 +122,12 @@ browser() {
 }
 
 start_browser() {
-  rm -f "$state/browser.port"
+  rm -f "$state/browser.sock"
   CHROMIUM_PATH="$(chromium_path)" nohup node "$scripts/browser.mjs" serve --state "$state" \
-    --base "$(url)" > "$state/browser.log" 2>&1 &
+    --base "$(url)" --convex "$(convex_url)" > "$state/browser.log" 2>&1 &
   write_state browser.pid "$!"
   for _ in $(seq 1 100); do
-    [[ -s "$state/browser.port" ]] && return 0
+    [[ -S "$state/browser.sock" ]] && return 0
     kill -0 "$(read_state browser.pid)" 2>/dev/null || { cat "$state/browser.log" >&2; die "the browser host exited"; }
     sleep 0.2
   done
@@ -331,6 +331,14 @@ cmd_doctor() {
   check "the entrypoint deployed this image's functions" \
     "[[ \$(docker exec $m cat /data/version) == \$(docker exec $m sh -c 'echo \$(node -p \"require(\\\"/app/backend/package.json\\\").version\")+\$(cat /app/backend/.functions-hash)') ]]"
   check "browser host answers" "browser url"
+  local network browser_pid
+  read -r network browser_pid <<<"$(browser network 2>/dev/null || true)"
+  case "$network" in
+    isolated) check "the browser has its own network namespace" \
+      "[[ -n '$browser_pid' && \$(readlink /proc/$browser_pid/ns/net) != \$(readlink /proc/self/ns/net) ]]" ;;
+    host) echo "info  the browser shares the host network, where Docker network changes can fail its requests" ;;
+    *) echo "FAIL  the browser host does not report its network"; failed=1 ;;
+  esac
   if [[ -n "$(read_state people)" ]]; then
     check "the CLI signs in as the owner" "cli_raw whoami | grep -q admin@movies.local"
   else
@@ -348,12 +356,11 @@ cmd_doctor() {
 
 cmd_browser() {
   take_side "$@"
-  [[ -s "$state/browser.port" ]] || die "no browser host on the $side side; run \`up --side $side\`"
+  [[ -S "$state/browser.sock" ]] || die "no browser host on the $side side; run \`up --side $side\`"
   if [[ "${args[0]:-}" == restart ]]; then
     local pid tries=0
     pid="$(read_state browser.pid)"
     kill "$pid" 2>/dev/null || true
-    # The old host removes browser.port as it exits, so wait for it before the new host writes one.
     while kill -0 "$pid" 2>/dev/null; do
       (( ++tries <= 300 )) || die "the browser host $pid did not stop"
       sleep 0.1
