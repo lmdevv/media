@@ -17,5 +17,6 @@ Rename this server.
 
 - Kind: mutation
 - Scope: account
+- API keys: refused
 - Arguments: `{ name: string; note?: string }`
 - Result: `null`

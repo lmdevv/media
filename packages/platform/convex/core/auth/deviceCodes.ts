@@ -17,7 +17,6 @@ import {
   sha256Hex,
 } from "../lib/secrets";
 import { liveSession, openSession } from "../sessions";
-import { refuseKeys } from "./caller";
 import type { SignedIn } from "../sessions";
 
 const PREFIX = "dc";
@@ -245,8 +244,7 @@ export const { start, lookup, approve, deny } = register({
       expiresAt: code.expiresAt,
     };
   },
-  approve: async (ctx, { userCode, scopes }, signedIn) => {
-    const caller = refuseKeys(signedIn);
+  approve: async (ctx, { userCode, scopes }, caller) => {
     const code = await pending(ctx, userCode, Date.now());
     const approver = (await ctx.db.get(caller.userId)) ?? fail("unauthenticated", "Sign in first");
     const granted = [...new Set(scopes)];

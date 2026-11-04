@@ -2,13 +2,129 @@
 
 # Core commands
 
+## `core.accounts.invites.create`
+
+Create an invite link code for someone new, who picks their own username and password.
+
+- Kind: action
+- Scope: admin
+- API keys: refused
+- Arguments: `{ role?: "admin" | "member"; expiresInDays?: number }`
+- Result: `{ inviteId: Id<"invites">; code: string; expiresAt: number }`
+
+## `core.accounts.invites.list`
+
+List the invites that have not expired, soonest to expire first.
+
+- Kind: query
+- Scope: admin
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Result: `{ page: Array<{ inviteId: Id<"invites">; role: "admin" | "member"; invitedBy: string; expiresAt: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.accounts.invites.lookup`
+
+Show what an invite code offers, or refuse it when it no longer works.
+
+- Kind: query
+- Scope: public
+- Arguments: `{ code: string }`
+- Result: `{ role: "admin" | "member"; invitedBy: string; expiresAt: number }`
+
+## `core.accounts.invites.revoke`
+
+Revoke an invite so its code stops working.
+
+- Kind: mutation
+- Scope: admin
+- Arguments: `{ inviteId: Id<"invites"> }`
+- Result: `null`
+
+## `core.accounts.me.changePassword`
+
+Change your password and sign out your other password and device sessions.
+
+- Kind: action
+- Scope: account
+- API keys: refused
+- Arguments: `{ currentPassword: string; newPassword: string }`
+- Result: `null`
+
+## `core.accounts.me.rename`
+
+Change your username; everything you own stays yours.
+
+- Kind: mutation
+- Scope: account
+- API keys: refused
+- Arguments: `{ username: string }`
+- Result: `null`
+
+## `core.accounts.resetLinks.create`
+
+Create a one-time link code that lets someone set a new password within a day.
+
+- Kind: action
+- Scope: admin
+- API keys: refused
+- Arguments: `{ userId: Id<"users"> }`
+- Result: `{ code: string; expiresAt: number }`
+
+## `core.accounts.resetLinks.lookup`
+
+Show whose password a reset code sets, or refuse it when it no longer works.
+
+- Kind: query
+- Scope: public
+- Arguments: `{ code: string }`
+- Result: `{ username: string; expiresAt: number }`
+
+## `core.accounts.users.create`
+
+Create a user with a username and password you choose for them.
+
+- Kind: action
+- Scope: admin
+- API keys: refused
+- Arguments: `{ username: string; password: string; role?: "admin" | "member" }`
+- Result: `{ userId: Id<"users"> }`
+
+## `core.accounts.users.handOverOwnership`
+
+Hand ownership of this server to another user and stay an admin, as the owner.
+
+- Kind: mutation
+- Scope: admin
+- API keys: refused
+- Arguments: `{ userId: Id<"users"> }`
+- Result: `null`
+
+## `core.accounts.users.list`
+
+List every user with their role, by username.
+
+- Kind: query
+- Scope: admin
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Result: `{ page: Array<{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.accounts.users.setRole`
+
+Make someone else an admin or a member; the owner's role never changes this way.
+
+- Kind: mutation
+- Scope: admin
+- API keys: refused
+- Arguments: `{ userId: Id<"users">; role: "admin" | "member" }`
+- Result: `null`
+
 ## `core.auth.apiKeys.create`
 
 Create an API key with some of this session's scopes and show its secret once.
 
 - Kind: action
 - Scope: account
-- Arguments: `{ name: string; scopes: Array<"account">; expiresInDays?: number }`
+- API keys: refused
+- Arguments: `{ name: string; scopes: Array<"account" | "admin">; expiresInDays?: number }`
 - Result: `{ keyId: Id<"apiKeys">; key: string; expiresAt: number | null }`
 
 ## `core.auth.apiKeys.endAll`
@@ -35,7 +151,8 @@ Sign a waiting device in as you, with some of this session's scopes.
 
 - Kind: mutation
 - Scope: account
-- Arguments: `{ userCode: string; scopes: Array<"account"> }`
+- API keys: refused
+- Arguments: `{ userCode: string; scopes: Array<"account" | "admin"> }`
 - Result: `null`
 
 ## `core.auth.deviceCodes.deny`
@@ -72,7 +189,7 @@ Show who is signed in, how, and with which scopes.
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `{ userId: Id<"users">; username: string; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode"; scopes: Array<"account"> }`
+- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode"; scopes: Array<"account" | "admin"> }`
 
 ## `core.auth.sessions.end`
 
@@ -94,9 +211,9 @@ Sign out every password and device session you have, or every other one.
 
 ## `core.server.info`
 
-Show this server's name and version.
+Show this server's name and version, and whether its owner has set it up.
 
 - Kind: query
 - Scope: public
 - Arguments: none
-- Result: `{ name: string; version: string }`
+- Result: `{ name: string; version: string; hasOwner: boolean }`

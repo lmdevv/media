@@ -3,7 +3,7 @@ import type { CheckedCommand } from "../check.ts";
 import type { CommandKind } from "../command.ts";
 import type { Emitted, Target } from "../outputs.ts";
 import { byCodeUnits } from "../order.ts";
-import { credentialScopes, scopes } from "../scopes.ts";
+import { assignableRoles, credentialScopes, roles, scopes } from "../scopes.ts";
 import { GENERATED_NOTE } from "../note.ts";
 
 const CONTEXTS = {
@@ -53,9 +53,10 @@ const contract = (module: string, commands: ReadonlyArray<CheckedCommand>): Emit
 
   const checks = [
     ...new Set(
-      commands.flatMap((command) =>
-        command.scope === "public" ? [] : [CALLER_CHECKS[command.kind]],
-      ),
+      commands.flatMap((command) => [
+        ...(command.scope === "public" ? [] : [CALLER_CHECKS[command.kind]]),
+        ...(command.refusesKeys ? ["refuseKeys"] : []),
+      ]),
     ),
   ].toSorted();
 
@@ -68,8 +69,10 @@ const contract = (module: string, commands: ReadonlyArray<CheckedCommand>): Emit
     const { args, result } = types(command);
     const caller = command.scope === "public" ? "" : ", caller: Caller";
 
+    const keys = command.refusesKeys ? ", API keys refused" : "";
+
     return [
-      `/** \`${command.name}\` (${command.kind}, ${command.scope}): ${command.summary}. */`,
+      `/** \`${command.name}\` (${command.kind}, ${command.scope}${keys}): ${command.summary}. */`,
       `readonly ${command.exportName}: (ctx: Omit<${CONTEXTS[command.kind]}, "auth">, args: ${args}${caller}) => ${result} | Promise<${result}>;`,
     ].join("\n");
   });
@@ -81,10 +84,12 @@ const contract = (module: string, commands: ReadonlyArray<CheckedCommand>): Emit
   });
 
   const registrations = commands.map((command) => {
+    const check = `await ${CALLER_CHECKS[command.kind]}(ctx, "${command.scope}")`;
+
     const call =
       command.scope === "public"
         ? `handlers.${command.exportName}(ctx, args)`
-        : `handlers.${command.exportName}(ctx, args, await ${CALLER_CHECKS[command.kind]}(ctx, "${command.scope}"))`;
+        : `handlers.${command.exportName}(ctx, args, ${command.refusesKeys ? `refuseKeys(${check})` : check})`;
 
     return [
       `${command.exportName}: ${command.kind}({`,
@@ -177,6 +182,22 @@ const scopesFile = (): Emitted => {
         [
           "/** `CredentialScope` as a Convex validator, for stored credentials and their arguments. */",
           `export const credentialScope = ${literalValidator(credentialScopes)};`,
+        ].join("\n"),
+        [
+          "/** A user's platform role. The owner is the admin who holds the server. */",
+          `export type Role = ${literalUnion(roles)};`,
+        ].join("\n"),
+        [
+          "/** `Role` as a Convex validator. */",
+          `export const role = ${literalValidator(roles)};`,
+        ].join("\n"),
+        [
+          "/** A role an admin can give someone. */",
+          `export type AssignableRole = ${literalUnion(assignableRoles)};`,
+        ].join("\n"),
+        [
+          "/** `AssignableRole` as a Convex validator. */",
+          `export const assignableRole = ${literalValidator(assignableRoles)};`,
         ].join("\n"),
       ].join("\n\n") + "\n",
   };

@@ -30,6 +30,11 @@ export interface Command {
   readonly kind: CommandKind;
   /** Who may call it. The generator refuses a command without one. */
   readonly scope: Scope;
+  /**
+   * Refuses API-key sessions that hold the scope: a command that makes a credential, an account, a
+   * link, or a role would let a leaked key outlive its own revocation (ADR 0004).
+   */
+  readonly refusesKeys?: true;
   /** One line for the skill reference, CLI help, and the command menu. */
   readonly summary: string;
   /** The arguments, written as Convex `args`. */

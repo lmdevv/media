@@ -1,3 +1,5 @@
+import { fail } from "./errors";
+
 const USERNAME = /^[A-Za-z0-9][\w.-]{0,31}$/u;
 
 /** A username as typed and as folded for uniqueness and sign-in: `Alice` and `alice`. */
@@ -12,3 +14,11 @@ export const parseUsername = (typed: string): Username | null => {
 
   return USERNAME.test(username) ? { username, usernameKey: username.toLowerCase() } : null;
 };
+
+/** The username in `typed`, or an `invalid_args` refusal that states the rules. */
+export const requireUsername = (typed: string): Username =>
+  parseUsername(typed) ??
+  fail(
+    "invalid_args",
+    "Use 1 to 32 letters, digits, dots, dashes, or underscores, starting with a letter or digit",
+  );

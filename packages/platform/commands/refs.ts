@@ -3,6 +3,10 @@
 
 import { api } from "../convex/_generated/api";
 
+import type { Refs as core_accounts_invites } from "./core/accounts/invites";
+import type { Refs as core_accounts_me } from "./core/accounts/me";
+import type { Refs as core_accounts_resetLinks } from "./core/accounts/resetLinks";
+import type { Refs as core_accounts_users } from "./core/accounts/users";
 import type { Refs as core_auth_apiKeys } from "./core/auth/apiKeys";
 import type { Refs as core_auth_deviceCodes } from "./core/auth/deviceCodes";
 import type { Refs as core_auth_sessions } from "./core/auth/sessions";
@@ -14,6 +18,28 @@ import type { Refs as core_server } from "./core/server";
  * `pnpm --filter @media/commands generate` with the dev stack up.
  */
 export const commandRefs = {
+  "core.accounts.invites.create": api.core.accounts.invites
+    .create satisfies core_accounts_invites["create"],
+  "core.accounts.invites.list": api.core.accounts.invites
+    .list satisfies core_accounts_invites["list"],
+  "core.accounts.invites.lookup": api.core.accounts.invites
+    .lookup satisfies core_accounts_invites["lookup"],
+  "core.accounts.invites.revoke": api.core.accounts.invites
+    .revoke satisfies core_accounts_invites["revoke"],
+  "core.accounts.me.changePassword": api.core.accounts.me
+    .changePassword satisfies core_accounts_me["changePassword"],
+  "core.accounts.me.rename": api.core.accounts.me.rename satisfies core_accounts_me["rename"],
+  "core.accounts.resetLinks.create": api.core.accounts.resetLinks
+    .create satisfies core_accounts_resetLinks["create"],
+  "core.accounts.resetLinks.lookup": api.core.accounts.resetLinks
+    .lookup satisfies core_accounts_resetLinks["lookup"],
+  "core.accounts.users.create": api.core.accounts.users
+    .create satisfies core_accounts_users["create"],
+  "core.accounts.users.handOverOwnership": api.core.accounts.users
+    .handOverOwnership satisfies core_accounts_users["handOverOwnership"],
+  "core.accounts.users.list": api.core.accounts.users.list satisfies core_accounts_users["list"],
+  "core.accounts.users.setRole": api.core.accounts.users
+    .setRole satisfies core_accounts_users["setRole"],
   "core.auth.apiKeys.create": api.core.auth.apiKeys.create satisfies core_auth_apiKeys["create"],
   "core.auth.apiKeys.endAll": api.core.auth.apiKeys.endAll satisfies core_auth_apiKeys["endAll"],
   "core.auth.apiKeys.revoke": api.core.auth.apiKeys.revoke satisfies core_auth_apiKeys["revoke"],

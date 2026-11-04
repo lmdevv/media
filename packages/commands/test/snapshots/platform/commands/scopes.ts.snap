@@ -4,16 +4,32 @@
 import { v } from "convex/values";
 
 /** A scope that needs a signed-in caller: every command scope but `public`. */
-export type CallerScope = "signed-in" | "account";
+export type CallerScope = "signed-in" | "account" | "admin";
 
 /** `CallerScope` as a Convex validator. */
-export const callerScope = v.union(v.literal("signed-in"), v.literal("account"));
+export const callerScope = v.union(
+  v.literal("signed-in"),
+  v.literal("account"),
+  v.literal("admin"),
+);
 
 /** The scopes a sign-in credential can hold, in declaration order. */
-export const credentialScopes = ["account"] as const;
+export const credentialScopes = ["account", "admin"] as const;
 
 /** A scope a sign-in credential can hold. */
 export type CredentialScope = (typeof credentialScopes)[number];
 
 /** `CredentialScope` as a Convex validator, for stored credentials and their arguments. */
-export const credentialScope = v.union(v.literal("account"));
+export const credentialScope = v.union(v.literal("account"), v.literal("admin"));
+
+/** A user's platform role. The owner is the admin who holds the server. */
+export type Role = "owner" | "admin" | "member";
+
+/** `Role` as a Convex validator. */
+export const role = v.union(v.literal("owner"), v.literal("admin"), v.literal("member"));
+
+/** A role an admin can give someone. */
+export type AssignableRole = "admin" | "member";
+
+/** `AssignableRole` as a Convex validator. */
+export const assignableRole = v.union(v.literal("admin"), v.literal("member"));

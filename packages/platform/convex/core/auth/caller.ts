@@ -2,7 +2,7 @@ import { getAuthSessionId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import type { Infer } from "convex/values";
 
-import { callerScope, credentialScope } from "../../../commands/scopes";
+import { callerScope, credentialScope, role } from "../../../commands/scopes";
 import type { CallerScope } from "../../../commands/scopes";
 import { internal } from "../../_generated/api";
 import { internalQuery } from "../../_generated/server";
@@ -13,6 +13,7 @@ import { heldScopes, liveSession } from "../sessions";
 const callerValidator = v.object({
   userId: v.id("users"),
   username: v.string(),
+  role,
   sessionId: v.id("authSessions"),
   kind: v.union(v.literal("password"), v.literal("apiKey"), v.literal("deviceCode")),
   /** The credential scopes the session holds now; `signed-in` is implied. */
@@ -41,9 +42,10 @@ export const requireCaller = async (
   const caller: Caller = {
     userId: live.user._id,
     username: live.user.username,
+    role: live.user.role,
     sessionId,
     kind: live.session.kind,
-    scopes: heldScopes(live.session),
+    scopes: heldScopes(live.session, live.user),
   };
 
   return scope === "signed-in" || caller.scopes.includes(scope)
@@ -52,12 +54,13 @@ export const requireCaller = async (
 };
 
 /**
- * The caller unless it signed in with an API key: a leaked key must not create a key or approve a
- * device that outlives its own revocation.
+ * The caller unless it signed in with an API key: a leaked key must not make a credential, an
+ * account, a link, or a role that outlives its own revocation. Commands declared `refusesKeys`
+ * call it.
  */
 export const refuseKeys = (caller: Caller): Caller =>
   caller.kind === "apiKey"
-    ? fail("forbidden", "Sign in with a password or a device to create keys or approve devices")
+    ? fail("forbidden", "API keys cannot do this; sign in with a password or a device")
     : caller;
 
 /**

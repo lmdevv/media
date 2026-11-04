@@ -25,6 +25,7 @@ const entry = (command: CheckedCommand): string =>
     [
       `- Kind: ${command.kind}`,
       `- Scope: ${command.scope}`,
+      ...(command.refusesKeys ? ["- API keys: refused"] : []),
       `- Arguments: ${command.args.length === 0 ? "none" : codeSpan(fieldsType(command.args))}`,
       `- Result: ${codeSpan(wireType(command.result))}`,
     ].join("\n"),

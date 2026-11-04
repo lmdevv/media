@@ -2,6 +2,7 @@ import { convexAuth } from "@convex-dev/auth/server";
 
 import { apiKeyProvider } from "./core/auth/apiKeys";
 import { deviceCodeProvider } from "./core/auth/deviceCodes";
+import { inviteProvider, resetProvider, setupProvider } from "./core/auth/flows";
 import { passwordProvider } from "./core/auth/password";
 import { JWT_MS, SESSION_MS } from "./core/sessions";
 
@@ -14,7 +15,14 @@ const openedByTheCore = (): never => {
  * it trusts the JWT alone.
  */
 export const { auth, signIn, signOut, store } = convexAuth({
-  providers: [passwordProvider, apiKeyProvider, deviceCodeProvider],
+  providers: [
+    passwordProvider,
+    apiKeyProvider,
+    deviceCodeProvider,
+    setupProvider,
+    inviteProvider,
+    resetProvider,
+  ],
   session: { totalDurationMs: SESSION_MS, inactiveDurationMs: SESSION_MS },
   jwt: { durationMs: JWT_MS },
   callbacks: {

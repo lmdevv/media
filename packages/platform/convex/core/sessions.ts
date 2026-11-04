@@ -2,7 +2,7 @@ import type { PaginationResult } from "convex/server";
 import { v } from "convex/values";
 
 import { credentialScopes } from "../../commands/scopes";
-import type { CredentialScope } from "../../commands/scopes";
+import type { CredentialScope, Role } from "../../commands/scopes";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
@@ -35,6 +35,9 @@ export interface SignedIn {
   readonly sessionId: Id<"authSessions">;
 }
 
+/** `SignedIn` as the result of the internal mutations providers call. */
+export const signedIn = v.object({ userId: v.id("users"), sessionId: v.id("authSessions") });
+
 /** What opens a session. */
 export type Opening =
   | { readonly kind: "password" }
@@ -52,9 +55,26 @@ const isLive = (session: Session, user: Doc<"users">, now: number): boolean =>
   session.expirationTime > now &&
   session.generation === currentGeneration(session.kind, user);
 
-/** The scopes a live session holds: its grant, or every scope for a password session. */
-export const heldScopes = (session: Session): Array<CredentialScope> =>
-  session.kind === "password" ? [...credentialScopes] : [...session.scopes];
+/** The credential scopes each role may hold (ADR 0005). */
+const roleScopes = {
+  owner: credentialScopes,
+  admin: credentialScopes,
+  member: ["account"],
+} as const satisfies { readonly [R in Role]: ReadonlyArray<CredentialScope> };
+
+/** Whether someone with `role` may hold `scope`. */
+export const roleHolds = (role: Role, scope: CredentialScope): boolean =>
+  roleScopes[role].some((held) => held === scope);
+
+/**
+ * The scopes a live session holds now: every scope its user's role may hold for a password
+ * session, and its grant cut down to those for a key or device session. A demotion takes effect
+ * on the next call.
+ */
+export const heldScopes = (session: Session, user: Doc<"users">): Array<CredentialScope> =>
+  session.kind === "password"
+    ? [...roleScopes[user.role]]
+    : session.scopes.filter((scope) => roleHolds(user.role, scope));
 
 /** A session and its user when the session is live, or null. */
 export const liveSession = async (

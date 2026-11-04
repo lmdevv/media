@@ -11,11 +11,14 @@ export interface RateLimit {
 
 type Ctx = Pick<MutationCtx, "db">;
 
-const bucket = async (ctx: Ctx, limit: RateLimit, now: number) => {
-  const row = await ctx.db
+const rowOf = (ctx: Ctx, limit: RateLimit) =>
+  ctx.db
     .query("rateLimits")
     .withIndex("by_identifier", (q) => q.eq("identifier", limit.identifier))
     .unique();
+
+const bucket = async (ctx: Ctx, limit: RateLimit, now: number) => {
+  const row = await rowOf(ctx, limit);
 
   const available =
     row === null
@@ -57,4 +60,11 @@ export const refundAttempt = async (ctx: Ctx, limit: RateLimit, now: number): Pr
   const { row, available } = await bucket(ctx, limit, now);
 
   await store(ctx, limit, row, Math.min(limit.perHour, available + 1), now);
+};
+
+/** Fills the bucket again, for a password someone has just reset. */
+export const clearAttempts = async (ctx: Ctx, limit: RateLimit): Promise<void> => {
+  const row = await rowOf(ctx, limit);
+
+  if (row !== null) await ctx.db.delete(row._id);
 };
