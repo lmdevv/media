@@ -224,9 +224,9 @@ describe("the media command", () => {
     for (const entry of registryEntries) expect(run.stdout).toContain(`"name": "${entry.name}"`);
   });
 
-  it("keeps the agent skill's command reference current", async () => {
+  it("keeps the agent skill's movies reference current", async () => {
     const skill = readFileSync(
-      join(import.meta.dirname, "..", "skills", "movies", "SKILL.md"),
+      join(import.meta.dirname, "..", "skills", "media", "movies.md"),
       "utf8",
     );
 
