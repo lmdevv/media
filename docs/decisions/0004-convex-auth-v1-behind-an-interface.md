@@ -160,10 +160,10 @@ redeeming a reset link (ADR 0003). Each is a provider of its own in `convex/core
   then calls one internal mutation in `convex/core/accounts/`. That mutation checks the
   credential again, makes or resets the account, uses up the link, and opens the session through
   `openSession`. Convex Auth still only mints tokens.
-- **Measured.** Accepting an invite, from the call to holding tokens, has a p50 of 152.5 ms at the
-  head and 153.5 ms for old movies' sign-up with an invite code. Those are medians of 5 runs of 50
-  accepts a side, with the sides interleaved. Both spend about 140 ms in one pure-JS Scrypt hash,
-  and the core's account steps take about 12 ms of the rest.
+- **Measured.** Accepting an invite, from the call to holding tokens, has a p50 of 154.1 ms at the
+  head and 153.1 ms for old movies' sign-up with an invite code. Those are medians of 5 runs of 50
+  accepts a side, with the sides interleaved. Both spend about 135 to 140 ms in one pure-JS Scrypt
+  hash, and the core's account steps take about 10 ms of the rest.
 - **Held scopes follow the role.** `admin` is the second credential scope (ADR 0005). A password
   session holds every scope its user's role may hold. A key or device session holds its grant cut
   down to those on every call, so a promotion takes effect on the next call. A demotion bumps both
