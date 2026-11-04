@@ -148,6 +148,18 @@ const checkCode = async (
   return { kind: "code", by, codeId: attempt.codeId };
 };
 
+const checkProof = async (
+  ctx: Pick<ActionCtx, "runMutation">,
+  key: TileKey,
+  proof: Infer<typeof tileProof> | undefined,
+): Promise<CheckedProof> => {
+  if (proof === undefined) return { kind: "none" };
+
+  if (proof.kind === "password") return checkPassword(ctx, key, proof.by, proof.password);
+
+  return proof.kind === "code" ? checkCode(ctx, key, proof.by, proof.code) : proof;
+};
+
 /**
  * The `tile` provider: opens a person's tile on a shared device as a new media-only session. The
  * proof is absent for an open tile, or a password, an unlock code, or an approval for a locked one.
@@ -159,15 +171,9 @@ export const tileProvider = ConvexCredentials<DataModel>({
     const parsed = parseSecret(DEVICE_PREFIX, device.trim()) ?? fail("not_found", NO_DEVICE);
     const key = { deviceId: parsed.rowId, secretHash: await sha256Hex(parsed.secret), userId };
 
-    const checked: CheckedProof =
-      proof === undefined
-        ? { kind: "none" }
-        : proof.kind === "password"
-          ? await checkPassword(ctx, key, proof.by, proof.password)
-          : proof.kind === "code"
-            ? await checkCode(ctx, key, proof.by, proof.code)
-            : proof;
-
-    return ctx.runMutation(internal.core.devices.tiles.open, { ...key, proof: checked });
+    return ctx.runMutation(internal.core.devices.tiles.open, {
+      ...key,
+      proof: await checkProof(ctx, key, proof),
+    });
   },
 });
