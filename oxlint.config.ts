@@ -23,6 +23,7 @@ export default defineConfig({
     "tools/oxlint/**",
     "**/dist/**",
     "packages/backend/convex/_generated/**",
+    "packages/platform/convex/_generated/**",
     "apps/web/src/routeTree.gen.ts",
     "apps/mobile/src/uniwind-types.d.ts",
   ],

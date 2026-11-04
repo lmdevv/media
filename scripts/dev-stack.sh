@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Runs an isolated [movies] development stack for the current worktree: a self-hosted Convex
-# backend in Docker with its own volume, ports, service credential, and temporary output directory.
+# Runs an isolated [media] development stack for the current worktree: two self-hosted Convex
+# backends in Docker, one for old movies (packages/backend) and one for the platform core
+# (packages/platform), each with its own volume and ports, plus the movies service credential and
+# a temporary output directory. The core has its own backend until the movies port moves movies
+# into it (docs/decisions/0023).
 #
-#   scripts/dev-stack.sh up        # start (or reuse) the backend, deploy, configure, write .env.local
+#   scripts/dev-stack.sh up        # start (or reuse) both backends, deploy, configure, write .env.local
 #   scripts/dev-stack.sh env       # print this worktree's name, ports, and directories
-#   scripts/dev-stack.sh down      # stop and remove the container (the data volume stays)
-#   scripts/dev-stack.sh destroy   # remove the container and its data volume
+#   scripts/dev-stack.sh down      # stop and remove both containers (the data volumes stay)
+#   scripts/dev-stack.sh destroy   # remove both containers and their data volumes
 #
 # The stack name defaults to the worktree directory name; override with MEDIA_STACK. Ports derive
 # from the name so worktrees do not collide; override the base with MEDIA_PORT_BASE.
@@ -13,6 +16,8 @@
 #   base + 1  Convex HTTP actions (auth)
 #   base + 2  media service
 #   base + 3  web dev server
+#   base + 4  core Convex API
+#   base + 5  core Convex HTTP actions
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -32,7 +37,10 @@ convex_port="$base"
 site_port=$((base + 1))
 media_port=$((base + 2))
 web_port=$((base + 3))
+core_port=$((base + 4))
+core_site_port=$((base + 5))
 container="movies-convex-${name}"
+core_container="media-platform-convex-${name}"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/movies-dev/${name}"
 data_dir="${state_dir}/data"
 transcode_dir="${TMPDIR:-/tmp}/movies-dev-${name}/transcode"
@@ -47,6 +55,9 @@ convex_url=http://127.0.0.1:${convex_port}
 convex_site_url=http://127.0.0.1:${site_port}
 media_url=http://127.0.0.1:${media_port}
 web_url=http://localhost:${web_port}
+core_container=${core_container}
+core_convex_url=http://127.0.0.1:${core_port}
+core_convex_site_url=http://127.0.0.1:${core_site_port}
 data_dir=${data_dir}
 transcode_dir=${transcode_dir}
 backup_dir=${backup_dir}
@@ -60,15 +71,15 @@ case "${1:-up}" in
     exit 0
     ;;
   down)
-    docker rm -f "$container" >/dev/null 2>&1 || true
-    echo "stopped ${container}"
+    docker rm -f "$container" "$core_container" >/dev/null 2>&1 || true
+    echo "stopped ${container} and ${core_container}"
     exit 0
     ;;
   destroy)
-    docker rm -f "$container" >/dev/null 2>&1 || true
-    docker volume rm "${container}-data" >/dev/null 2>&1 || true
+    docker rm -f "$container" "$core_container" >/dev/null 2>&1 || true
+    docker volume rm "${container}-data" "${core_container}-data" >/dev/null 2>&1 || true
     rm -rf "$state_dir" "$(dirname "$transcode_dir")"
-    echo "destroyed ${container}"
+    echo "destroyed ${container} and ${core_container}"
     exit 0
     ;;
   up) ;;
@@ -80,32 +91,40 @@ esac
 
 mkdir -p "$data_dir" "$transcode_dir" "$backup_dir" "${state_dir}/library"
 
-if ! docker inspect "$container" >/dev/null 2>&1; then
-  # The backend fetches its own OIDC discovery document from CONVEX_SITE_ORIGIN to verify auth
-  # tokens, so it listens inside the container on the same ports the host uses.
-  docker run -d --name "$container" \
-    -p "127.0.0.1:${convex_port}:${convex_port}" -p "127.0.0.1:${site_port}:${site_port}" \
-    -v "${container}-data:/convex/data" \
-    -e CONVEX_CLOUD_ORIGIN="http://127.0.0.1:${convex_port}" \
-    -e CONVEX_SITE_ORIGIN="http://127.0.0.1:${site_port}" \
-    -e DISABLE_BEACON=1 \
-    --entrypoint bash "$image" -c \
-    "sed -e 's/--port 3210/--port ${convex_port}/' -e 's/--site-proxy-port 3211/--site-proxy-port ${site_port}/' run_backend.sh >/tmp/run_backend.sh && exec bash /tmp/run_backend.sh" \
-    >/dev/null
-elif [[ "$(docker inspect -f '{{.State.Running}}' "$container")" != "true" ]]; then
-  docker start "$container" >/dev/null
-fi
+start_backend() {
+  local box="$1" api_port="$2" http_port="$3"
+  if ! docker inspect "$box" >/dev/null 2>&1; then
+    # The backend fetches its own OIDC discovery document from CONVEX_SITE_ORIGIN to verify auth
+    # tokens, so it listens inside the container on the same ports the host uses.
+    docker run -d --name "$box" \
+      -p "127.0.0.1:${api_port}:${api_port}" -p "127.0.0.1:${http_port}:${http_port}" \
+      -v "${box}-data:/convex/data" \
+      -e CONVEX_CLOUD_ORIGIN="http://127.0.0.1:${api_port}" \
+      -e CONVEX_SITE_ORIGIN="http://127.0.0.1:${http_port}" \
+      -e DISABLE_BEACON=1 \
+      --entrypoint bash "$image" -c \
+      "sed -e 's/--port 3210/--port ${api_port}/' -e 's/--site-proxy-port 3211/--site-proxy-port ${http_port}/' run_backend.sh >/tmp/run_backend.sh && exec bash /tmp/run_backend.sh" \
+      >/dev/null
+  elif [[ "$(docker inspect -f '{{.State.Running}}' "$box")" != "true" ]]; then
+    docker start "$box" >/dev/null
+  fi
+}
 
-convex_up() { curl -fsS "http://127.0.0.1:${convex_port}/version" >/dev/null 2>&1; }
-for _ in $(seq 1 60); do
-  convex_up && break
-  sleep 1
-done
-if ! convex_up; then
-  echo "Convex did not answer at http://127.0.0.1:${convex_port} within 60 s" >&2
-  docker logs --tail 40 "$container" >&2 || true
+wait_backend() {
+  local box="$1" api_port="$2"
+  for _ in $(seq 1 60); do
+    curl -fsS "http://127.0.0.1:${api_port}/version" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  echo "Convex did not answer at http://127.0.0.1:${api_port} within 60 s" >&2
+  docker logs --tail 40 "$box" >&2 || true
   exit 1
-fi
+}
+
+start_backend "$container" "$convex_port" "$site_port"
+start_backend "$core_container" "$core_port" "$core_site_port"
+wait_backend "$container" "$convex_port"
+wait_backend "$core_container" "$core_port"
 
 admin_key="$(docker exec "$container" ./generate_admin_key.sh | tail -n 1)"
 
@@ -142,5 +161,15 @@ CONVEX_BACKEND_DIR=${root}/packages/backend
 CONVEX_SELF_HOSTED_ADMIN_KEY=${admin_key}
 ${media_env}
 ENV
+
+core_admin_key="$(docker exec "$core_container" ./generate_admin_key.sh | tail -n 1)"
+
+cat >"${root}/packages/platform/.env.local" <<ENV
+CONVEX_SELF_HOSTED_URL=http://127.0.0.1:${core_port}
+CONVEX_SELF_HOSTED_ADMIN_KEY=${core_admin_key}
+ENV
+
+cd "${root}/packages/platform"
+pnpm exec convex deploy --yes >/dev/null
 
 print_env

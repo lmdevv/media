@@ -34,20 +34,21 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 
 ## Layout
 
-| Path                 | Role                                                              |
-| -------------------- | ----------------------------------------------------------------- |
-| `apps/web`           | Vite + React + TanStack Router SPA                                |
-| `apps/media`         | `@media/server`: Effect HttpApi media service; serves the SPA     |
-| `apps/cli`           | Effect CLI with JSON output; agent skill in `skills/movies/`      |
-| `apps/mobile`        | Expo + Expo Router + Uniwind iOS app over `@media/sdk/react`      |
-| `packages/backend`   | Convex schema, functions, and Convex Auth                         |
-| `packages/contracts` | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces |
-| `packages/sdk`       | Effect core with `/effect`, `/react`, `/promise` entry points     |
-| `packages/ui`        | shadcn components restyled through Paper tokens                   |
-| `packages/config`    | Shared strict `tsconfig`                                          |
-| `deploy/compose`     | Docker Compose: Convex backend plus media/web                     |
-| `nix/`               | NixOS module                                                      |
-| `legacy/music`       | Old [music] code, runnable until the music port deletes it        |
+| Path                 | Role                                                                |
+| -------------------- | ------------------------------------------------------------------- |
+| `apps/web`           | Vite + React + TanStack Router SPA                                  |
+| `apps/media`         | `@media/server`: Effect HttpApi media service; serves the SPA       |
+| `apps/cli`           | Effect CLI with JSON output; agent skill in `skills/movies/`        |
+| `apps/mobile`        | Expo + Expo Router + Uniwind iOS app over `@media/sdk/react`        |
+| `packages/backend`   | Old movies' Convex schema, functions, and Convex Auth               |
+| `packages/platform`  | The core's Convex project; movies and music port into it (ADR 0023) |
+| `packages/contracts` | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces   |
+| `packages/sdk`       | Effect core with `/effect`, `/react`, `/promise` entry points       |
+| `packages/ui`        | shadcn components restyled through Paper tokens                     |
+| `packages/config`    | Shared strict `tsconfig`                                            |
+| `deploy/compose`     | Docker Compose: Convex backend plus media/web                       |
+| `nix/`               | NixOS module                                                        |
+| `legacy/music`       | Old [music] code, runnable until the music port deletes it          |
 
 Ownership: Convex owns accounts, profiles, grants, libraries, titles, files, jobs, watch history,
 and playback sessions. Disk owns original media, which is read-only. The media service owns
@@ -81,9 +82,9 @@ everything when a root config file changes; `scripts/changed-packages.sh` prints
 `deploy/compose` (entrypoint, `compose.yaml`, `.env.example`), the root `.env.example`,
 `nix/module.nix`, and both READMEs; `check-deploy.sh` names what is missing.
 
-Each worktree gets its own stack: `scripts/dev-stack.sh up` starts a self-hosted Convex backend in
-Docker, deploys the functions, configures auth keys, the playback token secret and the media
-service credential, and writes the `.env.local` files. Ports, the data volume, and the temporary
+Each worktree gets its own stack: `scripts/dev-stack.sh up` starts two self-hosted Convex backends
+in Docker, one for old movies and one for the core, deploys both, configures movies' auth keys, the
+playback token secret and the media service credential, and writes the `.env.local` files. Ports, the data volume, and the temporary
 output directory derive from the worktree name; `scripts/dev-stack.sh env` prints them, and
 `down` / `destroy` stop or remove the stack. Commit the regenerated `convex/_generated/`.
 
@@ -163,10 +164,11 @@ The example identities must be replaced with the model and tool that actually co
 ## Verify and review
 
 - Ports come from the worktree's stack: Convex API at base, auth at base + 1, media at base + 2, web
-  at base + 3. `scripts/dev-stack.sh env` prints them. Playwright uses `E2E_PORT`, else the stack's
+  at base + 3, the core's Convex API at base + 4 and its HTTP actions at base + 5.
+  `scripts/dev-stack.sh env` prints them. Playwright uses `E2E_PORT`, else the stack's
   web port, else 3011.
 - Stack suites need Docker and `scripts/dev-stack.sh up`: `pnpm --filter <pkg> test:stack` for
-  `@media/backend`, `@media/sdk`, `@lmdevv/movies`, and `@media/server`, then
+  `@media/platform`, `@media/backend`, `@media/sdk`, `@lmdevv/movies`, and `@media/server`, then
   `pnpm --filter web exec playwright test`. For the migration suites, pull the pinned image
   (`docker pull` the `jellyfin/jellyfin:12.2@sha256:…` reference in `.github/workflows/ci.yml`)
   and set `MEDIA_JELLYFIN_DOCKER=1`; without the image the media suite skips the real-Jellyfin

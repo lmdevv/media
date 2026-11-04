@@ -102,6 +102,7 @@ jobs:
     needs: changes
     if: >-
       contains(fromJSON(needs.changes.outputs.workspaces), 'packages/backend')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/platform')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/sdk')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/cli')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
@@ -118,6 +119,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pnpm install --frozen-lockfile
       - run: scripts/dev-stack.sh up
+      - run: pnpm --filter @media/platform test:stack
       - run: pnpm --filter @media/backend test:stack
       - run: pnpm --filter @media/sdk test:stack
       - run: pnpm --filter @lmdevv/movies test:stack

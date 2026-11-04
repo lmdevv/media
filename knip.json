@@ -21,6 +21,11 @@
         "config": ["convex/tsconfig.json"]
       }
     },
+    "packages/platform": {
+      "typescript": {
+        "config": ["convex/tsconfig.json"]
+      }
+    },
     "packages/ui": {},
     "packages/sdk": {},
     "apps/cli": {

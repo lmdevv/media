@@ -1,0 +1,21 @@
+{
+  "name": "@media/platform",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p convex && tsc --noEmit -p test",
+    "test": "vitest run --root ../.. packages/platform/test",
+    "test:stack": "MEDIA_STACK_TESTS=1 vitest run --root ../.. packages/platform/test"
+  },
+  "dependencies": {
+    "convex": "catalog:"
+  },
+  "devDependencies": {
+    "@media/config": "workspace:*",
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "5.0.3"
+  }
+}
