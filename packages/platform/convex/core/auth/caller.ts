@@ -20,7 +20,12 @@ const callerValidator = v.object({
   username: v.string(),
   role,
   sessionId: v.id("authSessions"),
-  sessionKind: v.union(v.literal("password"), v.literal("apiKey"), v.literal("deviceCode")),
+  sessionKind: v.union(
+    v.literal("password"),
+    v.literal("apiKey"),
+    v.literal("deviceCode"),
+    v.literal("tile"),
+  ),
   /** The credential scopes the session holds now; `signed-in` is implied. */
   scopes: v.array(credentialScope),
   /** The person's restrictions, read live on this call. */

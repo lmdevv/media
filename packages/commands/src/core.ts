@@ -29,6 +29,32 @@ const jobStatus = v.union(
   v.literal("canceled"),
 );
 
+const deviceMode = v.union(v.literal("personal"), v.literal("shared"));
+
+const approvalIntent = v.union(v.literal("open"), v.literal("leave"));
+
+/** Why a tile on a shared device is locked (ADR 0006). */
+const lockReason = v.union(
+  v.literal("admin-rule"),
+  v.literal("kid-listed"),
+  v.literal("kid-holds-device"),
+);
+
+/** Whose proof opens a locked tile: its own person, an adult vouching for a kid, or either. */
+const opener = v.union(v.literal("self"), v.literal("adult"), v.literal("self-or-adult"));
+
+const sharedTile = v.object({
+  userId: v.id("users"),
+  username: v.string(),
+  kid: v.boolean(),
+  /** The person's unlock code on this device: none set, ready, or off after 5 wrong tries. */
+  code: v.union(v.literal("none"), v.literal("ready"), v.literal("off")),
+  lock: v.union(
+    v.object({ state: v.literal("open") }),
+    v.object({ state: v.literal("locked"), because: v.array(lockReason), opensWith: opener }),
+  ),
+});
+
 /** The core's commands: the server itself, accounts, devices, and the other shared modules. */
 export const core = [
   query("core.server.info", {
@@ -47,7 +73,12 @@ export const core = [
       username: v.string(),
       role,
       sessionId: v.id("authSessions"),
-      kind: v.union(v.literal("password"), v.literal("apiKey"), v.literal("deviceCode")),
+      kind: v.union(
+        v.literal("password"),
+        v.literal("apiKey"),
+        v.literal("deviceCode"),
+        v.literal("tile"),
+      ),
       scopes: v.array(credentialScope),
     }),
   }),
@@ -359,6 +390,144 @@ export const core = [
     scope: "admin",
     refusesKeys: true,
     args: { userId: v.id("users"), restrictions: v.union(restrictions, v.null()) },
+    result: v.null(),
+  }),
+
+  action("core.devices.registry.enroll", {
+    summary:
+      "Register this app as a personal device, or find it again by its device code, and sign this session in on it",
+    scope: "account",
+    refusesKeys: true,
+    args: { name: v.string(), device: v.optional(v.string()) },
+    result: v.object({ deviceId: v.id("devices"), device: v.string() }),
+  }),
+  query("core.devices.registry.list", {
+    summary: "List every registered device and whether it is shared, newest first",
+    scope: "admin",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({ deviceId: v.id("devices"), name: v.string(), mode: deviceMode }),
+    ),
+  }),
+  mutation("core.devices.registry.setMode", {
+    summary:
+      "Make a device shared, so its picker lists everyone who opted in, or personal again; either way everyone on it is signed out",
+    scope: "admin",
+    refusesKeys: true,
+    args: { deviceId: v.id("devices"), mode: deviceMode },
+    result: v.null(),
+  }),
+  mutation("core.devices.registry.remove", {
+    summary: "Forget a device and sign everyone on it out",
+    scope: "admin",
+    args: { deviceId: v.id("devices") },
+    result: v.null(),
+  }),
+  query("core.devices.picker.show", {
+    summary:
+      "Show a device's picker: who is signed in on it, or on a shared device who opted in, which tiles are locked, and its approval",
+    scope: "public",
+    args: { device: v.string() },
+    result: v.union(
+      v.object({
+        deviceId: v.id("devices"),
+        name: v.string(),
+        mode: v.literal("personal"),
+        tiles: v.array(v.object({ userId: v.id("users"), username: v.string() })),
+      }),
+      v.object({
+        deviceId: v.id("devices"),
+        name: v.string(),
+        mode: v.literal("shared"),
+        holder: v.union(v.id("users"), v.null()),
+        tiles: v.array(sharedTile),
+        approval: v.union(
+          v.object({
+            approvalId: v.id("tileApprovals"),
+            intent: approvalIntent,
+            userId: v.id("users"),
+            state: v.union(
+              v.literal("pending"),
+              v.literal("approved"),
+              v.literal("denied"),
+              v.literal("redeemed"),
+            ),
+            expiresAt: v.number(),
+          }),
+          v.null(),
+        ),
+      }),
+    ),
+  }),
+  mutation("core.devices.tiles.setListed", {
+    summary:
+      "Put yourself on every shared device's picker or take yourself off; an admin decides it for a kid",
+    scope: "account",
+    refusesKeys: true,
+    args: { userId: v.id("users"), listed: v.boolean() },
+    result: v.null(),
+  }),
+  mutation("core.devices.tiles.setLock", {
+    summary:
+      "Require someone's tile on shared devices to open with a proof, or stop; the lock a listed kid causes stays",
+    scope: "admin",
+    refusesKeys: true,
+    args: { userId: v.id("users"), locked: v.boolean() },
+    result: v.null(),
+  }),
+  action("core.devices.unlockCodes.set", {
+    summary:
+      "Set or clear your short unlock code, which opens your tile on shared-device lock screens and never signs in",
+    scope: "account",
+    refusesKeys: true,
+    args: { code: v.union(v.string(), v.null()) },
+    result: v.null(),
+  }),
+  mutation("core.devices.unlockCodes.reset", {
+    summary: "Turn someone's unlock code back on for one shared device after 5 wrong tries",
+    scope: "admin",
+    args: { deviceId: v.id("devices"), userId: v.id("users") },
+    result: v.null(),
+  }),
+  mutation("core.devices.approvals.request", {
+    summary:
+      "From a shared device, ask someone signed in elsewhere to open their locked tile, or an adult to let a kid leave",
+    scope: "public",
+    args: {
+      device: v.string(),
+      ask: v.union(
+        v.object({ intent: v.literal("open"), userId: v.id("users") }),
+        v.object({ intent: v.literal("leave") }),
+      ),
+    },
+    result: v.object({ approvalId: v.id("tileApprovals"), expiresAt: v.number() }),
+  }),
+  query("core.devices.approvals.pending", {
+    summary: "List the shared-device approvals you can answer now",
+    scope: "account",
+    args: {},
+    result: v.array(
+      v.object({
+        approvalId: v.id("tileApprovals"),
+        intent: approvalIntent,
+        deviceName: v.string(),
+        userId: v.id("users"),
+        username: v.string(),
+        expiresAt: v.number(),
+      }),
+    ),
+  }),
+  mutation("core.devices.approvals.approve", {
+    summary: "Approve opening your tile on a shared device, or as an adult let a kid leave theirs",
+    scope: "account",
+    refusesKeys: true,
+    args: { approvalId: v.id("tileApprovals") },
+    result: v.null(),
+  }),
+  mutation("core.devices.approvals.deny", {
+    summary: "Refuse a shared-device approval",
+    scope: "account",
+    args: { approvalId: v.id("tileApprovals") },
     result: v.null(),
   }),
 

@@ -19,6 +19,7 @@ import {
   contentDomains,
   contentVerbs,
   credentialScopes,
+  domainScopes,
   roleScopes,
   roles,
   scopes,
@@ -204,6 +205,10 @@ const scopesFile = (): Emitted => {
         [
           "/** `CredentialScope` as a Convex validator, for stored credentials and their arguments. */",
           `export const credentialScope = ${literalValidator(credentialScopes)};`,
+        ].join("\n"),
+        [
+          "/** The content domains' scopes, the only scopes a session on a shared device holds. */",
+          `export const domainScopes = ${tuple(domainScopes)};`,
         ].join("\n"),
         [
           "/** A user's platform role. The owner is the admin who holds the server. */",

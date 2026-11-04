@@ -1,5 +1,6 @@
 import { ConvexHttpClient } from "convex/browser";
 import { ConvexError } from "convex/values";
+import type { Value } from "convex/values";
 import { Schema } from "effect";
 
 import type { AssignableRole } from "../commands/scopes";
@@ -82,8 +83,8 @@ const clientWith = (stack: CoreStack, token: string): ConvexHttpClient => {
 /** Signs in with a provider and its params; rejects as `auth:signIn` does. */
 export const signIn = async (
   stack: CoreStack,
-  provider: "password" | "apiKey" | "deviceCode" | "setup" | "invite" | "reset",
-  params: Readonly<Record<string, string>>,
+  provider: "password" | "apiKey" | "deviceCode" | "setup" | "invite" | "reset" | "tile",
+  params: Readonly<Record<string, Value>>,
 ): Promise<SignedIn> => {
   const result = await new ConvexHttpClient(stack.url, { logger: false }).action(api.auth.signIn, {
     provider,

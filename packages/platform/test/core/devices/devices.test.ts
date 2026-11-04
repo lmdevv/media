@@ -1,0 +1,487 @@
+import { afterEach, describe, expect, it } from "vitest";
+
+import { roleScopes } from "../../../commands/scopes";
+import { api } from "../../../convex/_generated/api";
+import { inOrder } from "../../../convex/core/lib/inOrder";
+import {
+  anonymous,
+  enroll,
+  listings,
+  member,
+  openTile,
+  picker,
+  sharedDevice,
+  sharedTiles,
+  tileIn,
+} from "../../devices";
+import { refusal, signIn, signInAs } from "../../sign-in";
+import { coreStackFromEnvFile } from "../../stack-env";
+
+const stack = coreStackFromEnvFile();
+
+const listed = listings();
+
+const CONTENT_SCOPES = roleScopes.member.filter((scope) => scope !== "account");
+
+const LOCKED_BY_KID = { state: "locked", because: ["kid-listed"], opensWith: "self" };
+
+describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
+  afterEach(async () => {
+    await listed.clear();
+  });
+
+  it("registers personal devices whose picker lists only the people signed in on them", async () => {
+    if (stack === undefined) return;
+    const ada = await member(stack, "ada");
+    const bo = await member(stack, "bo");
+    const cy = await member(stack, "cy");
+
+    const laptop = await enroll(ada.signedIn, "Ada's laptop");
+    const again = await enroll(bo.signedIn, "Shared laptop", laptop.device);
+    await enroll(cy.signedIn, "Cy's phone");
+
+    expect(again).toEqual(laptop);
+
+    const shown = await picker(stack, laptop);
+    const names = shown.tiles.map((tile) => tile.username);
+
+    expect(shown).toMatchObject({ mode: "personal", name: "Shared laptop" });
+    expect(names).toEqual([ada.person.username, bo.person.username].toSorted());
+
+    await ada.signedIn.client.mutation(api.core.auth.sessions.end, { sessionId: ada.sessionId });
+
+    expect((await picker(stack, laptop)).tiles.map((tile) => tile.username)).toEqual([
+      bo.person.username,
+    ]);
+    expect(await refusal(enroll(cy.signedIn, "x", `${laptop.device}x`))).toBe("accepted");
+    expect(await refusal(picker(stack, { ...laptop, device: `${laptop.device}x` }))).toBe(
+      "not_found",
+    );
+  });
+
+  it("lists on a shared device only the people who opted in", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "admin", "admin");
+    const dad = await listed.adult(await member(stack, "dad"));
+    const mom = await listed.adult(await member(stack, "mom"));
+    const aunt = await member(stack, "aunt");
+    const tv = await sharedDevice(stack, admin);
+
+    expect(await refusal(tv.setUp.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
+
+    const ids = sharedTiles(await picker(stack, tv)).map((tile) => tile.userId);
+
+    expect(ids).toContain(dad.userId);
+    expect(ids).toContain(mom.userId);
+    expect(ids).not.toContain(aunt.userId);
+    expect(ids).not.toContain(admin.userId);
+    expect(await refusal(openTile(stack, tv, aunt.userId))).toBe("not_found");
+
+    const momTile = await openTile(stack, tv, mom.userId);
+
+    await mom.signedIn.client.mutation(api.core.devices.tiles.setListed, {
+      userId: mom.userId,
+      listed: false,
+    });
+
+    expect(sharedTiles(await picker(stack, tv)).map((tile) => tile.userId)).not.toContain(
+      mom.userId,
+    );
+    expect(await refusal(momTile.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
+  });
+
+  it("opens a kid's tile freely and locks every adult tile while a kid is listed", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "admin", "admin");
+    const dad = await listed.adult(await member(stack, "dad"));
+    const lily = await listed.kid(admin, await member(stack, "lily"));
+    const tv = await sharedDevice(stack, admin);
+
+    const before = await picker(stack, tv);
+
+    expect(tileIn(before, dad.userId).lock).toEqual(LOCKED_BY_KID);
+    expect(tileIn(before, lily.userId)).toMatchObject({ kid: true, lock: { state: "open" } });
+
+    const lilyTile = await openTile(stack, tv, lily.userId);
+
+    expect(await lilyTile.client.query(api.core.auth.sessions.current, {})).toMatchObject({
+      userId: lily.userId,
+      kind: "tile",
+      scopes: CONTENT_SCOPES,
+    });
+
+    const after = await picker(stack, tv);
+
+    expect(after).toMatchObject({ mode: "shared", holder: lily.userId });
+    expect(tileIn(after, dad.userId).lock).toEqual({
+      state: "locked",
+      because: ["kid-listed", "kid-holds-device"],
+      opensWith: "self",
+    });
+    expect(await refusal(openTile(stack, tv, dad.userId))).toBe("forbidden");
+    expect(
+      await refusal(lilyTile.client.action(api.core.devices.registry.enroll, { name: "TV" })),
+    ).toBe("forbidden");
+    expect(
+      await refusal(
+        lilyTile.client.query(api.core.accounts.users.list, {
+          paginationOpts: { numItems: 1, cursor: null },
+        }),
+      ),
+    ).toBe("forbidden");
+  });
+
+  it("refuses an admin who tries to lift the lock a listed kid puts on an adult's tile", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "admin", "admin");
+    const dad = await listed.adult(await member(stack, "dad"));
+    const lily = await listed.kid(admin, await member(stack, "lily"));
+    const tv = await sharedDevice(stack, admin);
+
+    const unlock = () =>
+      admin.signedIn.client.mutation(api.core.devices.tiles.setLock, {
+        userId: dad.userId,
+        locked: false,
+      });
+
+    expect(await refusal(unlock())).toBe("forbidden");
+    expect(tileIn(await picker(stack, tv), dad.userId).lock).toEqual(LOCKED_BY_KID);
+    expect(
+      await refusal(
+        lily.signedIn.client.mutation(api.core.devices.tiles.setListed, {
+          userId: lily.userId,
+          listed: false,
+        }),
+      ),
+    ).toBe("forbidden");
+
+    await admin.signedIn.client.mutation(api.core.devices.tiles.setListed, {
+      userId: lily.userId,
+      listed: false,
+    });
+
+    expect(await refusal(unlock())).toBe("accepted");
+    expect(tileIn(await picker(stack, tv), dad.userId).lock).toEqual({ state: "open" });
+  });
+
+  it("locks the one tile an admin names when no kid is listed", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "admin", "admin");
+    const dad = await listed.adult(await member(stack, "dad"));
+    const mom = await listed.adult(await member(stack, "mom"));
+    const tv = await sharedDevice(stack, admin);
+
+    expect(sharedTiles(await picker(stack, tv)).filter((tile) => tile.kid)).toEqual([]);
+
+    const setLock = (locked: boolean) =>
+      admin.signedIn.client.mutation(api.core.devices.tiles.setLock, {
+        userId: dad.userId,
+        locked,
+      });
+
+    await setLock(true);
+
+    const shown = await picker(stack, tv);
+
+    expect(tileIn(shown, dad.userId).lock).toEqual({
+      state: "locked",
+      because: ["admin-rule"],
+      opensWith: "self",
+    });
+    expect(tileIn(shown, mom.userId).lock).toEqual({ state: "open" });
+    expect(
+      sharedTiles(shown)
+        .filter((tile) => tile.userId !== dad.userId)
+        .every((tile) => tile.lock.state === "open"),
+    ).toBe(true);
+    expect(await refusal(openTile(stack, tv, dad.userId))).toBe("forbidden");
+    expect(
+      await refusal(
+        openTile(stack, tv, dad.userId, {
+          kind: "password",
+          by: mom.userId,
+          password: mom.person.password,
+        }),
+      ),
+    ).toBe("forbidden");
+
+    const dadTile = await openTile(stack, tv, dad.userId, {
+      kind: "password",
+      by: dad.userId,
+      password: dad.person.password,
+    });
+
+    expect(await dadTile.client.query(api.core.auth.sessions.current, {})).toMatchObject({
+      userId: dad.userId,
+      kind: "tile",
+    });
+
+    const momTile = await openTile(stack, tv, mom.userId);
+
+    expect(await refusal(dadTile.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
+    expect(await momTile.client.query(api.core.auth.sessions.current, {})).toMatchObject({
+      userId: mom.userId,
+    });
+
+    await setLock(false);
+  });
+
+  it("turns an unlock code off after 5 wrong tries until a password, an approval, or an admin", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "admin", "admin");
+    const dad = await listed.adult(await member(stack, "dad"));
+    await listed.kid(admin, await member(stack, "lily"));
+    const tv = await sharedDevice(stack, admin);
+    const code = "4826";
+
+    await dad.signedIn.client.action(api.core.devices.unlockCodes.set, { code });
+
+    const tryCode = (typed: string) =>
+      refusal(openTile(stack, tv, dad.userId, { kind: "code", by: dad.userId, code: typed }));
+
+    const codeState = async () => tileIn(await picker(stack, tv), dad.userId).code;
+
+    const fiveWrong = async () => {
+      expect(await inOrder(["1111", "2222", "3333", "4444", "5555"], tryCode)).toEqual(
+        Array.from({ length: 5 }, () => "unauthenticated"),
+      );
+
+      expect(await codeState()).toBe("off");
+      expect(await tryCode(code)).toBe("forbidden");
+    };
+
+    expect(await codeState()).toBe("ready");
+    expect(await tryCode(code)).toBe("accepted");
+
+    await fiveWrong();
+
+    expect(
+      await refusal(
+        openTile(stack, tv, dad.userId, {
+          kind: "password",
+          by: dad.userId,
+          password: dad.person.password,
+        }),
+      ),
+    ).toBe("accepted");
+    expect(await codeState()).toBe("ready");
+
+    await fiveWrong();
+
+    expect(
+      await refusal(
+        dad.signedIn.client.mutation(api.core.devices.unlockCodes.reset, {
+          deviceId: tv.deviceId,
+          userId: dad.userId,
+        }),
+      ),
+    ).toBe("forbidden");
+
+    await admin.signedIn.client.mutation(api.core.devices.unlockCodes.reset, {
+      deviceId: tv.deviceId,
+      userId: dad.userId,
+    });
+
+    expect(await codeState()).toBe("ready");
+    expect(await tryCode(code)).toBe("accepted");
+  });
+
+  it("never lets an unlock code sign in", async () => {
+    if (stack === undefined) return;
+    const dad = await listed.adult(await member(stack, "dad"));
+    const code = "73914482";
+
+    await dad.signedIn.client.action(api.core.devices.unlockCodes.set, { code });
+
+    expect(
+      await refusal(signIn(stack, "password", { username: dad.person.username, password: code })),
+    ).toBe("unauthenticated");
+
+    const phone = await enroll(dad.signedIn, "Dad's phone");
+
+    expect(
+      await refusal(openTile(stack, phone, dad.userId, { kind: "code", by: dad.userId, code })),
+    ).toBe("forbidden");
+
+    await dad.signedIn.client.action(api.core.accounts.me.changePassword, {
+      currentPassword: dad.person.password,
+      newPassword: code,
+    });
+
+    expect(
+      await refusal(dad.signedIn.client.action(api.core.devices.unlockCodes.set, { code })),
+    ).toBe("invalid_args");
+    expect(
+      await refusal(dad.signedIn.client.action(api.core.devices.unlockCodes.set, { code: "12ab" })),
+    ).toBe("invalid_args");
+  });
+
+  it("opens an adult's tile when that adult approves from another signed-in session", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "admin", "admin");
+    const dad = await listed.adult(await member(stack, "dad"));
+    const mom = await listed.adult(await member(stack, "mom"));
+    await listed.kid(admin, await member(stack, "lily"));
+    const tv = await sharedDevice(stack, admin);
+    const phone = await signInAs(stack, dad.person);
+
+    const asked = await anonymous(stack).mutation(api.core.devices.approvals.request, {
+      device: tv.device,
+      ask: { intent: "open", userId: dad.userId },
+    });
+
+    const proof = { kind: "approval", approvalId: asked.approvalId } as const;
+
+    expect(await refusal(openTile(stack, tv, dad.userId, proof))).toBe("pending");
+    expect(
+      (await mom.signedIn.client.query(api.core.devices.approvals.pending, {})).map(
+        (prompt) => prompt.approvalId,
+      ),
+    ).not.toContain(asked.approvalId);
+    expect(
+      await refusal(
+        mom.signedIn.client.mutation(api.core.devices.approvals.approve, {
+          approvalId: asked.approvalId,
+        }),
+      ),
+    ).toBe("not_found");
+
+    const prompts = await phone.client.query(api.core.devices.approvals.pending, {});
+
+    expect(prompts).toContainEqual({
+      approvalId: asked.approvalId,
+      intent: "open",
+      deviceName: "Living room TV",
+      userId: dad.userId,
+      username: dad.person.username,
+      expiresAt: asked.expiresAt,
+    });
+
+    await phone.client.mutation(api.core.devices.approvals.approve, {
+      approvalId: asked.approvalId,
+    });
+
+    const dadTile = await openTile(stack, tv, dad.userId, proof);
+    const current = await dadTile.client.query(api.core.auth.sessions.current, {});
+
+    expect(current).toMatchObject({ userId: dad.userId, kind: "tile" });
+    expect(
+      await (
+        await openTile(stack, tv, dad.userId, proof)
+      ).client.query(api.core.auth.sessions.current, {}),
+    ).toMatchObject({ sessionId: current.sessionId });
+    expect(
+      await refusal(
+        dadTile.client.mutation(api.core.devices.approvals.approve, {
+          approvalId: asked.approvalId,
+        }),
+      ),
+    ).toBe("forbidden");
+  });
+
+  it("keeps a kid on their tile until an adult approves leaving it", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "admin", "admin");
+    const mom = await listed.adult(await member(stack, "mom"));
+    const lily = await listed.kid(admin, await member(stack, "lily"));
+    const max = await listed.kid(admin, await member(stack, "max"));
+    const tv = await sharedDevice(stack, admin);
+    const device = { device: tv.device };
+
+    const lilyTile = await openTile(stack, tv, lily.userId);
+
+    await lilyTile.client.action(api.auth.signOut, {});
+
+    expect(tileIn(await picker(stack, tv), max.userId).lock).toEqual({
+      state: "locked",
+      because: ["kid-holds-device"],
+      opensWith: "adult",
+    });
+    expect(await refusal(openTile(stack, tv, max.userId))).toBe("forbidden");
+    expect(
+      await refusal(
+        anonymous(stack).mutation(api.core.devices.approvals.request, {
+          ...device,
+          ask: { intent: "open", userId: max.userId },
+        }),
+      ),
+    ).toBe("conflict");
+
+    const asked = await anonymous(stack).mutation(api.core.devices.approvals.request, {
+      ...device,
+      ask: { intent: "leave" },
+    });
+
+    const approve = (who: typeof mom) =>
+      who.signedIn.client.mutation(api.core.devices.approvals.approve, {
+        approvalId: asked.approvalId,
+      });
+
+    expect(await refusal(approve(max))).toBe("forbidden");
+    expect(await max.signedIn.client.query(api.core.devices.approvals.pending, {})).toEqual([]);
+    expect(
+      (await mom.signedIn.client.query(api.core.devices.approvals.pending, {})).map(
+        (prompt) => prompt.approvalId,
+      ),
+    ).toContain(asked.approvalId);
+
+    await approve(mom);
+
+    expect(await picker(stack, tv)).toMatchObject({ holder: null });
+    expect(await refusal(openTile(stack, tv, max.userId))).toBe("accepted");
+    expect(await picker(stack, tv)).toMatchObject({ holder: max.userId });
+  });
+
+  it("signs everyone out of a device when an admin changes its mode", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "admin", "admin");
+    const dad = await listed.adult(await member(stack, "dad"));
+    const tv = await sharedDevice(stack, admin);
+    const dadTile = await openTile(stack, tv, dad.userId);
+
+    const setMode = (mode: "personal" | "shared") =>
+      admin.signedIn.client.mutation(api.core.devices.registry.setMode, {
+        deviceId: tv.deviceId,
+        mode,
+      });
+
+    await setMode("personal");
+
+    expect(await refusal(dadTile.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
+    expect(await refusal(openTile(stack, tv, dad.userId))).toBe("forbidden");
+
+    const laptop = await signInAs(stack, dad.person);
+
+    await enroll(laptop, "Dad's laptop", tv.device);
+    await setMode("shared");
+
+    expect(await refusal(laptop.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
+    expect(await refusal(enroll(await signInAs(stack, dad.person), "x", tv.device))).toBe(
+      "conflict",
+    );
+    expect(
+      await refusal(
+        dad.signedIn.client.mutation(api.core.devices.registry.setMode, {
+          deviceId: tv.deviceId,
+          mode: "personal",
+        }),
+      ),
+    ).toBe("forbidden");
+
+    await admin.signedIn.client.mutation(api.core.devices.registry.remove, {
+      deviceId: tv.deviceId,
+    });
+
+    expect(await refusal(picker(stack, tv))).toBe("not_found");
+  });
+});

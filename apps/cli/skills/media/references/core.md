@@ -214,7 +214,7 @@ Show who is signed in, how, and with which scopes.
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit"> }`
+- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit"> }`
 
 ## `core.auth.sessions.end`
 
@@ -234,6 +234,143 @@ Sign out every password and device session you have, or every other one.
 - Kind: mutation
 - Scope: account
 - Arguments: `{ keepCurrent: boolean }`
+- Result: `null`
+
+## `core.devices.approvals.approve`
+
+Approve opening your tile on a shared device, or as an adult let a kid leave theirs.
+
+- CLI: `media auth approvals approve`
+- Kind: mutation
+- Scope: account
+- API keys: refused
+- Arguments: `{ approvalId: Id<"tileApprovals"> }`
+- Result: `null`
+
+## `core.devices.approvals.deny`
+
+Refuse a shared-device approval.
+
+- CLI: `media auth approvals deny`
+- Kind: mutation
+- Scope: account
+- Arguments: `{ approvalId: Id<"tileApprovals"> }`
+- Result: `null`
+
+## `core.devices.approvals.pending`
+
+List the shared-device approvals you can answer now.
+
+- CLI: `media auth approvals pending`
+- Kind: query
+- Scope: account
+- Arguments: none
+- Result: `Array<{ approvalId: Id<"tileApprovals">; intent: "open" | "leave"; deviceName: string; userId: Id<"users">; username: string; expiresAt: number }>`
+
+## `core.devices.approvals.request`
+
+From a shared device, ask someone signed in elsewhere to open their locked tile, or an adult to let a kid leave.
+
+- CLI: `media auth approvals request`
+- Kind: mutation
+- Scope: public
+- Arguments: `{ device: string; ask: { intent: "open"; userId: Id<"users"> } | { intent: "leave" } }`
+- Result: `{ approvalId: Id<"tileApprovals">; expiresAt: number }`
+
+## `core.devices.picker.show`
+
+Show a device's picker: who is signed in on it, or on a shared device who opted in, which tiles are locked, and its approval.
+
+- CLI: `media auth picker show`
+- Kind: query
+- Scope: public
+- Arguments: `{ device: string }`
+- Result: `{ deviceId: Id<"devices">; name: string; mode: "personal"; tiles: Array<{ userId: Id<"users">; username: string }> } | { deviceId: Id<"devices">; name: string; mode: "shared"; holder: Id<"users"> | null; tiles: Array<{ userId: Id<"users">; username: string; kid: boolean; code: "none" | "ready" | "off"; lock: { state: "open" } | { state: "locked"; because: Array<"admin-rule" | "kid-listed" | "kid-holds-device">; opensWith: "self" | "adult" | "self-or-adult" } }>; approval: { approvalId: Id<"tileApprovals">; intent: "open" | "leave"; userId: Id<"users">; state: "pending" | "approved" | "denied" | "redeemed"; expiresAt: number } | null }`
+
+## `core.devices.registry.enroll`
+
+Register this app as a personal device, or find it again by its device code, and sign this session in on it.
+
+- CLI: `media auth registry enroll`
+- Kind: action
+- Scope: account
+- API keys: refused
+- Arguments: `{ name: string; device?: string }`
+- Result: `{ deviceId: Id<"devices">; device: string }`
+
+## `core.devices.registry.list`
+
+List every registered device and whether it is shared, newest first.
+
+- CLI: `media admin registry list`
+- Kind: query
+- Scope: admin
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ deviceId: Id<"devices">; name: string; mode: "personal" | "shared" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.devices.registry.remove`
+
+Forget a device and sign everyone on it out.
+
+- CLI: `media admin registry remove`
+- Kind: mutation
+- Scope: admin
+- Arguments: `{ deviceId: Id<"devices"> }`
+- Result: `null`
+
+## `core.devices.registry.setMode`
+
+Make a device shared, so its picker lists everyone who opted in, or personal again; either way everyone on it is signed out.
+
+- CLI: `media admin registry set-mode`
+- Kind: mutation
+- Scope: admin
+- API keys: refused
+- Arguments: `{ deviceId: Id<"devices">; mode: "personal" | "shared" }`
+- Result: `null`
+
+## `core.devices.tiles.setListed`
+
+Put yourself on every shared device's picker or take yourself off; an admin decides it for a kid.
+
+- CLI: `media auth tiles set-listed`
+- Kind: mutation
+- Scope: account
+- API keys: refused
+- Arguments: `{ userId: Id<"users">; listed: boolean }`
+- Result: `null`
+
+## `core.devices.tiles.setLock`
+
+Require someone's tile on shared devices to open with a proof, or stop; the lock a listed kid causes stays.
+
+- CLI: `media admin tiles set-lock`
+- Kind: mutation
+- Scope: admin
+- API keys: refused
+- Arguments: `{ userId: Id<"users">; locked: boolean }`
+- Result: `null`
+
+## `core.devices.unlockCodes.reset`
+
+Turn someone's unlock code back on for one shared device after 5 wrong tries.
+
+- CLI: `media admin unlock-codes reset`
+- Kind: mutation
+- Scope: admin
+- Arguments: `{ deviceId: Id<"devices">; userId: Id<"users"> }`
+- Result: `null`
+
+## `core.devices.unlockCodes.set`
+
+Set or clear your short unlock code, which opens your tile on shared-device lock screens and never signs in.
+
+- CLI: `media auth unlock-codes set`
+- Kind: action
+- Scope: account
+- API keys: refused
+- Arguments: `{ code: string | null }`
 - Result: `null`
 
 ## `core.libraries.create`

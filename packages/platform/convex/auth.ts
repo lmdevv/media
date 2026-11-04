@@ -4,6 +4,7 @@ import { apiKeyProvider } from "./core/auth/apiKeys";
 import { deviceCodeProvider } from "./core/auth/deviceCodes";
 import { inviteProvider, resetProvider, setupProvider } from "./core/auth/flows";
 import { passwordProvider } from "./core/auth/password";
+import { tileProvider } from "./core/auth/tiles";
 import { JWT_MS, SESSION_MS } from "./core/sessions";
 
 const openedByTheCore = (): never => {
@@ -22,6 +23,7 @@ export const { auth, signIn, signOut, store } = convexAuth({
     setupProvider,
     inviteProvider,
     resetProvider,
+    tileProvider,
   ],
   session: { totalDurationMs: SESSION_MS, inactiveDurationMs: SESSION_MS },
   jwt: { durationMs: JWT_MS },

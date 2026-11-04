@@ -55,6 +55,16 @@ export const credentialScope = v.union(
   v.literal("music:edit"),
 );
 
+/** The content domains' scopes, the only scopes a session on a shared device holds. */
+export const domainScopes = [
+  "movies:read",
+  "movies:play",
+  "movies:edit",
+  "music:read",
+  "music:play",
+  "music:edit",
+] as const;
+
 /** A user's platform role. The owner is the admin who holds the server. */
 export type Role = "owner" | "admin" | "member" | "guest";
 

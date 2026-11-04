@@ -31,6 +31,10 @@ export const hashNewPassword = (password: string): Promise<string> => {
   return scrypt.hash(password);
 };
 
+/** Call it from an action, like `hashNewPassword`; an unlock code is stored the way a password is. */
+export const hashUnlockCode = (code: string): Promise<string> => scrypt.hash(code);
+
+/** Whether `password`, or an unlock code, matches a Scrypt hash, compared in constant time. */
 export const passwordMatches = (hash: string, password: string): Promise<boolean> =>
   scrypt.verify(hash, password);
 

@@ -15,6 +15,9 @@ export const SESSION_MS = 30 * DAY_MS;
 /** How long a JWT lasts. */
 export const JWT_MS = 10 * 60 * 1000;
 
+/** How long a tile on a shared device stays open, so a TV is back at its picker by the next day. */
+const TILE_SESSION_MS = 12 * 60 * 60 * 1000;
+
 const PURGE_BATCH = 100;
 
 /** More refresh tokens than a session can gather: one per JWT lifetime for its whole life. */
@@ -42,7 +45,8 @@ export type Opening =
   | {
       readonly kind: "deviceCode";
       readonly code: Extract<Doc<"deviceCodes">, { readonly state: "approved" }>;
-    };
+    }
+  | { readonly kind: "tile"; readonly device: Doc<"devices"> };
 
 const currentGeneration = (kind: SessionKind, user: Doc<"users">): number =>
   kind === "apiKey" ? user.keyGeneration : user.sessionGeneration;
@@ -51,6 +55,35 @@ const isLive = (session: Session, user: Doc<"users">, now: number): boolean =>
   session.userId === user._id &&
   session.expirationTime > now &&
   session.generation === currentGeneration(session.kind, user);
+
+type BoundDevice = NonNullable<Extract<Session, { readonly kind: "tile" }>["device"]>;
+
+const boundDevice = (session: Session): BoundDevice | null =>
+  session.kind === "apiKey" ? null : (session.device ?? null);
+
+/**
+ * Whether the device a session is bound to still carries it (ADR 0006): the device exists at the
+ * generation the session was bound at, and a tile also fills the device's slot and belongs to
+ * someone the shared devices list. So a mode change, a removal, a new tile, and an opt-out end
+ * sessions without deleting them.
+ */
+const carried = (
+  session: Session,
+  bound: BoundDevice,
+  device: Doc<"devices"> | null,
+  user: Doc<"users">,
+): boolean => {
+  if (device === null || device.generation !== bound.generation) return false;
+
+  if (session.kind !== "tile") return true;
+
+  return (
+    device.mode === "shared" &&
+    device.tile?.sessionId === session._id &&
+    user.kind === "person" &&
+    user.sharedDevices === true
+  );
+};
 
 /** A session and its user when the session is live, or null. */
 export const liveSession = async (
@@ -61,9 +94,13 @@ export const liveSession = async (
   const session = await db.get(sessionId);
   const user = session === null ? null : await db.get(session.userId);
 
-  return session === null || user === null || !isLive(session, user, now)
-    ? null
-    : { session, user };
+  if (session === null || user === null || !isLive(session, user, now)) return null;
+
+  const bound = boundDevice(session);
+
+  if (bound === null) return { session, user };
+
+  return carried(session, bound, await db.get(bound.id), user) ? { session, user } : null;
 };
 
 /** Whether a key still signs in: not ended by a key cut and not expired. */
@@ -114,6 +151,16 @@ export const openSession = async (
     await endKeySessionsBeyondNewest(ctx, opening.key._id);
 
     return sessionId;
+  }
+
+  if (opening.kind === "tile") {
+    return ctx.db.insert("authSessions", {
+      ...fields,
+      kind: "tile",
+      expirationTime: now + TILE_SESSION_MS,
+      generation: user.sessionGeneration,
+      device: { id: opening.device._id, generation: opening.device.generation },
+    });
   }
 
   return ctx.db.insert("authSessions", {
