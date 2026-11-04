@@ -3,8 +3,9 @@
 MIT-licensed, agent-first, self-hosted media platform. It streams the user's own folders or NAS
 shares, and it is merging [movies] and [music] into one server, one Convex database, and one
 account system with a branded client per product. `[media]`, brackets included, is the working
-name until a later rebrand. The repo is `lmdevv/media`; the `@media/*` scope, `MOVIES_` settings,
-the `movies` binary, and `verify-movies` keep their names until the rename lands.
+name until a later rebrand. The repo is `lmdevv/media`, the workspace scope is `@media/*`, settings
+start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv/media`.
+`verify-movies` keeps its name until `verify-media` replaces it.
 
 - Plan: `docs/architecture.md`, the ADRs in `docs/decisions/`, and the
   [Linear Platform project](https://linear.app/adsfsd/project/platform-c8c8792e24e6).
@@ -37,7 +38,7 @@ the `movies` binary, and `verify-movies` keep their names until the rename lands
 | Path                 | Role                                                              |
 | -------------------- | ----------------------------------------------------------------- |
 | `apps/web`           | Vite + React + TanStack Router SPA                                |
-| `apps/media`         | Node + Effect HttpApi media service; serves the built SPA         |
+| `apps/media`         | `@media/server`: Effect HttpApi media service; serves the SPA     |
 | `apps/cli`           | Effect CLI with JSON output; agent skill in `skills/movies/`      |
 | `apps/mobile`        | Expo + Expo Router + Uniwind iOS app over `@media/sdk/react`      |
 | `packages/backend`   | Convex schema, functions, and Convex Auth                         |
