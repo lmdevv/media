@@ -15,6 +15,7 @@ import type * as core_auth_deviceCodes from "../core/auth/deviceCodes.js";
 import type * as core_auth_password from "../core/auth/password.js";
 import type * as core_auth_sessions from "../core/auth/sessions.js";
 import type * as core_auth_sweep from "../core/auth/sweep.js";
+import type * as core_imports from "../core/imports.js";
 import type * as core_jobs_admin from "../core/jobs/admin.js";
 import type * as core_jobs_kinds from "../core/jobs/kinds.js";
 import type * as core_jobs_leases from "../core/jobs/leases.js";
@@ -52,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   "core/auth/password": typeof core_auth_password;
   "core/auth/sessions": typeof core_auth_sessions;
   "core/auth/sweep": typeof core_auth_sweep;
+  "core/imports": typeof core_imports;
   "core/jobs/admin": typeof core_jobs_admin;
   "core/jobs/kinds": typeof core_jobs_kinds;
   "core/jobs/leases": typeof core_jobs_leases;

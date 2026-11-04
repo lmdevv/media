@@ -2,6 +2,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 import { credentialScope } from "../commands/scopes";
+import { importSource } from "./core/jobs/kinds";
 import { jobDocument, jobItemDocument } from "./core/jobs/model";
 
 const sessionFields = {
@@ -156,4 +157,17 @@ export default defineSchema({
     cursor: v.union(v.string(), v.null()),
     done: v.boolean(),
   }).index("by_name", ["name"]),
+
+  /**
+   * One import from a Jellyfin or Plex server: which server, and the job that runs it. The plan
+   * and the imported counts are the domain's, in a table it keys by the import id.
+   */
+  imports: defineTable({
+    source: importSource,
+    serverId: v.string(),
+    serverName: v.string(),
+    jobId: v.id("jobs"),
+  })
+    .index("by_job", ["jobId"])
+    .index("by_source_server", ["source", "serverId"]),
 });
