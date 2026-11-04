@@ -4,9 +4,9 @@ import type { Unauthenticated } from "@media/contracts/errors";
 import { Platform, TokenStorage } from "@media/sdk/effect";
 import { Context, Effect, Layer, Option, Redacted, Result, Schema } from "effect";
 
-import { ConfigFileError, NotLoggedIn } from "../cli-errors";
+import { ConfigFileError, NotLoggedIn, UsageError } from "../cli-errors";
 import type { Environment } from "../config";
-import { nonEmpty, normalizeUrl, ServerUrl } from "../config";
+import { environmentError, isServerUrl, nonEmpty, normalizeUrl, ServerUrl } from "../config";
 import { readTextFile, writePrivateFile } from "../files";
 import type { Invocation } from "../invocation";
 
@@ -68,60 +68,70 @@ const writeStored = (path: string, stored: StoredCore): Effect.Effect<void, Conf
   });
 
 /** The core target of `profile`: the profile's file, overridden by `MEDIA_CORE_*`. */
-export const coreTarget = Effect.fn("Core.target")(
-  function* (env: Environment, profile: string) {
-    const url = Option.map(yield* nonEmpty("MEDIA_CORE_URL"), normalizeUrl);
-    const apiKey = Option.map(yield* nonEmpty("MEDIA_CORE_API_KEY"), Redacted.make);
-    const path = join(env.configHome, "media", "sessions", `${encodeURIComponent(profile)}.json`);
-    const stored = yield* readStored(path);
+export const coreTarget = Effect.fn("Core.target")(function* (env: Environment, profile: string) {
+  const url = Option.map(yield* nonEmpty("MEDIA_CORE_URL"), normalizeUrl);
 
-    const shadowed = Option.exists(stored, (file) =>
-      Option.exists(url, (wanted) => wanted !== file.url),
-    );
+  if (Option.isSome(url) && !isServerUrl(url.value)) {
+    return yield* new UsageError({
+      message: `MEDIA_CORE_URL is not an http(s) URL: "${url.value}"`,
+      command: null,
+    });
+  }
 
-    const target: CoreTarget = {
-      profile,
-      path,
-      url: Option.orElse(url, () => Option.map(stored, (file) => file.url)),
-      apiKey,
-      storage: Option.isSome(apiKey) || shadowed ? "memory" : "file",
-    };
+  const apiKey = Option.map(yield* nonEmpty("MEDIA_CORE_API_KEY"), Redacted.make);
+  const path = join(env.configHome, "media", "sessions", `${encodeURIComponent(profile)}.json`);
+  const stored = yield* readStored(path);
 
-    return target;
-  },
-  Effect.catchTag("ConfigError", (cause) =>
-    Effect.fail(
-      new ConfigFileError({
-        path: "environment",
-        message: "Could not read the environment",
-        cause,
-      }),
-    ),
-  ),
-);
+  const shadowed = Option.exists(stored, (file) =>
+    Option.exists(url, (wanted) => wanted !== file.url),
+  );
+
+  const target: CoreTarget = {
+    profile,
+    path,
+    url: Option.orElse(url, () => Option.map(stored, (file) => file.url)),
+    apiKey,
+    storage: Option.isSome(apiKey) || shadowed ? "memory" : "file",
+  };
+
+  return target;
+}, environmentError);
 
 const storageError =
   (operation: "load" | "save" | "clear") =>
   (cause: ConfigFileError): TokenStorage.TokenStorageError =>
     new TokenStorage.TokenStorageError({ operation, message: cause.message, cause });
 
-const layerSessionFile = (path: string, url: string): Layer.Layer<TokenStorage.TokenStorage> =>
+const toSession = (session: NonNullable<StoredCore["session"]>): TokenStorage.StoredSession => ({
+  token: Redacted.make(session.token),
+  refreshToken: Redacted.make(session.refreshToken),
+});
+
+/**
+ * Keeps the session for `url` in the profile's file. `stored` starts from the file's session for
+ * `url`; `signedOut` starts from none, so the file changes only once a new sign-in succeeds.
+ * Signing out keeps the core's URL.
+ */
+const layerSessionFile = (
+  path: string,
+  url: string,
+  start: "stored" | "signedOut",
+): Layer.Layer<TokenStorage.TokenStorage> =>
   Layer.succeed(
     TokenStorage.TokenStorage,
     TokenStorage.TokenStorage.of({
-      load: readStored(path).pipe(
-        Effect.map((stored) =>
-          Option.flatMap(
-            Option.filter(stored, (file) => file.url === url),
-            (file) =>
-              Option.map(Option.fromNullishOr(file.session), (session) => ({
-                token: Redacted.make(session.token),
-                refreshToken: Redacted.make(session.refreshToken),
-              })),
-          ),
-        ),
-        Effect.mapError(storageError("load")),
-      ),
+      load:
+        start === "signedOut"
+          ? Effect.succeedNone
+          : readStored(path).pipe(
+              Effect.map((stored) =>
+                Option.flatMap(
+                  Option.filter(stored, (file) => file.url === url),
+                  (file) => Option.map(Option.fromNullishOr(file.session), toSession),
+                ),
+              ),
+              Effect.mapError(storageError("load")),
+            ),
       save: (session) =>
         writeStored(path, {
           url,
@@ -134,25 +144,80 @@ const layerSessionFile = (path: string, url: string): Layer.Layer<TokenStorage.T
     }),
   );
 
+/** Holds `session` for one sign-out and writes nothing. */
+const layerHolding = (
+  session: TokenStorage.StoredSession,
+): Layer.Layer<TokenStorage.TokenStorage> =>
+  Layer.succeed(
+    TokenStorage.TokenStorage,
+    TokenStorage.TokenStorage.of({
+      load: Effect.succeedSome(session),
+      save: () => Effect.void,
+      clear: Effect.void,
+    }),
+  );
+
 /** A session store failure, reported as the session file it concerns. */
 export const storageFailure =
   (path: string) =>
   (error: TokenStorage.TokenStorageError): ConfigFileError =>
     new ConfigFileError({ path, message: error.message, cause: error });
 
-/** The platform client of `url` over the target's session store, for the scope's lifetime. */
-export const openCore = Effect.fn("Core.open")(function* (target: CoreTarget, url: string) {
-  const storage =
-    target.storage === "file" ? layerSessionFile(target.path, url) : TokenStorage.layerMemory;
+const openPlatform = (url: string, storage: Layer.Layer<TokenStorage.TokenStorage>, path: string) =>
+  Layer.build(Platform.layer({ url, connection: "http", storage })).pipe(
+    Effect.map((context) => Context.get(context, Platform.Platform)),
+    Effect.catchTag("TokenStorageError", (error) => Effect.fail(storageFailure(path)(error))),
+  );
 
-  const context = yield* Layer.build(Platform.layer({ url, connection: "http", storage })).pipe(
-    Effect.catchTag("TokenStorageError", (error) =>
-      Effect.fail(storageFailure(target.path)(error)),
+/** The platform client of `url` over the target's session store, for the scope's lifetime. */
+const openCore = (target: CoreTarget, url: string) =>
+  openPlatform(
+    url,
+    target.storage === "file"
+      ? layerSessionFile(target.path, url, "stored")
+      : TokenStorage.layerMemory,
+    target.path,
+  );
+
+/**
+ * A signed-out platform client of `url` whose sign-in replaces the profile's session file only
+ * once it succeeds.
+ */
+export const openForSignIn = (target: CoreTarget, url: string) =>
+  openPlatform(url, layerSessionFile(target.path, url, "signedOut"), target.path);
+
+/** A session the profile's file holds, and the core that issued it. */
+interface HeldSession {
+  readonly url: string;
+  readonly session: TokenStorage.StoredSession;
+}
+
+/** The session the profile's file holds, for whichever core issued it. */
+export const heldSession = (
+  target: CoreTarget,
+): Effect.Effect<Option.Option<HeldSession>, ConfigFileError> =>
+  Effect.map(readStored(target.path), (stored) =>
+    Option.flatMap(stored, (file) =>
+      Option.map(Option.fromNullishOr(file.session), (session) => ({
+        url: file.url,
+        session: toSession(session),
+      })),
     ),
   );
 
-  return Context.get(context, Platform.Platform);
-});
+/** Ends `held` on the core that issued it, when that core answers. Writes nothing. */
+export const endSession = (target: CoreTarget, held: HeldSession): Effect.Effect<void> =>
+  openPlatform(held.url, layerHolding(held.session), target.path).pipe(
+    Effect.flatMap((platform) => platform.session.signOut),
+    Effect.scoped,
+    Effect.ignore,
+  );
+
+/** Forgets the profile's session, keeping its core's URL. */
+export const forgetSession = (
+  target: CoreTarget,
+  url: string,
+): Effect.Effect<void, ConfigFileError> => writeStored(target.path, { url });
 
 interface CoreConnection {
   readonly platform: Platform.Interface;

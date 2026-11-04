@@ -1,18 +1,23 @@
 import { hostname } from "node:os";
 
 import { Platform } from "@media/sdk/effect";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Option } from "effect";
 
 import { LoginRefused } from "../cli-errors";
-import { normalizeUrl, ServerUrl } from "../config";
+import { isServerUrl, normalizeUrl } from "../config";
 import type { Invocation } from "../invocation";
 import { booleanFlag, readSecret, stringFlag, textOutcome, usage } from "../invocation";
 import { Output } from "../output";
 import type { CoreShortcut } from "./command";
 import { coreShortcut } from "./command";
-import { coreTarget, openCore, storageFailure } from "./session";
-
-const isServerUrl = Schema.is(ServerUrl);
+import {
+  coreTarget,
+  endSession,
+  forgetSession,
+  heldSession,
+  openForSignIn,
+  storageFailure,
+} from "./session";
 
 const announceDevice = Effect.fn("Core.announceDevice")(function* (
   invocation: Invocation,
@@ -73,12 +78,9 @@ const login = coreShortcut("auth", "login", {
         return yield* usage(invocation, "Pass --username or --api-key, not both");
       }
 
-      const platform = yield* openCore({ ...target, storage: "file" }, url.value);
+      const previous = yield* heldSession(target);
+      const platform = yield* openForSignIn(target, url.value);
       const failStorage = storageFailure(target.path);
-
-      if ((yield* platform.session.currentStatus) === "signedIn") {
-        yield* platform.session.signOut.pipe(Effect.mapError(failStorage));
-      }
 
       const signIn = (credentials: Platform.Credentials) =>
         platform.session
@@ -105,6 +107,8 @@ const login = coreShortcut("auth", "login", {
           }),
         );
       }
+
+      if (Option.isSome(previous)) yield* endSession(target, previous.value);
 
       const session = yield* platform.core.auth.sessions.current();
 
@@ -135,11 +139,11 @@ const logout = coreShortcut("auth", "logout", {
     Effect.gen(function* () {
       const output = yield* Output;
       const target = yield* coreTarget(invocation.env, invocation.target.name);
+      const held = yield* heldSession(target);
 
-      if (Option.isSome(target.url) && target.storage === "file") {
-        const platform = yield* openCore(target, target.url.value);
-
-        yield* platform.session.signOut.pipe(Effect.mapError(storageFailure(target.path)));
+      if (Option.isSome(held)) {
+        yield* endSession(target, held.value);
+        yield* forgetSession(target, held.value.url);
       }
 
       if (Option.isSome(target.apiKey)) {
@@ -147,10 +151,14 @@ const logout = coreShortcut("auth", "logout", {
       }
 
       return textOutcome(
-        { server: Option.getOrNull(target.url), profile: target.profile, signedOut: true },
-        Option.match(target.url, {
-          onNone: () => "Not signed in to a core.",
-          onSome: (url) => `Signed out of ${url}.`,
+        {
+          server: Option.getOrNull(Option.map(held, (session) => session.url)),
+          profile: target.profile,
+          signedOut: Option.isSome(held),
+        },
+        Option.match(held, {
+          onNone: () => `Profile ${target.profile} holds no core session.`,
+          onSome: (session) => `Signed out of ${session.url}.`,
         }),
       );
     }),

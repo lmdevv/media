@@ -140,17 +140,35 @@ export const flagsOf = (command: CoreCommand): FlagSet =>
     ]),
   );
 
-const limitOf = (invocation: Invocation): Effect.Effect<number, UsageError> =>
+const limitOf = (invocation: Invocation): Effect.Effect<Option.Option<number>, UsageError> =>
   Option.match(stringFlag(invocation.tokens, "limit"), {
-    onNone: () => Effect.succeed(DEFAULT_LIMIT),
+    onNone: () => Effect.succeedNone,
     onSome: (raw) => {
       const limit = Number(raw);
 
       return Number.isInteger(limit) && limit > 0
-        ? Effect.succeed(limit)
+        ? Effect.succeedSome(limit)
         : Effect.fail(usage(invocation, `--limit expects a positive integer, got "${raw}"`));
     },
   });
+
+const isJsonObject = Schema.is(Schema.JsonObject);
+
+/** The page to ask for: `--json`'s, else the first 100, with `--limit` and `--cursor` over it. */
+const pageOf = Effect.fn("Core.page")(function* (invocation: Invocation, given: WireArgs) {
+  const fromJson = given["paginationOpts"];
+  const base = isJsonObject(fromJson) ? fromJson : { numItems: DEFAULT_LIMIT, cursor: null };
+  const limit = yield* limitOf(invocation);
+  const cursor = stringFlag(invocation.tokens, "cursor");
+
+  const paginationOpts: WireArgs = Object.fromEntries([
+    ...Object.entries(base),
+    ...Option.toArray(Option.map(limit, (numItems) => ["numItems", numItems] as const)),
+    ...Option.toArray(Option.map(cursor, (after) => ["cursor", after] as const)),
+  ]);
+
+  return paginationOpts;
+});
 
 const secretOf = (
   invocation: Invocation,
@@ -184,15 +202,9 @@ export const wireArgsOf = Effect.fn("Core.wireArgs")(function* (
     );
   }
 
-  const page: WireArgs =
-    command.paginated && given["paginationOpts"] === undefined
-      ? {
-          paginationOpts: {
-            numItems: yield* limitOf(invocation),
-            cursor: Option.getOrNull(stringFlag(invocation.tokens, "cursor")),
-          },
-        }
-      : {};
+  const page: ReadonlyArray<readonly [string, WireArgs]> = command.paginated
+    ? [["paginationOpts", yield* pageOf(invocation, given)]]
+    : [];
 
   const secrets = yield* Effect.forEach(command.secrets, (secret) =>
     Effect.map(
@@ -205,11 +217,7 @@ export const wireArgsOf = Effect.fn("Core.wireArgs")(function* (
     ),
   );
 
-  const wire: WireArgs = Object.fromEntries([
-    ...Object.entries(given),
-    ...Object.entries(page),
-    ...secrets,
-  ]);
+  const wire: WireArgs = Object.fromEntries([...Object.entries(given), ...page, ...secrets]);
 
   return wire;
 });

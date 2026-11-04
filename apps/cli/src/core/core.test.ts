@@ -42,6 +42,28 @@ const errorCode = (stderr: string) =>
 const withFakeCore = <A>(body: (fake: FakeConvex.FakeConvex) => Effect.Effect<A>): Promise<A> =>
   Effect.runPromise(Effect.scoped(Effect.flatMap(FakeConvex.make, body)));
 
+const STORED = {
+  token: jwtExpiringAt(Date.now() + 3_600_000, "user-1|session-1"),
+  refreshToken: "refresh-1",
+};
+
+const storeSession = (env: Readonly<Record<string, string>>, url: string) =>
+  Effect.promise(() =>
+    writePrivateFile(sessionFile(env), JSON.stringify({ url, session: STORED })),
+  );
+
+const SessionFile = Schema.fromJsonString(
+  Schema.Struct({
+    url: Schema.String,
+    session: Schema.optionalKey(
+      Schema.Struct({ token: Schema.String, refreshToken: Schema.String }),
+    ),
+  }),
+);
+
+const storedFile = async (env: Readonly<Record<string, string>>) =>
+  Schema.decodeSync(SessionFile)(await readText(sessionFile(env)));
+
 describe("media's groups", () => {
   it("lists movies, music, admin, and auth first in media --help, then the movies server", async () => {
     const help = await media(["--help"]);
@@ -92,6 +114,11 @@ describe("media's groups", () => {
   it("gives every command its own words, apart from the movies server's", () => {
     const paths = coreEntries.map((entry) => entry.command.path);
 
+    expect(
+      paths.flatMap((path) =>
+        paths.flatMap((other) => (other !== path && other.startsWith(`${path} `) ? [other] : [])),
+      ),
+    ).toEqual([]);
     expect(new Set(paths).size).toBe(paths.length);
 
     const oldWords = new Set([
@@ -187,14 +214,7 @@ describe("a core command", () => {
 
     const answer = await withFakeCore((fake) =>
       Effect.gen(function* () {
-        const token = jwtExpiringAt(Date.now() + 3_600_000, "user-1|session-1");
-
-        yield* Effect.promise(() =>
-          writePrivateFile(
-            sessionFile(env),
-            JSON.stringify({ url: fake.url, session: { token, refreshToken: "refresh-1" } }),
-          ),
-        );
+        yield* storeSession(env, fake.url);
         yield* fake.reply(
           "core/auth/sessions:current",
           Reply.Failure({ code: "unauthenticated", message: "This session has ended" }),
@@ -209,7 +229,97 @@ describe("a core command", () => {
 
     expect(answer.run.code).toBe(ExitCode.unauthenticated);
     expect(errorCode(answer.run.stderr)).toBe("not_logged_in");
-    expect(JSON.parse(await readText(sessionFile(env)))).toEqual({ url: answer.url });
+    expect(await storedFile(env)).toEqual({ url: answer.url });
+  });
+
+  it("keeps the stored session when a new sign-in fails", async () => {
+    const env = { ...freshHome(), MEDIA_PASSWORD: "wrong-password" };
+
+    const answer = await withFakeCore((fake) =>
+      Effect.gen(function* () {
+        yield* storeSession(env, fake.url);
+        yield* fake.reply(
+          "auth:signIn",
+          Reply.Failure({ code: "unauthenticated", message: "Wrong username or password" }),
+        );
+
+        const run = yield* Effect.promise(() =>
+          media(["auth", "login", "--server", fake.url, "--username", "ada"], env),
+        );
+
+        return { run, url: fake.url, signOuts: (yield* fake.requestsTo("auth:signOut")).length };
+      }),
+    );
+
+    expect(answer.run.code).toBe(ExitCode.unauthenticated);
+    expect(answer.signOuts).toBe(0);
+    expect(await storedFile(env)).toEqual({ url: answer.url, session: STORED });
+  });
+
+  it("signs out the stored session even while MEDIA_CORE_API_KEY is set", async () => {
+    const env = freshHome();
+
+    const answer = await withFakeCore((fake) =>
+      Effect.gen(function* () {
+        yield* storeSession(env, fake.url);
+        yield* fake.reply("auth:signOut", Reply.Success({ value: null }));
+
+        const run = yield* Effect.promise(() =>
+          media(["auth", "logout"], { ...env, MEDIA_CORE_API_KEY: "mk_1.secret" }),
+        );
+
+        return { run, url: fake.url, signOuts: (yield* fake.requestsTo("auth:signOut")).length };
+      }),
+    );
+
+    expect(answer.run.code).toBe(ExitCode.ok);
+    expect(answer.signOuts).toBe(1);
+    expect(await storedFile(env)).toEqual({ url: answer.url });
+  });
+
+  it("lets --limit and --cursor override a page given in --json", async () => {
+    const env = freshHome();
+
+    const pages = await withFakeCore((fake) =>
+      Effect.gen(function* () {
+        yield* storeSession(env, fake.url);
+        yield* fake.reply(
+          "core/accounts/users:list",
+          Reply.Success({ value: { page: [], continueCursor: "end", isDone: true } }),
+        );
+        yield* Effect.promise(() =>
+          media(
+            [
+              "admin",
+              "users",
+              "list",
+              "--json",
+              '{"paginationOpts":{"numItems":5,"cursor":null}}',
+              "--cursor",
+              "abc",
+            ],
+            env,
+          ),
+        );
+        yield* Effect.promise(() => media(["admin", "users", "list"], env));
+
+        return (yield* fake.requestsTo("core/accounts/users:list")).map((request) => request.args);
+      }),
+    );
+
+    expect(pages).toEqual([
+      { paginationOpts: { numItems: 5, cursor: "abc" } },
+      { paginationOpts: { numItems: 100, cursor: null } },
+    ]);
+  });
+
+  it("refuses a MEDIA_CORE_URL that is not a URL", async () => {
+    const run = await media(["auth", "server", "info"], {
+      ...freshHome(),
+      MEDIA_CORE_URL: "nas.tailnet:3214",
+    });
+
+    expect(run.code).toBe(ExitCode.usage);
   });
 });
 
@@ -271,6 +381,35 @@ describe("media admin reset-password", () => {
     );
 
     expect(refused.code).toBe(ExitCode.unauthenticated);
+  });
+
+  it("reads the admin key from an env file, export lines and quotes included", async () => {
+    const env = freshHome();
+    const envFile = join(env.HOME, "core.env");
+
+    const run = await withMediaService(
+      answering(200, JSON.stringify({ status: "success", value: { username: "owner" } }), []),
+      async (url) => {
+        await writePrivateFile(
+          envFile,
+          `export CONVEX_SELF_HOSTED_URL="${url}"\nCONVEX_SELF_HOSTED_ADMIN_KEY='admin-key-1'\n`,
+        );
+
+        return media(["admin", "reset-password", "--env-file", envFile], {
+          ...env,
+          MEDIA_ARG_PASSWORD: "new-password",
+        });
+      },
+    );
+
+    expect(run.code, run.stderr).toBe(ExitCode.ok);
+    expect(JSON.parse(run.stdout)).toEqual({ username: "owner" });
+  });
+
+  it("refuses more than one user", async () => {
+    const run = await media(["admin", "reset-password", "lucia", "bob"], RESET);
+
+    expect(run.code).toBe(ExitCode.usage);
   });
 
   it("asks where the admin key is, never taking the movies backend's from the environment", async () => {

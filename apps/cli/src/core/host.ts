@@ -3,7 +3,7 @@ import { ProtocolError, TransportError } from "@media/sdk/effect";
 import { Effect, Option, Redacted, Result, Schema } from "effect";
 
 import { ConfigFileError } from "../cli-errors";
-import { nonEmpty, normalizeUrl, ServerUrl } from "../config";
+import { environmentError, isServerUrl, nonEmpty, normalizeUrl } from "../config";
 import { readTextFile } from "../files";
 import type { Invocation } from "../invocation";
 import { positionalText, readSecret, stringFlag, textOutcome, usage } from "../invocation";
@@ -15,72 +15,61 @@ interface HostKey {
   readonly adminKey: Redacted.Redacted;
 }
 
-const isServerUrl = Schema.is(ServerUrl);
-
 const MISSING =
   "reset-password needs the core's admin key from the server host: pass --env-file with CONVEX_SELF_HOSTED_URL and CONVEX_SELF_HOSTED_ADMIN_KEY, or set MEDIA_CORE_URL and MEDIA_CORE_ADMIN_KEY";
+
+const QUOTED = /^(["'])(.*)\1$/su;
 
 const envFileValues = (text: string): ReadonlyMap<string, string> =>
   new Map(
     text.split("\n").flatMap((line) => {
-      const separator = line.indexOf("=");
+      const assignment = line.trim().replace(/^export\s+/u, "");
+      const separator = assignment.indexOf("=");
+      const value = assignment.slice(separator + 1).trim();
 
       return separator > 0
-        ? [[line.slice(0, separator).trim(), line.slice(separator + 1).trim()] as const]
+        ? [[assignment.slice(0, separator).trim(), value.replace(QUOTED, "$2")] as const]
         : [];
     }),
   );
 
-const hostKey = Effect.fn("Core.hostKey")(
-  function* (invocation: Invocation) {
-    const fromFile = yield* Option.match(stringFlag(invocation.tokens, "env-file"), {
-      onNone: () => Effect.succeedNone,
-      onSome: (path) =>
-        Effect.tryPromise({
-          try: () => readTextFile(path),
-          catch: (cause) => new ConfigFileError({ path, message: `Could not read ${path}`, cause }),
-        }).pipe(
-          Effect.flatMap((text) =>
-            text === null
-              ? Effect.fail(
-                  new ConfigFileError({ path, message: `No file at ${path}`, cause: null }),
-                )
-              : Effect.succeedSome(envFileValues(text)),
-          ),
+const hostKey = Effect.fn("Core.hostKey")(function* (invocation: Invocation) {
+  const fromFile = yield* Option.match(stringFlag(invocation.tokens, "env-file"), {
+    onNone: () => Effect.succeedNone,
+    onSome: (path) =>
+      Effect.tryPromise({
+        try: () => readTextFile(path),
+        catch: (cause) => new ConfigFileError({ path, message: `Could not read ${path}`, cause }),
+      }).pipe(
+        Effect.flatMap((text) =>
+          text === null
+            ? Effect.fail(new ConfigFileError({ path, message: `No file at ${path}`, cause: null }))
+            : Effect.succeedSome(envFileValues(text)),
         ),
-    });
+      ),
+  });
 
-    const [url, adminKey] = Option.isSome(fromFile)
-      ? [
-          Option.fromNullishOr(fromFile.value.get("CONVEX_SELF_HOSTED_URL")),
-          Option.fromNullishOr(fromFile.value.get("CONVEX_SELF_HOSTED_ADMIN_KEY")),
-        ]
-      : [yield* nonEmpty("MEDIA_CORE_URL"), yield* nonEmpty("MEDIA_CORE_ADMIN_KEY")];
+  const [url, adminKey] = Option.isSome(fromFile)
+    ? [
+        Option.fromNullishOr(fromFile.value.get("CONVEX_SELF_HOSTED_URL")),
+        Option.fromNullishOr(fromFile.value.get("CONVEX_SELF_HOSTED_ADMIN_KEY")),
+      ]
+    : [yield* nonEmpty("MEDIA_CORE_URL"), yield* nonEmpty("MEDIA_CORE_ADMIN_KEY")];
 
-    if (Option.isNone(url) || Option.isNone(adminKey) || adminKey.value.length === 0) {
-      return yield* usage(invocation, MISSING);
-    }
+  if (Option.isNone(url) || Option.isNone(adminKey) || adminKey.value.length === 0) {
+    return yield* usage(invocation, MISSING);
+  }
 
-    const normalized = normalizeUrl(url.value);
+  const normalized = normalizeUrl(url.value);
 
-    if (!isServerUrl(normalized)) {
-      return yield* usage(invocation, `The core's URL is not an http(s) URL: "${url.value}"`);
-    }
+  if (!isServerUrl(normalized)) {
+    return yield* usage(invocation, `The core's URL is not an http(s) URL: "${url.value}"`);
+  }
 
-    const key: HostKey = { url: normalized, adminKey: Redacted.make(adminKey.value) };
+  const key: HostKey = { url: normalized, adminKey: Redacted.make(adminKey.value) };
 
-    return key;
-  },
-  Effect.catchTag("ConfigError", (cause) =>
-    Effect.fail(
-      new ConfigFileError({
-        path: "environment",
-        message: "Could not read the environment",
-        cause,
-      }),
-    ),
-  ),
-);
+  return key;
+}, environmentError);
 
 const FunctionAnswer = Schema.Union([
   Schema.Struct({ status: Schema.Literal("success"), value: Schema.Json }),
@@ -156,6 +145,10 @@ const resetPassword = coreShortcut("admin", "reset-password", {
   positionals: true,
   run: (invocation) =>
     Effect.gen(function* () {
+      if (invocation.tokens.positionals.length > 1) {
+        return yield* usage(invocation, "Name one user, or none for the owner");
+      }
+
       const key = yield* hostKey(invocation);
       const username = positionalText(invocation.tokens);
       const password = yield* readSecret(invocation, "MEDIA_ARG_PASSWORD", "new password");

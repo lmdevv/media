@@ -12,7 +12,6 @@ import {
   catalog,
   commandHelp,
   entryNamed,
-  exitCodeLine,
   groupHelp,
   groupWords,
   markdownReference,
@@ -22,8 +21,8 @@ import {
   visibleRegistryEntries,
 } from "./catalog";
 import type { CliError } from "./cli-errors";
-import { ConfigFileError, ExitCode, exitCodeOf, reportOf, UsageError } from "./cli-errors";
-import { environment, loadConfig, resolveTarget } from "./config";
+import { ExitCode, exitCodeOf, reportOf, UsageError } from "./cli-errors";
+import { environment, environmentError, loadConfig, resolveTarget } from "./config";
 import type { ParsedTokens, WireArgs } from "./flags";
 import {
   buildArgs,
@@ -240,26 +239,15 @@ const rawFormat = (argv: ReadonlyArray<string>): Format =>
     ? "table"
     : "json";
 
-const prepare = Effect.fn("Cli.prepare")(
-  function* (path: string, tokens: ParsedTokens) {
-    const env = yield* environment;
-    const config = yield* loadConfig(env.configPath);
-    const target = resolveTarget(config, env, stringFlag(tokens, "profile"));
-    const format = yield* formatOf(tokens, path);
-    const invocation: Invocation = { path, tokens, env, target, format };
+const prepare = Effect.fn("Cli.prepare")(function* (path: string, tokens: ParsedTokens) {
+  const env = yield* environment;
+  const config = yield* loadConfig(env.configPath);
+  const target = resolveTarget(config, env, stringFlag(tokens, "profile"));
+  const format = yield* formatOf(tokens, path);
+  const invocation: Invocation = { path, tokens, env, target, format };
 
-    return invocation;
-  },
-  Effect.catchTag("ConfigError", (cause) =>
-    Effect.fail(
-      new ConfigFileError({
-        path: "environment",
-        message: "Could not read the environment",
-        cause,
-      }),
-    ),
-  ),
-);
+  return invocation;
+}, environmentError);
 
 const verbosity =
   (invocation: Invocation) =>
@@ -391,9 +379,7 @@ const oldShortcutHelp = (command: ShortcutCommand) => (): string => {
 };
 
 const coreShortcutHelp = (command: CoreShortcut) => (): string =>
-  [`Usage: media ${shortcutSynopsis(command)}`, "", `${command.summary}.`, "", exitCodeLine].join(
-    "\n",
-  );
+  shortcutHelp({ synopsis: shortcutSynopsis(command), summary: command.summary });
 
 const runGenerated = Effect.fn("Cli.runGenerated")(function* (
   command: CoreCommand,

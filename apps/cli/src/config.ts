@@ -13,6 +13,23 @@ export const ServerUrl = Schema.String.check(
 
 const StoredSession = Schema.Struct({ token: Schema.String, refreshToken: Schema.String });
 
+/** Whether `url` is a server URL the CLI can talk to. */
+export const isServerUrl = (url: string): boolean => Schema.is(ServerUrl)(url);
+
+/** An environment the CLI could not read, reported as the config it is. */
+export const environmentError = <A, E, R>(
+  effect: Effect.Effect<A, E | Config.ConfigError, R>,
+): Effect.Effect<A, E | ConfigFileError, R> =>
+  Effect.mapError(effect, (error) =>
+    error instanceof Config.ConfigError
+      ? new ConfigFileError({
+          path: "environment",
+          message: "Could not read the environment",
+          cause: error,
+        })
+      : error,
+  );
+
 /** One server and its credentials. */
 export const StoredProfile = Schema.Struct({
   convexUrl: ServerUrl,

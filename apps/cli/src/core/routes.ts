@@ -136,7 +136,12 @@ export const coreCatalog = (): ReadonlyArray<CoreCatalogEntry> =>
         job: false,
         summary: command.summary,
         positional: null,
-        flags: [],
+        flags: Object.entries(command.options).map(([flag, option]) => ({
+          flag: `--${flag}`,
+          field: flag,
+          type: option.type === "boolean" ? "boolean" : "text",
+          required: false,
+        })),
         args: { type: "object" },
         secrets: [],
       }),

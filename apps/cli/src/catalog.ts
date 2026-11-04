@@ -443,7 +443,7 @@ export const commandHelp = (entry: RegistryEntry): string => {
 };
 
 /** Help for a shortcut. */
-export const shortcutHelp = (shortcut: Shortcut): string =>
+export const shortcutHelp = (shortcut: Pick<Shortcut, "synopsis" | "summary">): string =>
   [`Usage: media ${shortcut.synopsis}`, "", `${shortcut.summary}.`, "", exitCodeLine].join("\n");
 
 /** One entry of `media commands`. A type alias so it stays assignable to JSON. */
