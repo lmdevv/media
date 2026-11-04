@@ -8,13 +8,37 @@ on:
 permissions:
   contents: read
 
+env:
+  # A pull request is checked against its base, the merge commit's first parent; main checks all.
+  CHANGED: ${{ github.event_name == 'pull_request' && '--since HEAD^1' || '--all' }}
+
 jobs:
+  changes:
+    name: changed workspaces
+    runs-on: ubuntu-latest
+    outputs:
+      workspaces: ${{ steps.scope.outputs.workspaces }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter=. --ignore-scripts
+      - id: scope
+        run: echo "workspaces=$(scripts/changed-packages.sh $CHANGED | jq -Rsc 'split("\n") | map(select(. != ""))')" >> "$GITHUB_OUTPUT"
+
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -22,18 +46,25 @@ jobs:
           cache: pnpm
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm lint
+      - id: scope
+        run: echo "workspaces=$(scripts/changed-packages.sh $CHANGED | jq -Rsc 'split("\n") | map(select(. != ""))')" >> "$GITHUB_OUTPUT"
+      - run: scripts/changed-packages.sh $CHANGED typecheck
+      - run: scripts/changed-packages.sh $CHANGED lint
       - run: pnpm fmt:check
-      - run: pnpm test
+      - run: scripts/changed-packages.sh $CHANGED test
       - run: pnpm knip
-      - run: pnpm --filter mobile bundle
+      - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/mobile')
+        run: pnpm --filter mobile bundle
       - run: scripts/check-deploy.sh
-      - run: pnpm --filter @lmdevv/movies build:sea
-      - run: test "$(apps/cli/dist/sea/media-linux-x64 --version)" = "$(scripts/check-version.sh)"
+      - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/cli')
+        run: pnpm --filter @lmdevv/movies build:sea
+      - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/cli')
+        run: test "$(apps/cli/dist/sea/media-linux-x64 --version)" = "$(scripts/check-version.sh)"
 
   legacy-music:
     name: legacy/music checks
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.workspaces), 'legacy/music')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -56,9 +87,16 @@ jobs:
       - run: pnpm lint
       - run: pnpm fmt:check
       - run: pnpm test
+      - run: pnpm knip
 
   stack:
     name: backend against a local Convex
+    needs: changes
+    if: >-
+      contains(fromJSON(needs.changes.outputs.workspaces), 'packages/backend')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/sdk')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/cli')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,6 +122,11 @@ jobs:
 
   web-stack:
     name: web app against a local Convex
+    needs: changes
+    if: >-
+      contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/backend')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,6 +156,8 @@ jobs:
 
   sandbox:
     name: media tests under the NixOS module's system call filter
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -135,6 +180,11 @@ jobs:
 
   nix:
     name: Nix package and NixOS module
+    needs: changes
+    if: >-
+      contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/cli')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

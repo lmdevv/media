@@ -2,14 +2,23 @@ pre-commit:
   parallel: true
   jobs:
     - name: typecheck
-      run: pnpm typecheck
+      run: scripts/changed-packages.sh --staged typecheck
     - name: lint
-      run: pnpm lint
+      run: scripts/changed-packages.sh --staged lint
     - name: fmt
+      exclude: ["legacy/**"]
       run: pnpm fmt:check
     - name: test
-      run: pnpm test
+      run: scripts/changed-packages.sh --staged test
     - name: knip
+      exclude: ["legacy/**", "docs/**", "*.md"]
       run: pnpm knip
     - name: deploy
+      exclude: ["legacy/**"]
       run: scripts/check-deploy.sh
+    - name: legacy
+      glob: "legacy/**"
+      root: legacy/music/
+      run: >-
+        test -d node_modules || { echo "legacy: run pnpm install in legacy/music first" >&2; exit 1; };
+        pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test && pnpm knip
