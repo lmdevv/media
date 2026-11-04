@@ -47,7 +47,8 @@ route() {
     .github/workflows/ci.yml) printf '%s\n' . legacy/music ;;
     scripts/changed-packages.sh) echo . ;;
     nix/* | scripts/check-sandbox.sh) echo apps/media ;;
-    scripts/dev-stack.sh | deploy/convex-backend.image) echo packages/backend ;;
+    scripts/dev-stack.sh | deploy/convex-backend.image | deploy/functions-hash.sh) echo packages/backend ;;
+    scripts/check-version.sh) echo apps/cli ;;
     docs/* | *.md | LICENSE | .env.example | .gitignore | .dockerignore | deploy/* | scripts/*.sh) ;;
     .github/* | .agents/* | .claude/* | skills-lock.json) ;;
     *) echo . ;;
