@@ -1,8 +1,8 @@
 # @media/commands
 
 The command list: every user, client, or agent action, declared once (ADR 0009). The generator
-writes each command's Convex registration, its SDK method, and the agent skill's reference from
-it.
+writes each command's Convex registration, its SDK method, its CLI command, and the agent skill's
+reference from it.
 
 To add a command:
 
@@ -15,10 +15,14 @@ To add a command:
 4. For a new module, run `generate` again with the dev stack up (`scripts/dev-stack.sh up`), so it
    refreshes `packages/platform/convex/_generated`.
 
-The SDK method needs no step of its own: `generate` writes it into
-`packages/sdk/src/platform/generated/`, so `platform.core.server.info()` exists after the first
-run.
+The SDK method and the CLI command need no step of their own: `generate` writes them into
+`packages/sdk/src/platform/generated/` and `apps/cli/src/generated/`, so
+`platform.core.server.info()` and `media auth server info` exist after the first run. The CLI
+path follows from the name and the scope (ADR 0021): admin-scoped commands go under
+`media admin`, the core's others under `media auth`, then the module's last segment and the
+function. `generate` refuses two commands on one path.
 
-Never edit `packages/platform/commands/`, `packages/sdk/src/platform/generated/`, or
-`apps/cli/skills/media/references/`, and keep other files out of them. The generator owns all
-three, and `pnpm --filter @media/commands check` fails the commit when they drift from the list.
+Never edit `packages/platform/commands/`, `packages/sdk/src/platform/generated/`,
+`apps/cli/src/generated/`, or `apps/cli/skills/media/references/`, and keep other files out of
+them. The generator owns all four, and `pnpm --filter @media/commands check` fails the commit
+when they drift from the list.

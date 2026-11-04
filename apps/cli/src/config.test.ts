@@ -13,6 +13,7 @@ const dir = await makeTempDir("movies-config-test-");
 afterAll(() => removeDir(dir));
 
 const env = (overrides: Partial<Environment>): Environment => ({
+  configHome: dir,
   configPath: join(dir, "movies", "config.json"),
   convexUrl: Option.none(),
   mediaUrl: Option.none(),

@@ -1,4 +1,5 @@
 import type { CheckedCommand } from "../check.ts";
+import { cliPath, isPaginated, secretsOf } from "../cli.ts";
 import type { Domain } from "../command.ts";
 import type { Emitted, Target } from "../outputs.ts";
 import { fieldsType, wireType } from "../render.ts";
@@ -23,10 +24,18 @@ const entry = (command: CheckedCommand): string =>
     `## ${codeSpan(command.name)}`,
     `${command.summary}.`,
     [
+      `- CLI: ${codeSpan(`media ${cliPath(command).join(" ")}`)}`,
       `- Kind: ${command.kind}`,
       `- Scope: ${command.scope}`,
       ...(command.refusesKeys ? ["- API keys: refused"] : []),
       `- Arguments: ${command.args.length === 0 ? "none" : codeSpan(fieldsType(command.args))}`,
+      ...secretsOf(command.args).map(
+        (secret, _, secrets) =>
+          `- Secret: ${codeSpan(secret.field)} from ${codeSpan(secret.variable)}${secrets.length === 1 ? " or stdin" : ""}, never a flag`,
+      ),
+      ...(isPaginated(command.args)
+        ? ["- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`"]
+        : []),
       `- Result: ${codeSpan(wireType(command.result))}`,
     ].join("\n"),
   ].join("\n\n");

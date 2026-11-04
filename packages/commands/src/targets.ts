@@ -1,4 +1,5 @@
 import type { Target } from "./outputs.ts";
+import { cliTarget } from "./targets/cli.ts";
 import { platformTarget } from "./targets/platform.ts";
 import { sdkTarget } from "./targets/sdk.ts";
 import { skillTarget } from "./targets/skill.ts";
@@ -8,4 +9,5 @@ export const targets: ReadonlyArray<Target> = [
   platformTarget("packages/platform/commands"),
   sdkTarget("packages/sdk/src/platform/generated"),
   skillTarget("apps/cli/skills/media/references"),
+  cliTarget("apps/cli/src/generated"),
 ];

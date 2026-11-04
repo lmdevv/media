@@ -6,6 +6,7 @@
 
 Show this server's name and version.
 
+- CLI: `media auth server info`
 - Kind: query
 - Scope: public
 - Arguments: none
@@ -15,6 +16,7 @@ Show this server's name and version.
 
 Rename this server.
 
+- CLI: `media auth server rename`
 - Kind: mutation
 - Scope: account
 - API keys: refused
