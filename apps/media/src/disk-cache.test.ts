@@ -20,7 +20,7 @@ const cacheIn = (dataDir: string) =>
     Effect.map((context) => Context.get(context, DiskCache.Service)),
   );
 
-describe("disk cache", () => {
+describe("probe: disk cache", () => {
   layer(NodeServices.layer)((it) => {
     it.effect("reads what it wrote until it is older than the caller allows", () =>
       withDataDir((dataDir) =>
