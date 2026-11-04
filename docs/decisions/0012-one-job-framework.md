@@ -66,9 +66,11 @@ The first framework, in `packages/platform/convex/core/jobs/`, settled how these
   function, `step` in `machine.ts`, makes every transition, and `store.ts` is the only code that
   writes `jobs` and `jobItems`. Unit tests cover the transitions without a backend.
 - A worker claims by kind: `claim({ kinds, workerId, leaseMs })` takes the oldest queued job of a
-  kind that has a free slot. The claim reads at most `cap` running rows of each kind, so the cap
-  is counted from the rows, with no counter to drift. Two claims of one kind read the same rows,
-  and Convex runs them one after the other.
+  kind that has a free slot. A `jobKinds` row per kind holds its running count and the creation
+  time that no queued job of the kind is older than. `store.ts` moves the row in the same
+  mutation as every job transition and enqueue, so a claim reads one row and one queue entry.
+  Every claim and every job that stops running writes the row, so Convex runs them one after the
+  other, and the cap holds under any number of workers.
 - A lease is `{ jobId, attempt }`. Each claim adds one attempt, and a call with an older attempt
   answers `lost`. A lease lasts 5 seconds to 10 minutes, and `report` renews it.
 - A lease ends when the lease-release cron releases it, not at the moment it expires. No claim
@@ -130,4 +132,7 @@ Rejected for this shape:
 - Claiming a given job id after reading the queue, as old movies does. The cap would need a
   stored count, and workers race for the same id. With 4 workers, old movies made 3 failed
   claims per job.
-- A stored running count per kind. Every transition would have to keep it in step with the rows.
+- Counting the running rows on every claim, with no stored count. A range of `jobs` that a busy
+  queue moved through keeps the index entries of every job that left it until Convex's retention
+  removes them, and a claim scans them all. After 5,000 jobs of one kind, an idle claim took 10 ms
+  against 2 ms, and 1,000-job runs with 4 workers slowed from 31 s to between 72 s and 81 s.
