@@ -1,7 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
-import { credentialScope } from "../commands/scopes";
+import { assignableRole, credentialScope, role } from "../commands/scopes";
 import { importSource } from "./core/jobs/kinds";
 import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
 
@@ -33,11 +33,15 @@ export default defineSchema({
     username: v.string(),
     /** The username folded for uniqueness and sign-in: `alice`. */
     usernameKey: v.string(),
+    /** Exactly one user is the owner once the server is set up. */
+    role,
     /** Bumped when every password and device session of the user ends. */
     sessionGeneration: v.number(),
     /** Bumped when every API key of the user ends. */
     keyGeneration: v.number(),
-  }).index("by_username_key", ["usernameKey"]),
+  })
+    .index("by_username_key", ["usernameKey"])
+    .index("by_role", ["role"]),
 
   authSessions: defineTable(
     v.union(
@@ -115,6 +119,25 @@ export default defineSchema({
   )
     .index("by_user_code", ["userCode"])
     .index("by_expiration", ["expiresAt"]),
+
+  invites: defineTable({
+    /** SHA-256 of the secret half of the invite code, hex. */
+    secretHash: v.string(),
+    role: assignableRole,
+    invitedBy: v.id("users"),
+    inviterSessionGeneration: v.number(),
+    expiresAt: v.number(),
+  }).index("by_expiration", ["expiresAt"]),
+
+  resetLinks: defineTable({
+    /** SHA-256 of the secret half of the link code, hex. */
+    secretHash: v.string(),
+    userId: v.id("users"),
+    madeBy: v.id("users"),
+    userSessionGeneration: v.number(),
+    makerSessionGeneration: v.number(),
+    expiresAt: v.number(),
+  }).index("by_expiration", ["expiresAt"]),
 
   counters: defineTable({
     name: v.string(),

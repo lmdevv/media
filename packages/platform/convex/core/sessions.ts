@@ -2,7 +2,7 @@ import type { PaginationResult } from "convex/server";
 import { v } from "convex/values";
 
 import { credentialScopes } from "../../commands/scopes";
-import type { CredentialScope } from "../../commands/scopes";
+import type { CredentialScope, Role } from "../../commands/scopes";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
@@ -35,6 +35,8 @@ export interface SignedIn {
   readonly sessionId: Id<"authSessions">;
 }
 
+export const signedIn = v.object({ userId: v.id("users"), sessionId: v.id("authSessions") });
+
 /** What opens a session. */
 export type Opening =
   | { readonly kind: "password" }
@@ -52,9 +54,22 @@ const isLive = (session: Session, user: Doc<"users">, now: number): boolean =>
   session.expirationTime > now &&
   session.generation === currentGeneration(session.kind, user);
 
-/** The scopes a live session holds: its grant, or every scope for a password session. */
-export const heldScopes = (session: Session): Array<CredentialScope> =>
-  session.kind === "password" ? [...credentialScopes] : [...session.scopes];
+const roleScopes = {
+  owner: credentialScopes,
+  admin: credentialScopes,
+  member: ["account"],
+} as const satisfies { readonly [R in Role]: ReadonlyArray<CredentialScope> };
+
+export const roleHolds = (role: Role, scope: CredentialScope): boolean =>
+  roleScopes[role].some((held) => held === scope);
+
+export const losesScopes = (from: Role, to: Role): boolean =>
+  credentialScopes.some((scope) => roleHolds(from, scope) && !roleHolds(to, scope));
+
+export const heldScopes = (session: Session, user: Doc<"users">): Array<CredentialScope> =>
+  session.kind === "password"
+    ? [...roleScopes[user.role]]
+    : session.scopes.filter((scope) => roleHolds(user.role, scope));
 
 /** A session and its user when the session is live, or null. */
 export const liveSession = async (
@@ -197,6 +212,19 @@ export const endUserSessions = async (
     await ctx.db.patch(kept._id, { generation });
   }
 
+  await schedulePurge(ctx, user._id, "authSessions");
+};
+
+/** Ends every session and API key of the user. */
+export const endUserCredentials = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  user: Doc<"users">,
+): Promise<void> => {
+  await ctx.db.patch(user._id, {
+    sessionGeneration: user.sessionGeneration + 1,
+    keyGeneration: user.keyGeneration + 1,
+  });
+  await schedulePurge(ctx, user._id, "apiKeys");
   await schedulePurge(ctx, user._id, "authSessions");
 };
 

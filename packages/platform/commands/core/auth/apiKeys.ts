@@ -7,12 +7,12 @@ import type { Infer } from "convex/values";
 
 import { action, mutation } from "../../../convex/_generated/server";
 import type { ActionCtx, MutationCtx } from "../../../convex/_generated/server";
-import { requireActionCaller, requireCaller } from "../../../convex/core/auth/caller";
+import { refuseKeys, requireActionCaller, requireCaller } from "../../../convex/core/auth/caller";
 import type { Caller } from "../../../convex/core/auth/caller";
 
 const createArgs = v.object({
   name: v.string(),
-  scopes: v.array(v.union(v.literal("account"))),
+  scopes: v.array(v.union(v.literal("account"), v.literal("admin"))),
   expiresInDays: v.optional(v.number()),
 });
 
@@ -32,7 +32,7 @@ const revokeResult = v.null();
 
 /** The handlers `convex/core/auth/apiKeys.ts` passes to `register`, one per `core.auth.apiKeys` command. */
 export interface Handlers {
-  /** `core.auth.apiKeys.create` (action, account): Create an API key with some of this session's scopes and show its secret once. */
+  /** `core.auth.apiKeys.create` (action, account, API keys refused): Create an API key with some of this session's scopes and show its secret once. */
   readonly create: (
     ctx: Omit<ActionCtx, "auth">,
     args: Infer<typeof createArgs>,
@@ -82,7 +82,7 @@ export const register = (handlers: Handlers) => ({
     args: createArgs,
     returns: createResult,
     handler: async (ctx, args) =>
-      handlers.create(ctx, args, await requireActionCaller(ctx, "account")),
+      handlers.create(ctx, args, refuseKeys(await requireActionCaller(ctx, "account"))),
   }),
   endAll: mutation({
     args: endAllArgs,

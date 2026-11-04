@@ -42,14 +42,20 @@ describe("check", () => {
     const { scope: _, ...unscoped } = info;
 
     expect(refusalsOf([unscoped])).toEqual([
-      "core.server.info: refused, no scope (declare one of: public, signed-in, account)",
+      "core.server.info: refused, no scope (declare one of: public, signed-in, account, admin)",
     ]);
   });
 
   it("refuses a scope or a kind it does not know", () => {
     expect(refusalsOf([{ ...info, scope: "movies:read", kind: "subscription" }])).toEqual([
       'core.server.info: refused, unknown kind "subscription" (declare it with query, mutation, or action)',
-      'core.server.info: refused, unknown scope "movies:read" (declare one of: public, signed-in, account)',
+      'core.server.info: refused, unknown scope "movies:read" (declare one of: public, signed-in, account, admin)',
+    ]);
+  });
+
+  it("refuses refusesKeys on a public command, which has no session to refuse", () => {
+    expect(refusalsOf([{ ...info, refusesKeys: true }])).toEqual([
+      "core.server.info: refused, a public command has no session to refuse (drop refusesKeys or declare a scope)",
     ]);
   });
 

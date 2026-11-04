@@ -15,6 +15,7 @@ export interface Declaration {
   readonly name: string;
   readonly kind?: string;
   readonly scope?: string;
+  readonly refusesKeys?: boolean;
   readonly summary?: string;
   readonly args?: PropertyValidators;
   readonly result?: GenericValidator;
@@ -55,6 +56,7 @@ export interface CheckedCommand {
   readonly exportName: string;
   readonly kind: CommandKind;
   readonly scope: Scope;
+  readonly refusesKeys: boolean;
   readonly summary: string;
   readonly args: ReadonlyArray<WireField>;
   readonly result: Wire;
@@ -69,6 +71,7 @@ export type Refusal =
   | { readonly reason: "unknown-kind"; readonly name: string; readonly kind: string }
   | { readonly reason: "no-scope"; readonly name: string }
   | { readonly reason: "unknown-scope"; readonly name: string; readonly scope: string }
+  | { readonly reason: "public-refuses-keys"; readonly name: string }
   | { readonly reason: "bad-summary"; readonly name: string }
   | { readonly reason: "no-validator"; readonly name: string; readonly at: string }
   | { readonly reason: "args-object"; readonly name: string }
@@ -229,6 +232,7 @@ const parseCommand = (declaration: Declaration): Parsed<CheckedCommand> => {
   const kind = commandKinds.find((known) => known === declaration.kind);
   const scope = scopes.find((known) => known === declaration.scope);
   const summary = declaration.summary?.trim() ?? "";
+  const refusesKeys = declaration.refusesKeys === true;
 
   const args =
     declaration.args === undefined
@@ -252,6 +256,9 @@ const parseCommand = (declaration: Declaration): Parsed<CheckedCommand> => {
       : scope === undefined
         ? [{ reason: "unknown-scope", name, scope: declaration.scope } as const]
         : []),
+    ...(refusesKeys && declaration.scope === "public"
+      ? [{ reason: "public-refuses-keys", name } as const]
+      : []),
     ...(summary === "" || UNSAFE_SUMMARY.test(summary)
       ? [{ reason: "bad-summary", name } as const]
       : []),
@@ -268,7 +275,15 @@ const parseCommand = (declaration: Declaration): Parsed<CheckedCommand> => {
     args.ok &&
     result.ok &&
     refusals.length === 0
-    ? ok({ ...named.value, kind, scope, summary, args: args.value, result: result.value })
+    ? ok({
+        ...named.value,
+        kind,
+        scope,
+        refusesKeys,
+        summary,
+        args: args.value,
+        result: result.value,
+      })
     : { ok: false, refusals };
 };
 
@@ -330,6 +345,8 @@ export const refusalMessage = (refusal: Refusal): string =>
       "no-scope": () => `no scope (declare one of: ${scopes.join(", ")})`,
       "unknown-scope": (unknown) =>
         `unknown scope "${unknown.scope}" (declare one of: ${scopes.join(", ")})`,
+      "public-refuses-keys": () =>
+        "a public command has no session to refuse (drop refusesKeys or declare a scope)",
       "bad-summary": () =>
         "the summary must be one line of plain text with no closing punctuation, backticks, */, or leading #",
       "case-clash": (clash) =>

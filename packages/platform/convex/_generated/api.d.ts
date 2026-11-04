@@ -9,9 +9,15 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as core_accounts_host from "../core/accounts/host.js";
+import type * as core_accounts_invites from "../core/accounts/invites.js";
+import type * as core_accounts_me from "../core/accounts/me.js";
+import type * as core_accounts_resetLinks from "../core/accounts/resetLinks.js";
+import type * as core_accounts_users from "../core/accounts/users.js";
 import type * as core_auth_apiKeys from "../core/auth/apiKeys.js";
 import type * as core_auth_caller from "../core/auth/caller.js";
 import type * as core_auth_deviceCodes from "../core/auth/deviceCodes.js";
+import type * as core_auth_flows from "../core/auth/flows.js";
 import type * as core_auth_password from "../core/auth/password.js";
 import type * as core_auth_sessions from "../core/auth/sessions.js";
 import type * as core_auth_sweep from "../core/auth/sweep.js";
@@ -29,6 +35,7 @@ import type * as core_lib_counters from "../core/lib/counters.js";
 import type * as core_lib_errors from "../core/lib/errors.js";
 import type * as core_lib_inOrder from "../core/lib/inOrder.js";
 import type * as core_lib_paginate from "../core/lib/paginate.js";
+import type * as core_lib_passwords from "../core/lib/passwords.js";
 import type * as core_lib_rateLimit from "../core/lib/rateLimit.js";
 import type * as core_lib_secrets from "../core/lib/secrets.js";
 import type * as core_lib_serverFacing from "../core/lib/serverFacing.js";
@@ -48,9 +55,15 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  "core/accounts/host": typeof core_accounts_host;
+  "core/accounts/invites": typeof core_accounts_invites;
+  "core/accounts/me": typeof core_accounts_me;
+  "core/accounts/resetLinks": typeof core_accounts_resetLinks;
+  "core/accounts/users": typeof core_accounts_users;
   "core/auth/apiKeys": typeof core_auth_apiKeys;
   "core/auth/caller": typeof core_auth_caller;
   "core/auth/deviceCodes": typeof core_auth_deviceCodes;
+  "core/auth/flows": typeof core_auth_flows;
   "core/auth/password": typeof core_auth_password;
   "core/auth/sessions": typeof core_auth_sessions;
   "core/auth/sweep": typeof core_auth_sweep;
@@ -68,6 +81,7 @@ declare const fullApi: ApiFromModules<{
   "core/lib/errors": typeof core_lib_errors;
   "core/lib/inOrder": typeof core_lib_inOrder;
   "core/lib/paginate": typeof core_lib_paginate;
+  "core/lib/passwords": typeof core_lib_passwords;
   "core/lib/rateLimit": typeof core_lib_rateLimit;
   "core/lib/secrets": typeof core_lib_secrets;
   "core/lib/serverFacing": typeof core_lib_serverFacing;

@@ -15,9 +15,10 @@ const currentArgs = v.object({});
 const currentResult = v.object({
   userId: v.id("users"),
   username: v.string(),
+  role: v.union(v.literal("owner"), v.literal("admin"), v.literal("member")),
   sessionId: v.id("authSessions"),
   kind: v.union(v.literal("password"), v.literal("apiKey"), v.literal("deviceCode")),
-  scopes: v.array(v.union(v.literal("account"))),
+  scopes: v.array(v.union(v.literal("account"), v.literal("admin"))),
 });
 
 const endArgs = v.object({ sessionId: v.id("authSessions") });

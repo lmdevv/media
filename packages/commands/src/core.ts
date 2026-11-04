@@ -1,18 +1,23 @@
+import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import { v } from "convex/values";
 
 import { action, mutation, query } from "./command.ts";
 import type { Command } from "./command.ts";
-import { credentialScopes } from "./scopes.ts";
+import { assignableRoles, credentialScopes, roles } from "./scopes.ts";
 
 const credentialScope = v.union(...credentialScopes.map((scope) => v.literal(scope)));
+
+const role = v.union(...roles.map((name) => v.literal(name)));
+
+const assignableRole = v.union(...assignableRoles.map((name) => v.literal(name)));
 
 /** The core's commands: the server itself, accounts, devices, and the other shared modules. */
 export const core = [
   query("core.server.info", {
-    summary: "Show this server's name and version",
+    summary: "Show this server's name and version, and whether its owner has set it up",
     scope: "public",
     args: {},
-    result: v.object({ name: v.string(), version: v.string() }),
+    result: v.object({ name: v.string(), version: v.string(), hasOwner: v.boolean() }),
   }),
 
   query("core.auth.sessions.current", {
@@ -22,6 +27,7 @@ export const core = [
     result: v.object({
       userId: v.id("users"),
       username: v.string(),
+      role,
       sessionId: v.id("authSessions"),
       kind: v.union(v.literal("password"), v.literal("apiKey"), v.literal("deviceCode")),
       scopes: v.array(credentialScope),
@@ -43,6 +49,7 @@ export const core = [
   action("core.auth.apiKeys.create", {
     summary: "Create an API key with some of this session's scopes and show its secret once",
     scope: "account",
+    refusesKeys: true,
     args: {
       name: v.string(),
       scopes: v.array(credentialScope),
@@ -97,6 +104,7 @@ export const core = [
   mutation("core.auth.deviceCodes.approve", {
     summary: "Sign a waiting device in as you, with some of this session's scopes",
     scope: "account",
+    refusesKeys: true,
     args: { userCode: v.string(), scopes: v.array(credentialScope) },
     result: v.null(),
   }),
@@ -104,6 +112,99 @@ export const core = [
     summary: "Refuse a waiting device",
     scope: "account",
     args: { userCode: v.string() },
+    result: v.null(),
+  }),
+
+  action("core.accounts.invites.create", {
+    summary:
+      "Create an invite link code for someone new, who picks their own username and password",
+    scope: "admin",
+    refusesKeys: true,
+    args: { role: v.optional(assignableRole), expiresInDays: v.optional(v.number()) },
+    result: v.object({ inviteId: v.id("invites"), code: v.string(), expiresAt: v.number() }),
+  }),
+  query("core.accounts.invites.lookup", {
+    summary: "Show what an invite code offers, or refuse it when it no longer works",
+    scope: "public",
+    args: { code: v.string() },
+    result: v.object({ role: assignableRole, invitedBy: v.string(), expiresAt: v.number() }),
+  }),
+  query("core.accounts.invites.list", {
+    summary: "List the invites that still work, latest to expire first",
+    scope: "admin",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({
+        inviteId: v.id("invites"),
+        role: assignableRole,
+        invitedBy: v.string(),
+        expiresAt: v.number(),
+      }),
+    ),
+  }),
+  mutation("core.accounts.invites.revoke", {
+    summary: "Revoke an invite so its code stops working",
+    scope: "admin",
+    args: { inviteId: v.id("invites") },
+    result: v.null(),
+  }),
+
+  action("core.accounts.resetLinks.create", {
+    summary: "Create a one-time link code that lets someone set a new password within a day",
+    scope: "admin",
+    refusesKeys: true,
+    args: { userId: v.id("users") },
+    result: v.object({ code: v.string(), expiresAt: v.number() }),
+  }),
+  query("core.accounts.resetLinks.lookup", {
+    summary: "Show whose password a reset code sets, or refuse it when it no longer works",
+    scope: "public",
+    args: { code: v.string() },
+    result: v.object({ username: v.string(), expiresAt: v.number() }),
+  }),
+
+  action("core.accounts.users.create", {
+    summary: "Create a user with a username and password you choose for them",
+    scope: "admin",
+    refusesKeys: true,
+    args: { username: v.string(), password: v.string(), role: v.optional(assignableRole) },
+    result: v.object({ userId: v.id("users") }),
+  }),
+  query("core.accounts.users.list", {
+    summary: "List every user with their role, by username",
+    scope: "admin",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({ userId: v.id("users"), username: v.string(), role }),
+    ),
+  }),
+  mutation("core.accounts.users.setRole", {
+    summary: "Make someone else an admin or a member; the owner's role never changes this way",
+    scope: "admin",
+    refusesKeys: true,
+    args: { userId: v.id("users"), role: assignableRole },
+    result: v.null(),
+  }),
+  mutation("core.accounts.users.handOverOwnership", {
+    summary: "Hand ownership of this server to another user and stay an admin, as the owner",
+    scope: "admin",
+    refusesKeys: true,
+    args: { userId: v.id("users") },
+    result: v.null(),
+  }),
+
+  mutation("core.accounts.me.rename", {
+    summary: "Change your username; everything you own stays yours",
+    scope: "account",
+    refusesKeys: true,
+    args: { username: v.string() },
+    result: v.null(),
+  }),
+  action("core.accounts.me.changePassword", {
+    summary: "Change your password and sign out your other password and device sessions",
+    scope: "account",
+    refusesKeys: true,
+    args: { currentPassword: v.string(), newPassword: v.string() },
     result: v.null(),
   }),
 ] as const satisfies ReadonlyArray<Command>;

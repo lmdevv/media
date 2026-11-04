@@ -7,12 +7,12 @@ import type { Infer } from "convex/values";
 
 import { action, mutation, query } from "../../../convex/_generated/server";
 import type { ActionCtx, MutationCtx, QueryCtx } from "../../../convex/_generated/server";
-import { requireCaller } from "../../../convex/core/auth/caller";
+import { refuseKeys, requireCaller } from "../../../convex/core/auth/caller";
 import type { Caller } from "../../../convex/core/auth/caller";
 
 const approveArgs = v.object({
   userCode: v.string(),
-  scopes: v.array(v.union(v.literal("account"))),
+  scopes: v.array(v.union(v.literal("account"), v.literal("admin"))),
 });
 
 const approveResult = v.null();
@@ -46,7 +46,7 @@ const startResult = v.object({
 
 /** The handlers `convex/core/auth/deviceCodes.ts` passes to `register`, one per `core.auth.deviceCodes` command. */
 export interface Handlers {
-  /** `core.auth.deviceCodes.approve` (mutation, account): Sign a waiting device in as you, with some of this session's scopes. */
+  /** `core.auth.deviceCodes.approve` (mutation, account, API keys refused): Sign a waiting device in as you, with some of this session's scopes. */
   readonly approve: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof approveArgs>,
@@ -107,7 +107,8 @@ export const register = (handlers: Handlers) => ({
   approve: mutation({
     args: approveArgs,
     returns: approveResult,
-    handler: async (ctx, args) => handlers.approve(ctx, args, await requireCaller(ctx, "account")),
+    handler: async (ctx, args) =>
+      handlers.approve(ctx, args, refuseKeys(await requireCaller(ctx, "account"))),
   }),
   deny: mutation({
     args: denyArgs,

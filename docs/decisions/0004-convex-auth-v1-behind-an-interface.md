@@ -1,7 +1,8 @@
 # 0004. Use Convex Auth v1 behind a thin interface and check every session live
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-04 with how sign-in was built, and again on
-  2026-11-04 to give each API key sign-in its own session.
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with how sign-in was built, again on
+  2026-11-04 to give each API key sign-in its own session, and again on 2026-11-04 with the
+  account sign-ins.
 - Decisions: D14
 
 ## Context
@@ -106,9 +107,10 @@ The first sign-in in the core settled the interface, the session record, and the
   what its user may use on every call.
 - **Sign-in calls.** A client calls `auth:signIn` with a provider and its params:
   `password` with `{ username, password }`, `apiKey` with `{ key }`, or `deviceCode` with
-  `{ deviceCode }`. It refreshes with `{ refreshToken }` and signs out with `auth:signOut`.
-- **Users.** There is no open sign-up. The internal action `core/auth/password:createUser` makes a
-  user with the deployment's admin key until account flows build on it (ADR 0003).
+  `{ deviceCode }`. It refreshes with `{ refreshToken }` and signs out with `auth:signOut`. The
+  account sign-ins below add `setup`, `invite`, and `reset`.
+- **Users.** There is no open sign-up. ADR 0003's "Accounts as built" lists every way a user is
+  made.
 - Convex Auth's tables for email, OAuth, and its own password provider are left out of the
   schema, because the core never reaches the code that uses them.
 
@@ -141,3 +143,43 @@ client signing out.
   session. A device code signs one device into one session, and only retries of that code share
   it. Nothing deletes a single refresh token of a live session. Ending a session deletes all of
   them, and the sweep deletes only expired tokens, which outlive their session.
+
+## Account sign-ins (amended 2026-11-04)
+
+Three ways to get in also make or reset an account: first-run setup, accepting an invite, and
+redeeming a reset link (ADR 0003). Each is a provider of its own in `convex/core/auth/flows.ts`.
+
+| Provider | Params                         | What it does                              |
+| -------- | ------------------------------ | ----------------------------------------- |
+| `setup`  | `{ username, password }`       | makes the owner while the server has none |
+| `invite` | `{ code, username, password }` | makes the user an invite code asks for    |
+| `reset`  | `{ code, password }`           | sets the password a reset link allows     |
+
+- **One call, one hash, one transaction.** Each provider refuses a dead credential before any
+  hashing, through `core.server.info` or a public link lookup. It hashes the new password once,
+  then calls one internal mutation in `convex/core/accounts/`. That mutation checks the
+  credential again, makes or resets the account, uses up the link, and opens the session through
+  `openSession`. Convex Auth still only mints tokens.
+- **Measured.** Accepting an invite, from the call to holding tokens, has a p50 of 154.1 ms at the
+  head and 153.1 ms for old movies' sign-up with an invite code. Those are medians of 5 runs of 50
+  accepts a side, with the sides interleaved. Both spend about 135 to 140 ms in one pure-JS Scrypt
+  hash, and the core's account steps take about 10 ms of the rest.
+- **Held scopes follow the role.** `admin` is the second credential scope (ADR 0005). A password
+  session holds every scope its user's role may hold. A key or device session holds its grant cut
+  down to those on every call, so a promotion takes effect on the next call. A demotion bumps both
+  of the person's generations through `endUserCredentials`, which ends every session and key at
+  once, because a grant only cut down would come back with a later promotion.
+- **API keys.** A command declared `refusesKeys` refuses API-key sessions (ADR 0009). These
+  commands create a key, approve a device, make a user, a link, a role change, or a handover, or
+  change the caller's username or password. A device session is not refused. A password session
+  approves it with a subset of its scopes, `core.auth.sessions.endAll` ends it, and the CLI signs
+  in with one to run `media admin`.
+- **Users from the host.** `core/auth/password:createUser` moved to
+  `core/accounts/host:createUser`, next to `core/accounts/host:resetPassword`.
+
+Rejected:
+
+- Account commands followed by a password sign-in. Accepting an invite would take two calls and
+  two Scrypt runs, about twice the measured p50.
+- One `password` provider with a `flow` param. Its params would be a union, and the sign-in
+  bucket's rules would sit beside flows that must not take from it.

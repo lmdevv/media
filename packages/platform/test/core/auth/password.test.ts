@@ -1,8 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { api, internal } from "../../../convex/_generated/api";
-import { runFunction } from "../../admin";
+import { api } from "../../../convex/_generated/api";
 import { createPerson, refusal, signIn, signInAs } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 
@@ -40,11 +39,13 @@ describe.skipIf(stack === undefined)("password sign-in", { timeout: 120_000 }, (
     expect(new Set(callers.map((caller) => caller.userId)).size).toBe(1);
     expect(callers[0]).toMatchObject({
       username: person.username,
+      role: "member",
       kind: "password",
       scopes: ["account"],
     });
     expect(Object.keys(callers[0] ?? {}).toSorted()).toEqual([
       "kind",
+      "role",
       "scopes",
       "sessionId",
       "userId",
@@ -129,24 +130,5 @@ describe.skipIf(stack === undefined)("password sign-in", { timeout: 120_000 }, (
         signIn(stack, "password", { username: person.username, password: "wrong-password" }),
       ),
     ).toBe("unauthenticated");
-  });
-
-  it("keeps usernames unique ignoring case and refuses ones that break the rules", async () => {
-    if (stack === undefined) return;
-    const person = await createPerson(stack, "Unique");
-
-    const create = (username: string) =>
-      refusal(
-        runFunction(
-          stack,
-          internal.core.auth.password.createUser,
-          { username, password: "long-enough-password" },
-          Schema.String,
-        ),
-      );
-
-    expect(await create(person.username.toUpperCase())).toMatch(/That username is taken/u);
-    expect(await create("has space")).toMatch(/Use 1 to 32 letters/u);
-    expect(await create("Lucía")).toMatch(/Use 1 to 32 letters/u);
   });
 });

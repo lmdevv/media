@@ -2,6 +2,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { ConvexError } from "convex/values";
 import { Schema } from "effect";
 
+import type { AssignableRole } from "../commands/scopes";
 import { api, internal } from "../convex/_generated/api";
 import { runFunction } from "./admin";
 import type { CoreStack } from "./stack-env";
@@ -23,13 +24,49 @@ const Token = Schema.Struct({ token: Schema.String, refreshToken: Schema.String 
 
 const decodeTokens = Schema.decodeUnknownSync(Token);
 
-const unique = (): string => Math.random().toString(36).slice(2, 10);
+export const unique = (): string => Math.random().toString(36).slice(2, 10);
 
-/** Creates a user with the admin key. */
-export const createPerson = async (stack: CoreStack, label = "person"): Promise<Person> => {
+const setUps = new Map<string, Promise<void>>();
+
+const setUpOnce = async (stack: CoreStack): Promise<void> => {
+  const anonymous = new ConvexHttpClient(stack.url, { logger: false });
+
+  if ((await anonymous.query(api.core.server.info, {})).hasOwner) return;
+
+  const setUp = signIn(stack, "setup", {
+    username: `owner-${unique()}`,
+    password: `password-${unique()}`,
+  });
+
+  const outcome = await refusal(setUp);
+
+  if (outcome !== "accepted" && outcome !== "conflict") {
+    throw new Error(`Setting up the stack's owner answered ${outcome}`);
+  }
+};
+
+export const ensureOwner = (stack: CoreStack): Promise<void> => {
+  const setUp = setUps.get(stack.url) ?? setUpOnce(stack);
+
+  setUps.set(stack.url, setUp);
+
+  return setUp;
+};
+
+export const createPerson = async (
+  stack: CoreStack,
+  label = "person",
+  role: AssignableRole = "member",
+): Promise<Person> => {
   const person = { username: `${label}-${unique()}`, password: `password-${unique()}` };
 
-  await runFunction(stack, internal.core.auth.password.createUser, person, Schema.String);
+  await ensureOwner(stack);
+  await runFunction(
+    stack,
+    internal.core.accounts.host.createUser,
+    { ...person, role },
+    Schema.String,
+  );
 
   return person;
 };
@@ -45,7 +82,7 @@ const clientWith = (stack: CoreStack, token: string): ConvexHttpClient => {
 /** Signs in with a provider and its params; rejects as `auth:signIn` does. */
 export const signIn = async (
   stack: CoreStack,
-  provider: "password" | "apiKey" | "deviceCode",
+  provider: "password" | "apiKey" | "deviceCode" | "setup" | "invite" | "reset",
   params: Readonly<Record<string, string>>,
 ): Promise<SignedIn> => {
   const result = await new ConvexHttpClient(stack.url, { logger: false }).action(api.auth.signIn, {

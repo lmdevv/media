@@ -3,7 +3,6 @@ import { v } from "convex/values";
 import { action, mutation, query } from "../src/command.ts";
 import type { Command } from "../src/command.ts";
 
-/** A command list with every kind, every scope, every validator the generator renders, two modules, and two domains. */
 export const fixtures = [
   query("core.server.info", {
     summary: "Show this server's name and version",
@@ -14,6 +13,7 @@ export const fixtures = [
   mutation("core.server.rename", {
     summary: "Rename this server",
     scope: "account",
+    refusesKeys: true,
     args: { name: v.string(), note: v.optional(v.string()) },
     result: v.null(),
   }),

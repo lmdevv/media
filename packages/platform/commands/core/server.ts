@@ -10,11 +10,11 @@ import type { QueryCtx } from "../../convex/_generated/server";
 
 const infoArgs = v.object({});
 
-const infoResult = v.object({ name: v.string(), version: v.string() });
+const infoResult = v.object({ name: v.string(), version: v.string(), hasOwner: v.boolean() });
 
 /** The handlers `convex/core/server.ts` passes to `register`, one per `core.server` command. */
 export interface Handlers {
-  /** `core.server.info` (query, public): Show this server's name and version. */
+  /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */
   readonly info: (
     ctx: Omit<QueryCtx, "auth">,
     args: Record<string, never>,
