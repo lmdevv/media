@@ -113,9 +113,9 @@ export interface PersonalTicketRequest {
   readonly purpose: TicketPurpose;
   readonly now: number;
   /** Whole milliseconds, at least 1 s. Defaults to and is capped at `PERSONAL_TICKET_MAX_MS`. */
-  readonly lifetimeMs?: number;
-  /** A ceiling on the expiry, such as the session's own; at least `now` + 1 s. */
-  readonly notAfter?: number;
+  readonly lifetimeMs?: number | undefined;
+  /** A ceiling on the expiry, such as the session's own. */
+  readonly notAfter?: number | undefined;
 }
 
 /** What a shareable artwork ticket is issued for. */
@@ -133,7 +133,12 @@ export interface IssuedTicket {
 /** Whether an auth session still holds: as the verifier's host watches it. */
 export type SessionState = "live" | "ended" | "unavailable";
 
-/** Reads the state of the session a personal ticket names. A rejection counts as unavailable. */
+/**
+ * Reads the state of the session a personal ticket names, as the host's watch on it knows it. It
+ * answers `ended` once the session's own expiry passes, which the host enforces on its clock
+ * because the core's `sessionStatus` does not rerun as time passes. A rejection counts as
+ * unavailable.
+ */
 export type SessionReader = (principal: SessionPrincipal) => Promise<SessionState>;
 
 /** What a route serves: the purposes it accepts and the resource its path names. */
@@ -164,6 +169,25 @@ export class TicketRefused extends Error {
     super(`Ticket refused: ${reason}`);
     this.reason = reason;
     this.claims = claims;
+  }
+}
+
+/**
+ * Why a personal ticket was not issued: `lifetime` is not a whole number of at least
+ * `PERSONAL_TICKET_MIN_MS`, or the `notAfter` ceiling, rounded down to a whole second, leaves
+ * less than that (`ends_too_soon`).
+ */
+export type PersonalTicketProblem = "lifetime" | "ends_too_soon";
+
+/** A personal ticket request the issuer refused. Names the problem, never a value. */
+export class PersonalTicketInvalid extends Error {
+  override readonly name = "PersonalTicketInvalid";
+  /** What is wrong with the request. */
+  readonly problem: PersonalTicketProblem;
+
+  constructor(problem: PersonalTicketProblem) {
+    super(`Personal ticket not issued: ${problem}`);
+    this.problem = problem;
   }
 }
 
@@ -201,18 +225,47 @@ const MAC_BYTES = 32;
 
 const SECOND_MS = 1000;
 
-const LATEST_ISSUE_MS = 10 ** 14;
+const TIME_DIGITS = 12;
 
-const KEY_ID = /^[a-z0-9]{1,16}$/u;
+/** A digit short of the format's limit, so an expiry after it still fits. */
+const LATEST_ISSUE_MS = 10 ** (TIME_DIGITS - 1) * SECOND_MS;
 
-const KEY_TEXT = /^[\w-]{43}$/u;
+const KEY_ID_SOURCE = "[a-z0-9]{1,16}";
 
-const PRINCIPAL_ID = /^[a-z0-9]{1,64}$/u;
+const PRINCIPAL_ID_SOURCE = "[a-z0-9]{1,64}";
 
-const RESOURCE_ID = /^[\w-]{1,128}$/u;
+const RESOURCE_ID_SOURCE = "[\\w-]{1,128}";
 
-const TICKET_SYNTAX =
-  /^t1\.(?<kid>[a-z0-9]{1,16})\.(?<aud>[a-z]{1,16})\.(?<iat>0|[1-9]\d{0,11})\.(?<exp>0|[1-9]\d{0,11})\.(?<purpose>[a-z]{1,16})\.(?<kind>[a-z]{1,16})\.(?<id>[\w-]{1,128})\.(?:s\.(?<userId>[a-z0-9]{1,64})\.(?<sessionId>[a-z0-9]{1,64})|a)\.(?<mac>[\w-]{43})$/u;
+const MAC_SOURCE = `[\\w-]{${MAC_CHARS}}`;
+
+const WORD_SOURCE = "[a-z]{1,16}";
+
+const TIME_SOURCE = `0|[1-9]\\d{0,${TIME_DIGITS - 1}}`;
+
+const whole = (source: string): RegExp => new RegExp(`^(?:${source})$`, "u");
+
+const KEY_ID = whole(KEY_ID_SOURCE);
+
+const KEY_TEXT = whole(MAC_SOURCE);
+
+const PRINCIPAL_ID = whole(PRINCIPAL_ID_SOURCE);
+
+const RESOURCE_ID = whole(RESOURCE_ID_SOURCE);
+
+const TICKET_SYNTAX = whole(
+  [
+    TICKET_VERSION,
+    `(?<kid>${KEY_ID_SOURCE})`,
+    `(?<aud>${WORD_SOURCE})`,
+    `(?<iat>${TIME_SOURCE})`,
+    `(?<exp>${TIME_SOURCE})`,
+    `(?<purpose>${WORD_SOURCE})`,
+    `(?<kind>${WORD_SOURCE})`,
+    `(?<id>${RESOURCE_ID_SOURCE})`,
+    `(?:s\\.(?<userId>${PRINCIPAL_ID_SOURCE})\\.(?<sessionId>${PRINCIPAL_ID_SOURCE})|a)`,
+    `(?<mac>${MAC_SOURCE})`,
+  ].join("\\."),
+);
 
 const encoder = new TextEncoder();
 
@@ -290,7 +343,9 @@ const admissionToken: unique symbol = Symbol("TicketAdmission");
 
 /**
  * A ticket `TicketKeyRing.admit` accepted. Only `admit` makes one. It holds the admitted ticket
- * text privately, so the server can check later requests of the same stream against it.
+ * text privately, so the server can check later requests of the same stream against it. The
+ * server keeps it with the one stream it started and finds it by that stream's id, never by the
+ * ticket, so an expired ticket can only continue a stream that is still running.
  */
 export class TicketAdmission {
   /** The admitted ticket's claims. */
@@ -344,12 +399,13 @@ export interface TicketKeyRing {
    * `lifetimeMs` after `now`, but no more than 6 h after the second it was issued in and not after
    * `notAfter`, so it admits for at least `PERSONAL_TICKET_MIN_MS`.
    *
-   * @throws RangeError when an id is outside its alphabet, `now` is not whole milliseconds,
-   *   `lifetimeMs` is under 1 s or not whole, or `notAfter` rounded down to a whole second is under
-   *   `now` + 1 s. The message
-   *   names the field, never its value.
+   * @returns The ticket, or `PersonalTicketInvalid` for a lifetime or a ceiling it cannot meet.
+   * @throws RangeError when an id is outside its alphabet or `now` is not whole milliseconds. The
+   *   message names the field, never its value.
    */
-  issuePersonal(request: PersonalTicketRequest): Promise<IssuedTicket>;
+  issuePersonal(
+    request: PersonalTicketRequest,
+  ): Promise<TicketResult<IssuedTicket, PersonalTicketInvalid>>;
   /**
    * Signs a ticket that names no one, for artwork. Every call in one bucket returns the same
    * string, which admits until the end of the next bucket.
@@ -457,7 +513,7 @@ const requireWholeTime = (field: string, value: number): void => {
 
 const requireResourceId = (resource: TicketResource): void => {
   if (!RESOURCE_ID.test(resource.id)) {
-    throw new RangeError("resource.id must match [\\w-]{1,128}");
+    throw new RangeError(`resource.id must match ${RESOURCE_ID_SOURCE}`);
   }
 };
 
@@ -473,7 +529,9 @@ const makeRing = (keys: ReadonlyMap<string, CryptoKey>, signingKeyId: string): T
     return { ticket: `${signed}.${toBase64Url(new Uint8Array(mac))}`, expiresAt: claims.expiresAt };
   };
 
-  const issuePersonal = async (request: PersonalTicketRequest): Promise<IssuedTicket> => {
+  const issuePersonal = async (
+    request: PersonalTicketRequest,
+  ): Promise<TicketResult<IssuedTicket, PersonalTicketInvalid>> => {
     const { principal, resource, purpose, now } = request;
     const lifetimeMs = request.lifetimeMs ?? PERSONAL_TICKET_MAX_MS;
     const notAfter = request.notAfter ?? Number.POSITIVE_INFINITY;
@@ -482,25 +540,25 @@ const makeRing = (keys: ReadonlyMap<string, CryptoKey>, signingKeyId: string): T
     requireResourceId(resource);
 
     if (!PRINCIPAL_ID.test(principal.userId)) {
-      throw new RangeError("principal.userId must match [a-z0-9]{1,64}");
+      throw new RangeError(`principal.userId must match ${PRINCIPAL_ID_SOURCE}`);
     }
 
     if (!PRINCIPAL_ID.test(principal.sessionId)) {
-      throw new RangeError("principal.sessionId must match [a-z0-9]{1,64}");
+      throw new RangeError(`principal.sessionId must match ${PRINCIPAL_ID_SOURCE}`);
     }
 
     if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs < PERSONAL_TICKET_MIN_MS) {
-      throw new RangeError("lifetimeMs must be a whole number of at least 1000");
+      return { ok: false, error: new PersonalTicketInvalid("lifetime") };
     }
 
     const issuedAt = Math.floor(now / SECOND_MS) * SECOND_MS;
     const ceiling = Math.floor(notAfter / SECOND_MS) * SECOND_MS;
 
     if (Number.isNaN(ceiling) || ceiling < now + PERSONAL_TICKET_MIN_MS) {
-      throw new RangeError("notAfter must be at least now + 1000 on a whole second");
+      return { ok: false, error: new PersonalTicketInvalid("ends_too_soon") };
     }
 
-    return sign({
+    const issued = await sign({
       kind: "personal",
       principal: { userId: principal.userId, sessionId: principal.sessionId },
       purpose,
@@ -512,6 +570,8 @@ const makeRing = (keys: ReadonlyMap<string, CryptoKey>, signingKeyId: string): T
         ceiling,
       ),
     });
+
+    return accepted(issued);
   };
 
   const issueShareable = async (request: ShareableTicketRequest): Promise<IssuedTicket> => {

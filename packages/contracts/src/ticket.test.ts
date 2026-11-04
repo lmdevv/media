@@ -39,6 +39,17 @@ const ringOf = async (keys: string): Promise<TicketKeyRing> => {
   return loaded.value;
 };
 
+const personalOf = async (
+  ring: TicketKeyRing,
+  request: PersonalTicketRequest,
+): Promise<IssuedTicket> => {
+  const issued = await ring.issuePersonal(request);
+
+  if (!issued.ok) throw issued.error;
+
+  return issued.value;
+};
+
 const answering =
   (state: SessionState): SessionReader =>
   () =>
@@ -103,7 +114,7 @@ const issueVector = async (
 ): Promise<IssuedTicket | null> => {
   if (vector.issue === null) return null;
 
-  if (vector.issue.kind === "personal") return ring.issuePersonal(vector.issue.request);
+  if (vector.issue.kind === "personal") return personalOf(ring, vector.issue.request);
 
   return ring.issueShareable(vector.issue.request);
 };
@@ -231,7 +242,7 @@ describe("issuing and admitting", () => {
 
     await fc.assert(
       fc.asyncProperty(personalRequests, async (request) => {
-        const issued = await ring.issuePersonal(request);
+        const issued = await personalOf(ring, request);
 
         const admitted = await ring.admit(
           { ticket: issued.ticket, route: routeFor(request), readSession: live },
@@ -302,7 +313,7 @@ describe("issuing and admitting", () => {
         personalRequests,
         fc.integer({ min: -2 * PERSONAL_TICKET_MAX_MS, max: 2 * PERSONAL_TICKET_MAX_MS }),
         async (request, offset) => {
-          const issued = await ring.issuePersonal({ ...request, lifetimeMs: 10 ** 9 });
+          const issued = await personalOf(ring, { ...request, lifetimeMs: 10 ** 9 });
           const issuedAt = Math.floor(request.now / 1000) * 1000;
           const at = issuedAt + offset;
 
@@ -328,7 +339,7 @@ describe("issuing and admitting", () => {
         personalRequests,
         fc.integer({ min: 2000, max: PERSONAL_TICKET_MAX_MS }),
         async (request, ceiling) => {
-          const issued = await ring.issuePersonal({ ...request, notAfter: request.now + ceiling });
+          const issued = await personalOf(ring, { ...request, notAfter: request.now + ceiling });
 
           expect(issued.expiresAt).toBeLessThanOrEqual(request.now + ceiling);
           expect(issued.expiresAt % 1000).toBe(0);
@@ -399,19 +410,32 @@ describe("issuing and admitting", () => {
   it("refuses a lifetime under 1 s or not whole, a ceiling under 1 s away, and a bad clock", async () => {
     const ring = await ringOf(TICKET_TEST_KEYS.k1);
     const request = playIssue;
+    const second = Math.floor(request.now / 1000) * 1000;
 
-    const bad: ReadonlyArray<PersonalTicketRequest> = [
-      { ...request, lifetimeMs: 999 },
-      { ...request, lifetimeMs: 1000.5 },
-      { ...request, lifetimeMs: Number.NaN },
-      { ...request, notAfter: request.now + 999 },
-      { ...request, notAfter: Number.NaN },
-      { ...request, now: Number.NaN },
-      { ...request, now: 10 ** 14 + 1 },
+    const refused: ReadonlyArray<readonly [PersonalTicketRequest, string]> = [
+      [{ ...request, lifetimeMs: 999 }, "lifetime"],
+      [{ ...request, lifetimeMs: 1000.5 }, "lifetime"],
+      [{ ...request, lifetimeMs: Number.NaN }, "lifetime"],
+      [{ ...request, notAfter: request.now + 999 }, "ends_too_soon"],
+      [{ ...request, now: second + 1, notAfter: second + 1500 }, "ends_too_soon"],
+      [{ ...request, notAfter: Number.NaN }, "ends_too_soon"],
     ];
 
+    const problems = await Promise.all(
+      refused.map(async ([each]) => {
+        const issued = await ring.issuePersonal(each);
+
+        return issued.ok ? "issued" : issued.error.problem;
+      }),
+    );
+
+    expect(problems).toEqual(refused.map(([, problem]) => problem));
+
     await Promise.all(
-      bad.map((each) => expect(ring.issuePersonal(each)).rejects.toBeInstanceOf(RangeError)),
+      [
+        { ...request, now: Number.NaN },
+        { ...request, now: 10 ** 14 + 1 },
+      ].map((each) => expect(ring.issuePersonal(each)).rejects.toBeInstanceOf(RangeError)),
     );
 
     await expect(ring.admit(playRequest(playVector.ticket), Number.NaN)).rejects.toBeInstanceOf(
@@ -421,8 +445,8 @@ describe("issuing and admitting", () => {
 
   it("admits a 1 s ticket for a full second when it is issued late in a second", async () => {
     const ring = await ringOf(TICKET_TEST_KEYS.k1);
-    const now = playIssue.now + 999;
-    const issued = await ring.issuePersonal({ ...playIssue, now, lifetimeMs: 1000 });
+    const now = Math.floor(playIssue.now / 1000) * 1000 + 999;
+    const issued = await personalOf(ring, { ...playIssue, now, lifetimeMs: 1000 });
 
     expect(issued.expiresAt - now).toBeGreaterThanOrEqual(PERSONAL_TICKET_MIN_MS);
     expect(await reasonOf(ring, playRequest(issued.ticket), now + 999)).toBe("admitted");
@@ -431,7 +455,7 @@ describe("issuing and admitting", () => {
   it("issues tickets that still parse at the latest issue time", async () => {
     const ring = await ringOf(TICKET_TEST_KEYS.k1);
     const now = 10 ** 14;
-    const personal = await ring.issuePersonal({ ...playIssue, now });
+    const personal = await personalOf(ring, { ...playIssue, now });
 
     const shareable = await ring.issueShareable({
       resource: { kind: "artwork", id: "latest" },
@@ -460,7 +484,7 @@ describe("the clock", () => {
 
     await fc.assert(
       fc.asyncProperty(personalRequests, async (request) => {
-        const issued = await ring.issuePersonal(request);
+        const issued = await personalOf(ring, request);
         const issuedAt = Math.floor(request.now / 1000) * 1000;
 
         const at = (now: number) =>
@@ -626,10 +650,10 @@ describe("the key setting", () => {
     const promoted = await ringOf(TICKET_TEST_KEYS.rotated);
     const retired = await ringOf(TICKET_TEST_KEYS.k2);
     const request = playIssue;
-    const oldTicket = (await k1.issuePersonal(request)).ticket;
-    const newTicket = (await promoted.issuePersonal(request)).ticket;
+    const oldTicket = (await personalOf(k1, request)).ticket;
+    const newTicket = (await personalOf(promoted, request)).ticket;
 
-    expect((await added.issuePersonal(request)).ticket).toBe(oldTicket);
+    expect((await personalOf(added, request)).ticket).toBe(oldTicket);
     expect(await reasonOf(added, playRequest(newTicket), playVector.now)).toBe("admitted");
     expect(await reasonOf(promoted, playRequest(oldTicket), playVector.now)).toBe("admitted");
     expect(await reasonOf(retired, playRequest(oldTicket), playVector.now)).toBe("unknown_key");

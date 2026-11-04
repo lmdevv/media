@@ -36,8 +36,11 @@ const sessionStatus = (core: CoreStack, userId: string, sessionId: string) =>
 
 const coreSessions =
   (core: CoreStack): SessionReader =>
-  async ({ userId, sessionId }) =>
-    (await sessionStatus(core, userId, sessionId)).state === "live" ? "live" : "ended";
+  async ({ userId, sessionId }) => {
+    const status = await sessionStatus(core, userId, sessionId);
+
+    return status.state === "live" && status.endsAt > Date.now() ? "live" : "ended";
+  };
 
 const adminRefusal = async (call: Promise<unknown>): Promise<string> =>
   call.then(

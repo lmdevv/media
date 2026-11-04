@@ -1,9 +1,4 @@
-import {
-  loadTicketKeyRing,
-  PERSONAL_TICKET_MAX_MS,
-  PERSONAL_TICKET_MIN_MS,
-  TICKET_KEYS_SETTING,
-} from "@media/contracts/ticket";
+import { loadTicketKeyRing, TICKET_KEYS_SETTING } from "@media/contracts/ticket";
 import type {
   ArtworkResource,
   IssuedTicket,
@@ -54,8 +49,8 @@ interface PersonalTicketFor {
  *
  * Takes a mutation context so a query cannot call it: a subscription keeps a query's result until
  * the data it read changes, so it would hold an old personal ticket. Refuses `unauthenticated`
- * when the session is not live or ends within 2 seconds, and `invalid_args` for a lifetime under
- * 1 s or not whole.
+ * when the session is not live or ends too soon for a ticket, and `invalid_args` for a lifetime
+ * under 1 s or not whole.
  */
 export const issuePersonalTicket = async (
   ctx: Pick<MutationCtx, "db">,
@@ -65,30 +60,26 @@ export const issuePersonalTicket = async (
   const now = Date.now();
   const live = await liveSession(ctx.db, caller.sessionId, now);
 
-  if (
-    live === null ||
-    live.session.userId !== caller.userId ||
-    live.session.expirationTime < now + 2 * PERSONAL_TICKET_MIN_MS
-  ) {
+  if (live === null || live.session.userId !== caller.userId) {
     return fail("unauthenticated", "This session has ended; sign in again");
-  }
-
-  const lifetimeMs = request.lifetimeMs ?? PERSONAL_TICKET_MAX_MS;
-
-  if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs < PERSONAL_TICKET_MIN_MS) {
-    return fail("invalid_args", "A ticket lasts at least 1 second, in whole milliseconds");
   }
 
   const ring = await keyRing();
 
-  return ring.issuePersonal({
+  const issued = await ring.issuePersonal({
     principal: { userId: caller.userId, sessionId: caller.sessionId },
     resource: request.resource,
     purpose: request.purpose,
     now,
-    lifetimeMs,
+    lifetimeMs: request.lifetimeMs,
     notAfter: live.session.expirationTime,
   });
+
+  if (issued.ok) return issued.value;
+
+  return issued.error.problem === "lifetime"
+    ? fail("invalid_args", "A ticket lasts at least 1 second, in whole milliseconds")
+    : fail("unauthenticated", "This session ends too soon for a ticket; sign in again");
 };
 
 /**

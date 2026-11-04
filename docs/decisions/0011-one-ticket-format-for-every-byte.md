@@ -91,11 +91,13 @@ server route using them yet (D50). The server's routes adopt them in phase 4.
 - **Live revocation.** Admitting a personal ticket asks the verifier's host whether its session
   is live. The core's `core/tickets:sessionStatus` answers for the server's watch. It reruns when
   the session or its user changes (sign-out, `endAll`, a key revoke) and gives the session's
-  expiry, which the server enforces on its own clock because a subscription does not rerun as
-  time passes. It is an internal function behind `core/lib/serverFacing.ts` until the server signs
+  expiry. A subscription does not rerun as time passes, so the host's session reader answers
+  `ended` once that expiry passes on its own clock. It is an internal function behind `core/lib/serverFacing.ts` until the server signs
   in with the `media-service` scope (ADR 0010).
 - **Issuing.** Domain commands call `issuePersonalTicket` after their own access check. It caps
-  the expiry at 6 hours and at the session's own expiry. It takes a mutation context, because a
+  the expiry at 6 hours and at the session's own expiry, and it refuses a lifetime under a second
+  with `invalid_args` and a session that ends too soon for a one-second ticket with
+  `unauthenticated`. It takes a mutation context, because a
   subscription keeps a query's result until the data the query read changes, so a query would
   hold an old personal ticket. `issueShareableTicket` works in a query, because its result
   changes only once a week. `core/ticketsProbe.ts` runs both for the stack tests until the first
@@ -114,7 +116,9 @@ it was given, get a new ticket. D46 settles the principle, and this section sett
 - **The stream continues on its admission.** Every later request of that stream carries the same
   ticket, because the playlist copies its ticket onto each segment URL. The admission accepts it
   while the session is live, whatever the ticket's expiry. It compares the ticket with the one it
-  admitted and reads neither the clock nor a key.
+  admitted and reads neither the clock nor a key. The server keeps each admission with the one
+  stream it started and finds it by that stream's id, never by the ticket, so an expired ticket
+  continues only a stream that is still running.
 - **No renewal.** No command or route trades a ticket for a new one. A stream that keeps playing
   needs nothing, so a Cast receiver never needs a new URL mid-movie.
 - **A new start needs a fresh ticket.** A client that must start again after its ticket expired
@@ -133,9 +137,14 @@ it was given, get a new ticket. D46 settles the principle, and this section sett
   receiver shows a short reload.
 - Movies' `playback.renewToken` has no successor in the core. The movies port's player stops
   renewing.
-- A presentation query returns artwork URLs, and Convex does not rerun a query as time passes.
-  A client that keeps a subscription open for more than a week can hold expired artwork URLs, so
-  it runs the query again when an image is refused.
+- A presentation query returns artwork URLs, and a subscription keeps a query's result until the
+  data it read changes. A client that keeps one open for more than a week can hold expired artwork
+  URLs. It passes the current bucket as an argument, so its subscription changes with the bucket,
+  or it fetches again with a one-off query when an image is refused. On the dev stack, the server
+  refreshed a cached result that read the clock within 22 seconds.
+- Buckets start at the same instant for every artwork, so every artwork URL changes at once each
+  week and image caches miss together. A household library fetches images again as people view
+  them, so the core accepts that.
 
 ### Alternatives rejected
 
