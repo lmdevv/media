@@ -26,8 +26,10 @@ Both repos list user actions in one place, in different ways.
   - the command-menu entry,
   - the agent skill's reference.
 - Convex runs no Effect runtime.
-- Internal functions stay plain internal Convex functions. These are scanner callbacks, crons, and
-  calls only the server makes. They are not commands.
+- Crons and functions that only other Convex functions call stay plain internal Convex functions.
+- Calls the server makes, such as scanner callbacks and job claims, are public Convex functions that
+  check the `media-service` scope of the server's API-key session (ADR 0010). An internal function
+  cannot be called from outside Convex, so these cannot be internal. They are not commands.
 
 ## Consequences
 
@@ -46,6 +48,7 @@ Both repos list user actions in one place, in different ways.
 
 - A command's required scope is part of its declaration (ADR 0005), so every generated entry point
   checks the same scope.
-- An internal function never appears in the SDK, the CLI, or the command menu.
+- Internal functions and server-only functions never appear in the SDK, the CLI, or the command
+  menu.
 - Commands live in a domain group, such as `music.playlists`, which is the light seam for later
   products (ADR 0002).
