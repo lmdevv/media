@@ -13,6 +13,9 @@ export const TICKET_KEYS_SETTING = "MEDIA_TICKET_KEYS";
 /** The longest a personal ticket can admit a new stream for after it was issued. */
 export const PERSONAL_TICKET_MAX_MS = 6 * 60 * 60 * 1000;
 
+/** The shortest lifetime a personal ticket can be issued with. */
+export const PERSONAL_TICKET_MIN_MS = 1000;
+
 /** Shareable tickets start on these buckets and stay valid for two of them. */
 export const SHAREABLE_BUCKET_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -192,8 +195,6 @@ export class TicketKeysInvalid extends Error {
 
 const MAX_TICKET_CHARS = 512;
 
-const MIN_LIFETIME_MS = 1000;
-
 const MAC_CHARS = 43;
 
 const MAC_BYTES = 32;
@@ -339,11 +340,13 @@ export interface TicketKeyRing {
   /** Every listed key id, in setting order. Each verifies. */
   readonly keyIds: ReadonlyArray<string>;
   /**
-   * Signs a ticket for one auth session. It expires `lifetimeMs` after `now`, at most 6 h later,
-   * and never after `notAfter`, rounded down to a whole second.
+   * Signs a ticket for one auth session. It expires on the first whole second at least
+   * `lifetimeMs` after `now`, but no more than 6 h after the second it was issued in and not after
+   * `notAfter`, so it admits for at least `PERSONAL_TICKET_MIN_MS`.
    *
    * @throws RangeError when an id is outside its alphabet, `now` is not whole milliseconds,
-   *   `lifetimeMs` is under 1 s or not whole, or `notAfter` is under `now` + 1 s. The message
+   *   `lifetimeMs` is under 1 s or not whole, or `notAfter` rounded down to a whole second is under
+   *   `now` + 1 s. The message
    *   names the field, never its value.
    */
   issuePersonal(request: PersonalTicketRequest): Promise<IssuedTicket>;
@@ -486,23 +489,28 @@ const makeRing = (keys: ReadonlyMap<string, CryptoKey>, signingKeyId: string): T
       throw new RangeError("principal.sessionId must match [a-z0-9]{1,64}");
     }
 
-    if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs < MIN_LIFETIME_MS) {
+    if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs < PERSONAL_TICKET_MIN_MS) {
       throw new RangeError("lifetimeMs must be a whole number of at least 1000");
     }
 
-    if (Number.isNaN(notAfter) || notAfter < now + MIN_LIFETIME_MS) {
-      throw new RangeError("notAfter must be at least now + 1000");
-    }
+    const issuedAt = Math.floor(now / SECOND_MS) * SECOND_MS;
+    const ceiling = Math.floor(notAfter / SECOND_MS) * SECOND_MS;
 
-    const end = Math.min(now + Math.min(lifetimeMs, PERSONAL_TICKET_MAX_MS), notAfter);
+    if (Number.isNaN(ceiling) || ceiling < now + PERSONAL_TICKET_MIN_MS) {
+      throw new RangeError("notAfter must be at least now + 1000 on a whole second");
+    }
 
     return sign({
       kind: "personal",
       principal: { userId: principal.userId, sessionId: principal.sessionId },
       purpose,
       resource: { kind: resource.kind, id: resource.id },
-      issuedAt: Math.floor(now / SECOND_MS) * SECOND_MS,
-      expiresAt: Math.floor(end / SECOND_MS) * SECOND_MS,
+      issuedAt,
+      expiresAt: Math.min(
+        Math.ceil((now + lifetimeMs) / SECOND_MS) * SECOND_MS,
+        issuedAt + PERSONAL_TICKET_MAX_MS,
+        ceiling,
+      ),
     });
   };
 

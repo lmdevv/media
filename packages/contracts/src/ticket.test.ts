@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   loadTicketKeyRing,
   PERSONAL_TICKET_MAX_MS,
+  PERSONAL_TICKET_MIN_MS,
   SHAREABLE_BUCKET_MS,
   TICKET_CLOCK_SKEW_MS,
   ticketPurposes,
@@ -245,9 +246,13 @@ describe("issuing and admitting", () => {
           issuedAt: Math.floor(request.now / 1000) * 1000,
           expiresAt: issued.expiresAt,
         });
-        expect(issued.expiresAt).toBeLessThanOrEqual(
-          request.now + Math.min(request.lifetimeMs, PERSONAL_TICKET_MAX_MS),
+        const issuedAt = Math.floor(request.now / 1000) * 1000;
+
+        expect(issued.expiresAt - issuedAt).toBeLessThanOrEqual(PERSONAL_TICKET_MAX_MS);
+        expect(issued.expiresAt).toBeGreaterThanOrEqual(
+          Math.min(request.now + request.lifetimeMs, issuedAt + PERSONAL_TICKET_MAX_MS),
         );
+        expect(issued.expiresAt).toBeLessThan(request.now + request.lifetimeMs + 1000);
       }),
     );
   });
@@ -321,13 +326,13 @@ describe("issuing and admitting", () => {
     await fc.assert(
       fc.asyncProperty(
         personalRequests,
-        fc.integer({ min: 1000, max: PERSONAL_TICKET_MAX_MS }),
+        fc.integer({ min: 2000, max: PERSONAL_TICKET_MAX_MS }),
         async (request, ceiling) => {
           const issued = await ring.issuePersonal({ ...request, notAfter: request.now + ceiling });
 
           expect(issued.expiresAt).toBeLessThanOrEqual(request.now + ceiling);
           expect(issued.expiresAt % 1000).toBe(0);
-          expect(issued.expiresAt).toBeGreaterThan(request.now - 1000);
+          expect(issued.expiresAt).toBeGreaterThanOrEqual(request.now + PERSONAL_TICKET_MIN_MS);
         },
       ),
     );
@@ -412,6 +417,15 @@ describe("issuing and admitting", () => {
     await expect(ring.admit(playRequest(playVector.ticket), Number.NaN)).rejects.toBeInstanceOf(
       RangeError,
     );
+  });
+
+  it("admits a 1 s ticket for a full second when it is issued late in a second", async () => {
+    const ring = await ringOf(TICKET_TEST_KEYS.k1);
+    const now = playIssue.now + 999;
+    const issued = await ring.issuePersonal({ ...playIssue, now, lifetimeMs: 1000 });
+
+    expect(issued.expiresAt - now).toBeGreaterThanOrEqual(PERSONAL_TICKET_MIN_MS);
+    expect(await reasonOf(ring, playRequest(issued.ticket), now + 999)).toBe("admitted");
   });
 
   it("issues tickets that still parse at the latest issue time", async () => {
