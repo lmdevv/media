@@ -105,7 +105,7 @@ List every user with their role, by username.
 - Kind: query
 - Scope: admin
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
-- Result: `{ page: Array<{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.accounts.users.setRole`
 
@@ -124,7 +124,7 @@ Create an API key with some of this session's scopes and show its secret once.
 - Kind: action
 - Scope: account
 - API keys: refused
-- Arguments: `{ name: string; scopes: Array<"account" | "admin">; expiresInDays?: number }`
+- Arguments: `{ name: string; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; expiresInDays?: number }`
 - Result: `{ keyId: Id<"apiKeys">; key: string; expiresAt: number | null }`
 
 ## `core.auth.apiKeys.endAll`
@@ -152,7 +152,7 @@ Sign a waiting device in as you, with some of this session's scopes.
 - Kind: mutation
 - Scope: account
 - API keys: refused
-- Arguments: `{ userCode: string; scopes: Array<"account" | "admin"> }`
+- Arguments: `{ userCode: string; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit"> }`
 - Result: `null`
 
 ## `core.auth.deviceCodes.deny`
@@ -189,7 +189,7 @@ Show who is signed in, how, and with which scopes.
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode"; scopes: Array<"account" | "admin"> }`
+- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit"> }`
 
 ## `core.auth.sessions.end`
 
@@ -207,6 +207,88 @@ Sign out every password and device session you have, or every other one.
 - Kind: mutation
 - Scope: account
 - Arguments: `{ keepCurrent: boolean }`
+- Result: `null`
+
+## `core.permissions.groups.addMember`
+
+Add someone to a group; what is shared with it reaches them on their next call.
+
+- Kind: mutation
+- Scope: admin
+- Arguments: `{ groupId: Id<"groups">; userId: Id<"users"> }`
+- Result: `null`
+
+## `core.permissions.groups.create`
+
+Create a group of people to share with at once.
+
+- Kind: mutation
+- Scope: admin
+- Arguments: `{ name: string }`
+- Result: `{ groupId: Id<"groups"> }`
+
+## `core.permissions.groups.list`
+
+List the groups by name.
+
+- Kind: query
+- Scope: admin
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Result: `{ page: Array<{ groupId: Id<"groups">; name: string }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.permissions.groups.members`
+
+List the people in a group.
+
+- Kind: query
+- Scope: admin
+- Arguments: `{ groupId: Id<"groups">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Result: `{ page: Array<{ userId: Id<"users">; username: string }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.permissions.groups.remove`
+
+Delete a group, so what was shared with it no longer reaches its members.
+
+- Kind: mutation
+- Scope: admin
+- Arguments: `{ groupId: Id<"groups"> }`
+- Result: `null`
+
+## `core.permissions.groups.removeMember`
+
+Take someone out of a group; what is shared with it stops reaching them at once.
+
+- Kind: mutation
+- Scope: admin
+- Arguments: `{ groupId: Id<"groups">; userId: Id<"users"> }`
+- Result: `null`
+
+## `core.permissions.groups.rename`
+
+Rename a group.
+
+- Kind: mutation
+- Scope: admin
+- Arguments: `{ groupId: Id<"groups">; name: string }`
+- Result: `null`
+
+## `core.restrictions.get`
+
+Show a kid's limits on what they see, yours or as an admin someone else's.
+
+- Kind: query
+- Scope: signed-in
+- Arguments: `{ userId: Id<"users"> }`
+- Result: `{ maxMovieAge: number | null; hideUnrated: boolean; hideExplicitMusic: boolean; libraries: Array<Id<"accessProbes">> | null } | null`
+
+## `core.restrictions.set`
+
+Limit what a member sees by movie rating, explicit music, and library, or lift the limits.
+
+- Kind: mutation
+- Scope: admin
+- API keys: refused
+- Arguments: `{ userId: Id<"users">; restrictions: { maxMovieAge: number | null; hideUnrated: boolean; hideExplicitMusic: boolean; libraries: Array<Id<"accessProbes">> | null } | null }`
 - Result: `null`
 
 ## `core.server.info`

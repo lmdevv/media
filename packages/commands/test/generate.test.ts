@@ -61,6 +61,7 @@ describe("generate", () => {
     const planned = await planOf(fixtures);
 
     expect(planned.files.map((file) => file.path)).toEqual([
+      "platform/commands/access.ts",
       "platform/commands/core/server.ts",
       "platform/commands/music/playlists.ts",
       "platform/commands/refs.ts",

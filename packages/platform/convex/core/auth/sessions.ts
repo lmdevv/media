@@ -3,7 +3,14 @@ import { fail } from "../lib/errors";
 import { endSession, endUserSessions } from "../sessions";
 
 export const { current, end, endAll } = register({
-  current: (_ctx, _args, caller) => caller,
+  current: (_ctx, _args, caller) => ({
+    userId: caller.userId,
+    username: caller.username,
+    role: caller.role,
+    sessionId: caller.sessionId,
+    kind: caller.sessionKind,
+    scopes: caller.scopes,
+  }),
   end: async (ctx, { sessionId }, caller) => {
     const session = await ctx.db.get(sessionId);
 

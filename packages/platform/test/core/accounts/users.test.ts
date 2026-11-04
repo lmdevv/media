@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { roleScopes } from "../../../commands/scopes";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { createPerson, refusal, signIn, signInAs, unique } from "../../sign-in";
@@ -73,7 +74,7 @@ describe.skipIf(stack === undefined)("users", { timeout: 120_000 }, () => {
 
     await admin.client.mutation(api.core.accounts.users.setRole, { userId, role: "admin" });
 
-    expect(await whoIs(person)).toMatchObject({ role: "admin", scopes: ["account", "admin"] });
+    expect(await whoIs(person)).toMatchObject({ role: "admin", scopes: roleScopes.admin });
 
     const { key } = await person.client.action(api.core.auth.apiKeys.create, {
       name: "agent",
@@ -91,7 +92,7 @@ describe.skipIf(stack === undefined)("users", { timeout: 120_000 }, () => {
 
     const member = await signInAs(stack, credentials);
 
-    expect(await whoIs(member)).toMatchObject({ role: "member", scopes: ["account"] });
+    expect(await whoIs(member)).toMatchObject({ role: "member", scopes: roleScopes.member });
     expect(
       await refusal(
         member.client.query(api.core.accounts.users.list, {

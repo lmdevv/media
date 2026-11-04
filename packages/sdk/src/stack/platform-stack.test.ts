@@ -257,7 +257,19 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
 
     expect(answer).toMatchObject({
       info: { name: "[media]" },
-      me: { username: person.username, kind: "password", scopes: ["account"] },
+      me: {
+        username: person.username,
+        kind: "password",
+        scopes: [
+          "account",
+          "movies:read",
+          "movies:play",
+          "movies:edit",
+          "music:read",
+          "music:play",
+          "music:edit",
+        ],
+      },
       status: "signedOut",
       afterSignOut: { _tag: "Unauthenticated" },
       infoAfterSignOut: { name: "[media]" },

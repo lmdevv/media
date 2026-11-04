@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { roleScopes } from "../../../commands/scopes";
 import { api } from "../../../convex/_generated/api";
 import { createPerson, refusal, signIn, signInAs } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
@@ -41,7 +42,7 @@ describe.skipIf(stack === undefined)("password sign-in", { timeout: 120_000 }, (
       username: person.username,
       role: "member",
       kind: "password",
-      scopes: ["account"],
+      scopes: roleScopes.member,
     });
     expect(Object.keys(callers[0] ?? {}).toSorted()).toEqual([
       "kind",

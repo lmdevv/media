@@ -114,7 +114,7 @@ export const open = internalMutation({
     const user = await ctx.db.get(userId);
 
     if (
-      user === null ||
+      user?.kind !== "person" ||
       user.usernameKey !== usernameKey ||
       (await passwordHashOf(ctx.db, userId)) !== hash
     ) {

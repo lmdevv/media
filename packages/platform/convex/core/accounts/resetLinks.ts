@@ -10,8 +10,11 @@ import { fail } from "../lib/errors";
 import { signInLimit, storePassword } from "../lib/passwords";
 import { clearAttempts } from "../lib/rateLimit";
 import { formatSecret, randomSecret, rowForSecret, sha256Hex } from "../lib/secrets";
+import { requireAccount } from "../permissions/authorize";
+import { accountTarget, can, principalOf } from "../permissions/policy";
+import type { PersonDoc } from "../permissions/policy";
 import { endUserCredentials, openSession, signedIn } from "../sessions";
-import { manages, requireManages } from "./users";
+import { asPerson } from "./users";
 
 const PREFIX = "mr";
 
@@ -21,7 +24,7 @@ const DEAD = "This reset link no longer works; ask an admin for a new one";
 
 interface OpenLink {
   readonly link: Doc<"resetLinks">;
-  readonly user: Doc<"users">;
+  readonly user: PersonDoc;
 }
 
 const openLinkFor = async (db: DatabaseReader, code: string, now: number): Promise<OpenLink> => {
@@ -33,27 +36,28 @@ const openLinkFor = async (db: DatabaseReader, code: string, now: number): Promi
 
   if (link === null || link.expiresAt <= now) return fail("expired", DEAD);
 
-  const [user, maker] = await Promise.all([db.get(link.userId), db.get(link.madeBy)]);
+  const [found, maker] = await Promise.all([db.get(link.userId), db.get(link.madeBy)]);
+  const user = asPerson(found);
 
   return user !== null &&
     maker !== null &&
     user.sessionGeneration === link.userSessionGeneration &&
     maker.sessionGeneration === link.makerSessionGeneration &&
-    manages({ userId: maker._id, role: maker.role }, user)
+    can(principalOf(maker), "resetPassword", accountTarget(user)).allowed
     ? { link, user }
     : fail("expired", DEAD);
 };
 
 export const resetPassword = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
-  user: Doc<"users">,
+  user: PersonDoc,
   hash: string,
-): Promise<Doc<"users">> => {
+): Promise<PersonDoc> => {
   await storePassword(ctx.db, user._id, hash);
   await endUserCredentials(ctx, user);
   await clearAttempts(ctx, signInLimit(user.usernameKey));
 
-  return (await ctx.db.get(user._id)) ?? fail("not_found", "No such user");
+  return asPerson(await ctx.db.get(user._id)) ?? fail("not_found", "No such user");
 };
 
 export const insert = internalMutation({
@@ -62,9 +66,7 @@ export const insert = internalMutation({
   handler: async (ctx, { userId, secretHash }) => {
     const caller = refuseKeys(await requireCaller(ctx, "admin"));
     const maker = await callerUser(ctx, caller);
-    const user = (await ctx.db.get(userId)) ?? fail("not_found", "No such user");
-
-    requireManages(caller, user);
+    const user = await requireAccount(ctx, caller, "resetPassword", userId);
 
     const expiresAt = Date.now() + LINK_MS;
 

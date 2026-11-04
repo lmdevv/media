@@ -7,6 +7,6 @@
 Load a playlist from a file or another service.
 
 - Kind: action
-- Scope: signed-in
+- Scope: music:edit
 - Arguments: `{ source: "spotify" | "file"; tracks: Array<{ title: string; seconds: number }>; tags: Record<string, boolean>; owner: Id<"users">; size: bigint; cover?: ArrayBuffer; "dry-run": true; version: 2n }`
 - Result: `{ playlistId: Id<"playlists"> } | null`

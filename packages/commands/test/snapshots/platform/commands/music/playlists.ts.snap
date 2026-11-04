@@ -25,7 +25,7 @@ const loadResult = v.union(v.object({ playlistId: v.id("playlists") }), v.null()
 
 /** The handlers `convex/music/playlists.ts` passes to `register`, one per `music.playlists` command. */
 export interface Handlers {
-  /** `music.playlists.load` (action, signed-in): Load a playlist from a file or another service. */
+  /** `music.playlists.load` (action, music:edit): Load a playlist from a file or another service. */
   readonly load: (
     ctx: Omit<ActionCtx, "auth">,
     args: Infer<typeof loadArgs>,
@@ -49,6 +49,6 @@ export const register = (handlers: Handlers) => ({
     args: loadArgs,
     returns: loadResult,
     handler: async (ctx, args) =>
-      handlers.load(ctx, args, await requireActionCaller(ctx, "signed-in")),
+      handlers.load(ctx, args, await requireActionCaller(ctx, "music:edit")),
   }),
 });

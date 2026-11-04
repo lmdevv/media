@@ -10,8 +10,10 @@ import { callerUser, refuseKeys, requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
 import { paginate } from "../lib/paginate";
 import { formatSecret, randomSecret, rowForSecret, sha256Hex } from "../lib/secrets";
-import { openSession, roleHolds, signedIn } from "../sessions";
-import { DEFAULT_ROLE, insertUser } from "./users";
+import { SERVER, can, principalOf } from "../permissions/policy";
+import type { PersonDoc } from "../permissions/policy";
+import { openSession, signedIn } from "../sessions";
+import { DEFAULT_ROLE, asPerson, insertUser } from "./users";
 
 const PREFIX = "mi";
 
@@ -25,11 +27,12 @@ const DEAD = "This invite no longer works; ask an admin for a new one";
 
 interface OpenInvite {
   readonly invite: Doc<"invites">;
-  readonly invitedBy: Doc<"users">;
+  readonly invitedBy: PersonDoc;
 }
 
 const stillBackedBy = (invite: Doc<"invites">, inviter: Doc<"users">): boolean =>
-  inviter.sessionGeneration === invite.inviterSessionGeneration && roleHolds(inviter.role, "admin");
+  inviter.sessionGeneration === invite.inviterSessionGeneration &&
+  can(principalOf(inviter), "invite", SERVER).allowed;
 
 const openInviteFor = async (
   db: DatabaseReader,
@@ -42,7 +45,7 @@ const openInviteFor = async (
     return id === null ? null : db.get(id);
   });
 
-  const invitedBy = invite === null ? null : await db.get(invite.invitedBy);
+  const invitedBy = invite === null ? null : asPerson(await db.get(invite.invitedBy));
 
   return invite !== null &&
     invite.expiresAt > now &&
@@ -118,7 +121,7 @@ export const { create, lookup, list, revoke } = register({
     const makers = new Map(
       await Promise.all(
         [...new Set(page.page.map((invite) => invite.invitedBy))].map(
-          async (userId) => [userId, await ctx.db.get(userId)] as const,
+          async (userId) => [userId, asPerson(await ctx.db.get(userId))] as const,
         ),
       ),
     );

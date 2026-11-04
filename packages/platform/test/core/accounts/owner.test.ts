@@ -2,6 +2,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { roleScopes } from "../../../commands/scopes";
 import { api, internal } from "../../../convex/_generated/api";
 import { runFunction } from "../../admin";
 import { createPerson, ensureOwner, refusal, signIn, signInAs, unique } from "../../sign-in";
@@ -69,7 +70,7 @@ describe.skipIf(stack === undefined)("the owner", { timeout: 120_000 }, () => {
     if (stack === undefined) return;
     const { signedIn } = await claimOwner(stack);
 
-    expect(await whoIs(signedIn)).toMatchObject({ role: "owner", scopes: ["account", "admin"] });
+    expect(await whoIs(signedIn)).toMatchObject({ role: "owner", scopes: roleScopes.owner });
   });
 
   it("cannot be demoted or sent a reset link by any admin, or by themselves", async () => {
@@ -114,8 +115,8 @@ describe.skipIf(stack === undefined)("the owner", { timeout: 120_000 }, () => {
 
     await owner.client.mutation(api.core.accounts.users.handOverOwnership, { userId: heirId });
 
-    expect(await whoIs(heir)).toMatchObject({ role: "owner", scopes: ["account", "admin"] });
-    expect(await whoIs(owner)).toMatchObject({ role: "admin", scopes: ["account", "admin"] });
+    expect(await whoIs(heir)).toMatchObject({ role: "owner", scopes: roleScopes.owner });
+    expect(await whoIs(owner)).toMatchObject({ role: "admin", scopes: roleScopes.admin });
     expect(await refusal(signIn(stack, "reset", { code, password: `password-${unique()}` }))).toBe(
       "expired",
     );
