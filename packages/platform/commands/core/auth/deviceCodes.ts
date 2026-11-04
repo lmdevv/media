@@ -12,7 +12,18 @@ import type { Caller } from "../../../convex/core/auth/caller";
 
 const approveArgs = v.object({
   userCode: v.string(),
-  scopes: v.array(v.union(v.literal("account"), v.literal("admin"))),
+  scopes: v.array(
+    v.union(
+      v.literal("account"),
+      v.literal("admin"),
+      v.literal("movies:read"),
+      v.literal("movies:play"),
+      v.literal("movies:edit"),
+      v.literal("music:read"),
+      v.literal("music:play"),
+      v.literal("music:edit"),
+    ),
+  ),
 });
 
 const approveResult = v.null();

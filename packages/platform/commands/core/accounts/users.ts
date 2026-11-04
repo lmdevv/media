@@ -38,7 +38,12 @@ const listResult = v.object({
     v.object({
       userId: v.id("users"),
       username: v.string(),
-      role: v.union(v.literal("owner"), v.literal("admin"), v.literal("member")),
+      role: v.union(
+        v.literal("owner"),
+        v.literal("admin"),
+        v.literal("member"),
+        v.literal("guest"),
+      ),
     }),
   ),
   continueCursor: v.string(),

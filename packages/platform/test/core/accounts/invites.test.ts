@@ -4,6 +4,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { roleScopes } from "../../../commands/scopes";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { importRows, newestRows } from "../../rows";
@@ -78,7 +79,7 @@ describe.skipIf(stack === undefined)("invites", { timeout: 120_000 }, () => {
       username: person.username,
       role: "member",
       kind: "password",
-      scopes: ["account"],
+      scopes: roleScopes.member,
     });
 
     expect(await refusal(signInAs(stack, person))).toBe("accepted");
@@ -96,7 +97,7 @@ describe.skipIf(stack === undefined)("invites", { timeout: 120_000 }, () => {
 
     expect(await joined.client.query(api.core.auth.sessions.current, {})).toMatchObject({
       role: "admin",
-      scopes: ["account", "admin"],
+      scopes: roleScopes.admin,
     });
   });
 

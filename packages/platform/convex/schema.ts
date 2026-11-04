@@ -1,7 +1,8 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
-import { assignableRole, credentialScope, role } from "../commands/scopes";
+import { level, resourceId, resourceType, restrictions } from "../commands/access";
+import { assignableRole, contentDomain, credentialScope } from "../commands/scopes";
 import { importSource } from "./core/jobs/kinds";
 import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
 
@@ -13,6 +14,21 @@ const sessionFields = {
    * Required, so Convex Auth cannot open a session by itself.
    */
   generation: v.number(),
+};
+
+const generations = {
+  /** Bumped when every password and device session of the user ends. */
+  sessionGeneration: v.number(),
+  /** Bumped when every API key of the user ends. */
+  keyGeneration: v.number(),
+};
+
+const personFields = {
+  kind: v.literal("person"),
+  username: v.string(),
+  /** The username folded for uniqueness and sign-in: `alice`. */
+  usernameKey: v.string(),
+  ...generations,
 };
 
 const deviceCodeFields = {
@@ -29,19 +45,28 @@ const deviceCodeFields = {
  * and `authRefreshTokens`, so its other tables are left out.
  */
 export default defineSchema({
-  users: defineTable({
-    username: v.string(),
-    /** The username folded for uniqueness and sign-in: `alice`. */
-    usernameKey: v.string(),
-    /** Exactly one user is the owner once the server is set up. */
-    role,
-    /** Bumped when every password and device session of the user ends. */
-    sessionGeneration: v.number(),
-    /** Bumped when every API key of the user ends. */
-    keyGeneration: v.number(),
-  })
+  /**
+   * The principals. A person has a role, and exactly one person is the owner once the server is
+   * set up; only a member carries restrictions, which make them a kid. A service, such as the
+   * media server, has no role, password, or restrictions.
+   */
+  users: defineTable(
+    v.union(
+      v.object({
+        ...personFields,
+        role: v.literal("member"),
+        restrictions: v.optional(restrictions),
+      }),
+      v.object({
+        ...personFields,
+        role: v.union(v.literal("owner"), v.literal("admin"), v.literal("guest")),
+      }),
+      v.object({ kind: v.literal("service"), name: v.string(), ...generations }),
+    ),
+  )
     .index("by_username_key", ["usernameKey"])
-    .index("by_role", ["role"]),
+    .index("by_role", ["role"])
+    .index("by_kind_username_key", ["kind", "usernameKey"]),
 
   authSessions: defineTable(
     v.union(
@@ -138,6 +163,37 @@ export default defineSchema({
     makerSessionGeneration: v.number(),
     expiresAt: v.number(),
   }).index("by_expiration", ["expiresAt"]),
+
+  /** One row per resource and principal. `core/permissions/grants.ts` is its only writer. */
+  grants: defineTable({
+    resourceType,
+    resourceId,
+    /** A user, a group, or the household, stored as one value so it indexes. */
+    principal: v.union(v.id("users"), v.id("groups"), v.literal("household")),
+    level,
+  })
+    .index("by_resource_principal", ["resourceType", "resourceId", "principal"])
+    .index("by_principal_resource", ["principal", "resourceType", "resourceId"]),
+
+  groups: defineTable({
+    name: v.string(),
+    /** The name folded for uniqueness and order. */
+    nameKey: v.string(),
+  }).index("by_name_key", ["nameKey"]),
+
+  groupMembers: defineTable({ groupId: v.id("groups"), userId: v.id("users") })
+    .index("by_group_user", ["groupId", "userId"])
+    .index("by_user_group", ["userId", "groupId"]),
+
+  /** The permissions test seam: one grantable thing with the facts restrictions read. */
+  accessProbes: defineTable({
+    name: v.string(),
+    domain: contentDomain,
+    /** Movies: the minimum viewer age, or null when unrated. Music: always null. */
+    age: v.union(v.number(), v.null()),
+    /** Music: explicit. Movies: always false. */
+    explicit: v.boolean(),
+  }),
 
   counters: defineTable({
     name: v.string(),

@@ -54,7 +54,7 @@ export const effectMethods = (method: EffectBuilder) => ({
   },
   music: {
     playlists: {
-      /** `music.playlists.load` (action, signed-in): Load a playlist from a file or another service. */
+      /** `music.playlists.load` (action, music:edit): Load a playlist from a file or another service. */
       load: method.action(music_playlists_load),
     },
   },
@@ -72,7 +72,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
   },
   music: {
     playlists: {
-      /** `music.playlists.load` (action, signed-in): Load a playlist from a file or another service. */
+      /** `music.playlists.load` (action, music:edit): Load a playlist from a file or another service. */
       load: method.action(music_playlists_load),
     },
   },

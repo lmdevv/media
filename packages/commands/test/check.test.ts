@@ -42,14 +42,34 @@ describe("check", () => {
     const { scope: _, ...unscoped } = info;
 
     expect(refusalsOf([unscoped])).toEqual([
-      "core.server.info: refused, no scope (declare one of: public, signed-in, account, admin)",
+      "core.server.info: refused, no scope (declare one of: public, signed-in, account, admin, movies:read, movies:play, movies:edit, music:read, music:play, music:edit)",
     ]);
   });
 
   it("refuses a scope or a kind it does not know", () => {
-    expect(refusalsOf([{ ...info, scope: "movies:read", kind: "subscription" }])).toEqual([
+    expect(refusalsOf([{ ...info, scope: "photos:read", kind: "subscription" }])).toEqual([
       'core.server.info: refused, unknown kind "subscription" (declare it with query, mutation, or action)',
-      'core.server.info: refused, unknown scope "movies:read" (declare one of: public, signed-in, account, admin)',
+      'core.server.info: refused, unknown scope "photos:read" (declare one of: public, signed-in, account, admin, movies:read, movies:play, movies:edit, music:read, music:play, music:edit)',
+    ]);
+  });
+
+  it("keeps a content domain's commands on that domain's scopes and the core's off them", () => {
+    expect(
+      refusalsOf([
+        { ...info, scope: "movies:read" },
+        { ...info, name: "movies.titles.get", scope: "music:read" },
+        { ...info, name: "movies.titles.list", scope: "signed-in" },
+        { ...info, name: "music.tracks.list", scope: "admin" },
+        { ...info, name: "music.tracks.play", scope: "public" },
+        { ...info, name: "movies.titles.play", scope: "movies:play" },
+        { ...info, name: "core.server.rename", scope: "admin" },
+      ]),
+    ).toEqual([
+      "core.server.info: refused, a core command cannot declare movies:read (declare one of: public, signed-in, account, admin)",
+      "movies.titles.get: refused, a movies command cannot declare music:read (declare one of: movies:read, movies:play, movies:edit)",
+      "movies.titles.list: refused, a movies command cannot declare signed-in (declare one of: movies:read, movies:play, movies:edit)",
+      "music.tracks.list: refused, a music command cannot declare admin (declare one of: music:read, music:play, music:edit)",
+      "music.tracks.play: refused, a music command cannot declare public (declare one of: music:read, music:play, music:edit)",
     ]);
   });
 

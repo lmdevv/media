@@ -10,6 +10,8 @@ import type { Refs as core_accounts_users } from "./core/accounts/users";
 import type { Refs as core_auth_apiKeys } from "./core/auth/apiKeys";
 import type { Refs as core_auth_deviceCodes } from "./core/auth/deviceCodes";
 import type { Refs as core_auth_sessions } from "./core/auth/sessions";
+import type { Refs as core_permissions_groups } from "./core/permissions/groups";
+import type { Refs as core_restrictions } from "./core/restrictions";
 import type { Refs as core_server } from "./core/server";
 
 /**
@@ -55,5 +57,21 @@ export const commandRefs = {
     .current satisfies core_auth_sessions["current"],
   "core.auth.sessions.end": api.core.auth.sessions.end satisfies core_auth_sessions["end"],
   "core.auth.sessions.endAll": api.core.auth.sessions.endAll satisfies core_auth_sessions["endAll"],
+  "core.permissions.groups.addMember": api.core.permissions.groups
+    .addMember satisfies core_permissions_groups["addMember"],
+  "core.permissions.groups.create": api.core.permissions.groups
+    .create satisfies core_permissions_groups["create"],
+  "core.permissions.groups.list": api.core.permissions.groups
+    .list satisfies core_permissions_groups["list"],
+  "core.permissions.groups.members": api.core.permissions.groups
+    .members satisfies core_permissions_groups["members"],
+  "core.permissions.groups.remove": api.core.permissions.groups
+    .remove satisfies core_permissions_groups["remove"],
+  "core.permissions.groups.removeMember": api.core.permissions.groups
+    .removeMember satisfies core_permissions_groups["removeMember"],
+  "core.permissions.groups.rename": api.core.permissions.groups
+    .rename satisfies core_permissions_groups["rename"],
+  "core.restrictions.get": api.core.restrictions.get satisfies core_restrictions["get"],
+  "core.restrictions.set": api.core.restrictions.set satisfies core_restrictions["set"],
   "core.server.info": api.core.server.info satisfies core_server["info"],
 } as const;

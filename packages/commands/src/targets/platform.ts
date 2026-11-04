@@ -1,9 +1,28 @@
+import {
+  grantPrincipal,
+  level,
+  levels,
+  libraryId,
+  resourceId,
+  resourceType,
+  resourceTypes,
+  restrictions,
+} from "../access.ts";
 import { fieldsSource, wireSource } from "../render.ts";
+import { wireOf } from "../check.ts";
 import type { CheckedCommand } from "../check.ts";
 import type { CommandKind } from "../command.ts";
 import type { Emitted, Target } from "../outputs.ts";
 import { byCodeUnits } from "../order.ts";
-import { assignableRoles, credentialScopes, roles, scopes } from "../scopes.ts";
+import {
+  assignableRoles,
+  contentDomains,
+  contentVerbs,
+  credentialScopes,
+  roleScopes,
+  roles,
+  scopes,
+} from "../scopes.ts";
 import { GENERATED_NOTE } from "../note.ts";
 
 const CONTEXTS = {
@@ -23,6 +42,9 @@ const literalUnion = (values: ReadonlyArray<string>): string =>
 
 const literalValidator = (values: ReadonlyArray<string>): string =>
   `v.union(${values.map((value) => `v.literal(${JSON.stringify(value)})`).join(", ")})`;
+
+const tuple = (values: ReadonlyArray<string>): string =>
+  `[${values.map((value) => JSON.stringify(value)).join(", ")}] as const`;
 
 const header = `${GENERATED_NOTE.map((line) => `// ${line}`).join("\n")}\n\n`;
 
@@ -173,7 +195,7 @@ const scopesFile = (): Emitted => {
         ].join("\n"),
         [
           "/** The scopes a sign-in credential can hold, in declaration order. */",
-          `export const credentialScopes = [${credentialScopes.map((scope) => JSON.stringify(scope)).join(", ")}] as const;`,
+          `export const credentialScopes = ${tuple(credentialScopes)};`,
         ].join("\n"),
         [
           "/** A scope a sign-in credential can hold. */",
@@ -199,14 +221,90 @@ const scopesFile = (): Emitted => {
           "/** `AssignableRole` as a Convex validator. */",
           `export const assignableRole = ${literalValidator(assignableRoles)};`,
         ].join("\n"),
+        [
+          "/**",
+          " * Every scope each role allows. A password session holds all of its role's scopes; an API key",
+          " * or a device holds the ones it was given, cut to its role's on each call.",
+          " */",
+          `export const roleScopes = {\n${roles.map((name) => `${name}: ${tuple(roleScopes[name])},`).join("\n")}\n} as const satisfies { readonly [R in Role]: ReadonlyArray<CredentialScope> };`,
+        ].join("\n"),
+        [
+          "/** A domain that holds content. */",
+          `export type ContentDomain = ${literalUnion(contentDomains)};`,
+        ].join("\n"),
+        [
+          "/** `ContentDomain` as a Convex validator. */",
+          `export const contentDomain = ${literalValidator(contentDomains)};`,
+        ].join("\n"),
+        [
+          "/** What a credential may do in a content domain: the part after the colon of its scope. */",
+          `export type ContentVerb = ${literalUnion(contentVerbs)};`,
+        ].join("\n"),
       ].join("\n\n") + "\n",
   };
 };
 
+const shared = (name: string, docs: string, validator: Parameters<typeof wireOf>[1]): string =>
+  `/** ${docs} */\nexport const ${name} = ${wireSource(wireOf(name, validator))};`;
+
+const local = (name: string, docs: string, validator: Parameters<typeof wireOf>[1]): string =>
+  `/** ${docs} */\nconst ${name} = ${wireSource(wireOf(name, validator))};`;
+
+const accessFile = (): Emitted => ({
+  path: "access.ts",
+  text:
+    [
+      `${header}import { v } from "convex/values";\nimport type { Infer } from "convex/values";`,
+      [
+        "/** Grant levels, weakest first. Each level allows what the ones before it allow. */",
+        `export const levels = ${tuple(levels)};`,
+      ].join("\n"),
+      ["/** A grant level. */", "export type Level = (typeof levels)[number];"].join("\n"),
+      shared("level", "`Level` as a Convex validator.", level),
+      [
+        "/** Every resource type a grant can name, its table, and whether it is a library. */",
+        `export const resourceTypes = ${JSON.stringify(resourceTypes)} as const;`,
+      ].join("\n"),
+      [
+        "/** A resource type a grant can name. */",
+        "export type ResourceType = keyof typeof resourceTypes;",
+      ].join("\n"),
+      shared("resourceType", "`ResourceType` as a Convex validator.", resourceType),
+      shared("resourceId", "The id of a row of any resource type.", resourceId),
+      local("libraryId", "The id of a row of a library type.", libraryId),
+      [
+        "/** The id of something the allowed-libraries restriction lists. */",
+        "export type LibraryId = Infer<typeof libraryId>;",
+      ].join("\n"),
+      shared(
+        "grantPrincipal",
+        "Who a grant reaches: one user, a group's members, or every person on the server but guests.",
+        grantPrincipal,
+      ),
+      [
+        "/** Who a grant reaches. */",
+        "export type GrantPrincipal = Infer<typeof grantPrincipal>;",
+      ].join("\n"),
+      shared(
+        "restrictions",
+        "A kid's limits, which an admin sets on a member (ADR 0005).",
+        restrictions,
+      ),
+      [
+        "/**",
+        " * A kid's limits. `maxMovieAge` is the highest minimum viewer age a movie may carry, 0 to 21 (PG",
+        " * is 7), or null for no cap. `libraries` is null for every library the person's grants reach.",
+        " */",
+        "export type Restrictions = Infer<typeof restrictions>;",
+      ].join("\n"),
+    ].join("\n\n") + "\n",
+});
+
 /**
  * The core's Convex functions: for each Convex module, a contract with the module's validators,
  * its `Handlers` type, and `register`, which the hand-written module at `convex/<module>.ts` calls.
- * Also the caller scopes and `refs.ts`, which checks `api` against the declarations.
+ * Also the scopes and roles, the access validators the schema and the commands share, and
+ * `refs.ts`, which checks `api` against the declarations.
  */
 export const platformTarget = (root: string): Target => ({
   root,
@@ -214,8 +312,9 @@ export const platformTarget = (root: string): Target => ({
     const modules = byModule(commands);
 
     return modules.length === 0
-      ? [scopesFile()]
+      ? [accessFile(), scopesFile()]
       : [
+          accessFile(),
           ...modules.map(([module, inModule]) => contract(module, inModule)),
           refsFile(modules),
           scopesFile(),

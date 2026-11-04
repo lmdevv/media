@@ -1,6 +1,7 @@
 import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import { v } from "convex/values";
 
+import { restrictions } from "./access.ts";
 import { action, mutation, query } from "./command.ts";
 import type { Command } from "./command.ts";
 import { assignableRoles, credentialScopes, roles } from "./scopes.ts";
@@ -190,6 +191,65 @@ export const core = [
     scope: "admin",
     refusesKeys: true,
     args: { userId: v.id("users") },
+    result: v.null(),
+  }),
+
+  mutation("core.permissions.groups.create", {
+    summary: "Create a group of people to share with at once",
+    scope: "admin",
+    args: { name: v.string() },
+    result: v.object({ groupId: v.id("groups") }),
+  }),
+  mutation("core.permissions.groups.rename", {
+    summary: "Rename a group",
+    scope: "admin",
+    args: { groupId: v.id("groups"), name: v.string() },
+    result: v.null(),
+  }),
+  mutation("core.permissions.groups.remove", {
+    summary: "Delete a group, so what was shared with it no longer reaches its members",
+    scope: "admin",
+    args: { groupId: v.id("groups") },
+    result: v.null(),
+  }),
+  query("core.permissions.groups.list", {
+    summary: "List the groups by name",
+    scope: "admin",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(v.object({ groupId: v.id("groups"), name: v.string() })),
+  }),
+  query("core.permissions.groups.members", {
+    summary: "List the people in a group",
+    scope: "admin",
+    args: { groupId: v.id("groups"), paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(v.object({ userId: v.id("users"), username: v.string() })),
+  }),
+  mutation("core.permissions.groups.addMember", {
+    summary: "Add someone to a group; what is shared with it reaches them on their next call",
+    scope: "admin",
+    refusesKeys: true,
+    args: { groupId: v.id("groups"), userId: v.id("users") },
+    result: v.null(),
+  }),
+  mutation("core.permissions.groups.removeMember", {
+    summary: "Take someone out of a group; what is shared with it stops reaching them at once",
+    scope: "admin",
+    args: { groupId: v.id("groups"), userId: v.id("users") },
+    result: v.null(),
+  }),
+
+  query("core.restrictions.get", {
+    summary: "Show a kid's limits on what they see, yours or as an admin someone else's",
+    scope: "signed-in",
+    args: { userId: v.id("users") },
+    result: v.union(restrictions, v.null()),
+  }),
+  mutation("core.restrictions.set", {
+    summary:
+      "Limit what a member sees by movie rating, explicit music, and library, or lift the limits",
+    scope: "admin",
+    refusesKeys: true,
+    args: { userId: v.id("users"), restrictions: v.union(restrictions, v.null()) },
     result: v.null(),
   }),
 

@@ -1,8 +1,6 @@
 import type { PaginationResult } from "convex/server";
 import { v } from "convex/values";
 
-import { credentialScopes } from "../../commands/scopes";
-import type { CredentialScope, Role } from "../../commands/scopes";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
@@ -53,23 +51,6 @@ const isLive = (session: Session, user: Doc<"users">, now: number): boolean =>
   session.userId === user._id &&
   session.expirationTime > now &&
   session.generation === currentGeneration(session.kind, user);
-
-const roleScopes = {
-  owner: credentialScopes,
-  admin: credentialScopes,
-  member: ["account"],
-} as const satisfies { readonly [R in Role]: ReadonlyArray<CredentialScope> };
-
-export const roleHolds = (role: Role, scope: CredentialScope): boolean =>
-  roleScopes[role].some((held) => held === scope);
-
-export const losesScopes = (from: Role, to: Role): boolean =>
-  credentialScopes.some((scope) => roleHolds(from, scope) && !roleHolds(to, scope));
-
-export const heldScopes = (session: Session, user: Doc<"users">): Array<CredentialScope> =>
-  session.kind === "password"
-    ? [...roleScopes[user.role]]
-    : session.scopes.filter((scope) => roleHolds(user.role, scope));
 
 /** A session and its user when the session is live, or null. */
 export const liveSession = async (

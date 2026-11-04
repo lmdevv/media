@@ -1,6 +1,7 @@
 # 0005. Check access in four layers and make kids restricted users
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the first role and the `admin` scope.
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the first role and the `admin` scope,
+  and again the same day with the permissions as built.
 - Decisions: D16, D17
 
 ## Context
@@ -84,3 +85,164 @@ the rest of this ADR lands.
   invites or reset links must still end the person's sessions. The links check the maker's
   current role and session generation, and only the generation remembers that the right was lost
   in between.
+
+## Permissions as built (amended 2026-11-04)
+
+The permissions build added the four layers to the core. The code is in
+`packages/platform/convex/core/permissions/` and `convex/core/restrictions.ts`. The vocabulary is in
+`packages/commands/src/scopes.ts` and `packages/commands/src/access.ts`, and the generator emits it.
+
+### One pure decision
+
+`can(principal, action, resource)` in `permissions/policy.ts` reads no database. Three tables
+hold its rules, each typed by its list of actions, so a missing or extra row fails to compile.
+
+| Action              | On      | Needs                                                                                |
+| ------------------- | ------- | ------------------------------------------------------------------------------------ |
+| `view`              | content | `<domain>:read`, and a `view` grant                                                  |
+| `play`              | content | `<domain>:play`, and a `view` grant                                                  |
+| `edit`              | content | `<domain>:edit`, and an `edit` grant                                                 |
+| `manage`            | content | `<domain>:edit`, and a `manage` grant; it shares, renames, and deletes               |
+| `promote`           | account | `admin`; someone else; an admin or a member without restrictions                     |
+| `demote`            | account | `admin`; someone else; an admin or a member                                          |
+| `resetPassword`     | account | `admin`; someone else; an admin or a member                                          |
+| `restrict`          | account | `admin`; someone else; a member                                                      |
+| `viewRestrictions`  | account | nothing for yourself; otherwise `admin`, and anyone but a guest or a service         |
+| `joinGroup`         | account | `admin`; anyone but a guest or a service, yourself included                          |
+| `handOverOwnership` | account | `admin` and being the owner; someone else; an admin or a member without restrictions |
+| `invite`            | server  | `admin`                                                                              |
+| `manageGroups`      | server  | `admin`                                                                              |
+
+The answer is `allowed`, `hidden`, or `forbidden`. Content with no grant, content a restriction
+hides, and any content for a service are `hidden`, which fails `not_found` with the same message
+as a row that does not exist. So a private thing stays invisible to everyone else, admins and the
+owner included. `forbidden` refuses something the principal can see but may not do.
+
+Handlers never pass rows to `can` themselves. Loaders read the facts and decide:
+`requireContent` and `visiblePage` in `permissions/grants.ts`, and `requireAccount` and
+`requireServer` in `permissions/authorize.ts`. A link check has no session, so it asks `can` about
+`principalOf(maker)`, the principal the maker's row alone allows.
+
+### Roles and scopes
+
+| Role   | Scopes                                     |
+| ------ | ------------------------------------------ |
+| owner  | `account`, `admin`, and every domain scope |
+| admin  | `account`, `admin`, and every domain scope |
+| member | `account` and every domain scope           |
+| guest  | `movies:play`, `music:play`                |
+
+- The domain scopes are `read`, `play`, and `edit` for each content domain: `movies:read`,
+  `movies:play`, `movies:edit`, `music:read`, `music:play`, `music:edit`. `play` does not need
+  `read`, so a key for a speaker plays and cannot browse. `edit` covers what the `manage` level
+  allows, sharing included.
+- `roleScopes` in `packages/commands/src/scopes.ts` is the only role-to-scope table.
+  `heldScopes` in `policy.ts` gives a password session its role's scopes and cuts a key's or a
+  device's stored scopes to its role's on every call.
+- Nobody assigns `guest`. Guest links make guests (ADR 0007). The role cannot browse, search,
+  edit, or make keys.
+- The generator refuses a movies or music command that declares anything but a scope of its own
+  domain, and a core command that declares a domain scope (`domain-scope` in
+  `packages/commands/src/check.ts`). So a key with only `music:play` fails every movies command's
+  scope check before the command reads anything.
+- A role change that takes away any scope ends every session and API key of the person
+  (`endsCredentials`). Losing `admin` is such a change, so losing the right to make invites and
+  reset links still ends the links the person made (ADR 0003). A unit test checks every pair of
+  roles.
+
+### Service principals
+
+A service principal is a `users` row with `kind: "service"` and a `name`. It has no role,
+username, password, or restrictions, so the schema cannot give it a role.
+`core/accounts/host:createService` makes one. It holds no scope yet, and `requireCaller` refuses
+its sessions. The server move in phase 4 adds its scope and API key (D50). Every account action on
+a service is refused, so no admin can give it a role, a reset link, restrictions, or ownership.
+
+### Grants and groups
+
+- A `grants` row names a resource type, a resource id, a principal, and a level. The principal is a
+  user id, a group id, or `household`, stored as one value so it can be indexed. The household is
+  every person on the server but guests, which covers the libraries both old products shared with
+  everyone.
+- Resource types live in one registry, `resourceTypes` in `packages/commands/src/access.ts`. Each
+  entry names its table and whether the allowed-libraries restriction lists it. The validators for
+  resource ids and library ids derive from it.
+- A grant or revoke needs `manage`. A person who can see something can leave what was shared
+  with them. Only a
+  person can hold `manage`, and a group or the household gets `view` or `edit`. Removing or
+  lowering the last `manage` grant is a `conflict`. The mutation that creates a resource makes its
+  creator the first manager (`grantCreator`).
+- Admins hold no level they were not granted.
+- Admins manage groups through `core.permissions.groups.*`. Adding someone to a group refuses API
+  keys, because a leaked admin key could otherwise add its own person to every group. Group membership is read on every
+  content check, so a person added to or removed from a group gains or loses its grants on their
+  next call. Removing a group deletes its memberships at once and deletes its grants in scheduled
+  pages.
+- Limits: 1,000 grants per resource, 16 groups per person, and 500 people per group.
+
+### Restrictions
+
+- They live on the member's `users` row. The schema allows them on members only, because an
+  admin could lift their own through another admin they promote. The caller's row is already
+  read on every call, so a restriction check reads nothing more.
+- The fields are `maxMovieAge` (the highest minimum viewer age, 0 to 21, on the scale of
+  `packages/contracts/src/content-rating.ts`, where PG is 7), `hideUnrated`, `hideExplicitMusic`,
+  and `libraries` (null for every library the person's grants reach).
+- `core.restrictions.set` needs `admin`, refuses API keys, and works only on a member who is
+  someone else. `core.restrictions.get` shows your own, or as an admin anyone's, which is null
+  for someone who is not a member.
+- A kid is a member with restrictions (`isKid`). Limits that hide nothing are stored as no
+  restrictions. An admin lifts them before promoting the kid or
+  handing them ownership.
+- A change applies on the person's next call and ends no session.
+
+### Reads
+
+- One content check reads 2 grants, the person's own and the household's. Unless one of them is
+  `manage`, it then reads the person's group memberships and one grant per group.
+- A list page merges the index ranges of the person's own, household, and group grants after the
+  cursor, so it reads at most 1,000 documents however many grants the table holds. On the dev stack
+  with more than 1,000 grants in the table, a 50-row page read 168 documents.
+- A page reloaded up to its end cursor returns every row up to it, or asks the client to split it.
+  Restrictions can make a page short.
+
+### Test seam
+
+`convex/core/permissions/probe.ts` holds `accessProbes`, rows with a domain, a movie age, and an
+explicit flag, in place of libraries and titles until they exist. Its internal functions take a
+real session's id and run `callerOfSession`, which is everything `requireCaller` does after it reads
+the token. A stack test signs in for real, with a password or a key with chosen scopes, and calls
+them with the deployment admin key. The admin key acting as a user identity reaches only public
+functions, and the core allows no public function outside the command list.
+
+### Left to later units
+
+- Grant commands and the `library` resource type: p3-libraries.
+- Guest principals and links: p3-guests.
+- The service principal's scope and key: phase 4.
+- Locking shared-device tiles for kids, from `isKid`: p3-devices.
+
+### Edge cases settled
+
+- An admin who resets a person's password can sign in as them and see what was shared with them.
+  This ADR keeps admins out of private content in the apps only. The reset ends every session the
+  person had, so they notice. Music's rule that only the owner may reset someone who sees more
+  than the admin was not carried over.
+- An admin can add themselves to a group. A grant to a group trusts the admins who run groups.
+- A key whose person can see a thing, but which lacks the scope for the action, gets `forbidden`,
+  not `not_found`. The person could see the thing anyway.
+- Unrated movies stay visible to a kid unless `hideUnrated` is on. Old movies always hid them
+  from limited profiles. D17 makes it a switch of its own.
+- The allowed-libraries list is not checked for libraries that exist. Checking would tell an admin
+  which private libraries exist.
+
+Rejected in this build:
+
+- Access declared on each command and checked by the generated wrapper before the handler runs.
+  Lists and commands whose action depends on an argument, such as `setRole` (`promote` or
+  `demote`), fit no single declared target. It is worth another look in the movies port, when
+  many commands each open one title.
+- A table of each person's effective level per resource. A household grant would write a row per
+  person, and a group change a row per resource shared with the group.
+- Admins who see all content, and a `play` or `edit` scope that needs `read`.
+- A `server` scope now. Nothing checks it until the server moves onto the core.

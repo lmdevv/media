@@ -4,32 +4,116 @@
 import { v } from "convex/values";
 
 /** A scope that needs a signed-in caller: every command scope but `public`. */
-export type CallerScope = "signed-in" | "account" | "admin";
+export type CallerScope =
+  | "signed-in"
+  | "account"
+  | "admin"
+  | "movies:read"
+  | "movies:play"
+  | "movies:edit"
+  | "music:read"
+  | "music:play"
+  | "music:edit";
 
 /** `CallerScope` as a Convex validator. */
 export const callerScope = v.union(
   v.literal("signed-in"),
   v.literal("account"),
   v.literal("admin"),
+  v.literal("movies:read"),
+  v.literal("movies:play"),
+  v.literal("movies:edit"),
+  v.literal("music:read"),
+  v.literal("music:play"),
+  v.literal("music:edit"),
 );
 
 /** The scopes a sign-in credential can hold, in declaration order. */
-export const credentialScopes = ["account", "admin"] as const;
+export const credentialScopes = [
+  "account",
+  "admin",
+  "movies:read",
+  "movies:play",
+  "movies:edit",
+  "music:read",
+  "music:play",
+  "music:edit",
+] as const;
 
 /** A scope a sign-in credential can hold. */
 export type CredentialScope = (typeof credentialScopes)[number];
 
 /** `CredentialScope` as a Convex validator, for stored credentials and their arguments. */
-export const credentialScope = v.union(v.literal("account"), v.literal("admin"));
+export const credentialScope = v.union(
+  v.literal("account"),
+  v.literal("admin"),
+  v.literal("movies:read"),
+  v.literal("movies:play"),
+  v.literal("movies:edit"),
+  v.literal("music:read"),
+  v.literal("music:play"),
+  v.literal("music:edit"),
+);
 
 /** A user's platform role. The owner is the admin who holds the server. */
-export type Role = "owner" | "admin" | "member";
+export type Role = "owner" | "admin" | "member" | "guest";
 
 /** `Role` as a Convex validator. */
-export const role = v.union(v.literal("owner"), v.literal("admin"), v.literal("member"));
+export const role = v.union(
+  v.literal("owner"),
+  v.literal("admin"),
+  v.literal("member"),
+  v.literal("guest"),
+);
 
 /** A role an admin can give someone. */
 export type AssignableRole = "admin" | "member";
 
 /** `AssignableRole` as a Convex validator. */
 export const assignableRole = v.union(v.literal("admin"), v.literal("member"));
+
+/**
+ * Every scope each role allows. A password session holds all of its role's scopes; an API key
+ * or a device holds the ones it was given, cut to its role's on each call.
+ */
+export const roleScopes = {
+  owner: [
+    "account",
+    "admin",
+    "movies:read",
+    "movies:play",
+    "movies:edit",
+    "music:read",
+    "music:play",
+    "music:edit",
+  ] as const,
+  admin: [
+    "account",
+    "admin",
+    "movies:read",
+    "movies:play",
+    "movies:edit",
+    "music:read",
+    "music:play",
+    "music:edit",
+  ] as const,
+  member: [
+    "account",
+    "movies:read",
+    "movies:play",
+    "movies:edit",
+    "music:read",
+    "music:play",
+    "music:edit",
+  ] as const,
+  guest: ["movies:play", "music:play"] as const,
+} as const satisfies { readonly [R in Role]: ReadonlyArray<CredentialScope> };
+
+/** A domain that holds content. */
+export type ContentDomain = "movies" | "music";
+
+/** `ContentDomain` as a Convex validator. */
+export const contentDomain = v.union(v.literal("movies"), v.literal("music"));
+
+/** What a credential may do in a content domain: the part after the colon of its scope. */
+export type ContentVerb = "read" | "play" | "edit";

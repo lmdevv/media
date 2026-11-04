@@ -19,7 +19,7 @@ export const fixtures = [
   }),
   action("music.playlists.load", {
     summary: "Load a playlist from a file or another service",
-    scope: "signed-in",
+    scope: "music:edit",
     args: {
       source: v.union(v.literal("spotify"), v.literal("file")),
       tracks: v.array(v.object({ title: v.string(), seconds: v.number() })),

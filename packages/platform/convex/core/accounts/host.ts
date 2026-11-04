@@ -9,7 +9,9 @@ import { fail } from "../lib/errors";
 import { hashNewPassword } from "../lib/passwords";
 import { parseUsername } from "../lib/usernames";
 import { resetPassword as storeResetPassword } from "./resetLinks";
-import { DEFAULT_ROLE, insertUser, ownerOf } from "./users";
+import { DEFAULT_ROLE, asPerson, insertUser, ownerOf } from "./users";
+
+const SERVICE_NAME_MAX = 64;
 
 export const insert = internalMutation({
   args: { username: v.string(), hash: v.string(), role: assignableRole },
@@ -28,15 +30,40 @@ export const createUser = internalAction({
     }),
 });
 
+/**
+ * Creates a service principal, such as the media server: a user with no role, password, or
+ * restrictions, which no admin can give a role.
+ */
+export const createService = internalMutation({
+  args: { name: v.string() },
+  returns: v.id("users"),
+  handler: async (ctx, { name }) => {
+    const trimmed = name.trim();
+
+    if (trimmed.length === 0 || trimmed.length > SERVICE_NAME_MAX) {
+      return fail("invalid_args", `Name a service with 1 to ${SERVICE_NAME_MAX} characters`);
+    }
+
+    return ctx.db.insert("users", {
+      kind: "service",
+      name: trimmed,
+      sessionGeneration: 0,
+      keyGeneration: 0,
+    });
+  },
+});
+
 const userNamed = async (db: DatabaseReader, typed: string) => {
   const parsed = parseUsername(typed);
 
   return parsed === null
     ? null
-    : db
-        .query("users")
-        .withIndex("by_username_key", (q) => q.eq("usernameKey", parsed.usernameKey))
-        .unique();
+    : asPerson(
+        await db
+          .query("users")
+          .withIndex("by_username_key", (q) => q.eq("usernameKey", parsed.usernameKey))
+          .unique(),
+      );
 };
 
 export const storeReset = internalMutation({

@@ -15,10 +15,21 @@ const currentArgs = v.object({});
 const currentResult = v.object({
   userId: v.id("users"),
   username: v.string(),
-  role: v.union(v.literal("owner"), v.literal("admin"), v.literal("member")),
+  role: v.union(v.literal("owner"), v.literal("admin"), v.literal("member"), v.literal("guest")),
   sessionId: v.id("authSessions"),
   kind: v.union(v.literal("password"), v.literal("apiKey"), v.literal("deviceCode")),
-  scopes: v.array(v.union(v.literal("account"), v.literal("admin"))),
+  scopes: v.array(
+    v.union(
+      v.literal("account"),
+      v.literal("admin"),
+      v.literal("movies:read"),
+      v.literal("movies:play"),
+      v.literal("movies:edit"),
+      v.literal("music:read"),
+      v.literal("music:play"),
+      v.literal("music:edit"),
+    ),
+  ),
 });
 
 const endArgs = v.object({ sessionId: v.id("authSessions") });

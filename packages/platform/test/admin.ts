@@ -1,12 +1,17 @@
 import { getFunctionName } from "convex/server";
 import type { FunctionArgs, FunctionReference } from "convex/server";
+import { ConvexError } from "convex/values";
 import { Option, Schema } from "effect";
 
 import type { CoreStack } from "./stack-env";
 
 const FunctionResponse = Schema.Union([
   Schema.Struct({ status: Schema.Literal("success"), value: Schema.Unknown }),
-  Schema.Struct({ status: Schema.Literal("error"), errorMessage: Schema.String }),
+  Schema.Struct({
+    status: Schema.Literal("error"),
+    errorMessage: Schema.String,
+    errorData: Schema.optionalKey(Schema.Struct({ code: Schema.String, message: Schema.String })),
+  }),
 ]);
 
 const decodeResponse = Schema.decodeUnknownSync(FunctionResponse);
@@ -30,6 +35,10 @@ export class FunctionRefused extends Error {
   }
 }
 
+/**
+ * Runs a function with the deployment's admin key and decodes its result. A refusal the function
+ * failed with comes back as the `ConvexError` a client gets, so `refusal` reads its code.
+ */
 export const runFunction = async <
   Callable extends AdminCallable,
   Result extends Schema.ConstraintDecoder<unknown>,
@@ -55,7 +64,11 @@ export const runFunction = async <
 
   const decoded = decodeResponse(JSON.parse(body));
 
-  if (decoded.status === "error") throw new Error(`${path} failed: ${decoded.errorMessage}`);
+  if (decoded.status === "error") {
+    if (decoded.errorData !== undefined) throw new ConvexError(decoded.errorData);
+
+    throw new Error(`${path} failed: ${decoded.errorMessage}`);
+  }
 
   return Schema.decodeUnknownSync(result)(decoded.value);
 };

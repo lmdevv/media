@@ -141,6 +141,7 @@ const core_accounts_users_list = query({
           Schema.Literal("owner"),
           Schema.Literal("admin"),
           Schema.Literal("member"),
+          Schema.Literal("guest"),
         ]),
       }),
     ),
@@ -172,7 +173,18 @@ const core_auth_apiKeys_create = action({
   path: "core/auth/apiKeys:create",
   args: Schema.Struct({
     name: Schema.String,
-    scopes: Schema.Array(Schema.Union([Schema.Literal("account"), Schema.Literal("admin")])),
+    scopes: Schema.Array(
+      Schema.Union([
+        Schema.Literal("account"),
+        Schema.Literal("admin"),
+        Schema.Literal("movies:read"),
+        Schema.Literal("movies:play"),
+        Schema.Literal("movies:edit"),
+        Schema.Literal("music:read"),
+        Schema.Literal("music:play"),
+        Schema.Literal("music:edit"),
+      ]),
+    ),
     expiresInDays: Schema.optionalKey(Schema.Finite),
   }),
   result: Schema.Struct({
@@ -201,7 +213,18 @@ const core_auth_deviceCodes_approve = mutation({
   path: "core/auth/deviceCodes:approve",
   args: Schema.Struct({
     userCode: Schema.String,
-    scopes: Schema.Array(Schema.Union([Schema.Literal("account"), Schema.Literal("admin")])),
+    scopes: Schema.Array(
+      Schema.Union([
+        Schema.Literal("account"),
+        Schema.Literal("admin"),
+        Schema.Literal("movies:read"),
+        Schema.Literal("movies:play"),
+        Schema.Literal("movies:edit"),
+        Schema.Literal("music:read"),
+        Schema.Literal("music:play"),
+        Schema.Literal("music:edit"),
+      ]),
+    ),
   }),
   result: Schema.Null,
 });
@@ -253,6 +276,7 @@ const core_auth_sessions_current = query({
       Schema.Literal("owner"),
       Schema.Literal("admin"),
       Schema.Literal("member"),
+      Schema.Literal("guest"),
     ]),
     sessionId: Schema.String.pipe(Schema.brand("Id<authSessions>")),
     kind: Schema.Union([
@@ -260,7 +284,18 @@ const core_auth_sessions_current = query({
       Schema.Literal("apiKey"),
       Schema.Literal("deviceCode"),
     ]),
-    scopes: Schema.Array(Schema.Union([Schema.Literal("account"), Schema.Literal("admin")])),
+    scopes: Schema.Array(
+      Schema.Union([
+        Schema.Literal("account"),
+        Schema.Literal("admin"),
+        Schema.Literal("movies:read"),
+        Schema.Literal("movies:play"),
+        Schema.Literal("movies:edit"),
+        Schema.Literal("music:read"),
+        Schema.Literal("music:play"),
+        Schema.Literal("music:edit"),
+      ]),
+    ),
   }),
 });
 
@@ -275,6 +310,156 @@ const core_auth_sessions_endAll = mutation({
   name: "core.auth.sessions.endAll",
   path: "core/auth/sessions:endAll",
   args: Schema.Struct({ keepCurrent: Schema.Boolean }),
+  result: Schema.Null,
+});
+
+const core_permissions_groups_addMember = mutation({
+  name: "core.permissions.groups.addMember",
+  path: "core/permissions/groups:addMember",
+  args: Schema.Struct({
+    groupId: Schema.String.pipe(Schema.brand("Id<groups>")),
+    userId: Schema.String.pipe(Schema.brand("Id<users>")),
+  }),
+  result: Schema.Null,
+});
+
+const core_permissions_groups_create = mutation({
+  name: "core.permissions.groups.create",
+  path: "core/permissions/groups:create",
+  args: Schema.Struct({ name: Schema.String }),
+  result: Schema.Struct({ groupId: Schema.String.pipe(Schema.brand("Id<groups>")) }),
+});
+
+const core_permissions_groups_list = query({
+  name: "core.permissions.groups.list",
+  path: "core/permissions/groups:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        groupId: Schema.String.pipe(Schema.brand("Id<groups>")),
+        name: Schema.String,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const core_permissions_groups_members = query({
+  name: "core.permissions.groups.members",
+  path: "core/permissions/groups:members",
+  args: Schema.Struct({
+    groupId: Schema.String.pipe(Schema.brand("Id<groups>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        userId: Schema.String.pipe(Schema.brand("Id<users>")),
+        username: Schema.String,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const core_permissions_groups_remove = mutation({
+  name: "core.permissions.groups.remove",
+  path: "core/permissions/groups:remove",
+  args: Schema.Struct({ groupId: Schema.String.pipe(Schema.brand("Id<groups>")) }),
+  result: Schema.Null,
+});
+
+const core_permissions_groups_removeMember = mutation({
+  name: "core.permissions.groups.removeMember",
+  path: "core/permissions/groups:removeMember",
+  args: Schema.Struct({
+    groupId: Schema.String.pipe(Schema.brand("Id<groups>")),
+    userId: Schema.String.pipe(Schema.brand("Id<users>")),
+  }),
+  result: Schema.Null,
+});
+
+const core_permissions_groups_rename = mutation({
+  name: "core.permissions.groups.rename",
+  path: "core/permissions/groups:rename",
+  args: Schema.Struct({
+    groupId: Schema.String.pipe(Schema.brand("Id<groups>")),
+    name: Schema.String,
+  }),
+  result: Schema.Null,
+});
+
+const core_restrictions_get = query({
+  name: "core.restrictions.get",
+  path: "core/restrictions:get",
+  args: Schema.Struct({ userId: Schema.String.pipe(Schema.brand("Id<users>")) }),
+  result: Schema.Union([
+    Schema.Struct({
+      maxMovieAge: Schema.Union([Schema.Finite, Schema.Null]),
+      hideUnrated: Schema.Boolean,
+      hideExplicitMusic: Schema.Boolean,
+      libraries: Schema.Union([
+        Schema.Array(Schema.Union([Schema.String.pipe(Schema.brand("Id<accessProbes>"))])),
+        Schema.Null,
+      ]),
+    }),
+    Schema.Null,
+  ]),
+});
+
+const core_restrictions_set = mutation({
+  name: "core.restrictions.set",
+  path: "core/restrictions:set",
+  args: Schema.Struct({
+    userId: Schema.String.pipe(Schema.brand("Id<users>")),
+    restrictions: Schema.Union([
+      Schema.Struct({
+        maxMovieAge: Schema.Union([Schema.Finite, Schema.Null]),
+        hideUnrated: Schema.Boolean,
+        hideExplicitMusic: Schema.Boolean,
+        libraries: Schema.Union([
+          Schema.Array(Schema.Union([Schema.String.pipe(Schema.brand("Id<accessProbes>"))])),
+          Schema.Null,
+        ]),
+      }),
+      Schema.Null,
+    ]),
+  }),
   result: Schema.Null,
 });
 
@@ -353,6 +538,30 @@ export const effectMethods = (method: EffectBuilder) => ({
         endAll: method.mutation(core_auth_sessions_endAll),
       },
     },
+    permissions: {
+      groups: {
+        /** `core.permissions.groups.addMember` (mutation, admin, API keys refused): Add someone to a group; what is shared with it reaches them on their next call. */
+        addMember: method.mutation(core_permissions_groups_addMember),
+        /** `core.permissions.groups.create` (mutation, admin): Create a group of people to share with at once. */
+        create: method.mutation(core_permissions_groups_create),
+        /** `core.permissions.groups.list` (query, admin): List the groups by name. */
+        list: method.query(core_permissions_groups_list),
+        /** `core.permissions.groups.members` (query, admin): List the people in a group. */
+        members: method.query(core_permissions_groups_members),
+        /** `core.permissions.groups.remove` (mutation, admin): Delete a group, so what was shared with it no longer reaches its members. */
+        remove: method.mutation(core_permissions_groups_remove),
+        /** `core.permissions.groups.removeMember` (mutation, admin): Take someone out of a group; what is shared with it stops reaching them at once. */
+        removeMember: method.mutation(core_permissions_groups_removeMember),
+        /** `core.permissions.groups.rename` (mutation, admin): Rename a group. */
+        rename: method.mutation(core_permissions_groups_rename),
+      },
+    },
+    restrictions: {
+      /** `core.restrictions.get` (query, signed-in): Show a kid's limits on what they see, yours or as an admin someone else's. */
+      get: method.query(core_restrictions_get),
+      /** `core.restrictions.set` (mutation, admin, API keys refused): Limit what a member sees by movie rating, explicit music, and library, or lift the limits. */
+      set: method.mutation(core_restrictions_set),
+    },
     server: {
       /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */
       info: method.query(core_server_info),
@@ -424,6 +633,30 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
       },
+    },
+    permissions: {
+      groups: {
+        /** `core.permissions.groups.addMember` (mutation, admin, API keys refused): Add someone to a group; what is shared with it reaches them on their next call. */
+        addMember: method.mutation(core_permissions_groups_addMember),
+        /** `core.permissions.groups.create` (mutation, admin): Create a group of people to share with at once. */
+        create: method.mutation(core_permissions_groups_create),
+        /** `core.permissions.groups.list` (query, admin): List the groups by name. */
+        list: method.query(core_permissions_groups_list),
+        /** `core.permissions.groups.members` (query, admin): List the people in a group. */
+        members: method.query(core_permissions_groups_members),
+        /** `core.permissions.groups.remove` (mutation, admin): Delete a group, so what was shared with it no longer reaches its members. */
+        remove: method.mutation(core_permissions_groups_remove),
+        /** `core.permissions.groups.removeMember` (mutation, admin): Take someone out of a group; what is shared with it stops reaching them at once. */
+        removeMember: method.mutation(core_permissions_groups_removeMember),
+        /** `core.permissions.groups.rename` (mutation, admin): Rename a group. */
+        rename: method.mutation(core_permissions_groups_rename),
+      },
+    },
+    restrictions: {
+      /** `core.restrictions.get` (query, signed-in): Show a kid's limits on what they see, yours or as an admin someone else's. */
+      get: method.query(core_restrictions_get),
+      /** `core.restrictions.set` (mutation, admin, API keys refused): Limit what a member sees by movie rating, explicit music, and library, or lift the limits. */
+      set: method.mutation(core_restrictions_set),
     },
     server: {
       /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */

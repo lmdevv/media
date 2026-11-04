@@ -4,7 +4,7 @@ import { register } from "../../../commands/core/accounts/users";
 import { assignableRole } from "../../../commands/scopes";
 import type { AssignableRole, Role } from "../../../commands/scopes";
 import { internal } from "../../_generated/api";
-import type { Doc, Id } from "../../_generated/dataModel";
+import type { Doc } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { refuseKeys, requireCaller } from "../auth/caller";
@@ -12,37 +12,24 @@ import { fail } from "../lib/errors";
 import { paginate } from "../lib/paginate";
 import { hashNewPassword, storePassword } from "../lib/passwords";
 import { requireUsername } from "../lib/usernames";
-import { endUserCredentials, losesScopes, openSession, roleHolds, signedIn } from "../sessions";
-
-export interface Actor {
-  readonly userId: Id<"users">;
-  readonly role: Role;
-}
+import { requireAccount } from "../permissions/authorize";
+import { endsCredentials } from "../permissions/policy";
+import type { PersonDoc } from "../permissions/policy";
+import { endUserCredentials, openSession, signedIn } from "../sessions";
 
 export const DEFAULT_ROLE: AssignableRole = "member";
 
-const managementRefusal = (actor: Actor, target: Doc<"users">): string | null => {
-  if (!roleHolds(actor.role, "admin")) return "Only an admin can change someone's account";
+/** A user row as a person, or null for a service or nobody. */
+export const asPerson = (user: Doc<"users"> | null): PersonDoc | null =>
+  user?.kind === "person" ? user : null;
 
-  if (target.role === "owner") return "No admin can change the owner's account";
-
-  return actor.userId === target._id ? "Change your own account from your own settings" : null;
-};
-
-export const manages = (actor: Actor, target: Doc<"users">): boolean =>
-  managementRefusal(actor, target) === null;
-
-export const requireManages = (actor: Actor, target: Doc<"users">): void => {
-  const refusal = managementRefusal(actor, target);
-
-  if (refusal !== null) fail("forbidden", refusal);
-};
-
-export const ownerOf = (db: DatabaseReader): Promise<Doc<"users"> | null> =>
-  db
-    .query("users")
-    .withIndex("by_role", (q) => q.eq("role", "owner"))
-    .unique();
+export const ownerOf = async (db: DatabaseReader): Promise<PersonDoc | null> =>
+  asPerson(
+    await db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "owner"))
+      .unique(),
+  );
 
 const refuseTakenKey = async (db: DatabaseReader, usernameKey: string): Promise<void> => {
   const taken = await db
@@ -56,7 +43,7 @@ const refuseTakenKey = async (db: DatabaseReader, usernameKey: string): Promise<
 export const insertUser = async (
   ctx: Pick<MutationCtx, "db">,
   user: { readonly username: string; readonly hash: string; readonly role: Role },
-): Promise<Doc<"users">> => {
+): Promise<PersonDoc> => {
   const parsed = requireUsername(user.username);
   const hasOwner = (await ownerOf(ctx.db)) !== null;
 
@@ -71,6 +58,7 @@ export const insertUser = async (
   await refuseTakenKey(ctx.db, parsed.usernameKey);
 
   const userId = await ctx.db.insert("users", {
+    kind: "person",
     ...parsed,
     role: user.role,
     sessionGeneration: 0,
@@ -79,12 +67,12 @@ export const insertUser = async (
 
   await storePassword(ctx.db, userId, user.hash);
 
-  return (await ctx.db.get(userId)) ?? fail("not_found", "The new user vanished");
+  return asPerson(await ctx.db.get(userId)) ?? fail("not_found", "The new user vanished");
 };
 
 export const renameUser = async (
   ctx: Pick<MutationCtx, "db">,
-  user: Doc<"users">,
+  user: PersonDoc,
   typed: string,
 ): Promise<void> => {
   const parsed = requireUsername(typed);
@@ -132,38 +120,41 @@ export const { create, list, setRole, handOverOwnership } = register({
   list: async (ctx, { paginationOpts }) => {
     const page = await paginate(
       ctx.db,
-      { table: "users", index: "by_username_key" },
+      {
+        table: "users",
+        index: "by_kind_username_key",
+        range: (q) => q.eq("kind", "person"),
+      },
       paginationOpts,
     );
 
     return {
       ...page,
-      page: page.page.map((user) => ({
-        userId: user._id,
-        username: user.username,
-        role: user.role,
-      })),
+      page: page.page.flatMap((user) =>
+        user.kind === "person"
+          ? [{ userId: user._id, username: user.username, role: user.role }]
+          : [],
+      ),
     };
   },
   setRole: async (ctx, { userId, role }, caller) => {
-    const target = (await ctx.db.get(userId)) ?? fail("not_found", "No such user");
-
-    requireManages(caller, target);
+    const target = await requireAccount(
+      ctx,
+      caller,
+      role === "admin" ? "promote" : "demote",
+      userId,
+    );
 
     if (target.role === role) return null;
 
     await ctx.db.patch(target._id, { role });
 
-    if (losesScopes(target.role, role)) await endUserCredentials(ctx, target);
+    if (endsCredentials(target.role, role)) await endUserCredentials(ctx, target);
 
     return null;
   },
   handOverOwnership: async (ctx, { userId }, caller) => {
-    if (caller.role !== "owner") return fail("forbidden", "Only the owner hands over ownership");
-
-    if (userId === caller.userId) return fail("invalid_args", "You already own this server");
-
-    const target = (await ctx.db.get(userId)) ?? fail("not_found", "No such user");
+    const target = await requireAccount(ctx, caller, "handOverOwnership", userId);
 
     await ctx.db.patch(target._id, { role: "owner" });
     await ctx.db.patch(caller.userId, { role: "admin" });

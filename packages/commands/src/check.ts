@@ -4,8 +4,8 @@ import { Match, Predicate } from "effect";
 import { commandKinds, domains } from "./command.ts";
 import type { CommandKind, CommandName, Domain } from "./command.ts";
 import { byCodeUnits } from "./order.ts";
-import { scopes } from "./scopes.ts";
-import type { Scope } from "./scopes.ts";
+import { contentDomains, scopes } from "./scopes.ts";
+import type { ContentDomain, Scope } from "./scopes.ts";
 
 /**
  * A declaration as the generator receives it. Node strips types without checking them when it runs
@@ -72,6 +72,12 @@ export type Refusal =
   | { readonly reason: "no-scope"; readonly name: string }
   | { readonly reason: "unknown-scope"; readonly name: string; readonly scope: string }
   | { readonly reason: "public-refuses-keys"; readonly name: string }
+  | {
+      readonly reason: "domain-scope";
+      readonly name: string;
+      readonly domain: Domain;
+      readonly scope: Scope;
+    }
   | { readonly reason: "bad-summary"; readonly name: string }
   | { readonly reason: "no-validator"; readonly name: string; readonly at: string }
   | { readonly reason: "args-object"; readonly name: string }
@@ -135,6 +141,15 @@ const isCommandName = (name: string): name is CommandName =>
  * JSDoc, a backtick or a leading `#` changes the Markdown reference, and the outputs add the stop.
  */
 const UNSAFE_SUMMARY = /\*\/|[\n\r\u2028\u2029`]|^#|[.?!:;,]$/u;
+
+const scopeDomain = (scope: Scope): ContentDomain | null =>
+  contentDomains.find((domain) => scope.startsWith(`${domain}:`)) ?? null;
+
+const outsideDomain = (domain: Domain, scope: Scope): boolean =>
+  domain === "core" ? scopeDomain(scope) !== null : scopeDomain(scope) !== domain;
+
+const scopesOf = (domain: Domain): ReadonlyArray<Scope> =>
+  scopes.filter((scope) => scopeDomain(scope) === (domain === "core" ? null : domain));
 
 const moduleOf = (name: string): string => name.split(".").slice(0, -1).join("/");
 
@@ -256,6 +271,9 @@ const parseCommand = (declaration: Declaration): Parsed<CheckedCommand> => {
       : scope === undefined
         ? [{ reason: "unknown-scope", name, scope: declaration.scope } as const]
         : []),
+    ...(named.ok && scope !== undefined && outsideDomain(named.value.domain, scope)
+      ? [{ reason: "domain-scope", name, domain: named.value.domain, scope } as const]
+      : []),
     ...(refusesKeys && declaration.scope === "public"
       ? [{ reason: "public-refuses-keys", name } as const]
       : []),
@@ -345,6 +363,8 @@ export const refusalMessage = (refusal: Refusal): string =>
       "no-scope": () => `no scope (declare one of: ${scopes.join(", ")})`,
       "unknown-scope": (unknown) =>
         `unknown scope "${unknown.scope}" (declare one of: ${scopes.join(", ")})`,
+      "domain-scope": (outside) =>
+        `${outside.domain === "core" ? "a core command" : `a ${outside.domain} command`} cannot declare ${outside.scope} (declare one of: ${scopesOf(outside.domain).join(", ")})`,
       "public-refuses-keys": () =>
         "a public command has no session to refuse (drop refusesKeys or declare a scope)",
       "bad-summary": () =>
@@ -360,3 +380,17 @@ export const refusalMessage = (refusal: Refusal): string =>
         "the result cannot be optional (return v.union(..., v.null()) instead)",
     }),
   )}`;
+
+/**
+ * A shared validator's wire form, for an output that renders it as source.
+ *
+ * @throws Error when `check` would refuse the validator, such as `v.any()`; the shared validators
+ *   are code, so that is a defect.
+ */
+export const wireOf = (at: string, validator: GenericValidator): Wire => {
+  const parsed = parseWire(at, at, validator);
+
+  if (!parsed.ok) throw new Error(parsed.refusals.map(refusalMessage).join("\n"));
+
+  return parsed.value;
+};
