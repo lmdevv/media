@@ -3,7 +3,7 @@ import { v } from "convex/values";
 
 import { credentialScope } from "../commands/scopes";
 import { importSource } from "./core/jobs/kinds";
-import { jobDocument, jobItemDocument } from "./core/jobs/model";
+import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
 
 const sessionFields = {
   userId: v.id("users"),
@@ -135,6 +135,8 @@ export default defineSchema({
     .index("by_dedupe_status", ["dedupeKey", "status"]),
 
   jobItems: defineTable(jobItemDocument).index("by_job_seq", ["jobId", "seq"]),
+
+  jobKinds: defineTable(jobKindDocument).index("by_kind", ["kind"]),
 
   schemaMigrations: defineTable({
     name: v.string(),

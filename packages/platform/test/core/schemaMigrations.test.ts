@@ -5,7 +5,7 @@ import { internal } from "../../convex/_generated/api";
 import { followLog, logMark, runFunction } from "../admin";
 import { coreStackFromEnvFile } from "../stack-env";
 import type { CoreStack } from "../stack-env";
-import { eventually, freshRun, inSequence } from "./jobs/driver";
+import { eventually, freshRun, inSequence, retrying } from "./jobs/driver";
 
 const stack = coreStackFromEnvFile();
 
@@ -68,11 +68,13 @@ const unmigrated = async (
 };
 
 const clearMigrateRows = async (core: CoreStack, cursor: string | null = null): Promise<void> => {
-  const page = await runFunction(
-    core,
-    internal.core.limitsProbe.clear,
-    { groupPrefix: GROUP_PREFIX, cursor },
-    Schema.Struct({ continueCursor: Schema.String, isDone: Schema.Boolean }),
+  const page = await retrying(() =>
+    runFunction(
+      core,
+      internal.core.limitsProbe.clear,
+      { groupPrefix: GROUP_PREFIX, cursor },
+      Schema.Struct({ continueCursor: Schema.String, isDone: Schema.Boolean }),
+    ),
   );
 
   if (!page.isDone) await clearMigrateRows(core, page.continueCursor);
@@ -89,11 +91,13 @@ describe.skipIf(stack === undefined)("core schema migrations, live", { timeout: 
     await inSequence(
       Array.from({ length: ROWS / SEED_ROWS }, (_, n) => n * SEED_ROWS),
       (from) =>
-        runFunction(
-          stack,
-          internal.core.limitsProbe.seed,
-          { group, from, rows: SEED_ROWS },
-          Schema.Null,
+        retrying(() =>
+          runFunction(
+            stack,
+            internal.core.limitsProbe.seed,
+            { group, from, rows: SEED_ROWS },
+            Schema.Null,
+          ),
         ),
     );
     await runFunction(stack, internal.core.schemaMigrations.resetProbe, { name }, Schema.Null);

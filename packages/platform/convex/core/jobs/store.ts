@@ -13,6 +13,41 @@ export interface Enqueued {
   readonly created: boolean;
 }
 
+const kindRow = (db: DatabaseReader, kind: JobKind): Promise<Doc<"jobKinds"> | null> =>
+  db
+    .query("jobKinds")
+    .withIndex("by_kind", (q) => q.eq("kind", kind))
+    .unique();
+
+/**
+ * Moves a kind's row by what one job transition did: `running` by the job entering or leaving
+ * `running`, and `queueFrom` down to a job that becomes queued before it, or up to the job a claim
+ * took, which was the oldest queued. Writes nothing when neither moves.
+ */
+const moveKindRow = async (
+  ctx: MutationCtx,
+  kind: JobKind,
+  move: {
+    readonly running: number;
+    readonly queued: number | null;
+    readonly claimed: number | null;
+  },
+): Promise<void> => {
+  if (move.running === 0 && move.queued === null && move.claimed === null) return;
+
+  const row = await kindRow(ctx.db, kind);
+  const running = (row?.running ?? 0) + move.running;
+  const from = row?.queueFrom ?? 0;
+  const lowered = move.queued === null ? from : Math.min(from, move.queued);
+  const queueFrom = move.claimed === null ? lowered : Math.max(lowered, move.claimed);
+
+  if (row === null) {
+    await ctx.db.insert("jobKinds", { kind, running, queueFrom });
+  } else if (running !== row.running || queueFrom !== row.queueFrom) {
+    await ctx.db.patch("jobKinds", row._id, { running, queueFrom });
+  }
+};
+
 const activeWithKey = async (db: DatabaseReader, dedupeKey: string): Promise<Doc<"jobs"> | null> =>
   (await db
     .query("jobs")
@@ -53,6 +88,16 @@ export const insertJob = async (ctx: MutationCtx, payload: JobPayload): Promise<
     message: null,
     lastError: null,
   });
+
+  const job = await ctx.db.get("jobs", jobId);
+
+  if (job === null) throw new Error(`The job ${jobId} this enqueue inserted is gone`);
+
+  const row = await kindRow(ctx.db, payload.kind);
+
+  if (row !== null && job._creationTime < row.queueFrom) {
+    await ctx.db.patch("jobKinds", row._id, { queueFrom: job._creationTime });
+  }
 
   return { jobId, created: true };
 };
@@ -111,6 +156,16 @@ export const applyEvent = async (
 
   await ctx.db.replace("jobs", job._id, result.next);
 
+  const { status } = result.next;
+  const wasRunning = job.status === "running" ? 1 : 0;
+  const isRunning = status === "running" ? 1 : 0;
+
+  await moveKindRow(ctx, job.payload.kind, {
+    running: isRunning - wasRunning,
+    queued: status === "queued" && job.status !== "queued" ? job._creationTime : null,
+    claimed: job.status === "queued" && status === "running" ? job._creationTime : null,
+  });
+
   await Promise.all(result.writes.map((write) => applyWrite(ctx, job._id, write)));
 
   return result;
@@ -120,32 +175,35 @@ export const leasedJob = (db: DatabaseReader, lease: Lease): Promise<Doc<"jobs">
   db.get("jobs", lease.jobId);
 
 /**
- * What a claim of `kind` would see: up to `cap` running rows (a lapsed lease or a requested
- * cancel still holds its slot) and the oldest queued row, through `by_kind_status`. Two claims of
- * one kind read the same ranges, so they conflict and Convex serializes them, and the cap holds
- * under any number of workers.
+ * What a claim of `kind` would see: the kind's running count and, when it is below the cap, its
+ * oldest queued job. It reads the kind's row and one index entry, not the ranges a busy queue
+ * leaves its old entries in. Every claim and every job leaving `running` writes that row, so
+ * claims of one kind conflict with each other and with finishes, and Convex runs them one after
+ * the other; the cap holds under any number of workers.
  */
 export const kindQueue = async (
   db: DatabaseReader,
   kind: JobKind,
 ): Promise<KindQueue<Id<"jobs">>> => {
   const { cap } = kindDef(kind);
+  const row = await kindRow(db, kind);
+  const running = row?.running ?? 0;
 
-  const running = await db
-    .query("jobs")
-    .withIndex("by_kind_status", (q) => q.eq("payload.kind", kind).eq("status", "running"))
-    .take(cap);
-
-  if (running.length >= cap) return { cap, running: running.length, head: null };
+  if (running >= cap) return { cap, running, head: null };
 
   const head = await db
     .query("jobs")
-    .withIndex("by_kind_status", (q) => q.eq("payload.kind", kind).eq("status", "queued"))
+    .withIndex("by_kind_status", (q) =>
+      q
+        .eq("payload.kind", kind)
+        .eq("status", "queued")
+        .gte("_creationTime", row?.queueFrom ?? 0),
+    )
     .first();
 
   return {
     cap,
-    running: running.length,
+    running,
     head: head === null ? null : { jobId: head._id, createdAt: head._creationTime },
   };
 };

@@ -226,7 +226,7 @@ const RETRIED = new Set(["OptimisticConcurrencyControlFailure", "TooManyWrites"]
  * Convex gives up on a mutation whose reads keep changing under it, and the deployment caps
  * writes at 4 MiB a second. A report's `append.from` guard keeps a retry from duplicating items.
  */
-const retrying = async <Value>(send: () => Promise<Value>, attempt = 1): Promise<Value> => {
+export const retrying = async <Value>(send: () => Promise<Value>, attempt = 1): Promise<Value> => {
   try {
     return await send();
   } catch (error) {

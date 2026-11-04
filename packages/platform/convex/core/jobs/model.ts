@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import type { Infer, ObjectType } from "convex/values";
 
-import { jobItem, jobPayload } from "./kinds";
+import { jobItem, jobKind, jobPayload } from "./kinds";
 
 /**
  * How far a job got, in the mode its kind picks. `reported`: the worker reports done and total.
@@ -81,6 +81,20 @@ export const jobItemDocument = v.object({
   jobId: v.id("jobs"),
   seq: v.number(),
   item: jobItem,
+});
+
+/**
+ * One row per kind that has had a job, written only by `store.ts` in the mutation that moves a
+ * job. A claim reads this row instead of ranges of `jobs`: a range a queue has moved through holds
+ * the index entries of every job that left it until Convex's retention removes them, and scanning
+ * those made each claim slower the more jobs the kind had run.
+ */
+export const jobKindDocument = v.object({
+  kind: jobKind,
+  /** How many jobs of the kind are running, the count the cap is checked against. */
+  running: v.number(),
+  /** No queued job of the kind was created before this time, so a claim scans from here. */
+  queueFrom: v.number(),
 });
 
 export const lease = v.object({ jobId: v.id("jobs"), attempt: v.number() });
