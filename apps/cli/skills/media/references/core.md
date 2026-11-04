@@ -215,6 +215,7 @@ Add someone to a group; what is shared with it reaches them on their next call.
 
 - Kind: mutation
 - Scope: admin
+- API keys: refused
 - Arguments: `{ groupId: Id<"groups">; userId: Id<"users"> }`
 - Result: `null`
 

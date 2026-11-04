@@ -227,6 +227,7 @@ export const core = [
   mutation("core.permissions.groups.addMember", {
     summary: "Add someone to a group; what is shared with it reaches them on their next call",
     scope: "admin",
+    refusesKeys: true,
     args: { groupId: v.id("groups"), userId: v.id("users") },
     result: v.null(),
   }),

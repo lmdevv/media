@@ -141,7 +141,11 @@ describe.skipIf(stack === undefined)("restrictions", { timeout: 120_000 }, () =>
       await admin.signedIn.client.query(api.core.restrictions.get, { userId: otherAdmin.userId }),
     ).toBeNull();
 
-    await restrict(admin, kid, null);
+    await restrict(admin, kid, NONE);
+
+    expect(
+      await admin.signedIn.client.query(api.core.restrictions.get, { userId: kid.userId }),
+    ).toBeNull();
     await admin.signedIn.client.mutation(api.core.accounts.users.setRole, {
       userId: kid.userId,
       role: "admin",

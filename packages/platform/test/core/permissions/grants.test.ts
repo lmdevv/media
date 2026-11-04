@@ -14,7 +14,7 @@ import {
   visibleProbes,
 } from "../../probe";
 import type { Session } from "../../probe";
-import { createPerson, refusal, signInAs, unique } from "../../sign-in";
+import { createPerson, refusal, signIn, signInAs, unique } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
 
@@ -241,6 +241,26 @@ describe.skipIf(stack === undefined)("grants", { timeout: 120_000 }, () => {
       await refusal(
         member.signedIn.client.mutation(api.core.permissions.groups.create, {
           name: `other-${unique()}`,
+        }),
+      ),
+    ).toBe("forbidden");
+
+    const { groupId } = await admin.signedIn.client.mutation(api.core.permissions.groups.create, {
+      name: `keyed-${unique()}`,
+    });
+
+    const { key } = await admin.signedIn.client.action(api.core.auth.apiKeys.create, {
+      name: "agent",
+      scopes: ["admin"],
+    });
+
+    const agent = await signIn(stack, "apiKey", { key });
+
+    expect(
+      await refusal(
+        agent.client.mutation(api.core.permissions.groups.addMember, {
+          groupId,
+          userId: admin.userId,
         }),
       ),
     ).toBe("forbidden");

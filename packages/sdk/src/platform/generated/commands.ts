@@ -540,7 +540,7 @@ export const effectMethods = (method: EffectBuilder) => ({
     },
     permissions: {
       groups: {
-        /** `core.permissions.groups.addMember` (mutation, admin): Add someone to a group; what is shared with it reaches them on their next call. */
+        /** `core.permissions.groups.addMember` (mutation, admin, API keys refused): Add someone to a group; what is shared with it reaches them on their next call. */
         addMember: method.mutation(core_permissions_groups_addMember),
         /** `core.permissions.groups.create` (mutation, admin): Create a group of people to share with at once. */
         create: method.mutation(core_permissions_groups_create),
@@ -636,7 +636,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
     },
     permissions: {
       groups: {
-        /** `core.permissions.groups.addMember` (mutation, admin): Add someone to a group; what is shared with it reaches them on their next call. */
+        /** `core.permissions.groups.addMember` (mutation, admin, API keys refused): Add someone to a group; what is shared with it reaches them on their next call. */
         addMember: method.mutation(core_permissions_groups_addMember),
         /** `core.permissions.groups.create` (mutation, admin): Create a group of people to share with at once. */
         create: method.mutation(core_permissions_groups_create),

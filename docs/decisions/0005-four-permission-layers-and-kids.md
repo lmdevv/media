@@ -173,7 +173,8 @@ a service is refused, so no admin can give it a role, a reset link, restrictions
   lowering the last `manage` grant is a `conflict`. The mutation that creates a resource makes its
   creator the first manager (`grantCreator`).
 - Admins hold no level they were not granted.
-- Admins manage groups through `core.permissions.groups.*`. Group membership is read on every
+- Admins manage groups through `core.permissions.groups.*`. Adding someone to a group refuses API
+  keys, because a leaked admin key could otherwise add its own person to every group. Group membership is read on every
   content check, so a person added to or removed from a group gains or loses its grants on their
   next call. Removing a group deletes its memberships at once and deletes its grants in scheduled
   pages.
@@ -190,7 +191,8 @@ a service is refused, so no admin can give it a role, a reset link, restrictions
 - `core.restrictions.set` needs `admin`, refuses API keys, and works only on a member who is
   someone else. `core.restrictions.get` shows your own, or as an admin anyone's, which is null
   for someone who is not a member.
-- A kid is a member with restrictions (`isKid`). An admin lifts them before promoting the kid or
+- A kid is a member with restrictions (`isKid`). Limits that hide nothing are stored as no
+  restrictions. An admin lifts them before promoting the kid or
   handing them ownership.
 - A change applies on the person's next call and ends no session.
 

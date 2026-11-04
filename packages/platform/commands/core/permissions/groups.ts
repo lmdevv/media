@@ -7,7 +7,7 @@ import type { Infer } from "convex/values";
 
 import { mutation, query } from "../../../convex/_generated/server";
 import type { MutationCtx, QueryCtx } from "../../../convex/_generated/server";
-import { requireCaller } from "../../../convex/core/auth/caller";
+import { refuseKeys, requireCaller } from "../../../convex/core/auth/caller";
 import type { Caller } from "../../../convex/core/auth/caller";
 
 const addMemberArgs = v.object({ groupId: v.id("groups"), userId: v.id("users") });
@@ -75,7 +75,7 @@ const renameResult = v.null();
 
 /** The handlers `convex/core/permissions/groups.ts` passes to `register`, one per `core.permissions.groups` command. */
 export interface Handlers {
-  /** `core.permissions.groups.addMember` (mutation, admin): Add someone to a group; what is shared with it reaches them on their next call. */
+  /** `core.permissions.groups.addMember` (mutation, admin, API keys refused): Add someone to a group; what is shared with it reaches them on their next call. */
   readonly addMember: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof addMemberArgs>,
@@ -176,7 +176,8 @@ export const register = (handlers: Handlers) => ({
   addMember: mutation({
     args: addMemberArgs,
     returns: addMemberResult,
-    handler: async (ctx, args) => handlers.addMember(ctx, args, await requireCaller(ctx, "admin")),
+    handler: async (ctx, args) =>
+      handlers.addMember(ctx, args, refuseKeys(await requireCaller(ctx, "admin"))),
   }),
   create: mutation({
     args: createArgs,
