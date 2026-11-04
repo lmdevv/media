@@ -1,27 +1,22 @@
-# [music]
+# legacy/music
 
-MIT-licensed, agent-first, self-hosted music platform. It streams the user's own on-disk library
-from one install: a container image or a NixOS package. The product name is `[music]`, brackets
-included; the repo and packages use `music`.
-
-- Plan: [Linear project](https://linear.app/adsfsd/project/music-8c860e163f25). It holds the
-  overview, stack, architecture, and design summary.
-- MVP: server, web app, and CLI with an agent skill. Native apps are V1.
+The old [music] code, imported with its history from `lmdevv/music`, which is archived. It stays
+runnable until the music port onto the [media] core lands, then it is deleted. The root `CLAUDE.md`
+holds the shared rules for copyleft, coding standards, secrets, lint, mocks, commits, PRs, review,
+pstack, and design, including the `[music]` Paper file. This file adds only what the old music code
+needs, and wins where the two differ for code under `legacy/music`.
 
 ## Rules
 
-- **GPL and AGPL code is read-only.** Navidrome (GPL-3.0) and Immich (AGPL-3.0) may be read for
-  ideas and edge cases. Never copy, port, or translate their code into this repo. Effect, OpenCode,
-  and Pi are MIT and safe to reference.
-- **Load the `coding-standards` skill** before writing, reviewing, or refactoring TypeScript. It is
-  in `.agents/skills/coding-standards/`, copied from `dmmulroy/.dotfiles` at `574e1f2`; Dillon has
-  since removed it, so don't `skills update` it. Where any skill conflicts with this file, this file
-  wins: no lint suppressions or disabled rules, even where a skill shows them.
+- **Nested workspace.** Run every command below from `legacy/music`, after its own `pnpm install`.
+  Root checks and the root hook skip this folder. Paths in root rules, such as `packages/ui`,
+  resolve inside this folder when you work here.
+- **Effect differs here.** `effect` 4.0.2 is pinned in this folder's `pnpm-workspace.yaml`, one
+  patch behind root's reference clone, and some Convex functions use Effect. Follow the surrounding
+  code, not root's plain-TypeScript Convex rule.
+- **pstack model choices live in the root `.agents/pstack-models.md`.** This folder's
+  `.claude/rules/pstack-models.md` and `.agents/pstack/` are left over from the old repo.
 - **No MCP server.** Agents use the CLI and `skills/music/SKILL.md`.
-- **Never commit secret values.** `.env.example` lists configuration names only.
-- **Never weaken a lint rule, add a cast, or add a suppression to pass checks.** Fix the code or
-  report the finding. Casts other than `as const` need a `// SAFETY:` comment.
-- **No module mocks.** Test through real seams.
 
 ## Layout
 
@@ -62,71 +57,11 @@ scripts/stack-e2e.sh # build the image and run the real-stack E2E suite against 
 scripts/ios-mac.sh build-sim <udid>  # build the iOS dev client on a Mac over ssh (apps/mobile/README.md)
 ```
 
-`typecheck`, `lint`, `fmt:check`, and `test` run in the `legacy-music` job of the root CI, not in a
-pre-commit hook. Run all four before every commit to legacy/music.
+`typecheck`, `lint`, `fmt:check`, and `test` run in the root CI's `legacy/music checks` job, not in
+a pre-commit hook. Run all four before every commit to legacy/music.
 
 Use `scripts/dev-backend.sh` for a local self-hosted Convex; pick a different name and port per
 worktree. Commit the regenerated `convex/_generated/`.
-
-## Contributing
-
-### Commit messages
-
-Use this structure for commit messages and PR titles:
-
-```text
-type(scope): summary
-```
-
-- Use `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `migrate`, `update`, `perf`, `build`, or `ci`
-  for the type. Name the affected package or domain in the scope, such as `media`, `web`, or `sdk`.
-- Write the summary in imperative present tense, lowercase, with no trailing period. Describe the
-  concrete change, such as `fix(media): stop streams when playback ends`.
-- Add an optional bullet body for substantial changes or notable impact. Explain why the change
-  is needed, the resulting behavior, and any important risk, migration, or follow-up.
-- Base the message on the staged diff. Replace vague messages such as `fix stuff` or `address
-  review` with the actual change.
-- Put relevant PR and issue references in a `Refs:` trailer, such as `Refs: #19, ADS-145`.
-  Place it after any bullet body and before co-author trailers. Use known references only,
-  deduplicate them, and omit the trailer when none apply. Preserve relevant references when
-  rewording, rebasing, squashing, or merging commits.
-- Every agent-created or agent-amended commit must include `Co-authored-by` trailers identifying
-  the contributing model and coding tool. Read the actual identities from runtime context or
-  configuration. Never silently omit attribution because a trailer was not supplied by the harness.
-- Use `noreply@openai.com` for OpenAI models and Codex, and `noreply@anthropic.com` for Anthropic
-  models and Claude Code. For other providers or tools, resolve their attribution address before
-  committing. Do not invent model identities or addresses, and do not include thinking-level metadata.
-- Deduplicate trailers and verify that attribution is present before every commit or amend.
-  Preserve all contributing agents' trailers through rebases, squashes, and merges.
-
-Example:
-
-```text
-docs(agents): define commit and pull request writing rules
-
-- define commit titles and optional bodies so history explains each change.
-- require PR descriptions and merge messages to match the final diff.
-
-Co-authored-by: openai/gpt-6.1-sol <noreply@openai.com>
-Co-authored-by: Codex <noreply@openai.com>
-```
-
-The example identities must be replaced with the model and tool that actually contributed.
-
-### PR descriptions, rebases, and merges
-
-- Write the PR description for a reviewer who has not read the conversation. Lead with the
-  problem and resulting behavior. Include relevant validation results and material risks or
-  migration steps. Keep simple changes to a short paragraph and validation notes.
-- After scope changes or a rebase, and immediately before merging, compare the PR title and
-  description with the final diff against the target branch. Rewrite stale or vague text, remove
-  abandoned approaches, and update validation results. Report skipped or failing checks accurately.
-- During a rebase, review the messages of commits that will remain in history. Reword vague or
-  outdated messages and combine fixup commits where appropriate. Preserve valid co-author trailers.
-- Before a squash or merge commit, explicitly review and improve its title and body using the
-  same rules. Use the final PR title and description as the starting point, then remove review
-  chatter and redundant commit lists. For a rebase merge, check each retained commit message.
-- These writing checks supplement the verification and review requirements below.
 
 ## Verify and review
 
@@ -137,7 +72,8 @@ The example identities must be replaced with the model and tool that actually co
   `apps/web/e2e/README.md`.
 - `scripts/stack-e2e.sh` needs Docker. `MUSIC_VIDEO=1` records video; results land in
   `apps/web/test-results/stack`. On NixOS, set `CHROMIUM_PATH=$(which chromium)`.
-- Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, `pnpm test --repeats=20`.
+- Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`. For Vitest, use root's
+  fresh-process loop, not `--repeats`; this folder pins the same `@effect/vitest` 4.0.3.
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `react-doctor`,
   `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked. `verify-music` is this
   repo's own: it runs disposable servers built from the checkout and from main, drives the web app,
@@ -148,50 +84,6 @@ The example identities must be replaced with the model and tool that actually co
   user sees carries before and after screenshots of each changed screen, at desktop and phone size
   on the web, and a short video of the changed flow, published with `evidence publish`. When a PR
   changes nothing a user sees, say so under its verification notes instead.
-- `main` requires the `check` and `stack-e2e` CI jobs. PRs matching the `paths` in
-  `.github/workflows/image.yml` also run the `Image` workflow; check it too. Never merge with admin
-  bypass.
-- Run `/pstack:no-comments` on the diff before `/code-review` when a PR adds or changes comments,
-  with or without `/pstack:poteto-mode`. Tell it to keep required `// SAFETY:` comments; its agent
-  does not know this repo's rule.
-- Every PR gets Codex automatic review on GitHub; address its findings before merging. Run
-  Claude's `/code-review` locally before you open or merge one. Do not enable, request, or wait for
-  CodeRabbit or Bugbot. Don't add a project skill named `code-review`; it shadows Claude's.
-- Cloud environments: none yet. Pin the Claude one in `.claude/settings.json`
-  (`remote.defaultEnvironmentId`) and write the Codex ID here for `codex cloud exec --env`. Docker
-  suites run in Claude cloud only.
-
-## pstack
-
-[pstack](https://github.com/cursor/plugins/tree/main/pstack) is Lauren Tan's skill stack. Start
-rigorous work with `poteto-mode`. Where a pstack skill conflicts with this file, this file wins.
-
-- Claude Code: `.claude/settings.json` enables `pstack@cursor-plugins`. Skills are `/pstack:<name>`.
-  Model roles are in `.claude/rules/pstack-models.md`, which Claude Code loads on its own.
-- Codex: install once per machine with `codex plugin marketplace add cursor/plugins` and
-  `codex plugin add pstack@cursor-plugins`. Skills are `$pstack:<name>`. Before you follow a pstack
-  skill, read `.agents/pstack/codex.md`. Model roles are in `.agents/pstack/codex-models.md`.
-- Model agreement: each tool writes code with its session model and runs judgment roles at high
-  effort. Every review panel pairs Opus with GPT-6.1-Sol by calling the other tool's CLI, as
-  `.agents/pstack/cross-tool.md` describes. Change both model files together.
-
-## Design
-
-Build UI from the Paper file `[music]` (ID `01M4KQQQ46CWH4S1JGX96NPA0T`) through the Paper MCP.
-Paper Desktop must be running.
-
-- Paper is the source of truth. Read structure with `get_tree_summary` and `get_jsx`, exact values
-  with `get_computed_styles`, and the target with `get_screenshot`. Never read colors or sizes from
-  screenshots.
-- Tokens live in `packages/ui/src/styles/globals.css` under their Paper names. Re-export them with
-  `get_tokens` in `tailwind` format when the design changes. Dark mode maps each `--color-dark-*`
-  token onto its light role inside `.dark`.
-- Use tokens for every color, size, and font. No raw values in components.
-- Light mode follows Apple Music (red accent); dark mode follows Spotify (green accent, rounded
-  panels on black). Phone layouts feel native to iOS.
-- Follow the design handoff note in the owner's vault (`projects/music/music Design.md`): flows,
-  artboard map, decisions, and open questions. If code must differ from Paper, flag it instead of
-  drifting.
 
 <!-- BEGIN:turborepo-agent-rules -->
 
