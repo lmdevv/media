@@ -22,6 +22,8 @@ const linkFor = async (admin: SignedIn, person: SignedIn) =>
 const redeem = (core: CoreStack, code: string) =>
   signIn(core, "reset", { code, password: `password-${unique()}` });
 
+const anonymous = (core: CoreStack) => new ConvexHttpClient(core.url, { logger: false });
+
 describe.skipIf(stack === undefined)("reset links", { timeout: 120_000 }, () => {
   it("set a new password once, ending every session and key the person had", async () => {
     if (stack === undefined) return;
@@ -38,10 +40,7 @@ describe.skipIf(stack === undefined)("reset links", { timeout: 120_000 }, () => 
 
     expect(expiresAt - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1000);
     expect(
-      await new ConvexHttpClient(stack.url, { logger: false }).query(
-        api.core.accounts.resetLinks.lookup,
-        { code },
-      ),
+      await anonymous(stack).query(api.core.accounts.resetLinks.lookup, { code }),
     ).toMatchObject({ username: person.username });
 
     const password = `password-${unique()}`;
@@ -78,6 +77,55 @@ describe.skipIf(stack === undefined)("reset links", { timeout: 120_000 }, () => 
     });
 
     expect(await refusal(redeem(stack, demoted.code))).toBe("expired");
+  });
+
+  it("never work again once their maker lost admin, even after a promotion back", async () => {
+    if (stack === undefined) return;
+    const makerPerson = await createPerson(stack, "admin", "admin");
+    const maker = await signInAs(stack, makerPerson);
+    const other = await signInAdmin(stack);
+    const target = await createPerson(stack, "admin", "admin");
+    const targetSession = await signInAs(stack, target);
+    const kept = await linkFor(maker, targetSession);
+    const makerId = (await whoIs(maker)).userId;
+
+    await other.client.mutation(api.core.accounts.users.setRole, {
+      userId: makerId,
+      role: "member",
+    });
+    await other.client.mutation(api.core.accounts.users.setRole, {
+      userId: makerId,
+      role: "admin",
+    });
+
+    const fresh = await linkFor(await signInAs(stack, makerPerson), targetSession);
+
+    expect(
+      await refusal(
+        anonymous(stack).query(api.core.accounts.resetLinks.lookup, { code: kept.code }),
+      ),
+    ).toBe("expired");
+    expect(await refusal(redeem(stack, kept.code))).toBe("expired");
+    expect(await refusal(whoIs(targetSession))).toBe("accepted");
+    expect(await refusal(signInAs(stack, target))).toBe("accepted");
+    expect(
+      await anonymous(stack).query(api.core.accounts.resetLinks.lookup, { code: fresh.code }),
+    ).toMatchObject({ username: target.username });
+  });
+
+  it("stop working when their maker changes their password", async () => {
+    if (stack === undefined) return;
+    const makerPerson = await createPerson(stack, "admin", "admin");
+    const maker = await signInAs(stack, makerPerson);
+    const person = await signInAs(stack, await createPerson(stack));
+    const { code } = await linkFor(maker, person);
+
+    await maker.client.action(api.core.accounts.me.changePassword, {
+      currentPassword: makerPerson.password,
+      newPassword: `password-${unique()}`,
+    });
+
+    expect(await refusal(redeem(stack, code))).toBe("expired");
   });
 
   it("are refused for yourself, from members, and from API keys", async () => {

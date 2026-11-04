@@ -193,6 +193,45 @@ describe.skipIf(stack === undefined)("invites", { timeout: 120_000 }, () => {
     ).toBe("not_found");
   });
 
+  it("never works again once its maker lost admin, even after a promotion back", async () => {
+    if (stack === undefined) return;
+    const makerPerson = await createPerson(stack, "admin", "admin");
+    const maker = await signInAs(stack, makerPerson);
+    const other = await signInAdmin(stack);
+    const { userId } = await maker.client.query(api.core.auth.sessions.current, {});
+    const kept = await maker.client.action(api.core.accounts.invites.create, { role: "admin" });
+
+    await other.client.mutation(api.core.accounts.users.setRole, { userId, role: "member" });
+    await other.client.mutation(api.core.accounts.users.setRole, { userId, role: "admin" });
+
+    const promoted = await signInAs(stack, makerPerson);
+    const fresh = await promoted.client.action(api.core.accounts.invites.create, {});
+    const attacker = newcomer();
+
+    expect(
+      await refusal(anonymous(stack).query(api.core.accounts.invites.lookup, { code: kept.code })),
+    ).toBe("expired");
+    expect(await refusal(signIn(stack, "invite", { code: kept.code, ...attacker }))).toBe(
+      "expired",
+    );
+    expect(await refusal(signInAs(stack, attacker))).toBe("unauthenticated");
+    expect(await listsInvite(other, kept.inviteId)).toBe(false);
+    expect(await refusal(signIn(stack, "invite", { code: fresh.code, ...newcomer() }))).toBe(
+      "accepted",
+    );
+  });
+
+  it("stops working when its maker ends their other sessions", async () => {
+    if (stack === undefined) return;
+    const maker = await signInAdmin(stack);
+    const { code, inviteId } = await maker.client.action(api.core.accounts.invites.create, {});
+
+    await maker.client.mutation(api.core.auth.sessions.endAll, { keepCurrent: true });
+
+    expect(await refusal(signIn(stack, "invite", { code, ...newcomer() }))).toBe("expired");
+    expect(await listsInvite(maker, inviteId)).toBe(false);
+  });
+
   it("keeps the invite when the username is taken, so the invitee can pick another", async () => {
     if (stack === undefined) return;
     const admin = await signInAdmin(stack);
