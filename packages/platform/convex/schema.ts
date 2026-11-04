@@ -191,7 +191,6 @@ export default defineSchema({
    * `core/libraries.ts` is its only writer.
    */
   libraries: defineTable({
-    /** Not unique: refusing a taken name would tell its creator a private library exists. */
     name: v.string(),
     kind: contentDomain,
     /**
@@ -222,7 +221,6 @@ export default defineSchema({
     mtime: v.number(),
     /** Movies: the minimum viewer age, or null when unrated. */
     age: v.union(v.number(), v.null()),
-    /** Music: explicit. */
     explicit: v.boolean(),
   }).index("by_library_path", ["libraryId", "path"]),
 

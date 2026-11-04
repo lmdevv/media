@@ -107,17 +107,13 @@ export function defineKind<
 
 const probeRun = { run: v.string(), n: v.number() };
 
-/**
- * A domain's scan kind. A scan is a reported job: its durable progress is the domain's own rows,
- * which let a restarted attempt skip unchanged files, so its paths never become job items. Cap 2
- * lets two libraries of a domain scan at once, and lets a library's new scan start while its
- * canceled one waits for its worker's next call. One active scan per library, by its dedupe key.
- */
+const LIBRARIES_SCANNING_PER_DOMAIN = 2;
+
 const scanKind = <const Kind extends ContentDomain>(kind: Kind) =>
   defineKind(`${kind}.scan`, {
     payload: { libraryId: v.id("libraries") },
     item: null,
-    cap: 2,
+    cap: LIBRARIES_SCANNING_PER_DOMAIN,
     maxStrikes: 3,
     dedupe: (payload) => payload.libraryId,
   });

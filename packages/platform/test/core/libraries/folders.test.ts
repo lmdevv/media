@@ -31,7 +31,6 @@ const segments = fc.array(segment, { minLength: 1, maxLength: 6 });
 
 const folder = segments.map((names) => `/${names.join("/")}`);
 
-/** A folder and another that holds it, shares a prefix of its name, or is unrelated. */
 const pair = fc
   .tuple(segments, segments, fc.nat(6), fc.constantFrom("holds", "prefix", "apart"))
   .map(([names, others, depth, relation]) => {

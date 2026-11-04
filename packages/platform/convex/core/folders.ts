@@ -78,12 +78,7 @@ export const foldersOf = async (
       .take(FOLDERS_MAX)
   ).map((row) => row.path);
 
-/**
- * Whether another library has `folder`, a folder that holds it, or a folder inside it. Reads one
- * index entry per segment of `folder` and one range of at most 17 entries, whatever the number of
- * libraries, private ones included. A concurrent claim of an overlapping folder writes a key this
- * read, so Convex runs the two one after the other.
- */
+// Convex serializes a concurrent claim of an overlapping folder: it writes a key this reads.
 const takenByOther = async (
   db: DatabaseReader,
   folder: string,

@@ -108,7 +108,7 @@ describe.skipIf(stack === undefined)("libraries", { timeout: 180_000 }, () => {
     );
   });
 
-  it("never share a folder, and a refusal names no other library", async () => {
+  it("never share a folder, and neither a folder nor a taken name tells of another library", async () => {
     if (stack === undefined) return;
     const owner = await person(stack, "owner", "admin");
     const otherAdmin = await person(stack, "admin", "admin");
@@ -131,7 +131,15 @@ describe.skipIf(stack === undefined)("libraries", { timeout: 180_000 }, () => {
       expect(refused).not.toContain(first.libraryId);
     }
 
-    expect(await refusal(create(otherAdmin, "movies", [join(root, "film")]))).toBe("accepted");
+    expect(
+      await refusal(
+        otherAdmin.client.mutation(api.core.libraries.create, {
+          name,
+          kind: "movies",
+          folders: [join(root, "film")],
+        }),
+      ),
+    ).toBe("accepted");
     expect(
       await refusal(create(otherAdmin, "movies", [join(root, "x"), join(root, "x", "y")])),
     ).toBe("invalid_args");

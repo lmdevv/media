@@ -12,14 +12,12 @@ const role = v.union(...roles.map((name) => v.literal(name)));
 
 const assignableRole = v.union(...assignableRoles.map((name) => v.literal(name)));
 
-/** A library's kind is the domain its content belongs to. */
 const libraryKind = v.union(...contentDomains.map((domain) => v.literal(domain)));
 
 const libraryRow = {
   libraryId: v.id("libraries"),
   name: v.string(),
   kind: libraryKind,
-  /** The strongest level the caller's grants give them. */
   level,
 };
 

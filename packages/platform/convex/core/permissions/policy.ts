@@ -259,7 +259,6 @@ const accountRules: AccountRules = {
 const serverRules: ServerRules = {
   invite: { scope: "admin" },
   manageGroups: { scope: "admin" },
-  /** Creating a library or changing its folders points the server at its own disk. */
   manageFolders: { scope: "admin" },
 };
 

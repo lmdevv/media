@@ -19,11 +19,6 @@ import { contentActions, ratingOf } from "./permissions/policy";
 import type { ContentFacts } from "./permissions/policy";
 import { purgeStep, scanAnswer, withLibraryItems, withScanLease } from "./scans";
 
-/**
- * The test seam for a domain's library items until the movies port: the scanner callbacks a
- * domain writes, over `probeItems`, and loaders that decide on items as a title list will.
- */
-
 const SEED_MAX = 1000;
 
 const BATCH_MAX = 500;

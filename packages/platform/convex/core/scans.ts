@@ -16,7 +16,6 @@ import type { JobCtx } from "./jobs/store";
 import { deleteCounter, incrementCounter, readCounter } from "./lib/counters";
 import { serverMutation, serverQuery } from "./lib/serverFacing";
 
-/** The counter of a library's items. Private, so only the writes below move a library's count. */
 const itemsCounter = (libraryId: Id<"libraries">): string => `libraryItems:${libraryId}`;
 
 /**
@@ -231,10 +230,6 @@ type PurgeHook = FunctionReference<
   null
 >;
 
-/**
- * Each domain's purge of a library's items, which deletes the rows no current folder holds, a
- * page at a time. Until the movies port, both domains' items are the test seam's.
- */
 const purgeHooks = {
   movies: internal.core.libraryProbe.purge,
   music: internal.core.libraryProbe.purge,

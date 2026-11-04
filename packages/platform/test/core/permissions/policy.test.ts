@@ -189,7 +189,6 @@ const libraryAt = (
   library = library1,
 ): ContentResource => ({ on: "content", domain, level, placement: { in: "library", library } });
 
-/** A thing in no one library, such as a playlist: a container unless given facts. */
 const unplaced = (
   domain: ContentDomain,
   level: Level | null,

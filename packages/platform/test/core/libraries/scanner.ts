@@ -137,10 +137,6 @@ const stopped = (outcome: "canceled" | "lost", found = 0) => ({
   removed: 0,
 });
 
-/**
- * Sends `queue` one batch after another and sums the counts they answer, or answers null at the first
- * batch whose call no longer holds the lease.
- */
 const sendAll = async <Batch>(
   queue: ReadonlyArray<Batch>,
   send: (batch: Batch) => Promise<number | null>,
@@ -155,11 +151,6 @@ const sendAll = async <Batch>(
   return count === null ? null : sendAll(rest, send, sum + count);
 };
 
-/**
- * Runs the scan a claim hands over the way the server will: reads the folders under the lease,
- * walks them, writes new and changed files and drops missing ones 500 at a time, then finishes.
- * It stops at the first call that answers `canceled` or `lost`.
- */
 const scanClaimed = async (
   calls: Calls,
   kind: ContentDomain,

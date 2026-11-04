@@ -23,31 +23,23 @@ const parseName = (typed: string): string => {
 
 const libraryRef = (id: Id<"libraries">) => ({ type: "library", id }) as const;
 
-/**
- * Queues a scan of `library`, the only code that queues a scan kind, so a library's scans are
- * always its own domain's. `join` returns a scan already queued or running, so asking twice runs
- * one scan. `restart` does the same for a queued scan, which reads the folders when it starts, but
- * cancels a running one, which read the old folders, and queues a new scan at once: the canceled
- * attempt's next call ends it, and it writes nothing after the cancel (`withScanLease`).
- */
-const startScan = async (
-  ctx: JobCtx,
-  library: Doc<"libraries">,
-  mode: "join" | "restart",
-): Promise<Enqueued> => {
-  const payload = { kind: scanKindOf(library.kind), libraryId: library._id };
-  const joined = await enqueue(ctx, payload);
-
-  const restart =
-    mode === "restart" && !joined.created && (await ctx.db.get(joined.jobId))?.status === "running";
-
-  if (restart) await cancel(ctx, joined.jobId);
-
-  const scan = restart ? await enqueue(ctx, payload) : joined;
+const queueScan = async (ctx: JobCtx, library: Doc<"libraries">): Promise<Enqueued> => {
+  const scan = await enqueue(ctx, { kind: scanKindOf(library.kind), libraryId: library._id });
 
   if (scan.created) await ctx.db.patch(library._id, { lastScan: scan.jobId });
 
   return scan;
+};
+
+const restartScan = async (ctx: JobCtx, library: Doc<"libraries">): Promise<Enqueued> => {
+  const joined = await queueScan(ctx, library);
+  const running = !joined.created && (await ctx.db.get(joined.jobId))?.status === "running";
+
+  if (!running) return joined;
+
+  await cancel(ctx, joined.jobId);
+
+  return queueScan(ctx, library);
 };
 
 const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null) => {
@@ -78,7 +70,7 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
     await grantCreator(ctx, libraryRef(libraryId), caller.userId);
 
     const { doc } = await requireContent(ctx, caller, "manage", libraryRef(libraryId));
-    const first = await startScan(ctx, doc, "join");
+    const first = await queueScan(ctx, doc);
 
     return { libraryId, scanJobId: first.jobId };
   },
@@ -126,12 +118,12 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
 
     if (removed.length > 0) await schedulePurge(ctx, doc);
 
-    return { scanJobId: (await startScan(ctx, doc, "restart")).jobId };
+    return { scanJobId: (await restartScan(ctx, doc)).jobId };
   },
   scan: async (ctx, { libraryId }, caller) => {
     const { doc } = await requireContent(ctx, caller, "edit", libraryRef(libraryId));
 
-    return startScan(ctx, doc, "join");
+    return queueScan(ctx, doc);
   },
   remove: async (ctx, { libraryId }, caller) => {
     const { doc } = await requireContent(ctx, caller, "manage", libraryRef(libraryId));
