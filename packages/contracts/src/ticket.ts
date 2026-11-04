@@ -112,7 +112,7 @@ export interface PersonalTicketRequest {
   readonly resource: TicketResource;
   readonly purpose: TicketPurpose;
   readonly now: number;
-  /** Whole milliseconds, at least 1 s. Defaults to and is capped at `PERSONAL_TICKET_MAX_MS`. */
+  /** Whole milliseconds, at least 1 s. Defaults to `PERSONAL_TICKET_MAX_MS`. */
   readonly lifetimeMs?: number | undefined;
   /** A ceiling on the expiry, such as the session's own. */
   readonly notAfter?: number | undefined;
@@ -246,8 +246,6 @@ const whole = (source: string): RegExp => new RegExp(`^(?:${source})$`, "u");
 
 const KEY_ID = whole(KEY_ID_SOURCE);
 
-const KEY_TEXT = whole(MAC_SOURCE);
-
 const PRINCIPAL_ID = whole(PRINCIPAL_ID_SOURCE);
 
 const RESOURCE_ID = whole(RESOURCE_ID_SOURCE);
@@ -360,6 +358,8 @@ export class TicketAdmission {
     claims: TicketClaims,
     readSession: SessionReader,
   ) {
+    if (token !== admissionToken) throw new TypeError("Only TicketKeyRing.admit makes admissions");
+
     this.#ticket = ticket;
     this.claims = claims;
     this.#readSession = readSession;
@@ -374,7 +374,9 @@ export class TicketAdmission {
    * @returns The admitted claims, or `TicketRefused` carrying them.
    */
   async continue(ticket: string): Promise<TicketResult<TicketClaims, TicketRefused>> {
-    if (!constantTimeEqual(ticket, this.#ticket)) return refused("other_ticket", this.claims);
+    if (ticket.length > MAX_TICKET_CHARS || !constantTimeEqual(ticket, this.#ticket)) {
+      return refused("other_ticket", this.claims);
+    }
 
     const { claims } = this;
 
@@ -511,7 +513,11 @@ const requireWholeTime = (field: string, value: number): void => {
   }
 };
 
-const requireResourceId = (resource: TicketResource): void => {
+const requireResource = (resource: TicketResource): void => {
+  if (listed(ticketResourceKinds, resource.kind) === undefined) {
+    throw new RangeError("resource.kind must be one of ticketResourceKinds");
+  }
+
   if (!RESOURCE_ID.test(resource.id)) {
     throw new RangeError(`resource.id must match ${RESOURCE_ID_SOURCE}`);
   }
@@ -537,7 +543,11 @@ const makeRing = (keys: ReadonlyMap<string, CryptoKey>, signingKeyId: string): T
     const notAfter = request.notAfter ?? Number.POSITIVE_INFINITY;
 
     requireWholeTime("now", now);
-    requireResourceId(resource);
+    requireResource(resource);
+
+    if (listed(ticketPurposes, purpose) === undefined) {
+      throw new RangeError("purpose must be one of ticketPurposes");
+    }
 
     if (!PRINCIPAL_ID.test(principal.userId)) {
       throw new RangeError(`principal.userId must match ${PRINCIPAL_ID_SOURCE}`);
@@ -576,7 +586,7 @@ const makeRing = (keys: ReadonlyMap<string, CryptoKey>, signingKeyId: string): T
 
   const issueShareable = async (request: ShareableTicketRequest): Promise<IssuedTicket> => {
     requireWholeTime("now", request.now);
-    requireResourceId(request.resource);
+    requireResource(request.resource);
 
     const issuedAt = Math.floor(request.now / SHAREABLE_BUCKET_MS) * SHAREABLE_BUCKET_MS;
 
@@ -667,7 +677,7 @@ const parseEntry = (entry: string, position: number): KeyEntry | TicketKeysInval
 
   if (!KEY_ID.test(keyId)) return new TicketKeysInvalid("key_id", position);
 
-  const bytes = KEY_TEXT.test(keyText) ? fromCanonicalBase64Url(keyText, TICKET_KEY_BYTES) : null;
+  const bytes = fromCanonicalBase64Url(keyText, TICKET_KEY_BYTES);
 
   return bytes === null ? new TicketKeysInvalid("key_bytes", position) : { keyId, bytes };
 };

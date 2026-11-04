@@ -32,7 +32,14 @@ let imported: { readonly text: string; readonly ring: Promise<TicketKeyRing> } |
 const keyRing = (): Promise<TicketKeyRing> => {
   const text = process.env[TICKET_KEYS_SETTING] ?? "";
 
-  if (imported?.text !== text) imported = { text, ring: importRing(text) };
+  if (imported?.text !== text) {
+    const ring = importRing(text);
+
+    imported = { text, ring };
+    ring.catch(() => {
+      if (imported?.ring === ring) imported = undefined;
+    });
+  }
 
   return imported.ring;
 };

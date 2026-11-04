@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import * as fc from "fast-check";
@@ -161,6 +162,23 @@ describe("ticket vectors", () => {
       expect(vector.admits.ok && vector.admits.claims.expiresAt).toBe(issued?.expiresAt);
     },
   );
+
+  it.each(
+    TICKET_TEST_VECTORS.filter(
+      (vector) => vector.admits.ok || refusedAfterMac(vector.admits.reason),
+    ),
+  )("carries an HMAC that node:crypto computes for $name", (vector) => {
+    const keyId = vector.ticket.split(".")[1];
+    const entry = vector.keys.split(",").find((each) => each.startsWith(`${keyId}:`)) ?? "";
+    const signed = vector.ticket.slice(0, vector.ticket.lastIndexOf("."));
+
+    const mac = createHmac("sha256", Buffer.from(entry.slice(entry.indexOf(":") + 1), "base64url"))
+      .update(signed, "ascii")
+      .digest("base64url");
+
+    expect(entry).not.toBe("");
+    expect(macOf(vector.ticket)).toBe(mac);
+  });
 
   it.each(TICKET_TEST_VECTORS)("answers $name exactly", async (vector) => {
     const ring = await ringOf(vector.keys);
@@ -573,6 +591,9 @@ describe("continuing an admitted stream", () => {
     };
 
     expect(await reasonOfContinue(admission.continue(downloadVector.ticket))).toBe("other_ticket");
+    expect(await reasonOfContinue(admission.continue(playVector.ticket.repeat(10_000)))).toBe(
+      "other_ticket",
+    );
     expect(await reasonOfContinue(download.continue(downloadVector.ticket))).toBe("wrong_purpose");
 
     state = "ended";

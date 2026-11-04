@@ -44,7 +44,7 @@ if (names.has(TICKET_KEYS_SETTING)) {
   process.stderr.write(`kept ${TICKET_KEYS_SETTING}\n`);
 } else {
   const day = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-  const keyId = `k${day}${randomBytes(4).toString("hex").slice(0, 6)}`;
+  const keyId = `k${day}${randomBytes(3).toString("hex")}`;
   const key = randomBytes(TICKET_KEY_BYTES).toString("base64url");
 
   convex(["env", "set", TICKET_KEYS_SETTING, "--", `${keyId}:${key}`]);
