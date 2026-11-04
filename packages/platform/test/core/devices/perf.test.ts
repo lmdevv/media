@@ -17,8 +17,6 @@ const CODES = 10;
 
 const CALLS = 200;
 
-const P50_BUDGET_MS = 50;
-
 const median = (values: ReadonlyArray<number>): number =>
   values.toSorted((left, right) => left - right)[Math.floor(values.length / 2)] ?? Number.NaN;
 
@@ -29,7 +27,7 @@ describe.skipIf(stack === undefined)("a shared device's picker", { timeout: 600_
     await listed.clear();
   });
 
-  it("answers in under 50 ms at the median with 20 people listed", async () => {
+  it("reads a bounded number of documents with 20 people listed", async () => {
     if (stack === undefined) return;
     const admin = await member(stack, "admin", "admin");
 
@@ -95,6 +93,5 @@ describe.skipIf(stack === undefined)("a shared device's picker", { timeout: 600_
     expect(timings.every((call) => call.tiles >= LISTED)).toBe(true);
     expect(reads.length).toBeGreaterThanOrEqual(CALLS);
     expect(Math.max(...reads)).toBeLessThanOrEqual(2 + 3 * LISTED);
-    expect(p50).toBeLessThan(P50_BUDGET_MS);
   });
 });

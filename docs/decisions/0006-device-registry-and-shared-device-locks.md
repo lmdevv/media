@@ -78,8 +78,8 @@ The registry, the picker, tiles, unlock codes, and approvals are in
 - A personal device's picker lists the people with a live session on it. A shared device's picker
   lists everyone who opted in (`users.sharedDevices`), by username, at most 50 people.
   `core.devices.picker.show` takes the device code, because a shared device at its picker has no
-  session. On the dev stack it answered in 8.3 ms at the median over 200 uncached calls with 20
-  people listed, reading 32 documents a call.
+  session. On an idle dev stack with 20 people listed, it answered in 8 to 10 ms at the median
+  over 200 uncached calls in five runs, and read 32 documents a call.
 
 ### Tiles
 
