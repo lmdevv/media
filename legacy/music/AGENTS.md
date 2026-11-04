@@ -49,7 +49,7 @@ media service subscribes to the `jobs` table.
 
 ```sh
 nix develop          # Node 24, pnpm, ffmpeg, Caddy
-pnpm install         # also patches tsc and Oxlint with Effect diagnostics, installs lefthook
+pnpm install         # also patches tsc and Oxlint with Effect diagnostics
 scripts/dev-backend.sh [name] [port]  # self-hosted Convex in Docker, deployed and configured
 pnpm dev             # web on :3001, media service, and Convex dev
 pnpm typecheck       # tsc 7 with the Effect language service
@@ -62,8 +62,8 @@ scripts/stack-e2e.sh # build the image and run the real-stack E2E suite against 
 scripts/ios-mac.sh build-sim <udid>  # build the iOS dev client on a Mac over ssh (apps/mobile/README.md)
 ```
 
-`typecheck`, `lint`, `fmt:check`, and `test` run in the lefthook pre-commit hook and in CI. All
-four must pass before every commit.
+`typecheck`, `lint`, `fmt:check`, and `test` run in the `legacy-music` job of the root CI, not in a
+pre-commit hook. Run all four before every commit to legacy/music.
 
 Use `scripts/dev-backend.sh` for a local self-hosted Convex; pick a different name and port per
 worktree. Commit the regenerated `convex/_generated/`.

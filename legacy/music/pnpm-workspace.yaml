@@ -3,7 +3,6 @@ packages:
   - packages/*
 allowBuilds:
   esbuild: true
-  lefthook: true
 catalog:
   effect: 4.0.2
   typescript: 7.0.2
