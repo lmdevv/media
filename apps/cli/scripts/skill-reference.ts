@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const root = join(import.meta.dirname, "..");
 
-const skill = join(root, "skills", "movies", "SKILL.md");
+const skill = join(root, "skills", "media", "movies.md");
 
 const begin = "<!-- BEGIN:commands -->";
 

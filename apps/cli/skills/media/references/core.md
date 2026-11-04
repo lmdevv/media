@@ -6,6 +6,7 @@
 
 Create an invite link code for someone new, who picks their own username and password.
 
+- CLI: `media admin invites create`
 - Kind: action
 - Scope: admin
 - API keys: refused
@@ -16,15 +17,18 @@ Create an invite link code for someone new, who picks their own username and pas
 
 List the invites that still work, latest to expire first.
 
+- CLI: `media admin invites list`
 - Kind: query
 - Scope: admin
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ inviteId: Id<"invites">; role: "admin" | "member"; invitedBy: string; expiresAt: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.accounts.invites.lookup`
 
 Show what an invite code offers, or refuse it when it no longer works.
 
+- CLI: `media auth invites lookup`
 - Kind: query
 - Scope: public
 - Arguments: `{ code: string }`
@@ -34,6 +38,7 @@ Show what an invite code offers, or refuse it when it no longer works.
 
 Revoke an invite so its code stops working.
 
+- CLI: `media admin invites revoke`
 - Kind: mutation
 - Scope: admin
 - Arguments: `{ inviteId: Id<"invites"> }`
@@ -43,16 +48,20 @@ Revoke an invite so its code stops working.
 
 Change your password and sign out your other password and device sessions.
 
+- CLI: `media auth me change-password`
 - Kind: action
 - Scope: account
 - API keys: refused
 - Arguments: `{ currentPassword: string; newPassword: string }`
+- Secret: `currentPassword` from `MEDIA_ARG_CURRENT_PASSWORD`, never a flag
+- Secret: `newPassword` from `MEDIA_ARG_NEW_PASSWORD`, never a flag
 - Result: `null`
 
 ## `core.accounts.me.rename`
 
 Change your username; everything you own stays yours.
 
+- CLI: `media auth me rename`
 - Kind: mutation
 - Scope: account
 - API keys: refused
@@ -63,6 +72,7 @@ Change your username; everything you own stays yours.
 
 Create a one-time link code that lets someone set a new password within a day.
 
+- CLI: `media admin reset-links create`
 - Kind: action
 - Scope: admin
 - API keys: refused
@@ -73,6 +83,7 @@ Create a one-time link code that lets someone set a new password within a day.
 
 Show whose password a reset code sets, or refuse it when it no longer works.
 
+- CLI: `media auth reset-links lookup`
 - Kind: query
 - Scope: public
 - Arguments: `{ code: string }`
@@ -82,16 +93,19 @@ Show whose password a reset code sets, or refuse it when it no longer works.
 
 Create a user with a username and password you choose for them.
 
+- CLI: `media admin users create`
 - Kind: action
 - Scope: admin
 - API keys: refused
 - Arguments: `{ username: string; password: string; role?: "admin" | "member" }`
+- Secret: `password` from `MEDIA_ARG_PASSWORD` or stdin, never a flag
 - Result: `{ userId: Id<"users"> }`
 
 ## `core.accounts.users.handOverOwnership`
 
 Hand ownership of this server to another user and stay an admin, as the owner.
 
+- CLI: `media admin users hand-over-ownership`
 - Kind: mutation
 - Scope: admin
 - API keys: refused
@@ -102,15 +116,18 @@ Hand ownership of this server to another user and stay an admin, as the owner.
 
 List every user with their role, by username.
 
+- CLI: `media admin users list`
 - Kind: query
 - Scope: admin
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.accounts.users.setRole`
 
 Make someone else an admin or a member; the owner's role never changes this way.
 
+- CLI: `media admin users set-role`
 - Kind: mutation
 - Scope: admin
 - API keys: refused
@@ -121,6 +138,7 @@ Make someone else an admin or a member; the owner's role never changes this way.
 
 Create an API key with some of this session's scopes and show its secret once.
 
+- CLI: `media auth api-keys create`
 - Kind: action
 - Scope: account
 - API keys: refused
@@ -131,6 +149,7 @@ Create an API key with some of this session's scopes and show its secret once.
 
 Stop every API key you have made so far.
 
+- CLI: `media auth api-keys end-all`
 - Kind: mutation
 - Scope: account
 - Arguments: none
@@ -140,6 +159,7 @@ Stop every API key you have made so far.
 
 Revoke one of your API keys and sign out what it signed in.
 
+- CLI: `media auth api-keys revoke`
 - Kind: mutation
 - Scope: account
 - Arguments: `{ keyId: Id<"apiKeys"> }`
@@ -149,6 +169,7 @@ Revoke one of your API keys and sign out what it signed in.
 
 Sign a waiting device in as you, with some of this session's scopes.
 
+- CLI: `media auth device-codes approve`
 - Kind: mutation
 - Scope: account
 - API keys: refused
@@ -159,6 +180,7 @@ Sign a waiting device in as you, with some of this session's scopes.
 
 Refuse a waiting device.
 
+- CLI: `media auth device-codes deny`
 - Kind: mutation
 - Scope: account
 - Arguments: `{ userCode: string }`
@@ -168,6 +190,7 @@ Refuse a waiting device.
 
 Show the device waiting on a user code.
 
+- CLI: `media auth device-codes lookup`
 - Kind: query
 - Scope: account
 - Arguments: `{ userCode: string }`
@@ -177,6 +200,7 @@ Show the device waiting on a user code.
 
 Start a device sign-in and return its user code and secret device code.
 
+- CLI: `media auth device-codes start`
 - Kind: action
 - Scope: public
 - Arguments: `{ clientName: string }`
@@ -186,6 +210,7 @@ Start a device sign-in and return its user code and secret device code.
 
 Show who is signed in, how, and with which scopes.
 
+- CLI: `media auth sessions current`
 - Kind: query
 - Scope: signed-in
 - Arguments: none
@@ -195,6 +220,7 @@ Show who is signed in, how, and with which scopes.
 
 Sign out one of your sessions.
 
+- CLI: `media auth sessions end`
 - Kind: mutation
 - Scope: account
 - Arguments: `{ sessionId: Id<"authSessions"> }`
@@ -204,6 +230,7 @@ Sign out one of your sessions.
 
 Sign out every password and device session you have, or every other one.
 
+- CLI: `media auth sessions end-all`
 - Kind: mutation
 - Scope: account
 - Arguments: `{ keepCurrent: boolean }`
@@ -213,6 +240,7 @@ Sign out every password and device session you have, or every other one.
 
 Add someone to a group; what is shared with it reaches them on their next call.
 
+- CLI: `media admin groups add-member`
 - Kind: mutation
 - Scope: admin
 - API keys: refused
@@ -223,6 +251,7 @@ Add someone to a group; what is shared with it reaches them on their next call.
 
 Create a group of people to share with at once.
 
+- CLI: `media admin groups create`
 - Kind: mutation
 - Scope: admin
 - Arguments: `{ name: string }`
@@ -232,24 +261,29 @@ Create a group of people to share with at once.
 
 List the groups by name.
 
+- CLI: `media admin groups list`
 - Kind: query
 - Scope: admin
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ groupId: Id<"groups">; name: string }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.permissions.groups.members`
 
 List the people in a group.
 
+- CLI: `media admin groups members`
 - Kind: query
 - Scope: admin
 - Arguments: `{ groupId: Id<"groups">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ userId: Id<"users">; username: string }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.permissions.groups.remove`
 
 Delete a group, so what was shared with it no longer reaches its members.
 
+- CLI: `media admin groups remove`
 - Kind: mutation
 - Scope: admin
 - Arguments: `{ groupId: Id<"groups"> }`
@@ -259,6 +293,7 @@ Delete a group, so what was shared with it no longer reaches its members.
 
 Take someone out of a group; what is shared with it stops reaching them at once.
 
+- CLI: `media admin groups remove-member`
 - Kind: mutation
 - Scope: admin
 - Arguments: `{ groupId: Id<"groups">; userId: Id<"users"> }`
@@ -268,6 +303,7 @@ Take someone out of a group; what is shared with it stops reaching them at once.
 
 Rename a group.
 
+- CLI: `media admin groups rename`
 - Kind: mutation
 - Scope: admin
 - Arguments: `{ groupId: Id<"groups">; name: string }`
@@ -277,6 +313,7 @@ Rename a group.
 
 Show a kid's limits on what they see, yours or as an admin someone else's.
 
+- CLI: `media auth restrictions get`
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ userId: Id<"users"> }`
@@ -286,6 +323,7 @@ Show a kid's limits on what they see, yours or as an admin someone else's.
 
 Limit what a member sees by movie rating, explicit music, and library, or lift the limits.
 
+- CLI: `media admin restrictions set`
 - Kind: mutation
 - Scope: admin
 - API keys: refused
@@ -296,6 +334,7 @@ Limit what a member sees by movie rating, explicit music, and library, or lift t
 
 Show this server's name and version, and whether its owner has set it up.
 
+- CLI: `media auth server info`
 - Kind: query
 - Scope: public
 - Arguments: none

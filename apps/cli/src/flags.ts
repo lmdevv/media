@@ -108,14 +108,18 @@ export const deriveFlags = (args: Schema.Top): FlagSet => {
 
   if (!SchemaAST.isObjects(ast)) return { flags: [], positional: null };
 
-  const flags = ast.propertySignatures.map((property): FlagSpec => ({
-    key: String(property.name),
-    flag: kebabCase(String(property.name)),
-    type: flagTypeOf(property.type),
-    required: !SchemaAST.isOptional(property.type),
-    defaulted: DEFAULTED_FIELDS.has(String(property.name)),
-  }));
+  return withPositional(
+    ast.propertySignatures.map((property): FlagSpec => ({
+      key: String(property.name),
+      flag: kebabCase(String(property.name)),
+      type: flagTypeOf(property.type),
+      required: !SchemaAST.isOptional(property.type),
+      defaulted: DEFAULTED_FIELDS.has(String(property.name)),
+    })),
+  );
+};
 
+const withPositional = (flags: ReadonlyArray<FlagSpec>): FlagSet => {
   const positionalCandidates = flags.filter(
     (spec) =>
       spec.required &&
@@ -131,6 +135,13 @@ export const deriveFlags = (args: Schema.Top): FlagSet => {
     positional: positionalCandidates.length === 1 && positional !== undefined ? positional : null,
   };
 };
+
+/**
+ * The flags without the fields in `keys`, which the command fills another way, with the
+ * positional chosen again from what is left.
+ */
+export const withoutFields = (set: FlagSet, keys: ReadonlySet<string>): FlagSet =>
+  withPositional(set.flags.filter((spec) => !keys.has(spec.key)));
 
 const isIdField = (key: string): boolean => /Ids?$/u.test(key);
 

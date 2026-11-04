@@ -13,6 +13,23 @@ export const ServerUrl = Schema.String.check(
 
 const StoredSession = Schema.Struct({ token: Schema.String, refreshToken: Schema.String });
 
+/** Whether `url` is a server URL the CLI can talk to. */
+export const isServerUrl = (url: string): boolean => Schema.is(ServerUrl)(url);
+
+/** An environment the CLI could not read, reported as the config it is. */
+export const environmentError = <A, E, R>(
+  effect: Effect.Effect<A, E | Config.ConfigError, R>,
+): Effect.Effect<A, E | ConfigFileError, R> =>
+  Effect.mapError(effect, (error) =>
+    error instanceof Config.ConfigError
+      ? new ConfigFileError({
+          path: "environment",
+          message: "Could not read the environment",
+          cause: error,
+        })
+      : error,
+  );
+
 /** One server and its credentials. */
 export const StoredProfile = Schema.Struct({
   convexUrl: ServerUrl,
@@ -46,6 +63,8 @@ const encodeConfig = Schema.encodeSync(Schema.fromJsonString(StoredConfig));
 
 /** What the environment supplies. */
 export interface Environment {
+  /** `XDG_CONFIG_HOME`, or `.config` in `HOME`. */
+  readonly configHome: string;
   readonly configPath: string;
   readonly convexUrl: Option.Option<string>;
   readonly mediaUrl: Option.Option<string>;
@@ -53,7 +72,8 @@ export interface Environment {
   readonly profile: Option.Option<string>;
 }
 
-const nonEmpty = (name: string): Config.Config<Option.Option<string>> =>
+/** A variable that is unset or blank reads as none. */
+export const nonEmpty = (name: string): Config.Config<Option.Option<string>> =>
   Config.option(Config.String(name)).pipe(
     Config.map(Option.filter((value) => value.trim().length > 0)),
   );
@@ -70,22 +90,23 @@ export const environment: Config.Config<Environment> = Config.all({
   apiKey: nonEmpty("MEDIA_API_KEY"),
   profile: nonEmpty("MEDIA_PROFILE"),
 }).pipe(
-  Config.map(({ xdg, home, convexUrl, mediaUrl, apiKey, profile }) => ({
-    configPath: join(
-      Option.getOrElse(xdg, () =>
-        join(
-          Option.getOrElse(home, () => "."),
-          ".config",
-        ),
+  Config.map(({ xdg, home, convexUrl, mediaUrl, apiKey, profile }) => {
+    const configHome = Option.getOrElse(xdg, () =>
+      join(
+        Option.getOrElse(home, () => "."),
+        ".config",
       ),
-      "movies",
-      "config.json",
-    ),
-    convexUrl: Option.map(convexUrl, normalizeUrl),
-    mediaUrl: Option.map(mediaUrl, normalizeUrl),
-    apiKey: Option.map(apiKey, (value) => Redacted.make(value.trim())),
-    profile,
-  })),
+    );
+
+    return {
+      configHome,
+      configPath: join(configHome, "movies", "config.json"),
+      convexUrl: Option.map(convexUrl, normalizeUrl),
+      mediaUrl: Option.map(mediaUrl, normalizeUrl),
+      apiKey: Option.map(apiKey, (value) => Redacted.make(value.trim())),
+      profile,
+    };
+  }),
 );
 
 /** Reads the config file; a missing file is an empty config. */

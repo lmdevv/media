@@ -6,6 +6,7 @@
 
 Load a playlist from a file or another service.
 
+- CLI: `media music playlists load`
 - Kind: action
 - Scope: music:edit
 - Arguments: `{ source: "spotify" | "file"; tracks: Array<{ title: string; seconds: number }>; tags: Record<string, boolean>; owner: Id<"users">; size: bigint; cover?: ArrayBuffer; "dry-run": true; version: 2n }`

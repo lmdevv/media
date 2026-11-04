@@ -1,48 +1,15 @@
----
-name: movies
-description: Control a [movies] server (the user's self-hosted movie and TV library) from the terminal with the `media` CLI. Use when asked to find, play, or track movies and shows, run watch rooms, manage profiles, libraries, scans, API keys, devices, invites, and accounts, migrate from Jellyfin or Plex, back up, or restore a [movies] server, or find out why playback stalled, buffered, or failed.
----
+# Movies: the [movies] server's commands
 
-# [movies] CLI
+These commands reach the [movies] server, at the top level of `media` (`media search`,
+`media play`), until the movies port moves them under `media movies`. Each one is a command in
+the movies server's registry, so the CLI, the web app, and this reference always agree. Output
+is JSON by default. `SKILL.md` covers installing `media`, output, and exit codes.
 
-`media` runs every action the [movies] app has. Each one is a command in a shared registry, so
-the CLI, the web app, and this skill always agree. Output is JSON by default.
-
-## Install
-
-Skip this when `media --version` already works. Each server release ships the CLI at its own
-version.
-
-- **On the server:** a Compose install has it in the image (`docker compose exec movies media ...`,
-  already pointed at that stack; it runs as root and keeps its login root-only in `/data/config`).
-  A NixOS install puts it on every user's `PATH` with `MEDIA_CONVEX_URL` and `MEDIA_SERVER_URL`
-  set.
-- **Node 22 or newer:** `npm install -g @lmdevv/movies`, or once with `npx @lmdevv/movies --help`.
-- **No Node:** download the binary with `curl`, check it, and install it (`media-linux-arm64` or
-  `media-darwin-arm64` likewise; `shasum -a 256 -c` on macOS):
-
-  ```sh
-  curl -fLO https://github.com/lmdevv/media/releases/latest/download/media-linux-x64
-  curl -fLO https://github.com/lmdevv/media/releases/latest/download/SHA256SUMS
-  grep media-linux-x64 SHA256SUMS | sha256sum -c
-  mkdir -p ~/.local/bin && install -m 755 media-linux-x64 ~/.local/bin/media
-  ```
-
-  The macOS binary is signed ad hoc: a copy downloaded in a browser is quarantined and Gatekeeper
-  blocks it; `xattr -d com.apple.quarantine media-darwin-arm64` clears it.
-
-- **Nix:** `nix run github:lmdevv/media -- <command>`. NixOS (`nixosModules.cli`) and Home Manager
-  (`homeManagerModules.movies`) set `programs.media = { enable = true; convexUrl = "..."; mediaUrl
-  = "..."; }`. Home Manager's variables reach only shells it configures (on macOS, enable its
-  `programs.zsh`).
+## Setup
 
 `MEDIA_CONVEX_URL` beats a stored login: while it names another server, a profile saved for a
 different one stays unused, even with `--profile`. Run `MEDIA_CONVEX_URL= MEDIA_SERVER_URL= media
 ...` to use that profile.
-
-No install holds a credential; sign in as below.
-
-## Setup
 
 The server URL is the install's Convex URL (`CONVEX_PUBLIC_URL`; port 3210 on the Compose and
 NixOS installs, such as `http://nas.tailnet.ts.net:3210`); the media service URL is the web
@@ -209,23 +176,6 @@ its own when a `LIBRARY_ROOTS` folder ends in the same names (`/data/movies` to
 `/mnt/nas/movies`); pass `--path-map` for the rest.
 Media files are never moved or copied. Running the import again changes nothing already imported,
 and newer [movies] progress is kept unless the source played the item more recently.
-
-## Exit codes
-
-| Code | Meaning                                                          | What to do                                      |
-| ---- | ---------------------------------------------------------------- | ----------------------------------------------- |
-| 0    | Success                                                          |                                                 |
-| 1    | Server or protocol failure, unreadable config, mpv missing       | Read `error.code` and `error.message`           |
-| 2    | Usage: unknown command, missing flag, invalid argument           | Fix the command; see `media <command> --help`   |
-| 3    | Not logged in, session ended, credentials or login refused       | `media login`, or a new API key                 |
-| 4    | Forbidden: missing scope, role, PIN unlock, or not the host      | Use a key with the scope, or ask an admin       |
-| 5    | Not found (hidden titles also report this)                       | Check the ID; list again                        |
-| 6    | Conflict or stale revision                                       | Read the state again and retry                  |
-| 7    | Expired code, invite, or key                                     | Start over with a new one                       |
-| 8    | Rate limited, or the media service is busy                       | Wait and retry                                  |
-| 9    | Server unreachable                                               | Check the URLs; a mutation may still have run   |
-| 10   | A job followed with `--wait` failed, was cancelled, or timed out | `media jobs get <job-id>`                       |
-| 11   | `media import` could not use the Jellyfin or Plex server         | Read `error.code`, such as `source_auth_failed` |
 
 ## Troubleshooting
 

@@ -177,6 +177,16 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
   const transport = yield* ConvexTransport.ConvexTransport;
   const engine = yield* Auth.makeEngine({ convexUrl: url });
 
+  const refreshAfterRefusal = engine
+    .accessToken(true)
+    .pipe(
+      Effect.catchTag("TokenStorageError", (error) =>
+        Effect.logWarning("Platform.sessionStorageFailed").pipe(
+          Effect.annotateLogs({ operation: error.operation, message: error.message }),
+        ),
+      ),
+    );
+
   const run: Interface["run"] = (command, params) => {
     const [args] = params;
 
@@ -184,6 +194,7 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
       Effect.flatMap((wire) => transport.call(command.kind, command.path, wire)),
       Effect.flatMap((raw) => decodeResult(command.name, command.result, raw)),
       Effect.mapError(toPlatformError(command.name)),
+      Effect.tapErrorTag("Unauthenticated", () => refreshAfterRefusal),
       Effect.withSpan("Platform.call", { attributes: { command: command.name } }),
     );
   };
@@ -200,7 +211,10 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
             .pipe(Stream.mapEffect((raw) => decodeResult(command.name, command.result, raw))),
         ),
       ),
-    ).pipe(Stream.mapError(toPlatformError(command.name)));
+    ).pipe(
+      Stream.mapError(toPlatformError(command.name)),
+      Stream.tapErrorTag("Unauthenticated", () => refreshAfterRefusal),
+    );
   };
 
   const methods = effectMethods(effectBuilder({ run, watch }));

@@ -26,7 +26,8 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
   `LLMS.md` before writing Effect code. Do not import from or edit it.
 - **Convex functions stay plain TypeScript** with `v` validators. Effect lives in the media
   service, contracts, SDK, and CLI.
-- **No MCP server.** Agents use the CLI and `apps/cli/skills/movies/SKILL.md`.
+- **No MCP server.** Agents use the CLI and `apps/cli/skills/media/SKILL.md`, which loads one
+  reference per domain on demand.
 - **Never commit secret values.** `.env.example` lists configuration names only.
 - **Never weaken a lint rule, add a cast, or add a suppression to pass checks.** Fix the code or
   report the finding. Casts other than `as const` need a `// SAFETY:` comment.
@@ -38,7 +39,7 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 | -------------------- | ------------------------------------------------------------------- |
 | `apps/web`           | Vite + React + TanStack Router SPA                                  |
 | `apps/media`         | `@media/server`: Effect HttpApi media service; serves the SPA       |
-| `apps/cli`           | Effect CLI with JSON output; agent skill in `skills/movies/`        |
+| `apps/cli`           | Effect CLI with JSON output; agent skill in `skills/media/`         |
 | `apps/mobile`        | Expo + Expo Router + Uniwind iOS app over `@media/sdk/react`        |
 | `packages/backend`   | Old movies' Convex schema, functions, and Convex Auth               |
 | `packages/platform`  | The core's Convex project; movies and music port into it (ADR 0023) |

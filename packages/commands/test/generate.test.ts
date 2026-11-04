@@ -9,6 +9,7 @@ import { query } from "../src/command.ts";
 import { drift, plan, write } from "../src/outputs.ts";
 import type { Planned } from "../src/outputs.ts";
 import oxfmtConfig from "../../../.oxfmtrc.json" with { type: "json" };
+import { cliTarget } from "../src/targets/cli.ts";
 import { platformTarget } from "../src/targets/platform.ts";
 import { sdkTarget } from "../src/targets/sdk.ts";
 import { skillTarget } from "../src/targets/skill.ts";
@@ -18,6 +19,7 @@ const targets = [
   platformTarget("platform/commands"),
   sdkTarget("sdk/generated"),
   skillTarget("skill/references"),
+  cliTarget("cli/generated"),
 ];
 
 const repos: Array<string> = [];
@@ -69,6 +71,8 @@ describe("generate", () => {
       "sdk/generated/commands.ts",
       "skill/references/core.md",
       "skill/references/music.md",
+      "cli/generated/groups.ts",
+      "cli/generated/commands.ts",
     ]);
 
     await Promise.all(
@@ -163,6 +167,7 @@ describe("generate", () => {
     const edited = await planOf([{ ...info, summary: "Show the server's name" }, rename]);
 
     expect(await drift(repo, edited)).toEqual([
+      { kind: "stale", path: "cli/generated/commands.ts" },
       { kind: "stale", path: "platform/commands/core/server.ts" },
       { kind: "extra", path: "platform/commands/music/playlists.ts" },
       { kind: "stale", path: "platform/commands/refs.ts" },

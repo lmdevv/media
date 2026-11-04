@@ -241,8 +241,14 @@ Home Manager, or pass `--server` and `--media-url` to `media login` instead.
 
 No install stores a credential: each user runs `media login` once, or sets `MEDIA_API_KEY`.
 Output is JSON by default. Agents get an API key from Settings → API keys and follow
-[apps/cli/skills/movies/SKILL.md](apps/cli/skills/movies/SKILL.md). In a checkout,
-`pnpm --filter @lmdevv/movies build` writes `apps/cli/dist/media.js`.
+[apps/cli/skills/media/SKILL.md](apps/cli/skills/media/SKILL.md), which loads one reference per
+domain. In a checkout, `pnpm --filter @lmdevv/movies build` writes `apps/cli/dist/media.js`.
+
+`media --help` lists the `auth`, `admin`, `movies`, and `music` groups first. Until the movies
+port, the movies commands stay at the top level against the movies server, and the `auth` and
+`admin` groups reach the new core server with their own sign-in (`media auth login`).
+`media admin reset-password [<username>]` sets a new password from the server host with the
+core's admin key (`--env-file`, or `MEDIA_CORE_URL` and `MEDIA_CORE_ADMIN_KEY`).
 
 ## iOS app
 

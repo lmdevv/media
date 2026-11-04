@@ -15,7 +15,7 @@ import {
   layerProfileStorage,
   loadConfig,
   normalizeUrl,
-  ServerUrl,
+  isServerUrl,
   setDefaultProfile,
   updateProfile,
 } from "./config";
@@ -32,8 +32,6 @@ import {
 } from "./invocation";
 import { Output } from "./output";
 import { connect, openSdk, storageFailure } from "./session";
-
-const isServerUrl = Schema.is(ServerUrl);
 
 const keepOtherServerProfile = (
   invocation: Invocation,

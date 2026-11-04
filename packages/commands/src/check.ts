@@ -1,6 +1,7 @@
 import type { GenericValidator, PropertyValidators } from "convex/values";
 import { Match, Predicate } from "effect";
 
+import { cliRefusals } from "./cli.ts";
 import { commandKinds, domains } from "./command.ts";
 import type { CommandKind, CommandName, Domain } from "./command.ts";
 import { byCodeUnits } from "./order.ts";
@@ -88,7 +89,13 @@ export type Refusal =
       readonly at: string;
       readonly kind: string;
     }
-  | { readonly reason: "optional-result"; readonly name: string };
+  | { readonly reason: "optional-result"; readonly name: string }
+  | {
+      readonly reason: "cli-clash";
+      readonly name: string;
+      readonly other: string;
+      readonly path: string;
+    };
 
 /** The outcome of `check`: every command parsed, or every refusal found. */
 export type Checked =
@@ -344,6 +351,10 @@ export const check = (declarations: ReadonlyArray<Declaration>): Checked => {
     return { ok: false, refusals: [...crossed, ...refusalsOf(parsed)] };
   }
 
+  const placed = cliRefusals(parsed.value);
+
+  if (placed.length > 0) return { ok: false, refusals: placed };
+
   return {
     ok: true,
     commands: parsed.value.toSorted((left, right) => byCodeUnits(left.name, right.name)),
@@ -378,6 +389,8 @@ export const refusalMessage = (refusal: Refusal): string =>
         `a ${unsupported.kind} validator at ${unsupported.at} is not supported`,
       "optional-result": () =>
         "the result cannot be optional (return v.union(..., v.null()) instead)",
+      "cli-clash": (clash) =>
+        `its CLI path \`media ${clash.path}\` is also ${clash.other}'s (rename a module or function)`,
     }),
   )}`;
 

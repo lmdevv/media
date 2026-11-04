@@ -140,7 +140,9 @@ The SDK target settled how one declaration becomes a method in `/effect`, `/prom
   `stale_revision`, so the client turns one into `ProtocolError`. A session without the command's
   scope gets `Forbidden`. An ended session gets `Unauthenticated`.
 - **Sign-in.** The platform client reuses the session engine in `auth.ts`
-  (`Auth.makeEngine`): refresh, stalls, reconnects, and sign-out. The engine signs in with a
+  (`Auth.makeEngine`): refresh, stalls, reconnects, and sign-out. A command that comes back
+  `Unauthenticated` asks for one forced refresh, so a session ended elsewhere reads signed out at
+  once (D51, ADR 0021). The engine signs in with a
   provider and its params. `Auth` keeps its movies credentials and public interface over it. The
   platform client sends `password` with `{ username, password }`, `apiKey` with `{ key }`, and
   polls `deviceCode` with `{ deviceCode }`, which answers `pending` or `denied` until a session

@@ -263,7 +263,8 @@ export const groupWords: ReadonlySet<string> = new Set(
   }),
 );
 
-const positionalUsage = (spec: FlagSpec): string =>
+/** How a positional reads in a synopsis: `<user-id>`, `<admin|member>`. */
+export const positionalUsage = (spec: FlagSpec): string =>
   FlagType.$match(spec.type, {
     List: () => `<${spec.flag}...>`,
     Choice: ({ choices }) => `<${choices.join("|")}>`,
@@ -273,7 +274,8 @@ const positionalUsage = (spec: FlagSpec): string =>
     Json: () => `<${spec.flag}>`,
   });
 
-const synopsisPart = (spec: FlagSpec): string => {
+/** How a flag reads in a synopsis: `[--role <admin|member>]` when optional. */
+export const synopsisPart = (spec: FlagSpec): string => {
   if (!spec.required || spec.defaulted) return `[${flagUsage(spec)}]`;
 
   return FlagType.$is("Boolean")(spec.type) ? `(${flagUsage(spec)})` : flagUsage(spec);
@@ -291,7 +293,8 @@ const synopsis = (entry: RegistryEntry): string => {
   return ["media", entry.path, ...parts, ...wait].join(" ");
 };
 
-const pad = (rows: ReadonlyArray<readonly [string, string]>): ReadonlyArray<string> => {
+/** Two columns of help, the left padded to one width up to 48 characters. */
+export const pad = (rows: ReadonlyArray<readonly [string, string]>): ReadonlyArray<string> => {
   const width = Math.min(48, Math.max(0, ...rows.map(([left]) => left.length)));
 
   return rows.map(([left, right]) =>
@@ -301,7 +304,8 @@ const pad = (rows: ReadonlyArray<readonly [string, string]>): ReadonlyArray<stri
   );
 };
 
-const exitCodeLine = `Exit codes: ${Object.entries(ExitCode)
+/** The help line listing every exit code. */
+export const exitCodeLine = `Exit codes: ${Object.entries(ExitCode)
   .map(([name, code]) => `${String(code)} ${name}`)
   .join(", ")}.`;
 
@@ -319,17 +323,23 @@ const shortcutRows = (section: Shortcut["section"]): ReadonlyArray<readonly [str
     shortcut.section === section ? [[shortcut.synopsis, shortcut.summary] as const] : [],
   );
 
-/** `media --help`. */
-export const rootHelp = (version: string): string =>
+/** `media --help`: the core's groups, then the movies server's commands. */
+export const rootHelp = (version: string, groups: ReadonlyArray<string>): string =>
   [
-    `media ${version}: the [movies] command line. Everything the app can do, for people and agents.`,
+    `media ${version}: the [media] command line. Everything the apps can do, for people and agents.`,
+    "",
+    "Usage: media <group> <command> [flags]",
+    "",
+    ...groups,
+    "",
+    "The movies server, until the movies port (media login signs in to it)",
     "",
     "Usage: media <command> [flags]",
     "",
     ...(
       ["Account", "Watching", "Rooms", "Administration", "Troubleshooting", "Reference"] as const
     ).flatMap((section) => Array.of<string>(section).concat(pad(shortcutRows(section)), [""])),
-    "Commands (media <group> --help lists a group)",
+    "Commands (media <command-group> --help lists one)",
     ...pad([...groupWords].toSorted().map((group) => [group, groupSummary(group)] as const)),
     "",
     "Global flags",
@@ -374,7 +384,8 @@ export const groupHelp = (group: string): string =>
     `Run media ${group} <command> --help for its flags.`,
   ].join("\n");
 
-const flagNote = (spec: FlagSpec): string => {
+/** Whether a flag is required, how it is defaulted, and how a list is given. */
+export const flagNote = (spec: FlagSpec): string => {
   const parts = [spec.required && !spec.defaulted ? "required" : "optional"];
 
   if (spec.defaulted) {
@@ -432,7 +443,7 @@ export const commandHelp = (entry: RegistryEntry): string => {
 };
 
 /** Help for a shortcut. */
-export const shortcutHelp = (shortcut: Shortcut): string =>
+export const shortcutHelp = (shortcut: Pick<Shortcut, "synopsis" | "summary">): string =>
   [`Usage: media ${shortcut.synopsis}`, "", `${shortcut.summary}.`, "", exitCodeLine].join("\n");
 
 /** One entry of `media commands`. A type alias so it stays assignable to JSON. */
@@ -464,7 +475,7 @@ const dialect = "https://json-schema.org/draft/2020-12/schema";
  * The wire arguments as JSON Schema. Effect describes an empty struct as "anything but null";
  * agents read it better as an object with no properties, which is what the CLI sends.
  */
-const argsJsonSchema = (args: Schema.Top): Schema.Json => {
+export const argsJsonSchema = (args: Schema.Top): Schema.Json => {
   const ast = SchemaAST.toEncoded(args.ast);
 
   if (

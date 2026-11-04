@@ -46,3 +46,27 @@ export const findStack = (): Stack | undefined => {
 
   return { convexUrl, mediaServiceKey };
 };
+
+/** The core deployment of the stack: its URL and the env file holding its admin key. */
+export interface CoreStack {
+  readonly url: string;
+  readonly envFile: string;
+}
+
+/**
+ * The stack's core, or undefined unless `MEDIA_STACK_TESTS=1`.
+ *
+ * @throws When `MEDIA_STACK_TESTS=1` but no core is configured, a setup mistake.
+ */
+export const findCoreStack = (): CoreStack | undefined => {
+  if (process.env["MEDIA_STACK_TESTS"] !== "1") return undefined;
+
+  const envFile = join(repoRoot, "packages/platform/.env.local");
+  const url = readEnvFile(envFile).get("CONVEX_SELF_HOSTED_URL");
+
+  if (url === undefined) {
+    throw new Error("MEDIA_STACK_TESTS=1 but no core is configured; run scripts/dev-stack.sh up");
+  }
+
+  return { url, envFile };
+};

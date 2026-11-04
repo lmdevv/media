@@ -21,8 +21,8 @@ import {
   visibleRegistryEntries,
 } from "./catalog";
 import type { CliError } from "./cli-errors";
-import { ConfigFileError, ExitCode, exitCodeOf, reportOf, UsageError } from "./cli-errors";
-import { environment, loadConfig, resolveTarget } from "./config";
+import { ExitCode, exitCodeOf, reportOf, UsageError } from "./cli-errors";
+import { environment, environmentError, loadConfig, resolveTarget } from "./config";
 import type { ParsedTokens, WireArgs } from "./flags";
 import {
   buildArgs,
@@ -49,6 +49,25 @@ import type { Interface as OutputInterface } from "./output";
 import { renderResult } from "./render";
 import { roomCommands } from "./room-commands";
 import { diagnosticsCommands, formatLogLine } from "./diagnostics-commands";
+import type { CoreCommand, CoreShortcut } from "./core/command";
+import {
+  commandHelp as coreCommandHelp,
+  flagsOf,
+  pageOptions,
+  shortcutSynopsis,
+  wireArgsOf,
+} from "./core/command";
+import {
+  coreCatalog,
+  coreCommandNamed,
+  CoreEntry,
+  groupsHelp,
+  isCoreGroup,
+  prefixHelp,
+  resolveCore,
+} from "./core/routes";
+import { connectCore } from "./core/session";
+import { coreGroups } from "./generated/groups";
 import { connect, deviceIdFor } from "./session";
 import { watchCommands } from "./watch-commands";
 
@@ -72,6 +91,8 @@ type Route = Data.TaggedEnum<{
   Shortcut: { readonly command: ShortcutCommand; readonly rest: ReadonlyArray<string> };
   Call: { readonly rest: ReadonlyArray<string> };
   Commands: { readonly rest: ReadonlyArray<string> };
+  Core: { readonly entry: CoreEntry; readonly rest: ReadonlyArray<string> };
+  CoreHelp: { readonly help: string };
 }>;
 
 const Route = Data.taggedEnum<Route>();
@@ -98,6 +119,7 @@ const splitLeadingGlobals = (argv: ReadonlyArray<string>) => {
 const word = (text: string): string => kebabCase(text).toLowerCase();
 
 const topWords = [
+  ...coreGroups,
   ...groupWords,
   ...shortcuts.flatMap((shortcut) => (shortcut.path.includes(" ") ? [] : [shortcut.path])),
 ];
@@ -126,6 +148,8 @@ const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> 
   if (head === "call") return Result.succeed(Route.Call({ rest: restAfter(1) }));
 
   if (head === "commands") return Result.succeed(Route.Commands({ rest: restAfter(1) }));
+
+  if (isCoreGroup(head)) return resolveInGroup(head, words, restAfter);
   const twoWords = sub === undefined ? undefined : shortcutCommands.get(`${head} ${sub}`);
 
   if (twoWords !== undefined)
@@ -154,6 +178,30 @@ const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> 
   }
 
   return Result.succeed(Route.Registry({ entry, rest: restAfter(2) }));
+};
+
+const resolveInGroup = (
+  group: string,
+  words: ReadonlyArray<string>,
+  restAfter: (count: number) => ReadonlyArray<string>,
+): Result.Result<Route, UsageError> => {
+  const end = words.findIndex((token) => token.startsWith("-"));
+  const path = (end === -1 ? words : words.slice(0, end)).map(word);
+
+  return Option.match(resolveCore(path), {
+    onSome: ({ entry, taken }) => Result.succeed(Route.Core({ entry, rest: restAfter(taken) })),
+    onNone: () =>
+      Option.match(prefixHelp(path), {
+        onSome: (help) => Result.succeed(Route.CoreHelp({ help })),
+        onNone: () =>
+          Result.fail(
+            new UsageError({
+              message: `Unknown command "${path.join(" ")}"; run media ${group} --help`,
+              command: group,
+            }),
+          ),
+      }),
+  });
 };
 
 const formatOf = (tokens: ParsedTokens, command: string): Effect.Effect<Format, UsageError> => {
@@ -191,26 +239,15 @@ const rawFormat = (argv: ReadonlyArray<string>): Format =>
     ? "table"
     : "json";
 
-const prepare = Effect.fn("Cli.prepare")(
-  function* (path: string, tokens: ParsedTokens) {
-    const env = yield* environment;
-    const config = yield* loadConfig(env.configPath);
-    const target = resolveTarget(config, env, stringFlag(tokens, "profile"));
-    const format = yield* formatOf(tokens, path);
-    const invocation: Invocation = { path, tokens, env, target, format };
+const prepare = Effect.fn("Cli.prepare")(function* (path: string, tokens: ParsedTokens) {
+  const env = yield* environment;
+  const config = yield* loadConfig(env.configPath);
+  const target = resolveTarget(config, env, stringFlag(tokens, "profile"));
+  const format = yield* formatOf(tokens, path);
+  const invocation: Invocation = { path, tokens, env, target, format };
 
-    return invocation;
-  },
-  Effect.catchTag("ConfigError", (cause) =>
-    Effect.fail(
-      new ConfigFileError({
-        path: "environment",
-        message: "Could not read the environment",
-        cause,
-      }),
-    ),
-  ),
-);
+  return invocation;
+}, environmentError);
 
 const verbosity =
   (invocation: Invocation) =>
@@ -308,17 +345,17 @@ const runRegistry = Effect.fn("Cli.runRegistry")(function* (
   return yield* print(invocation.format, outcome);
 });
 
+const rootText = (): string => rootHelp(version, groupsHelp());
+
 const runShortcut = Effect.fn("Cli.runShortcut")(function* (
   command: ShortcutCommand,
   rest: ReadonlyArray<string>,
+  help: () => string,
 ) {
   const output = yield* Output;
   const tokens = yield* tokenize({ ...globalOptions, ...command.options }, rest, command.path);
-  const shortcut = shortcuts.find((candidate) => candidate.path === command.path);
 
-  if (booleanFlag(tokens, "help")) {
-    return yield* output.out(shortcut === undefined ? rootHelp(version) : shortcutHelp(shortcut));
-  }
+  if (booleanFlag(tokens, "help")) return yield* output.out(help());
 
   if (!command.positionals && tokens.positionals.length > 0) {
     return yield* new UsageError({
@@ -335,6 +372,61 @@ const runShortcut = Effect.fn("Cli.runShortcut")(function* (
   );
 });
 
+const oldShortcutHelp = (command: ShortcutCommand) => (): string => {
+  const shortcut = shortcuts.find((candidate) => candidate.path === command.path);
+
+  return shortcut === undefined ? rootText() : shortcutHelp(shortcut);
+};
+
+const coreShortcutHelp = (command: CoreShortcut) => (): string =>
+  shortcutHelp({ synopsis: shortcutSynopsis(command), summary: command.summary });
+
+const runGenerated = Effect.fn("Cli.runGenerated")(function* (
+  command: CoreCommand,
+  rest: ReadonlyArray<string>,
+) {
+  const output = yield* Output;
+  const flags = flagsOf(command);
+
+  const tokens = yield* tokenize(
+    optionsFor(flags, command.paginated ? pageOptions : {}),
+    rest,
+    command.path,
+  );
+
+  if (booleanFlag(tokens, "help")) return yield* output.out(coreCommandHelp(command));
+  const invocation = yield* prepare(command.path, tokens);
+  const wire = yield* wireArgsOf(command, invocation);
+
+  const call = yield* command
+    .prepare(wire)
+    .pipe(
+      Effect.mapError(
+        (error) =>
+          new UsageError({ message: describeIssue(flags, error.issue), command: command.path }),
+      ),
+    );
+
+  const outcome = yield* Effect.gen(function* () {
+    const connection = yield* connectCore(
+      invocation,
+      command.scope === "public" ? "optional" : "required",
+    );
+
+    const json = yield* connection.signedIn(call(connection.platform));
+
+    return Outcome.Result({ json, human: renderResult(command.result, json) });
+  }).pipe(verbosity(invocation));
+
+  return yield* print(invocation.format, outcome);
+});
+
+const runCore = (entry: CoreEntry, rest: ReadonlyArray<string>) =>
+  CoreEntry.$match(entry, {
+    Generated: ({ command }) => runGenerated(command, rest),
+    HandWritten: ({ command }) => runShortcut(command, rest, coreShortcutHelp(command)),
+  });
+
 const runCall = Effect.fn("Cli.runCall")(function* (rest: ReadonlyArray<string>) {
   const output = yield* Output;
   const { globals, words } = splitLeadingGlobals(rest);
@@ -348,14 +440,18 @@ const runCall = Effect.fn("Cli.runCall")(function* (rest: ReadonlyArray<string>)
 
   const entry = entryNamed(name);
 
-  if (entry === undefined) {
+  if (entry !== undefined) return yield* runRegistry(entry, [...globals, ...after]);
+
+  const generated = coreCommandNamed(name);
+
+  if (Option.isNone(generated)) {
     return yield* new UsageError({
       message: `Unknown registry command "${name}"; run media commands`,
       command: "call",
     });
   }
 
-  return yield* runRegistry(entry, [...globals, ...after]);
+  return yield* runGenerated(generated.value, [...globals, ...after]);
 });
 
 const runCommands = Effect.fn("Cli.runCommands")(function* (rest: ReadonlyArray<string>) {
@@ -371,7 +467,7 @@ const runCommands = Effect.fn("Cli.runCommands")(function* (rest: ReadonlyArray<
   const format = yield* formatOf(tokens, "commands");
 
   return yield* output.out(
-    format === "json" ? JSON.stringify(catalog(), null, 2) : rootHelp(version),
+    format === "json" ? JSON.stringify([...catalog(), ...coreCatalog()], null, 2) : rootText(),
   );
 });
 
@@ -383,13 +479,15 @@ const program = (
     const route = yield* Effect.fromResult(resolve(argv));
 
     yield* Route.$match(route, {
-      Root: () => output.out(rootHelp(version)),
+      Root: () => output.out(rootText()),
       Version: () => output.out(version),
       Group: ({ group }) => output.out(groupHelp(group)),
       Registry: ({ entry, rest }) => runRegistry(entry, rest),
-      Shortcut: ({ command, rest }) => runShortcut(command, rest),
+      Shortcut: ({ command, rest }) => runShortcut(command, rest, oldShortcutHelp(command)),
       Call: ({ rest }) => runCall(rest),
       Commands: ({ rest }) => runCommands(rest),
+      Core: ({ entry, rest }) => runCore(entry, rest),
+      CoreHelp: ({ help }) => output.out(help),
     });
   });
 
