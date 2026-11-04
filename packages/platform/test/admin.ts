@@ -99,7 +99,6 @@ const logSince = async (stack: CoreStack, cursor: number): Promise<typeof Functi
   return decodeLog(JSON.parse(body));
 };
 
-/** A point in the function log: calls that start after it show up in `usageSince`. */
 export interface LogMark {
   readonly cursor: number;
   readonly at: number;
@@ -110,7 +109,6 @@ export const logMark = async (stack: CoreStack): Promise<LogMark> => ({
   at: Date.now(),
 });
 
-/** The documents one attempt of a call read and wrote. */
 export interface CallUsage {
   readonly reads: number;
   readonly writes: number;

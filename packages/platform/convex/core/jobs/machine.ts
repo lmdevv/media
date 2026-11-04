@@ -1,39 +1,12 @@
-/**
- * The job state machine as pure functions: a stored job, an event, the time, and the kind's policy
- * in; the next stored state and the item writes out, or a refusal. `store.ts` is the only code
- * that applies a step, and plain Vitest covers every transition without a stack.
- *
- *   queued:   claim  -> running (attempts + 1, fresh lease)
- *   queued:   cancel -> canceled
- *   running:  report -> running (lease renewed; progress and items recorded)
- *   running:  finish succeeded -> succeeded (an item kind only when sealed and every item is done)
- *   running:  finish failed    -> queued (strikes + 1) or failed (retry false, or strikes spent)
- *   running:  cancel -> running with cancelRequestedAt, then canceled at its worker's next lease
- *             call, which answers canceled
- *   running:  lapse  -> canceled (cancel requested), queued, or failed (strikes spent)
- *   finished: cancel -> unchanged; a repeated finish of the same attempt and outcome -> unchanged
- *
- * A lease ends when the cron's lapse releases it, not the instant it expires: `holds` ignores the
- * expiry, and no claim takes over a running job, so a late renew before the release has no rival
- * holder and keeps its work. After the release, the attempt check refuses it.
- *
- * A lapse strikes only when its attempt made durable progress, which only items record: it
- * appended items or moved the done watermark. Such an attempt resets the strikes to 0, so a long
- * item job that restarts on every deploy keeps going, and a job that kills its worker before doing
- * anything new fails after `maxStrikes` (music's stalls, generalized). A reported kind's lapses
- * always strike.
- */
 import type { JobItem } from "./kinds";
 import type { JobCommon, JobFields, JobWork, Lease } from "./model";
 
-/** The part of a lease the machine fences on; the job id only finds the row. */
 type Attempt = Pick<Lease, "attempt">;
 
 export const LEASE_MS_MIN = 5000;
 
 export const LEASE_MS_MAX = 600_000;
 
-/** Most items one report appends, or marks done past the current watermark. */
 export const ITEM_BATCH_MAX = 4000;
 
 export const LAPSED_ERROR = "The worker stopped responding";
@@ -74,7 +47,6 @@ export type JobEvent =
   | { readonly type: "cancel" }
   | { readonly type: "lapse" };
 
-/** Item writes `store.ts` makes in the same mutation as the next state. */
 export type ItemWrite =
   /** Delete the done items with `from <= seq < to`. */
   | { readonly type: "drop"; readonly from: number; readonly to: number }
@@ -85,7 +57,6 @@ export type ItemWrite =
 
 type ItemsWork = Extract<JobWork, { mode: "items" }>;
 
-/** Why a step wrote nothing. Every one is an ordinary answer, not an error. */
 export type Refusal =
   /** The job was canceled at this attempt; the worker stops. */
   | { readonly refused: "canceled" }
@@ -101,7 +72,7 @@ export type Refusal =
 export type Step =
   | {
       readonly ok: true;
-      /** The job itself, the same object, when the step changes nothing. */
+      readonly changed: boolean;
       readonly next: JobFields;
       readonly writes: ReadonlyArray<ItemWrite>;
     }
@@ -118,17 +89,17 @@ const commonOf = (job: JobFields): JobCommon => ({
   message: job.message,
 });
 
-const unchanged = (job: JobFields): Step => ({ ok: true, next: job, writes: [] });
+const unchanged = (job: JobFields): Step => ({ ok: true, changed: false, next: job, writes: [] });
 
 const moved = (next: JobFields, writes: ReadonlyArray<ItemWrite> = []): Step => ({
   ok: true,
+  changed: true,
   next,
   writes,
 });
 
 const refuse = (refusal: Refusal): Step => ({ ok: false, ...refusal });
 
-/** The purge of a finishing job's items that are not done, if it has any. */
 const purgeOf = (work: JobWork): ReadonlyArray<ItemWrite> =>
   work.mode === "items" && work.appended > work.done ? [{ type: "purge", from: work.done }] : [];
 
@@ -160,7 +131,6 @@ export const holds = (
   return { held: false, refused: job.status === "canceled" ? "canceled" : "lost" };
 };
 
-/** What one report does to a running job's work. */
 interface WorkUpdate {
   readonly work: JobWork;
   readonly progressed: boolean;
@@ -174,8 +144,6 @@ const reportedWork = (work: Extract<JobWork, { mode: "reported" }>, report: Repo
 
   if (report.progress === undefined) return { work, progressed: false, writes: [] };
 
-  // A reported count is display only. A restarted attempt reports the same counts again, so
-  // treating them as progress would let a job that kills its worker at the same point retry forever.
   return {
     work: { mode: "reported", done: report.progress.done, total: report.progress.total },
     progressed: false,
@@ -293,7 +261,6 @@ const lapse = (job: Running, now: number, policy: Policy): Step => {
   return moved({ ...commonOf(job), strikes, status: "queued", lastError: LAPSED_ERROR });
 };
 
-/** Whether a repeated finish of the same attempt asks for the state the job already reached. */
 const settledAlready = (job: JobFields, end: Finish): boolean =>
   (job.status === "succeeded" && end.outcome === "succeeded") ||
   (job.status === "failed" && end.outcome === "failed");
@@ -356,7 +323,6 @@ export const step = (job: JobFields, event: JobEvent, now: number, policy: Polic
     : finish(held.job, event.finish, now, policy);
 };
 
-/** What `store.ts` read for one kind: its cap, its running jobs (at most cap), its oldest queued. */
 export interface KindQueue<JobId> {
   readonly cap: number;
   readonly running: number;
@@ -383,7 +349,6 @@ export const pickClaim = <JobId>(queues: ReadonlyArray<KindQueue<JobId>>): JobId
   return best?.jobId ?? null;
 };
 
-/** Done and total as a person reads them, whatever the job's work mode. */
 export const progressOf = (
   work: JobWork,
 ): { readonly done: number; readonly total: number | null } =>

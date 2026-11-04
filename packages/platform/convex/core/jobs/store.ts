@@ -1,8 +1,3 @@
-/**
- * The only code that writes `jobs` and `jobItems` rows. `queue.ts` (domains), `worker.ts` (the
- * server), `leases.ts` (the cron), and `admin.ts` all go through it, so every stored state is one
- * the machine produced.
- */
 import { internal } from "../../_generated/api";
 import type { Doc, Id } from "../../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../../_generated/server";
@@ -112,7 +107,7 @@ export const applyEvent = async (
 ): Promise<Step> => {
   const result = step(job, event, Date.now(), kindDef(job.payload.kind));
 
-  if (!result.ok || result.next === job) return result;
+  if (!result.ok || !result.changed) return result;
 
   await ctx.db.replace("jobs", job._id, result.next);
 
@@ -121,7 +116,6 @@ export const applyEvent = async (
   return result;
 };
 
-/** The job a lease names, or null when the id is gone. The machine decides whether it is held. */
 export const leasedJob = (db: DatabaseReader, lease: Lease): Promise<Doc<"jobs"> | null> =>
   db.get("jobs", lease.jobId);
 

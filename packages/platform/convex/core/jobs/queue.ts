@@ -1,8 +1,3 @@
-/**
- * What a domain calls from its own functions: queue a job and cancel one. A domain function the
- * server calls with a lease, such as a scanner callback, checks it with `machine.holds`, the rule
- * every lease call runs; the first such callback adds its helper here.
- */
 import type { Id } from "../../_generated/dataModel";
 import type { MutationCtx } from "../../_generated/server";
 import type { JobPayload } from "./kinds";

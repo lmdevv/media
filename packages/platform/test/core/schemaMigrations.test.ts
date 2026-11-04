@@ -13,10 +13,8 @@ const ROWS = 40_000;
 
 const SEED_ROWS = 8000;
 
-/** Rows one probe migration batch reads and at most writes. */
 const STEP_ROWS = 500;
 
-/** Rows one page of the verification reads. */
 const PAGE_ROWS = 1000;
 
 const GROUP_PREFIX = "migrate-";
@@ -69,7 +67,6 @@ const unmigrated = async (
     : unmigrated(core, group, result.continueCursor, counted.rows, counted.wrong);
 };
 
-/** Deletes the rows this lane seeded, in this run or an aborted one, so the table stays small. */
 const clearMigrateRows = async (core: CoreStack, cursor: string | null = null): Promise<void> => {
   const page = await runFunction(
     core,

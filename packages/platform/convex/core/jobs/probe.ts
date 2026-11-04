@@ -1,14 +1,9 @@
-/**
- * Probe entry points for the stack suite, internal only, like `core/limitsProbe.ts`. The probe
- * kinds live in `KINDS`; the server never claims them.
- */
 import { v } from "convex/values";
 
 import { internalMutation, internalQuery } from "../../_generated/server";
 import { kindDef } from "./kinds";
 import { cancel, enqueue as enqueueJob } from "./queue";
 
-/** The probe kinds whose payload is `{ run, n }`. */
 const probeRunKind = v.union(
   v.literal("probe.capped"),
   v.literal("probe.wide"),
@@ -17,7 +12,6 @@ const probeRunKind = v.union(
 
 const probeKind = v.union(probeRunKind, v.literal("probe.import"));
 
-/** Most jobs one `enqueue` queues, and most queued jobs one `reset` cancels. */
 const PROBE_BATCH = 1000;
 
 /**
@@ -65,7 +59,6 @@ export const reset = internalMutation({
   },
 });
 
-/** Whether any of a job's items are left, by one bounded read. */
 export const hasItems = internalQuery({
   args: { jobId: v.id("jobs") },
   returns: v.boolean(),

@@ -1,16 +1,3 @@
-/**
- * Data migrations: rewrites of stored rows that a new version needs and a schema change cannot
- * do. Music's cursor runner, ported (ADR 0012), with one registry, `MIGRATIONS`.
- *
- * Each migration walks one table in batches inside the per-call limits and saves its cursor after
- * every batch, so a stopped chain resumes where it stopped. Every batch is idempotent: it computes
- * each row's target and writes only rows that differ. Changing what a migration computes needs a
- * new name, or deployments that finished the old one never rewrite their rows.
- *
- * `scripts/dev-stack.sh` calls `run` after it deploys the core. A deploy mid-chain therefore calls
- * `run` while the chain's next `step` is scheduled; both steps start from the saved cursor, and
- * exactly one advances (see `step`). Scheduled steps survive a backend restart.
- */
 import { v } from "convex/values";
 
 import { internal } from "../_generated/api";
@@ -33,14 +20,9 @@ const defineMigration = <const Name extends string>(
   batch: SchemaMigration<Name>["batch"],
 ): SchemaMigration<Name> => ({ name, batch });
 
-/** Rows one probe batch reads, and at most writes. */
 const PROBE_BATCH = 500;
 
 const MIGRATIONS = [
-  /**
-   * Probe, for the stack suite, like `limitsProbe`: sets `doubled = position * 2` on every
-   * `limitsProbeRows` row. That table is empty in production, so this finishes in one batch there.
-   */
   defineMigration("probe.doublePositions", async (ctx, cursor) => {
     const page = await ctx.db.query("limitsProbeRows").paginate({ cursor, numItems: PROBE_BATCH });
 
@@ -81,7 +63,6 @@ export const run = internalMutation({
       v.object({
         name: migrationName,
         state: v.literal("scheduled"),
-        /** Where the chain starts: null for a fresh start, else where it resumes. */
         cursor: v.union(v.string(), v.null()),
       }),
     ),
@@ -153,10 +134,6 @@ export const status = internalQuery({
   },
 });
 
-/**
- * Probe only: sets the probe migration back to not started, so a repeat stack-suite run watches
- * it run again. A non-probe name fails argument validation.
- */
 export const resetProbe = internalMutation({
   args: { name: v.literal("probe.doublePositions") },
   returns: v.null(),

@@ -1,17 +1,6 @@
-/**
- * The one list of job kinds (ADR 0012). A kind is a name, the validators of what a job of that
- * kind stores (a payload, and items when it batches them), and its policy: how many run at once,
- * how many strikes it survives, and which active job a new one collapses into. Every stored
- * validator derives from `KINDS`, so adding a kind is one entry here.
- *
- * Kind names carry their domain as a prefix (`movies.scan`, `probe.capped`), so a server worker
- * pool names the kinds of its domain. `schema.ts` imports this module, so it imports only
- * `convex/values`.
- */
 import { v } from "convex/values";
 import type { Infer, ObjectType, PropertyValidators } from "convex/values";
 
-/** Where an import comes from. Shared by `imports` rows and every import kind's payload. */
 export const importSource = v.union(v.literal("jellyfin"), v.literal("plex"));
 
 const tagged = <const Kind extends string, Fields extends PropertyValidators>(
@@ -116,7 +105,6 @@ export function defineKind<
 const probeRun = { run: v.string(), n: v.number() };
 
 export const KINDS = [
-  /** Probe kinds ship like `limitsProbe`: the stack suite claims them, the server never does. */
   defineKind("probe.capped", {
     payload: probeRun,
     item: null,
@@ -147,14 +135,12 @@ export type JobKind = KindDef["kind"];
 
 export const jobKind = v.union(...KINDS.map((def) => v.literal(def.kind)));
 
-/** Every kind's payload, discriminated by `kind`. Stored as `jobs.payload`. */
 export const jobPayload = v.union(...KINDS.map((def) => def.payload));
 
 export type JobPayload = Infer<typeof jobPayload>;
 
 export type PayloadOf<Kind extends JobKind> = Extract<JobPayload, { readonly kind: Kind }>;
 
-/** Every item kind's item, discriminated by `kind`. Stored as `jobItems.item`. */
 export const jobItem = v.union(...KINDS.flatMap((def) => (def.item === null ? [] : [def.item])));
 
 export type JobItem = Infer<typeof jobItem>;

@@ -96,6 +96,17 @@ describe("job machine", () => {
     expect(renewed).toMatchObject({ status: "running", leaseExpiresAt: NOW + 3000 + LEASE_MS });
   });
 
+  it("keeps a lease renewed after it expired but before the cron released it", () => {
+    const running = claim(queued());
+    const late = NOW + LEASE_MS + 2000;
+
+    expect(next(report(running, {}, late))).toMatchObject({
+      status: "running",
+      attempts: 1,
+      leaseExpiresAt: late + LEASE_MS,
+    });
+  });
+
   it("leaves a lease that has not expired, and releases one that has to the queue", () => {
     const running = claim(queued());
 
@@ -197,7 +208,7 @@ describe("job machine", () => {
   it("answers a repeated finish of the same attempt with the same state and no writes", () => {
     const done = next(succeed(claim(queued())));
 
-    expect(succeed(done)).toEqual({ ok: true, next: done, writes: [] });
+    expect(succeed(done)).toEqual({ ok: true, changed: false, next: done, writes: [] });
     expect(
       step(
         done,

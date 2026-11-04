@@ -1,9 +1,3 @@
-/**
- * The stored job, one union over its status, so a queued job cannot carry a lease and a finished
- * job cannot carry a worker. `store.ts` writes each state whole with `db.replace`, so a
- * transition never leaves a field of the state it left. `schema.ts` imports this module, so it
- * imports only `convex/values` and `kinds.ts`.
- */
 import { v } from "convex/values";
 import type { Infer, ObjectType } from "convex/values";
 
@@ -32,17 +26,14 @@ export type JobWork = Infer<typeof jobWork>;
 
 const common = {
   payload: jobPayload,
-  /** From the kind's `dedupe` at enqueue; null when the kind does not dedupe. */
   dedupeKey: v.union(v.string(), v.null()),
   /**
    * Claims so far. The claim that makes attempt N hands its worker the lease `{ jobId, attempt: N }`,
    * so attempts is also the fencing token.
    */
   attempts: v.number(),
-  /** Counted against the kind's `maxStrikes`. */
   strikes: v.number(),
   work: jobWork,
-  /** The holder's last status line, kept across attempts. */
   message: v.union(v.string(), v.null()),
 };
 
@@ -52,13 +43,11 @@ export const jobDocument = v.union(
   v.object({
     ...common,
     status: v.literal("queued"),
-    /** Why the last attempt ended, while the job waits for its next. */
     lastError: v.union(v.string(), v.null()),
   }),
   v.object({
     ...common,
     status: v.literal("running"),
-    /** Who holds the lease, for people reading the job; fencing uses `attempts`. */
     workerId: v.string(),
     leaseExpiresAt: v.number(),
     claimedAt: v.number(),
@@ -94,7 +83,6 @@ export const jobItemDocument = v.object({
   item: jobItem,
 });
 
-/** What a worker holds: the job and the attempt it claimed. */
 export const lease = v.object({ jobId: v.id("jobs"), attempt: v.number() });
 
 export type Lease = Infer<typeof lease>;

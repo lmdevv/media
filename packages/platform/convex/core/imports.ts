@@ -1,11 +1,3 @@
-/**
- * Imports from a Jellyfin or Plex server (ADR 0012: movies' import records become core
- * `imports`). The core owns what every importing domain shares: which server, the job that runs
- * the import, and one active import per source server, which is the import kind's dedupe key. The
- * domain owns the plan (user-to-profile mapping, libraries, path mappings, sealed credentials),
- * its resume point, and the imported counts, in its own table keyed by the import id. Phase 3
- * tests with `probe.import`; movies adds `movies.import` to `KINDS`.
- */
 import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Infer } from "convex/values";
@@ -20,7 +12,6 @@ import { paginate } from "./lib/paginate";
 
 type ImportSource = Infer<typeof importSource>;
 
-/** Import kinds: every kind whose payload is exactly a source server. */
 type ImportKind = {
   [Kind in JobKind]: PayloadOf<Kind> extends {
     readonly kind: Kind;
@@ -44,7 +35,6 @@ interface Started {
   readonly created: boolean;
 }
 
-/** The import a job runs, or null when the job runs none. */
 const importOfJob = (db: DatabaseReader, jobId: Id<"jobs">): Promise<Doc<"imports"> | null> =>
   db
     .query("imports")
@@ -91,7 +81,6 @@ const importView = v.object({
   createdAt: v.number(),
 });
 
-/** Imports of one server, newest first. */
 export const listByServer = internalQuery({
   args: { source: importSource, serverId: v.string(), paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(importView),
@@ -121,7 +110,6 @@ export const listByServer = internalQuery({
   },
 });
 
-/** Probe entry for the stack suite: `startImport` with `probe.import`. Internal only. */
 export const probeStart = internalMutation({
   args: { source: importSource, serverId: v.string(), serverName: v.string() },
   returns: v.object({ importId: v.id("imports"), jobId: v.id("jobs"), created: v.boolean() }),

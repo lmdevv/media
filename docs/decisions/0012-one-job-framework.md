@@ -96,7 +96,8 @@ The first framework, in `packages/platform/convex/core/jobs/`, settled how these
   `media-service` scope (ADR 0009, ADR 0010).
 - `schemaMigrations.ts` is music's runner with one list, `MIGRATIONS`. `run` starts each
   unfinished migration from its saved cursor, and a step runs only from the saved cursor, so two
-  chains never both advance. `scripts/dev-stack.sh` calls `run` after it deploys the core, and
+  chains never both advance. A changed migration needs a new name, because a deployment that
+  finished the old name never runs it again. `scripts/dev-stack.sh` calls `run` after it deploys the core, and
   the deploy image does the same once the server joins it.
 - An `imports` row holds the source, the server id and name, and the job. One active import per
   source server is the import kind's dedupe key. Movies keeps the import plan, its resume point,

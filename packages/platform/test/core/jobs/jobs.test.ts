@@ -27,7 +27,6 @@ import type { Lease, ProbeKind, ProbeRunKind } from "./driver";
 
 const stack = coreStackFromEnvFile();
 
-/** The cron's 10 s interval plus the 5 s lease, plus slack. */
 const RELEASE_WITHIN_MS = 30_000;
 
 const ITEMS = 50_000;
@@ -72,7 +71,6 @@ const runningOf = (core: CoreStack, kind: ProbeKind): Promise<number> =>
 const hasItems = (core: CoreStack, jobId: Id<"jobs">): Promise<boolean> =>
   runFunction(core, internal.core.jobs.probe.hasItems, { jobId }, Schema.Boolean);
 
-/** Claims jobs of `kinds` with one worker until a claim comes back idle. */
 const claimAll = async (
   w: ReturnType<typeof worker>,
   kinds: ReadonlyArray<ProbeRunKind>,
@@ -83,12 +81,6 @@ const claimAll = async (
   return answer.outcome === "idle" ? leases : claimAll(w, kinds, [...leases, answer.lease]);
 };
 
-/**
- * Claims and finishes jobs of `kinds` until none is queued, every worker claiming again after an
- * idle answer, and holds each job across one more round trip so an over-cap claim would overlap
- * it. Records each kind's peak of jobs held at once, both as the workers saw it and as the core
- * lists it.
- */
 const drain = async (
   core: CoreStack,
   kinds: ReadonlyArray<ProbeRunKind>,

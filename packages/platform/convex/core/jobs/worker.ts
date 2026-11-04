@@ -1,15 +1,3 @@
-/**
- * The server's whole job protocol, five functions:
- *
- *   waiting (query)     per kind: free slots, and whether a claim would get a job now
- *   claim   (mutation)  take the oldest queued job among some kinds, inside their caps
- *   report  (mutation)  renew the lease, and record a message, progress, appended or done items
- *   items   (query)     read a held job's items from a seq
- *   finish  (mutation)  end the attempt: succeeded, or failed with or without a retry
- *
- * Every lease call answers `canceled` or `lost` as a value and writes nothing then, except that the
- * call which learns of a requested cancel commits it. Built with the p3-auth seam's builders.
- */
 import { v } from "convex/values";
 
 import { paginate } from "../lib/paginate";
@@ -121,7 +109,6 @@ export const report = serverMutation({
   },
 });
 
-/** Most items one `items` call returns. */
 const ITEMS_PAGE_MAX = 1000;
 
 /**

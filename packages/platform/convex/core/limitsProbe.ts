@@ -51,14 +51,8 @@ export const add = internalMutation({
   },
 });
 
-/** Most rows one `clear` call deletes. */
 const CLEAR_ROWS_MAX = 1000;
 
-/**
- * Deletes up to 1,000 rows of the groups whose name starts with `groupPrefix`, from `cursor`, so a
- * lane that seeds many rows leaves the table no larger. The caller passes back `continueCursor`
- * until `isDone`; resuming after the deleted rows keeps each call from rescanning them.
- */
 export const clear = internalMutation({
   args: { groupPrefix: v.string(), cursor: v.union(v.string(), v.null()) },
   returns: v.object({ continueCursor: v.string(), isDone: v.boolean() }),

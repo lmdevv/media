@@ -1,9 +1,3 @@
-/**
- * Reading and canceling jobs as a person would. Internal until commands exist: a later unit
- * declares scoped commands whose handlers call these bodies. No totals ship, because nothing reads
- * one yet; `store.applyEvent` is the one place that moves a job between statuses, so per-status
- * counters would go there.
- */
 import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import type { PaginationResult } from "convex/server";
 import { v } from "convex/values";
@@ -20,7 +14,6 @@ import { jobStatus } from "./model";
 import type { JobStatus } from "./model";
 import { cancel as cancelJob } from "./queue";
 
-/** A job as people and agents read it: progress flattened, no lease internals. */
 const jobView = v.object({
   id: v.id("jobs"),
   createdAt: v.number(),
@@ -102,12 +95,6 @@ const pageOf = (
   return paginate(db, { table: "jobs", index: "by_creation_time", order: "desc" }, options);
 };
 
-/**
- * Jobs newest first, optionally of one kind and/or one status, one page at a time. A status list
- * reads `by_status_lease`, so running jobs order by lease expiry there; the other statuses, and
- * every list without a status, order by creation. Running jobs number at most the sum of the
- * caps, so that order costs little.
- */
 export const list = internalQuery({
   args: {
     kind: v.optional(jobKind),

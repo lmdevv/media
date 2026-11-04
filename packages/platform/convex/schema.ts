@@ -125,43 +125,23 @@ export default defineSchema({
   limitsProbeRows: defineTable({
     group: v.string(),
     position: v.number(),
-    /** Written by the `probe.doublePositions` schema migration; absent until it reaches the row. */
     doubled: v.optional(v.number()),
   }).index("by_group_position", ["group", "position"]),
 
-  /**
-   * Every background job of every domain (ADR 0012), one index per access pattern:
-   *
-   * - `by_kind_status`: a claim's queue head and cap read, and kind plus status lists.
-   * - `by_status_lease`: the lease-release cron (running, earliest expiry first) and status lists.
-   *   Only running rows carry `leaseExpiresAt`, so other statuses order by creation.
-   * - `by_kind`: kind lists across statuses.
-   * - `by_dedupe_status`: enqueue's check for a queued or running job with the same key.
-   */
   jobs: defineTable(jobDocument)
     .index("by_kind_status", ["payload.kind", "status"])
     .index("by_status_lease", ["status", "leaseExpiresAt"])
     .index("by_kind", ["payload.kind"])
     .index("by_dedupe_status", ["dedupeKey", "status"]),
 
-  /**
-   * A job's batched items. Rows below the job's watermark are deleted as the holder reports them
-   * done, and a finished job's leftovers are purged in batches (`leases.purgeItems`).
-   */
   jobItems: defineTable(jobItemDocument).index("by_job_seq", ["jobId", "seq"]),
 
-  /** Progress of each data migration in `core/schemaMigrations.ts`. */
   schemaMigrations: defineTable({
     name: v.string(),
-    /** Where the next batch starts; null before the first batch. */
     cursor: v.union(v.string(), v.null()),
     done: v.boolean(),
   }).index("by_name", ["name"]),
 
-  /**
-   * One import from a Jellyfin or Plex server: which server, and the job that runs it. The plan
-   * and the imported counts are the domain's, in a table it keys by the import id.
-   */
   imports: defineTable({
     source: importSource,
     serverId: v.string(),

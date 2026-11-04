@@ -1,7 +1,3 @@
-/**
- * A test worker that speaks the server's job protocol over the admin key. A worker that stops
- * calling is what the cron sees when a server process dies.
- */
 import { setTimeout as sleep } from "node:timers/promises";
 
 import type { FunctionArgs } from "convex/server";
@@ -13,7 +9,6 @@ import { kindDef } from "../../../convex/core/jobs/kinds";
 import { FunctionRefused, runFunction } from "../../admin";
 import type { CoreStack } from "../../stack-env";
 
-/** The server functions. p3-auth repoints this at `api.core.jobs.worker` with a service session. */
 export const server = internal.core.jobs.worker;
 
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
@@ -120,7 +115,6 @@ export const jobOf = async (stack: CoreStack, jobId: Id<"jobs">): Promise<JobVie
   return job;
 };
 
-/** Polls until `ready` answers a value, or throws after `timeoutMs`. */
 export const eventually = async <Value>(
   what: string,
   ready: () => Promise<Value | null>,
@@ -143,7 +137,6 @@ export const eventually = async <Value>(
   return poll();
 };
 
-/** Runs `run` on each item, one after another, and returns the results in order. */
 export const inSequence = async <Item, Result>(
   items: ReadonlyArray<Item>,
   run: (item: Item) => Promise<Result>,
@@ -158,7 +151,6 @@ export const inSequence = async <Item, Result>(
   return inSequence(items, run, [...done, await run(item)]);
 };
 
-/** Polls a job until `done` holds for it. */
 export const waitForJob = (
   stack: CoreStack,
   jobId: Id<"jobs">,
@@ -175,10 +167,6 @@ export const waitForJob = (
     timeoutMs,
   );
 
-/**
- * Empties a probe kind: cancels its queued jobs and waits until no job of it runs, whatever an
- * aborted earlier run left (a running job frees its slot when its lease lapses).
- */
 export const freshKind = async (stack: CoreStack, kind: ProbeKind): Promise<void> => {
   const { more } = await runFunction(
     stack,
@@ -202,7 +190,6 @@ export const freshKind = async (stack: CoreStack, kind: ProbeKind): Promise<void
   );
 };
 
-/** Queues `count` jobs of a probe kind for one run, and returns their ids in queue order. */
 export const enqueue = (
   stack: CoreStack,
   kind: ProbeRunKind,
@@ -229,11 +216,9 @@ export type ReportFields = Omit<FunctionArgs<typeof server.report>, "lease" | "l
 
 export type End = FunctionArgs<typeof server.finish>["end"];
 
-/** `count` probe items numbered from `from`. */
 export const probeItems = (from: number, count: number) =>
   Array.from({ length: count }, (_, n) => ({ kind: "probe.items" as const, n: from + n }));
 
-/** Refusals that commit nothing, so the worker sends the same call again. */
 const RETRIED = new Set(["OptimisticConcurrencyControlFailure", "TooManyWrites"]);
 
 /**
@@ -257,7 +242,6 @@ const retrying = async <Value>(send: () => Promise<Value>, attempt = 1): Promise
   }
 };
 
-/** One test worker: a fixed id and the protocol calls, nothing else. */
 export const worker = (stack: CoreStack, workerId: string) => ({
   claim: (kinds: ReadonlyArray<ProbeKind>, leaseMs = LEASE_MS) =>
     retrying(() =>

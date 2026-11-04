@@ -1,14 +1,9 @@
-/**
- * The framework's own background work: the one lease-release cron target for every kind, and the
- * batched purge of a finished job's leftover items. Both stay inside the per-call limits.
- */
 import { v } from "convex/values";
 
 import { internal } from "../../_generated/api";
 import { internalMutation } from "../../_generated/server";
 import { applyEvent, deleteItemBatch } from "./store";
 
-/** Lapsed leases one call releases; each writes its job and may schedule one purge. */
 const RELEASE_BATCH = 200;
 
 /**
@@ -39,10 +34,6 @@ export const releaseExpired = internalMutation({
   },
 });
 
-/**
- * Deletes a finished job's items from `from` up, 4,000 per call, rescheduling itself until none
- * are left. The finishing transition schedules it in its own mutation.
- */
 export const purgeItems = internalMutation({
   args: { jobId: v.id("jobs"), from: v.number() },
   returns: v.null(),
