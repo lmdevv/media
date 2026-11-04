@@ -53,7 +53,6 @@ import { diagnosticsCommands, formatLogLine } from "./diagnostics-commands";
 import type { CoreCommand, CoreShortcut } from "./core/command";
 import {
   commandHelp as coreCommandHelp,
-  coreGroups,
   flagsOf,
   pageOptions,
   shortcutSynopsis,
@@ -69,6 +68,7 @@ import {
   resolveCore,
 } from "./core/routes";
 import { connectCore } from "./core/session";
+import { coreGroups } from "./generated/groups";
 import { connect, deviceIdFor } from "./session";
 import { watchCommands } from "./watch-commands";
 
@@ -181,7 +181,6 @@ const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> 
   return Result.succeed(Route.Registry({ entry, rest: restAfter(2) }));
 };
 
-/** A command in a core group, or the help of the group or of the words given. */
 const resolveInGroup = (
   group: string,
   words: ReadonlyArray<string>,
@@ -396,7 +395,6 @@ const coreShortcutHelp = (command: CoreShortcut) => (): string =>
     "\n",
   );
 
-/** Runs a generated command on the core through the platform SDK. */
 const runGenerated = Effect.fn("Cli.runGenerated")(function* (
   command: CoreCommand,
   rest: ReadonlyArray<string>,

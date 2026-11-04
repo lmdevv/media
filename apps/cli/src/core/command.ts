@@ -18,17 +18,11 @@ import type { FlagSet, WireArgs } from "../flags";
 import { buildArgs, deriveFlags, flagTypeLabel, flagUsage, withoutFields } from "../flags";
 import type { Invocation, ShortcutCommand } from "../invocation";
 import { readSecret, stringFlag, usage } from "../invocation";
-
-/**
- * The groups the generator places commands in, in help order (`cliGroups` in
- * `packages/commands`). A group can have no commands yet.
- */
-export const coreGroups = ["auth", "admin", "movies", "music"] as const;
+import type { coreGroups } from "../generated/groups";
 
 /** A generated command's group word. */
 export type CoreGroup = (typeof coreGroups)[number];
 
-/** An argument that never travels on the command line, and the variable that supplies it. */
 interface Secret {
   readonly field: string;
   readonly variable: string;
@@ -36,7 +30,6 @@ interface Secret {
 
 type Kind = "query" | "mutation" | "action";
 
-/** What the generator writes for one command. */
 interface Spec<Args, Result> {
   readonly name: string;
   readonly path: readonly [CoreGroup, ...Array<string>];
@@ -45,14 +38,9 @@ interface Spec<Args, Result> {
   readonly refusesKeys: boolean;
   readonly summary: string;
   readonly secrets: ReadonlyArray<Secret>;
-  /** `paginationOpts` comes from `--limit` and `--cursor`. */
   readonly paginated: boolean;
   readonly args: Schema.Codec<Args, WireArgs>;
   readonly result: Schema.Codec<Result, unknown>;
-  /**
-   * The SDK method that runs it. Inference unifies `Args` and `Result` across `args`, `result`,
-   * and this method, so schemas that disagree with the SDK's fail to compile here.
-   */
   readonly method: (
     platform: Platform.Interface,
   ) => (args: Args) => Effect.Effect<Result, Platform.PlatformError>;
@@ -77,7 +65,6 @@ export const coreShortcut = (
 export const shortcutSynopsis = (command: CoreShortcut): string =>
   command.usage.length === 0 ? command.path : `${command.path} ${command.usage}`;
 
-/** A call ready to run, its arguments already decoded. */
 type Call = (platform: Platform.Interface) => Effect.Effect<Schema.Json, Platform.PlatformError>;
 
 /** A generated command as the router, help, and `media commands` see it. */
@@ -99,7 +86,7 @@ export interface CoreCommand {
   readonly prepare: (wire: WireArgs) => Effect.Effect<Call, Schema.SchemaError>;
 }
 
-/** One generated command; `generated/commands.ts` calls it once per command. */
+/** A generated command from its spec. */
 export const coreCommand = <Args, Result>(spec: Spec<Args, Result>): CoreCommand => {
   const encoded = (result: Result): Effect.Effect<Schema.Json, ProtocolError> =>
     Schema.encodeUnknownEffect(Schema.toCodecJson(spec.result))(result).pipe(
@@ -165,16 +152,12 @@ const limitOf = (invocation: Invocation): Effect.Effect<number, UsageError> =>
     },
   });
 
-/**
- * A secret from its variable, or from piped stdin when it is the command's only one: two
- * secrets cannot share stdin.
- */
 const secretOf = (
   invocation: Invocation,
   secret: Secret,
-  only: boolean,
+  fromStdin: "allowed" | "shared with another secret",
 ): Effect.Effect<Redacted.Redacted, UsageError | ConfigFileError> =>
-  only
+  fromStdin === "allowed"
     ? readSecret(invocation, secret.variable, secret.field)
     : Config.Redacted(secret.variable).pipe(
         Effect.mapError(() => usage(invocation, `Set ${secret.variable} to the ${secret.field}`)),
@@ -184,11 +167,7 @@ const secretOf = (
         ),
       );
 
-/**
- * The wire arguments of an invocation: flags and `--json` as for any command, then the page from
- * `--limit` and `--cursor` unless `--json` gave one, then each secret from its variable or stdin.
- * A secret inside `--json` is refused: it would sit in shell history like a flag.
- */
+/** The wire arguments of an invocation, refusing a secret given in `--json`. */
 export const wireArgsOf = Effect.fn("Core.wireArgs")(function* (
   command: CoreCommand,
   invocation: Invocation,
@@ -217,7 +196,11 @@ export const wireArgsOf = Effect.fn("Core.wireArgs")(function* (
 
   const secrets = yield* Effect.forEach(command.secrets, (secret) =>
     Effect.map(
-      secretOf(invocation, secret, command.secrets.length === 1),
+      secretOf(
+        invocation,
+        secret,
+        command.secrets.length === 1 ? "allowed" : "shared with another secret",
+      ),
       (value) => [secret.field, Redacted.value(value)] as const,
     ),
   );

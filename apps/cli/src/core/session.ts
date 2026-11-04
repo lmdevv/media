@@ -1,7 +1,3 @@
-/**
- * Where the CLI keeps each profile's core server and session (D53), and how a command connects to
- * the core through the platform SDK. The movies port folds this module into the one config.
- */
 import { join } from "node:path";
 
 import type { Unauthenticated } from "@media/contracts/errors";
@@ -14,7 +10,6 @@ import { nonEmpty, normalizeUrl, ServerUrl } from "../config";
 import { readTextFile, writePrivateFile } from "../files";
 import type { Invocation } from "../invocation";
 
-/** One profile's core: the server that issued its session, and the session while signed in. */
 const StoredCore = Schema.Struct({
   url: ServerUrl,
   session: Schema.optionalKey(Schema.Struct({ token: Schema.String, refreshToken: Schema.String })),
@@ -110,10 +105,6 @@ const storageError =
   (cause: ConfigFileError): TokenStorage.TokenStorageError =>
     new TokenStorage.TokenStorageError({ operation, message: cause.message, cause });
 
-/**
- * Keeps the session for `url` in the profile's file. A file for another core reads as signed out
- * and is replaced at the next sign-in; signing out keeps the core's URL.
- */
 const layerSessionFile = (path: string, url: string): Layer.Layer<TokenStorage.TokenStorage> =>
   Layer.succeed(
     TokenStorage.TokenStorage,
@@ -163,15 +154,10 @@ export const openCore = Effect.fn("Core.open")(function* (target: CoreTarget, ur
   return Context.get(context, Platform.Platform);
 });
 
-/** What a command on the core runs with. */
 interface CoreConnection {
   readonly platform: Platform.Interface;
   readonly url: string;
   readonly target: CoreTarget;
-  /**
-   * Runs a call, reporting an `Unauthenticated` refusal that left the client signed out (D51) as
-   * `NotLoggedIn`, so the person knows to sign in again.
-   */
   readonly signedIn: <A>(
     effect: Effect.Effect<A, Platform.PlatformError>,
   ) => Effect.Effect<A, Platform.PlatformError | NotLoggedIn>;

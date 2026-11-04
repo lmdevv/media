@@ -1,5 +1,5 @@
 import type { CheckedCommand } from "../check.ts";
-import { cliPath, isPaginated, secretsOf } from "../cli.ts";
+import { cliGroups, cliPath, isPaginated, secretsOf } from "../cli.ts";
 import type { Emitted, Target } from "../outputs.ts";
 import { GENERATED_NOTE } from "../note.ts";
 import { fieldsSchema, wireSchema } from "../render.ts";
@@ -21,14 +21,20 @@ const entry = (command: CheckedCommand): string =>
     "}),",
   ].join("\n");
 
-/**
- * The CLI's commands: each command's path, what help and `media commands` show, its schemas, and
- * the platform SDK method that runs it. The file is data; `coreCommand` in the CLI holds the policy,
- * and inference ties each entry's schemas to its SDK method's types, so the two cannot disagree.
- */
+/** The CLI's generated command list. */
 export const cliTarget = (root: string): Target => ({
   root,
   emit: (commands) => [
+    {
+      path: "groups.ts",
+      text: [
+        ...GENERATED_NOTE.map((line) => `// ${line}`),
+        "",
+        "/** The CLI groups, in help order; a group can have no commands yet. */",
+        `export const coreGroups = ${JSON.stringify(cliGroups)} as const;`,
+        "",
+      ].join("\n"),
+    } satisfies Emitted,
     {
       path: "commands.ts",
       text: [

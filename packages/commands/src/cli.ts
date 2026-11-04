@@ -25,8 +25,7 @@ const kebab = (segment: string): string =>
  * command, then its module's last segment and its function, in kebab case.
  * `core.accounts.users.setRole` is `admin users set-role`, `core.auth.sessions.endAll` is
  * `auth sessions end-all`, and an admin-scoped `music.scans.start` would be
- * `admin music scans start`. Middle module segments drop out, so `check` refuses two commands on
- * one path.
+ * `admin music scans start`. Middle module segments drop out.
  */
 export const cliPath = (
   command: Pick<CheckedCommand, "name" | "domain" | "scope">,
@@ -49,9 +48,7 @@ const SECRET = /password$/iu;
 
 /**
  * The arguments a flag would leak into shell history and the process list: every string field
- * whose name ends in `password`. The CLI reads each from its variable, or from stdin when it is
- * the command's only one. The variables carry `ARG_` so a caller's own `MEDIA_PASSWORD` never
- * becomes another person's password.
+ * whose name ends in `password`.
  */
 export const secretsOf = (args: ReadonlyArray<WireField>): ReadonlyArray<Secret> =>
   args.flatMap((field) =>

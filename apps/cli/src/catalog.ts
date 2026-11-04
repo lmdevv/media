@@ -323,10 +323,7 @@ const shortcutRows = (section: Shortcut["section"]): ReadonlyArray<readonly [str
     shortcut.section === section ? [[shortcut.synopsis, shortcut.summary] as const] : [],
   );
 
-/**
- * `media --help`: the core's groups, then the movies server's commands, which stay at the top
- * level until the movies port moves them under `media movies`.
- */
+/** `media --help`: the core's groups, then the movies server's commands. */
 export const rootHelp = (version: string, groups: ReadonlyArray<string>): string =>
   [
     `media ${version}: the [media] command line. Everything the apps can do, for people and agents.`,

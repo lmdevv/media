@@ -56,7 +56,6 @@ const errorCode = (stderr: string): string =>
     stderr.trimEnd().split("\n").at(-1) ?? "",
   ).error.code;
 
-/** Sets up the core's owner through the SDK, as the account app would, unless it has one. */
 const setUpOwner = (username: string) =>
   Effect.runPromise(
     Effect.scoped(

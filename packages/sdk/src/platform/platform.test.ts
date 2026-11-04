@@ -40,7 +40,6 @@ const withPlatform = <A, E>(
 
 const RENEWED = jwtExpiringAt(Date.now() + 7_200_000, "user-1|session-1");
 
-/** Signs in, then has the server refuse a command as unauthenticated and answer the refresh with `refresh`. */
 const refusedAfterSignIn = (refresh: Reply) =>
   withPlatform((platform, fake) =>
     Effect.gen(function* () {

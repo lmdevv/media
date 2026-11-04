@@ -177,14 +177,7 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
   const transport = yield* ConvexTransport.ConvexTransport;
   const engine = yield* Auth.makeEngine({ convexUrl: url });
 
-  /**
-   * A command refused as `Unauthenticated` asks for one forced refresh at once (D51). A refused
-   * refresh forgets the session, so the client reads signed out when the call returns rather than
-   * at the next scheduled renewal. A renewed one keeps it: the refusal was the command's own, such
-   * as a wrong current password, and repeating the call would spend another sign-in try, so the
-   * call is never repeated.
-   */
-  const confirmSession = engine
+  const refreshAfterRefusal = engine
     .accessToken(true)
     .pipe(
       Effect.catchTag("TokenStorageError", (error) =>
@@ -201,7 +194,7 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
       Effect.flatMap((wire) => transport.call(command.kind, command.path, wire)),
       Effect.flatMap((raw) => decodeResult(command.name, command.result, raw)),
       Effect.mapError(toPlatformError(command.name)),
-      Effect.tapErrorTag("Unauthenticated", () => confirmSession),
+      Effect.tapErrorTag("Unauthenticated", () => refreshAfterRefusal),
       Effect.withSpan("Platform.call", { attributes: { command: command.name } }),
     );
   };
@@ -220,7 +213,7 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
       ),
     ).pipe(
       Stream.mapError(toPlatformError(command.name)),
-      Stream.tapErrorTag("Unauthenticated", () => confirmSession),
+      Stream.tapErrorTag("Unauthenticated", () => refreshAfterRefusal),
     );
   };
 

@@ -12,7 +12,7 @@ import { writePrivateFile } from "../files";
 import { withMediaService } from "../testing/media-service";
 import { makeTempDir, readText, removeDir } from "../testing/process";
 import { runInProcess, stderrRecords } from "../testing/run-cli";
-import { coreGroups } from "./command";
+import { coreGroups } from "../generated/groups";
 import { coreEntries, isCoreGroup } from "./routes";
 
 const home = await makeTempDir("media-core-test-");
@@ -213,7 +213,6 @@ describe("a core command", () => {
   });
 });
 
-/** Answers every request with `status` and `body`, recording its key and body in `seen`. */
 const answering =
   (status: number, body: string, seen: Array<string>) =>
   (request: IncomingMessage, response: ServerResponse): void => {
@@ -274,10 +273,12 @@ describe("media admin reset-password", () => {
     expect(refused.code).toBe(ExitCode.unauthenticated);
   });
 
-  it("asks where the admin key is when nothing names it", async () => {
+  it("asks where the admin key is, never taking the movies backend's from the environment", async () => {
     const run = await media(["admin", "reset-password", "lucia"], {
       ...freshHome(),
       MEDIA_ARG_PASSWORD: "new-password",
+      CONVEX_SELF_HOSTED_URL: "http://127.0.0.1:3210",
+      CONVEX_SELF_HOSTED_ADMIN_KEY: "movies-admin-key",
     });
 
     expect(run.code).toBe(ExitCode.usage);

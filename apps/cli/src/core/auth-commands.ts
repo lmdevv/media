@@ -14,7 +14,6 @@ import { coreTarget, openCore, storageFailure } from "./session";
 
 const isServerUrl = Schema.is(ServerUrl);
 
-/** The device sign-in's code, on stderr: one JSON line for agents, a sentence for people. */
 const announceDevice = Effect.fn("Core.announceDevice")(function* (
   invocation: Invocation,
   pending: Platform.DeviceSignIn,

@@ -4,7 +4,8 @@ import { pad } from "../catalog";
 import { generatedCommands } from "../generated/commands";
 import { authCommands } from "./auth-commands";
 import type { CoreCatalogEntry, CoreCommand, CoreGroup, CoreShortcut } from "./command";
-import { catalogEntry, coreGroups, shortcutSynopsis } from "./command";
+import { coreGroups } from "../generated/groups";
+import { catalogEntry, shortcutSynopsis } from "./command";
 import { hostCommands } from "./host";
 
 /** A command in a core group: generated from the command list, or written by hand. */
@@ -34,8 +35,7 @@ const table: ReadonlyMap<string, CoreEntry> = new Map(
 export const isCoreGroup = (word: string): word is CoreGroup =>
   coreGroups.some((group) => group === word);
 
-/** The longest a core command's path runs: group, domain, module, and function. */
-const LONGEST_PATH = 4;
+const LONGEST_PATH = Math.max(...coreEntries.map((entry) => pathOf(entry).split(" ").length));
 
 /**
  * The core command the leading words name, trying the longest path first, and how many words it

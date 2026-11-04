@@ -10,7 +10,6 @@ import { positionalText, readSecret, stringFlag, textOutcome, usage } from "../i
 import type { CoreShortcut } from "./command";
 import { coreShortcut } from "./command";
 
-/** The core deployment as its host knows it: its URL and its admin key. */
 interface HostKey {
   readonly url: string;
   readonly adminKey: Redacted.Redacted;
@@ -32,11 +31,6 @@ const envFileValues = (text: string): ReadonlyMap<string, string> =>
     }),
   );
 
-/**
- * The URL and admin key, together from one place: `--env-file`, as the core's own env file
- * names them, else `MEDIA_CORE_URL` and `MEDIA_CORE_ADMIN_KEY`. The environment's own
- * `CONVEX_SELF_HOSTED_*` are never read: on an install they name the movies backend.
- */
 const hostKey = Effect.fn("Core.hostKey")(
   function* (invocation: Invocation) {
     const fromFile = yield* Option.match(stringFlag(invocation.tokens, "env-file"), {
@@ -105,10 +99,6 @@ const decodeReset = Schema.decodeUnknownEffect(Schema.Struct({ username: Schema.
 
 const RESET = "core/accounts/host:resetPassword";
 
-/**
- * Runs the internal function at `path` with the admin key, as `convex run` does. A refusal the
- * function sends keeps its code; a refused key is `Unauthenticated`.
- */
 const runInternal = Effect.fn("Core.runInternal")(function* (
   key: HostKey,
   path: string,

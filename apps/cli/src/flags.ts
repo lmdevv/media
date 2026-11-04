@@ -108,7 +108,7 @@ export const deriveFlags = (args: Schema.Top): FlagSet => {
 
   if (!SchemaAST.isObjects(ast)) return { flags: [], positional: null };
 
-  return flagSet(
+  return withPositional(
     ast.propertySignatures.map((property): FlagSpec => ({
       key: String(property.name),
       flag: kebabCase(String(property.name)),
@@ -119,8 +119,7 @@ export const deriveFlags = (args: Schema.Top): FlagSet => {
   );
 };
 
-/** The flags, with the one required plain value among them, if only one, as the positional. */
-const flagSet = (flags: ReadonlyArray<FlagSpec>): FlagSet => {
+const withPositional = (flags: ReadonlyArray<FlagSpec>): FlagSet => {
   const positionalCandidates = flags.filter(
     (spec) =>
       spec.required &&
@@ -142,7 +141,7 @@ const flagSet = (flags: ReadonlyArray<FlagSpec>): FlagSet => {
  * positional chosen again from what is left.
  */
 export const withoutFields = (set: FlagSet, keys: ReadonlySet<string>): FlagSet =>
-  flagSet(set.flags.filter((spec) => !keys.has(spec.key)));
+  withPositional(set.flags.filter((spec) => !keys.has(spec.key)));
 
 const isIdField = (key: string): boolean => /Ids?$/u.test(key);
 

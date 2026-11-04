@@ -71,6 +71,7 @@ describe("generate", () => {
       "sdk/generated/commands.ts",
       "skill/references/core.md",
       "skill/references/music.md",
+      "cli/generated/groups.ts",
       "cli/generated/commands.ts",
     ]);
 
