@@ -34,7 +34,8 @@ two runs on their own. Each side of a run owns these resources and nothing else:
 | Volumes    | `movies-verify-<run>-<side>_convex-data`, `_movies-data`, `_movies-transcode`, and its network |
 | Image      | `movies:verify-<run>`, built by `up` for the after side                                 |
 | Ports      | Two free loopback ports chosen at `up`: the web app and Convex, with `MOVIES_PUBLIC_URL` and `CONVEX_PUBLIC_URL` at `http://localhost:<port>` |
-| State      | `${TMPDIR:-/tmp}/movies-verify/<run>/<side>/`: ports, pids, logs, and each person's CLI config |
+| Network    | The browser host's own network namespace where the host allows it, reached through Unix sockets in the state folder (see [Network view](#network-view)) |
+| State      | `${TMPDIR:-/tmp}/movies-verify/<run>/<side>/`: ports, pids, logs, sockets, and each person's CLI config |
 | Simulator  | `movies-verify-<run>-<side>` on `darwin`, made by `ios up`                              |
 | Evidence   | `captures/verify/<run>/`, gitignored and kept after `down`                              |
 
@@ -46,11 +47,48 @@ person their own `XDG_CONFIG_HOME`. `scripts/dev-stack.sh` rewrites the `.env.lo
 owner's `pnpm dev` reads, so this skill never calls it. Compose sees only the settings `up`
 writes, never a `deploy/compose/.env` or the caller's environment.
 
+### Network view
+
+Chromium cancels every request still waiting for a connection, to any address including
+`localhost`, whenever any interface on its host gains or loses an address. Each Docker container
+that starts or stops on a bridge network does that, so another agent's `up`, `down`, or test
+container fails requests in a browser on the host with `net::ERR_NETWORK_CHANGED`: a module, a
+poster, or data goes missing from the page.
+
+Where the host allows it, the browser host therefore runs in a private user and network namespace
+(`scripts/private-network.sh` at the repo root), with the same Chromium, Node, fonts, ffmpeg, and
+files. Its loopback has only these, relayed over Unix sockets in the state folder:
+
+- The side's web and Convex ports, at the same numbers, so every URL and origin stays
+  `http://localhost:<port>` for the browser, the CLI, and the iOS forwards alike.
+- An HTTPS proxy to the internet on the host, for the Cast SDK, TMDB images, and trailers.
+  Chromium sends loopback addresses straight to the relays, never through it.
+
+`$S browser` and `seed.mjs` reach the host through `browser.sock` in the state folder. Every
+command fails, naming the requests, when Chromium cancelled any with `net::ERR_NETWORK_CHANGED`
+since the page's last command: open the page again before you trust it. In the namespace that
+should never happen.
+
+The namespace needs Linux with unprivileged user namespaces, util-linux's `unshare`, and
+iproute2's `ip`. Some hosts lack one, such as macOS, or Ubuntu 24.04, whose AppArmor policy
+blocks unprivileged user namespaces by default. `MOVIES_VERIFY_BROWSER_NETWORK`, read at `up` and
+`browser restart`, picks what happens:
+
+| Value            | Browser network                                                              |
+| ---------------- | ---------------------------------------------------------------------------- |
+| `auto` (default) | The namespace when a quick check can make one; otherwise the host network    |
+| `isolated`       | The namespace, or the browser host stops and says why                        |
+| `host`           | The host network                                                             |
+
+On the host network, `up` and `doctor` print why, and Docker network changes elsewhere on the
+host can fail the browser's requests; the command that saw them fails rather than hide it.
+
 ## Launch
 
 Prerequisites: Docker 28 or later (image mounts), Node 24, pnpm, `pnpm install` done in this
 checkout, and ffmpeg for recordings. On NixOS the helper uses the system Chromium on its own,
-since Playwright's bundled one does not run there.
+since Playwright's bundled one does not run there. The browser gets its own network namespace
+where the host allows it (see [Network view](#network-view)).
 
 ```sh
 $S up                  # the after side: build the image from this checkout
@@ -66,7 +104,8 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/movies:main
    `deploy/compose/compose.demo.yaml`; `up` pulls it once per machine.
 3. It starts the Compose project and waits until `/api/health` reports
    `"backend":"connected"`, which needs Convex, the deployed functions, and the media service.
-4. It starts the browser host and runs first-run setup through the web app, as an owner does:
+4. It starts the browser host, in its own network namespace where it can, and runs first-run setup
+   through the web app, as an owner does:
    the owner `admin@movies.local` (Lucía) with password `password123`, the `Movies` library at
    `/media/library/Movies` and its first scan, then the `Shows` library at
    `/media/library/Shows` from Admin, Libraries.
@@ -153,6 +192,8 @@ one line per check, and exits non-zero on any `FAIL`:
 - The entrypoint deployed this image's functions: `/data/version` matches the image's version and
   functions hash.
 - The browser host answers.
+- The browser has its own network namespace: its Chromium's `/proc/<pid>/ns/net` differs from
+  the helper's. When the browser shares the host network instead, an `info` line says why.
 - Lucía's CLI is signed in.
 - For the after side, the image matches the checkout.
 
@@ -194,7 +235,7 @@ matches `Play from start`.
 | `wait <locator> [--hidden]`, `wait --url RE`     | Waits up to 30 s (`--timeout ms`)                            |
 | `text`, `count`, `attr --attr A`                 | Reads the element                                            |
 | `snapshot [locator] [--path F]`                  | Prints the ARIA tree, and saves it with `--path`             |
-| `screenshot --path F [--full]`                   | Centres an element in the window, waits for the posters and backdrops it covers, then saves a PNG of the page or element |
+| `screenshot --path F [--full]`                   | Centres an element in the window, waits for the posters and backdrops it covers, then saves a PNG of the page or element. Fails when any of them failed to load |
 | `video`                                          | Prints `{"playing","seconds","elements","source","size","requests"}` from the real media element |
 | `wait-video --past S` or `--advance S`           | Waits until the video plays past S, or S more seconds        |
 | `record-start --path F.mp4 [--show-actions]`     | Records the page to an H.264 MP4                             |
@@ -205,6 +246,7 @@ matches `Play from start`.
 | `invite [--invite-role member\|admin]`           | Makes an invite link in Admin, Users and prints its code     |
 | `join --code C --name N --email E`               | Accepts an invite at `/invite/<code>` and makes the account  |
 | `url`, `pages`, `close-page`, `eval --js`        | Inspects the session, or closes a page and its recording     |
+| `network`                                        | Prints `isolated` or `host` and the Chromium's pid           |
 | `restart`                                        | Restarts the host after `browser.mjs` changed; signs `main` in again as Lucía |
 
 `video` reads the page's media elements, not the player's buttons. `source` is `file` when the
@@ -340,7 +382,8 @@ $S down --side before   # one side
 $S down --purge         # also remove the iOS build cache on the Mac (~/movies-ios/verify-<run>, and dev-client-<hash> for this checkout)
 ```
 
-`down` stops only what this run started: processes by the pids it recorded, and Docker resources
+`down` stops only what this run started: processes by the pids it recorded (the browser host
+stops its own namespace, relays, and sockets with it), and Docker resources
 by this side's Compose project label, which also finds them when the state folder is gone. It
 never kills by process name. The demo library image stays for the next run. Evidence in
 `captures/verify/<run>/` stays; clear it yourself when you no longer need it.
@@ -359,6 +402,13 @@ never kills by process name. The demo library image stays for the next run. Evid
   left the iPhone alone.
 - `scripts/seed.mjs` creates the [demo data](#demo-data) after setup and checks what each person
   sees. `up` calls it.
+- `scripts/check-network.mjs [--trials N] [--image IMG]` proves the [network view](#network-view)
+  on this host, with no stack. It runs one browser host on the host network and one isolated,
+  stops a bridge container of its own (`movies-verify-netcheck-<pid>`, default image
+  `ghcr.io/lmdevv/movies:main`) while each has requests waiting, and prints what each lost. It
+  exits 0 when the isolated host lost none and the host-network one lost some, 1 when the isolated
+  one lost any or failed, and 2 when the control lost none, which proves nothing. The container can fail
+  requests in other browsers on this host, so run it only to check the isolation.
 
 ## Feature map
 

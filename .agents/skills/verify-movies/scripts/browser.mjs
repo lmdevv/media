@@ -4,15 +4,32 @@
 // action to it and prints the result. verify-movies.sh calls this; agents call it through
 // `verify-movies.sh browser`.
 //
-//   node browser.mjs serve --state <dir> --base <url>
+//   node browser.mjs serve --state <dir> --base <url> --convex <url>
 //   node browser.mjs <command> --state <dir> [flags]
-import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
+//
+// Where the host allows it, the browser runs in a private network namespace (see `isolate`),
+// because Chromium cancels its queued requests whenever any host interface gains or loses an
+// address, which every Docker container start and stop does. MOVIES_VERIFY_BROWSER_NETWORK picks
+// `auto` (the default: isolated when possible), `isolated` (or fail), or `host`.
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, request as httpRequest } from "node:http";
+import { connect, createServer as createTcpServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const OWNER = { name: "Lucía", email: "admin@movies.local", password: "password123" };
+
+// Every socket lives in the side's state folder and is named relative to it: a socket address
+// holds at most 107 bytes, which a long TMPDIR and run name can pass.
+const SOCKETS = { control: "browser.sock", web: "web.sock", convex: "convex.sock", proxy: "proxy.sock" };
+const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
+const PRIVATE_NETWORK = fileURLToPath(new URL("../../../../scripts/private-network.sh", import.meta.url));
+const NETWORKS = ["auto", "isolated", "host"];
+// A relay must carry each direction's end on its own: a client may finish its request and still
+// wait for the response.
+const HALF_OPEN = { allowHalfOpen: true };
 
 // Runs in every page before the app: records each media element that plays, including detached
 // ones, so `video` reports real playback rather than what the player's buttons show.
@@ -28,6 +45,7 @@ const TRACK_MEDIA = `(() => {
 const FLAGS = {
   state: { type: "string" },
   base: { type: "string" },
+  convex: { type: "string" },
   page: { type: "string", default: "main" },
   device: { type: "string" },
   width: { type: "string" },
@@ -78,32 +96,36 @@ if (!command || !flags.state) {
 }
 
 if (command === "serve") {
-  await serve(flags.state, flags.base);
+  await serve(flags);
+} else if (command === "serve-inside") {
+  await serveInside(flags);
 } else {
   await send(flags.state, command, rest, flags);
 }
 
 async function send(state, name, args, options) {
-  let port;
-  try {
-    port = readFileSync(join(state, "browser.port"), "utf8").trim();
-  } catch {
+  const body = JSON.stringify({ ...options, command: name, args, cwd: process.cwd() });
+  if (!existsSync(join(state, SOCKETS.control))) {
     console.error("no browser host for this side; run `verify-movies.sh up` first");
     process.exit(1);
   }
-  const body = { ...options, command: name, args, cwd: process.cwd() };
-  let response;
+  process.chdir(state);
+  let result;
   try {
-    response = await fetch(`http://127.0.0.1:${port}/`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+    result = await new Promise((resolveResult, rejectResult) => {
+      const request = httpRequest({ socketPath: SOCKETS.control, method: "POST", path: "/" }, (response) => {
+        let text = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => (text += chunk));
+        response.on("end", () => resolveResult(JSON.parse(text)));
+      });
+      request.on("error", rejectResult);
+      request.end(body);
     });
   } catch (error) {
-    console.error(`the browser host on port ${port} does not answer: ${error.message}`);
+    console.error(`the browser host does not answer on ${join(state, SOCKETS.control)}: ${error.message}`);
     process.exit(1);
   }
-  const result = await response.json();
   if (result.output !== undefined && result.output !== "") console.log(result.output);
   if (!result.ok) {
     console.error(result.error);
@@ -111,15 +133,139 @@ async function send(state, name, args, options) {
   }
 }
 
-async function serve(state, base) {
-  if (!base) throw new Error("serve needs --base");
+function pipe(a, b) {
+  a.pipe(b).pipe(a);
+  a.on("error", () => b.destroy());
+  b.on("error", () => a.destroy());
+}
+
+function listen(server, ...address) {
+  return new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(...address, () => resolveListen(server));
+  });
+}
+
+function chromiumPid() {
+  if (process.platform !== "linux") return "";
+  const cmdline = (pid) => {
+    try {
+      return readFileSync(`/proc/${pid}/cmdline`, "utf8");
+    } catch {
+      return "";
+    }
+  };
+  const children = readFileSync(`/proc/self/task/${process.pid}/children`, "utf8").trim().split(" ");
+  return children.find((pid) => cmdline(pid).includes("--remote-debugging-pipe")) ?? "";
+}
+
+function portOf(url, name) {
+  const port = Number(new URL(url).port);
+  if (!port) throw new Error(`serve needs --${name} with an explicit port, not ${url}`);
+  return port;
+}
+
+// Why this host can't give the browser a private network namespace, or null when it can.
+function namespaceUnavailable() {
+  if (process.platform !== "linux") return `${process.platform} has no network namespaces`;
+  const probe = spawnSync(PRIVATE_NETWORK, ["true"], { encoding: "utf8" });
+  if (probe.error) return `scripts/private-network.sh did not run (${probe.error.message})`;
+  if (probe.status === 0) return null;
+  return `scripts/private-network.sh failed (${probe.stderr.trim() || `exit ${probe.status}`})`;
+}
+
+async function serve(options) {
+  if (!options.base || !options.convex) throw new Error("serve needs --base and --convex");
+  const requested = process.env.MOVIES_VERIFY_BROWSER_NETWORK || "auto";
+  if (!NETWORKS.includes(requested)) {
+    throw new Error(`MOVIES_VERIFY_BROWSER_NETWORK must be ${NETWORKS.join(", ")}, not "${requested}"`);
+  }
+  const unavailable = requested === "host" ? "MOVIES_VERIFY_BROWSER_NETWORK=host" : namespaceUnavailable();
+  if (unavailable && requested === "isolated") {
+    throw new Error(`MOVIES_VERIFY_BROWSER_NETWORK=isolated, but ${unavailable}`);
+  }
+  process.chdir(options.state);
+  // A host that was killed leaves its sockets behind, and a socket path that exists can't be bound.
+  for (const socket of Object.values(SOCKETS)) rmSync(socket, { force: true });
+  if (!unavailable) return isolate(options.base, options.convex);
+  // verify-movies.sh shows this line at `up` and in `doctor`.
+  console.error(`browser: ${unavailable}, so the browser shares the host network, where Docker network changes can fail its requests`);
+  return drive(options.base, "host", []);
+}
+
+// Pathname Unix sockets cross network namespaces, so the relays use them. Web and Convex keep
+// their port numbers inside, so every origin stays `http://localhost:<port>`. The proxy carries
+// HTTPS to the internet for the Cast SDK, TMDB images, and trailers.
+async function isolate(base, convex) {
+  const toHost = (port) =>
+    createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, port, host: "127.0.0.1" })));
+  const proxy = createServer((request, response) => {
+    response.writeHead(501).end("this proxy carries HTTPS only\n");
+  });
+  proxy.on("connect", (request, client, head) => {
+    const at = request.url.lastIndexOf(":");
+    const upstream = connect(Number(request.url.slice(at + 1)), request.url.slice(0, at).replace(/^\[(.*)\]$/, "$1"));
+    const refuse = () => client.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+    upstream.once("error", refuse);
+    upstream.once("connect", () => {
+      upstream.off("error", refuse);
+      client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      upstream.write(head);
+      pipe(client, upstream);
+    });
+    client.on("error", () => upstream.destroy());
+  });
+  const relays = await Promise.all([
+    listen(toHost(portOf(base, "base")), SOCKETS.web),
+    listen(toHost(portOf(convex, "convex")), SOCKETS.convex),
+    listen(proxy, SOCKETS.proxy),
+  ]);
+
+  // The wrapper execs down to node, so the child is the browser host itself. Its stdin is a pipe
+  // from this process, which closes if this process dies, and the host then stops too.
+  const host = spawn(
+    PRIVATE_NETWORK,
+    [process.execPath, fileURLToPath(import.meta.url), "serve-inside", "--state", ".", "--base", base, "--convex", convex],
+    { stdio: ["pipe", "inherit", "inherit"] },
+  );
+  const stop = () => host.kill("SIGTERM");
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
+  const finish = (code) => {
+    for (const relay of relays) relay.close();
+    for (const socket of [SOCKETS.web, SOCKETS.convex, SOCKETS.proxy]) rmSync(socket, { force: true });
+    if (code !== 0 && !existsSync(SOCKETS.control)) {
+      console.error("the browser host stopped before it was ready (see above)");
+    }
+    process.exit(code);
+  };
+  host.once("error", (error) => {
+    console.error(`could not run scripts/private-network.sh: ${error.message}`);
+    finish(1);
+  });
+  host.once("exit", (code, signal) => finish(code ?? (signal === "SIGTERM" ? 0 : 1)));
+}
+
+async function serveInside(options) {
+  process.chdir(options.state);
+  const toSocket = (socket) => createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, path: socket })));
+  await listen(toSocket(SOCKETS.web), portOf(options.base, "base"), "127.0.0.1");
+  await listen(toSocket(SOCKETS.convex), portOf(options.convex, "convex"), "127.0.0.1");
+  const proxy = await listen(toSocket(SOCKETS.proxy), 0, "127.0.0.1");
+  // Chromium never proxies loopback, so the app's ports still reach the relays above.
+  await drive(options.base, "isolated", [`--proxy-server=http://127.0.0.1:${proxy.address().port}`]);
+  process.stdin.on("end", () => process.kill(process.pid, "SIGTERM"));
+  process.stdin.resume();
+}
+
+async function drive(base, network, launchArgs) {
   const { chromium, devices } = await import("@playwright/test");
   const executablePath = process.env.CHROMIUM_PATH || undefined;
   const browser = await chromium.launch({
     executablePath,
-    args: ["--autoplay-policy=no-user-gesture-required"],
+    args: ["--autoplay-policy=no-user-gesture-required", ...launchArgs],
   });
-  /** @type {Map<string, {context: any, page: any, viewport: any, recording: any, streams: any}>} */
+  /** @type {Map<string, {context: any, page: any, viewport: any, recording: any, streams: any, networkChanged: string[]}>} */
   const pages = new Map();
 
   const pageFor = async (options) => {
@@ -153,10 +299,14 @@ async function serve(state, base) {
       if (path.startsWith("/media/hls/")) streams.hls += 1;
       else if (path.startsWith("/media/direct/") || path.startsWith("/media/file/")) streams.direct += 1;
     });
+    const networkChanged = [];
+    page.on("requestfailed", (request) => {
+      if (request.failure()?.errorText === NETWORK_CHANGED) networkChanged.push(request.url());
+    });
     // Screencast frames come at this size; the device's pixel ratio, up to 2, keeps text sharp.
     const scale = Math.min(device?.deviceScaleFactor ?? 1, 2);
     const frame = { width: viewport.width * scale, height: viewport.height * scale };
-    const entry = { context, page, viewport: frame, recording: null, streams };
+    const entry = { context, page, viewport: frame, recording: null, streams, networkChanged };
     pages.set(options.page, entry);
     return entry;
   };
@@ -327,7 +477,7 @@ async function serve(state, base) {
         };
         const deadline = Date.now() + ms;
         while (!covered().every((image) => image.complete)) {
-          if (Date.now() > deadline) return false;
+          if (Date.now() > deadline) return { settled: false, broken: [] };
           await new Promise((done) => setTimeout(done, 100));
         }
         // A background image has no element to wait on, so load each into one; the cache hands
@@ -335,17 +485,26 @@ async function serve(state, base) {
         const loaded = backgrounds().map((url) => {
           const image = new Image();
           image.src = url;
-          return image.decode().catch(() => {});
+          return image.decode().then(() => null, () => url);
         });
         const timer = new Promise((done) => setTimeout(() => done("timeout"), Math.max(0, deadline - Date.now())));
-        if ((await Promise.race([Promise.all(loaded), timer])) === "timeout") return false;
-        await Promise.all(covered().map((image) => image.decode().catch(() => {})));
+        const backgroundResults = await Promise.race([Promise.all(loaded), timer]);
+        if (backgroundResults === "timeout") return { settled: false, broken: [] };
+        // A broken image counts as `complete` too; it is the one with nothing to decode.
+        const imageResults = await Promise.all(
+          covered().map((image) =>
+            image.decode().then(() => null, () => (image.naturalWidth === 0 && image.currentSrc ? image.currentSrc : null)),
+          ),
+        );
         await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-        return true;
+        return { settled: true, broken: [...backgroundResults, ...imageResults].filter((url) => url !== null) };
       },
       [Boolean(options.full), timeout(options)],
     );
-    if (!settled) throw new Error("the images in the screenshot did not finish loading");
+    if (!settled.settled) throw new Error("the images in the screenshot did not finish loading");
+    if (settled.broken.length > 0) {
+      throw new Error(`images in the screenshot failed to load: ${settled.broken.join(", ")}`);
+    }
   };
 
   // Signed-in pages land on the profile picker, or on a page with the app's main navigation.
@@ -391,7 +550,9 @@ async function serve(state, base) {
     async "record-stop"(entry) {
       return stopRecording(entry);
     },
-    async open({ page }, options) {
+    async open({ page, networkChanged }, options) {
+      // A new page load replaces whatever the cancelled requests left out.
+      networkChanged.length = 0;
       await page.goto(options.args[0] ?? "/");
       return page.url();
     },
@@ -570,6 +731,7 @@ async function serve(state, base) {
   };
 
   const handle = async (options) => {
+    if (options.command === "network") return `${network} ${chromiumPid()}`;
     if (options.command === "pages") {
       return [...pages.entries()]
         .map(([name, { page, recording }]) => `${name}\t${page.url()}${recording ? "\trecording" : ""}`)
@@ -585,16 +747,31 @@ async function serve(state, base) {
     }
     const run = commands[options.command];
     if (!run) throw new Error(`unknown command "${options.command}"`);
-    return run(await pageFor(options), options);
+    const entry = await pageFor(options);
+    const outcome = await run(entry, options).then(
+      (output) => ({ output }),
+      (error) => ({ error }),
+    );
+    const lost = entry.networkChanged.splice(0);
+    if (lost.length > 0) {
+      const urls = [...new Set(lost)];
+      throw new Error(
+        [
+          `${lost.length} requests failed with ${NETWORK_CHANGED}: a host network address changed, ` +
+            `as a Docker container starting or stopping does. Open the page again before trusting it.`,
+          ...(outcome.error ? [outcome.error.message.split("\n")[0]] : []),
+          ...urls.slice(0, 5),
+          ...(urls.length > 5 ? [`and ${urls.length - 5} more`] : []),
+        ].join("\n"),
+      );
+    }
+    if (outcome.error) throw outcome.error;
+    return outcome.output;
   };
 
+  // Connecting to a Unix socket needs write permission on it, so under the usual umask only this
+  // user drives the signed-in pages.
   const server = createServer((request, response) => {
-    // A JSON content type makes a browser preflight a cross-origin request, which this host never
-    // answers, so a web page open elsewhere can't drive the signed-in verification pages.
-    if (request.method !== "POST" || request.headers["content-type"] !== "application/json") {
-      response.writeHead(415).end();
-      return;
-    }
     let body = "";
     request.on("data", (chunk) => (body += chunk));
     request.on("end", async () => {
@@ -608,11 +785,7 @@ async function serve(state, base) {
       response.end(JSON.stringify(result));
     });
   });
-  server.listen(0, "127.0.0.1", () => {
-    const portFile = join(state, "browser.port");
-    writeFileSync(`${portFile}.tmp`, String(server.address().port));
-    renameSync(`${portFile}.tmp`, portFile);
-  });
+  await listen(server, SOCKETS.control);
 
   const stop = async () => {
     for (const entry of pages.values()) {
@@ -620,7 +793,7 @@ async function serve(state, base) {
       await entry.context.close().catch(() => {});
     }
     await browser.close();
-    rmSync(join(state, "browser.port"), { force: true });
+    rmSync(SOCKETS.control, { force: true });
     process.exit(0);
   };
   process.on("SIGTERM", stop);
