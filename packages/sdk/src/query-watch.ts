@@ -46,19 +46,18 @@ const retryTransient: Schedule.Schedule<Duration.Duration, CallError> = Schedule
 );
 
 /**
- * Builds a watch of query `name` with `args`, run on `runtime`. Nothing runs until the first
- * listener subscribes, and the subscription closes when the last one leaves.
+ * Builds a watch of `results`, run on `runtime`. Nothing runs until the first listener subscribes,
+ * and the stream stops when the last one leaves.
  */
-export const make = <Name extends QueryName>(
-  runtime: ManagedRuntime.ManagedRuntime<MoviesClient, unknown>,
-  name: Name,
-  args: CommandArgs<Name>,
-): QueryWatch<CommandResult<Name>> => {
+export const fromStream = <A, R>(
+  runtime: ManagedRuntime.ManagedRuntime<R, unknown>,
+  results: Stream.Stream<A, CallError, R>,
+): QueryWatch<A> => {
   const listeners = new Set<() => void>();
-  let state: QueryState<CommandResult<Name>> = LOADING;
+  let state: QueryState<A> = LOADING;
   let running: Fiber.Fiber<void, unknown> | null = null;
 
-  const publish = (next: QueryState<CommandResult<Name>>): void => {
+  const publish = (next: QueryState<A>): void => {
     state = next;
 
     for (const listener of listeners) listener();
@@ -66,7 +65,7 @@ export const make = <Name extends QueryName>(
 
   const start = (): void => {
     running = runtime.runFork(
-      Stream.unwrap(Effect.map(MoviesClient, (client) => client.subscribe(name, args))).pipe(
+      results.pipe(
         Stream.retry(retryTransient),
         Stream.runForEach((data) => Effect.sync(() => publish({ status: "success", data }))),
         Effect.catch((error) => Effect.sync(() => publish({ status: "error", error, retry }))),
@@ -107,3 +106,14 @@ export const make = <Name extends QueryName>(
     getSnapshot: () => state,
   };
 };
+
+/** A watch of query `name` with `args` on the movies backend, run on `runtime`. */
+export const make = <Name extends QueryName>(
+  runtime: ManagedRuntime.ManagedRuntime<MoviesClient, unknown>,
+  name: Name,
+  args: CommandArgs<Name>,
+): QueryWatch<CommandResult<Name>> =>
+  fromStream(
+    runtime,
+    Stream.unwrap(Effect.map(MoviesClient, (client) => client.subscribe(name, args))),
+  );

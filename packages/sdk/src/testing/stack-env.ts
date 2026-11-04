@@ -47,3 +47,30 @@ export const findStack = (): Stack | undefined => {
 
   return { convexUrl, mediaServiceKey };
 };
+
+/** What the platform stack suites need: the core deployment and its admin key. */
+export interface PlatformStack {
+  readonly url: string;
+  readonly adminKey: string;
+}
+
+/**
+ * The platform deployment of the stack to test, or undefined unless `MEDIA_STACK_TESTS=1`.
+ *
+ * @throws When `MEDIA_STACK_TESTS=1` but no core stack is configured, a setup mistake.
+ */
+export const findPlatformStack = (): PlatformStack | undefined => {
+  if (process.env["MEDIA_STACK_TESTS"] !== "1") return undefined;
+
+  const platform = readEnvFile(join(repoRoot, "packages/platform/.env.local"));
+  const url = platform.get("CONVEX_SELF_HOSTED_URL");
+  const adminKey = platform.get("CONVEX_SELF_HOSTED_ADMIN_KEY");
+
+  if (url === undefined || adminKey === undefined) {
+    throw new Error(
+      "MEDIA_STACK_TESTS=1 but no core stack is configured; run scripts/dev-stack.sh up",
+    );
+  }
+
+  return { url, adminKey };
+};

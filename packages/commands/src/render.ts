@@ -37,6 +37,41 @@ export const wireSource = (wire: Wire): string =>
     }),
   );
 
+/**
+ * The fields of an object as an Effect Schema struct, such as `Schema.Struct({ name:
+ * Schema.String })`. An optional field is an absent key, as Convex drops `undefined`.
+ */
+export const fieldsSchema = (fields: ReadonlyArray<WireField>): string =>
+  `Schema.Struct({ ${fields
+    .map(
+      (field) =>
+        `${key(field.name)}: ${field.optional ? `Schema.optionalKey(${wireSchema(field.wire)})` : wireSchema(field.wire)}`,
+    )
+    .join(", ")} })`;
+
+/**
+ * A value's Effect Schema as source, whose encoded side is the value Convex sends, such as
+ * `Schema.Array(Schema.String)`. An ID is a string branded with its table, `Id<users>`, so an ID
+ * from one result type-checks only where the same table's ID is expected.
+ */
+export const wireSchema = (wire: Wire): string =>
+  Match.value(wire).pipe(
+    Match.discriminatorsExhaustive("kind")({
+      string: () => "Schema.String",
+      float64: () => "Schema.Finite",
+      int64: () => "Schema.BigInt",
+      boolean: () => "Schema.Boolean",
+      null: () => "Schema.Null",
+      bytes: () => "Schema.instanceOf(ArrayBuffer)",
+      id: (id) => `Schema.String.pipe(Schema.brand(${JSON.stringify(`Id<${id.table}>`)}))`,
+      literal: (literal) => `Schema.Literal(${literalSource(literal.value)})`,
+      array: (array) => `Schema.Array(${wireSchema(array.element)})`,
+      record: (record) => `Schema.Record(${wireSchema(record.key)}, ${wireSchema(record.value)})`,
+      union: (union) => `Schema.Union([${union.members.map(wireSchema).join(", ")}])`,
+      object: (object) => fieldsSchema(object.fields),
+    }),
+  );
+
 /** The fields of an object as a TypeScript type, such as `{ name: string; year?: number }`. */
 export const fieldsType = (fields: ReadonlyArray<WireField>): string =>
   fields.length === 0

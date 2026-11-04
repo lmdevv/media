@@ -36,8 +36,11 @@ export interface RecordedRequest {
 export type Reply = Data.TaggedEnum<{
   /** The function returned `value`. */
   Success: { readonly value: Schema.Json };
-  /** The function threw `ConvexError({ code, message })`. */
-  Failure: { readonly code: ErrorCode; readonly message: string };
+  /**
+   * The function threw `ConvexError({ code, message })`. The platform's device code provider
+   * also answers `pending` and `denied`.
+   */
+  Failure: { readonly code: ErrorCode | "pending" | "denied"; readonly message: string };
   /** The function crashed with an uncaught error. */
   Crash: { readonly message: string };
   /** Convex could not verify the auth token and ran nothing. */
