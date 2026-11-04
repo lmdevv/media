@@ -20,10 +20,6 @@ import { liveSession } from "./sessions";
 
 const MIN_LIFETIME_MS = 1000;
 
-/**
- * The deployment's key ring, read on every call so nothing outlives one Convex request. A bad
- * setting is a deployment defect, so it throws a message that names the problem, never the value.
- */
 const keyRing = async (): Promise<TicketKeyRing> => {
   const loaded = await loadTicketKeyRing(process.env[TICKET_KEYS_SETTING] ?? "");
 
@@ -36,11 +32,9 @@ const keyRing = async (): Promise<TicketKeyRing> => {
   return loaded.value;
 };
 
-/** What a domain command asks a personal ticket for. */
 interface PersonalTicketFor {
   readonly resource: TicketResource;
   readonly purpose: TicketPurpose;
-  /** Whole milliseconds, at least 1 s; longer than 6 h is cut to 6 h. */
   readonly lifetimeMs?: number | undefined;
 }
 
