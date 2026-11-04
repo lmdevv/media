@@ -6,7 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p convex && tsc --noEmit -p scripts && tsc --noEmit -p test",
     "test": "vitest run --root ../.. packages/platform/test",
-    "test:stack": "MEDIA_STACK_TESTS=1 vitest run --root ../.. packages/platform/test",
+    "test:stack": "MEDIA_STACK_TESTS=1 vitest run --root ../.. --no-file-parallelism packages/platform/test",
     "configure": "node scripts/configure.ts"
   },
   "dependencies": {

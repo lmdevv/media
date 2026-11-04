@@ -51,6 +51,34 @@ export const add = internalMutation({
   },
 });
 
+/** Most rows one `clear` call deletes. */
+const CLEAR_ROWS_MAX = 1000;
+
+/**
+ * Deletes up to 1,000 rows of the groups whose name starts with `groupPrefix`, from `cursor`, so a
+ * lane that seeds many rows leaves the table no larger. The caller passes back `continueCursor`
+ * until `isDone`; resuming after the deleted rows keeps each call from rescanning them.
+ */
+export const clear = internalMutation({
+  args: { groupPrefix: v.string(), cursor: v.union(v.string(), v.null()) },
+  returns: v.object({ continueCursor: v.string(), isDone: v.boolean() }),
+  handler: async (ctx, { groupPrefix, cursor }) => {
+    const page = await paginate(
+      ctx.db,
+      {
+        table: "limitsProbeRows",
+        index: "by_group_position",
+        range: (q) => q.gte("group", groupPrefix).lt("group", `${groupPrefix}\uffff`),
+      },
+      { cursor, numItems: CLEAR_ROWS_MAX },
+    );
+
+    await Promise.all(page.page.map((row) => ctx.db.delete("limitsProbeRows", row._id)));
+
+    return { continueCursor: page.continueCursor, isDone: page.isDone };
+  },
+});
+
 export const count = internalQuery({
   args: { group: v.string() },
   returns: v.number(),

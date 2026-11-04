@@ -34,7 +34,7 @@ const defineMigration = <const Name extends string>(
 ): SchemaMigration<Name> => ({ name, batch });
 
 /** Rows one probe batch reads, and at most writes. */
-const PROBE_BATCH = 1000;
+const PROBE_BATCH = 500;
 
 const MIGRATIONS = [
   /**

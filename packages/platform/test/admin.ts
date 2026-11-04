@@ -1,8 +1,6 @@
-import { setTimeout as sleep } from "node:timers/promises";
-
 import { getFunctionName } from "convex/server";
 import type { FunctionArgs, FunctionReference } from "convex/server";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 
 import type { CoreStack } from "./stack-env";
 
@@ -14,6 +12,23 @@ const FunctionResponse = Schema.Union([
 const decodeResponse = Schema.decodeUnknownSync(FunctionResponse);
 
 type AdminCallable = FunctionReference<"query" | "mutation" | "action", "public" | "internal">;
+
+const decodeRefusalCode = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ code: Schema.String })),
+);
+
+/**
+ * A call the backend refused before or instead of committing it, such as a conflict that outlasted
+ * its retries (`OptimisticConcurrencyControlFailure`) or the write-rate limit (`TooManyWrites`).
+ */
+export class FunctionRefused extends Error {
+  readonly code: string | null;
+
+  constructor(path: string, status: number, body: string) {
+    super(`${path} answered HTTP ${status}: ${body}`);
+    this.code = Option.getOrNull(decodeRefusalCode(body))?.code ?? null;
+  }
+}
 
 export const runFunction = async <
   Callable extends AdminCallable,
@@ -35,7 +50,7 @@ export const runFunction = async <
   const body = await response.text();
 
   if (!response.ok && response.status !== 560) {
-    throw new Error(`${path} answered HTTP ${response.status}: ${body}`);
+    throw new FunctionRefused(path, response.status, body);
   }
 
   const decoded = decodeResponse(JSON.parse(body));
@@ -53,12 +68,24 @@ const FunctionLog = Schema.Struct({
       identifier: Schema.optionalKey(Schema.String),
       executionTimestamp: Schema.optionalKey(Schema.Finite),
       cachedResult: Schema.optionalKey(Schema.Boolean),
-      usageStats: Schema.optionalKey(Schema.Struct({ databaseReadDocuments: Schema.Finite })),
+      error: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      willRetry: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+      usageStats: Schema.optionalKey(
+        Schema.Struct({
+          databaseReadDocuments: Schema.Finite,
+          databaseWriteDocuments: Schema.Finite,
+        }),
+      ),
     }),
   ),
 });
 
 const decodeLog = Schema.decodeUnknownSync(FunctionLog);
+
+type LogEntry = (typeof FunctionLog.Type)["entries"][number];
+
+/** The backend keeps the latest 1,000 log entries; one read returns at most that many. */
+const LOG_BUFFER_ENTRIES = 1000;
 
 const logSince = async (stack: CoreStack, cursor: number): Promise<typeof FunctionLog.Type> => {
   const response = await fetch(`${stack.url}/api/stream_function_logs?cursor=${cursor}`, {
@@ -72,7 +99,7 @@ const logSince = async (stack: CoreStack, cursor: number): Promise<typeof Functi
   return decodeLog(JSON.parse(body));
 };
 
-/** A point in the function log: calls that start after it show up in `readsSince`. */
+/** A point in the function log: calls that start after it show up in `usageSince`. */
 export interface LogMark {
   readonly cursor: number;
   readonly at: number;
@@ -83,36 +110,99 @@ export const logMark = async (stack: CoreStack): Promise<LogMark> => ({
   at: Date.now(),
 });
 
+/** The documents one attempt of a call read and wrote. */
+export interface CallUsage {
+  readonly reads: number;
+  readonly writes: number;
+  /**
+   * False for an attempt that failed, including one Convex retried after a conflict or the
+   * write-rate limit; its writes rolled back.
+   */
+  readonly committed: boolean;
+}
+
+export interface LogFollower {
+  /**
+   * Reads the entries logged since the last read. When none are new it waits for the next one,
+   * which the lease-release cron logs every 10 seconds.
+   *
+   * @throws Error when the backend's buffer dropped entries since the last read.
+   */
+  readonly catchUp: () => Promise<void>;
+  /**
+   * The usage of each attempt of `callable` read so far that started after the mark and was not
+   * served from the query cache, which reads nothing.
+   */
+  readonly usage: (callable: AdminCallable) => ReadonlyArray<CallUsage>;
+}
+
+/** Follows the function log from `mark`. Read it often enough that 1,000 entries never pile up. */
+export const followLog = (stack: CoreStack, mark: LogMark): LogFollower => {
+  const entries: Array<LogEntry> = [];
+  let cursor = mark.cursor;
+
+  return {
+    catchUp: async () => {
+      const page = await logSince(stack, cursor);
+
+      if (page.entries.length >= LOG_BUFFER_ENTRIES) {
+        throw new Error("The function log dropped entries; read it more often");
+      }
+
+      entries.push(...page.entries);
+      cursor = page.newCursor;
+    },
+    usage: (callable) => {
+      const identifier = getFunctionName(callable);
+
+      return entries.flatMap((entry) =>
+        entry.kind === "Completion" &&
+        entry.identifier === identifier &&
+        entry.cachedResult !== true &&
+        entry.executionTimestamp !== undefined &&
+        entry.executionTimestamp * 1000 >= mark.at &&
+        entry.usageStats !== undefined
+          ? [
+              {
+                reads: entry.usageStats.databaseReadDocuments,
+                writes: entry.usageStats.databaseWriteDocuments,
+                committed: (entry.error ?? null) === null && !(entry.willRetry ?? false),
+              },
+            ]
+          : [],
+      );
+    },
+  };
+};
+
 /**
- * The documents read by each call of `callable` that started after `mark` and was not served
- * from the query cache. A call logged late from before the mark does not count, and neither does
- * a cached result, which reads nothing.
+ * The usage of each attempt of `callable` that started after `mark`, once at least `calls` of them
+ * committed.
  */
-export const readsSince = async (
+export const usageSince = async (
   stack: CoreStack,
   mark: LogMark,
   callable: AdminCallable,
   calls: number,
-  attempts = 40,
-): Promise<ReadonlyArray<number>> => {
-  const identifier = getFunctionName(callable);
+  timeoutMs = 30_000,
+): Promise<ReadonlyArray<CallUsage>> => {
+  const log = followLog(stack, mark);
+  const deadline = Date.now() + timeoutMs;
 
-  const reads = (await logSince(stack, mark.cursor)).entries.flatMap((entry) =>
-    entry.kind === "Completion" &&
-    entry.identifier === identifier &&
-    entry.cachedResult !== true &&
-    entry.executionTimestamp !== undefined &&
-    entry.executionTimestamp * 1000 >= mark.at &&
-    entry.usageStats !== undefined
-      ? [entry.usageStats.databaseReadDocuments]
-      : [],
-  );
+  const logged = async (): Promise<ReadonlyArray<CallUsage>> => {
+    const usage = log.usage(callable);
+    const committed = usage.filter((call) => call.committed).length;
 
-  if (reads.length >= calls) return reads;
+    if (committed >= calls) return usage;
 
-  if (attempts <= 0) throw new Error(`Only ${reads.length} of ${calls} ${identifier} calls logged`);
+    if (Date.now() > deadline) {
+      throw new Error(`Only ${committed} of ${calls} ${getFunctionName(callable)} calls logged`);
+    }
 
-  await sleep(250);
+    await log.catchUp();
 
-  return readsSince(stack, mark, callable, calls, attempts - 1);
+    return logged();
+  };
+
+  return logged();
 };

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { internal } from "../../convex/_generated/api";
 import { COUNTER_SHARDS } from "../../convex/core/lib/counters";
 import { PAGE_ROWS_MAX } from "../../convex/core/lib/paginate";
-import { logMark, readsSince, runFunction } from "../admin";
+import { logMark, runFunction, usageSince } from "../admin";
 import { coreStackFromEnvFile } from "../stack-env";
 import type { CoreStack } from "../stack-env";
 
@@ -60,7 +60,10 @@ describe.skipIf(stack === undefined)("core limits", { timeout: 120_000 }, () => 
 
     const mark = await logMark(stack);
     const { positions, pages } = await pageThrough(stack, group, 25);
-    const reads = await readsSince(stack, mark, internal.core.limitsProbe.page, pages);
+
+    const reads = (await usageSince(stack, mark, internal.core.limitsProbe.page, pages)).map(
+      (call) => call.reads,
+    );
 
     expect(positions).toEqual(range(250));
     expect(Math.max(...reads)).toBeLessThanOrEqual(25);
@@ -87,7 +90,9 @@ describe.skipIf(stack === undefined)("core limits", { timeout: 120_000 }, () => 
       Page,
     );
 
-    const reads = await readsSince(stack, mark, internal.core.limitsProbe.page, 1);
+    const reads = (await usageSince(stack, mark, internal.core.limitsProbe.page, 1)).map(
+      (call) => call.reads,
+    );
 
     expect(first.page).toHaveLength(PAGE_ROWS_MAX);
     expect(first.isDone).toBe(false);
@@ -116,7 +121,10 @@ describe.skipIf(stack === undefined)("core limits", { timeout: 120_000 }, () => 
 
     const mark = await logMark(stack);
     const total = await countOf(stack, group);
-    const reads = await readsSince(stack, mark, internal.core.limitsProbe.count, 1);
+
+    const reads = (await usageSince(stack, mark, internal.core.limitsProbe.count, 1)).map(
+      (call) => call.reads,
+    );
 
     expect(total).toBe(1200);
     expect(Math.max(...reads)).toBeLessThanOrEqual(COUNTER_SHARDS);
