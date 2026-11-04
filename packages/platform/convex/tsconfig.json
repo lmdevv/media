@@ -4,6 +4,6 @@
     "lib": ["ES2023"],
     "types": ["node"]
   },
-  "include": ["./**/*"],
+  "include": ["./**/*", "../commands/**/*"],
   "exclude": ["./_generated"]
 }

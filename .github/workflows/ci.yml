@@ -55,6 +55,7 @@ jobs:
       - run: scripts/changed-packages.sh $CHANGED typecheck
       - run: scripts/changed-packages.sh $CHANGED lint
       - run: pnpm fmt:check
+      - run: pnpm --filter @media/commands check
       - run: scripts/changed-packages.sh $CHANGED test
       - run: pnpm knip
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/mobile')

@@ -128,6 +128,9 @@ catalogs:
     next-themes:
       specifier: ^0.4.6
       version: 0.4.6
+    oxfmt:
+      specifier: 0.72.0
+      version: 0.72.0
     react:
       specifier: ^19.2.8
       version: 19.3.0
@@ -170,7 +173,7 @@ importers:
         specifier: 2.2.1
         version: 2.2.1
       oxfmt:
-        specifier: 0.72.0
+        specifier: 'catalog:'
         version: 0.72.0
       oxlint:
         specifier: 1.87.0
@@ -521,6 +524,31 @@ importers:
       vitest:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+
+  packages/commands:
+    dependencies:
+      convex:
+        specifier: 'catalog:'
+        version: 1.46.0(react@19.3.0)
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.3
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.72.0
+    devDependencies:
+      '@media/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.5
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
 
   packages/config: {}
 

@@ -92,5 +92,33 @@ export default defineConfig({
       files: ["**/*.test.ts", "**/*.test.tsx", "**/test/**"],
       rules: { "anti-slop-effect/no-manual-tagged-construction": "off" },
     },
+    {
+      // Every public function in the core is a command, registered through its generated contract
+      // in packages/platform/commands, so its scope check cannot be skipped.
+      files: ["packages/platform/convex/**"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            paths: [
+              {
+                name: "convex/server",
+                importNames: ["queryGeneric", "mutationGeneric", "actionGeneric"],
+                message:
+                  "Declare a public function as a command in packages/commands and pass its handler to register from packages/platform/commands.",
+              },
+            ],
+            patterns: [
+              {
+                regex: "_generated/server$",
+                importNames: ["query", "mutation", "action"],
+                message:
+                  "Declare a public function as a command in packages/commands and pass its handler to register from packages/platform/commands.",
+              },
+            ],
+          },
+        ],
+      },
+    },
   ],
 });

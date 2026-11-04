@@ -16,6 +16,9 @@ pre-commit:
     - name: deploy
       exclude: ["legacy/**"]
       run: scripts/check-deploy.sh
+    - name: commands
+      exclude: ["legacy/**"]
+      run: pnpm --filter @media/commands check
     - name: legacy
       glob: "legacy/**"
       root: legacy/music/
