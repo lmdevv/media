@@ -455,7 +455,7 @@ export const generatedCommands = [
     path: ["admin", "libraries", "create"],
     kind: "mutation",
     scope: "admin",
-    refusesKeys: false,
+    refusesKeys: true,
     summary: "Create a library of movies or music from folders on the server and scan it",
     secrets: [],
     paginated: false,
@@ -490,7 +490,7 @@ export const generatedCommands = [
         Schema.Literal("edit"),
         Schema.Literal("manage"),
       ]),
-      items: Schema.Finite,
+      items: Schema.Union([Schema.Finite, Schema.Null]),
       folders: Schema.Union([Schema.Array(Schema.String), Schema.Null]),
       scan: Schema.Union([
         Schema.Struct({
@@ -607,7 +607,7 @@ export const generatedCommands = [
     path: ["admin", "libraries", "set-folders"],
     kind: "mutation",
     scope: "admin",
-    refusesKeys: false,
+    refusesKeys: true,
     summary:
       "Change the folders of a library you manage; what a removed folder held leaves the library",
     secrets: [],

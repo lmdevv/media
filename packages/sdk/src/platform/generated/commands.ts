@@ -336,7 +336,7 @@ const core_libraries_get = query({
     name: Schema.String,
     kind: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
     level: Schema.Union([Schema.Literal("view"), Schema.Literal("edit"), Schema.Literal("manage")]),
-    items: Schema.Finite,
+    items: Schema.Union([Schema.Finite, Schema.Null]),
     folders: Schema.Union([Schema.Array(Schema.String), Schema.Null]),
     scan: Schema.Union([
       Schema.Struct({
@@ -768,7 +768,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       },
     },
     libraries: {
-      /** `core.libraries.create` (mutation, admin): Create a library of movies or music from folders on the server and scan it. */
+      /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
       create: method.mutation(core_libraries_create),
       /** `core.libraries.get` (query, signed-in): Show a library, how many items it holds, its latest scan, and to its managers its folders. */
       get: method.query(core_libraries_get),
@@ -780,7 +780,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       rename: method.mutation(core_libraries_rename),
       /** `core.libraries.scan` (mutation, signed-in): Scan a library for new, changed, and missing files, or join the scan already queued. */
       scan: method.mutation(core_libraries_scan),
-      /** `core.libraries.setFolders` (mutation, admin): Change the folders of a library you manage; what a removed folder held leaves the library. */
+      /** `core.libraries.setFolders` (mutation, admin, API keys refused): Change the folders of a library you manage; what a removed folder held leaves the library. */
       setFolders: method.mutation(core_libraries_setFolders),
     },
     permissions: {
@@ -888,7 +888,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       },
     },
     libraries: {
-      /** `core.libraries.create` (mutation, admin): Create a library of movies or music from folders on the server and scan it. */
+      /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
       create: method.mutation(core_libraries_create),
       /** `core.libraries.get` (query, signed-in): Show a library, how many items it holds, its latest scan, and to its managers its folders. */
       get: method.query(core_libraries_get),
@@ -900,7 +900,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       rename: method.mutation(core_libraries_rename),
       /** `core.libraries.scan` (mutation, signed-in): Scan a library for new, changed, and missing files, or join the scan already queued. */
       scan: method.mutation(core_libraries_scan),
-      /** `core.libraries.setFolders` (mutation, admin): Change the folders of a library you manage; what a removed folder held leaves the library. */
+      /** `core.libraries.setFolders` (mutation, admin, API keys refused): Change the folders of a library you manage; what a removed folder held leaves the library. */
       setFolders: method.mutation(core_libraries_setFolders),
     },
     permissions: {

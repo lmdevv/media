@@ -7,8 +7,9 @@ import type { ContentDomain } from "../../commands/scopes";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
-import { foldersOf, isInside } from "./folders";
+import { foldersOf, isInside, isPlainPath } from "./folders";
 import { scanKindOf } from "./jobs/kinds";
+import { cancel } from "./jobs/queue";
 import { lease } from "./jobs/model";
 import type { Lease } from "./jobs/model";
 import { applyEvent } from "./jobs/store";
@@ -70,8 +71,6 @@ export const withLibraryItems = async <Value>(
   return moveCount(ctx.db, libraryId, await write(library));
 };
 
-const SEGMENT_OUT = new Set(["", ".", ".."]);
-
 /** A scan the caller's lease holds, and the library it scans. */
 export interface HeldScan {
   readonly jobId: Id<"jobs">;
@@ -121,15 +120,7 @@ const heldScan = (
     folders,
     keeps,
     admit: (paths) => {
-      const outside = paths.find(
-        (path) =>
-          !path.startsWith("/") ||
-          path
-            .split("/")
-            .slice(1)
-            .some((segment) => SEGMENT_OUT.has(segment)) ||
-          !keeps(path),
-      );
+      const outside = paths.find((path) => !isPlainPath(path) || !keeps(path));
 
       if (outside !== undefined) {
         throw new Error(`${outside} is not a path inside the library's folders`);
@@ -182,7 +173,7 @@ export const withScanLease = async <Value>(
   const library = await ctx.db.get(payload.libraryId);
 
   if (library === null) {
-    await applyEvent(ctx, job, { type: "cancel" });
+    await cancel(ctx, job._id);
 
     const canceling = await ctx.db.get(job._id);
 

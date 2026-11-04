@@ -14,6 +14,15 @@ const CONTROL = /\p{Cc}/u;
 const hasDotSegment = (path: string): boolean =>
   path.split("/").some((segment) => segment === "." || segment === "..");
 
+/** Whether `path` is absolute, with no empty, `.`, or `..` part. */
+export const isPlainPath = (path: string): boolean =>
+  path.startsWith("/") &&
+  !hasDotSegment(path) &&
+  path
+    .split("/")
+    .slice(1)
+    .every((segment) => segment !== "");
+
 /**
  * A typed folder as stored and compared, written down by `normalizeFolder` as the web app does.
  * Refuses with `invalid_args` a relative path, a `.` or `..` segment, a control
@@ -66,17 +75,17 @@ export const selfAndAncestors = (folder: string): ReadonlyArray<string> =>
     .slice(1)
     .map((_, index, segments) => `/${segments.slice(0, index + 1).join("/")}`);
 
+const folderRows = (db: DatabaseReader, libraryId: Id<"libraries">) =>
+  db
+    .query("libraryFolders")
+    .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId))
+    .take(FOLDERS_MAX);
+
 /** A library's folders, in path order: at most 16 rows. */
 export const foldersOf = async (
   db: DatabaseReader,
   libraryId: Id<"libraries">,
-): Promise<ReadonlyArray<string>> =>
-  (
-    await db
-      .query("libraryFolders")
-      .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId))
-      .take(FOLDERS_MAX)
-  ).map((row) => row.path);
+): Promise<ReadonlyArray<string>> => (await folderRows(db, libraryId)).map((row) => row.path);
 
 // Convex serializes a concurrent claim of an overlapping folder: it writes a key this reads.
 const takenByOther = async (
@@ -113,10 +122,7 @@ export const claimFolders = async (
   libraryId: Id<"libraries">,
   folders: ReadonlyArray<string>,
 ): Promise<{ readonly added: ReadonlyArray<string>; readonly removed: ReadonlyArray<string> }> => {
-  const current = await ctx.db
-    .query("libraryFolders")
-    .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId))
-    .take(FOLDERS_MAX);
+  const current = await folderRows(ctx.db, libraryId);
 
   const leaving = current.filter((row) => !folders.includes(row.path));
   const added = folders.filter((folder) => !current.some((row) => row.path === folder));
@@ -146,10 +152,7 @@ export const releaseFolders = async (
   ctx: Pick<MutationCtx, "db">,
   libraryId: Id<"libraries">,
 ): Promise<void> => {
-  const rows = await ctx.db
-    .query("libraryFolders")
-    .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId))
-    .take(FOLDERS_MAX);
+  const rows = await folderRows(ctx.db, libraryId);
 
   await Promise.all(rows.map((row) => ctx.db.delete(row._id)));
 };

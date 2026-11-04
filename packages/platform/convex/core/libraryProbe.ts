@@ -201,7 +201,10 @@ export const known = serverMutation({
     }),
 });
 
-/** Writes up to 500 files a scan found: inserts the new ones and updates the changed ones. */
+/**
+ * Writes up to 500 files a scan found: inserts the new ones and updates the changed ones. A path
+ * sent twice in one batch is written once, with its last size and change time.
+ */
 export const upsert = serverMutation({
   args: { lease, kind: contentDomain, files: v.array(scannedFile) },
   returns: scanAnswer(v.object({ inserted: v.number() })),
@@ -210,8 +213,10 @@ export const upsert = serverMutation({
       checkBatch(files.length);
       scan.admit(files.map((file) => file.path));
 
+      const byPath = new Map(files.map((file) => [file.path, file]));
+
       const inserted = await Promise.all(
-        files.map(async (file): Promise<number> => {
+        [...byPath.values()].map(async (file): Promise<number> => {
           const row = await itemAt(ctx.db, scan.library._id, file.path);
 
           if (row === null) {
@@ -248,7 +253,7 @@ export const missing = serverMutation({
       checkBatch(paths.length);
 
       const rows = await Promise.all(
-        scan.admit(paths).map(async (path) => itemAt(ctx.db, scan.library._id, path)),
+        [...new Set(scan.admit(paths))].map(async (path) => itemAt(ctx.db, scan.library._id, path)),
       );
 
       const gone = rows.flatMap((row) => (row === null ? [] : [row]));

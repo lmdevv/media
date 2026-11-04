@@ -243,6 +243,7 @@ Create a library of movies or music from folders on the server and scan it.
 - CLI: `media admin libraries create`
 - Kind: mutation
 - Scope: admin
+- API keys: refused
 - Arguments: `{ name: string; kind: "movies" | "music"; folders: Array<string> }`
 - Result: `{ libraryId: Id<"libraries">; scanJobId: Id<"jobs"> }`
 
@@ -254,7 +255,7 @@ Show a library, how many items it holds, its latest scan, and to its managers it
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ libraryId: Id<"libraries"> }`
-- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number; total: number | null; error: string | null; finishedAt: number | null } | null }`
+- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number | null; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number; total: number | null; error: string | null; finishedAt: number | null } | null }`
 
 ## `core.libraries.list`
 
@@ -304,6 +305,7 @@ Change the folders of a library you manage; what a removed folder held leaves th
 - CLI: `media admin libraries set-folders`
 - Kind: mutation
 - Scope: admin
+- API keys: refused
 - Arguments: `{ libraryId: Id<"libraries">; folders: Array<string> }`
 - Result: `{ scanJobId: Id<"jobs"> | null }`
 

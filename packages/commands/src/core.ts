@@ -258,6 +258,7 @@ export const core = [
   mutation("core.libraries.create", {
     summary: "Create a library of movies or music from folders on the server and scan it",
     scope: "admin",
+    refusesKeys: true,
     args: { name: v.string(), kind: libraryKind, folders: v.array(v.string()) },
     result: v.object({ libraryId: v.id("libraries"), scanJobId: v.id("jobs") }),
   }),
@@ -274,7 +275,7 @@ export const core = [
     args: { libraryId: v.id("libraries") },
     result: v.object({
       ...libraryRow,
-      items: v.number(),
+      items: v.union(v.number(), v.null()),
       folders: v.union(v.array(v.string()), v.null()),
       scan: v.union(
         v.object({
@@ -299,6 +300,7 @@ export const core = [
     summary:
       "Change the folders of a library you manage; what a removed folder held leaves the library",
     scope: "admin",
+    refusesKeys: true,
     args: { libraryId: v.id("libraries"), folders: v.array(v.string()) },
     result: v.object({ scanJobId: v.union(v.id("jobs"), v.null()) }),
   }),

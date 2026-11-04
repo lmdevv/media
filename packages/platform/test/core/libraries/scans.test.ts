@@ -33,8 +33,10 @@ afterAll(async () => {
 const admin = async (core: CoreStack): Promise<SignedIn["client"]> =>
   (await signInAs(core, await createPerson(core, "admin", "admin"))).client;
 
-const itemsOf = async (client: SignedIn["client"], libraryId: Id<"libraries">): Promise<number> =>
-  (await client.query(api.core.libraries.get, { libraryId })).items;
+const itemsOf = async (
+  client: SignedIn["client"],
+  libraryId: Id<"libraries">,
+): Promise<number | null> => (await client.query(api.core.libraries.get, { libraryId })).items;
 
 const Domains = Schema.Array(Schema.Struct({ kind: Schema.String, hasLibraries: Schema.Boolean }));
 
@@ -105,6 +107,34 @@ describe.skipIf(stack === undefined)("library scans", { timeout: 180_000 }, () =
       status: "canceled",
     });
     await expect(calls.upsert(lease, "music", files)).rejects.toThrow(/movies\.scan/u);
+  });
+
+  it("write a path sent twice in one batch once", async () => {
+    if (stack === undefined) return;
+    const owner = await admin(stack);
+    const root = await tree(["a.flac", "b.flac"]);
+
+    const { libraryId } = await owner.mutation(api.core.libraries.create, {
+      name: "Twice",
+      kind: "music",
+      folders: [root],
+    });
+
+    const calls = scanCalls(stack, "twice");
+    const lease = await claimScanOf(calls, "music", libraryId);
+    const [first, second] = await walk(root);
+
+    if (first === undefined || second === undefined) throw new Error("The tree holds two files");
+
+    expect(await calls.upsert(lease, "music", [first, first, second])).toEqual({
+      outcome: "held",
+      value: { inserted: 2 },
+    });
+    expect(await calls.missing(lease, "music", [first.path, first.path])).toEqual({
+      outcome: "held",
+      value: { removed: 1 },
+    });
+    expect(await itemsOf(owner, libraryId)).toBe(1);
   });
 
   it("drop what a removed folder held from the count, and refuse writes outside the folders", async () => {

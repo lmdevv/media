@@ -42,7 +42,7 @@ const restartScan = async (ctx: JobCtx, library: Doc<"libraries">): Promise<Enqu
   return queueScan(ctx, library);
 };
 
-const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null) => {
+const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null, manager: boolean) => {
   const job = jobId === null ? null : await db.get(jobId);
 
   if (job === null) return null;
@@ -51,7 +51,7 @@ const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null) => {
     jobId: job._id,
     status: job.status,
     ...progressOf(job.work),
-    error: job.status === "failed" ? job.error : null,
+    error: manager && job.status === "failed" ? job.error : null,
     finishedAt: job.status === "queued" || job.status === "running" ? null : job.finishedAt,
   };
 };
@@ -89,15 +89,16 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
   },
   get: async (ctx, { libraryId }, caller) => {
     const { doc, level } = await requireContent(ctx, caller, "view", libraryRef(libraryId));
+    const manager = level === "manage";
 
     return {
       libraryId: doc._id,
       name: doc.name,
       kind: doc.kind,
       level,
-      items: await itemCount(ctx.db, doc._id),
-      folders: level === "manage" ? [...(await foldersOf(ctx.db, doc._id))] : null,
-      scan: await scanOf(ctx.db, doc.lastScan),
+      items: caller.restrictions === null ? await itemCount(ctx.db, doc._id) : null,
+      folders: manager ? [...(await foldersOf(ctx.db, doc._id))] : null,
+      scan: await scanOf(ctx.db, doc.lastScan, manager),
     };
   },
   rename: async (ctx, { libraryId, name }, caller) => {

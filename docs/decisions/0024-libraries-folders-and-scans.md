@@ -50,7 +50,11 @@ the server keeps its file access until phase 4 (D50).
   role. Renaming, sharing, and removing need `manage`; scanning needs `edit`; reading needs `view`.
   Each also needs the library's domain scope, such as `music:edit`.
 - An admin sees no library they hold no grant on, in `list`, in `get`, or through a refusal.
-- `get` shows the folders only to a manager, because they are the server's disk layout.
+- `get` shows the folders, and a failed scan's error, which may name them, only to a manager,
+  because they are the server's disk layout. It shows a kid no item count, because the total
+  would count what their restrictions hide.
+- `create` and `setFolders` refuse API keys: a leaked key with the `admin` scope could otherwise
+  point the server at any folder it can read.
 
 ### Commands
 
@@ -158,8 +162,9 @@ The movies port replaces the seam with movies' rows and deletes it.
 
 ## Left for later units
 
-- Claiming folders through links and bind mounts, as old music's `claimRoot` did, needs the
-  server's file access: phase 4, with the scanner.
+- Claiming folders through links, bind mounts, and case-insensitive or Unicode-normalizing mounts,
+  where two spellings name one folder, needs the server's file access: phase 4, with the scanner,
+  by folder identity as old music's `claimRoot` did.
 - A library whose last manager's account is deleted has no one who can see it. Account deletion
   does not exist yet; the unit that adds it decides who inherits.
 - Guest links (p3-guests) must be a capability of their own, not grants on a title, or items would

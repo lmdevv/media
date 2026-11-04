@@ -7,7 +7,7 @@ import type { Infer } from "convex/values";
 
 import { mutation, query } from "../../convex/_generated/server";
 import type { MutationCtx, QueryCtx } from "../../convex/_generated/server";
-import { requireCaller } from "../../convex/core/auth/caller";
+import { refuseKeys, requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
 
 const createArgs = v.object({
@@ -25,7 +25,7 @@ const getResult = v.object({
   name: v.string(),
   kind: v.union(v.literal("movies"), v.literal("music")),
   level: v.union(v.literal("view"), v.literal("edit"), v.literal("manage")),
-  items: v.number(),
+  items: v.union(v.number(), v.null()),
   folders: v.union(v.array(v.string()), v.null()),
   scan: v.union(
     v.object({
@@ -92,7 +92,7 @@ const setFoldersResult = v.object({ scanJobId: v.union(v.id("jobs"), v.null()) }
 
 /** The handlers `convex/core/libraries.ts` passes to `register`, one per `core.libraries` command. */
 export interface Handlers {
-  /** `core.libraries.create` (mutation, admin): Create a library of movies or music from folders on the server and scan it. */
+  /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
   readonly create: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof createArgs>,
@@ -134,7 +134,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof scanResult> | Promise<Infer<typeof scanResult>>;
 
-  /** `core.libraries.setFolders` (mutation, admin): Change the folders of a library you manage; what a removed folder held leaves the library. */
+  /** `core.libraries.setFolders` (mutation, admin, API keys refused): Change the folders of a library you manage; what a removed folder held leaves the library. */
   readonly setFolders: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof setFoldersArgs>,
@@ -193,7 +193,8 @@ export const register = (handlers: Handlers) => ({
   create: mutation({
     args: createArgs,
     returns: createResult,
-    handler: async (ctx, args) => handlers.create(ctx, args, await requireCaller(ctx, "admin")),
+    handler: async (ctx, args) =>
+      handlers.create(ctx, args, refuseKeys(await requireCaller(ctx, "admin"))),
   }),
   get: query({
     args: getArgs,
@@ -223,6 +224,7 @@ export const register = (handlers: Handlers) => ({
   setFolders: mutation({
     args: setFoldersArgs,
     returns: setFoldersResult,
-    handler: async (ctx, args) => handlers.setFolders(ctx, args, await requireCaller(ctx, "admin")),
+    handler: async (ctx, args) =>
+      handlers.setFolders(ctx, args, refuseKeys(await requireCaller(ctx, "admin"))),
   }),
 });

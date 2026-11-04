@@ -168,7 +168,27 @@ describe.skipIf(stack === undefined)("libraries", { timeout: 180_000 }, () => {
     expect(await sees(stranger, libraryId)).toEqual({ get: "not_found", listed: false });
     expect(await friend.client.query(api.core.libraries.get, { libraryId })).toMatchObject({
       level: "view",
+      items: 0,
       folders: null,
+    });
+
+    await owner.client.mutation(api.core.restrictions.set, {
+      userId: friend.userId,
+      restrictions: {
+        maxMovieAge: 7,
+        hideUnrated: false,
+        hideExplicitMusic: false,
+        libraries: null,
+      },
+    });
+
+    expect(await friend.client.query(api.core.libraries.get, { libraryId })).toMatchObject({
+      items: null,
+    });
+
+    await owner.client.mutation(api.core.restrictions.set, {
+      userId: friend.userId,
+      restrictions: null,
     });
     expect(await refusal(friend.client.mutation(api.core.libraries.scan, { libraryId }))).toBe(
       "forbidden",
