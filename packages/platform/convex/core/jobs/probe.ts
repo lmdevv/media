@@ -1,0 +1,77 @@
+/**
+ * Probe entry points for the stack suite, internal only, like `core/limitsProbe.ts`. The probe
+ * kinds live in `KINDS`; the server never claims them.
+ */
+import { v } from "convex/values";
+
+import { internalMutation, internalQuery } from "../../_generated/server";
+import { kindDef } from "./kinds";
+import { cancel, enqueue as enqueueJob } from "./queue";
+
+/** The probe kinds whose payload is `{ run, n }`. */
+const probeRunKind = v.union(
+  v.literal("probe.capped"),
+  v.literal("probe.wide"),
+  v.literal("probe.items"),
+);
+
+const probeKind = v.union(probeRunKind, v.literal("probe.import"));
+
+/** Most jobs one `enqueue` queues, and most queued jobs one `reset` cancels. */
+const PROBE_BATCH = 1000;
+
+/**
+ * Queues `count` probe jobs `{ run, n }` of one kind, n from 0.
+ *
+ * @throws Error when `count` is not a whole number from 1 to 1,000.
+ */
+export const enqueue = internalMutation({
+  args: { kind: probeRunKind, run: v.string(), count: v.number() },
+  returns: v.array(v.id("jobs")),
+  handler: async (ctx, { kind, run, count }) => {
+    if (!Number.isSafeInteger(count) || count < 1 || count > PROBE_BATCH) {
+      throw new Error(`probe enqueue queues 1 to ${PROBE_BATCH} jobs; got ${count}`);
+    }
+
+    const queued = await Promise.all(
+      Array.from({ length: count }, (_, n) => enqueueJob(ctx, { kind, run, n })),
+    );
+
+    return queued.map((job) => job.jobId);
+  },
+});
+
+/**
+ * Cancels up to 1,000 queued jobs of a probe kind and requests the cancel of its running ones, so
+ * a lane starts from an empty queue whatever an aborted run left. A running job frees its slot at
+ * its lease's lapse. Says whether queued jobs remain; the caller loops.
+ */
+export const reset = internalMutation({
+  args: { kind: probeKind },
+  returns: v.object({ more: v.boolean() }),
+  handler: async (ctx, { kind }) => {
+    const jobs = (status: "queued" | "running", limit: number) =>
+      ctx.db
+        .query("jobs")
+        .withIndex("by_kind_status", (q) => q.eq("payload.kind", kind).eq("status", status))
+        .take(limit);
+
+    const queued = await jobs("queued", PROBE_BATCH);
+    const running = await jobs("running", kindDef(kind).cap);
+
+    await Promise.all([...queued, ...running].map((job) => cancel(ctx, job._id)));
+
+    return { more: queued.length === PROBE_BATCH };
+  },
+});
+
+/** Whether any of a job's items are left, by one bounded read. */
+export const hasItems = internalQuery({
+  args: { jobId: v.id("jobs") },
+  returns: v.boolean(),
+  handler: async (ctx, { jobId }) =>
+    (await ctx.db
+      .query("jobItems")
+      .withIndex("by_job_seq", (q) => q.eq("jobId", jobId))
+      .first()) !== null,
+});

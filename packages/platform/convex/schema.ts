@@ -2,6 +2,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 import { credentialScope } from "../commands/scopes";
+import { jobDocument, jobItemDocument } from "./core/jobs/model";
 
 const sessionFields = {
   userId: v.id("users"),
@@ -124,4 +125,25 @@ export default defineSchema({
     group: v.string(),
     position: v.number(),
   }).index("by_group_position", ["group", "position"]),
+
+  /**
+   * Every background job of every domain (ADR 0012), one index per access pattern:
+   *
+   * - `by_kind_status`: a claim's queue head and cap read, and kind plus status lists.
+   * - `by_status_lease`: the lease-release cron (running, earliest expiry first) and status lists.
+   *   Only running rows carry `leaseExpiresAt`, so other statuses order by creation.
+   * - `by_kind`: kind lists across statuses.
+   * - `by_dedupe_status`: enqueue's check for a queued or running job with the same key.
+   */
+  jobs: defineTable(jobDocument)
+    .index("by_kind_status", ["payload.kind", "status"])
+    .index("by_status_lease", ["status", "leaseExpiresAt"])
+    .index("by_kind", ["payload.kind"])
+    .index("by_dedupe_status", ["dedupeKey", "status"]),
+
+  /**
+   * A job's batched items. Rows below the job's watermark are deleted as the holder reports them
+   * done, and a finished job's leftovers are purged in batches (`leases.purgeItems`).
+   */
+  jobItems: defineTable(jobItemDocument).index("by_job_seq", ["jobId", "seq"]),
 });
