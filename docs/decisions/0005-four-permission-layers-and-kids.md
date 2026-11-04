@@ -1,6 +1,6 @@
 # 0005. Check access in four layers and make kids restricted users
 
-- Status: Accepted, 2026-11-03
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the first role and the `admin` scope.
 - Decisions: D16, D17
 
 ## Context
@@ -63,3 +63,20 @@ A kid cannot change their own restrictions. Admins are enough, so there is no gu
 - A service account is its own principal type. It holds no platform role.
 - `account` is the first credential scope. It lets a session manage its user's own credentials,
   so a key without it cannot make a key or approve a device that outlives it (ADR 0004).
+
+## Roles and the admin scope as built (amended 2026-11-04)
+
+The accounts build (ADR 0003) needed the platform role and a way to gate admin commands before
+the rest of this ADR lands.
+
+- `users.role` is `owner`, `admin`, or `member`. `packages/commands/src/scopes.ts` lists the roles
+  once, and the generator emits the `role` and `assignableRole` validators that the schema and the
+  command arguments use. `guest` arrives with guest links (ADR 0007).
+- `admin` is the second credential scope. `roleScopes` in `convex/core/sessions.ts` gives the
+  owner and admins `account` and `admin`, and members `account`. `heldScopes` cuts every session
+  down to its user's role on each call.
+- An admin command declares the `admin` scope, so the generated function refuses a session
+  without it. Rules about the target account live in one pure function, `manages` in
+  `convex/core/accounts/users.ts`: an admin acts on someone else who is not the owner.
+- The permissions build replaces `roleScopes` and `heldScopes`, adds the domain scopes, and folds
+  `manages` into `can(principal, action, resource)`.

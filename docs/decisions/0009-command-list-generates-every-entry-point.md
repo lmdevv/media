@@ -1,6 +1,7 @@
 # 0009. Declare each action once and generate its Convex function and clients
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the generator's layout.
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the generator's layout, and again on
+  2026-11-04 with `refusesKeys`.
 - Decisions: D23
 
 ## Context
@@ -98,3 +99,17 @@ Rejected for this layout:
 - A drift test that runs only through the package graph, with `@media/commands` depending on
   every package it writes into. Every declaration edit would typecheck the old CLI and its
   dependencies, and the check would run only where the graph routes it.
+
+## Refusing API keys (amended 2026-11-04)
+
+- A declaration can set `refusesKeys: true`. The generated function then passes the caller
+  through `refuseKeys` in `convex/core/auth/caller.ts`, which refuses an API-key session with
+  `forbidden` even when the key holds the scope. The skill reference prints "API keys: refused".
+- `check` refuses `refusesKeys` on a `public` command, which has no session to refuse.
+- A command sets it when it makes something that would outlive a leaked key's revocation: a key,
+  a device sign-in, a user, a link, a role change, a handover, or a new username or password
+  (ADR 0004). `core.auth.apiKeys.create` and `core.auth.deviceCodes.approve` moved their
+  hand-written checks onto it.
+- The sign-ins that make or reset an account (`setup`, `invite`, `reset`) are Convex Auth
+  providers, not commands, like the other sign-ins (ADR 0004). The generator writes nothing for
+  them.
