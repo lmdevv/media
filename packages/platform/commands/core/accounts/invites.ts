@@ -70,7 +70,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof createResult> | Promise<Infer<typeof createResult>>;
 
-  /** `core.accounts.invites.list` (query, admin): List the invites whose makers are still admins, latest to expire first. */
+  /** `core.accounts.invites.list` (query, admin): List the invites that still work, latest to expire first. */
   readonly list: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof listArgs>,

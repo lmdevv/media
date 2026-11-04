@@ -130,7 +130,7 @@ export const core = [
     result: v.object({ role: assignableRole, invitedBy: v.string(), expiresAt: v.number() }),
   }),
   query("core.accounts.invites.list", {
-    summary: "List the invites whose makers are still admins, latest to expire first",
+    summary: "List the invites that still work, latest to expire first",
     scope: "admin",
     args: { paginationOpts: paginationOptsValidator },
     result: paginationResultValidator(
