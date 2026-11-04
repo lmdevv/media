@@ -27,10 +27,7 @@ const callerValidator = v.object({
   restrictions: v.union(restrictions, v.null()),
 });
 
-/**
- * The signed-in person a scoped command runs as, checked live on this call. It is a person
- * `Principal`, so it goes to `can` as it is.
- */
+/** The signed-in person a scoped command runs as, checked live on this call. */
 export type Caller = Infer<typeof callerValidator>;
 
 /**

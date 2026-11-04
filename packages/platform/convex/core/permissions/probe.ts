@@ -8,12 +8,6 @@ import { callerOfSession } from "../auth/caller";
 import { grant, grantCreator, requireContent, revoke, visiblePage } from "./grants";
 import { contentActions } from "./policy";
 
-/**
- * The permissions test seam. Each function takes a real session's id and runs as that session
- * would through a command, skipping only the token parse, so stack tests reach grant-checked
- * paths before any movies or music command exists.
- */
-
 const SEED_MAX = 1000;
 
 const probeFields = {

@@ -46,7 +46,6 @@ export const movie = (name: string, age: number | null): Probe => ({
   explicit: false,
 });
 
-/** A music probe. */
 export const song = (name: string, explicit: boolean): Probe => ({
   name,
   domain: "music",

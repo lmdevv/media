@@ -15,12 +15,10 @@ import type { ContentAction, Principal, ResourceRef, TableOf } from "./policy";
 /** Most groups one person is in; it bounds the reads of every content check. */
 export const GROUPS_PER_USER_MAX = 16;
 
-/** Most grants one resource holds. */
 const RESOURCE_GRANTS_MAX = 1000;
 
 const PURGE_BATCH = 500;
 
-/** A grant's principal as the `grants` table stores it. */
 type PrincipalKey = Doc<"grants">["principal"];
 
 /** A row the caller may see, and the strongest level their grants give them on it. */
@@ -139,7 +137,6 @@ export const requireContent = async <T extends ResourceType>(
 };
 
 interface Bounds<T extends ResourceType> {
-  /** Only rows after this id; null from the start. */
   readonly after: Id<TableOf<T>> | null;
   /** Only rows up to this id, for a reactive page reloaded to the end it had; null for no end. */
   readonly through: Id<TableOf<T>> | null;

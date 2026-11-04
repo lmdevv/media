@@ -145,7 +145,6 @@ const UNSAFE_SUMMARY = /\*\/|[\n\r\u2028\u2029`]|^#|[.?!:;,]$/u;
 const scopeDomain = (scope: Scope): ContentDomain | null =>
   contentDomains.find((domain) => scope.startsWith(`${domain}:`)) ?? null;
 
-/** A content domain's command declares a scope of its own domain; a core command declares none. */
 const outsideDomain = (domain: Domain, scope: Scope): boolean =>
   domain === "core" ? scopeDomain(scope) !== null : scopeDomain(scope) !== domain;
 

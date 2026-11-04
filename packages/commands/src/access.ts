@@ -3,7 +3,6 @@ import { v } from "convex/values";
 /** Grant levels, weakest first. Each level allows what the ones before it allow. */
 export const levels = ["view", "edit", "manage"] as const;
 
-/** Where a resource type's rows live, and whether the allowed-libraries restriction lists it. */
 interface ResourceTypeEntry {
   readonly table: string;
   readonly library: boolean;
@@ -46,9 +45,7 @@ export const grantPrincipal = v.union(
 export const restrictions = v.object({
   /** The highest minimum viewer age a movie may carry, 0 to 21 (PG is 7); null means no cap. */
   maxMovieAge: v.union(v.number(), v.null()),
-  /** Hide movies that carry no rating. */
   hideUnrated: v.boolean(),
-  /** Hide music marked explicit. */
   hideExplicitMusic: v.boolean(),
   /** The libraries this person may use; null means every library their grants reach. */
   libraries: v.union(v.array(libraryId), v.null()),

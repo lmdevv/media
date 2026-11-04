@@ -53,10 +53,8 @@ export interface ContentResource {
   readonly facts: ContentFacts | null;
 }
 
-/** The table that holds a resource type's rows. */
 export type TableOf<T extends ResourceType> = (typeof resourceTypes)[T]["table"];
 
-/** One row of a resource type, by its type and id. */
 export interface ResourceRef<T extends ResourceType> {
   readonly type: T;
   readonly id: Id<TableOf<T>>;
@@ -67,7 +65,6 @@ type Placement = Pick<ContentResource, "domain" | "library" | "facts">;
 const ratingOf = (age: number | null): Rating =>
   age === null ? { kind: "unrated" } : { kind: "rated", age };
 
-/** How to place a row of each resource type: one entry per type, or `tsc` fails. */
 type Placements = { readonly [T in ResourceType]: (doc: Doc<TableOf<T>>) => Placement };
 
 const placements: Placements = {
@@ -153,13 +150,10 @@ export const accountActions = [
 /** What can be done to the server as a whole. */
 export const serverActions = ["invite", "manageGroups"] as const;
 
-/** An action on content. */
 export type ContentAction = (typeof contentActions)[number];
 
-/** An action on an account. */
 export type AccountAction = (typeof accountActions)[number];
 
-/** A server-wide action. */
 export type ServerAction = (typeof serverActions)[number];
 
 interface ContentRule {
@@ -195,7 +189,6 @@ const contentRules: ContentRules = {
   manage: { verb: "edit", level: "manage" },
 };
 
-/** What a content action needs on a thing: a scope of its domain and a grant level. */
 export interface ContentNeeds {
   readonly scope: CredentialScope;
   readonly level: Level;
@@ -401,7 +394,6 @@ export const principalOf = (
         restrictions: restrictionsOf(user),
       };
 
-/** A user row as the target of an account action. */
 export const accountTarget = (user: Doc<"users">): AccountResource => ({
   on: "account",
   target:
@@ -427,6 +419,6 @@ export const endsCredentials = (from: Role, to: Role): boolean => {
   return held.some((scope) => !kept.includes(scope));
 };
 
-/** A kid: a member an admin restricted. Shared devices lock their tiles on it. */
+/** A kid: a member an admin restricted. */
 export const isKid = (user: Doc<"users">): boolean =>
   user.kind === "person" && restrictionsOf(user) !== null;

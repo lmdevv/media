@@ -4,7 +4,6 @@ import type { Domain } from "./command.ts";
 /** A domain that holds content, such as movies or music. The core holds accounts, not content. */
 export type ContentDomain = Exclude<Domain, "core">;
 
-/** The domains that hold content: every domain but the core. */
 export const contentDomains = domains.filter(
   (domain): domain is ContentDomain => domain !== "core",
 );
@@ -18,7 +17,6 @@ export const contentVerbs = ["read", "play", "edit"] as const;
 
 type ContentVerb = (typeof contentVerbs)[number];
 
-/** A content domain's scope, such as `movies:read` or `music:play`. */
 type DomainScope = `${ContentDomain}:${ContentVerb}`;
 
 const domainScopes: ReadonlyArray<DomainScope> = contentDomains.flatMap((domain) =>
@@ -32,7 +30,6 @@ const domainScopes: ReadonlyArray<DomainScope> = contentDomains.flatMap((domain)
  */
 export const credentialScopes = ["account", "admin", ...domainScopes] as const;
 
-/** A scope a sign-in credential can hold. */
 export type CredentialScope = (typeof credentialScopes)[number];
 
 /**
@@ -53,7 +50,6 @@ export const assignableRoles = ["admin", "member"] as const;
  */
 export const roles = ["owner", ...assignableRoles, "guest"] as const;
 
-/** A user's platform role. */
 export type Role = (typeof roles)[number];
 
 /**
