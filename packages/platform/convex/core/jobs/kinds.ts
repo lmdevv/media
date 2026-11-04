@@ -24,7 +24,8 @@ interface KindPolicy<Payload extends PropertyValidators> {
   readonly maxStrikes: number;
   /**
    * The key a new job collapses into while a job with the same key is queued or running, or null
-   * when every enqueue makes a job. Prefix it with the kind's domain, such as `scan:<libraryId>`.
+   * when every enqueue makes a job. The stored key starts with the kind's name, so two kinds never
+   * share a key.
    */
   readonly dedupe: ((payload: ObjectType<Payload>) => string) | null;
 }
@@ -97,7 +98,7 @@ export function defineKind<
         throw new Error(`Job kind ${kind} was asked for the dedupe key of a ${payload.kind} job`);
       }
 
-      return dedupe === null ? null : dedupe(payload);
+      return dedupe === null ? null : `${kind}:${dedupe(payload)}`;
     },
   };
 }
@@ -151,6 +152,8 @@ export type JobItem = Infer<typeof jobItem>;
  * @throws Error on a name outside `KINDS`, which the stored validators already rule out.
  */
 export const kindDef = <Kind extends JobKind>(kind: Kind): Extract<KindDef, { kind: Kind }> => {
+  // SAFETY: a type predicate, not checked by the compiler. `KINDS` entries are tagged by their
+  // literal `kind`, so the entry whose `kind` equals `kind` is exactly the member this extracts.
   const def = KINDS.find((entry): entry is Extract<KindDef, { kind: Kind }> => entry.kind === kind);
 
   if (def === undefined) throw new Error(`No job kind ${kind}`);

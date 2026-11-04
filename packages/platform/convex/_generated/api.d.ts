@@ -27,6 +27,7 @@ import type * as core_jobs_store from "../core/jobs/store.js";
 import type * as core_jobs_worker from "../core/jobs/worker.js";
 import type * as core_lib_counters from "../core/lib/counters.js";
 import type * as core_lib_errors from "../core/lib/errors.js";
+import type * as core_lib_inOrder from "../core/lib/inOrder.js";
 import type * as core_lib_paginate from "../core/lib/paginate.js";
 import type * as core_lib_rateLimit from "../core/lib/rateLimit.js";
 import type * as core_lib_secrets from "../core/lib/secrets.js";
@@ -65,6 +66,7 @@ declare const fullApi: ApiFromModules<{
   "core/jobs/worker": typeof core_jobs_worker;
   "core/lib/counters": typeof core_lib_counters;
   "core/lib/errors": typeof core_lib_errors;
+  "core/lib/inOrder": typeof core_lib_inOrder;
   "core/lib/paginate": typeof core_lib_paginate;
   "core/lib/rateLimit": typeof core_lib_rateLimit;
   "core/lib/secrets": typeof core_lib_secrets;

@@ -6,7 +6,7 @@ import { jobItem, jobKind, jobPayload } from "./kinds";
 import { holds } from "./machine";
 import type { Refusal, Step } from "./machine";
 import { jobWork, lease } from "./model";
-import { applyEvent, claimJob, kindQueue, leasedJob } from "./store";
+import { applyEvent, claimJob, kindQueue } from "./store";
 
 const canceledAnswer = v.object({ outcome: v.literal("canceled") });
 
@@ -29,8 +29,8 @@ const leaseRefusal = (
 
 /**
  * For each asked kind: how many more jobs it may run now, and whether a claim would get one. Reads
- * at most `cap + 1` rows per kind, so a pool subscribes to it and claims when a kind is ready. A
- * slot freed by the cron or a cancel changes the answer and wakes the pool.
+ * the kind's row and one queue entry, so a pool subscribes to it and claims when a kind is ready.
+ * A slot freed by the cron or a cancel changes the answer and wakes the pool.
  */
 export const waiting = serverQuery({
   args: { kinds: v.array(jobKind) },
@@ -85,7 +85,7 @@ export const report = serverMutation({
     lostAnswer,
   ),
   handler: async (ctx, { lease: held, ...fields }) => {
-    const job = await leasedJob(ctx.db, held);
+    const job = await ctx.db.get("jobs", held.jobId);
 
     if (job === null) return { outcome: "lost" as const };
 
@@ -126,7 +126,11 @@ export const items = serverQuery({
     lostAnswer,
   ),
   handler: async (ctx, { lease: held, from, limit }) => {
-    const job = await leasedJob(ctx.db, held);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > ITEMS_PAGE_MAX) {
+      throw new Error(`items returns 1 to ${ITEMS_PAGE_MAX} items a call; got ${limit}`);
+    }
+
+    const job = await ctx.db.get("jobs", held.jobId);
 
     if (job === null) return { outcome: "lost" as const };
 
@@ -143,7 +147,7 @@ export const items = serverQuery({
         index: "by_job_seq",
         range: (q) => q.eq("jobId", held.jobId).gte("seq", from),
       },
-      { numItems: Math.min(limit, ITEMS_PAGE_MAX), cursor: null },
+      { numItems: limit, cursor: null },
     );
 
     return {
@@ -176,7 +180,7 @@ export const finish = serverMutation({
     lostAnswer,
   ),
   handler: async (ctx, { lease: held, end }) => {
-    const job = await leasedJob(ctx.db, held);
+    const job = await ctx.db.get("jobs", held.jobId);
 
     if (job === null) return { outcome: "lost" as const };
 

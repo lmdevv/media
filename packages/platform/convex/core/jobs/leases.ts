@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { internal } from "../../_generated/api";
 import { internalMutation } from "../../_generated/server";
+import { inOrder } from "../lib/inOrder";
 import { applyEvent, deleteItemBatch } from "./store";
 
 const RELEASE_BATCH = 200;
@@ -24,7 +25,7 @@ export const releaseExpired = internalMutation({
       .withIndex("by_status_lease", (q) => q.eq("status", "running").lt("leaseExpiresAt", now))
       .take(RELEASE_BATCH);
 
-    await Promise.all(lapsed.map((job) => applyEvent(ctx, job, { type: "lapse" })));
+    await inOrder(lapsed, (job) => applyEvent(ctx, job, { type: "lapse" }));
 
     const more = lapsed.length === RELEASE_BATCH;
 

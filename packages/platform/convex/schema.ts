@@ -130,6 +130,7 @@ export default defineSchema({
 
   jobs: defineTable(jobDocument)
     .index("by_kind_status", ["payload.kind", "status"])
+    .index("by_status", ["status"])
     .index("by_status_lease", ["status", "leaseExpiresAt"])
     .index("by_kind", ["payload.kind"])
     .index("by_dedupe_status", ["dedupeKey", "status"]),

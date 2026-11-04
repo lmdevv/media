@@ -155,6 +155,18 @@ describe("job machine", () => {
     expect(third).toMatchObject({ attempts: 3, error: "boom" });
   });
 
+  it("counts a failure after progress as the first strike, forgiving earlier ones", () => {
+    const struck = lapse(claim(lapse(claim(queued(noItems)))));
+
+    const progressed = next(
+      report(claim(struck), { append: { from: 0, items: items(0, 2), sealed: false } }),
+    );
+
+    expect(struck.strikes).toBe(2);
+    expect(progressed.strikes).toBe(0);
+    expect(fail(progressed, true)).toMatchObject({ status: "queued", strikes: 1, attempts: 3 });
+  });
+
   it("fails at once when the worker asks for no retry", () => {
     expect(fail(claim(queued()), false)).toMatchObject({ status: "failed", attempts: 1 });
   });
@@ -201,6 +213,12 @@ describe("job machine", () => {
     expect(run(acked, { type: "cancel" })).toBe(acked);
   });
 
+  it("drops a canceling job's dedupe key, so a new job of the same key can be queued", () => {
+    const running = claim({ ...queued(), dedupeKey: "probe.wide:x" });
+
+    expect(run(running, { type: "cancel" })).toMatchObject({ status: "running", dedupeKey: null });
+  });
+
   it("cancels a canceling job whose lease lapses instead of re-queueing it", () => {
     expect(lapse(run(claim(queued()), { type: "cancel" })).status).toBe("canceled");
   });
@@ -223,6 +241,23 @@ describe("job machine", () => {
     ).toEqual({ ok: false, refused: "lost" });
   });
 
+  it("answers a repeated retried failure with the queued state it already reached", () => {
+    const requeued = fail(claim(queued()), true);
+
+    expect(
+      step(
+        requeued,
+        {
+          type: "finish",
+          lease: { attempt: 1 },
+          finish: { outcome: "failed", error: "boom", retry: true },
+        },
+        NOW,
+        policy,
+      ),
+    ).toEqual({ ok: true, changed: false, next: requeued, writes: [] });
+  });
+
   it("appends items only at the job's count, and refuses a retried append", () => {
     const running = claim(queued(noItems));
     const result = report(running, { append: { from: 0, items: items(0, 3), sealed: false } });
@@ -235,6 +270,19 @@ describe("job machine", () => {
     expect(
       report(next(result), { append: { from: 0, items: items(0, 3), sealed: false } }),
     ).toEqual({ ok: false, refused: "outOfOrder", appended: 3 });
+  });
+
+  it("accepts a repeated empty append that seals the items, and refuses items after the seal", () => {
+    const sealed = next(
+      report(claim(queued(noItems)), { append: { from: 0, items: [], sealed: true } }),
+    );
+
+    expect(next(report(sealed, { append: { from: 0, items: [], sealed: true } }))).toMatchObject({
+      work: { appended: 0, sealed: true },
+    });
+    expect(() => report(sealed, { append: { from: 0, items: items(0, 1), sealed: true } })).toThrow(
+      /after the items were sealed/,
+    );
   });
 
   it("treats an oversized append or a watermark past the items as a defect", () => {

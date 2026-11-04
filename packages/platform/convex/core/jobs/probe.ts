@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 
 import { internalMutation, internalQuery } from "../../_generated/server";
+import { inOrder } from "../lib/inOrder";
 import { kindDef } from "./kinds";
 import { cancel, enqueue as enqueueJob } from "./queue";
 
@@ -27,8 +28,9 @@ export const enqueue = internalMutation({
       throw new Error(`probe enqueue queues 1 to ${PROBE_BATCH} jobs; got ${count}`);
     }
 
-    const queued = await Promise.all(
-      Array.from({ length: count }, (_, n) => enqueueJob(ctx, { kind, run, n })),
+    const queued = await inOrder(
+      Array.from({ length: count }, (_, n) => n),
+      (n) => enqueueJob(ctx, { kind, run, n }),
     );
 
     return queued.map((job) => job.jobId);
@@ -53,7 +55,7 @@ export const reset = internalMutation({
     const queued = await jobs("queued", PROBE_BATCH);
     const running = await jobs("running", kindDef(kind).cap);
 
-    await Promise.all([...queued, ...running].map((job) => cancel(ctx, job._id)));
+    await inOrder([...queued, ...running], (job) => cancel(ctx, job._id));
 
     return { more: queued.length === PROBE_BATCH };
   },

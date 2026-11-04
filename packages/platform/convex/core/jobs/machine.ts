@@ -162,7 +162,9 @@ const itemsWork = (job: Running, work: ItemsWork, report: Report): WorkUpdate | 
 
     if (from !== work.appended) return { refused: "outOfOrder", appended: work.appended };
 
-    if (work.sealed) throw new Error("An append after the items were sealed");
+    if (work.sealed && (items.length > 0 || !sealed)) {
+      throw new Error("An append after the items were sealed");
+    }
 
     if (items.length > ITEM_BATCH_MAX) {
       throw new Error(`A report appends at most ${ITEM_BATCH_MAX} items; got ${items.length}`);
@@ -215,6 +217,7 @@ const report = (job: Running, event: Report, now: number): Step => {
       work: result.work,
       message: event.message ?? job.message,
       leaseExpiresAt: now + event.leaseMs,
+      strikes: result.progressed ? 0 : job.strikes,
       progressed: job.progressed || result.progressed,
     },
     result.writes,
@@ -254,7 +257,7 @@ const lapse = (job: Running, now: number, policy: Policy): Step => {
 
   if (job.cancelRequestedAt !== null) return canceled(job, now);
 
-  const strikes = job.progressed ? 0 : job.strikes + 1;
+  const strikes = job.progressed ? job.strikes : job.strikes + 1;
 
   if (strikes >= policy.maxStrikes) return failed(job, LAPSED_ERROR, strikes, now);
 
@@ -263,7 +266,8 @@ const lapse = (job: Running, now: number, policy: Policy): Step => {
 
 const settledAlready = (job: JobFields, end: Finish): boolean =>
   (job.status === "succeeded" && end.outcome === "succeeded") ||
-  (job.status === "failed" && end.outcome === "failed");
+  (job.status === "failed" && end.outcome === "failed") ||
+  (job.status === "queued" && end.outcome === "failed" && end.retry);
 
 /**
  * The one transition function.
@@ -296,7 +300,7 @@ export const step = (job: JobFields, event: JobEvent, now: number, policy: Polic
     }
 
     return job.status === "running" && job.cancelRequestedAt === null
-      ? moved({ ...job, cancelRequestedAt: now })
+      ? moved({ ...job, cancelRequestedAt: now, dedupeKey: null })
       : unchanged(job);
   }
 

@@ -1,16 +1,13 @@
 import type { Id } from "../../_generated/dataModel";
 import type { MutationCtx } from "../../_generated/server";
-import type { JobPayload } from "./kinds";
-import { applyEvent, insertJob } from "./store";
-import type { Enqueued } from "./store";
+import { applyEvent } from "./store";
 
 /**
- * Queues a job of `payload.kind`. While a job with the kind's dedupe key is queued or running, it
- * returns that one with `created: false`, so a double-clicked scan or a resubmitted import runs
- * once.
+ * Queues a job of `payload.kind`. While a job with the kind's dedupe key is queued or running and
+ * not being canceled, it returns that one with `created: false`, so a double-clicked scan or a
+ * resubmitted import runs once.
  */
-export const enqueue = (ctx: MutationCtx, payload: JobPayload): Promise<Enqueued> =>
-  insertJob(ctx, payload);
+export { insertJob as enqueue } from "./store";
 
 export type Canceled =
   /** It was queued and is now canceled, or it had already finished; `status` says how. */

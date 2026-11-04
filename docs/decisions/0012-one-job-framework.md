@@ -78,18 +78,24 @@ The first framework, in `packages/platform/convex/core/jobs/`, settled how these
 - One cron, `release expired job leases`, runs every 10 seconds. It releases at most 200 jobs per
   call and calls itself again when it filled a batch.
 - A strike is an attempt that failed with `retry`, or a lease that lapsed without progress. A
-  kind's `maxStrikes` strikes fail the job. Progress means appended items or a moved done mark,
-  and it resets the strikes, so an item job that restarts on every deploy keeps going. Counts a
-  worker reports are for display, because a restarted attempt reports them again.
+  kind's `maxStrikes` strikes fail the job. Progress means appended items or a moved done mark.
+  The report that records progress resets the strikes, so an item job that restarts on every
+  deploy keeps going, and a failure after progress counts as the first strike. Counts a worker
+  reports are for display, because a restarted attempt reports them again.
 - Canceling a queued job ends it at once. Canceling a running job marks it, and the job keeps its
   slot until its worker's next call answers `canceled` or its lease lapses. The cap therefore
-  still counts a process that may be running.
+  still counts a process that may be running. The marked job drops its dedupe key, so a new job
+  with that key can be queued right away.
 - Only the lease holder adds items. One `report` appends up to 4,000 items numbered from the
   job's appended count, so a retried append whose first try committed answers `outOfOrder`.
   `report({ through })` marks the items below `through` done and deletes them, up to 4,000 at a
   time. A job with items succeeds only when its items are sealed and all done. A failed or
   canceled job's leftover items are deleted 4,000 per scheduled call.
-- A kind's dedupe key makes `enqueue` return the queued or running job with the same key.
+- A kind's dedupe key makes `enqueue` return the queued or running job with the same key. The
+  stored key starts with the kind's name, so two kinds never share one.
+- Calls that move jobs in one mutation run one after another, because each one reads and writes
+  its kind's `jobKinds` row. Run in parallel, two releases of one kind both read the same count
+  and one decrement was lost, which a stack test caught.
 - Every lease call answers `canceled`, `lost`, `outOfOrder`, or `unfinished` as a value. It
   throws only on a defect, such as a lease length out of range.
 - The server-facing functions use `serverQuery` and `serverMutation` from
@@ -122,6 +128,9 @@ Left for the first unit that needs each one:
   callback. It runs `holds` from `machine.ts`, the rule every lease call runs.
 - A delayed retry and a pause of a whole kind, which music's lyrics lookups need.
 - Deleting finished jobs after a retention period, before trickplay queues thousands of jobs.
+- A command that recounts a kind's `jobKinds` row from its running jobs, for an operator who
+  edited jobs by hand. Every write in this unit goes through `store.ts`, so nothing else moves
+  the count.
 - Totals of jobs by status, when a screen shows them. `store.applyEvent` is the one place that
   moves a job between statuses, so the counters go there.
 

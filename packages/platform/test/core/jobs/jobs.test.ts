@@ -184,6 +184,53 @@ describe.skipIf(stack === undefined)("core jobs, live", { timeout: 180_000 }, ()
     expect((await jobOf(stack, jobId)).status).toBe("succeeded");
   });
 
+  it("frees every slot when the cron releases all of a kind's lapsed leases at once", async () => {
+    if (stack === undefined) return;
+
+    await freshKind(stack, "probe.capped");
+
+    const jobIds = await enqueue(stack, "probe.capped", 3);
+    const gone = worker(stack, "gone");
+
+    await claimed(gone.claim(["probe.capped"]));
+    await claimed(gone.claim(["probe.capped"]));
+
+    expect(only(await waiting(stack, ["probe.capped"]))).toMatchObject({ free: 0 });
+
+    await eventually(
+      "both lapsed leases released",
+      async () => {
+        const jobs = await Promise.all(jobIds.map((jobId) => jobOf(stack, jobId)));
+
+        return jobs.every((job) => job.status === "queued") ? true : null;
+      },
+      RELEASE_WITHIN_MS,
+    );
+
+    expect(only(await waiting(stack, ["probe.capped"]))).toEqual({
+      kind: "probe.capped",
+      free: 2,
+      ready: true,
+    });
+
+    const back = worker(stack, "back");
+    const leases = await claimAll(back, ["probe.capped"]);
+
+    expect(leases).toHaveLength(2);
+
+    await inSequence(leases, (lease) => back.finish(lease, { outcome: "succeeded" }));
+
+    const last = await claimed(back.claim(["probe.capped"]));
+
+    await back.finish(last.lease, { outcome: "succeeded" });
+
+    const statuses = await Promise.all(
+      jobIds.map(async (jobId) => (await jobOf(stack, jobId)).status),
+    );
+
+    expect(statuses).toEqual(["succeeded", "succeeded", "succeeded"]);
+  });
+
   it("never runs more than 2 of 10 jobs capped at 2, with 5 workers racing", async () => {
     if (stack === undefined) return;
 
@@ -422,5 +469,22 @@ describe.skipIf(stack === undefined)("core jobs, live", { timeout: 180_000 }, ()
     );
 
     expect(listed.page.map((row) => row.id)).toEqual([next.importId, first.importId]);
+
+    const older = await claimed(w.claim(["probe.import"], 30_000));
+
+    expect(older.lease.jobId).toBe(other.jobId);
+
+    await w.finish(older.lease, { outcome: "succeeded" });
+
+    const held = await claimed(w.claim(["probe.import"], 30_000));
+
+    expect(held.lease.jobId).toBe(next.jobId);
+    expect(await cancel(stack, held.lease.jobId)).toMatchObject({ outcome: "canceling" });
+
+    const restarted = await start();
+
+    expect(restarted.created).toBe(true);
+    expect(restarted.jobId).not.toBe(next.jobId);
+    expect(await w.report(held.lease)).toEqual({ outcome: "canceled" });
   });
 });

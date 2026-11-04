@@ -84,7 +84,7 @@ const pageOf = (
       db,
       {
         table: "jobs",
-        index: "by_status_lease",
+        index: "by_status",
         range: (q) => q.eq("status", status),
         order: "desc",
       },

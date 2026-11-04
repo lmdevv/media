@@ -1,6 +1,7 @@
 import { internal } from "../../_generated/api";
 import type { Doc, Id } from "../../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../../_generated/server";
+import { inOrder } from "../lib/inOrder";
 import { kindDef } from "./kinds";
 import type { JobKind, JobPayload } from "./kinds";
 import { ITEM_BATCH_MAX, pickClaim, step } from "./machine";
@@ -142,8 +143,9 @@ const applyWrite = async (ctx: MutationCtx, jobId: Id<"jobs">, write: ItemWrite)
 
 /**
  * Runs one machine step on a stored job and applies it in this mutation: the next state with
- * `db.replace`, then its item writes. A step that changes nothing returns the job itself and
- * writes nothing.
+ * `db.replace`, the kind's row, then its item writes. A step that changes nothing writes nothing.
+ * Calls in one mutation must run one after another (`inOrder`), because each reads and writes
+ * its kind's row.
  */
 export const applyEvent = async (
   ctx: MutationCtx,
@@ -166,13 +168,10 @@ export const applyEvent = async (
     claimed: job.status === "queued" && status === "running" ? job._creationTime : null,
   });
 
-  await Promise.all(result.writes.map((write) => applyWrite(ctx, job._id, write)));
+  await inOrder(result.writes, (write) => applyWrite(ctx, job._id, write));
 
   return result;
 };
-
-export const leasedJob = (db: DatabaseReader, lease: Lease): Promise<Doc<"jobs"> | null> =>
-  db.get("jobs", lease.jobId);
 
 /**
  * What a claim of `kind` would see: the kind's running count and, when it is below the cap, its
