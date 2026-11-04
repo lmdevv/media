@@ -4,7 +4,6 @@ on:
   pull_request:
     paths: &paths
       - "deploy/demo-library/**"
-      - "scripts/demo-library.sh"
       - "scripts/build-demo-library.sh"
       - ".github/workflows/demo-library.yml"
   push:
@@ -22,7 +21,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -30,9 +29,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The download (about 7.5 GB with its cache), BuildKit's copy of it for each platform, and the
-      # pushed layers need about 30 GB; the runner starts with less free. Its Android, .NET, Haskell,
-      # and CodeQL toolchains and its cached Docker images are unused here.
+      # The local build pulls both source images (about 7.5 GB), and the push builds each platform
+      # again in BuildKit; the runner starts with less free than both need. Its Android, .NET,
+      # Haskell, and CodeQL toolchains and its cached Docker images are unused here.
       - name: Free disk space
         run: |
           df -h /
@@ -40,10 +39,6 @@ jobs:
             /opt/hostedtoolcache/CodeQL
           docker image prune --all --force >/dev/null
           df -h /
-      # ffmpeg, dvdauthor, and fontconfig come from the flake's nixpkgs through its dev shell, not
-      # apt: the runner's apt mirror has hung installs for half an hour at a time, and the Feature
-      # Test's image subtitle needs dvdauthor with the shell's fonts.
-      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - if: github.event_name != 'pull_request'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -51,8 +46,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - run: >-
-          nix develop --command
-          scripts/build-demo-library.sh ${{ github.event_name != 'pull_request' && '--push' || '' }}
+      - run: scripts/build-demo-library.sh ${{ github.event_name != 'pull_request' && '--push' || '' }}
       - if: always()
         run: df -h /

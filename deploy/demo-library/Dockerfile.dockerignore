@@ -1,4 +1,0 @@
-# The demo-library.sh download cache and unfinished files stay out of the image.
-.cache
-**/*.part
-**/*.part.*

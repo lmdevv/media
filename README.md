@@ -143,8 +143,8 @@ It needs `curl`, `ffmpeg`, and `unzip`, plus `spumux` from dvdauthor for the ima
   so it matches without a TMDB key, and local posters and backgrounds taken from the film.
   Credits and licenses are written to `CREDITS.md` in the library folder.
 
-The full set also ships as a data-only image, `ghcr.io/lmdevv/movies-demo-library:v1`, so a
-Compose install can mount it with no download script:
+The full set also ships, with five Creative Commons albums under `Music`, as a data-only image,
+`ghcr.io/lmdevv/media-demo-library:v1`, so a Compose install can mount it with no download script:
 `docker compose -f compose.yaml -f compose.demo.yaml up -d` in `deploy/compose`, then add
 `/media/library/Movies` and `/media/library/Shows`. [docs/demo-library.md](docs/demo-library.md)
 covers what it holds, building it, and its credits.
