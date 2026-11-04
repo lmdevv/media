@@ -16,7 +16,7 @@ that `[music]` used for its demo (about 520 MB).
 | `Shows/Caminandes (2013)`                       | Three episodes of VP8 and Vorbis in Ogg, always transcoded                                                                                   |
 | `Shows/Pioneer One (2010)`                      | A six-episode season, for Continue Watching and the next episode                                                                             |
 | `Music/raymundo mendoza/translations ep`        | Five lossless FLAC tracks                                                                                                                    |
-| `Music/Dadive/Frightening Freighters EP`        | Two lossless FLAC tracks whose tags the download added                                                                                       |
+| `Music/Dadive/Frightening Freighters EP`        | Two lossless FLAC tracks that ship untagged; the download script tagged them                                                                 |
 | `Music/Doc & Lena Selyanina/Cosmic Lullabies`   | Three long MP3 tracks, and one artist across two albums                                                                                      |
 | `Music/Doc & Lena Selyanina/Vienna Blue`        | Seven MP3 tracks with per-track credits                                                                                                      |
 | `Music/Andy G. Cohen/Prisma`                    | An eleven-track MP3 album                                                                                                                    |
@@ -67,7 +67,7 @@ project's own words. The artists, studios, and labels do not endorse [media].
 | Sintel (2010)                                 | Blender Foundation, durian.blender.org       | CC BY 3.0    | download.blender.org/durian                                   |
 | Tears of Steel (2012)                         | Blender Foundation, mango.blender.org        | CC BY 3.0    | download.blender.org/demo/movies/ToS                          |
 | Cosmos Laundromat: First Cycle (2015)         | Blender Institute, gooseberry.blender.org    | CC BY 4.0    | archive.org/details/CosmosLaundromatFirstCycle                |
-| Caminandes (2013-2016)                        | Blender Institute, caminandes.com            | CC BY        | archive.org (caminandes-1/2/3)                                |
+| Caminandes (2013-2016)                        | Blender Institute, caminandes.com            | CC BY 3.0    | archive.org (caminandes-1/2/3)                                |
 | Pioneer One (2010)                            | Josh Bernhard and Bracey Smith               | CC BY-SA 4.0 | archive.org (pioneer-one-ep.-1 … 6)                           |
 | raymundo mendoza, translations ep (2010)      | raymundo mendoza, released by unfoundsound   | CC BY 3.0    | archive.org/details/unfound53                                 |
 | Dadive, Frightening Freighters EP (2018)      | Dadive, released by monoKraK                 | CC BY-SA 3.0 | archive.org/details/MonoKraK207Dadive_FrighteningFreightersEP |
@@ -78,9 +78,9 @@ project's own words. The artists, studios, and labels do not endorse [media].
 The "[movies] Feature Test" versions are cut and re-encoded from Sintel (CC BY 3.0, Blender
 Foundation). Posters, backgrounds, and stills are frames taken from each film. The albums' audio
 and supplied covers are reproduced as their sources distribute them. The Dadive FLAC files are the
-Internet Archive's lossless encodings of the original WAV recordings, and the download added the
-artist, album, title, and track tags they lack; the audio is unchanged. Vienna Blue also credits
-Mahmoud el Kipikapi (guitar on "Wanderer"), KraftiM, Softspace, and TheOmen (voices on
+Internet Archive's lossless encodings of the original WAV recordings, and the download script
+added the artist, album, title, and track tags they lack; the audio is unchanged. Vienna Blue also
+credits Mahmoud el Kipikapi (guitar on "Wanderer"), KraftiM, Softspace, and TheOmen (voices on
 "Doppelgänger"), the Internet Archive (the Sigmund Freud recording), and Corsica_S, Ingsey101, and
 Acclivity (sound samples), per its
 [release notes](https://archive.org/download/mt021/mt021_release_info.txt). Adaptations of the
