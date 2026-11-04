@@ -61,21 +61,21 @@ The core lives in `packages/platform/convex/core`, plus the server code that ser
 jobs. Each module is used by every domain. Until the movies port, `packages/platform` runs as its
 own Convex deployment next to old movies' `packages/backend` (ADR 0023).
 
-| Module      | Holds                                                                                     | ADR        |
-| ----------- | ----------------------------------------------------------------------------------------- | ---------- |
-| Identity    | Users, usernames, passwords, sessions, API keys, device codes, invites, reset links       | 0003, 0004 |
-| Permissions | Platform roles, credential scopes, the grants table, groups, content restrictions         | 0005       |
-| Devices     | The device registry, personal and shared devices, the picker, locks, unlock codes         | 0006       |
-| Guests      | Guest principals, share links, the admin switch, the guest address, rate limits           | 0007       |
-| Commands    | `packages/commands` and the generator for Convex functions, SDK, CLI, menu, and skill     | 0009       |
-| Tickets     | One signed-URL format for every byte-serving route, with key ids and live revocation      | 0011       |
-| Jobs        | Job kinds, typed payloads, leases, attempts, per-kind caps, `schemaMigrations`, `imports` | 0012       |
-| Limits      | Pagination by index, counter tables, batched writes                                       | 0013       |
-| Libraries   | Libraries with a `kind`, their folders, and the grants that share them                    | 0002, 0005 |
-| Settings    | The table that marks each setting as synced per user or kept per device                   | 0019       |
-| Downloads   | Who may download, per-device item lists, storage caps, re-sync, expiry on revocation      | 0019       |
-| Together    | Group sessions with join links, roles, join settings, presence, and a shared clock        | 0017       |
-| Connect     | Remote control, loose sync, Chromecast and AirPlay targets, control rules                 | 0018       |
+| Module      | Holds                                                                                                                            | ADR        |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| Identity    | Users, usernames, passwords, sessions, API keys, device codes, invites, reset links                                              | 0003, 0004 |
+| Permissions | Platform roles, credential scopes, the grants table, groups, content restrictions                                                | 0005       |
+| Devices     | The device registry, personal and shared devices, the picker, locks, unlock codes                                                | 0006       |
+| Guests      | Guest principals, share links, the admin switch, the guest address, rate limits                                                  | 0007       |
+| Commands    | `packages/commands` and the generator for Convex functions, SDK, CLI, menu, and skill                                            | 0009       |
+| Tickets     | One signed-URL format for every byte-serving route, with key ids and live revocation                                             | 0011       |
+| Jobs        | Job kinds, typed payloads, leases, attempts, per-kind caps, batched items, the lease-release cron, `schemaMigrations`, `imports` | 0012       |
+| Limits      | Pagination by index, counter tables, batched writes                                                                              | 0013       |
+| Libraries   | Libraries with a `kind`, their folders, and the grants that share them                                                           | 0002, 0005 |
+| Settings    | The table that marks each setting as synced per user or kept per device                                                          | 0019       |
+| Downloads   | Who may download, per-device item lists, storage caps, re-sync, expiry on revocation                                             | 0019       |
+| Together    | Group sessions with join links, roles, join settings, presence, and a shared clock                                               | 0017       |
+| Connect     | Remote control, loose sync, Chromecast and AirPlay targets, control rules                                                        | 0018       |
 
 ## Domains
 
