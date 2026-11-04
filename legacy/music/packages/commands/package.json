@@ -1,0 +1,39 @@
+{
+  "name": "@music/commands",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Command registry: every user action as an Effect Schema.",
+  "type": "module",
+  "exports": {
+    "./ids": "./src/ids.ts",
+    "./models": "./src/models.ts",
+    "./command": "./src/command.ts",
+    "./registry": "./src/registry.ts",
+    "./codec": "./src/codec.ts",
+    "./signed-url": "./src/signed-url.ts",
+    "./search-text": "./src/search-text.ts",
+    "./text": "./src/text.ts",
+    "./permissions": "./src/permissions.ts",
+    "./folder-ids": "./src/folder-ids.ts",
+    "./system-folders": "./src/system-folders.ts",
+    "./text-order": "./src/text-order.ts",
+    "./media-limits": "./src/media-limits.ts",
+    "./revision": "./src/revision.ts",
+    "./forms": "./src/forms.ts",
+    "./queue-rules": "./src/queue-rules.ts",
+    "./session-commands": "./src/session-commands.ts",
+    "./lyrics": "./src/lyrics.ts",
+    "./lyric-lookups": "./src/lyric-lookups.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@music/config": "workspace:*",
+    "fast-check": "4.10.2",
+    "typescript": "catalog:"
+  }
+}

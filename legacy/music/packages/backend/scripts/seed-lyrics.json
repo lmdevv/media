@@ -1,0 +1,171 @@
+{
+  "Massive Attack/Blue Lines/01 Safe From Harm.flac": {
+    "lyricsFiles": "01 Safe From Harm.lrc:1:0",
+    "lyrics": [
+      {
+        "kind": "main",
+        "lang": "en",
+        "origin": {
+          "_tag": "Sidecar",
+          "fileName": "01 Safe From Harm.lrc",
+          "format": "lrc"
+        },
+        "body": {
+          "_tag": "Synced",
+          "lines": [
+            {
+              "text": "Morning finds the harbour still",
+              "startMs": 1000,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Gulls draw circles on the glass",
+              "startMs": 3500,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Every window holds a light",
+              "startMs": 6000,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Nobody here is in a hurry",
+              "startMs": 8500,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "The ferry hums its single note",
+              "startMs": 11000,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "We count the boats and lose the count",
+              "startMs": 13500,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Salt is drying on the rail",
+              "startMs": 16000,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "A radio plays somewhere upstairs",
+              "startMs": 18500,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "The tide comes in without a sound",
+              "startMs": 21000,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Hold the rope and let it run",
+              "startMs": 23500,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Clouds are folding into rain",
+              "startMs": 26000,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Somebody whistles down the pier",
+              "startMs": 28500,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "The water keeps the colour of the sky",
+              "startMs": 31000,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "We stay until the lamps come on",
+              "startMs": 33500,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Then walk home the longer way",
+              "startMs": 36000,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Under the bridge the echoes answer",
+              "startMs": 38500,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Every step a little slower",
+              "startMs": 41000,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "The harbour sleeps and so do we",
+              "startMs": 43500,
+              "endMs": 46000,
+              "words": null,
+              "voice": null
+            },
+            {
+              "text": "Morning finds the harbour still\nand the gulls come back to the glass",
+              "startMs": 50000,
+              "endMs": null,
+              "words": null,
+              "voice": null
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Massive Attack/Mezzanine/01 Angel.flac": {
+    "lyricsFiles": "",
+    "lyrics": [
+      {
+        "kind": "main",
+        "lang": "en",
+        "origin": {
+          "_tag": "Embedded",
+          "tag": "vorbis:LYRICS"
+        },
+        "body": {
+          "_tag": "Plain",
+          "text": "Dust on the windowsill, a kettle on the stove,\nthe long afternoon leaning on the door.\n\nNobody calls, nothing is late,\nthe clock just keeps its own slow time."
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,176 @@
+import type { ControllerId, DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
+import type { PlaybackState, QueueEntry, RepeatMode } from "@music/commands/models";
+import { Data } from "effect";
+
+import { livePosition } from "./live-position";
+
+const SEEK_THRESHOLD_MS = 1500;
+
+/**
+ * How far a device listening along to someone else's Jam may drift from the host before it seeks
+ * back in step.
+ */
+export const FOLLOW_DRIFT_MS = 1000;
+
+/** The session as one device sees it. */
+export interface SessionView {
+  readonly control?: PlaybackState["control"];
+  readonly ownSeek: boolean;
+  /** True when this device is the session's active device. */
+  readonly active: boolean;
+  readonly index: number;
+  /** The queue entry at `index`, or null when the queue is empty. */
+  readonly track: QueueEntry | null;
+  readonly positionMs: number;
+  readonly updatedAt: number;
+  readonly playing: boolean;
+  readonly volume: number;
+  /**
+   * This device listens along to someone else's Jam: it plays in step with the host's device,
+   * which is the clock, and never reports or moves the queue itself.
+   */
+  readonly following: boolean;
+}
+
+/** Projects the session onto one device. */
+export const sessionView = (
+  state: PlaybackState,
+  deviceId: DeviceId,
+  controllerId?: ControllerId,
+): SessionView => ({
+  control: state.control,
+  ownSeek: controllerId !== undefined && state.control?.appliedBy === controllerId,
+  active: state.activeDevice?.id === deviceId,
+  index: state.index,
+  track: state.queue[state.index] ?? null,
+  positionMs: state.positionMs,
+  updatedAt: state.updatedAt,
+  playing: state.playing,
+  volume: state.volume,
+  following: state.following,
+});
+
+/** What the engine holds right now. */
+export interface LocalPlayback {
+  readonly itemId: QueueItemId | null;
+  /** The track the engine loaded (or is loading), or null when unloaded. */
+  readonly trackId: TrackId | null;
+  /** The engine's last reported position. */
+  readonly positionMs: number;
+  /**
+   * The position this device last sent with `playback.report`, or null. A server position equal
+   * to it is this device's own report coming back, never a seek, even when the device clock is
+   * off from the server clock by more than the seek threshold.
+   */
+  readonly reportedMs: number | null;
+}
+
+/** One step for the engine, run in order. */
+export type EngineCommand = Data.TaggedEnum<{
+  /** Stop output and release the audio. */
+  Unload: {};
+  /** Load the queue entry at `index` and start at `startMs`. */
+  Load: {
+    readonly track: QueueEntry;
+    readonly index: number;
+    readonly startMs: number;
+    readonly autoplay: boolean;
+  };
+  /**
+   * The engine already plays this track; it is now the entry `track` at `index` in the queue (the
+   * same song, moved, or queued again as another entry).
+   */
+  AdoptIndex: { readonly index: number; readonly track: QueueEntry };
+  Play: {};
+  Pause: {};
+  Seek: { readonly positionMs: number };
+  SetVolume: { readonly volume: number };
+}>;
+
+/** Constructors and matchers for `EngineCommand`. */
+export const EngineCommand = Data.taggedEnum<EngineCommand>();
+
+/**
+ * The commands that bring the engine in line with `next`. Pass `previous = null` to force a full
+ * resync (first snapshot, or after the media service came back).
+ */
+export const planEngine = (
+  previous: SessionView | null,
+  next: SessionView,
+  local: LocalPlayback,
+  now: number,
+): ReadonlyArray<EngineCommand> => {
+  if (!next.active || next.track === null) {
+    return local.trackId === null ? [] : [EngineCommand.Unload()];
+  }
+
+  const target = livePosition(next, now, next.track.durationMs);
+
+  const load = (track: QueueEntry): ReadonlyArray<EngineCommand> => [
+    EngineCommand.SetVolume({ volume: next.volume }),
+    EngineCommand.Load({ track, index: next.index, startMs: target, autoplay: next.playing }),
+  ];
+
+  if (previous === null || !previous.active || local.trackId === null) return load(next.track);
+
+  const commands: Array<EngineCommand> = [];
+
+  const entryChanged =
+    previous.index !== next.index ||
+    previous.track?.id !== next.track.id ||
+    previous.track.itemId !== next.track.itemId;
+
+  if (entryChanged && next.track.id !== local.trackId) return load(next.track);
+
+  if (entryChanged) {
+    commands.push(EngineCommand.AdoptIndex({ index: next.index, track: next.track }));
+  }
+
+  if (previous.volume !== next.volume) {
+    commands.push(EngineCommand.SetVolume({ volume: next.volume }));
+  }
+
+  const positionWritten =
+    (previous.positionMs !== next.positionMs || previous.updatedAt !== next.updatedAt) &&
+    next.positionMs !== local.reportedMs;
+
+  const seekOrdered =
+    next.control !== undefined && next.control.seek !== (previous.control?.seek ?? 0);
+
+  const transportOrdered =
+    next.control !== undefined && next.control.transport !== (previous.control?.transport ?? 0);
+
+  const sameEntry = entryChanged || local.itemId === next.track.itemId;
+  const threshold = next.following ? FOLLOW_DRIFT_MS : SEEK_THRESHOLD_MS;
+
+  if (
+    sameEntry &&
+    (seekOrdered
+      ? !next.ownSeek
+      : positionWritten && Math.abs(target - local.positionMs) > threshold)
+  ) {
+    commands.push(EngineCommand.Seek({ positionMs: target }));
+  }
+
+  if (transportOrdered || previous.playing !== next.playing) {
+    commands.push(next.playing ? EngineCommand.Play() : EngineCommand.Pause());
+  }
+
+  return commands;
+};
+
+/**
+ * The queue index that plays after `index` finishes on its own, or null when playback stops or
+ * repeats the same entry (`repeat: "one"`, handled by seeking to the start).
+ */
+export const followingIndex = (
+  index: number,
+  queueLength: number,
+  repeat: RepeatMode,
+): number | null => {
+  if (repeat === "one") return null;
+
+  if (index + 1 < queueLength) return index + 1;
+
+  return repeat === "all" && queueLength > 0 ? 0 : null;
+};

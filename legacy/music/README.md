@@ -1,0 +1,143 @@
+# [music]
+
+Self-hosted music for people and agents. Stream your own library from one install, with
+multi-user accounts, live handoff between devices, lossless and gapless playback, and a CLI that
+can do everything the app can.
+
+![Home in light mode](docs/screenshots/04-home-light.webp)
+
+|                                                            |                                                      |
+| ---------------------------------------------------------- | ---------------------------------------------------- |
+| ![Album in dark mode](docs/screenshots/14-album-dark.webp) | ![Now Playing](docs/screenshots/07-now-playing.webp) |
+| ![Command menu](docs/screenshots/09-command-menu.webp)     | ![API keys](docs/screenshots/11-api-key.webp)        |
+
+<p>
+  <img src="docs/screenshots/15-phone-home.webp" alt="Phone home" width="260">
+  <img src="docs/screenshots/16-phone-now-playing.webp" alt="Phone Now Playing, playing on another device" width="260">
+</p>
+
+A one-minute walkthrough recording is attached to the
+[latest release](https://github.com/lmdevv/music/releases).
+
+## What it does
+
+- **Your files, your tags.** Point it at folders in the usual Artist/Album layout. It reads the
+  existing tags and artwork, watches for changes, and never rewrites your files.
+- **Lossless and gapless.** FLAC plays as FLAC. Albums play without gaps through a Media Source
+  Extensions engine that trims encoder delay to the sample; browsers without it fall back to
+  regular audio. Lower-quality AAC streams for slow connections.
+- **Every device, one session.** Start on your laptop, move to your phone, control either from
+  the other. The queue, position, likes, playlists, and history follow you.
+- **Multi-user.** The first account is the admin. Invite others with a link; libraries can be
+  shared or private.
+- **Agent-first.** Every action is a command in one registry. The web app's command menu (⌘K),
+  the `music` CLI, and the agent skill in [`skills/music`](skills/music/SKILL.md) all run the
+  same commands. API keys let agents act for you.
+- **One install.** A single container (or a NixOS module) runs everything on one port.
+
+## Install
+
+```sh
+docker run -d --name music -p 8080:8080 \
+  -v music-data:/data \
+  -v /path/to/your/music:/music:ro \
+  -e PUBLIC_URL=http://localhost:8080 \
+  ghcr.io/lmdevv/music:latest
+```
+
+Open <http://localhost:8080>, create the admin account, and add `/music` as a library. The first
+scan starts at once; albums appear while it runs.
+
+- **Homelab guide:** [`docs/homelab.md`](docs/homelab.md) covers Compose, reverse proxies
+  (Caddy, Traefik, Nginx Proxy Manager), Tailscale, NixOS, upgrades, and troubleshooting.
+- **Compose:** [`deploy/docker/compose.yaml`](deploy/docker/compose.yaml).
+- **NixOS:** import the flake's `nixosModules.default` and set
+  `services.music = { enable = true; musicDirs = [ "/srv/music" ]; };`. It listens on
+  localhost unless you set `openFirewall = true` (container ports bypass the NixOS firewall).
+  The CLI is `nix run github:lmdevv/music#cli`.
+- **Remote access:** put it behind your own reverse proxy or Tailscale and set `PUBLIC_URL`.
+- **Images:** `linux/amd64` and `linux/arm64`.
+- **Data:** everything lives in `/data`: the database, artwork, the transcode cache, generated
+  secrets, and a backup taken before every upgrade (the newest `BACKUP_KEEP`, default 5).
+- **Permissions:** no service runs as root. The media service, which reads your music with
+  ffmpeg, runs as uid and gid 1000 unless you set `PUID` and `PGID` (the NixOS module's `uid` and
+  `gid`). Your music must be readable by that user; ordinary `644` files in `755` folders are. It
+  owns `/data/media` (fixed on every start) and cannot read the secrets or the database.
+- **Operations:** backups, restoring one, upgrading Docker, Compose, and NixOS installs, health
+  checks, and permissions are in [`docs/operations.md`](docs/operations.md).
+- **Try it with free music:** [`docs/demo-music.md`](docs/demo-music.md) downloads five Creative
+  Commons albums.
+
+## CLI and agents
+
+Create an API key in Settings → API keys, then:
+
+```sh
+pnpm --filter @music/cli build && alias music="node $PWD/apps/cli/dist/music.js"
+music login --server http://localhost:8080/convex   # asks for the key; or pipe it to --key-stdin
+music play cosmic lullabies
+music playlists create "Late night" --track-ids "$(music search neptune --json | jq -r '[.tracks[].id] | join(",")')"
+music libraries scan <library-id> --wait
+music commands --json        # every command with its arguments as JSON Schema
+```
+
+Keep keys out of shell history and the process list: `music login` asks for the key at a
+terminal, reads it from stdin with `--key-stdin` (`printf %s "$KEY" | music login --server ...
+--key-stdin`), or takes `MUSIC_API_KEY`. It refuses a plain `http://` server on another machine
+unless you pass `--insecure`, since the key would cross the network unencrypted.
+
+Give an agent [`skills/music/SKILL.md`](skills/music/SKILL.md) and an API key. There is no MCP
+server; the CLI is the interface.
+
+## How it works
+
+| Part                                       | Role                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------ |
+| [Convex](https://convex.dev) (self-hosted) | All product state, auth, live sync, and the job queue                    |
+| `apps/media` (Node, Hono, Effect, ffmpeg)  | Scans and watches folders, serves signed streams and artwork, transcodes |
+| `apps/web` (Vite, React, TanStack Router)  | The web app, designed in Paper, light and dark, desktop and phone        |
+| `packages/player`                          | Gapless MSE engine, HTML audio fallback, device sync                     |
+| `apps/cli` + `skills/music`                | The CLI generated from the command registry, and the agent skill         |
+| `packages/commands`                        | Every user action as an Effect Schema, shared by all of the above        |
+| Caddy + s6                                 | One port: `/` web app, `/convex` API and WebSocket, `/media` streams     |
+
+Convex is the only source of truth for product state. The media service is the only process that
+touches files, and it never decides access: Convex signs each stream URL after checking the user
+can read that library.
+
+## Lyrics lookups
+
+The server looks up lyrics on [LRCLIB](https://lrclib.net) for songs without synced lyrics of
+their own (a `.lrc` file beside the song, or synced lyrics in its tags): when a song starts
+playing, when it is downloaded to a device, and when an admin runs `music lyrics backfill`. Each
+lookup sends the song's title, artist, album, and length, from the server's IP address with the
+User-Agent `music/<version> (+https://github.com/lmdevv/music)`. Lyrics LRCLIB finds, and its
+answer that a song is instrumental, are kept, so that song is not asked again. A song LRCLIB lacks
+is asked again only when it plays, is downloaded, or is backfilled 30 days or more later. While
+LRCLIB is down or asks for fewer requests, every lookup waits, even across a restart, and none is
+taken as a song LRCLIB lacks. Lookups are on by default; an admin turns them off with
+`music server update --no-remote-lyrics` (a switch in the settings follows). Lyrics already found
+keep showing.
+
+## Development
+
+```sh
+nix develop                    # Node 24, pnpm, ffmpeg, Caddy
+pnpm install
+scripts/dev-backend.sh         # self-hosted Convex in Docker on :3210, deployed and configured
+pnpm dev                       # web on :3001, media service, Convex watcher
+```
+
+Checks: `pnpm typecheck`, `pnpm lint`, `pnpm fmt:check`, `pnpm test`, `pnpm knip`, and the
+real-stack end-to-end suite `scripts/stack-e2e.sh`, which builds the image and drives the real app
+with real audio. See [`AGENTS.md`](AGENTS.md) for the layout and rules.
+
+## Status
+
+The MVP is complete: server, web app, CLI, and agent skill. Native iOS, Android, and desktop
+apps, offline downloads, lyrics, and plugins come next.
+
+## License
+
+MIT. The bundled Convex backend is FSL-1.1, converting to Apache-2.0 after two years. Demo music
+credits are in [`docs/demo-music.md`](docs/demo-music.md).

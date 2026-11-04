@@ -1,0 +1,38 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": ["tools/oxlint/**"],
+  "ignoreDependencies": ["@effect/language-service"],
+  "workspaces": {
+    ".": {
+      "ignoreDependencies": ["@effect/vitest", "effect"],
+      "entry": [".agents/skills/*/scripts/*.mjs"],
+      "ignoreBinaries": ["ffmpeg"]
+    },
+    "apps/web": {
+      "entry": ["e2e-stack/first-audio.ts"]
+    },
+    "apps/mobile": {
+      "entry": ["src/app/**/*.tsx"],
+      "project": ["src/**/*.{ts,tsx,css}"]
+    },
+    "apps/cli": {
+      "entry": ["src/main.ts", "scripts/*.ts"]
+    },
+    "packages/backend": {
+      "entry": ["convex/*.ts", "scripts/*.ts", "test/*.test.ts"],
+      "typescript": {
+        "config": ["convex/tsconfig.json"]
+      }
+    },
+    "packages/ui": {},
+    "packages/commands": {},
+    "packages/sdk": {},
+    "packages/player": {
+      "entry": ["harness/*.{ts,tsx}", "browser/*.spec.ts"],
+      "ignoreBinaries": ["ffmpeg", "ffprobe"]
+    },
+    "apps/media": {
+      "entry": ["src/main.ts", "scripts/*.ts"]
+    }
+  }
+}

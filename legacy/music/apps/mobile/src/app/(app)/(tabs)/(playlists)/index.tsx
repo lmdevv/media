@@ -1,0 +1,124 @@
+import type { Playlist } from "@music/commands/models";
+import { useRead } from "@music/sdk/react";
+import { router } from "expo-router";
+import { Heart, ListMusic, Plus, Users } from "lucide-react-native";
+import { useState } from "react";
+
+import { OfflineNotice, OfflineState } from "@/components/states/offline-notice";
+import { Button } from "@/components/ui/button";
+import { ChipGroup } from "@/components/ui/chip";
+import { EmptyState } from "@/components/ui/empty-state";
+import { IconButton } from "@/components/ui/icon-button";
+import { Row, RowChevron } from "@/components/ui/row";
+import { TabRoot } from "@/components/ui/tab-root";
+import { countOf } from "@/lib/format";
+import { playlistLine } from "@/lib/playlist-format";
+import { useServerReach } from "@/session/server-reach";
+
+/** Which playlists the list shows. */
+type Shelf = "yours" | "shared";
+
+const SHELVES = [
+  { value: "yours", label: "Yours" },
+  { value: "shared", label: "Shared with you" },
+] as const;
+
+const LIKES_PAGE = 200;
+
+const openNew = () => router.push("/playlist/new");
+
+function LikedRow() {
+  const page = useRead("likes.page", { limit: LIKES_PAGE });
+  const count = page === undefined ? null : page.items.length;
+
+  return (
+    <Row
+      title="Liked songs"
+      subtitle={
+        count === null
+          ? " "
+          : page?.done === true
+            ? countOf(count, "song")
+            : `${String(count)}+ songs`
+      }
+      leading={{ kind: "icon", icon: Heart, tone: "accent" }}
+      active
+      trailing={<RowChevron />}
+      onPress={() => router.push("/liked")}
+    />
+  );
+}
+
+function PlaylistRows({ playlists }: { readonly playlists: ReadonlyArray<Playlist> }) {
+  return playlists.map((playlist) => (
+    <Row
+      key={playlist.id}
+      title={playlist.name}
+      subtitle={playlistLine(playlist)}
+      leading={{ kind: "art", url: playlist.artUrls[0] ?? null, recyclingKey: playlist.id }}
+      trailing={<RowChevron />}
+      onPress={() => router.push({ pathname: "/playlist/[id]", params: { id: playlist.id } })}
+    />
+  ));
+}
+
+function Yours() {
+  const playlists = useRead("playlists.list", {});
+
+  return (
+    <>
+      <LikedRow />
+      {playlists === undefined ? null : playlists.length === 0 ? (
+        <EmptyState
+          icon={ListMusic}
+          title="Start a playlist."
+          body={"Gather songs for a mood,\na trip, or a friend."}
+          primary={<Button label="New playlist" icon={Plus} onPress={openNew} />}
+        />
+      ) : (
+        <PlaylistRows playlists={playlists} />
+      )}
+    </>
+  );
+}
+
+function Shared() {
+  const playlists = useRead("playlists.shared", {});
+
+  if (playlists === undefined) return null;
+
+  if (playlists.length === 0) {
+    return (
+      <EmptyState
+        icon={Users}
+        title="Nothing shared yet."
+        body={"Playlists people share with you\nshow up here."}
+      />
+    );
+  }
+
+  return <PlaylistRows playlists={playlists} />;
+}
+
+export default function Playlists() {
+  const [shelf, setShelf] = useState<Shelf>("yours");
+
+  if (useServerReach() === "offline") {
+    return (
+      <TabRoot title="Playlists">
+        <OfflineState body="Your playlists come back when the server answers." />
+      </TabRoot>
+    );
+  }
+
+  return (
+    <TabRoot
+      title="Playlists"
+      action={<IconButton icon={Plus} label="New playlist" onPress={openNew} />}
+    >
+      <OfflineNotice variant="card" className="mb-1" />
+      <ChipGroup label="Show" options={SHELVES} value={shelf} onChange={setShelf} />
+      {shelf === "yours" ? <Yours /> : <Shared />}
+    </TabRoot>
+  );
+}

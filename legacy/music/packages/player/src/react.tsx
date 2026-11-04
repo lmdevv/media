@@ -1,0 +1,427 @@
+import { ControllerId } from "@music/commands/ids";
+import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
+import type { Device, Jam, QueueEntry, RepeatMode } from "@music/commands/models";
+import { makeMusicClient } from "@music/sdk/client";
+import { useRead } from "@music/sdk/react";
+import { useConvex } from "convex/react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type { ReactNode } from "react";
+
+import {
+  browserStorage,
+  describeDevice,
+  loadDeviceId,
+  readItem,
+  writeItem,
+} from "./device-identity";
+import type { EngineKind, PlayerEngine } from "./engine";
+import { HtmlAudioEngine } from "./html-audio-engine";
+import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
+import { MseEngine } from "./mse-engine";
+import { PlaybackController } from "./playback-controller";
+import type { EngineFactory } from "./playback-controller";
+import { serverSession } from "./session-router";
+import { streamSources } from "./source-resolver";
+import { parseStreamQuality } from "./stream-quality";
+import type { StreamQuality } from "./stream-quality";
+
+const POSITION_INTERVAL_MS = 250;
+
+const QUALITY_KEY = "music.streamQuality";
+
+/** What the player is doing: nothing queued, loading a song, playing, paused, waiting, or failed. */
+export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "buffering" | "error";
+
+/** The player as the UI shows it: the session from Convex merged with this browser's audio. */
+export interface PlayerState {
+  readonly status: PlayerStatus;
+  readonly track: QueueEntry | null;
+  readonly queue: ReadonlyArray<QueueEntry>;
+  readonly index: number;
+  readonly durationMs: number;
+  readonly shuffle: boolean;
+  readonly repeat: RepeatMode;
+  /** Whether autoplay adds similar songs when the queue runs out. */
+  readonly autoplay: boolean;
+  readonly volume: number;
+  /** This browser's device ID, stable per browser profile. */
+  readonly deviceId: DeviceId | null;
+  /** The device that outputs audio, or null when none is chosen. */
+  readonly activeDevice: Device | null;
+  /** True when this browser outputs the audio. */
+  readonly isThisDevice: boolean;
+  /** False when the media service cannot be reached; browsing still works. */
+  readonly mediaOnline: boolean;
+  readonly error: string | null;
+  /** The streaming quality setting, saved per browser. */
+  readonly quality: StreamQuality;
+  /**
+   * True when the browser refused to start audio without a tap, usually right after playback
+   * moved here from another device. `error` then reads "Tap play to start here"; `togglePlay`
+   * starts it.
+   */
+  readonly autoplayBlocked: boolean;
+  /**
+   * The engine that plays here, for diagnostics: `mse` is the sample-accurate gapless engine,
+   * `html` the HTML audio fallback (data saver, browsers without MSE, or after the MSE engine
+   * failed on a song this session).
+   */
+  readonly engine: EngineKind;
+  /**
+   * The Jam this person hosts, is in, or waits to join, or the one that just ended under them;
+   * null outside any. In someone else's Jam the queue and position are the host's.
+   */
+  readonly jam: Jam | null;
+  /** This person listens along to someone else's Jam, on `activeDevice`. */
+  readonly following: boolean;
+}
+
+/** What the UI can ask the player to do. Actions never reject: failures become `error`. */
+export interface PlayerActions {
+  /** Replaces the queue and plays it on this browser. */
+  readonly playTracks: (trackIds: ReadonlyArray<TrackId>, index?: number) => Promise<void>;
+  readonly togglePlay: () => Promise<void>;
+  readonly next: () => Promise<void>;
+  readonly previous: () => Promise<void>;
+  readonly seek: (positionMs: number) => Promise<void>;
+  /** Plays a queue entry. */
+  readonly jump: (itemId: QueueItemId) => Promise<void>;
+  readonly setShuffle: (on: boolean) => Promise<void>;
+  readonly setRepeat: (mode: RepeatMode) => Promise<void>;
+  readonly setVolume: (volume: number) => Promise<void>;
+  /** Adds songs to the queue; resolves whether they landed (a failure sets `error`). */
+  readonly addToQueue: (trackIds: ReadonlyArray<TrackId>, next?: boolean) => Promise<boolean>;
+  /** Removes the entry `itemId`; resolves whether the removal landed (a failure sets `error`). */
+  readonly removeFromQueue: (itemId: QueueItemId) => Promise<boolean>;
+  readonly setAutoplay: (on: boolean) => Promise<void>;
+  /** Moves playback to this browser; resolves whether the move landed (a failure sets `error`). */
+  readonly playHere: () => Promise<boolean>;
+  /** Moves playback to another device; resolves whether the move landed. */
+  readonly transferTo: (deviceId: DeviceId) => Promise<boolean>;
+  /** Changes the streaming quality. It applies from the next song. */
+  readonly setQuality: (quality: StreamQuality) => void;
+}
+
+/** The player state and actions that `usePlayer` returns. */
+export type Player = PlayerState & PlayerActions;
+
+const PlayerContext = createContext<Player | null>(null);
+
+const PositionContext = createContext<number>(0);
+
+/** The song that plays and what the player does with it: the slice a long song list needs. */
+export interface CurrentTrack {
+  readonly trackId: TrackId | null;
+  readonly status: PlayerStatus;
+}
+
+const CurrentTrackContext = createContext<CurrentTrack>({ trackId: null, status: "idle" });
+
+const HasTrackContext = createContext(false);
+
+/** Reads the player when it is needed (in an event handler) without re-rendering on its changes. */
+interface PlayerReaders {
+  readonly player: () => Player;
+  readonly positionMs: () => number;
+}
+
+const ReadersContext = createContext<PlayerReaders | null>(null);
+
+const useReaders = (): PlayerReaders => {
+  const readers = useContext(ReadersContext);
+
+  if (readers === null) throw new Error("Player readers must be used inside PlayerProvider");
+
+  return readers;
+};
+
+/**
+ * The player state and actions. Must be inside `PlayerProvider`. Actions never reject: server
+ * failures show up in `error`.
+ */
+export const usePlayer = (): Player => {
+  const player = useContext(PlayerContext);
+
+  if (player === null) throw new Error("usePlayer must be used inside PlayerProvider");
+
+  return player;
+};
+
+/** The live position in milliseconds. Separate from `usePlayer` because it changes often. */
+export const usePlayerPosition = (): number => useContext(PositionContext);
+
+/**
+ * The current song's ID and the player status, which change far less often than the rest of the
+ * player (a position report, the queue, or the device list). Long lists use it to mark the playing
+ * row without re-rendering every row on each player change.
+ */
+export const useCurrentTrack = (): CurrentTrack => useContext(CurrentTrackContext);
+
+/**
+ * Whether a song is loaded. Changes only when the queue goes from empty to not, for chrome (the
+ * player bar's frame, the shell's surfaces) that shows or hides with it but ignores play, pause,
+ * and buffering.
+ */
+export const useHasTrack = (): boolean => useContext(HasTrackContext);
+
+/**
+ * A stable function that returns the player as it is now. For event handlers and callbacks that
+ * act on the player but don't show it, so their component doesn't re-render on player changes.
+ */
+export const useLatestPlayer = (): (() => Player) => useReaders().player;
+
+/**
+ * A stable function that returns the live position in milliseconds, worked out afresh on every
+ * call: between the engine's reports it moves on with a monotonic clock while playing and holds
+ * while paused or buffering. For handlers (such as a seek shortcut) that would otherwise re-render
+ * with every position tick, and for animation-frame loops that follow playback closely, such as
+ * synced lyrics.
+ */
+export const usePositionReader = (): (() => number) => useReaders().positionMs;
+
+const engineFactory = (
+  engine: (() => PlayerEngine) | undefined,
+  audioElement: (() => HTMLAudioElement) | undefined,
+): EngineFactory => {
+  if (engine !== undefined) return { mse: null, create: engine };
+
+  return {
+    mse: MseEngine.detectSupport(),
+    create: (kind) =>
+      kind === "mse"
+        ? new MseEngine(audioElement?.() ?? new Audio())
+        : new HtmlAudioEngine(audioElement),
+  };
+};
+
+/**
+ * This browser's device ID, the one `PlayerProvider` registers, for screens outside it (such as
+ * a Jam link's page joining to listen along here).
+ */
+export const thisBrowserDeviceId = (): DeviceId =>
+  loadDeviceId(browserStorage(), () => crypto.randomUUID());
+
+const createController = (
+  convex: ReturnType<typeof useConvex>,
+  engines: EngineFactory,
+): PlaybackController => {
+  const storage = browserStorage();
+  const probe = document.createElement("audio");
+  const client = makeMusicClient(convex);
+
+  const sources = streamSources(client, { now: Date.now, resolveUrl: (url) => url });
+
+  return new PlaybackController(serverSession(client), sources, engines, {
+    controllerId: ControllerId.make(crypto.randomUUID()),
+    deviceId: loadDeviceId(storage, () => crypto.randomUUID()),
+    device: describeDevice(navigator.userAgent, navigator.maxTouchPoints),
+    canPlay: (mimeType) => probe.canPlayType(mimeType) !== "",
+    now: Date.now,
+    monotonicNow: () => performance.now(),
+    quality: parseStreamQuality(readItem(storage, QUALITY_KEY)),
+    saveQuality: (quality) => {
+      writeItem(storage, QUALITY_KEY, quality);
+    },
+    nowPlaying: { setHandlers: setMediaSessionHandlers, show: showNowPlaying },
+    onForeground: (listener) => {
+      const onVisibility = (): void => {
+        if (document.visibilityState === "visible") listener();
+      };
+
+      document.addEventListener("visibilitychange", onVisibility);
+
+      return () => {
+        document.removeEventListener("visibilitychange", onVisibility);
+      };
+    },
+  });
+};
+
+function PositionTicker({
+  controller,
+  children,
+}: {
+  readonly controller: PlaybackController;
+  readonly children: ReactNode;
+}) {
+  const [position, setPosition] = useState(() => Math.round(controller.positionMs()));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setPosition(Math.round(controller.positionMs()));
+    }, POSITION_INTERVAL_MS);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [controller]);
+
+  return <PositionContext.Provider value={position}>{children}</PositionContext.Provider>;
+}
+
+/**
+ * Provides `usePlayer`, `usePlayerPosition`, `useCurrentTrack`, `useHasTrack`,
+ * `useLatestPlayer`, and `usePositionReader`. Place it inside the Convex provider of a signed-in
+ * user. It registers this browser as a device, plays audio while this browser is the session's
+ * active device, and stops the moment another device takes over.
+ */
+export function PlayerProvider({
+  children,
+  engine,
+  audioElement,
+}: {
+  readonly children: ReactNode;
+  /**
+   * Builds a fixed audio engine once per mount, replacing the automatic choice between the
+   * gapless MSE engine and HTML audio. Pass a stable function.
+   */
+  readonly engine?: () => PlayerEngine;
+  /**
+   * Makes the audio elements the built-in engines play through, for example to route output
+   * through Web Audio. Pass a stable function.
+   */
+  readonly audioElement?: () => HTMLAudioElement;
+}) {
+  const convex = useConvex();
+
+  const controller = useMemo(
+    () => createController(convex, engineFactory(engine, audioElement)),
+    [convex, engine, audioElement],
+  );
+
+  const position = useRead("playback.position", {});
+  const queue = useRead("queue.list", {});
+  const jam = useRead("jam.get", {}) ?? null;
+
+  const state = useMemo(
+    () => (position === undefined || queue === undefined ? undefined : { ...position, ...queue }),
+    [position, queue],
+  );
+
+  const local = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+
+  useEffect(() => controller.start(), [controller]);
+
+  useEffect(() => {
+    if (state !== undefined) controller.sync(state);
+  }, [controller, state]);
+
+  const player = useMemo((): Player => {
+    const track = state?.queue[state.index] ?? null;
+    const isThisDevice = state?.activeDevice?.id === controller.deviceId;
+    const playing = local.pendingPlaying ?? state?.playing ?? false;
+    const client = makeMusicClient(convex);
+
+    const localStatus = (): PlayerStatus => {
+      if (track === null) return "idle";
+
+      return local.engineStatus === "idle" ? "loading" : local.engineStatus;
+    };
+
+    const remoteStatus = (): PlayerStatus => {
+      if (track === null) return "idle";
+
+      return playing ? "playing" : "paused";
+    };
+
+    const status = (): PlayerStatus => {
+      if (state === undefined) return "loading";
+
+      return isThisDevice ? localStatus() : remoteStatus();
+    };
+
+    return {
+      status: status(),
+      track,
+      queue: state?.queue ?? [],
+      index: state?.index ?? 0,
+      durationMs: track?.durationMs ?? 0,
+      shuffle: state?.shuffle ?? false,
+      repeat: state?.repeat ?? "off",
+      autoplay: state?.autoplay ?? true,
+      volume: local.pendingVolume ?? state?.volume ?? 1,
+      deviceId: controller.deviceId,
+      activeDevice: state?.activeDevice ?? null,
+      isThisDevice,
+      mediaOnline: local.mediaOnline,
+      error: local.error,
+      quality: local.quality,
+      autoplayBlocked: local.autoplayBlocked,
+      engine: local.engine,
+      jam,
+      following: state?.following ?? false,
+      playTracks: (ids, index) => {
+        const picked = ids[index ?? 0];
+
+        if (jam?.role !== "member" || jam.status !== "active") {
+          return controller.playTracks(ids, index);
+        }
+
+        return picked === undefined
+          ? Promise.resolve()
+          : controller.capture(client.run("queue.add", { trackIds: [picked] }));
+      },
+      togglePlay: () => controller.togglePlay(),
+      next: () => controller.capture(client.run("playback.next", {})),
+      previous: () => controller.capture(client.run("playback.previous", {})),
+      seek: (positionMs) => controller.seek(positionMs),
+      jump: (itemId) => controller.capture(client.run("playback.jump", { itemId })),
+      setShuffle: (on) => controller.capture(client.run("playback.shuffle", { on })),
+      setRepeat: (mode) => controller.capture(client.run("playback.repeat", { mode })),
+      setVolume: (volume) => controller.setVolume(volume),
+      addToQueue: (ids, toFront) =>
+        controller.attempt(
+          client.run(
+            "queue.add",
+            toFront === undefined ? { trackIds: ids } : { trackIds: ids, next: toFront },
+          ),
+        ),
+      removeFromQueue: (itemId) => controller.attempt(client.run("queue.remove", { itemId })),
+      setAutoplay: (on) => controller.capture(client.run("queue.autoplay", { on })),
+      playHere: () => controller.playHere(),
+      transferTo: (deviceId) => controller.transferTo(deviceId),
+      setQuality: (quality) => {
+        controller.setQuality(quality);
+      },
+    };
+  }, [state, local, controller, convex, jam]);
+
+  const latest = useRef(player);
+
+  useLayoutEffect(() => {
+    latest.current = player;
+  }, [player]);
+
+  const readers = useMemo(
+    (): PlayerReaders => ({
+      player: () => latest.current,
+      positionMs: () => Math.round(controller.positionMs()),
+    }),
+    [controller],
+  );
+
+  const trackId = player.track?.id ?? null;
+  const status = player.status;
+  const current = useMemo((): CurrentTrack => ({ trackId, status }), [trackId, status]);
+
+  return (
+    <ReadersContext.Provider value={readers}>
+      <PlayerContext.Provider value={player}>
+        <CurrentTrackContext.Provider value={current}>
+          <HasTrackContext.Provider value={trackId !== null}>
+            <PositionTicker controller={controller}>{children}</PositionTicker>
+          </HasTrackContext.Provider>
+        </CurrentTrackContext.Provider>
+      </PlayerContext.Provider>
+    </ReadersContext.Provider>
+  );
+}

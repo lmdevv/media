@@ -1,0 +1,70 @@
+import { Schema } from "effect";
+
+/** Convex document IDs travel as opaque strings; the backend normalizes them per table. */
+export const TrackId = Schema.NonEmptyString.pipe(Schema.brand("TrackId"));
+
+export type TrackId = typeof TrackId.Type;
+
+export const AlbumId = Schema.NonEmptyString.pipe(Schema.brand("AlbumId"));
+
+export type AlbumId = typeof AlbumId.Type;
+
+export const ArtistId = Schema.NonEmptyString.pipe(Schema.brand("ArtistId"));
+
+export type ArtistId = typeof ArtistId.Type;
+
+export const PlaylistId = Schema.NonEmptyString.pipe(Schema.brand("PlaylistId"));
+
+export type PlaylistId = typeof PlaylistId.Type;
+
+export const PlaylistItemId = Schema.NonEmptyString.pipe(Schema.brand("PlaylistItemId"));
+
+export type PlaylistItemId = typeof PlaylistItemId.Type;
+
+/**
+ * One entry in a play queue. It stays the same while the entry is in the queue, whatever moves
+ * around it, so two devices editing the queue at once never act on the wrong row.
+ */
+export const QueueItemId = Schema.NonEmptyString.pipe(Schema.brand("QueueItemId"));
+
+export type QueueItemId = typeof QueueItemId.Type;
+
+export const LibraryId = Schema.NonEmptyString.pipe(Schema.brand("LibraryId"));
+
+export type LibraryId = typeof LibraryId.Type;
+
+export const JobId = Schema.NonEmptyString.pipe(Schema.brand("JobId"));
+
+export type JobId = typeof JobId.Type;
+
+export const ApiKeyId = Schema.NonEmptyString.pipe(Schema.brand("ApiKeyId"));
+
+export type ApiKeyId = typeof ApiKeyId.Type;
+
+export const InviteId = Schema.NonEmptyString.pipe(Schema.brand("InviteId"));
+
+export type InviteId = typeof InviteId.Type;
+
+export const UserId = Schema.NonEmptyString.pipe(Schema.brand("UserId"));
+
+export type UserId = typeof UserId.Type;
+
+/** Client-generated, stable per browser profile or CLI install. */
+export const DeviceId = Schema.NonEmptyString.pipe(Schema.brand("DeviceId"));
+
+export type DeviceId = typeof DeviceId.Type;
+
+/** Ephemeral identity of one player controller, distinct from its persistent device. */
+export const ControllerId = Schema.NonEmptyString.pipe(Schema.brand("ControllerId"));
+
+export type ControllerId = typeof ControllerId.Type;
+
+/** A Jam: a shared live listening session hosted from someone's playback. */
+export const JamId = Schema.NonEmptyString.pipe(Schema.brand("JamId"));
+
+export type JamId = typeof JamId.Type;
+
+/** A download pin: one album, playlist, or song a person keeps on one device. */
+export const DownloadPinId = Schema.NonEmptyString.pipe(Schema.brand("DownloadPinId"));
+
+export type DownloadPinId = typeof DownloadPinId.Type;

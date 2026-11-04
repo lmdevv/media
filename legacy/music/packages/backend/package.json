@@ -1,0 +1,30 @@
+{
+  "name": "@music/backend",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "convex dev",
+    "dev:setup": "convex dev --configure --until-success",
+    "typecheck": "tsc --noEmit -p convex && tsc --noEmit -p scripts && tsc --noEmit -p test",
+    "configure": "node scripts/configure.ts"
+  },
+  "dependencies": {
+    "@auth/core": "^0.41.3",
+    "@convex-dev/auth": "^0.0.96",
+    "@music/commands": "workspace:*",
+    "convex": "catalog:",
+    "effect": "catalog:",
+    "jose": "^6.2.12",
+    "lucia": "^3.2.2"
+  },
+  "devDependencies": {
+    "@music/config": "workspace:*",
+    "@music/sdk": "workspace:*",
+    "@types/node": "catalog:",
+    "convex-test": "0.0.61",
+    "fast-check": "^4.10.2",
+    "typescript": "catalog:",
+    "vitest": "5.0.3"
+  }
+}

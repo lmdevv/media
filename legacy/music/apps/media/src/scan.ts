@@ -1,0 +1,465 @@
+import { Buffer } from "node:buffer";
+import { basename, dirname, join } from "node:path";
+
+import type { LibraryId } from "@music/commands/ids";
+import { UNKNOWN_ARTIST } from "@music/commands/models";
+import { compareText } from "@music/commands/text-order";
+import { Cache, Effect, HashSet, Option, Ref, Schema, Stream } from "effect";
+
+import { saveArt } from "./art-store.ts";
+import { extensionOf, isAudioFile } from "./audio-format.ts";
+import * as Files from "./files.ts";
+import { folderArtKey, folderArtLookup, isFolderArt } from "./folder-art.ts";
+import { isLyricsSidecar, lyricsFilesKey, lyricsSidecarMatcher } from "./lyrics/sidecars.ts";
+import {
+  type Fingerprint,
+  type FingerprintPage,
+  type JobProgress,
+  MediaBackend,
+  type PathRange,
+  type ScannedLyrics,
+  type ScannedTrack,
+  type TrackMove,
+} from "./media-backend.ts";
+import { MediaConfig } from "./media-config.ts";
+import { movedFileMatcher } from "./moved-files.ts";
+import type { WalkedFile } from "./platform/node-files.ts";
+import { readTagLyrics, readTrackTags } from "./tag-reader.ts";
+import { LYRICS_READER_VERSION, readTrackLyrics } from "./track-lyrics.ts";
+
+const UPSERT_BATCH = 100;
+
+const BATCH_LYRICS_BYTES = 2 * 1024 * 1024;
+
+const MISSING_BATCH = 200;
+
+const TAG_CONCURRENCY = 8;
+
+const FINGERPRINT_RANGE = 800;
+
+const FINGERPRINT_CONCURRENCY = 4;
+
+const unreadableReason = (cause: Error | undefined, depth = 0): string | null => {
+  if (cause === undefined || depth > 4) return null;
+
+  if (cause.name === "UnreadableFolder") return cause.message;
+
+  return unreadableReason(cause.cause instanceof Error ? cause.cause : undefined, depth + 1);
+};
+
+/** The library folder is missing or is not a readable directory. */
+export class LibraryUnavailable extends Schema.TaggedError<LibraryUnavailable>()(
+  "LibraryUnavailable",
+  {
+    libraryId: Schema.String,
+    path: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    const cause = this.cause instanceof Error ? this.cause : undefined;
+
+    return unreadableReason(cause) ?? `Library folder unavailable: ${this.path}`;
+  }
+}
+
+/**
+ * The library folder holds no audio files while Convex knows songs in it: most likely a network
+ * share or a drive that is not mounted, whose empty mount point reads fine. The scan stops
+ * without marking anything missing. Losing every song to an unmounted drive is worse than
+ * keeping songs that were all deleted on purpose, which deleting the library clears.
+ */
+export class LibraryEmpty extends Schema.TaggedError<LibraryEmpty>()("LibraryEmpty", {
+  libraryId: Schema.String,
+  path: Schema.String,
+}) {
+  override get message(): string {
+    return (
+      `The folder is empty. Is the drive mounted? (${this.path}) ` +
+      "If its music was removed on purpose, delete the library."
+    );
+  }
+}
+
+/** The library being scanned. */
+export interface ScanTarget {
+  readonly id: LibraryId;
+  /** Absolute folder path. */
+  readonly path: string;
+}
+
+/** Counts from a finished scan. */
+export interface ScanSummary {
+  readonly files: number;
+  /** New and changed files read and stored, besides the moved ones. */
+  readonly updated: number;
+  /** Files found at a new path whose track moved with them. */
+  readonly moved: number;
+  readonly missing: number;
+  readonly failed: number;
+}
+
+/** A one-line description of a scan result for the jobs list. */
+export const describeScan = (summary: ScanSummary): string => {
+  const parts = [`${summary.files} files`, `${summary.updated} updated`];
+
+  if (summary.moved > 0) parts.push(`${summary.moved} moved`);
+  parts.push(`${summary.missing} missing`);
+
+  if (summary.failed > 0) parts.push(`${summary.failed} unreadable`);
+
+  return parts.join(", ");
+};
+
+const chunks = <A>(items: ReadonlyArray<A>, size: number): ReadonlyArray<ReadonlyArray<A>> =>
+  Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
+    items.slice(index * size, (index + 1) * size),
+  );
+
+const byLyricsSize = <A>(
+  items: ReadonlyArray<A>,
+  lyricsBytesOf: (item: A) => number,
+): ReadonlyArray<ReadonlyArray<A>> => {
+  const batches: Array<Array<A>> = [];
+  let bytes = 0;
+
+  for (const item of items) {
+    const size = lyricsBytesOf(item);
+    const last = batches.at(-1);
+
+    if (last === undefined || bytes + size > BATCH_LYRICS_BYTES) {
+      batches.push([item]);
+      bytes = size;
+    } else {
+      last.push(item);
+      bytes += size;
+    }
+  }
+
+  return batches;
+};
+
+/** A file found on disk that Convex does not have as it is now, and what to read of it. */
+interface Pending {
+  /** `file`: its tags, art, and lyrics. `lyrics`: only its lyrics, the rest is unchanged. */
+  readonly read: "file" | "lyrics";
+  readonly file: WalkedFile;
+}
+
+/** What reading a pending file found. */
+type Read =
+  | { readonly read: "file"; readonly track: ScannedTrack }
+  | { readonly read: "lyrics"; readonly lyrics: ScannedLyrics };
+
+const readNeeded = (
+  known: Fingerprint | undefined,
+  file: { size: number; mtimeMs: number },
+  folderArt: string | undefined,
+  lyricsFiles: string,
+): Pending["read"] | null => {
+  if (
+    known === undefined ||
+    known.missing ||
+    known.size !== file.size ||
+    known.mtimeMs !== file.mtimeMs ||
+    known.folderArt !== folderArt
+  ) {
+    return "file";
+  }
+
+  return known.lyricsFiles === lyricsFiles && known.lyricsReader === LYRICS_READER_VERSION
+    ? null
+    : "lyrics";
+};
+
+/**
+ * Splits a library's paths into ranges holding about `size` of `paths` each, in the code point
+ * order Convex keeps them in. The first range is open below and the last open above, so every
+ * path Convex knows, found on disk or not, falls in exactly one range.
+ */
+export const pathRanges = (
+  paths: ReadonlyArray<string>,
+  size: number,
+): ReadonlyArray<PathRange> => {
+  const sorted = paths.toSorted(compareText);
+  const bounds = sorted.filter((_, index) => index > 0 && index % size === 0);
+
+  return [undefined, ...bounds].map((from, index) => ({ from, to: bounds[index] }));
+};
+
+const knownFingerprints = Effect.fn("Scan.knownFingerprints")(function* (
+  libraryId: LibraryId,
+  paths: ReadonlyArray<string>,
+) {
+  const backend = yield* MediaBackend;
+
+  const readRange = Effect.fnUntraced(function* (range: PathRange) {
+    const files: Array<Fingerprint> = [];
+    let cursor: string | null = null;
+    let done = false;
+
+    while (!done) {
+      const page: FingerprintPage = yield* backend.fingerprints(libraryId, cursor, range);
+
+      files.push(...page.files);
+      cursor = page.cursor;
+      ({ done } = page);
+    }
+
+    return files;
+  });
+
+  const ranges = yield* Effect.forEach(pathRanges(paths, FINGERPRINT_RANGE), readRange, {
+    concurrency: FINGERPRINT_CONCURRENCY,
+  });
+
+  return new Map(ranges.flat().map((file) => [file.path, file]));
+});
+
+/**
+ * Scans `library`, writing progress into `progress` as it goes, and adding the artwork each
+ * saved batch stopped using somewhere to `releasedArt` (for `collectReleasedArt`) as soon as the
+ * batch is written, so it counts even when the scan fails or is cancelled later. Unreadable files are skipped and
+ * counted; they are retried on the next scan because Convex never learns their fingerprint.
+ *
+ * @returns The scan's counts, or `LibraryUnavailable` when the folder cannot be read, or
+ *   `LibraryEmpty` when it holds no audio files although the library has songs.
+ */
+export const scanLibrary = Effect.fn("Scan.library")(function* (
+  library: ScanTarget,
+  progress: Ref.Ref<JobProgress>,
+  releasedArt: Ref.Ref<HashSet.HashSet<string>>,
+) {
+  const backend = yield* MediaBackend;
+  const { dataDir } = yield* MediaConfig;
+
+  yield* Ref.set(progress, { done: 0, message: "Listing files" });
+
+  const walked = yield* Files.walkTree(
+    library.path,
+    (name) => isAudioFile(name) || isFolderArt(name) || isLyricsSidecar(name),
+  ).pipe(
+    Effect.mapError(
+      (cause) => new LibraryUnavailable({ libraryId: library.id, path: library.path, cause }),
+    ),
+  );
+
+  const files = walked.filter((file) => isAudioFile(file.relativePath));
+  const artFor = folderArtLookup(walked.filter((file) => isFolderArt(basename(file.relativePath))));
+  const folderArtOf = (file: WalkedFile) => artFor(dirname(file.relativePath));
+  const sidecarsOf = lyricsSidecarMatcher(walked);
+
+  yield* Ref.set(progress, { done: 0, message: `Found ${files.length} files, comparing` });
+
+  const known = yield* knownFingerprints(
+    library.id,
+    files.map((file) => file.relativePath),
+  );
+
+  if (files.length === 0 && known.values().some((file) => !file.missing)) {
+    return yield* new LibraryEmpty({ libraryId: library.id, path: library.path });
+  }
+
+  const changed = files.flatMap((file): ReadonlyArray<Pending> => {
+    const read = readNeeded(
+      known.get(file.relativePath),
+      file,
+      folderArtKey(folderArtOf(file)),
+      lyricsFilesKey(sidecarsOf(file.relativePath)),
+    );
+
+    return read === null ? [] : [{ read, file }];
+  });
+
+  yield* Ref.set(progress, {
+    done: 0,
+    total: changed.length > 0 ? changed.length : undefined,
+    message: `Found ${files.length} files, ${changed.length} changed`,
+  });
+
+  const folderArt = yield* Cache.make({
+    capacity: 100_000,
+    lookup: (relativePath: string) =>
+      Effect.gen(function* () {
+        const inside = yield* Files.resolveWithin(library.path, join(library.path, relativePath));
+
+        if (Option.isNone(inside)) return undefined;
+        const bytes = yield* Files.readWholeFile(inside.value);
+
+        return Option.getOrUndefined(yield* saveArt(dataDir, bytes));
+      }),
+  });
+
+  const readFile = Effect.fnUntraced(function* (file: WalkedFile) {
+    const absolute = join(library.path, file.relativePath);
+    const tags = yield* readTrackTags(absolute);
+    const art = folderArtOf(file);
+
+    const artHash =
+      tags.picture !== undefined
+        ? Option.getOrUndefined(yield* saveArt(dataDir, tags.picture))
+        : art === undefined
+          ? undefined
+          : yield* Cache.get(folderArt, art.relativePath);
+
+    const lyrics = yield* readTrackLyrics(library.path, sidecarsOf(file.relativePath), tags.lyrics);
+    const folder = dirname(file.relativePath);
+    const fileName = basename(file.relativePath);
+    const extension = extensionOf(fileName);
+
+    const track: ScannedTrack = {
+      path: file.relativePath,
+      size: file.size,
+      mtimeMs: file.mtimeMs,
+      title:
+        tags.title ?? (extension === "" ? fileName : fileName.slice(0, -(extension.length + 1))),
+      artist: tags.artist ?? tags.albumArtist ?? UNKNOWN_ARTIST,
+      albumArtist: tags.albumArtist,
+      album: tags.album ?? (folder === "." ? "Unknown Album" : basename(folder)),
+      trackNumber: tags.trackNumber,
+      discNumber: tags.discNumber,
+      year: tags.year,
+      genre: tags.genre,
+      durationMs: tags.durationMs,
+      codec: tags.codec,
+      lossless: tags.lossless,
+      bitrate: tags.bitrate,
+      sampleRate: tags.sampleRate,
+      bitDepth: tags.bitDepth,
+      artHash,
+      folderArt: folderArtKey(art),
+      ...lyrics,
+    };
+
+    return { read: "file", track } satisfies Read;
+  });
+
+  const readLyrics = Effect.fnUntraced(function* (file: WalkedFile) {
+    const embedded = yield* readTagLyrics(join(library.path, file.relativePath));
+    const lyrics = yield* readTrackLyrics(library.path, sidecarsOf(file.relativePath), embedded);
+
+    return { read: "lyrics", lyrics: { path: file.relativePath, ...lyrics } } satisfies Read;
+  });
+
+  const readOne = ({ read, file }: Pending): Effect.Effect<Option.Option<Read>> =>
+    Effect.gen(function* () {
+      const found: Read = read === "file" ? yield* readFile(file) : yield* readLyrics(file);
+
+      return Option.some(found);
+    }).pipe(
+      Effect.catchTags({
+        TagReadError: (error) =>
+          Effect.logWarning("Scan.file_unreadable", error).pipe(Effect.as(Option.none())),
+        FileError: (error) =>
+          Effect.logWarning("Scan.file_unreadable", error).pipe(Effect.as(Option.none())),
+      }),
+      Effect.annotateLogs({ libraryId: library.id }),
+    );
+
+  const seen = new Set(files.map((file) => file.relativePath));
+
+  const vanished = known
+    .values()
+    .filter((file) => !seen.has(file.path))
+    .toArray();
+
+  const movedFrom = movedFileMatcher(vanished);
+  const claimed = new Set<string>();
+  let moved = 0;
+
+  const saved = <E>(write: Effect.Effect<ReadonlyArray<string>, E>) =>
+    write.pipe(
+      Effect.tap((hashes) =>
+        Ref.update(releasedArt, (current) =>
+          hashes.reduce((set, hash) => HashSet.add(set, hash), current),
+        ),
+      ),
+      Effect.uninterruptible,
+    );
+
+  const lyricsBytes = (path: string, read: ScannedLyrics): number =>
+    Math.max(Buffer.byteLength(JSON.stringify(read.lyrics)), known.get(path)?.lyricsBytes ?? 0);
+
+  let done = 0;
+  let failed = 0;
+
+  const save = Effect.fnUntraced(function* (read: ReadonlyArray<Option.Option<Read>>) {
+    const found = read.flatMap(Option.toArray);
+    const moves: Array<TrackMove> = [];
+    const upserts: Array<ScannedTrack> = [];
+    const lyrics: Array<ScannedLyrics> = [];
+
+    for (const item of found) {
+      if (item.read === "lyrics") {
+        lyrics.push(item.lyrics);
+        continue;
+      }
+
+      const { track } = item;
+      const from = known.has(track.path) ? undefined : movedFrom(track);
+
+      if (from === undefined) upserts.push(track);
+      else moves.push({ from, track });
+    }
+
+    failed += read.length - found.length;
+
+    for (const batch of byLyricsSize(upserts, (track) => lyricsBytes(track.path, track))) {
+      yield* saved(backend.upsertTracks(library.id, batch));
+    }
+
+    for (const batch of byLyricsSize(moves, (move) => lyricsBytes(move.from, move.track))) {
+      yield* saved(
+        backend.moveTracks(library.id, batch).pipe(
+          Effect.map((result) => {
+            moved += result.moved;
+
+            return result.released;
+          }),
+        ),
+      );
+    }
+
+    for (const batch of byLyricsSize(lyrics, (track) => lyricsBytes(track.path, track))) {
+      yield* backend.saveLocalLyrics(library.id, batch);
+    }
+
+    for (const { from } of moves) claimed.add(from);
+    done += read.length;
+    yield* Ref.set(progress, {
+      done,
+      total: changed.length,
+      message: `Read ${done} of ${changed.length} changed files`,
+    });
+  });
+
+  yield* Stream.fromIterable(chunks(changed, UPSERT_BATCH)).pipe(
+    Stream.mapEffect((batch) => Effect.forEach(batch, readOne, { concurrency: TAG_CONCURRENCY })),
+    Stream.buffer({ capacity: 1 }),
+    Stream.runForEach(save),
+  );
+
+  const gone = vanished
+    .filter((file) => !file.missing && !claimed.has(file.path))
+    .map((file) => file.path);
+
+  for (const batch of chunks(gone, MISSING_BATCH)) {
+    yield* saved(backend.markMissing(library.id, batch));
+  }
+
+  const summary: ScanSummary = {
+    files: files.length,
+    updated: changed.length - failed - moved,
+    moved,
+    missing: gone.length,
+    failed,
+  };
+
+  yield* Ref.set(progress, {
+    done: changed.length,
+    total: changed.length,
+    message: describeScan(summary),
+  });
+
+  return summary;
+});

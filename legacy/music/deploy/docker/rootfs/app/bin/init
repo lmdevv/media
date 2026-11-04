@@ -1,0 +1,131 @@
+#!/command/with-contenv bash
+set -euo pipefail
+umask 077
+
+data="${MUSIC_DATA:-/data}"
+secrets="$data/secrets"
+backups="$data/backups"
+public="${PUBLIC_URL%/}"
+version="$(node -p 'require("/app/backend/package.json").version')"
+build="$(cat /app/build-id)"
+mkdir -p "$secrets" "$data/media" "$backups"
+chmod 700 "$secrets" "$backups"
+find "$secrets" "$backups" -type f -exec chmod 600 {} +
+
+log() { echo "[init] $*"; }
+
+newer_than() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]; }
+if [ -s "$data/version" ]; then
+  data_version="$(head -n 1 "$data/version")"
+  if newer_than "$data_version" "$version"; then
+    log "refusing to start: the data in $data was last used by version $data_version, and this image is the older $version."
+    log "Run version $data_version or newer instead. To go back to $version, restore the backup taken before the upgrade, while the newer image runs:"
+    log "  docker exec <container> /app/bin/restore /data/backups/pre-$data_version-<build>-from-$version-<time>.zip"
+    log "then start $version again. See docs/operations.md#restore."
+    exit 1
+  fi
+fi
+
+keep="${BACKUP_KEEP:-5}"
+if ! [[ "$keep" =~ ^[0-9]+$ ]]; then
+  log "BACKUP_KEEP must be a whole number (0 keeps every backup); got BACKUP_KEEP=$keep"
+  exit 1
+fi
+
+puid="${PUID:-1000}"
+pgid="${PGID:-1000}"
+if ! [[ "$puid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ ]] || [ "$puid" = 0 ] || [ "$pgid" = 0 ]; then
+  log "PUID and PGID must be numeric and not 0 (root); got PUID=$puid PGID=$pgid"
+  exit 1
+fi
+for reserved in convex caddy; do
+  if [ "$puid" = "$(id -u "$reserved")" ] || [ "$pgid" = "$(id -g "$reserved")" ]; then
+    log "PUID and PGID may not be $(id -u "$reserved"), which the $reserved service uses; got PUID=$puid PGID=$pgid"
+    exit 1
+  fi
+done
+[ "$(id -g music)" = "$pgid" ] || groupmod --non-unique --gid "$pgid" music
+[ "$(id -u music)" = "$puid" ] || usermod --non-unique --uid "$puid" --gid "$pgid" music
+chmod o+x "$data"
+chmod 750 "$data/media"
+find "$data/media" \( \! -user music -o \! -group music \) -exec chown -h music:music {} +
+install -d -m 750 -o root -g music /run/music
+
+random() { node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("base64url"))'; }
+
+log "waiting for Convex"
+for _ in $(seq 1 120); do
+  curl -fsS http://127.0.0.1:3210/version >/dev/null 2>&1 && break
+  sleep 1
+done
+curl -fsS http://127.0.0.1:3210/version >/dev/null
+
+admin_key="$(LD_PRELOAD=/app/convex/argv-secret.so ARGV_SECRET_FILE="$secrets/instance_secret" \
+  /app/convex/generate_key music @ARGV_SECRET_FILE | tail -n 1)"
+export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210
+export CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
+printf '%s\n' "$admin_key" > "$secrets/admin_key"
+
+if [ ! -s "$secrets/media_secret" ]; then
+  random > "$secrets/media_secret"
+fi
+
+cd /app/backend
+convex() { ./node_modules/.bin/convex "$@"; }
+
+if [ -s "$data/build" ] && ! [ "$data/version" -nt "$data/build" ]; then
+  previous="$(cat "$data/build")"
+elif [ -s "$data/version" ]; then
+  previous="version $(cat "$data/version")"
+else
+  previous=""
+fi
+
+pending="$backups/.pending"
+upgrade="$previous -> $build"
+
+if [ -n "$previous" ] && [ "$previous" != "$build" ] && [ -s "$pending" ] \
+  && [ "$(head -n 1 "$pending")" = "$upgrade" ] && [ -s "$(tail -n 1 "$pending")" ] \
+  && ! [ "$data/version" -nt "$pending" ]; then
+  log "upgrading from $previous to $version ($build); already backed up to $(tail -n 1 "$pending")"
+elif [ -n "$previous" ] && [ "$previous" != "$build" ]; then
+  from="$(head -n 1 "$data/version" 2>/dev/null || true)"
+  backup="$backups/pre-$version-$build-from-${from:-unknown}-$(date -u +%Y%m%d%H%M%S).zip"
+  log "upgrading from $previous to $version ($build); exporting to $backup"
+  convex export --path "$backup"
+  printf '%s\n%s\n' "$upgrade" "$backup" > "$pending"
+  if [ "$keep" -gt 0 ]; then
+    find "$backups" -maxdepth 1 -type f -name 'pre-*.zip' -printf '%T@ %p\n' | sort -rn \
+      | tail -n +"$((keep + 1))" | cut -d' ' -f2- | while IFS= read -r old; do
+        log "removing old backup $old"
+        rm -f -- "$old"
+      done
+  fi
+fi
+
+log "deploying functions"
+convex deploy --yes --codegen disable --typecheck disable
+
+log "starting data migrations"
+convex run migrations:run
+
+log "configuring deployment"
+# `--name=value` so a secret that starts with "-" is not read as an option.
+node scripts/configure.ts "--site-url=$public" --media-url=/media \
+  "--media-secret=$(cat "$secrets/media_secret")"
+
+signing="$(convex env get STREAM_SIGNING_KEY)"
+install -m 600 -o music -g music /dev/null /run/music/media.env
+cat > /run/music/media.env <<ENV
+CONVEX_URL=http://127.0.0.1:3210
+MEDIA_SERVICE_SECRET=$(cat "$secrets/media_secret")
+STREAM_SIGNING_KEY=$signing
+MEDIA_DATA_DIR=$data/media
+PORT=4100
+ENV
+
+printf '%s\n' "$version" > "$data/version"
+printf '%s\n' "$build" > "$data/build"
+touch -r "$data/version" -d '+1 second' "$data/build" 2>/dev/null || touch "$data/build"
+rm -f "$pending"
+log "ready at $public (version $version, build $build)"

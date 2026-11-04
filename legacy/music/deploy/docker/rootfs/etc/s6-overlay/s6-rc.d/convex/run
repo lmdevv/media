@@ -1,0 +1,43 @@
+#!/command/with-contenv sh
+# Self-hosted Convex backend, as the unprivileged `convex` user. The instance secret is generated
+# on first boot into /data/secrets (root only); this script, still root, hands the backend a copy
+# only it can read. HTTP actions stay internal: Convex Auth signs tokens with the site URL as
+# issuer and the backend fetches its JWKS from that URL, so it must be reachable from inside the
+# container. Clients only use the /convex API origin.
+set -e
+umask 077
+data="${MUSIC_DATA:-/data}"
+mkdir -p "$data/convex/storage" "$data/convex/tmp" "$data/secrets"
+chmod 700 "$data/secrets" "$data/convex"
+chmod o+x "$data"
+if [ ! -s "$data/secrets/instance_secret" ]; then
+  node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' > "$data/secrets/instance_secret"
+fi
+find "$data/convex" \( \! -user convex -o \! -group convex \) -exec chown -h convex:convex {} +
+install -d -m 700 -o convex -g convex /run/convex
+install -m 400 -o convex -g convex "$data/secrets/instance_secret" /run/convex/instance_secret
+public="${PUBLIC_URL%/}"
+export TMPDIR="$data/convex/tmp"
+# Plain text logs: `docker logs` is not a terminal. The backend stops on SIGINT, which drains
+# requests and shuts the database down cleanly (SIGTERM kills it at once), so `down-signal` here
+# makes s6 stop it that way.
+export NO_COLOR=1
+# Convex refuses to start with TZ set ("Convex requires UTC"); TZ only localizes the other logs.
+unset TZ
+# The backend takes its secret only as an argument, and every process can read every other's
+# arguments in /proc/<pid>/cmdline. The argv-secret shim swaps the placeholder for the file's
+# contents inside the process, so the command line only ever shows the placeholder.
+exec s6-setuidgid convex env \
+  LD_PRELOAD=/app/convex/argv-secret.so ARGV_SECRET_FILE=/run/convex/instance_secret \
+  /app/convex/convex-local-backend \
+  --instance-name music \
+  --instance-secret @ARGV_SECRET_FILE \
+  --port 3210 \
+  --site-proxy-port 3211 \
+  --interface 127.0.0.1 \
+  --convex-origin "$public/convex" \
+  --convex-site http://127.0.0.1:3211 \
+  --beacon-tag music-self-hosted \
+  --disable-beacon \
+  --local-storage "$data/convex/storage" \
+  "$data/convex/db.sqlite3"

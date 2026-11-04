@@ -1,0 +1,38 @@
+name: Demo library
+
+on:
+  pull_request:
+    paths: &paths
+      - "deploy/demo-library/**"
+      - "scripts/download-demo-music.sh"
+      - "scripts/build-demo-library.sh"
+      - "scripts/check-demo-library.sh"
+      - "docs/demo-music.md"
+      - ".agents/skills/verify-music/SKILL.md"
+      - ".agents/skills/verify-music/scripts/verify-music.sh"
+      - ".github/workflows/demo-library.yml"
+      - ".github/workflows/publish-demo-library.yml"
+  push:
+    branches: [main]
+    paths: *paths
+
+concurrency:
+  group: demo-library-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # ffmpeg comes from the flake's nixpkgs, not apt: the runner's apt mirror has hung this
+      # install for half an hour at a time (ADS-271).
+      - uses: cachix/install-nix-action@v31
+      - run: >-
+          nix shell --inputs-from . nixpkgs#ffmpeg --command
+          scripts/check-demo-library.sh
