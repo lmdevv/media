@@ -4,14 +4,18 @@ The old [music] code, imported with its history from `lmdevv/music`, which is ar
 runnable until the music port onto the [media] core lands, then it is deleted. The root `CLAUDE.md`
 holds the shared rules for copyleft, coding standards, secrets, lint, mocks, commits, PRs, review,
 pstack, and design, including the `[music]` Paper file. This file adds only what the old music code
-needs.
+needs, and wins where the two differ for code under `legacy/music`.
 
 ## Rules
 
 - **Nested workspace.** Run every command below from `legacy/music`, after its own `pnpm install`.
-  Root checks and the root hook skip this folder.
-- **Effect differs here.** `effect` 4.0.2 is pinned in this folder's `pnpm-workspace.yaml`, and some
-  Convex functions use Effect. Follow the surrounding code, not root's plain-TypeScript Convex rule.
+  Root checks and the root hook skip this folder. Paths in root rules, such as `packages/ui`,
+  resolve inside this folder when you work here.
+- **Effect differs here.** `effect` 4.0.2 is pinned in this folder's `pnpm-workspace.yaml`, one
+  patch behind root's reference clone, and some Convex functions use Effect. Follow the surrounding
+  code, not root's plain-TypeScript Convex rule.
+- **pstack model choices live in the root `.agents/pstack-models.md`.** This folder's
+  `.claude/rules/pstack-models.md` and `.agents/pstack/` are left over from the old repo.
 - **No MCP server.** Agents use the CLI and `skills/music/SKILL.md`.
 
 ## Layout
@@ -68,7 +72,8 @@ worktree. Commit the regenerated `convex/_generated/`.
   `apps/web/e2e/README.md`.
 - `scripts/stack-e2e.sh` needs Docker. `MUSIC_VIDEO=1` records video; results land in
   `apps/web/test-results/stack`. On NixOS, set `CHROMIUM_PATH=$(which chromium)`.
-- Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, `pnpm test --repeats=20`.
+- Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`. For Vitest, use root's
+  fresh-process loop, not `--repeats`; this folder pins the same `@effect/vitest` 4.0.3.
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `react-doctor`,
   `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked. `verify-music` is this
   repo's own: it runs disposable servers built from the checkout and from main, drives the web app,
