@@ -55,7 +55,8 @@ export default defineSchema({
     ),
   )
     .index("userId", ["userId"])
-    .index("by_key", ["keyId"]),
+    .index("by_key", ["keyId"])
+    .index("by_expiration", ["expirationTime"]),
 
   /** Convex Auth's refresh tokens, in its own shape. */
   authRefreshTokens: defineTable({

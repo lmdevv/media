@@ -165,6 +165,22 @@ export const endKeySessions = async (
   await Promise.all(sessions.map((session) => ctx.db.delete(session._id)));
 };
 
+/** Deletes up to `limit` sessions that expired before `now`, and says how many it deleted. */
+export const sweepExpiredSessions = async (
+  ctx: Pick<MutationCtx, "db">,
+  now: number,
+  limit: number,
+): Promise<number> => {
+  const expired = await ctx.db
+    .query("authSessions")
+    .withIndex("by_expiration", (q) => q.lt("expirationTime", now))
+    .take(limit);
+
+  await Promise.all(expired.map((session) => ctx.db.delete(session._id)));
+
+  return expired.length;
+};
+
 /** Ends every password and device session of the user except `keep`. */
 export const endUserSessions = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
