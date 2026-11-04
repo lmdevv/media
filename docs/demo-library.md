@@ -52,8 +52,11 @@ from the films' and albums' own sources.
 every folder above, with the Feature Test's four versions, every episode, and all 28 tracks. The
 Demo library workflow runs it on pull requests, and publishes the version named in
 `deploy/demo-library/image` for amd64 and arm64 when it changes on main. A published version never
-changes: to change what goes in, bump the version there and in `deploy/compose/compose.demo.yaml`
-(`scripts/check-deploy.sh` checks that they match).
+changes: to change what goes in, set the new version's tag, with no digest, there and in
+`deploy/compose/compose.demo.yaml` (`scripts/check-deploy.sh` checks that they match). Once the
+workflow has published it, pin both to `<tag>@sha256:<index digest>`, from
+`docker buildx imagetools inspect <tag>`. Docker resolves a pinned reference by its digest alone,
+so a new tag beside the old digest still mounts the old version.
 
 ## Credits
 

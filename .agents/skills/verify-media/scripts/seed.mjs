@@ -2,7 +2,7 @@
 // Seeds a side with the demo people and what they watch, through the paths a person uses: the
 // owner adds a kids profile and invites three people from the web app, each joins from their
 // invite link in a browser of their own, and then everyone uses their own signed-in CLI.
-// verify-movies.sh runs it after first-run setup, against the demo library, and it fails when
+// verify-media.sh runs it after first-run setup, against the demo library, and it fails when
 // anyone sees more or less than the demo data says.
 //
 //   seed.mjs --state <dir> --server <convex-url> --media-url <url> --cli <movies.js> --browser <browser.mjs>

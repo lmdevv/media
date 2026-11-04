@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // A Chromium that stays open between commands, so a verification can drive the [movies] web app
-// one step at a time. `serve` starts the host for one side of a run; every other command sends one
-// action to it and prints the result. verify-movies.sh calls this; agents call it through
-// `verify-movies.sh browser`.
+// and old [music]'s one step at a time. `serve` starts the host for one side of a run; every other
+// command sends one action to it and prints the result. Each page belongs to one app, picked with
+// --app when the page is created. verify-media.sh calls this; agents call it through
+// `verify-media.sh browser`.
 //
-//   node browser.mjs serve --state <dir> --base <url> --convex <url>
-//   node browser.mjs <command> --state <dir> [flags]
+//   node browser.mjs serve --state <dir> --base <url> --convex <url> [--music <url>]
+//   node browser.mjs <command> --state <dir> [--app movies|music] [flags]
 //
 // Where the host allows it, the browser runs in a private network namespace (see `isolate`),
 // because Chromium cancels its queued requests whenever any host interface gains or loses an
@@ -20,10 +21,11 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const OWNER = { name: "Lucía", email: "admin@movies.local", password: "password123" };
+const APPS = ["movies", "music"];
 
 // Every socket lives in the side's state folder and is named relative to it: a socket address
 // holds at most 107 bytes, which a long TMPDIR and run name can pass.
-const SOCKETS = { control: "browser.sock", web: "web.sock", convex: "convex.sock", proxy: "proxy.sock" };
+const SOCKETS = { control: "browser.sock", web: "web.sock", convex: "convex.sock", music: "music.sock", proxy: "proxy.sock" };
 const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
 const PRIVATE_NETWORK = fileURLToPath(new URL("../../../../scripts/private-network.sh", import.meta.url));
 const NETWORKS = ["auto", "isolated", "host"];
@@ -34,10 +36,10 @@ const HALF_OPEN = { allowHalfOpen: true };
 // Runs in every page before the app: records each media element that plays, including detached
 // ones, so `video` reports real playback rather than what the player's buttons show.
 const TRACK_MEDIA = `(() => {
-  window.moviesVerifyMedia = new Set();
+  window.mediaVerifyMedia = new Set();
   const play = HTMLMediaElement.prototype.play;
   HTMLMediaElement.prototype.play = function () {
-    window.moviesVerifyMedia.add(this);
+    window.mediaVerifyMedia.add(this);
     return play.call(this);
   };
 })();`;
@@ -46,7 +48,9 @@ const FLAGS = {
   state: { type: "string" },
   base: { type: "string" },
   convex: { type: "string" },
-  page: { type: "string", default: "main" },
+  music: { type: "string" },
+  app: { type: "string" },
+  page: { type: "string" },
   device: { type: "string" },
   width: { type: "string" },
   height: { type: "string" },
@@ -94,6 +98,11 @@ if (!command || !flags.state) {
   console.error("usage: browser.mjs <command> --state <dir> [flags]");
   process.exit(2);
 }
+if (flags.app !== undefined && !APPS.includes(flags.app)) {
+  console.error(`--app must be ${APPS.join(" or ")}, not "${flags.app}"`);
+  process.exit(2);
+}
+flags.page ??= flags.app === "music" ? "music" : "main";
 
 if (command === "serve") {
   await serve(flags);
@@ -106,7 +115,7 @@ if (command === "serve") {
 async function send(state, name, args, options) {
   const body = JSON.stringify({ ...options, command: name, args, cwd: process.cwd() });
   if (!existsSync(join(state, SOCKETS.control))) {
-    console.error("no browser host for this side; run `verify-movies.sh up` first");
+    console.error("no browser host for this side; run `verify-media.sh up` first");
     process.exit(1);
   }
   process.chdir(state);
@@ -187,16 +196,16 @@ async function serve(options) {
   process.chdir(options.state);
   // A host that was killed leaves its sockets behind, and a socket path that exists can't be bound.
   for (const socket of Object.values(SOCKETS)) rmSync(socket, { force: true });
-  if (!unavailable) return isolate(options.base, options.convex);
-  // verify-movies.sh shows this line at `up` and in `doctor`.
+  if (!unavailable) return isolate(options);
+  // verify-media.sh shows this line at `up` and in `doctor`.
   console.error(`browser: ${unavailable}, so the browser shares the host network, where Docker network changes can fail its requests`);
-  return drive(options.base, "host", []);
+  return drive(options, "host", []);
 }
 
-// Pathname Unix sockets cross network namespaces, so the relays use them. Web and Convex keep
-// their port numbers inside, so every origin stays `http://localhost:<port>`. The proxy carries
-// HTTPS to the internet for the Cast SDK, TMDB images, and trailers.
-async function isolate(base, convex) {
+// Pathname Unix sockets cross network namespaces, so the relays use them. Web, Convex, and music
+// keep their port numbers inside, so every origin stays `http://localhost:<port>`. The proxy
+// carries HTTPS to the internet for the Cast SDK, TMDB images, and trailers.
+async function isolate({ base, convex, music }) {
   const toHost = (port) =>
     createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, port, host: "127.0.0.1" })));
   const proxy = createServer((request, response) => {
@@ -218,6 +227,7 @@ async function isolate(base, convex) {
   const relays = await Promise.all([
     listen(toHost(portOf(base, "base")), SOCKETS.web),
     listen(toHost(portOf(convex, "convex")), SOCKETS.convex),
+    ...(music ? [listen(toHost(portOf(music, "music")), SOCKETS.music)] : []),
     listen(proxy, SOCKETS.proxy),
   ]);
 
@@ -225,7 +235,10 @@ async function isolate(base, convex) {
   // from this process, which closes if this process dies, and the host then stops too.
   const host = spawn(
     PRIVATE_NETWORK,
-    [process.execPath, fileURLToPath(import.meta.url), "serve-inside", "--state", ".", "--base", base, "--convex", convex],
+    [
+      process.execPath, fileURLToPath(import.meta.url), "serve-inside", "--state", ".", "--base", base,
+      "--convex", convex, ...(music ? ["--music", music] : []),
+    ],
     { stdio: ["pipe", "inherit", "inherit"] },
   );
   const stop = () => host.kill("SIGTERM");
@@ -233,7 +246,7 @@ async function isolate(base, convex) {
   process.on("SIGINT", stop);
   const finish = (code) => {
     for (const relay of relays) relay.close();
-    for (const socket of [SOCKETS.web, SOCKETS.convex, SOCKETS.proxy]) rmSync(socket, { force: true });
+    for (const socket of [SOCKETS.web, SOCKETS.convex, SOCKETS.music, SOCKETS.proxy]) rmSync(socket, { force: true });
     if (code !== 0 && !existsSync(SOCKETS.control)) {
       console.error("the browser host stopped before it was ready (see above)");
     }
@@ -251,38 +264,41 @@ async function serveInside(options) {
   const toSocket = (socket) => createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, path: socket })));
   await listen(toSocket(SOCKETS.web), portOf(options.base, "base"), "127.0.0.1");
   await listen(toSocket(SOCKETS.convex), portOf(options.convex, "convex"), "127.0.0.1");
+  if (options.music) await listen(toSocket(SOCKETS.music), portOf(options.music, "music"), "127.0.0.1");
   const proxy = await listen(toSocket(SOCKETS.proxy), 0, "127.0.0.1");
-  // Chromium never proxies loopback, so the app's ports still reach the relays above.
-  await drive(options.base, "isolated", [`--proxy-server=http://127.0.0.1:${proxy.address().port}`]);
+  // Chromium never proxies loopback, so the apps' ports still reach the relays above.
+  await drive(options, "isolated", [`--proxy-server=http://127.0.0.1:${proxy.address().port}`]);
   process.stdin.on("end", () => process.kill(process.pid, "SIGTERM"));
   process.stdin.resume();
 }
 
-async function drive(base, network, launchArgs) {
+async function drive({ base, music }, network, launchArgs) {
   const { chromium, devices } = await import("@playwright/test");
   const executablePath = process.env.CHROMIUM_PATH || undefined;
   const browser = await chromium.launch({
     executablePath,
     args: ["--autoplay-policy=no-user-gesture-required", ...launchArgs],
   });
-  /** @type {Map<string, {context: any, page: any, viewport: any, recording: any, streams: any, networkChanged: string[]}>} */
+  /** @type {Map<string, {app: string, context: any, page: any, viewport: any, recording: any, streams: any, networkChanged: string[]}>} */
   const pages = new Map();
+  const bases = { movies: base, music };
 
-  const pageFor = async (options) => {
+  const pageFor = async (options, app) => {
     const existing = pages.get(options.page);
     if (existing) return existing;
+    if (!bases[app]) throw new Error("this side has no music; up ran with --no-music");
     const device = options.device ? devices[options.device] : undefined;
     if (options.device && !device) throw new Error(`unknown Playwright device "${options.device}"`);
     const viewport =
       options.width && options.height
         ? { width: Number(options.width), height: Number(options.height) }
         : (device?.viewport ?? { width: 1440, height: 900 });
-    // Dark is the app's default theme and follows the system; --light asks for the light one.
+    const dark = app === "music" ? options.dark : !options.light;
     const context = await browser.newContext({
       ...device,
       viewport,
-      baseURL: base,
-      colorScheme: options.light ? "light" : "dark",
+      baseURL: bases[app],
+      colorScheme: dark ? "dark" : "light",
     });
     await context.addInitScript({ content: TRACK_MEDIA });
     const page = await context.newPage();
@@ -306,7 +322,7 @@ async function drive(base, network, launchArgs) {
     // Screencast frames come at this size; the device's pixel ratio, up to 2, keeps text sharp.
     const scale = Math.min(device?.deviceScaleFactor ?? 1, 2);
     const frame = { width: viewport.width * scale, height: viewport.height * scale };
-    const entry = { context, page, viewport: frame, recording: null, streams, networkChanged };
+    const entry = { app, context, page, viewport: frame, recording: null, streams, networkChanged };
     pages.set(options.page, entry);
     return entry;
   };
@@ -353,7 +369,7 @@ async function drive(base, network, launchArgs) {
   const media = async (entry) => {
     const now = await entry.page.evaluate(() => {
       const elements = [
-        ...new Set([...(window.moviesVerifyMedia ?? []), ...document.querySelectorAll("video, audio")]),
+        ...new Set([...(window.mediaVerifyMedia ?? []), ...document.querySelectorAll("video, audio")]),
       ];
       const playing = elements.filter((element) => !element.paused && !element.ended);
       const shown = playing.length > 0 ? playing : elements;
@@ -635,6 +651,11 @@ async function drive(base, network, launchArgs) {
       if (!options.js) throw new Error("eval needs --js");
       return JSON.stringify(await page.evaluate(options.js));
     },
+  };
+  commands.audio = commands.video;
+  commands["wait-audio"] = commands["wait-video"];
+
+  const moviesCommands = {
     async "sign-in"({ page }, options) {
       await page.goto("/sign-in");
       await page.getByLabel("Email").fill(options.email ?? OWNER.email);
@@ -730,11 +751,63 @@ async function drive(base, network, launchArgs) {
     },
   };
 
+  const musicSignedIn = (page) =>
+    page.getByRole("navigation", { name: "Library" }).or(page.getByRole("navigation", { name: "Main" }));
+
+  const musicCommands = {
+    async "sign-in"({ page }, options) {
+      await page.goto("/sign-in");
+      await page.getByLabel("Email").fill(options.email ?? OWNER.email);
+      await page.getByLabel("Password").fill(options.password ?? OWNER.password);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await musicSignedIn(page).first().waitFor({ timeout: timeout(options) });
+      return page.url();
+    },
+    async setup({ page }, options) {
+      await page.goto("/");
+      await page.waitForURL(/\/setup/, { timeout: timeout(options) });
+      await page.getByLabel("Name").fill(OWNER.name);
+      await page.getByLabel("Email").fill(OWNER.email);
+      await page.getByLabel("Password").fill(OWNER.password);
+      await page.getByRole("button", { name: "Create admin account" }).click();
+      await page.getByRole("heading", { name: "Where's your music?" }).waitFor({ timeout: timeout(options) });
+      await page.getByLabel("Library folder").fill("/music");
+      await page.getByRole("button", { name: "Start scanning" }).click();
+      await page.getByRole("heading", { name: "Your library is ready" }).waitFor({ timeout: Number(options.timeout ?? 300_000) });
+      await page.getByRole("button", { name: "Open my library" }).click();
+      await page.getByRole("heading", { name: "Recently added" }).waitFor({ timeout: timeout(options) });
+      return `set up music as ${OWNER.email}`;
+    },
+    async join({ page }, options) {
+      if (!options.code || !options.name || !options.email) throw new Error("join needs --code, --name, and --email");
+      await page.goto(`/invite/${options.code}`);
+      const email = page.getByLabel("Email");
+      await email.waitFor({ timeout: timeout(options) });
+      if (await email.isEditable()) await email.fill(options.email);
+      await page.getByLabel("Your name").fill(options.name);
+      await page.getByLabel("Choose a password").fill(options.password ?? OWNER.password);
+      await page.getByRole("button", { name: "Join" }).click();
+      await musicSignedIn(page).first().waitFor({ timeout: timeout(options) });
+      return `joined music as ${options.email}`;
+    },
+    async "create-key"({ page }, options) {
+      await page.goto("/settings/keys");
+      await page.getByRole("button", { name: "New key" }).click();
+      await page.getByLabel("Name").fill("verify-media");
+      await page.getByRole("button", { name: "Create key" }).click();
+      const key = (await page.getByTestId("new-api-key").textContent({ timeout: timeout(options) }))?.trim() ?? "";
+      if (!key.startsWith("mk_")) throw new Error(`the new key looks wrong: "${key}"`);
+      await page.getByRole("button", { name: "Done" }).click();
+      return key;
+    },
+  };
+  const appCommands = { movies: moviesCommands, music: musicCommands };
+
   const handle = async (options) => {
     if (options.command === "network") return `${network} ${chromiumPid()}`;
     if (options.command === "pages") {
       return [...pages.entries()]
-        .map(([name, { page, recording }]) => `${name}\t${page.url()}${recording ? "\trecording" : ""}`)
+        .map(([name, { app, page, recording }]) => `${name}\t${app}\t${page.url()}${recording ? "\trecording" : ""}`)
         .join("\n");
     }
     if (options.command === "close-page") {
@@ -745,9 +818,14 @@ async function drive(base, network, launchArgs) {
       await entry.context.close();
       return saved ? `closed ${options.page}; saved ${saved}` : `closed ${options.page}`;
     }
-    const run = commands[options.command];
-    if (!run) throw new Error(`unknown command "${options.command}"`);
-    const entry = await pageFor(options);
+    const existing = pages.get(options.page);
+    if (existing && options.app && options.app !== existing.app) {
+      throw new Error(`page ${options.page} is a ${existing.app} page; name another --page for ${options.app}`);
+    }
+    const app = existing?.app ?? options.app ?? "movies";
+    const run = appCommands[app][options.command] ?? commands[options.command];
+    if (!run) throw new Error(`unknown ${app} command "${options.command}"`);
+    const entry = await pageFor(options, app);
     const outcome = await run(entry, options).then(
       (output) => ({ output }),
       (error) => ({ error }),

@@ -26,11 +26,11 @@ const { values: flags } = parseArgs({
   },
 });
 const browserJs = fileURLToPath(new URL("browser.mjs", import.meta.url));
-// The Chromium verify-movies.sh picks: CHROMIUM_PATH, else the system one on NixOS, else Playwright's.
+// The Chromium verify-media.sh picks: CHROMIUM_PATH, else the system one on NixOS, else Playwright's.
 const chromium =
   process.env.CHROMIUM_PATH ||
   (existsSync("/etc/NIXOS") ? spawnSync("sh", ["-c", "command -v chromium"], { encoding: "utf8" }).stdout.trim() : "");
-const container = `movies-verify-netcheck-${process.pid}`;
+const container = `media-verify-netcheck-${process.pid}`;
 const docker = (...args) => promisify(execFile)("docker", args);
 const NETWORKS = ["host", "isolated"];
 const REQUESTS = 16;
@@ -93,7 +93,7 @@ try {
   }
   await docker("image", "inspect", flags.image).catch(() => docker("pull", "-q", flags.image));
   await docker(
-    "create", "--name", container, "--label", "movies.verify.check=network", "--network", "bridge",
+    "create", "--name", container, "--label", "media.verify.check=network", "--network", "bridge",
     "--entrypoint", "sleep", flags.image, "600",
   );
 

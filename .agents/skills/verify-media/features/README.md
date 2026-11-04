@@ -56,7 +56,7 @@ It then uses exactly four H2 sections in this order:
 
 1. `Sub-features` lists short IDs with one line for each behavior.
 2. `How to get to it (user POV)` lists every user entry point.
-3. `Driving it with verify-movies` starts with `Preconditions:` and uses labeled bullets that pair
+3. `Driving it with verify-media` starts with `Preconditions:` and uses labeled bullets that pair
    each user action with an exact command and observable result.
 4. `Gotchas` lists traps that can waste or invalidate a verification run.
 
@@ -75,3 +75,6 @@ commands, and observable proof.
   its PIN, and a restricted library that a member wasn't granted.
 - [My List and Continue watching](./my-list.md) covers adding to My List and the Continue
   watching row with its resume point and next episode.
+
+Old [music] runs on every side too. Its map is [music/README.md](./music/README.md), with
+first-run setup, playback, search, playlists, and devices.

@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Runs disposable [movies] stacks for verification and drives them. See ../SKILL.md.
+# Runs disposable [media] stacks for verification and drives them. See ../SKILL.md.
 #
-#   verify-movies.sh up [--side after|before] [--image IMG] [--library demo|fixtures|DIR] [--no-setup] [--no-seed]
-#   verify-movies.sh doctor [--side S]
-#   verify-movies.sh browser [--side S] <command> [flags]
-#   verify-movies.sh cli [--side S] [--as PERSON] -- <movies args>
-#   verify-movies.sh logs [--side S] [--service movies|convex] [lines]
-#   verify-movies.sh ios <up|doctor|describe|find|tap|type|swipe|wait|shot|record|appearance|orientation|open|matrix|sign-in|down> [--side S] ...
-#   verify-movies.sh evidence <add|list|clear|publish> ...
-#   verify-movies.sh status
-#   verify-movies.sh down [--side S] [--purge]
+#   verify-media.sh up [--side after|before] [--image IMG] [--library demo|fixtures|DIR] [--no-music] [--no-setup] [--no-seed]
+#   verify-media.sh doctor [--side S]
+#   verify-media.sh browser [--side S] [--app movies|music] <command> [flags]
+#   verify-media.sh cli [--side S] [--app movies|music] [--as PERSON] -- <media or music args>
+#   verify-media.sh logs [--side S] [--service movies|convex|music] [lines]
+#   verify-media.sh ios <up|doctor|describe|find|tap|type|swipe|wait|shot|record|appearance|orientation|open|matrix|sign-in|down> [--side S] ...
+#   verify-media.sh evidence <add|list|clear|publish> ...
+#   verify-media.sh status
+#   verify-media.sh down [--side S] [--purge]
 #
 # MEDIA_VERIFY_RUN names the run (default: the checkout's directory name). A run has two sides:
-# `after` is an image built from this checkout, `before` is ghcr.io/lmdevv/media:main. Each side
-# is its own Compose project of deploy/compose/compose.yaml, named movies-verify-<run>-<side>.
+# `after` is built from this checkout, `before` from main. Each side is its own Compose project,
+# media-verify-<run>-<side>: deploy/compose/compose.yaml for movies, plus old music from
+# legacy/music as one more service.
 set -euo pipefail
 
 skill="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,7 +24,7 @@ scripts="$skill/scripts"
 slug() { tr '[:upper:]' '[:lower:]' <<<"$1" | tr -c 'a-z0-9\n' '-' | sed 's/^-*//; s/-*$//'; }
 run="$(slug "${MEDIA_VERIFY_RUN:-$(basename "$root")}")"
 [[ -n "$run" ]] || { echo "MEDIA_VERIFY_RUN is empty after cleaning" >&2; exit 2; }
-state_root="${TMPDIR:-/tmp}/movies-verify/$run"
+state_root="${TMPDIR:-/tmp}/media-verify/$run"
 evidence_root="$root/captures/verify/$run"
 mac="${MAC_HOST:-darwin}"
 axe='$HOME/music-ios/tools/axe/axe'
@@ -31,10 +32,12 @@ mac_dir="movies-ios"
 before_image_default="ghcr.io/lmdevv/media:main"
 demo_image="$(<"$root/deploy/demo-library/image")"
 cli_js="$root/apps/cli/dist/media.js"
+music_root="$root/legacy/music"
+music_cli_js="$music_root/apps/cli/dist/music.js"
 password="password123"
 
-die() { echo "verify-movies: $*" >&2; exit 1; }
-say() { echo "verify-movies: $*" >&2; }
+die() { echo "verify-media: $*" >&2; exit 1; }
+say() { echo "verify-media: $*" >&2; }
 
 # Pulls a leading --side out of the arguments; the rest stay in `args`.
 side="after"
@@ -50,7 +53,7 @@ take_side() {
   [[ "$side" == after || "$side" == before ]] || die "--side must be after or before, not $side"
   state="$state_root/$side"
   evidence="$evidence_root/$side"
-  project="movies-verify-$run-$side"
+  project="media-verify-$run-$side"
 }
 
 read_state() { cat "$state/$1" 2>/dev/null || true; }
@@ -61,22 +64,28 @@ free_port() {
     console.log(s.address().port); s.close(); });'
 }
 
-# The revision of what the image is built from. The top-level paths that `.dockerignore` leaves
-# out (such as .agents, .claude, docs, and nix) don't count, so a commit that only edits a skill or
-# the docs keeps the revision and the after side stays current.
-checkout_rev() {
-  local ignored=() tree dirty pattern path
+# The revision of what an image is built from: the build context ($1, `.` or a folder such as
+# legacy/music) as committed, plus the contents of what changed since. The top-level paths that
+# its `.dockerignore` leaves out (such as .agents, .claude, docs, and nix) don't count, so a commit
+# that only edits a skill or the docs keeps the revision and the after side stays current.
+tree_rev() {
+  local prefix="" ignored=() pattern meta path
+  [[ "$1" == . ]] || prefix="$1/"
   while read -r pattern; do
     [[ "$pattern" =~ ^[A-Za-z0-9._-]+$ ]] && ignored+=("$pattern")
-  done < "$root/.dockerignore"
-  tree="$(git -C "$root" ls-tree HEAD | while IFS=$'\t' read -r meta path; do
-    printf '%s\n' "${ignored[@]}" | grep -qxF -- "$path" || printf '%s\t%s\n' "$meta" "$path"
-  done | sha1sum | cut -c1-12)"
-  local excludes=(':!captures')
-  for path in "${ignored[@]}"; do excludes+=(":!$path"); done
-  dirty="$(git -C "$root" status --porcelain --untracked-files=normal -- . "${excludes[@]}" | sha1sum | cut -c1-12)"
-  echo "$tree+$dirty"
+  done < "$root/$prefix.dockerignore"
+  local excludes=(":!${prefix}captures")
+  for path in "${ignored[@]}"; do excludes+=(":!$prefix$path"); done
+  {
+    git -C "$root" ls-tree HEAD ${prefix:+"$prefix"} | while IFS=$'\t' read -r meta path; do
+      printf '%s\n' "${ignored[@]}" | grep -qxF -- "${path#"$prefix"}" || printf '%s\t%s\n' "$meta" "$path"
+    done
+    git -C "$root" diff HEAD -- "$1" "${excludes[@]}"
+    git -C "$root" ls-files -oz --exclude-standard -- "$1" "${excludes[@]}" | (cd "$root" && xargs -0r sha1sum)
+  } | sha1sum | cut -c1-12
 }
+checkout_rev() { tree_rev .; }
+music_rev() { tree_rev legacy/music; }
 
 chromium_path() {
   if [[ -n "${CHROMIUM_PATH:-}" ]]; then echo "$CHROMIUM_PATH"; return; fi
@@ -86,6 +95,8 @@ chromium_path() {
 
 url() { echo "http://localhost:$(read_state port)"; }
 convex_url() { echo "http://localhost:$(read_state convex_port)"; }
+music_url() { echo "http://localhost:$(read_state music_port)"; }
+has_music() { [[ -n "$(read_state music_port)" ]]; }
 container() { echo "$project-$1-1"; }
 
 # Compose for this side only: its own project, the settings `up` wrote, the demo library's own
@@ -101,34 +112,41 @@ compose() {
 }
 
 healthy() { curl -fsS "$(url)/api/health" 2>/dev/null | grep -q '"backend":"connected"'; }
+music_healthy() { curl -fsS "$(music_url)/healthz" 2>/dev/null | grep -q '"ok":true'; }
 
 wait_healthy() {
-  local status
+  local services=(movies convex) status service
+  has_music && services+=(music)
   for _ in $(seq 1 180); do
-    healthy && return 0
-    status="$(docker inspect -f '{{.State.Status}}' "$(container movies)" 2>/dev/null || echo missing)"
-    if [[ "$status" == exited || "$status" == dead ]]; then
-      compose logs --no-color --tail 40 movies convex >&2 || true
-      die "$(container movies) stopped while starting"
-    fi
+    healthy && { ! has_music || music_healthy; } && return 0
+    for service in movies music; do
+      [[ "$service" == music ]] && ! has_music && continue
+      status="$(docker inspect -f '{{.State.Status}}' "$(container "$service")" 2>/dev/null || echo missing)"
+      if [[ "$status" == exited || "$status" == dead ]]; then
+        compose logs --no-color --tail 40 "${services[@]}" >&2 || true
+        die "$(container "$service") stopped while starting"
+      fi
+    done
     sleep 2
   done
-  compose logs --no-color --tail 40 movies convex >&2 || true
+  compose logs --no-color --tail 40 "${services[@]}" >&2 || true
   die "$project did not become healthy in 6 minutes"
 }
 
 browser() {
-  CHROMIUM_PATH="$(chromium_path)" node "$scripts/browser.mjs" "$1" --state "$state" "${@:2}"
+  CHROMIUM_PATH="$(chromium_path)" node "$scripts/browser.mjs" --state "$state" "$@"
 }
 
 start_browser() {
   rm -f "$state/browser.sock"
+  local music=()
+  has_music && music=(--music "$(music_url)")
   CHROMIUM_PATH="$(chromium_path)" nohup node "$scripts/browser.mjs" serve --state "$state" \
-    --base "$(url)" --convex "$(convex_url)" > "$state/browser.log" 2>&1 &
+    --base "$(url)" --convex "$(convex_url)" "${music[@]}" > "$state/browser.log" 2>&1 &
   write_state browser.pid "$!"
   for _ in $(seq 1 100); do
     if [[ -S "$state/browser.sock" ]]; then
-      sed -n 's/^browser: /verify-movies: /p' "$state/browser.log" >&2
+      sed -n 's/^browser: /verify-media: /p' "$state/browser.log" >&2
       return 0
     fi
     kill -0 "$(read_state browser.pid)" 2>/dev/null || { cat "$state/browser.log" >&2; die "the browser host exited"; }
@@ -142,6 +160,11 @@ as="lucia"
 cli_raw() {
   env -u MEDIA_CONVEX_URL -u MEDIA_SERVER_URL -u MEDIA_API_KEY -u MEDIA_PROFILE -u MEDIA_PASSWORD \
     XDG_CONFIG_HOME="$state/cli/$as" node "$cli_js" "$@"
+}
+
+music_cli_raw() {
+  env -u MUSIC_INSECURE MUSIC_SERVER="$(music_url)/convex" \
+    MUSIC_API_KEY="$(read_state "music/key.$as")" XDG_CONFIG_HOME="$state/music/cli/$as" node "$music_cli_js" "$@"
 }
 
 # Signs a person's CLI in with their password, the way `media login` documents it.
@@ -181,20 +204,22 @@ wait_libraries() {
 
 cmd_up() {
   take_side "$@"
-  local image="" library="" setup=1 seed=1 started=$SECONDS step=$SECONDS
+  local image="" library="" setup=1 seed=1 music=1 started=$SECONDS step=$SECONDS
   set -- "${args[@]}"
   while (($#)); do
     case "$1" in
       --image) image="$2"; shift 2 ;;
       --library) library="$2"; shift 2 ;;
+      --no-music) music=0; shift ;;
       --no-setup) setup=0; seed=0; shift ;;
       --no-seed) seed=0; shift ;;
       *) die "up: unknown flag $1" ;;
     esac
   done
-  [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$project")" ]] ||
+  [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$project")" && ! -d "$state" ]] ||
     die "$project already exists; run \`down --side $side\` first"
   mkdir -p "$state" "$evidence"
+  write_state up.pid "$$"
   timing() { say "$1 took $((SECONDS - step))s"; step=$SECONDS; }
 
   local built=0
@@ -203,10 +228,10 @@ cmd_up() {
     say "pulling $image"
     docker pull -q "$image" >/dev/null
   elif [[ -z "$image" ]]; then
-    image="movies:verify-$run"
+    image="media:verify-$run"
     say "building $image from $root"
-    docker build -q -f "$root/deploy/compose/Dockerfile" --label "movies.verify.run=$run" \
-      --label "movies.verify.rev=$(checkout_rev)" -t "$image" "$root" >/dev/null
+    docker build -q -f "$root/deploy/compose/Dockerfile" --label "media.verify.run=$run" \
+      --label "media.verify.side=$side" --label "media.verify.rev=$(checkout_rev)" -t "$image" "$root" >/dev/null
     built=1
   fi
   write_state image "$image"
@@ -215,46 +240,87 @@ cmd_up() {
   write_state rev "$(checkout_rev)"
   timing "the image"
 
+  # This repo publishes no music image, so both sides build legacy/music.
+  local music_image="media:verify-$run-music-$side" music_rev
+  if ((music)); then
+    mkdir -p "$state/music"
+    if [[ "$side" == before ]]; then
+      git -C "$root" fetch -q origin main || say "could not fetch main; building music from the local origin/main"
+      music_rev="$(git -C "$root" rev-parse --short=12 origin/main:legacy/music)"
+      say "building $music_image from origin/main:legacy/music"
+      git -C "$root" archive origin/main:legacy/music | docker build -q -f deploy/docker/Dockerfile \
+        --label "media.verify.run=$run" --label "media.verify.side=$side" --label "media.verify.rev=$music_rev" \
+        -t "$music_image" - >/dev/null
+    else
+      music_rev="$(music_rev)"
+      say "building $music_image from $music_root"
+      docker build -q -f "$music_root/deploy/docker/Dockerfile" --label "media.verify.run=$run" \
+        --label "media.verify.side=$side" --label "media.verify.rev=$music_rev" -t "$music_image" "$music_root" >/dev/null
+    fi
+    write_state music/image "$music_image"
+    write_state music/image_id "$(docker image inspect -f '{{.Id}}' "$music_image")"
+    write_state music/rev "$music_rev"
+    timing "the music image"
+  fi
+
   # The demo library is a data-only image that every side on this machine mounts read-only, so
   # Docker keeps one copy of it. Other libraries are folders bind-mounted read-only.
-  local mount movies_dir="Movies" shows_dir="Shows"
+  local mount movies_dir="Movies" shows_dir="Shows" music_dir="Music" music_mount
   library="${library:-demo}"
   if [[ "$library" == demo ]]; then
     library="$demo_image"
     if ! docker image inspect "$library" >/dev/null 2>&1; then
-      say "pulling $library (about 7 GB, once per machine)"
-      docker pull -q "$library" >/dev/null ||
-        die "could not pull $library; build it with scripts/build-demo-library.sh"
+      say "pulling $library (about 7.5 GB, once per machine)"
+      docker pull -q "$library" >/dev/null || die "could not pull $library; check Docker and access to ghcr.io, then retry"
       timing "the demo library pull"
     fi
     mount=""
+    music_mount="{ type: image, source: \"$library\", target: /music, image: { subpath: Music } }"
   else
     if [[ "$library" == fixtures ]]; then
       # Its own folder, never a state file's name: `library` holds the library's name below.
       library="$state/fixtures"
       rm -rf "$library"
       node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
+      ((music)) && node "$music_root/apps/media/scripts/generate-fixtures.ts" "$library/Music" >/dev/null
       chmod -R a+rX "$library"
     fi
     library="$(cd "$library" && pwd)"
-    # The media service runs unprivileged in the container and must read every folder and file.
+    # The media service runs unprivileged in its container and must read every folder and file.
     if [[ -n "$(find "$library" \( \( -type d \! -perm -o+rx \) -o \( -type f \! -perm -o+r \) \) -print -quit)" ]]; then
       die "$library is not readable by others; run chmod -R a+rX on it"
     fi
     [[ -d "$library/Movies" ]] || movies_dir="movies"
     [[ -d "$library/Shows" ]] || shows_dir="shows"
+    [[ -d "$library/Music" ]] || music_dir="music"
     [[ -d "$library/$movies_dir" || -d "$library/$shows_dir" ]] ||
       die "$library has no Movies or Shows folder"
+    ((music)) && [[ ! -d "$library/$music_dir" ]] && die "$library has no Music folder for old music; add one or pass --no-music"
     mount="    volumes:
       - { type: bind, source: \"$library\", target: /media/library, read_only: true }"
+    music_mount="{ type: bind, source: \"$library/$music_dir\", target: /music, read_only: true }"
   fi
   write_state library "$library"
 
-  local port convex_port
+  local port convex_port music_port music_service=""
   port="$(free_port)"
   convex_port="$(free_port)"
   write_state port "$port"
   write_state convex_port "$convex_port"
+  if ((music)); then
+    music_port="$(free_port)"
+    write_state music_port "$music_port"
+    music_service="  music:
+    image: $music_image
+    labels: { media.verify.run: \"$run\", media.verify.side: \"$side\" }
+    ports: [\"127.0.0.1:$music_port:8080\"]
+    environment: { PUBLIC_URL: \"http://localhost:$music_port\", PUID: \"$(id -u)\", PGID: \"$(id -g)\", TZ: UTC }
+    volumes:
+      - music-data:/data
+      - $music_mount
+volumes:
+  music-data: {}"
+  fi
   # Both public URLs must be the addresses clients use: sign-in tokens and stream URLs carry them.
   # localhost works for the browser here and, through `ios up`'s ssh forwards, on the Mac.
   cat > "$state/compose.env" <<ENV
@@ -274,18 +340,25 @@ ENV
   cat > "$state/compose.verify.yaml" <<YAML
 services:
   convex:
-    labels: { movies.verify.run: "$run", movies.verify.side: "$side" }
+    labels: { media.verify.run: "$run", media.verify.side: "$side" }
   movies:
-    labels: { movies.verify.run: "$run", movies.verify.side: "$side" }
+    labels: { media.verify.run: "$run", media.verify.side: "$side" }
 $mount
+$music_service
 YAML
   compose up -d --pull missing --no-build --quiet-pull > "$state/compose.log" 2>&1 ||
     { cat "$state/compose.log" >&2; die "docker compose up failed"; }
-  say "waiting for $project on ports $port (web) and $convex_port (Convex)"
+  say "waiting for $project on ports $port (web) and $convex_port (Convex)${music_port:+, and $music_port (music)}"
   wait_healthy
   timing "starting the stack"
 
   [[ -f "$cli_js" ]] || pnpm --dir "$root" --filter @lmdevv/movies build >/dev/null
+  if ((music)) && [[ ! -f "$music_cli_js" ]]; then
+    say "building old music's CLI in $music_root"
+    { pnpm --dir "$music_root" install --frozen-lockfile --prefer-offline &&
+      pnpm --dir "$music_root" --filter @music/cli build; } > "$state/music/cli-build.log" 2>&1 ||
+      { tail -20 "$state/music/cli-build.log" >&2; die "could not build old music's CLI"; }
+  fi
   start_browser
   if ((setup)); then
     local shows=()
@@ -294,17 +367,31 @@ YAML
     browser setup --movies "/media/library/$movies_dir" "${shows[@]}" >/dev/null
     as=lucia cli_login admin@movies.local
     cli_raw whoami | grep -q admin@movies.local || die "the CLI does not sign in as the owner"
+    if ((music)); then
+      say "running old music's first-run setup through its web app and scanning /music"
+      browser setup --app music >/dev/null
+      mkdir -p "$state/music/cli/lucia"
+      write_state music/key.lucia "$(browser create-key --app music)"
+      as=lucia music_cli_raw whoami --json | grep -q admin@movies.local || die "the API key does not sign music's CLI in as the owner"
+      write_state music/people lucia
+    fi
     wait_libraries "$(( ${#shows[@]} > 0 ? 2 : 1 ))"
     write_state people lucia
     timing "setup and the first scans"
   fi
   if ((seed)); then
-    [[ "$library" == "$demo_image" ]] || say "the seed expects the demo library's titles"
+    [[ "$library" == "$demo_image" ]] || say "the seed expects the demo library's titles and albums"
     say "seeding the demo people, profiles, access, and watching"
     seed
+    if ((music)); then
+      say "seeding the same people in music, with playlists and likes"
+      node "$scripts/music-seed.mjs" --state "$state" --server "$(music_url)/convex" --cli "$music_cli_js" \
+        --browser "$scripts/browser.mjs" >&2
+    fi
     timing "the seed"
   fi
-  echo "ready: $(url) in $((SECONDS - started))s (run $run, side $side, project $project, image $image, library $library, evidence $evidence)"
+  write_state ready "$((SECONDS - started))"
+  echo "ready: $(url) in $((SECONDS - started))s (run $run, side $side, project $project, image $image,${music_port:+ music $(music_url) image $music_image,} library $library, evidence $evidence)"
 }
 
 seed() {
@@ -326,7 +413,7 @@ cmd_doctor() {
   m="$(container movies)"
   c="$(container convex)"
   check "containers $m and $c run" "[[ \$(docker inspect -f '{{.State.Running}}' $m $c | sort -u) == true ]]"
-  check "both belong to run $run" "[[ \$(docker inspect -f '{{index .Config.Labels \"movies.verify.run\"}}' $m $c | sort -u) == $run ]]"
+  check "both belong to run $run" "[[ \$(docker inspect -f '{{index .Config.Labels \"media.verify.run\"}}' $m $c | sort -u) == $run ]]"
   check "port $port maps to $m" "docker port $m 8080/tcp | grep -q ':$port\$'"
   check "port $convex_port maps to $c" "docker port $c 3210/tcp | grep -q ':$convex_port\$'"
   check "/api/health reports the backend connected" "healthy"
@@ -354,6 +441,29 @@ cmd_doctor() {
     else echo "FAIL  the checkout changed since up; run \`down --side $side\` and \`up --side $side\` to test it"; failed=1; fi
   fi
   echo "info  version $(docker exec "$m" cat /data/version 2>/dev/null), image $(read_state image), library $(read_state library)"
+  if ! has_music; then
+    echo "info  no music (up ran with --no-music)"
+    return "$failed"
+  fi
+  local u music_port
+  u="$(container music)"
+  music_port="$(read_state music_port)"
+  check "music container $u runs in run $run" \
+    "[[ \$(docker inspect -f '{{.State.Running}} {{index .Config.Labels \"media.verify.run\"}}' $u) == 'true $run' ]]"
+  check "port $music_port maps to $u" "docker port $u 8080/tcp | grep -q ':$music_port\$'"
+  check "music's /healthz is ok" "music_healthy"
+  check "music runs the image from up" "[[ \$(docker inspect -f '{{.Image}}' $u) == $(read_state music/image_id) ]]"
+  check "music's init deployed this build" "[[ \$(docker exec $u cat /data/build) == \$(docker exec $u cat /app/build-id) ]]"
+  if [[ -n "$(read_state music/people)" ]]; then
+    check "music's CLI signs in as the owner" "music_cli_raw whoami --json | grep -q admin@movies.local"
+  else
+    echo "skip  music CLI (up ran with --no-setup)"
+  fi
+  if [[ "$side" == after ]]; then
+    if [[ "$(read_state music/rev)" == "$(music_rev)" ]]; then echo "ok    music image matches legacy/music"
+    else echo "FAIL  legacy/music changed since up; run \`down --side $side\` and \`up --side $side\` to test it"; failed=1; fi
+  fi
+  echo "info  music $(music_url), build $(docker exec "$u" cat /app/build-id 2>/dev/null), image $(read_state music/image)"
   return "$failed"
 }
 
@@ -373,7 +483,8 @@ cmd_browser() {
     start_browser
     if [[ -n "$(read_state people)" ]]; then
       browser sign-in --profile Lucía >/dev/null
-      echo "browser host restarted; page main is signed in again as Lucía"
+      [[ -n "$(read_state music/people)" ]] && browser sign-in --app music >/dev/null
+      echo "browser host restarted; pages main$([[ -n "$(read_state music/people)" ]] && echo " and music") are signed in again as Lucía"
     else
       echo "browser host restarted"
     fi
@@ -384,20 +495,34 @@ cmd_browser() {
 
 cmd_cli() {
   take_side "$@"
+  [[ -n "$(read_state port)" ]] || die "no $side side in run $run; run \`up --side $side\`"
+  local app=movies
   set -- "${args[@]}"
-  if [[ "${1:-}" == --as ]]; then
-    # Before the slug: it works on bytes, so it would turn the í into two dashes.
-    as="${2:?--as needs a person}"
-    [[ "$as" == [Ll]ucía ]] && as=lucia
-    as="$(slug "$as")"
-    shift 2
-  fi
-  [[ "${1:-}" == "--" ]] && shift
-  [[ -d "$state/cli/$as" ]] || {
-    [[ "$as" == lucia ]] && die "no CLI session on the $side side; up ran with --no-setup"
-    die "no CLI session for $as on the $side side; up ran with --no-seed, or $as is not a seeded person"
-  }
-  cli_raw "$@"
+  while (($#)); do
+    case "$1" in
+      # Before the slug: it works on bytes, so it would turn the í into two dashes.
+      --as) as="${2:?--as needs a person}"; [[ "$as" == [Ll]ucía ]] && as=lucia; as="$(slug "$as")"; shift 2 ;;
+      --app) app="${2:?--app needs movies or music}"; shift 2 ;;
+      --) shift; break ;;
+      *) break ;;
+    esac
+  done
+  case "$app" in
+    movies)
+      [[ -d "$state/cli/$as" ]] || {
+        [[ "$as" == lucia ]] && die "no CLI session on the $side side; up ran with --no-setup"
+        die "no CLI session for $as on the $side side; up ran with --no-seed, or $as is not a seeded person"
+      }
+      cli_raw "$@" ;;
+    music)
+      has_music || die "no music on the $side side; up ran with --no-music"
+      [[ -n "$(read_state "music/key.$as")" ]] || {
+        [[ "$as" == lucia ]] && die "no music API key on the $side side; up ran with --no-setup"
+        die "no music API key for $as on the $side side; up ran with --no-seed, $as is a guest, or not a seeded person"
+      }
+      music_cli_raw "$@" ;;
+    *) die "--app must be movies or music, not $app" ;;
+  esac
 }
 
 cmd_logs() {
@@ -413,12 +538,19 @@ cmd_logs() {
   docker logs --tail "$lines" "$(container "$service")" 2>&1
 }
 
+side_phase() {
+  if [[ -n "$(read_state ready)" ]]; then echo ready
+  elif kill -0 "$(read_state up.pid)" 2>/dev/null; then echo starting
+  else echo failed; fi
+}
+
 cmd_status() {
   local s
   for s in after before; do
     take_side --side "$s"
     [[ -n "$(read_state port)" ]] || continue
-    echo "$s: $(url) (Convex $(convex_url)) project $project ($(docker inspect -f '{{.State.Status}}' "$(container movies)" 2>/dev/null || echo gone)) image $(read_state image)"
+    echo "$s: $(side_phase) movies $(url) (Convex $(convex_url)) project $project ($(docker inspect -f '{{.State.Status}}' "$(container movies)" 2>/dev/null || echo gone)) image $(read_state image)"
+    has_music && echo "$s: $(side_phase) music $(music_url) container $(container music) ($(docker inspect -f '{{.State.Status}}' "$(container music)" 2>/dev/null || echo gone)) image $(read_state music/image)"
     [[ -n "$(read_state ios_udid)" ]] && echo "$s ios: simulator $(read_state ios_udid), metro $(read_state metro_port)"
   done
   echo "evidence: $evidence_root"
@@ -605,7 +737,7 @@ cmd_ios_up() {
     # The dev client is built from this checkout, so another checkout's JavaScript only runs on it
     # when both ask for the same native code.
     [[ "$(native_hash "$source")" == "$(native_hash)" ]] \
-      || die "$source changes the app's native inputs; run verify-movies from that checkout instead"
+      || die "$source changes the app's native inputs; run verify-media from that checkout instead"
     src="$source"
   fi
   say "starting Metro for $src on port $metro"
@@ -622,7 +754,7 @@ cmd_ios_up() {
   curl -fsS "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running || { tail -20 "$state/metro.log" >&2; die "Metro did not start"; }
 
   local id
-  id="$(on_mac "xcrun simctl create movies-verify-$run-$side $(printf %q "$sim_type")")"
+  id="$(on_mac "xcrun simctl create media-verify-$run-$side $(printf %q "$sim_type")")"
   write_state ios_udid "$id"
   write_state ios_device "$sim_type"
   on_mac "xcrun simctl boot $id && xcrun simctl bootstatus $id -b >/dev/null"
@@ -742,22 +874,22 @@ cmd_ios() {
     shot)
       local path="${args[1]:?ios shot <path.png>}"
       mkdir -p "$(dirname "$path")"
-      on_mac "xcrun simctl io $(udid) screenshot --type=png /tmp/movies-verify-$run-$side.png >/dev/null 2>&1"
-      scp -q "$mac:/tmp/movies-verify-$run-$side.png" "$path"
+      on_mac "xcrun simctl io $(udid) screenshot --type=png /tmp/media-verify-$run-$side.png >/dev/null 2>&1"
+      scp -q "$mac:/tmp/media-verify-$run-$side.png" "$path"
       echo "$path" ;;
     record)
       case "${args[1]:-}" in
         start)
-          on_mac "rm -f /tmp/movies-verify-$run-$side.mp4; nohup xcrun simctl io $(udid) recordVideo --codec h264 --force /tmp/movies-verify-$run-$side.mp4 > /tmp/movies-verify-$run-$side.rec.log 2>&1 &"
+          on_mac "rm -f /tmp/media-verify-$run-$side.mp4; nohup xcrun simctl io $(udid) recordVideo --codec h264 --force /tmp/media-verify-$run-$side.mp4 > /tmp/media-verify-$run-$side.rec.log 2>&1 &"
           write_state ios_record "${args[2]:?ios record start <path.mp4>}"
           sleep 2 ;;
         stop)
           local out
           out="$(read_state ios_record)"
           [[ -n "$out" ]] || die "no recording in progress on the $side side"
-          on_mac "pkill -INT -f 'recordVideo.*movies-verify-$run-$side.mp4' || true; sleep 3"
+          on_mac "pkill -INT -f 'recordVideo.*media-verify-$run-$side.mp4' || true; sleep 3"
           mkdir -p "$(dirname "$out")"
-          scp -q "$mac:/tmp/movies-verify-$run-$side.mp4" "$out"
+          scp -q "$mac:/tmp/media-verify-$run-$side.mp4" "$out"
           rm -f "$state/ios_record"
           echo "$out" ;;
         *) die "ios record start <path.mp4> | stop" ;;
@@ -786,7 +918,7 @@ ios_agent() {
 
 # One try, for a probe whose failure is an answer, such as no alert on screen.
 ios_agent_once() {
-  on_mac "ad=\$(ls -d ~/.t3/device/tools/agent-device@*/node_modules/.bin/agent-device | tail -1); session=movies-verify-$run-$side \
+  on_mac "ad=\$(ls -d ~/.t3/device/tools/agent-device@*/node_modules/.bin/agent-device | tail -1); session=media-verify-$run-$side \
     && \$ad open dev.lmdevv.movies --udid $(udid) --platform ios --session \$session >/dev/null \
     && \$ad $* --session \$session"
 }
@@ -866,8 +998,8 @@ ios_matrix() {
       alert="$(ios_alert)"
       [[ "$alert" != "?" ]] || say "could not check $name for an iOS prompt; look at it"
       [[ "$alert" == "?" || ! "$alert" =~ \?$|"Would Like" ]] || die "an iOS prompt covers $name: $alert"
-      on_mac "xcrun simctl io $(udid) screenshot --type=png /tmp/movies-verify-$run-$side.png >/dev/null 2>&1"
-      scp -q "$mac:/tmp/movies-verify-$run-$side.png" "$out/$device-$orientation-$name.png"
+      on_mac "xcrun simctl io $(udid) screenshot --type=png /tmp/media-verify-$run-$side.png >/dev/null 2>&1"
+      scp -q "$mac:/tmp/media-verify-$run-$side.png" "$out/$device-$orientation-$name.png"
       echo "$out/$device-$orientation-$name.png"
     done
   done
@@ -914,11 +1046,11 @@ ios_down() {
   local id pid
   id="$(read_state ios_udid)"
   if [[ -n "$id" ]]; then
-    on_mac "pkill -INT -f 'recordVideo.*movies-verify-$run-$side' || true; xcrun simctl shutdown $id 2>/dev/null || true; xcrun simctl delete $id" || true
+    on_mac "pkill -INT -f 'recordVideo.*media-verify-$run-$side' || true; xcrun simctl shutdown $id 2>/dev/null || true; xcrun simctl delete $id" || true
     on_mac "ad=\$(ls -d ~/.t3/device/tools/agent-device@*/node_modules/.bin/agent-device 2>/dev/null | tail -1); \
-      [ -z \"\$ad\" ] || \$ad close --session movies-verify-$run-$side >/dev/null 2>&1 || true" || true
+      [ -z \"\$ad\" ] || \$ad close --session media-verify-$run-$side >/dev/null 2>&1 || true" || true
     # `ios shot` and `ios record` stage their files here before copying them back.
-    on_mac "rm -f /tmp/movies-verify-$run-$side.png /tmp/movies-verify-$run-$side.mp4 /tmp/movies-verify-$run-$side.rec.log" || true
+    on_mac "rm -f /tmp/media-verify-$run-$side.png /tmp/media-verify-$run-$side.mp4 /tmp/media-verify-$run-$side.rec.log" || true
   fi
   # Metro leads its own process group; pnpm ignores SIGTERM, so the group gets SIGKILL after it.
   pid="$(read_state metro_pid)"
@@ -954,10 +1086,8 @@ side_down() {
   docker ps -aq --filter "$label" | xargs -r docker rm -f >/dev/null 2>&1 || true
   docker volume ls -q --filter "$label" | xargs -r docker volume rm >/dev/null 2>&1 || true
   docker network ls -q --filter "$label" | xargs -r docker network rm >/dev/null 2>&1 || true
-  # The after side's image is the one `up` built and labeled for this run.
-  if [[ "$side" == after ]]; then
-    docker images -q --filter "label=movies.verify.run=$run" | sort -u | xargs -r docker image rm -f >/dev/null 2>&1 || true
-  fi
+  docker images -q --filter "label=media.verify.run=$run" --filter "label=media.verify.side=$side" | sort -u |
+    xargs -r docker image rm -f >/dev/null 2>&1 || true
   [[ -d "$state/src" ]] && git -C "$root" worktree remove --force "$state/src" 2>/dev/null || true
   rm -rf "$state"
   say "removed the $side side (evidence kept in $evidence)"
@@ -995,7 +1125,7 @@ main() {
     evidence) cmd_evidence "$@" ;;
     status) cmd_status ;;
     down) cmd_down "$@" ;;
-    *) sed -n '2,16p' "$0" >&2; exit 2 ;;
+    *) sed -n '2,17p' "$0" >&2; exit 2 ;;
   esac
 }
 main "$@"; exit

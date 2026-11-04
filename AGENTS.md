@@ -5,7 +5,6 @@ shares, and it is merging [movies] and [music] into one server, one Convex datab
 account system with a branded client per product. `[media]`, brackets included, is the working
 name until a later rebrand. The repo is `lmdevv/media`, the workspace scope is `@media/*`, settings
 start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv/media`.
-`verify-movies` keeps its name until `verify-media` replaces it.
 
 - Plan: `docs/architecture.md`, the ADRs in `docs/decisions/`, and the
   [Linear Platform project](https://linear.app/adsfsd/project/platform-c8c8792e24e6).
@@ -177,13 +176,14 @@ The example identities must be replaced with the model and tool that actually co
   Don't use Vitest's `--repeats`: `@effect/vitest` 4.0.3 counts each repeat as a finished test and
   closes a `layer(...)` early, which fails with missing files or `ECONNREFUSED`, not a product bug.
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `react-doctor`,
-  `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked. `verify-movies` is this
-  repo's own: it runs disposable stacks built from the checkout and from main, drives the web app,
-  the CLI, and the iOS app on a simulator, and publishes the evidence to a PR. Its stacks share
-  one set of demo data: the demo library image (`docs/demo-library.md`) and four seeded people with
-  their profiles, library access, and watching. Use that data, never your own media, in
-  screenshots and recordings.
-- Prove a user-facing change with `verify-movies` before you open its PR. A PR that changes what a
+  `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked. `verify-media` is this
+  repo's own: it runs disposable stacks built from the checkout and from main, each with movies and
+  old music from `legacy/music`, drives both web apps, both CLIs, and the movies iOS app on a
+  simulator, and publishes the evidence to a PR. Its stacks share one set of demo data: the demo
+  library image (`docs/demo-library.md`) and four seeded people, the same in both apps, with their
+  profiles, library access, watching, playlists, and likes. Use that data, never your own media,
+  in screenshots and recordings.
+- Prove a user-facing change with `verify-media` before you open its PR. A PR that changes what a
   user sees carries before and after screenshots of each changed screen, at desktop and phone size
   on the web, and a short video of the changed flow, published with `evidence publish`. When a PR
   changes nothing a user sees, say so under its verification notes instead.

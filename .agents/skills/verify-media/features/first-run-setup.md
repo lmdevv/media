@@ -18,7 +18,7 @@ library, such as the shows, is added from Admin, Libraries.
 - Then `/setup/library` and `/setup/scan`, which the steps lead to.
 - Admin, Libraries (`/admin/libraries`) and its `Add library` button, for every later library.
 
-## Driving it with verify-movies
+## Driving it with verify-media
 
 Preconditions:
 

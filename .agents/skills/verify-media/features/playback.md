@@ -24,7 +24,7 @@ progress offers to resume where the profile stopped.
 - Terminal: `media play <title>` prints a stream URL for mpv or VLC.
 - iOS app: a title, then `Play`.
 
-## Driving it with verify-movies
+## Driving it with verify-media
 
 Preconditions:
 

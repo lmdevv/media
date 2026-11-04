@@ -22,7 +22,7 @@ CLI. Everything shown is limited to the libraries and ratings the profile may se
 - `/search?q=<words>` directly.
 - Terminal: `media search <query>`, `media titles list`, `media titles get <id>`.
 
-## Driving it with verify-movies
+## Driving it with verify-media
 
 Preconditions:
 
