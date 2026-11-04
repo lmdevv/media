@@ -1,0 +1,102 @@
+import { v } from "convex/values";
+import type { Infer, ObjectType } from "convex/values";
+
+import { jobItem, jobKind, jobPayload } from "./kinds";
+
+/**
+ * How far a job got, in the mode its kind picks. `reported`: the worker reports done and total.
+ * `items`: done is the watermark below which every batched item is complete, `appended` counts the
+ * items the holders appended, and `sealed` says no more will come.
+ */
+export const jobWork = v.union(
+  v.object({
+    mode: v.literal("reported"),
+    done: v.number(),
+    total: v.union(v.number(), v.null()),
+  }),
+  v.object({
+    mode: v.literal("items"),
+    done: v.number(),
+    appended: v.number(),
+    sealed: v.boolean(),
+  }),
+);
+
+export type JobWork = Infer<typeof jobWork>;
+
+const common = {
+  payload: jobPayload,
+  dedupeKey: v.union(v.string(), v.null()),
+  /**
+   * Claims so far. The claim that makes attempt N hands its worker the lease `{ jobId, attempt: N }`,
+   * so attempts is also the fencing token.
+   */
+  attempts: v.number(),
+  strikes: v.number(),
+  work: jobWork,
+  message: v.union(v.string(), v.null()),
+};
+
+export type JobCommon = ObjectType<typeof common>;
+
+export const jobDocument = v.union(
+  v.object({
+    ...common,
+    status: v.literal("queued"),
+    lastError: v.union(v.string(), v.null()),
+  }),
+  v.object({
+    ...common,
+    status: v.literal("running"),
+    workerId: v.string(),
+    leaseExpiresAt: v.number(),
+    claimedAt: v.number(),
+    /** Whether this attempt made durable progress: appended items or moved the item watermark. */
+    progressed: v.boolean(),
+    /**
+     * Set by cancel. The job keeps its slot until its worker's next lease call or the lease
+     * lapses, so the cap still counts the process that may be running; then it becomes canceled.
+     */
+    cancelRequestedAt: v.union(v.number(), v.null()),
+  }),
+  v.object({ ...common, status: v.literal("succeeded"), finishedAt: v.number() }),
+  v.object({ ...common, status: v.literal("failed"), finishedAt: v.number(), error: v.string() }),
+  v.object({ ...common, status: v.literal("canceled"), finishedAt: v.number() }),
+);
+
+export type JobFields = Infer<typeof jobDocument>;
+
+export type JobStatus = JobFields["status"];
+
+export const jobStatus = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("succeeded"),
+  v.literal("failed"),
+  v.literal("canceled"),
+);
+
+/** One batched item. `seq` counts from 0 per job in append order. */
+export const jobItemDocument = v.object({
+  jobId: v.id("jobs"),
+  seq: v.number(),
+  item: jobItem,
+});
+
+/**
+ * One row per kind that has had a job, written only by `store.ts` in the mutation that moves a
+ * job. A claim reads this row instead of ranges of `jobs`: a range a queue has moved through holds
+ * the index entries of every job that left it until Convex's retention removes them, and scanning
+ * those made each claim slower the more jobs the kind had run.
+ */
+export const jobKindDocument = v.object({
+  kind: jobKind,
+  /** How many jobs of the kind are running, the count the cap is checked against. */
+  running: v.number(),
+  /** No queued job of the kind was created before this time, so a claim scans from here. */
+  queueFrom: v.number(),
+});
+
+export const lease = v.object({ jobId: v.id("jobs"), attempt: v.number() });
+
+export type Lease = Infer<typeof lease>;

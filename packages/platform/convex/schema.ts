@@ -2,6 +2,8 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 import { credentialScope } from "../commands/scopes";
+import { importSource } from "./core/jobs/kinds";
+import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
 
 const sessionFields = {
   userId: v.id("users"),
@@ -123,5 +125,32 @@ export default defineSchema({
   limitsProbeRows: defineTable({
     group: v.string(),
     position: v.number(),
+    doubled: v.optional(v.number()),
   }).index("by_group_position", ["group", "position"]),
+
+  jobs: defineTable(jobDocument)
+    .index("by_kind_status", ["payload.kind", "status"])
+    .index("by_status", ["status"])
+    .index("by_status_lease", ["status", "leaseExpiresAt"])
+    .index("by_kind", ["payload.kind"])
+    .index("by_dedupe_status", ["dedupeKey", "status"]),
+
+  jobItems: defineTable(jobItemDocument).index("by_job_seq", ["jobId", "seq"]),
+
+  jobKinds: defineTable(jobKindDocument).index("by_kind", ["kind"]),
+
+  schemaMigrations: defineTable({
+    name: v.string(),
+    cursor: v.union(v.string(), v.null()),
+    done: v.boolean(),
+  }).index("by_name", ["name"]),
+
+  imports: defineTable({
+    source: importSource,
+    serverId: v.string(),
+    serverName: v.string(),
+    jobId: v.id("jobs"),
+  })
+    .index("by_job", ["jobId"])
+    .index("by_source_server", ["source", "serverId"]),
 });

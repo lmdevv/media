@@ -17,6 +17,7 @@ const probeRow = v.object({
   _creationTime: v.number(),
   group: v.string(),
   position: v.number(),
+  doubled: v.optional(v.number()),
 });
 
 export const seed = internalMutation({
@@ -47,6 +48,37 @@ export const add = internalMutation({
     await incrementCounter(ctx.db, counterName(group), 1);
 
     return null;
+  },
+});
+
+const CLEAR_ROWS_MAX = 1000;
+
+export const clear = internalMutation({
+  args: { groupPrefix: v.string(), cursor: v.union(v.string(), v.null()) },
+  returns: v.object({ continueCursor: v.string(), isDone: v.boolean() }),
+  handler: async (ctx, { groupPrefix, cursor }) => {
+    const page = await paginate(
+      ctx.db,
+      {
+        table: "limitsProbeRows",
+        index: "by_group_position",
+        range: (q) => q.gte("group", groupPrefix).lt("group", `${groupPrefix}\uffff`),
+      },
+      { cursor, numItems: CLEAR_ROWS_MAX },
+    );
+
+    await Promise.all(page.page.map((row) => ctx.db.delete("limitsProbeRows", row._id)));
+
+    const removed = page.page.reduce(
+      (groups, row) => groups.set(row.group, (groups.get(row.group) ?? 0) + 1),
+      new Map<string, number>(),
+    );
+
+    await Promise.all(
+      [...removed].map(([group, rows]) => incrementCounter(ctx.db, counterName(group), -rows)),
+    );
+
+    return { continueCursor: page.continueCursor, isDone: page.isDone };
   },
 });
 
