@@ -7,8 +7,8 @@ import type { Infer } from "convex/values";
 
 import { action } from "../../convex/_generated/server";
 import type { ActionCtx } from "../../convex/_generated/server";
-import { requireCaller } from "../../convex/core/lib/caller";
-import type { Caller } from "../../convex/core/lib/caller";
+import { requireActionCaller } from "../../convex/core/auth/caller";
+import type { Caller } from "../../convex/core/auth/caller";
 
 const loadArgs = v.object({
   source: v.union(v.literal("spotify"), v.literal("file")),
@@ -27,7 +27,7 @@ const loadResult = v.union(v.object({ playlistId: v.id("playlists") }), v.null()
 export interface Handlers {
   /** `music.playlists.load` (action, signed-in): Load a playlist from a file or another service. */
   readonly load: (
-    ctx: ActionCtx,
+    ctx: Omit<ActionCtx, "auth">,
     args: Infer<typeof loadArgs>,
     caller: Caller,
   ) => Infer<typeof loadResult> | Promise<Infer<typeof loadResult>>;
@@ -48,6 +48,7 @@ export const register = (handlers: Handlers) => ({
   load: action({
     args: loadArgs,
     returns: loadResult,
-    handler: async (ctx, args) => handlers.load(ctx, args, await requireCaller(ctx, "signed-in")),
+    handler: async (ctx, args) =>
+      handlers.load(ctx, args, await requireActionCaller(ctx, "signed-in")),
   }),
 });

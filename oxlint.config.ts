@@ -1,6 +1,32 @@
 import { strict as effectStrict } from "@effect/tsgo/oxlint-presets";
 import { defineConfig } from "oxlint";
 
+const commandOnly =
+  "Declare a public function as a command in packages/commands and pass its handler to register from packages/platform/commands.";
+
+const builderBans = {
+  paths: [
+    {
+      name: "convex/server",
+      importNames: ["queryGeneric", "mutationGeneric", "actionGeneric"],
+      message: commandOnly,
+    },
+  ],
+  patterns: [
+    {
+      regex: "_generated/server$",
+      importNames: ["query", "mutation", "action"],
+      message: commandOnly,
+    },
+  ],
+};
+
+const convexAuthBan = {
+  regex: "^@convex-dev/auth",
+  message:
+    "Read the caller through requireCaller in convex/core/auth/caller.ts; only convex/auth.ts and convex/core/auth/ use Convex Auth.",
+};
+
 export default defineConfig({
   extends: [effectStrict],
   plugins: ["typescript", "unicorn", "oxc", "import", "promise"],
@@ -93,32 +119,17 @@ export default defineConfig({
       rules: { "anti-slop-effect/no-manual-tagged-construction": "off" },
     },
     {
-      // Every public function in the core is a command, registered through its generated contract
-      // in packages/platform/commands, so its scope check cannot be skipped.
       files: ["packages/platform/convex/**"],
       rules: {
         "no-restricted-imports": [
           "error",
-          {
-            paths: [
-              {
-                name: "convex/server",
-                importNames: ["queryGeneric", "mutationGeneric", "actionGeneric"],
-                message:
-                  "Declare a public function as a command in packages/commands and pass its handler to register from packages/platform/commands.",
-              },
-            ],
-            patterns: [
-              {
-                regex: "_generated/server$",
-                importNames: ["query", "mutation", "action"],
-                message:
-                  "Declare a public function as a command in packages/commands and pass its handler to register from packages/platform/commands.",
-              },
-            ],
-          },
+          { ...builderBans, patterns: [...builderBans.patterns, convexAuthBan] },
         ],
       },
+    },
+    {
+      files: ["packages/platform/convex/auth.ts", "packages/platform/convex/core/auth/**"],
+      rules: { "no-restricted-imports": ["error", builderBans] },
     },
   ],
 });

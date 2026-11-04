@@ -3,7 +3,7 @@ import type { CheckedCommand } from "../check.ts";
 import type { CommandKind } from "../command.ts";
 import type { Emitted, Target } from "../outputs.ts";
 import { byCodeUnits } from "../order.ts";
-import { scopes } from "../scopes.ts";
+import { credentialScopes, scopes } from "../scopes.ts";
 import { GENERATED_NOTE } from "../note.ts";
 
 const CONTEXTS = {
@@ -11,6 +11,18 @@ const CONTEXTS = {
   mutation: "MutationCtx",
   action: "ActionCtx",
 } as const satisfies { readonly [Kind in CommandKind]: string };
+
+const CALLER_CHECKS = {
+  query: "requireCaller",
+  mutation: "requireCaller",
+  action: "requireActionCaller",
+} as const satisfies { readonly [Kind in CommandKind]: string };
+
+const literalUnion = (values: ReadonlyArray<string>): string =>
+  values.length === 0 ? "never" : values.map((value) => JSON.stringify(value)).join(" | ");
+
+const literalValidator = (values: ReadonlyArray<string>): string =>
+  `v.union(${values.map((value) => `v.literal(${JSON.stringify(value)})`).join(", ")})`;
 
 const header = `${GENERATED_NOTE.map((line) => `// ${line}`).join("\n")}\n\n`;
 
@@ -38,7 +50,14 @@ const contract = (module: string, commands: ReadonlyArray<CheckedCommand>): Emit
   const up = "../".repeat(module.split("/").length);
   const group = module.replaceAll("/", ".");
   const kinds = [...new Set(commands.map((command) => command.kind))].toSorted();
-  const scoped = commands.some((command) => command.scope !== "public");
+
+  const checks = [
+    ...new Set(
+      commands.flatMap((command) =>
+        command.scope === "public" ? [] : [CALLER_CHECKS[command.kind]],
+      ),
+    ),
+  ].toSorted();
 
   const validators = commands.flatMap((command) => [
     `const ${command.exportName}Args = v.object(${fieldsSource(command.args)});`,
@@ -51,7 +70,7 @@ const contract = (module: string, commands: ReadonlyArray<CheckedCommand>): Emit
 
     return [
       `/** \`${command.name}\` (${command.kind}, ${command.scope}): ${command.summary}. */`,
-      `readonly ${command.exportName}: (ctx: ${CONTEXTS[command.kind]}, args: ${args}${caller}) => ${result} | Promise<${result}>;`,
+      `readonly ${command.exportName}: (ctx: Omit<${CONTEXTS[command.kind]}, "auth">, args: ${args}${caller}) => ${result} | Promise<${result}>;`,
     ].join("\n");
   });
 
@@ -65,7 +84,7 @@ const contract = (module: string, commands: ReadonlyArray<CheckedCommand>): Emit
     const call =
       command.scope === "public"
         ? `handlers.${command.exportName}(ctx, args)`
-        : `handlers.${command.exportName}(ctx, args, await requireCaller(ctx, "${command.scope}"))`;
+        : `handlers.${command.exportName}(ctx, args, await ${CALLER_CHECKS[command.kind]}(ctx, "${command.scope}"))`;
 
     return [
       `${command.exportName}: ${command.kind}({`,
@@ -83,10 +102,10 @@ const contract = (module: string, commands: ReadonlyArray<CheckedCommand>): Emit
     "",
     `import { ${kinds.join(", ")} } from "${up}convex/_generated/server";`,
     `import type { ${kinds.map((kind) => CONTEXTS[kind]).join(", ")} } from "${up}convex/_generated/server";`,
-    ...(scoped
+    ...(checks.length > 0
       ? [
-          `import { requireCaller } from "${up}convex/core/lib/caller";`,
-          `import type { Caller } from "${up}convex/core/lib/caller";`,
+          `import { ${checks.join(", ")} } from "${up}convex/core/auth/caller";`,
+          `import type { Caller } from "${up}convex/core/auth/caller";`,
         ]
       : []),
   ];
@@ -136,11 +155,30 @@ const scopesFile = (): Emitted => {
 
   return {
     path: "scopes.ts",
-    text: [
-      header,
-      "/** A scope that needs a signed-in caller: every command scope but `public`. */\n",
-      `export type CallerScope = ${callerScopes.length === 0 ? "never" : callerScopes.map((scope) => JSON.stringify(scope)).join(" | ")};\n`,
-    ].join(""),
+    text:
+      [
+        `${header}import { v } from "convex/values";`,
+        [
+          "/** A scope that needs a signed-in caller: every command scope but `public`. */",
+          `export type CallerScope = ${literalUnion(callerScopes)};`,
+        ].join("\n"),
+        [
+          "/** `CallerScope` as a Convex validator. */",
+          `export const callerScope = ${literalValidator(callerScopes)};`,
+        ].join("\n"),
+        [
+          "/** The scopes a sign-in credential can hold, in declaration order. */",
+          `export const credentialScopes = [${credentialScopes.map((scope) => JSON.stringify(scope)).join(", ")}] as const;`,
+        ].join("\n"),
+        [
+          "/** A scope a sign-in credential can hold. */",
+          "export type CredentialScope = (typeof credentialScopes)[number];",
+        ].join("\n"),
+        [
+          "/** `CredentialScope` as a Convex validator, for stored credentials and their arguments. */",
+          `export const credentialScope = ${literalValidator(credentialScopes)};`,
+        ].join("\n"),
+      ].join("\n\n") + "\n",
   };
 };
 

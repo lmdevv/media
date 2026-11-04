@@ -16,6 +16,6 @@ Show this server's name and version.
 Rename this server.
 
 - Kind: mutation
-- Scope: signed-in
+- Scope: account
 - Arguments: `{ name: string; note?: string }`
 - Result: `null`

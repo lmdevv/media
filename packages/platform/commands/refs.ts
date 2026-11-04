@@ -3,6 +3,9 @@
 
 import { api } from "../convex/_generated/api";
 
+import type { Refs as core_auth_apiKeys } from "./core/auth/apiKeys";
+import type { Refs as core_auth_deviceCodes } from "./core/auth/deviceCodes";
+import type { Refs as core_auth_sessions } from "./core/auth/sessions";
 import type { Refs as core_server } from "./core/server";
 
 /**
@@ -11,5 +14,20 @@ import type { Refs as core_server } from "./core/server";
  * `pnpm --filter @media/commands generate` with the dev stack up.
  */
 export const commandRefs = {
+  "core.auth.apiKeys.create": api.core.auth.apiKeys.create satisfies core_auth_apiKeys["create"],
+  "core.auth.apiKeys.endAll": api.core.auth.apiKeys.endAll satisfies core_auth_apiKeys["endAll"],
+  "core.auth.apiKeys.revoke": api.core.auth.apiKeys.revoke satisfies core_auth_apiKeys["revoke"],
+  "core.auth.deviceCodes.approve": api.core.auth.deviceCodes
+    .approve satisfies core_auth_deviceCodes["approve"],
+  "core.auth.deviceCodes.deny": api.core.auth.deviceCodes
+    .deny satisfies core_auth_deviceCodes["deny"],
+  "core.auth.deviceCodes.lookup": api.core.auth.deviceCodes
+    .lookup satisfies core_auth_deviceCodes["lookup"],
+  "core.auth.deviceCodes.start": api.core.auth.deviceCodes
+    .start satisfies core_auth_deviceCodes["start"],
+  "core.auth.sessions.current": api.core.auth.sessions
+    .current satisfies core_auth_sessions["current"],
+  "core.auth.sessions.end": api.core.auth.sessions.end satisfies core_auth_sessions["end"],
+  "core.auth.sessions.endAll": api.core.auth.sessions.endAll satisfies core_auth_sessions["endAll"],
   "core.server.info": api.core.server.info satisfies core_server["info"],
 } as const;

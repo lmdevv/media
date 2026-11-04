@@ -83,8 +83,8 @@ everything when a root config file changes; `scripts/changed-packages.sh` prints
 `nix/module.nix`, and both READMEs; `check-deploy.sh` names what is missing.
 
 Each worktree gets its own stack: `scripts/dev-stack.sh up` starts two self-hosted Convex backends
-in Docker, one for old movies and one for the core, deploys both, configures movies' auth keys, the
-playback token secret and the media service credential, and writes the `.env.local` files. Ports, the data volume, and the temporary
+in Docker, one for old movies and one for the core, deploys both, configures both backends' auth keys,
+movies' playback token secret and media service credential, and writes the `.env.local` files. Ports, the data volume, and the temporary
 output directory derive from the worktree name; `scripts/dev-stack.sh env` prints them, and
 `down` / `destroy` stop or remove the stack. Commit the regenerated `convex/_generated/`.
 

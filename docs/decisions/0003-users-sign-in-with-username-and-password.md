@@ -49,6 +49,8 @@ product needs one model for who a person is and how they get in.
 ## Edge cases settled
 
 - `Alice` and `alice` are the same username.
+- A username is ASCII, so no two look alike. It starts with a letter or a digit and holds 1 to
+  32 letters, digits, dots, dashes, and underscores. A password has 8 to 256 characters.
 - A changed username keeps its history, because history follows the user id.
 - An admin cannot remove or demote the owner. Only the owner hands over ownership.
 - A forgotten owner password is reset from the server host with `media admin reset-password`, not
