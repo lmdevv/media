@@ -23,7 +23,7 @@ exist.
 - Terminal: `media profiles list`, `media profiles unlock --profile-id <id> <pin>`,
   `media titles list --profile-id <id>`.
 
-## Driving it with verify-movies
+## Driving it with verify-media
 
 Preconditions:
 

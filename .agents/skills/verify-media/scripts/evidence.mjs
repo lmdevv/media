@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Collects before/after screenshots and videos for a run and publishes them to a pull request's
-// description through `gh pr edit --attach`. verify-movies.sh passes --root, --run, and --evidence.
+// description through `gh pr edit --attach`. verify-media.sh passes --root, --run, and --evidence.
 //
 //   evidence.mjs add --label <text> [--before <file>] [--after <file>]
 //   evidence.mjs list
 //   evidence.mjs clear
 //   evidence.mjs publish --pr <number> [--dry-run]
+//   evidence.mjs publish --dry-run              (the block alone, with no PR to read)
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, relative, resolve } from "node:path";
@@ -26,8 +27,8 @@ const { values: flags, positionals } = parseArgs({
   },
 });
 
-const START = "<!-- verify-movies:start -->";
-const END = "<!-- verify-movies:end -->";
+const START = "<!-- verify-media:start -->";
+const END = "<!-- verify-media:end -->";
 // GitHub's limits for an attachment: 10 MB for an image, and 10 MB for a video on a free plan.
 const LIMIT = 10 * 1024 * 1024;
 const IMAGE = new Set([".png", ".jpg", ".jpeg", ".gif"]);
@@ -139,7 +140,7 @@ const gh = (args, input) => execFileSync("gh", args, { cwd: root, encoding: "utf
 const readBody = () => gh(["pr", "view", flags.pr, "--json", "body", "--jq", ".body"]).trimEnd();
 
 const publish = () => {
-  if (!flags.pr) fail("publish needs --pr");
+  if (!flags.pr && !flags["dry-run"]) fail("publish needs --pr");
   const items = rows().map((row, index) => {
     const type = kind(row.before ?? row.after);
     const prepare = (file, side) => {
@@ -153,7 +154,7 @@ const publish = () => {
   const files = items.flatMap((item) => [item.before, item.after]).filter(Boolean);
   if (files.length > 50) fail(`gh attaches at most 50 files per edit; this run has ${files.length}`);
 
-  const current = readBody();
+  const current = flags.pr ? readBody() : "";
   const ours = block(items);
   const start = current.indexOf(START);
   const end = current.indexOf(END);
@@ -166,7 +167,7 @@ const publish = () => {
   writeFileSync(bodyFile, `${body.trimEnd()}\n`);
   if (flags["dry-run"]) {
     console.log(ours);
-    console.log(`\ndry run: would attach ${files.length} files to PR ${flags.pr}; body in ${relative(root, bodyFile)}`);
+    console.log(`\ndry run: would attach ${files.length} files to PR ${flags.pr ?? "<none>"}; body in ${relative(root, bodyFile)}`);
     return;
   }
 

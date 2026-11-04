@@ -19,7 +19,7 @@ the `My List` page and row hold the titles the profile saved.
 - Home's `Continue watching for <profile>` row.
 - Terminal: `media continue`, `media my-list list`, `media my-list add <title-id>`.
 
-## Driving it with verify-movies
+## Driving it with verify-media
 
 Preconditions:
 
