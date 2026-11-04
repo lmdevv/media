@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { LibraryId } from "@movies/contracts/ids";
+import { LibraryId } from "@media/contracts/ids";
 import { Cause, Context, Effect, Exit, Layer, Option, Runtime, Schema } from "effect";
 
 import * as ArtworkKeys from "./artwork/artwork-keys.ts";
@@ -163,7 +163,7 @@ Effect.gen(function* () {
   const services = yield* Layer.build(application);
   const retained = Context.get(services, RetainedLogs.Service);
 
-  // Runs first at shutdown: an open `movies logs --follow` never ends on its own, and the HTTP
+  // Runs first at shutdown: an open `media logs --follow` never ends on its own, and the HTTP
   // server waits for open responses before it closes.
   yield* Effect.addFinalizer(() => retained.close);
 

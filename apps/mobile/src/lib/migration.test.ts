@@ -1,13 +1,13 @@
-import { ProfileId } from "@movies/contracts/ids";
+import { ProfileId } from "@media/contracts/ids";
 import {
   MigrationConnection,
   MigrationReport,
   MigrationRun,
-} from "@movies/contracts/models/migration";
+} from "@media/contracts/models/migration";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { SKIP, userRows } from "@movies/contracts/migration-plan";
+import { SKIP, userRows } from "@media/contracts/migration-plan";
 
 import { SKIP_LABEL, choiceLabel, doneRows, phaseRows, reviewRows } from "./migration";
 

@@ -1,6 +1,6 @@
-import type { MediaFileId } from "@movies/contracts/ids";
-import { FileResolverUnavailable, MediaFileNotFound } from "@movies/contracts/media-playback";
-import type { CallError } from "@movies/sdk/effect";
+import type { MediaFileId } from "@media/contracts/ids";
+import { FileResolverUnavailable, MediaFileNotFound } from "@media/contracts/media-playback";
+import type { CallError } from "@media/sdk/effect";
 import { Cache, Duration, Effect, Exit, FileSystem, Layer, Match, Option } from "effect";
 
 import * as FileResolver from "../playback/file-resolver.ts";

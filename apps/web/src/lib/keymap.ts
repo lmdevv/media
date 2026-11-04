@@ -1,6 +1,6 @@
-import { createKeymap } from "@movies/ui/lib/keymap";
-import type { KeymapEntry } from "@movies/ui/lib/keymap";
-import { detectPlatform } from "@movies/ui/lib/use-keymap";
+import { createKeymap } from "@media/ui/lib/keymap";
+import type { KeymapEntry } from "@media/ui/lib/keymap";
+import { detectPlatform } from "@media/ui/lib/use-keymap";
 
 const SHORTCUTS = [
   { id: "menu.toggle", keys: "mod+k", whileTyping: true, title: "Search or jump to…" },

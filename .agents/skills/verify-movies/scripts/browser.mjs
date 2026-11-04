@@ -9,7 +9,7 @@
 //
 // Where the host allows it, the browser runs in a private network namespace (see `isolate`),
 // because Chromium cancels its queued requests whenever any host interface gains or loses an
-// address, which every Docker container start and stop does. MOVIES_VERIFY_BROWSER_NETWORK picks
+// address, which every Docker container start and stop does. MEDIA_VERIFY_BROWSER_NETWORK picks
 // `auto` (the default: isolated when possible), `isolated` (or fail), or `host`.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -176,13 +176,13 @@ function namespaceUnavailable() {
 
 async function serve(options) {
   if (!options.base || !options.convex) throw new Error("serve needs --base and --convex");
-  const requested = process.env.MOVIES_VERIFY_BROWSER_NETWORK || "auto";
+  const requested = process.env.MEDIA_VERIFY_BROWSER_NETWORK || "auto";
   if (!NETWORKS.includes(requested)) {
-    throw new Error(`MOVIES_VERIFY_BROWSER_NETWORK must be ${NETWORKS.join(", ")}, not "${requested}"`);
+    throw new Error(`MEDIA_VERIFY_BROWSER_NETWORK must be ${NETWORKS.join(", ")}, not "${requested}"`);
   }
-  const unavailable = requested === "host" ? "MOVIES_VERIFY_BROWSER_NETWORK=host" : namespaceUnavailable();
+  const unavailable = requested === "host" ? "MEDIA_VERIFY_BROWSER_NETWORK=host" : namespaceUnavailable();
   if (unavailable && requested === "isolated") {
-    throw new Error(`MOVIES_VERIFY_BROWSER_NETWORK=isolated, but ${unavailable}`);
+    throw new Error(`MEDIA_VERIFY_BROWSER_NETWORK=isolated, but ${unavailable}`);
   }
   process.chdir(options.state);
   // A host that was killed leaves its sockets behind, and a socket path that exists can't be bound.

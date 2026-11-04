@@ -1,4 +1,4 @@
-import type { EpisodeId, PersonId } from "@movies/contracts/ids";
+import type { EpisodeId, PersonId } from "@media/contracts/ids";
 import type {
   Credit,
   CreditKind,
@@ -8,8 +8,8 @@ import type {
   Season,
   ShowStatus,
   TitleDetail,
-} from "@movies/contracts/models/catalog";
-import { MediaLabels } from "@movies/sdk/effect";
+} from "@media/contracts/models/catalog";
+import { MediaLabels } from "@media/sdk/effect";
 
 import { facts, formatRemaining, formatRuntime } from "@/lib/format";
 

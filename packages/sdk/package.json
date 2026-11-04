@@ -1,5 +1,5 @@
 {
-  "name": "@movies/sdk",
+  "name": "@media/sdk",
   "version": "0.2.0",
   "private": true,
   "description": "Effect core SDK with effect, react, and promise entry points, shared by every client.",
@@ -12,15 +12,15 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test:stack": "MOVIES_STACK_TESTS=1 vitest run --root ../.. packages/sdk/src/stack"
+    "test:stack": "MEDIA_STACK_TESTS=1 vitest run --root ../.. packages/sdk/src/stack"
   },
   "dependencies": {
-    "@movies/contracts": "workspace:*",
+    "@media/contracts": "workspace:*",
     "convex": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@movies/config": "workspace:*",
+    "@media/config": "workspace:*",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "fast-check": "4.10.2",

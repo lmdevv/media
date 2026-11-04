@@ -1,4 +1,4 @@
-import type { TitleCard } from "@movies/contracts/models/catalog";
+import type { TitleCard } from "@media/contracts/models/catalog";
 
 const NEW_FOR_MS = 7 * 86_400_000;
 

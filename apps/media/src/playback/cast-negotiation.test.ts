@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { castCapabilities } from "@movies/contracts/cast";
+import { castCapabilities } from "@media/contracts/cast";
 
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
 import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";

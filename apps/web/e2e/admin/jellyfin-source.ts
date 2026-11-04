@@ -27,7 +27,7 @@ export interface JellyfinSource {
  * @throws When the server exits or does not answer in time, with what it logged.
  */
 export const startJellyfinSource = (workspace: string): Promise<JellyfinSource> => {
-  const docker = process.env["MOVIES_JELLYFIN_DOCKER"] === "1";
+  const docker = process.env["MEDIA_JELLYFIN_DOCKER"] === "1";
 
   const child = spawn(process.execPath, [script, workspace, ...(docker ? ["--docker"] : [])], {
     stdio: ["ignore", "pipe", "pipe"],

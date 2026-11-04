@@ -1,6 +1,6 @@
 import { useRender } from "@base-ui/react/use-render";
-import { focusRowItem, rowItems } from "@movies/ui/lib/row-focus";
-import { cn } from "@movies/ui/lib/utils";
+import { focusRowItem, rowItems } from "@media/ui/lib/row-focus";
+import { cn } from "@media/ui/lib/utils";
 import { ChevronRightIcon } from "lucide-react";
 import { useId } from "react";
 import type { KeyboardEvent, ReactNode } from "react";

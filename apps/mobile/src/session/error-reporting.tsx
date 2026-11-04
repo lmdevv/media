@@ -1,4 +1,4 @@
-import { useReportError } from "@movies/sdk/react";
+import { useReportError } from "@media/sdk/react";
 import Constants from "expo-constants";
 import { ErrorBoundary, usePathname } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";

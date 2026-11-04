@@ -1,4 +1,4 @@
-import type { LibraryKind } from "@movies/contracts/models/catalog";
+import type { LibraryKind } from "@media/contracts/models/catalog";
 
 const SECOND_MS = 1000;
 

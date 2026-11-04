@@ -1,4 +1,4 @@
-import { EpisodeId, MediaFileId, RoomId, TitleId } from "@movies/contracts/ids";
+import { EpisodeId, MediaFileId, RoomId, TitleId } from "@media/contracts/ids";
 import { Option, Schema } from "effect";
 
 type RawParam = string | ReadonlyArray<string> | undefined;

@@ -1,6 +1,6 @@
-import type { ContinueWatchingItem, PersonCard, TitleCard } from "@movies/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import type { CommandItem, CommandLeading } from "@movies/ui/lib/command-menu";
+import type { ContinueWatchingItem, PersonCard, TitleCard } from "@media/contracts/models/catalog";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import type { CommandItem, CommandLeading } from "@media/ui/lib/command-menu";
 import { FilmIcon, PlayIcon, PlusIcon, SearchIcon, TvIcon, UserRoundIcon } from "lucide-react";
 import { useMemo } from "react";
 import { toast } from "sonner";

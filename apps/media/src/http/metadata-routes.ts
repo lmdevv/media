@@ -1,5 +1,5 @@
-import { Internal, RateLimited } from "@movies/contracts/errors";
-import type { MetadataCandidate } from "@movies/contracts/models/catalog";
+import { Internal, RateLimited } from "@media/contracts/errors";
+import type { MetadataCandidate } from "@media/contracts/models/catalog";
 import { Effect, Layer, Match } from "effect";
 import type { HttpRouter } from "effect/http";
 

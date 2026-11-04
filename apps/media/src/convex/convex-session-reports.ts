@@ -1,4 +1,4 @@
-import type { SessionStatus } from "@movies/contracts/models/scan";
+import type { SessionStatus } from "@media/contracts/models/scan";
 import { Effect, Layer, Stream } from "effect";
 
 import * as SessionReports from "../playback/session-reports.ts";

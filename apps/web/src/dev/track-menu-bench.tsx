@@ -1,6 +1,6 @@
-import { PlayerButton, PlayerControls, TracksGlyph } from "@movies/ui/components/player-controls";
-import { TrackPopover } from "@movies/ui/components/track-popover";
-import type { TrackChoice, TrackOption } from "@movies/ui/components/track-popover";
+import { PlayerButton, PlayerControls, TracksGlyph } from "@media/ui/components/player-controls";
+import { TrackPopover } from "@media/ui/components/track-popover";
+import type { TrackChoice, TrackOption } from "@media/ui/components/track-popover";
 import { useState } from "react";
 
 import { useFullscreen } from "@/components/player/use-player-frame";

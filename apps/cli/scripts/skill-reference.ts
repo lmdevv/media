@@ -14,7 +14,7 @@ execFileSync(process.execPath, [join(root, "scripts", "build.ts")]);
 
 const reference = execFileSync(
   process.execPath,
-  [join(root, "dist", "movies.js"), "commands", "--markdown"],
+  [join(root, "dist", "media.js"), "commands", "--markdown"],
   { encoding: "utf8", env: { PATH: process.env["PATH"] ?? "" } },
 ).trimEnd();
 

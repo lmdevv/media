@@ -1,18 +1,18 @@
-import type { ApiKey, CreatedApiKey } from "@movies/contracts/models/account";
-import { ApiKeyScope } from "@movies/contracts/scopes";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { Checkbox } from "@movies/ui/components/checkbox";
-import { Chip } from "@movies/ui/components/chip";
+import type { ApiKey, CreatedApiKey } from "@media/contracts/models/account";
+import { ApiKeyScope } from "@media/contracts/scopes";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { Checkbox } from "@media/ui/components/checkbox";
+import { Chip } from "@media/ui/components/chip";
 import {
   Dialog,
   DialogBody,
   DialogClose,
   DialogContent,
   DialogFooter,
-} from "@movies/ui/components/dialog";
-import { Skeleton } from "@movies/ui/components/skeleton";
-import { TextField } from "@movies/ui/components/text-field";
+} from "@media/ui/components/dialog";
+import { Skeleton } from "@media/ui/components/skeleton";
+import { TextField } from "@media/ui/components/text-field";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";

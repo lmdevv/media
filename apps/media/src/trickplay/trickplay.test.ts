@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import { MediaFileId } from "@movies/contracts/ids";
-import { TrickplayManifest, trickplayVersion } from "@movies/contracts/trickplay";
+import { MediaFileId } from "@media/contracts/ids";
+import { TrickplayManifest, trickplayVersion } from "@media/contracts/trickplay";
 import {
   Context,
   Duration,

@@ -1,5 +1,5 @@
-import type { TitleCard, TitleDetail } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { TitleCard, TitleDetail } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Check, Play, Plus } from "lucide-react-native";

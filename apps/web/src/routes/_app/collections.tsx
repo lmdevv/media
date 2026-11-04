@@ -1,6 +1,6 @@
-import { useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { CalmState } from "@movies/ui/components/calm-state";
+import { useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { CalmState } from "@media/ui/components/calm-state";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { CollectionCard } from "@/components/browse/collection-card";

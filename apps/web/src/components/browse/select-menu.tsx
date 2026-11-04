@@ -4,8 +4,8 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
-} from "@movies/ui/components/dropdown-menu";
-import { cn } from "@movies/ui/lib/utils";
+} from "@media/ui/components/dropdown-menu";
+import { cn } from "@media/ui/lib/utils";
 import type { ReactNode } from "react";
 
 /** One choice of a {@link SelectMenu}. */

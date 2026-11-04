@@ -38,13 +38,13 @@ export interface MediaStack {
 }
 
 /**
- * The stack to test, or undefined unless `MOVIES_STACK_TESTS=1`, so `pnpm test` stays green
+ * The stack to test, or undefined unless `MEDIA_STACK_TESTS=1`, so `pnpm test` stays green
  * without Docker.
  *
- * @throws When `MOVIES_STACK_TESTS=1` but no stack is configured, a setup mistake.
+ * @throws When `MEDIA_STACK_TESTS=1` but no stack is configured, a setup mistake.
  */
 export const findMediaStack = (): MediaStack | undefined => {
-  if (process.env["MOVIES_STACK_TESTS"] !== "1") return undefined;
+  if (process.env["MEDIA_STACK_TESTS"] !== "1") return undefined;
 
   const media = readEnvFile(join(mediaRoot, ".env.local"));
   const convexUrl = media.get("CONVEX_URL");
@@ -52,7 +52,7 @@ export const findMediaStack = (): MediaStack | undefined => {
   const mediaServiceKey = media.get("MEDIA_SERVICE_API_KEY");
 
   if (convexUrl === undefined || mediaUrl === undefined || mediaServiceKey === undefined) {
-    throw new Error("MOVIES_STACK_TESTS=1 but no stack is configured; run scripts/dev-stack.sh up");
+    throw new Error("MEDIA_STACK_TESTS=1 but no stack is configured; run scripts/dev-stack.sh up");
   }
 
   return { convexUrl, mediaUrl, mediaServiceKey, mediaEnv: Object.fromEntries(media) };
@@ -141,7 +141,7 @@ export const waitForBody = async <A>(
   return attempt();
 };
 
-/** The outcome of one `movies` invocation. */
+/** The outcome of one `media` invocation. */
 export interface CliRun {
   readonly code: number | null;
   readonly stdout: string;
@@ -155,7 +155,7 @@ export const runMovies = (
   stdin = "",
 ): Promise<CliRun> =>
   new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [join(cliRoot, "dist", "movies.js"), ...args], {
+    const child = spawn(process.execPath, [join(cliRoot, "dist", "media.js"), ...args], {
       env: { PATH: process.env["PATH"] ?? "", ...env },
     });
 

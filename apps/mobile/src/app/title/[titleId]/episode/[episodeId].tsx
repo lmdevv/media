@@ -1,6 +1,6 @@
-import type { EpisodeId, TitleId } from "@movies/contracts/ids";
-import type { SeasonEpisode } from "@movies/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { EpisodeId, TitleId } from "@media/contracts/ids";
+import type { SeasonEpisode } from "@media/contracts/models/catalog";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { Check, Clapperboard, EyeOff, RotateCcw, UsersRound } from "lucide-react-native";
 

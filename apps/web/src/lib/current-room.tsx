@@ -1,5 +1,5 @@
-import type { DeviceId, EpisodeId, ProfileId, RoomId, TitleId } from "@movies/contracts/ids";
-import { useCommandQuery, useRoomPresence } from "@movies/sdk/react";
+import type { DeviceId, EpisodeId, ProfileId, RoomId, TitleId } from "@media/contracts/ids";
+import { useCommandQuery, useRoomPresence } from "@media/sdk/react";
 import { createContext, useContext, useMemo } from "react";
 import type { ReactNode } from "react";
 

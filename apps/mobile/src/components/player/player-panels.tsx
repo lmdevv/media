@@ -1,5 +1,5 @@
-import type { NegotiateResponse } from "@movies/contracts/media-playback";
-import type { AudioStream, SeasonEpisode } from "@movies/contracts/models/catalog";
+import type { NegotiateResponse } from "@media/contracts/media-playback";
+import type { AudioStream, SeasonEpisode } from "@media/contracts/models/catalog";
 import { Check, ChevronRight, Minus, Play, Plus, RotateCcw } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { FlatList, Pressable, ScrollView, View } from "react-native";

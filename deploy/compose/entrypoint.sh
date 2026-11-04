@@ -5,7 +5,7 @@ umask 077
 log() { echo "[movies] $*" >&2; }
 
 data=/data
-public_url="${MOVIES_PUBLIC_URL%/}"
+public_url="${MEDIA_BASE_URL%/}"
 convex_public_url="${CONVEX_PUBLIC_URL%/}"
 convex_url="${CONVEX_URL%/}"
 credentials="${CONVEX_CREDENTIALS_DIR:-/run/convex-credentials}"

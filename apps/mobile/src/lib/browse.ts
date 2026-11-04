@@ -1,5 +1,5 @@
-import type { CommandArgs } from "@movies/contracts/commands";
-import type { LibraryId, ProfileId, TitleId } from "@movies/contracts/ids";
+import type { CommandArgs } from "@media/contracts/commands";
+import type { LibraryId, ProfileId, TitleId } from "@media/contracts/ids";
 import type {
   HistoryEntry,
   Home,
@@ -8,7 +8,7 @@ import type {
   TitleDetail,
   TitleKind,
   TitleSort,
-} from "@movies/contracts/models/catalog";
+} from "@media/contracts/models/catalog";
 
 import { episodeCode, facts, formatRuntime, progressFraction } from "./format";
 import type { WidthClass } from "./layout";

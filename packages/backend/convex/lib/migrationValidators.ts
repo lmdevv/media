@@ -177,7 +177,7 @@ export const overrideImport = v.object({
   externalIds: v.optional(externalIds),
 });
 
-/** Mirrors `Collection` in `@movies/contracts/models/collections`. */
+/** Mirrors `Collection` in `@media/contracts/models/collections`. */
 export const collection = v.object({
   id: v.id("collections"),
   name: v.string(),

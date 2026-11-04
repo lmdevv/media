@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHmac } from "node:crypto";
 
-import { ArtworkKey } from "@movies/contracts/artwork";
+import { ArtworkKey } from "@media/contracts/artwork";
 import { Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
@@ -24,7 +24,7 @@ export interface Interface {
 }
 
 /** The artwork key codec. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/ArtworkKeys") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/ArtworkKeys") {}
 
 const PREFIX = "a1.";
 

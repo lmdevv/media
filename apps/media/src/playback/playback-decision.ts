@@ -3,13 +3,13 @@ import {
   decodesAudio,
   decodesVideo,
   videoSupport,
-} from "@movies/contracts/direct-play";
+} from "@media/contracts/direct-play";
 import type {
   ClientCapabilities,
   PlaybackQuality,
   UnsupportedReason,
-} from "@movies/contracts/media-playback";
-import type { PlaybackMode } from "@movies/contracts/models/playback";
+} from "@media/contracts/media-playback";
+import type { PlaybackMode } from "@media/contracts/models/playback";
 import { Data } from "effect";
 
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";

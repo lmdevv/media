@@ -21,7 +21,7 @@ progress offers to resume where the profile stopped.
 - A `Resume …` card in the `Continue watching for <profile>` row on Home.
 - The player at `/watch/<id>`: `Pause`/`Play`, `Back 10 seconds`, `Forward 10 seconds`, the `Seek`
   slider, `Audio, subtitles, and quality`, `Watch together`, `Full screen`, and `Back to details`.
-- Terminal: `movies play <title>` prints a stream URL for mpv or VLC.
+- Terminal: `media play <title>` prints a stream URL for mpv or VLC.
 - iOS app: a title, then `Play`.
 
 ## Driving it with verify-movies

@@ -1,5 +1,5 @@
-import { Episode, MediaVersion, Progress, TitleDetail } from "@movies/contracts/models/catalog";
-import type { CreditKind } from "@movies/contracts/models/catalog";
+import { Episode, MediaVersion, Progress, TitleDetail } from "@media/contracts/models/catalog";
+import type { CreditKind } from "@media/contracts/models/catalog";
 import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";

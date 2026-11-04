@@ -1,18 +1,18 @@
-import type { LibraryId, TitleId } from "@movies/contracts/ids";
+import type { LibraryId, TitleId } from "@media/contracts/ids";
 import type {
   LibraryFile,
   MetadataCandidate,
   MetadataOverrides,
-} from "@movies/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { CalmState } from "@movies/ui/components/calm-state";
-import { Input } from "@movies/ui/components/input";
-import { RadioGroup, RadioItem } from "@movies/ui/components/radio-group";
-import { Skeleton } from "@movies/ui/components/skeleton";
-import { Spinner } from "@movies/ui/components/spinner";
-import { cn } from "@movies/ui/lib/utils";
+} from "@media/contracts/models/catalog";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { CalmState } from "@media/ui/components/calm-state";
+import { Input } from "@media/ui/components/input";
+import { RadioGroup, RadioItem } from "@media/ui/components/radio-group";
+import { Skeleton } from "@media/ui/components/skeleton";
+import { Spinner } from "@media/ui/components/spinner";
+import { cn } from "@media/ui/lib/utils";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Predicate } from "effect";
 import { CheckIcon, SearchIcon } from "lucide-react";

@@ -1,4 +1,4 @@
-# The demo library instead of MOVIES_LIBRARY: Creative Commons films and shows in a data-only
+# The demo library instead of MEDIA_LIBRARY: Creative Commons films and shows in a data-only
 # image, mounted read-only at /media/library (Docker 28 or later). From this folder:
 #
 #   docker compose -f compose.yaml -f compose.demo.yaml up -d

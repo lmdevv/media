@@ -1,5 +1,5 @@
 import { Input as InputPrimitive } from "@base-ui/react/input";
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import type { ComponentProps } from "react";
 
 /**

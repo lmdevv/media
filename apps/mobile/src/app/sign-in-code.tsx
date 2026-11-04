@@ -1,4 +1,4 @@
-import { useAuth } from "@movies/sdk/react";
+import { useAuth } from "@media/sdk/react";
 import { Predicate } from "effect";
 import { Lock } from "lucide-react-native";
 import { useEffect, useState } from "react";

@@ -1,4 +1,4 @@
-import { MediaApi } from "@movies/contracts/media-api";
+import { MediaApi } from "@media/contracts/media-api";
 import { Effect, Layer, Option } from "effect";
 import { HttpEffect } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";

@@ -7,21 +7,21 @@ import { createInterface } from "node:readline";
 
 const packageRoot = join(import.meta.dirname, "..", "..");
 
-const binary = join(packageRoot, "dist", "movies.js");
+const binary = join(packageRoot, "dist", "media.js");
 
 /** Bundles the CLI so tests run the same file users install. */
 export const buildCli = (): void => {
   execFileSync(process.execPath, [join(packageRoot, "scripts", "build.ts")]);
 };
 
-/** The outcome of one `movies` invocation. */
+/** The outcome of one `media` invocation. */
 export interface Run {
   readonly code: number | null;
   readonly stdout: string;
   readonly stderr: string;
 }
 
-/** A running `movies` process whose stderr can be read line by line. */
+/** A running `media` process whose stderr can be read line by line. */
 export interface Running {
   readonly child: ChildProcessWithoutNullStreams;
   /** Resolves with the next stderr line. */

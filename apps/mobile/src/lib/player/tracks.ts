@@ -1,6 +1,6 @@
-import { BITMAP_SUBTITLE_FORMATS } from "@movies/contracts/media-playback";
-import type { SubtitleTrack } from "@movies/contracts/media-playback";
-import type { AudioStream } from "@movies/contracts/models/catalog";
+import { BITMAP_SUBTITLE_FORMATS } from "@media/contracts/media-playback";
+import type { SubtitleTrack } from "@media/contracts/media-playback";
+import type { AudioStream } from "@media/contracts/models/catalog";
 
 import { languageName } from "../languages";
 

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
-import type { BackupId } from "@movies/contracts/ids";
-import type { BackupArchive } from "@movies/contracts/models/jobs";
-import type { CallError } from "@movies/sdk/effect";
+import type { BackupId } from "@media/contracts/ids";
+import type { BackupArchive } from "@media/contracts/models/jobs";
+import type { CallError } from "@media/sdk/effect";
 import {
   Clock,
   Context,
@@ -78,7 +78,7 @@ export interface Interface {
 }
 
 /** Database backups. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/Backups") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/Backups") {}
 
 const folderFailed =
   (operation: BackupFolderFailed["operation"]) => (cause: PlatformError.PlatformError) =>

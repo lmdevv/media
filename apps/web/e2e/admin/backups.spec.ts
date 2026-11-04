@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { JobId } from "@movies/contracts/ids";
+import type { JobId } from "@media/contracts/ids";
 import { expect, test } from "@playwright/test";
 
 import { buildMediaService, startMediaService } from "../stack/media-service";

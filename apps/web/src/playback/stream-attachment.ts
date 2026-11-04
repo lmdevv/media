@@ -1,6 +1,6 @@
-import { PlayerObservation } from "@movies/contracts/diagnostics";
-import type { NegotiateResponse } from "@movies/contracts/media-playback";
-import type { PlayerDiagnostics } from "@movies/sdk/effect";
+import { PlayerObservation } from "@media/contracts/diagnostics";
+import type { NegotiateResponse } from "@media/contracts/media-playback";
+import type { PlayerDiagnostics } from "@media/sdk/effect";
 import type { ErrorData, FragLoadedData } from "hls.js";
 
 /** Why a stream stopped playing. */

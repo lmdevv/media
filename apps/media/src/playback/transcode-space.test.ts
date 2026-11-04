@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { assert, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
-import { InsufficientTranscodeSpace } from "@movies/contracts/media-playback";
+import { InsufficientTranscodeSpace } from "@media/contracts/media-playback";
 
 import { freeBytes } from "../platform/node-directories.ts";
 import { testConfigLayer } from "../testing/test-config.ts";

@@ -1,5 +1,5 @@
 import { Switch as SwitchPrimitive } from "@base-ui/react/switch";
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 
 /**
  * The Paper toggle, as on the profile editor: a 44×26 pill, red with a white knob when on, a

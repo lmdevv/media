@@ -1,7 +1,7 @@
-import { SOURCE_NAMES, failureLine } from "@movies/contracts/migration-plan";
-import type { MigrationSource } from "@movies/contracts/models/jobs";
-import type { MigrationSourceFailure } from "@movies/contracts/models/migration";
-import { useCommandQuery } from "@movies/sdk/react";
+import { SOURCE_NAMES, failureLine } from "@media/contracts/migration-plan";
+import type { MigrationSource } from "@media/contracts/models/jobs";
+import type { MigrationSourceFailure } from "@media/contracts/models/migration";
+import { useCommandQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { RotateCcw } from "lucide-react-native";
 import { useEffect, useState } from "react";

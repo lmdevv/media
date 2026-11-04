@@ -33,7 +33,7 @@ export interface Interface {
 }
 
 /** The OMDb client. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/Omdb") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/Omdb") {}
 
 const NAMESPACE = "omdb";
 

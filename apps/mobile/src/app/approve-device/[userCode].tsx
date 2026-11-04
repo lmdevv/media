@@ -1,6 +1,6 @@
-import type { DeviceCodeLookup } from "@movies/contracts/models/account";
-import type { DeviceScope } from "@movies/contracts/scopes";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { DeviceCodeLookup } from "@media/contracts/models/account";
+import type { DeviceScope } from "@media/contracts/scopes";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import { Airplay, Check, Clock, Lock, UserRound, X } from "lucide-react-native";

@@ -1,5 +1,5 @@
-import { PASSWORD_MIN_LENGTH } from "@movies/contracts/models/account";
-import { useCommand } from "@movies/sdk/react";
+import { PASSWORD_MIN_LENGTH } from "@media/contracts/models/account";
+import { useCommand } from "@media/sdk/react";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { Check } from "lucide-react-native";

@@ -1,5 +1,5 @@
 import { Popover } from "@base-ui/react/popover";
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import { AirplayIcon, CastIcon, MonitorSmartphoneIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactElement, ReactNode } from "react";

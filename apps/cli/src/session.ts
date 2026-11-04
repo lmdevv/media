@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { hostname, userInfo } from "node:os";
 
-import { DeviceId, ProfileId } from "@movies/contracts/ids";
-import { Auth, MediaOrigin, Movies, MoviesClient, TokenStorage } from "@movies/sdk/effect";
-import type { CallError } from "@movies/sdk/effect";
+import { DeviceId, ProfileId } from "@media/contracts/ids";
+import { Auth, MediaOrigin, Movies, MoviesClient, TokenStorage } from "@media/sdk/effect";
+import type { CallError } from "@media/sdk/effect";
 import { Context, Effect, Layer, Option } from "effect";
 
 import { ConfigFileError, NotLoggedIn } from "./cli-errors";
@@ -17,7 +17,7 @@ export interface Connection {
   readonly convexUrl: string;
   /** This install's device on this server. */
   readonly deviceId: DeviceId;
-  /** The default viewing profile from `movies profiles use` or login. */
+  /** The default viewing profile from `media profiles use` or login. */
   readonly viewingProfileId: Option.Option<ProfileId>;
   /**
    * Runs a call, signing in again with the API key once if the server ended the session. Its
@@ -76,7 +76,7 @@ export const connect = Effect.fn("Session.connect")(function* (
   if (Option.isNone(target.convexUrl)) {
     return yield* new NotLoggedIn({
       message:
-        "Not logged in: run movies login --server <convex-url>, or set MOVIES_CONVEX_URL and MOVIES_API_KEY",
+        "Not logged in: run media login --server <convex-url>, or set MEDIA_CONVEX_URL and MEDIA_API_KEY",
     });
   }
 
@@ -104,7 +104,7 @@ export const connect = Effect.fn("Session.connect")(function* (
 
   if (mode === "required" && (yield* auth.currentStatus) !== "signedIn") {
     return yield* new NotLoggedIn({
-      message: `Not logged in to ${convexUrl}: run movies login`,
+      message: `Not logged in to ${convexUrl}: run media login`,
     });
   }
 

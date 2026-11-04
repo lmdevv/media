@@ -12,8 +12,8 @@ import {
   Stream,
 } from "effect";
 
-import type { LibraryId } from "@movies/contracts/ids";
-import { SCAN_FAILURE_PREFIXES } from "@movies/contracts/scan-failure";
+import type { LibraryId } from "@media/contracts/ids";
+import { SCAN_FAILURE_PREFIXES } from "@media/contracts/scan-failure";
 import { createHash } from "node:crypto";
 
 import * as MediaConfig from "../media-config.ts";
@@ -121,7 +121,7 @@ export interface Interface {
 
 /** The library scanner. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/LibraryScanner",
+  "@media/server/LibraryScanner",
 ) {}
 
 const PROBE_CONCURRENCY = 8;

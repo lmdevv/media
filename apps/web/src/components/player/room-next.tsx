@@ -1,6 +1,6 @@
-import type { ClockOffset } from "@movies/contracts/clock";
-import type { Room } from "@movies/contracts/models/rooms";
-import { RoomSync } from "@movies/sdk/effect";
+import type { ClockOffset } from "@media/contracts/clock";
+import type { Room } from "@media/contracts/models/rooms";
+import { RoomSync } from "@media/sdk/effect";
 
 import { artworkUrl } from "@/lib/artwork";
 import { useNow } from "@/lib/use-now";

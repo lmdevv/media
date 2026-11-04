@@ -11,8 +11,8 @@ import {
   TranscodeCapacityReached,
   TranscodeFailed,
   UnsupportedPlayback,
-} from "@movies/contracts/media-playback";
-import type { PlaybackMode } from "@movies/contracts/models/playback";
+} from "@media/contracts/media-playback";
+import type { PlaybackMode } from "@media/contracts/models/playback";
 import {
   Clock,
   Context,
@@ -35,8 +35,8 @@ import {
   Stream,
 } from "effect";
 
-import type { MediaFileId, PlaybackSessionId, UserId } from "@movies/contracts/ids";
-import { StreamId } from "@movies/contracts/media-playback";
+import type { MediaFileId, PlaybackSessionId, UserId } from "@media/contracts/ids";
+import { StreamId } from "@media/contracts/media-playback";
 import { LogEvent } from "../diagnostics/log-events.ts";
 import * as MediaConfig from "../media-config.ts";
 import * as MediaTools from "../media/media-tools.ts";
@@ -177,7 +177,7 @@ export interface Interface {
 
 /** The stream session manager. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/StreamSessions",
+  "@media/server/StreamSessions",
 ) {}
 
 const LOOKAHEAD_SEGMENTS = 3;
@@ -186,7 +186,7 @@ const THROTTLE_INTERVAL = Duration.seconds(1);
 
 /** How often a wait for a segment reads its folder when no fragment write woke it sooner. */
 export const PollInterval = Context.Reference<Duration.Duration>(
-  "@movies/media/StreamSessions/PollInterval",
+  "@media/server/StreamSessions/PollInterval",
   { defaultValue: () => Duration.millis(50) },
 );
 

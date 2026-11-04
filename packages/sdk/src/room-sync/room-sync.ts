@@ -1,16 +1,16 @@
-import type { ClockOffset, ClockSample } from "@movies/contracts/clock";
-import type { CommandArgs } from "@movies/contracts/commands";
+import type { ClockOffset, ClockSample } from "@media/contracts/clock";
+import type { CommandArgs } from "@media/contracts/commands";
 import {
   countdownRemaining,
   estimateClockOffset,
   isNewerRevision,
   targetPosition,
   toServerTime,
-} from "@movies/contracts/clock";
-import type { DeviceId, MediaFileId, RoomId } from "@movies/contracts/ids";
-import type { Room, RoomClock } from "@movies/contracts/models/rooms";
-import type { EpochMillis } from "@movies/contracts/units";
-import { EpochMillis as EpochMillisSchema, Milliseconds } from "@movies/contracts/units";
+} from "@media/contracts/clock";
+import type { DeviceId, MediaFileId, RoomId } from "@media/contracts/ids";
+import type { Room, RoomClock } from "@media/contracts/models/rooms";
+import type { EpochMillis } from "@media/contracts/units";
+import { EpochMillis as EpochMillisSchema, Milliseconds } from "@media/contracts/units";
 import {
   Clock,
   Duration,

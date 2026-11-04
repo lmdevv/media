@@ -1,5 +1,5 @@
-import type { EpisodeId } from "@movies/contracts/ids";
-import type { Episode, Progress, TitleDetail } from "@movies/contracts/models/catalog";
+import type { EpisodeId } from "@media/contracts/ids";
+import type { Episode, Progress, TitleDetail } from "@media/contracts/models/catalog";
 
 /** The media and position a new room starts at. */
 export interface RoomStart {

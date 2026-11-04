@@ -1,9 +1,9 @@
-import type { ArtworkKey } from "@movies/contracts/artwork";
-import { ageRatingFromCertification } from "@movies/contracts/content-rating";
-import { dynamicRangeOf } from "@movies/contracts/direct-play";
-import { Container, type DynamicRange } from "@movies/contracts/media-playback";
-import type { ExternalSubtitle, HdrFormat, Probe } from "@movies/contracts/models/catalog";
-import { type Ratings, type Trailer, YOUTUBE_KEY_PATTERN } from "@movies/contracts/models/catalog";
+import type { ArtworkKey } from "@media/contracts/artwork";
+import { ageRatingFromCertification } from "@media/contracts/content-rating";
+import { dynamicRangeOf } from "@media/contracts/direct-play";
+import { Container, type DynamicRange } from "@media/contracts/media-playback";
+import type { ExternalSubtitle, HdrFormat, Probe } from "@media/contracts/models/catalog";
+import { type Ratings, type Trailer, YOUTUBE_KEY_PATTERN } from "@media/contracts/models/catalog";
 import {
   CREDIT_BATCH_LIMIT,
   type ResolvedFile,
@@ -14,9 +14,9 @@ import {
   type ScannedTitle,
   TITLE_LIST_LIMIT,
   TITLE_TAG_LIMIT,
-} from "@movies/contracts/models/scan";
+} from "@media/contracts/models/scan";
 import { createHash } from "node:crypto";
-import { Bytes, EpochMillis, Milliseconds } from "@movies/contracts/units";
+import { Bytes, EpochMillis, Milliseconds } from "@media/contracts/units";
 import { Effect, Option, Schema } from "effect";
 
 import { ArtworkSource } from "../artwork/artwork-keys.ts";

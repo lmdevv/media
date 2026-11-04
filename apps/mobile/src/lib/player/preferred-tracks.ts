@@ -1,5 +1,5 @@
-import type { SubtitleTrack } from "@movies/contracts/media-playback";
-import type { AudioStream } from "@movies/contracts/models/catalog";
+import type { SubtitleTrack } from "@media/contracts/media-playback";
+import type { AudioStream } from "@media/contracts/models/catalog";
 
 import { isLanguage } from "../languages";
 import type { PlaybackPreferences } from "../preferences";

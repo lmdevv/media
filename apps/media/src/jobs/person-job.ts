@@ -1,7 +1,7 @@
-import type { ScannedPersonDetails } from "@movies/contracts/models/scan";
+import type { ScannedPersonDetails } from "@media/contracts/models/scan";
 import { Effect, Match, Option } from "effect";
 
-import type { ArtworkKey } from "@movies/contracts/artwork";
+import type { ArtworkKey } from "@media/contracts/artwork";
 import { ArtworkSource } from "../artwork/artwork-keys.ts";
 import * as ArtworkKeys from "../artwork/artwork-keys.ts";
 import { idsOrNull } from "../convex/catalog-records.ts";

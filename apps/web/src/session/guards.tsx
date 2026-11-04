@@ -1,7 +1,7 @@
-import type { Profile } from "@movies/contracts/models/profiles";
-import { Button } from "@movies/ui/components/button";
-import { CalmState } from "@movies/ui/components/calm-state";
-import { useAuth, useCommandQuery } from "@movies/sdk/react";
+import type { Profile } from "@media/contracts/models/profiles";
+import { Button } from "@media/ui/components/button";
+import { CalmState } from "@media/ui/components/calm-state";
+import { useAuth, useCommandQuery } from "@media/sdk/react";
 import { useLocation } from "@tanstack/react-router";
 import { createContext, useContext, useMemo } from "react";
 import type { ReactNode } from "react";

@@ -1,5 +1,5 @@
-import { PASSWORD_MIN_LENGTH } from "@movies/contracts/models/account";
-import { useAuth } from "@movies/sdk/react";
+import { PASSWORD_MIN_LENGTH } from "@media/contracts/models/account";
+import { useAuth } from "@media/sdk/react";
 import { useRef, useState } from "react";
 import type { ComponentRef } from "react";
 import type { TextInput } from "react-native";

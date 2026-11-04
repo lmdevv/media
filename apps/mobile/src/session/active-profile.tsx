@@ -1,4 +1,4 @@
-import type { Profile } from "@movies/contracts/models/profiles";
+import type { Profile } from "@media/contracts/models/profiles";
 import { createContext, useContext } from "react";
 
 /** The profile on screen and its account's other profiles. */

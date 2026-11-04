@@ -13,7 +13,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 
-import { PlaybackSessionId } from "@movies/contracts/ids";
+import { PlaybackSessionId } from "@media/contracts/ids";
 
 import * as ConvexSessionReports from "../convex/convex-session-reports.ts";
 import * as TestConvex from "../testing/test-convex.ts";

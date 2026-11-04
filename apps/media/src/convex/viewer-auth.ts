@@ -1,9 +1,9 @@
-import { commands } from "@movies/contracts/commands";
-import { Forbidden } from "@movies/contracts/errors";
-import type { Viewer } from "@movies/contracts/models/account";
-import type { CommandAccess } from "@movies/contracts/scopes";
-import { ConvexTransport, ProtocolError } from "@movies/sdk/effect";
-import type { CallError } from "@movies/sdk/effect";
+import { commands } from "@media/contracts/commands";
+import { Forbidden } from "@media/contracts/errors";
+import type { Viewer } from "@media/contracts/models/account";
+import type { CommandAccess } from "@media/contracts/scopes";
+import { ConvexTransport, ProtocolError } from "@media/sdk/effect";
+import type { CallError } from "@media/sdk/effect";
 import { Context, Effect, Layer, Redacted, Schema } from "effect";
 
 /** Checks who a bearer token belongs to and what it may do. */
@@ -19,7 +19,7 @@ export interface Interface {
 }
 
 /** The viewer authorizer. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/ViewerAuth") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/ViewerAuth") {}
 
 const viewerCommand = commands["account.viewer"];
 

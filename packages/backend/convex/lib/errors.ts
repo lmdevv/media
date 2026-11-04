@@ -1,6 +1,6 @@
 import { ConvexError } from "convex/values";
 
-/** Expected failure codes; `ErrorCode` in `@movies/contracts/errors` lists the same values. */
+/** Expected failure codes; `ErrorCode` in `@media/contracts/errors` lists the same values. */
 export type FailureCode =
   | "unauthenticated"
   | "forbidden"

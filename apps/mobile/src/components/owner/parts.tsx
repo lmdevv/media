@@ -1,4 +1,4 @@
-import type { QueryState } from "@movies/sdk/react";
+import type { QueryState } from "@media/sdk/react";
 import type { LucideIcon } from "lucide-react-native";
 import { RotateCcw } from "lucide-react-native";
 import { useEffect, useState } from "react";

@@ -1,5 +1,5 @@
-import type { ApiKey, SessionInfo } from "@movies/contracts/models/account";
-import type { ApiKeyScope } from "@movies/contracts/scopes";
+import type { ApiKey, SessionInfo } from "@media/contracts/models/account";
+import type { ApiKeyScope } from "@media/contracts/scopes";
 
 import { dayLabel } from "./dates";
 import { sortedBy } from "./sorted-by";

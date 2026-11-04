@@ -1,4 +1,4 @@
-import { DIAGNOSTICS_ROUTES } from "@movies/contracts/diagnostics";
+import { DIAGNOSTICS_ROUTES } from "@media/contracts/diagnostics";
 import { Schema } from "effect";
 
 const decodeSession = Schema.decodeUnknownSync(

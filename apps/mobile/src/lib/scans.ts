@@ -1,6 +1,6 @@
-import type { Job } from "@movies/contracts/models/jobs";
-import { folderTroubleOf } from "@movies/contracts/scan-failure";
-import type { FolderTrouble } from "@movies/contracts/scan-failure";
+import type { Job } from "@media/contracts/models/jobs";
+import { folderTroubleOf } from "@media/contracts/scan-failure";
+import type { FolderTrouble } from "@media/contracts/scan-failure";
 
 import { formatCount } from "./owner-format";
 

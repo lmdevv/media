@@ -1,4 +1,4 @@
-import { normalizeFolder } from "@movies/contracts/library-folder";
+import { normalizeFolder } from "@media/contracts/library-folder";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 

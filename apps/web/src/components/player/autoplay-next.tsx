@@ -1,6 +1,6 @@
-import type { Episode } from "@movies/contracts/models/catalog";
-import { Button } from "@movies/ui/components/button";
-import { cn } from "@movies/ui/lib/utils";
+import type { Episode } from "@media/contracts/models/catalog";
+import { Button } from "@media/ui/components/button";
+import { cn } from "@media/ui/lib/utils";
 import { PlayIcon, TvIcon } from "lucide-react";
 import { useId } from "react";
 

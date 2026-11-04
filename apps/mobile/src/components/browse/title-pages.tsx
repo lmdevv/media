@@ -1,6 +1,6 @@
-import type { ProfileId } from "@movies/contracts/ids";
-import type { TitleCard, TitleKind } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { ProfileId } from "@media/contracts/ids";
+import type { TitleCard, TitleKind } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 

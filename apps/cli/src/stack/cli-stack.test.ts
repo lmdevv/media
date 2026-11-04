@@ -122,14 +122,14 @@ const decodeConfig = Schema.decodeSync(Schema.fromJsonString(StoredConfig));
 
 const encodeConfig = Schema.encodeSync(Schema.fromJsonString(StoredConfig));
 
-describe.skipIf(stack === undefined)("the movies CLI against a real stack", () => {
+describe.skipIf(stack === undefined)("the media CLI against a real stack", () => {
   beforeAll(async () => {
     buildCli();
     owner = await install();
 
     const status = await runMovies(["setup", "status"], {
       ...(await install()),
-      MOVIES_CONVEX_URL: url,
+      MEDIA_CONVEX_URL: url,
     });
 
     if (!SetupStatus(status.stdout).hasOwner) {
@@ -183,20 +183,20 @@ describe.skipIf(stack === undefined)("the movies CLI against a real stack", () =
 
     const fromEnv = await runMovies(["whoami"], {
       ...(await install()),
-      MOVIES_CONVEX_URL: url,
-      MOVIES_API_KEY: secret,
+      MEDIA_CONVEX_URL: url,
+      MEDIA_API_KEY: secret,
     });
 
     expect(fromEnv.code).toBe(ExitCode.unauthenticated);
   });
 
-  it("signs out the stored session on logout even while MOVIES_API_KEY is set", async () => {
+  it("signs out the stored session on logout even while MEDIA_API_KEY is set", async () => {
     const device = await install();
 
     await loginOwner(device);
     const saved = await readText(configPath(device));
     const created = await runMovies(["keys", "create", `logout-${id}`, "--scopes", "read"], owner);
-    const withKey = { ...device, MOVIES_API_KEY: Secret(created.stdout).secret };
+    const withKey = { ...device, MEDIA_API_KEY: Secret(created.stdout).secret };
 
     expect((await runMovies(["logout"], withKey)).code).toBe(ExitCode.ok);
 
@@ -237,8 +237,8 @@ describe.skipIf(stack === undefined)("the movies CLI against a real stack", () =
 
     const agent = {
       ...(await install()),
-      MOVIES_CONVEX_URL: url,
-      MOVIES_API_KEY: Secret(created.stdout).secret,
+      MEDIA_CONVEX_URL: url,
+      MEDIA_API_KEY: Secret(created.stdout).secret,
     };
 
     expect((await runMovies(["search", "anything"], agent)).code).toBe(ExitCode.usage);
@@ -249,7 +249,7 @@ describe.skipIf(stack === undefined)("the movies CLI against a real stack", () =
     expect((await runMovies(["search", "anything"], agent)).code).toBe(ExitCode.ok);
     expect(Who((await runMovies(["whoami"], agent)).stdout).viewingProfileId).toBe(first?.id);
 
-    const stored = await runMovies(["whoami"], { ...agent, MOVIES_API_KEY: "" });
+    const stored = await runMovies(["whoami"], { ...agent, MEDIA_API_KEY: "" });
 
     expect(stored.code).toBe(ExitCode.unauthenticated);
   });

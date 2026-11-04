@@ -1,5 +1,5 @@
-import type { Profile } from "@movies/contracts/models/profiles";
-import { useCommand } from "@movies/sdk/react";
+import type { Profile } from "@media/contracts/models/profiles";
+import { useCommand } from "@media/sdk/react";
 import { router } from "expo-router";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";

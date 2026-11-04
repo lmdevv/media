@@ -1,6 +1,6 @@
-import type { Scope } from "@movies/contracts/scopes";
-import { Badge } from "@movies/ui/components/badge";
-import { cn } from "@movies/ui/lib/utils";
+import type { Scope } from "@media/contracts/scopes";
+import { Badge } from "@media/ui/components/badge";
+import { cn } from "@media/ui/lib/utils";
 
 function ScopeBadge({ scope }: { readonly scope: Scope }) {
   return (

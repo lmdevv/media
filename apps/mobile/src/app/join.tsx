@@ -1,6 +1,6 @@
-import type { InviteLookup } from "@movies/contracts/models/account";
-import { PASSWORD_MIN_LENGTH } from "@movies/contracts/models/account";
-import { useAuth, useCommandQuery } from "@movies/sdk/react";
+import type { InviteLookup } from "@media/contracts/models/account";
+import { PASSWORD_MIN_LENGTH } from "@media/contracts/models/account";
+import { useAuth, useCommandQuery } from "@media/sdk/react";
 import { Link } from "lucide-react-native";
 import { useRef, useState } from "react";
 import type { ComponentRef } from "react";

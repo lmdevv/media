@@ -10,7 +10,7 @@
  * (its watchlist lives on plex.tv), and other accounts' positions are only on plex.tv, so other
  * accounts import watched marks, play counts, and last-played dates from the play history.
  */
-import type { MetadataOverrides } from "@movies/contracts/models/catalog";
+import type { MetadataOverrides } from "@media/contracts/models/catalog";
 import { Effect, Redacted, Schema } from "effect";
 import { HttpClient } from "effect/http";
 

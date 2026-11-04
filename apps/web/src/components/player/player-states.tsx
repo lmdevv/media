@@ -1,9 +1,9 @@
-import { Button } from "@movies/ui/components/button";
-import { PlayGlyph } from "@movies/ui/components/icons";
-import { ProgressRing } from "@movies/ui/components/progress-ring";
-import { Spinner } from "@movies/ui/components/spinner";
-import { formatTimecode } from "@movies/ui/lib/timecode";
-import { cn } from "@movies/ui/lib/utils";
+import { Button } from "@media/ui/components/button";
+import { PlayGlyph } from "@media/ui/components/icons";
+import { ProgressRing } from "@media/ui/components/progress-ring";
+import { Spinner } from "@media/ui/components/spinner";
+import { formatTimecode } from "@media/ui/lib/timecode";
+import { cn } from "@media/ui/lib/utils";
 import { CaptionsIcon, FileXIcon, FlagIcon, RotateCcwIcon } from "lucide-react";
 import type { ReactNode } from "react";
 

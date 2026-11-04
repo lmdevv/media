@@ -1,12 +1,12 @@
 {
-  "extends": "@movies/config/tsconfig.base.json",
+  "extends": "@media/config/tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "paths": {
       "@/*": ["./src/*"],
-      "@movies/ui/*": ["../../packages/ui/src/*"]
+      "@media/ui/*": ["../../packages/ui/src/*"]
     }
   },
   "include": ["src", "vite.config.ts", "playwright.config.ts", "e2e"]

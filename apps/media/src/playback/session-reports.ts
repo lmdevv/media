@@ -1,4 +1,4 @@
-import type { PlaybackSessionId } from "@movies/contracts/ids";
+import type { PlaybackSessionId } from "@media/contracts/ids";
 import { Context, Layer, Stream } from "effect";
 
 import type { SessionReport } from "./stream-liveness.ts";
@@ -11,7 +11,7 @@ export interface Interface {
 
 /** Reports on playback sessions. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/SessionReports",
+  "@media/server/SessionReports",
 ) {}
 
 /** No reports, for standalone mode: streams keep their encoders on requests alone. */

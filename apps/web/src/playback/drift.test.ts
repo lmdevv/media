@@ -2,7 +2,7 @@ import {
   DRIFT_WINDOW_SAMPLES,
   MAX_DRIFT_MS,
   PlayerObservation,
-} from "@movies/contracts/diagnostics";
+} from "@media/contracts/diagnostics";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DriftElement, DriftEvent, PresentedFrame } from "./drift";

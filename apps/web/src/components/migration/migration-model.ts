@@ -1,5 +1,5 @@
-import type { MigrationSource } from "@movies/contracts/models/jobs";
-import type { MigrationPhase } from "@movies/contracts/models/migration";
+import type { MigrationSource } from "@media/contracts/models/jobs";
+import type { MigrationPhase } from "@media/contracts/models/migration";
 
 /** What the Importing screen says each phase is doing. */
 export const PHASE_LABELS: Readonly<Record<MigrationPhase, string>> = {

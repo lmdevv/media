@@ -1,6 +1,6 @@
-import type { PathMapping, UnmatchedReason } from "@movies/contracts/models/migration";
-import type { CatalogFile } from "@movies/contracts/models/migration-service";
-import type { EpisodeId, MediaFileId, TitleId } from "@movies/contracts/ids";
+import type { PathMapping, UnmatchedReason } from "@media/contracts/models/migration";
+import type { CatalogFile } from "@media/contracts/models/migration-service";
+import type { EpisodeId, MediaFileId, TitleId } from "@media/contracts/ids";
 import { Data } from "effect";
 
 import { isInside, normalizePath, toLocalPath } from "./paths.ts";

@@ -1,6 +1,6 @@
 ---
 name: verify-movies
-description: Run disposable [movies] stacks (the real Compose install, with the Convex backend, the media service, the scanner, ffmpeg, and real video) built from this checkout and from main, then drive the web app in Chromium, the `movies` CLI as each seeded person, and the iOS app on a Mac simulator to prove a change works the way a user sees it. Captures before/after screenshots and H.264 videos and publishes them to the PR description. Use to verify a web, CLI, backend, media, or iOS change end to end, to reproduce a user-facing bug, or to put visual evidence on a PR.
+description: Run disposable [movies] stacks (the real Compose install, with the Convex backend, the media service, the scanner, ffmpeg, and real video) built from this checkout and from main, then drive the web app in Chromium, the `media` CLI as each seeded person, and the iOS app on a Mac simulator to prove a change works the way a user sees it. Captures before/after screenshots and H.264 videos and publishes them to the PR description. Use to verify a web, CLI, backend, media, or iOS change end to end, to reproduce a user-facing bug, or to put visual evidence on a PR.
 ---
 
 # Verify [movies]
@@ -10,10 +10,10 @@ This skill runs the real product: `deploy/compose/compose.yaml`, with its `conve
 `/media/library`. A run has two sides, each its own Compose project:
 
 - `after` is an image built from this checkout. It is the default side for every command.
-- `before` is `ghcr.io/lmdevv/movies:main`, the last image published from main.
+- `before` is `ghcr.io/lmdevv/media:main`, the last image published from main.
 
 You drive a side through three surfaces: a Chromium that stays open between commands, the built
-`movies` CLI signed in as each seeded person, and the iOS app on a simulator on the Mac `darwin`.
+`media` CLI signed in as each seeded person, and the iOS app on a simulator on the Mac `darwin`.
 Run every command from the repo root. `S` is shorthand for the helper:
 
 ```sh
@@ -25,7 +25,7 @@ same command.
 
 ## Isolation
 
-`MOVIES_VERIFY_RUN` names a run and defaults to the checkout's directory name, so two worktrees get
+`MEDIA_VERIFY_RUN` names a run and defaults to the checkout's directory name, so two worktrees get
 two runs on their own. Each side of a run owns these resources and nothing else:
 
 | Resource   | Name                                                                                    |
@@ -33,7 +33,7 @@ two runs on their own. Each side of a run owns these resources and nothing else:
 | Project    | `movies-verify-<run>-<side>`: containers `…-convex-1` and `…-movies-1`, labeled `movies.verify.run=<run>` |
 | Volumes    | `movies-verify-<run>-<side>_convex-data`, `_movies-data`, `_movies-transcode`, and its network |
 | Image      | `movies:verify-<run>`, built by `up` for the after side                                 |
-| Ports      | Two free loopback ports chosen at `up`: the web app and Convex, with `MOVIES_PUBLIC_URL` and `CONVEX_PUBLIC_URL` at `http://localhost:<port>` |
+| Ports      | Two free loopback ports chosen at `up`: the web app and Convex, with `MEDIA_BASE_URL` and `CONVEX_PUBLIC_URL` at `http://localhost:<port>` |
 | Network    | The browser host's own network namespace where the host allows it, reached through Unix sockets in the state folder (see [Network view](#network-view)) |
 | State      | `${TMPDIR:-/tmp}/movies-verify/<run>/<side>/`: ports, pids, logs, sockets, and each person's CLI config |
 | Simulator  | `movies-verify-<run>-<side>` on `darwin`, made by `ios up`                              |
@@ -41,8 +41,8 @@ two runs on their own. Each side of a run owns these resources and nothing else:
 
 Never drive or touch anything not named `movies-verify-*`. The owner runs a real `movies` stack
 on this host (`movies-convex` and the NixOS media service), plus `music` containers; they hold
-real data. The owner's shell also exports `MOVIES_CONVEX_URL` and `MOVIES_MEDIA_URL` for their own
-server, so never run `apps/cli/dist/movies.js` directly: `$S cli` strips those and gives each
+real data. The owner's shell also exports `MEDIA_CONVEX_URL` and `MEDIA_SERVER_URL` for their own
+server, so never run `apps/cli/dist/media.js` directly: `$S cli` strips those and gives each
 person their own `XDG_CONFIG_HOME`. `scripts/dev-stack.sh` rewrites the `.env.local` files the
 owner's `pnpm dev` reads, so this skill never calls it. Compose sees only the settings `up`
 writes, never a `deploy/compose/.env` or the caller's environment.
@@ -71,7 +71,7 @@ should never happen.
 
 The namespace needs Linux with unprivileged user namespaces, util-linux's `unshare`, and
 iproute2's `ip`. Some hosts lack one, such as macOS, or Ubuntu 24.04, whose AppArmor policy
-blocks unprivileged user namespaces by default. `MOVIES_VERIFY_BROWSER_NETWORK`, read at `up` and
+blocks unprivileged user namespaces by default. `MEDIA_VERIFY_BROWSER_NETWORK`, read at `up` and
 `browser restart`, picks what happens:
 
 | Value            | Browser network                                                              |
@@ -92,7 +92,7 @@ where the host allows it (see [Network view](#network-view)).
 
 ```sh
 $S up                  # the after side: build the image from this checkout
-$S up --side before    # the before side: pull ghcr.io/lmdevv/movies:main
+$S up --side before    # the before side: pull ghcr.io/lmdevv/media:main
 ```
 
 `up` does these steps in order and prints how long each took:
@@ -267,7 +267,7 @@ from the tree.
 
 ### CLI
 
-`$S cli [--side S] [--as mateo|aiko|sam] -- <args>` runs `apps/cli/dist/movies.js` against the
+`$S cli [--side S] [--as mateo|aiko|sam] -- <args>` runs `apps/cli/dist/media.js` against the
 side as Lucía, or as a seeded person, each signed in with their password and their own config.
 Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3` unauthenticated, `4` forbidden, `5`
 notFound. `$S cli -- --help` lists every command. The CLI is built from this checkout, so on the
@@ -405,7 +405,7 @@ never kills by process name. The demo library image stays for the next run. Evid
 - `scripts/check-network.mjs [--trials N] [--image IMG]` proves the [network view](#network-view)
   on this host, with no stack. It runs one browser host on the host network and one isolated,
   stops a bridge container of its own (`movies-verify-netcheck-<pid>`, default image
-  `ghcr.io/lmdevv/movies:main`) while each has requests waiting, and prints what each lost. It
+  `ghcr.io/lmdevv/media:main`) while each has requests waiting, and prints what each lost. It
   exits 0 when the isolated host lost none and the host-network one lost some, 1 when the isolated
   one lost any or failed, and 2 when the control lost none, which proves nothing. The container can fail
   requests in other browsers on this host, so run it only to check the isolation.

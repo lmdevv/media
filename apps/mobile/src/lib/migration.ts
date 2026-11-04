@@ -1,10 +1,10 @@
-import type { UserRow } from "@movies/contracts/migration-plan";
-import type { MigrationSource } from "@movies/contracts/models/jobs";
+import type { UserRow } from "@media/contracts/migration-plan";
+import type { MigrationSource } from "@media/contracts/models/jobs";
 import type {
   MigrationPhase,
   MigrationReport,
   MigrationRun,
-} from "@movies/contracts/models/migration";
+} from "@media/contracts/models/migration";
 
 import { countOf, formatCount } from "./owner-format";
 

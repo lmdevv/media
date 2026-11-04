@@ -1,4 +1,4 @@
-import type { Room } from "@movies/contracts/models/rooms";
+import type { Room } from "@media/contracts/models/rooms";
 import { Pause, Play } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";

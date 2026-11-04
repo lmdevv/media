@@ -3,8 +3,8 @@
  * while; the Convex client shares identical subscriptions, so opening the title then renders from
  * data that is already there.
  */
-import type { ProfileId, TitleId } from "@movies/contracts/ids";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { ProfileId, TitleId } from "@media/contracts/ids";
+import { useCommandQuery } from "@media/sdk/react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 

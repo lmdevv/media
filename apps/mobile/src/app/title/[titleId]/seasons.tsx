@@ -1,4 +1,4 @@
-import { useCommandQuery } from "@movies/sdk/react";
+import { useCommandQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 
 import { seasonParam, titleIdParam } from "@/components/title/route-params";

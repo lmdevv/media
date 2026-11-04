@@ -1,7 +1,7 @@
-import type { Scope } from "@movies/contracts/scopes";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { CalmState } from "@movies/ui/components/calm-state";
-import { Spinner } from "@movies/ui/components/spinner";
+import type { Scope } from "@media/contracts/scopes";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { CalmState } from "@media/ui/components/calm-state";
+import { Spinner } from "@media/ui/components/spinner";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 

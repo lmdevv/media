@@ -5,8 +5,8 @@ import {
   type NegotiateResponse,
   type PlaybackSessionEnded,
   UnsupportedPlayback,
-} from "@movies/contracts/media-playback";
-import type { PlaybackTokenInvalid } from "@movies/contracts/playback-token";
+} from "@media/contracts/media-playback";
+import type { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 import { Context, Duration, Effect, FileSystem, Layer, Option, Path, Redacted } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
@@ -37,7 +37,7 @@ export interface Interface {
 
 /** The playback negotiator. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/PlaybackNegotiator",
+  "@media/server/PlaybackNegotiator",
 ) {}
 
 const KEYFRAME_WAIT = Duration.seconds(2);

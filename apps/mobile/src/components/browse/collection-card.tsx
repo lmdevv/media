@@ -1,4 +1,4 @@
-import type { Collection } from "@movies/contracts/models/collections";
+import type { Collection } from "@media/contracts/models/collections";
 import { router } from "expo-router";
 import { Pressable, View } from "react-native";
 

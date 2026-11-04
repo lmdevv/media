@@ -1,4 +1,4 @@
-import type { PlayerEvent, PlayerPort } from "@movies/sdk/effect";
+import type { PlayerEvent, PlayerPort } from "@media/sdk/effect";
 
 /** `TimeRanges` as the adapter reads it. */
 export interface TimeRangesLike {

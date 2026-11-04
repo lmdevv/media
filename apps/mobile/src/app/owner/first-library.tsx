@@ -1,4 +1,4 @@
-import { useCommand } from "@movies/sdk/react";
+import { useCommand } from "@media/sdk/react";
 import { router } from "expo-router";
 import { useEffect } from "react";
 

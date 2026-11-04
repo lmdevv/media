@@ -7,7 +7,7 @@ import {
   MAX_DRIFT_MS,
   PlayerObservation,
   summarizeDrift,
-} from "@movies/contracts/diagnostics";
+} from "@media/contracts/diagnostics";
 import { Array as Arr } from "effect";
 
 import type { Observe } from "./stream-attachment";

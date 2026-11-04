@@ -1,5 +1,5 @@
-import type { QueryState } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
+import type { QueryState } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
 import { Match } from "effect";
 import type { ReactNode } from "react";
 

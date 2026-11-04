@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { TitleId } from "@movies/contracts/ids";
+import type { TitleId } from "@media/contracts/ids";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 

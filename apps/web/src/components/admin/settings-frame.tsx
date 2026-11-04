@@ -1,4 +1,4 @@
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import type { LinkProps } from "@tanstack/react-router";
 import type { ReactNode } from "react";

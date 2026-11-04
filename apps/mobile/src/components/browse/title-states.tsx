@@ -1,6 +1,6 @@
-import type { ProfileId, TitleId } from "@movies/contracts/ids";
-import type { TitleCard } from "@movies/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { ProfileId, TitleId } from "@media/contracts/ids";
+import type { TitleCard } from "@media/contracts/models/catalog";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import * as Haptics from "expo-haptics";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";

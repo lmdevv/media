@@ -4,8 +4,8 @@
  * controller chose. AVPlayer reports neither dropped frames nor segment load times through
  * expo-video, so neither is sent; the timeline says so.
  */
-import { PlayerObservation, type RecoveryAction } from "@movies/contracts/diagnostics";
-import { PlayerDiagnostics } from "@movies/sdk/effect";
+import { PlayerObservation, type RecoveryAction } from "@media/contracts/diagnostics";
+import { PlayerDiagnostics } from "@media/sdk/effect";
 import { Option } from "effect";
 
 import { PlaybackStep } from "./policy";

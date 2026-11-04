@@ -1,7 +1,7 @@
 import { Popover } from "@base-ui/react/popover";
 import { Radio } from "@base-ui/react/radio";
 import { RadioGroup } from "@base-ui/react/radio-group";
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import { CheckIcon } from "lucide-react";
 import { Fragment, useCallback, useId, useLayoutEffect, useRef } from "react";
 import type { ReactElement } from "react";

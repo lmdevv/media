@@ -3,11 +3,11 @@ import { assert, describe, it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Layer, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
-import { Conflict } from "@movies/contracts/errors";
-import { JobId, LibraryId } from "@movies/contracts/ids";
-import type { Job, JobProgress } from "@movies/contracts/models/jobs";
-import { EpochMillis } from "@movies/contracts/units";
-import { type CallError, TransportError } from "@movies/sdk/effect";
+import { Conflict } from "@media/contracts/errors";
+import { JobId, LibraryId } from "@media/contracts/ids";
+import type { Job, JobProgress } from "@media/contracts/models/jobs";
+import { EpochMillis } from "@media/contracts/units";
+import { type CallError, TransportError } from "@media/sdk/effect";
 
 import * as MemoryBackend from "../testing/memory-backend.ts";
 import * as JobWorker from "./job-worker.ts";

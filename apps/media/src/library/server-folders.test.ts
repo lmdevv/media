@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, layer } from "@effect/vitest";
 import { Context, Effect, FileSystem, Layer, Path } from "effect";
 
-import { NotFound } from "@movies/contracts/errors";
+import { NotFound } from "@media/contracts/errors";
 
 import { testConfigLayer } from "../testing/test-config.ts";
 import * as ServerFolders from "./server-folders.ts";

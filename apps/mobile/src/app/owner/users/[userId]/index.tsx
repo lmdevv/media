@@ -1,9 +1,9 @@
-import type { LibraryId } from "@movies/contracts/ids";
-import { UserId } from "@movies/contracts/ids";
-import type { User } from "@movies/contracts/models/account";
-import type { LibraryDetail } from "@movies/contracts/models/catalog";
-import type { AssignableRole } from "@movies/contracts/scopes";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { LibraryId } from "@media/contracts/ids";
+import { UserId } from "@media/contracts/ids";
+import type { User } from "@media/contracts/models/account";
+import type { LibraryDetail } from "@media/contracts/models/catalog";
+import type { AssignableRole } from "@media/contracts/scopes";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ellipsis, Folder, User as UserIcon } from "lucide-react-native";

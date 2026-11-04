@@ -8,8 +8,8 @@
  * the WebSocket client waits for its token before running calls, so refreshing through it would
  * wait on itself.
  */
-import type { FunctionPath } from "@movies/contracts/command";
-import { Unauthenticated } from "@movies/contracts/errors";
+import type { FunctionPath } from "@media/contracts/command";
+import { Unauthenticated } from "@media/contracts/errors";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import type { Value } from "convex/values";
@@ -52,7 +52,7 @@ export type Credentials = Data.TaggedEnum<{
     readonly name: Option.Option<string>;
     readonly inviteCode: Option.Option<string>;
   };
-  /** A scoped API key, as `movies keys create` or Settings shows it once. */
+  /** A scoped API key, as `media keys create` or Settings shows it once. */
   ApiKey: { readonly key: Redacted.Redacted };
   /** The secret device code of an approved device sign-in. */
   DeviceCode: { readonly deviceCode: Redacted.Redacted };
@@ -122,7 +122,7 @@ export interface Interface {
 }
 
 /** The SDK's sign-in state. */
-export class Auth extends Context.Service<Auth, Interface>()("@movies/sdk/Auth") {}
+export class Auth extends Context.Service<Auth, Interface>()("@media/sdk/Auth") {}
 
 const Tokens = Schema.Struct({ token: Schema.String, refreshToken: Schema.String });
 

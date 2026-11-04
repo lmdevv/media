@@ -1,4 +1,4 @@
-import type { CommandPage } from "@movies/ui/lib/command-menu";
+import type { CommandPage } from "@media/ui/lib/command-menu";
 import { useMemo } from "react";
 
 import { useAccountCommands } from "./account";

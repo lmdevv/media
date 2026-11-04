@@ -1,14 +1,14 @@
-# NixOS module for the `movies` CLI. A host that runs services.movies gets it already pointed at
+# NixOS module for the `media` CLI. A host that runs services.media gets it already pointed at
 # that server (nix/module.nix). Any other machine that talks to the same server imports just this
 # module (`movies.nixosModules.cli`) and sets:
 #
-#   programs.movies = {
+#   programs.media = {
 #     enable = true;
 #     convexUrl = "http://nas.tailnet.ts.net:3210";
 #     mediaUrl = "http://nas.tailnet.ts.net:8080";
 #   };
 #
-# Each user still runs `movies login` once (or sets MOVIES_API_KEY), so no key enters the Nix
+# Each user still runs `media login` once (or sets MEDIA_API_KEY), so no key enters the Nix
 # store.
 {
   config,
@@ -17,12 +17,12 @@
   ...
 }:
 let
-  cfg = config.programs.movies;
+  cfg = config.programs.media;
 
   shared = import ./cli-options.nix { inherit lib pkgs; };
 in
 {
-  options.programs.movies = shared.options;
+  options.programs.media = shared.options;
 
   config = lib.mkIf cfg.enable {
     environment = {

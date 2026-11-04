@@ -1,9 +1,9 @@
 import { join } from "node:path";
 
-import { NotFound } from "@movies/contracts/errors";
-import type { JobId } from "@movies/contracts/ids";
-import { HealthResponse, MEDIA_ROUTES } from "@movies/contracts/media-playback";
-import type { Backup } from "@movies/contracts/models/jobs";
+import { NotFound } from "@media/contracts/errors";
+import type { JobId } from "@media/contracts/ids";
+import { HealthResponse, MEDIA_ROUTES } from "@media/contracts/media-playback";
+import type { Backup } from "@media/contracts/models/jobs";
 import { Effect, Exit, Option, Schema, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 

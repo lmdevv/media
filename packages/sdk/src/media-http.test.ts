@@ -8,8 +8,8 @@ import {
   StreamGenerationGone,
   StreamNotFound,
   TranscodeCapacityReached,
-} from "@movies/contracts/media-playback";
-import { PlaybackTokenInvalid } from "@movies/contracts/playback-token";
+} from "@media/contracts/media-playback";
+import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 
 import type { MediaRequest } from "./media-http";
 import { requestJson, requestLines, requestPlayback } from "./media-http";

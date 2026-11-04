@@ -1,6 +1,6 @@
-import type { ProfileId, TitleId } from "@movies/contracts/ids";
-import type { SeasonEpisode, TitleDetail } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { ProfileId, TitleId } from "@media/contracts/ids";
+import type { SeasonEpisode, TitleDetail } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronDown, CircleAlert } from "lucide-react-native";
 import { ActivityIndicator, Pressable, useWindowDimensions, View } from "react-native";

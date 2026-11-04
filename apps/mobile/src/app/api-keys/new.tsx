@@ -1,6 +1,6 @@
-import type { CreatedApiKey } from "@movies/contracts/models/account";
-import type { ApiKeyScope } from "@movies/contracts/scopes";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { CreatedApiKey } from "@media/contracts/models/account";
+import type { ApiKeyScope } from "@media/contracts/scopes";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";

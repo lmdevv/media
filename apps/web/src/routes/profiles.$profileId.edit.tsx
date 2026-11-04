@@ -1,5 +1,5 @@
-import { ProfileId } from "@movies/contracts/ids";
-import { useCommandQuery } from "@movies/sdk/react";
+import { ProfileId } from "@media/contracts/ids";
+import { useCommandQuery } from "@media/sdk/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 

@@ -1,10 +1,10 @@
-import { JobId, LibraryId } from "@movies/contracts/ids";
-import type { Job } from "@movies/contracts/models/jobs";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { Skeleton } from "@movies/ui/components/skeleton";
-import { cn } from "@movies/ui/lib/utils";
+import { JobId, LibraryId } from "@media/contracts/ids";
+import type { Job } from "@media/contracts/models/jobs";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { Skeleton } from "@media/ui/components/skeleton";
+import { cn } from "@media/ui/lib/utils";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, CircleAlertIcon, RotateCwIcon } from "lucide-react";
 import { Schema } from "effect";

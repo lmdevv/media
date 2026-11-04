@@ -1,6 +1,6 @@
-import { HealthResponse, MEDIA_ROUTES } from "@movies/contracts/media-playback";
-import { Skeleton } from "@movies/ui/components/skeleton";
-import { cn } from "@movies/ui/lib/utils";
+import { HealthResponse, MEDIA_ROUTES } from "@media/contracts/media-playback";
+import { Skeleton } from "@media/ui/components/skeleton";
+import { cn } from "@media/ui/lib/utils";
 import { Option, Schema } from "effect";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";

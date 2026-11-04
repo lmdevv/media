@@ -1,6 +1,6 @@
-import { BITMAP_SUBTITLE_FORMATS, type SubtitleTrack } from "@movies/contracts/media-playback";
-import type { AudioStream, MediaFile } from "@movies/contracts/models/catalog";
-import { MediaLabels } from "@movies/sdk/effect";
+import { BITMAP_SUBTITLE_FORMATS, type SubtitleTrack } from "@media/contracts/media-playback";
+import type { AudioStream, MediaFile } from "@media/contracts/models/catalog";
+import { MediaLabels } from "@media/sdk/effect";
 
 const { channelLabel, codecLabel, hdrLabel, resolutionLabel } = MediaLabels;
 

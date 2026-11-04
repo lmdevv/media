@@ -1,4 +1,4 @@
-import { Playback } from "@movies/sdk/effect";
+import { Playback } from "@media/sdk/effect";
 import { Data, Option, Schema } from "effect";
 
 /** What Convex says about a playback session, parsed at the adapter. */

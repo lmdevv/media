@@ -1,10 +1,10 @@
-import type { CommandArgs } from "@movies/contracts/commands";
-import type { ProfileId } from "@movies/contracts/ids";
-import type { TitleCard, TitleKind, TitleSort } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { CalmState } from "@movies/ui/components/calm-state";
-import { Chip } from "@movies/ui/components/chip";
+import type { CommandArgs } from "@media/contracts/commands";
+import type { ProfileId } from "@media/contracts/ids";
+import type { TitleCard, TitleKind, TitleSort } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { CalmState } from "@media/ui/components/calm-state";
+import { Chip } from "@media/ui/components/chip";
 import { ChevronDownIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";

@@ -1,5 +1,5 @@
-import type { ProfileId, TitleId } from "@movies/contracts/ids";
-import { useCommand } from "@movies/sdk/react";
+import type { ProfileId, TitleId } from "@media/contracts/ids";
+import { useCommand } from "@media/sdk/react";
 import * as Haptics from "expo-haptics";
 import { useRef, useState } from "react";
 

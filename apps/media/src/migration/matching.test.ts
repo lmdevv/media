@@ -1,5 +1,5 @@
-import { EpisodeId, LibraryId, MediaFileId, TitleId } from "@movies/contracts/ids";
-import type { CatalogFile } from "@movies/contracts/models/migration-service";
+import { EpisodeId, LibraryId, MediaFileId, TitleId } from "@media/contracts/ids";
+import type { CatalogFile } from "@media/contracts/models/migration-service";
 import { assert, describe, it } from "@effect/vitest";
 
 import { indexCatalog, ItemMatch, matchItems } from "./matching.ts";

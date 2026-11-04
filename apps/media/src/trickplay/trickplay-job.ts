@@ -1,5 +1,5 @@
-import { type TrickplayVersion, trickplayVersion } from "@movies/contracts/trickplay";
-import { Bytes, EpochMillis } from "@movies/contracts/units";
+import { type TrickplayVersion, trickplayVersion } from "@media/contracts/trickplay";
+import { Bytes, EpochMillis } from "@media/contracts/units";
 import { Clock, Effect, FileSystem, Match } from "effect";
 import type { Duration, Path } from "effect";
 

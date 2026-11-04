@@ -1,5 +1,5 @@
 {
-  "name": "@movies/backend",
+  "name": "@media/backend",
   "version": "0.2.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "dev:setup": "convex dev --configure --until-success",
     "typecheck": "tsc --noEmit -p convex && tsc --noEmit -p scripts && tsc --noEmit -p test",
     "configure": "node scripts/configure.ts",
-    "test:stack": "MOVIES_STACK_TESTS=1 vitest run --root ../.. packages/backend/test"
+    "test:stack": "MEDIA_STACK_TESTS=1 vitest run --root ../.. packages/backend/test"
   },
   "dependencies": {
     "@auth/core": "^0.41.3",
@@ -17,8 +17,8 @@
     "lucia": "^3.2.2"
   },
   "devDependencies": {
-    "@movies/config": "workspace:*",
-    "@movies/contracts": "workspace:*",
+    "@media/config": "workspace:*",
+    "@media/contracts": "workspace:*",
     "@types/node": "catalog:",
     "effect": "catalog:",
     "fast-check": "4.10.2",

@@ -1,4 +1,4 @@
-import type { PersonCard } from "@movies/contracts/models/catalog";
+import type { PersonCard } from "@media/contracts/models/catalog";
 import { router } from "expo-router";
 import { ChevronRight } from "lucide-react-native";
 import { Pressable, View } from "react-native";

@@ -34,7 +34,7 @@ describe("SDK import boundary", () => {
 
   it("keeps backend and media service code out of the SDK", () => {
     const offenders = sources(root).filter((path) =>
-      /from "@movies\/(backend|media)|convex\/_generated/u.test(code(path)),
+      /from "@media\/(backend|server)|convex\/_generated/u.test(code(path)),
     );
 
     expect(offenders).toStrictEqual([]);

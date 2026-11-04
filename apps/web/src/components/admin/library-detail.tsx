@@ -1,25 +1,25 @@
-import type { LibraryId } from "@movies/contracts/ids";
+import type { LibraryId } from "@media/contracts/ids";
 import type {
   LibraryDetail,
   LibraryFile,
   LibraryFileFilter,
   LibraryFileSummary,
-} from "@movies/contracts/models/catalog";
-import type { Job } from "@movies/contracts/models/jobs";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { CalmState } from "@movies/ui/components/calm-state";
-import { Chip } from "@movies/ui/components/chip";
+} from "@media/contracts/models/catalog";
+import type { Job } from "@media/contracts/models/jobs";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { CalmState } from "@media/ui/components/calm-state";
+import { Chip } from "@media/ui/components/chip";
 import {
   Dialog,
   DialogBody,
   DialogClose,
   DialogContent,
   DialogFooter,
-} from "@movies/ui/components/dialog";
-import { Skeleton } from "@movies/ui/components/skeleton";
-import { cn } from "@movies/ui/lib/utils";
+} from "@media/ui/components/dialog";
+import { Skeleton } from "@media/ui/components/skeleton";
+import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import {
   CircleHelpIcon,

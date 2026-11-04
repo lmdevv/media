@@ -3,8 +3,8 @@ import type {
   DownloadQuality,
   PlaybackQuality,
   UnsupportedReason,
-} from "@movies/contracts/media-playback";
-import type { PlaybackMode } from "@movies/contracts/models/playback";
+} from "@media/contracts/media-playback";
+import type { PlaybackMode } from "@media/contracts/models/playback";
 import { Data } from "effect";
 
 import type { MediaProbe } from "../media/media-probe.ts";

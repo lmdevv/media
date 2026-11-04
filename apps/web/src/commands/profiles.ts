@@ -1,4 +1,4 @@
-import type { CommandItem } from "@movies/ui/lib/command-menu";
+import type { CommandItem } from "@media/ui/lib/command-menu";
 import { UserRoundIcon, UsersRoundIcon } from "lucide-react";
 import { useMemo } from "react";
 

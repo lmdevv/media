@@ -1,6 +1,6 @@
-import type { MigrationPhase, MigrationRun } from "@movies/contracts/models/migration";
-import { SOURCE_NAMES, importFraction } from "@movies/contracts/migration-plan";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { MigrationPhase, MigrationRun } from "@media/contracts/models/migration";
+import { SOURCE_NAMES, importFraction } from "@media/contracts/migration-plan";
+import { useCommandQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   Bookmark,

@@ -1,5 +1,5 @@
-import { PlaybackSessionEnded } from "@movies/contracts/media-playback";
-import { PlaybackTokenInvalid } from "@movies/contracts/playback-token";
+import { PlaybackSessionEnded } from "@media/contracts/media-playback";
+import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 import { Effect, Layer, Match, Option, Schema } from "effect";
 import { HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 

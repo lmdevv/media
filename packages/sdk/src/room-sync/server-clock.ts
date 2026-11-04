@@ -1,4 +1,4 @@
-import type { ClockSample } from "@movies/contracts/clock";
+import type { ClockSample } from "@media/contracts/clock";
 import { Clock, Effect, Option } from "effect";
 
 import { MoviesClient } from "../movies-client";

@@ -1,8 +1,8 @@
-import type { Profile } from "@movies/contracts/models/profiles";
-import { useCommandQuery } from "@movies/sdk/react";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { AddProfileTile, ProfileTile } from "@movies/ui/components/profile-tile";
-import { cn } from "@movies/ui/lib/utils";
+import type { Profile } from "@media/contracts/models/profiles";
+import { useCommandQuery } from "@media/sdk/react";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { AddProfileTile, ProfileTile } from "@media/ui/components/profile-tile";
+import { cn } from "@media/ui/lib/utils";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { PencilIcon } from "lucide-react";
 import { Schema } from "effect";

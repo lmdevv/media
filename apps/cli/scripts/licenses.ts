@@ -57,6 +57,6 @@ export const writeThirdPartyLicenses = async (
 
   await writeFile(
     outfile,
-    `# Third-party licenses\n\nThe \`movies\` CLI bundles this software.\n\n${sections.join("\n")}`,
+    `# Third-party licenses\n\nThe \`media\` CLI bundles this software.\n\n${sections.join("\n")}`,
   );
 };

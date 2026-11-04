@@ -1,5 +1,5 @@
-import { Conflict, NotFound } from "@movies/contracts/errors";
-import { PlaybackSessionId } from "@movies/contracts/ids";
+import { Conflict, NotFound } from "@media/contracts/errors";
+import { PlaybackSessionId } from "@media/contracts/ids";
 import {
   MediaFileNotFound,
   PlaybackSessionEnded,
@@ -7,8 +7,8 @@ import {
   StreamNotFound,
   TranscodeCapacityReached,
   UnsupportedPlayback,
-} from "@movies/contracts/media-playback";
-import { TransportError } from "@movies/sdk/effect";
+} from "@media/contracts/media-playback";
+import { TransportError } from "@media/sdk/effect";
 import { describe, expect, it } from "vitest";
 
 import { IOS_CAPABILITIES } from "./capabilities";

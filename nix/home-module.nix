@@ -1,12 +1,12 @@
-# Home Manager module for the `movies` CLI, on Linux or macOS:
+# Home Manager module for the `media` CLI, on Linux or macOS:
 #
-#   programs.movies = {
+#   programs.media = {
 #     enable = true;
 #     convexUrl = "http://nas.tailnet.ts.net:3210";
 #     mediaUrl = "http://nas.tailnet.ts.net:8080";
 #   };
 #
-# You still run `movies login` once (or set MOVIES_API_KEY), so no key enters the Nix store.
+# You still run `media login` once (or set MEDIA_API_KEY), so no key enters the Nix store.
 {
   config,
   lib,
@@ -14,12 +14,12 @@
   ...
 }:
 let
-  cfg = config.programs.movies;
+  cfg = config.programs.media;
 
   shared = import ./cli-options.nix { inherit lib pkgs; };
 in
 {
-  options.programs.movies = shared.options;
+  options.programs.media = shared.options;
 
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];

@@ -1,5 +1,5 @@
-import { useCommand } from "@movies/sdk/react";
-import type { CommandItem } from "@movies/ui/lib/command-menu";
+import { useCommand } from "@media/sdk/react";
+import type { CommandItem } from "@media/ui/lib/command-menu";
 import {
   ArchiveIcon,
   FolderPlusIcon,

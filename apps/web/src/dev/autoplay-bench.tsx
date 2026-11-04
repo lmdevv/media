@@ -1,4 +1,4 @@
-import { Milliseconds } from "@movies/contracts/units";
+import { Milliseconds } from "@media/contracts/units";
 import { useState } from "react";
 
 import { AutoplayNext } from "@/components/player/autoplay-next";

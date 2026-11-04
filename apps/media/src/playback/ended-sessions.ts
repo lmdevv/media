@@ -1,5 +1,5 @@
-import type { PlaybackSessionId } from "@movies/contracts/ids";
-import { PLAYBACK_TOKEN_LIFETIME_MS } from "@movies/contracts/playback-token";
+import type { PlaybackSessionId } from "@media/contracts/ids";
+import { PLAYBACK_TOKEN_LIFETIME_MS } from "@media/contracts/playback-token";
 import {
   Cache,
   Context,
@@ -29,7 +29,7 @@ export interface Interface {
 }
 
 /** The ended-session registry. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/EndedSessions") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/EndedSessions") {}
 
 const ANSWER_WAIT = Duration.seconds(5);
 

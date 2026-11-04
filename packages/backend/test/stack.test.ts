@@ -5,10 +5,10 @@ import {
   HOST_ABANDON_TIMEOUT_MS,
   NEXT_EPISODE_COUNTDOWN_MS,
   PLAYER_SILENCE_MS,
-} from "@movies/contracts/clock";
-import type { AnyCommand } from "@movies/contracts/command";
-import type { CommandArgs } from "@movies/contracts/commands";
-import { commands } from "@movies/contracts/commands";
+} from "@media/contracts/clock";
+import type { AnyCommand } from "@media/contracts/command";
+import type { CommandArgs } from "@media/contracts/commands";
+import { commands } from "@media/contracts/commands";
 import type {
   DeviceId,
   JobId,
@@ -19,28 +19,28 @@ import type {
   RoomId,
   TitleId,
   UserId,
-} from "@movies/contracts/ids";
-import type { CatalogFile, WatchStateImport } from "@movies/contracts/models/migration-service";
+} from "@media/contracts/ids";
+import type { CatalogFile, WatchStateImport } from "@media/contracts/models/migration-service";
 import {
   DeviceId as DeviceIdSchema,
   EpisodeId as EpisodeIdSchema,
   JobId as JobIdSchema,
   RoomId as RoomIdSchema,
-} from "@movies/contracts/ids";
-import type { TitleCard } from "@movies/contracts/models/catalog";
+} from "@media/contracts/ids";
+import type { TitleCard } from "@media/contracts/models/catalog";
 import {
   type ScannedEpisode as ScannedEpisodeSchema,
   ScannedItem,
   type ScannedTitle as ScannedTitleSchema,
-} from "@movies/contracts/models/scan";
+} from "@media/contracts/models/scan";
 import {
   importPlaybackTokenSecret,
   PLAYBACK_TOKEN_LIFETIME_MS,
   verifyPlaybackToken,
-} from "@movies/contracts/playback-token";
-import { mediaServiceFunctions } from "@movies/contracts/media-service";
-import type { CommandAccess } from "@movies/contracts/scopes";
-import { Bytes, EpochMillis, Milliseconds } from "@movies/contracts/units";
+} from "@media/contracts/playback-token";
+import { mediaServiceFunctions } from "@media/contracts/media-service";
+import type { CommandAccess } from "@media/contracts/scopes";
+import { Bytes, EpochMillis, Milliseconds } from "@media/contracts/units";
 import { makeFunctionReference } from "convex/server";
 import type { Value } from "convex/values";
 import { Effect, Match, Redacted, Schema } from "effect";

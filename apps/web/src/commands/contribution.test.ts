@@ -1,4 +1,4 @@
-import type { CommandItem } from "@movies/ui/lib/command-menu";
+import type { CommandItem } from "@media/ui/lib/command-menu";
 import { describe, expect, it } from "vitest";
 
 import { mergeContributions } from "./contribution";

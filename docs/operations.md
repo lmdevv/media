@@ -5,10 +5,10 @@ restores, upgrades, hardware acceleration, and telemetry. The README has the qui
 
 ## What runs
 
-| Piece          | Compose (`deploy/compose`)            | NixOS (`services.movies`)                   |
+| Piece          | Compose (`deploy/compose`)            | NixOS (`services.media`)                    |
 | -------------- | ------------------------------------- | ------------------------------------------- |
 | Convex backend | `convex` service, pinned image        | `movies-convex` OCI container, pinned image |
-| Media service  | `movies` image, runs as `PUID:PGID`   | native `movies.service`, user `movies`      |
+| Media service  | `media` image, runs as `PUID:PGID`    | native `movies.service`, user `movies`      |
 | Web app        | served by the media service           | served by the media service                 |
 | Database       | `convex-data` volume                  | `dataDir/convex`                            |
 | Service state  | `movies-data` volume, `/data/media`   | `dataDir/media`                             |
@@ -39,7 +39,7 @@ Every start, as root, before the media service runs unprivileged:
   password hash and the media service key's hash. Copy them off the machine with the same care.
 - After a new backup succeeds, archives older than `BACKUP_RETENTION_DAYS` (14) are deleted. The
   new archive is never deleted, and nothing is pruned after a failed backup.
-- Back up now: Admin → Backups in the web app, or `movies backup --wait`.
+- Back up now: Admin → Backups in the web app, or `media backup --wait`.
 - Deployment environment variables (JWT keys, playback secret, service key) are not part of an
   export. A restore keeps the current ones and the startup configuration fills in anything
   missing.
@@ -49,8 +49,8 @@ Every start, as root, before the media service runs unprivileged:
 Admin → Backups → Restore in the web app, or with the CLI as an admin:
 
 ```sh
-movies backups list
-movies restore movies-nightly-2026-10-12T03-00-00-000Z.zip
+media backups list
+media restore movies-nightly-2026-10-12T03-00-00-000Z.zip
 ```
 
 The media service (`POST /api/backups/restore`) then:
@@ -101,30 +101,30 @@ Releases are git tags `vX.Y.Z`. Each one publishes the image as `X.Y.Z`, `X.Y`, 
 higher version is already tagged, `latest` (pre-releases such as `v0.2.0-rc.1` only as
 `0.2.0-rc.1`); `main` publishes `:main`, the edge,
 and every build also gets `sha-<commit>`. The NixOS module follows whatever revision the flake
-input points at. A release also publishes the `movies` CLI at the same version: `@lmdevv/movies` on
+input points at. A release also publishes the `media` CLI at the same version: `@lmdevv/movies` on
 npm and standalone binaries on the tag's GitHub Release. Upgrade a CLI installed that way with
 `npm install -g @lmdevv/movies@X.Y.Z` or the release's binary, fetched with `curl` as in the
 [README](../README.md#cli) (macOS quarantines a browser download, and Gatekeeper then blocks the
 ad hoc signed binary until `xattr -d com.apple.quarantine`); the image and the Nix modules carry
 their own.
 
-| Track     | Compose `MOVIES_IMAGE`                              | NixOS flake input             |
-| --------- | --------------------------------------------------- | ----------------------------- |
-| A release | `ghcr.io/lmdevv/movies:latest`, `:0.2`, or `:0.2.1` | `github:lmdevv/movies/v0.2.1` |
-| Edge      | `ghcr.io/lmdevv/movies:main`                        | `github:lmdevv/movies`        |
+| Track     | Compose `MEDIA_IMAGE`                              | NixOS flake input            |
+| --------- | -------------------------------------------------- | ---------------------------- |
+| A release | `ghcr.io/lmdevv/media:latest`, `:0.2`, or `:0.2.1` | `github:lmdevv/media/v0.2.1` |
+| Edge      | `ghcr.io/lmdevv/media:main`                        | `github:lmdevv/media`        |
 
 ### Compose
 
-Keep the checkout and `MOVIES_IMAGE` on the same release: `compose.yaml` pins the Convex backend
+Keep the checkout and `MEDIA_IMAGE` on the same release: `compose.yaml` pins the Convex backend
 that release was tested with, and the image derives the Convex admin key with that backend's
 tool. The entrypoint logs a warning when the image was built for another backend than
 `compose.yaml` runs. `:latest` follows the newest release whatever the checkout, so pin the version
 when you check out a tag.
 
 ```sh
-cd movies && git fetch --tags && git checkout v0.2.0      # or `git pull` on main for the edge
+cd media && git fetch --tags && git checkout v0.2.0      # or `git pull` on main for the edge
 cd deploy/compose
-# .env: MOVIES_IMAGE=ghcr.io/lmdevv/movies:0.2.0             # or :main for the edge
+# .env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.2.0             # or :main for the edge
 docker compose pull
 docker compose up -d
 docker compose logs -f movies    # "upgrading from 0.1.0 to 0.2.0; backing up to ... first"
@@ -151,10 +151,10 @@ upgrades ride along with [movies] releases; never change its image on your own.
 ### Rolling back
 
 1. Go back to the previous version: `git checkout v0.1.0` and its image tag
-   (`MOVIES_IMAGE=ghcr.io/lmdevv/movies:0.1.0`, then `docker compose up -d`), or
+   (`MEDIA_IMAGE=ghcr.io/lmdevv/media:0.1.0`, then `docker compose up -d`), or
    `nixos-rebuild switch --rollback`.
 2. If the older functions start, restore the `movies-manual-…` archive the upgrade took (Admin →
-   Backups, or `movies restore`). If they do not deploy over the newer data, restore without the
+   Backups, or `media restore`). If they do not deploy over the newer data, restore without the
    media service (above) and start it again.
 
 ### Releasing
@@ -207,14 +207,14 @@ npm publish /tmp/movies-cli/lmdevv-movies-0.2.0.tgz --access public
 ```
 
 Then, on npmjs.com, open `@lmdevv/movies` → Settings → Trusted publishing, choose GitHub Actions,
-and enter the owner `lmdevv`, the repository `movies`, and the workflow `release.yml`. Once a tag
+and enter the owner `lmdevv`, the repository `media`, and the workflow `release.yml`. Once a tag
 has published through it, set Publishing access to require two-factor authentication and
 disallow tokens.
 
 ## Remote access
 
 Both ports listen on `127.0.0.1` by default. For use away from home, put the host on a Tailscale
-tailnet and set the bind address (`MOVIES_BIND` on Compose, `listenAddress` on NixOS) to the
+tailnet and set the bind address (`MEDIA_BIND` on Compose, `listenAddress` on NixOS) to the
 host's Tailscale address, or keep localhost and use `tailscale serve`. Do not expose either port
 to the internet: Convex and the media service speak plain HTTP, and the Convex port must be
 reachable by every browser and CLI that uses [movies].
@@ -253,7 +253,7 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
   so. Lines waiting to be written are capped at 8 MiB of text; past that they are dropped and
   counted (`RetainedLogs.dropped`). When the folder cannot be written or read, the service logs
   to standard output only, says so once (`RetainedLogs.unwritable`), retries with every batch,
-  and `movies logs` says since when. A folder that comes back, such as a late mount, is listed
+  and `media logs` says since when. A folder that comes back, such as a late mount, is listed
   again at once, so the files already in it count against the cap.
 - Each HTTP response logs `HttpServer.response` at `DEBUG` with its method, status, time taken,
   and path (no query string, cut to 128 characters), so at the default `info` nothing a caller
@@ -264,11 +264,11 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
   letters, digits, `_`, or `-`, not shaped like a credential, and not a UUID that could pass for
   the service's own id, the lines carry it as `clientRequestId`. A stop ends open responses after 3 s, such as a direct-play file, which the
   player resumes with a range request; Compose gives the container 30 s to stop.
-- `movies logs` reads the retained log without SSH or `sudo`: `--follow`, `--since 15m` or a time,
+- `media logs` reads the retained log without SSH or `sudo`: `--follow`, `--since 15m` or a time,
   `--until`, `--level warn`, `--session-id`, `--stream-id`, `--slow 1s`, `--grep`, and `--json` for
   NDJSON. It needs an admin session. The service streams it as NDJSON from `POST /api/logs` and
   answers at most 5000 records before following. A follow ends as the service shuts down, and
-  `movies logs --follow` then exits `unavailable`.
+  `media logs --follow` then exits `unavailable`.
 - A failed media request (any 4xx or 5xx on `/media/`) logs `MediaRoutes.request_failed` at `WARN`
   with its playback session, at most 30 at once and one every 2 s per session (60, then one a
   second, per account), with path parameters cut to 64 characters. A token that is signed but
@@ -291,7 +291,7 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
   refused batch, and a refused diagnostics read, answers `429` with `Retry-After`. They land in the same log as `Player.*` records. An event's
   stream counts as its `streamId` only when the stream is the token's session's own (or ended in
   the last ten minutes); otherwise it is kept as `claimedStreamId`, which `--stream-id` does not
-  match. `movies diagnostics playback <session-id>` builds a session's timeline from both sides;
+  match. `media diagnostics playback <session-id>` builds a session's timeline from both sides;
   admins read any session and other accounts only their own, a few times a minute. Audio/video drift is not measured:
   no player reports it.
 - The web and iOS apps report their unexpected errors, a crashed page or screen and (web only)
@@ -299,7 +299,7 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
   account's token. Each lands as `Client.error` at `WARN` with the account, platform, app
   version, page, error name, message, and stack, cut to fixed bounds and redacted like every
   other line. The SDK request id an error carries is kept as `failedRequestId`, and a playback
-  session the app names as `claimedSessionId`, never as `sessionId`, and `movies diagnostics
+  session the app names as `claimedSessionId`, never as `sessionId`, and `media diagnostics
   sessions` counts only records that name a session, so error reports never crowd sessions out.
   An app sends a repeated error once per 30 s and, after a `429`, nothing until its
   `Retry-After` has passed. The service takes 120 requests at once, then 2 a second, before it
@@ -307,7 +307,7 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
   every account together 50 at once, then one every 5 s (about 95 MB a day at the largest
   reports). The rest answer `429` with `Retry-After`, and every 30 s
   `ClientErrors.suppressed` counts them by account (`userId` null for requests refused before
-  the account was known). `movies logs --grep Client.error` lists the reports.
+  the account was known). `media logs --grep Client.error` lists the reports.
 - With `OTEL_EXPORTER_OTLP_ENDPOINT` (Compose) or `otlpEndpoint` (NixOS) set to an OTLP/HTTP
   collector, the media service exports traces and logs: library scans, playback negotiation, the
   first HLS segment, seeks, encoder failures and GPU-to-software fallbacks, backups and restores, and
@@ -329,7 +329,7 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
 - `scripts/stack-e2e.sh` builds the image and runs the packaged suite against a fresh Compose
   stack: privilege and secret checks, owner sign-up, library, scan, direct and HLS playback, a
   media restart (streams answer a typed `StreamNotFound`, then play again), CLI backup and
-  restore, the image's own `movies` signing in to its stack, and an upgrade backup. CI runs it on
+  restore, the image's own `media` signing in to its stack, and an upgrade backup. CI runs it on
   every image change.
 - `scripts/nixos-module-e2e.sh` does the same against the NixOS module's own unit on a NixOS host
   (needs sudo and Docker), and checks the sandbox.

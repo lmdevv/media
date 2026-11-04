@@ -1,6 +1,6 @@
 import { Context, type Effect, Schema } from "effect";
 
-import type { LibraryId } from "@movies/contracts/ids";
+import type { LibraryId } from "@media/contracts/ids";
 import { MediaProbe } from "../media/media-probe.ts";
 import { EpisodeMetadata, TitleMetadata } from "../metadata/title-metadata.ts";
 import { MediaName } from "./media-naming.ts";
@@ -93,4 +93,4 @@ export interface Interface {
 }
 
 /** The library sink. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/LibrarySink") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/LibrarySink") {}

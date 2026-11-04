@@ -4,9 +4,9 @@ import {
   currentFrame,
   initialCommandMenuState,
   visibleCommands,
-} from "@movies/ui/lib/command-menu";
-import type { CommandItem, CommandLeading, CommandPage } from "@movies/ui/lib/command-menu";
-import { cn } from "@movies/ui/lib/utils";
+} from "@media/ui/lib/command-menu";
+import type { CommandItem, CommandLeading, CommandPage } from "@media/ui/lib/command-menu";
+import { cn } from "@media/ui/lib/utils";
 import { CheckIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useId, useReducer, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";

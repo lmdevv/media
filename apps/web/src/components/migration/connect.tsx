@@ -1,16 +1,16 @@
-import type { MigrationSource } from "@movies/contracts/models/jobs";
+import type { MigrationSource } from "@media/contracts/models/jobs";
 import type {
   MigrationConnection,
   MigrationReport,
   MigrationSourceFailure,
   PathMapping,
   UserMapping,
-} from "@movies/contracts/models/migration";
-import { useCommand } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { RadioGroup, RadioItem } from "@movies/ui/components/radio-group";
-import { FieldError, TextField } from "@movies/ui/components/text-field";
-import { SOURCE_NAMES, failureLine } from "@movies/contracts/migration-plan";
+} from "@media/contracts/models/migration";
+import { useCommand } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { RadioGroup, RadioItem } from "@media/ui/components/radio-group";
+import { FieldError, TextField } from "@media/ui/components/text-field";
+import { SOURCE_NAMES, failureLine } from "@media/contracts/migration-plan";
 import { Redacted } from "effect";
 import { useCallback } from "react";
 import type { FormEvent } from "react";

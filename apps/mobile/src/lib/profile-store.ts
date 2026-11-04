@@ -1,4 +1,4 @@
-import { ProfileId } from "@movies/contracts/ids";
+import { ProfileId } from "@media/contracts/ids";
 import { Option, Schema } from "effect";
 
 import { readValue, writeValue } from "./secure-storage";

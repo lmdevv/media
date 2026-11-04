@@ -1,8 +1,8 @@
-import { ProfileId } from "@movies/contracts/ids";
-import type { Profile } from "@movies/contracts/models/profiles";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Avatar } from "@movies/ui/components/avatar";
-import { CodeInput } from "@movies/ui/components/code-input";
+import { ProfileId } from "@media/contracts/ids";
+import type { Profile } from "@media/contracts/models/profiles";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Avatar } from "@media/ui/components/avatar";
+import { CodeInput } from "@media/ui/components/code-input";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { CircleAlertIcon } from "lucide-react";
 import { Match, Schema } from "effect";

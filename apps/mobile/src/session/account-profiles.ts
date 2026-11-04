@@ -1,4 +1,4 @@
-import type { Profile } from "@movies/contracts/models/profiles";
+import type { Profile } from "@media/contracts/models/profiles";
 
 import { useSessionPhase } from "./session-phase";
 

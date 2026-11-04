@@ -1,5 +1,5 @@
-import type { TitleDetail } from "@movies/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { TitleDetail } from "@media/contracts/models/catalog";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Ellipsis, Folder } from "lucide-react-native";
 import { View } from "react-native";

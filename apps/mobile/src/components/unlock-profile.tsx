@@ -1,5 +1,5 @@
-import type { Profile } from "@movies/contracts/models/profiles";
-import { useCommand } from "@movies/sdk/react";
+import type { Profile } from "@media/contracts/models/profiles";
+import { useCommand } from "@media/sdk/react";
 import * as Haptics from "expo-haptics";
 import { useEffect, useRef, useState } from "react";
 import { View } from "react-native";

@@ -1,7 +1,7 @@
-import type { TitleCard } from "@movies/contracts/models/catalog";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { CalmState } from "@movies/ui/components/calm-state";
-import { cn } from "@movies/ui/lib/utils";
+import type { TitleCard } from "@media/contracts/models/catalog";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { CalmState } from "@media/ui/components/calm-state";
+import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { FolderPlusIcon, PlusIcon } from "lucide-react";
 

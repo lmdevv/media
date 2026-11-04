@@ -88,7 +88,7 @@ const afterFailedSave = (
   );
 };
 
-describe("the movies binary", () => {
+describe("the media binary", () => {
   it("rejects an empty secret on stdin before connecting", async () => {
     const env = { XDG_CONFIG_HOME: home, HOME: home };
 
@@ -113,12 +113,12 @@ describe("the movies binary", () => {
     const runs = await Promise.all([
       runMovies(
         ["import", "jellyfin", "--url", "http://127.0.0.1:9"],
-        { ...env, MOVIES_IMPORT_TOKEN: "" },
+        { ...env, MEDIA_IMPORT_TOKEN: "" },
         "token\n",
       ),
       runMovies(
         ["login", "--server", "http://127.0.0.1:9", "--email", "a@example.com", "--password"],
-        { ...env, MOVIES_PASSWORD: " " },
+        { ...env, MEDIA_PASSWORD: " " },
         "password\n",
       ),
     ]);
@@ -129,7 +129,7 @@ describe("the movies binary", () => {
     }
   });
 
-  it("ends quietly when the reader of its output stops early, as `movies logs | head` does", async () => {
+  it("ends quietly when the reader of its output stops early, as `media logs | head` does", async () => {
     const signedIn = join(home, "signed-in");
 
     const record = `${JSON.stringify({
@@ -164,7 +164,7 @@ describe("the movies binary", () => {
         const running = startMovies(["logs", "--json", "--limit", "5000"], {
           XDG_CONFIG_HOME: signedIn,
           HOME: signedIn,
-          MOVIES_MEDIA_URL: mediaUrl,
+          MEDIA_SERVER_URL: mediaUrl,
         });
 
         running.child.stdout.once("data", () => running.child.stdout.destroy());
@@ -207,6 +207,6 @@ describe("the movies binary", () => {
 
     expect(run.code, run.stderr).toBe(ExitCode.expired);
     expect(run.stderr).toMatch(/WARN\s+Auth\.tokenStorageFailed operation=save/u);
-    expect(run.stderr).toContain("movies: Device code expired");
+    expect(run.stderr).toContain("media: Device code expired");
   });
 });

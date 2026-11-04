@@ -1,4 +1,4 @@
-import type { MigrationCredentials } from "@movies/contracts/models/migration";
+import type { MigrationCredentials } from "@media/contracts/models/migration";
 import { assert, layer } from "@effect/vitest";
 import { Effect, Redacted, Schema } from "effect";
 import { FetchHttpClient } from "effect/http";

@@ -1,8 +1,8 @@
-import { TitleId } from "@movies/contracts/ids";
-import { useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { CalmState } from "@movies/ui/components/calm-state";
+import { TitleId } from "@media/contracts/ids";
+import { useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { CalmState } from "@media/ui/components/calm-state";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 

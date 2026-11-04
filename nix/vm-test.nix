@@ -1,4 +1,4 @@
-# NixOS VM test of the module: boots a machine with `services.movies` enabled, starts the pinned
+# NixOS VM test of the module: boots a machine with `services.media` enabled, starts the pinned
 # Convex backend (from a fixed-output image, since the test has no network) and the media service,
 # and checks that the service signs in to Convex, serves the web app, keeps its secrets private,
 # and survives a restart.
@@ -53,7 +53,7 @@ testers.runNixOSTest {
 
     systemd.tmpfiles.rules = [ "d /srv/media/movies 0755 root root -" ];
 
-    services.movies = {
+    services.media = {
       enable = true;
       libraryDirs = [ "/srv/media/movies" ];
       convexImage = "${imageName}:${imageTag}";
@@ -86,7 +86,7 @@ testers.runNixOSTest {
         page = machine.succeed("curl -fsS http://127.0.0.1:8080/")
         assert "<div id=\"app\"" in page, page
         machine.succeed("grep -rqF http://localhost:3210 /run/movies/web")
-        machine.fail("grep -rqF __MOVIES_CONVEX_URL__ /run/movies/web")
+        machine.fail("grep -rqF __MEDIA_CONVEX_URL__ /run/movies/web")
         machine.succeed("curl -fsS http://127.0.0.1:8080/some/client/route | grep -qF '<div id=\"app\"'")
 
     with subtest("options reach the service"):

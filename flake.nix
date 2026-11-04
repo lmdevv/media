@@ -97,7 +97,7 @@
                   {
                     boot.isContainer = true;
                     system.stateVersion = "26.05";
-                    services.movies = {
+                    services.media = {
                       enable = true;
                       libraryDirs = [ "/srv/media/movies" ];
                     }
@@ -159,11 +159,11 @@
                 }).config;
               summary = config: {
                 cli = builtins.any (package: package.pname or "" == "movies-cli") config.environment.systemPackages;
-                convexUrl = config.environment.sessionVariables.MOVIES_CONVEX_URL or null;
-                mediaUrl = config.environment.sessionVariables.MOVIES_MEDIA_URL or null;
+                convexUrl = config.environment.sessionVariables.MEDIA_CONVEX_URL or null;
+                mediaUrl = config.environment.sessionVariables.MEDIA_SERVER_URL or null;
                 server = config.systemd.services ? movies;
               };
-              serverSettings.services.movies = {
+              serverSettings.services.media = {
                 enable = true;
                 publicUrl = "http://nas:8080";
                 convexPublicUrl = "http://nas:3210";
@@ -172,7 +172,7 @@
                 server = summary (system [ self.nixosModules.default ] serverSettings);
                 cliOnly = summary (
                   system [ self.nixosModules.cli ] {
-                    programs.movies = {
+                    programs.media = {
                       enable = true;
                       convexUrl = "http://nas:3210";
                       mediaUrl = "http://nas:8080";
@@ -187,8 +187,8 @@
                 );
                 withoutCli = summary (
                   system [ self.nixosModules.default ] {
-                    services.movies.enable = true;
-                    programs.movies.enable = false;
+                    services.media.enable = true;
+                    programs.media.enable = false;
                   }
                 );
               };
@@ -216,7 +216,7 @@
             in
             assert nixpkgs.lib.assertMsg (
               actual == expected
-            ) "programs.movies: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
+            ) "programs.media: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
             pkgs.writeText "movies-cli-module-check" (builtins.toJSON actual);
           home-module =
             let
@@ -255,14 +255,14 @@
               };
               actual = {
                 configured = summary (home {
-                  programs.movies = {
+                  programs.media = {
                     enable = true;
                     convexUrl = "http://nas:3210";
                     mediaUrl = "http://nas:8080";
                   };
                 });
                 packageOnly = summary (home {
-                  programs.movies.enable = true;
+                  programs.media.enable = true;
                 });
                 off = summary (home { });
               };
@@ -270,8 +270,8 @@
                 configured = {
                   cli = true;
                   sessionVariables = {
-                    MOVIES_CONVEX_URL = "http://nas:3210";
-                    MOVIES_MEDIA_URL = "http://nas:8080";
+                    MEDIA_CONVEX_URL = "http://nas:3210";
+                    MEDIA_SERVER_URL = "http://nas:8080";
                   };
                 };
                 packageOnly = {
@@ -285,7 +285,7 @@
               };
             in
             assert lib.assertMsg (actual == expected)
-              "Home Manager programs.movies: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
+              "Home Manager programs.media: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
             pkgs.writeText "movies-home-module-check" (builtins.toJSON actual);
           vm = pkgs.callPackage ./nix/vm-test.nix { module = self.nixosModules.movies; };
         }

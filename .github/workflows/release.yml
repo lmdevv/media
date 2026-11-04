@@ -108,7 +108,7 @@ jobs:
             runner: macos-15
     runs-on: ${{ matrix.runner }}
     env:
-      BINARY: apps/cli/dist/sea/movies-${{ matrix.target }}
+      BINARY: apps/cli/dist/sea/media-${{ matrix.target }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -123,10 +123,10 @@ jobs:
       - name: The binary runs and reports the tag's version
         run: |
           [ "v$("$BINARY" --version)" = "$GITHUB_REF_NAME" ]
-          "$BINARY" --help | grep -q "Usage: movies"
+          "$BINARY" --help | grep -q "Usage: media"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: movies-${{ matrix.target }}
+          name: media-${{ matrix.target }}
           path: ${{ env.BINARY }}
           if-no-files-found: error
       - if: matrix.target == 'linux-x64'
@@ -155,7 +155,7 @@ jobs:
       - name: License and checksums
         run: |
           cp LICENSE "$RUNNER_TEMP/dist/LICENSE"
-          cd "$RUNNER_TEMP/dist" && sha256sum movies-* | tee SHA256SUMS
+          cd "$RUNNER_TEMP/dist" && sha256sum media-* | tee SHA256SUMS
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -178,21 +178,21 @@ jobs:
           notes="$(cat <<EOF
           ## Install
 
-          - Server: the image \`ghcr.io/lmdevv/movies:$version\` with this tag's \`deploy/compose\`, or the NixOS module from \`github:lmdevv/movies/$GITHUB_REF_NAME\`. Both include the \`movies\` CLI.
+          - Server: the image \`ghcr.io/lmdevv/media:$version\` with this tag's \`deploy/compose\`, or the NixOS module from \`github:lmdevv/media/$GITHUB_REF_NAME\`. Both include the \`media\` CLI.
           - CLI with Node 22 or newer: \`npm install -g @lmdevv/movies@$version\`.
-          - CLI with Nix: \`nix run github:lmdevv/movies/$GITHUB_REF_NAME -- --help\`, or \`programs.movies\` from \`nixosModules.cli\` or \`homeManagerModules.movies\`.
-          - CLI without Node: the \`movies-<os>-<arch>\` binary below. Download it with \`curl\`, check it, and put it on your PATH (here Linux x64; use \`movies-linux-arm64\` or \`movies-darwin-arm64\` likewise):
+          - CLI with Nix: \`nix run github:lmdevv/media/$GITHUB_REF_NAME -- --help\`, or \`programs.media\` from \`nixosModules.cli\` or \`homeManagerModules.movies\`.
+          - CLI without Node: the \`media-<os>-<arch>\` binary below. Download it with \`curl\`, check it, and put it on your PATH (here Linux x64; use \`media-linux-arm64\` or \`media-darwin-arm64\` likewise):
 
             \`\`\`sh
-            curl -fLO $download/movies-linux-x64
+            curl -fLO $download/media-linux-x64
             curl -fLO $download/SHA256SUMS
-            grep movies-linux-x64 SHA256SUMS | sha256sum -c    # shasum -a 256 -c on macOS
-            mkdir -p ~/.local/bin && install -m 755 movies-linux-x64 ~/.local/bin/movies
+            grep media-linux-x64 SHA256SUMS | sha256sum -c    # shasum -a 256 -c on macOS
+            mkdir -p ~/.local/bin && install -m 755 media-linux-x64 ~/.local/bin/media
             \`\`\`
 
-            The macOS binary is signed ad hoc, not notarized. macOS quarantines a binary downloaded in a browser, and Gatekeeper then refuses to run it; \`curl\` does not quarantine, or clear it with \`xattr -d com.apple.quarantine movies-darwin-arm64\`.
+            The macOS binary is signed ad hoc, not notarized. macOS quarantines a binary downloaded in a browser, and Gatekeeper then refuses to run it; \`curl\` does not quarantine, or clear it with \`xattr -d com.apple.quarantine media-darwin-arm64\`.
 
-          Upgrading a server: [docs/operations.md](https://github.com/lmdevv/movies/blob/$GITHUB_REF_NAME/docs/operations.md#upgrading).
+          Upgrading a server: [docs/operations.md](https://github.com/lmdevv/media/blob/$GITHUB_REF_NAME/docs/operations.md#upgrading).
           EOF
           )"
           gh release create "$GITHUB_REF_NAME" "$DIST"/* --verify-tag --title "[movies] $version" \

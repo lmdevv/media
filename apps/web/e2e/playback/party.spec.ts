@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
-import type { EpisodeId, LibraryId, RoomId, TitleId } from "@movies/contracts/ids";
-import { RoomId as RoomIdSchema } from "@movies/contracts/ids";
+import type { EpisodeId, LibraryId, RoomId, TitleId } from "@media/contracts/ids";
+import { RoomId as RoomIdSchema } from "@media/contracts/ids";
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 import { Schema } from "effect";

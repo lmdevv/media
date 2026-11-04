@@ -7,10 +7,10 @@
  * account together, so many accounts at once still cannot. Every 30 s
  * `ClientErrors.suppressed` counts the reports each account, or anyone not yet known, sent over.
  */
-import { ClientErrorReport, DIAGNOSTICS_ROUTES } from "@movies/contracts/diagnostics";
-import { RateLimited } from "@movies/contracts/errors";
-import type { UserId } from "@movies/contracts/ids";
-import type { Viewer } from "@movies/contracts/models/account";
+import { ClientErrorReport, DIAGNOSTICS_ROUTES } from "@media/contracts/diagnostics";
+import { RateLimited } from "@media/contracts/errors";
+import type { UserId } from "@media/contracts/ids";
+import type { Viewer } from "@media/contracts/models/account";
 import { Clock, Duration, Effect, Layer, Option, Schedule } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 

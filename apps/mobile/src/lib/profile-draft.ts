@@ -1,5 +1,5 @@
-import { AgeRating, KIDS_DEFAULT_MAX_AGE } from "@movies/contracts/content-rating";
-import type { CreateProfileArgs, Profile } from "@movies/contracts/models/profiles";
+import { AgeRating, KIDS_DEFAULT_MAX_AGE } from "@media/contracts/content-rating";
+import type { CreateProfileArgs, Profile } from "@media/contracts/models/profiles";
 import { Schema } from "effect";
 
 import { firstFreeAvatar } from "./avatars";

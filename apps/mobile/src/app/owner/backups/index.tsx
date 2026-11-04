@@ -1,4 +1,4 @@
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Server } from "lucide-react-native";
 

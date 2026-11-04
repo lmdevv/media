@@ -1,9 +1,9 @@
-import type { ProfileId } from "@movies/contracts/ids";
-import type { Episode, SeasonEpisode, TitleDetail } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
-import { EpisodeRow } from "@movies/ui/components/media-card";
-import { ProgressBar } from "@movies/ui/components/progress-bar";
-import { cn } from "@movies/ui/lib/utils";
+import type { ProfileId } from "@media/contracts/ids";
+import type { Episode, SeasonEpisode, TitleDetail } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
+import { EpisodeRow } from "@media/ui/components/media-card";
+import { ProgressBar } from "@media/ui/components/progress-bar";
+import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";

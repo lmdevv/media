@@ -1,7 +1,7 @@
-import type { Job } from "@movies/contracts/models/jobs";
-import type { Library } from "@movies/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import type { CommandItem } from "@movies/ui/lib/command-menu";
+import type { Job } from "@media/contracts/models/jobs";
+import type { Library } from "@media/contracts/models/catalog";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import type { CommandItem } from "@media/ui/lib/command-menu";
 import { CircleXIcon, FolderIcon, RefreshCwIcon } from "lucide-react";
 import { useMemo } from "react";
 import { toast } from "sonner";

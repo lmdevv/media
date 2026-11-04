@@ -1,6 +1,6 @@
-import { RoomId } from "@movies/contracts/ids";
-import type { CommandItem } from "@movies/ui/lib/command-menu";
-import { useCommand } from "@movies/sdk/react";
+import { RoomId } from "@media/contracts/ids";
+import type { CommandItem } from "@media/ui/lib/command-menu";
+import { useCommand } from "@media/sdk/react";
 import { LinkIcon, LogOutIcon, SquareXIcon, UsersIcon } from "lucide-react";
 import { Option, Schema } from "effect";
 import { useMemo } from "react";

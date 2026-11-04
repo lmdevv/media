@@ -1,4 +1,4 @@
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import type { ComponentProps } from "react";
 
 /** One key of a shortcut, drawn as a small mono keycap: `G`, `⌘`, `↵`. */

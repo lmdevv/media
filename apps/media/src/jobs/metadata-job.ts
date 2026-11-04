@@ -1,4 +1,4 @@
-import type { ScannedEpisode } from "@movies/contracts/models/scan";
+import type { ScannedEpisode } from "@media/contracts/models/scan";
 import type { FunctionResult } from "../convex/media-backend.ts";
 import { Effect, Match, Option } from "effect";
 

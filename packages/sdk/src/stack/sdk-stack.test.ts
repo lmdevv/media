@@ -1,9 +1,9 @@
-import { targetPosition } from "@movies/contracts/clock";
-import type { CommandError } from "@movies/contracts/errors";
-import { DeviceId } from "@movies/contracts/ids";
-import type { ProfileId, TitleId } from "@movies/contracts/ids";
-import { mediaServiceFunctions } from "@movies/contracts/media-service";
-import { Milliseconds } from "@movies/contracts/units";
+import { targetPosition } from "@media/contracts/clock";
+import type { CommandError } from "@media/contracts/errors";
+import { DeviceId } from "@media/contracts/ids";
+import type { ProfileId, TitleId } from "@media/contracts/ids";
+import { mediaServiceFunctions } from "@media/contracts/media-service";
+import { Milliseconds } from "@media/contracts/units";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import {

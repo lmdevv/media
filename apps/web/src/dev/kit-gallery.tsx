@@ -1,24 +1,24 @@
-import { Avatar, EditableAvatar } from "@movies/ui/components/avatar";
-import { Badge } from "@movies/ui/components/badge";
-import { Button } from "@movies/ui/components/button";
-import { CalmState } from "@movies/ui/components/calm-state";
-import { Chip, NavChip } from "@movies/ui/components/chip";
-import { CodeInput } from "@movies/ui/components/code-input";
-import { CommandMenu } from "@movies/ui/components/command-menu";
-import { HeroCard, Hero } from "@movies/ui/components/hero";
-import { PlayGlyph } from "@movies/ui/components/icons";
-import { EpisodeRow, LandscapeCard, PosterCard } from "@movies/ui/components/media-card";
-import { MediaRow } from "@movies/ui/components/media-row";
-import { CompactTopBar, LargeTitle } from "@movies/ui/components/phone-title";
-import { PlayerButton, PlayerControls, TracksGlyph } from "@movies/ui/components/player-controls";
-import { AddProfileTile, ProfileTile } from "@movies/ui/components/profile-tile";
-import { RoomPanel } from "@movies/ui/components/room-panel";
-import { Spinner } from "@movies/ui/components/spinner";
-import { TabBar, TabBarItem, TabBarSearch } from "@movies/ui/components/tab-bar";
-import { TextField } from "@movies/ui/components/text-field";
-import { RoomPill, SearchTrigger, TopBar, TopBarLink } from "@movies/ui/components/top-bar";
-import { TrackPanel, TrackPopover } from "@movies/ui/components/track-popover";
-import type { CommandItem, CommandPage } from "@movies/ui/lib/command-menu";
+import { Avatar, EditableAvatar } from "@media/ui/components/avatar";
+import { Badge } from "@media/ui/components/badge";
+import { Button } from "@media/ui/components/button";
+import { CalmState } from "@media/ui/components/calm-state";
+import { Chip, NavChip } from "@media/ui/components/chip";
+import { CodeInput } from "@media/ui/components/code-input";
+import { CommandMenu } from "@media/ui/components/command-menu";
+import { HeroCard, Hero } from "@media/ui/components/hero";
+import { PlayGlyph } from "@media/ui/components/icons";
+import { EpisodeRow, LandscapeCard, PosterCard } from "@media/ui/components/media-card";
+import { MediaRow } from "@media/ui/components/media-row";
+import { CompactTopBar, LargeTitle } from "@media/ui/components/phone-title";
+import { PlayerButton, PlayerControls, TracksGlyph } from "@media/ui/components/player-controls";
+import { AddProfileTile, ProfileTile } from "@media/ui/components/profile-tile";
+import { RoomPanel } from "@media/ui/components/room-panel";
+import { Spinner } from "@media/ui/components/spinner";
+import { TabBar, TabBarItem, TabBarSearch } from "@media/ui/components/tab-bar";
+import { TextField } from "@media/ui/components/text-field";
+import { RoomPill, SearchTrigger, TopBar, TopBarLink } from "@media/ui/components/top-bar";
+import { TrackPanel, TrackPopover } from "@media/ui/components/track-popover";
+import type { CommandItem, CommandPage } from "@media/ui/lib/command-menu";
 import {
   BookmarkIcon,
   CircleXIcon,
@@ -38,8 +38,8 @@ import {
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { moveRowFocus } from "@movies/ui/lib/row-focus";
-import { useKeymap } from "@movies/ui/lib/use-keymap";
+import { moveRowFocus } from "@media/ui/lib/row-focus";
+import { useKeymap } from "@media/ui/lib/use-keymap";
 
 import { keymap, shortcutLabel } from "@/lib/keymap";
 

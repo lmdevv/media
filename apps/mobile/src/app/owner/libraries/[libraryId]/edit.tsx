@@ -1,6 +1,6 @@
-import { LibraryId } from "@movies/contracts/ids";
-import type { LibraryDetail } from "@movies/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import { LibraryId } from "@media/contracts/ids";
+import type { LibraryDetail } from "@media/contracts/models/catalog";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 

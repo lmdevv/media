@@ -14,7 +14,7 @@ import {
   TrickplayManifest,
   type TrickplayVersion,
   trickplayLayout,
-} from "@movies/contracts/trickplay";
+} from "@media/contracts/trickplay";
 import { Duration, Effect, FileSystem, Option, Path, Schema } from "effect";
 
 import * as MediaTools from "../media/media-tools.ts";

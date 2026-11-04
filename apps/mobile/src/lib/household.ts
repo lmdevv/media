@@ -1,6 +1,6 @@
-import type { LibraryId, UserId } from "@movies/contracts/ids";
-import type { Invite, User } from "@movies/contracts/models/account";
-import type { LibraryDetail } from "@movies/contracts/models/catalog";
+import type { LibraryId, UserId } from "@media/contracts/ids";
+import type { Invite, User } from "@media/contracts/models/account";
+import type { LibraryDetail } from "@media/contracts/models/catalog";
 
 /** How each role reads. */
 export const ROLE_LABELS: Readonly<Record<User["role"], string>> = {

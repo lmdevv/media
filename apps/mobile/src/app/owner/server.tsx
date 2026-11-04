@@ -1,4 +1,4 @@
-import type { HealthResponse } from "@movies/contracts/media-playback";
+import type { HealthResponse } from "@media/contracts/media-playback";
 import { Option } from "effect";
 import { router } from "expo-router";
 import { History, Play, Server, Settings2 } from "lucide-react-native";

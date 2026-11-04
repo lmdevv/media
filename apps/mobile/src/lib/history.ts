@@ -1,4 +1,4 @@
-import type { HistoryEntry } from "@movies/contracts/models/catalog";
+import type { HistoryEntry } from "@media/contracts/models/catalog";
 
 import { daysAgo } from "./dates";
 import { progressLabel } from "./format";

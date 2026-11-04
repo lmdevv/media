@@ -1,8 +1,8 @@
-import { PlaybackMode } from "@movies/contracts/models/playback";
+import { PlaybackMode } from "@media/contracts/models/playback";
 import { Context, Effect, Layer, Ref, Schema } from "effect";
 
-import { MediaFileId, PlaybackSessionId, UserId } from "@movies/contracts/ids";
-import { StreamId } from "@movies/contracts/media-playback";
+import { MediaFileId, PlaybackSessionId, UserId } from "@media/contracts/ids";
+import { StreamId } from "@media/contracts/media-playback";
 
 import { LogEvent } from "../diagnostics/log-events.ts";
 import { Snapshot } from "./stream-liveness.ts";
@@ -66,7 +66,7 @@ export interface Interface {
 
 /** The playback event reporter. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/PlaybackReporter",
+  "@media/server/PlaybackReporter",
 ) {}
 
 /** Logs `event` at `INFO` under its playback event name, with its fields as annotations. */
@@ -95,7 +95,7 @@ export interface RecordingInterface {
 
 /** A reporter that keeps every event in memory, for tests. */
 export class Recording extends Context.Service<Recording, RecordingInterface>()(
-  "@movies/media/PlaybackReporter/Recording",
+  "@media/server/PlaybackReporter/Recording",
 ) {}
 
 /** A recording reporter providing both the reporter and its inspection service. */

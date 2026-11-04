@@ -1,11 +1,11 @@
 /**
  * What casting sends to a Chromecast, as plain data the SDK adapter turns into Cast objects. The
  * device negotiates through the same playback ladder as a browser, with the client profile in
- * `@movies/contracts/cast`. The receiver fetches media itself, so URLs are the
+ * `@media/contracts/cast`. The receiver fetches media itself, so URLs are the
  * absolute ones the media service hands out, with the session's playback token in the query (a
  * receiver cannot send headers).
  */
-import type { NegotiateResponse } from "@movies/contracts/media-playback";
+import type { NegotiateResponse } from "@media/contracts/media-playback";
 
 import { subtitleTrackLabels } from "@/lib/media-facts";
 

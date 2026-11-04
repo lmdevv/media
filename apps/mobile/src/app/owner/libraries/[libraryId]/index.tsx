@@ -1,7 +1,7 @@
-import { LibraryId } from "@movies/contracts/ids";
-import type { LibraryDetail, LibraryFileSummary } from "@movies/contracts/models/catalog";
-import type { Job } from "@movies/contracts/models/jobs";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import { LibraryId } from "@media/contracts/ids";
+import type { LibraryDetail, LibraryFileSummary } from "@media/contracts/models/catalog";
+import type { Job } from "@media/contracts/models/jobs";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import {

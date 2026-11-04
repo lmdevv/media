@@ -1,19 +1,12 @@
-import {
-  EpisodeId,
-  JobId,
-  LibraryId,
-  MediaFileId,
-  ProfileId,
-  TitleId,
-} from "@movies/contracts/ids";
-import type { MigrationImported } from "@movies/contracts/models/migration";
+import { EpisodeId, JobId, LibraryId, MediaFileId, ProfileId, TitleId } from "@media/contracts/ids";
+import type { MigrationImported } from "@media/contracts/models/migration";
 import type {
   CatalogFile,
   MigrationCheckpoint,
   StoredMigrationPlan,
   WatchStateImport,
-} from "@movies/contracts/models/migration-service";
-import { TransportError } from "@movies/sdk/effect";
+} from "@media/contracts/models/migration-service";
+import { TransportError } from "@media/sdk/effect";
 import { assert, describe, it as test, layer } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Predicate, Redacted } from "effect";
 import { FetchHttpClient } from "effect/http";

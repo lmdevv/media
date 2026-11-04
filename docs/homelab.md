@@ -16,7 +16,7 @@ at startup, backups and restores, and telemetry in more depth.
 ## Docker Compose
 
 ```sh
-git clone https://github.com/lmdevv/movies && cd movies
+git clone https://github.com/lmdevv/media && cd media
 git checkout "$(git describe --tags --abbrev=0 --exclude '*-*')"   # latest stable release, = :latest
 cd deploy/compose
 cp .env.example .env
@@ -25,11 +25,11 @@ cp .env.example .env
 Edit `.env`:
 
 ```sh
-MOVIES_LIBRARY=/srv/media                 # host folder with your movies and shows
-MOVIES_PUBLIC_URL=http://nas.tailnet.ts.net:8080
+MEDIA_LIBRARY=/srv/media                 # host folder with your movies and shows
+MEDIA_BASE_URL=http://nas.tailnet.ts.net:8080
 CONVEX_PUBLIC_URL=http://nas.tailnet.ts.net:3210
-MOVIES_BIND=100.64.0.1                    # the host's Tailscale address (`tailscale ip -4`)
-PUID=1000                                 # a user that can read MOVIES_LIBRARY (`id -u you`)
+MEDIA_BIND=100.64.0.1                    # the host's Tailscale address (`tailscale ip -4`)
+PUID=1000                                 # a user that can read MEDIA_LIBRARY (`id -u you`)
 PGID=1000
 TMDB_API_KEY=...                          # optional: posters and metadata from TMDB
 ```
@@ -43,11 +43,11 @@ docker compose ps          # movies turns (healthy)
 docker compose logs -f movies
 ```
 
-Open `MOVIES_PUBLIC_URL`, create the owner account (the first account is the owner), and add
+Open `MEDIA_BASE_URL`, create the owner account (the first account is the owner), and add
 `/media/library` as a library. More folders: add one read-only line per folder under the `movies`
 service's `volumes:` (`- /mnt/nas/shows:/media/shows:ro`) and add `/media/shows` as a library.
 
-- **Image.** `MOVIES_IMAGE` defaults to `ghcr.io/lmdevv/movies:latest`, the newest release. Best
+- **Image.** `MEDIA_IMAGE` defaults to `ghcr.io/lmdevv/media:latest`, the newest release. Best
   is the release your checkout is at (`git checkout vX.Y.Z` with `:X.Y.Z`), or `main` with
   `:main` to follow development, since `compose.yaml` pins the Convex backend for its release.
   `docker compose build` builds the image from your checkout instead. Images exist for amd64 and
@@ -61,12 +61,12 @@ service's `volumes:` (`- /mnt/nas/shows:/media/shows:ro`) and add `/media/shows`
 
 ```nix
 # flake.nix
-inputs.movies.url = "github:lmdevv/movies";   # or github:lmdevv/movies/v0.1.0 to pin a release
+inputs.movies.url = "github:lmdevv/media";   # or github:lmdevv/media/v0.1.0 to pin a release
 
 # in nixosSystem { modules = [ ... ]; }
 inputs.movies.nixosModules.default
 {
-  services.movies = {
+  services.media = {
     enable = true;
     libraryDirs = [ "/srv/media/movies" "/srv/media/shows" ];
     listenAddress = "100.64.0.1";                     # the host's Tailscale address
@@ -85,7 +85,7 @@ sandboxed systemd unit with read-only access to `libraryDirs`. The service user 
 read them; add a group with `users.users.movies.extraGroups` if your files are not
 world-readable.
 
-Every setting has an option (`nixos-option services.movies` lists them); `extraEnvironment` sets
+Every setting has an option (`nixos-option services.media` lists them); `extraEnvironment` sets
 anything else, and `environmentFile` keeps secrets out of the Nix store. The flake also exports
 `packages.<system>.movies`, `overlays.default` (`pkgs.movies`), and a VM test
 (`nix build .#checks.x86_64-linux.vm`).
@@ -94,7 +94,7 @@ anything else, and `environmentFile` keeps secrets out of the Nix store. The fla
 
 ### Tailscale (recommended)
 
-Put the host on your tailnet and bind both ports to its Tailscale address (`MOVIES_BIND` or
+Put the host on your tailnet and bind both ports to its Tailscale address (`MEDIA_BIND` or
 `listenAddress`). Use the MagicDNS name in both public URLs. Every device on the tailnet can
 reach it, and nothing else can. Traffic is encrypted by WireGuard; [movies] itself speaks plain
 HTTP.
@@ -107,7 +107,7 @@ tailscale serve --bg --https=443 http://127.0.0.1:8080
 tailscale serve --bg --https=8443 http://127.0.0.1:3210
 ```
 
-and set `MOVIES_PUBLIC_URL=https://nas.tailnet.ts.net` and
+and set `MEDIA_BASE_URL=https://nas.tailnet.ts.net` and
 `CONVEX_PUBLIC_URL=https://nas.tailnet.ts.net:8443` (`publicUrl` and `convexPublicUrl`).
 
 ### Caddy on your LAN
@@ -127,7 +127,7 @@ convex.movies.home.arpa {
 }
 ```
 
-Set `MOVIES_PUBLIC_URL=https://movies.home.arpa` and
+Set `MEDIA_BASE_URL=https://movies.home.arpa` and
 `CONVEX_PUBLIC_URL=https://convex.movies.home.arpa`. Every browser and phone must trust
 Caddy's local root CA: copy `pki/authorities/local/root.crt` from Caddy's data folder (such as
 `/var/lib/caddy/.local/share/caddy` on NixOS) to each device and install it as a trusted root.
@@ -188,7 +188,7 @@ docker compose exec -u movies movies vainfo --display drm --device /dev/dri/rend
 | Database, file storage, Convex secrets | `convex-data` volume                  | `/var/lib/movies/convex`       |
 | Service state and caches               | `movies-data` volume, `/data/media`   | `/var/lib/movies/media`        |
 | Nightly backups                        | `movies-data` volume, `/data/backups` | `/var/lib/movies/backups`      |
-| `movies` CLI logins                    | `movies-data` volume, `/data/config`  | each user's `~/.config/movies` |
+| `media` CLI logins                     | `movies-data` volume, `/data/config`  | each user's `~/.config/movies` |
 | Transcode segments (disposable)        | `movies-transcode` volume             | `/var/cache/movies/transcode`  |
 | Your library                           | read-only bind mounts under `/media`  | `libraryDirs`, read-only       |
 
@@ -203,7 +203,7 @@ plus a few GB per stream.
 
 Every night at 03:00 UTC the media service exports the whole database, file storage included,
 into the backup folder and keeps `BACKUP_RETENTION_DAYS` (14) days. Each upgrade backs up first.
-Back up now with Admin → Backups or `movies backup --wait`.
+Back up now with Admin → Backups or `media backup --wait`.
 
 Copy the archives off the box with your usual tool (restic, borg, rsync) from the backup folder.
 They hold password hashes, so store them as carefully as the server. Restoring, including onto a
@@ -215,12 +215,12 @@ Compose: keep the checkout and the image on the same release, since `compose.yam
 Convex backend that release's image was built for (the image logs a warning when they differ).
 
 ```sh
-cd movies && git fetch --tags && git checkout v0.2.0
-# in deploy/compose/.env: MOVIES_IMAGE=ghcr.io/lmdevv/movies:0.2.0
+cd media && git fetch --tags && git checkout v0.2.0
+# in deploy/compose/.env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.2.0
 cd deploy/compose && docker compose pull && docker compose up -d
 ```
 
-For the edge, `git pull` on `main` with `MOVIES_IMAGE=ghcr.io/lmdevv/movies:main`.
+For the edge, `git pull` on `main` with `MEDIA_IMAGE=ghcr.io/lmdevv/media:main`.
 
 NixOS: `nix flake update movies && nixos-rebuild switch` (or move the pinned tag). Both back up
 before the new version deploys its functions; `docs/operations.md` ("Upgrading") covers rolling

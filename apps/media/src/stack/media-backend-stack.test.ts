@@ -1,7 +1,7 @@
 import { assert, describe, layer } from "@effect/vitest";
 import { Duration, Effect, Fiber, Layer, Redacted, Schedule, Stream } from "effect";
 
-import { TransportError } from "@movies/sdk/effect";
+import { TransportError } from "@media/sdk/effect";
 
 import * as MediaBackend from "../convex/media-backend.ts";
 import { findMediaStack } from "../testing/stack-processes.ts";

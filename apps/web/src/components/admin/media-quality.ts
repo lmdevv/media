@@ -1,4 +1,4 @@
-import type { LibraryFile } from "@movies/contracts/models/catalog";
+import type { LibraryFile } from "@media/contracts/models/catalog";
 
 const CODEC_LABELS = new Map([
   ["h264", "H.264"],

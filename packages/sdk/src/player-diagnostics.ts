@@ -9,8 +9,8 @@ import {
   type PlayerEngine,
   type RecoveryAction,
   type StartupStages,
-} from "@movies/contracts/diagnostics";
-import type { PlaybackSessionId } from "@movies/contracts/ids";
+} from "@media/contracts/diagnostics";
+import type { PlaybackSessionId } from "@media/contracts/ids";
 import {
   Array as Arr,
   Clock,

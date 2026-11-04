@@ -1,4 +1,4 @@
-import type { Episode } from "@movies/contracts/models/catalog";
+import type { Episode } from "@media/contracts/models/catalog";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { Ellipsis, Play } from "lucide-react-native";

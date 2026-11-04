@@ -1,7 +1,7 @@
-import type { JobId } from "@movies/contracts/ids";
-import type { Job } from "@movies/contracts/models/jobs";
-import { Auth, ConvexTransport, Movies, MoviesClient, TokenStorage } from "@movies/sdk/effect";
-import type { TransportError } from "@movies/sdk/effect";
+import type { JobId } from "@media/contracts/ids";
+import type { Job } from "@media/contracts/models/jobs";
+import { Auth, ConvexTransport, Movies, MoviesClient, TokenStorage } from "@media/sdk/effect";
+import type { TransportError } from "@media/sdk/effect";
 import type { Context, Duration, Scope } from "effect";
 import { Effect, Layer, Option, Redacted, Stream } from "effect";
 

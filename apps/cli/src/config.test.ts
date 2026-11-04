@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { TokenStorage } from "@movies/sdk/effect";
+import { TokenStorage } from "@media/sdk/effect";
 import { Context, Effect, Layer, Option, Redacted } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -30,7 +30,7 @@ const config: StoredConfig = {
 };
 
 describe("target resolution", () => {
-  it("prefers the flag, then MOVIES_PROFILE, then the stored default", () => {
+  it("prefers the flag, then MEDIA_PROFILE, then the stored default", () => {
     expect(resolveTarget(config, env({}), Option.none()).name).toBe("home");
     expect(resolveTarget(config, env({ profile: Option.some("work") }), Option.none()).name).toBe(
       "work",
@@ -55,7 +55,7 @@ describe("target resolution", () => {
     expect(target.apiKeyFromEnvironment).toBe(true);
   });
 
-  it("keeps the stored profile's credentials away from another server in MOVIES_CONVEX_URL", () => {
+  it("keeps the stored profile's credentials away from another server in MEDIA_CONVEX_URL", () => {
     const target = resolveTarget(
       config,
       env({ convexUrl: Option.some("https://other.example/convex") }),
@@ -69,7 +69,7 @@ describe("target resolution", () => {
     expect(target.sessionStorage).toBe("memory");
   });
 
-  it("uses the stored profile when MOVIES_CONVEX_URL names its server", () => {
+  it("uses the stored profile when MEDIA_CONVEX_URL names its server", () => {
     const target = resolveTarget(
       config,
       env({ convexUrl: Option.some("https://home.example/convex") }),

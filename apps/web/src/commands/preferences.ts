@@ -1,4 +1,4 @@
-import type { CommandItem } from "@movies/ui/lib/command-menu";
+import type { CommandItem } from "@media/ui/lib/command-menu";
 import { LogOutIcon, MonitorIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useMemo } from "react";

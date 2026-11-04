@@ -1,6 +1,6 @@
-import { LibraryId } from "@movies/contracts/ids";
-import type { LibraryFile } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
+import { LibraryId } from "@media/contracts/ids";
+import type { LibraryFile } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
 import { Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { FileQuestion, FileWarning } from "lucide-react-native";

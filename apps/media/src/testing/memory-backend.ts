@@ -1,4 +1,4 @@
-import type { CallError } from "@movies/sdk/effect";
+import type { CallError } from "@media/sdk/effect";
 import { Effect, Layer, Stream } from "effect";
 
 import * as MediaBackend from "../convex/media-backend.ts";

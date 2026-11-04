@@ -10,9 +10,9 @@ import {
   type TimelineEntry,
   type TimelineKind,
   summarizeDrift,
-} from "@movies/contracts/diagnostics";
-import { PlaybackSessionId, UserId } from "@movies/contracts/ids";
-import { EpochMillis } from "@movies/contracts/units";
+} from "@media/contracts/diagnostics";
+import { PlaybackSessionId, UserId } from "@media/contracts/ids";
+import { EpochMillis } from "@media/contracts/units";
 import { LogLevel, Option, Predicate, type Schema } from "effect";
 
 import type { StreamEndReason } from "../playback/playback-reporter.ts";
@@ -465,7 +465,7 @@ const missingEvidence = (
     ...(fromPlayer || dropsInfo
       ? []
       : [
-          "The player sent no diagnostics: an app from before diagnostics, a player that does not report them (mpv or VLC through movies play), or events lost on the way. Stalls and player errors are unknown.",
+          "The player sent no diagnostics: an app from before diagnostics, a player that does not report them (mpv or VLC through media play), or events lost on the way. Stalls and player errors are unknown.",
         ]),
     ...(direct
       ? ["Direct play serves byte ranges, which are not timed; only failed requests show."]

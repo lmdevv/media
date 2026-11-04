@@ -1,8 +1,8 @@
-import type { Backup } from "@movies/contracts/models/jobs";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { Skeleton } from "@movies/ui/components/skeleton";
-import { cn } from "@movies/ui/lib/utils";
+import type { Backup } from "@media/contracts/models/jobs";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { Skeleton } from "@media/ui/components/skeleton";
+import { cn } from "@media/ui/lib/utils";
 import { UploadIcon } from "lucide-react";
 import { useState } from "react";
 

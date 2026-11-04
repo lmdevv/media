@@ -1,4 +1,4 @@
-import { TitleKind } from "@movies/contracts/models/catalog";
+import { TitleKind } from "@media/contracts/models/catalog";
 import { useLocalSearchParams } from "expo-router";
 import { Option, Schema } from "effect";
 import { Tags } from "lucide-react-native";

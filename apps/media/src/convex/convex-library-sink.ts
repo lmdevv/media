@@ -1,5 +1,5 @@
-import type { LibraryId } from "@movies/contracts/ids";
-import type { UpsertedFile } from "@movies/contracts/models/scan";
+import type { LibraryId } from "@media/contracts/ids";
+import type { UpsertedFile } from "@media/contracts/models/scan";
 import { Context, Effect, Layer, Option, Ref, Stream } from "effect";
 
 import * as ArtworkKeys from "../artwork/artwork-keys.ts";
@@ -21,7 +21,7 @@ export interface ProgressInterface {
 
 /** Scan progress as the sink last saw it, for job lease renewals. */
 export class ScanProgress extends Context.Service<ScanProgress, ProgressInterface>()(
-  "@movies/media/ScanProgress",
+  "@media/server/ScanProgress",
 ) {}
 
 const failed =

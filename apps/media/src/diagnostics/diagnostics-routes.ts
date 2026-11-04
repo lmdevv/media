@@ -1,7 +1,7 @@
-import { type LogQuery, MAX_LOG_LIMIT } from "@movies/contracts/diagnostics";
-import { NotFound, RateLimited } from "@movies/contracts/errors";
-import { EpochMillis } from "@movies/contracts/units";
-import type { Viewer } from "@movies/contracts/models/account";
+import { type LogQuery, MAX_LOG_LIMIT } from "@media/contracts/diagnostics";
+import { NotFound, RateLimited } from "@media/contracts/errors";
+import { EpochMillis } from "@media/contracts/units";
+import type { Viewer } from "@media/contracts/models/account";
 import {
   Clock,
   Duration,

@@ -156,7 +156,7 @@ const itemLabel = (item: FlagType): string =>
     Json: () => "json",
   });
 
-/** A short type label for `movies commands`. */
+/** A short type label for `media commands`. */
 export const flagTypeLabel = (spec: FlagSpec): string =>
   FlagType.$match(spec.type, {
     Text: () => (isIdField(spec.key) ? "id" : "text"),

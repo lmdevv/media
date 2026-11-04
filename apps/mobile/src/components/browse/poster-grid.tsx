@@ -1,4 +1,4 @@
-import type { TitleCard } from "@movies/contracts/models/catalog";
+import type { TitleCard } from "@media/contracts/models/catalog";
 import type { ReactElement } from "react";
 import { ActivityIndicator, FlatList, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

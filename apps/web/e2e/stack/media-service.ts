@@ -2,7 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { MEDIA_ROUTES } from "@movies/contracts/media-playback";
+import { MEDIA_ROUTES } from "@media/contracts/media-playback";
 
 import { isConnected } from "./media-health";
 import type { StackEnv } from "./stack-env";

@@ -1,6 +1,6 @@
 /**
  * The media service's playback API as data: routes, requests, responses, and the tagged errors it
- * answers with. `@movies/contracts/media-api` builds the media service's HttpApi from these, and
+ * answers with. `@media/contracts/media-api` builds the media service's HttpApi from these, and
  * clients decode the same schemas, so both sides share one definition. Only stable Effect modules
  * are used here, so browser bundles and the SDK can import it.
  *

@@ -1,11 +1,11 @@
 {
-  "extends": "@movies/config/tsconfig.base.json",
+  "extends": "@media/config/tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": [],
     "paths": {
-      "@movies/ui/*": ["./src/*"]
+      "@media/ui/*": ["./src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],

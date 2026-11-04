@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 
-import { BackupId } from "@movies/contracts/ids";
+import { BackupId } from "@media/contracts/ids";
 import { Effect, Layer, Option, Predicate, Redacted } from "effect";
 import type { Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

@@ -1,7 +1,7 @@
-import type { LibraryId } from "@movies/contracts/ids";
-import type { Job } from "@movies/contracts/models/jobs";
-import { folderTroubleOf } from "@movies/contracts/scan-failure";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { LibraryId } from "@media/contracts/ids";
+import type { Job } from "@media/contracts/models/jobs";
+import { folderTroubleOf } from "@media/contracts/scan-failure";
+import { useCommandQuery } from "@media/sdk/react";
 import { useMemo } from "react";
 
 const RECENT_SCANS = 100;

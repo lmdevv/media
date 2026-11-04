@@ -1,4 +1,4 @@
-import { DeviceId, RoomId } from "@movies/contracts/ids";
+import { DeviceId, RoomId } from "@media/contracts/ids";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 

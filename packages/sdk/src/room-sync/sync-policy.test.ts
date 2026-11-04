@@ -1,6 +1,6 @@
-import type { ClockAnchor } from "@movies/contracts/clock";
-import { targetPosition } from "@movies/contracts/clock";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
+import type { ClockAnchor } from "@media/contracts/clock";
+import { targetPosition } from "@media/contracts/clock";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
 import { Option } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";

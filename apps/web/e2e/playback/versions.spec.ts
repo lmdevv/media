@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { MediaFileId, TitleId } from "@movies/contracts/ids";
+import type { MediaFileId, TitleId } from "@media/contracts/ids";
 import { devices, expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 

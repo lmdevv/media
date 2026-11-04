@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-import { MediaFileId, type LibraryId } from "@movies/contracts/ids";
-import { MediaFileNotFound } from "@movies/contracts/media-playback";
+import { MediaFileId, type LibraryId } from "@media/contracts/ids";
+import { MediaFileNotFound } from "@media/contracts/media-playback";
 import { Context, Effect, Layer, Ref } from "effect";
 
 import * as FileResolver from "../playback/file-resolver.ts";
@@ -24,7 +24,7 @@ export interface Interface {
 }
 
 /** The in-memory library store. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/MemoryLibrary") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/MemoryLibrary") {}
 
 interface State {
   readonly files: ReadonlyMap<MediaFileId, StoredFile>;

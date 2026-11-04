@@ -1,6 +1,6 @@
-import { MediaFileId, PlaybackSessionId } from "@movies/contracts/ids";
-import type { SessionStatus } from "@movies/contracts/models/scan";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
+import { MediaFileId, PlaybackSessionId } from "@media/contracts/ids";
+import type { SessionStatus } from "@media/contracts/models/scan";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
 import { Clock, Context, Effect, Layer, Stream, SubscriptionRef } from "effect";
 
 import type * as MediaBackend from "../convex/media-backend.ts";
@@ -20,7 +20,7 @@ export interface Interface {
 
 /** The scripted Convex. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/test/TestConvex",
+  "@media/server/test/TestConvex",
 ) {}
 
 interface Play {

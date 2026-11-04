@@ -1,6 +1,6 @@
-import { TextField } from "@movies/ui/components/text-field";
-import { Wordmark } from "@movies/ui/components/wordmark";
-import { cn } from "@movies/ui/lib/utils";
+import { TextField } from "@media/ui/components/text-field";
+import { Wordmark } from "@media/ui/components/wordmark";
+import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { CheckIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import { useState } from "react";

@@ -3,7 +3,7 @@
 Plain TypeScript with `v` validators; no Effect here. Each public function authorizes first with
 `authorize(ctx, scope)` from `lib/viewer.ts`. Profile, PIN, library, and rating checks go through
 `lib/access.ts`; results are built by `lib/present.ts` against the validators in
-`lib/validators.ts`, which mirror `@movies/contracts`. `lib/bounds.ts` enforces the contracts'
+`lib/validators.ts`, which mirror `@media/contracts`. `lib/bounds.ts` enforces the contracts'
 length and range bounds that validators cannot express, and holds the constants shared with
 contracts; `lib/roots.ts` keeps library folders apart.
 
@@ -27,8 +27,8 @@ contracts; `lib/roots.ts` keeps library folders apart.
 
 - `pnpm test` runs `test/registry.test.ts`: every registry command against its function's
   validators, plus the shared constants and token vectors. No backend needed.
-- `pnpm --filter @movies/backend test:stack` runs `test/stack.test.ts` against the worktree's
+- `pnpm --filter @media/backend test:stack` runs `test/stack.test.ts` against the worktree's
   stack from `scripts/dev-stack.sh up`. It reads the URL and the media service's credentials from
   the `.env.local` files that script writes, or from `CONVEX_SELF_HOSTED_URL`,
-  `MEDIA_SERVICE_API_KEY`, and `PLAYBACK_TOKEN_SECRET`. Without `MOVIES_STACK_TESTS=1` (which the
+  `MEDIA_SERVICE_API_KEY`, and `PLAYBACK_TOKEN_SECRET`. Without `MEDIA_STACK_TESTS=1` (which the
   `test:stack` script sets) the suite is skipped, so running Vitest directly skips it too.

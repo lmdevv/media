@@ -30,7 +30,7 @@ jobs:
       - run: pnpm --filter mobile bundle
       - run: scripts/check-deploy.sh
       - run: pnpm --filter @lmdevv/movies build:sea
-      - run: test "$(apps/cli/dist/sea/movies-linux-x64 --version)" = "$(scripts/check-version.sh)"
+      - run: test "$(apps/cli/dist/sea/media-linux-x64 --version)" = "$(scripts/check-version.sh)"
 
   legacy-music:
     name: legacy/music checks
@@ -72,13 +72,13 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pnpm install --frozen-lockfile
       - run: scripts/dev-stack.sh up
-      - run: pnpm --filter @movies/backend test:stack
-      - run: pnpm --filter @movies/sdk test:stack
+      - run: pnpm --filter @media/backend test:stack
+      - run: pnpm --filter @media/sdk test:stack
       - run: pnpm --filter @lmdevv/movies test:stack
       - run: docker pull jellyfin/jellyfin:12.2@sha256:357724bf0ae27a672c7cbaa899db2d9abeb13dbd8657ccce750258a4c059d037
-      - run: pnpm --filter @movies/media test:stack
+      - run: pnpm --filter @media/server test:stack
         env:
-          MOVIES_JELLYFIN_DOCKER: "1"
+          MEDIA_JELLYFIN_DOCKER: "1"
       - if: always()
         run: scripts/dev-stack.sh destroy
 
@@ -101,7 +101,7 @@ jobs:
       - run: docker pull jellyfin/jellyfin:12.2@sha256:357724bf0ae27a672c7cbaa899db2d9abeb13dbd8657ccce750258a4c059d037
       - run: pnpm --filter web exec playwright test
         env:
-          MOVIES_JELLYFIN_DOCKER: "1"
+          MEDIA_JELLYFIN_DOCKER: "1"
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

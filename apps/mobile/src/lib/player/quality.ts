@@ -1,4 +1,4 @@
-import type { PlaybackQuality } from "@movies/contracts/media-playback";
+import type { PlaybackQuality } from "@media/contracts/media-playback";
 
 /** A quality the viewer can choose. */
 export type QualityChoice = "auto" | "1080p" | "720p" | "480p";

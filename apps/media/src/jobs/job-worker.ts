@@ -1,8 +1,8 @@
 import { hostname } from "node:os";
 
-import type { JobId } from "@movies/contracts/ids";
-import type { Job, JobKind, JobProgress } from "@movies/contracts/models/jobs";
-import type { ClaimedJob } from "@movies/contracts/models/scan";
+import type { JobId } from "@media/contracts/ids";
+import type { Job, JobKind, JobProgress } from "@media/contracts/models/jobs";
+import type { ClaimedJob } from "@media/contracts/models/scan";
 import {
   Cause,
   Crypto,

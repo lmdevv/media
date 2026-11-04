@@ -1,16 +1,16 @@
-import type { CollectionId, ProfileId, TitleId } from "@movies/contracts/ids";
+import type { CollectionId, ProfileId, TitleId } from "@media/contracts/ids";
 import type {
   Credit,
   CreditKind,
   Ratings,
   TitleDetail,
   Trailer,
-} from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
-import { Avatar } from "@movies/ui/components/avatar";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { MediaRow } from "@movies/ui/components/media-row";
-import { cn } from "@movies/ui/lib/utils";
+} from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
+import { Avatar } from "@media/ui/components/avatar";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { MediaRow } from "@media/ui/components/media-row";
+import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRightIcon, ClapperboardIcon, StarIcon } from "lucide-react";
 import { Fragment, useRef, useState } from "react";

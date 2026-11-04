@@ -1,9 +1,9 @@
-import { targetPosition } from "@movies/contracts/clock";
-import type { EpisodeId } from "@movies/contracts/ids";
-import type { SeasonEpisode } from "@movies/contracts/models/catalog";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
-import type { Playback } from "@movies/sdk/effect";
-import { useCommandQuery, useMoviesRuntime, usePlaybackSession } from "@movies/sdk/react";
+import { targetPosition } from "@media/contracts/clock";
+import type { EpisodeId } from "@media/contracts/ids";
+import type { SeasonEpisode } from "@media/contracts/models/catalog";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
+import type { Playback } from "@media/sdk/effect";
+import { useCommandQuery, useMoviesRuntime, usePlaybackSession } from "@media/sdk/react";
 import * as Brightness from "expo-brightness";
 import { useKeepAwake } from "expo-keep-awake";
 import * as Network from "expo-network";

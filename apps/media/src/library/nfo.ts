@@ -1,4 +1,4 @@
-import { YOUTUBE_KEY_PATTERN } from "@movies/contracts/models/catalog";
+import { YOUTUBE_KEY_PATTERN } from "@media/contracts/models/catalog";
 import { Schema } from "effect";
 
 import { childrenNamed, childText, parseXml, type XmlElement } from "./xml.ts";

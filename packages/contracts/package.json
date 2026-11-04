@@ -1,5 +1,5 @@
 {
-  "name": "@movies/contracts",
+  "name": "@media/contracts",
   "version": "0.2.0",
   "private": true,
   "description": "Effect Schema DTOs, errors, the media HttpApi, and typed plugin interfaces.",
@@ -35,7 +35,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@movies/config": "workspace:*",
+    "@media/config": "workspace:*",
     "fast-check": "4.10.2",
     "typescript": "catalog:",
     "vitest": "5.0.3"

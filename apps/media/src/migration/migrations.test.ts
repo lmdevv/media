@@ -1,6 +1,6 @@
-import { ProfileId, UserId } from "@movies/contracts/ids";
-import type { SourceUser } from "@movies/contracts/models/migration";
-import type { MigrationTarget } from "@movies/contracts/models/migration-service";
+import { ProfileId, UserId } from "@media/contracts/ids";
+import type { SourceUser } from "@media/contracts/models/migration";
+import type { MigrationTarget } from "@media/contracts/models/migration-service";
 import { assert, describe, it } from "@effect/vitest";
 
 import { resolveUsers, suggestProfile } from "./migrations.ts";

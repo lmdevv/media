@@ -1,14 +1,14 @@
-import { mediaServiceFunctions } from "@movies/contracts/media-service";
-import type { MediaServiceFunctions } from "@movies/contracts/media-service";
-import { InvalidArgs } from "@movies/contracts/errors";
+import { mediaServiceFunctions } from "@media/contracts/media-service";
+import type { MediaServiceFunctions } from "@media/contracts/media-service";
+import { InvalidArgs } from "@media/contracts/errors";
 import {
   Auth,
   ConvexTransport,
   ProtocolError,
   TokenStorage,
   TransportError,
-} from "@movies/sdk/effect";
-import type { CallError } from "@movies/sdk/effect";
+} from "@media/sdk/effect";
+import type { CallError } from "@media/sdk/effect";
 import {
   Clock,
   Context,
@@ -68,7 +68,7 @@ export interface Interface {
 }
 
 /** The Convex connection. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/MediaBackend") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/MediaBackend") {}
 
 /** Where to connect and as whom. */
 export interface Options {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { ArtworkWidth } from "@movies/contracts/artwork";
+import type { ArtworkWidth } from "@media/contracts/artwork";
 import {
   Cache,
   Clock,
@@ -55,7 +55,7 @@ export interface Interface {
 }
 
 /** The artwork store. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/ArtworkStore") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/ArtworkStore") {}
 
 const ALLOWED_HOSTS: ReadonlySet<string> = new Set(["image.tmdb.org"]);
 

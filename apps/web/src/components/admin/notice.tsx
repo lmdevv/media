@@ -1,4 +1,4 @@
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import { TriangleAlertIcon } from "lucide-react";
 import type { ReactNode } from "react";
 

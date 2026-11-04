@@ -3,7 +3,7 @@ import { assert, describe, layer } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path } from "effect";
 
 import * as DiskCache from "../disk-cache.ts";
-import { MediaFileId } from "@movies/contracts/ids";
+import { MediaFileId } from "@media/contracts/ids";
 import { probeFile } from "../media/media-probe.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";

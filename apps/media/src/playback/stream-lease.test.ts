@@ -16,13 +16,13 @@ import {
 } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
-import type { LogRecord } from "@movies/contracts/diagnostics";
+import type { LogRecord } from "@media/contracts/diagnostics";
 import {
   type ClientCapabilities,
   HealthResponse,
   NegotiateResponse,
   StreamId,
-} from "@movies/contracts/media-playback";
+} from "@media/contracts/media-playback";
 
 import { writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";

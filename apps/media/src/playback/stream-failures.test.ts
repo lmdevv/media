@@ -8,9 +8,9 @@ import {
   type ClientCapabilities,
   NegotiateResponse,
   SeekResponse,
-} from "@movies/contracts/media-playback";
+} from "@media/contracts/media-playback";
 
-import { LibraryId, PlaybackSessionId } from "@movies/contracts/ids";
+import { LibraryId, PlaybackSessionId } from "@media/contracts/ids";
 
 import { timelineOf } from "../diagnostics/timeline.ts";
 

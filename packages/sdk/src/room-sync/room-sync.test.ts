@@ -2,12 +2,12 @@ import {
   MEMBER_PRESENCE_TIMEOUT_MS,
   PLAYER_SILENCE_MS,
   targetPosition,
-} from "@movies/contracts/clock";
-import { DeviceId, MediaFileId } from "@movies/contracts/ids";
-import type { RoomClock } from "@movies/contracts/models/rooms";
-import type { RoomNext } from "@movies/contracts/models/rooms";
-import { Room, RoomClock as RoomClockSchema } from "@movies/contracts/models/rooms";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
+} from "@media/contracts/clock";
+import { DeviceId, MediaFileId } from "@media/contracts/ids";
+import type { RoomClock } from "@media/contracts/models/rooms";
+import type { RoomNext } from "@media/contracts/models/rooms";
+import { Room, RoomClock as RoomClockSchema } from "@media/contracts/models/rooms";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
 import { Deferred, Effect, Fiber, Layer, Option, Schema } from "effect";
 import type { Scope } from "effect";
 import { TestClock } from "effect/testing";

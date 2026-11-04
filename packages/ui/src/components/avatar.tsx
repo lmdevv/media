@@ -1,5 +1,5 @@
-import { monogramOf } from "@movies/ui/lib/monogram";
-import { cn } from "@movies/ui/lib/utils";
+import { monogramOf } from "@media/ui/lib/monogram";
+import { cn } from "@media/ui/lib/utils";
 import { PencilIcon } from "lucide-react";
 
 const SIZES = {

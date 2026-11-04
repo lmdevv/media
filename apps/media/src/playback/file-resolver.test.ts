@@ -2,8 +2,8 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path } from "effect";
 
-import { MediaFileId } from "@movies/contracts/ids";
-import { MediaFileNotFound } from "@movies/contracts/media-playback";
+import { MediaFileId } from "@media/contracts/ids";
+import { MediaFileNotFound } from "@media/contracts/media-playback";
 import { testConfigLayer } from "../testing/test-config.ts";
 import { sidecarTrackId } from "../subtitles/subtitle-tracks.ts";
 import * as FileResolver from "./file-resolver.ts";

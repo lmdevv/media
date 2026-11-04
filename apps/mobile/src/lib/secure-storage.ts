@@ -1,4 +1,4 @@
-import type { MoviesProviderProps } from "@movies/sdk/react";
+import type { MoviesProviderProps } from "@media/sdk/react";
 import * as SecureStore from "expo-secure-store";
 
 /** Reads `key`, or null when it is unset, cleared, or the keychain is unavailable. */

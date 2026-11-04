@@ -1,9 +1,9 @@
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import type { CommandItem } from "@movies/ui/lib/command-menu";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import type { CommandItem } from "@media/ui/lib/command-menu";
 import { CircleXIcon, DownloadIcon, LoaderIcon } from "lucide-react";
 import { useMemo } from "react";
 
-import { SOURCE_NAMES, importFraction } from "@movies/contracts/migration-plan";
+import { SOURCE_NAMES, importFraction } from "@media/contracts/migration-plan";
 
 import { PHASE_LABELS } from "@/components/migration/migration-model";
 import { toastFailure } from "@/lib/failure";

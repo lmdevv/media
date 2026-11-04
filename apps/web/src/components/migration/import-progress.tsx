@@ -1,9 +1,9 @@
-import { SOURCE_NAMES, importFraction, importMinutesLeft } from "@movies/contracts/migration-plan";
-import type { MigrationRun } from "@movies/contracts/models/migration";
-import { useCommand } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { ProgressBar } from "@movies/ui/components/progress-bar";
+import { SOURCE_NAMES, importFraction, importMinutesLeft } from "@media/contracts/migration-plan";
+import type { MigrationRun } from "@media/contracts/models/migration";
+import { useCommand } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { ProgressBar } from "@media/ui/components/progress-bar";
 import { Link } from "@tanstack/react-router";
 
 import { useAction } from "@/components/admin/action";

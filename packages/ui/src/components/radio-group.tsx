@@ -1,6 +1,6 @@
 import { Radio } from "@base-ui/react/radio";
 import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 
 /** A group of {@link RadioItem}s; control it with `value` and `onValueChange`. */
 export function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {

@@ -1,11 +1,11 @@
-import type { JobId, LibraryId, ProfileId } from "@movies/contracts/ids";
+import type { JobId, LibraryId, ProfileId } from "@media/contracts/ids";
 import type {
   MigrationConnection,
   MigrationCredentials,
   MigrationReport,
   UserMapping,
-} from "@movies/contracts/models/migration";
-import type { ConvexTransport, Movies } from "@movies/sdk/effect";
+} from "@media/contracts/models/migration";
+import type { ConvexTransport, Movies } from "@media/sdk/effect";
 import { Effect, Exit, Option, Predicate, Redacted, Schema, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -44,8 +44,7 @@ const stack = findMediaStack();
 
 const hasFfmpeg = await ffmpegAvailable();
 
-const withDocker =
-  process.env["MOVIES_JELLYFIN_DOCKER"] === "1" && (await jellyfinImageAvailable());
+const withDocker = process.env["MEDIA_JELLYFIN_DOCKER"] === "1" && (await jellyfinImageAvailable());
 
 const id = Math.random().toString(36).slice(2, 8);
 
@@ -367,10 +366,10 @@ describe.skipIf(stack === undefined || !hasFfmpeg)(
       expect(unreachable).toMatchObject({ status: "failed", reason: "unreachable" });
     });
 
-    it("imports the same server again through the movies CLI without duplicates", async () => {
+    it("imports the same server again through the media CLI without duplicates", async () => {
       const before = await summaryOf(profiles.admin);
       const home = await makeTempDir("movies-migration-cli-");
-      const env = { XDG_CONFIG_HOME: home, HOME: home, MOVIES_IMPORT_TOKEN: FIXTURE_API_KEY };
+      const env = { XDG_CONFIG_HOME: home, HOME: home, MEDIA_IMPORT_TOKEN: FIXTURE_API_KEY };
 
       try {
         const login = async (email: string) =>
@@ -431,7 +430,7 @@ describe.skipIf(stack === undefined || !hasFfmpeg)(
 
         const refused = await runMovies(
           ["import", "jellyfin", "--url", jellyfinFixture.url, "--dry-run"],
-          { ...env, MOVIES_IMPORT_TOKEN: "wrong" },
+          { ...env, MEDIA_IMPORT_TOKEN: "wrong" },
         );
 
         expect(refused.code).toBe(11);

@@ -1,6 +1,6 @@
-import type { HistoryEntry } from "@movies/contracts/models/catalog";
-import type { Cursor as CursorSchema } from "@movies/contracts/models/common";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { HistoryEntry } from "@media/contracts/models/catalog";
+import type { Cursor as CursorSchema } from "@media/contracts/models/common";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { router, useFocusEffect } from "expo-router";
 import { Ellipsis, History as HistoryIcon, Play } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

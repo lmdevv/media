@@ -1,12 +1,12 @@
-import type { DeviceId, EpisodeId, MediaFileId, ProfileId, TitleId } from "@movies/contracts/ids";
+import type { DeviceId, EpisodeId, MediaFileId, ProfileId, TitleId } from "@media/contracts/ids";
 import {
   type ClientCapabilities,
   type DownloadQuality,
   MEDIA_ROUTES,
   PrepareDownloadRequest,
   PrepareDownloadResponse,
-} from "@movies/contracts/media-playback";
-import type { StartedPlayback } from "@movies/contracts/models/playback";
+} from "@media/contracts/media-playback";
+import type { StartedPlayback } from "@media/contracts/models/playback";
 import { Effect, Option, Redacted } from "effect";
 
 import { encodeJson, mediaUrl, requestPlayback, withRenewedToken } from "./media-http";

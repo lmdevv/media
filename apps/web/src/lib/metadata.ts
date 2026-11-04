@@ -5,7 +5,7 @@ import {
   type Ratings,
   type TitleKind,
   YOUTUBE_KEY_PATTERN,
-} from "@movies/contracts/models/catalog";
+} from "@media/contracts/models/catalog";
 
 /** One site's score, ready to draw. */
 export interface Score {

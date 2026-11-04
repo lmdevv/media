@@ -1,7 +1,7 @@
-import type { ClientCapabilities, NegotiateResponse } from "@movies/contracts/media-playback";
-import { PlaybackApiError } from "@movies/contracts/media-playback";
-import type { CallError, PlaybackCallError } from "@movies/sdk/effect";
-import { Playback } from "@movies/sdk/effect";
+import type { ClientCapabilities, NegotiateResponse } from "@media/contracts/media-playback";
+import { PlaybackApiError } from "@media/contracts/media-playback";
+import type { CallError, PlaybackCallError } from "@media/sdk/effect";
+import { Playback } from "@media/sdk/effect";
 import { Data, Match, Predicate, Schema, Struct } from "effect";
 
 /** Where playback ends up when it cannot continue. */

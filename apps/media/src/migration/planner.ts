@@ -1,22 +1,22 @@
-import type { LibraryId, ProfileId } from "@movies/contracts/ids";
-import type { LibraryKind } from "@movies/contracts/models/catalog";
+import type { LibraryId, ProfileId } from "@media/contracts/ids";
+import type { LibraryKind } from "@media/contracts/models/catalog";
 import type {
   MigrationReport,
   MigrationSummary,
   PathMapping,
   PlannedLibraryAccess,
   UnmatchedReason,
-} from "@movies/contracts/models/migration";
+} from "@media/contracts/models/migration";
 import type {
   CatalogFile,
   CollectionImport,
   LocalProgress,
   OverrideImport,
   WatchStateImport,
-} from "@movies/contracts/models/migration-service";
-import type { MediaLibrary } from "@movies/contracts/models/scan";
-import type { MigrationSource } from "@movies/contracts/models/jobs";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
+} from "@media/contracts/models/migration-service";
+import type { MediaLibrary } from "@media/contracts/models/scan";
+import type { MigrationSource } from "@media/contracts/models/jobs";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
 
 import { indexCatalog, ItemMatch, matchItems } from "./matching.ts";
 import { isInside, toLocalPath } from "./paths.ts";

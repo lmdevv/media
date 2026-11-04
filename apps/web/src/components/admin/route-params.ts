@@ -1,4 +1,4 @@
-import { LibraryId, TitleId } from "@movies/contracts/ids";
+import { LibraryId, TitleId } from "@media/contracts/ids";
 import { Schema } from "effect";
 
 /** Parses a `$libraryId` route parameter; an empty one fails the route. */

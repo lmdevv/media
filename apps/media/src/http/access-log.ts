@@ -6,7 +6,7 @@
  * query string, which carries playback tokens, and is cut to 128 characters. A handler that died
  * still logs at ERROR with its cause: that is a bug in the service, not traffic.
  */
-import { REQUEST_ID_HEADER } from "@movies/contracts/request-id";
+import { REQUEST_ID_HEADER } from "@media/contracts/request-id";
 import { Cause, Clock, Crypto, Effect, Exit } from "effect";
 import {
   HttpEffect,

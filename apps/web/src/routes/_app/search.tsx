@@ -1,9 +1,9 @@
-import type { ProfileId } from "@movies/contracts/ids";
-import type { TitleCard, TitleKind } from "@movies/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Chip } from "@movies/ui/components/chip";
-import { LandscapeCard } from "@movies/ui/components/media-card";
-import { cn } from "@movies/ui/lib/utils";
+import type { ProfileId } from "@media/contracts/ids";
+import type { TitleCard, TitleKind } from "@media/contracts/models/catalog";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Chip } from "@media/ui/components/chip";
+import { LandscapeCard } from "@media/ui/components/media-card";
+import { cn } from "@media/ui/lib/utils";
 import { Link, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
 import { ArrowRightIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
 import { Schema } from "effect";

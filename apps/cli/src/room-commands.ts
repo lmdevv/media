@@ -1,17 +1,17 @@
-import type { ClockOffset } from "@movies/contracts/clock";
+import type { ClockOffset } from "@media/contracts/clock";
 import {
   countdownRemaining,
   estimateClockOffset,
   targetPosition,
   toServerTime,
-} from "@movies/contracts/clock";
-import { commands } from "@movies/contracts/commands";
-import { NotFound } from "@movies/contracts/errors";
-import type { ProfileId } from "@movies/contracts/ids";
-import { EpisodeId, RoomId } from "@movies/contracts/ids";
-import type { Room, RoomClock } from "@movies/contracts/models/rooms";
-import type { EpochMillis, Milliseconds } from "@movies/contracts/units";
-import { Milliseconds as MillisecondsSchema } from "@movies/contracts/units";
+} from "@media/contracts/clock";
+import { commands } from "@media/contracts/commands";
+import { NotFound } from "@media/contracts/errors";
+import type { ProfileId } from "@media/contracts/ids";
+import { EpisodeId, RoomId } from "@media/contracts/ids";
+import type { Room, RoomClock } from "@media/contracts/models/rooms";
+import type { EpochMillis, Milliseconds } from "@media/contracts/units";
+import { Milliseconds as MillisecondsSchema } from "@media/contracts/units";
 import { Clock, Effect, Option, Ref, Stream } from "effect";
 
 import type { Invocation, ShortcutCommand } from "./invocation";

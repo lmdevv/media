@@ -1,5 +1,5 @@
-import type { ClientErrorKind } from "@movies/contracts/diagnostics";
-import { useReportError } from "@movies/sdk/react";
+import type { ClientErrorKind } from "@media/contracts/diagnostics";
+import { useReportError } from "@media/sdk/react";
 import { useCallback, useEffect } from "react";
 
 import packageJson from "../../package.json" with { type: "json" };

@@ -1,5 +1,5 @@
-import { PersonId } from "@movies/contracts/ids";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import { PersonId } from "@media/contracts/ids";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { Option, Schema } from "effect";
 import { useEffect, useState } from "react";

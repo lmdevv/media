@@ -21,7 +21,7 @@ export interface Interface {
 
 /** Hardware transcoding availability. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/HardwareAcceleration",
+  "@media/server/HardwareAcceleration",
 ) {}
 
 const testSource = ["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10:duration=1"];

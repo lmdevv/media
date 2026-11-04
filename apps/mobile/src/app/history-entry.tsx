@@ -1,4 +1,4 @@
-import { useCommand } from "@movies/sdk/react";
+import { useCommand } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { Check, Play, RotateCcw, Trash2 } from "lucide-react-native";
 

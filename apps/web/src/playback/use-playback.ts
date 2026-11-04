@@ -1,4 +1,4 @@
-import { useMoviesRuntime } from "@movies/sdk/react";
+import { useMoviesRuntime } from "@media/sdk/react";
 import { useEffect, useEffectEvent, useMemo, useState, useSyncExternalStore } from "react";
 
 import { browserMediaSupport } from "./browser-support";

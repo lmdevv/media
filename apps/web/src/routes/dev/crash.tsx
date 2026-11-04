@@ -1,4 +1,4 @@
-import { CalmState } from "@movies/ui/components/calm-state";
+import { CalmState } from "@media/ui/components/calm-state";
 import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 

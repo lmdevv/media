@@ -1,4 +1,4 @@
-import type { DeviceScope } from "@movies/contracts/scopes";
+import type { DeviceScope } from "@media/contracts/scopes";
 
 /** What each grantable scope allows, as the key and device screens describe it. */
 export const SCOPE_DESCRIPTIONS: Readonly<Record<DeviceScope, string>> = {

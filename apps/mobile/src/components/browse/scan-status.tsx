@@ -1,6 +1,6 @@
-import type { Job } from "@movies/contracts/models/jobs";
-import type { Library } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { Job } from "@media/contracts/models/jobs";
+import type { Library } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
 import { Folder } from "lucide-react-native";
 import { View } from "react-native";
 

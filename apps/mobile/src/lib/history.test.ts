@@ -1,4 +1,4 @@
-import { HistoryEntry } from "@movies/contracts/models/catalog";
+import { HistoryEntry } from "@media/contracts/models/catalog";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

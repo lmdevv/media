@@ -1,6 +1,6 @@
-import { LibraryId, TitleId } from "@movies/contracts/ids";
-import type { LibraryFile, MetadataCandidate } from "@movies/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import { LibraryId, TitleId } from "@media/contracts/ids";
+import type { LibraryFile, MetadataCandidate } from "@media/contracts/models/catalog";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { Predicate, Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { Check, Search } from "lucide-react-native";

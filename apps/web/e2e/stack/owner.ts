@@ -1,5 +1,5 @@
-import type { CreatedInvite } from "@movies/contracts/models/account";
-import { createMovies } from "@movies/sdk/promise";
+import type { CreatedInvite } from "@media/contracts/models/account";
+import { createMovies } from "@media/sdk/promise";
 
 import type { StackEnv } from "./stack-env";
 

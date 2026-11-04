@@ -1,5 +1,5 @@
-import { NEXT_EPISODE_COUNTDOWN_MS } from "@movies/contracts/clock";
-import type { Episode } from "@movies/contracts/models/catalog";
+import { NEXT_EPISODE_COUNTDOWN_MS } from "@media/contracts/clock";
+import type { Episode } from "@media/contracts/models/catalog";
 
 import { formatRuntime } from "../format";
 

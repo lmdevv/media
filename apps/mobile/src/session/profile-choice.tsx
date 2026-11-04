@@ -1,5 +1,5 @@
-import type { ProfileId } from "@movies/contracts/ids";
-import { useCommand } from "@movies/sdk/react";
+import type { ProfileId } from "@media/contracts/ids";
+import { useCommand } from "@media/sdk/react";
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 

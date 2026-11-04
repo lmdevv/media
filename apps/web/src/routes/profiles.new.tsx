@@ -1,4 +1,4 @@
-import { useCommandQuery } from "@movies/sdk/react";
+import { useCommandQuery } from "@media/sdk/react";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { AuthPage } from "@/components/auth/auth-page";

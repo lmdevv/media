@@ -1,6 +1,6 @@
-import { estimateClockOffset } from "@movies/contracts/clock";
-import type { RoomId } from "@movies/contracts/ids";
-import { useCommand } from "@movies/sdk/react";
+import { estimateClockOffset } from "@media/contracts/clock";
+import type { RoomId } from "@media/contracts/ids";
+import { useCommand } from "@media/sdk/react";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";

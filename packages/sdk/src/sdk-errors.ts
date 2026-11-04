@@ -1,5 +1,5 @@
-import { RequestIdentity } from "@movies/contracts/errors";
-import type { CommandError } from "@movies/contracts/errors";
+import { RequestIdentity } from "@media/contracts/errors";
+import type { CommandError } from "@media/contracts/errors";
 import { Predicate, Schema } from "effect";
 
 /**

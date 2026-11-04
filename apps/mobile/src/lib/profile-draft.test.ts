@@ -1,5 +1,5 @@
-import { AgeRating } from "@movies/contracts/content-rating";
-import { Profile } from "@movies/contracts/models/profiles";
+import { AgeRating } from "@media/contracts/content-rating";
+import { Profile } from "@media/contracts/models/profiles";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

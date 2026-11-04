@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { TokenStorage } from "@movies/sdk/effect";
+import { TokenStorage } from "@media/sdk/effect";
 import { Config, Effect, Layer, Option, Redacted, Result, Schema, Struct } from "effect";
 
 import { ConfigFileError } from "./cli-errors";
@@ -21,7 +21,7 @@ export const StoredProfile = Schema.Struct({
   deviceId: Schema.String,
   /** The viewing profile commands use when `--profile-id` is not given. */
   viewingProfileId: Schema.optionalKey(Schema.String),
-  /** An API key stored by `movies login --api-key`; it signs in again when the session ends. */
+  /** An API key stored by `media login --api-key`; it signs in again when the session ends. */
   apiKey: Schema.optionalKey(Schema.String),
   session: Schema.optionalKey(StoredSession),
 });
@@ -61,14 +61,14 @@ const nonEmpty = (name: string): Config.Config<Option.Option<string>> =>
 /** `https://host/` → `https://host`. */
 export const normalizeUrl = (url: string): string => url.trim().replace(/\/+$/u, "");
 
-/** Reads `XDG_CONFIG_HOME` (or `HOME/.config`) and the `MOVIES_*` overrides. */
+/** Reads `XDG_CONFIG_HOME` (or `HOME/.config`) and the `MEDIA_*` overrides. */
 export const environment: Config.Config<Environment> = Config.all({
   xdg: nonEmpty("XDG_CONFIG_HOME"),
   home: nonEmpty("HOME"),
-  convexUrl: nonEmpty("MOVIES_CONVEX_URL"),
-  mediaUrl: nonEmpty("MOVIES_MEDIA_URL"),
-  apiKey: nonEmpty("MOVIES_API_KEY"),
-  profile: nonEmpty("MOVIES_PROFILE"),
+  convexUrl: nonEmpty("MEDIA_CONVEX_URL"),
+  mediaUrl: nonEmpty("MEDIA_SERVER_URL"),
+  apiKey: nonEmpty("MEDIA_API_KEY"),
+  profile: nonEmpty("MEDIA_PROFILE"),
 }).pipe(
   Config.map(({ xdg, home, convexUrl, mediaUrl, apiKey, profile }) => ({
     configPath: join(
@@ -101,7 +101,7 @@ export const loadConfig = Effect.fn("Config.load")(function* (path: string) {
   if (Result.isFailure(decoded)) {
     return yield* new ConfigFileError({
       path,
-      message: `${path} is not a valid [movies] config; fix it or run movies login again`,
+      message: `${path} is not a valid [movies] config; fix it or run media login again`,
       cause: decoded.failure,
     });
   }
@@ -151,12 +151,12 @@ export interface Target {
   /** The profile's name in the config file. */
   readonly name: string;
   /**
-   * The stored profile, unless `MOVIES_CONVEX_URL` names another server: a profile's device,
+   * The stored profile, unless `MEDIA_CONVEX_URL` names another server: a profile's device,
    * viewing profile, API key, and session belong to its own server and are never sent elsewhere.
    */
   readonly stored: Option.Option<StoredProfile>;
   /**
-   * The stored profile of this name when it belongs to another server than `MOVIES_CONVEX_URL`.
+   * The stored profile of this name when it belongs to another server than `MEDIA_CONVEX_URL`.
    * Commands never replace or clear it.
    */
   readonly shadowed: Option.Option<StoredProfile>;
@@ -164,7 +164,7 @@ export interface Target {
   readonly convexUrl: Option.Option<string>;
   readonly mediaUrl: Option.Option<string>;
   readonly apiKey: Option.Option<Redacted.Redacted>;
-  /** The API key came from `MOVIES_API_KEY`, so its session is not stored. */
+  /** The API key came from `MEDIA_API_KEY`, so its session is not stored. */
   readonly apiKeyFromEnvironment: boolean;
   /**
    * Where the session's tokens live: in the stored profile, or only in memory when the API key

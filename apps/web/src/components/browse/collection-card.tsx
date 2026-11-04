@@ -1,5 +1,5 @@
-import type { Collection } from "@movies/contracts/models/collections";
-import { PosterCard } from "@movies/ui/components/media-card";
+import type { Collection } from "@media/contracts/models/collections";
+import { PosterCard } from "@media/ui/components/media-card";
 import { Link } from "@tanstack/react-router";
 
 import { artworkUrl } from "@/lib/artwork";

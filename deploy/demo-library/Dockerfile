@@ -14,7 +14,7 @@
 FROM scratch
 LABEL org.opencontainers.image.title="[movies] demo library" \
   org.opencontainers.image.description="Creative Commons films and shows for [movies] demos and tests" \
-  org.opencontainers.image.source="https://github.com/lmdevv/movies" \
+  org.opencontainers.image.source="https://github.com/lmdevv/media" \
   org.opencontainers.image.licenses="CC-BY-2.5 AND CC-BY-3.0 AND CC-BY-4.0 AND CC-BY-SA-4.0"
 COPY CREDITS.md /
 COPY ["Movies/Big Buck Bunny (2008)", "/Movies/Big Buck Bunny (2008)/"]

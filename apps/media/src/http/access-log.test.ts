@@ -1,6 +1,6 @@
 import { assert, describe, layer } from "@effect/vitest";
-import type { LogRecord } from "@movies/contracts/diagnostics";
-import { RequestId } from "@movies/contracts/request-id";
+import type { LogRecord } from "@media/contracts/diagnostics";
+import { RequestId } from "@media/contracts/request-id";
 import { Effect, Predicate, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 

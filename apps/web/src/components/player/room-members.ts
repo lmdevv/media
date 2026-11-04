@@ -1,6 +1,6 @@
-import type { DeviceId } from "@movies/contracts/ids";
-import type { Room } from "@movies/contracts/models/rooms";
-import type { RoomMember, RoomMemberStatus } from "@movies/ui/components/room-panel";
+import type { DeviceId } from "@media/contracts/ids";
+import type { Room } from "@media/contracts/models/rooms";
+import type { RoomMember, RoomMemberStatus } from "@media/ui/components/room-panel";
 
 import { avatarImage } from "@/lib/avatars";
 

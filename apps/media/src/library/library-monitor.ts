@@ -1,4 +1,4 @@
-import type { LibraryId } from "@movies/contracts/ids";
+import type { LibraryId } from "@media/contracts/ids";
 import {
   Clock,
   Context,
@@ -47,7 +47,7 @@ export interface Interface {
 
 /** The library monitor. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/LibraryMonitor",
+  "@media/server/LibraryMonitor",
 ) {}
 
 interface MonitorTiming {

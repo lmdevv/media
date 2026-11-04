@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import type { MediaFileId, PlaybackSessionId } from "@movies/contracts/ids";
+import type { MediaFileId, PlaybackSessionId } from "@media/contracts/ids";
 import {
   DownloadPreparing,
   DownloadReady,
@@ -12,11 +12,11 @@ import {
   type PrepareDownloadResponse,
   TranscodeFailed,
   UnsupportedPlayback,
-} from "@movies/contracts/media-playback";
+} from "@media/contracts/media-playback";
 import {
   PLAYBACK_TOKEN_LIFETIME_MS,
   type PlaybackTokenInvalid,
-} from "@movies/contracts/playback-token";
+} from "@media/contracts/playback-token";
 import {
   Cause,
   Clock,
@@ -69,7 +69,7 @@ export interface Interface {
 }
 
 /** The downloads service. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/Downloads") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/Downloads") {}
 
 const KEEP_UNUSED = Duration.hours(6);
 

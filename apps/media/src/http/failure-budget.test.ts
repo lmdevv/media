@@ -1,4 +1,4 @@
-import { PlaybackSessionId, UserId } from "@movies/contracts/ids";
+import { PlaybackSessionId, UserId } from "@media/contracts/ids";
 import { assert, describe, it } from "vitest";
 
 import { makeFailureBudget } from "./failure-budget.ts";

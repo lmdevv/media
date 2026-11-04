@@ -1,4 +1,4 @@
-import type { QueryState } from "@movies/sdk/react";
+import type { QueryState } from "@media/sdk/react";
 
 const NO_ROWS: ReadonlyArray<never> = [];
 

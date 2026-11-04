@@ -1,8 +1,8 @@
 import { join } from "node:path";
 
-import { RoomId } from "@movies/contracts/ids";
-import { MEDIA_ROUTES } from "@movies/contracts/media-playback";
-import type { TitleId } from "@movies/contracts/ids";
+import { RoomId } from "@media/contracts/ids";
+import { MEDIA_ROUTES } from "@media/contracts/media-playback";
+import type { TitleId } from "@media/contracts/ids";
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page, Request } from "@playwright/test";
 import { Schema } from "effect";

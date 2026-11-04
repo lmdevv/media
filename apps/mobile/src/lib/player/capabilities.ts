@@ -5,7 +5,7 @@
  * with HDR10, HLG, and Dolby Vision, the audio codecs Core Audio decodes, and fMP4 HLS for
  * everything else. A file in another container (MKV, WebM, AVI) arrives remuxed into HLS.
  */
-import type { ClientCapabilities } from "@movies/contracts/media-playback";
+import type { ClientCapabilities } from "@media/contracts/media-playback";
 
 /** H.264 level 5.2 in ffprobe units. */
 const H264_MAX_LEVEL = 52;

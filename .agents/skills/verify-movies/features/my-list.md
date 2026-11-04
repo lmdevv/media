@@ -10,14 +10,14 @@ the `My List` page and row hold the titles the profile saved.
 - `list-page` shows My List at `/my-list` with a title count.
 - `continue-resume` shows a half-watched title with the time left and the share watched.
 - `continue-next` shows a show's next episode after the watched ones.
-- `continue-cli` reads the same rows with `movies continue` and `movies my-list list`.
+- `continue-cli` reads the same rows with `media continue` and `media my-list list`.
 
 ## How to get to it (user POV)
 
 - A title's page: `Add to My List`, which then reads `Remove from My List` (pressed).
 - `My List` in the `Sections` navigation, and Home's `My List` row with `See all`.
 - Home's `Continue watching for <profile>` row.
-- Terminal: `movies continue`, `movies my-list list`, `movies my-list add <title-id>`.
+- Terminal: `media continue`, `media my-list list`, `media my-list add <title-id>`.
 
 ## Driving it with verify-movies
 

@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 
-import { DEFAULT_TRICKPLAY_INTERVAL_SECONDS } from "@movies/contracts/trickplay";
+import { DEFAULT_TRICKPLAY_INTERVAL_SECONDS } from "@media/contracts/trickplay";
 import {
   Config,
   Context,
@@ -51,7 +51,7 @@ export interface Interface {
   readonly backupRetention: Duration.Duration;
   /** Admin key of the self-hosted Convex deployment, for `convex export` and `convex import`. */
   readonly convexAdminKey: Option.Option<Redacted.Redacted>;
-  /** The deployed `@movies/backend` package, whose Convex CLI backs up and restores. */
+  /** The deployed `@media/backend` package, whose Convex CLI backs up and restores. */
   readonly convexBackendDir: Option.Option<string>;
   /** Shared HMAC secret Convex signs playback tokens with: base64url of at least 32 bytes. */
   readonly playbackTokenSecret: Redacted.Redacted;
@@ -111,7 +111,7 @@ export interface Interface {
 }
 
 /** The media service configuration. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/MediaConfig") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/MediaConfig") {}
 
 const MEBIBYTE = 1024 * 1024;
 

@@ -9,12 +9,12 @@
 #   scripts/nixos-module-e2e.sh                              # software transcoding
 #   HARDWARE_ACCELERATION=auto scripts/nixos-module-e2e.sh   # probe and use the host's Quick Sync
 #
-# Needs sudo, Docker, and Nix with flakes. Env: MOVIES_PORT (18380), CONVEX_PORT (18310),
+# Needs sudo, Docker, and Nix with flakes. Env: MEDIA_PORT (18380), CONVEX_PORT (18310),
 # HARDWARE_ACCELERATION (none), KEEP=1 to leave it running.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-movies_port="${MOVIES_PORT:-18380}"
+movies_port="${MEDIA_PORT:-18380}"
 convex_port="${CONVEX_PORT:-18310}"
 acceleration="${HARDWARE_ACCELERATION:-none}"
 unit=movies-module-e2e
@@ -61,7 +61,7 @@ evaluated="$(
             boot.isContainer = true;
             system.stateVersion = \"26.05\";
             virtualisation.oci-containers.backend = \"docker\";
-            services.movies = {
+            services.media = {
               enable = true;
               user = \"nobody\";
               group = \"nogroup\";
@@ -141,11 +141,11 @@ sudo systemd-analyze security "$unit" --no-pager | tail -1
 
 pnpm --dir "$root" --filter @lmdevv/movies build >/dev/null
 
-MOVIES_PACKAGED_STACK=1 \
-  MOVIES_PACKAGED_CONVEX_URL="http://127.0.0.1:$convex_port" \
-  MOVIES_PACKAGED_MEDIA_URL="$media_url" \
-  MOVIES_PACKAGED_LIBRARY="$base/library" \
-  MOVIES_PACKAGED_RESTART="sudo systemctl restart $unit" \
+MEDIA_PACKAGED_STACK=1 \
+  MEDIA_PACKAGED_CONVEX_URL="http://127.0.0.1:$convex_port" \
+  MEDIA_PACKAGED_SERVER_URL="$media_url" \
+  MEDIA_PACKAGED_LIBRARY="$base/library" \
+  MEDIA_PACKAGED_RESTART="sudo systemctl restart $unit" \
   pnpm --dir "$root" exec vitest run --root "$root" apps/media/src/stack/packaged-stack.test.ts
 
 if [[ "$acceleration" != none ]]; then

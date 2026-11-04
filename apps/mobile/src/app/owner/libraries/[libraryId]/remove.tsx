@@ -1,5 +1,5 @@
-import { LibraryId } from "@movies/contracts/ids";
-import { useCommand } from "@movies/sdk/react";
+import { LibraryId } from "@media/contracts/ids";
+import { useCommand } from "@media/sdk/react";
 import { Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { Trash2 } from "lucide-react-native";

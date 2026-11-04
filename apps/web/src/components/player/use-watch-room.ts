@@ -1,7 +1,7 @@
-import type { DeviceId, ProfileId, RoomId } from "@movies/contracts/ids";
-import type { Room } from "@movies/contracts/models/rooms";
-import { HEARTBEAT_INTERVAL_MS } from "@movies/contracts/clock";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { DeviceId, ProfileId, RoomId } from "@media/contracts/ids";
+import type { Room } from "@media/contracts/models/rooms";
+import { HEARTBEAT_INTERVAL_MS } from "@media/contracts/clock";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { Predicate } from "effect";
 import { useEffect, useState } from "react";
 

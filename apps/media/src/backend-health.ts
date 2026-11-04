@@ -1,4 +1,4 @@
-import type { HealthResponse } from "@movies/contracts/media-playback";
+import type { HealthResponse } from "@media/contracts/media-playback";
 import { Context, Effect, Layer } from "effect";
 
 type BackendStatus = HealthResponse["backend"];
@@ -9,7 +9,7 @@ export interface Interface {
 }
 
 /** The backend health reporter. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/BackendHealth") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/BackendHealth") {}
 
 /** Standalone mode: no backend to connect to. */
 export const layerStandalone: Layer.Layer<Service> = Layer.succeed(

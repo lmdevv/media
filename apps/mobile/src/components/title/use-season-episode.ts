@@ -1,5 +1,5 @@
-import type { EpisodeId, TitleId } from "@movies/contracts/ids";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { EpisodeId, TitleId } from "@media/contracts/ids";
+import { useCommandQuery } from "@media/sdk/react";
 
 import { useActiveProfile } from "@/session/active-profile";
 

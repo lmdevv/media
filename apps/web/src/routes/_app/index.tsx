@@ -1,9 +1,9 @@
-import type { ProfileId } from "@movies/contracts/ids";
-import type { Home, TitleCard } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { CalmState } from "@movies/ui/components/calm-state";
-import { MediaRow } from "@movies/ui/components/media-row";
+import type { ProfileId } from "@media/contracts/ids";
+import type { Home, TitleCard } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { CalmState } from "@media/ui/components/calm-state";
+import { MediaRow } from "@media/ui/components/media-row";
 import { Link, createFileRoute } from "@tanstack/react-router";
 
 import { CollectionCard } from "@/components/browse/collection-card";

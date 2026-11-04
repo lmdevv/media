@@ -41,11 +41,11 @@ const RATINGS = {
   "Pioneer One": ["TV-14", 14],
 };
 
-// The owner's shell may point the CLI at a real server (MOVIES_CONVEX_URL and friends); each
+// The owner's shell may point the CLI at a real server (MEDIA_CONVEX_URL and friends); each
 // person's CLI uses only their own config folder.
 const env = (handle) => {
   const clean = { ...process.env, XDG_CONFIG_HOME: join(flags.state, "cli", handle) };
-  for (const name of ["MOVIES_CONVEX_URL", "MOVIES_MEDIA_URL", "MOVIES_API_KEY", "MOVIES_PROFILE", "MOVIES_PASSWORD"]) {
+  for (const name of ["MEDIA_CONVEX_URL", "MEDIA_SERVER_URL", "MEDIA_API_KEY", "MEDIA_PROFILE", "MEDIA_PASSWORD"]) {
     delete clean[name];
   }
   return clean;
@@ -53,7 +53,7 @@ const env = (handle) => {
 const run = (handle, args, input) => spawnSync("node", [flags.cli, ...args], { encoding: "utf8", env: env(handle), input });
 const movies = (handle, ...args) => {
   const result = run(handle, args);
-  if (result.status !== 0) throw new Error(`${handle}: movies ${args.join(" ")} exited ${result.status}: ${result.stderr.trim()}`);
+  if (result.status !== 0) throw new Error(`${handle}: media ${args.join(" ")} exited ${result.status}: ${result.stderr.trim()}`);
   return JSON.parse(result.stdout);
 };
 const browser = (...args) =>

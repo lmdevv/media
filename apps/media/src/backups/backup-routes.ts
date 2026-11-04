@@ -1,4 +1,4 @@
-import { Conflict, Internal, NotFound } from "@movies/contracts/errors";
+import { Conflict, Internal, NotFound } from "@media/contracts/errors";
 import { Effect, Layer } from "effect";
 import type { HttpRouter } from "effect/http";
 

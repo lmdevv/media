@@ -1,5 +1,5 @@
-import type { PlayerObservation, RecoveryAction } from "@movies/contracts/diagnostics";
-import { PlayerDiagnostics } from "@movies/sdk/effect";
+import type { PlayerObservation, RecoveryAction } from "@media/contracts/diagnostics";
+import { PlayerDiagnostics } from "@media/sdk/effect";
 import { Option } from "effect";
 
 import type { TimeRangesLike } from "./media-element-player";

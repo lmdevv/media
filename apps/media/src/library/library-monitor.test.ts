@@ -5,7 +5,7 @@ import { FetchHttpClient } from "effect/http";
 import { test } from "vitest";
 
 import * as DiskCache from "../disk-cache.ts";
-import { LibraryId } from "@movies/contracts/ids";
+import { LibraryId } from "@media/contracts/ids";
 import * as MediaTools from "../media/media-tools.ts";
 import * as MetadataResolver from "../metadata/title-metadata.ts";
 import * as Omdb from "../metadata/omdb.ts";

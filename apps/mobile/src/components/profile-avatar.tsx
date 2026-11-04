@@ -1,4 +1,4 @@
-import type { Profile } from "@movies/contracts/models/profiles";
+import type { Profile } from "@media/contracts/models/profiles";
 import { Match } from "effect";
 import { LinearGradient } from "expo-linear-gradient";
 import { Tv } from "lucide-react-native";

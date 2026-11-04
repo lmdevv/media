@@ -1,30 +1,30 @@
-import { targetPosition } from "@movies/contracts/clock";
-import { DRIFT_THRESHOLDS } from "@movies/contracts/clock";
-import type { EpisodeId, MediaFileId, RoomId, TitleId } from "@movies/contracts/ids";
-import type { NegotiateResponse } from "@movies/contracts/media-playback";
-import type { MediaVersion } from "@movies/contracts/models/catalog";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
-import { Playback, Versions } from "@movies/sdk/effect";
+import { targetPosition } from "@media/contracts/clock";
+import { DRIFT_THRESHOLDS } from "@media/contracts/clock";
+import type { EpisodeId, MediaFileId, RoomId, TitleId } from "@media/contracts/ids";
+import type { NegotiateResponse } from "@media/contracts/media-playback";
+import type { MediaVersion } from "@media/contracts/models/catalog";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
+import { Playback, Versions } from "@media/sdk/effect";
 import {
   useCommand,
   useCommandQuery,
   useMoviesRuntime,
   useRoomPresence,
   useRoomSync,
-} from "@movies/sdk/react";
-import { ChapterPopover } from "@movies/ui/components/chapter-popover";
-import { CommandMenu } from "@movies/ui/components/command-menu";
+} from "@media/sdk/react";
+import { ChapterPopover } from "@media/ui/components/chapter-popover";
+import { CommandMenu } from "@media/ui/components/command-menu";
 import {
   EpisodesGlyph,
   PlayerButton,
   PlayerControls,
   TracksGlyph,
-} from "@movies/ui/components/player-controls";
-import { RoomPanel } from "@movies/ui/components/room-panel";
-import { TrackPopover } from "@movies/ui/components/track-popover";
-import type { TrackOption } from "@movies/ui/components/track-popover";
-import { useKeymap } from "@movies/ui/lib/use-keymap";
-import { cn } from "@movies/ui/lib/utils";
+} from "@media/ui/components/player-controls";
+import { RoomPanel } from "@media/ui/components/room-panel";
+import { TrackPopover } from "@media/ui/components/track-popover";
+import type { TrackOption } from "@media/ui/components/track-popover";
+import { useKeymap } from "@media/ui/lib/use-keymap";
+import { cn } from "@media/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { Effect, Fiber, Result, Stream } from "effect";
 import {

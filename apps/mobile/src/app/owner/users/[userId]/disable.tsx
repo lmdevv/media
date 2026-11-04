@@ -1,5 +1,5 @@
-import { UserId } from "@movies/contracts/ids";
-import { useCommand } from "@movies/sdk/react";
+import { UserId } from "@media/contracts/ids";
+import { useCommand } from "@media/sdk/react";
 import { Schema } from "effect";
 import { useLocalSearchParams } from "expo-router";
 import { UserX } from "lucide-react-native";

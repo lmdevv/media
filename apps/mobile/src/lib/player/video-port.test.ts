@@ -1,4 +1,4 @@
-import type { PlayerEvent } from "@movies/sdk/effect";
+import type { PlayerEvent } from "@media/sdk/effect";
 import { describe, expect, it } from "vitest";
 
 import { StallVerdict, checked, watching } from "./stall-watchdog";

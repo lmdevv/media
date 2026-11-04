@@ -8,29 +8,29 @@ import {
   NEXT_EPISODE_COUNTDOWN_MS,
   PLAYER_SILENCE_MS,
   UNTIMED_HOST_REANCHOR_THRESHOLD_MS,
-} from "@movies/contracts/clock";
-import type { AnyCommand } from "@movies/contracts/command";
-import { commands } from "@movies/contracts/commands";
-import { KIDS_DEFAULT_MAX_AGE } from "@movies/contracts/content-rating";
-import { DeviceId } from "@movies/contracts/ids";
-import { mediaServiceFunctions } from "@movies/contracts/media-service";
-import { LibraryRoot } from "@movies/contracts/models/catalog";
-import { NewPassword } from "@movies/contracts/models/account";
-import { DisplayName } from "@movies/contracts/models/common";
-import { BACKUP_SYNC_LIMIT } from "@movies/contracts/models/jobs";
+} from "@media/contracts/clock";
+import type { AnyCommand } from "@media/contracts/command";
+import { commands } from "@media/contracts/commands";
+import { KIDS_DEFAULT_MAX_AGE } from "@media/contracts/content-rating";
+import { DeviceId } from "@media/contracts/ids";
+import { mediaServiceFunctions } from "@media/contracts/media-service";
+import { LibraryRoot } from "@media/contracts/models/catalog";
+import { NewPassword } from "@media/contracts/models/account";
+import { DisplayName } from "@media/contracts/models/common";
+import { BACKUP_SYNC_LIMIT } from "@media/contracts/models/jobs";
 import {
   COLLECTION_BATCH_LIMIT,
   COLLECTION_MEMBER_BATCH_LIMIT,
-} from "@movies/contracts/models/migration-service";
-import { AvatarKey } from "@movies/contracts/models/profiles";
-import { SCAN_BATCH_LIMIT } from "@movies/contracts/models/scan";
-import { Milliseconds } from "@movies/contracts/units";
+} from "@media/contracts/models/migration-service";
+import { AvatarKey } from "@media/contracts/models/profiles";
+import { SCAN_BATCH_LIMIT } from "@media/contracts/models/scan";
+import { Milliseconds } from "@media/contracts/units";
 import {
   PLAYBACK_TOKEN_LIFETIME_MS,
   PLAYBACK_TOKEN_TEST_VECTORS,
-} from "@movies/contracts/playback-token";
-import { YOUTUBE_KEY_PATTERN } from "@movies/contracts/models/catalog";
-import { Role, roleScopes } from "@movies/contracts/scopes";
+} from "@media/contracts/playback-token";
+import { YOUTUBE_KEY_PATTERN } from "@media/contracts/models/catalog";
+import { Role, roleScopes } from "@media/contracts/scopes";
 import { Predicate, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

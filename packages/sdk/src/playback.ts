@@ -5,7 +5,7 @@ import type {
   ProfileId,
   RoomId,
   TitleId,
-} from "@movies/contracts/ids";
+} from "@media/contracts/ids";
 import {
   type ClientCapabilities,
   MEDIA_ROUTES,
@@ -15,14 +15,14 @@ import {
   SeekRequest,
   SeekResponse,
   StopRequest,
-} from "@movies/contracts/media-playback";
-import type { Episode, MediaFile } from "@movies/contracts/models/catalog";
+} from "@media/contracts/media-playback";
+import type { Episode, MediaFile } from "@media/contracts/models/catalog";
 import type {
   ProgressEvent,
   ProgressReceipt,
   StartedPlayback,
-} from "@movies/contracts/models/playback";
-import { Milliseconds } from "@movies/contracts/units";
+} from "@media/contracts/models/playback";
+import { Milliseconds } from "@media/contracts/units";
 import { Clock, Duration, Effect, Match, Option, Redacted, Schedule, Schema, Stream } from "effect";
 
 import type { PlaybackCallError } from "./media-http";

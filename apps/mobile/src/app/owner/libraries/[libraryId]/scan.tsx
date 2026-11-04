@@ -1,8 +1,8 @@
-import { JobId, LibraryId } from "@movies/contracts/ids";
-import type { LibraryDetail } from "@movies/contracts/models/catalog";
-import type { Job } from "@movies/contracts/models/jobs";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import type { QueryState } from "@movies/sdk/react";
+import { JobId, LibraryId } from "@media/contracts/ids";
+import type { LibraryDetail } from "@media/contracts/models/catalog";
+import type { Job } from "@media/contracts/models/jobs";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import type { QueryState } from "@media/sdk/react";
 import { Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { Clapperboard, RotateCcw, Search } from "lucide-react-native";

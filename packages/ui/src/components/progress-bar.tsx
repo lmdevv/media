@@ -1,4 +1,4 @@
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 
 /**
  * A watched or job progress bar: an accent fill over a translucent track.

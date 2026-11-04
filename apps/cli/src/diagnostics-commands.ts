@@ -1,4 +1,4 @@
-import { commands } from "@movies/contracts/commands";
+import { commands } from "@media/contracts/commands";
 import {
   type DiagnosedSession,
   LOG_LEVELS,
@@ -7,10 +7,10 @@ import {
   type LogQuery,
   LogRecord,
   type PlaybackDiagnostics,
-} from "@movies/contracts/diagnostics";
-import { PlaybackSessionId } from "@movies/contracts/ids";
-import { EpochMillis } from "@movies/contracts/units";
-import { TransportError } from "@movies/sdk/effect";
+} from "@media/contracts/diagnostics";
+import { PlaybackSessionId } from "@media/contracts/ids";
+import { EpochMillis } from "@media/contracts/units";
+import { TransportError } from "@media/sdk/effect";
 import { Clock, Effect, Option, Predicate, Schema, Stream } from "effect";
 
 import type { ShortcutCommand, Invocation } from "./invocation";
@@ -350,7 +350,7 @@ const playbackTimeline: ShortcutCommand = {
       if (Option.isNone(sessionId)) {
         return yield* usage(
           invocation,
-          "diagnostics playback needs a session ID; movies diagnostics sessions lists recent ones",
+          "diagnostics playback needs a session ID; media diagnostics sessions lists recent ones",
         );
       }
 

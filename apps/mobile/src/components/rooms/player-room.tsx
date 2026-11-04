@@ -1,8 +1,8 @@
-import type { EpisodeId, MediaFileId, RoomId } from "@movies/contracts/ids";
-import type { Room } from "@movies/contracts/models/rooms";
-import { Milliseconds } from "@movies/contracts/units";
-import type { PlayerPort, RoomSync } from "@movies/sdk/effect";
-import { useCommand, useCommandQuery, useRoomSync } from "@movies/sdk/react";
+import type { EpisodeId, MediaFileId, RoomId } from "@media/contracts/ids";
+import type { Room } from "@media/contracts/models/rooms";
+import { Milliseconds } from "@media/contracts/units";
+import type { PlayerPort, RoomSync } from "@media/sdk/effect";
+import { useCommand, useCommandQuery, useRoomSync } from "@media/sdk/react";
 import { Result } from "effect";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";

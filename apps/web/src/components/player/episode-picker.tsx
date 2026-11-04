@@ -1,8 +1,8 @@
-import type { EpisodeId, ProfileId, TitleId } from "@movies/contracts/ids";
-import type { SeasonEpisode, TitleDetail } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
-import { EpisodePopover } from "@movies/ui/components/episode-popover";
-import type { EpisodeOption } from "@movies/ui/components/episode-popover";
+import type { EpisodeId, ProfileId, TitleId } from "@media/contracts/ids";
+import type { SeasonEpisode, TitleDetail } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
+import { EpisodePopover } from "@media/ui/components/episode-popover";
+import type { EpisodeOption } from "@media/ui/components/episode-popover";
 import { useMemo, useState } from "react";
 import type { ReactElement } from "react";
 

@@ -22,7 +22,7 @@ const { values: flags } = parseArgs({
   strict: true,
   options: {
     trials: { type: "string", default: "2" },
-    image: { type: "string", default: "ghcr.io/lmdevv/movies:main" },
+    image: { type: "string", default: "ghcr.io/lmdevv/media:main" },
   },
 });
 const browserJs = fileURLToPath(new URL("browser.mjs", import.meta.url));
@@ -78,7 +78,7 @@ try {
   for (const network of NETWORKS) {
     const state = mkdtempSync("/tmp/movies-netcheck-");
     const host = spawn("node", [browserJs, "serve", "--state", state, "--base", base, "--convex", convexUrl], {
-      env: { ...process.env, ...(chromium ? { CHROMIUM_PATH: chromium } : {}), MOVIES_VERIFY_BROWSER_NETWORK: network },
+      env: { ...process.env, ...(chromium ? { CHROMIUM_PATH: chromium } : {}), MEDIA_VERIFY_BROWSER_NETWORK: network },
       stdio: ["ignore", "ignore", "inherit"],
     });
     hosts.set(network, { process: host, state });

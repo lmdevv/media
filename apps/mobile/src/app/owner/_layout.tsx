@@ -1,4 +1,4 @@
-import { useCommandQuery } from "@movies/sdk/react";
+import { useCommandQuery } from "@media/sdk/react";
 import { Stack } from "expo-router";
 import { Lock } from "lucide-react-native";
 
