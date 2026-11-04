@@ -339,3 +339,5 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
   `EPERM` for a denied call instead, so one in a dependency fails that call rather than ending
   every stream; the check keeps the service from relying on that. CI runs it on every change.
 - `nix flake check` evaluates the server, CLI, and Home Manager modules and builds the packages.
+
+Probe line.
