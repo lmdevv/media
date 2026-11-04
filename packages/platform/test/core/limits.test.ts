@@ -69,6 +69,31 @@ describe.skipIf(stack === undefined)("core limits", { timeout: 120_000 }, () => 
     expect(Math.max(...reads)).toBeLessThanOrEqual(25);
   });
 
+  it("counts none of a group's rows once clear deleted them", async () => {
+    if (stack === undefined) return;
+
+    const group = freshGroup("clear");
+
+    await runFunction(
+      stack,
+      internal.core.limitsProbe.seed,
+      { group, from: 0, rows: 30 },
+      Schema.Null,
+    );
+
+    expect(await countOf(stack, group)).toBe(30);
+
+    await runFunction(
+      stack,
+      internal.core.limitsProbe.clear,
+      { groupPrefix: group, cursor: null },
+      Schema.Struct({ continueCursor: Schema.String, isDone: Schema.Boolean }),
+    );
+
+    expect(await pageThrough(stack, group, 25)).toEqual({ positions: [], pages: 1 });
+    expect(await countOf(stack, group)).toBe(0);
+  });
+
   it("holds a page to the most rows a page may hold, whatever the caller asks", async () => {
     if (stack === undefined) return;
 
