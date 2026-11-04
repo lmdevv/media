@@ -54,6 +54,16 @@ const createUserFromSignUp = makeFunctionReference<"mutation", CallbackProfile, 
   "users:createFromSignUp",
 );
 
+const parseUsernameParams = makeFunctionReference<
+  "query",
+  SignInParams,
+  { readonly flow: "signUp" | "signIn"; readonly username: string; readonly password: string }
+>("authParams:username");
+
+const createCoreUser = makeFunctionReference<"mutation", CallbackProfile, Id<"users">>(
+  "core/users:createFromUsername",
+);
+
 const scrypt = new Scrypt();
 
 const signUpProfile = (email: string, parsed: PasswordParams): SignUpProfile => {
@@ -113,6 +123,38 @@ const convexAuthFunctions = convexAuth({
       },
     }),
     ConvexCredentials({
+      id: "username",
+      authorize: async (params, ctx) => {
+        const parsed = await ctx.runQuery(parseUsernameParams, params);
+        const username = parsed.username.trim();
+        const secret = parsed.password;
+        const key = username.toLowerCase();
+
+        if (parsed.flow === "signIn") {
+          const retrieved = await retrieveAccount(ctx, {
+            provider: "username",
+            account: { id: key, secret },
+          }).catch(signInFailure);
+
+          return { userId: retrieved.user._id };
+        }
+
+        const { user } = await createAccount(ctx, {
+          provider: "username",
+          account: { id: key, secret },
+          profile: { username, usernameKey: key },
+          shouldLinkViaEmail: false,
+          shouldLinkViaPhone: false,
+        });
+
+        return { userId: user._id };
+      },
+      crypto: {
+        hashSecret: (password) => scrypt.hash(password),
+        verifySecret: (password, hash) => scrypt.verify(hash, password),
+      },
+    }),
+    ConvexCredentials({
       id: "apikey",
       authorize: (params, ctx) => ctx.runMutation(redeemApiKey, params),
     }),
@@ -124,6 +166,10 @@ const convexAuthFunctions = convexAuth({
   callbacks: {
     createOrUpdateUser: async (ctx, args) => {
       if (args.existingUserId !== null) return args.existingUserId;
+
+      if (args.provider.id === "username") {
+        return ctx.runMutation(createCoreUser, args.profile);
+      }
 
       return ctx.runMutation(createUserFromSignUp, args.profile);
     },

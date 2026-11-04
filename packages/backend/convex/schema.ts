@@ -2,6 +2,8 @@ import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+import { identityTables } from "./core/identity";
+
 import {
   migrationCheckpoint,
   migrationImported,
@@ -33,7 +35,6 @@ import {
   playbackState,
   probe,
   ratings,
-  role,
   roomPresence,
   roomRole,
   roomStatus,
@@ -61,29 +62,7 @@ export const sessionGrant = v.object({
 export default defineSchema({
   ...authTables,
 
-  /** Convex Auth sessions, extended with the grant and the PIN profiles this session unlocked. */
-  authSessions: defineTable({
-    userId: v.id("users"),
-    expirationTime: v.number(),
-    grant: v.optional(sessionGrant),
-    unlockedProfiles: v.optional(v.array(v.id("profiles"))),
-  }).index("userId", ["userId"]),
-
-  users: defineTable({
-    name: v.optional(v.string()),
-    image: v.optional(v.string()),
-    email: v.optional(v.string()),
-    emailVerificationTime: v.optional(v.number()),
-    phone: v.optional(v.string()),
-    phoneVerificationTime: v.optional(v.number()),
-    isAnonymous: v.optional(v.boolean()),
-    role,
-    disabledAt: v.optional(v.number()),
-    /** Only carried from the sign-up form to `createOrUpdateUser`; never stored. */
-    inviteCode: v.optional(v.string()),
-  })
-    .index("email", ["email"])
-    .index("by_role", ["role"]),
+  ...identityTables,
 
   invites: defineTable({
     /** SHA-256 of the invite code, hex. The code is shown once and never stored. */

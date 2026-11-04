@@ -14,6 +14,8 @@ import type * as auth from "../auth.js";
 import type * as authParams from "../authParams.js";
 import type * as backups from "../backups.js";
 import type * as collections from "../collections.js";
+import type * as core_identity from "../core/identity.js";
+import type * as core_users from "../core/users.js";
 import type * as crons from "../crons.js";
 import type * as deviceAuth from "../deviceAuth.js";
 import type * as downloads from "../downloads.js";
@@ -77,6 +79,8 @@ declare const fullApi: ApiFromModules<{
   authParams: typeof authParams;
   backups: typeof backups;
   collections: typeof collections;
+  "core/identity": typeof core_identity;
+  "core/users": typeof core_users;
   crons: typeof crons;
   deviceAuth: typeof deviceAuth;
   downloads: typeof downloads;

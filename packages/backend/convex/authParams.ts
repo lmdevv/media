@@ -24,3 +24,18 @@ export const password = internalQuery({
   }),
   handler: (_ctx, args) => args,
 });
+
+/** PROTOTYPE A: parses the core username provider's params. */
+export const username = internalQuery({
+  args: {
+    flow: v.union(v.literal("signUp"), v.literal("signIn")),
+    username: v.string(),
+    password: v.string(),
+  },
+  returns: v.object({
+    flow: v.union(v.literal("signUp"), v.literal("signIn")),
+    username: v.string(),
+    password: v.string(),
+  }),
+  handler: (_ctx, args) => args,
+});

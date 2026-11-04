@@ -36,6 +36,14 @@ export type SignInParams =
         readonly inviteCode?: string;
       };
     }
+  | {
+      readonly provider: "username";
+      readonly params: {
+        readonly flow: "signUp" | "signIn";
+        readonly username: string;
+        readonly password: string;
+      };
+    }
   | { readonly provider: "apikey"; readonly params: { readonly key: string } }
   | { readonly provider: "device"; readonly params: { readonly deviceCode: string } };
 
