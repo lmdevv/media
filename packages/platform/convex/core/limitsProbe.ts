@@ -69,6 +69,15 @@ export const clear = internalMutation({
 
     await Promise.all(page.page.map((row) => ctx.db.delete("limitsProbeRows", row._id)));
 
+    const removed = page.page.reduce(
+      (groups, row) => groups.set(row.group, (groups.get(row.group) ?? 0) + 1),
+      new Map<string, number>(),
+    );
+
+    await Promise.all(
+      [...removed].map(([group, rows]) => incrementCounter(ctx.db, counterName(group), -rows)),
+    );
+
     return { continueCursor: page.continueCursor, isDone: page.isDone };
   },
 });
