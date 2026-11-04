@@ -25,7 +25,9 @@ const everyPackage = [
   "packages/ui",
 ];
 
-describe("changed-packages.sh", () => {
+// Each call starts the script, two turbo processes, and node, which a loaded host can stretch past
+// the default 5 s.
+describe("changed-packages.sh", { timeout: 30_000 }, () => {
   it("affects nothing for a docs-only diff", () => {
     expect(affected("docs/operations.md", "README.md", "deploy/compose/README.md")).toEqual([]);
   });

@@ -91,6 +91,10 @@ jobs:
       - run: pnpm lint
       - run: pnpm fmt:check
       - run: pnpm test
+      # knip's config loader resolves the repo root's tsconfig.json from legacy/music, and that
+      # extends @media/config, which only the root install links.
+      - run: pnpm install --frozen-lockfile --filter=. --ignore-scripts
+        working-directory: .
       - run: pnpm knip
 
   stack:
