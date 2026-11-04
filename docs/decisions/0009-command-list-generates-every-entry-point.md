@@ -1,7 +1,7 @@
 # 0009. Declare each action once and generate its Convex function and clients
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the generator's layout, and again on
-  2026-11-04 with `refusesKeys`.
+  2026-11-04 with `refusesKeys` and with the SDK target.
 - Decisions: D23
 
 ## Context
@@ -113,3 +113,58 @@ Rejected for this layout:
 - The sign-ins that make or reset an account (`setup`, `invite`, `reset`) are Convex Auth
   providers, not commands, like the other sign-ins (ADR 0004). The generator writes nothing for
   them.
+
+## The SDK target (amended 2026-11-04)
+
+The SDK target settled how one declaration becomes a method in `/effect`, `/promise`, and `/react`.
+
+- **What the generator writes.** `sdkTarget` owns `packages/sdk/src/platform/generated/` and writes
+  one file, `commands.ts`. For each command it holds a private declaration with the Convex
+  function's path and Effect schemas for its arguments and result, rendered from the same parsed
+  validators as the platform contract. It exports two trees nested by name, `effectMethods` and
+  `promiseMethods`. Each leaf carries the command's summary, kind, scope, and `refusesKeys` as
+  JSDoc, so the method's hover shows them.
+- **One method per command, one call path.** Each tree takes a builder from
+  `packages/sdk/src/platform/`, and every leaf is `method.query(...)`, `method.mutation(...)`, or
+  `method.action(...)`. The builders are hand-written, so call policy has one owner: arguments are
+  encoded before they leave (`InvalidArgs`), results are decoded (`ProtocolError`), and queries get
+  `watch`. The generated file holds no policy.
+- **Value mapping.** `v.number()` is `Schema.Finite`, so a non-finite answer is a protocol error.
+  `v.id("t")` is a string branded `Id<t>`, so an ID from one result passes into another command's
+  arguments and an ID of the wrong table does not type-check. `v.int64()` is `Schema.BigInt` and
+  `v.bytes()` is an `ArrayBuffer`. An optional field is an absent key. Arguments must encode to a
+  JSON object, so a command that takes an `int64` or `bytes` argument fails the SDK's `tsc` until
+  the transport carries Convex values. No command takes one today.
+- **Errors.** Calls fail with `PlatformError`, the contracts' tagged errors without
+  `StaleRevision`, plus `TransportError` and `ProtocolError`. The platform never sends
+  `stale_revision`, so the client turns one into `ProtocolError`. A session without the command's
+  scope gets `Forbidden`. An ended session gets `Unauthenticated`.
+- **Sign-in.** The platform client reuses the session engine in `auth.ts`
+  (`Auth.makeEngine`): refresh, stalls, reconnects, and sign-out. The engine signs in with a
+  provider and its params. `Auth` keeps its movies credentials and public interface over it. The
+  platform client sends `password` with `{ username, password }`, `apiKey` with `{ key }`, and
+  polls `deviceCode` with `{ deviceCode }`, which answers `pending` or `denied` until a session
+  approves the code (ADR 0004). The account sign-ins are credentials too: `setup` with
+  `{ username, password }`, `invite` with `{ code, username, password }`, and `reset` with
+  `{ code, password }` (ADR 0003).
+- **Beside the movies client.** The platform client opens its own connection and session, so an
+  app or the CLI can hold both clients until movies moves onto the platform. Phase 4 deletes the
+  movies client (`movies.ts`, `movies-client.ts`, `device-login.ts`, `QueryWatch.make`,
+  `MoviesProvider` and its hooks, `createMovies`), the movies credentials in `auth.ts`, and the
+  SDK's use of `@media/contracts/commands`. Movies commands then appear as
+  `platform.movies.*` from the same generator.
+- **One sign-in on the web.** Clients that store their session under one key share it.
+  `createPlatform` and `PlatformProvider` default to `media.session`, so every web client on one
+  origin shares one sign-in (ADR 0020).
+
+Rejected for the SDK target:
+
+- One generated data tree, with each entry point's methods derived by a recursive mapped type and
+  a runtime walk. The walk's result needs an unchecked assertion, which lint refuses, and the walk
+  types its leaves with `object` or `unknown`, which lint also refuses. Two generated trees cost a
+  few bytes per command and need no assertion.
+- Emitting `v` validators into the SDK and checking values with a hand-written walk over them. It
+  parses by hand where the SDK parses with Effect Schema, and the CLI needs schemas to read flags.
+- Methods keyed by name, such as `client.query("core.server.info", args)`. The caller picks the
+  kind, and no method has its own hover.
+- A copy of `Auth` for the platform. Every refresh fix would land twice.

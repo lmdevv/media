@@ -12,6 +12,7 @@ import type { FunctionPath } from "@media/contracts/command";
 import { Unauthenticated } from "@media/contracts/errors";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+import { ConvexError } from "convex/values";
 import type { Value } from "convex/values";
 import {
   Clock,
@@ -81,6 +82,28 @@ export const passwordCredentials = (input: PasswordSignIn): Credentials =>
     name: Option.fromNullishOr(input.name),
     inviteCode: Option.fromNullishOr(input.inviteCode),
   });
+
+/** A Convex Auth sign-in: a provider of the deployment and the params it takes. */
+export interface SignInRequest {
+  readonly provider: string;
+  readonly params: Readonly<Record<string, Value>>;
+}
+
+/**
+ * The provider has not signed anyone in yet: the core's device code provider answers `pending`
+ * until the code is approved and `denied` once it is refused.
+ */
+export class SignInWaiting extends Schema.TaggedError<SignInWaiting>()("SignInWaiting", {
+  state: Schema.Literals(["pending", "denied"]),
+  message: Schema.String,
+}) {}
+
+const WaitingFailure = Schema.Struct({
+  code: Schema.Literals(["pending", "denied"]),
+  message: Schema.String,
+});
+
+const decodeWaiting = Schema.decodeUnknownOption(WaitingFailure);
 
 /** Signs in and out and supplies the session's current token. */
 export interface Interface {
@@ -181,7 +204,7 @@ const toSession = (tokens: typeof Tokens.Type): StoredSession => ({
   refreshToken: Redacted.make(tokens.refreshToken),
 });
 
-const providerParams = (credentials: Credentials): Readonly<Record<string, Value>> =>
+const providerParams = (credentials: Credentials): SignInRequest =>
   Credentials.$match(credentials, {
     Password: ({ flow, email, password, name, inviteCode }) => ({
       provider: "password",
@@ -263,10 +286,24 @@ const logStorageFailure = (error: TokenStorage.TokenStorageError): Effect.Effect
   );
 
 /**
- * Builds the auth service: reads the stored session, then gives the Convex connection a token
+ * The session lifecycle of any Convex Auth v1 deployment: `Auth` with the provider left open, so
+ * the movies backend and the platform share one implementation of refresh, stalls, and sign-out.
+ */
+export interface Engine extends Omit<Interface, "signIn"> {
+  /**
+   * Signs in with `request` and stores the session. A provider that refuses fails with its
+   * refusal, such as `Unauthenticated`; one that has not decided yet fails with `SignInWaiting`.
+   */
+  readonly open: (
+    request: SignInRequest,
+  ) => Effect.Effect<void, CallError | SignInWaiting | TokenStorage.TokenStorageError>;
+}
+
+/**
+ * Builds the session engine: reads the stored session, then gives the Convex connection a token
  * source. Requires the connection and a token store.
  */
-export const make = Effect.fn("Auth.make")(function* (options: Options) {
+export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Options) {
   const transport = yield* ConvexTransport.ConvexTransport;
   const storage = yield* TokenStorage.TokenStorage;
   const context = yield* Effect.context();
@@ -313,7 +350,11 @@ export const make = Effect.fn("Auth.make")(function* (options: Options) {
           args,
         );
       },
-      catch: (cause) => ConvexTransport.translateFailure(path, cause),
+      catch: (cause) =>
+        Option.match(cause instanceof ConvexError ? decodeWaiting(cause.data) : Option.none(), {
+          onNone: () => ConvexTransport.translateFailure(path, cause),
+          onSome: ({ code, message }) => new SignInWaiting({ state: code, message }),
+        }),
     });
   });
 
@@ -380,7 +421,7 @@ export const make = Effect.fn("Auth.make")(function* (options: Options) {
    */
   const failed =
     (seen: StoredSession) =>
-    (error: CallError): Effect.Effect<RefreshOutcome> =>
+    (error: CallError | SignInWaiting): Effect.Effect<RefreshOutcome> =>
       Effect.gen(function* () {
         const now = yield* Clock.monotonicTimeNanos;
 
@@ -452,6 +493,7 @@ export const make = Effect.fn("Auth.make")(function* (options: Options) {
         StaleRevision: failed(seen),
         Internal: failed(seen),
         ProtocolError: failed(seen),
+        SignInWaiting: failed(seen),
       }),
     );
 
@@ -596,8 +638,11 @@ export const make = Effect.fn("Auth.make")(function* (options: Options) {
     });
   }
 
-  const signIn = Effect.fn("Auth.signIn")(function* (credentials: Credentials) {
-    const opened = yield* requestTokens(providerParams(credentials), SignInResult);
+  const open = Effect.fn("Auth.open")(function* (request: SignInRequest) {
+    const opened = yield* requestTokens(
+      { provider: request.provider, params: request.params },
+      SignInResult,
+    );
 
     if (Option.isNone(opened)) {
       return yield* new Unauthenticated({
@@ -629,15 +674,52 @@ export const make = Effect.fn("Auth.make")(function* (options: Options) {
 
   yield* adopt(stored);
 
-  return Auth.of({
+  const engine: Engine = {
     status: SubscriptionRef.changes(status),
     currentStatus: SubscriptionRef.get(status),
     reconnecting: SubscriptionRef.changes(reconnecting),
     isReconnecting: SubscriptionRef.get(reconnecting),
     currentIdentity: Effect.map(Ref.get(session), Option.flatMap(sessionOf)),
-    signIn,
+    open,
     signOut: signOut(),
     accessToken,
+  };
+
+  return engine;
+});
+
+/**
+ * `waiting` from a sign-in that should never wait, such as a password: the server is not the one
+ * this client was built for.
+ */
+export const unexpectedWaiting = (waiting: SignInWaiting): ProtocolError =>
+  new ProtocolError({
+    operation: SIGN_IN,
+    message: `Protocol error in auth:signIn: the server answered ${waiting.state}`,
+    cause: waiting,
+  });
+
+/**
+ * Builds the auth service over the movies backend's providers. Requires the connection and a
+ * token store.
+ */
+export const make = Effect.fn("Auth.make")(function* (options: Options) {
+  const engine = yield* makeEngine(options);
+
+  return Auth.of({
+    status: engine.status,
+    currentStatus: engine.currentStatus,
+    reconnecting: engine.reconnecting,
+    isReconnecting: engine.isReconnecting,
+    currentIdentity: engine.currentIdentity,
+    signIn: (credentials) =>
+      engine
+        .open(providerParams(credentials))
+        .pipe(
+          Effect.catchTag("SignInWaiting", (waiting) => Effect.fail(unexpectedWaiting(waiting))),
+        ),
+    signOut: engine.signOut,
+    accessToken: engine.accessToken,
   });
 });
 

@@ -10,10 +10,15 @@ import { drift, plan, write } from "../src/outputs.ts";
 import type { Planned } from "../src/outputs.ts";
 import oxfmtConfig from "../../../.oxfmtrc.json" with { type: "json" };
 import { platformTarget } from "../src/targets/platform.ts";
+import { sdkTarget } from "../src/targets/sdk.ts";
 import { skillTarget } from "../src/targets/skill.ts";
 import { fixtures } from "./fixtures.ts";
 
-const targets = [platformTarget("platform/commands"), skillTarget("skill/references")];
+const targets = [
+  platformTarget("platform/commands"),
+  sdkTarget("sdk/generated"),
+  skillTarget("skill/references"),
+];
 
 const repos: Array<string> = [];
 
@@ -60,6 +65,7 @@ describe("generate", () => {
       "platform/commands/music/playlists.ts",
       "platform/commands/refs.ts",
       "platform/commands/scopes.ts",
+      "sdk/generated/commands.ts",
       "skill/references/core.md",
       "skill/references/music.md",
     ]);
@@ -88,6 +94,34 @@ describe("generate", () => {
       "Refs as core_foo_bar",
       "Refs as core_fooBar",
     ]);
+  });
+
+  it("gives a new command its SDK descriptor at its name's path after one run", async () => {
+    const repo = await freshRepo();
+    const [info] = fixtures;
+
+    await written(repo, await planOf(fixtures));
+
+    const report = await written(
+      repo,
+      await planOf([...fixtures, query("core.server.health", { ...info, summary: "Show uptime" })]),
+    );
+
+    expect(report.written).toContain("sdk/generated/commands.ts");
+    expect(await readFile(join(repo, "sdk/generated/commands.ts"), "utf8")).toContain(
+      [
+        "const core_server_health = query({",
+        '  name: "core.server.health",',
+        '  path: "core/server:health",',
+      ].join("\n"),
+    );
+    expect(await readFile(join(repo, "sdk/generated/commands.ts"), "utf8")).toContain(
+      [
+        "    server: {",
+        "      /** `core.server.health` (query, public): Show uptime. */",
+        "      health: method.query(core_server_health),",
+      ].join("\n"),
+    );
   });
 
   it("writes nothing on a second run", async () => {
@@ -132,6 +166,7 @@ describe("generate", () => {
       { kind: "extra", path: "platform/commands/music/playlists.ts" },
       { kind: "stale", path: "platform/commands/refs.ts" },
       { kind: "stale", path: "platform/commands/scopes.ts" },
+      { kind: "stale", path: "sdk/generated/commands.ts" },
       { kind: "missing", path: "skill/references/core.md" },
       { kind: "extra", path: "skill/references/music.md" },
     ]);

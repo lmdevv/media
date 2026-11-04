@@ -1,15 +1,89 @@
 # @media/sdk
 
-The client core shared by the web app, the CLI, and later the native apps. Calls are typed by the
-command registry in `@media/contracts`: arguments are encoded and results decoded with each
-command's schemas, and failures are the contracts' tagged errors plus `TransportError` and
-`ProtocolError`. No Node built-ins or DOM globals in shipped sources (`import-boundary.test.ts`).
+The client core shared by the web app, the CLI, and later the native apps. No Node built-ins or
+DOM globals in shipped sources (`import-boundary.test.ts`).
+
+It holds two clients side by side until movies moves onto the platform (phase 4):
+
+- **The platform client** talks to the platform deployment (`packages/platform`). The generator in
+  `packages/commands` gives every command a method at its name's path, so `core.server.info` is
+  `platform.core.server.info()`.
+- **The movies client** talks to the movies backend (`packages/backend`). Its calls are typed by the
+  command registry in `@media/contracts`.
+
+Arguments are encoded and results decoded with each command's schemas. Failures are the contracts'
+tagged errors plus `TransportError` and `ProtocolError`.
 
 | Entry point          | For                                                               |
 | -------------------- | ----------------------------------------------------------------- |
 | `@media/sdk/effect`  | Effect programs: services, layers, workflows                      |
-| `@media/sdk/react`   | React: provider and hooks on the app's `ConvexReactClient`        |
+| `@media/sdk/react`   | React: providers and hooks                                        |
 | `@media/sdk/promise` | Everything else: a Promise facade that rejects with tagged errors |
+
+## Platform
+
+```ts
+import { Platform, TokenStorage } from "@media/sdk/effect";
+
+const program = Effect.gen(function* () {
+  const platform = yield* Platform.Platform;
+
+  yield* platform.session.signIn(
+    Platform.Credentials.Password({ username, password: Redacted.make(password) }),
+  );
+
+  const { name } = yield* platform.core.server.info();
+  const me = yield* platform.core.auth.sessions.current();
+
+  yield* platform.core.auth.sessions.end({ sessionId: me.sessionId });
+}).pipe(
+  Effect.provide(Platform.layer({ url, connection: "http", storage: TokenStorage.layerMemory })),
+);
+```
+
+```ts
+import { createPlatform } from "@media/sdk/promise";
+
+const platform = createPlatform({ url, connection: "http" });
+const { name } = await platform.core.server.info();
+```
+
+```tsx
+import { PlatformProvider, usePlatform, usePlatformQuery } from "@media/sdk/react";
+
+<PlatformProvider url={url} storage={window.localStorage}>
+  <ServerName />
+</PlatformProvider>;
+
+const ServerName = () => {
+  const info = usePlatformQuery(usePlatform().core.server.info);
+
+  return info.status === "success" ? <h1>{info.data.name}</h1> : null;
+};
+```
+
+- Every command `domain.module.fn` is the method `platform.domain.module.fn(args)`. Hover it for
+  the command's summary, kind, scope, and whether it refuses API keys. A command whose arguments are all optional takes none.
+  Queries also have `watch`: a `Stream` in Effect, a `QueryWatch` in Promise code and React.
+- IDs are typed by table (`Platform.Id<"authSessions">`), so an ID from a result passes into
+  another command's arguments and an ID of the wrong table does not type-check.
+- Calls fail with `PlatformError`: a session without the command's scope gets `Forbidden`, and a
+  session that was ended elsewhere gets `Unauthenticated`.
+- `platform.session` signs in with `Credentials.Password` or `Credentials.ApiKey`, signs out, and
+  reports `status`. `startDeviceSignIn(clientName)` starts a device sign-in: show its `userCode`,
+  then `complete` waits until a signed-in session approves it, or fails with
+  `DeviceSignInRefused`. Tokens refresh by themselves through the same session engine as `Auth`.
+- The account sign-ins make or change an account and sign in as it. `Credentials.Setup` makes the
+  first account the owner and fails with `Conflict` once the server has one. `Credentials.Invite`
+  makes an account from an invite code and `Credentials.Reset` sets a new password from a reset
+  link code; a used or expired code fails with `Expired`. In Promise code and React they are
+  `session.setUpOwner`, `session.acceptInvite`, and `session.resetPassword`.
+- The platform client opens its own connection and keeps its own session, so it runs beside the
+  movies client. Clients that store their session under one key share one sign-in, as the web
+  clients on one origin do (`media.session` by default).
+- `src/platform/generated/` is written by `pnpm --filter @media/commands generate`. Never edit it.
+
+## Movies
 
 ## Effect
 

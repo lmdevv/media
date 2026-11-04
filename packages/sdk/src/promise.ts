@@ -2,6 +2,8 @@
  * `@media/sdk/promise`: the SDK for code that does not use Effect. It runs the Effect core in a
  * `ManagedRuntime`. Promises reject with the same tagged errors the Effect API fails with
  * (`Unauthenticated`, `NotFound`, `TransportError`, ...), so callers branch on `error._tag`.
+ * `createPlatform` opens the platform deployment's client; `createMovies` opens the movies
+ * backend's.
  */
 import type { CommandArgs, CommandName, CommandResult } from "@media/contracts/commands";
 import type { DeviceId, RoomId } from "@media/contracts/ids";
@@ -51,6 +53,18 @@ export interface MoviesOptions {
 export type Stop = () => Promise<void>;
 
 export type { PasswordSignIn } from "./auth";
+
+export { createPlatform } from "./platform/promise";
+
+export type {
+  PendingDeviceSignIn,
+  PlatformInvite,
+  PlatformOptions,
+  PlatformPassword,
+  PlatformReset,
+  PlatformSdk,
+  PlatformSession,
+} from "./platform/promise";
 
 export type { PendingDeviceLogin } from "./device-login";
 

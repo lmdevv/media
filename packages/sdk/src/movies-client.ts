@@ -19,16 +19,16 @@ import {
   LOG_UNAVAILABLE_SINCE_HEADER,
   LogQuery,
 } from "@media/contracts/diagnostics";
-import { InvalidArgs } from "@media/contracts/errors";
 import { EpochMillis } from "@media/contracts/units";
-import { Context, Effect, Layer, Option, Schema, SchemaIssue, Stream } from "effect";
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect";
 
 import * as Auth from "./auth";
+import { acrossReconnects, decodeResult, encodeArgs } from "./calls";
 import * as ConvexTransport from "./convex-transport";
-import type { FunctionKind, WireArgs } from "./convex-transport";
+import type { FunctionKind } from "./convex-transport";
 import { baseUrl, encodeJson, requestJson, requestLines } from "./media-http";
 import type { CallError } from "./sdk-errors";
-import { ProtocolError, TransportError } from "./sdk-errors";
+import { TransportError } from "./sdk-errors";
 import type { TokenStorageError } from "./token-storage";
 
 /** Commands served by a Convex query; only these can be subscribed to. */
@@ -124,84 +124,10 @@ export interface Options {
   readonly mediaUrl: Option.Option<string>;
 }
 
-const decodeWireArgs = Schema.decodeUnknownEffect(Schema.JsonObject);
-
-const issueText = (issue: SchemaIssue.Issue): string =>
-  SchemaIssue.makeFormatterDefault()(issue).replaceAll("\n", " ");
-
-const encodeArgs = <Command extends AnyCommand>(
-  name: string,
-  command: Command,
-  args: Command["args"]["Type"],
-): Effect.Effect<WireArgs, InvalidArgs> =>
-  Schema.encodeUnknownEffect(command.args)(args).pipe(
-    Effect.flatMap(decodeWireArgs),
-    Effect.mapError(
-      (error) =>
-        new InvalidArgs({ message: `Invalid arguments for ${name}: ${issueText(error.issue)}` }),
-    ),
-  );
-
-const decodeResult = <A>(
-  name: string,
-  schema: Schema.Codec<A, unknown>,
-  raw: Schema.Json,
-): Effect.Effect<A, ProtocolError> =>
-  Schema.decodeEffect(schema)(raw).pipe(
-    Effect.mapError(
-      (cause) =>
-        new ProtocolError({
-          operation: name,
-          message: `Protocol error in ${name}: the result does not match the contract`,
-          cause,
-        }),
-    ),
-  );
-
 /** Builds the client over the Convex connection and the session's auth. */
 export const make = Effect.fn("MoviesClient.make")(function* (options: Options) {
   const transport = yield* ConvexTransport.ConvexTransport;
   const auth = yield* Auth.Auth;
-
-  /**
-   * Whether to subscribe again after Convex answered `Unauthenticated` to a subscription made as
-   * `identity`: once the connection signs in again, when it ran signed out because the server
-   * keeps failing to renew the session, or at once when it did so as the subscription was made,
-   * since the answer may be from then. Only while that session is still the one signed in, so
-   * nothing one account asked is asked again as another.
-   */
-  const subscribeAgain = (askedWhileReconnecting: boolean, identity: Option.Option<string>) =>
-    Effect.gen(function* () {
-      const reconnecting = yield* auth.isReconnecting;
-
-      if (!reconnecting && !askedWhileReconnecting) return false;
-      yield* Stream.runHead(Stream.filter(auth.reconnecting, (waiting) => !waiting));
-      const current = yield* auth.currentIdentity;
-
-      return Option.isSome(identity) && Option.contains(current, identity.value);
-    });
-
-  /**
-   * `results`, subscribed again as `subscribeAgain` says, however long the connection runs signed
-   * out, so a screen keeps what it shows.
-   */
-  const subscribedAcrossReconnects = <A>(
-    results: Stream.Stream<A, CallError>,
-  ): Stream.Stream<A, CallError> =>
-    Stream.unwrap(
-      Effect.gen(function* () {
-        const askedWhileReconnecting = yield* auth.isReconnecting;
-        const identity = yield* auth.currentIdentity;
-
-        return Stream.catchTag(results, "Unauthenticated", (error) =>
-          Stream.unwrap(
-            Effect.map(subscribeAgain(askedWhileReconnecting, identity), (again) =>
-              again ? subscribedAcrossReconnects(results) : Stream.fail(error),
-            ),
-          ),
-        );
-      }),
-    );
 
   const callConvex = <Command extends ConvexCommand<FunctionKind, ArgsSchema, WireSchema>>(
     name: string,
@@ -209,7 +135,7 @@ export const make = Effect.fn("MoviesClient.make")(function* (options: Options) 
     args: Command["args"]["Type"],
   ): Effect.Effect<Command["result"]["Type"], CallError> =>
     Effect.gen(function* () {
-      const wire = yield* encodeArgs(name, command, args);
+      const wire = yield* encodeArgs(name, command.args, args);
       const raw = yield* transport.call(command.kind, command.function, wire);
 
       return yield* decodeResult(name, command.result, raw);
@@ -234,7 +160,7 @@ export const make = Effect.fn("MoviesClient.make")(function* (options: Options) 
     args: Command["args"]["Type"],
   ): Effect.Effect<Command["result"]["Type"], ClientError> =>
     Effect.gen(function* () {
-      const wire = yield* encodeArgs(name, command, args);
+      const wire = yield* encodeArgs(name, command.args, args);
       const url = yield* mediaRoute(name, command.route.path);
       const bearer = yield* auth.accessToken(false);
 
@@ -301,8 +227,9 @@ export const make = Effect.fn("MoviesClient.make")(function* (options: Options) 
     args: Command["args"]["Type"],
   ): Stream.Stream<Command["result"]["Type"], CallError> =>
     Stream.unwrap(
-      Effect.map(encodeArgs(name, command, args), (wire) =>
-        subscribedAcrossReconnects(
+      Effect.map(encodeArgs(name, command.args, args), (wire) =>
+        acrossReconnects(
+          auth,
           transport
             .subscribe(command.function, wire)
             .pipe(Stream.mapEffect((raw) => decodeResult(name, command.result, raw))),
