@@ -10,6 +10,7 @@ import {
   member,
   openTile,
   picker,
+  sharedAdmin,
   sharedDevice,
   sharedTiles,
   tileIn,
@@ -61,7 +62,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
 
   it("lists on a shared device only the people who opted in", async () => {
     if (stack === undefined) return;
-    const admin = await member(stack, "admin", "admin");
+    const admin = await sharedAdmin(stack);
     const dad = await listed.adult(await member(stack, "dad"));
     const mom = await listed.adult(await member(stack, "mom"));
     const aunt = await member(stack, "aunt");
@@ -96,7 +97,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
 
   it("opens a kid's tile freely and locks every adult tile while a kid is listed", async () => {
     if (stack === undefined) return;
-    const admin = await member(stack, "admin", "admin");
+    const admin = await sharedAdmin(stack);
     const dad = await listed.adult(await member(stack, "dad"));
     const lily = await listed.kid(admin, await member(stack, "lily"));
     const tv = await sharedDevice(stack, admin);
@@ -137,7 +138,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
 
   it("refuses an admin who tries to lift the lock a listed kid puts on an adult's tile", async () => {
     if (stack === undefined) return;
-    const admin = await member(stack, "admin", "admin");
+    const admin = await sharedAdmin(stack);
     const dad = await listed.adult(await member(stack, "dad"));
     const lily = await listed.kid(admin, await member(stack, "lily"));
     const tv = await sharedDevice(stack, admin);
@@ -170,7 +171,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
 
   it("locks the one tile an admin names when no kid is listed", async () => {
     if (stack === undefined) return;
-    const admin = await member(stack, "admin", "admin");
+    const admin = await sharedAdmin(stack);
     const dad = await listed.adult(await member(stack, "dad"));
     const mom = await listed.adult(await member(stack, "mom"));
     const tv = await sharedDevice(stack, admin);
@@ -234,7 +235,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
 
   it("turns an unlock code off after 5 wrong tries until a password, an approval, or an admin", async () => {
     if (stack === undefined) return;
-    const admin = await member(stack, "admin", "admin");
+    const admin = await sharedAdmin(stack);
     const dad = await listed.adult(await member(stack, "dad"));
     await listed.kid(admin, await member(stack, "lily"));
     const tv = await sharedDevice(stack, admin);
@@ -324,7 +325,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
 
   it("opens an adult's tile when that adult approves from another signed-in session", async () => {
     if (stack === undefined) return;
-    const admin = await member(stack, "admin", "admin");
+    const admin = await sharedAdmin(stack);
     const dad = await listed.adult(await member(stack, "dad"));
     const mom = await listed.adult(await member(stack, "mom"));
     await listed.kid(admin, await member(stack, "lily"));
@@ -387,7 +388,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
 
   it("keeps a kid on their tile until an adult approves leaving it", async () => {
     if (stack === undefined) return;
-    const admin = await member(stack, "admin", "admin");
+    const admin = await sharedAdmin(stack);
     const mom = await listed.adult(await member(stack, "mom"));
     const lily = await listed.kid(admin, await member(stack, "lily"));
     const max = await listed.kid(admin, await member(stack, "max"));
@@ -463,7 +464,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
 
   it("signs everyone out of a device when an admin changes its mode", async () => {
     if (stack === undefined) return;
-    const admin = await member(stack, "admin", "admin");
+    const admin = await sharedAdmin(stack);
     const dad = await listed.adult(await member(stack, "dad"));
     const tv = await sharedDevice(stack, admin);
     const dadTile = await openTile(stack, tv, dad.userId);

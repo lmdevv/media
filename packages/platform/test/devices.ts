@@ -58,6 +58,17 @@ export interface Listings {
   readonly clear: () => Promise<void>;
 }
 
+const admins = new Map<string, Promise<Member>>();
+
+/** One admin per stack for every device test, which keeps the users list short. */
+export const sharedAdmin = (stack: CoreStack): Promise<Member> => {
+  const made = admins.get(stack.url) ?? member(stack, "admin", "admin");
+
+  admins.set(stack.url, made);
+
+  return made;
+};
+
 /**
  * Lists people on shared devices and takes them off again. Every shared device lists the same
  * people, so a test that leaves someone listed changes every later test's locks.
