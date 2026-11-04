@@ -20,7 +20,7 @@ const setResult = v.null();
 
 /** The handlers `convex/core/devices/unlockCodes.ts` passes to `register`, one per `core.devices.unlockCodes` command. */
 export interface Handlers {
-  /** `core.devices.unlockCodes.reset` (mutation, admin): Turn someone's unlock code back on for one shared device after 5 wrong tries. */
+  /** `core.devices.unlockCodes.reset` (mutation, admin, API keys refused): Turn someone's unlock code back on for one shared device after 5 wrong tries. */
   readonly reset: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof resetArgs>,
@@ -56,7 +56,8 @@ export const register = (handlers: Handlers) => ({
   reset: mutation({
     args: resetArgs,
     returns: resetResult,
-    handler: async (ctx, args) => handlers.reset(ctx, args, await requireCaller(ctx, "admin")),
+    handler: async (ctx, args) =>
+      handlers.reset(ctx, args, refuseKeys(await requireCaller(ctx, "admin"))),
   }),
   set: action({
     args: setArgs,

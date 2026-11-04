@@ -2,7 +2,8 @@ import type { Doc, Id } from "../../_generated/dataModel";
 import type { DatabaseReader, MutationCtx, QueryCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
 import { constantTimeEqual, rowForSecret } from "../lib/secrets";
-import { can, isKid, proverOf } from "../permissions/policy";
+import { asPerson } from "../accounts/users";
+import { can, isKid, lockOf, principalOf, proverOf } from "../permissions/policy";
 import type { Decision, PersonDoc, Principal, Prover, TileResource } from "../permissions/policy";
 import { endSession } from "../sessions";
 
@@ -85,6 +86,39 @@ export const tileOf = (
   holder,
   proof,
 });
+
+/** The person whose tile a sign-in names. */
+export const tilePerson = async (db: DatabaseReader, userId: Id<"users">): Promise<PersonDoc> =>
+  asPerson(await db.get(userId)) ?? fail("not_found", NO_TILE);
+
+const lockedMessage = (tile: TileResource): string => {
+  const lock = lockOf(tile);
+
+  if (lock.state === "locked" && lock.opensWith === "adult") {
+    return "An adult approves leaving a kid's tile, or proves who they are for this one";
+  }
+
+  return "This tile is locked; type the password or unlock code, or approve from another device";
+};
+
+/**
+ * Decides opening `person`'s tile on `device` with a proof by `prover`, or with none. An unlisted
+ * person fails `not_found`, and a lock the proof does not lift fails `forbidden`.
+ */
+export const requireOpen = async (
+  db: DatabaseReader,
+  device: SharedDevice,
+  person: PersonDoc,
+  prover: Prover | null,
+): Promise<void> => {
+  const listed = await listedPeople(db);
+  const tile = tileOf(person, listed, holderOf(device, listed), prover);
+  const decision = can(principalOf(person), "open", tile);
+
+  if (decision.allowed) return;
+
+  fail(decision.refusal === "hidden" ? "not_found" : "forbidden", lockedMessage(tile));
+};
 
 const tileRefusal = (decision: Extract<Decision, { readonly allowed: false }>): never => {
   if (decision.because === "kid-lock") {

@@ -94,6 +94,7 @@ describe.skipIf(stack === undefined)("a shared device's picker", { timeout: 600_
 
     expect(timings.every((call) => call.tiles >= LISTED)).toBe(true);
     expect(reads.length).toBeGreaterThanOrEqual(CALLS);
+    expect(Math.max(...reads)).toBeLessThanOrEqual(2 + 3 * LISTED);
     expect(p50).toBeLessThan(P50_BUDGET_MS);
   });
 });

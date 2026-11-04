@@ -10,8 +10,10 @@ import { fail } from "../lib/errors";
 import { hashUnlockCode, passwordHashOf, passwordMatches } from "../lib/passwords";
 import { takeAttempt } from "../lib/rateLimit";
 import type { RateLimit } from "../lib/rateLimit";
+import { asPerson } from "../accounts/users";
 import { requireAccount } from "../permissions/authorize";
-import { sharedDeviceById } from "./facts";
+import { proverOf } from "../permissions/policy";
+import { requireOpen, sharedDeviceById, tilePerson } from "./facts";
 
 /** Wrong unlock codes in a row that turn a person's code off on one device (D47). */
 export const CODE_TRIES = 5;
@@ -19,6 +21,9 @@ export const CODE_TRIES = 5;
 const UNLOCKS_PER_HOUR = 20;
 
 const CODE_FORMAT = /^\d{4,8}$/u;
+
+/** Whether `typed` has an unlock code's shape: 4 to 8 digits. */
+export const isUnlockCode = (typed: string): boolean => CODE_FORMAT.test(typed);
 
 /** Every unlock-code try a person makes, on any device, takes from this bucket. */
 export const unlockLimit = (userId: Id<"users">): RateLimit => ({
@@ -46,13 +51,16 @@ const wrongTries = (code: Doc<"unlockCodes">, strike: Doc<"unlockStrikes"> | nul
   strike?.codeId === code._id ? strike.wrong : 0;
 
 /** Whether a person's code works on a device: none set, ready, or off after 5 wrong tries. */
-export const codeState = (
-  code: Doc<"unlockCodes"> | null,
-  strike: Doc<"unlockStrikes"> | null,
-): "none" | "ready" | "off" => {
+export const codeStateOn = async (
+  db: DatabaseReader,
+  deviceId: Id<"devices">,
+  userId: Id<"users">,
+): Promise<"none" | "ready" | "off"> => {
+  const code = await codeOf(db, userId);
+
   if (code === null) return "none";
 
-  return wrongTries(code, strike) >= CODE_TRIES ? "off" : "ready";
+  return wrongTries(code, await strikeOf(db, deviceId, userId)) >= CODE_TRIES ? "off" : "ready";
 };
 
 /**
@@ -71,10 +79,11 @@ export const clearStrikes = async (
 
 /**
  * Takes one wrong try before the action checks the digits, so tries made at once never pass 5,
- * and a right code gives it back by clearing the count.
+ * and a right code gives it back by clearing the count. A code that could not open the tile even
+ * when right is refused first and costs no try.
  */
 export const attempt = internalMutation({
-  args: { deviceId: v.string(), secretHash: v.string(), by: v.id("users") },
+  args: { deviceId: v.string(), secretHash: v.string(), userId: v.id("users"), by: v.id("users") },
   returns: v.union(
     v.object({ kind: v.literal("none") }),
     v.object({ kind: v.literal("off") }),
@@ -86,11 +95,14 @@ export const attempt = internalMutation({
       left: v.number(),
     }),
   ),
-  handler: async (ctx, { deviceId, secretHash, by }) => {
+  handler: async (ctx, { deviceId, secretHash, userId, by }) => {
     const device = await sharedDeviceById(ctx.db, deviceId, secretHash);
-    const code = await codeOf(ctx.db, by);
+    const typist = asPerson(await ctx.db.get(by));
+    const code = typist === null ? null : await codeOf(ctx.db, typist._id);
 
-    if (code === null) return { kind: "none" as const };
+    if (typist === null || code === null) return { kind: "none" as const };
+
+    await requireOpen(ctx.db, device, await tilePerson(ctx.db, userId), proverOf(typist));
 
     const strike = await strikeOf(ctx.db, device._id, by);
     const wrong = wrongTries(code, strike);
@@ -152,7 +164,7 @@ export const { set, reset } = register({
 
     const digits = code.trim();
 
-    if (!CODE_FORMAT.test(digits)) {
+    if (!isUnlockCode(digits)) {
       return fail("invalid_args", "Use 4 to 8 digits for the unlock code");
     }
 

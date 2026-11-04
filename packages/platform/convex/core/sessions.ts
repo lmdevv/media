@@ -84,6 +84,22 @@ const stillOnDevice = (
   );
 };
 
+/** Whether a session bound to `device`, read with its user, is live. */
+export const liveOnDevice = (
+  session: Session,
+  user: Doc<"users">,
+  device: Doc<"devices">,
+  now: number,
+): boolean => {
+  const bound = boundDevice(session);
+
+  return (
+    bound?.id === device._id &&
+    isLive(session, user, now) &&
+    stillOnDevice(session, bound, device, user)
+  );
+};
+
 /** A session and its user when the session is live, or null. */
 export const liveSession = async (
   db: DatabaseReader,

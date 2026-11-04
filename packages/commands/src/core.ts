@@ -420,6 +420,7 @@ export const core = [
   mutation("core.devices.registry.remove", {
     summary: "Forget a device and sign everyone on it out",
     scope: "admin",
+    refusesKeys: true,
     args: { deviceId: v.id("devices") },
     result: v.null(),
   }),
@@ -486,6 +487,7 @@ export const core = [
   mutation("core.devices.unlockCodes.reset", {
     summary: "Turn someone's unlock code back on for one shared device after 5 wrong tries",
     scope: "admin",
+    refusesKeys: true,
     args: { deviceId: v.id("devices"), userId: v.id("users") },
     result: v.null(),
   }),

@@ -9,20 +9,19 @@ import { fail } from "../lib/errors";
 import { passwordHashOf, signInLimit } from "../lib/passwords";
 import { refundAttempt } from "../lib/rateLimit";
 import { requireAccount } from "../permissions/authorize";
-import { can, lockOf, principalOf, proverOf } from "../permissions/policy";
-import type { PersonDoc, TileResource } from "../permissions/policy";
+import { proverOf } from "../permissions/policy";
+import type { PersonDoc } from "../permissions/policy";
 import { openSession, signedIn } from "../sessions";
 import { markRedeemed, redeemable } from "./approvals";
 import type { Redeemed } from "./approvals";
 import {
   LISTED_MAX,
-  NO_TILE,
-  holderOf,
   listedPeople,
   occupyTile,
+  requireOpen,
   requireTile,
   sharedDeviceById,
-  tileOf,
+  tilePerson,
 } from "./facts";
 import type { SharedDevice } from "./facts";
 import { clearStrikes, codeOf, unlockLimit } from "./unlockCodes";
@@ -30,7 +29,12 @@ import { clearStrikes, codeOf, unlockLimit } from "./unlockCodes";
 /** A proof the provider checked, which `open` checks again against the rows it reads. */
 export const checkedProof = v.union(
   v.object({ kind: v.literal("none") }),
-  v.object({ kind: v.literal("password"), by: v.id("users"), hash: v.string() }),
+  v.object({
+    kind: v.literal("password"),
+    by: v.id("users"),
+    hash: v.string(),
+    usernameKey: v.string(),
+  }),
   v.object({ kind: v.literal("code"), by: v.id("users"), codeId: v.id("unlockCodes") }),
   v.object({ kind: v.literal("approval"), approvalId: v.id("tileApprovals") }),
 );
@@ -61,16 +65,6 @@ const proverFor = async (
     : fail("unauthenticated", "That changed meanwhile; try again");
 };
 
-const lockedMessage = (tile: TileResource): string => {
-  const lock = lockOf(tile);
-
-  if (lock.state === "locked" && lock.opensWith === "adult") {
-    return "An adult approves leaving a kid's tile, or proves who they are for this one";
-  }
-
-  return "This tile is locked; type the password or unlock code, or approve from another device";
-};
-
 /** Opens `userId`'s tile with a checked proof, ending the tile session the device held. */
 export const open = internalMutation({
   args: {
@@ -82,22 +76,15 @@ export const open = internalMutation({
   returns: signedIn,
   handler: async (ctx, { deviceId, secretHash, userId, proof }) => {
     const device = await sharedDeviceById(ctx.db, deviceId, secretHash);
-    const person = asPerson(await ctx.db.get(userId)) ?? fail("not_found", NO_TILE);
+    const person = await tilePerson(ctx.db, userId);
     const now = Date.now();
     const proved = await proverFor(ctx, device, person, proof, now);
 
     if (proved.kind === "again") return proved.signedIn;
 
     const prover = proved.kind === "prover" ? proved.prover : null;
-    const listed = await listedPeople(ctx.db);
-    const tile = tileOf(person, listed, holderOf(device, listed), prover);
-    const decision = can(principalOf(person), "open", tile);
 
-    if (!decision.allowed) {
-      return decision.refusal === "hidden"
-        ? fail("not_found", NO_TILE)
-        : fail("forbidden", lockedMessage(tile));
-    }
+    await requireOpen(ctx.db, device, person, prover);
 
     const sessionId = await openSession(ctx, person, { kind: "tile", device }, now);
 
@@ -105,11 +92,7 @@ export const open = internalMutation({
 
     if (prover !== null) await clearStrikes(ctx, device._id, prover.userId);
 
-    if (proof.kind === "password") {
-      const by = asPerson(await ctx.db.get(proof.by));
-
-      if (by !== null) await refundAttempt(ctx, signInLimit(by.usernameKey), now);
-    }
+    if (proof.kind === "password") await refundAttempt(ctx, signInLimit(proof.usernameKey), now);
 
     if (proof.kind === "code") await refundAttempt(ctx, unlockLimit(proof.by), now);
 

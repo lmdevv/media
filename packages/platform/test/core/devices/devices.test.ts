@@ -394,6 +394,10 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     const tv = await sharedDevice(stack, admin);
     const device = { device: tv.device };
 
+    const maxCode = "6152";
+
+    await max.signedIn.client.action(api.core.devices.unlockCodes.set, { code: maxCode });
+
     const lilyTile = await openTile(stack, tv, lily.userId);
 
     await lilyTile.client.action(api.auth.signOut, {});
@@ -404,6 +408,15 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
       opensWith: "adult",
     });
     expect(await refusal(openTile(stack, tv, max.userId))).toBe("forbidden");
+    expect(
+      await refusal(
+        openTile(stack, tv, max.userId, { kind: "code", by: max.userId, code: maxCode }),
+      ),
+    ).toBe("forbidden");
+    expect(
+      await refusal(openTile(stack, tv, max.userId, { kind: "code", by: max.userId, code: "x" })),
+    ).toBe("invalid_args");
+    expect(tileIn(await picker(stack, tv), max.userId).code).toBe("ready");
     expect(
       await refusal(
         anonymous(stack).mutation(api.core.devices.approvals.request, {
@@ -436,6 +449,16 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     expect(await picker(stack, tv)).toMatchObject({ holder: null });
     expect(await refusal(openTile(stack, tv, max.userId))).toBe("accepted");
     expect(await picker(stack, tv)).toMatchObject({ holder: max.userId });
+
+    const again = await anonymous(stack).mutation(api.core.devices.approvals.request, {
+      ...device,
+      ask: { intent: "leave" },
+    });
+
+    expect(again.approvalId).not.toBe(asked.approvalId);
+    expect(await picker(stack, tv)).toMatchObject({
+      approval: { approvalId: again.approvalId, intent: "leave", state: "pending" },
+    });
   });
 
   it("signs everyone out of a device when an admin changes its mode", async () => {

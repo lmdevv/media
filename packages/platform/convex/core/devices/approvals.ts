@@ -27,6 +27,14 @@ const NO_APPROVAL = "No such approval";
 
 type Approval = Doc<"tileApprovals">;
 
+/** What every state of an approval keeps. */
+const fieldsOf = ({ deviceId, intent, userId, expiresAt }: Approval) => ({
+  deviceId,
+  intent,
+  userId,
+  expiresAt,
+});
+
 const approvalsOf = (db: DatabaseReader, deviceId: Id<"devices">) =>
   db
     .query("tileApprovals")
@@ -156,10 +164,7 @@ export const markRedeemed = async (
   if (approval?.state !== "approved") return;
 
   await ctx.db.replace(approval._id, {
-    deviceId: approval.deviceId,
-    intent: approval.intent,
-    userId: approval.userId,
-    expiresAt: approval.expiresAt,
+    ...fieldsOf(approval),
     state: "redeemed",
     answeredBy: approval.answeredBy,
     sessionId,
@@ -194,7 +199,8 @@ export const { request, pending, approve, deny } = register({
         approval.intent === ask.intent &&
         approval.userId === userId &&
         approval.expiresAt > now &&
-        (approval.state === "pending" || approval.state === "approved"),
+        (approval.state === "pending" ||
+          (approval.state === "approved" && approval.intent === "open")),
     );
 
     if (live !== undefined) return { approvalId: live._id, expiresAt: live.expiresAt };
@@ -276,10 +282,7 @@ export const { request, pending, approve, deny } = register({
     }
 
     await ctx.db.replace(approval._id, {
-      deviceId: approval.deviceId,
-      intent: approval.intent,
-      userId: approval.userId,
-      expiresAt: approval.expiresAt,
+      ...fieldsOf(approval),
       state: "approved",
       answeredBy: me._id,
       generation: me.sessionGeneration,
@@ -298,10 +301,7 @@ export const { request, pending, approve, deny } = register({
     }
 
     await ctx.db.replace(approval._id, {
-      deviceId: approval.deviceId,
-      intent: approval.intent,
-      userId: approval.userId,
-      expiresAt: approval.expiresAt,
+      ...fieldsOf(approval),
       state: "denied",
       answeredBy: me._id,
     });

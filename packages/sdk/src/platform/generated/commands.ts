@@ -1005,7 +1005,7 @@ export const effectMethods = (method: EffectBuilder) => ({
         enroll: method.action(core_devices_registry_enroll),
         /** `core.devices.registry.list` (query, admin): List every registered device and whether it is shared, newest first. */
         list: method.query(core_devices_registry_list),
-        /** `core.devices.registry.remove` (mutation, admin): Forget a device and sign everyone on it out. */
+        /** `core.devices.registry.remove` (mutation, admin, API keys refused): Forget a device and sign everyone on it out. */
         remove: method.mutation(core_devices_registry_remove),
         /** `core.devices.registry.setMode` (mutation, admin, API keys refused): Make a device shared, so its picker lists everyone who opted in, or personal again; either way everyone on it is signed out. */
         setMode: method.mutation(core_devices_registry_setMode),
@@ -1017,7 +1017,7 @@ export const effectMethods = (method: EffectBuilder) => ({
         setLock: method.mutation(core_devices_tiles_setLock),
       },
       unlockCodes: {
-        /** `core.devices.unlockCodes.reset` (mutation, admin): Turn someone's unlock code back on for one shared device after 5 wrong tries. */
+        /** `core.devices.unlockCodes.reset` (mutation, admin, API keys refused): Turn someone's unlock code back on for one shared device after 5 wrong tries. */
         reset: method.mutation(core_devices_unlockCodes_reset),
         /** `core.devices.unlockCodes.set` (action, account, API keys refused): Set or clear your short unlock code, which opens your tile on shared-device lock screens and never signs in. */
         set: method.action(core_devices_unlockCodes_set),
@@ -1163,7 +1163,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         enroll: method.action(core_devices_registry_enroll),
         /** `core.devices.registry.list` (query, admin): List every registered device and whether it is shared, newest first. */
         list: method.query(core_devices_registry_list),
-        /** `core.devices.registry.remove` (mutation, admin): Forget a device and sign everyone on it out. */
+        /** `core.devices.registry.remove` (mutation, admin, API keys refused): Forget a device and sign everyone on it out. */
         remove: method.mutation(core_devices_registry_remove),
         /** `core.devices.registry.setMode` (mutation, admin, API keys refused): Make a device shared, so its picker lists everyone who opted in, or personal again; either way everyone on it is signed out. */
         setMode: method.mutation(core_devices_registry_setMode),
@@ -1175,7 +1175,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         setLock: method.mutation(core_devices_tiles_setLock),
       },
       unlockCodes: {
-        /** `core.devices.unlockCodes.reset` (mutation, admin): Turn someone's unlock code back on for one shared device after 5 wrong tries. */
+        /** `core.devices.unlockCodes.reset` (mutation, admin, API keys refused): Turn someone's unlock code back on for one shared device after 5 wrong tries. */
         reset: method.mutation(core_devices_unlockCodes_reset),
         /** `core.devices.unlockCodes.set` (action, account, API keys refused): Set or clear your short unlock code, which opens your tile on shared-device lock screens and never signs in. */
         set: method.action(core_devices_unlockCodes_set),

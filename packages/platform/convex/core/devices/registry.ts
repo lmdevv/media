@@ -20,7 +20,7 @@ import {
 } from "../lib/secrets";
 import { requireServer } from "../permissions/authorize";
 import type { PersonDoc } from "../permissions/policy";
-import { endSession, liveSession } from "../sessions";
+import { endSession, liveOnDevice } from "../sessions";
 import { dropApprovals } from "./approvals";
 import { DEVICE_PREFIX, NO_DEVICE } from "./facts";
 
@@ -47,22 +47,37 @@ interface SignedInHere {
   readonly person: PersonDoc;
 }
 
+/** Each distinct user of `sessions`, read once. */
+const usersOf = async (
+  db: DatabaseReader,
+  sessions: ReadonlyArray<Doc<"authSessions">>,
+): Promise<ReadonlyMap<Id<"users">, Doc<"users">>> => {
+  const ids = [...new Set(sessions.map((session) => session.userId))];
+  const users = await Promise.all(ids.map((userId) => db.get(userId)));
+
+  return new Map(users.flatMap((user) => (user === null ? [] : [[user._id, user] as const])));
+};
+
 /** The live sessions on a personal device and the people they sign in. */
 export const signedInOn = async (
   db: DatabaseReader,
-  deviceId: Id<"devices">,
+  device: Doc<"devices">,
   now: number,
 ): Promise<ReadonlyArray<SignedInHere>> => {
   const sessions = await db
     .query("authSessions")
-    .withIndex("by_device_user", (q) => q.eq("device.id", deviceId))
+    .withIndex("by_device_user", (q) => q.eq("device.id", device._id))
     .take(DEVICE_SESSIONS_READ);
 
-  const live = await Promise.all(sessions.map((session) => liveSession(db, session._id, now)));
+  const users = await usersOf(db, sessions);
 
-  return live.flatMap((found) =>
-    found?.user.kind === "person" ? [{ sessionId: found.session._id, person: found.user }] : [],
-  );
+  return sessions.flatMap((session) => {
+    const user = users.get(session.userId);
+
+    return user?.kind === "person" && liveOnDevice(session, user, device, now)
+      ? [{ sessionId: session._id, person: user }]
+      : [];
+  });
 };
 
 /**
@@ -74,7 +89,7 @@ const joinDevice = async (
   caller: Caller,
   device: Doc<"devices">,
 ): Promise<void> => {
-  const here = await signedInOn(ctx.db, device._id, Date.now());
+  const here = await signedInOn(ctx.db, device, Date.now());
 
   const others = new Set(
     here.flatMap(({ person }) => (person._id === caller.userId ? [] : [person._id])),
@@ -134,16 +149,16 @@ export const insert = internalMutation({
       return fail("rate_limited", "Too many devices registered; try again in a few minutes");
     }
 
+    const generation = 0;
+
     const deviceId = await ctx.db.insert("devices", {
       name: parseName(name),
       secretHash,
-      generation: 0,
+      generation,
       mode: "personal",
     });
 
-    const device = (await ctx.db.get(deviceId)) ?? fail("not_found", NO_DEVICE);
-
-    await joinDevice(ctx, caller, device);
+    await ctx.db.patch(caller.sessionId, { device: { id: deviceId, generation } });
 
     return deviceId;
   },
@@ -161,9 +176,16 @@ const deleteEndedSessions = async (
     options,
   );
 
+  const [device, users] = await Promise.all([ctx.db.get(deviceId), usersOf(ctx.db, page.page)]);
+
   await Promise.all(
     page.page.map(async (session) => {
-      if ((await liveSession(ctx.db, session._id, now)) === null) await ctx.db.delete(session._id);
+      const user = users.get(session.userId);
+
+      const live =
+        device !== null && user !== undefined && liveOnDevice(session, user, device, now);
+
+      if (!live) await ctx.db.delete(session._id);
     }),
   );
 

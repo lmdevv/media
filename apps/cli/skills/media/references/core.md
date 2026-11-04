@@ -316,6 +316,7 @@ Forget a device and sign everyone on it out.
 - CLI: `media admin registry remove`
 - Kind: mutation
 - Scope: admin
+- API keys: refused
 - Arguments: `{ deviceId: Id<"devices"> }`
 - Result: `null`
 
@@ -359,6 +360,7 @@ Turn someone's unlock code back on for one shared device after 5 wrong tries.
 - CLI: `media admin unlock-codes reset`
 - Kind: mutation
 - Scope: admin
+- API keys: refused
 - Arguments: `{ deviceId: Id<"devices">; userId: Id<"users"> }`
 - Result: `null`
 

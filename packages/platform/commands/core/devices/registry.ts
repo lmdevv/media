@@ -68,7 +68,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof listResult> | Promise<Infer<typeof listResult>>;
 
-  /** `core.devices.registry.remove` (mutation, admin): Forget a device and sign everyone on it out. */
+  /** `core.devices.registry.remove` (mutation, admin, API keys refused): Forget a device and sign everyone on it out. */
   readonly remove: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof removeArgs>,
@@ -127,7 +127,8 @@ export const register = (handlers: Handlers) => ({
   remove: mutation({
     args: removeArgs,
     returns: removeResult,
-    handler: async (ctx, args) => handlers.remove(ctx, args, await requireCaller(ctx, "admin")),
+    handler: async (ctx, args) =>
+      handlers.remove(ctx, args, refuseKeys(await requireCaller(ctx, "admin"))),
   }),
   setMode: mutation({
     args: setModeArgs,

@@ -3,9 +3,9 @@ import { fail } from "../lib/errors";
 import { isKid, lockOf } from "../permissions/policy";
 import type { Lock, PersonDoc } from "../permissions/policy";
 import { currentApproval } from "./approvals";
-import { LISTED_MAX, NO_DEVICE, deviceOfCode, holderOf, listedPeople, tileOf } from "./facts";
+import { NO_DEVICE, deviceOfCode, holderOf, listedPeople, tileOf } from "./facts";
 import { signedInOn } from "./registry";
-import { codeOf, codeState } from "./unlockCodes";
+import { codeStateOn } from "./unlockCodes";
 
 const lockView = (lock: Lock) =>
   lock.state === "open"
@@ -22,7 +22,7 @@ export const { show } = register({
 
     if (device.mode === "personal") {
       const people = new Map(
-        (await signedInOn(ctx.db, device._id, now)).map(({ person }) => [person._id, person]),
+        (await signedInOn(ctx.db, device, now)).map(({ person }) => [person._id, person]),
       );
 
       return {
@@ -38,12 +38,8 @@ export const { show } = register({
     const listed = await listedPeople(ctx.db);
     const holder = holderOf(device, listed);
 
-    const [codes, strikes, approval] = await Promise.all([
-      Promise.all(listed.map((person) => codeOf(ctx.db, person._id))),
-      ctx.db
-        .query("unlockStrikes")
-        .withIndex("by_device_user", (q) => q.eq("deviceId", device._id))
-        .take(LISTED_MAX * 2),
+    const [codes, approval] = await Promise.all([
+      Promise.all(listed.map((person) => codeStateOn(ctx.db, device._id, person._id))),
       currentApproval(ctx.db, device._id, now),
     ]);
 
@@ -56,10 +52,7 @@ export const { show } = register({
         userId: person._id,
         username: person.username,
         kid: isKid(person),
-        code: codeState(
-          codes[index] ?? null,
-          strikes.find((strike) => strike.userId === person._id) ?? null,
-        ),
+        code: codes[index] ?? "none",
         lock: lockView(lockOf(tileOf(person, listed, holder, null))),
       })),
       approval:
