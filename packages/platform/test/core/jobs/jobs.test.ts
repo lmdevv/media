@@ -308,6 +308,41 @@ describe.skipIf(stack === undefined)("core jobs, live", { timeout: 180_000 }, ()
     expect(only(await waiting(stack, ["probe.wide"]))).toMatchObject({ free: 4, ready: false });
   });
 
+  it("frees a canceled job's slot at once when its worker hears of the cancel from items", async () => {
+    if (stack === undefined) return;
+
+    await freshKind(stack, "probe.items");
+
+    const [first, second, third] = await enqueue(stack, "probe.items", 3);
+
+    if (first === undefined || second === undefined || third === undefined) {
+      throw new Error("Three jobs were queued");
+    }
+
+    const a = worker(stack, "hears-from-items");
+    const b = worker(stack, "takes-the-slot");
+    const leases = await claimAll(a, ["probe.items"]);
+
+    expect(leases.map((lease) => lease.jobId)).toEqual([first, second]);
+
+    const [heard, kept] = leases;
+
+    if (heard === undefined || kept === undefined) throw new Error("Two jobs were claimed");
+
+    expect(await cancel(stack, first)).toEqual({ outcome: "canceling" });
+    expect(await a.items(heard, 0, 10)).toEqual({ outcome: "canceled" });
+
+    const taken = await claimed(b.claim(["probe.items"], 30_000));
+
+    expect(taken.lease.jobId).toBe(third);
+    expect(await jobOf(stack, first)).toMatchObject({ status: "canceled", canceling: false });
+
+    const end = { outcome: "failed", error: "The test is over", retry: false } as const;
+
+    expect(await a.finish(kept, end)).toEqual({ outcome: "settled", status: "failed" });
+    expect(await b.finish(taken.lease, end)).toEqual({ outcome: "settled", status: "failed" });
+  });
+
   it("fails a job after three failed attempts", async () => {
     if (stack === undefined) return;
 
