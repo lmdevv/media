@@ -24,6 +24,7 @@ const StoredInvite = Schema.Struct({
   secretHash: Schema.String,
   role: Schema.Literals(["admin", "member"]),
   invitedBy: Schema.String,
+  inviterSessionGeneration: Schema.Finite,
   expiresAt: Schema.Finite,
 });
 
@@ -113,13 +114,18 @@ describe.skipIf(stack === undefined)("invites", { timeout: 120_000 }, () => {
     if (stack === undefined) return;
     const admin = await signInAdmin(stack);
     const { userId } = await admin.client.query(api.core.auth.sessions.current, {});
+    const { inviteId } = await admin.client.action(api.core.accounts.invites.create, {});
+    const made = storedInvites().find(({ invite }) => invite._id === inviteId);
     const secret = `expired-${unique()}-${unique()}-${unique()}`;
+
+    expect(made).toBeDefined();
 
     importRows("invites", [
       {
         secretHash: sha256(secret),
         role: "member",
         invitedBy: userId,
+        inviterSessionGeneration: made?.invite.inviterSessionGeneration ?? -1,
         expiresAt: Date.now() - 1000,
       },
     ]);

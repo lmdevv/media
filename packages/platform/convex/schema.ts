@@ -125,6 +125,7 @@ export default defineSchema({
     secretHash: v.string(),
     role: assignableRole,
     invitedBy: v.id("users"),
+    inviterSessionGeneration: v.number(),
     expiresAt: v.number(),
   }).index("by_expiration", ["expiresAt"]),
 
@@ -133,7 +134,8 @@ export default defineSchema({
     secretHash: v.string(),
     userId: v.id("users"),
     madeBy: v.id("users"),
-    sessionGeneration: v.number(),
+    userSessionGeneration: v.number(),
+    makerSessionGeneration: v.number(),
     expiresAt: v.number(),
   }).index("by_expiration", ["expiresAt"]),
 

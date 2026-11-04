@@ -74,9 +74,13 @@ the rest of this ADR lands.
   command arguments use. `guest` arrives with guest links (ADR 0007).
 - `admin` is the second credential scope. `roleScopes` in `convex/core/sessions.ts` gives the
   owner and admins `account` and `admin`, and members `account`. `heldScopes` cuts every session
-  down to its user's role on each call, and a demotion ends every session and key of the person.
+  down to its user's role on each call. A demotion ends every session and key of the person, and
+  so every invite and reset link they made, for good (ADR 0003).
 - An admin command declares the `admin` scope, so the generated function refuses a session
   without it. Rules about the target account live in one pure function, `manages` in
   `convex/core/accounts/users.ts`: an admin acts on someone else who is not the owner.
 - The permissions build replaces `roleScopes` and `heldScopes`, adds the domain scopes, and folds
-  `manages` into `can(principal, action, resource)`.
+  `manages` into `can(principal, action, resource)`. A change that takes away the right to make
+  invites or reset links must still end the person's sessions. The links check the maker's
+  current role and session generation, and only the generation remembers that the right was lost
+  in between.

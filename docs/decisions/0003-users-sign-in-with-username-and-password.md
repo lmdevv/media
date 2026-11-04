@@ -76,12 +76,13 @@ each link and password event does. The code is in `packages/platform/convex/core
   Only the owner hands over ownership. The handover patches both users in one transaction, and
   the old owner stays an admin. `manages` in `accounts/users.ts` holds these rules. A demotion
   ends every session and API key the person has, so a key made with `admin` cannot hold it again
-  after a later promotion.
+  after a later promotion. The invites and reset links the person made also stop working for good.
 - **Invites.** `core.accounts.invites.create` returns a code `mi_<inviteId>.<secret>` with 32
   random bytes of secret. The `invites` table stores only the secret's SHA-256, and a lookup by
   id compares it in constant time. The admin picks the role and 1 to 30 days, 7 by default.
   - An invite works until it expires, is accepted, or is revoked, and only while its maker is an
-    admin. Accepting or revoking deletes the row, and the hourly sweep deletes expired ones.
+    admin whose sessions have not ended since they made it. Accepting or revoking deletes the
+    row, and the hourly sweep deletes expired ones.
   - The invitee calls the `invite` sign-in with the code and the username and password they
     picked. One call makes the user and signs them in. A taken username leaves the invite open.
   - `core.accounts.invites.lookup` shows a landing page the role and the inviter, and refuses a
@@ -91,15 +92,32 @@ each link and password event does. The code is in `packages/platform/convex/core
 - **Reset links.** `core.accounts.resetLinks.create` returns `mr_<resetLinkId>.<secret>`, stored
   and compared the same way. A link works once, within 24 hours. It records the person's session
   generation, so it stops working when their sessions end for any reason. It also stops when its
-  maker can no longer manage the person, for example after a demotion or when the person became
-  the owner. The `reset` sign-in sets the new password and signs the person in.
+  maker can no longer manage the person, for example when the person became the owner, and when
+  the maker's sessions end. The `reset` sign-in sets the new password and signs the person in.
+- **A link lives only as long as the sessions that made it.** API keys cannot make invites or
+  reset links, so every link comes from a password or device session, and each such session is
+  live only while its generation equals the maker's `sessionGeneration` (ADR 0004). Each link
+  records the maker's `sessionGeneration` (`invites.inviterSessionGeneration`,
+  `resetLinks.makerSessionGeneration`), and its lookup and its redemption refuse it once the two differ.
+  A device approval already records the approver's generation the same way (ADR 0004).
+  - A demotion that loses `admin` ends the maker's sessions, so their links never work again,
+    even if they are promoted back before the links expire. Someone holding a stolen admin
+    session cannot keep a link for later.
+  - Changing a password, ending every session, and both resets also end the maker's links. These
+    are what a person does about a stolen session, and nobody can list or revoke a reset link, so
+    they void what a thief made with it. An admin who does one of these makes their open invites
+    again.
+  - Handing over ownership moves no generation. The old owner stays an admin, and an admin can
+    make every link an owner can.
+  - Each check compares two numbers on rows the lookup already reads. A generation only grows, so
+    nothing makes a dead link work again.
 - **Password events.**
 
-  | Event                              | Needs                                           | Ends                                                 | Keeps                           |
-  | ---------------------------------- | ----------------------------------------------- | ---------------------------------------------------- | ------------------------------- |
-  | `core.accounts.me.changePassword`  | the current password, which takes a sign-in try | other password and device sessions, open reset links | this session, API keys          |
-  | The `reset` sign-in                | the link                                        | every session and API key                            | nothing; it opens a new session |
-  | `core/accounts/host:resetPassword` | the deployment admin key                        | every session and API key                            | nothing                         |
+  | Event                              | Needs                                           | Ends                                                                | Keeps                           |
+  | ---------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------- | ------------------------------- |
+  | `core.accounts.me.changePassword`  | the current password, which takes a sign-in try | other password and device sessions, open links for or by the person | this session, API keys          |
+  | The `reset` sign-in                | the link                                        | every session, API key, and link for or by the person               | nothing; it opens a new session |
+  | `core/accounts/host:resetPassword` | the deployment admin key                        | every session, API key, and link for or by the person               | nothing                         |
 
   Both resets fill the person's sign-in tries again, so someone locked out by wrong guesses gets
   in at once.
@@ -115,7 +133,8 @@ each link and password event does. The code is in `packages/platform/convex/core
   `core.auth.deviceCodes.start`, and the two link lookups. A test in `packages/commands` fails when
   that list grows.
 - **Not built here.** Removing a user. The unit that adds it keeps the owner out of reach through
-  `manages`.
+  `manages`, and either deletes the user row or ends the person's sessions, so the links they made
+  stop working.
 
 Rejected in this build:
 
@@ -126,3 +145,10 @@ Rejected in this build:
   invite costs (ADR 0004).
 - One table for invites and reset links. They share no list or revoke, and ADR 0023 names
   `invites`.
+- Checking only the maker's current role when a link is used. A link whose maker lost admin
+  worked again once the maker was promoted back before it expired.
+- A counter that moves only when the maker loses admin. A password change would leave working
+  every link a thief made with a stolen session.
+- Deleting every link a maker made when they lose admin. It needs an index by maker and batches
+  across calls to stay inside Convex's limits, and a promotion back that lands before the last
+  batch revives the links not yet deleted.

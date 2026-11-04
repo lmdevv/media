@@ -28,6 +28,14 @@ interface OpenInvite {
   readonly invitedBy: Doc<"users">;
 }
 
+const stillBackedBy = (
+  invite: Doc<"invites">,
+  inviter: Doc<"users"> | null,
+): inviter is Doc<"users"> =>
+  inviter !== null &&
+  inviter.sessionGeneration === invite.inviterSessionGeneration &&
+  roleHolds(inviter.role, "admin");
+
 const openInviteFor = async (
   db: DatabaseReader,
   code: string,
@@ -41,10 +49,7 @@ const openInviteFor = async (
 
   const invitedBy = invite === null ? null : await db.get(invite.invitedBy);
 
-  return invite !== null &&
-    invite.expiresAt > now &&
-    invitedBy !== null &&
-    roleHolds(invitedBy.role, "admin")
+  return invite !== null && invite.expiresAt > now && stillBackedBy(invite, invitedBy)
     ? { invite, invitedBy }
     : fail("expired", DEAD);
 };
@@ -54,6 +59,7 @@ export const insert = internalMutation({
   returns: v.object({ inviteId: v.id("invites"), expiresAt: v.number() }),
   handler: async (ctx, { secretHash, role, expiresInDays }) => {
     const caller = refuseKeys(await requireCaller(ctx, "admin"));
+    const inviter = (await ctx.db.get(caller.userId)) ?? fail("unauthenticated", "Sign in first");
 
     if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > DAYS_MAX) {
       return fail("invalid_args", `Invites last 1 to ${DAYS_MAX} days`);
@@ -65,6 +71,7 @@ export const insert = internalMutation({
       secretHash,
       role,
       invitedBy: caller.userId,
+      inviterSessionGeneration: inviter.sessionGeneration,
       expiresAt,
     });
 
@@ -121,9 +128,9 @@ export const { create, lookup, list, revoke } = register({
     return {
       ...page,
       page: page.page.flatMap((invite) => {
-        const maker = makers.get(invite.invitedBy);
+        const maker = makers.get(invite.invitedBy) ?? null;
 
-        return maker !== undefined && maker !== null && roleHolds(maker.role, "admin")
+        return stillBackedBy(invite, maker)
           ? [
               {
                 inviteId: invite._id,

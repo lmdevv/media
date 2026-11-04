@@ -37,7 +37,8 @@ const openLinkFor = async (db: DatabaseReader, code: string, now: number): Promi
 
   return user !== null &&
     maker !== null &&
-    user.sessionGeneration === link.sessionGeneration &&
+    user.sessionGeneration === link.userSessionGeneration &&
+    maker.sessionGeneration === link.makerSessionGeneration &&
     manages({ userId: maker._id, role: maker.role }, user)
     ? { link, user }
     : fail("expired", DEAD);
@@ -60,6 +61,7 @@ export const insert = internalMutation({
   returns: v.object({ resetLinkId: v.id("resetLinks"), expiresAt: v.number() }),
   handler: async (ctx, { userId, secretHash }) => {
     const caller = refuseKeys(await requireCaller(ctx, "admin"));
+    const maker = (await ctx.db.get(caller.userId)) ?? fail("unauthenticated", "Sign in first");
     const user = (await ctx.db.get(userId)) ?? fail("not_found", "No such user");
 
     requireManages(caller, user);
@@ -70,7 +72,8 @@ export const insert = internalMutation({
       secretHash,
       userId,
       madeBy: caller.userId,
-      sessionGeneration: user.sessionGeneration,
+      userSessionGeneration: user.sessionGeneration,
+      makerSessionGeneration: maker.sessionGeneration,
       expiresAt,
     });
 
