@@ -18,7 +18,7 @@ import {
 } from "../lib/secrets";
 import { endKeySessions, endUserKeys, keyWorks, openSession } from "../sessions";
 import type { SignedIn } from "../sessions";
-import { refuseKeys, requireCaller } from "./caller";
+import { callerUser, refuseKeys, requireCaller } from "./caller";
 
 const PREFIX = "mk";
 
@@ -96,7 +96,7 @@ export const insert = internalMutation({
   returns: v.object({ keyId: v.id("apiKeys"), expiresAt: v.union(v.number(), v.null()) }),
   handler: async (ctx, { name, scopes, expiresInDays, secretHash }) => {
     const caller = refuseKeys(await requireCaller(ctx, "account"));
-    const user = (await ctx.db.get(caller.userId)) ?? fail("unauthenticated", "Sign in first");
+    const user = await callerUser(ctx, caller);
     const trimmed = name.trim();
     const granted = [...new Set(scopes)];
 

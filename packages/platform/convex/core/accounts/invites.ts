@@ -6,7 +6,7 @@ import { internal } from "../../_generated/api";
 import type { Doc } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader } from "../../_generated/server";
-import { refuseKeys, requireCaller } from "../auth/caller";
+import { callerUser, refuseKeys, requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
 import { paginate } from "../lib/paginate";
 import { formatSecret, randomSecret, rowForSecret, sha256Hex } from "../lib/secrets";
@@ -28,13 +28,8 @@ interface OpenInvite {
   readonly invitedBy: Doc<"users">;
 }
 
-const stillBackedBy = (
-  invite: Doc<"invites">,
-  inviter: Doc<"users"> | null,
-): inviter is Doc<"users"> =>
-  inviter !== null &&
-  inviter.sessionGeneration === invite.inviterSessionGeneration &&
-  roleHolds(inviter.role, "admin");
+const stillBackedBy = (invite: Doc<"invites">, inviter: Doc<"users">): boolean =>
+  inviter.sessionGeneration === invite.inviterSessionGeneration && roleHolds(inviter.role, "admin");
 
 const openInviteFor = async (
   db: DatabaseReader,
@@ -49,7 +44,10 @@ const openInviteFor = async (
 
   const invitedBy = invite === null ? null : await db.get(invite.invitedBy);
 
-  return invite !== null && invite.expiresAt > now && stillBackedBy(invite, invitedBy)
+  return invite !== null &&
+    invite.expiresAt > now &&
+    invitedBy !== null &&
+    stillBackedBy(invite, invitedBy)
     ? { invite, invitedBy }
     : fail("expired", DEAD);
 };
@@ -59,7 +57,7 @@ export const insert = internalMutation({
   returns: v.object({ inviteId: v.id("invites"), expiresAt: v.number() }),
   handler: async (ctx, { secretHash, role, expiresInDays }) => {
     const caller = refuseKeys(await requireCaller(ctx, "admin"));
-    const inviter = (await ctx.db.get(caller.userId)) ?? fail("unauthenticated", "Sign in first");
+    const inviter = await callerUser(ctx, caller);
 
     if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > DAYS_MAX) {
       return fail("invalid_args", `Invites last 1 to ${DAYS_MAX} days`);
@@ -128,9 +126,9 @@ export const { create, lookup, list, revoke } = register({
     return {
       ...page,
       page: page.page.flatMap((invite) => {
-        const maker = makers.get(invite.invitedBy) ?? null;
+        const maker = makers.get(invite.invitedBy);
 
-        return stillBackedBy(invite, maker)
+        return maker !== undefined && maker !== null && stillBackedBy(invite, maker)
           ? [
               {
                 inviteId: invite._id,

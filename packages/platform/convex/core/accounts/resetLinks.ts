@@ -5,7 +5,7 @@ import { internal } from "../../_generated/api";
 import type { Doc } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../../_generated/server";
-import { refuseKeys, requireCaller } from "../auth/caller";
+import { callerUser, refuseKeys, requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
 import { signInLimit, storePassword } from "../lib/passwords";
 import { clearAttempts } from "../lib/rateLimit";
@@ -61,7 +61,7 @@ export const insert = internalMutation({
   returns: v.object({ resetLinkId: v.id("resetLinks"), expiresAt: v.number() }),
   handler: async (ctx, { userId, secretHash }) => {
     const caller = refuseKeys(await requireCaller(ctx, "admin"));
-    const maker = (await ctx.db.get(caller.userId)) ?? fail("unauthenticated", "Sign in first");
+    const maker = await callerUser(ctx, caller);
     const user = (await ctx.db.get(userId)) ?? fail("not_found", "No such user");
 
     requireManages(caller, user);

@@ -3,9 +3,7 @@ import { v } from "convex/values";
 import { register } from "../../../commands/core/accounts/me";
 import { internal } from "../../_generated/api";
 import { internalMutation } from "../../_generated/server";
-import type { MutationCtx } from "../../_generated/server";
-import { requireCaller } from "../auth/caller";
-import type { Caller } from "../auth/caller";
+import { callerUser, requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
 import {
   checkNewPassword,
@@ -18,9 +16,6 @@ import {
 import { refundAttempt, takeAttempt } from "../lib/rateLimit";
 import { endUserSessions } from "../sessions";
 import { renameUser } from "./users";
-
-const callerUser = async (ctx: Pick<MutationCtx, "db">, caller: Caller) =>
-  (await ctx.db.get(caller.userId)) ?? fail("unauthenticated", "Sign in first");
 
 export const attempt = internalMutation({
   args: {},

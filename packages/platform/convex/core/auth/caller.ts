@@ -5,6 +5,7 @@ import type { Infer } from "convex/values";
 import { callerScope, credentialScope, role } from "../../../commands/scopes";
 import type { CallerScope } from "../../../commands/scopes";
 import { internal } from "../../_generated/api";
+import type { Doc } from "../../_generated/dataModel";
 import { internalQuery } from "../../_generated/server";
 import type { ActionCtx, QueryCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
@@ -52,6 +53,12 @@ export const requireCaller = async (
     ? caller
     : fail("forbidden", `This session lacks the ${scope} scope`);
 };
+
+export const callerUser = async (
+  ctx: Pick<QueryCtx, "db">,
+  caller: Caller,
+): Promise<Doc<"users">> =>
+  (await ctx.db.get(caller.userId)) ?? fail("unauthenticated", "Sign in first");
 
 export const refuseKeys = (caller: Caller): Caller =>
   caller.kind === "apiKey"
