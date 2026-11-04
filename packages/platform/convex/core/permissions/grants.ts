@@ -8,7 +8,7 @@ import type { Doc, Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx, QueryCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
-import { PAGE_ROWS_MAX, paginate } from "../lib/paginate";
+import { PAGE_ROWS_MAX, pageRows, paginate } from "../lib/paginate";
 import { can, contentNeeds, resourceOf } from "./policy";
 import type { ContentAction, Principal, ResourceRef, TableOf } from "./policy";
 
@@ -88,17 +88,16 @@ export const levelOn = async <T extends ResourceType>(
   principal: Principal,
   ref: ResourceRef<T>,
 ): Promise<Level | null> => {
-  const direct = strongest(
-    (await Promise.all(directKeys(principal).map(async (key) => grantOn(db, ref, key)))).map(
-      (grant) => grant?.level ?? null,
-    ),
-  );
+  const [directGrants, groups] = await Promise.all([
+    Promise.all(directKeys(principal).map(async (key) => grantOn(db, ref, key))),
+    principal.kind === "service" ? [] : groupsOf(db, principal.userId),
+  ]);
 
-  if (principal.kind === "service" || direct === "manage") return direct;
+  const direct = strongest(directGrants.map((grant) => grant?.level ?? null));
 
-  const viaGroups = await Promise.all(
-    (await groupsOf(db, principal.userId)).map(async (groupId) => grantOn(db, ref, groupId)),
-  );
+  if (direct === "manage") return direct;
+
+  const viaGroups = await Promise.all(groups.map(async (groupId) => grantOn(db, ref, groupId)));
 
   return strongest([direct, ...viaGroups.map((grant) => grant?.level ?? null)]);
 };
@@ -194,7 +193,7 @@ export const visiblePage = async <T extends ResourceType>(
   const fits = Math.floor((PAGE_ROWS_MAX - groups.length - keys.length) / (keys.length + 1));
 
   const rows =
-    bounds.through === null ? Math.max(1, Math.min(Math.floor(options.numItems), fits)) : fits;
+    bounds.through === null ? Math.max(1, Math.min(pageRows(options.numItems), fits)) : fits;
 
   const ranges = await Promise.all(
     keys.map(async (key) => rangeOf(ctx.db, type, key, bounds, rows + 1)),
@@ -329,8 +328,9 @@ export const grant = async <T extends ResourceType>(
 };
 
 /**
- * Takes `principal`'s grant on `ref` away. It needs `manage`, except for a person leaving what
- * was shared with them. Removing the last manager is a `conflict`; a missing grant is no change.
+ * Takes `principal`'s grant on `ref` away. It needs `manage`, except that a person who can see
+ * `ref` may leave what was shared with them. Removing the last manager is a `conflict`; a missing
+ * grant is no change.
  */
 export const revoke = async <T extends ResourceType>(
   ctx: Pick<MutationCtx, "db">,
@@ -340,7 +340,7 @@ export const revoke = async <T extends ResourceType>(
 ): Promise<void> => {
   const leaving = principal.kind === "user" && principal.userId === caller.userId;
 
-  if (!leaving) await requireContent(ctx, caller, "manage", ref);
+  await requireContent(ctx, caller, leaving ? "view" : "manage", ref);
 
   const existing = await grantOn(ctx.db, ref, storedKey(principal));
 

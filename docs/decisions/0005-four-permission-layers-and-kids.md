@@ -103,10 +103,11 @@ hold its rules, each typed by its list of actions, so a missing or extra row fai
 | `play`              | content | `<domain>:play`, and a `view` grant                                                  |
 | `edit`              | content | `<domain>:edit`, and an `edit` grant                                                 |
 | `manage`            | content | `<domain>:edit`, and a `manage` grant; it shares, renames, and deletes               |
-| `setRole`           | account | `admin`; someone else; an admin or a member without restrictions                     |
+| `promote`           | account | `admin`; someone else; an admin or a member without restrictions                     |
+| `demote`            | account | `admin`; someone else; an admin or a member                                          |
 | `resetPassword`     | account | `admin`; someone else; an admin or a member                                          |
 | `restrict`          | account | `admin`; someone else; a member                                                      |
-| `viewRestrictions`  | account | nothing for yourself; otherwise `admin` and a member                                 |
+| `viewRestrictions`  | account | nothing for yourself; otherwise `admin`, and anyone but a guest or a service         |
 | `joinGroup`         | account | `admin`; anyone but a guest or a service, yourself included                          |
 | `handOverOwnership` | account | `admin` and being the owner; someone else; an admin or a member without restrictions |
 | `invite`            | server  | `admin`                                                                              |
@@ -166,7 +167,8 @@ a service is refused, so no admin can give it a role, a reset link, restrictions
 - Resource types live in one registry, `resourceTypes` in `packages/commands/src/access.ts`. Each
   entry names its table and whether the allowed-libraries restriction lists it. The validators for
   resource ids and library ids derive from it.
-- A grant or revoke needs `manage`. A person can always leave what was shared with them. Only a
+- A grant or revoke needs `manage`. A person who can see something can leave what was shared
+  with them. Only a
   person can hold `manage`, and a group or the household gets `view` or `edit`. Removing or
   lowering the last `manage` grant is a `conflict`. The mutation that creates a resource makes its
   creator the first manager (`grantCreator`).
@@ -186,7 +188,8 @@ a service is refused, so no admin can give it a role, a reset link, restrictions
   `packages/contracts/src/content-rating.ts`, where PG is 7), `hideUnrated`, `hideExplicitMusic`,
   and `libraries` (null for every library the person's grants reach).
 - `core.restrictions.set` needs `admin`, refuses API keys, and works only on a member who is
-  someone else. `core.restrictions.get` shows your own, or as an admin a member's.
+  someone else. `core.restrictions.get` shows your own, or as an admin anyone's, which is null
+  for someone who is not a member.
 - A kid is a member with restrictions (`isKid`). An admin lifts them before promoting the kid or
   handing them ownership.
 - A change applies on the person's next call and ends no session.
@@ -234,9 +237,9 @@ functions, and the core allows no public function outside the command list.
 Rejected in this build:
 
 - Access declared on each command and checked by the generated wrapper before the handler runs.
-  Lists and commands whose action depends on an argument, such as `setRole`, fit no single
-  declared target. It is worth another look in the movies port, when many commands each open one
-  title.
+  Lists and commands whose action depends on an argument, such as `setRole` (`promote` or
+  `demote`), fit no single declared target. It is worth another look in the movies port, when
+  many commands each open one title.
 - A table of each person's effective level per resource. A household grant would write a row per
   person, and a group change a row per resource shared with the group.
 - Admins who see all content, and a `play` or `edit` scope that needs `read`.

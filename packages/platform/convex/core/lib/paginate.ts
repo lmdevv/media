@@ -28,7 +28,8 @@ export interface IndexedList<Table extends TableNames, Index extends IndexNames<
   readonly order?: "asc" | "desc";
 }
 
-const pageRows = (requested: number): number =>
+/** The rows a page holds for a requested size: at least 1, at most `PAGE_ROWS_MAX`. */
+export const pageRows = (requested: number): number =>
   Number.isFinite(requested)
     ? Math.min(Math.max(Math.floor(requested), 1), PAGE_ROWS_MAX)
     : PAGE_ROWS_MAX;

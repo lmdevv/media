@@ -36,7 +36,7 @@ const accountRefusal = (action: AccountAction, because: Because, target: Account
     return "No admin can change the owner's account";
   }
 
-  return action === "restrict" || action === "viewRestrictions"
+  return action === "restrict"
     ? "Only a member can have restrictions"
     : "A guest's account follows the link that made it";
 };

@@ -139,7 +139,8 @@ export const contentActions = ["view", "play", "edit", "manage"] as const;
 
 /** What can be done to someone's account. */
 export const accountActions = [
-  "setRole",
+  "promote",
+  "demote",
   "resetPassword",
   "restrict",
   "viewRestrictions",
@@ -203,10 +204,16 @@ export const contentNeeds = (action: ContentAction, domain: ContentDomain): Cont
 const PEOPLE: ReadonlyArray<Role> = ["admin", "member"];
 
 const accountRules: AccountRules = {
-  setRole: { scope: "admin", self: "refuse", targets: PEOPLE, unrestricted: true },
+  promote: { scope: "admin", self: "refuse", targets: PEOPLE, unrestricted: true },
+  demote: { scope: "admin", self: "refuse", targets: PEOPLE, unrestricted: false },
   resetPassword: { scope: "admin", self: "refuse", targets: PEOPLE, unrestricted: false },
   restrict: { scope: "admin", self: "refuse", targets: ["member"], unrestricted: false },
-  viewRestrictions: { scope: "admin", self: "always", targets: ["member"], unrestricted: false },
+  viewRestrictions: {
+    scope: "admin",
+    self: "always",
+    targets: ["owner", "admin", "member"],
+    unrestricted: false,
+  },
   joinGroup: {
     scope: "admin",
     self: "allow",

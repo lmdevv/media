@@ -10,6 +10,7 @@ import { callerUser, refuseKeys, requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
 import { paginate } from "../lib/paginate";
 import { formatSecret, randomSecret, rowForSecret, sha256Hex } from "../lib/secrets";
+import { requireServer } from "../permissions/authorize";
 import { SERVER, can, principalOf } from "../permissions/policy";
 import type { PersonDoc } from "../permissions/policy";
 import { openSession, signedIn } from "../sessions";
@@ -61,6 +62,8 @@ export const insert = internalMutation({
   handler: async (ctx, { secretHash, role, expiresInDays }) => {
     const caller = refuseKeys(await requireCaller(ctx, "admin"));
     const inviter = await callerUser(ctx, caller);
+
+    requireServer(caller, "invite");
 
     if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > DAYS_MAX) {
       return fail("invalid_args", `Invites last 1 to ${DAYS_MAX} days`);

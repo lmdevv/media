@@ -138,7 +138,12 @@ export const { create, list, setRole, handOverOwnership } = register({
     };
   },
   setRole: async (ctx, { userId, role }, caller) => {
-    const target = await requireAccount(ctx, caller, "setRole", userId);
+    const target = await requireAccount(
+      ctx,
+      caller,
+      role === "admin" ? "promote" : "demote",
+      userId,
+    );
 
     if (target.role === role) return null;
 
