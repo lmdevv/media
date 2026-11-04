@@ -1,0 +1,4 @@
+{
+  "extends": "@movies/config/tsconfig.base.json",
+  "include": ["*.ts"]
+}

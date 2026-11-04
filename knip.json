@@ -4,7 +4,7 @@
   "ignoreDependencies": ["@effect/language-service"],
   "workspaces": {
     ".": {
-      "entry": [".agents/skills/*/scripts/*.mjs"],
+      "entry": [".agents/skills/*/scripts/*.mjs", "scripts/*.ts"],
       "ignoreBinaries": ["ffmpeg"]
     },
     "apps/media": {
