@@ -213,6 +213,20 @@ describe("job machine", () => {
     expect(run(acked, { type: "cancel" })).toBe(acked);
   });
 
+  it("ends a canceling job at a check, as at every lease call, and changes nothing else", () => {
+    const running = claim(queued(noItems));
+
+    const check = (job: JobFields, attempt = job.attempts): Step =>
+      step(job, { type: "check", lease: { attempt } }, NOW, policy);
+
+    expect(check(running)).toEqual({ ok: true, changed: false, next: running, writes: [] });
+    expect(next(check(run(running, { type: "cancel" })))).toMatchObject({
+      status: "canceled",
+      finishedAt: NOW,
+    });
+    expect(check(claim(lapse(running)), 1)).toEqual({ ok: false, refused: "lost" });
+  });
+
   it("drops a canceling job's dedupe key, so a new job of the same key can be queued", () => {
     const running = claim({ ...queued(), dedupeKey: "probe.wide:x" });
 

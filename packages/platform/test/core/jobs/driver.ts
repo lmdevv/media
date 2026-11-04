@@ -252,7 +252,7 @@ export const worker = (stack: CoreStack, workerId: string) => ({
       runFunction(stack, server.report, { leaseMs: LEASE_MS, ...fields, lease }, Reported),
     ),
   items: (lease: Lease, from: number, limit: number) =>
-    runFunction(stack, server.items, { lease, from, limit }, Items),
+    retrying(() => runFunction(stack, server.items, { lease, from, limit }, Items)),
   finish: (lease: Lease, end: End) =>
     retrying(() => runFunction(stack, server.finish, { lease, end }, Finished)),
 });

@@ -3,7 +3,6 @@ import { v } from "convex/values";
 import { paginate } from "../lib/paginate";
 import { serverMutation, serverQuery } from "../lib/serverFacing";
 import { jobItem, jobKind, jobPayload } from "./kinds";
-import { holds } from "./machine";
 import type { Refusal, Step } from "./machine";
 import { jobWork, lease } from "./model";
 import { applyEvent, claimJob, kindQueue } from "./store";
@@ -115,7 +114,7 @@ const ITEMS_PAGE_MAX = 1000;
  * Up to `limit` (at most 1,000) of a held job's items from seq `from`, in seq order. The seq is the
  * cursor. A resumed worker starts at the `work.done` its claim returned.
  */
-export const items = serverQuery({
+export const items = serverMutation({
   args: { lease, from: v.number(), limit: v.number() },
   returns: v.union(
     v.object({
@@ -134,11 +133,15 @@ export const items = serverQuery({
 
     if (job === null) return { outcome: "lost" as const };
 
-    const check = holds(job, held);
+    const result = await applyEvent(ctx, job, { type: "check", lease: held });
 
-    if (!check.held) return { outcome: check.refused };
+    if (!result.ok) return leaseRefusal("items", result);
 
-    if (check.job.cancelRequestedAt !== null) return { outcome: "canceled" as const };
+    const { status } = result.next;
+
+    if (status === "canceled") return { outcome: "canceled" as const };
+
+    if (status !== "running") return unexpected("items", result);
 
     const page = await paginate(
       ctx.db,

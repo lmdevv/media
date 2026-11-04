@@ -86,6 +86,11 @@ The first framework, in `packages/platform/convex/core/jobs/`, settled how these
   slot until its worker's next call answers `canceled` or its lease lapses. The cap therefore
   still counts a process that may be running. The marked job drops its dedupe key, so a new job
   with that key can be queued right away.
+- Every lease call is a mutation that runs `step`: `report`, `finish`, and `items`, which runs the
+  `check` event. The call that answers `canceled` therefore ends the job and frees its slot.
+  `items` was first a query. It answered `canceled` but could not write, so the worker stopped and
+  the slot stayed taken until the lease lapsed, up to 10 minutes later. A stack test catches it.
+  The fencing rule, `holds`, is private to `machine.ts`, so only `step` decides a lease.
 - Only the lease holder adds items. One `report` appends up to 4,000 items numbered from the
   job's appended count, so a retried append whose first try committed answers `outOfOrder`.
   `report({ through })` marks the items below `through` done and deletes them, up to 4,000 at a
@@ -125,7 +130,8 @@ Left for the first unit that needs each one:
   list stays out of `kinds.ts`, because `schema.ts` imports `kinds.ts` and must not import
   `convex/_generated`.
 - A helper that checks a lease inside a domain function the server calls, such as a scanner
-  callback. It runs `holds` from `machine.ts`, the rule every lease call runs.
+  callback. It applies the `check` event through `store.applyEvent` in the callback's mutation,
+  as `items` does, so a cancel it reports also ends the job.
 - A delayed retry and a pause of a whole kind, which music's lyrics lookups need.
 - Deleting finished jobs after a retention period, before trickplay queues thousands of jobs.
 - A command that recounts a kind's `jobKinds` row from its running jobs, for an operator who
@@ -138,6 +144,10 @@ Rejected for this shape:
 
 - A lease document per attempt as the record of who holds a slot. It counts a canceled job's
   slot exactly, but adds a table and a write to every claim, renew, and release.
+- A separate call that acknowledges a cancel. A worker that stops without making it holds the
+  slot until its lease lapses, and the protocol gains a sixth call.
+- `items` answering `held` while a cancel waits, so that only `report` and `finish` answer
+  `canceled`. The worker would process another page of a canceled job.
 - Claiming a given job id after reading the queue, as old movies does. The cap would need a
   stored count, and workers race for the same id. With 4 workers, old movies made 3 failed
   claims per job.

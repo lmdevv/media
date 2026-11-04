@@ -43,6 +43,8 @@ export type Finish =
 export type JobEvent =
   | { readonly type: "claim"; readonly workerId: string; readonly leaseMs: number }
   | { readonly type: "report"; readonly lease: Attempt; readonly report: Report }
+  /** A holder's call with nothing of its own to record, such as reading its items. */
+  | { readonly type: "check"; readonly lease: Attempt }
   | { readonly type: "finish"; readonly lease: Attempt; readonly finish: Finish }
   | { readonly type: "cancel" }
   | { readonly type: "lapse" };
@@ -112,13 +114,7 @@ const checkLeaseMs = (leaseMs: number): void => {
 const canceled = (job: Running, now: number): Step =>
   moved({ ...commonOf(job), status: "canceled", finishedAt: now }, purgeOf(job.work));
 
-/**
- * Whether `lease` holds `job`: the one fencing rule. Held means running at the lease's attempt; a
- * requested cancel still holds, and the caller decides whether to answer it. A job canceled at the
- * lease's attempt answers `canceled`; anything else is `lost`, including a job back in the queue at
- * the same attempt count.
- */
-export const holds = (
+const holds = (
   job: JobFields,
   lease: Attempt,
 ):
@@ -321,6 +317,8 @@ export const step = (job: JobFields, event: JobEvent, now: number, policy: Polic
   if (!held.held) return refuse({ refused: held.refused });
 
   if (held.job.cancelRequestedAt !== null) return canceled(held.job, now);
+
+  if (event.type === "check") return unchanged(held.job);
 
   return event.type === "report"
     ? report(held.job, event.report, now)
