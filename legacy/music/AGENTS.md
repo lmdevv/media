@@ -11,9 +11,9 @@ needs, and wins where the two differ for code under `legacy/music`.
 - **Nested workspace.** Run every command below from `legacy/music`, after its own `pnpm install`.
   Root checks and the root hook skip this folder. Paths in root rules, such as `packages/ui`,
   resolve inside this folder when you work here.
-- **Effect differs here.** `effect` 4.0.2 is pinned in this folder's `pnpm-workspace.yaml`, one
-  patch behind root's reference clone, and some Convex functions use Effect. Follow the surrounding
-  code, not root's plain-TypeScript Convex rule.
+- **Effect runs in Convex here.** This folder's `pnpm-workspace.yaml` pins `effect` 4.0.3, the
+  version root pins, and some Convex functions use Effect. Follow the surrounding code, not root's
+  plain-TypeScript Convex rule.
 - **pstack model choices live in the root `.agents/pstack-models.md`.** This folder's
   `.claude/rules/pstack-models.md` and `.agents/pstack/` are left over from the old repo.
 - **No MCP server.** Agents use the CLI and `skills/music/SKILL.md`.
