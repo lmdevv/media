@@ -74,7 +74,8 @@ each link and password event does. The code is in `packages/platform/convex/core
 - **Who changes whom.** An admin can make someone else an admin or a member and send them a reset
   link. Nobody changes the owner's role, sends the owner a reset link, or changes their own role.
   Only the owner hands over ownership. The handover patches both users in one transaction, and
-  the old owner stays an admin. `manages` in `accounts/users.ts` holds these rules. A demotion
+  the old owner stays an admin. The account rows of the permission policy hold these rules
+  (`convex/core/permissions/policy.ts`, ADR 0005). A demotion
   ends every session and API key the person has, so a key made with `admin` cannot hold it again
   after a later promotion. The invites and reset links the person made also stop working for good.
 - **Invites.** `core.accounts.invites.create` returns a code `mi_<inviteId>.<secret>` with 32
@@ -133,8 +134,8 @@ each link and password event does. The code is in `packages/platform/convex/core
   `core.auth.deviceCodes.start`, and the two link lookups. A test in `packages/commands` fails when
   that list grows.
 - **Not built here.** Removing a user. The unit that adds it keeps the owner out of reach through
-  `manages`, and either deletes the user row or ends the person's sessions, so the links they made
-  stop working.
+  an account row of the permission policy, and either deletes the user row or ends the person's
+  sessions, so the links they made stop working.
 
 Rejected in this build:
 
