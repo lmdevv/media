@@ -69,7 +69,8 @@ Where the host allows it, the browser host therefore runs in a private user and 
 files. Its loopback has only these, relayed over Unix sockets in the state folder:
 
 - The side's movies web, Convex, and music ports, at the same numbers, so every URL and origin
-  stays `http://localhost:<port>` for the browser, the CLIs, and the iOS forwards alike.
+  stays `http://localhost:<port>` for the browser and the CLIs alike, and for movies through the
+  iOS forwards.
 - An HTTPS proxy to the internet on the host, for the Cast SDK, TMDB images, and trailers.
   Chromium sends loopback addresses straight to the relays, never through it.
 
@@ -157,7 +158,7 @@ The images hold the checkout as it was at `up`. After you change code, run `down
 and `up` again. `doctor` fails when the checkout has moved on since the build. For movies,
 changes only to the paths `.dockerignore` leaves out (`.agents`, `.claude`, `docs`, `legacy`,
 `nix`) don't count, since the image doesn't hold them. For music, only `legacy/music` counts,
-apart from its `.agents` and `.claude`.
+apart from the paths its own `.dockerignore` leaves out.
 
 ### Demo data
 
@@ -241,7 +242,8 @@ the `:main` tag moves only when the Image workflow publishes. `$S logs [--side S
 movies|convex|music] [N]` shows a container's last lines; the media service logs one JSON record
 per line, such as `"message":"Stream.started"` with the stream's `mode`, and music's container
 holds its init, Convex, media service, and Caddy logs. `$S status` lists each side's apps, whether
-the side is `ready` or still `starting`, and its simulator.
+the side is `ready`, still `starting`, or `failed` (its `up` stopped before ready; run `down`),
+and its simulator.
 
 When `up` failed partway, or `doctor` reports a run you don't recognize, run `$S down` and start
 again.

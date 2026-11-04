@@ -64,31 +64,28 @@ free_port() {
     console.log(s.address().port); s.close(); });'
 }
 
-# The revision of what the image is built from. The top-level paths that `.dockerignore` leaves
-# out (such as .agents, .claude, docs, and nix) don't count, so a commit that only edits a skill or
-# the docs keeps the revision and the after side stays current.
-checkout_rev() {
-  local ignored=() tree dirty pattern path
+# The revision of what an image is built from: the build context ($1, `.` or a folder such as
+# legacy/music) as committed, plus the contents of what changed since. The top-level paths that
+# its `.dockerignore` leaves out (such as .agents, .claude, docs, and nix) don't count, so a commit
+# that only edits a skill or the docs keeps the revision and the after side stays current.
+tree_rev() {
+  local prefix="" ignored=() pattern meta path
+  [[ "$1" == . ]] || prefix="$1/"
   while read -r pattern; do
     [[ "$pattern" =~ ^[A-Za-z0-9._-]+$ ]] && ignored+=("$pattern")
-  done < "$root/.dockerignore"
-  tree="$(git -C "$root" ls-tree HEAD | while IFS=$'\t' read -r meta path; do
-    printf '%s\n' "${ignored[@]}" | grep -qxF -- "$path" || printf '%s\t%s\n' "$meta" "$path"
-  done | sha1sum | cut -c1-12)"
-  local excludes=(':!captures')
-  for path in "${ignored[@]}"; do excludes+=(":!$path"); done
-  dirty="$(git -C "$root" status --porcelain --untracked-files=normal -- . "${excludes[@]}" | sha1sum | cut -c1-12)"
-  echo "$tree+$dirty"
+  done < "$root/$prefix.dockerignore"
+  local excludes=(":!${prefix}captures")
+  for path in "${ignored[@]}"; do excludes+=(":!$prefix$path"); done
+  {
+    git -C "$root" ls-tree HEAD ${prefix:+"$prefix"} | while IFS=$'\t' read -r meta path; do
+      printf '%s\n' "${ignored[@]}" | grep -qxF -- "${path#"$prefix"}" || printf '%s\t%s\n' "$meta" "$path"
+    done
+    git -C "$root" diff HEAD -- "$1" "${excludes[@]}"
+    git -C "$root" ls-files -oz --exclude-standard -- "$1" "${excludes[@]}" | (cd "$root" && xargs -0r sha1sum)
+  } | sha1sum | cut -c1-12
 }
-
-# The revision old music's image is built from: legacy/music as committed, plus what changed there
-# since, apart from the paths its own .dockerignore leaves out.
-music_rev() {
-  local dirty
-  dirty="$(git -C "$root" status --porcelain --untracked-files=normal -- legacy/music \
-    ':!legacy/music/.agents' ':!legacy/music/.claude' | sha1sum | cut -c1-12)"
-  echo "$(git -C "$root" rev-parse --short=12 HEAD:legacy/music)+$dirty"
-}
+checkout_rev() { tree_rev .; }
+music_rev() { tree_rev legacy/music; }
 
 chromium_path() {
   if [[ -n "${CHROMIUM_PATH:-}" ]]; then echo "$CHROMIUM_PATH"; return; fi
@@ -117,8 +114,6 @@ compose() {
 healthy() { curl -fsS "$(url)/api/health" 2>/dev/null | grep -q '"backend":"connected"'; }
 music_healthy() { curl -fsS "$(music_url)/healthz" 2>/dev/null | grep -q '"ok":true'; }
 
-# Waits for movies, with Convex and its deployed functions, and for old music, whose /healthz needs
-# its own web server, media service, and Convex.
 wait_healthy() {
   local services=(movies convex) status service
   has_music && services+=(music)
@@ -167,7 +162,6 @@ cli_raw() {
     XDG_CONFIG_HOME="$state/cli/$as" node "$cli_js" "$@"
 }
 
-# Old music's CLI for one person, with the API key they made and their own config folder.
 music_cli_raw() {
   env -u MUSIC_INSECURE MUSIC_SERVER="$(music_url)/convex" \
     MUSIC_API_KEY="$(read_state "music/key.$as")" XDG_CONFIG_HOME="$state/music/cli/$as" node "$music_cli_js" "$@"
@@ -222,9 +216,10 @@ cmd_up() {
       *) die "up: unknown flag $1" ;;
     esac
   done
-  [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$project")" ]] ||
+  [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$project")" && ! -d "$state" ]] ||
     die "$project already exists; run \`down --side $side\` first"
   mkdir -p "$state" "$evidence"
+  write_state up.pid "$$"
   timing() { say "$1 took $((SECONDS - step))s"; step=$SECONDS; }
 
   local built=0
@@ -245,9 +240,7 @@ cmd_up() {
   write_state rev "$(checkout_rev)"
   timing "the image"
 
-  # Old music has no published image from this repo, so each side builds legacy/music: the after
-  # side from this checkout, the before side from main's tree. Docker's cache makes an unchanged
-  # tree build in seconds.
+  # This repo publishes no music image, so both sides build legacy/music.
   local music_image="media:verify-$run-music-$side" music_rev
   if ((music)); then
     mkdir -p "$state/music"
@@ -293,7 +286,7 @@ cmd_up() {
       chmod -R a+rX "$library"
     fi
     library="$(cd "$library" && pwd)"
-    # The media services run unprivileged in their containers and must read every folder and file.
+    # The media service runs unprivileged in its container and must read every folder and file.
     if [[ -n "$(find "$library" \( \( -type d \! -perm -o+rx \) -o \( -type f \! -perm -o+r \) \) -print -quit)" ]]; then
       die "$library is not readable by others; run chmod -R a+rX on it"
     fi
@@ -317,7 +310,6 @@ cmd_up() {
   if ((music)); then
     music_port="$(free_port)"
     write_state music_port "$music_port"
-    # PUBLIC_URL is the address clients use: music issues sign-in tokens for it.
     music_service="  music:
     image: $music_image
     labels: { media.verify.run: \"$run\", media.verify.side: \"$side\" }
@@ -546,7 +538,11 @@ cmd_logs() {
   docker logs --tail "$lines" "$(container "$service")" 2>&1
 }
 
-side_phase() { [[ -n "$(read_state ready)" ]] && echo ready || echo starting; }
+side_phase() {
+  if [[ -n "$(read_state ready)" ]]; then echo ready
+  elif kill -0 "$(read_state up.pid)" 2>/dev/null; then echo starting
+  else echo failed; fi
+}
 
 cmd_status() {
   local s
@@ -1090,7 +1086,6 @@ side_down() {
   docker ps -aq --filter "$label" | xargs -r docker rm -f >/dev/null 2>&1 || true
   docker volume ls -q --filter "$label" | xargs -r docker volume rm >/dev/null 2>&1 || true
   docker network ls -q --filter "$label" | xargs -r docker network rm >/dev/null 2>&1 || true
-  # The images `up` built and labeled for this side: movies for the after side, music for both.
   docker images -q --filter "label=media.verify.run=$run" --filter "label=media.verify.side=$side" | sort -u |
     xargs -r docker image rm -f >/dev/null 2>&1 || true
   [[ -d "$state/src" ]] && git -C "$root" worktree remove --force "$state/src" 2>/dev/null || true
@@ -1130,7 +1125,7 @@ main() {
     evidence) cmd_evidence "$@" ;;
     status) cmd_status ;;
     down) cmd_down "$@" ;;
-    *) sed -n '2,16p' "$0" >&2; exit 2 ;;
+    *) sed -n '2,17p' "$0" >&2; exit 2 ;;
   esac
 }
 main "$@"; exit

@@ -1,4 +1,3 @@
-// The skill's own tests, which need no stack: node --test .agents/skills/verify-media/scripts/verify-media.test.mjs
 import assert from "node:assert/strict";
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -24,8 +23,7 @@ const chromium = () => {
   return found.status === 0 ? found.stdout.trim() : undefined;
 };
 
-// One second of a 440 Hz tone, so a music page has real audio to play.
-const tone = () => {
+const toneWav = () => {
   const rate = 8000;
   const samples = Buffer.alloc(rate * 2);
   for (let i = 0; i < rate; i += 1) samples.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * 8000), i * 2);
@@ -49,7 +47,7 @@ const serveApp = (name) =>
   new Promise((resolve) => {
     const server = createServer((request, response) => {
       if (request.url === "/tone.wav") {
-        response.writeHead(200, { "content-type": "audio/wav" }).end(tone());
+        response.writeHead(200, { "content-type": "audio/wav" }).end(toneWav());
         return;
       }
       response.writeHead(200, { "content-type": "text/html" });

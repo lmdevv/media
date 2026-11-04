@@ -4,7 +4,7 @@
 #   docker compose -f compose.yaml -f compose.demo.yaml up -d
 #
 # Then add /media/library/Movies as a movies library and /media/library/Shows as a shows library.
-# docs/demo-library.md lists what it holds. The reference matches deploy/demo-library/image.
+# docs/demo-library.md lists what it holds.
 services:
   movies:
     volumes:

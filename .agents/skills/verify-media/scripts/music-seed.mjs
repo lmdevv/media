@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// Seeds a side's old [music] with the same demo people as movies, and what they made: Mateo,
-// Aiko, and Sam join from invites, then each makes playlists, likes songs, and shares through their
-// own API key, as a user would. verify-media.sh runs it after music's first-run setup, against the
-// demo library, and it fails when anyone sees other albums than the demo data says.
+// Seeds a side's old [music] with the movies demo people, their playlists, and likes, through
+// invites, the web app, and each person's own API key. Needs music's first-run setup on the demo
+// library and <state>/music/key.lucia; fails when anyone sees other albums than the demo data.
 //
 //   music-seed.mjs --state <side dir> --server <music url>/convex --cli <music.js> --browser <browser.mjs>
 import { execFileSync } from "node:child_process";
@@ -20,23 +19,20 @@ const { values: flags } = parseArgs({
   },
 });
 
-// The movies people, with the same emails and passwords. Guests can't make API keys, so Sam has
-// no music CLI.
 const PEOPLE = [
   { handle: "mateo", name: "Mateo", email: "mateo@movies.local", role: "admin" },
   { handle: "aiko", name: "Aiko", email: "aiko@movies.local", role: "member" },
   { handle: "sam", name: "Sam", email: "sam@movies.local", role: "guest" },
 ];
 const ALBUMS = 5;
-// The side's browser host serves both apps; music's keys and CLI configs live in its own folder.
-const dir = join(flags.state, "music");
+const musicState = join(flags.state, "music");
 
 const music = (handle, ...args) => {
   const env = {
     ...process.env,
     MUSIC_SERVER: flags.server,
-    MUSIC_API_KEY: readFileSync(join(dir, `key.${handle}`), "utf8").trim(),
-    XDG_CONFIG_HOME: join(dir, "cli", handle),
+    MUSIC_API_KEY: readFileSync(join(musicState, `key.${handle}`), "utf8").trim(),
+    XDG_CONFIG_HOME: join(musicState, "cli", handle),
   };
   delete env.MUSIC_INSECURE;
   mkdirSync(env.XDG_CONFIG_HOME, { recursive: true });
@@ -62,7 +58,7 @@ for (const person of PEOPLE) {
   const page = `music-${person.handle}`;
   const { code } = music("lucia", "invites", "create", "--email", person.email, "--role", person.role);
   browser("join", "--page", page, `--code=${code}`, "--name", person.name, "--email", person.email);
-  if (person.role !== "guest") writeFileSync(join(dir, `key.${person.handle}`), `${browser("create-key", "--page", page)}\n`);
+  if (person.role !== "guest") writeFileSync(join(musicState, `key.${person.handle}`), `${browser("create-key", "--page", page)}\n`);
   browser("close-page", "--page", page);
 }
 const people = new Map(music("lucia", "people", "list").map((person) => [person.email, person]));
@@ -103,5 +99,5 @@ for (const person of PEOPLE) {
   if (role !== person.role) fail(`${person.name} is ${role ?? "missing"} in music, not ${person.role}`);
 }
 
-writeFileSync(join(dir, "people"), "lucia\nmateo\naiko\n");
+writeFileSync(join(musicState, "people"), "lucia\nmateo\naiko\n");
 console.log("seeded music: Mateo (admin), Aiko (member), Sam (guest), 4 playlists, and 6 likes");

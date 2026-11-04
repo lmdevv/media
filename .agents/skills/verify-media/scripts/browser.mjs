@@ -20,7 +20,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-// One owner for both apps: the same person, email, and password.
 const OWNER = { name: "Lucía", email: "admin@movies.local", password: "password123" };
 const APPS = ["movies", "music"];
 
@@ -103,7 +102,6 @@ if (flags.app !== undefined && !APPS.includes(flags.app)) {
   console.error(`--app must be ${APPS.join(" or ")}, not "${flags.app}"`);
   process.exit(2);
 }
-// A music page is named `music` unless --page says otherwise.
 flags.page ??= flags.app === "music" ? "music" : "main";
 
 if (command === "serve") {
@@ -295,8 +293,6 @@ async function drive({ base, music }, network, launchArgs) {
       options.width && options.height
         ? { width: Number(options.width), height: Number(options.height) }
         : (device?.viewport ?? { width: 1440, height: 900 });
-    // Each app follows the system theme. Movies defaults to dark (--light for light), and music
-    // to light (--dark for dark), as each app does.
     const dark = app === "music" ? options.dark : !options.light;
     const context = await browser.newContext({
       ...device,
@@ -656,7 +652,6 @@ async function drive({ base, music }, network, launchArgs) {
       return JSON.stringify(await page.evaluate(options.js));
     },
   };
-  // Music's names for the same reads: its pages play audio.
   commands.audio = commands.video;
   commands["wait-audio"] = commands["wait-video"];
 
@@ -756,8 +751,7 @@ async function drive({ base, music }, network, launchArgs) {
     },
   };
 
-  // Old music's web app: its sidebar or tab bar shows once a page is signed in.
-  const musicNavigation = (page) =>
+  const musicSignedIn = (page) =>
     page.getByRole("navigation", { name: "Library" }).or(page.getByRole("navigation", { name: "Main" }));
 
   const musicCommands = {
@@ -766,11 +760,9 @@ async function drive({ base, music }, network, launchArgs) {
       await page.getByLabel("Email").fill(options.email ?? OWNER.email);
       await page.getByLabel("Password").fill(options.password ?? OWNER.password);
       await page.getByRole("button", { name: "Sign in" }).click();
-      await musicNavigation(page).first().waitFor({ timeout: timeout(options) });
+      await musicSignedIn(page).first().waitFor({ timeout: timeout(options) });
       return page.url();
     },
-    // First-run setup, as an owner does it on a fresh server: the owner account, /music as the
-    // library folder, and its first scan.
     async setup({ page }, options) {
       await page.goto("/");
       await page.waitForURL(/\/setup/, { timeout: timeout(options) });
@@ -786,7 +778,6 @@ async function drive({ base, music }, network, launchArgs) {
       await page.getByRole("heading", { name: "Recently added" }).waitFor({ timeout: timeout(options) });
       return `set up music as ${OWNER.email}`;
     },
-    // Accepts an invite at /invite/<code> and makes the account, as the invited person does.
     async join({ page }, options) {
       if (!options.code || !options.name || !options.email) throw new Error("join needs --code, --name, and --email");
       await page.goto(`/invite/${options.code}`);
@@ -796,10 +787,9 @@ async function drive({ base, music }, network, launchArgs) {
       await page.getByLabel("Your name").fill(options.name);
       await page.getByLabel("Choose a password").fill(options.password ?? OWNER.password);
       await page.getByRole("button", { name: "Join" }).click();
-      await musicNavigation(page).first().waitFor({ timeout: timeout(options) });
+      await musicSignedIn(page).first().waitFor({ timeout: timeout(options) });
       return `joined music as ${options.email}`;
     },
-    // Makes an API key at /settings/keys for the signed-in person and prints it.
     async "create-key"({ page }, options) {
       await page.goto("/settings/keys");
       await page.getByRole("button", { name: "New key" }).click();
