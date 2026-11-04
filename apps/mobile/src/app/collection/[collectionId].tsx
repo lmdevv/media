@@ -1,5 +1,5 @@
-import { CollectionId } from "@movies/contracts/ids";
-import { useCommandQuery } from "@movies/sdk/react";
+import { CollectionId } from "@media/contracts/ids";
+import { useCommandQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import { Play } from "lucide-react-native";
 import { Option, Schema } from "effect";

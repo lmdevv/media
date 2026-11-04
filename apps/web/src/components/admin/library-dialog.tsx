@@ -1,18 +1,18 @@
-import type { LibraryDetail } from "@movies/contracts/models/catalog";
-import { LibraryAccess, LibraryKind } from "@movies/contracts/models/catalog";
-import { useCommand } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { Chip } from "@movies/ui/components/chip";
+import type { LibraryDetail } from "@media/contracts/models/catalog";
+import { LibraryAccess, LibraryKind } from "@media/contracts/models/catalog";
+import { useCommand } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { Chip } from "@media/ui/components/chip";
 import {
   Dialog,
   DialogBody,
   DialogClose,
   DialogContent,
   DialogFooter,
-} from "@movies/ui/components/dialog";
-import { FieldError, TextField } from "@movies/ui/components/text-field";
-import { Input } from "@movies/ui/components/input";
-import { Switch } from "@movies/ui/components/switch";
+} from "@media/ui/components/dialog";
+import { FieldError, TextField } from "@media/ui/components/text-field";
+import { Input } from "@media/ui/components/input";
+import { Switch } from "@media/ui/components/switch";
 import { useNavigate } from "@tanstack/react-router";
 import { PlusIcon, XIcon } from "lucide-react";
 import { useState } from "react";

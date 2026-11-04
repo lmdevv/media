@@ -12,7 +12,7 @@ CLI. Everything shown is limited to the libraries and ratings the profile may se
 - `browse-episodes` lists a show's seasons and episodes on its page.
 - `search-menu` finds a title from the command menu (`Search`).
 - `search-page` finds titles on `/search`, with `All`, `Movies`, and `Shows` counts.
-- `search-cli` finds titles with `movies search`.
+- `search-cli` finds titles with `media search`.
 
 ## How to get to it (user POV)
 
@@ -20,7 +20,7 @@ CLI. Everything shown is limited to the libraries and ratings the profile may se
   `Search` button in the banner.
 - Any poster opens `/title/<id>`.
 - `/search?q=<words>` directly.
-- Terminal: `movies search <query>`, `movies titles list`, `movies titles get <id>`.
+- Terminal: `media search <query>`, `media titles list`, `media titles get <id>`.
 
 ## Driving it with verify-movies
 

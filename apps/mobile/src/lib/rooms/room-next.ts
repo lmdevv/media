@@ -1,6 +1,6 @@
-import type { EpisodeId } from "@movies/contracts/ids";
-import type { Episode } from "@movies/contracts/models/catalog";
-import type { Room } from "@movies/contracts/models/rooms";
+import type { EpisodeId } from "@media/contracts/ids";
+import type { Episode } from "@media/contracts/models/catalog";
+import type { Room } from "@media/contracts/models/rooms";
 
 import type { RoomRole } from "./room-view";
 

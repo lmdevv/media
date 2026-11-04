@@ -3,19 +3,19 @@
 # project with a generated fixture library mounted read-only, checks the install's privilege and
 # secret boundaries, then runs apps/media/src/stack/packaged-stack.test.ts against it (sign-up,
 # library, scan, direct and HLS playback, a media restart, CLI backup and restore) and the image's
-# own `movies` CLI.
+# own `media` CLI.
 #
 #   scripts/stack-e2e.sh
-#   IMAGE=ghcr.io/lmdevv/movies:main scripts/stack-e2e.sh   # skip the build
+#   IMAGE=ghcr.io/lmdevv/media:main scripts/stack-e2e.sh   # skip the build
 #   QSV=1 scripts/stack-e2e.sh   # with compose.qsv.yaml: Quick Sync on the host's Intel GPU
 #
-# Env: IMAGE, PROJECT (compose project, default movies-e2e), MOVIES_PORT (18080), CONVEX_PORT
+# Env: IMAGE, PROJECT (compose project, default movies-e2e), MEDIA_PORT (18080), CONVEX_PORT
 # (18210), KEEP=1 to leave the stack running afterwards.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 project="${PROJECT:-movies-e2e}"
-movies_port="${MOVIES_PORT:-18080}"
+movies_port="${MEDIA_PORT:-18080}"
 convex_port="${CONVEX_PORT:-18210}"
 image="${IMAGE:-}"
 
@@ -30,11 +30,11 @@ node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
 # read any real library.
 chmod -R a+rX "$library"
 
-export MOVIES_IMAGE="$image"
-export MOVIES_LIBRARY="$library"
-export MOVIES_PORT="$movies_port"
+export MEDIA_IMAGE="$image"
+export MEDIA_LIBRARY="$library"
+export MEDIA_PORT="$movies_port"
 export CONVEX_PORT="$convex_port"
-export MOVIES_PUBLIC_URL="http://127.0.0.1:${movies_port}"
+export MEDIA_BASE_URL="http://127.0.0.1:${movies_port}"
 export CONVEX_PUBLIC_URL="http://127.0.0.1:${convex_port}"
 export PUID="$(id -u)" PGID="$(id -g)"
 compose_args=(-p "$project" -f "$root/deploy/compose/compose.yaml")
@@ -59,7 +59,7 @@ trap cleanup EXIT
 compose down --volumes --remove-orphans >/dev/null 2>&1 || true
 compose up -d --pull missing --no-build
 
-healthy() { curl -fsS "${MOVIES_PUBLIC_URL}/api/health" 2>/dev/null | grep -q '"backend":"connected"'; }
+healthy() { curl -fsS "${MEDIA_BASE_URL}/api/health" 2>/dev/null | grep -q '"backend":"connected"'; }
 for _ in $(seq 1 120); do
   healthy && break
   sleep 2
@@ -94,31 +94,31 @@ check "Convex refuses admin calls without the key" \
 
 pnpm --dir "$root" --filter @lmdevv/movies build >/dev/null
 
-MOVIES_PACKAGED_STACK=1 \
-  MOVIES_PACKAGED_CONVEX_URL="$CONVEX_PUBLIC_URL" \
-  MOVIES_PACKAGED_MEDIA_URL="$MOVIES_PUBLIC_URL" \
-  MOVIES_PACKAGED_LIBRARY=/media/library \
-  MOVIES_PACKAGED_RESTART="docker compose ${compose_args[*]} restart movies" \
+MEDIA_PACKAGED_STACK=1 \
+  MEDIA_PACKAGED_CONVEX_URL="$CONVEX_PUBLIC_URL" \
+  MEDIA_PACKAGED_SERVER_URL="$MEDIA_BASE_URL" \
+  MEDIA_PACKAGED_LIBRARY=/media/library \
+  MEDIA_PACKAGED_RESTART="docker compose ${compose_args[*]} restart movies" \
   pnpm --dir "$root" exec vitest run --root "$root" apps/media/src/stack/packaged-stack.test.ts
 
 release="$("$root/scripts/check-version.sh")"
-check "the image's CLI reports the release version" '[[ "$(in_movies movies --version)" == "$release" ]]'
+check "the image's CLI reports the release version" '[[ "$(in_movies media --version)" == "$release" ]]'
 check "the image's CLI signs in to its own stack" \
-  'printf %s stack-test-password | in_movies movies login --email owner@movies.test --password >/dev/null'
-check "the image's CLI calls its own stack" 'in_movies movies whoami | grep -qF "owner@movies.test"'
-played="$(in_movies movies play "Big Buck Fixture")" ||
+  'printf %s stack-test-password | in_movies media login --email owner@movies.test --password >/dev/null'
+check "the image's CLI calls its own stack" 'in_movies media whoami | grep -qF "owner@movies.test"'
+played="$(in_movies media play "Big Buck Fixture")" ||
   { echo "check failed: the image's CLI plays in its own stack" >&2; exit 1; }
 play_url="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).url)' "$played")"
 stream_url_without_token="${play_url%%\?*}"
 echo "ok: the image's CLI plays in its own stack: ${stream_url_without_token}"
-check "the image's CLI plays at the public URL" '[[ "$play_url" == "$MOVIES_PUBLIC_URL/"* ]]'
+check "the image's CLI plays at the public URL" '[[ "$play_url" == "$MEDIA_BASE_URL/"* ]]'
 check "the printed stream URL plays from the host" \
   '[[ "$(curl -fsS -r 0-0 -o /dev/null -w "%{http_code}" "$play_url")" =~ ^20[06]$ ]]'
 check "the CLI login is root's and private, in the data volume" \
   '[[ "$(in_movies stat -c "%U %a" /data/config/movies/config.json)" == "root 600" ]]'
-retained="$(in_movies movies logs --since 5m --json 2>&1)" || true
+retained="$(in_movies media logs --since 5m --json 2>&1)" || true
 if ! grep -qF '"message":"Stream.started"' <<<"$retained"; then
-  echo "movies logs answered $(wc -l <<<"$retained") lines; the last ten:" >&2
+  echo "media logs answered $(wc -l <<<"$retained") lines; the last ten:" >&2
   tail -n 10 <<<"$retained" | cut -c1-300 >&2
   in_movies ls -l /data/media/logs >&2 || true
 fi

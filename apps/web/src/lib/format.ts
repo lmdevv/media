@@ -1,4 +1,4 @@
-import type { Episode, Progress, TitleCard } from "@movies/contracts/models/catalog";
+import type { Episode, Progress, TitleCard } from "@media/contracts/models/catalog";
 
 const MINUTE_MS = 60_000;
 

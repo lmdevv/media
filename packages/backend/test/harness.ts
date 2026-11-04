@@ -1,10 +1,10 @@
-import type { ArgsSchema, ConvexCommand, WireSchema } from "@movies/contracts/command";
-import { commands } from "@movies/contracts/commands";
-import type { CommandArgs, CommandName, CommandResult, Commands } from "@movies/contracts/commands";
-import { CommandFailure } from "@movies/contracts/errors";
-import type { ErrorCode } from "@movies/contracts/errors";
-import { mediaServiceFunctions } from "@movies/contracts/media-service";
-import type { MediaServiceFunctions } from "@movies/contracts/media-service";
+import type { ArgsSchema, ConvexCommand, WireSchema } from "@media/contracts/command";
+import { commands } from "@media/contracts/commands";
+import type { CommandArgs, CommandName, CommandResult, Commands } from "@media/contracts/commands";
+import { CommandFailure } from "@media/contracts/errors";
+import type { ErrorCode } from "@media/contracts/errors";
+import { mediaServiceFunctions } from "@media/contracts/media-service";
+import type { MediaServiceFunctions } from "@media/contracts/media-service";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import { ConvexError } from "convex/values";

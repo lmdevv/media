@@ -2,8 +2,8 @@ import { assert, describe, layer } from "@effect/vitest";
 import { Duration, Effect, Fiber, FileSystem, Path, Ref, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
-import { LibraryId } from "@movies/contracts/ids";
-import { type ClientCapabilities, NegotiateResponse } from "@movies/contracts/media-playback";
+import { LibraryId } from "@media/contracts/ids";
+import { type ClientCapabilities, NegotiateResponse } from "@media/contracts/media-playback";
 
 import * as LibraryScanner from "../library/library-scanner.ts";
 import * as MemoryLibrary from "../library/memory-library.ts";

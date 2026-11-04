@@ -1,4 +1,4 @@
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import { ChevronRightIcon } from "lucide-react";
 import { Fragment } from "react";
 import type { ReactNode } from "react";

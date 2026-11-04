@@ -1,4 +1,4 @@
-import { useCommandQuery } from "@movies/sdk/react";
+import { useCommandQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { KeyRound, Lock, Server } from "lucide-react-native";
 import { ActivityIndicator, View } from "react-native";

@@ -1,5 +1,5 @@
-import type { LibraryDetail } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { LibraryDetail } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Folder, Plus } from "lucide-react-native";
 

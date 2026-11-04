@@ -1,4 +1,4 @@
-import { DownloadQuality } from "@movies/contracts/media-playback";
+import { DownloadQuality } from "@media/contracts/media-playback";
 import { Effect, Option, Schema } from "effect";
 
 /** Download Settings. */

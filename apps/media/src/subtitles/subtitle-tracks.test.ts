@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
 import { Context, Effect, FileSystem, Layer, Path } from "effect";
 
-import { MediaFileId } from "@movies/contracts/ids";
+import { MediaFileId } from "@media/contracts/ids";
 
 import * as DiskCache from "../disk-cache.ts";
 import * as MediaTools from "../media/media-tools.ts";

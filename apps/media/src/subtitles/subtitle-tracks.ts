@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { SubtitleTrack } from "@movies/contracts/media-playback";
+import type { SubtitleTrack } from "@media/contracts/media-playback";
 import { Context, Duration, Effect, FileSystem, Layer, Option, Schema, Semaphore } from "effect";
 
 import * as DiskCache from "../disk-cache.ts";
@@ -88,7 +88,7 @@ export interface Interface {
 
 /** The subtitle converter. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/SubtitleConverter",
+  "@media/server/SubtitleConverter",
 ) {}
 
 const CACHE_NAMESPACE = "subtitles";

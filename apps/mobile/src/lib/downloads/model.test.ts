@@ -4,9 +4,9 @@ import {
   PlaybackSessionId,
   ProfileId,
   TitleId,
-} from "@movies/contracts/ids";
-import { MediaFile } from "@movies/contracts/models/catalog";
-import { Milliseconds } from "@movies/contracts/units";
+} from "@media/contracts/ids";
+import { MediaFile } from "@media/contracts/models/catalog";
+import { Milliseconds } from "@media/contracts/units";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

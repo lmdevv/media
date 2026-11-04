@@ -7,11 +7,11 @@ import {
   SeasonId,
   TitleId,
   UserId,
-} from "@movies/contracts/ids";
-import type { Episode } from "@movies/contracts/models/catalog";
-import type { Room, RoomMember } from "@movies/contracts/models/rooms";
-import { Conflict, Internal, NotFound } from "@movies/contracts/errors";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
+} from "@media/contracts/ids";
+import type { Episode } from "@media/contracts/models/catalog";
+import type { Room, RoomMember } from "@media/contracts/models/rooms";
+import { Conflict, Internal, NotFound } from "@media/contracts/errors";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
 import { describe, expect, it } from "vitest";
 
 import { FILE_MISSING, closedKey, roomNextCard, shouldStartCountdown } from "./room-next";

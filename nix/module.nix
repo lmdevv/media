@@ -2,7 +2,7 @@
 # media service (which also serves the web app) as a native, hardened systemd service built from
 # this repository (nix/package.nix).
 #
-#   services.movies = {
+#   services.media = {
 #     enable = true;
 #     libraryDirs = [ "/srv/media/movies" "/srv/media/shows" ];
 #     # Reached over Tailscale; see README.md.
@@ -19,7 +19,7 @@
 # generated inside Convex and kept there), and writes the service's environment to
 # /run/movies/media.env, readable by the service user only. No secret enters the Nix store.
 #
-# The host also gets the `movies` CLI, pointed at this server (programs.movies, in cli-module.nix).
+# The host also gets the `media` CLI, pointed at this server (programs.media, in cli-module.nix).
 {
   config,
   lib,
@@ -27,7 +27,7 @@
   ...
 }:
 let
-  cfg = config.services.movies;
+  cfg = config.services.media;
 
   pinnedConvexImage = lib.fileContents ../deploy/convex-backend.image;
 
@@ -130,7 +130,7 @@ in
 {
   imports = [ ./cli-module.nix ];
 
-  options.services.movies = {
+  options.services.media = {
     enable = lib.mkEnableOption "[movies], self-hosted movies and TV for people and agents";
 
     package = lib.mkOption {
@@ -212,7 +212,7 @@ in
     listenAddress = lib.mkOption {
       type = lib.types.str;
       default = if cfg.openFirewall then "0.0.0.0" else "127.0.0.1";
-      defaultText = lib.literalExpression ''if config.services.movies.openFirewall then "0.0.0.0" else "127.0.0.1"'';
+      defaultText = lib.literalExpression ''if config.services.media.openFirewall then "0.0.0.0" else "127.0.0.1"'';
       example = "100.64.0.1";
       description = ''
         Address both ports listen on. Container port publishing bypasses the NixOS firewall, so this,
@@ -224,14 +224,14 @@ in
     publicUrl = lib.mkOption {
       type = lib.types.str;
       default = "http://localhost:${toString cfg.port}";
-      defaultText = lib.literalExpression ''"http://localhost:''${toString config.services.movies.port}"'';
+      defaultText = lib.literalExpression ''"http://localhost:''${toString config.services.media.port}"'';
       description = "URL people use for the web app and streams.";
     };
 
     convexPublicUrl = lib.mkOption {
       type = lib.types.str;
       default = "http://localhost:${toString cfg.convexPort}";
-      defaultText = lib.literalExpression ''"http://localhost:''${toString config.services.movies.convexPort}"'';
+      defaultText = lib.literalExpression ''"http://localhost:''${toString config.services.media.convexPort}"'';
       description = "URL browsers and the CLI use for Convex.";
     };
 
@@ -388,7 +388,7 @@ in
       default = "info";
       description = ''
         Least severe level the media service logs, to the journal and to its retained log files
-        under `dataDir/media/logs`, which `movies logs` reads.
+        under `dataDir/media/logs`, which `media logs` reads.
       '';
     };
 
@@ -483,7 +483,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    programs.movies = {
+    programs.media = {
       enable = lib.mkDefault true;
       convexUrl = lib.mkDefault cfg.convexPublicUrl;
       mediaUrl = lib.mkDefault cfg.publicUrl;

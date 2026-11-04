@@ -1,6 +1,6 @@
 import { Popover } from "@base-ui/react/popover";
-import { formatTimecode } from "@movies/ui/lib/timecode";
-import { cn } from "@movies/ui/lib/utils";
+import { formatTimecode } from "@media/ui/lib/timecode";
+import { cn } from "@media/ui/lib/utils";
 import { useState } from "react";
 import type { ReactElement } from "react";
 

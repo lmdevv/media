@@ -1,5 +1,5 @@
-import { normalizeFolder } from "@movies/contracts/library-folder";
-import { useCommand } from "@movies/sdk/react";
+import { normalizeFolder } from "@media/contracts/library-folder";
+import { useCommand } from "@media/sdk/react";
 import { router, useLocalSearchParams, usePathname } from "expo-router";
 import { Check, Folder } from "lucide-react-native";
 import { useRef, useState } from "react";

@@ -1,11 +1,11 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { Button } from "@movies/ui/components/button";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { PlayGlyph } from "@movies/ui/components/icons";
-import { ProgressRing } from "@movies/ui/components/progress-ring";
-import { Wordmark } from "@movies/ui/components/wordmark";
-import { formatTimecode } from "@movies/ui/lib/timecode";
-import { cn } from "@movies/ui/lib/utils";
+import { Button } from "@media/ui/components/button";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { PlayGlyph } from "@media/ui/components/icons";
+import { ProgressRing } from "@media/ui/components/progress-ring";
+import { Wordmark } from "@media/ui/components/wordmark";
+import { formatTimecode } from "@media/ui/lib/timecode";
+import { cn } from "@media/ui/lib/utils";
 import { CopyIcon, EyeOffIcon, HouseIcon, Link2Icon, Link2OffIcon } from "lucide-react";
 import type { ReactNode } from "react";
 

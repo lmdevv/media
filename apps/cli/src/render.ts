@@ -1,4 +1,4 @@
-import { ApiKey, Invite, SessionInfo, User } from "@movies/contracts/models/account";
+import { ApiKey, Invite, SessionInfo, User } from "@media/contracts/models/account";
 import {
   ContinueWatchingItem,
   Episode,
@@ -6,11 +6,11 @@ import {
   Library,
   LibraryDetail,
   TitleCard,
-} from "@movies/contracts/models/catalog";
-import { Backup, Job } from "@movies/contracts/models/jobs";
-import { PlaybackSession } from "@movies/contracts/models/playback";
-import { Profile } from "@movies/contracts/models/profiles";
-import { RoomMember } from "@movies/contracts/models/rooms";
+} from "@media/contracts/models/catalog";
+import { Backup, Job } from "@media/contracts/models/jobs";
+import { PlaybackSession } from "@media/contracts/models/playback";
+import { Profile } from "@media/contracts/models/profiles";
+import { RoomMember } from "@media/contracts/models/rooms";
 import { Predicate, SchemaAST } from "effect";
 import type { Schema } from "effect";
 

@@ -1,6 +1,6 @@
 /**
  * Apps' unexpected errors, such as a crashed screen or an unhandled rejection, written to the media
- * service's retained log so whoever runs the server can find them with `movies logs`. Nothing is
+ * service's retained log so whoever runs the server can find them with `media logs`. Nothing is
  * sent while signed out, and an error that repeats is sent once per `REPEAT_WINDOW_MS`, failed or
  * not, so a render loop or a failing poll sends one report rather than a flood. After the service
  * refuses one for its budget, nothing is sent until its `Retry-After` has passed; reports in
@@ -11,9 +11,9 @@ import {
   type ClientErrorKind,
   type ClientErrorReport,
   type ClientPlatform,
-} from "@movies/contracts/diagnostics";
-import type { PlaybackSessionId } from "@movies/contracts/ids";
-import { RequestId } from "@movies/contracts/request-id";
+} from "@media/contracts/diagnostics";
+import type { PlaybackSessionId } from "@media/contracts/ids";
+import { RequestId } from "@media/contracts/request-id";
 import { Clock, Context, Effect, Layer, Option, Predicate, Schema } from "effect";
 
 import { Auth } from "./auth";
@@ -116,7 +116,7 @@ export interface Interface {
 
 /** The error reporter. */
 export class ClientErrors extends Context.Service<ClientErrors, Interface>()(
-  "@movies/sdk/ClientErrors",
+  "@media/sdk/ClientErrors",
 ) {}
 
 const make = Effect.gen(function* () {

@@ -5,7 +5,7 @@
  * when Media Source Extensions accept them. A path that fails anyway is dropped with
  * `withoutFailedPath` and playback renegotiates.
  */
-import type { ClientCapabilities, NegotiateResponse } from "@movies/contracts/media-playback";
+import type { ClientCapabilities, NegotiateResponse } from "@media/contracts/media-playback";
 import { Struct } from "effect";
 
 /** The browser checks capability detection needs, so tests can describe any browser. */

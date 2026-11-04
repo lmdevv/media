@@ -1,8 +1,8 @@
-import { targetPosition } from "@movies/contracts/clock";
-import type { RoomId } from "@movies/contracts/ids";
-import type { Room } from "@movies/contracts/models/rooms";
-import { EpochMillis } from "@movies/contracts/units";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import { targetPosition } from "@media/contracts/clock";
+import type { RoomId } from "@media/contracts/ids";
+import type { Room } from "@media/contracts/models/rooms";
+import { EpochMillis } from "@media/contracts/units";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   ChevronLeft,

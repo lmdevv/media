@@ -1,4 +1,4 @@
-import { ApiKey, SessionInfo } from "@movies/contracts/models/account";
+import { ApiKey, SessionInfo } from "@media/contracts/models/account";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

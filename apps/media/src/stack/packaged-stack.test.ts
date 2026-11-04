@@ -1,13 +1,13 @@
-import { DeviceId } from "@movies/contracts/ids";
-import type { LibraryId, ProfileId, TitleId } from "@movies/contracts/ids";
+import { DeviceId } from "@media/contracts/ids";
+import type { LibraryId, ProfileId, TitleId } from "@media/contracts/ids";
 import {
   type ClientCapabilities,
   HealthResponse,
   MEDIA_ROUTES,
   NegotiateRequest,
   NegotiateResponse,
-} from "@movies/contracts/media-playback";
-import { Auth } from "@movies/sdk/effect";
+} from "@media/contracts/media-playback";
+import { Auth } from "@media/sdk/effect";
 import { Effect, Exit, Option, Redacted, Schema, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -27,15 +27,15 @@ import {
   waitForBody,
 } from "../testing/stack-processes.ts";
 
-const enabled = process.env["MOVIES_PACKAGED_STACK"] === "1";
+const enabled = process.env["MEDIA_PACKAGED_STACK"] === "1";
 
-const convexUrl = process.env["MOVIES_PACKAGED_CONVEX_URL"] ?? "";
+const convexUrl = process.env["MEDIA_PACKAGED_CONVEX_URL"] ?? "";
 
-const mediaUrl = process.env["MOVIES_PACKAGED_MEDIA_URL"] ?? "";
+const mediaUrl = process.env["MEDIA_PACKAGED_SERVER_URL"] ?? "";
 
-const libraryDir = process.env["MOVIES_PACKAGED_LIBRARY"] ?? "/media/library";
+const libraryDir = process.env["MEDIA_PACKAGED_LIBRARY"] ?? "/media/library";
 
-const restartCommand = (process.env["MOVIES_PACKAGED_RESTART"] ?? "").split(" ").filter(Boolean);
+const restartCommand = (process.env["MEDIA_PACKAGED_RESTART"] ?? "").split(" ").filter(Boolean);
 
 const OWNER = "owner@movies.test";
 
@@ -172,7 +172,7 @@ describe.skipIf(!enabled)("the packaged install", { timeout: 180_000 }, () => {
     const bundle = await (await fetch(`${mediaUrl}${script}`)).text();
 
     expect(bundle).toContain(convexUrl);
-    expect(bundle).not.toContain("__MOVIES_CONVEX_URL__");
+    expect(bundle).not.toContain("__MEDIA_CONVEX_URL__");
   });
 
   it("scans a read-only library an admin adds", async () => {

@@ -87,7 +87,7 @@ export interface ExternalIds extends Schema.Schema.Type<typeof ExternalIds> {}
 
 /**
  * Artwork references. Each is an opaque key the media service minted; clients load it from
- * `${mediaBaseUrl}/artwork/${key}` (see `artworkUrl` in `@movies/contracts/artwork`).
+ * `${mediaBaseUrl}/artwork/${key}` (see `artworkUrl` in `@media/contracts/artwork`).
  */
 export const Artwork = Schema.Struct({
   poster: Schema.NullOr(Schema.String),

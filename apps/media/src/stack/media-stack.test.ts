@@ -1,25 +1,25 @@
-import { artworkUrl } from "@movies/contracts/artwork";
+import { artworkUrl } from "@media/contracts/artwork";
 import {
   ClientDiagnosticsRequest,
   DIAGNOSTICS_ROUTES,
   LogRecord,
   PlaybackDiagnostics,
   PlayerObservation,
-} from "@movies/contracts/diagnostics";
-import { DeviceId } from "@movies/contracts/ids";
-import type { LibraryId, ProfileId, TitleId } from "@movies/contracts/ids";
+} from "@media/contracts/diagnostics";
+import { DeviceId } from "@media/contracts/ids";
+import type { LibraryId, ProfileId, TitleId } from "@media/contracts/ids";
 import {
   type ClientCapabilities,
   HealthResponse,
   MEDIA_ROUTES,
   NegotiateRequest,
   NegotiateResponse,
-} from "@movies/contracts/media-playback";
-import type { StartedPlayback } from "@movies/contracts/models/playback";
-import { trickplayManifestUrl, trickplaySheetUrl } from "@movies/contracts/trickplay";
-import { Milliseconds } from "@movies/contracts/units";
-import type { Movies } from "@movies/sdk/effect";
-import { Auth, ConvexTransport, MoviesClient } from "@movies/sdk/effect";
+} from "@media/contracts/media-playback";
+import type { StartedPlayback } from "@media/contracts/models/playback";
+import { trickplayManifestUrl, trickplaySheetUrl } from "@media/contracts/trickplay";
+import { Milliseconds } from "@media/contracts/units";
+import type { Movies } from "@media/sdk/effect";
+import { Auth, ConvexTransport, MoviesClient } from "@media/sdk/effect";
 import {
   Context,
   Effect,
@@ -702,7 +702,7 @@ describe.skipIf(stack === undefined || !hasFfmpeg)(
       expect(outside).toMatchObject({ _tag: "NotFound" });
     });
 
-    it("does the same through the movies CLI", async () => {
+    it("does the same through the media CLI", async () => {
       const home = await makeTempDir("movies-media-cli-");
       const env = { XDG_CONFIG_HOME: home, HOME: home };
 

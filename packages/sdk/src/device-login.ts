@@ -1,5 +1,5 @@
-import type { DeviceCodeState } from "@movies/contracts/models/account";
-import type { EpochMillis } from "@movies/contracts/units";
+import type { DeviceCodeState } from "@media/contracts/models/account";
+import type { EpochMillis } from "@media/contracts/units";
 import { Clock, Duration, Effect, Option, Redacted, Schedule, Schema, Stream } from "effect";
 import type { ManagedRuntime } from "effect";
 

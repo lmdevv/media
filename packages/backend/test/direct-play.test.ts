@@ -1,6 +1,6 @@
-import { playsDirectly as contractsPlaysDirectly } from "@movies/contracts/direct-play";
-import type { DirectPlayFile } from "@movies/contracts/direct-play";
-import type { ClientCapabilities } from "@movies/contracts/media-playback";
+import { playsDirectly as contractsPlaysDirectly } from "@media/contracts/direct-play";
+import type { DirectPlayFile } from "@media/contracts/direct-play";
+import type { ClientCapabilities } from "@media/contracts/media-playback";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 

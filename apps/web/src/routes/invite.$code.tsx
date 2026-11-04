@@ -1,10 +1,10 @@
-import type { InviteLookup } from "@movies/contracts/models/account";
-import { PASSWORD_MIN_LENGTH } from "@movies/contracts/models/account";
-import { useAuth, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { FieldError, TextField } from "@movies/ui/components/text-field";
-import { cn } from "@movies/ui/lib/utils";
+import type { InviteLookup } from "@media/contracts/models/account";
+import { PASSWORD_MIN_LENGTH } from "@media/contracts/models/account";
+import { useAuth, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { FieldError, TextField } from "@media/ui/components/text-field";
+import { cn } from "@media/ui/lib/utils";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, LockIcon, SendIcon } from "lucide-react";
 import { useState } from "react";

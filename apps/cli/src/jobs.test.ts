@@ -1,5 +1,5 @@
-import { JobId } from "@movies/contracts/ids";
-import { ConvexTransport, Movies, MoviesClient, TokenStorage } from "@movies/sdk/effect";
+import { JobId } from "@media/contracts/ids";
+import { ConvexTransport, Movies, MoviesClient, TokenStorage } from "@media/sdk/effect";
 import { Clock, Context, Duration, Effect, Fiber, Layer, Option, Predicate, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";

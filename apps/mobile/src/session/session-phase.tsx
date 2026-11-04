@@ -1,7 +1,7 @@
-import { useAuth, useCommandQuery } from "@movies/sdk/react";
-import type { QueryState } from "@movies/sdk/react";
-import type { SetupStatus } from "@movies/contracts/models/account";
-import type { Profile } from "@movies/contracts/models/profiles";
+import { useAuth, useCommandQuery } from "@media/sdk/react";
+import type { QueryState } from "@media/sdk/react";
+import type { SetupStatus } from "@media/contracts/models/account";
+import type { Profile } from "@media/contracts/models/profiles";
 import { createContext, useContext, useMemo, useState } from "react";
 
 import { isFailure } from "@/lib/failure";

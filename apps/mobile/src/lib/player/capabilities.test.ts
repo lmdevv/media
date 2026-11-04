@@ -1,6 +1,6 @@
-import { playsDirectly } from "@movies/contracts/direct-play";
-import type { DirectPlayFile } from "@movies/contracts/direct-play";
-import { ClientCapabilities } from "@movies/contracts/media-playback";
+import { playsDirectly } from "@media/contracts/direct-play";
+import type { DirectPlayFile } from "@media/contracts/direct-play";
+import { ClientCapabilities } from "@media/contracts/media-playback";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

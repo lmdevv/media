@@ -1,5 +1,5 @@
-import type { Home as HomeRows, Library } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { Home as HomeRows, Library } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Folder, Plus, Popcorn } from "lucide-react-native";
 import { useState } from "react";

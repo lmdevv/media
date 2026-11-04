@@ -1,4 +1,4 @@
-import type { Viewer } from "@movies/contracts/models/account";
+import type { Viewer } from "@media/contracts/models/account";
 import { createContext, useContext } from "react";
 
 /** The viewer of the owner screens, provided by their layout once it loads. */

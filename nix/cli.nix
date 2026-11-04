@@ -1,6 +1,6 @@
-# The `movies` CLI, bundled by esbuild into one file and run with Node.
+# The `media` CLI, bundled by esbuild into one file and run with Node.
 #
-#   nix run github:lmdevv/movies#cli -- login --server http://nas.tailnet.ts.net:3210
+#   nix run github:lmdevv/media#cli -- login --server http://nas.tailnet.ts.net:3210
 #
 # Dependencies come from pnpm-lock.yaml through fetchPnpmDeps. When the lockfile changes, update
 # `hash` below: set it to "" and copy the hash from the error `nix build .#cli` prints.
@@ -71,25 +71,25 @@ stdenvNoCC.mkDerivation (finalAttrs: {
 
   installPhase = ''
     runHook preInstall
-    install -Dm644 apps/cli/dist/movies.js "$out/lib/movies/movies.mjs"
+    install -Dm644 apps/cli/dist/media.js "$out/lib/media/media.mjs"
     install -Dm644 apps/cli/dist/THIRD_PARTY_LICENSES.md -t "$out/share/doc/movies-cli"
-    makeWrapper ${lib.getExe nodejs_24} "$out/bin/movies" --add-flags "$out/lib/movies/movies.mjs"
+    makeWrapper ${lib.getExe nodejs_24} "$out/bin/media" --add-flags "$out/lib/media/media.mjs"
     runHook postInstall
   '';
 
   doInstallCheck = true;
   installCheckPhase = ''
     runHook preInstallCheck
-    [ "$("$out/bin/movies" --version)" = "${finalAttrs.version}" ]
-    "$out/bin/movies" --help | grep -q "Usage: movies"
+    [ "$("$out/bin/media" --version)" = "${finalAttrs.version}" ]
+    "$out/bin/media" --help | grep -q "Usage: media"
     runHook postInstallCheck
   '';
 
   meta = {
     description = "The [movies] command line: every command of a self-hosted [movies] server";
-    homepage = "https://github.com/lmdevv/movies";
+    homepage = "https://github.com/lmdevv/media";
     license = lib.licenses.mit;
-    mainProgram = "movies";
+    mainProgram = "media";
     platforms = lib.platforms.linux ++ lib.platforms.darwin;
   };
 })

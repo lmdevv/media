@@ -11,8 +11,8 @@
 #   verify-movies.sh status
 #   verify-movies.sh down [--side S] [--purge]
 #
-# MOVIES_VERIFY_RUN names the run (default: the checkout's directory name). A run has two sides:
-# `after` is an image built from this checkout, `before` is ghcr.io/lmdevv/movies:main. Each side
+# MEDIA_VERIFY_RUN names the run (default: the checkout's directory name). A run has two sides:
+# `after` is an image built from this checkout, `before` is ghcr.io/lmdevv/media:main. Each side
 # is its own Compose project of deploy/compose/compose.yaml, named movies-verify-<run>-<side>.
 set -euo pipefail
 
@@ -21,16 +21,16 @@ root="$(cd "$skill/../../.." && pwd)"
 scripts="$skill/scripts"
 
 slug() { tr '[:upper:]' '[:lower:]' <<<"$1" | tr -c 'a-z0-9\n' '-' | sed 's/^-*//; s/-*$//'; }
-run="$(slug "${MOVIES_VERIFY_RUN:-$(basename "$root")}")"
-[[ -n "$run" ]] || { echo "MOVIES_VERIFY_RUN is empty after cleaning" >&2; exit 2; }
+run="$(slug "${MEDIA_VERIFY_RUN:-$(basename "$root")}")"
+[[ -n "$run" ]] || { echo "MEDIA_VERIFY_RUN is empty after cleaning" >&2; exit 2; }
 state_root="${TMPDIR:-/tmp}/movies-verify/$run"
 evidence_root="$root/captures/verify/$run"
 mac="${MAC_HOST:-darwin}"
 axe='$HOME/music-ios/tools/axe/axe'
 mac_dir="movies-ios"
-before_image_default="ghcr.io/lmdevv/movies:main"
+before_image_default="ghcr.io/lmdevv/media:main"
 demo_image="$(<"$root/deploy/demo-library/image")"
-cli_js="$root/apps/cli/dist/movies.js"
+cli_js="$root/apps/cli/dist/media.js"
 password="password123"
 
 die() { echo "verify-movies: $*" >&2; exit 1; }
@@ -140,11 +140,11 @@ start_browser() {
 # The CLI for one person, with their own config folder, so sessions never mix. Lucía is the owner.
 as="lucia"
 cli_raw() {
-  env -u MOVIES_CONVEX_URL -u MOVIES_MEDIA_URL -u MOVIES_API_KEY -u MOVIES_PROFILE -u MOVIES_PASSWORD \
+  env -u MEDIA_CONVEX_URL -u MEDIA_SERVER_URL -u MEDIA_API_KEY -u MEDIA_PROFILE -u MEDIA_PASSWORD \
     XDG_CONFIG_HOME="$state/cli/$as" node "$cli_js" "$@"
 }
 
-# Signs a person's CLI in with their password, the way `movies login` documents it.
+# Signs a person's CLI in with their password, the way `media login` documents it.
 cli_login() {
   local email="$1"
   mkdir -p "$state/cli/$as"
@@ -258,19 +258,19 @@ cmd_up() {
   # Both public URLs must be the addresses clients use: sign-in tokens and stream URLs carry them.
   # localhost works for the browser here and, through `ios up`'s ssh forwards, on the Mac.
   cat > "$state/compose.env" <<ENV
-MOVIES_IMAGE=$image
-MOVIES_BIND=127.0.0.1
-MOVIES_PORT=$port
+MEDIA_IMAGE=$image
+MEDIA_BIND=127.0.0.1
+MEDIA_PORT=$port
 CONVEX_PORT=$convex_port
-MOVIES_PUBLIC_URL=http://localhost:$port
+MEDIA_BASE_URL=http://localhost:$port
 CONVEX_PUBLIC_URL=http://localhost:$convex_port
-MOVIES_LIBRARY=/nonexistent
+MEDIA_LIBRARY=/nonexistent
 PUID=$(id -u)
 PGID=$(id -g)
 TZ=UTC
 ENV
   # Compose merges a service's volumes by their target, so either library mount replaces
-  # compose.yaml's MOVIES_LIBRARY line.
+  # compose.yaml's MEDIA_LIBRARY line.
   cat > "$state/compose.verify.yaml" <<YAML
 services:
   convex:

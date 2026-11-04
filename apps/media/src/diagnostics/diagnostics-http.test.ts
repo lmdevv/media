@@ -2,12 +2,12 @@ import { createServer } from "node:http";
 
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { assert, layer } from "@effect/vitest";
-import { DiagnosedSession, PlaybackDiagnostics } from "@movies/contracts/diagnostics";
-import { Forbidden, Unauthenticated } from "@movies/contracts/errors";
-import { AuthSessionId, UserId } from "@movies/contracts/ids";
-import type { Viewer } from "@movies/contracts/models/account";
-import { type Role, roleScopes } from "@movies/contracts/scopes";
-import { EpochMillis } from "@movies/contracts/units";
+import { DiagnosedSession, PlaybackDiagnostics } from "@media/contracts/diagnostics";
+import { Forbidden, Unauthenticated } from "@media/contracts/errors";
+import { AuthSessionId, UserId } from "@media/contracts/ids";
+import type { Viewer } from "@media/contracts/models/account";
+import { type Role, roleScopes } from "@media/contracts/scopes";
+import { EpochMillis } from "@media/contracts/units";
 import {
   Context,
   Duration,

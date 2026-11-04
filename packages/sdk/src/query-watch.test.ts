@@ -1,4 +1,4 @@
-import { Internal, NotFound } from "@movies/contracts/errors";
+import { Internal, NotFound } from "@media/contracts/errors";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import type { Schema } from "effect";
 import { TestClock } from "effect/testing";

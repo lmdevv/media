@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 
-import { CLIENT_ERROR_LIMITS } from "@movies/contracts/diagnostics";
-import { NotFound } from "@movies/contracts/errors";
-import { PlaybackSessionId } from "@movies/contracts/ids";
+import { CLIENT_ERROR_LIMITS } from "@media/contracts/diagnostics";
+import { NotFound } from "@media/contracts/errors";
+import { PlaybackSessionId } from "@media/contracts/ids";
 import { Effect, Layer, Option, Predicate, Redacted } from "effect";
 import type { Scope } from "effect";
 import { TestClock } from "effect/testing";

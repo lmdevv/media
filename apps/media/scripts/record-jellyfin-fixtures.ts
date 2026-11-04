@@ -1,5 +1,5 @@
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import type { MigrationCredentials } from "@movies/contracts/models/migration";
+import type { MigrationCredentials } from "@media/contracts/models/migration";
 import { Effect, FileSystem, Layer, Option, Redacted, Schema } from "effect";
 import { FetchHttpClient } from "effect/http";
 

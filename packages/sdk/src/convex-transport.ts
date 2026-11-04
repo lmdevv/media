@@ -1,11 +1,11 @@
-import type { FunctionPath } from "@movies/contracts/command";
+import type { FunctionPath } from "@media/contracts/command";
 import {
   CommandFailure,
   commandError,
   Internal,
   NotFound,
   Unauthenticated,
-} from "@movies/contracts/errors";
+} from "@media/contracts/errors";
 import { ConvexClient, ConvexHttpClient } from "convex/browser";
 import type { AuthTokenFetcher } from "convex/browser";
 import type { FunctionReference } from "convex/server";
@@ -81,7 +81,7 @@ export interface Interface {
 
 /** The connection to the [movies] Convex deployment. */
 export class ConvexTransport extends Context.Service<ConvexTransport, Interface>()(
-  "@movies/sdk/ConvexTransport",
+  "@media/sdk/ConvexTransport",
 ) {}
 
 const HttpFailure = Schema.Struct({ code: Schema.String, message: Schema.String });

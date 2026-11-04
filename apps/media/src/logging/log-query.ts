@@ -1,4 +1,4 @@
-import { atLeast, type LogQuery, LogRecord } from "@movies/contracts/diagnostics";
+import { atLeast, type LogQuery, LogRecord } from "@media/contracts/diagnostics";
 import { Option, Predicate, Schema } from "effect";
 
 const decodeLine = Schema.decodeUnknownOption(Schema.fromJsonString(LogRecord));

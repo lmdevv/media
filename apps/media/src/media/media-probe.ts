@@ -1,6 +1,6 @@
 import { extname } from "node:path";
 
-import { BITMAP_SUBTITLE_FORMATS, Container, DynamicRange } from "@movies/contracts/media-playback";
+import { BITMAP_SUBTITLE_FORMATS, Container, DynamicRange } from "@media/contracts/media-playback";
 import { Effect, Schema } from "effect";
 
 import * as MediaTools from "./media-tools.ts";

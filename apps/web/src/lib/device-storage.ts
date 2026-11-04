@@ -1,4 +1,4 @@
-import { DeviceId, ProfileId } from "@movies/contracts/ids";
+import { DeviceId, ProfileId } from "@media/contracts/ids";
 import { LogLevel, Option, Schema } from "effect";
 
 import { QualityChoice } from "@/playback/quality";

@@ -1,5 +1,5 @@
-import type { JobId, ProfileId, UserId } from "@movies/contracts/ids";
-import type { Viewer } from "@movies/contracts/models/account";
+import type { JobId, ProfileId, UserId } from "@media/contracts/ids";
+import type { Viewer } from "@media/contracts/models/account";
 import type {
   MigrationConnectArgs,
   MigrationConnection,
@@ -9,13 +9,13 @@ import type {
   PathMapping,
   SourceUser as ContractSourceUser,
   UserMapping,
-} from "@movies/contracts/models/migration";
-import type { MigrationSource } from "@movies/contracts/models/jobs";
-import { MigrationSourceFailure } from "@movies/contracts/models/migration";
-import type { MigrationTarget } from "@movies/contracts/models/migration-service";
-import { Conflict, Internal, NotFound } from "@movies/contracts/errors";
-import type { CallError } from "@movies/sdk/effect";
-import { EpochMillis } from "@movies/contracts/units";
+} from "@media/contracts/models/migration";
+import type { MigrationSource } from "@media/contracts/models/jobs";
+import { MigrationSourceFailure } from "@media/contracts/models/migration";
+import type { MigrationTarget } from "@media/contracts/models/migration-service";
+import { Conflict, Internal, NotFound } from "@media/contracts/errors";
+import type { CallError } from "@media/sdk/effect";
+import { EpochMillis } from "@media/contracts/units";
 import {
   Clock,
   Context,
@@ -81,7 +81,7 @@ export interface Interface {
 }
 
 /** The migration flow. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/Migrations") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/Migrations") {}
 
 const sourceFailure = (error: SourceError): MigrationSourceFailure => ({
   status: "failed",

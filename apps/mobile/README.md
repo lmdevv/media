@@ -1,7 +1,7 @@
 # [movies] for iPhone
 
 The iOS app: Expo SDK 58, Expo Router, and Uniwind (Tailwind 4 for React Native) over
-`@movies/sdk/react`. Screens follow the Paper pages **14–20 iOS** in the `[movies]` file; tokens in
+`@media/sdk/react`. Screens follow the Paper pages **14–20 iOS** in the `[movies]` file; tokens in
 `src/global.css` keep their Paper names, and dark is the default theme.
 
 ## How it connects

@@ -1,4 +1,4 @@
-import { useCommandQuery } from "@movies/sdk/react";
+import { useCommandQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { Ellipsis, Link, Share as ShareIcon } from "lucide-react-native";
 import { useState } from "react";

@@ -12,7 +12,7 @@ export type RoomStatus = typeof RoomStatus.Type;
 
 /**
  * The committed shared timeline. Clients compute the live position with `targetPosition` from
- * `@movies/contracts/clock` and apply clocks in `revision` order.
+ * `@media/contracts/clock` and apply clocks in `revision` order.
  */
 export const RoomClock = Schema.Struct({
   status: RoomStatus,

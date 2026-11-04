@@ -1,4 +1,4 @@
-import type { CommandItem, CommandPage } from "@movies/ui/lib/command-menu";
+import type { CommandItem, CommandPage } from "@media/ui/lib/command-menu";
 import { describe, expect, it } from "vitest";
 
 import type { PlayerCommands } from "./contribution";

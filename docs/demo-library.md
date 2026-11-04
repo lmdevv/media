@@ -21,7 +21,7 @@ also holds `CREDITS.md`; the credits are below.
 ## Use it with Docker Compose
 
 `deploy/compose/compose.demo.yaml` mounts the image read-only at `/media/library` in place of
-`MOVIES_LIBRARY` (Docker 28 or later). Docker pulls it once per machine, and every container that
+`MEDIA_LIBRARY` (Docker 28 or later). Docker pulls it once per machine, and every container that
 mounts it shares that copy. From `deploy/compose`:
 
 ```sh

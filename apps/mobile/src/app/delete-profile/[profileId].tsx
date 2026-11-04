@@ -1,5 +1,5 @@
-import { ProfileId } from "@movies/contracts/ids";
-import { useCommand } from "@movies/sdk/react";
+import { ProfileId } from "@media/contracts/ids";
+import { useCommand } from "@media/sdk/react";
 import { Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { Trash2, X } from "lucide-react-native";

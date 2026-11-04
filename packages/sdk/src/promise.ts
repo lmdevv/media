@@ -1,10 +1,10 @@
 /**
- * `@movies/sdk/promise`: the SDK for code that does not use Effect. It runs the Effect core in a
+ * `@media/sdk/promise`: the SDK for code that does not use Effect. It runs the Effect core in a
  * `ManagedRuntime`. Promises reject with the same tagged errors the Effect API fails with
  * (`Unauthenticated`, `NotFound`, `TransportError`, ...), so callers branch on `error._tag`.
  */
-import type { CommandArgs, CommandName, CommandResult } from "@movies/contracts/commands";
-import type { DeviceId, RoomId } from "@movies/contracts/ids";
+import type { CommandArgs, CommandName, CommandResult } from "@media/contracts/commands";
+import type { DeviceId, RoomId } from "@media/contracts/ids";
 import {
   Effect,
   Exit,

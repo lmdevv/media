@@ -1,6 +1,6 @@
-import { DRIFT_THRESHOLDS } from "@movies/contracts/clock";
-import type { DeviceId, ProfileId, RoomId } from "@movies/contracts/ids";
-import type { Room, RoomMember } from "@movies/contracts/models/rooms";
+import { DRIFT_THRESHOLDS } from "@media/contracts/clock";
+import type { DeviceId, ProfileId, RoomId } from "@media/contracts/ids";
+import type { Room, RoomMember } from "@media/contracts/models/rooms";
 import { Predicate } from "effect";
 import { sortedBy } from "../sorted-by";
 

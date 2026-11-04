@@ -1,6 +1,6 @@
-import type { CreatedInvite } from "@movies/contracts/models/account";
-import type { AssignableRole } from "@movies/contracts/scopes";
-import { useCommand } from "@movies/sdk/react";
+import type { CreatedInvite } from "@media/contracts/models/account";
+import type { AssignableRole } from "@media/contracts/scopes";
+import { useCommand } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Share as ShareIcon, ShieldCheck, User } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";

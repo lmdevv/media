@@ -8,7 +8,7 @@
  * `Authorization: MediaBrowser ... Token="..."`, which Jellyfin accepts on every supported version;
  * the legacy `X-Emby-Token` header is off by default on current servers.
  */
-import type { MetadataOverrides } from "@movies/contracts/models/catalog";
+import type { MetadataOverrides } from "@media/contracts/models/catalog";
 import { DateTime, Effect, Option, Redacted, Schema } from "effect";
 import { HttpClient } from "effect/http";
 

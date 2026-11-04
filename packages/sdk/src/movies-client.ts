@@ -4,23 +4,23 @@ import type {
   ConvexCommand,
   MediaCommand,
   WireSchema,
-} from "@movies/contracts/command";
-import { commands } from "@movies/contracts/commands";
+} from "@media/contracts/command";
+import { commands } from "@media/contracts/commands";
 import type {
   CommandArgs,
   CommandName,
   CommandNameOfKind,
   CommandResult,
-} from "@movies/contracts/commands";
+} from "@media/contracts/commands";
 import {
   ClientErrorReport,
   DIAGNOSTICS_ROUTES,
   LOG_TRUNCATED_HEADER,
   LOG_UNAVAILABLE_SINCE_HEADER,
   LogQuery,
-} from "@movies/contracts/diagnostics";
-import { InvalidArgs } from "@movies/contracts/errors";
-import { EpochMillis } from "@movies/contracts/units";
+} from "@media/contracts/diagnostics";
+import { InvalidArgs } from "@media/contracts/errors";
+import { EpochMillis } from "@media/contracts/units";
 import { Context, Effect, Layer, Option, Schema, SchemaIssue, Stream } from "effect";
 
 import * as Auth from "./auth";
@@ -115,7 +115,7 @@ export interface Interface {
 
 /** The typed command client. */
 export class MoviesClient extends Context.Service<MoviesClient, Interface>()(
-  "@movies/sdk/MoviesClient",
+  "@media/sdk/MoviesClient",
 ) {}
 
 /** Options for the command client. */

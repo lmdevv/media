@@ -23,18 +23,18 @@ Tailscale and a Caddy reverse proxy, GPU passthrough, where data lives, backups,
 ### Docker Compose
 
 ```sh
-git clone https://github.com/lmdevv/movies && cd movies
+git clone https://github.com/lmdevv/media && cd media
 git checkout "$(git describe --tags --abbrev=0 --exclude '*-*')"   # latest stable release, = :latest
 cd deploy/compose
-cp .env.example .env    # set MOVIES_LIBRARY, the two public URLs, and PUID/PGID
+cp .env.example .env    # set MEDIA_LIBRARY, the two public URLs, and PUID/PGID
 docker compose up -d
 ```
 
-Open `MOVIES_PUBLIC_URL` (default `http://localhost:8080`), create the owner account (the first
+Open `MEDIA_BASE_URL` (default `http://localhost:8080`), create the owner account (the first
 account is the owner), and add `/media/library` (or a folder in it) as a library.
 
-- The `movies` image (`ghcr.io/lmdevv/movies`, amd64 and arm64) holds the media service, the web
-  app, the Convex CLI with the bundled functions, the `movies` CLI, and ffmpeg. Compose runs
+- The `media` image (`ghcr.io/lmdevv/media`, amd64 and arm64) holds the media service, the web
+  app, the Convex CLI with the bundled functions, the `media` CLI, and ffmpeg. Compose runs
   `:latest`, the newest release; pin `:X.Y` or `:X.Y.Z`, or follow `:main` for the edge.
   `docker compose build` builds it from source instead.
 - Each start deploys the functions and configures the deployment; secrets are generated inside
@@ -53,10 +53,10 @@ account is the owner), and add `/media/library` (or a folder in it) as a library
 
 ```nix
 # flake.nix
-inputs.movies.url = "github:lmdevv/movies";
+inputs.movies.url = "github:lmdevv/media";
 
 # configuration.nix, with inputs.movies.nixosModules.default in modules
-services.movies = {
+services.media = {
   enable = true;
   libraryDirs = [ "/srv/media/movies" "/srv/media/shows" ];
   listenAddress = "100.64.0.1";                       # the host's Tailscale address
@@ -68,7 +68,7 @@ services.movies = {
 ```
 
 The Convex backend runs as a pinned OCI container; the media service runs natively as a sandboxed
-systemd service built from this repository (`nix build github:lmdevv/movies#movies`). Library
+systemd service built from this repository (`nix build github:lmdevv/media#movies`). Library
 folders are read-only to it, and `openFirewall` is off by default.
 
 ## Configuration
@@ -78,13 +78,13 @@ default. The NixOS options are in brackets.
 
 | Name                          | Meaning                                                                   |
 | ----------------------------- | ------------------------------------------------------------------------- |
-| `MOVIES_LIBRARY`              | Host folder mounted read-only at `/media/library` (`libraryDirs`)         |
-| `MOVIES_PUBLIC_URL`           | URL of the web app and streams (`publicUrl`)                              |
+| `MEDIA_LIBRARY`               | Host folder mounted read-only at `/media/library` (`libraryDirs`)         |
+| `MEDIA_BASE_URL`              | URL of the web app and streams (`publicUrl`)                              |
 | `CONVEX_PUBLIC_URL`           | URL browsers and the CLI use for Convex (`convexPublicUrl`)               |
-| `MOVIES_BIND`                 | Address both ports listen on, `127.0.0.1` by default (`listenAddress`)    |
-| `MOVIES_PORT`, `CONVEX_PORT`  | Ports, 8080 and 3210 (`port`, `convexPort`)                               |
+| `MEDIA_BIND`                  | Address both ports listen on, `127.0.0.1` by default (`listenAddress`)    |
+| `MEDIA_PORT`, `CONVEX_PORT`   | Ports, 8080 and 3210 (`port`, `convexPort`)                               |
 | `PUID`, `PGID`                | User and group of the media service, 1000 (`user`, `group`)               |
-| `MOVIES_IMAGE`, `TZ`          | Image to run, `ghcr.io/lmdevv/movies:latest`; time zone, UTC              |
+| `MEDIA_IMAGE`, `TZ`           | Image to run, `ghcr.io/lmdevv/media:latest`; time zone, UTC               |
 | `TMDB_API_KEY`                | TMDB key or read token for metadata and artwork (`tmdbApiKeyFile`)        |
 | `OMDB_API_KEY`                | OMDb key for IMDb, RT, and Metacritic scores (`omdbApiKeyFile`)           |
 | `LIBRARY_ROOTS`               | Approved library folders in the container, `/media` (from `libraryDirs`)  |
@@ -129,7 +129,7 @@ scripts/demo-library.sh --dir ~/movies-demo --set full      # about 6 GB, adds P
 
 It needs `curl`, `ffmpeg`, and `unzip`, plus `spumux` from dvdauthor for the image subtitle
 (`nix develop` has all of them). Add `~/movies-demo/Movies` as a movies library and
-`~/movies-demo/Shows` as a shows library (with Compose, point `MOVIES_LIBRARY` at
+`~/movies-demo/Shows` as a shows library (with Compose, point `MEDIA_LIBRARY` at
 `~/movies-demo`).
 
 - **Movies:** Big Buck Bunny, Elephants Dream, Sintel, Tears of Steel (with subtitles in 20
@@ -152,7 +152,7 @@ covers what it holds, building it, and its credits.
 ## Remote access
 
 Keep both ports off the internet. For use away from home, join the host to a Tailscale tailnet and
-bind to its Tailscale address (`MOVIES_BIND` / `listenAddress`), or keep the localhost default and
+bind to its Tailscale address (`MEDIA_BIND` / `listenAddress`), or keep the localhost default and
 use `tailscale serve`. Convex and the media service speak plain HTTP, and every browser and CLI
 must reach both ports.
 
@@ -163,9 +163,9 @@ the backup folder (`/data/backups` in the `movies-data` volume, or `backupDir` o
 14 days. Each upgrade also backs up before it deploys. Restore from Admin → Backups, or:
 
 ```sh
-movies backup --wait
-movies backups list
-movies restore movies-nightly-2026-10-12T03-00-00-000Z.zip   # everyone signs in again
+media backup --wait
+media backups list
+media restore movies-nightly-2026-10-12T03-00-00-000Z.zip   # everyone signs in again
 ```
 
 Archives hold password hashes; store copies as carefully as the server. See
@@ -174,56 +174,56 @@ service.
 
 ## CLI
 
-`movies` runs everything the app can, for people and agents. Each release ships it with the same
+`media` runs everything the app can, for people and agents. Each release ships it with the same
 version as the server.
 
-| Where                       | Install                                                                                          |
-| --------------------------- | ------------------------------------------------------------------------------------------------ |
-| The Compose server          | In the image: `docker compose exec movies movies login`                                          |
-| The NixOS server            | Installed by `services.movies`, pointed at the server                                            |
-| Anywhere with Node 22+      | `npm install -g @lmdevv/movies`                                                                  |
-| Linux or macOS without Node | `movies-<os>-<arch>` from the [latest release](https://github.com/lmdevv/movies/releases/latest) |
-| Another NixOS machine       | `nixosModules.cli` with `programs.movies` (below)                                                |
-| Home Manager (Linux, macOS) | `homeManagerModules.movies` with `programs.movies` (below)                                       |
-| Nix, once                   | `nix run github:lmdevv/movies -- --help`                                                         |
+| Where                       | Install                                                                                        |
+| --------------------------- | ---------------------------------------------------------------------------------------------- |
+| The Compose server          | In the image: `docker compose exec movies media login`                                         |
+| The NixOS server            | Installed by `services.media`, pointed at the server                                           |
+| Anywhere with Node 22+      | `npm install -g @lmdevv/movies`                                                                |
+| Linux or macOS without Node | `media-<os>-<arch>` from the [latest release](https://github.com/lmdevv/media/releases/latest) |
+| Another NixOS machine       | `nixosModules.cli` with `programs.media` (below)                                               |
+| Home Manager (Linux, macOS) | `homeManagerModules.movies` with `programs.media` (below)                                      |
+| Nix, once                   | `nix run github:lmdevv/media -- --help`                                                        |
 
 ```sh
-movies login --server http://nas.tailnet.ts.net:3210 --media-url http://nas.tailnet.ts.net:8080
-movies search alien
-movies play "Alien" --open        # mpv; without --open, prints the stream URL
-movies libraries list --human
+media login --server http://nas.tailnet.ts.net:3210 --media-url http://nas.tailnet.ts.net:8080
+media search alien
+media play "Alien" --open        # mpv; without --open, prints the stream URL
+media libraries list --human
 ```
 
 The release binaries cover Linux on x64 and arm64 and macOS on Apple silicon. Download one with
-`curl`, check it, and put it on your `PATH` (`movies-darwin-arm64` and `shasum -a 256 -c` on a
+`curl`, check it, and put it on your `PATH` (`media-darwin-arm64` and `shasum -a 256 -c` on a
 Mac):
 
 ```sh
-curl -fLO https://github.com/lmdevv/movies/releases/latest/download/movies-linux-x64
-curl -fLO https://github.com/lmdevv/movies/releases/latest/download/SHA256SUMS
-grep movies-linux-x64 SHA256SUMS | sha256sum -c
-mkdir -p ~/.local/bin && install -m 755 movies-linux-x64 ~/.local/bin/movies
+curl -fLO https://github.com/lmdevv/media/releases/latest/download/media-linux-x64
+curl -fLO https://github.com/lmdevv/media/releases/latest/download/SHA256SUMS
+grep media-linux-x64 SHA256SUMS | sha256sum -c
+mkdir -p ~/.local/bin && install -m 755 media-linux-x64 ~/.local/bin/media
 ```
 
 The macOS binary is signed ad hoc, not notarized. macOS quarantines a file downloaded in a
 browser, and Gatekeeper then refuses to run it; `curl` does not quarantine, or clear it with
-`xattr -d com.apple.quarantine movies-darwin-arm64`.
+`xattr -d com.apple.quarantine media-darwin-arm64`.
 
-`MOVIES_MEDIA_URL` (or `login --media-url`) is where the CLI reaches the media service, for its
-`media` commands and for playback. The stream URL `movies play` prints is always the server's
-public one (`MOVIES_PUBLIC_URL`), so a player on another machine can open it.
+`MEDIA_SERVER_URL` (or `login --media-url`) is where the CLI reaches the media service, for its
+`media` commands and for playback. The stream URL `media play` prints is always the server's
+public one (`MEDIA_BASE_URL`), so a player on another machine can open it.
 
-In the Compose image, `MOVIES_CONVEX_URL` and `MOVIES_MEDIA_URL` point at that stack from inside
-the container. `docker compose exec movies movies` runs as root, so its login in the `movies-data`
+In the Compose image, `MEDIA_CONVEX_URL` and `MEDIA_SERVER_URL` point at that stack from inside
+the container. `docker compose exec movies media` runs as root, so its login in the `movies-data`
 volume (`/data/config`) is readable by root only, and stays across upgrades. On NixOS,
-`services.movies` sets both variables for every user, so `movies login` needs no `--server`;
-`programs.movies.enable = false` leaves the CLI out. Another NixOS machine, or Home Manager on
+`services.media` sets both variables for every user, so `media login` needs no `--server`;
+`programs.media.enable = false` leaves the CLI out. Another NixOS machine, or Home Manager on
 Linux or macOS, sets the two URLs itself:
 
 ```nix
 # NixOS: inputs.movies.nixosModules.cli in the system's modules.
 # Home Manager: inputs.movies.homeManagerModules.movies in home-manager's modules.
-programs.movies = {
+programs.media = {
   enable = true;
   convexUrl = "http://nas.tailnet.ts.net:3210";
   mediaUrl = "http://nas.tailnet.ts.net:8080";
@@ -232,17 +232,17 @@ programs.movies = {
 };
 ```
 
-The variables win over a login's stored server: while `MOVIES_CONVEX_URL` names another server, a
+The variables win over a login's stored server: while `MEDIA_CONVEX_URL` names another server, a
 profile saved for a different one stays unused, whatever `--profile` says. To use that profile,
-clear both for the command: `MOVIES_CONVEX_URL= MOVIES_MEDIA_URL= movies whoami`. The NixOS
+clear both for the command: `MEDIA_CONVEX_URL= MEDIA_SERVER_URL= media whoami`. The NixOS
 modules set them for every user on the machine. Home Manager sets them in `home.sessionVariables`,
 which only shells Home Manager configures load: on macOS, enable `programs.zsh` (or your shell) in
-Home Manager, or pass `--server` and `--media-url` to `movies login` instead.
+Home Manager, or pass `--server` and `--media-url` to `media login` instead.
 
-No install stores a credential: each user runs `movies login` once, or sets `MOVIES_API_KEY`.
+No install stores a credential: each user runs `media login` once, or sets `MEDIA_API_KEY`.
 Output is JSON by default. Agents get an API key from Settings → API keys and follow
 [apps/cli/skills/movies/SKILL.md](apps/cli/skills/movies/SKILL.md). In a checkout,
-`pnpm --filter @lmdevv/movies build` writes `apps/cli/dist/movies.js`.
+`pnpm --filter @lmdevv/movies build` writes `apps/cli/dist/media.js`.
 
 ## iOS app
 

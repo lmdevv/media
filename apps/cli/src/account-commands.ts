@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 
-import { commands } from "@movies/contracts/commands";
-import { NotFound } from "@movies/contracts/errors";
-import { ApiKeyScope } from "@movies/contracts/scopes";
-import { Auth, DeviceLogin, MoviesClient } from "@movies/sdk/effect";
+import { commands } from "@media/contracts/commands";
+import { NotFound } from "@media/contracts/errors";
+import { ApiKeyScope } from "@media/contracts/scopes";
+import { Auth, DeviceLogin, MoviesClient } from "@media/sdk/effect";
 import { Effect, Option, Redacted, Schema, Struct } from "effect";
 import { renderUnicodeCompact } from "uqr";
 
@@ -140,7 +140,7 @@ const login: ShortcutCommand = {
         yield* signIn(Auth.Credentials.ApiKey({ key: apiKey.value }));
       } else if (Option.isSome(email) || booleanFlag(tokens, "password")) {
         if (Option.isNone(email)) return yield* usage(invocation, "--password needs --email");
-        const password = yield* readSecret(invocation, "MOVIES_PASSWORD", "password");
+        const password = yield* readSecret(invocation, "MEDIA_PASSWORD", "password");
 
         yield* signIn(
           Auth.Credentials.Password({
@@ -152,7 +152,7 @@ const login: ShortcutCommand = {
           }),
         );
       } else {
-        const pending = yield* DeviceLogin.start(`movies CLI on ${hostname()}`).pipe(
+        const pending = yield* DeviceLogin.start(`media CLI on ${hostname()}`).pipe(
           Effect.provideService(Auth.Auth, auth),
           Effect.provideService(MoviesClient.MoviesClient, client),
         );
@@ -263,7 +263,7 @@ const logout: ShortcutCommand = {
       );
 
       if (target.apiKeyFromEnvironment) {
-        yield* output.err("MOVIES_API_KEY is still set in the environment and keeps working.");
+        yield* output.err("MEDIA_API_KEY is still set in the environment and keeps working.");
       }
 
       return textOutcome({ ok: true }, "Logged out.");
@@ -438,7 +438,7 @@ const keysRevoke: ShortcutCommand = {
 
       if (key === undefined) {
         return yield* new NotFound({
-          message: `No active API key "${wanted}"; see movies keys list`,
+          message: `No active API key "${wanted}"; see media keys list`,
         });
       }
 

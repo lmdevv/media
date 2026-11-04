@@ -1,6 +1,6 @@
-import type { JobId, LibraryId, ProfileId } from "@movies/contracts/ids";
-import type { JobProgress } from "@movies/contracts/models/jobs";
-import type { MigrationImported } from "@movies/contracts/models/migration";
+import type { JobId, LibraryId, ProfileId } from "@media/contracts/ids";
+import type { JobProgress } from "@media/contracts/models/jobs";
+import type { MigrationImported } from "@media/contracts/models/migration";
 import type {
   CatalogFile,
   CollectionImport,
@@ -11,10 +11,10 @@ import type {
   OverrideImport,
   StartMigrationArgs,
   WatchStateImport,
-} from "@movies/contracts/models/migration-service";
-import type { MediaLibrary } from "@movies/contracts/models/scan";
-import { SCAN_BATCH_LIMIT } from "@movies/contracts/models/scan";
-import type { CallError } from "@movies/sdk/effect";
+} from "@media/contracts/models/migration-service";
+import type { MediaLibrary } from "@media/contracts/models/scan";
+import { SCAN_BATCH_LIMIT } from "@media/contracts/models/scan";
+import type { CallError } from "@media/sdk/effect";
 import { Context, Effect, Layer } from "effect";
 
 import * as MediaBackend from "../convex/media-backend.ts";
@@ -82,7 +82,7 @@ export interface Interface {
 
 /** Migration's view of Convex. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/MigrationBackend",
+  "@media/server/MigrationBackend",
 ) {}
 
 /** Most items one import call carries. */

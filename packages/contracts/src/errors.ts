@@ -36,7 +36,7 @@ export interface CommandFailure extends Schema.Schema.Type<typeof CommandFailure
 export const RequestIdentity = Schema.Struct({
   /**
    * The media service's `x-request-id` of the failed request, to find its log lines with
-   * `movies logs --grep`; absent when no response arrived or the failure came from Convex.
+   * `media logs --grep`; absent when no response arrived or the failure came from Convex.
    */
   requestId: Schema.optionalKey(RequestId),
 });

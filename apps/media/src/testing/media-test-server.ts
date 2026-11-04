@@ -7,8 +7,8 @@ import { FetchHttpClient, HttpServer } from "effect/http";
 import * as BackendHealth from "../backend-health.ts";
 import * as ConvexSessionReports from "../convex/convex-session-reports.ts";
 import { routesLayer, serve } from "../http/http-server.ts";
-import type { LogRecord } from "@movies/contracts/diagnostics";
-import { type MediaFileId, LibraryId } from "@movies/contracts/ids";
+import type { LogRecord } from "@media/contracts/diagnostics";
+import { type MediaFileId, LibraryId } from "@media/contracts/ids";
 import * as LibraryScanner from "../library/library-scanner.ts";
 import { decodeRecord } from "../logging/log-query.ts";
 import * as MemoryLibrary from "../library/memory-library.ts";
@@ -34,7 +34,7 @@ export interface Interface {
 
 /** The running test server. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/test/MediaTestServer",
+  "@media/server/test/MediaTestServer",
 ) {}
 
 const MOVIES = LibraryId.make("movies");

@@ -1,4 +1,4 @@
-import type { CallError } from "@movies/sdk/effect";
+import type { CallError } from "@media/sdk/effect";
 import { Effect, Layer, Queue, Stream } from "effect";
 
 import * as PlaybackReporter from "../playback/playback-reporter.ts";

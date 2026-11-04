@@ -154,7 +154,7 @@ export interface Interface {
 
 /** The metadata resolver. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/MetadataResolver",
+  "@media/server/MetadataResolver",
 ) {}
 
 const normaliseTitle = (title: string): string =>

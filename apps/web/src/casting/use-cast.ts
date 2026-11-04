@@ -1,4 +1,4 @@
-import { useMoviesRuntime } from "@movies/sdk/react";
+import { useMoviesRuntime } from "@media/sdk/react";
 import { Result } from "effect";
 import {
   useCallback,

@@ -1,5 +1,5 @@
-import type { ContinueWatchingItem, TitleCard } from "@movies/contracts/models/catalog";
-import { LandscapeCard, PosterCard } from "@movies/ui/components/media-card";
+import type { ContinueWatchingItem, TitleCard } from "@media/contracts/models/catalog";
+import { LandscapeCard, PosterCard } from "@media/ui/components/media-card";
 import { Link } from "@tanstack/react-router";
 
 import { artworkUrl } from "@/lib/artwork";

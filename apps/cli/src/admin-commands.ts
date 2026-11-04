@@ -1,10 +1,10 @@
-import { commands } from "@movies/contracts/commands";
-import { NotFound } from "@movies/contracts/errors";
-import type { JobId } from "@movies/contracts/ids";
-import { ProfileId } from "@movies/contracts/ids";
-import type { Job } from "@movies/contracts/models/jobs";
-import { MigrationSource } from "@movies/contracts/models/jobs";
-import type { MigrationSourceFailure } from "@movies/contracts/models/migration";
+import { commands } from "@media/contracts/commands";
+import { NotFound } from "@media/contracts/errors";
+import type { JobId } from "@media/contracts/ids";
+import { ProfileId } from "@media/contracts/ids";
+import type { Job } from "@media/contracts/models/jobs";
+import { MigrationSource } from "@media/contracts/models/jobs";
+import type { MigrationSourceFailure } from "@media/contracts/models/migration";
 import { Effect, Option, Schema, Struct } from "effect";
 
 import { MigrationSourceError } from "./cli-errors";
@@ -77,7 +77,7 @@ const scan: ShortcutCommand = {
         return yield* new NotFound({
           message: Option.match(wanted, {
             onNone: () => "There are no libraries to scan",
-            onSome: (name) => `No library "${name}"; see movies libraries list-details`,
+            onSome: (name) => `No library "${name}"; see media libraries list-details`,
           }),
         });
       }
@@ -151,11 +151,11 @@ const isMigrationSource = Schema.is(MigrationSource);
 const importCredentials = (invocation: Invocation) =>
   Option.match(stringFlag(invocation.tokens, "user"), {
     onNone: () =>
-      readSecret(invocation, "MOVIES_IMPORT_TOKEN", "source server's token").pipe(
+      readSecret(invocation, "MEDIA_IMPORT_TOKEN", "source server's token").pipe(
         Effect.map((token) => ({ kind: "token" as const, token })),
       ),
     onSome: (username) =>
-      readSecret(invocation, "MOVIES_IMPORT_PASSWORD", "source server's password").pipe(
+      readSecret(invocation, "MEDIA_IMPORT_PASSWORD", "source server's password").pipe(
         Effect.map((password) => ({ kind: "password" as const, username, password })),
       ),
   });
@@ -267,7 +267,7 @@ const restore: ShortcutCommand = {
       );
 
       if (found === undefined) {
-        return yield* new NotFound({ message: `No backup "${wanted}"; see movies backups list` });
+        return yield* new NotFound({ message: `No backup "${wanted}"; see media backups list` });
       }
 
       yield* connection.withSession(

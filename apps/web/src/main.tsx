@@ -1,5 +1,5 @@
-import { MoviesProvider } from "@movies/sdk/react";
-import { Spinner } from "@movies/ui/components/spinner";
+import { MoviesProvider } from "@media/sdk/react";
+import { Spinner } from "@media/ui/components/spinner";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { ConvexReactClient } from "convex/react";
 import { StrictMode } from "react";

@@ -15,8 +15,8 @@ import {
   LOG_TRUNCATED_HEADER,
   LOG_UNAVAILABLE_SINCE_HEADER,
   LogQuery,
-} from "@movies/contracts/diagnostics";
-import { InvalidArgs } from "@movies/contracts/errors";
+} from "@media/contracts/diagnostics";
+import { InvalidArgs } from "@media/contracts/errors";
 import { Duration, Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 

@@ -1,0 +1,4 @@
+{
+  "extends": "@media/config/tsconfig.base.json",
+  "include": ["*.ts"]
+}

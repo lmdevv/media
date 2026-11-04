@@ -1,12 +1,12 @@
-import { hostReading, PLAYER_SILENCE_MS, targetPosition } from "@movies/contracts/clock";
-import type { FunctionPath } from "@movies/contracts/command";
-import { commands } from "@movies/contracts/commands";
-import type { CommandError } from "@movies/contracts/errors";
-import { Conflict, Forbidden, NotFound, StaleRevision } from "@movies/contracts/errors";
-import type { Room, RoomClock } from "@movies/contracts/models/rooms";
-import type { MediaFileId } from "@movies/contracts/ids";
-import { Room as RoomSchema, RoomClock as RoomClockSchema } from "@movies/contracts/models/rooms";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
+import { hostReading, PLAYER_SILENCE_MS, targetPosition } from "@media/contracts/clock";
+import type { FunctionPath } from "@media/contracts/command";
+import { commands } from "@media/contracts/commands";
+import type { CommandError } from "@media/contracts/errors";
+import { Conflict, Forbidden, NotFound, StaleRevision } from "@media/contracts/errors";
+import type { Room, RoomClock } from "@media/contracts/models/rooms";
+import type { MediaFileId } from "@media/contracts/ids";
+import { Room as RoomSchema, RoomClock as RoomClockSchema } from "@media/contracts/models/rooms";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
 import {
   Clock,
   Duration,

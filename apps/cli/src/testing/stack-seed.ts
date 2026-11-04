@@ -1,5 +1,5 @@
-import { mediaServiceFunctions } from "@movies/contracts/media-service";
-import { Auth, ConvexTransport, Movies, TokenStorage } from "@movies/sdk/effect";
+import { mediaServiceFunctions } from "@media/contracts/media-service";
+import { Auth, ConvexTransport, Movies, TokenStorage } from "@media/sdk/effect";
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 
 const open = (convexUrl: string) =>

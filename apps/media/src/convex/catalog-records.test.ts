@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import { LibraryId, MediaFileId } from "@movies/contracts/ids";
-import { ScannedItem } from "@movies/contracts/models/scan";
+import { LibraryId, MediaFileId } from "@media/contracts/ids";
+import { ScannedItem } from "@media/contracts/models/scan";
 import { Effect, Layer, Option, Path, Schema } from "effect";
 import { it as plain } from "vitest";
 import { FetchHttpClient } from "effect/http";

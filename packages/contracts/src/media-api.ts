@@ -2,12 +2,12 @@
  * The media service's Effect HttpApi: playback negotiation, HLS stream control, player
  * diagnostics, preparing downloads, health, and the connection details apps read. The
  * media service implements it; clients that may use Effect's unstable HTTP modules can derive an
- * `HttpApiClient` from it, and others decode the same schemas from `@movies/contracts/media-playback`.
+ * `HttpApiClient` from it, and others decode the same schemas from `@media/contracts/media-playback`.
  *
  * Media bytes (direct files, HLS playlists and segments, WebVTT, artwork) are plain routes on the
  * media service, because `<video>`, `<img>`, and HLS players fetch them by URL. Registry `media`
  * commands (such as `metadata.searchCandidates`) answer with command failures instead and are
- * described by `@movies/contracts/commands`.
+ * described by `@media/contracts/commands`.
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api";
 

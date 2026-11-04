@@ -1,5 +1,5 @@
-import { artworkUrl as mediaArtworkUrl } from "@movies/contracts/artwork";
-import type { ArtworkWidth } from "@movies/contracts/artwork";
+import { artworkUrl as mediaArtworkUrl } from "@media/contracts/artwork";
+import type { ArtworkWidth } from "@media/contracts/artwork";
 
 import { MEDIA_BASE_URL } from "@/env";
 

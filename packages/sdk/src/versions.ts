@@ -1,6 +1,6 @@
-import { dynamicRangeOf, playsDirectly as filePlaysDirectly } from "@movies/contracts/direct-play";
-import type { ClientCapabilities } from "@movies/contracts/media-playback";
-import type { MediaVersion } from "@movies/contracts/models/catalog";
+import { dynamicRangeOf, playsDirectly as filePlaysDirectly } from "@media/contracts/direct-play";
+import type { ClientCapabilities } from "@media/contracts/media-playback";
+import type { MediaVersion } from "@media/contracts/models/catalog";
 import { Option } from "effect";
 
 import { channelLabel, codecLabel, hdrLabel, resolutionLabel, sizeLabel } from "./media-labels";

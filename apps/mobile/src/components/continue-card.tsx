@@ -1,4 +1,4 @@
-import type { ContinueWatchingItem } from "@movies/contracts/models/catalog";
+import type { ContinueWatchingItem } from "@media/contracts/models/catalog";
 import { router } from "expo-router";
 import { Play } from "lucide-react-native";
 import { Pressable, View } from "react-native";

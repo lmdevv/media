@@ -1,5 +1,5 @@
-import { chordFromEvent, stepKeymap } from "@movies/ui/lib/keymap";
-import type { KeyEventLike } from "@movies/ui/lib/keymap";
+import { chordFromEvent, stepKeymap } from "@media/ui/lib/keymap";
+import type { KeyEventLike } from "@media/ui/lib/keymap";
 import { describe, expect, it } from "vitest";
 
 import { playerKeymap } from "./keymap";

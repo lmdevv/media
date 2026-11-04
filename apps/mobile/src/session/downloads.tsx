@@ -1,5 +1,5 @@
-import { Profile } from "@movies/contracts/models/profiles";
-import { useAuth, useCommandQuery, useMoviesRuntime } from "@movies/sdk/react";
+import { Profile } from "@media/contracts/models/profiles";
+import { useAuth, useCommandQuery, useMoviesRuntime } from "@media/sdk/react";
 import { Option, Schema } from "effect";
 import { Directory, Paths } from "expo-file-system";
 import * as Network from "expo-network";

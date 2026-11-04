@@ -1,9 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Context, Effect, Layer, Stream } from "effect";
 
-import { MediaFileId, PlaybackSessionId } from "@movies/contracts/ids";
-import type { SessionStatus } from "@movies/contracts/models/scan";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
+import { MediaFileId, PlaybackSessionId } from "@media/contracts/ids";
+import type { SessionStatus } from "@media/contracts/models/scan";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
 
 import * as SessionReports from "../playback/session-reports.ts";
 import { SessionReport } from "../playback/stream-liveness.ts";

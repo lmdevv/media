@@ -11,8 +11,8 @@ import {
   Schedule,
 } from "effect";
 
-import * as FakeConvex from "@movies/sdk/testing/fake-convex";
-import { jwtIssuedAt, Reply } from "@movies/sdk/testing/fake-convex";
+import * as FakeConvex from "@media/sdk/testing/fake-convex";
+import { jwtIssuedAt, Reply } from "@media/sdk/testing/fake-convex";
 
 import * as MediaBackend from "./media-backend.ts";
 

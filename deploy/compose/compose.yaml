@@ -1,10 +1,10 @@
 # [movies] with Docker Compose: the self-hosted Convex backend and the media service, which also
 # serves the web app. From this folder:
 #
-#   cp .env.example .env        # then set MOVIES_LIBRARY and the URLs; see docs/homelab.md
+#   cp .env.example .env        # then set MEDIA_LIBRARY and the URLs; see docs/homelab.md
 #   docker compose up -d
 #
-# Open MOVIES_PUBLIC_URL, create the owner account, and add /media/library as a library.
+# Open MEDIA_BASE_URL, create the owner account, and add /media/library as a library.
 # Optional: Intel Quick Sync with `-f compose.yaml -f compose.qsv.yaml`; an OpenTelemetry
 # collector with `--profile telemetry`. Upgrades: docs/operations.md.
 name: movies
@@ -25,7 +25,7 @@ services:
       # Plain HTTP over the tailnet or localhost; put a TLS proxy in front for anything else.
       DO_NOT_REQUIRE_SSL: "1"
     ports:
-      - "${MOVIES_BIND:-127.0.0.1}:${CONVEX_PORT:-3210}:3210"
+      - "${MEDIA_BIND:-127.0.0.1}:${CONVEX_PORT:-3210}:3210"
     volumes:
       - convex-data:/convex/data
     healthcheck:
@@ -37,7 +37,7 @@ services:
 
   movies:
     # `latest` is the newest release; pin a version (`:0.1`, `:0.1.2`) or follow `main` for the edge.
-    image: ${MOVIES_IMAGE:-ghcr.io/lmdevv/movies:latest}
+    image: ${MEDIA_IMAGE:-ghcr.io/lmdevv/media:latest}
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile
@@ -51,7 +51,7 @@ services:
       convex:
         condition: service_healthy
     environment:
-      MOVIES_PUBLIC_URL: ${MOVIES_PUBLIC_URL:-http://localhost:8080}
+      MEDIA_BASE_URL: ${MEDIA_BASE_URL:-http://localhost:8080}
       CONVEX_PUBLIC_URL: ${CONVEX_PUBLIC_URL:-http://localhost:3210}
       CONVEX_URL: http://convex:3210
       CONVEX_BACKEND_IMAGE: *convex-image
@@ -88,7 +88,7 @@ services:
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-}
       LOG_MAX_MB: ${LOG_MAX_MB:-}
     ports:
-      - "${MOVIES_BIND:-127.0.0.1}:${MOVIES_PORT:-8080}:8080"
+      - "${MEDIA_BIND:-127.0.0.1}:${MEDIA_PORT:-8080}:8080"
     volumes:
       # Service state and nightly backups (/data/backups). Bind a host folder to keep backups
       # elsewhere, such as `- /srv/backups/movies:/data/backups`.
@@ -105,7 +105,7 @@ services:
         volume:
           subpath: credentials
       # Libraries, read-only. Add one line per folder and add /media/<name> as a library.
-      - ${MOVIES_LIBRARY:-./library}:/media/library:ro
+      - ${MEDIA_LIBRARY:-./library}:/media/library:ro
 
   # No health check: the collector image holds only its binary, with nothing to probe it from.
   otel-collector:

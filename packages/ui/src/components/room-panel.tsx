@@ -1,4 +1,4 @@
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 
 import { Avatar } from "./avatar";
 import { Button } from "./button";

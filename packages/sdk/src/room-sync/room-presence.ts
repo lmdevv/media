@@ -1,5 +1,5 @@
-import { HEARTBEAT_INTERVAL_MS } from "@movies/contracts/clock";
-import type { DeviceId, RoomId } from "@movies/contracts/ids";
+import { HEARTBEAT_INTERVAL_MS } from "@media/contracts/clock";
+import type { DeviceId, RoomId } from "@media/contracts/ids";
 import { Cause, Duration, Effect, Predicate, Schedule } from "effect";
 
 import { MoviesClient } from "../movies-client";

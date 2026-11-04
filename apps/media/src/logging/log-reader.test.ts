@@ -1,8 +1,8 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import type { LogLevel, LogQuery } from "@movies/contracts/diagnostics";
-import { PlaybackSessionId } from "@movies/contracts/ids";
-import { EpochMillis } from "@movies/contracts/units";
+import type { LogLevel, LogQuery } from "@media/contracts/diagnostics";
+import { PlaybackSessionId } from "@media/contracts/ids";
+import { EpochMillis } from "@media/contracts/units";
 import { Duration, Effect, FileSystem, Predicate, Stream } from "effect";
 import { TestClock } from "effect/testing";
 

@@ -1,4 +1,4 @@
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import { CircleAlertIcon } from "lucide-react";
 import { useId } from "react";
 import type { ComponentProps, ReactNode } from "react";

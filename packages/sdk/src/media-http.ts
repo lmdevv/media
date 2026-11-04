@@ -1,8 +1,8 @@
-import { CommandFailure, RateLimited, commandError } from "@movies/contracts/errors";
-import type { CommandError, ErrorCode, RequestIdentity } from "@movies/contracts/errors";
-import { REQUEST_ID_HEADER, RequestId } from "@movies/contracts/request-id";
-import { PlaybackApiError } from "@movies/contracts/media-playback";
-import type { StartedPlayback } from "@movies/contracts/models/playback";
+import { CommandFailure, RateLimited, commandError } from "@media/contracts/errors";
+import type { CommandError, ErrorCode, RequestIdentity } from "@media/contracts/errors";
+import { REQUEST_ID_HEADER, RequestId } from "@media/contracts/request-id";
+import { PlaybackApiError } from "@media/contracts/media-playback";
+import type { StartedPlayback } from "@media/contracts/models/playback";
 import { Context, Effect, Option, Redacted, Schema, Stream } from "effect";
 
 import type { CallError } from "./sdk-errors";
@@ -16,7 +16,7 @@ import { ProtocolError, TransportError } from "./sdk-errors";
  * the service's public URL, so they stay the ones to hand a player. None (the default) sends
  * requests to the session's URL.
  */
-export const MediaOrigin = Context.Reference<Option.Option<string>>("@movies/sdk/MediaOrigin", {
+export const MediaOrigin = Context.Reference<Option.Option<string>>("@media/sdk/MediaOrigin", {
   defaultValue: Option.none,
 });
 

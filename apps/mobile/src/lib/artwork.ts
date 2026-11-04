@@ -1,5 +1,5 @@
-import { artworkUrl as mediaArtworkUrl } from "@movies/contracts/artwork";
-import type { ArtworkWidth } from "@movies/contracts/artwork";
+import { artworkUrl as mediaArtworkUrl } from "@media/contracts/artwork";
+import type { ArtworkWidth } from "@media/contracts/artwork";
 
 // An iPad's billboard is up to 2752 pixels wide, past the largest resize, so it takes the original.
 const WIDTHS = {

@@ -1,4 +1,4 @@
-import { PlaybackDiagnostics } from "@movies/contracts/diagnostics";
+import { PlaybackDiagnostics } from "@media/contracts/diagnostics";
 import { Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

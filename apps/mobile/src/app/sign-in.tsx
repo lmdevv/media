@@ -1,4 +1,4 @@
-import { useAuth } from "@movies/sdk/react";
+import { useAuth } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Server } from "lucide-react-native";
 import { useRef, useState } from "react";

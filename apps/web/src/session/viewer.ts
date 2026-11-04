@@ -1,6 +1,6 @@
-import type { Viewer } from "@movies/contracts/models/account";
-import type { Scope } from "@movies/contracts/scopes";
-import { useAuth, useCommandQuery } from "@movies/sdk/react";
+import type { Viewer } from "@media/contracts/models/account";
+import type { Scope } from "@media/contracts/scopes";
+import { useAuth, useCommandQuery } from "@media/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 

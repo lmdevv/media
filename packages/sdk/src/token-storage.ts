@@ -26,7 +26,7 @@ export interface Interface {
 
 /** The token store the SDK's auth reads and writes. */
 export class TokenStorage extends Context.Service<TokenStorage, Interface>()(
-  "@movies/sdk/TokenStorage",
+  "@media/sdk/TokenStorage",
 ) {}
 
 /** Keeps the session in memory only; a new process starts signed out. */

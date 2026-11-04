@@ -1,7 +1,7 @@
 import { assert, describe, layer } from "@effect/vitest";
 import { Effect, Fiber, Layer, Predicate, Redacted, Result } from "effect";
 
-import { type ClientCapabilities } from "@movies/contracts/media-playback";
+import { type ClientCapabilities } from "@media/contracts/media-playback";
 
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as MediaTools from "../media/media-tools.ts";

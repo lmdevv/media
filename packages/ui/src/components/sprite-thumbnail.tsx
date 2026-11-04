@@ -1,4 +1,4 @@
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 
 /** One tile of a sprite sheet: the sheet's URL and size and the tile's rectangle, in pixels. */
 export interface SpriteTile {

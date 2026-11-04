@@ -275,7 +275,7 @@ export interface Interface {
 
 /** The active metadata plugin. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/MetadataPlugin",
+  "@media/server/MetadataPlugin",
 ) {}
 
 /**

@@ -1,5 +1,5 @@
-import type { ClientCapabilities } from "@movies/contracts/media-playback";
-import { MediaVersion } from "@movies/contracts/models/catalog";
+import type { ClientCapabilities } from "@media/contracts/media-playback";
+import { MediaVersion } from "@media/contracts/models/catalog";
 import { Option, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";

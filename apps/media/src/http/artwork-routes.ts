@@ -1,4 +1,4 @@
-import { ArtworkWidth } from "@movies/contracts/artwork";
+import { ArtworkWidth } from "@media/contracts/artwork";
 import { Effect, Layer, Option, Schema } from "effect";
 import { HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 

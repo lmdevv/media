@@ -1,9 +1,9 @@
-import type { PlayerObservation } from "@movies/contracts/diagnostics";
-import type { ClientCapabilities, NegotiateResponse } from "@movies/contracts/media-playback";
-import { Milliseconds } from "@movies/contracts/units";
-import type { Movies } from "@movies/sdk/effect";
-import { Playback, PlayerDiagnostics } from "@movies/sdk/effect";
-import type { useMoviesRuntime } from "@movies/sdk/react";
+import type { PlayerObservation } from "@media/contracts/diagnostics";
+import type { ClientCapabilities, NegotiateResponse } from "@media/contracts/media-playback";
+import { Milliseconds } from "@media/contracts/units";
+import type { Movies } from "@media/sdk/effect";
+import { Playback, PlayerDiagnostics } from "@media/sdk/effect";
+import type { useMoviesRuntime } from "@media/sdk/react";
 import { Data, Effect, Exit, Option, Result, Scope, Struct } from "effect";
 import { createVideoPlayer } from "expo-video";
 import type { VideoMetadata, VideoPlayer } from "expo-video";

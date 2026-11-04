@@ -1,4 +1,4 @@
-import { KeyframeIndexFailed } from "@movies/contracts/media-playback";
+import { KeyframeIndexFailed } from "@media/contracts/media-playback";
 import {
   Context,
   Deferred,
@@ -36,7 +36,7 @@ export interface Interface {
 }
 
 /** The keyframe index. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/KeyframeIndex") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/KeyframeIndex") {}
 
 const CACHE_NAMESPACE = "keyframes";
 

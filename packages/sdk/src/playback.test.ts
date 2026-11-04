@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 
-import type { FunctionPath } from "@movies/contracts/command";
-import { StartedPlayback } from "@movies/contracts/models/playback";
-import { Milliseconds } from "@movies/contracts/units";
+import type { FunctionPath } from "@media/contracts/command";
+import { StartedPlayback } from "@media/contracts/models/playback";
+import { Milliseconds } from "@media/contracts/units";
 import { Effect, Exit, Fiber, Layer, Option, Predicate, Ref, Schema, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

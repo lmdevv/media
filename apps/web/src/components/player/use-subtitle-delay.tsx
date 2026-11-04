@@ -1,5 +1,5 @@
-import type { NegotiateResponse } from "@movies/contracts/media-playback";
-import { SubtitleDelay } from "@movies/ui/components/subtitle-delay";
+import type { NegotiateResponse } from "@media/contracts/media-playback";
+import { SubtitleDelay } from "@media/ui/components/subtitle-delay";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 

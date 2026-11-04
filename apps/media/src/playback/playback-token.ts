@@ -1,5 +1,5 @@
-import type { MediaFileId, PlaybackSessionId, ProfileId, UserId } from "@movies/contracts/ids";
-import { PlaybackSessionEnded } from "@movies/contracts/media-playback";
+import type { MediaFileId, PlaybackSessionId, ProfileId, UserId } from "@media/contracts/ids";
+import { PlaybackSessionEnded } from "@media/contracts/media-playback";
 import {
   checkPlaybackTokenExpiry,
   importPlaybackTokenSecret,
@@ -7,7 +7,7 @@ import {
   type PlaybackTokenPayload,
   type PlaybackTokenSecretInvalid,
   readPlaybackTokenIgnoringExpiry,
-} from "@movies/contracts/playback-token";
+} from "@media/contracts/playback-token";
 import { Context, Data, Effect, Layer, Option, Redacted } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
@@ -77,7 +77,7 @@ export interface Interface {
 
 /** The playback token verifier. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/PlaybackTokenVerifier",
+  "@media/server/PlaybackTokenVerifier",
 ) {}
 
 /** Builds a verifier for tokens signed with `secret`. */

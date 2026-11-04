@@ -1,6 +1,6 @@
-import type { MediaFileId } from "@movies/contracts/ids";
-import { MediaLabels, Versions } from "@movies/sdk/effect";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { MediaFileId } from "@media/contracts/ids";
+import { MediaLabels, Versions } from "@media/sdk/effect";
+import { useCommandQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { Check, Clapperboard, Play } from "lucide-react-native";
 import { useState } from "react";

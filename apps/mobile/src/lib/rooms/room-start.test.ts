@@ -1,6 +1,6 @@
-import { EpisodeId, SeasonId, TitleId } from "@movies/contracts/ids";
-import type { Episode, Progress } from "@movies/contracts/models/catalog";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
+import { EpisodeId, SeasonId, TitleId } from "@media/contracts/ids";
+import type { Episode, Progress } from "@media/contracts/models/catalog";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
 import { describe, expect, it } from "vitest";
 
 import { roomStart } from "./room-start";

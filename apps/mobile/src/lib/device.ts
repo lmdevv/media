@@ -1,4 +1,4 @@
-import { DeviceId } from "@movies/contracts/ids";
+import { DeviceId } from "@media/contracts/ids";
 import * as Crypto from "expo-crypto";
 import * as Device from "expo-device";
 

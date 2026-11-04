@@ -5,12 +5,12 @@ import type {
   ProfileId,
   RoomId,
   TitleId,
-} from "@movies/contracts/ids";
-import type { ClientCapabilities, NegotiateResponse } from "@movies/contracts/media-playback";
-import type { StartedPlayback } from "@movies/contracts/models/playback";
-import { Milliseconds } from "@movies/contracts/units";
-import type { CallError } from "@movies/sdk/effect";
-import { MoviesClient, Playback, PlayerDiagnostics } from "@movies/sdk/effect";
+} from "@media/contracts/ids";
+import type { ClientCapabilities, NegotiateResponse } from "@media/contracts/media-playback";
+import type { StartedPlayback } from "@media/contracts/models/playback";
+import { Milliseconds } from "@media/contracts/units";
+import type { CallError } from "@media/sdk/effect";
+import { MoviesClient, Playback, PlayerDiagnostics } from "@media/sdk/effect";
 import { Data, Effect, Exit, Option, Predicate, Result, Scope } from "effect";
 
 import { withoutFailedPath } from "./capabilities";

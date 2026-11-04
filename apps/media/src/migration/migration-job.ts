@@ -1,11 +1,11 @@
-import type { JobProgress } from "@movies/contracts/models/jobs";
-import type { MigrationImported, MigrationPhase } from "@movies/contracts/models/migration";
+import type { JobProgress } from "@media/contracts/models/jobs";
+import type { MigrationImported, MigrationPhase } from "@media/contracts/models/migration";
 import {
   COLLECTION_BATCH_LIMIT,
   COLLECTION_MEMBER_BATCH_LIMIT,
   type MigrationCheckpoint,
-} from "@movies/contracts/models/migration-service";
-import type { CallError } from "@movies/sdk/effect";
+} from "@media/contracts/models/migration-service";
+import type { CallError } from "@media/sdk/effect";
 import { Duration, Effect, Match, Option, Ref } from "effect";
 import type { HttpClient } from "effect/http";
 

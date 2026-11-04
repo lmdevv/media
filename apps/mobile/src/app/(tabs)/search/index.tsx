@@ -1,5 +1,5 @@
-import type { PersonCard, TitleCard } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { PersonCard, TitleCard } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
 import { Stack, router, useFocusEffect, useNavigation } from "expo-router";
 import { Search as SearchIcon } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";

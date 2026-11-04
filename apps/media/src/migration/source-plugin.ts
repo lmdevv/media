@@ -1,7 +1,7 @@
-import type { MigrationCredentials } from "@movies/contracts/models/migration";
-import type { MetadataOverrides } from "@movies/contracts/models/catalog";
-import type { MigrationSource } from "@movies/contracts/models/jobs";
-import type { SourceFailureReason } from "@movies/contracts/models/migration";
+import type { MigrationCredentials } from "@media/contracts/models/migration";
+import type { MetadataOverrides } from "@media/contracts/models/catalog";
+import type { MigrationSource } from "@media/contracts/models/jobs";
+import type { SourceFailureReason } from "@media/contracts/models/migration";
 import { Effect, Match, Schema } from "effect";
 import { HttpClient, type HttpClientError } from "effect/http";
 

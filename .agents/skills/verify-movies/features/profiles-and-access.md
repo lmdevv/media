@@ -20,8 +20,8 @@ exist.
 - The banner's `<profile>: switch profile` button opens the command menu's `Switch profile` list.
 - `/profiles/new` adds a profile; `Kids profile` and `Profile PIN` are switches there.
 - Admin, Libraries: a library's `Who sees it` (`Everyone` or `Only people I choose`).
-- Terminal: `movies profiles list`, `movies profiles unlock --profile-id <id> <pin>`,
-  `movies titles list --profile-id <id>`.
+- Terminal: `media profiles list`, `media profiles unlock --profile-id <id> <pin>`,
+  `media titles list --profile-id <id>`.
 
 ## Driving it with verify-movies
 

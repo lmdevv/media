@@ -20,7 +20,7 @@ export interface Interface {
 
 /** The fixture workspace. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/test/FixtureWorkspace",
+  "@media/server/test/FixtureWorkspace",
 ) {}
 
 /** Generates the fixture library into a fresh temporary folder. */

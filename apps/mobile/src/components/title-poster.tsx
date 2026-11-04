@@ -1,4 +1,4 @@
-import type { TitleCard } from "@movies/contracts/models/catalog";
+import type { TitleCard } from "@media/contracts/models/catalog";
 import { Link } from "expo-router";
 import { Pressable, View } from "react-native";
 

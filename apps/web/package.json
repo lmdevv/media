@@ -13,9 +13,9 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
-    "@movies/contracts": "workspace:*",
-    "@movies/sdk": "workspace:*",
-    "@movies/ui": "workspace:*",
+    "@media/contracts": "workspace:*",
+    "@media/sdk": "workspace:*",
+    "@media/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-router": "^1.170.32",
     "convex": "catalog:",
@@ -28,7 +28,7 @@
     "sonner": "catalog:"
   },
   "devDependencies": {
-    "@movies/config": "workspace:*",
+    "@media/config": "workspace:*",
     "@playwright/test": "1.64.0",
     "@tanstack/react-router-devtools": "^1.167.1",
     "@tanstack/router-plugin": "^1.168.35",

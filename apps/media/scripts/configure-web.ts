@@ -3,7 +3,7 @@ import { chmod, cp, readdir, readFile, rename, rm, writeFile } from "node:fs/pro
 import { basename, dirname, extname, join, relative } from "node:path";
 import { parseArgs } from "node:util";
 
-const PLACEHOLDER = "__MOVIES_CONVEX_URL__";
+const PLACEHOLDER = "__MEDIA_CONVEX_URL__";
 
 const TEXT = new Set([".html", ".js", ".mjs", ".css", ".json", ".webmanifest", ".map"]);
 

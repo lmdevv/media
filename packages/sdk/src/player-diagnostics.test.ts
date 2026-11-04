@@ -1,11 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 
-import { ClientDiagnosticsRequest, PlayerObservation } from "@movies/contracts/diagnostics";
-import type { NegotiateResponse } from "@movies/contracts/media-playback";
-import { StreamId } from "@movies/contracts/media-playback";
-import type { AudioStream } from "@movies/contracts/models/catalog";
-import { StartedPlayback } from "@movies/contracts/models/playback";
+import { ClientDiagnosticsRequest, PlayerObservation } from "@media/contracts/diagnostics";
+import type { NegotiateResponse } from "@media/contracts/media-playback";
+import { StreamId } from "@media/contracts/media-playback";
+import type { AudioStream } from "@media/contracts/models/catalog";
+import { StartedPlayback } from "@media/contracts/models/playback";
 import { Effect, Exit, Layer, Option, Predicate, Redacted, Schema, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";

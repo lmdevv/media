@@ -1,5 +1,5 @@
 {
-  "extends": "@movies/config/tsconfig.base.json",
+  "extends": "@media/config/tsconfig.base.json",
   "compilerOptions": { "allowImportingTsExtensions": true },
   "include": ["./*.ts"]
 }

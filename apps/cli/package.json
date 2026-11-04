@@ -10,19 +10,19 @@
     "movies",
     "self-hosted"
   ],
-  "homepage": "https://github.com/lmdevv/movies#readme",
-  "bugs": "https://github.com/lmdevv/movies/issues",
+  "homepage": "https://github.com/lmdevv/media#readme",
+  "bugs": "https://github.com/lmdevv/media/issues",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lmdevv/movies.git",
+    "url": "git+https://github.com/lmdevv/media.git",
     "directory": "apps/cli"
   },
   "bin": {
-    "movies": "dist/movies.js"
+    "media": "dist/media.js"
   },
   "files": [
-    "dist/movies.js",
+    "dist/media.js",
     "dist/THIRD_PARTY_LICENSES.md",
     "skills"
   ],
@@ -36,12 +36,12 @@
     "prepack": "node scripts/build.ts",
     "typecheck": "tsc --noEmit",
     "skill:reference": "node scripts/skill-reference.ts",
-    "test:stack": "MOVIES_STACK_TESTS=1 vitest run --root ../.. apps/cli/src/stack"
+    "test:stack": "MEDIA_STACK_TESTS=1 vitest run --root ../.. apps/cli/src/stack"
   },
   "devDependencies": {
-    "@movies/config": "workspace:*",
-    "@movies/contracts": "workspace:*",
-    "@movies/sdk": "workspace:*",
+    "@media/config": "workspace:*",
+    "@media/contracts": "workspace:*",
+    "@media/sdk": "workspace:*",
     "@types/node": "catalog:",
     "effect": "catalog:",
     "esbuild": "0.28.2",

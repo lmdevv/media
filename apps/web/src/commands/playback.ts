@@ -1,5 +1,5 @@
-import type { CommandItem, CommandPage } from "@movies/ui/lib/command-menu";
-import type { TrackOption } from "@movies/ui/components/track-popover";
+import type { CommandItem, CommandPage } from "@media/ui/lib/command-menu";
+import type { TrackOption } from "@media/ui/components/track-popover";
 import {
   AudioLinesIcon,
   CaptionsIcon,

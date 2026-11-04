@@ -1,20 +1,20 @@
-# @movies/sdk
+# @media/sdk
 
 The client core shared by the web app, the CLI, and later the native apps. Calls are typed by the
-command registry in `@movies/contracts`: arguments are encoded and results decoded with each
+command registry in `@media/contracts`: arguments are encoded and results decoded with each
 command's schemas, and failures are the contracts' tagged errors plus `TransportError` and
 `ProtocolError`. No Node built-ins or DOM globals in shipped sources (`import-boundary.test.ts`).
 
-| Entry point           | For                                                               |
-| --------------------- | ----------------------------------------------------------------- |
-| `@movies/sdk/effect`  | Effect programs: services, layers, workflows                      |
-| `@movies/sdk/react`   | React: provider and hooks on the app's `ConvexReactClient`        |
-| `@movies/sdk/promise` | Everything else: a Promise facade that rejects with tagged errors |
+| Entry point          | For                                                               |
+| -------------------- | ----------------------------------------------------------------- |
+| `@media/sdk/effect`  | Effect programs: services, layers, workflows                      |
+| `@media/sdk/react`   | React: provider and hooks on the app's `ConvexReactClient`        |
+| `@media/sdk/promise` | Everything else: a Promise facade that rejects with tagged errors |
 
 ## Effect
 
 ```ts
-import { Movies, MoviesClient, TokenStorage } from "@movies/sdk/effect";
+import { Movies, MoviesClient, TokenStorage } from "@media/sdk/effect";
 
 const sdk = Movies.layer({
   convexUrl,
@@ -39,7 +39,7 @@ const titles = Effect.flatMap(MoviesClient.MoviesClient, (client) =>
   seconds and on pause, resume, seek, and end; ends the session when its scope closes),
   `nextEpisode`, `autoplayCountdown`, `seekStream`, `renegotiate` (renews the playback token when
   it expires within five minutes, then negotiates again), and `recoveryFor`, which maps each
-  playback API failure (`@movies/contracts/media-playback`) to what the player does next:
+  playback API failure (`@media/contracts/media-playback`) to what the player does next:
   `reload-playlist`, `renegotiate`, `renew-token`, `new-session`, `retry-later`, `unsupported`,
   or `fail`. Media URLs carry the token, so after renewing load the new `stream.url`.
 - `MediaOrigin`: playback and download requests go to the public URL the session names unless
@@ -87,5 +87,5 @@ controls and heartbeats name that file, so the server refuses them for the new o
 ## Tests
 
 `pnpm test` runs the unit suites, including the room engine against an in-memory backend and a
-fake player on `TestClock`. `pnpm --filter @movies/sdk test:stack` runs the SDK against the dev
+fake player on `TestClock`. `pnpm --filter @media/sdk test:stack` runs the SDK against the dev
 stack from `scripts/dev-stack.sh up`.

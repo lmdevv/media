@@ -1,6 +1,6 @@
-import type { AnyCommand, CommandGroup } from "@movies/contracts/command";
-import { commands, isCommandName } from "@movies/contracts/commands";
-import type { CommandName } from "@movies/contracts/commands";
+import type { AnyCommand, CommandGroup } from "@media/contracts/command";
+import { commands, isCommandName } from "@media/contracts/commands";
+import type { CommandName } from "@media/contracts/commands";
 import { Match, Schema, SchemaAST } from "effect";
 
 import { ExitCode } from "./cli-errors";
@@ -10,7 +10,7 @@ import { deriveFlags, FlagType, flagTypeLabel, flagUsage, kebabCase } from "./fl
 /** A registry command as the CLI exposes it. */
 export interface RegistryEntry {
   readonly name: CommandName;
-  /** The words after `movies`: `api-keys create`. */
+  /** The words after `media`: `api-keys create`. */
   readonly path: string;
   readonly flags: FlagSet;
   /** The result names a background job, so `--wait` can follow it. */
@@ -37,7 +37,7 @@ export const registryEntries: ReadonlyArray<RegistryEntry> = Object.keys(command
 
 /** A command the CLI implements on top of the registry. */
 export interface Shortcut {
-  /** The words after `movies`: `rooms pause`. */
+  /** The words after `media`: `rooms pause`. */
   readonly path: string;
   readonly synopsis: string;
   readonly summary: string;
@@ -57,7 +57,7 @@ export const shortcuts: ReadonlyArray<Shortcut> = [
     synopsis:
       "login [--server <convex-url>] [--media-url <url>] [--api-key <key> | --email <email> --password]",
     summary:
-      "Sign in: device login by default (prints a code, a URL, and a QR code, then waits); --api-key or --email with --password (read from stdin or MOVIES_PASSWORD)",
+      "Sign in: device login by default (prints a code, a URL, and a QR code, then waits); --api-key or --email with --password (read from stdin or MEDIA_PASSWORD)",
     section: "Account",
   },
   {
@@ -196,7 +196,7 @@ export const shortcuts: ReadonlyArray<Shortcut> = [
     synopsis:
       "import jellyfin|plex --url <server-url> [--user <jellyfin-admin>] [--path-map <source-folder>=<local-folder>,...] [--map <source-user-id>=<profile-id>|skip,...] [--dry-run] [--wait [--timeout <seconds>]]",
     summary:
-      "Migrate libraries, watch history, favorites, collections, and metadata overrides; the token (or --user's password) is read from stdin, MOVIES_IMPORT_TOKEN, or MOVIES_IMPORT_PASSWORD",
+      "Migrate libraries, watch history, favorites, collections, and metadata overrides; the token (or --user's password) is read from stdin, MEDIA_IMPORT_TOKEN, or MEDIA_IMPORT_PASSWORD",
     section: "Administration",
   },
   {
@@ -288,7 +288,7 @@ const synopsis = (entry: RegistryEntry): string => {
 
   const wait = entry.job ? ["[--wait [--timeout <seconds>]]"] : [];
 
-  return ["movies", entry.path, ...parts, ...wait].join(" ");
+  return ["media", entry.path, ...parts, ...wait].join(" ");
 };
 
 const pad = (rows: ReadonlyArray<readonly [string, string]>): ReadonlyArray<string> => {
@@ -308,7 +308,7 @@ const exitCodeLine = `Exit codes: ${Object.entries(ExitCode)
 const globalFlagLines = pad([
   ["--format json|table", "Output format; JSON (the default) for agents, tables for people"],
   ["--human", "Same as --format table"],
-  ["--profile <name>", "Use another stored server profile (or set MOVIES_PROFILE)"],
+  ["--profile <name>", "Use another stored server profile (or set MEDIA_PROFILE)"],
   ["--verbose", "Print debug logs on stderr too, not only warnings and errors"],
   ["-h, --help", "Show help for any command"],
   ["--version", "Print the version"],
@@ -319,17 +319,17 @@ const shortcutRows = (section: Shortcut["section"]): ReadonlyArray<readonly [str
     shortcut.section === section ? [[shortcut.synopsis, shortcut.summary] as const] : [],
   );
 
-/** `movies --help`. */
+/** `media --help`. */
 export const rootHelp = (version: string): string =>
   [
-    `movies ${version}: the [movies] command line. Everything the app can do, for people and agents.`,
+    `media ${version}: the [movies] command line. Everything the app can do, for people and agents.`,
     "",
-    "Usage: movies <command> [flags]",
+    "Usage: media <command> [flags]",
     "",
     ...(
       ["Account", "Watching", "Rooms", "Administration", "Troubleshooting", "Reference"] as const
     ).flatMap((section) => Array.of<string>(section).concat(pad(shortcutRows(section)), [""])),
-    "Commands (movies <group> --help lists a group)",
+    "Commands (media <group> --help lists a group)",
     ...pad([...groupWords].toSorted().map((group) => [group, groupSummary(group)] as const)),
     "",
     "Global flags",
@@ -337,7 +337,7 @@ export const rootHelp = (version: string): string =>
     "",
     exitCodeLine,
     'Output is JSON on stdout; errors are {"error":{"code","message"}} on stderr, with "requestId"',
-    "when the media service answered: movies logs --grep <request-id> finds its records.",
+    "when the media service answered: media logs --grep <request-id> finds its records.",
   ].join("\n");
 
 const groupSummary = (group: string): string => {
@@ -353,10 +353,10 @@ const groupSummary = (group: string): string => {
   return [...new Set(names)].join(", ");
 };
 
-/** `movies rooms --help`. */
+/** `media rooms --help`. */
 export const groupHelp = (group: string): string =>
   [
-    `Usage: movies ${group} <command> [flags]`,
+    `Usage: media ${group} <command> [flags]`,
     "",
     ...pad([
       ...shortcuts.flatMap((shortcut) =>
@@ -366,12 +366,12 @@ export const groupHelp = (group: string): string =>
       ),
       ...visibleRegistryEntries.flatMap((entry) =>
         entry.path.startsWith(`${group} `)
-          ? [[`movies ${entry.path}`, commands[entry.name].summary] as const]
+          ? [[`media ${entry.path}`, commands[entry.name].summary] as const]
           : [],
       ),
     ]),
     "",
-    `Run movies ${group} <command> --help for its flags.`,
+    `Run media ${group} <command> --help for its flags.`,
   ].join("\n");
 
 const flagNote = (spec: FlagSpec): string => {
@@ -381,7 +381,7 @@ const flagNote = (spec: FlagSpec): string => {
     parts.push(
       spec.key === "deviceId"
         ? "defaults to this install's device"
-        : "defaults to `movies profiles use`",
+        : "defaults to `media profiles use`",
     );
   }
 
@@ -397,7 +397,7 @@ const access = (command: AnyCommand): string =>
     Match.orElse((scope) => `scope ${scope}`),
   );
 
-/** `movies libraries create --help`. */
+/** `media libraries create --help`. */
 export const commandHelp = (entry: RegistryEntry): string => {
   const command = commands[entry.name];
   const { flags, positional } = entry.flags;
@@ -433,9 +433,9 @@ export const commandHelp = (entry: RegistryEntry): string => {
 
 /** Help for a shortcut. */
 export const shortcutHelp = (shortcut: Shortcut): string =>
-  [`Usage: movies ${shortcut.synopsis}`, "", `${shortcut.summary}.`, "", exitCodeLine].join("\n");
+  [`Usage: media ${shortcut.synopsis}`, "", `${shortcut.summary}.`, "", exitCodeLine].join("\n");
 
-/** One entry of `movies commands`. A type alias so it stays assignable to JSON. */
+/** One entry of `media commands`. A type alias so it stays assignable to JSON. */
 export type CatalogEntry = {
   readonly name: string;
   readonly command: string;
@@ -488,8 +488,8 @@ const argsJsonSchema = (args: Schema.Top): Schema.Json => {
 export const catalog = (): ReadonlyArray<CatalogEntry> => [
   ...shortcuts.map((shortcut): CatalogEntry => ({
     name: shortcut.path,
-    command: `movies ${shortcut.path}`,
-    synopsis: `movies ${shortcut.synopsis}`,
+    command: `media ${shortcut.path}`,
+    synopsis: `media ${shortcut.synopsis}`,
     group: "shortcut",
     kind: "shortcut",
     scope: "varies",
@@ -505,8 +505,8 @@ export const catalog = (): ReadonlyArray<CatalogEntry> => [
 
     return {
       name: entry.name,
-      command: replaced ? `movies call ${entry.name}` : `movies ${entry.path}`,
-      synopsis: replaced ? `movies call ${entry.name} --json <object>` : synopsis(entry),
+      command: replaced ? `media call ${entry.name}` : `media ${entry.path}`,
+      synopsis: replaced ? `media call ${entry.name} --json <object>` : synopsis(entry),
       group: command.group,
       kind: command.kind,
       scope: command.scope,
@@ -537,7 +537,7 @@ export const markdownReference = (): string => {
   const shortcutSection = [
     "### Shortcuts",
     "",
-    ...shortcuts.map((shortcut) => `- \`movies ${shortcut.synopsis}\`: ${shortcut.summary}.`),
+    ...shortcuts.map((shortcut) => `- \`media ${shortcut.synopsis}\`: ${shortcut.summary}.`),
   ].join("\n");
 
   const sections = [...groups].map(([group, entries]) =>
@@ -547,7 +547,7 @@ export const markdownReference = (): string => {
       ...entries.map((entry) => {
         const command = commands[entry.name];
         const replaced = shortcutPaths.has(entry.path);
-        const usage = replaced ? `movies call ${entry.name} --json <object>` : synopsis(entry);
+        const usage = replaced ? `media call ${entry.name} --json <object>` : synopsis(entry);
 
         const notes = [access(command), entry.job ? "job: add `--wait`" : null].filter(
           (note) => note !== null,
@@ -569,6 +569,6 @@ export const markdownReference = (): string => {
     .trimEnd();
 };
 
-/** The registry entry for a dotted name typed into `movies call`. */
+/** The registry entry for a dotted name typed into `media call`. */
 export const entryNamed = (name: string): RegistryEntry | undefined =>
   registryEntries.find((entry) => entry.name === name);

@@ -18,7 +18,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import type { Duplex } from "node:stream";
 
-import type { ErrorCode } from "@movies/contracts/errors";
+import type { ErrorCode } from "@media/contracts/errors";
 import { Data, Effect, Option, Predicate, Schema } from "effect";
 import type { Scope } from "effect";
 

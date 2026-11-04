@@ -26,13 +26,13 @@ export interface Stack {
 }
 
 /**
- * The stack to test, or undefined unless `MOVIES_STACK_TESTS=1`, so `pnpm test` stays green
+ * The stack to test, or undefined unless `MEDIA_STACK_TESTS=1`, so `pnpm test` stays green
  * without Docker.
  *
- * @throws When `MOVIES_STACK_TESTS=1` but no stack is configured, a setup mistake.
+ * @throws When `MEDIA_STACK_TESTS=1` but no stack is configured, a setup mistake.
  */
 export const findStack = (): Stack | undefined => {
-  if (process.env["MOVIES_STACK_TESTS"] !== "1") return undefined;
+  if (process.env["MEDIA_STACK_TESTS"] !== "1") return undefined;
 
   const backend = readEnvFile(join(repoRoot, "packages/backend/.env.local"));
   const media = readEnvFile(join(repoRoot, "apps/media/.env.local"));
@@ -42,7 +42,7 @@ export const findStack = (): Stack | undefined => {
     process.env["MEDIA_SERVICE_API_KEY"] ?? media.get("MEDIA_SERVICE_API_KEY");
 
   if (convexUrl === undefined || mediaServiceKey === undefined) {
-    throw new Error("MOVIES_STACK_TESTS=1 but no stack is configured; run scripts/dev-stack.sh up");
+    throw new Error("MEDIA_STACK_TESTS=1 but no stack is configured; run scripts/dev-stack.sh up");
   }
 
   return { convexUrl, mediaServiceKey };

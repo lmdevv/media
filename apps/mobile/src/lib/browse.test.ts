@@ -1,5 +1,5 @@
-import { ProfileId, TitleId } from "@movies/contracts/ids";
-import { Episode, Library, Progress, TitleCard } from "@movies/contracts/models/catalog";
+import { ProfileId, TitleId } from "@media/contracts/ids";
+import { Episode, Library, Progress, TitleCard } from "@media/contracts/models/catalog";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

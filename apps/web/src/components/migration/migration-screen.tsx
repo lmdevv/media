@@ -1,11 +1,11 @@
-import type { JobId } from "@movies/contracts/ids";
-import type { MigrationSourceFailure } from "@movies/contracts/models/migration";
-import { useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { CalmState } from "@movies/ui/components/calm-state";
-import { Spinner } from "@movies/ui/components/spinner";
+import type { JobId } from "@media/contracts/ids";
+import type { MigrationSourceFailure } from "@media/contracts/models/migration";
+import { useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { CalmState } from "@media/ui/components/calm-state";
+import { Spinner } from "@media/ui/components/spinner";
 import { useNavigate } from "@tanstack/react-router";
-import { SOURCE_NAMES } from "@movies/contracts/migration-plan";
+import { SOURCE_NAMES } from "@media/contracts/migration-plan";
 import { Match } from "effect";
 import { useEffect, useState } from "react";
 

@@ -1,11 +1,11 @@
 /**
- * `@movies/sdk/react`: the SDK in React. `MoviesProvider` runs the Effect core on the app's
+ * `@media/sdk/react`: the SDK in React. `MoviesProvider` runs the Effect core on the app's
  * `ConvexReactClient`, so `convex/react` subscriptions and the SDK share one WebSocket. Queries
  * are typed by command name and return a state instead of throwing; commands return Promises that
  * reject with the SDK's tagged errors.
  */
-import type { CommandArgs, CommandName, CommandResult } from "@movies/contracts/commands";
-import type { DeviceId, MediaFileId, RoomId } from "@movies/contracts/ids";
+import type { CommandArgs, CommandName, CommandResult } from "@media/contracts/commands";
+import type { DeviceId, MediaFileId, RoomId } from "@media/contracts/ids";
 import type { ConvexReactClient } from "convex/react";
 import { ConvexProvider } from "convex/react";
 import {

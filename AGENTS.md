@@ -3,8 +3,9 @@
 MIT-licensed, agent-first, self-hosted media platform. It streams the user's own folders or NAS
 shares, and it is merging [movies] and [music] into one server, one Convex database, and one
 account system with a branded client per product. `[media]`, brackets included, is the working
-name until a later rebrand. The repo is `lmdevv/media`; the `@movies/*` scope, `MOVIES_` settings,
-the `movies` binary, and `verify-movies` keep their names until the rename lands.
+name until a later rebrand. The repo is `lmdevv/media`, the workspace scope is `@media/*`, settings
+start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv/media`.
+`verify-movies` keeps its name until `verify-media` replaces it.
 
 - Plan: `docs/architecture.md`, the ADRs in `docs/decisions/`, and the
   [Linear Platform project](https://linear.app/adsfsd/project/platform-c8c8792e24e6).
@@ -37,9 +38,9 @@ the `movies` binary, and `verify-movies` keep their names until the rename lands
 | Path                 | Role                                                              |
 | -------------------- | ----------------------------------------------------------------- |
 | `apps/web`           | Vite + React + TanStack Router SPA                                |
-| `apps/media`         | Node + Effect HttpApi media service; serves the built SPA         |
+| `apps/media`         | `@media/server`: Effect HttpApi media service; serves the SPA     |
 | `apps/cli`           | Effect CLI with JSON output; agent skill in `skills/movies/`      |
-| `apps/mobile`        | Expo + Expo Router + Uniwind iOS app over `@movies/sdk/react`     |
+| `apps/mobile`        | Expo + Expo Router + Uniwind iOS app over `@media/sdk/react`      |
 | `packages/backend`   | Convex schema, functions, and Convex Auth                         |
 | `packages/contracts` | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces |
 | `packages/sdk`       | Effect core with `/effect`, `/react`, `/promise` entry points     |
@@ -162,10 +163,10 @@ The example identities must be replaced with the model and tool that actually co
   at base + 3. `scripts/dev-stack.sh env` prints them. Playwright uses `E2E_PORT`, else the stack's
   web port, else 3011.
 - Stack suites need Docker and `scripts/dev-stack.sh up`: `pnpm --filter <pkg> test:stack` for
-  `@movies/backend`, `@movies/sdk`, `@lmdevv/movies`, and `@movies/media`, then
+  `@media/backend`, `@media/sdk`, `@lmdevv/movies`, and `@media/server`, then
   `pnpm --filter web exec playwright test`. For the migration suites, pull the pinned image
   (`docker pull` the `jellyfin/jellyfin:12.2@sha256:…` reference in `.github/workflows/ci.yml`)
-  and set `MOVIES_JELLYFIN_DOCKER=1`; without the image the media suite skips the real-Jellyfin
+  and set `MEDIA_JELLYFIN_DOCKER=1`; without the image the media suite skips the real-Jellyfin
   case silently, but the web migration spec starts Jellyfin anyway, pulling the image or failing.
 - Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, and for Vitest, fresh
   processes that stop at the first failure: `(for run in $(seq 20); do pnpm test <paths> || exit; done)`.

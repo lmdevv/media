@@ -1,5 +1,5 @@
-import { createMovies } from "@movies/sdk/promise";
-import type { MoviesSdk } from "@movies/sdk/promise";
+import { createMovies } from "@media/sdk/promise";
+import type { MoviesSdk } from "@media/sdk/promise";
 import type { Page } from "@playwright/test";
 
 import { OWNER } from "../stack/owner";

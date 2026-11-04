@@ -1,4 +1,4 @@
-import type { CommandArgs, CommandResult } from "@movies/contracts/commands";
+import type { CommandArgs, CommandResult } from "@media/contracts/commands";
 import type { Duration, ManagedRuntime } from "effect";
 import { Effect, Fiber, Schedule, Stream } from "effect";
 

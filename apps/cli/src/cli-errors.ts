@@ -1,6 +1,6 @@
-import type { CommandError, RequestIdentity } from "@movies/contracts/errors";
-import { PlaybackApiError } from "@movies/contracts/media-playback";
-import type { CallError } from "@movies/sdk/effect";
+import type { CommandError, RequestIdentity } from "@media/contracts/errors";
+import { PlaybackApiError } from "@media/contracts/media-playback";
+import type { CallError } from "@media/sdk/effect";
 import { Match, Schema } from "effect";
 
 /** The command line was wrong: an unknown command, a missing flag, or a value the schema rejects. */
@@ -62,7 +62,7 @@ export class PlaybackRefused extends Schema.TaggedError<PlaybackRefused>()("Play
   }
 }
 
-/** `movies import` could not use the Jellyfin or Plex server; `reason` says why. */
+/** `media import` could not use the Jellyfin or Plex server; `reason` says why. */
 export class MigrationSourceError extends Schema.TaggedError<MigrationSourceError>()(
   "MigrationSourceError",
   {

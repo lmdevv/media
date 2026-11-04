@@ -3,7 +3,7 @@
  * headers, so every token-authorized route reads it from the `token` query parameter, kept
  * redacted.
  */
-import { PlaybackTokenInvalid } from "@movies/contracts/playback-token";
+import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 import { Effect, Redacted } from "effect";
 import type { HttpServerRequest } from "effect/http";
 

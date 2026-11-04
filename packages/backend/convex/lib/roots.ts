@@ -6,7 +6,7 @@ import type { ReadCtx } from "./viewer";
 /**
  * A folder as stored and compared: trimmed, repeated slashes collapsed, and any trailing run of
  * slashes and whitespace dropped (`/` stays), in one pass. Mirrors `normalizeFolder` in
- * `@movies/contracts/library-folder`, which the web app uses; `test/library-folder.test.ts`
+ * `@media/contracts/library-folder`, which the web app uses; `test/library-folder.test.ts`
  * checks they agree. A blank folder stays blank, so `checkAbsolute` refuses it rather than taking
  * it for `/`.
  */

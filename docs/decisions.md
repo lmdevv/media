@@ -13,7 +13,7 @@ choices made while implementing them. Update it in the same PR that changes a de
   (playback session ID), `iat` and `exp` (milliseconds since the epoch), and `pur: "download"`
   last for a download session's token only. Lifetime six hours.
 - Convex signs with WebCrypto in plain TypeScript. The media service verifies with the shared
-  verifier in `@movies/contracts/playback-token` (constant time; a wrong audience, a bad or
+  verifier in `@media/contracts/playback-token` (constant time; a wrong audience, a bad or
   non-canonically encoded signature, or `exp <= now` is refused). Shared test vectors in
   `packages/contracts` keep both sides honest.
 - Each media route takes tokens of one purpose: negotiation, seeking, HLS, and trickplay only
@@ -89,20 +89,20 @@ choices made while implementing them. Update it in the same PR that changes a de
 
 ## Command registry
 
-- `@movies/contracts/commands` lists every user action once: name (dotted, such as
+- `@media/contracts/commands` lists every user action once: name (dotted, such as
   `titles.list`), summary, group, kind (`query`, `mutation`, `action`, or `media` for media
   service HTTP calls), `scope` (a scope, `public` for anonymous calls, or `authenticated` for any
   session), Effect Schema args and result, and the Convex function it calls. The function path is
   the name with its dot replaced by a colon (`titles.list` calls `titles:list`); `media` commands
   name a `route` instead.
 - Convex functions stay plain TypeScript with `v` validators and do not import
-  `@movies/contracts`. `packages/backend/test/registry.test.ts` checks that each Convex command
+  `@media/contracts`. `packages/backend/test/registry.test.ts` checks that each Convex command
   and media service function names an existing public function of the same kind whose argument and
   return validators describe the same wire values as the schemas, that every public function is
   listed, and that constants duplicated on both sides agree. ID schemas carry a `convexTable`
   annotation for this check.
 - Expected failures travel as `ConvexError({ code, message })` with the codes in
-  `@movies/contracts/errors`; the media service answers `media` commands with the same body.
+  `@media/contracts/errors`; the media service answers `media` commands with the same body.
 - For `media` commands the SDK sends the caller's Convex auth token as a bearer token; the media
   service calls `account.viewer` with it (a one-shot HTTP call, so revoked sessions are refused at
   once) and checks the command's scope. Route groups register through `commandRoute` in
@@ -138,7 +138,7 @@ choices made while implementing them. Update it in the same PR that changes a de
   featurettes) belong to no title and are not stored. A multi-episode file is stored under its
   first episode.
 - The media service's functions are listed with their schemas in
-  `@movies/contracts/media-service` (`mediaService:*`). It subscribes to `pendingJobs`,
+  `@media/contracts/media-service` (`mediaService:*`). It subscribes to `pendingJobs`,
   `libraries`, and `sessionStatus`, resolves a token's file with `resolveFile`, and writes scans
   in batches of at most 100 with `upsertScanned` and `markMissing`. Missing files keep their
   records and history.
@@ -163,8 +163,8 @@ choices made while implementing them. Update it in the same PR that changes a de
 
 ## Media playback API
 
-- The media service's HttpApi lives in `@movies/contracts/media-api`; its routes, request and
-  response schemas, and tagged errors live in `@movies/contracts/media-playback`, which uses only
+- The media service's HttpApi lives in `@media/contracts/media-api`; its routes, request and
+  response schemas, and tagged errors live in `@media/contracts/media-playback`, which uses only
   stable Effect modules. Contracts allow the unstable `effect/http-api` module for the definition
   alone. The SDK does not import the HttpApi: it posts with `fetch` and decodes the shared schemas
   (with their JSON codecs: absent optional fields arrive as `null`) and tagged errors.
@@ -218,7 +218,7 @@ choices made while implementing them. Update it in the same PR that changes a de
   not churn. Both keys derive from `PLAYBACK_TOKEN_SECRET` with their own labels; rotating it
   invalidates artwork keys until the next full scan.
 - Clients load `${mediaBaseUrl}/artwork/${key}`, optionally `?w=` one of 185, 342, 500, 780,
-  1280 (`artworkUrl` in `@movies/contracts/artwork`). No token: `<img>` cannot send one, artwork
+  1280 (`artworkUrl` in `@media/contracts/artwork`). No token: `<img>` cannot send one, artwork
   is low sensitivity, and a key can only name an image the service sealed itself, so the route
   cannot be pointed at other files and URLs reveal no folder names. Local images are re-checked
   against `LIBRARY_ROOTS`; remote images are fetched only from `image.tmdb.org` and cached under
@@ -345,7 +345,7 @@ choices made while implementing them. Update it in the same PR that changes a de
   one stream per playback session, so the page lets go of its stream first (`park`: no
   negotiation, recovery, or token renewal on the page while a TV plays) and the receiver gets a
   new stream, negotiated through the same ladder with the Chromecast client profile in
-  `@movies/contracts/cast` (1080p H.264 and AAC, MP4 or fMP4 HLS, on every model; HEVC Main 10,
+  `@media/contracts/cast` (1080p H.264 and AAC, MP4 or fMP4 HLS, on every model; HEVC Main 10,
   2160p, HDR10 and HLG only for models known to play them). The web sender SDK's
   `chrome.cast.Receiver` carries a name, `video_out`-style capabilities, and volume, and no model
   or codecs (read from Google's sender script), so the web app always asks for the profile every
@@ -391,7 +391,7 @@ choices made while implementing them. Update it in the same PR that changes a de
   Without a `fileId`, `createSession` plays that remembered file while it is on disk, else the
   best its `capabilities` play directly, else the best quality; the SDK's
   `Versions.preferredVersion` orders a client's list the same way. Direct play is decided by
-  `@movies/contracts/direct-play`, which the media service's negotiation, the SDK, and the title
+  `@media/contracts/direct-play`, which the media service's negotiation, the SDK, and the title
   page use; Convex mirrors it in `convex/lib/directPlay.ts` and a property test keeps the two
   equal. The web player sends its capabilities and starts at once; it switches versions in a new
   session (the media service streams one file per session) at the same position and play state,
@@ -650,12 +650,12 @@ choices made while implementing them. Update it in the same PR that changes a de
   A running import is pinned to the URL (`?job=`), so the page lands on Done. Job progress
   restarts at every phase, so the bar weighs the phases.
 - The web migration suite imports from the recorded Jellyfin server by default and from a real
-  Jellyfin in Docker with `MOVIES_JELLYFIN_DOCKER=1`, as CI runs it; both are served by
+  Jellyfin in Docker with `MEDIA_JELLYFIN_DOCKER=1`, as CI runs it; both are served by
   `apps/media/scripts/serve-jellyfin-source.ts` over the generated fixture library.
 
 ## Web UI kit
 
-- `@movies/ui` holds presentational components with typed props and no data access; routes wire
+- `@media/ui` holds presentational components with typed props and no data access; routes wire
   them to the SDK. Link-like components take the router's link through Base UI's `render` prop.
 - Components use Paper tokens only. Paper literals that are not tokens yet (such as the 11px
   keycap size, the hero title size, and the glass fill) live in a separate, labeled `@theme` block
@@ -675,9 +675,9 @@ choices made while implementing them. Update it in the same PR that changes a de
 - Desktop layout starts at `md` (48rem). Rows switch layouts with container queries, so they also
   fit narrow panels.
 - Keyboard shortcuts are listed once in `apps/web/src/lib/keymap.ts` and resolved by
-  `@movies/ui/lib/keymap` (`mod` is `⌘` on Apple devices and `Ctrl` elsewhere). The command menu
+  `@media/ui/lib/keymap` (`mod` is `⌘` on Apple devices and `Ctrl` elsewhere). The command menu
   draws its keycaps from that registry. Sequences such as `g h` wait one second for the next key.
-- The command menu takes a typed page model (`@movies/ui/lib/command-menu`): groups scoped to
+- The command menu takes a typed page model (`@media/ui/lib/command-menu`): groups scoped to
   browsing or searching, fuzzy or caller-ranked filtering, actions (sync or async) and submenus
   that replace the list in the same panel, running-job progress, and fallback commands for no
   results. Rows come from the web app's feature contributions (see Web app), which run registry
@@ -698,7 +698,7 @@ choices made while implementing them. Update it in the same PR that changes a de
 
 ## Web app
 
-- Every screen reads and writes through `@movies/sdk/react` (`useCommandQuery`, `useCommand`,
+- Every screen reads and writes through `@media/sdk/react` (`useCommandQuery`, `useCommand`,
   `useAuth`); components never name Convex functions.
 - Guards are components, not router `beforeLoad`, because the session lives in the SDK:
   `RequireSignedIn` sends people to `/welcome` before the owner exists and to `/sign-in?redirect=`
@@ -728,7 +728,7 @@ choices made while implementing them. Update it in the same PR that changes a de
   draws; the phone tab bar's search circle opens it). Kids filtering is server-side; the web app
   shows no notice. The menu keeps earlier results on screen only while the same query is typed
   further or shortened; a replaced query clears them, so Enter never opens a stale result.
-- Artwork loads through `artworkUrl` from `@movies/contracts/artwork` against `VITE_MEDIA_BASE_URL`
+- Artwork loads through `artworkUrl` from `@media/contracts/artwork` against `VITE_MEDIA_BASE_URL`
   (this origin when unset), resized per use (`?w=185` thumbnails, `500` posters, `780` cards,
   stills, and logos, `1280` backdrops), as lazy images over a fixed-aspect raised placeholder; a
   missing or failing image leaves the placeholder.
@@ -747,7 +747,7 @@ choices made while implementing them. Update it in the same PR that changes a de
 
 ## SDK
 
-- `@movies/sdk` runs on three Convex clients through one transport: the WebSocket `ConvexClient`
+- `@media/sdk` runs on three Convex clients through one transport: the WebSocket `ConvexClient`
   for apps, `ConvexHttpClient` for short-lived processes (subscriptions poll), and the app's
   `ConvexReactClient` in React. Functions are called by registry path with `makeFunctionReference`.
 - The SDK avoids Effect modules marked unstable, which the repo's lint rejects: media service

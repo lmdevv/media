@@ -1,4 +1,4 @@
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 
 /**
  * The loading ring: a faint full circle with a red quarter arc that turns. With reduced motion it

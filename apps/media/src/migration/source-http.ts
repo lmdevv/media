@@ -10,7 +10,7 @@
 import { Duration, Effect, Match, Predicate, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 
-import type { MigrationSource } from "@movies/contracts/models/jobs";
+import type { MigrationSource } from "@media/contracts/models/jobs";
 
 import type { SourceError, SourceManifest } from "./source-plugin.ts";
 import {

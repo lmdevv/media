@@ -1,7 +1,7 @@
-import type { ProfileId, TitleId } from "@movies/contracts/ids";
-import type { TitleCard, TitleDetail } from "@movies/contracts/models/catalog";
-import { Versions } from "@movies/sdk/effect";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { ProfileId, TitleId } from "@media/contracts/ids";
+import type { TitleCard, TitleDetail } from "@media/contracts/models/catalog";
+import { Versions } from "@media/sdk/effect";
+import { useCommandQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { ChevronRight, Clapperboard, Info, UserRound } from "lucide-react-native";
 import { FlatList, Pressable, View } from "react-native";

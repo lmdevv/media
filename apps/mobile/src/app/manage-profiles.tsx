@@ -1,4 +1,4 @@
-import type { Profile } from "@movies/contracts/models/profiles";
+import type { Profile } from "@media/contracts/models/profiles";
 import { router } from "expo-router";
 import { Check, Pencil, Plus } from "lucide-react-native";
 import { Pressable, View } from "react-native";

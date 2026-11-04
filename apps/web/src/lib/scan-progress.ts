@@ -1,4 +1,4 @@
-import type { Job } from "@movies/contracts/models/jobs";
+import type { Job } from "@media/contracts/models/jobs";
 
 /** A scan job's progress as the UI shows it. */
 export interface ScanProgress {

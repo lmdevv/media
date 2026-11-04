@@ -1,4 +1,4 @@
-import { JobId } from "@movies/contracts/ids";
+import { JobId } from "@media/contracts/ids";
 import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 

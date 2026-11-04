@@ -1,6 +1,6 @@
-import { useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { Skeleton } from "@movies/ui/components/skeleton";
+import { useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { Skeleton } from "@media/ui/components/skeleton";
 
 import { useAction } from "@/components/admin/action";
 import { formatFullDate } from "@/components/admin/format";

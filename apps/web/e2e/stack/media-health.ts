@@ -1,4 +1,4 @@
-import { HealthResponse } from "@movies/contracts/media-playback";
+import { HealthResponse } from "@media/contracts/media-playback";
 import { Option, Schema } from "effect";
 
 const decodeHealth = Schema.decodeUnknownOption(Schema.fromJsonString(HealthResponse));

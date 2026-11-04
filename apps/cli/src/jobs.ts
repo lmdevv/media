@@ -1,6 +1,6 @@
-import type { JobId } from "@movies/contracts/ids";
-import type { Job } from "@movies/contracts/models/jobs";
-import type { MoviesClient } from "@movies/sdk/effect";
+import type { JobId } from "@media/contracts/ids";
+import type { Job } from "@media/contracts/models/jobs";
+import type { MoviesClient } from "@media/sdk/effect";
 import { Clock, Duration, Effect, Option, Ref, Stream } from "effect";
 
 import { JobError } from "./cli-errors";
@@ -60,7 +60,7 @@ const followJob = Effect.fn("Jobs.follow")(function* (
     return yield* new JobError({
       code: "timeout",
       jobId,
-      message: `Job ${jobId} is still running after ${Duration.format(options.timeout)}; check it with movies jobs get ${jobId}`,
+      message: `Job ${jobId} is still running after ${Duration.format(options.timeout)}; check it with media jobs get ${jobId}`,
     });
   }
 

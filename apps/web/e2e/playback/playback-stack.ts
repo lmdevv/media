@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import type { LibraryId, TitleId } from "@movies/contracts/ids";
-import type { LibraryAccess, LibraryKind } from "@movies/contracts/models/catalog";
-import type { MoviesSdk } from "@movies/sdk/promise";
+import type { LibraryId, TitleId } from "@media/contracts/ids";
+import type { LibraryAccess, LibraryKind } from "@media/contracts/models/catalog";
+import type { MoviesSdk } from "@media/sdk/promise";
 import { expect } from "@playwright/test";
 import type { Locator, Page, Route } from "@playwright/test";
 

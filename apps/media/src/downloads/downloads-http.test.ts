@@ -6,7 +6,7 @@ import {
   type ClientCapabilities,
   type DownloadQuality,
   PrepareDownloadResponse,
-} from "@movies/contracts/media-playback";
+} from "@media/contracts/media-playback";
 
 import * as MediaTools from "../media/media-tools.ts";
 import { parseFfprobeJson } from "../media/media-probe.ts";

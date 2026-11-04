@@ -1,5 +1,5 @@
 import { OTPField } from "@base-ui/react/otp-field";
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import { Fragment, useId } from "react";
 
 const toUpperCase = (value: string): string => value.toUpperCase();

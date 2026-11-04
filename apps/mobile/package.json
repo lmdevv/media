@@ -11,8 +11,8 @@
   },
   "dependencies": {
     "@expo/ui": "~58.0.20",
-    "@movies/contracts": "workspace:*",
-    "@movies/sdk": "workspace:*",
+    "@media/contracts": "workspace:*",
+    "@media/sdk": "workspace:*",
     "convex": "catalog:",
     "effect": "catalog:",
     "expo": "~58.0.14",
@@ -54,7 +54,7 @@
     "uniwind": "1.12.2"
   },
   "devDependencies": {
-    "@movies/config": "workspace:*",
+    "@media/config": "workspace:*",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "fast-check": "4.10.2",

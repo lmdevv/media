@@ -11,13 +11,13 @@ const root = join(import.meta.dirname, "..");
 
 const out = join(root, "dist", "sea");
 
-const main = join(out, "movies.cjs");
+const main = join(out, "media.cjs");
 
-const blob = join(out, "movies.blob");
+const blob = join(out, "media.blob");
 
 const config = join(out, "sea-config.json");
 
-const executable = join(out, `movies-${process.platform}-${process.arch}`);
+const executable = join(out, `media-${process.platform}-${process.arch}`);
 
 const postject = fileURLToPath(import.meta.resolve("postject/dist/cli.js"));
 

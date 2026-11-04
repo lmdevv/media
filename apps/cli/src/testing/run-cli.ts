@@ -10,7 +10,7 @@ export interface CliRun {
   readonly stderr: string;
 }
 
-/** Runs `movies <argv>` with only `env` as its environment. */
+/** Runs `media <argv>` with only `env` as its environment. */
 export const runInProcess = async (
   argv: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,

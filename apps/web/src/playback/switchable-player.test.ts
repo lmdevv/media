@@ -1,4 +1,4 @@
-import type { PlayerEvent, PlayerPort } from "@movies/sdk/effect";
+import type { PlayerEvent, PlayerPort } from "@media/sdk/effect";
 import { describe, expect, it } from "vitest";
 
 import { SwitchablePlayer } from "./switchable-player";

@@ -1,6 +1,6 @@
 import { Slider } from "@base-ui/react/slider";
-import { formatTimecode } from "@movies/ui/lib/timecode";
-import { cn } from "@movies/ui/lib/utils";
+import { formatTimecode } from "@media/ui/lib/timecode";
+import { cn } from "@media/ui/lib/utils";
 import {
   CaptionsIcon,
   GalleryVerticalEndIcon,

@@ -61,7 +61,7 @@ export interface Interface {
 }
 
 /** The retained log service. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/RetainedLogs") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/RetainedLogs") {}
 
 /** Where and how much to keep. */
 export interface Settings {

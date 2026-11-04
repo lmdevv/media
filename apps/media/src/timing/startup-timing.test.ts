@@ -2,8 +2,8 @@ import { assert, describe, layer } from "@effect/vitest";
 import { Duration, Effect, FileSystem, Option, Path, Schema, Stream } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
-import { LibraryId } from "@movies/contracts/ids";
-import { type ClientCapabilities, NegotiateResponse } from "@movies/contracts/media-playback";
+import { LibraryId } from "@media/contracts/ids";
+import { type ClientCapabilities, NegotiateResponse } from "@media/contracts/media-playback";
 
 import * as LibraryScanner from "../library/library-scanner.ts";
 import * as MemoryLibrary from "../library/memory-library.ts";
@@ -14,12 +14,12 @@ import * as MediaTestServer from "../testing/media-test-server.ts";
 import { signTestToken } from "../testing/test-config.ts";
 
 const settings = {
-  enabled: process.env["MOVIES_TIMING"] === "1" && (await ffmpegAvailable()),
-  runsPerCase: Number(process.env["MOVIES_TIMING_RUNS"] ?? "5"),
-  keptSourcesFolder: process.env["MOVIES_TIMING_SOURCES"],
-  quickSync: process.env["MOVIES_TIMING_HARDWARE"] === "qsv",
-  casesNaming: process.env["MOVIES_TIMING_ONLY"] ?? "",
-  rowsJsonFile: process.env["MOVIES_TIMING_OUT"],
+  enabled: process.env["MEDIA_TIMING"] === "1" && (await ffmpegAvailable()),
+  runsPerCase: Number(process.env["MEDIA_TIMING_RUNS"] ?? "5"),
+  keptSourcesFolder: process.env["MEDIA_TIMING_SOURCES"],
+  quickSync: process.env["MEDIA_TIMING_HARDWARE"] === "qsv",
+  casesNaming: process.env["MEDIA_TIMING_ONLY"] ?? "",
+  rowsJsonFile: process.env["MEDIA_TIMING_OUT"],
 };
 
 const TIMING = LibraryId.make("timing");

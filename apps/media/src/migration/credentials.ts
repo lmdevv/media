@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 
-import { MigrationCredentials } from "@movies/contracts/models/migration";
-import type { SealedCredentials } from "@movies/contracts/models/migration-service";
+import { MigrationCredentials } from "@media/contracts/models/migration";
+import type { SealedCredentials } from "@media/contracts/models/migration-service";
 import { Effect, Redacted, Schema } from "effect";
 
 const SALT = "movies/migration-credentials";

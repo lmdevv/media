@@ -1,7 +1,7 @@
-import { useAuth, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { FieldError, TextField } from "@movies/ui/components/text-field";
-import { Spinner } from "@movies/ui/components/spinner";
+import { useAuth, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { FieldError, TextField } from "@media/ui/components/text-field";
+import { Spinner } from "@media/ui/components/spinner";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, SmartphoneIcon } from "lucide-react";
 import { Schema } from "effect";

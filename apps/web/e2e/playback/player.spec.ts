@@ -2,12 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { DeviceId } from "@movies/contracts/ids";
-import type { EpisodeId, TitleId } from "@movies/contracts/ids";
-import { MEDIA_ROUTES } from "@movies/contracts/media-playback";
-import type { PlaybackMode } from "@movies/contracts/models/playback";
-import { Milliseconds } from "@movies/contracts/units";
-import { formatTimecode } from "@movies/ui/lib/timecode";
+import { DeviceId } from "@media/contracts/ids";
+import type { EpisodeId, TitleId } from "@media/contracts/ids";
+import { MEDIA_ROUTES } from "@media/contracts/media-playback";
+import type { PlaybackMode } from "@media/contracts/models/playback";
+import { Milliseconds } from "@media/contracts/units";
+import { formatTimecode } from "@media/ui/lib/timecode";
 import { devices, expect, test } from "@playwright/test";
 import type { BrowserContext, Page, Request, Route } from "@playwright/test";
 

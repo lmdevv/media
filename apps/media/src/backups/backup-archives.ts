@@ -1,5 +1,5 @@
-import type { BackupArchive } from "@movies/contracts/models/jobs";
-import { Bytes, EpochMillis } from "@movies/contracts/units";
+import type { BackupArchive } from "@media/contracts/models/jobs";
+import { Bytes, EpochMillis } from "@media/contracts/units";
 import { Duration, Option } from "effect";
 
 /** Why a backup ran. */

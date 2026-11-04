@@ -1,4 +1,4 @@
-import { MoviesProvider } from "@movies/sdk/react";
+import { MoviesProvider } from "@media/sdk/react";
 import { ConvexReactClient } from "convex/react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";

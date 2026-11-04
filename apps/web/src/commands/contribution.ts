@@ -1,7 +1,7 @@
-import type { Profile } from "@movies/contracts/models/profiles";
-import type { Scope } from "@movies/contracts/scopes";
-import type { TrackOption } from "@movies/ui/components/track-popover";
-import type { CommandGroup, CommandItem } from "@movies/ui/lib/command-menu";
+import type { Profile } from "@media/contracts/models/profiles";
+import type { Scope } from "@media/contracts/scopes";
+import type { TrackOption } from "@media/ui/components/track-popover";
+import type { CommandGroup, CommandItem } from "@media/ui/lib/command-menu";
 import type { useNavigate } from "@tanstack/react-router";
 
 type PlayerRoomCommands = { readonly copyLink: () => void } & (

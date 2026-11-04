@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 
-import { LogRecord } from "@movies/contracts/diagnostics";
-import type { TitleId } from "@movies/contracts/ids";
+import { LogRecord } from "@media/contracts/diagnostics";
+import type { TitleId } from "@media/contracts/ids";
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 import { Option, Schema } from "effect";

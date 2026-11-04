@@ -1,5 +1,5 @@
-import type { LibraryDetail } from "@movies/contracts/models/catalog";
-import { normalizeFolder } from "@movies/contracts/library-folder";
+import type { LibraryDetail } from "@media/contracts/models/catalog";
+import { normalizeFolder } from "@media/contracts/library-folder";
 
 /** The kinds the form offers; `mixed` libraries come from imports and keep their kind. */
 export type FormKind = "movies" | "shows";

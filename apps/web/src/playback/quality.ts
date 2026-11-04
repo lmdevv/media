@@ -1,4 +1,4 @@
-import type { PlaybackQuality } from "@movies/contracts/media-playback";
+import type { PlaybackQuality } from "@media/contracts/media-playback";
 import { Schema } from "effect";
 
 /** A quality the viewer can choose. */

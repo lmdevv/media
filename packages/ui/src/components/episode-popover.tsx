@@ -1,5 +1,5 @@
 import { Popover } from "@base-ui/react/popover";
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import { useCallback, useRef } from "react";
 import type { KeyboardEvent, ReactElement, Ref } from "react";
 

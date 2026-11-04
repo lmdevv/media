@@ -42,8 +42,8 @@ stdenv.mkDerivation (finalAttrs: {
 
   pnpmWorkspaces = [
     "web..."
-    "@movies/media..."
-    "@movies/backend..."
+    "@media/server..."
+    "@media/backend..."
   ];
 
   pnpmDeps = fetchPnpmDeps {
@@ -68,8 +68,8 @@ stdenv.mkDerivation (finalAttrs: {
   buildPhase = ''
     runHook preBuild
 
-    VITE_CONVEX_URL=__MOVIES_CONVEX_URL__ pnpm --filter web build
-    pnpm --filter @movies/media build
+    VITE_CONVEX_URL=__MEDIA_CONVEX_URL__ pnpm --filter web build
+    pnpm --filter @media/server build
 
     runHook postBuild
   '';
@@ -81,10 +81,10 @@ stdenv.mkDerivation (finalAttrs: {
     mkdir -p $lib/media/scripts $out/bin
 
     # The functions' tsconfig extends the shared config, which `convex deploy` reads.
-    pnpm --filter @movies/backend --config.inject-workspace-packages=true deploy --prod --offline $lib/backend
+    pnpm --filter @media/backend --config.inject-workspace-packages=true deploy --prod --offline $lib/backend
     rm -rf $lib/backend/test
-    mkdir -p $lib/backend/node_modules/@movies
-    cp -r packages/config $lib/backend/node_modules/@movies/config
+    mkdir -p $lib/backend/node_modules/@media
+    cp -r packages/config $lib/backend/node_modules/@media/config
     sh deploy/functions-hash.sh $lib/backend >$lib/backend/.functions-hash
 
     cp -r apps/media/dist $lib/media/dist
@@ -118,7 +118,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   meta = {
     description = "Self-hosted movies and TV for people and agents";
-    homepage = "https://github.com/lmdevv/movies";
+    homepage = "https://github.com/lmdevv/media";
     license = lib.licenses.mit;
     mainProgram = "movies-media";
     platforms = lib.platforms.linux;

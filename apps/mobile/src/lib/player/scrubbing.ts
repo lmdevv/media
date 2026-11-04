@@ -1,6 +1,6 @@
-import type { Chapter, MediaFile } from "@movies/contracts/models/catalog";
-import type { StartedPlayback } from "@movies/contracts/models/playback";
-import { trickplaySheetUrl, trickplayTile } from "@movies/contracts/trickplay";
+import type { Chapter, MediaFile } from "@media/contracts/models/catalog";
+import type { StartedPlayback } from "@media/contracts/models/playback";
+import { trickplaySheetUrl, trickplayTile } from "@media/contracts/trickplay";
 
 /** One thumbnail: its sheet's URL and size, and its rectangle on the sheet, in pixels. */
 export interface ScrubTile {

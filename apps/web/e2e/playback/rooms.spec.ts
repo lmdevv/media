@@ -4,10 +4,10 @@ import {
   HEARTBEAT_INTERVAL_MS,
   HOST_PRESENCE_TIMEOUT_MS,
   PLAYER_SILENCE_MS,
-} from "@movies/contracts/clock";
-import { DeviceId, RoomId } from "@movies/contracts/ids";
-import type { TitleId } from "@movies/contracts/ids";
-import { Milliseconds } from "@movies/contracts/units";
+} from "@media/contracts/clock";
+import { DeviceId, RoomId } from "@media/contracts/ids";
+import type { TitleId } from "@media/contracts/ids";
+import { Milliseconds } from "@media/contracts/units";
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { Schema } from "effect";

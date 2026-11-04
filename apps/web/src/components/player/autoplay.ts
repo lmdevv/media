@@ -1,4 +1,4 @@
-import { NEXT_EPISODE_COUNTDOWN_MS } from "@movies/contracts/clock";
+import { NEXT_EPISODE_COUNTDOWN_MS } from "@media/contracts/clock";
 
 /**
  * The countdown before the next episode plays, and how often it ticks: as long alone as in a watch

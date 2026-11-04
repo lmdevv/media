@@ -1,4 +1,4 @@
-import type { CommandError } from "@movies/contracts/errors";
+import type { CommandError } from "@media/contracts/errors";
 import { Predicate } from "effect";
 
 /** The tag of an expected command failure, such as `Unauthenticated` or `Expired`. */

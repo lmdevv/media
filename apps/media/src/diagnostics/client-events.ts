@@ -3,8 +3,8 @@ import {
   type ClientDiagnosticsRequest,
   DiagnosticsRateLimited,
   PlayerObservation,
-} from "@movies/contracts/diagnostics";
-import type { PlaybackTokenInvalid } from "@movies/contracts/playback-token";
+} from "@media/contracts/diagnostics";
+import type { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 import { Clock, Context, Effect, Layer, Option, Predicate } from "effect";
 
 import { makeLimiter } from "../http/rate-limit.ts";
@@ -33,7 +33,7 @@ export interface Interface {
 
 /** The client event recorder. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/ClientDiagnostics",
+  "@media/server/ClientDiagnostics",
 ) {}
 
 const SESSION_BUDGET = { burst: 300, perSecond: 2 };

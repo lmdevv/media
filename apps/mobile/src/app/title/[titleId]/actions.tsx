@@ -1,5 +1,5 @@
-import type { TitleDetail } from "@movies/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { TitleDetail } from "@media/contracts/models/catalog";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { Check, EyeOff, Minus, Plus, RotateCcw, Share as ShareIcon } from "lucide-react-native";
 import { Share } from "react-native";

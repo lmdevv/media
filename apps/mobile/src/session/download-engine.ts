@@ -1,10 +1,10 @@
-import type { PrepareDownloadResponse } from "@movies/contracts/media-playback";
-import type { StartedPlayback } from "@movies/contracts/models/playback";
-import type { DeviceId } from "@movies/contracts/ids";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
-import type { CallError, Movies, PlaybackCallError } from "@movies/sdk/effect";
-import { Downloads, MoviesClient } from "@movies/sdk/effect";
-import type { useMoviesRuntime } from "@movies/sdk/react";
+import type { PrepareDownloadResponse } from "@media/contracts/media-playback";
+import type { StartedPlayback } from "@media/contracts/models/playback";
+import type { DeviceId } from "@media/contracts/ids";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
+import type { CallError, Movies, PlaybackCallError } from "@media/sdk/effect";
+import { Downloads, MoviesClient } from "@media/sdk/effect";
+import type { useMoviesRuntime } from "@media/sdk/react";
 import { Effect, Exit, Option, Predicate, Result, Schema } from "effect";
 import { Directory, DownloadTask, File, Paths } from "expo-file-system";
 import type { DownloadPauseState } from "expo-file-system";

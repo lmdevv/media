@@ -1,4 +1,4 @@
-import { CONVEX_TABLE_ANNOTATION } from "@movies/contracts/ids";
+import { CONVEX_TABLE_ANNOTATION } from "@media/contracts/ids";
 import { Match, Predicate, Schema, SchemaAST } from "effect";
 
 /** Convex's JSON description of a validator. */

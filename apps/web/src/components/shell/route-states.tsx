@@ -1,8 +1,8 @@
-import { useAuth, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { CalmState } from "@movies/ui/components/calm-state";
-import { cn } from "@movies/ui/lib/utils";
+import { useAuth, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { CalmState } from "@media/ui/components/calm-state";
+import { cn } from "@media/ui/lib/utils";
 import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { createContext, useContext, useEffect } from "react";

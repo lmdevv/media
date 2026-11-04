@@ -1,4 +1,4 @@
-import { TransportError } from "@movies/sdk/effect";
+import { TransportError } from "@media/sdk/effect";
 import { describe, expect, it } from "vitest";
 
 import { listOrLoading } from "./query-state";

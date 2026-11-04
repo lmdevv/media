@@ -29,7 +29,7 @@ export interface Interface {
 }
 
 /** The disk cache. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/DiskCache") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/DiskCache") {}
 
 const Entry = Schema.Struct({ fetchedAt: Schema.Finite, body: Schema.String });
 

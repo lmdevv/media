@@ -1,4 +1,4 @@
-import type { MediaFileId } from "@movies/contracts/ids";
+import type { MediaFileId } from "@media/contracts/ids";
 import {
   type Container,
   FileResolverUnavailable,
@@ -12,8 +12,8 @@ import {
   StreamNotFound,
   TranscodeFailed,
   UnsupportedPlayback,
-} from "@movies/contracts/media-playback";
-import { PlaybackTokenInvalid } from "@movies/contracts/playback-token";
+} from "@media/contracts/media-playback";
+import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 import {
   Clock,
   Duration,

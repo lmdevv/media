@@ -1,7 +1,7 @@
-import { PASSWORD_MIN_LENGTH } from "@movies/contracts/models/account";
-import { useAuth, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { FieldError, TextField } from "@movies/ui/components/text-field";
+import { PASSWORD_MIN_LENGTH } from "@media/contracts/models/account";
+import { useAuth, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { FieldError, TextField } from "@media/ui/components/text-field";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon } from "lucide-react";
 import { useState } from "react";

@@ -1,7 +1,7 @@
-import type { DynamicRange, NegotiateResponse } from "@movies/contracts/media-playback";
-import type { HdrFormat, MediaFile } from "@movies/contracts/models/catalog";
-import { MediaLabels } from "@movies/sdk/effect";
-import { cn } from "@movies/ui/lib/utils";
+import type { DynamicRange, NegotiateResponse } from "@media/contracts/media-playback";
+import type { HdrFormat, MediaFile } from "@media/contracts/models/catalog";
+import { MediaLabels } from "@media/sdk/effect";
+import { cn } from "@media/ui/lib/utils";
 import { XIcon } from "lucide-react";
 
 const { channelLabel, codecLabel } = MediaLabels;

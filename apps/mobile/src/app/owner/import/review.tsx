@@ -8,8 +8,8 @@ import {
   Users,
 } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
-import { mappingsFor } from "@movies/contracts/migration-plan";
-import { useCommand } from "@movies/sdk/react";
+import { mappingsFor } from "@media/contracts/migration-plan";
+import { useCommand } from "@media/sdk/react";
 
 import { useImportState, useReview } from "@/components/owner/import-state";
 import type { Preview } from "@/components/owner/import-state";

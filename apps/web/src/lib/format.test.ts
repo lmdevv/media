@@ -1,4 +1,4 @@
-import { Progress } from "@movies/contracts/models/catalog";
+import { Progress } from "@media/contracts/models/catalog";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

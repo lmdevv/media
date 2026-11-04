@@ -1,8 +1,8 @@
-import { artworkUrl } from "@movies/contracts/artwork";
-import { castCapabilities } from "@movies/contracts/cast";
-import type { StartedPlayback } from "@movies/contracts/models/playback";
-import { Milliseconds } from "@movies/contracts/units";
-import { Playback } from "@movies/sdk/effect";
+import { artworkUrl } from "@media/contracts/artwork";
+import { castCapabilities } from "@media/contracts/cast";
+import type { StartedPlayback } from "@media/contracts/models/playback";
+import { Milliseconds } from "@media/contracts/units";
+import { Playback } from "@media/sdk/effect";
 import { Option, Predicate, Result } from "effect";
 
 import type { PlaybackController } from "@/playback/playback-controller";

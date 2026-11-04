@@ -3,7 +3,7 @@ import { assert, describe, layer } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Option, Path } from "effect";
 import { FetchHttpClient } from "effect/http";
 
-import { LibraryId } from "@movies/contracts/ids";
+import { LibraryId } from "@media/contracts/ids";
 import * as MediaTools from "../media/media-tools.ts";
 import * as DiskCache from "../disk-cache.ts";
 import * as MetadataResolver from "../metadata/title-metadata.ts";

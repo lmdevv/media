@@ -1,10 +1,10 @@
 import type { ParseArgsOptionsConfig } from "node:util";
 
-import type { AnyCommand } from "@movies/contracts/command";
-import type { ProfileId } from "@movies/contracts/ids";
-import { ProfileId as ProfileIdSchema } from "@movies/contracts/ids";
-import { Milliseconds } from "@movies/contracts/units";
-import { ProtocolError } from "@movies/sdk/effect";
+import type { AnyCommand } from "@media/contracts/command";
+import type { ProfileId } from "@media/contracts/ids";
+import { ProfileId as ProfileIdSchema } from "@media/contracts/ids";
+import { Milliseconds } from "@media/contracts/units";
+import { ProtocolError } from "@media/sdk/effect";
 import { Config, Data, Duration, Effect, Option, Predicate, Redacted, Schema } from "effect";
 import type { Scope } from "effect";
 
@@ -189,7 +189,7 @@ export const viewingProfile = (
     Effect.mapError(() =>
       usage(
         invocation,
-        "No viewing profile: pass --profile-id or run movies profiles use <profile>",
+        "No viewing profile: pass --profile-id or run media profiles use <profile>",
       ),
     ),
   );

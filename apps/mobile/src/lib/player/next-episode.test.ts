@@ -1,4 +1,4 @@
-import { Milliseconds } from "@movies/contracts/units";
+import { Milliseconds } from "@media/contracts/units";
 import { describe, expect, it } from "vitest";
 
 import { episodeLine, inCredits, nextEpisodeFacts, secondsLeft } from "./next-episode";

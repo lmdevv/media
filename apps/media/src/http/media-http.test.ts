@@ -2,16 +2,16 @@ import { assert, describe, layer } from "@effect/vitest";
 import { Duration, Effect, FileSystem, Path, Predicate, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 
-import { artworkUrl } from "@movies/contracts/artwork";
-import { LibraryId } from "@movies/contracts/ids";
-import { RequestId } from "@movies/contracts/request-id";
+import { artworkUrl } from "@media/contracts/artwork";
+import { LibraryId } from "@media/contracts/ids";
+import { RequestId } from "@media/contracts/request-id";
 import {
   type ClientCapabilities,
   HealthResponse,
   NegotiateResponse,
   type PlaybackQuality,
   SeekResponse,
-} from "@movies/contracts/media-playback";
+} from "@media/contracts/media-playback";
 
 import * as ArtworkKeys from "../artwork/artwork-keys.ts";
 import * as DiskCache from "../disk-cache.ts";

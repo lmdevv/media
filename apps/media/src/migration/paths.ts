@@ -7,7 +7,7 @@
  * NFC (macOS and some NAS shares store decomposed names). Windows drive paths compare without
  * case, as Windows does; POSIX paths compare exactly.
  */
-import type { PathMapping } from "@movies/contracts/models/migration";
+import type { PathMapping } from "@media/contracts/models/migration";
 
 const DRIVE = /^[A-Za-z]:\//u;
 

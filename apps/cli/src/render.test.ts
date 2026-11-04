@@ -1,4 +1,4 @@
-import { commands } from "@movies/contracts/commands";
+import { commands } from "@media/contracts/commands";
 import { describe, expect, it } from "vitest";
 
 import { formatDuration, renderResult } from "./render";

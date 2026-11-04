@@ -1,5 +1,5 @@
-import type { Invite } from "@movies/contracts/models/account";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { Invite } from "@media/contracts/models/account";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Link, Plus, RotateCcw, User } from "lucide-react-native";
 import { Alert } from "react-native";

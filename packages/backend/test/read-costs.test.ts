@@ -5,14 +5,14 @@
  * stack and runs only when asked:
  *
  *   scripts/dev-stack.sh destroy && scripts/dev-stack.sh up
- *   MOVIES_STACK_TESTS=1 MOVIES_READ_COSTS=1 pnpm exec vitest run packages/backend/test/read-costs
+ *   MEDIA_STACK_TESTS=1 MEDIA_READ_COSTS=1 pnpm exec vitest run packages/backend/test/read-costs
  */
 import { setTimeout as sleep } from "node:timers/promises";
 
-import type { EpisodeId, ProfileId, TitleId } from "@movies/contracts/ids";
-import { DeviceId } from "@movies/contracts/ids";
-import { ScannedItem } from "@movies/contracts/models/scan";
-import { Milliseconds } from "@movies/contracts/units";
+import type { EpisodeId, ProfileId, TitleId } from "@media/contracts/ids";
+import { DeviceId } from "@media/contracts/ids";
+import { ScannedItem } from "@media/contracts/models/scan";
+import { Milliseconds } from "@media/contracts/units";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -36,7 +36,7 @@ const CAST = 8;
 
 const DURATION_MS = 600_000;
 
-const stack = process.env["MOVIES_READ_COSTS"] === "1" ? findStack() : undefined;
+const stack = process.env["MEDIA_READ_COSTS"] === "1" ? findStack() : undefined;
 
 const url = stack?.convexUrl ?? "";
 

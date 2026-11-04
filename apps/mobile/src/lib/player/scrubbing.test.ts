@@ -1,5 +1,5 @@
-import { MediaFileId } from "@movies/contracts/ids";
-import { Milliseconds } from "@movies/contracts/units";
+import { MediaFileId } from "@media/contracts/ids";
+import { Milliseconds } from "@media/contracts/units";
 import { describe, expect, it } from "vitest";
 
 import { chapterRows, scrubTileAt } from "./scrubbing";

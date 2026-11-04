@@ -1,6 +1,6 @@
-import type { MediaFileId } from "@movies/contracts/ids";
-import type { MediaVersion } from "@movies/contracts/models/catalog";
-import { Versions } from "@movies/sdk/effect";
+import type { MediaFileId } from "@media/contracts/ids";
+import type { MediaVersion } from "@media/contracts/models/catalog";
+import { Versions } from "@media/sdk/effect";
 import { Option } from "effect";
 import { useMemo, useState } from "react";
 

@@ -1,4 +1,4 @@
-import { Job } from "@movies/contracts/models/jobs";
+import { Job } from "@media/contracts/models/jobs";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

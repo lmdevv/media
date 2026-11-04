@@ -1,11 +1,11 @@
-import type { LibraryDetail } from "@movies/contracts/models/catalog";
-import type { Job } from "@movies/contracts/models/jobs";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { ProgressBar } from "@movies/ui/components/progress-bar";
-import { Skeleton } from "@movies/ui/components/skeleton";
-import { Spinner } from "@movies/ui/components/spinner";
-import { cn } from "@movies/ui/lib/utils";
+import type { LibraryDetail } from "@media/contracts/models/catalog";
+import type { Job } from "@media/contracts/models/jobs";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { ProgressBar } from "@media/ui/components/progress-bar";
+import { Skeleton } from "@media/ui/components/skeleton";
+import { Spinner } from "@media/ui/components/spinner";
+import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { PlusIcon, RotateCwIcon } from "lucide-react";
 

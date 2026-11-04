@@ -7,8 +7,8 @@
 #   scripts/dev-stack.sh down      # stop and remove the container (the data volume stays)
 #   scripts/dev-stack.sh destroy   # remove the container and its data volume
 #
-# The stack name defaults to the worktree directory name; override with MOVIES_STACK. Ports derive
-# from the name so worktrees do not collide; override the base with MOVIES_PORT_BASE.
+# The stack name defaults to the worktree directory name; override with MEDIA_STACK. Ports derive
+# from the name so worktrees do not collide; override the base with MEDIA_PORT_BASE.
 #   base      Convex API
 #   base + 1  Convex HTTP actions (auth)
 #   base + 2  media service
@@ -18,11 +18,11 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 image="${CONVEX_BACKEND_IMAGE:-$(<"${root}/deploy/convex-backend.image")}"
 
-raw_name="${MOVIES_STACK:-$(basename "$root")}"
+raw_name="${MEDIA_STACK:-$(basename "$root")}"
 name="$(printf '%s' "$raw_name" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | sed 's/-*$//')"
 
-if [[ -n "${MOVIES_PORT_BASE:-}" ]]; then
-  base="$MOVIES_PORT_BASE"
+if [[ -n "${MEDIA_PORT_BASE:-}" ]]; then
+  base="$MEDIA_PORT_BASE"
 else
   slot=$(($(printf '%s' "$name" | cksum | cut -d' ' -f1) % 40))
   base=$((13200 + slot * 10))
@@ -37,7 +37,7 @@ state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/movies-dev/${name}"
 data_dir="${state_dir}/data"
 transcode_dir="${TMPDIR:-/tmp}/movies-dev-${name}/transcode"
 backup_dir="${state_dir}/backups"
-library_roots="${MOVIES_LIBRARY_ROOTS:-${state_dir}/library}"
+library_roots="${MEDIA_LIBRARY_ROOTS:-${state_dir}/library}"
 
 print_env() {
   cat <<EOF

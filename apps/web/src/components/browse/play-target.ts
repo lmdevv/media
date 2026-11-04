@@ -1,6 +1,6 @@
-import type { EpisodeId, MediaFileId, ProfileId, TitleId } from "@movies/contracts/ids";
-import type { TitleDetail } from "@movies/contracts/models/catalog";
-import { useCommand } from "@movies/sdk/react";
+import type { EpisodeId, MediaFileId, ProfileId, TitleId } from "@media/contracts/ids";
+import type { TitleDetail } from "@media/contracts/models/catalog";
+import { useCommand } from "@media/sdk/react";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 

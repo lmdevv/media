@@ -1,18 +1,18 @@
-import type { MediaFileId, ProfileId } from "@movies/contracts/ids";
+import type { MediaFileId, ProfileId } from "@media/contracts/ids";
 import type {
   MediaFile,
   MediaVersion,
   ShowStatus,
   TitleDetail,
-} from "@movies/contracts/models/catalog";
-import { MediaLabels, Versions } from "@movies/sdk/effect";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Badge } from "@movies/ui/components/badge";
-import { Button } from "@movies/ui/components/button";
-import { buttonVariants } from "@movies/ui/lib/button-variants";
-import { PlayGlyph } from "@movies/ui/components/icons";
-import { formatTimecode } from "@movies/ui/lib/timecode";
-import { cn } from "@movies/ui/lib/utils";
+} from "@media/contracts/models/catalog";
+import { MediaLabels, Versions } from "@media/sdk/effect";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Badge } from "@media/ui/components/badge";
+import { Button } from "@media/ui/components/button";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { PlayGlyph } from "@media/ui/components/icons";
+import { formatTimecode } from "@media/ui/lib/timecode";
+import { cn } from "@media/ui/lib/utils";
 import { Link, useRouter } from "@tanstack/react-router";
 import {
   CheckIcon,

@@ -1,5 +1,5 @@
-import type { MoviesClient, Playback } from "@movies/sdk/effect";
-import type { useMoviesRuntime } from "@movies/sdk/react";
+import type { MoviesClient, Playback } from "@media/sdk/effect";
+import type { useMoviesRuntime } from "@media/sdk/react";
 import { Effect, Exit, Struct } from "effect";
 import type { Result } from "effect";
 

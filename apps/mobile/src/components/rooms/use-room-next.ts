@@ -1,6 +1,6 @@
-import type { DeviceId, EpisodeId, TitleId } from "@movies/contracts/ids";
-import type { Room } from "@movies/contracts/models/rooms";
-import { useCommand } from "@movies/sdk/react";
+import type { DeviceId, EpisodeId, TitleId } from "@media/contracts/ids";
+import type { Room } from "@media/contracts/models/rooms";
+import { useCommand } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Predicate } from "effect";
 import { useCallback, useEffect, useRef, useState } from "react";

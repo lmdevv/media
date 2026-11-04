@@ -1,4 +1,4 @@
-import type { CallError, PlaybackCallError } from "@movies/sdk/effect";
+import type { CallError, PlaybackCallError } from "@media/sdk/effect";
 import { Data, Predicate } from "effect";
 
 /** What to do after a download call failed. */

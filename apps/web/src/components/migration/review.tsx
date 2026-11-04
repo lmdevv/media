@@ -1,16 +1,16 @@
-import type { JobId } from "@movies/contracts/ids";
+import type { JobId } from "@media/contracts/ids";
 import type {
   MigrationConnection,
   MigrationSourceFailure,
   PlannedLibraryAccess,
-} from "@movies/contracts/models/migration";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { Input } from "@movies/ui/components/input";
-import { FieldError } from "@movies/ui/components/text-field";
+} from "@media/contracts/models/migration";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { Input } from "@media/ui/components/input";
+import { FieldError } from "@media/ui/components/text-field";
 import { ChevronDownIcon } from "lucide-react";
-import { mappingsFor, mappingsWith, userRows } from "@movies/contracts/migration-plan";
-import type { UserChoice, UserRow } from "@movies/contracts/migration-plan";
+import { mappingsFor, mappingsWith, userRows } from "@media/contracts/migration-plan";
+import type { UserChoice, UserRow } from "@media/contracts/migration-plan";
 import { Option } from "effect";
 import { useId, useMemo, useState } from "react";
 import type { FormEvent } from "react";

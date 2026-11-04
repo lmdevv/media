@@ -1,5 +1,5 @@
 /**
- * `@movies/sdk/effect`: the Effect core. Start from `Movies.layer` with a `TokenStorage` layer,
+ * `@media/sdk/effect`: the Effect core. Start from `Movies.layer` with a `TokenStorage` layer,
  * then use `MoviesClient`, `Auth`, `ClientErrors`, `DeviceLogin`, `Playback` (with `PlayerDiagnostics`),
  * `Downloads`, `Versions` (with `MediaLabels` naming their facts), `RoomSync`, and `RoomPresence`.
  */

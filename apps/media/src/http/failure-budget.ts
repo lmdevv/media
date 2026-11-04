@@ -1,4 +1,4 @@
-import type { PlaybackSessionId, UserId } from "@movies/contracts/ids";
+import type { PlaybackSessionId, UserId } from "@media/contracts/ids";
 import { Option } from "effect";
 
 import { makeLimiter } from "./rate-limit.ts";

@@ -1,5 +1,5 @@
-import type { LogLevel, LogRecord } from "@movies/contracts/diagnostics";
-import { PlaybackSessionId } from "@movies/contracts/ids";
+import type { LogLevel, LogRecord } from "@media/contracts/diagnostics";
+import { PlaybackSessionId } from "@media/contracts/ids";
 import { Option } from "effect";
 import { assert, describe, it } from "vitest";
 

@@ -1,7 +1,7 @@
-import type { LibraryKind } from "@movies/contracts/models/catalog";
-import { useCommand } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
-import { cn } from "@movies/ui/lib/utils";
+import type { LibraryKind } from "@media/contracts/models/catalog";
+import { useCommand } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { cn } from "@media/ui/lib/utils";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   ArrowRightIcon,

@@ -1,4 +1,4 @@
-import type { HdrFormat } from "@movies/contracts/models/catalog";
+import type { HdrFormat } from "@media/contracts/models/catalog";
 import { Match } from "effect";
 
 /** `4K`, `1080p`, or `720p` for a picture of that class; null below 720p. */

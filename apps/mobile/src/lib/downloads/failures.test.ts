@@ -1,8 +1,8 @@
-import { PlaybackSessionId } from "@movies/contracts/ids";
-import { PlaybackSessionEnded, TranscodeFailed } from "@movies/contracts/media-playback";
-import { PlaybackTokenInvalid } from "@movies/contracts/playback-token";
-import { NotFound } from "@movies/contracts/errors";
-import { TransportError } from "@movies/sdk/effect";
+import { PlaybackSessionId } from "@media/contracts/ids";
+import { PlaybackSessionEnded, TranscodeFailed } from "@media/contracts/media-playback";
+import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
+import { NotFound } from "@media/contracts/errors";
+import { TransportError } from "@media/sdk/effect";
 import { describe, expect, it } from "vitest";
 
 import { DownloadStep, SERVER_UNAVAILABLE, afterDownloadFailure } from "./failures";

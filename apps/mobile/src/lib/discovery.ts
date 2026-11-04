@@ -2,7 +2,7 @@ import {
   ClientConfigResponse,
   HealthResponse,
   MEDIA_ROUTES,
-} from "@movies/contracts/media-playback";
+} from "@media/contracts/media-playback";
 import { Option, Schema } from "effect";
 
 /** Where this install connects. */

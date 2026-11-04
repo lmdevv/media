@@ -8,7 +8,7 @@ import { writeThirdPartyLicenses } from "./licenses.ts";
 
 const root = join(import.meta.dirname, "..");
 
-const outfile = join(root, "dist", "movies.js");
+const outfile = join(root, "dist", "media.js");
 
 const options: BuildOptions = {
   entryPoints: [join(root, "src", "main.ts")],

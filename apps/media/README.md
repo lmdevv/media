@@ -1,4 +1,4 @@
-# @movies/media
+# @media/server
 
 Node + Effect HttpApi media service. It scans approved library folders, probes files with
 ffprobe, merges local NFO/artwork with TMDB metadata, negotiates playback, serves direct files
@@ -7,10 +7,10 @@ tone mapping, or software transcode capped at 1080p), converts text subtitles to
 hosts the built web app.
 
 ```sh
-pnpm --filter @movies/media dev        # bundle, watch, and run with .env.local
-pnpm --filter @movies/media build      # dist/main.js
-pnpm --filter @movies/media start      # node dist/main.js
-pnpm --filter @movies/media fixtures /tmp/movies-fixtures   # generated test library
+pnpm --filter @media/server dev        # bundle, watch, and run with .env.local
+pnpm --filter @media/server build      # dist/main.js
+pnpm --filter @media/server start      # node dist/main.js
+pnpm --filter @media/server fixtures /tmp/movies-fixtures   # generated test library
 ```
 
 With `CONVEX_URL` and `MEDIA_SERVICE_API_KEY` (written by `scripts/dev-stack.sh up`) the service
@@ -45,8 +45,8 @@ playback events are logged. `CONVEX_URL` without the key refuses to start.
 | `GET /*`                                                 | Built web app from `WEB_DIST_DIR`, with SPA fallback                |
 
 The playback API (`/api/playback/*`, `/api/health`, `/api/client-config`) is the Effect HttpApi in
-`@movies/contracts/media-api`, built from the schemas and tagged errors in
-`@movies/contracts/media-playback`. Its errors are JSON bodies encoded with their schema, such as
+`@media/contracts/media-api`, built from the schemas and tagged errors in
+`@media/contracts/media-playback`. Its errors are JSON bodies encoded with their schema, such as
 `{"_tag":"StreamGenerationGone","streamId":"…","generation":1,"currentGeneration":2}` (410).
 Registry `media` commands answer `{ code, message }` like Convex.
 
@@ -78,9 +78,9 @@ narrows the web app's content security policy), `MEDIA_SERVICE_API_KEY`,
 `CONVEX_SELF_HOSTED_ADMIN_KEY` and `CONVEX_BACKEND_DIR` (backups), `BACKUP_RETENTION_DAYS` (14),
 `LOG_LEVEL` (`info`; `trace`, `debug`, `warn`, `error`: the least severe level logged, on standard
 output and in the retained log), `LOG_RETENTION_DAYS` (14) and `LOG_MAX_MB` (512, from 8 to
-1048576: the size the retained log files under `DATA_DIR/logs`, which `movies logs` and
-`movies diagnostics playback` read, never grow past together). The dev stack sets
-`LIBRARY_ROOTS` to its own `library` folder unless `MOVIES_LIBRARY_ROOTS` says otherwise.
+1048576: the size the retained log files under `DATA_DIR/logs`, which `media logs` and
+`media diagnostics playback` read, never grow past together). The dev stack sets
+`LIBRARY_ROOTS` to its own `library` folder unless `MEDIA_LIBRARY_ROOTS` says otherwise.
 
 QSV needs an ffmpeg built with libvpl; the Nix dev shell uses `ffmpeg-full` for that. ffmpeg and
 ffprobe see `LIBVA_DRIVER_NAME`, `LIBVA_DRIVERS_PATH`, and `ONEVPL_SEARCH_PATH` when they are set.
@@ -98,7 +98,7 @@ environment, so a crafted file that exploits them finds no credentials.
 
 - `MediaBackend` (`media-backend.ts`): the SDK's WebSocket transport and auth, signed in with
   `MEDIA_SERVICE_API_KEY` through the `apikey` provider, with every `mediaService:*` call typed by
-  `@movies/contracts/media-service`. Sign-in retries with capped exponential backoff, a session
+  `@media/contracts/media-service`. Sign-in retries with capped exponential backoff, a session
   that ends (restore, revocation) signs in again, and dropped subscriptions resubscribe.
   `GET /api/health` reports `backend: connected | connecting | standalone`.
 - `LibrarySink` over `upsertScanned`, `markMissing`, and `fileIndex` (`convex-library-sink.ts`),
@@ -152,20 +152,20 @@ API documentation and needs checking against a real server.
 
 ```sh
 scripts/dev-stack.sh up
-pnpm --filter @movies/media test:stack
+pnpm --filter @media/server test:stack
 ```
 
 Builds the service and the CLI, generates the fixture library, starts the service on the stack's
 media port (stop a `pnpm dev` service first), and proves the slice: an admin adds libraries, the
 scan jobs run, titles carry probe, NFO metadata, and artwork; direct play with byte ranges, HLS
 remux, and software transcode; progress reaches continue watching; an ended session stops its
-stream; metadata commands check scopes; the same through `movies scan --wait`, `search`, `play`
+stream; metadata commands check scopes; the same through `media scan --wait`, `search`, `play`
 (the URL is probed with ffprobe), `progress`, and `continue`; and a job whose worker died is
 claimed again after its lease expires (up to a minute, the release cron's interval).
 
 The migration suite connects to the recorded Jellyfin and Plex servers, dry-runs, imports, and
 reads each profile's history, continue watching, My List, and collections back from Convex, then
-imports again through `movies import --wait` without duplicates. With `MOVIES_JELLYFIN_DOCKER=1`
+imports again through `media import --wait` without duplicates. With `MEDIA_JELLYFIN_DOCKER=1`
 and the pinned `jellyfin/jellyfin:12.2@sha256:…` image pulled (the reference in
 `.github/workflows/ci.yml`; a bare `12.2` pull counts only while the tag still has that digest), it
 also sets up a real Jellyfin in Docker over the
@@ -178,5 +178,5 @@ Effect 4.0.3 marks its HTTP, platform, process, observability, and some core mod
 `@stability unstable`, and the lint preset rejects unstable APIs. `tsconfig.json` allows exactly
 the modules this service depends on (`allowedUnstableApis`): the architecture chose Effect
 HttpApi and the lint rules require Effect's `FileSystem` and `ChildProcessSpawner`.
-`@movies/contracts` allows only `effect/http-api`, for the HttpApi definition in `media-api.ts`;
+`@media/contracts` allows only `effect/http-api`, for the HttpApi definition in `media-api.ts`;
 the SDK uses none and decodes the same schemas from `media-playback.ts` over `fetch`.

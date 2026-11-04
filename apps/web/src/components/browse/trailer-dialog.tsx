@@ -1,4 +1,4 @@
-import { Dialog, DialogContent } from "@movies/ui/components/dialog";
+import { Dialog, DialogContent } from "@media/ui/components/dialog";
 
 /**
  * A title's trailer in a dialog, loaded apart from the title page. The player frame exists only

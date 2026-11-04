@@ -60,7 +60,7 @@ export interface Interface {
 }
 
 /** The media tools. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/MediaTools") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/MediaTools") {}
 
 const STDERR_TAIL = 4096;
 

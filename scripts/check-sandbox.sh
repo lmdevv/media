@@ -33,7 +33,7 @@ let
       {
         boot.isContainer = true;
         system.stateVersion = "26.05";
-        services.movies = { enable = true; libraryDirs = [ "/srv/media/movies" ]; };
+        services.media = { enable = true; libraryDirs = [ "/srv/media/movies" ]; };
       }
     ];
   };
@@ -61,8 +61,8 @@ sandbox="$(nix eval --json --impure --expr "$(module '
     MemoryDenyWriteExecute = null;
   } config.systemd.services.movies.serviceConfig
 ')")"
-node_dir="$(built config.services.movies.package.nodejs)/bin"
-ffmpeg_dir="$(built 'lib.getBin config.services.movies.ffmpegPackage')/bin"
+node_dir="$(built config.services.media.package.nodejs)/bin"
+ffmpeg_dir="$(built 'lib.getBin config.services.media.ffmpegPackage')/bin"
 [[ -x "$node_dir/node" ]] || fail "no node in $node_dir"
 [[ -x "$ffmpeg_dir/ffmpeg" && -x "$ffmpeg_dir/ffprobe" ]] || fail "no ffmpeg in $ffmpeg_dir"
 

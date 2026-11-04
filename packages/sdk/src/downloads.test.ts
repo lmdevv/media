@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 
-import { StartedPlayback } from "@movies/contracts/models/playback";
+import { StartedPlayback } from "@media/contracts/models/playback";
 import { Effect, Option, Predicate, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 

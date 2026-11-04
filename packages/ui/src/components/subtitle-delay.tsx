@@ -1,4 +1,4 @@
-import { cn } from "@movies/ui/lib/utils";
+import { cn } from "@media/ui/lib/utils";
 import { MinusIcon, PlusIcon } from "lucide-react";
 import { useId, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";

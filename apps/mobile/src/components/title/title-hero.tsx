@@ -1,5 +1,5 @@
-import type { ProfileId } from "@movies/contracts/ids";
-import type { TitleDetail } from "@movies/contracts/models/catalog";
+import type { ProfileId } from "@media/contracts/ids";
+import type { TitleDetail } from "@media/contracts/models/catalog";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";

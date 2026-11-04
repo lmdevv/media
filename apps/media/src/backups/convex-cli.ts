@@ -44,7 +44,7 @@ export interface Interface {
 }
 
 /** The Convex CLI. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/ConvexCli") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/ConvexCli") {}
 
 const OUTPUT_TAIL = 4096;
 

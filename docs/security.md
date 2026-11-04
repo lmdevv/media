@@ -8,7 +8,7 @@ Each finding says what was wrong, how it was fixed or why it stays, and where th
 ## Threat model
 
 - One household, self-hosted on a LAN or a tailnet. The Compose install publishes both ports on
-  `127.0.0.1` unless `MOVIES_BIND` says otherwise, and the NixOS module listens on `listenAddress`;
+  `127.0.0.1` unless `MEDIA_BIND` says otherwise, and the NixOS module listens on `listenAddress`;
   a media service started directly without `HOST` listens on every interface. Neither port may face
   the internet (`docs/operations.md`).
 - Attackers considered: a stranger who can reach the ports, a signed-in member probing for more
@@ -184,7 +184,7 @@ A review of `packages/backend` found these after the table above; each has a sta
 
 ```sh
 scripts/dev-stack.sh destroy && scripts/dev-stack.sh up
-pnpm --filter @movies/backend test:stack   # includes the every-public-function check
+pnpm --filter @media/backend test:stack   # includes the every-public-function check
 pnpm test                                    # hardening, outbound, media tools, throttle, scanner
 pnpm audit --prod
 VITE_CONVEX_URL=http://127.0.0.1:13200 pnpm --filter web build && grep -rlF "<secret value>" apps/web/dist

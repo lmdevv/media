@@ -4,10 +4,10 @@ import {
   PlaybackSessionId,
   ProfileId,
   TitleId,
-} from "@movies/contracts/ids";
-import { DownloadQuality } from "@movies/contracts/media-playback";
-import { Episode, MediaFile } from "@movies/contracts/models/catalog";
-import { Milliseconds } from "@movies/contracts/units";
+} from "@media/contracts/ids";
+import { DownloadQuality } from "@media/contracts/media-playback";
+import { Episode, MediaFile } from "@media/contracts/models/catalog";
+import { Milliseconds } from "@media/contracts/units";
 import { Data, Effect, Option, Schema, Struct } from "effect";
 
 import { formatRuntime } from "../format";

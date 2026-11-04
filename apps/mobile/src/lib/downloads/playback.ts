@@ -1,8 +1,8 @@
-import { PlaybackSessionId } from "@movies/contracts/ids";
-import type { NegotiateResponse } from "@movies/contracts/media-playback";
-import { Milliseconds } from "@movies/contracts/units";
-import { EpochMillis } from "@movies/contracts/units";
-import type { Playback } from "@movies/sdk/effect";
+import { PlaybackSessionId } from "@media/contracts/ids";
+import type { NegotiateResponse } from "@media/contracts/media-playback";
+import { Milliseconds } from "@media/contracts/units";
+import { EpochMillis } from "@media/contracts/units";
+import type { Playback } from "@media/sdk/effect";
 
 import type { DownloadRecord } from "./model";
 

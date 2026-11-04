@@ -1,4 +1,4 @@
-import { ProgressBar } from "@movies/ui/components/progress-bar";
+import { ProgressBar } from "@media/ui/components/progress-bar";
 import { Link } from "@tanstack/react-router";
 import { LoaderCircleIcon } from "lucide-react";
 import { useState } from "react";

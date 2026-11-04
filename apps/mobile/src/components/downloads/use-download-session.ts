@@ -1,6 +1,6 @@
-import { MediaFileNotFound } from "@movies/contracts/media-playback";
-import type { PlayerPort } from "@movies/sdk/effect";
-import type { Playback } from "@movies/sdk/effect";
+import { MediaFileNotFound } from "@media/contracts/media-playback";
+import type { PlayerPort } from "@media/sdk/effect";
+import type { Playback } from "@media/sdk/effect";
 import { Result } from "effect";
 import { useEffect, useState } from "react";
 

@@ -1,9 +1,9 @@
-import type { Chapter } from "@movies/contracts/models/catalog";
-import type { StartedPlayback } from "@movies/contracts/models/playback";
-import { trickplaySheetUrl, trickplayTile } from "@movies/contracts/trickplay";
-import type { ChapterOption } from "@movies/ui/components/chapter-popover";
-import type { ScrubPreview } from "@movies/ui/components/player-controls";
-import type { SpriteTile } from "@movies/ui/components/sprite-thumbnail";
+import type { Chapter } from "@media/contracts/models/catalog";
+import type { StartedPlayback } from "@media/contracts/models/playback";
+import { trickplaySheetUrl, trickplayTile } from "@media/contracts/trickplay";
+import type { ChapterOption } from "@media/ui/components/chapter-popover";
+import type { ScrubPreview } from "@media/ui/components/player-controls";
+import type { SpriteTile } from "@media/ui/components/sprite-thumbnail";
 import { useCallback, useMemo, useRef } from "react";
 
 type TileAt = (seconds: number) => SpriteTile | null;

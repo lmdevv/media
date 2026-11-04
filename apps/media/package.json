@@ -1,5 +1,5 @@
 {
-  "name": "@movies/media",
+  "name": "@media/server",
   "version": "0.2.0",
   "private": true,
   "description": "Node + Effect HttpApi media service. Also serves the built web app.",
@@ -10,9 +10,9 @@
     "start": "node --enable-source-maps dist/main.js",
     "typecheck": "tsc --noEmit",
     "fixtures": "node scripts/generate-fixtures.ts",
-    "timing": "MOVIES_TIMING=1 vitest run --root ../.. --silent=false apps/media/src/timing",
-    "timing:hls": "MOVIES_TIMING=1 vitest run --root ../.. --silent=false apps/media/src/playback/hls-timing.test.ts",
-    "test:stack": "MOVIES_STACK_TESTS=1 vitest run --root ../.. --no-file-parallelism apps/media/src/stack"
+    "timing": "MEDIA_TIMING=1 vitest run --root ../.. --silent=false apps/media/src/timing",
+    "timing:hls": "MEDIA_TIMING=1 vitest run --root ../.. --silent=false apps/media/src/playback/hls-timing.test.ts",
+    "test:stack": "MEDIA_STACK_TESTS=1 vitest run --root ../.. --no-file-parallelism apps/media/src/stack"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.3",
@@ -20,9 +20,9 @@
   },
   "devDependencies": {
     "@effect/vitest": "4.0.3",
-    "@movies/config": "workspace:*",
-    "@movies/contracts": "workspace:*",
-    "@movies/sdk": "workspace:*",
+    "@media/config": "workspace:*",
+    "@media/contracts": "workspace:*",
+    "@media/sdk": "workspace:*",
     "@types/node": "catalog:",
     "esbuild": "0.27.0",
     "typescript": "catalog:",

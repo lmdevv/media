@@ -1,5 +1,5 @@
-import { DeviceId } from "@movies/contracts/ids";
-import { Room } from "@movies/contracts/models/rooms";
+import { DeviceId } from "@media/contracts/ids";
+import { Room } from "@media/contracts/models/rooms";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

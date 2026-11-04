@@ -8,12 +8,12 @@
  * set it.
  */
 import { Slider } from "@base-ui/react/slider";
-import { PauseGlyph, PlayGlyph } from "@movies/ui/components/icons";
-import { Scrubber } from "@movies/ui/components/player-controls";
-import type { RoomMember } from "@movies/ui/components/room-panel";
-import { Avatar } from "@movies/ui/components/avatar";
-import { formatTimecode } from "@movies/ui/lib/timecode";
-import { cn } from "@movies/ui/lib/utils";
+import { PauseGlyph, PlayGlyph } from "@media/ui/components/icons";
+import { Scrubber } from "@media/ui/components/player-controls";
+import type { RoomMember } from "@media/ui/components/room-panel";
+import { Avatar } from "@media/ui/components/avatar";
+import { formatTimecode } from "@media/ui/lib/timecode";
+import { cn } from "@media/ui/lib/utils";
 import {
   CaptionsIcon,
   CastIcon,

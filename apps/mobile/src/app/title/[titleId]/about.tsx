@@ -1,5 +1,5 @@
-import type { TitleDetail } from "@movies/contracts/models/catalog";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { TitleDetail } from "@media/contracts/models/catalog";
+import { useCommandQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { CircleAlert } from "lucide-react-native";
 import { ActivityIndicator, View } from "react-native";

@@ -6,7 +6,7 @@
  * it that coarsely. Each line is redacted again before it is decoded or matched, so a file written by anything
  * else never shows, and a `grep` never finds, what the console would hide.
  */
-import type { LogQuery, LogRecord } from "@movies/contracts/diagnostics";
+import type { LogQuery, LogRecord } from "@media/contracts/diagnostics";
 import { Effect, FileSystem, Option, Path, Stream } from "effect";
 
 import { redactJsonText } from "../observability.ts";

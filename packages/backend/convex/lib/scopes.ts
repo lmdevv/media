@@ -3,13 +3,13 @@ import type { Infer } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import type { role, scope } from "./validators";
 
-/** A session scope; `Scope` in `@movies/contracts/scopes` lists the same values. */
+/** A session scope; `Scope` in `@media/contracts/scopes` lists the same values. */
 export type Scope = Infer<typeof scope>;
 
 /** An account role. */
 export type Role = Infer<typeof role>;
 
-/** Every scope each role allows; `roleScopes` in `@movies/contracts/scopes` agrees. */
+/** Every scope each role allows; `roleScopes` in `@media/contracts/scopes` agrees. */
 export const ROLE_SCOPES = {
   owner: ["read", "play", "account", "manage", "admin"],
   admin: ["read", "play", "account", "manage", "admin"],

@@ -1,4 +1,4 @@
-import type { TitleCard } from "@movies/contracts/models/catalog";
+import type { TitleCard } from "@media/contracts/models/catalog";
 import { Link, router } from "expo-router";
 import type { ReactElement } from "react";
 

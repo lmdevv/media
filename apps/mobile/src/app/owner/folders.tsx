@@ -1,5 +1,5 @@
-import type { ServerFolders } from "@movies/contracts/models/catalog";
-import { useCommand } from "@movies/sdk/react";
+import type { ServerFolders } from "@media/contracts/models/catalog";
+import { useCommand } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import { Check, Folder, FolderX, RotateCcw } from "lucide-react-native";
 import { useEffect, useState } from "react";

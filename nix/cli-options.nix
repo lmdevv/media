@@ -8,7 +8,7 @@
       default = pkgs.callPackage ./cli.nix { };
       defaultText = lib.literalExpression "pkgs.callPackage ./cli.nix { }";
       description = ''
-        The `movies` CLI package, built with your nixpkgs. On a nixpkgs too old to build it, use
+        The `media` CLI package, built with your nixpkgs. On a nixpkgs too old to build it, use
         the flake's own: `movies.packages.''${pkgs.stdenv.hostPlatform.system}.cli`.
       '';
     };
@@ -18,7 +18,7 @@
       default = null;
       example = "http://nas.tailnet.ts.net:3210";
       description = ''
-        The server's Convex URL, set as `MOVIES_CONVEX_URL`, so `movies login` needs no
+        The server's Convex URL, set as `MEDIA_CONVEX_URL`, so `media login` needs no
         `--server`. A profile saved for another server stays unused while it is set.
       '';
     };
@@ -27,12 +27,12 @@
       type = lib.types.nullOr lib.types.str;
       default = null;
       example = "http://nas.tailnet.ts.net:8080";
-      description = "The server's web app and stream URL, set as `MOVIES_MEDIA_URL`.";
+      description = "The server's web app and stream URL, set as `MEDIA_SERVER_URL`.";
     };
   };
 
   sessionVariables =
     cfg:
-    lib.optionalAttrs (cfg.convexUrl != null) { MOVIES_CONVEX_URL = cfg.convexUrl; }
-    // lib.optionalAttrs (cfg.mediaUrl != null) { MOVIES_MEDIA_URL = cfg.mediaUrl; };
+    lib.optionalAttrs (cfg.convexUrl != null) { MEDIA_CONVEX_URL = cfg.convexUrl; }
+    // lib.optionalAttrs (cfg.mediaUrl != null) { MEDIA_SERVER_URL = cfg.mediaUrl; };
 }

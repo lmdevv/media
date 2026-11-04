@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints a short hash of what a deployed @movies/backend sends to Convex: the functions and schema
+# Prints a short hash of what a deployed @media/backend sends to Convex: the functions and schema
 # (convex/) and the version of every dependency bundled with them (each package.json). The image
 # and the Nix package write it to .functions-hash; the installs record it with the release, so any
 # build whose functions differ backs up before it deploys.

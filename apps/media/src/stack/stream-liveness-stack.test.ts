@@ -1,18 +1,18 @@
 import { join } from "node:path";
 
-import { LogRecord } from "@movies/contracts/diagnostics";
-import { DeviceId } from "@movies/contracts/ids";
-import type { LibraryId, PlaybackSessionId, ProfileId, TitleId } from "@movies/contracts/ids";
+import { LogRecord } from "@media/contracts/diagnostics";
+import { DeviceId } from "@media/contracts/ids";
+import type { LibraryId, PlaybackSessionId, ProfileId, TitleId } from "@media/contracts/ids";
 import {
   type ClientCapabilities,
   HealthResponse,
   MEDIA_ROUTES,
   NegotiateRequest,
   NegotiateResponse,
-} from "@movies/contracts/media-playback";
-import type { StartedPlayback } from "@movies/contracts/models/playback";
-import { Milliseconds } from "@movies/contracts/units";
-import type { ConvexTransport, Movies } from "@movies/sdk/effect";
+} from "@media/contracts/media-playback";
+import type { StartedPlayback } from "@media/contracts/models/playback";
+import { Milliseconds } from "@media/contracts/units";
+import type { ConvexTransport, Movies } from "@media/sdk/effect";
 import { Effect, Exit, Option, Redacted, Schema, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 

@@ -50,6 +50,10 @@ nix/                  NixOS module with hardened native units
 legacy/music/         old music code, runnable until the music port lands, then deleted
 ```
 
+The server keeps its folder, `apps/media`, under the package name `@media/server`. Moving it to
+`apps/server` would only rewrite the paths that the Dockerfile, the Nix packages, CI, the scripts,
+and the docs name, with no change in behavior.
+
 ## Core modules
 
 The core lives in `packages/backend/convex/core`, plus the server code that serves bytes and runs
@@ -186,8 +190,6 @@ an ADR.
 - **The exact shared UI split.** Each product has its own look on a shared shadcn base and type
   scale. Which components are shared and which belong to one product is decided in Paper during
   the ports (ADR 0020).
-- **The server's folder.** The register renames the package to `@media/server` and does not name
-  its folder. The tree above keeps today's `apps/media`. Phase 2 settles it.
 - **Where Convex's HTTP actions live on the one address.** Convex Auth serves its sign-in routes
   and its JWKS from Convex's HTTP actions origin, a separate port in today's dev stack. The
   register names `/convex` for Convex and `/api` for the server and does not place that origin.

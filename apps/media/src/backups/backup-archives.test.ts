@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Duration, Option, Schema } from "effect";
 
-import { Bytes, EpochMillis } from "@movies/contracts/units";
+import { Bytes, EpochMillis } from "@media/contracts/units";
 
 import * as Archives from "./backup-archives.ts";
 

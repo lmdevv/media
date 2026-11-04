@@ -1,4 +1,4 @@
-import { Toaster } from "@movies/ui/components/sonner";
+import { Toaster } from "@media/ui/components/sonner";
 import { HeadContent, Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 

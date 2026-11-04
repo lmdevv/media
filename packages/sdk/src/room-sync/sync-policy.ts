@@ -1,7 +1,7 @@
-import type { ClockAnchor } from "@movies/contracts/clock";
-import { DRIFT_THRESHOLDS, HEARTBEAT_INTERVAL_MS, targetPosition } from "@movies/contracts/clock";
-import type { EpochMillis } from "@movies/contracts/units";
-import { Milliseconds } from "@movies/contracts/units";
+import type { ClockAnchor } from "@media/contracts/clock";
+import { DRIFT_THRESHOLDS, HEARTBEAT_INTERVAL_MS, targetPosition } from "@media/contracts/clock";
+import type { EpochMillis } from "@media/contracts/units";
+import { Milliseconds } from "@media/contracts/units";
 import { Data, Option } from "effect";
 
 /**

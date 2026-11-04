@@ -1,4 +1,4 @@
-import { commands } from "@movies/contracts/commands";
+import { commands } from "@media/contracts/commands";
 import { Result } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";

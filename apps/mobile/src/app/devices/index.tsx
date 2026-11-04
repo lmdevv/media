@@ -1,5 +1,5 @@
-import type { SessionInfo } from "@movies/contracts/models/account";
-import { useCommandQuery } from "@movies/sdk/react";
+import type { SessionInfo } from "@media/contracts/models/account";
+import { useCommandQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Airplay, Monitor, Plus, Smartphone } from "lucide-react-native";
 import { useState } from "react";

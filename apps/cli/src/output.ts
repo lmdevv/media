@@ -7,7 +7,7 @@ export interface Interface {
 }
 
 /** The CLI's output streams. */
-export class Output extends Context.Service<Output, Interface>()("@movies/cli/Output") {}
+export class Output extends Context.Service<Output, Interface>()("@media/cli/Output") {}
 
 /** Writes to the process streams, one line per call. */
 export const processOutput: Interface = Output.of({

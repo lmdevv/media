@@ -1,6 +1,6 @@
-import { normalizeFolder } from "@movies/contracts/library-folder";
-import { NotFound } from "@movies/contracts/errors";
-import type { ServerFolder, ServerFolders } from "@movies/contracts/models/catalog";
+import { normalizeFolder } from "@media/contracts/library-folder";
+import { NotFound } from "@media/contracts/errors";
+import type { ServerFolder, ServerFolders } from "@media/contracts/models/catalog";
 import { Effect, FileSystem, Option, Path } from "effect";
 
 import * as MediaConfig from "../media-config.ts";

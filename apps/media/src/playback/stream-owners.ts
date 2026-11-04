@@ -1,5 +1,5 @@
-import type { PlaybackSessionId } from "@movies/contracts/ids";
-import type { StreamId } from "@movies/contracts/media-playback";
+import type { PlaybackSessionId } from "@media/contracts/ids";
+import type { StreamId } from "@media/contracts/media-playback";
 import { Clock, Context, Effect, Layer } from "effect";
 
 /** Stream owners. */
@@ -13,7 +13,7 @@ export interface Interface {
 }
 
 /** The stream owner registry. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/StreamOwners") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/StreamOwners") {}
 
 const ENDED_GRACE_MS = 10 * 60 * 1000;
 

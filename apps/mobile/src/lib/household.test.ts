@@ -1,5 +1,5 @@
-import { User } from "@movies/contracts/models/account";
-import { LibraryDetail } from "@movies/contracts/models/catalog";
+import { User } from "@media/contracts/models/account";
+import { LibraryDetail } from "@media/contracts/models/catalog";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 

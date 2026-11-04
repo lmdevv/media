@@ -1,7 +1,7 @@
-import type { TitleId } from "@movies/contracts/ids";
-import type { Episode, TitleDetail } from "@movies/contracts/models/catalog";
-import { Milliseconds } from "@movies/contracts/units";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+import type { TitleId } from "@media/contracts/ids";
+import type { Episode, TitleDetail } from "@media/contracts/models/catalog";
+import { Milliseconds } from "@media/contracts/units";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import { CircleAlert, UsersRound } from "lucide-react-native";

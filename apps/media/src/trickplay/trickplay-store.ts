@@ -1,4 +1,4 @@
-import { type TrickplayManifest, TrickplayVersion } from "@movies/contracts/trickplay";
+import { type TrickplayManifest, TrickplayVersion } from "@media/contracts/trickplay";
 import { Clock, Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
@@ -65,7 +65,7 @@ export interface Interface {
 
 /** The thumbnail store. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/TrickplayStore",
+  "@media/server/TrickplayStore",
 ) {}
 
 const make = Effect.fn("TrickplayStore.make")(function* (root: string) {

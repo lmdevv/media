@@ -1,7 +1,7 @@
 import { Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { MediaVersion, TitleCard } from "@movies/contracts/models/catalog";
+import { MediaVersion, TitleCard } from "@media/contracts/models/catalog";
 
 import { bestTitle, pickVersion } from "./watch-commands";
 

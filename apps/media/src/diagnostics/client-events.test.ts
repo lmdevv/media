@@ -4,9 +4,9 @@ import {
   ClientDiagnosticsRequest,
   type LogRecord,
   PlayerObservation,
-} from "@movies/contracts/diagnostics";
-import { PlaybackSessionId } from "@movies/contracts/ids";
-import { StreamId } from "@movies/contracts/media-playback";
+} from "@media/contracts/diagnostics";
+import { PlaybackSessionId } from "@media/contracts/ids";
+import { StreamId } from "@media/contracts/media-playback";
 import {
   Duration,
   Effect,

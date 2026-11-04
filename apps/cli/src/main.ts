@@ -1,5 +1,5 @@
 /**
- * The `movies` executable. No top-level await: the standalone binary embeds this as CommonJS
+ * The `media` executable. No top-level await: the standalone binary embeds this as CommonJS
  * (scripts/build-sea.ts).
  */
 import { Effect } from "effect";
@@ -8,7 +8,7 @@ import { runCli } from "./cli";
 import { ExitCode } from "./cli-errors";
 import { Output, processOutput } from "./output";
 
-// A reader that stops early, as `movies logs | head` or `| grep -q` does, closes stdout: the
+// A reader that stops early, as `media logs | head` or `| grep -q` does, closes stdout: the
 // output has ended, not the command, so it exits as a finished command, never with a stack trace.
 process.stdout.on("error", (error: NodeJS.ErrnoException) => {
   process.exit(error.code === "EPIPE" ? ExitCode.ok : ExitCode.failed);

@@ -1,4 +1,4 @@
-import { useAuth } from "@movies/sdk/react";
+import { useAuth } from "@media/sdk/react";
 import { useCallback } from "react";
 
 import { useProfileChoice } from "./profile-choice";

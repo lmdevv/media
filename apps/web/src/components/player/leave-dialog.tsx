@@ -1,5 +1,5 @@
-import { Button } from "@movies/ui/components/button";
-import { Dialog, DialogClose, DialogContent, DialogFooter } from "@movies/ui/components/dialog";
+import { Button } from "@media/ui/components/button";
+import { Dialog, DialogClose, DialogContent, DialogFooter } from "@media/ui/components/dialog";
 import { useRef } from "react";
 
 /**

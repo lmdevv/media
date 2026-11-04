@@ -1,10 +1,10 @@
-import { commands } from "@movies/contracts/commands";
-import { NotFound } from "@movies/contracts/errors";
-import { EpisodeId, TitleId } from "@movies/contracts/ids";
-import type { ProfileId } from "@movies/contracts/ids";
-import { type ClientCapabilities, PlaybackApiError } from "@movies/contracts/media-playback";
-import type { MediaVersion, TitleCard, TitleDetail } from "@movies/contracts/models/catalog";
-import { MoviesClient, Playback, Versions } from "@movies/sdk/effect";
+import { commands } from "@media/contracts/commands";
+import { NotFound } from "@media/contracts/errors";
+import { EpisodeId, TitleId } from "@media/contracts/ids";
+import type { ProfileId } from "@media/contracts/ids";
+import { type ClientCapabilities, PlaybackApiError } from "@media/contracts/media-playback";
+import type { MediaVersion, TitleCard, TitleDetail } from "@media/contracts/models/catalog";
+import { MoviesClient, Playback, Versions } from "@media/sdk/effect";
 import { Effect, Option, Predicate, Result, Schema } from "effect";
 
 import { LaunchError, PlaybackRefused } from "./cli-errors";
@@ -294,7 +294,7 @@ const play: ShortcutCommand = {
         Playback.start({
           profileId,
           deviceId: connection.deviceId,
-          deviceName: Option.some("movies CLI"),
+          deviceName: Option.some("media CLI"),
           titleId: title.id,
           episodeId: Option.map(episode, (chosen) => chosen.id),
           fileId,

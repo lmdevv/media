@@ -1,14 +1,14 @@
-import type { SessionInfo } from "@movies/contracts/models/account";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
-import { Button } from "@movies/ui/components/button";
+import type { SessionInfo } from "@media/contracts/models/account";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
 import {
   Dialog,
   DialogBody,
   DialogClose,
   DialogContent,
   DialogFooter,
-} from "@movies/ui/components/dialog";
-import { Skeleton } from "@movies/ui/components/skeleton";
+} from "@media/ui/components/dialog";
+import { Skeleton } from "@media/ui/components/skeleton";
 import { useState } from "react";
 
 import { useAction } from "@/components/admin/action";

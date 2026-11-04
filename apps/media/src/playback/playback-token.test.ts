@@ -4,13 +4,13 @@ import { assert, layer } from "@effect/vitest";
 import { Effect, Layer, Match, Option, Redacted, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
-import { PlaybackSessionId, UserId } from "@movies/contracts/ids";
-import { PlaybackSessionEnded } from "@movies/contracts/media-playback";
+import { PlaybackSessionId, UserId } from "@media/contracts/ids";
+import { PlaybackSessionEnded } from "@media/contracts/media-playback";
 import {
   PLAYBACK_TOKEN_TEST_VECTORS,
   type PlaybackTokenInvalid,
   PlaybackTokenSecretInvalid,
-} from "@movies/contracts/playback-token";
+} from "@media/contracts/playback-token";
 
 import * as ConvexSessionReports from "../convex/convex-session-reports.ts";
 import * as TestConvex from "../testing/test-convex.ts";

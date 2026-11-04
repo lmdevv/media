@@ -1,4 +1,4 @@
-import type { CommandError } from "@movies/contracts/errors";
+import type { CommandError } from "@media/contracts/errors";
 import { Predicate } from "effect";
 import { toast } from "sonner";
 

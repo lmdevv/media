@@ -1,14 +1,14 @@
-import type { MigrationSource } from "@movies/contracts/models/jobs";
+import type { MigrationSource } from "@media/contracts/models/jobs";
 import type {
   MigrationConnection,
   MigrationReport,
   MigrationSourceFailure,
   PathMapping,
   UserMapping,
-} from "@movies/contracts/models/migration";
-import { mappingsFor, mappingsWith, userRows } from "@movies/contracts/migration-plan";
-import type { UserChoice, UserRow } from "@movies/contracts/migration-plan";
-import { useCommand, useCommandQuery } from "@movies/sdk/react";
+} from "@media/contracts/models/migration";
+import { mappingsFor, mappingsWith, userRows } from "@media/contracts/migration-plan";
+import type { UserChoice, UserRow } from "@media/contracts/migration-plan";
+import { useCommand, useCommandQuery } from "@media/sdk/react";
 import { Option, Redacted } from "effect";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";

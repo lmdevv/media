@@ -1,4 +1,4 @@
-import type { PlayerEvent } from "@movies/sdk/effect";
+import type { PlayerEvent } from "@media/sdk/effect";
 import { describe, expect, it } from "vitest";
 
 import type { MediaElementLike, StreamSeeker, TimeRangesLike } from "./media-element-player";

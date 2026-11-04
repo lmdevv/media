@@ -1,9 +1,9 @@
-import type { CommandArgs, CommandResult } from "@movies/contracts/commands";
-import { commands } from "@movies/contracts/commands";
-import type { CommandNameOfKind } from "@movies/contracts/commands";
-import { type CommandError, InvalidArgs, Unauthenticated } from "@movies/contracts/errors";
-import type { Viewer } from "@movies/contracts/models/account";
-import type { CallError } from "@movies/sdk/effect";
+import type { CommandArgs, CommandResult } from "@media/contracts/commands";
+import { commands } from "@media/contracts/commands";
+import type { CommandNameOfKind } from "@media/contracts/commands";
+import { type CommandError, InvalidArgs, Unauthenticated } from "@media/contracts/errors";
+import type { Viewer } from "@media/contracts/models/account";
+import type { CallError } from "@media/sdk/effect";
 import { Effect, Match, Redacted, Schema, SchemaIssue } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 

@@ -1,7 +1,7 @@
-import { type FileResolverUnavailable, MediaFileNotFound } from "@movies/contracts/media-playback";
+import { type FileResolverUnavailable, MediaFileNotFound } from "@media/contracts/media-playback";
 import { Context, Effect, FileSystem, Option, Path, Schema, Struct } from "effect";
 
-import type { MediaFileId } from "@movies/contracts/ids";
+import type { MediaFileId } from "@media/contracts/ids";
 import { SidecarFormat } from "../library/sidecar-subtitles.ts";
 import * as MediaConfig from "../media-config.ts";
 import type { MediaProbe } from "../media/media-probe.ts";
@@ -50,7 +50,7 @@ export interface Interface {
 }
 
 /** The file resolver. */
-export class Service extends Context.Service<Service, Interface>()("@movies/media/FileResolver") {}
+export class Service extends Context.Service<Service, Interface>()("@media/server/FileResolver") {}
 
 const isWithin = (root: string, candidate: string, separator: string): boolean =>
   candidate === root ||

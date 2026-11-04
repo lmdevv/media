@@ -1,4 +1,4 @@
-import type { TitleId } from "@movies/contracts/ids";
+import type { TitleId } from "@media/contracts/ids";
 import { router } from "expo-router";
 import { UsersRound } from "lucide-react-native";
 

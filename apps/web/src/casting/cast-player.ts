@@ -6,7 +6,7 @@
  * buffering, as the element player does. Receivers play at normal speed only (`fixedRate`), so
  * the room engine corrects drift by seeking.
  */
-import type { PlayerEvent, PlayerPort } from "@movies/sdk/effect";
+import type { PlayerEvent, PlayerPort } from "@media/sdk/effect";
 
 import type {
   CastFramework,

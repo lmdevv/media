@@ -1,6 +1,6 @@
-import { commands } from "@movies/contracts/commands";
-import type { CommandName } from "@movies/contracts/commands";
-import { JobId } from "@movies/contracts/ids";
+import { commands } from "@media/contracts/commands";
+import type { CommandName } from "@media/contracts/commands";
+import { JobId } from "@media/contracts/ids";
 import { Cause, Data, Effect, Logger, Option, Predicate, References, Result, Schema } from "effect";
 import type { Scope } from "effect";
 
@@ -107,7 +107,7 @@ const suggest = (typed: string): string => {
     .filter((candidate) => candidate.startsWith(typed) || typed.startsWith(candidate))
     .slice(0, 3);
 
-  return close.length > 0 ? `; did you mean ${close.join(", ")}?` : "; run movies --help";
+  return close.length > 0 ? `; did you mean ${close.join(", ")}?` : "; run media --help";
 };
 
 const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> => {
@@ -147,7 +147,7 @@ const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> 
   if (entry === undefined) {
     return Result.fail(
       new UsageError({
-        message: `Unknown command "${head} ${sub}"; run movies ${head} --help`,
+        message: `Unknown command "${head} ${sub}"; run media ${head} --help`,
         command: head,
       }),
     );
@@ -342,7 +342,7 @@ const runCall = Effect.fn("Cli.runCall")(function* (rest: ReadonlyArray<string>)
 
   if (name === undefined || name.startsWith("-")) {
     return yield* output.out(
-      "Usage: movies call <command-name> [--json <object>]\n\nRun movies commands for every name.",
+      "Usage: media call <command-name> [--json <object>]\n\nRun media commands for every name.",
     );
   }
 
@@ -350,7 +350,7 @@ const runCall = Effect.fn("Cli.runCall")(function* (rest: ReadonlyArray<string>)
 
   if (entry === undefined) {
     return yield* new UsageError({
-      message: `Unknown registry command "${name}"; run movies commands`,
+      message: `Unknown registry command "${name}"; run media commands`,
       command: "call",
     });
   }
@@ -404,13 +404,13 @@ const reportError = (error: CliError, format: Format): Effect.Effect<void, never
       return;
     }
 
-    yield* output.err(`movies: ${report.message}`);
+    yield* output.err(`media: ${report.message}`);
 
     if (report.requestId !== undefined) yield* output.err(`Request ID: ${report.requestId}`);
 
     if (Predicate.isTagged(error, "UsageError")) {
       yield* output.err(
-        error.command === null ? "Run movies --help." : `Run movies ${error.command} --help.`,
+        error.command === null ? "Run media --help." : `Run media ${error.command} --help.`,
       );
     }
   });
@@ -438,7 +438,7 @@ export const runCli = (argv: ReadonlyArray<string>): Effect.Effect<number, never
 
           yield* format === "json"
             ? output.err(JSON.stringify({ error: { code: "internal", message } }))
-            : output.err(`movies: ${message}`);
+            : output.err(`media: ${message}`);
 
           return ExitCode.failed;
         }),

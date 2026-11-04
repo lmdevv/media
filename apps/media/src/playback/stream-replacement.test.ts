@@ -2,7 +2,7 @@ import { assert, describe, layer } from "@effect/vitest";
 import { Duration, Effect, Fiber, FileSystem, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
-import { type ClientCapabilities, NegotiateResponse } from "@movies/contracts/media-playback";
+import { type ClientCapabilities, NegotiateResponse } from "@media/contracts/media-playback";
 
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";

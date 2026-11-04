@@ -1,6 +1,6 @@
-import { EpisodeId, LibraryId, MediaFileId, ProfileId, TitleId } from "@movies/contracts/ids";
-import type { CatalogFile, LocalProgress } from "@movies/contracts/models/migration-service";
-import { EpochMillis, Milliseconds } from "@movies/contracts/units";
+import { EpisodeId, LibraryId, MediaFileId, ProfileId, TitleId } from "@media/contracts/ids";
+import type { CatalogFile, LocalProgress } from "@media/contracts/models/migration-service";
+import { EpochMillis, Milliseconds } from "@media/contracts/units";
 import { assert, describe, it } from "@effect/vitest";
 
 import { planMigration } from "./planner.ts";

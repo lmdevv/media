@@ -1,4 +1,4 @@
-import { InsufficientTranscodeSpace } from "@movies/contracts/media-playback";
+import { InsufficientTranscodeSpace } from "@media/contracts/media-playback";
 import { Context, Effect, Layer, Ref } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
@@ -20,7 +20,7 @@ export interface Interface {
 
 /** The transcode space ledger. */
 export class Service extends Context.Service<Service, Interface>()(
-  "@movies/media/TranscodeSpace",
+  "@media/server/TranscodeSpace",
 ) {}
 
 /** The ledger over the configured `TRANSCODE_DIR`. */

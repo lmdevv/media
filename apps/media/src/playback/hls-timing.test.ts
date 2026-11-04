@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
 import { Console, Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 
-import { MediaFileId } from "@movies/contracts/ids";
+import { MediaFileId } from "@media/contracts/ids";
 
 import * as DiskCache from "../disk-cache.ts";
 import { type MediaProbe, probeFile } from "../media/media-probe.ts";
@@ -26,7 +26,7 @@ const hasFfmpeg = await ffmpegAvailable();
  * Opts in to what depends on the machine: hardware encoders, properties the code does not meet
  * yet (whose measured values depend on the ffmpeg build), and the printed report.
  */
-const optIn = process.env["MOVIES_TIMING"] === "1";
+const optIn = process.env["MEDIA_TIMING"] === "1";
 
 const runnable = {
   copy: hasFfmpeg,
@@ -320,11 +320,11 @@ interface Measurement {
 }
 
 class Measured extends Context.Service<Measured, Measurement>()(
-  "@movies/media/test/HlsTiming/Measured",
+  "@media/server/test/HlsTiming/Measured",
 ) {}
 
 class Workspace extends Context.Service<Workspace, { readonly root: string }>()(
-  "@movies/media/test/HlsTiming/Workspace",
+  "@media/server/test/HlsTiming/Workspace",
 ) {}
 
 const workspaceLayer = Layer.effect(
@@ -359,7 +359,7 @@ const toolsLayer = Layer.unwrap(
 class Sources extends Context.Service<
   Sources,
   { readonly file: (source: Source) => Effect.Effect<string> }
->()("@movies/media/test/HlsTiming/Sources") {}
+>()("@media/server/test/HlsTiming/Sources") {}
 
 const generateSource = Effect.fn("HlsTiming.generateSource")(function* (source: Source) {
   const { root } = yield* Workspace;

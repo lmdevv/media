@@ -1,4 +1,4 @@
-import type { PlayerEvent, PlayerPort } from "@movies/sdk/effect";
+import type { PlayerEvent, PlayerPort } from "@media/sdk/effect";
 
 /** A player whose target can change while others listen to it. */
 export class SwitchablePlayer implements PlayerPort {
