@@ -1,19 +1,22 @@
-# [movies]
+# [media]
 
-MIT-licensed, agent-first, self-hosted movie and TV platform. It streams the user's own folders or
-NAS shares with reactive playback, shared watching, and full Jellyfin and Plex migration. The
-product name is `[movies]`, brackets included; the repo and packages use `movies`.
+MIT-licensed, agent-first, self-hosted media platform. It streams the user's own folders or NAS
+shares, and it is merging [movies] and [music] into one server, one Convex database, and one
+account system with a branded client per product. `[media]`, brackets included, is the working
+name until a later rebrand. The repo is `lmdevv/media`; the `@movies/*` scope, `MOVIES_` settings,
+the `movies` binary, and `verify-movies` keep their names until the rename lands.
 
-- Plan: [Linear project](https://linear.app/adsfsd/project/movies-b7a377940443). It holds the
-  overview, stack, architecture, and design summary.
+- Plan: `docs/architecture.md`, the ADRs in `docs/decisions/`, and the
+  [Linear Platform project](https://linear.app/adsfsd/project/platform-c8c8792e24e6).
 - MVP: media service, web app, SDK, and CLI with an agent skill. Native mobile and TV apps are V1.
 
 ## Rules
 
 - **Copyleft code is read-only.** Jellyfin (GPL-2.0), Silo (AGPL-3.0), Kyoo (GPL-3.0), Wholphin
-  (GPL) and Streamyfin (MPL-2.0) may be read for ideas and edge cases. Never copy, port, or
-  translate their code into this repo. SyncLounge and stremio-core are MIT and may be reused with
-  attribution. Effect, T3 Code and OpenCode are MIT and safe to reference.
+  (GPL), Streamyfin (MPL-2.0), Navidrome (GPL-3.0), Immich (AGPL-3.0), Nextcloud (AGPL-3.0), and
+  Audiobookshelf (GPL-3.0) may be read for ideas and edge cases. Never copy, port, or translate
+  their code into this repo. SyncLounge and stremio-core are MIT and may be reused with
+  attribution. Effect, T3 Code, OpenCode, and Pi are MIT and safe to reference.
 - **Load the `coding-standards` skill** before writing, reviewing, or refactoring TypeScript. It is
   in `.agents/skills/coding-standards/`, copied from `dmmulroy/.dotfiles` at `574e1f2`; Dillon has
   since removed it, so don't `skills update` it. Where any skill conflicts with this file, this file
@@ -44,6 +47,7 @@ product name is `[movies]`, brackets included; the repo and packages use `movies
 | `packages/config`    | Shared strict `tsconfig`                                          |
 | `deploy/compose`     | Docker Compose: Convex backend plus media/web                     |
 | `nix/`               | NixOS module                                                      |
+| `legacy/music`       | Old [music] code, runnable until the music port deletes it        |
 
 Ownership: Convex owns accounts, profiles, grants, libraries, titles, files, jobs, watch history,
 and playback sessions. Disk owns original media, which is read-only. The media service owns
@@ -79,6 +83,14 @@ Docker, deploys the functions, configures auth keys, the playback token secret a
 service credential, and writes the `.env.local` files. Ports, the data volume, and the temporary
 output directory derive from the worktree name; `scripts/dev-stack.sh env` prints them, and
 `down` / `destroy` stop or remove the stack. Commit the regenerated `convex/_generated/`.
+
+`legacy/music` is a nested workspace outside the root one, with its own install, lockfile, and
+checks. Root checks and the hook skip it; CI runs its checks in the `legacy/music checks` job. Read
+`legacy/music/CLAUDE.md` before working there, and run its checks before committing there:
+
+```sh
+cd legacy/music && pnpm install && pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test
+```
 
 The Effect reference lives in `.repos/effect-smol`. Effect 4 stable releases are tagged in
 `Effect-TS/effect`, so clone the tag matching the pinned version:
@@ -177,37 +189,40 @@ The example identities must be replaced with the model and tool that actually co
   Node and ffmpeg, in a `systemd-run --user` unit that kills on any denied call. Run it after a
   change to the media service's file or process handling, its dependencies, or the module's
   sandbox. Copy test files with `testing/byte-copies.ts`: `copyFile` calls `fchown`.
-- CI runs `check`, both stack jobs, the sandbox job, and the Nix job. PRs matching the `paths` in
-  `.github/workflows/image.yml` also run its `build and smoke-test`. `main` has no branch
-  protection, so check every one yourself before merging. Never merge with admin bypass.
+- CI runs `check`, `legacy/music checks`, both stack jobs, the sandbox job, and the Nix job. PRs
+  matching the `paths` in `.github/workflows/image.yml` also run its `build and smoke-test`. `main`
+  has no branch protection, so check every one yourself before merging. Never merge with admin
+  bypass.
 - Run `/pstack:no-comments` on the diff before `/code-review` when a PR adds or changes comments,
   with or without `/pstack:poteto-mode`. Tell it to keep required `// SAFETY:` comments; its agent
   does not know this repo's rule.
 - Every PR gets Codex automatic review on GitHub; address its findings before merging. Run
   Claude's `/code-review` locally before you open or merge one. Do not enable, request, or wait for
-  CodeRabbit or Bugbot.
+  CodeRabbit or Bugbot. Don't add a project skill named `code-review`; it shadows Claude's.
 - Cloud environments: none yet. Pin the Claude one in `.claude/settings.json`
   (`remote.defaultEnvironmentId`) and write the Codex ID here for `codex cloud exec --env`. Docker
   suites run in Claude cloud only.
 
 ## Design
 
-Build UI from the Paper file `[movies]` (ID `01M4PMRM5T60Q4P0YYZ8DY580D`) through the Paper MCP.
-Paper Desktop must be running.
+Build UI through the Paper MCP from the Paper file `[movies]` (ID `01M4PMRM5T60Q4P0YYZ8DY580D`) or
+`[music]` (ID `01M4KQQQ46CWH4S1JGX96NPA0T`). Paper Desktop must be running.
 
 - Paper is the source of truth. Read structure with `get_tree_summary` and `get_jsx`, exact values
   with `get_computed_styles`, and the target with `get_screenshot`. Never read colors or sizes from
   screenshots.
 - Tokens live in `packages/ui/src/styles/globals.css` under their Paper names. Re-export them with
-  `get_tokens` in `tailwind` format when the design changes. Dark is the default theme and maps
-  each `--color-dark-*` token onto its light role inside `.dark`.
+  `get_tokens` in `tailwind` format when the design changes. Dark maps each `--color-dark-*` token
+  onto its light role inside `.dark`, and is the default theme in movies.
 - Use tokens for every color, size, and font. No raw values in components.
-- Netflix look on web, the Apple TV app look on iOS, Netflix red in both modes.
+- Movies: Netflix look on web, the Apple TV app look on iOS, Netflix red in both modes.
+- Music: light follows Apple Music (red accent), dark follows Spotify (green accent, rounded panels
+  on black). Phone layouts feel native to iOS.
 - Content rules: no tips or filler copy, no CLI hints in the UI, no colored left stripes, and
   whitespace over bordered cards. One "Search ⌘K" field opens the command menu.
-- Follow the design handoff note in the owner's vault (`projects/movies/movies Design.md`): flows,
-  artboard map, decisions, and open questions. If code must differ from Paper, flag it instead of
-  drifting.
+- Follow the design handoff notes in the owner's vault (`projects/movies/movies Design.md` and
+  `projects/music/music Design.md`): flows, artboard map, decisions, and open questions. If code
+  must differ from Paper, flag it instead of drifting.
 
 ## Pstack skills
 
