@@ -95,11 +95,11 @@ server route using them yet (D50). The server's routes adopt them in phase 4.
   time passes. It is an internal function behind `core/lib/serverFacing.ts` until the server signs
   in with the `media-service` scope (ADR 0010).
 - **Issuing.** Domain commands call `issuePersonalTicket` after their own access check. It caps
-  the expiry at 6 hours and at the session's own expiry, and it takes a mutation context because
-  a cached query result would hand out an old personal ticket. `issueShareableTicket` works in a
-  query, since a cached result stays valid for at least one bucket.
-  `core/ticketsProbe.ts` runs both for the stack tests until the first domain command issues
-  tickets.
+  the expiry at 6 hours and at the session's own expiry. It takes a mutation context, because a
+  subscription keeps a query's result until the data the query read changes, so a query would
+  hold an old personal ticket. `issueShareableTicket` works in a query, because its result
+  changes only once a week. `core/ticketsProbe.ts` runs both for the stack tests until the first
+  domain command issues tickets.
 
 ## Long playback and Cast (amended 2026-11-04)
 

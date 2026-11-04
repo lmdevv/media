@@ -1,6 +1,7 @@
 import {
   loadTicketKeyRing,
   PERSONAL_TICKET_MAX_MS,
+  PERSONAL_TICKET_MIN_MS,
   TICKET_KEYS_SETTING,
 } from "@media/contracts/ticket";
 import type {
@@ -18,10 +19,8 @@ import { fail } from "./lib/errors";
 import { serverQuery } from "./lib/serverFacing";
 import { liveSession } from "./sessions";
 
-const MIN_LIFETIME_MS = 1000;
-
-const keyRing = async (): Promise<TicketKeyRing> => {
-  const loaded = await loadTicketKeyRing(process.env[TICKET_KEYS_SETTING] ?? "");
+const importRing = async (text: string): Promise<TicketKeyRing> => {
+  const loaded = await loadTicketKeyRing(text);
 
   if (!loaded.ok) {
     throw new Error(
@@ -30,6 +29,17 @@ const keyRing = async (): Promise<TicketKeyRing> => {
   }
 
   return loaded.value;
+};
+
+let imported: { readonly text: string; readonly ring: Promise<TicketKeyRing> } | undefined;
+
+/** Imports the keys once per setting value, so a query that signs many tickets imports them once. */
+const keyRing = (): Promise<TicketKeyRing> => {
+  const text = process.env[TICKET_KEYS_SETTING] ?? "";
+
+  if (imported?.text !== text) imported = { text, ring: importRing(text) };
+
+  return imported.ring;
 };
 
 interface PersonalTicketFor {
@@ -42,9 +52,10 @@ interface PersonalTicketFor {
  * Issues a ticket for the caller's own session, after the domain command's own access check. It
  * expires after `lifetimeMs`, at most 6 h, and never after the session does.
  *
- * Takes a mutation context so a query cannot call it: a cached query result would hand out an old
- * personal ticket. Refuses `unauthenticated` when the session is not live or ends within a second,
- * and `invalid_args` for a lifetime under 1 s or not whole.
+ * Takes a mutation context so a query cannot call it: a subscription keeps a query's result until
+ * the data it read changes, so it would hold an old personal ticket. Refuses `unauthenticated`
+ * when the session is not live or ends within 2 seconds, and `invalid_args` for a lifetime under
+ * 1 s or not whole.
  */
 export const issuePersonalTicket = async (
   ctx: Pick<MutationCtx, "db">,
@@ -57,14 +68,14 @@ export const issuePersonalTicket = async (
   if (
     live === null ||
     live.session.userId !== caller.userId ||
-    live.session.expirationTime < now + MIN_LIFETIME_MS
+    live.session.expirationTime < now + 2 * PERSONAL_TICKET_MIN_MS
   ) {
     return fail("unauthenticated", "This session has ended; sign in again");
   }
 
   const lifetimeMs = request.lifetimeMs ?? PERSONAL_TICKET_MAX_MS;
 
-  if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs < MIN_LIFETIME_MS) {
+  if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs < PERSONAL_TICKET_MIN_MS) {
     return fail("invalid_args", "A ticket lasts at least 1 second, in whole milliseconds");
   }
 

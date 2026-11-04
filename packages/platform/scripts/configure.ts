@@ -43,7 +43,8 @@ if (names.has("JWT_PRIVATE_KEY") && names.has("JWKS")) {
 if (names.has(TICKET_KEYS_SETTING)) {
   process.stderr.write(`kept ${TICKET_KEYS_SETTING}\n`);
 } else {
-  const keyId = `k${new Date().toISOString().slice(0, 10).replaceAll("-", "")}`;
+  const day = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const keyId = `k${day}${randomBytes(4).toString("hex").slice(0, 6)}`;
   const key = randomBytes(TICKET_KEY_BYTES).toString("base64url");
 
   convex(["env", "set", TICKET_KEYS_SETTING, "--", `${keyId}:${key}`]);

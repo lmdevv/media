@@ -1,4 +1,4 @@
-import { PERSONAL_TICKET_MAX_MS } from "@media/contracts/ticket";
+import { PERSONAL_TICKET_MAX_MS, SHAREABLE_BUCKET_MS } from "@media/contracts/ticket";
 import type {
   SessionReader,
   TicketAdmission,
@@ -183,32 +183,30 @@ describe.skipIf(stack === undefined)("tickets on a live core", { timeout: 120_00
     if (stack === undefined) return;
     const ring = await deploymentTicketKeys();
     const hash = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
-    const before = Date.now();
 
-    const artworkUrl = async (): Promise<string> => {
-      const { ticket } = await runFunction(
+    const issue = () =>
+      runFunction(
         stack,
         internal.core.ticketsProbe.issueShareable,
         { artworkId: hash },
         IssuedTicket,
       );
 
-      return `https://media.example/artwork/${hash}?ticket=${ticket}`;
-    };
-
-    const first = await artworkUrl();
-    const second = await artworkUrl();
-    const ticket = new URL(first).searchParams.get("ticket") ?? "";
+    const first = await issue();
+    const second = await issue();
+    const urlOf = (ticket: string) => `https://media.example/artwork/${hash}?ticket=${ticket}`;
+    const bucketStart = first.expiresAt - 2 * SHAREABLE_BUCKET_MS;
 
     // The deployment may answer the second call from its query cache, so the ticket is also
     // checked against one this process signs at another instant of the same bucket.
     const local = await ring.issueShareable({
       resource: { kind: "artwork", id: hash },
-      now: before,
+      now: bucketStart + SHAREABLE_BUCKET_MS - 1,
     });
 
-    expect(second).toBe(first);
-    expect(ticket).toBe(local.ticket);
-    expect(ticket.split(".")[8]).toBe("a");
+    expect(urlOf(second.ticket)).toBe(urlOf(first.ticket));
+    expect(first.ticket).toBe(local.ticket);
+    expect(bucketStart).toBeLessThanOrEqual(Date.now());
+    expect(first.ticket.split(".")[8]).toBe("a");
   });
 });
