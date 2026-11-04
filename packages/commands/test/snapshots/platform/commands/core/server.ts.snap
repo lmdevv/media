@@ -7,8 +7,8 @@ import type { Infer } from "convex/values";
 
 import { mutation, query } from "../../convex/_generated/server";
 import type { MutationCtx, QueryCtx } from "../../convex/_generated/server";
-import { requireCaller } from "../../convex/core/lib/caller";
-import type { Caller } from "../../convex/core/lib/caller";
+import { requireCaller } from "../../convex/core/auth/caller";
+import type { Caller } from "../../convex/core/auth/caller";
 
 const infoArgs = v.object({});
 
@@ -22,13 +22,13 @@ const renameResult = v.null();
 export interface Handlers {
   /** `core.server.info` (query, public): Show this server's name and version. */
   readonly info: (
-    ctx: QueryCtx,
+    ctx: Omit<QueryCtx, "auth">,
     args: Record<string, never>,
   ) => Infer<typeof infoResult> | Promise<Infer<typeof infoResult>>;
 
-  /** `core.server.rename` (mutation, signed-in): Rename this server. */
+  /** `core.server.rename` (mutation, account): Rename this server. */
   readonly rename: (
-    ctx: MutationCtx,
+    ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof renameArgs>,
     caller: Caller,
   ) => Infer<typeof renameResult> | Promise<Infer<typeof renameResult>>;
@@ -60,6 +60,6 @@ export const register = (handlers: Handlers) => ({
   rename: mutation({
     args: renameArgs,
     returns: renameResult,
-    handler: async (ctx, args) => handlers.rename(ctx, args, await requireCaller(ctx, "signed-in")),
+    handler: async (ctx, args) => handlers.rename(ctx, args, await requireCaller(ctx, "account")),
   }),
 });

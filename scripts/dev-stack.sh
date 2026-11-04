@@ -5,7 +5,7 @@
 # a temporary output directory. The core has its own backend until the movies port moves movies
 # into it (docs/decisions/0023).
 #
-#   scripts/dev-stack.sh up        # start (or reuse) both backends, deploy, configure, write .env.local
+#   scripts/dev-stack.sh up        # start (or reuse) both backends, deploy, configure both, write .env.local
 #   scripts/dev-stack.sh env       # print this worktree's name, ports, and directories
 #   scripts/dev-stack.sh down      # stop and remove both containers (the data volumes stay)
 #   scripts/dev-stack.sh destroy   # remove both containers and their data volumes
@@ -171,5 +171,6 @@ ENV
 
 cd "${root}/packages/platform"
 pnpm exec convex deploy --yes >/dev/null
+node scripts/configure.ts
 
 print_env

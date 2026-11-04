@@ -16,7 +16,7 @@ const infoResult = v.object({ name: v.string(), version: v.string() });
 export interface Handlers {
   /** `core.server.info` (query, public): Show this server's name and version. */
   readonly info: (
-    ctx: QueryCtx,
+    ctx: Omit<QueryCtx, "auth">,
     args: Record<string, never>,
   ) => Infer<typeof infoResult> | Promise<Infer<typeof infoResult>>;
 }

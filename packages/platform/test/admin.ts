@@ -13,7 +13,7 @@ const FunctionResponse = Schema.Union([
 
 const decodeResponse = Schema.decodeUnknownSync(FunctionResponse);
 
-type AdminCallable = FunctionReference<"query" | "mutation", "public" | "internal">;
+type AdminCallable = FunctionReference<"query" | "mutation" | "action", "public" | "internal">;
 
 export const runFunction = async <
   Callable extends AdminCallable,

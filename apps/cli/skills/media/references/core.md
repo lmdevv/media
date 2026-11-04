@@ -2,6 +2,96 @@
 
 # Core commands
 
+## `core.auth.apiKeys.create`
+
+Create an API key with some of this session's scopes and show its secret once.
+
+- Kind: action
+- Scope: account
+- Arguments: `{ name: string; scopes: Array<"account">; expiresInDays?: number }`
+- Result: `{ keyId: Id<"apiKeys">; key: string; expiresAt: number | null }`
+
+## `core.auth.apiKeys.endAll`
+
+Stop every API key you have made so far.
+
+- Kind: mutation
+- Scope: account
+- Arguments: none
+- Result: `null`
+
+## `core.auth.apiKeys.revoke`
+
+Revoke one of your API keys and sign out what it signed in.
+
+- Kind: mutation
+- Scope: account
+- Arguments: `{ keyId: Id<"apiKeys"> }`
+- Result: `null`
+
+## `core.auth.deviceCodes.approve`
+
+Sign a waiting device in as you, with some of this session's scopes.
+
+- Kind: mutation
+- Scope: account
+- Arguments: `{ userCode: string; scopes: Array<"account"> }`
+- Result: `null`
+
+## `core.auth.deviceCodes.deny`
+
+Refuse a waiting device.
+
+- Kind: mutation
+- Scope: account
+- Arguments: `{ userCode: string }`
+- Result: `null`
+
+## `core.auth.deviceCodes.lookup`
+
+Show the device waiting on a user code.
+
+- Kind: query
+- Scope: account
+- Arguments: `{ userCode: string }`
+- Result: `{ clientName: string; state: "pending" | "approved" | "denied" | "redeemed" | "expired"; expiresAt: number }`
+
+## `core.auth.deviceCodes.start`
+
+Start a device sign-in and return its user code and secret device code.
+
+- Kind: action
+- Scope: public
+- Arguments: `{ clientName: string }`
+- Result: `{ deviceCode: string; userCode: string; expiresAt: number; intervalSeconds: number }`
+
+## `core.auth.sessions.current`
+
+Show who is signed in, how, and with which scopes.
+
+- Kind: query
+- Scope: signed-in
+- Arguments: none
+- Result: `{ userId: Id<"users">; username: string; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode"; scopes: Array<"account"> }`
+
+## `core.auth.sessions.end`
+
+Sign out one of your sessions.
+
+- Kind: mutation
+- Scope: account
+- Arguments: `{ sessionId: Id<"authSessions"> }`
+- Result: `null`
+
+## `core.auth.sessions.endAll`
+
+Sign out every password and device session you have, or every other one.
+
+- Kind: mutation
+- Scope: account
+- Arguments: `{ keepCurrent: boolean }`
+- Result: `null`
+
 ## `core.server.info`
 
 Show this server's name and version.
