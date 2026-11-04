@@ -8,9 +8,11 @@
  * @module
  */
 
+import type * as core_lib_caller from "../core/lib/caller.js";
 import type * as core_lib_counters from "../core/lib/counters.js";
 import type * as core_lib_paginate from "../core/lib/paginate.js";
 import type * as core_limitsProbe from "../core/limitsProbe.js";
+import type * as core_server from "../core/server.js";
 
 import type {
   ApiFromModules,
@@ -19,9 +21,11 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "core/lib/caller": typeof core_lib_caller;
   "core/lib/counters": typeof core_lib_counters;
   "core/lib/paginate": typeof core_lib_paginate;
   "core/limitsProbe": typeof core_limitsProbe;
+  "core/server": typeof core_server;
 }>;
 
 /**

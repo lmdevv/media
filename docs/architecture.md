@@ -39,6 +39,7 @@ packages/
                       downloads, together, connect
     movies/           titles, files, metadata, the Jellyfin and Plex importer
     music/            tracks, albums, playlists, lyrics
+  platform/commands/  generated command contracts that each Convex module registers
   commands/           the command list and its generator
   contracts/          Effect Schema DTOs, errors, the server's HttpApi
   sdk/                Effect core with /effect, /react, /promise entry points

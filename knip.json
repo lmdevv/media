@@ -22,6 +22,7 @@
       }
     },
     "packages/platform": {
+      "entry": ["commands/refs.ts"],
       "typescript": {
         "config": ["convex/tsconfig.json"]
       }

@@ -1,6 +1,6 @@
 # 0009. Declare each action once and generate its Convex function and clients
 
-- Status: Accepted, 2026-11-03
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the generator's layout.
 - Decisions: D23
 
 ## Context
@@ -52,3 +52,46 @@ Both repos list user actions in one place, in different ways.
   menu.
 - Commands live in a domain group, such as `music.playlists`, which is the light seam for later
   products (ADR 0002).
+
+## Layout (amended 2026-11-04)
+
+The first generator settled how declarations, outputs, and checks fit together.
+
+- A declaration lives in `packages/commands/src/<domain>.ts`, such as
+  `query("core.server.info", { summary, scope, args, result })`. The name is the domain, the
+  module path, and the function, so `core.server.info` is the Convex function `core/server:info`.
+- `pnpm --filter @media/commands generate` refuses a declaration with no scope, an unknown scope
+  or kind, `v.any()`, an optional result, a summary that is not one line, or a name that is
+  duplicated, malformed, or a reserved word. It names every refusal and writes nothing.
+- Each output is a folder the generator owns. It deletes a generated file that no command writes
+  anymore. A file it did not write stops it, and it deletes nothing it did not write.
+  - `packages/platform/commands/` holds one contract per Convex module, with the module's
+    validators, a `Handlers` type, and `register`. It also holds the caller scopes and
+    `refs.ts`.
+  - `apps/cli/skills/media/references/<domain>.md` is the skill's reference for each domain.
+- The Convex module at the command's path, such as `packages/platform/convex/core/server.ts`, is
+  hand-written and calls its contract's `register`. A module can hold commands, internal
+  functions, and server-facing functions side by side.
+- A missing, extra, or mistyped handler fails `tsc`. `refs.ts` checks each command's `api`
+  reference, so a missing module or a stale `convex/_generated` also fails `tsc`.
+- Lint bans the public `query`, `mutation`, and `action` builders in `packages/platform/convex/`,
+  so every public function goes through a contract's `register` and its scope check. The
+  server-facing functions get their own guarded builder when the server moves onto the core.
+- Until the permission layers land, the scopes are `public` and `signed-in`. A scoped command's
+  handler receives the caller from `requireCaller` in `convex/core/lib/caller.ts`, which rejects
+  every call until sign-in exists.
+- `pnpm --filter @media/commands check` runs in the pre-commit hook and in CI's `check` job on
+  every change. It fails on a stale, missing, or leftover output in any package.
+- `generate` also runs `convex codegen` when the worktree has a dev stack. A command in a new module
+  needs one more run after its module is written, and `refs.ts` fails `tsc` until then.
+- The SDK, CLI, and command-menu outputs each add one target: a folder and the function that
+  writes it.
+
+Rejected for this layout:
+
+- Generated Convex modules at the command's path that call hand-written `*.handlers.ts` files. A
+  module could not hold internal or server-facing functions, and finding generated files among
+  hand-written ones needs a marker scan.
+- A drift test that runs only through the package graph, with `@media/commands` depending on
+  every package it writes into. Every declaration edit would typecheck the old CLI and its
+  dependencies, and the check would run only where the graph routes it.

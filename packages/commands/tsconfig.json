@@ -1,0 +1,8 @@
+{
+  "extends": "@media/config/tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["generate.ts", "src/**/*.ts", "test/**/*.ts"]
+}

@@ -19,6 +19,7 @@ const everyPackage = [
   "apps/mobile",
   "apps/web",
   "packages/backend",
+  "packages/commands",
   "packages/config",
   "packages/contracts",
   "packages/platform",
