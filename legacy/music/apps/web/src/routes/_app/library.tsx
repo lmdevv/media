@@ -1,0 +1,93 @@
+import { useRead } from "@music/sdk/react";
+import { Link, createFileRoute } from "@tanstack/react-router";
+import type { LinkProps } from "@tanstack/react-router";
+import {
+  ChevronRightIcon,
+  DiscIcon,
+  HeartIcon,
+  ListMusicIcon,
+  MusicIcon,
+  UserRoundIcon,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+
+import { Artwork } from "@/components/library/artwork";
+import { AlbumCard, PageHeader, SectionHeader } from "@/components/library/cards";
+import { plural } from "@/lib/format";
+
+export const Route = createFileRoute("/_app/library")({ component: LibraryPage });
+
+const LINKS: ReadonlyArray<{
+  readonly to: NonNullable<LinkProps["to"]>;
+  readonly label: string;
+  readonly icon: LucideIcon;
+}> = [
+  { to: "/playlists", label: "Playlists", icon: ListMusicIcon },
+  { to: "/artists", label: "Artists", icon: UserRoundIcon },
+  { to: "/albums", label: "Albums", icon: DiscIcon },
+  { to: "/songs", label: "Songs", icon: MusicIcon },
+  { to: "/liked", label: "Liked songs", icon: HeartIcon },
+];
+
+function LibraryPage() {
+  const home = useRead("library.home", {});
+  const shared = useRead("playlists.shared", {});
+
+  return (
+    <div className="flex flex-col gap-6 px-5 pt-safe-top lg:px-12 lg:pt-row">
+      <PageHeader title="Library" />
+      <nav aria-label="Library" className="flex flex-col">
+        {LINKS.map((link) => (
+          <Link
+            key={link.label}
+            to={link.to}
+            className="flex h-12 items-center gap-3.5 border-b-hairline border-border font-sans text-lg leading-lg text-text"
+          >
+            <link.icon aria-hidden className="size-6 text-accent" />
+            <span className="grow">{link.label}</span>
+            <ChevronRightIcon aria-hidden className="size-5 text-text-muted" />
+          </Link>
+        ))}
+      </nav>
+      {shared === undefined || shared.length === 0 ? null : (
+        <section aria-label="Shared with you" className="flex flex-col gap-3 pt-2">
+          <SectionHeader title="Shared with you" to="/playlists" />
+          <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 xl:grid-cols-6">
+            {shared.map((playlist) => (
+              <Link
+                key={playlist.id}
+                to="/playlists/$playlistId"
+                params={{ playlistId: playlist.id }}
+                className="flex min-w-0 flex-col gap-2"
+              >
+                <Artwork
+                  url={playlist.artUrls[0] ?? null}
+                  seed={playlist.id}
+                  className="aspect-square w-full rounded-md"
+                />
+                <span className="flex min-w-0 flex-col gap-px">
+                  <span className="truncate font-sans text-base/sm font-medium text-text">
+                    {playlist.name}
+                  </span>
+                  <span className="truncate font-sans text-sm/xs text-text-muted">
+                    {playlist.owner?.name ?? "Someone"} · {plural(playlist.trackCount, "song")}
+                  </span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+      {home !== undefined && home.recentlyAdded.length > 0 ? (
+        <section className="flex flex-col gap-3 pt-2">
+          <SectionHeader title="Recently Added" to="/albums" />
+          <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 xl:grid-cols-6">
+            {home.recentlyAdded.map((album) => (
+              <AlbumCard key={album.id} album={album} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}

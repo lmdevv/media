@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.agents
+.claude
+.convex
+**/.turbo
+**/test-results
+**/playwright-report

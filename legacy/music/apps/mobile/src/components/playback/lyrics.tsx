@@ -1,0 +1,435 @@
+import type { LyricLine } from "@music/commands/lyrics";
+import { TrackLyrics } from "@music/commands/lyrics";
+import { lyricLineState, lyricsMoment } from "@music/player/lyrics";
+import type { LyricLineState, LyricsAnswer, LyricsMoment } from "@music/player/lyrics";
+import * as Haptics from "expo-haptics";
+import { ArrowDown, ArrowUp } from "lucide-react-native";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import type {
+  LayoutChangeEvent,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  ScrollViewInstance,
+} from "react-native";
+import { useReducedMotion } from "react-native-reanimated";
+
+import { Icon } from "@/components/ui/icon";
+import { Text } from "@/components/ui/text";
+import { anchorTop, followLines, lineDirection, LINES_WAITING } from "@/lib/lyrics-follow";
+import type { LineBox, LineDirection, LineFollow, LineFollowEvent } from "@/lib/lyrics-follow";
+import { clock } from "@/lib/playback-format";
+import { useThemeColor } from "@/lib/theme-color";
+import { usePlayerActions, usePositionReader } from "@/player";
+
+import { EdgeFade } from "./edge-fade";
+import type { PanelPlace } from "./reorder-list";
+
+const LINES: Readonly<
+  Record<
+    PanelPlace,
+    {
+      readonly variant: "lyric" | "panelHeading";
+      readonly list: string;
+      readonly plainList: string;
+    }
+  >
+> = {
+  player: { variant: "lyric", list: "gap-6 pt-6 pr-6", plainList: "gap-6 pt-6 pr-6 pb-12" },
+  panel: { variant: "panelHeading", list: "gap-3 pt-1", plainList: "gap-3 pt-1 pb-12" },
+};
+
+/**
+ * The playing song's lyrics under its row: synced lines, plain text, the song's own plain text
+ * while synced lyrics are looked up, or a note that there are none, that this is an instrumental,
+ * or that they failed to load. Mount it with the song's ID as its `key`, so a new song starts at
+ * the top, following. `background` is the sheet's color, for the fades at the edges. `paused` stops
+ * following playback while something covers the lyrics.
+ */
+export function LyricsPanel({
+  lyrics,
+  background,
+  place = "player",
+  paused = false,
+}: {
+  readonly lyrics: LyricsAnswer;
+  readonly background: string;
+  readonly place?: PanelPlace;
+  readonly paused?: boolean;
+}) {
+  if (lyrics === "loading") return <LyricsMessage looking>Looking for lyrics…</LyricsMessage>;
+
+  if (lyrics === "failed") return <LyricsMessage>Couldn’t load the lyrics</LyricsMessage>;
+
+  return TrackLyrics.match(lyrics, {
+    Synced: ({ main }) => (
+      <SyncedLyrics lines={main.body.lines} background={background} place={place} paused={paused} />
+    ),
+    Plain: ({ main }) => (
+      <PlainLyrics text={main.body.text} background={background} place={place} />
+    ),
+    Pending: ({ fallback }) =>
+      fallback === null ? (
+        <LyricsMessage looking>Looking for lyrics…</LyricsMessage>
+      ) : (
+        <PlainLyrics text={fallback.body.text} background={background} place={place} />
+      ),
+    None: () => <LyricsMessage>No lyrics for this song</LyricsMessage>,
+    Instrumental: () => <LyricsMessage>Instrumental</LyricsMessage>,
+  });
+}
+
+function LyricsMessage({
+  looking = false,
+  children,
+}: {
+  readonly looking?: boolean;
+  readonly children: string;
+}) {
+  const muted = useThemeColor("--color-text-muted");
+
+  return (
+    <View
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={children}
+      className="flex-1 flex-row items-center justify-center gap-3"
+    >
+      {looking ? <ActivityIndicator color={muted} /> : null}
+      <Text variant="bodyStrong" tone="muted">
+        {children}
+      </Text>
+    </View>
+  );
+}
+
+function PlainLyrics({
+  text,
+  background,
+  place,
+}: {
+  readonly text: string;
+  readonly background: string;
+  readonly place: PanelPlace;
+}) {
+  const stanzas = text.split(/\n\s*\n/u).filter((stanza) => stanza.trim() !== "");
+
+  return (
+    <View className="min-h-0 flex-1">
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerClassName={LINES[place].plainList}
+      >
+        {stanzas.map((stanza, index) => (
+          <Text key={index} variant="lyricPlain">
+            {stanza}
+          </Text>
+        ))}
+      </ScrollView>
+      <EdgeFade edge="top" background={background} />
+      <EdgeFade edge="bottom" background={background} />
+    </View>
+  );
+}
+
+const SETTLE_MS = 1000;
+
+function useLineFollow(started: number, animate: boolean) {
+  const scroller = useRef<ScrollViewInstance>(null);
+  const [following, setFollowing] = useState(true);
+  const [direction, setDirection] = useState<LineDirection>("up");
+  const [height, setHeight] = useState(0);
+  const state = useRef<LineFollow>(LINES_WAITING);
+  const sung = useRef(started);
+  const shownDirection = useRef<LineDirection>("up");
+  const motion = useRef(animate);
+  const viewport = useRef(0);
+  const content = useRef(0);
+  const boxes = useRef<Array<LineBox | undefined>>([]);
+  const relayout = useRef<number | null>(null);
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const topOf = useCallback(
+    (index: number): number | null =>
+      anchorTop(
+        { viewport: viewport.current, content: content.current, lines: boxes.current },
+        index,
+      ),
+    [],
+  );
+
+  const dispatch = useCallback(
+    function dispatch(event: LineFollowEvent): void {
+      const step = followLines(state.current, event);
+      state.current = step.state;
+      setFollowing(step.state.kind !== "released");
+
+      if (step.state.kind === "released") {
+        const top = topOf(sung.current);
+
+        const next =
+          top === null
+            ? shownDirection.current
+            : lineDirection(step.state.offset, top, shownDirection.current);
+
+        if (next !== shownDirection.current) {
+          shownDirection.current = next;
+          setDirection(next);
+        }
+      }
+
+      if (step.scroll === undefined) return;
+      scroller.current?.scrollTo({
+        y: step.scroll.top,
+        animated: step.scroll.animated && motion.current,
+      });
+
+      if (settle.current !== null) clearTimeout(settle.current);
+      settle.current = setTimeout(() => {
+        settle.current = null;
+        dispatch({ type: "scrollSettled" });
+      }, SETTLE_MS);
+    },
+    [topOf],
+  );
+
+  useEffect(() => {
+    motion.current = animate;
+  }, [animate]);
+
+  useLayoutEffect(() => {
+    sung.current = started;
+    dispatch({ type: "started", top: topOf(started) });
+  }, [started, dispatch, topOf]);
+
+  useEffect(
+    () => () => {
+      if (relayout.current !== null) cancelAnimationFrame(relayout.current);
+
+      if (settle.current !== null) clearTimeout(settle.current);
+    },
+    [],
+  );
+
+  const laidOut = useCallback((): void => {
+    if (relayout.current !== null) return;
+
+    relayout.current = requestAnimationFrame(() => {
+      relayout.current = null;
+      dispatch({ type: "laidOut", top: topOf(sung.current) });
+    });
+  }, [dispatch, topOf]);
+
+  const onLayout = useCallback(
+    (event: LayoutChangeEvent): void => {
+      viewport.current = event.nativeEvent.layout.height;
+      setHeight(event.nativeEvent.layout.height);
+      laidOut();
+    },
+    [laidOut],
+  );
+
+  const onContentSizeChange = useCallback(
+    (_width: number, contentHeight: number): void => {
+      content.current = contentHeight;
+      laidOut();
+    },
+    [laidOut],
+  );
+
+  const onLineLayout = useCallback(
+    (index: number, box: LineBox): void => {
+      boxes.current[index] = box;
+      laidOut();
+    },
+    [laidOut],
+  );
+
+  const onScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      dispatch({ type: "scrolled", offset: event.nativeEvent.contentOffset.y });
+    },
+    [dispatch],
+  );
+
+  const onScrollBeginDrag = useCallback((): void => {
+    dispatch({ type: "dragged" });
+  }, [dispatch]);
+
+  const onMomentumScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      dispatch({ type: "scrolled", offset: event.nativeEvent.contentOffset.y });
+    },
+    [dispatch],
+  );
+
+  const follow = useCallback((): void => {
+    dispatch({ type: "follow", top: topOf(sung.current) });
+  }, [dispatch, topOf]);
+
+  return {
+    scroller,
+    following,
+    direction,
+    follow,
+    height,
+    onLayout,
+    onContentSizeChange,
+    onLineLayout,
+    onScroll,
+    onScrollBeginDrag,
+    onMomentumScrollEnd,
+  };
+}
+
+function SyncedLyrics({
+  lines,
+  background,
+  place,
+  paused,
+}: {
+  readonly lines: ReadonlyArray<LyricLine>;
+  readonly background: string;
+  readonly place: PanelPlace;
+  readonly paused: boolean;
+}) {
+  const readPosition = usePositionReader();
+  const { seek } = usePlayerActions();
+  const reduceMotion = useReducedMotion();
+  const [moment, setMoment] = useState(() => lyricsMoment(lines, readPosition()));
+  const follow = useLineFollow(moment.started, !reduceMotion);
+
+  useEffect(() => {
+    if (paused) return undefined;
+
+    let shown: LyricsMoment | null = null;
+
+    let frame = requestAnimationFrame(function tick() {
+      const next = lyricsMoment(lines, readPosition());
+
+      if (shown === null || next.started !== shown.started || next.sung !== shown.sung) {
+        shown = next;
+        setMoment(next);
+      }
+
+      frame = requestAnimationFrame(tick);
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [lines, readPosition, paused]);
+
+  const { follow: followAgain, onLineLayout } = follow;
+
+  const onSeek = useCallback(
+    (startMs: number) => {
+      void Haptics.selectionAsync();
+      void seek(startMs);
+      followAgain();
+    },
+    [seek, followAgain],
+  );
+
+  return (
+    <View className="min-h-0 flex-1">
+      <ScrollView
+        ref={follow.scroller}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onLayout={follow.onLayout}
+        onContentSizeChange={follow.onContentSizeChange}
+        onScroll={follow.onScroll}
+        onScrollBeginDrag={follow.onScrollBeginDrag}
+        onMomentumScrollEnd={follow.onMomentumScrollEnd}
+        contentContainerClassName={LINES[place].list}
+      >
+        {lines.map((line, index) => (
+          <Line
+            key={index}
+            index={index}
+            text={line.text}
+            startMs={line.startMs}
+            state={lyricLineState(index, moment)}
+            variant={LINES[place].variant}
+            onSeek={onSeek}
+            onBox={onLineLayout}
+          />
+        ))}
+        <View style={{ height: follow.height }} />
+      </ScrollView>
+      <EdgeFade edge="top" background={background} />
+      <EdgeFade edge="bottom" background={background} />
+      {follow.following ? null : <BackToLine direction={follow.direction} onPress={followAgain} />}
+    </View>
+  );
+}
+
+const LINE_LOOK: Readonly<Record<LyricLineState, string>> = {
+  past: "opacity-disabled",
+  active: "",
+  upcoming: "opacity-disabled",
+};
+
+const Line = memo(function Line({
+  index,
+  text,
+  startMs,
+  state,
+  variant,
+  onSeek,
+  onBox,
+}: {
+  readonly index: number;
+  readonly text: string;
+  readonly startMs: number;
+  readonly state: LyricLineState;
+  readonly variant: "lyric" | "panelHeading";
+  readonly onSeek: (startMs: number) => void;
+  readonly onBox: (index: number, box: LineBox) => void;
+}) {
+  const blank = text.trim() === "";
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={blank ? "Instrumental" : text}
+      accessibilityHint={`Plays from ${clock(startMs)}`}
+      accessibilityState={{ selected: state === "active" }}
+      onPress={() => {
+        onSeek(startMs);
+      }}
+      onLayout={(event) => {
+        const { y, height } = event.nativeEvent.layout;
+        onBox(index, { y, height });
+      }}
+      className={LINE_LOOK[state]}
+    >
+      <Text variant={variant}>{blank ? "♪" : text}</Text>
+    </Pressable>
+  );
+});
+
+function BackToLine({
+  direction,
+  onPress,
+}: {
+  readonly direction: LineDirection;
+  readonly onPress: () => void;
+}) {
+  return (
+    <View className="absolute inset-x-0 bottom-3 items-center" pointerEvents="box-none">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Back to current line"
+        onPress={onPress}
+        className="h-ios-36 flex-row items-center gap-2 rounded-full bg-text pr-4 pl-3 shadow-lg shadow-glass-shadow active:opacity-80"
+      >
+        <Icon icon={direction === "up" ? ArrowUp : ArrowDown} tone="inverse" size="meta" />
+        <Text variant="secondaryStrong" tone="inverse">
+          Back to current line
+        </Text>
+      </Pressable>
+    </View>
+  );
+}

@@ -1,0 +1,198 @@
+import { StreamTimingHeader } from "@music/commands/models";
+import { type Context, Duration, Effect, Exit, Option, Scope, Stream } from "effect";
+
+import { isFragmentedProfile } from "./ffmpeg.ts";
+import { fileResponse, STREAM_CACHE_CONTROL } from "./file-response.ts";
+import { estimatedTimingHeaders, timingHeaders } from "./sample-timing.ts";
+import {
+  Opened,
+  Prepared,
+  type Transcoded,
+  type TranscodeError,
+  Transcoder,
+  type TranscodeInput,
+} from "./transcoder.ts";
+
+const OPENING_RANGE = /^bytes=0-1?$/u;
+
+const wantsWholeStream = (request: Request): boolean => {
+  const range = request.headers.get("Range");
+
+  return (
+    request.method === "GET" &&
+    (range === null || OPENING_RANGE.test(range.trim())) &&
+    ["If-Range", "If-None-Match"].every((name) => !request.headers.has(name))
+  );
+};
+
+const finishedFile = (request: Request, { path, timing }: Transcoded) =>
+  fileResponse(request, path, {
+    contentType: "audio/mp4",
+    cacheControl: STREAM_CACHE_CONTROL,
+    headers: Option.match(timing, { onNone: () => [], onSome: timingHeaders }),
+  });
+
+/**
+ * Answers `request` with the transcode of `input`. A `GET` for the whole stream while it is
+ * still being transcoded gets a `200` streamed as ffmpeg writes it, with no `Content-Length`, no
+ * `ETag`, and `Cache-Control: no-store`: fragmented profiles as `audio/mp4` with estimated timing
+ * headers (see `StreamTimingHeader.estimated`), AAC profiles as ADTS (`audio/aac`). A failure
+ * after the first byte aborts the response. Other requests wait for the finished file.
+ *
+ * @returns The response, or `TranscodeError` when the transcode fails before its first byte, or
+ *   `FileError` when the finished file cannot be read.
+ */
+export const transcodedResponse = Effect.fn("TranscodedResponse.make")(function* (
+  request: Request,
+  input: TranscodeInput,
+) {
+  const transcoder = yield* Transcoder;
+
+  const serveFinished = Effect.fn("TranscodedResponse.serveFinished")(function* () {
+    return yield* finishedFile(request, yield* transcoder.transcode(input));
+  });
+
+  if (!wantsWholeStream(request)) return yield* serveFinished();
+
+  const context = yield* Effect.context();
+  const scope = yield* Scope.make();
+
+  return yield* transcoder.open(input).pipe(
+    Scope.provide(scope),
+    Effect.flatMap(
+      Opened.$match({
+        Finished: () => Scope.close(scope, Exit.void).pipe(Effect.andThen(serveFinished())),
+        Live: ({ timing, bytes }) =>
+          streamedResponse(
+            request,
+            input,
+            bytes,
+            scope,
+            context,
+            Option.match(timing, { onNone: () => [], onSome: estimatedTimingHeaders }),
+          ),
+      }),
+    ),
+    Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
+  );
+});
+
+/**
+ * Answers a request for the finished transcode of `input` (`&finished=1`, `GET` or `HEAD`): the
+ * cached file as `transcodedResponse` serves it once finished, with `Content-Length`, `ETag`, and
+ * byte ranges. While the transcode is prepared in the background, it answers `503` with
+ * `Retry-After` and `Cache-Control: no-store` instead, so a client polls rather than holding a
+ * connection through the encode, and leaving does not stop it.
+ *
+ * @returns The response, or `TranscodeError` when the background transcode failed just now, or
+ *   `FileError` when the finished file cannot be read.
+ */
+export const finishedResponse = Effect.fn("TranscodedResponse.finished")(function* (
+  request: Request,
+  input: TranscodeInput,
+) {
+  const transcoder = yield* Transcoder;
+
+  return yield* Prepared.$match(yield* transcoder.prepare(input), {
+    Ready: ({ transcoded }) => finishedFile(request, transcoded),
+    Pending: ({ retryAfter }) =>
+      Effect.succeed(
+        new Response("Preparing the file; retry shortly", {
+          status: 503,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Retry-After": String(Math.ceil(Duration.toSeconds(retryAfter))),
+          },
+        }),
+      ),
+    Failed: ({ error }) => Effect.fail(error),
+  });
+});
+
+const closeWhenAborted = (signal: AbortSignal, scope: Scope.Closeable): Effect.Effect<void> => {
+  if (signal.aborted) return Scope.close(scope, Exit.void);
+
+  const abort = () => {
+    Effect.runFork(Scope.close(scope, Exit.void));
+  };
+
+  signal.addEventListener("abort", abort, { once: true });
+
+  return Scope.addFinalizer(
+    scope,
+    Effect.sync(() => {
+      signal.removeEventListener("abort", abort);
+    }),
+  );
+};
+
+const streamedResponse = (
+  request: Request,
+  input: TranscodeInput,
+  bytes: Stream.Stream<Uint8Array, TranscodeError>,
+  scope: Scope.Closeable,
+  context: Context.Context<never>,
+  timing: ReadonlyArray<readonly [string, string]>,
+): Effect.Effect<Response> =>
+  closeWhenAborted(request.signal, scope).pipe(
+    Effect.map(() => {
+      const body = bytes.pipe(
+        Stream.tapError((error) =>
+          request.signal.aborted
+            ? Effect.void
+            : Effect.logError("TranscodedResponse.live_failed", error),
+        ),
+        Stream.ensuring(Scope.close(scope, Exit.void)),
+        Stream.toReadableStreamWith(context),
+      );
+
+      const headers = new Headers({
+        "Content-Type": isFragmentedProfile(input.profile) ? "audio/mp4" : "audio/aac",
+        "Cache-Control": "no-store",
+      });
+
+      for (const [name, value] of timing) headers.set(name, value);
+
+      return new Response(body, { status: 200, headers });
+    }),
+  );
+
+/**
+ * Answers a request for the transcode of `input` from `startMs` into the song (`&start=` on a
+ * transcoded profile) with a fresh encode from that point, whatever the cache holds: a `200`
+ * streamed like a live transcode (see `transcodedResponse`), with `X-Music-Start-Samples`,
+ * `X-Music-Priming-Samples`, and `X-Music-Sample-Rate`, plus an estimated
+ * `X-Music-Duration-Samples` for the fragmented profiles (see `FromOffset` for the timeline).
+ * Ranges and validators do not apply. ffmpeg stops when the client goes away.
+ *
+ * @returns The response, or `TranscodeError` when ffmpeg fails before its first byte.
+ */
+export const offsetResponse = Effect.fn("TranscodedResponse.offset")(function* (
+  request: Request,
+  input: TranscodeInput,
+  startMs: number,
+) {
+  const transcoder = yield* Transcoder;
+  const context = yield* Effect.context();
+  const scope = yield* Scope.make();
+
+  return yield* transcoder.openAt(input, startMs).pipe(
+    Scope.provide(scope),
+    Effect.flatMap((opened) =>
+      streamedResponse(request, input, opened.bytes, scope, context, [
+        [StreamTimingHeader.start, String(opened.startSamples)],
+        [StreamTimingHeader.priming, String(opened.primingSamples)],
+        [StreamTimingHeader.sampleRate, String(opened.sampleRate)],
+        ...Option.match(opened.durationSamples, {
+          onNone: () => [],
+          onSome: (samples) => [
+            [StreamTimingHeader.duration, String(samples)] as const,
+            [StreamTimingHeader.estimated, "1"] as const,
+          ],
+        }),
+      ]),
+    ),
+    Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
+  );
+});

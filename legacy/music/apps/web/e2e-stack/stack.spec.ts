@@ -1,0 +1,1038 @@
+import type { Buffer } from "node:buffer";
+
+import { JobId, LibraryId } from "@music/commands/ids";
+import { Device, Job, PlaybackState } from "@music/commands/models";
+import { expect, test } from "@playwright/test";
+import type { Page, WebSocketRoute } from "@playwright/test";
+import { Option, Schema } from "effect";
+
+import {
+  ADMIN,
+  cli,
+  container,
+  convexAdmin,
+  convexImport,
+  cspViolations,
+  expectAudioPast,
+  isPlayingAudio,
+  joinWithInvite,
+  playedSeconds,
+  signIn,
+} from "./support";
+
+test.describe.configure({ mode: "serial" });
+
+let apiKey = process.env["MUSIC_E2E_KEY"] ?? "";
+
+const decodeDevices = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Device)));
+
+const decodeState = Schema.decodeUnknownSync(Schema.fromJsonString(PlaybackState));
+
+const decodeJob = Schema.decodeUnknownSync(Schema.fromJsonString(Job));
+
+const decodeUserRow = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ _id: Schema.String, email: Schema.optionalKey(Schema.String) }),
+  ),
+);
+
+const decodeDeviceRow = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ deviceId: Schema.String })),
+);
+
+const daysAgo = (days: number): number => Date.now() - days * 24 * 60 * 60 * 1000;
+
+const rows = <Row>(decode: (line: string) => Row, output: string): ReadonlyArray<Row> =>
+  output
+    .split("\n")
+    .filter((line) => line.startsWith("{"))
+    .map(decode);
+
+const decodeCreated = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ libraryId: LibraryId, jobId: JobId })),
+);
+
+const decodeCreatedPlaylist = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ playlistId: Schema.String })),
+);
+
+const openFirstAlbum = async (page: Page): Promise<string> => {
+  await page
+    .getByRole("navigation", { name: "Library" })
+    .getByRole("link", { name: "Albums" })
+    .click();
+  const card = page.locator("main a[href^='/albums/']").first();
+  await expect(card).toBeVisible();
+  const name = (await card.getAttribute("aria-label")) ?? (await card.textContent()) ?? "";
+  await card.click();
+  await expect(page).toHaveURL(/\/albums\/[^/]+$/);
+  const heading = page.getByRole("heading", { level: 1 }).first();
+  await expect(heading).not.toHaveText("Albums");
+  const title = (await heading.textContent()) ?? name;
+  expect(title.length).toBeGreaterThan(0);
+
+  return title;
+};
+
+test("first run: create the admin, add /music, and the real scanner indexes it", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/setup/);
+  await page.getByLabel("Name").fill(ADMIN.name);
+  await page.getByLabel("Email").fill(ADMIN.email);
+  await page.getByLabel("Password").fill(ADMIN.password);
+  await page.getByRole("button", { name: "Create admin account" }).click();
+  await expect(page.getByRole("heading", { name: "Where's your music?" })).toBeVisible();
+  await page.getByLabel("Library folder").fill("/music");
+  await page.getByRole("button", { name: "Start scanning" }).click();
+  await expect(page.getByRole("heading", { name: "Your library is ready" })).toBeVisible({
+    timeout: 120_000,
+  });
+  await page.getByRole("button", { name: "Open my library" }).click();
+  await expect(page.getByRole("heading", { name: "Recently added" })).toBeVisible();
+  await expect(page.locator("main img").first()).toBeVisible();
+});
+
+test("an album plays real audio, pauses, and skips", async ({ page }) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+
+  const bar = page.getByRole("region", { name: "Player" });
+  await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await expectAudioPast(page, 2);
+
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(bar.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+  await expect.poll(() => isPlayingAudio(page)).toBe(false);
+
+  await bar.getByRole("button", { name: "Play", exact: true }).click();
+  await expectAudioPast(page, 1);
+  const before = await page.locator("[role=row][aria-current=true]").first().textContent();
+  await bar.getByRole("button", { name: "Next", exact: true }).click();
+  await expect
+    .poll(() => page.locator("[role=row][aria-current=true]").first().textContent())
+    .not.toBe(before);
+  await expectAudioPast(page, 1);
+});
+
+test("Ctrl+J and Ctrl+P move through the command menu", async ({ page }) => {
+  await signIn(page);
+  await page.keyboard.press("ControlOrMeta+k");
+  const menu = page.getByRole("dialog", { name: "Command menu" });
+  const options = menu.getByRole("option");
+  const third = await options.nth(2).boundingBox();
+
+  if (third === null) throw new Error("The command menu has fewer than three rows");
+  const rest = { x: third.x + third.width / 2, y: third.y + third.height / 2 };
+  await page.mouse.move(rest.x, rest.y);
+
+  const press = async (key: string): Promise<void> => {
+    await page.keyboard.press(key);
+    await page.mouse.move(rest.x, rest.y);
+  };
+
+  await menu.getByRole("combobox").fill("queue");
+  await expect(options.first()).toHaveId("command-open-queue");
+  await expect(options.first()).toHaveAttribute("aria-selected", "true");
+
+  await press("Control+j");
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
+  await press("Control+j");
+  await expect(options.nth(2)).toHaveAttribute("aria-selected", "true");
+  await press("Control+p");
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
+});
+
+test("search finds songs from the scanned library", async ({ page }) => {
+  await signIn(page);
+  const album = await openFirstAlbum(page);
+  await page.keyboard.press("/");
+  await expect(page).toHaveURL(/\/search/);
+  const word = album.split(" ")[0] ?? album;
+  await page.locator("#search-input").fill(word);
+  await expect(page.getByText("Top result")).toBeVisible();
+});
+
+test("search ignores accents and shows the original title", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/search");
+  await page.locator("#search-input").fill("doppelganger");
+  const top = page.locator("section", { has: page.getByRole("heading", { name: "Top result" }) });
+  await expect(top.getByText("Doppelgänger", { exact: true })).toBeVisible();
+});
+
+test("an API key drives the CLI, and the CLI controls the browser's playback", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/settings/keys");
+  await page.getByRole("button", { name: "New key" }).click();
+  await page.getByLabel("Name").fill("stack e2e");
+  await page.getByRole("button", { name: "Create key" }).click();
+  apiKey = (await page.getByTestId("new-api-key").textContent())?.trim() ?? "";
+  expect(apiKey).toMatch(/^mk_/);
+  await page.getByRole("button", { name: "Done" }).click();
+
+  expect(cli(apiKey, ["whoami"])).toContain(ADMIN.email);
+
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 1);
+
+  cli(apiKey, ["pause"]);
+  const bar = page.getByRole("region", { name: "Player" });
+  await expect(bar.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+  await expect.poll(() => isPlayingAudio(page)).toBe(false);
+
+  cli(apiKey, ["resume"]);
+  await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await expectAudioPast(page, 1);
+});
+
+test("a playlist deleted from the CLI while open shows its deleted state and the audio plays on", async ({
+  page,
+}) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 1);
+
+  const created = decodeCreatedPlaylist(cli(apiKey, ["playlists", "create", "Doomed", "--json"]));
+  await page
+    .getByRole("navigation", { name: "Library" })
+    .getByRole("link", { name: /Doomed/ })
+    .click();
+  await expect(page.getByRole("heading", { level: 1, name: "Doomed" })).toBeVisible();
+
+  cli(apiKey, ["playlists", "delete", created.playlistId]);
+
+  await expect(page.getByRole("heading", { name: "You can't open this playlist" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
+  const bar = page.getByRole("region", { name: "Player" });
+  await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+
+  const before = await page.evaluate(() =>
+    Math.max(0, ...[...(window.musicTestMedia ?? [])].map((element) => element.currentTime)),
+  );
+
+  await expectAudioPast(page, before + 1);
+
+  await page.getByRole("link", { name: "Back to playlists" }).click();
+  await expect(page).toHaveURL(/\/playlists$/);
+  await expect(page.getByRole("link", { name: /Doomed/ })).toHaveCount(0);
+});
+
+test("playback moves to a second browser and the first one stops", async ({ page, browser }) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 2);
+
+  const other = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const phone = await other.newPage();
+  await signIn(phone);
+  await expect(phone.getByRole("button", { name: /Open Now Playing/ })).toBeVisible();
+
+  const devices = decodeDevices(cli(apiKey, ["devices", "list", "--json"]));
+  const state = decodeState(cli(apiKey, ["now", "--json"]));
+
+  const target = devices.find((device) => device.online && device.id !== state.activeDevice?.id);
+  expect(target).toBeDefined();
+  cli(apiKey, ["playback", "transfer", target?.id ?? ""]);
+
+  await expect.poll(() => isPlayingAudio(page)).toBe(false);
+  await expectAudioPast(phone, 1);
+  await expect(page.getByText(/Playing on /).first()).toBeVisible();
+  await other.close();
+});
+
+const decodeInvite = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ code: Schema.String })),
+);
+
+const decodeJam = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ code: Schema.String })),
+);
+
+const decodeJamState = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.NullOr(Schema.Struct({ status: Schema.String }))),
+);
+
+interface StreamRequest {
+  readonly url: URL;
+  readonly at: number;
+}
+
+const recordStreams = (page: Page): Array<StreamRequest> => {
+  const streams: Array<StreamRequest> = [];
+
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+
+    if (url.pathname.includes("/stream/")) streams.push({ url, at: Date.now() });
+  });
+
+  return streams;
+};
+
+const refuseNextStream = async (page: Page): Promise<{ refused: boolean }> => {
+  const state = { refused: false };
+
+  await page.route(/\/stream\//u, async (route) => {
+    if (state.refused) {
+      await route.continue();
+
+      return;
+    }
+
+    state.refused = true;
+    await route.fulfill({ status: 403, body: "The link has expired" });
+  });
+
+  return state;
+};
+
+test("a Jam member listens along with real audio, in step with the host", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  cli(apiKey, ["playback", "repeat", "all"]);
+
+  try {
+    await signIn(page);
+    await openFirstAlbum(page);
+    await page.getByRole("button", { name: "Play", exact: true }).first().click();
+    await expectAudioPast(page, 1);
+    const { code } = decodeJam(cli(apiKey, ["jam", "start", "--json"]));
+
+    const invite = decodeInvite(cli(apiKey, ["invites", "create", "--role", "guest", "--json"]));
+    const other = await browser.newContext();
+    const friend = await other.newPage();
+    const streams = recordStreams(friend);
+
+    await joinWithInvite(friend, invite.code, {
+      email: `jam-${Date.now().toString(36)}@music.local`,
+      name: "Noor",
+    });
+    await friend.goto(`/jam/${code}`);
+    await friend.getByRole("button", { name: "Join", exact: true }).click();
+    await expect(friend.getByRole("status", { name: "Jam" })).toContainText("listening along here");
+
+    const inStep = async () => {
+      const [host, member] = await Promise.all([playedSeconds(page), playedSeconds(friend)]);
+      const state = decodeState(cli(apiKey, ["now", "--json"]));
+      const length = (state.queue[state.index]?.durationMs ?? 0) / 1000;
+      const gap = Math.abs(host - member);
+
+      return host > 0 && member > 0 && Math.min(gap, length - gap) < 2;
+    };
+
+    await expectAudioPast(friend, 0.5);
+    await expect.poll(inStep, { timeout: 30_000 }).toBe(true);
+
+    const lifetimes = streams.map(({ url, at }) => Number(url.searchParams.get("exp")) - at);
+
+    expect(lifetimes.length).toBeGreaterThan(0);
+    expect(Math.max(...lifetimes)).toBeLessThanOrEqual(5 * 60_000);
+
+    const refusal = await refuseNextStream(friend);
+
+    await expect.poll(() => refusal.refused, { timeout: 30_000 }).toBe(true);
+    const refusedAt = Date.now();
+
+    await expect
+      .poll(() => streams.filter(({ at }) => at > refusedAt).length, { timeout: 30_000 })
+      .toBeGreaterThan(0);
+    await expect.poll(() => isPlayingAudio(friend), { timeout: 30_000 }).toBe(true);
+    await expect.poll(inStep, { timeout: 30_000 }).toBe(true);
+
+    cli(apiKey, ["jam", "end"]);
+    await expect.poll(() => isPlayingAudio(friend), { timeout: 30_000 }).toBe(false);
+    await expect(friend.getByRole("status", { name: "Jam" })).toContainText("The Jam ended");
+    await other.close();
+  } finally {
+    cli(apiKey, ["playback", "repeat", "off"]);
+
+    if (decodeJamState(cli(apiKey, ["jam", "get", "--json"]))?.status === "active") {
+      cli(apiKey, ["jam", "end"]);
+    }
+  }
+});
+
+test("the app runs under its Content-Security-Policy and security headers", async ({ page }) => {
+  const response = await page.request.get("/");
+  const headers = response.headers();
+
+  expect(headers["content-security-policy"]).toContain("script-src 'self';");
+  expect(headers["x-content-type-options"]).toBe("nosniff");
+  expect(headers["x-frame-options"]).toBe("DENY");
+
+  await signIn(page);
+  await expect(page.locator("main img").first()).toBeVisible();
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 1);
+  await page.keyboard.press("/");
+  await page.locator("#search-input").fill("a");
+  await expect(page.getByText("Top result")).toBeVisible();
+
+  expect(await cspViolations(page)).toEqual([]);
+});
+
+test("a numeric search and the Add folder dialog keep their screens", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/search");
+  await page.locator("#search-input").fill("1999");
+  await expect(page).toHaveURL(/q=1999/);
+  await expect(page.getByRole("heading", { name: "Not in your library" })).toBeVisible();
+
+  await page.goto("/settings/libraries");
+  await page.getByRole("button", { name: "Add folder" }).click();
+  await expect(page).toHaveURL(/add=1/);
+  await expect(page.getByRole("textbox", { name: "Library folder" })).toBeFocused();
+});
+
+test("playlists: create with N, add from a song's menu, remove, rename, and delete", async ({
+  page,
+}) => {
+  const errors: Array<string> = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await signIn(page);
+  await openFirstAlbum(page);
+
+  await page.keyboard.press("n");
+  await expect(page.getByRole("dialog", { name: "New playlist" })).toBeVisible();
+  await page.keyboard.type("Road trip");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/playlists\/[^/]+$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Road trip" })).toBeVisible();
+
+  await page.goBack();
+  const row = page.locator("main [role=row]").nth(1);
+  const title = (await row.locator("[role=cell]").nth(1).textContent())?.trim() ?? "";
+  await row.hover();
+  await row.getByRole("button", { name: `More actions for ${title}` }).click();
+  await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+  await page.getByRole("menuitem", { name: "Road trip" }).click();
+  await expect(page.getByText("Added to Road trip")).toBeVisible();
+
+  await page
+    .getByRole("navigation", { name: "Library" })
+    .getByRole("link", { name: /Road trip/ })
+    .click();
+  const added = page.locator("main [role=row]").filter({ hasText: title });
+  await expect(added).toBeVisible();
+  await added.hover();
+  await added.getByRole("button", { name: `More actions for ${title}` }).click();
+  await page.getByRole("menuitem", { name: "Remove from this playlist" }).click();
+  await expect(page.getByText("Let's find something for this playlist")).toBeVisible();
+
+  await page.getByRole("button", { name: "More actions for Road trip" }).click();
+  await page.getByRole("menuitem", { name: "Edit details…" }).click();
+  await page.getByLabel("Name", { exact: true }).fill("Night drive");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { level: 1, name: "Night drive" })).toBeVisible();
+
+  await page.getByRole("button", { name: "More actions for Night drive" }).click();
+  await page.getByRole("menuitem", { name: "Delete playlist…" }).click();
+  await page.getByRole("button", { name: "Delete playlist" }).click();
+  await expect(page).toHaveURL(/\/playlists$/);
+  await expect(page.getByText("Deleted Night drive")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Night drive/ })).toHaveCount(0);
+  expect(errors.filter((text) => text.includes("Playlist not found"))).toEqual([]);
+});
+
+test("home and artists show each artist's art", async ({ page }) => {
+  await signIn(page);
+
+  const recent = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "Recently played artists" }),
+  });
+
+  const circles = recent.locator("a[href^='/artists/']");
+
+  await expect(circles.first()).toBeVisible();
+  await expect(recent.locator("a[href^='/artists/'] img")).toHaveCount(await circles.count());
+
+  await page
+    .getByRole("navigation", { name: "Library" })
+    .getByRole("link", { name: "Artists" })
+    .click();
+
+  const artists = page.locator("main a[href^='/artists/']");
+
+  await expect(artists.first()).toBeVisible();
+  await expect(page.locator("main a[href^='/artists/'] img")).toHaveCount(await artists.count());
+});
+
+test("a phone shows where the music plays while another device plays it", async ({
+  page,
+  browser,
+}) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 1);
+
+  const other = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const phone = await other.newPage();
+
+  await signIn(phone);
+
+  const mini = phone.getByRole("button", { name: /Open Now Playing: .+, playing on / });
+
+  await expect(mini).toBeVisible();
+  await expect(mini.getByText(/^Playing on /)).toBeVisible();
+  expect(await isPlayingAudio(phone)).toBe(false);
+
+  await mini.click();
+  await expect(phone.getByRole("status").filter({ hasText: /^Playing on / })).toBeVisible();
+  await other.close();
+});
+
+test("the seek and volume sliders are named and work from the keyboard", async ({ page }) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 1);
+
+  const bar = page.getByRole("region", { name: "Player" });
+  const seek = bar.getByRole("slider", { name: "Seek" });
+  const volume = bar.getByRole("slider", { name: "Volume" });
+
+  await expect(seek).toBeVisible();
+  await volume.focus();
+
+  const before = Number(await volume.getAttribute("aria-valuenow"));
+
+  await page.keyboard.press("ArrowLeft");
+  await expect
+    .poll(async () => Number(await volume.getAttribute("aria-valuenow")))
+    .toBeLessThan(before);
+});
+
+test("the song menu's Q, Shift+Enter, and L keys do what the menu shows", async ({ page }) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+
+  const row = page
+    .locator("main [role=row]")
+    .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
+    .first();
+
+  const menu = row.getByRole("button", { name: /^More actions for / });
+  await row.hover();
+  const label = (await menu.getAttribute("aria-label")) ?? "";
+  const title = label.replace(/^More actions for /, "");
+  expect(title.length).toBeGreaterThan(0);
+
+  const openMenu = async (): Promise<void> => {
+    await row.hover();
+    await menu.click();
+    await expect(page.getByRole("menu")).toBeFocused();
+  };
+
+  await openMenu();
+  await page.keyboard.press("q");
+  await expect(page.getByText(`Added ${title} to the queue`)).toBeVisible();
+  await expect(page.getByRole("menu")).toBeHidden();
+
+  await openMenu();
+  await page.keyboard.press("Shift+Enter");
+  await expect(page.getByText(`${title} plays next`)).toBeVisible();
+
+  await openMenu();
+  await page.keyboard.press("l");
+  await expect(page.getByText(`Liked ${title}`)).toBeVisible();
+  await page.goto("/liked");
+  await expect(page.locator("main [role=row]").filter({ hasText: title })).toBeVisible();
+});
+
+test("phone queue keeps the transport on screen and the device list fits", async ({ browser }) => {
+  for (let index = 0; index < 12; index += 1) {
+    cli(apiKey, [
+      "devices",
+      "heartbeat",
+      "--device-id",
+      `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      "--name",
+      `Old laptop ${index}`,
+      "--kind",
+      "web",
+    ]);
+  }
+
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const phone = await context.newPage();
+
+  await signIn(phone);
+  await phone.goto("/albums");
+  await phone.locator("main a[href^='/albums/']").first().click();
+  await phone.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(phone, 1);
+  await phone.getByRole("button", { name: /Open Now Playing/ }).click();
+  await phone.getByRole("button", { name: "Queue", exact: true }).click();
+
+  const fits = async (name: RegExp | string): Promise<boolean> => {
+    const box = await phone.getByRole("button", { name, exact: true }).last().boundingBox();
+
+    return box !== null && box.y >= 0 && box.y + box.height <= 844;
+  };
+
+  await expect.poll(() => fits("Next")).toBe(true);
+  await expect.poll(() => fits("Hide queue")).toBe(true);
+
+  await phone.getByRole("button", { name: /Play on another device/ }).click();
+
+  const list = phone.getByRole("menu", { name: "Play on" });
+
+  await expect(list.getByRole("menuitemradio", { name: /Old laptop 11/ })).toBeAttached();
+
+  await expect
+    .poll(async () => {
+      const box = await list.boundingBox();
+
+      return box !== null && box.y + box.height <= 844;
+    })
+    .toBe(true);
+  await context.close();
+});
+
+test("Esc closes the desktop queue panel", async ({ page }) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await page.getByRole("region", { name: "Player" }).getByRole("button", { name: "Queue" }).click();
+  await expect(page.getByRole("complementary", { name: "Queue" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("complementary", { name: "Queue" })).toBeHidden();
+});
+
+test("the sign-in screen shows the release version", async ({ page }) => {
+  const version = cli(apiKey, ["--version"]).trim();
+
+  expect(version).toMatch(/^\d+\.\d+\.\d+/);
+
+  await page.goto("/sign-in");
+  await expect(page.getByText(`· V${version}`)).toBeVisible();
+});
+
+test("album cards and song rows expose their play buttons", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/albums");
+  const card = page.locator("main a[href^='/albums/']").first();
+  const album = (await card.locator("span").first().textContent())?.trim() ?? "";
+
+  await card.hover();
+  await page.getByRole("button", { name: `Play ${album}`, exact: true }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "Player" })
+      .getByRole("button", { name: "Pause", exact: true }),
+  ).toBeVisible();
+
+  await page.goto("/songs");
+
+  const menu = page
+    .locator("main [role=row]:not([aria-current=true])")
+    .getByRole("button", { name: /^More actions for / })
+    .first();
+
+  const menuLabel = (await menu.getAttribute("aria-label")) ?? "";
+
+  const row = page
+    .locator("main [role=row]")
+    .filter({ has: page.getByRole("button", { name: menuLabel, exact: true }) });
+
+  const play = row.getByRole("button", { name: /^Play / });
+
+  await expect(play).toHaveCount(1);
+  await play.focus();
+  await page.keyboard.press("Enter");
+  await expect(row).toHaveAttribute("aria-current", "true");
+});
+
+test("the last song in the queue stops at its end instead of starting over", async ({ page }) => {
+  test.setTimeout(180_000);
+  cli(apiKey, ["playback", "shuffle", "--no-on"]);
+  cli(apiKey, ["playback", "repeat", "off"]);
+  cli(apiKey, ["queue", "autoplay", "--no-on"]);
+
+  await signIn(page);
+  await openFirstAlbum(page);
+
+  const last = page
+    .locator("main [role=row]")
+    .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
+    .last();
+
+  const label =
+    (await last.getByRole("button", { name: /^More actions for / }).getAttribute("aria-label")) ??
+    "";
+
+  const title = label.replace(/^More actions for /, "");
+
+  await last.hover();
+  await last.getByRole("button", { name: `Play ${title}`, exact: true }).click();
+  await expectAudioPast(page, 1);
+
+  const playing = decodeState(cli(apiKey, ["now", "--json"]));
+  const durationMs = playing.queue[playing.index]?.durationMs ?? 0;
+
+  expect(playing.index).toBe(playing.queue.length - 1);
+  cli(apiKey, ["playback", "seek", "--position-ms", String(Math.max(0, durationMs - 3000))]);
+
+  await expect
+    .poll(() => decodeState(cli(apiKey, ["now", "--json"])).playing, { timeout: 60_000 })
+    .toBe(false);
+
+  const stoppedAt = Date.now();
+
+  await expect
+    .poll(
+      async () =>
+        Date.now() - stoppedAt > 17_000 &&
+        !(await isPlayingAudio(page)) &&
+        !decodeState(cli(apiKey, ["now", "--json"])).playing,
+      { timeout: 30_000, intervals: [1000] },
+    )
+    .toBe(true);
+  await expect(
+    page.getByRole("region", { name: "Player" }).getByRole("button", { name: "Play", exact: true }),
+  ).toBeVisible();
+});
+
+test("autoplay keeps the music going after the last song", async ({ page }) => {
+  test.setTimeout(180_000);
+  cli(apiKey, ["playback", "shuffle", "--no-on"]);
+  cli(apiKey, ["playback", "repeat", "off"]);
+  cli(apiKey, ["queue", "autoplay", "--on"]);
+
+  await signIn(page);
+  await openFirstAlbum(page);
+
+  const last = page
+    .locator("main [role=row]")
+    .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
+    .last();
+
+  const label =
+    (await last.getByRole("button", { name: /^More actions for / }).getAttribute("aria-label")) ??
+    "";
+
+  const title = label.replace(/^More actions for /, "");
+
+  await last.hover();
+  await last.getByRole("button", { name: `Play ${title}`, exact: true }).click();
+  await expectAudioPast(page, 1);
+
+  const playing = decodeState(cli(apiKey, ["now", "--json"]));
+  const durationMs = playing.queue[playing.index]?.durationMs ?? 0;
+
+  expect(playing.queue.slice(playing.index + 1).some((entry) => entry.autoplay)).toBe(true);
+  cli(apiKey, ["playback", "seek", "--position-ms", String(Math.max(0, durationMs - 3000))]);
+
+  await expect
+    .poll(
+      () => {
+        const state = decodeState(cli(apiKey, ["now", "--json"]));
+
+        return state.playing && (state.queue[state.index]?.autoplay ?? false);
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+
+  const autoplayBaseline = await page.evaluate(() =>
+    Math.max(
+      0,
+      ...[...(window.musicTestMedia ?? [])].map((element) =>
+        element.paused ? 0 : element.currentTime,
+      ),
+    ),
+  );
+
+  await expectAudioPast(page, autoplayBaseline + 1);
+});
+
+test("the command menu rescans the only library folder with Enter", async ({ page }) => {
+  await signIn(page);
+  await page.keyboard.press("Control+k");
+  await page.getByRole("combobox").fill("Rescan");
+
+  const menu = page.getByRole("dialog");
+
+  await expect(menu.getByRole("img", { name: "Searching" })).toHaveCount(0);
+  await expect(
+    menu.getByRole("option", { name: /^Rescan a library folder/, selected: true }),
+  ).toBeVisible();
+  await expect(menu.getByRole("option", { name: /^\/music/, selected: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(menu.getByText("Scanning /music", { exact: true })).toBeVisible();
+  await expect(menu.getByRole("alert")).toHaveCount(0);
+});
+
+test("adding a folder that doesn't exist shows the failed scan and keeps open lists working", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/albums");
+  await expect(page.locator("main a[href^='/albums/']").first()).toBeVisible();
+
+  const created = decodeCreated(
+    cli(apiKey, ["libraries", "create", "--name", "Nowhere", "--path", "/nowhere", "--json"]),
+  );
+
+  try {
+    await expect
+      .poll(() => decodeJob(cli(apiKey, ["jobs", "get", created.jobId, "--json"])).status)
+      .toBe("failed");
+
+    await expect(page.getByText("This screen didn't load")).toHaveCount(0);
+    await expect(page.locator("main a[href^='/albums/']").first()).toBeVisible();
+
+    await page.goto("/settings/libraries");
+    const card = page.getByRole("region", { name: "/nowhere" });
+    await expect(card.getByText("Scan failed")).toBeVisible();
+    await expect(card.getByText(/unavailable/)).toBeVisible();
+  } finally {
+    try {
+      cli(apiKey, ["libraries", "delete", created.libraryId]);
+    } catch (cause) {
+      console.warn(`Could not remove the /nowhere library ${created.libraryId}`, cause);
+    }
+  }
+});
+
+test("phone forms keep their buttons on screen", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const phone = await context.newPage();
+
+  const onScreen = async (name: string): Promise<boolean> => {
+    const box = await phone.getByRole("button", { name, exact: true }).boundingBox();
+
+    return box !== null && box.x >= 0 && box.x + box.width <= 390;
+  };
+
+  await signIn(phone);
+  await phone.goto("/songs");
+  await expect.poll(() => onScreen("Shuffle all")).toBe(true);
+  await phone.goto("/settings/account");
+  await expect.poll(() => onScreen("Save")).toBe(true);
+  await context.close();
+});
+
+test("devices silent for a day leave Play on, and the daily prune deletes old ones", async ({
+  page,
+}) => {
+  test.skip(container() === "", "needs MUSIC_CONTAINER, which scripts/stack-e2e.sh sets");
+
+  const admin = rows(decodeUserRow, convexAdmin(["data", "users", "--format", "jsonl"])).find(
+    (user) => user.email === ADMIN.email,
+  );
+
+  if (admin === undefined) throw new Error(`No user row for ${ADMIN.email}`);
+
+  const closed = { deviceId: "00000000-0000-4000-9000-000000000001", name: "Closed tab" };
+  const ancient = { deviceId: "00000000-0000-4000-9000-000000000002", name: "Ancient laptop" };
+  const speaker = { deviceId: "00000000-0000-4000-9000-000000000003", name: "Paused speaker" };
+
+  convexImport("devices", [
+    { ...closed, userId: admin._id, kind: "web", lastSeenAt: daysAgo(2) },
+    { ...ancient, userId: admin._id, kind: "web", lastSeenAt: daysAgo(40) },
+    { ...speaker, userId: admin._id, kind: "web", lastSeenAt: daysAgo(40) },
+  ]);
+
+  cli(apiKey, ["playback", "pause"]);
+  cli(apiKey, ["playback", "transfer", speaker.deviceId]);
+
+  const names = (args: ReadonlyArray<string> = []): ReadonlyArray<string> =>
+    decodeDevices(cli(apiKey, ["devices", "list", ...args, "--json"])).map((device) => device.name);
+
+  expect(names()).toContain(speaker.name);
+  expect(names()).not.toContain(closed.name);
+  expect(names()).not.toContain(ancient.name);
+  expect(names(["--device-id", closed.deviceId])).toContain(closed.name);
+
+  await signIn(page);
+  await page.getByRole("button", { name: /Play on another device/ }).click();
+
+  const list = page.getByRole("menu", { name: "Play on" });
+
+  await expect(list.getByRole("menuitemradio", { name: /Paused speaker/ })).toBeVisible();
+  await expect(list.getByRole("menuitemradio", { name: /Closed tab|Ancient laptop/ })).toHaveCount(
+    0,
+  );
+
+  convexAdmin(["run", "maintenance:pruneStaleDevices", "{}"]);
+
+  const kept = rows(
+    decodeDeviceRow,
+    convexAdmin(["data", "devices", "--format", "jsonl", "--limit", "1000"]),
+  ).map((device) => device.deviceId);
+
+  expect(kept).toContain(speaker.deviceId);
+  expect(kept).toContain(closed.deviceId);
+  expect(kept).not.toContain(ancient.deviceId);
+});
+
+test("data saver plays through HTML audio, starts a first play at once, and seeks", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/settings/playback");
+
+  const dataSaver = page
+    .getByRole("radiogroup", { name: "Streaming quality" })
+    .getByRole("radio", { name: "Data saver" });
+
+  await dataSaver.click();
+  await expect(dataSaver).toHaveAttribute("aria-checked", "true");
+  await openFirstAlbum(page);
+
+  const dataSaverAt = (): Promise<number> =>
+    page.evaluate(() =>
+      Math.max(
+        -1,
+        ...[...(window.musicTestMedia ?? [])].flatMap((element) =>
+          !element.paused && element.src.includes("p=aac-128")
+            ? [
+                element.currentTime +
+                  Number(new URL(element.src).searchParams.get("start") ?? "0") / 1000,
+              ]
+            : [],
+        ),
+      ),
+    );
+
+  const tappedAt = Date.now();
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expect.poll(dataSaverAt, { intervals: [50] }).toBeGreaterThan(0.02);
+  const firstAudioMs = Date.now() - tappedAt;
+
+  console.log(`data saver first play: audio after ${firstAudioMs} ms`);
+  expect(firstAudioMs).toBeLessThan(3000);
+
+  const bar = page.getByRole("region", { name: "Player" });
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect.poll(() => isPlayingAudio(page)).toBe(false);
+  await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).playing).toBe(false);
+  cli(apiKey, ["playback", "seek", "--position-ms", "3000"]);
+  await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).positionMs).toBe(3000);
+
+  const resumedAt = Date.now();
+  await bar.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(dataSaverAt, { intervals: [50] }).toBeGreaterThanOrEqual(3);
+  expect(Date.now() - resumedAt).toBeLessThan(2000);
+});
+
+test("newer controls survive delayed browser measurements", async ({ page }) => {
+  const decodeReport = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({
+        requestId: Schema.Int,
+        args: Schema.Tuple([
+          Schema.Struct({
+            name: Schema.Literal("playback.report"),
+            args: Schema.Struct({ playing: Schema.Boolean }),
+          }),
+        ]),
+      }),
+    ),
+  );
+
+  const decodeResponse = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({
+        type: Schema.Literal("MutationResponse"),
+        requestId: Schema.Int,
+        success: Schema.Boolean,
+      }),
+    ),
+  );
+
+  const held: Array<{
+    readonly server: WebSocketRoute;
+    readonly message: string | Buffer;
+    readonly requestId: number | null;
+  }> = [];
+
+  const responses = new Map<number, boolean>();
+  let holdPlaying: boolean | null = null;
+
+  await page.routeWebSocket(/\/api\/[^/]+\/sync$/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const report = decodeReport(message.toString());
+      const matches = Option.isSome(report) && report.value.args[0].args.playing === holdPlaying;
+
+      if (matches || held.length > 0) {
+        held.push({
+          server,
+          message,
+          requestId: Option.isSome(report) ? report.value.requestId : null,
+        });
+      } else server.send(message);
+    });
+    server.onMessage((message) => {
+      const response = decodeResponse(message.toString());
+
+      if (Option.isSome(response)) responses.set(response.value.requestId, response.value.success);
+      socket.send(message);
+    });
+  });
+
+  const release = async (): Promise<void> => {
+    holdPlaying = null;
+    const delayed = held.splice(0);
+
+    for (const frame of delayed) frame.server.send(frame.message);
+
+    await Promise.all(
+      delayed.flatMap(({ requestId }) =>
+        requestId === null ? [] : [expect.poll(() => responses.get(requestId)).toBe(true)],
+      ),
+    );
+  };
+
+  await signIn(page);
+  await page.goto("/settings/playback");
+  await page.getByRole("radio", { name: "Data saver", exact: true }).click();
+  await openFirstAlbum(page);
+  const bar = page.getByRole("region", { name: "Player" });
+  holdPlaying = true;
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expect.poll(() => held.length).toBeGreaterThan(0);
+  await expect.poll(() => isPlayingAudio(page)).toBe(true);
+  cli(apiKey, ["pause"]);
+  await expect.poll(() => isPlayingAudio(page)).toBe(false);
+  await release();
+  expect(decodeState(cli(apiKey, ["now", "--json"])).playing).toBe(false);
+  expect(await isPlayingAudio(page)).toBe(false);
+
+  await bar.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(() => isPlayingAudio(page)).toBe(true);
+  holdPlaying = false;
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect.poll(() => held.length).toBeGreaterThan(0);
+  await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).playing).toBe(false);
+  cli(apiKey, ["playback", "seek", "--position-ms", "3000"]);
+  expect(decodeState(cli(apiKey, ["now", "--json"])).positionMs).toBe(3000);
+  await release();
+  expect(decodeState(cli(apiKey, ["now", "--json"])).positionMs).toBe(3000);
+
+  cli(apiKey, ["resume"]);
+  await expect.poll(() => isPlayingAudio(page)).toBe(true);
+  holdPlaying = false;
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect.poll(() => held.length).toBeGreaterThan(0);
+  await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).playing).toBe(false);
+  cli(apiKey, ["resume"]);
+  await expect.poll(() => isPlayingAudio(page)).toBe(true);
+  await release();
+  expect(decodeState(cli(apiKey, ["now", "--json"])).playing).toBe(true);
+  expect(await isPlayingAudio(page)).toBe(true);
+});

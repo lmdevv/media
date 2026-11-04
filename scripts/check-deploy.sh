@@ -82,7 +82,7 @@ for name in "${user_facing[@]}"; do
 done
 
 mapfile -t jellyfin_refs < <(
-  git ls-files -z -- ':!*.md' |
+  git ls-files -z -- ':!*.md' ':!legacy' |
     xargs -0 grep -ohE 'jellyfin/jellyfin:[0-9][0-9.]*(@sha256:[0-9a-f]{64})?' 2>/dev/null | sort -u
 )
 ((${#jellyfin_refs[@]} > 0)) || fail "found no Jellyfin test image reference"

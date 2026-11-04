@@ -1,0 +1,131 @@
+import type { DeviceId } from "@music/commands/ids";
+import type { Track } from "@music/commands/models";
+import { loadDeviceId, readItem, writeItem } from "@music/player/device-identity";
+import type { KeyValueStorage } from "@music/player/device-identity";
+import type { NowPlayingControls } from "@music/player/playback-controller";
+import type { StreamQuality } from "@music/player/stream-quality";
+import { Option, Schema } from "effect";
+import { requireNativeModule } from "expo";
+import type { EventEmitter } from "expo";
+import { randomUUID } from "expo-crypto";
+import { deviceName, modelName } from "expo-device";
+import * as SecureStore from "expo-secure-store";
+import { AppState } from "react-native";
+
+import { DEVICE_FAMILY } from "../lib/this-device";
+import type { NativeEngine } from "./native-engine";
+import { parseQuality } from "./player-state";
+
+const QUALITY_KEY = "music.streamQuality";
+
+const DOWNLOAD_QUALITY_KEY = "music.downloadQuality";
+
+const storage: KeyValueStorage = {
+  getItem: (key) => SecureStore.getItem(key),
+  setItem: (key, value) => {
+    SecureStore.setItem(key, value);
+  },
+};
+
+/** This phone's stable device ID, made on first use and kept in the keychain. */
+export const loadPhoneId = (): DeviceId => loadDeviceId(storage, randomUUID);
+
+/**
+ * How this device names itself in the device list: its name in Settings where iOS shares it, else
+ * the model ("iPhone 17"), else what it is ("iPad").
+ */
+export const phoneName = (): string => deviceName ?? modelName ?? DEVICE_FAMILY;
+
+export const loadQuality = (): StreamQuality => parseQuality(readItem(storage, QUALITY_KEY));
+
+export const saveQuality = (quality: StreamQuality): void => {
+  writeItem(storage, QUALITY_KEY, quality);
+};
+
+const DownloadQuality = Schema.Literals(["high", "lossless"]);
+
+export type DownloadQuality = typeof DownloadQuality.Type;
+
+const decodeDownloadQuality = Schema.decodeUnknownOption(DownloadQuality);
+
+/** The saved download quality; `high` until someone picks lossless, or when the value is unknown. */
+export const loadDownloadQuality = (): DownloadQuality =>
+  Option.getOrElse(decodeDownloadQuality(readItem(storage, DOWNLOAD_QUALITY_KEY)), () => "high");
+
+/** Saves the download quality for this phone. */
+export const saveDownloadQuality = (quality: DownloadQuality): void => {
+  writeItem(storage, DOWNLOAD_QUALITY_KEY, quality);
+};
+
+/** Calls `listener` each time the app comes back to the screen. */
+export const onForeground = (listener: () => void): (() => void) => {
+  const subscription = AppState.addEventListener("change", (state) => {
+    if (state === "active") listener();
+  });
+
+  return () => {
+    subscription.remove();
+  };
+};
+
+const remoteCommands =
+  requireNativeModule<EventEmitter<{ nextTrack: () => void; previousTrack: () => void }>>(
+    "RemoteCommands",
+  );
+
+const nothingToStop = (): void => {};
+
+const listenForTrackCommands = (handlers: {
+  readonly next: () => void;
+  readonly previous: () => void;
+}): (() => void) => {
+  const subscriptions = [
+    remoteCommands.addListener("nextTrack", () => {
+      handlers.next();
+    }),
+    remoteCommands.addListener("previousTrack", () => {
+      handlers.previous();
+    }),
+  ];
+
+  return () => {
+    for (const subscription of subscriptions) subscription.remove();
+  };
+};
+
+/**
+ * The lock screen, Control Center, headphones, and CarPlay. expo-audio routes play, pause, and
+ * scrubbing to the playing AVPlayer itself, which the engine sees as status changes. Next and
+ * previous come from the `RemoteCommands` module and go to the controller's handlers, which ask
+ * the server to move the queue. `artwork` names the cover to show for a song: its downloaded
+ * file when this phone holds one, so the cover shows without the server.
+ */
+export const lockScreenControls = (
+  engine: NativeEngine,
+  artwork: (track: Track) => string | null,
+): NowPlayingControls => {
+  let shown: Track | null = null;
+  let stopListening = nothingToStop;
+
+  return {
+    setHandlers: (handlers) => {
+      stopListening();
+      stopListening = handlers === null ? nothingToStop : listenForTrackCommands(handlers);
+    },
+    show: (track) => {
+      if (track?.id === shown?.id && track?.title === shown?.title) return;
+      shown = track;
+
+      engine.setLockScreen(
+        track === null
+          ? null
+          : {
+              title: track.title,
+              artist: track.artist,
+              album: track.album,
+              artworkUrl: artwork(track),
+            },
+      );
+    },
+  };
+};

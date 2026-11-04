@@ -1,0 +1,54 @@
+import tailwindcss from "@tailwindcss/vite";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+import type { Plugin } from "vite";
+
+const BODY_FONT = /^assets\/inter-latin-wght-normal-[\w-]+\.woff2$/;
+
+const preloadBodyFont = (): Plugin => ({
+  name: "music:preload-body-font",
+  apply: "build",
+  transformIndexHtml: {
+    order: "post",
+    handler: (_html, { bundle }) => {
+      const font = Object.values(bundle ?? {}).find((output) => BODY_FONT.test(output.fileName));
+
+      if (font === undefined) {
+        throw new Error("The Inter Latin font file is missing from the build; update BODY_FONT");
+      }
+
+      return [
+        {
+          tag: "link",
+          attrs: {
+            rel: "preload",
+            as: "font",
+            type: "font/woff2",
+            href: `/${font.fileName}`,
+            crossorigin: true,
+          },
+          injectTo: "head",
+        },
+      ];
+    },
+  },
+});
+
+export default defineConfig({
+  server: {
+    port: 3001,
+  },
+  resolve: {
+    tsconfigPaths: true,
+  },
+  plugins: [
+    tailwindcss(),
+    tanstackRouter({
+      target: "react",
+      autoCodeSplitting: true,
+    }),
+    react(),
+    preloadBodyFont(),
+  ],
+});
