@@ -62,7 +62,6 @@ export const refundAttempt = async (ctx: Ctx, limit: RateLimit, now: number): Pr
   await store(ctx, limit, row, Math.min(limit.perHour, available + 1), now);
 };
 
-/** Fills the bucket again, for a password someone has just reset. */
 export const clearAttempts = async (ctx: Ctx, limit: RateLimit): Promise<void> => {
   const row = await rowOf(ctx, limit);
 

@@ -14,7 +14,6 @@ export const scopes = ["public", "signed-in", ...credentialScopes] as const;
 /** A scope a command can require. */
 export type Scope = (typeof scopes)[number];
 
-/** The roles an admin can give someone (ADR 0005). */
 export const assignableRoles = ["admin", "member"] as const;
 
 /** A user's platform role. The owner is the admin who holds the server; only a handover moves it. */

@@ -120,7 +120,6 @@ export default defineSchema({
     .index("by_user_code", ["userCode"])
     .index("by_expiration", ["expiresAt"]),
 
-  /** An open invite. Accepting or revoking it deletes the row. */
   invites: defineTable({
     /** SHA-256 of the secret half of the invite code, hex. */
     secretHash: v.string(),
@@ -129,14 +128,12 @@ export default defineSchema({
     expiresAt: v.number(),
   }).index("by_expiration", ["expiresAt"]),
 
-  /** A one-time password reset link. Using it deletes the row. */
   resetLinks: defineTable({
     /** SHA-256 of the secret half of the link code, hex. */
     secretHash: v.string(),
     userId: v.id("users"),
     madeBy: v.id("users"),
-    /** The user's `sessionGeneration` when the link was made; ending their sessions voids it. */
-    generation: v.number(),
+    sessionGeneration: v.number(),
     expiresAt: v.number(),
   }).index("by_expiration", ["expiresAt"]),
 

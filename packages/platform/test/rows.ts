@@ -17,10 +17,6 @@ const convex = (args: ReadonlyArray<string>): string =>
     stdio: ["ignore", "pipe", "ignore"],
   });
 
-/**
- * Appends rows to a table with `convex import`, the admin import path, for a row a test cannot
- * wait for, such as an invite that expired a second ago.
- */
 export const importRows = <Table extends TableNames>(
   table: Table,
   rows: ReadonlyArray<WithoutSystemFields<Doc<Table>>>,
@@ -36,7 +32,6 @@ export const importRows = <Table extends TableNames>(
   }
 };
 
-/** The newest rows of a table as `convex data` prints them, one JSON object per line. */
 export const newestRows = (table: TableNames, limit = 200): ReadonlyArray<string> =>
   convex(["data", table, "--format", "jsonl", "--order", "desc", "--limit", String(limit)])
     .split("\n")

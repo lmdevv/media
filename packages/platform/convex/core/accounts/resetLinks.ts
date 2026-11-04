@@ -19,24 +19,17 @@ import {
 import { endUserKeys, endUserSessions, openSession, signedIn } from "../sessions";
 import { manages } from "./users";
 
-/** A reset link code is `mr_<resetLinkId>.<secret>`. */
 const PREFIX = "mr";
 
 const LINK_MS = 24 * 60 * 60 * 1000;
 
 const DEAD = "This reset link no longer works; ask an admin for a new one";
 
-/** A reset link that still works, and the user whose password it sets. */
 interface OpenLink {
   readonly link: Doc<"resetLinks">;
   readonly user: Doc<"users">;
 }
 
-/**
- * The reset link a code names when its secret matches, it has not expired, the user's sessions
- * have not ended since it was made, and its maker may still manage the user. Refuses every other
- * case alike with `expired`.
- */
 const openLinkFor = async (db: DatabaseReader, code: string, now: number): Promise<OpenLink> => {
   const parsed = parseSecret(PREFIX, code.trim());
   const id = parsed === null ? null : db.normalizeId("resetLinks", parsed.rowId);
@@ -55,17 +48,12 @@ const openLinkFor = async (db: DatabaseReader, code: string, now: number): Promi
 
   return user !== null &&
     maker !== null &&
-    user.sessionGeneration === link.generation &&
+    user.sessionGeneration === link.sessionGeneration &&
     manages({ userId: maker._id, role: maker.role }, user)
     ? { link, user }
     : fail("expired", DEAD);
 };
 
-/**
- * Sets a new password after a reset: ends every session and API key the user had, so whoever
- * else knew the old password is out, and fills their sign-in tries again. Returns the user as
- * stored afterwards.
- */
 export const resetPassword = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   user: Doc<"users">,
@@ -79,7 +67,6 @@ export const resetPassword = async (
   return (await ctx.db.get(user._id)) ?? fail("not_found", "No such user");
 };
 
-/** Stores a new reset link the calling admin made for `userId`. */
 export const insert = internalMutation({
   args: { userId: v.id("users"), secretHash: v.string() },
   returns: v.object({ resetLinkId: v.id("resetLinks"), expiresAt: v.number() }),
@@ -101,7 +88,7 @@ export const insert = internalMutation({
       secretHash,
       userId,
       madeBy: caller.userId,
-      generation: user.sessionGeneration,
+      sessionGeneration: user.sessionGeneration,
       expiresAt,
     });
 
@@ -109,7 +96,6 @@ export const insert = internalMutation({
   },
 });
 
-/** Sets the password a reset link allows and signs the user in, for the `reset` provider. */
 export const redeem = internalMutation({
   args: { code: v.string(), hash: v.string() },
   returns: signedIn,

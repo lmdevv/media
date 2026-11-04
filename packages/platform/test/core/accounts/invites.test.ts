@@ -18,7 +18,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
 
-/** An invite row exactly as stored: decoding refuses any field beyond these. */
 const StoredInvite = Schema.Struct({
   _id: Schema.String,
   _creationTime: Schema.Finite,

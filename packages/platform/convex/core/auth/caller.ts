@@ -53,11 +53,6 @@ export const requireCaller = async (
     : fail("forbidden", `This session lacks the ${scope} scope`);
 };
 
-/**
- * The caller unless it signed in with an API key: a leaked key must not make a credential, an
- * account, a link, or a role that outlives its own revocation. Commands declared `refusesKeys`
- * call it.
- */
 export const refuseKeys = (caller: Caller): Caller =>
   caller.kind === "apiKey"
     ? fail("forbidden", "API keys cannot do this; sign in with a password or a device")

@@ -11,12 +11,6 @@ import { hashNewPassword } from "../lib/passwords";
 import { requireUsername } from "../lib/usernames";
 import type { SignedIn } from "../sessions";
 
-/**
- * The sign-ins that also make or reset an account: first-run setup, accepting an invite, and
- * redeeming a reset link. Each refuses a dead credential before hashing, hashes the new password
- * once, and then makes the account and opens its session in one transaction (ADR 0003).
- */
-
 type Params = Partial<Record<string, Value | undefined>>;
 
 const setupParams = { username: v.string(), password: v.string() };
@@ -25,21 +19,18 @@ const inviteParams = { code: v.string(), username: v.string(), password: v.strin
 
 const resetParams = { code: v.string(), password: v.string() };
 
-/** Checks the `setup` params' shape. */
 export const parseSetup = internalQuery({
   args: setupParams,
   returns: v.object(setupParams),
   handler: (_ctx, args) => args,
 });
 
-/** Checks the `invite` params' shape. */
 export const parseInvite = internalQuery({
   args: inviteParams,
   returns: v.object(inviteParams),
   handler: (_ctx, args) => args,
 });
 
-/** Checks the `reset` params' shape. */
 export const parseReset = internalQuery({
   args: resetParams,
   returns: v.object(resetParams),
@@ -64,7 +55,6 @@ const parseResetParams = makeFunctionReference<
   { readonly code: string; readonly password: string }
 >("core/auth/flows:parseReset");
 
-/** Makes the owner on a server nobody has set up, and signs them in. */
 export const setupProvider = ConvexCredentials<DataModel>({
   id: "setup",
   authorize: async (params, ctx): Promise<SignedIn> => {
@@ -83,7 +73,6 @@ export const setupProvider = ConvexCredentials<DataModel>({
   },
 });
 
-/** Makes the user an invite code asks for, with the username and password they picked. */
 export const inviteProvider = ConvexCredentials<DataModel>({
   id: "invite",
   authorize: async (params, ctx): Promise<SignedIn> => {
@@ -100,7 +89,6 @@ export const inviteProvider = ConvexCredentials<DataModel>({
   },
 });
 
-/** Sets the password a reset link allows, ending every other session and key. */
 export const resetProvider = ConvexCredentials<DataModel>({
   id: "reset",
   authorize: async (params, ctx): Promise<SignedIn> => {

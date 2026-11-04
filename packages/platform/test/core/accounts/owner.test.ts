@@ -4,13 +4,37 @@ import { describe, expect, it } from "vitest";
 
 import { api, internal } from "../../../convex/_generated/api";
 import { runFunction } from "../../admin";
-import { claimOwner, createPerson, refusal, signIn, signInAs, unique } from "../../sign-in";
-import type { SignedIn } from "../../sign-in";
+import { createPerson, ensureOwner, refusal, signIn, signInAs, unique } from "../../sign-in";
+import type { Person, SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
+import type { CoreStack } from "../../stack-env";
 
 const stack = coreStackFromEnvFile();
 
 const whoIs = (signedIn: SignedIn) => signedIn.client.query(api.core.auth.sessions.current, {});
+
+/**
+ * Takes over the stack's owner, whoever it is now, with the host reset, and signs in as them. The
+ * reset ends the owner's other sessions, so no other test file signs in as the owner.
+ */
+const claimOwner = async (
+  core: CoreStack,
+): Promise<{ readonly person: Person; readonly signedIn: SignedIn }> => {
+  const password = `password-${unique()}`;
+
+  await ensureOwner(core);
+
+  const { username } = await runFunction(
+    core,
+    internal.core.accounts.host.resetPassword,
+    { password },
+    Schema.Struct({ username: Schema.String }),
+  );
+
+  const person = { username, password };
+
+  return { person, signedIn: await signInAs(core, person) };
+};
 
 describe.skipIf(stack === undefined)("the owner", { timeout: 120_000 }, () => {
   it("is made exactly once, however many setups race", async () => {

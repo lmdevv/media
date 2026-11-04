@@ -19,7 +19,6 @@ import {
 import { openSession, roleHolds, signedIn } from "../sessions";
 import { insertUser } from "./users";
 
-/** An invite code is `mi_<inviteId>.<secret>`. */
 const PREFIX = "mi";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -30,16 +29,11 @@ const DAYS_MAX = 30;
 
 const DEAD = "This invite no longer works; ask an admin for a new one";
 
-/** An invite that still works, and the admin who made it. */
 interface OpenInvite {
   readonly invite: Doc<"invites">;
   readonly invitedBy: Doc<"users">;
 }
 
-/**
- * The invite `inviteId` names when `secretHash` matches it, it has not expired, and its maker is
- * still an admin. Null for every other case alike.
- */
 const openInvite = async (
   db: DatabaseReader,
   inviteId: string,
@@ -58,7 +52,6 @@ const openInvite = async (
     : null;
 };
 
-/** The open invite a code names, or an `expired` refusal. */
 const openInviteFor = async (db: DatabaseReader, code: string, now: number) => {
   const parsed = parseSecret(PREFIX, code.trim());
 
@@ -70,7 +63,6 @@ const openInviteFor = async (db: DatabaseReader, code: string, now: number) => {
   return found ?? fail("expired", DEAD);
 };
 
-/** Stores a new invite for the calling admin. */
 export const insert = internalMutation({
   args: { secretHash: v.string(), role: assignableRole, expiresInDays: v.number() },
   returns: v.object({ inviteId: v.id("invites"), expiresAt: v.number() }),
@@ -94,7 +86,6 @@ export const insert = internalMutation({
   },
 });
 
-/** Makes the user an invite code asks for and signs them in, for the `invite` provider. */
 export const accept = internalMutation({
   args: { code: v.string(), username: v.string(), hash: v.string() },
   returns: signedIn,

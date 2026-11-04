@@ -35,7 +35,6 @@ export interface SignedIn {
   readonly sessionId: Id<"authSessions">;
 }
 
-/** `SignedIn` as the result of the internal mutations providers call. */
 export const signedIn = v.object({ userId: v.id("users"), sessionId: v.id("authSessions") });
 
 /** What opens a session. */
@@ -55,22 +54,15 @@ const isLive = (session: Session, user: Doc<"users">, now: number): boolean =>
   session.expirationTime > now &&
   session.generation === currentGeneration(session.kind, user);
 
-/** The credential scopes each role may hold (ADR 0005). */
 const roleScopes = {
   owner: credentialScopes,
   admin: credentialScopes,
   member: ["account"],
 } as const satisfies { readonly [R in Role]: ReadonlyArray<CredentialScope> };
 
-/** Whether someone with `role` may hold `scope`. */
 export const roleHolds = (role: Role, scope: CredentialScope): boolean =>
   roleScopes[role].some((held) => held === scope);
 
-/**
- * The scopes a live session holds now: every scope its user's role may hold for a password
- * session, and its grant cut down to those for a key or device session. A demotion takes effect
- * on the next call.
- */
 export const heldScopes = (session: Session, user: Doc<"users">): Array<CredentialScope> =>
   session.kind === "password"
     ? [...roleScopes[user.role]]

@@ -14,17 +14,14 @@ import { hashNewPassword, storePassword } from "../lib/passwords";
 import { requireUsername } from "../lib/usernames";
 import { openSession, roleHolds, signedIn } from "../sessions";
 
-/** Someone acting on accounts: a caller, or the maker of a link. */
 export interface Actor {
   readonly userId: Id<"users">;
   readonly role: Role;
 }
 
-/** Whether `actor` may change `target`'s account: an admin, acting on someone else, who is not the owner. */
 export const manages = (actor: Actor, target: Doc<"users">): boolean =>
   roleHolds(actor.role, "admin") && actor.userId !== target._id && target.role !== "owner";
 
-/** Why `actor` may not change `target`'s account, as a refusal. */
 const refuseToManage = (actor: Actor, target: Doc<"users">): never => {
   if (target.role === "owner") {
     return fail("forbidden", "No admin can change the owner's account");
@@ -35,7 +32,6 @@ const refuseToManage = (actor: Actor, target: Doc<"users">): never => {
     : fail("forbidden", "Only an admin can change someone's account");
 };
 
-/** The owner, or null before setup. Throws if a second owner ever exists. */
 export const ownerOf = (db: DatabaseReader): Promise<Doc<"users"> | null> =>
   db
     .query("users")
@@ -51,10 +47,6 @@ const refuseTakenKey = async (db: DatabaseReader, usernameKey: string): Promise<
   if (taken !== null) fail("conflict", "That username is taken");
 };
 
-/**
- * Makes a user with a password hash: the only code that inserts into `users`. The first user must
- * be the owner and there is never a second, so the owner comes only from setup.
- */
 export const insertUser = async (
   ctx: Pick<MutationCtx, "db">,
   user: { readonly username: string; readonly hash: string; readonly role: Role },
@@ -84,7 +76,6 @@ export const insertUser = async (
   return (await ctx.db.get(userId)) ?? fail("not_found", "The new user vanished");
 };
 
-/** Changes a user's username; a change of case alone keeps the folded key. */
 export const renameUser = async (
   ctx: Pick<MutationCtx, "db">,
   user: Doc<"users">,
@@ -97,7 +88,6 @@ export const renameUser = async (
   await ctx.db.patch(user._id, parsed);
 };
 
-/** Makes the owner and signs them in, for the `setup` provider, while the server has none. */
 export const setUp = internalMutation({
   args: { username: v.string(), hash: v.string() },
   returns: signedIn,
@@ -111,7 +101,6 @@ export const setUp = internalMutation({
   },
 });
 
-/** Stores the user an admin typed in, checking the admin again. */
 export const insert = internalMutation({
   args: { username: v.string(), hash: v.string(), role: assignableRole },
   returns: v.id("users"),

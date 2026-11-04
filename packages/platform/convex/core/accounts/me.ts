@@ -22,10 +22,6 @@ import { renameUser } from "./users";
 const callerUser = async (ctx: Pick<MutationCtx, "db">, caller: Caller) =>
   (await ctx.db.get(caller.userId)) ?? fail("unauthenticated", "Sign in first");
 
-/**
- * Takes a sign-in try for checking the caller's current password, as a password sign-in would,
- * and returns the hash to check it against.
- */
 export const attempt = internalMutation({
   args: {},
   returns: v.union(
@@ -46,10 +42,6 @@ export const attempt = internalMutation({
   },
 });
 
-/**
- * Swaps the caller's password when it is still the one they proved, gives the try back, and ends
- * every other password and device session.
- */
 export const replace = internalMutation({
   args: { checkedHash: v.string(), hash: v.string() },
   returns: v.null(),

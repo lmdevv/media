@@ -8,11 +8,6 @@ const SWEEP_BATCH = 500;
 
 const HOUR_MS = 60 * 60 * 1000;
 
-/**
- * Deletes sign-in rows nothing can use anymore, a batch of each at a time, and runs again while a
- * batch comes back full: expired refresh tokens, sessions, invites, and reset links, device codes
- * an hour past their expiry, and rate limit buckets idle long enough to be full again.
- */
 export const sweep = internalMutation({
   args: {},
   returns: v.null(),

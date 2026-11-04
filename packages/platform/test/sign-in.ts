@@ -24,7 +24,6 @@ const Token = Schema.Struct({ token: Schema.String, refreshToken: Schema.String 
 
 const decodeTokens = Schema.decodeUnknownSync(Token);
 
-/** A short random suffix for usernames and passwords no other test uses. */
 export const unique = (): string => Math.random().toString(36).slice(2, 10);
 
 const setUps = new Map<string, Promise<void>>();
@@ -46,10 +45,6 @@ const setUpOnce = async (stack: CoreStack): Promise<void> => {
   }
 };
 
-/**
- * Sets the stack's server up with an owner nobody keeps the password of, unless it has one. Test
- * files run this in parallel on a fresh stack, and exactly one setup wins.
- */
 export const ensureOwner = (stack: CoreStack): Promise<void> => {
   const setUp = setUps.get(stack.url) ?? setUpOnce(stack);
 
@@ -58,7 +53,6 @@ export const ensureOwner = (stack: CoreStack): Promise<void> => {
   return setUp;
 };
 
-/** Creates a member, or a user with `role`, with the deployment's admin key. */
 export const createPerson = async (
   stack: CoreStack,
   label = "person",
@@ -75,29 +69,6 @@ export const createPerson = async (
   );
 
   return person;
-};
-
-/**
- * Takes over the stack's owner, whoever it is now, with the host reset, and signs in as them. It
- * ends the owner's other sessions, so only one test file may call it.
- */
-export const claimOwner = async (
-  stack: CoreStack,
-): Promise<{ readonly person: Person; readonly signedIn: SignedIn }> => {
-  const password = `password-${unique()}`;
-
-  await ensureOwner(stack);
-
-  const { username } = await runFunction(
-    stack,
-    internal.core.accounts.host.resetPassword,
-    { password },
-    Schema.Struct({ username: Schema.String }),
-  );
-
-  const person = { username, password };
-
-  return { person, signedIn: await signInAs(stack, person) };
 };
 
 const clientWith = (stack: CoreStack, token: string): ConvexHttpClient => {

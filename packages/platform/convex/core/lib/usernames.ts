@@ -15,7 +15,6 @@ export const parseUsername = (typed: string): Username | null => {
   return USERNAME.test(username) ? { username, usernameKey: username.toLowerCase() } : null;
 };
 
-/** The username in `typed`, or an `invalid_args` refusal that states the rules. */
 export const requireUsername = (typed: string): Username =>
   parseUsername(typed) ??
   fail(
