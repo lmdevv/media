@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
 # Maps a diff to the workspaces it affects, and runs typecheck, lint, or test on just those.
 #
-#   scripts/changed-packages.sh --staged [task]       the staged changes (the pre-commit hook)
+#   scripts/changed-packages.sh --staged [task]       the staged changes
 #   scripts/changed-packages.sh --since <ref> [task]  changes from the merge base of <ref> to HEAD
-#   scripts/changed-packages.sh --all [task]          every workspace (CI on main)
+#   scripts/changed-packages.sh --all [task]          every workspace
 #   scripts/changed-packages.sh - [task]              changed paths read from stdin, one per line
 #
 # With no task it prints each affected workspace directory on its own line: `.` for the root
 # workspace, then its packages, then legacy/music. A change inside a package affects that package
-# and every package that depends on it, as Turborepo's `...{./<dir>}` filter selects them. A change
-# to the root workspace affects every package. `route` below sends the remaining paths to a
-# workspace, or to none when no check reads them.
+# and every package that depends on it. A change to the root workspace affects every package.
 #
 # With a task it runs `pnpm <task>` over the affected packages of the root workspace, over the whole
-# workspace when `.` is affected, or not at all. legacy/music has its own install and checks.
+# workspace when `.` is affected, or not at all. It never runs a task over legacy/music.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,11 +22,9 @@ usage() {
   exit 2
 }
 
-# Prints the lines of a captured output, and nothing for an empty one.
-lines() { [[ -z "$1" ]] || printf '%s\n' "$1"; }
+nonempty_lines() { [[ -z "$1" ]] || printf '%s\n' "$1"; }
 
-# Prints the directory of each package that `turbo ls <filters>` selects. turbo prints its version
-# on stderr, so stderr is shown only when it fails.
+# turbo prints its version on stderr, so stderr is shown only when it fails.
 turbo_dirs() {
   local json
   if ! json="$(node_modules/.bin/turbo ls "$@" --output=json 2>/dev/null)"; then
@@ -79,12 +75,12 @@ case "$mode" in
   *) usage ;;
 esac
 listed="$(turbo_dirs)"
-mapfile -t packages < <(lines "$listed" | sort)
+mapfile -t packages < <(nonempty_lines "$listed" | sort)
 
 if [[ "$mode" == --all ]]; then
   routed=(. legacy/music)
 else
-  mapfile -t paths < <(lines "$changed")
+  mapfile -t paths < <(nonempty_lines "$changed")
   mapfile -t routed < <(for path in "${paths[@]}"; do route "$path"; done | sort -u)
 fi
 
@@ -101,7 +97,7 @@ if $whole; then
   affected=("${packages[@]}")
 elif ((${#filters[@]} > 0)); then
   dependents="$(turbo_dirs "${filters[@]}")"
-  mapfile -t affected < <(lines "$dependents" | sort)
+  mapfile -t affected < <(nonempty_lines "$dependents" | sort)
 else
   affected=()
 fi

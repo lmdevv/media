@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  # A pull request is checked against its base, the merge commit's first parent; main checks all.
+  # pull_request runs check out GitHub's merge commit, whose first parent is the base branch tip.
   CHANGED: ${{ github.event_name == 'pull_request' && '--since HEAD^1' || '--all' }}
 
 jobs:
