@@ -117,7 +117,7 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/media:main
 The side is ready only after a line like this prints:
 
 ```text
-ready: http://localhost:40773 in 95s (run verify-movies, side after, project movies-verify-verify-movies-after, image movies:verify-verify-movies, library ghcr.io/lmdevv/movies-demo-library:v1, evidence …)
+ready: http://localhost:40773 in 95s (run verify-movies, side after, project movies-verify-verify-movies-after, image movies:verify-verify-movies, library ghcr.io/lmdevv/media-demo-library:v1, evidence …)
 ```
 
 A warm `up` takes about 90 seconds: under 30 to rebuild the image after a small change, about 15
@@ -142,12 +142,13 @@ doesn't hold them.
 Every side starts from the same data, so evidence from any machine looks alike and shows nothing
 personal or unlicensed.
 
-- **Library.** `ghcr.io/lmdevv/movies-demo-library:v1` holds the full set of
+- **Library.** `ghcr.io/lmdevv/media-demo-library:v1` holds the full set of
   `scripts/demo-library.sh`: six movies (Big Buck Bunny, Elephants Dream, Sintel, Tears of Steel,
   Cosmos Laundromat, and the four-version `[movies] Feature Test`) and two shows (Caminandes, 3
-  episodes, and Pioneer One, 6), about 7 GB with `CREDITS.md`. It's a data-only image that every
-  side mounts read-only, so Docker keeps one copy per machine. A published version never changes;
-  `scripts/build-demo-library.sh` builds it (`--from ~/movies-demo` reuses a finished download), and
+  episodes, and Pioneer One, 6), about 7 GB with `CREDITS.md`, and five albums under `Music` that
+  the movies stack does not scan. It's a data-only image that every side mounts read-only, so
+  Docker keeps one copy per machine. A published version never changes;
+  `scripts/build-demo-library.sh` builds it from the published movies and music demo images, and
   the Demo library workflow publishes the version in `deploy/demo-library/image`. When the pull
   fails, build it locally. [docs/demo-library.md](../../../docs/demo-library.md) has the details.
 - **People.** Everyone's password is `password123`, and everyone has a CLI:

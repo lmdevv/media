@@ -94,7 +94,7 @@ done
 scripts/check-version.sh >/dev/null || fail "the workspace packages disagree on the release version"
 
 demo_library="$(<deploy/demo-library/image)"
-[[ "$(sed -n 's/^ *source: \(ghcr\.io\/lmdevv\/movies-demo-library:.*\)$/\1/p' deploy/compose/compose.demo.yaml)" == "$demo_library" ]] ||
+[[ "$(sed -n 's/^ *source: \(ghcr\.io\/lmdevv\/media-demo-library:.*\)$/\1/p' deploy/compose/compose.demo.yaml)" == "$demo_library" ]] ||
   fail "compose.demo.yaml does not mount deploy/demo-library/image ('$demo_library')"
 
 if ((failures > 0)); then

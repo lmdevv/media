@@ -1,5 +1,5 @@
-# The demo library instead of MEDIA_LIBRARY: Creative Commons films and shows in a data-only
-# image, mounted read-only at /media/library (Docker 28 or later). From this folder:
+# The demo library instead of MEDIA_LIBRARY: Creative Commons films, shows, and music in a
+# data-only image, mounted read-only at /media/library (Docker 28 or later). From this folder:
 #
 #   docker compose -f compose.yaml -f compose.demo.yaml up -d
 #
@@ -9,5 +9,5 @@ services:
   movies:
     volumes:
       - type: image
-        source: ghcr.io/lmdevv/movies-demo-library:v1
+        source: ghcr.io/lmdevv/media-demo-library:v1
         target: /media/library
