@@ -65,18 +65,10 @@ describe("CLI placement", () => {
     });
   });
 
-  it("keeps a product domain's word, and puts its admin commands under admin", () => {
-    expect(cliPath({ name: "movies.titles.list", domain: "movies", scope: "signed-in" })).toEqual([
-      "movies",
-      "titles",
-      "list",
-    ]);
-    expect(cliPath({ name: "music.scans.start", domain: "music", scope: "admin" })).toEqual([
-      "admin",
-      "music",
-      "scans",
-      "start",
-    ]);
+  it("puts a content domain's commands under its own group", () => {
+    expect(cliPath({ name: "movies.titles.list", domain: "movies", scope: "movies:read" })).toEqual(
+      ["movies", "titles", "list"],
+    );
   });
 
   it("refuses two commands on one CLI path", () => {
@@ -86,8 +78,8 @@ describe("CLI placement", () => {
         declared("core.people.users.remove", "admin"),
       ]),
     ).toEqual([
-      "core.accounts.users.remove: refused, its CLI path `media admin users remove` is core.people.users.remove's or starts it (rename a module or function)",
-      "core.people.users.remove: refused, its CLI path `media admin users remove` is core.accounts.users.remove's or starts it (rename a module or function)",
+      "core.accounts.users.remove: refused, its CLI path `media admin users remove` is also core.people.users.remove's (rename a module or function)",
+      "core.people.users.remove: refused, its CLI path `media admin users remove` is also core.accounts.users.remove's (rename a module or function)",
     ]);
   });
 

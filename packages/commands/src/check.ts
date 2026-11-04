@@ -390,7 +390,7 @@ export const refusalMessage = (refusal: Refusal): string =>
       "optional-result": () =>
         "the result cannot be optional (return v.union(..., v.null()) instead)",
       "cli-clash": (clash) =>
-        `its CLI path \`media ${clash.path}\` is ${clash.other}'s or starts it (rename a module or function)`,
+        `its CLI path \`media ${clash.path}\` is also ${clash.other}'s (rename a module or function)`,
     }),
   )}`;
 

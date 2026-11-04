@@ -2,9 +2,9 @@ import type { CheckedCommand, Refusal, WireField } from "./check.ts";
 import type { Domain } from "./command.ts";
 
 /**
- * The first word after `media` for every generated command. `admin` holds every admin-scoped
- * command of every domain (ADR 0021), `auth` the rest of the core's, and each product domain its
- * own.
+ * The first word after `media` for every generated command. `admin` holds the admin-scoped
+ * commands (ADR 0021), `auth` the rest of the core's, and each content domain its own; a content
+ * domain's commands declare only that domain's scopes, so none is admin-scoped.
  */
 export const cliGroups = ["auth", "admin", "movies", "music"] as const;
 
@@ -21,20 +21,21 @@ const kebab = (segment: string): string =>
   segment.replaceAll(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);
 
 /**
- * A command's words after `media`: its group, the domain again for a product domain's admin
- * command, then its module's last segment and its function, in kebab case.
- * `core.accounts.users.setRole` is `admin users set-role`, `core.auth.sessions.endAll` is
- * `auth sessions end-all`, and an admin-scoped `music.scans.start` would be
- * `admin music scans start`. Middle module segments drop out.
+ * A command's words after `media`: its group, then its module's last segment and its function,
+ * in kebab case. `core.accounts.users.setRole` is `admin users set-role`,
+ * `core.auth.sessions.endAll` is `auth sessions end-all`, and `movies.titles.list` is
+ * `movies titles list`. Middle module segments drop out.
  */
 export const cliPath = (
   command: Pick<CheckedCommand, "name" | "domain" | "scope">,
-): readonly [CliGroup, ...Array<string>] => {
+): readonly [CliGroup, string, string] => {
   const [module = "", fn = ""] = command.name.split(".").slice(-2);
-  const admin = command.scope === "admin";
-  const domainWord = admin && command.domain !== "core" ? [command.domain] : [];
 
-  return [admin ? "admin" : DOMAIN_GROUPS[command.domain], ...domainWord, kebab(module), kebab(fn)];
+  return [
+    command.scope === "admin" ? "admin" : DOMAIN_GROUPS[command.domain],
+    kebab(module),
+    kebab(fn),
+  ];
 };
 
 /** An argument that never travels on the command line, and the variable that supplies it. */
@@ -66,10 +67,7 @@ export const secretsOf = (args: ReadonlyArray<WireField>): ReadonlyArray<Secret>
 export const isPaginated = (args: ReadonlyArray<WireField>): boolean =>
   args.some((field) => field.name === "paginationOpts");
 
-/**
- * Refuses two commands on one CLI path, and a path that starts another, which would make one
- * command's words a group of the other's.
- */
+/** Refuses two commands on one CLI path. */
 export const cliRefusals = (commands: ReadonlyArray<CheckedCommand>): ReadonlyArray<Refusal> => {
   const placed = commands.map((command) => ({
     name: command.name,
@@ -78,7 +76,7 @@ export const cliRefusals = (commands: ReadonlyArray<CheckedCommand>): ReadonlyAr
 
   return placed.flatMap(({ name, path }): ReadonlyArray<Refusal> =>
     placed.flatMap((other): ReadonlyArray<Refusal> =>
-      other.name !== name && (other.path === path || other.path.startsWith(`${path} `))
+      other.name !== name && other.path === path
         ? [{ reason: "cli-clash", name, other: other.name, path }]
         : [],
     ),

@@ -64,7 +64,8 @@ export const coreCommandNamed = (name: string): Option.Option<CoreCommand> =>
 
 const SUMMARIES = {
   auth: "Sign in to the core server, and manage your sessions, API keys, device sign-ins, and account",
-  admin: "Manage the core's users, invites, and reset links; reset a password on the server host",
+  admin:
+    "Manage the core's users, invites, reset links, groups, and restrictions; reset a password on the server host",
   movies: "Movies and shows",
   music: "Music",
 } as const satisfies { readonly [Group in CoreGroup]: string };

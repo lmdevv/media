@@ -46,11 +46,11 @@ The first build of the shell (p3-cli-shell, D53) settled how generated commands 
 while the old movies commands stay where they are.
 
 - **Placement.** One rule in `packages/commands/src/cli.ts` places every command. An
-  admin-scoped command goes under `media admin`, with its domain word when it is a product
-  domain's (`admin music scans start`). The core's other commands go under `media auth`, and a
-  product domain's under its own group. The module's last segment and the function follow, in
-  kebab case: `core.accounts.users.setRole` is `media admin users set-role`. The generator
-  refuses two commands on one path, or a path that starts another, before writing anything.
+  admin-scoped command goes under `media admin` and the core's other commands under
+  `media auth`. A content domain's commands declare only that domain's scopes (ADR 0005), so they
+  all go under its own group. The module's last segment and the function follow, in kebab case:
+  `core.accounts.users.setRole` is `media admin users set-role`. The generator refuses two
+  commands on one path before writing anything.
 - **The CLI target.** The generator writes `apps/cli/src/generated/commands.ts`: each command's
   path, summary, scope, schemas, and the platform SDK method that runs it. `coreCommand` in
   `apps/cli/src/core/command.ts` holds the policy: flags, `--json`, help, `media commands`, and

@@ -15,7 +15,7 @@ Read the one file that covers the task, and no other.
 | Task                                                                                                                                                                               | Read                 |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
 | Movies and shows: search, play, progress, watch rooms, libraries, scans, metadata, imports, backups, playback diagnostics, and the movies server's own sign-in, profiles, and keys | `movies.md`          |
-| The core: sign-in, sessions, API keys, device sign-ins, your username and password, users, roles, invites, and reset links                                                         | `references/core.md` |
+| The core: sign-in, sessions, API keys, device sign-ins, your username and password, users, roles, invites, reset links, groups, and restrictions                                   | `references/core.md` |
 | Music                                                                                                                                                                              | No commands yet      |
 
 [media] is moving onto one core server. Until the movies port lands there are two servers. The
