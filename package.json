@@ -14,7 +14,7 @@
     "dev:server": "turbo run dev -F @media/backend --",
     "dev:setup": "turbo run dev:setup -F @media/backend --",
     "prepare": "effect-tsgo patch --typescript --oxlint && lefthook install",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && tsc --noEmit -p scripts",
     "lint": "oxlint --disable-nested-config",
     "lint:fix": "oxlint --disable-nested-config --fix",
     "fmt": "oxfmt --disable-nested-config",

@@ -30,7 +30,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --filter=. --ignore-scripts
       - id: scope
-        run: echo "workspaces=$(scripts/changed-packages.sh $CHANGED | jq -Rsc 'split("\n") | map(select(. != ""))')" >> "$GITHUB_OUTPUT"
+        run: |
+          workspaces="$(scripts/changed-packages.sh $CHANGED)"
+          echo "workspaces=$(jq -Rsc 'split("\n") | map(select(. != ""))' <<<"$workspaces")" >> "$GITHUB_OUTPUT"
 
   check:
     runs-on: ubuntu-latest
@@ -47,7 +49,9 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pnpm install --frozen-lockfile
       - id: scope
-        run: echo "workspaces=$(scripts/changed-packages.sh $CHANGED | jq -Rsc 'split("\n") | map(select(. != ""))')" >> "$GITHUB_OUTPUT"
+        run: |
+          workspaces="$(scripts/changed-packages.sh $CHANGED)"
+          echo "workspaces=$(jq -Rsc 'split("\n") | map(select(. != ""))' <<<"$workspaces")" >> "$GITHUB_OUTPUT"
       - run: scripts/changed-packages.sh $CHANGED typecheck
       - run: scripts/changed-packages.sh $CHANGED lint
       - run: pnpm fmt:check
@@ -185,6 +189,7 @@ jobs:
       contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/cli')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/backend')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

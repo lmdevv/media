@@ -75,7 +75,10 @@ scripts/check-deploy.sh  # installs pin one Convex backend and expose every medi
 ```
 
 `typecheck`, `lint`, `fmt:check`, `test`, `knip`, and `scripts/check-deploy.sh` run in the lefthook
-pre-commit hook and in CI. All must pass before every commit. A new media service setting goes in
+pre-commit hook and in CI. All must pass before every commit. The hook and pull request CI run
+typecheck, lint, and test only over the packages a diff affects and their dependents, and run
+everything when a root config file changes; `scripts/changed-packages.sh` prints that set. CI on
+`main` runs everything. A new media service setting goes in
 `deploy/compose` (entrypoint, `compose.yaml`, `.env.example`), the root `.env.example`,
 `nix/module.nix`, and both READMEs; `check-deploy.sh` names what is missing.
 
@@ -86,11 +89,12 @@ output directory derive from the worktree name; `scripts/dev-stack.sh env` print
 `down` / `destroy` stop or remove the stack. Commit the regenerated `convex/_generated/`.
 
 `legacy/music` is a nested workspace outside the root one, with its own install, lockfile, and
-checks. Root checks and the hook skip it; CI runs its checks in the `legacy/music checks` job. Read
-`legacy/music/CLAUDE.md` before working there, and run its checks before committing there:
+checks. Root checks skip it. A commit that touches it runs its typecheck, lint, fmt:check, test,
+and knip in the hook's `legacy` job, which needs its own install, and CI runs them in the
+`legacy/music checks` job. Read `legacy/music/CLAUDE.md` before working there:
 
 ```sh
-cd legacy/music && pnpm install && pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test
+cd legacy/music && pnpm install
 ```
 
 The Effect reference lives in `.repos/effect-smol`. Effect 4 stable releases are tagged in
@@ -190,9 +194,11 @@ The example identities must be replaced with the model and tool that actually co
   Node and ffmpeg, in a `systemd-run --user` unit that kills on any denied call. Run it after a
   change to the media service's file or process handling, its dependencies, or the module's
   sandbox. Copy test files with `testing/byte-copies.ts`: `copyFile` calls `fchown`.
-- CI runs `check`, `legacy/music checks`, both stack jobs, the sandbox job, and the Nix job. PRs
-  matching the `paths` in `.github/workflows/image.yml` also run its `build and smoke-test`. `main`
-  has no branch protection, so check every one yourself before merging. Never merge with admin
+- CI runs `check`, `legacy/music checks`, both stack jobs, the sandbox job, and the Nix job. On a
+  PR, the `changed workspaces` job skips each of the last five when the diff does not reach the
+  workspaces it tests. PRs matching the `paths` in `.github/workflows/image.yml` also run its
+  `build and smoke-test`. `main` has no branch protection, so check every one yourself before
+  merging. Never merge with admin
   bypass.
 - Run `/pstack:no-comments` on the diff before `/code-review` when a PR adds or changes comments,
   with or without `/pstack:poteto-mode`. Tell it to keep required `// SAFETY:` comments; its agent

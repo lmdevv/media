@@ -59,6 +59,7 @@ describe("changed-packages.sh", () => {
   it("routes the NixOS module to the media service and the dev stack to the backend", () => {
     expect(affected("nix/module.nix")).toEqual(["apps/media"]);
     expect(affected("scripts/dev-stack.sh")).toEqual(["packages/backend"]);
+    expect(affected("deploy/functions-hash.sh")).toEqual(["packages/backend"]);
   });
 
   it("lists every workspace for --all", () => {
