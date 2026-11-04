@@ -124,6 +124,8 @@ export default defineSchema({
   limitsProbeRows: defineTable({
     group: v.string(),
     position: v.number(),
+    /** Written by the `probe.doublePositions` schema migration; absent until it reaches the row. */
+    doubled: v.optional(v.number()),
   }).index("by_group_position", ["group", "position"]),
 
   /**
@@ -146,4 +148,12 @@ export default defineSchema({
    * done, and a finished job's leftovers are purged in batches (`leases.purgeItems`).
    */
   jobItems: defineTable(jobItemDocument).index("by_job_seq", ["jobId", "seq"]),
+
+  /** Progress of each data migration in `core/schemaMigrations.ts`. */
+  schemaMigrations: defineTable({
+    name: v.string(),
+    /** Where the next batch starts; null before the first batch. */
+    cursor: v.union(v.string(), v.null()),
+    done: v.boolean(),
+  }).index("by_name", ["name"]),
 });

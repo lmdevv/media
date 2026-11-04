@@ -172,5 +172,6 @@ ENV
 cd "${root}/packages/platform"
 pnpm exec convex deploy --yes >/dev/null
 node scripts/configure.ts
+pnpm exec convex run core/schemaMigrations:run >/dev/null
 
 print_env

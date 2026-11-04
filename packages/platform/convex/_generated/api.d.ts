@@ -32,6 +32,7 @@ import type * as core_lib_secrets from "../core/lib/secrets.js";
 import type * as core_lib_server from "../core/lib/server.js";
 import type * as core_lib_usernames from "../core/lib/usernames.js";
 import type * as core_limitsProbe from "../core/limitsProbe.js";
+import type * as core_schemaMigrations from "../core/schemaMigrations.js";
 import type * as core_server from "../core/server.js";
 import type * as core_sessions from "../core/sessions.js";
 import type * as crons from "../crons.js";
@@ -68,6 +69,7 @@ declare const fullApi: ApiFromModules<{
   "core/lib/server": typeof core_lib_server;
   "core/lib/usernames": typeof core_lib_usernames;
   "core/limitsProbe": typeof core_limitsProbe;
+  "core/schemaMigrations": typeof core_schemaMigrations;
   "core/server": typeof core_server;
   "core/sessions": typeof core_sessions;
   crons: typeof crons;
