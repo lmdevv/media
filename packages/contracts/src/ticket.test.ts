@@ -413,6 +413,31 @@ describe("issuing and admitting", () => {
       RangeError,
     );
   });
+
+  it("issues tickets that still parse at the latest issue time", async () => {
+    const ring = await ringOf(TICKET_TEST_KEYS.k1);
+    const now = 10 ** 14;
+    const personal = await ring.issuePersonal({ ...playIssue, now });
+
+    const shareable = await ring.issueShareable({
+      resource: { kind: "artwork", id: "latest" },
+      now,
+    });
+
+    const artworkRoute: TicketRoute = {
+      purposes: ["image"],
+      resource: { kind: "artwork", id: "latest" },
+    };
+
+    expect(await reasonOf(ring, playRequest(personal.ticket), now)).toBe("admitted");
+    expect(
+      await reasonOf(
+        ring,
+        { ticket: shareable.ticket, route: artworkRoute, readSession: live },
+        now,
+      ),
+    ).toBe("admitted");
+  });
 });
 
 describe("the clock", () => {

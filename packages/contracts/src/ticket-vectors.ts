@@ -1,7 +1,3 @@
-/**
- * Ticket test vectors: the bytes `ticket.ts` must issue and the answers `admit` must give. Every
- * MAC was computed with Node's `createHmac`, never with `ticket.ts`. The keys are test keys only.
- */
 import type {
   PersonalTicketRequest,
   SessionState,

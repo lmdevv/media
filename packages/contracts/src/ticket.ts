@@ -1,18 +1,3 @@
-/**
- * Tickets: the one signed-URL format every byte-serving route accepts. The core issues them; the
- * media server admits them.
- *
- * `t1.<kid>.<aud>.<iat>.<exp>.<purpose>.<kind>.<id>.<principal>.<mac>`, plain ASCII and URL-safe
- * as is. `iat` and `exp` are whole seconds since the epoch, `principal` is `s.<userId>.<sessionId>`
- * for a personal ticket or `a` for a shareable one, and `mac` is unpadded base64url of
- * HMAC-SHA256 over the text before the last `.`, keyed with the raw bytes of the key `kid` names.
- * One claims value has exactly one encoding, so every shareable ticket for one artwork in one
- * bucket is the same string.
- *
- * This module has no imports: Convex functions and the server load the same file, and
- * `TICKET_TEST_VECTORS` pins its bytes.
- */
-
 /** The format version, which is also the first segment of every ticket. */
 export const TICKET_VERSION = "t1";
 
@@ -34,7 +19,7 @@ export const SHAREABLE_BUCKET_MS = 7 * 24 * 60 * 60 * 1000;
 /** How far ahead of the verifier's clock the issuer's clock may run. */
 export const TICKET_CLOCK_SKEW_MS = 60 * 1000;
 
-/** How long a key must stay listed after it last signed: the longest ticket plus the skew. */
+/** How long a key must stay listed after it last signed. */
 export const TICKET_KEY_RETENTION_MS = 2 * SHAREABLE_BUCKET_MS + TICKET_CLOCK_SKEW_MS;
 
 /** The size of every key, in bytes. */
@@ -215,8 +200,7 @@ const MAC_BYTES = 32;
 
 const SECOND_MS = 1000;
 
-/** Keeps every issued `iat` and `exp` inside the format's 12 digits. */
-const LATEST_TIME_MS = 10 ** 14;
+const LATEST_ISSUE_MS = 10 ** 14;
 
 const KEY_ID = /^[a-z0-9]{1,16}$/u;
 
@@ -237,7 +221,6 @@ const toBase64Url = (bytes: Uint8Array): string =>
     .replaceAll("/", "_")
     .replace(/=+$/u, "");
 
-/** The bytes of canonical unpadded base64url of exactly `size` bytes, or null. */
 const fromCanonicalBase64Url = (text: string, size: number): Uint8Array<ArrayBuffer> | null => {
   if (!/^[\w-]*$/u.test(text) || text.length % 4 === 1) return null;
 
@@ -464,7 +447,7 @@ const clockRefusal = (claims: TicketClaims, now: number): TicketRefusalReason | 
 };
 
 const requireWholeTime = (field: string, value: number): void => {
-  if (!Number.isSafeInteger(value) || value < 0 || value > LATEST_TIME_MS) {
+  if (!Number.isSafeInteger(value) || value < 0 || value > LATEST_ISSUE_MS) {
     throw new RangeError(`${field} must be whole milliseconds since the epoch, at most 10^14`);
   }
 };
