@@ -1,0 +1,5 @@
+{
+  "extends": "@media/config/tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023", "dom"], "types": ["node"] },
+  "include": ["./**/*.ts"]
+}
