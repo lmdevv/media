@@ -1,6 +1,7 @@
 # 0004. Use Convex Auth v1 behind a thin interface and check every session live
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-04 with how sign-in was built.
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with how sign-in was built, and again on
+  2026-11-04 to give each API key sign-in its own session.
 - Decisions: D14
 
 ## Context
@@ -89,15 +90,16 @@ The first sign-in in the core settled the interface, the session record, and the
     successful sign-in gives its try back.
   - An API key is `mk_<keyId>.<secret>`, and a device code is `dc_<codeId>.<secret>`. Only the
     SHA-256 of the secret is stored, and it is compared in constant time after a lookup by id.
-    Every sign-in with one key shares one session, which keeps its newest 100 refresh tokens.
-    A key cannot create a key or approve a device, even with the `account` scope, so a leaked key
-    cannot mint a credential that outlives its own revocation.
+    Each sign-in with a key opens its own session, and a key keeps its newest 100 (see "One
+    session per API key sign-in" below). A key cannot create a key or approve a device, even with
+    the `account` scope, so a leaked key cannot mint a credential that outlives its own revocation.
   - A device code lasts 10 minutes, at most 50 wait at once, and the device polls `auth:signIn`,
     which answers `pending`, `denied`, or `expired` until approval. After approval the code signs
     the device into the same session until it expires, so a lost answer costs only a retry.
-- **Cleanup.** Ending a session deletes its refresh tokens. Ending every session or key deletes the
-  ended rows in scheduled batches. An hourly sweep deletes expired refresh tokens, old device
-  codes, and idle rate-limit buckets.
+- **Cleanup.** Ending a session deletes its refresh tokens. Revoking a key deletes its sessions at
+  once and leaves their refresh tokens to the sweep. Ending every session or key deletes the ended
+  rows in scheduled batches. An hourly sweep deletes expired refresh tokens, old device codes, and
+  idle rate-limit buckets.
 - **Scopes.** `account` is the first credential scope (ADR 0005). It manages the caller's own
   credentials. A password session holds every scope its user may use. A key or device session
   holds the scopes it was granted, which must be a subset of the granting session's, cut down to
@@ -109,3 +111,33 @@ The first sign-in in the core settled the interface, the session record, and the
   user with the deployment's admin key until account flows build on it (ADR 0003).
 - Convex Auth's tables for email, OAuth, and its own password provider are left out of the
   schema, because the core never reaches the code that uses them.
+
+## One session per API key sign-in (amended 2026-11-04)
+
+The first build shared one session among every sign-in with a key, and pruned the session's
+refresh tokens to its newest 100. Convex Auth treats a session as one client's. When a client
+refreshes with a refresh token that no longer exists, Convex Auth deletes the whole session and
+all of its refresh tokens, and `auth:signOut` deletes the whole session too. So one old client of
+a key, refreshing with a pruned token, signed out every other client of that key, and so did one
+client signing out.
+
+- **Decision.** Each sign-in with a key opens its own session, as a password sign-in does.
+  Opening one ends the key's sessions beyond its newest 100, refresh tokens included, so a script
+  that signs in on every run keeps at most 100 sessions and their tokens. A client whose session
+  ended that way signs in with the key again.
+- **Revocation still ends every client at once.** Revoking a key deletes all of its sessions in
+  the same call. They are at most 100 rows, and their refresh tokens are left to expire and be
+  swept, so revocation stays inside one call's write limit however much the sessions refreshed.
+  Ending every key bumps `keyGeneration`, which every key session checks.
+- **The criteria of the first build still hold.** The live check still reads the session and the
+  user. A sign-in reads at most 101 sessions of its key, plus the refresh tokens of the one session
+  it ends, where it used to read 120 refresh tokens. The core still uses Convex Auth only to mint
+  and refresh tokens.
+- **Rejected: keep the shared session and stop it from being deleted.** Keeping every refresh
+  token of the shared session lets a key that signs in on every run grow tokens without bound.
+  Intercepting Convex Auth's refresh to skip the delete ties the core to Convex Auth's internals
+  and still lets one client's sign-out end the others.
+- **Password and device code sessions do not share this fault.** A password sign-in opens its own
+  session. A device code signs one device into one session, and only retries of that code share
+  it. Nothing deletes a single refresh token of a live session. Ending a session deletes all of
+  them, and the sweep deletes only expired tokens, which outlive their session.

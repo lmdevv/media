@@ -19,11 +19,10 @@ export const JWT_MS = 10 * 60 * 1000;
 
 const PURGE_BATCH = 100;
 
-/**
- * More refresh tokens than a session can gather: one per JWT lifetime for its whole life, which
- * API key sign-ins stay under by pruning (`core/auth/apiKeys.ts`).
- */
+/** More refresh tokens than a session can gather: one per JWT lifetime for its whole life. */
 const SESSION_REFRESH_TOKENS_MAX = Math.ceil(SESSION_MS / JWT_MS) + 500;
+
+const KEY_SESSIONS_MAX = 100;
 
 type Session = Doc<"authSessions">;
 
@@ -75,8 +74,22 @@ export const liveSession = async (
 export const keyWorks = (key: Doc<"apiKeys">, user: Doc<"users">, now: number): boolean =>
   key.generation === user.keyGeneration && (key.expiresAt === undefined || key.expiresAt > now);
 
+const keySessions = (db: DatabaseReader, keyId: Id<"apiKeys">) =>
+  db.query("authSessions").withIndex("by_key", (q) => q.eq("keyId", keyId));
+
+const endKeySessionsBeyondNewest = async (
+  ctx: Pick<MutationCtx, "db">,
+  keyId: Id<"apiKeys">,
+): Promise<void> => {
+  const newest = await keySessions(ctx.db, keyId)
+    .order("desc")
+    .take(KEY_SESSIONS_MAX + 1);
+
+  await Promise.all(newest.slice(KEY_SESSIONS_MAX).map((oldest) => endSession(ctx, oldest._id)));
+};
+
 /** Opens a session for `user`, stamped with the generation of what opened it. */
-export const openSession = (
+export const openSession = async (
   ctx: Pick<MutationCtx, "db">,
   user: Doc<"users">,
   opening: Opening,
@@ -93,7 +106,7 @@ export const openSession = (
   }
 
   if (opening.kind === "apiKey") {
-    return ctx.db.insert("authSessions", {
+    const sessionId = await ctx.db.insert("authSessions", {
       ...fields,
       kind: "apiKey",
       expirationTime: Math.min(fields.expirationTime, opening.key.expiresAt ?? Infinity),
@@ -101,6 +114,10 @@ export const openSession = (
       keyId: opening.key._id,
       scopes: opening.key.scopes,
     });
+
+    await endKeySessionsBeyondNewest(ctx, opening.key._id);
+
+    return sessionId;
   }
 
   return ctx.db.insert("authSessions", {
@@ -133,6 +150,19 @@ export const endSession = async (
   await Promise.all(refreshTokens.map((token) => ctx.db.delete(token._id)));
 
   if ((await ctx.db.get(sessionId)) !== null) await ctx.db.delete(sessionId);
+};
+
+/**
+ * Ends every session a key opened, at once. They are at most `KEY_SESSIONS_MAX` rows, and their
+ * refresh tokens are left to expire and be swept, so the call stays inside Convex's write limit.
+ */
+export const endKeySessions = async (
+  ctx: Pick<MutationCtx, "db">,
+  keyId: Id<"apiKeys">,
+): Promise<void> => {
+  const sessions = await keySessions(ctx.db, keyId).collect();
+
+  await Promise.all(sessions.map((session) => ctx.db.delete(session._id)));
 };
 
 /** Ends every password and device session of the user except `keep`. */

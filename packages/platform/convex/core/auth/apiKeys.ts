@@ -6,9 +6,8 @@ import type { Value } from "convex/values";
 import { register } from "../../../commands/core/auth/apiKeys";
 import { credentialScope } from "../../../commands/scopes";
 import { internal } from "../../_generated/api";
-import type { DataModel, Id } from "../../_generated/dataModel";
+import type { DataModel } from "../../_generated/dataModel";
 import { internalMutation, internalQuery } from "../../_generated/server";
-import type { MutationCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
 import {
   constantTimeEqual,
@@ -17,7 +16,7 @@ import {
   randomSecret,
   sha256Hex,
 } from "../lib/secrets";
-import { endSession, endUserKeys, keyWorks, liveSession, openSession } from "../sessions";
+import { endKeySessions, endUserKeys, keyWorks, openSession } from "../sessions";
 import type { SignedIn } from "../sessions";
 import { refuseKeys, requireCaller } from "./caller";
 
@@ -30,28 +29,6 @@ const NAME_MAX = 64;
 const EXPIRY_DAYS_MAX = 365;
 
 const BAD_KEY = "This API key does not work";
-
-/**
- * Every sign-in with a key mints a refresh token for the key's one session, and a script that
- * signs in on every run would grow them without end. Each sign-in deletes some beyond the newest
- * `KEPT_REFRESH_TOKENS`; a client still holding a deleted one signs in with the key again.
- */
-const KEPT_REFRESH_TOKENS = 100;
-
-const PRUNED_PER_SIGN_IN = 20;
-
-const pruneRefreshTokens = async (
-  ctx: Pick<MutationCtx, "db">,
-  sessionId: Id<"authSessions">,
-): Promise<void> => {
-  const newest = await ctx.db
-    .query("authRefreshTokens")
-    .withIndex("sessionId", (q) => q.eq("sessionId", sessionId))
-    .order("desc")
-    .take(KEPT_REFRESH_TOKENS + PRUNED_PER_SIGN_IN);
-
-  await Promise.all(newest.slice(KEPT_REFRESH_TOKENS).map((token) => ctx.db.delete(token._id)));
-};
 
 const keyParams = { key: v.string() };
 
@@ -86,7 +63,7 @@ export const apiKeyProvider = ConvexCredentials<DataModel>({
   },
 });
 
-/** Signs in with a key: reuses the key's live session or opens one. Null when the key fails. */
+/** Signs in with a key into a new session of its own. Null when the key fails. */
 export const redeem = internalMutation({
   args: { keyId: v.string(), secretHash: v.string() },
   returns: v.union(v.null(), v.object({ userId: v.id("users"), sessionId: v.id("authSessions") })),
@@ -100,19 +77,6 @@ export const redeem = internalMutation({
     const now = Date.now();
 
     if (user === null || !keyWorks(key, user, now)) return null;
-
-    const current = await ctx.db
-      .query("authSessions")
-      .withIndex("by_key", (q) => q.eq("keyId", key._id))
-      .first();
-
-    if (current !== null && (await liveSession(ctx.db, current._id, now)) !== null) {
-      await pruneRefreshTokens(ctx, current._id);
-
-      return { userId: user._id, sessionId: current._id };
-    }
-
-    if (current !== null) await endSession(ctx, current._id);
 
     return {
       userId: user._id,
@@ -186,12 +150,7 @@ export const { create, revoke, endAll } = register({
 
     if (key?.userId !== caller.userId) return fail("not_found", "No such API key");
 
-    const session = await ctx.db
-      .query("authSessions")
-      .withIndex("by_key", (q) => q.eq("keyId", keyId))
-      .first();
-
-    if (session !== null) await endSession(ctx, session._id);
+    await endKeySessions(ctx, keyId);
     await ctx.db.delete(keyId);
 
     return null;
