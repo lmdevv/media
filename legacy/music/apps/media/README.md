@@ -112,7 +112,7 @@ runs at startup.
 
 ## Effect-free platform modules
 
-Effect 4.0.2 marks `FileSystem`, `ChildProcess`, and `NodeRuntime` unstable, and the lint policy
+Effect 4.0.3 marks `FileSystem`, `ChildProcess`, and `NodeRuntime` unstable, and the lint policy
 rejects unstable Effect APIs as well as `node:fs` and `node:child_process` in Effect modules. File,
 process, and watch calls therefore live in `src/platform/`, which does not import Effect;
 `files.ts`, `ffmpeg.ts`, and `library-watcher.ts` translate their failures into typed errors.

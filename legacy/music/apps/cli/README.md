@@ -26,7 +26,7 @@ node dist/music.js commands --json        # every command with its argument JSON
 | `src/shortcuts.ts` | `play`, `now`, and the transport shortcuts                            |
 | `src/render.ts`    | Tables and key-value output                                           |
 
-Argument parsing uses `node:util.parseArgs`: Effect 4.0.2's `effect/cli` is marked
+Argument parsing uses `node:util.parseArgs`: Effect 4.0.3's `effect/cli` is marked
 `@stability unstable`, and the repo's lint rejects unstable APIs. `src/files.ts` owns `node:fs` for
 the same reason (`FileSystem` is unstable too), and `src/terminal.ts` owns stdin.
 

@@ -123,11 +123,11 @@ catalogs:
       specifier: ^19.2.7
       version: 19.3.0
     convex:
-      specifier: ^1.45.0
+      specifier: ^1.46.0
       version: 1.46.0
     effect:
-      specifier: 4.0.2
-      version: 4.0.2
+      specifier: 4.0.3
+      version: 4.0.3
     lucide-react:
       specifier: ^1.41.0
       version: 1.54.0
@@ -159,7 +159,7 @@ importers:
         version: 0.51.1
       '@effect/vitest':
         specifier: 4.0.3
-        version: 4.0.3(effect@4.0.2)(vitest@5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))
+        version: 4.0.3(effect@4.0.3)(vitest@5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))
       '@music/config':
         specifier: workspace:*
         version: link:packages/config
@@ -174,7 +174,7 @@ importers:
         version: 26.6.5
       effect:
         specifier: 'catalog:'
-        version: 4.0.2
+        version: 4.0.3
       knip:
         specifier: 6.41.0
         version: 6.41.0
@@ -216,7 +216,7 @@ importers:
         version: 1.46.0(react@19.3.0)
       effect:
         specifier: 'catalog:'
-        version: 4.0.2
+        version: 4.0.3
       esbuild:
         specifier: 0.27.0
         version: 0.27.0
@@ -246,7 +246,7 @@ importers:
         version: 1.46.0(react@19.3.0)
       effect:
         specifier: 'catalog:'
-        version: 4.0.2
+        version: 4.0.3
       hono:
         specifier: ^4.13.13
         version: 4.13.13
@@ -304,7 +304,7 @@ importers:
         version: 1.46.0(react@19.3.0)
       effect:
         specifier: 'catalog:'
-        version: 4.0.2
+        version: 4.0.3
       expo:
         specifier: ~58.0.17
         version: 58.0.17(@babel/core@7.29.7(supports-color@8.1.1))(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.15)(expo-router@58.0.25)(react-dom@19.3.0(react@19.3.0))(react-native-worklets@0.13.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)(supports-color@8.1.1))(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)(supports-color@8.1.1)(typescript@7.0.2)
@@ -461,7 +461,7 @@ importers:
         version: 1.46.0(react@19.3.0)
       effect:
         specifier: 'catalog:'
-        version: 4.0.2
+        version: 4.0.3
       lucide-react:
         specifier: 'catalog:'
         version: 1.54.0(@types/react@19.3.0)(react@19.3.0)
@@ -528,7 +528,7 @@ importers:
         version: 1.46.0(react@19.3.0)
       effect:
         specifier: 'catalog:'
-        version: 4.0.2
+        version: 4.0.3
       jose:
         specifier: ^6.2.12
         version: 6.2.12
@@ -562,7 +562,7 @@ importers:
     dependencies:
       effect:
         specifier: 'catalog:'
-        version: 4.0.2
+        version: 4.0.3
     devDependencies:
       '@music/config':
         specifier: workspace:*
@@ -589,7 +589,7 @@ importers:
         version: 1.46.0(react@19.3.0)
       effect:
         specifier: 'catalog:'
-        version: 4.0.2
+        version: 4.0.3
     devDependencies:
       '@music/config':
         specifier: workspace:*
@@ -641,7 +641,7 @@ importers:
         version: 1.46.0(react@19.3.0)
       effect:
         specifier: 'catalog:'
-        version: 4.0.2
+        version: 4.0.3
     devDependencies:
       '@music/config':
         specifier: workspace:*
@@ -3598,8 +3598,8 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  effect@4.0.2:
-    resolution: {integrity: sha512-YeYnLqSFrL4+tCOXRrfNP03w8FILoF/wDl+ukraJAGzXrjcS383W7LAAvGBbLatEyktmLxRq+9xJinx7QzXW5A==}
+  effect@4.0.3:
+    resolution: {integrity: sha512-LoWn/Uwwx0JjHSDmBAAahx8sB+klzM6vsZovnbYowBNw6B4QScJLRLBByO61plvNiycx7HPN8FnsWUCu0eXW5w==}
 
   electron-to-chromium@1.5.452:
     resolution: {integrity: sha512-cVvk1YBSj6571VmV6hdJTqj94Y79xSu8cj6Y9t6ae4Y4431z8/7EJFvu3rVp90xhfuv9BpPKUmaLfTo4+FOGBg==}
@@ -6678,9 +6678,9 @@ snapshots:
       '@effect/tsgo-win32-arm64': 0.51.1
       '@effect/tsgo-win32-x64': 0.51.1
 
-  '@effect/vitest@4.0.3(effect@4.0.2)(vitest@5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))':
+  '@effect/vitest@4.0.3(effect@4.0.3)(vitest@5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))':
     dependencies:
-      effect: 4.0.2
+      effect: 4.0.3
       vitest: 5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
 
   '@emnapi/core@1.11.2':
@@ -8813,7 +8813,7 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  effect@4.0.2: {}
+  effect@4.0.3: {}
 
   electron-to-chromium@1.5.452: {}
 
