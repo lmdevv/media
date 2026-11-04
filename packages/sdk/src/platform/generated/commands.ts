@@ -348,7 +348,7 @@ const core_libraries_get = query({
           Schema.Literal("failed"),
           Schema.Literal("canceled"),
         ]),
-        done: Schema.Finite,
+        done: Schema.Union([Schema.Finite, Schema.Null]),
         total: Schema.Union([Schema.Finite, Schema.Null]),
         error: Schema.Union([Schema.String, Schema.Null]),
         finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
@@ -774,7 +774,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       get: method.query(core_libraries_get),
       /** `core.libraries.list` (query, signed-in): List the libraries shared with you. */
       list: method.query(core_libraries_list),
-      /** `core.libraries.remove` (mutation, signed-in): Delete a library you manage and everything it lists; the files on disk stay. */
+      /** `core.libraries.remove` (mutation, signed-in, API keys refused): Delete a library you manage and everything it lists; the files on disk stay. */
       remove: method.mutation(core_libraries_remove),
       /** `core.libraries.rename` (mutation, signed-in): Rename a library you manage. */
       rename: method.mutation(core_libraries_rename),
@@ -894,7 +894,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       get: method.query(core_libraries_get),
       /** `core.libraries.list` (query, signed-in): List the libraries shared with you. */
       list: method.query(core_libraries_list),
-      /** `core.libraries.remove` (mutation, signed-in): Delete a library you manage and everything it lists; the files on disk stay. */
+      /** `core.libraries.remove` (mutation, signed-in, API keys refused): Delete a library you manage and everything it lists; the files on disk stay. */
       remove: method.mutation(core_libraries_remove),
       /** `core.libraries.rename` (mutation, signed-in): Rename a library you manage. */
       rename: method.mutation(core_libraries_rename),

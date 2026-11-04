@@ -9,6 +9,9 @@ export const FOLDERS_MAX = 16;
 
 const FOLDER_CHARS_MAX = 1024;
 
+/** Each level of a folder costs its overlap check one index read. */
+const FOLDER_DEPTH_MAX = 32;
+
 const CONTROL = /\p{Cc}/u;
 
 const hasDotSegment = (path: string): boolean =>
@@ -26,7 +29,8 @@ export const isPlainPath = (path: string): boolean =>
 /**
  * A typed folder as stored and compared, written down by `normalizeFolder` as the web app does.
  * Refuses with `invalid_args` a relative path, a `.` or `..` segment, a control
- * character, `/` itself, which would hold every other library, and more than 1,024 characters.
+ * character, `/` itself, which would hold every other library, more than 1,024 characters, and
+ * more than 32 levels.
  */
 export const parseFolder = (typed: string): string => {
   const folder = normalizeFolder(typed);
@@ -37,8 +41,12 @@ export const parseFolder = (typed: string): string => {
 
   if (folder === "/") return fail("invalid_args", "A library cannot hold the whole disk");
 
-  return folder.length > FOLDER_CHARS_MAX
-    ? fail("invalid_args", `Folders have at most ${FOLDER_CHARS_MAX} characters`)
+  if (folder.length > FOLDER_CHARS_MAX) {
+    return fail("invalid_args", `Folders have at most ${FOLDER_CHARS_MAX} characters`);
+  }
+
+  return folder.split("/").length - 1 > FOLDER_DEPTH_MAX
+    ? fail("invalid_args", `Folders are at most ${FOLDER_DEPTH_MAX} levels deep`)
     : folder;
 };
 

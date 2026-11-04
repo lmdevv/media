@@ -281,7 +281,7 @@ export const core = [
         v.object({
           jobId: v.id("jobs"),
           status: jobStatus,
-          done: v.number(),
+          done: v.union(v.number(), v.null()),
           total: v.union(v.number(), v.null()),
           error: v.union(v.string(), v.null()),
           finishedAt: v.union(v.number(), v.null()),
@@ -313,6 +313,7 @@ export const core = [
   mutation("core.libraries.remove", {
     summary: "Delete a library you manage and everything it lists; the files on disk stay",
     scope: "signed-in",
+    refusesKeys: true,
     args: { libraryId: v.id("libraries") },
     result: v.null(),
   }),

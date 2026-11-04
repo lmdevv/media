@@ -25,7 +25,8 @@ the server keeps its file access until phase 4 (D50).
 - A library's folders live in `libraryFolders`, one row per folder, and nowhere else. A library has
   1 to 16 folders. A folder is absolute, written down by `normalizeFolder` from
   `@media/contracts/library-folder` as the web app writes it, without `.` or `..` parts or control
-  characters, not `/`, and at most 1,024 characters. No folder of a library holds another of it.
+  characters, not `/`, at most 1,024 characters, and at most 32 levels deep, since each level costs
+  the overlap check one index read. No folder of a library holds another of it.
 - No two libraries share files, whatever their kinds. A new folder is refused with `conflict` when
   another library has it, a folder that holds it, or a folder inside it. The check reads one
   `by_path` entry per segment of the folder and one range of at most 17 entries, so it covers
@@ -51,10 +52,11 @@ the server keeps its file access until phase 4 (D50).
   Each also needs the library's domain scope, such as `music:edit`.
 - An admin sees no library they hold no grant on, in `list`, in `get`, or through a refusal.
 - `get` shows the folders, and a failed scan's error, which may name them, only to a manager,
-  because they are the server's disk layout. It shows a kid no item count, because the total
-  would count what their restrictions hide.
-- `create` and `setFolders` refuse API keys: a leaked key with the `admin` scope could otherwise
-  point the server at any folder it can read.
+  because they are the server's disk layout. It shows a kid no item count and no scan progress,
+  because both would count what their restrictions hide.
+- `create`, `setFolders`, and `remove` refuse API keys: a leaked key with the `admin` scope could
+  otherwise point the server at any folder it can read, and one with `manage` could delete a
+  library and everything it lists.
 
 ### Commands
 
@@ -75,6 +77,10 @@ generic grant commands `core.permissions.grants.set`, `remove`, and `list` (ADR 
   same mutation.
 - The scanner's first call after a claim is `core/scans:target`, which answers the folders under
   the lease.
+- A callback's `check` does not renew the lease; `report` does. A scanner reports at least once a
+  lease while it walks, so a cancel reaches it within one lease and its lease never lapses. A
+  canceled scan keeps its slot until then (ADR 0012), so two quick folder changes in a row can
+  hold both of a domain's slots for that long.
 
 ### The scanner-callback contract
 
@@ -86,6 +92,8 @@ generic grant commands `core.permissions.grants.set`, `remove`, and `list` (ADR 
   mutation. `HeldScan.admit` refuses a path outside the folders.
 - The counter's name is private to `scans.ts`. A write outside a scan, such as an import, moves
   the count through `withLibraryItems`, and a purge through `purgeStep`.
+- A callback takes at most 500 paths. Each path costs one index read, and Convex caps the index
+  ranges one transaction reads at 4,096.
 - A count stays equal to the domain's rows: it moves in the transaction that writes them, a retried
   call finds its rows and reports nothing new, and two attempts writing one path serialize on its
   index entry.
@@ -169,5 +177,8 @@ The movies port replaces the seam with movies' rows and deletes it.
   does not exist yet; the unit that adds it decides who inherits.
 - Guest links (p3-guests) must be a capability of their own, not grants on a title, or items would
   need grants of their own.
+- A purge after a folder removal pages the whole library. A domain whose libraries hold many
+  items can page only the removed folders' path ranges instead.
+- A recount of a library's items from the domain's rows, for a count a defect moved wrong.
 - Totals of a library's items by kind of item (titles, episodes, tracks, albums) belong to each
   domain's port.

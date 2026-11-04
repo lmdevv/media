@@ -55,12 +55,14 @@ describe("library folders", () => {
     );
   });
 
-  it("refuse relative paths, dot segments, control characters, and the whole disk", () => {
+  it("refuse relative paths, dot segments, control characters, the whole disk, and deep paths", () => {
     for (const typed of ["srv/films", "/srv/../etc", "/srv/./films", "/srv/\u0000x", "/", "  "]) {
       expect(refusalOf(() => parseFolder(typed))).toBe("invalid_args");
     }
 
     expect(refusalOf(() => parseFolder(`/${"a".repeat(1024)}`))).toBe("invalid_args");
+    expect(refusalOf(() => parseFolder("/a".repeat(33)))).toBe("invalid_args");
+    expect(parseFolder("/a".repeat(32))).toBe("/a".repeat(32));
   });
 
   it("hold 1 to 16 folders per library, none inside another", () => {

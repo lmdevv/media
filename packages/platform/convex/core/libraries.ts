@@ -42,7 +42,14 @@ const restartScan = async (ctx: JobCtx, library: Doc<"libraries">): Promise<Enqu
   return queueScan(ctx, library);
 };
 
-const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null, manager: boolean) => {
+interface ScanShown {
+  /** A failed scan's error may name the folders, which only managers see. */
+  readonly error: boolean;
+  /** Progress counts what a kid's restrictions may hide, so a kid sees none. */
+  readonly progress: boolean;
+}
+
+const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null, shown: ScanShown) => {
   const job = jobId === null ? null : await db.get(jobId);
 
   if (job === null) return null;
@@ -50,8 +57,8 @@ const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null, manager: boo
   return {
     jobId: job._id,
     status: job.status,
-    ...progressOf(job.work),
-    error: manager && job.status === "failed" ? job.error : null,
+    ...(shown.progress ? progressOf(job.work) : { done: null, total: null }),
+    error: shown.error && job.status === "failed" ? job.error : null,
     finishedAt: job.status === "queued" || job.status === "running" ? null : job.finishedAt,
   };
 };
@@ -90,15 +97,16 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
   get: async (ctx, { libraryId }, caller) => {
     const { doc, level } = await requireContent(ctx, caller, "view", libraryRef(libraryId));
     const manager = level === "manage";
+    const counts = caller.restrictions === null;
 
     return {
       libraryId: doc._id,
       name: doc.name,
       kind: doc.kind,
       level,
-      items: caller.restrictions === null ? await itemCount(ctx.db, doc._id) : null,
+      items: counts ? await itemCount(ctx.db, doc._id) : null,
       folders: manager ? [...(await foldersOf(ctx.db, doc._id))] : null,
-      scan: await scanOf(ctx.db, doc.lastScan, manager),
+      scan: await scanOf(ctx.db, doc.lastScan, { error: manager, progress: counts }),
     };
   },
   rename: async (ctx, { libraryId, name }, caller) => {

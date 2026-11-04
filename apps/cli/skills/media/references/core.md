@@ -255,7 +255,7 @@ Show a library, how many items it holds, its latest scan, and to its managers it
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ libraryId: Id<"libraries"> }`
-- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number | null; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number; total: number | null; error: string | null; finishedAt: number | null } | null }`
+- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number | null; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number | null; total: number | null; error: string | null; finishedAt: number | null } | null }`
 
 ## `core.libraries.list`
 
@@ -275,6 +275,7 @@ Delete a library you manage and everything it lists; the files on disk stay.
 - CLI: `media auth libraries remove`
 - Kind: mutation
 - Scope: signed-in
+- API keys: refused
 - Arguments: `{ libraryId: Id<"libraries"> }`
 - Result: `null`
 

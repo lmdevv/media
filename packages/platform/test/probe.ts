@@ -5,6 +5,7 @@ import type { GrantPrincipal, Level } from "../commands/access";
 import type { CallerScope } from "../commands/scopes";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { inOrder } from "../convex/core/lib/inOrder";
 import { runFunction } from "./admin";
 import type { SignedIn } from "./sign-in";
 import type { CoreStack } from "./stack-env";
@@ -65,18 +66,32 @@ export const sessionOf = async (signedIn: SignedIn): Promise<Session> => {
   };
 };
 
-/** Seeds libraries that `manager` manages, in order, with no scan queued. */
-export const seedLibraries = (
+const SEED_BATCH = 200;
+
+/**
+ * Seeds libraries that `manager` manages, in order, with no scan queued, 200 a call: each library
+ * costs its seed a few index ranges, and Convex caps the ranges one transaction reads.
+ */
+export const seedLibraries = async (
   stack: CoreStack,
   manager: Session,
   libraries: ReadonlyArray<Library>,
-): Promise<typeof Seeded.Type> =>
-  runFunction(
-    stack,
-    internal.core.libraryProbe.seed,
-    { managerId: manager.userId, libraries: [...libraries] },
-    Seeded,
+): Promise<typeof Seeded.Type> => {
+  const batches = Array.from({ length: Math.ceil(libraries.length / SEED_BATCH) }, (_, n) =>
+    libraries.slice(n * SEED_BATCH, (n + 1) * SEED_BATCH),
   );
+
+  const seeded = await inOrder(batches, async (batch) =>
+    runFunction(
+      stack,
+      internal.core.libraryProbe.seed,
+      { managerId: manager.userId, libraries: [...batch] },
+      Seeded,
+    ),
+  );
+
+  return seeded.flat();
+};
 
 /** Seeds one library that `manager` manages. */
 export const seedLibrary = async (

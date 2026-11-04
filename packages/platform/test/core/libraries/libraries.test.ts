@@ -184,6 +184,7 @@ describe.skipIf(stack === undefined)("libraries", { timeout: 180_000 }, () => {
 
     expect(await friend.client.query(api.core.libraries.get, { libraryId })).toMatchObject({
       items: null,
+      scan: { status: "queued", done: null, total: null },
     });
 
     await owner.client.mutation(api.core.restrictions.set, {

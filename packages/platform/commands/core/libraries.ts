@@ -37,7 +37,7 @@ const getResult = v.object({
         v.literal("failed"),
         v.literal("canceled"),
       ),
-      done: v.number(),
+      done: v.union(v.number(), v.null()),
       total: v.union(v.number(), v.null()),
       error: v.union(v.string(), v.null()),
       finishedAt: v.union(v.number(), v.null()),
@@ -113,7 +113,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof listResult> | Promise<Infer<typeof listResult>>;
 
-  /** `core.libraries.remove` (mutation, signed-in): Delete a library you manage and everything it lists; the files on disk stay. */
+  /** `core.libraries.remove` (mutation, signed-in, API keys refused): Delete a library you manage and everything it lists; the files on disk stay. */
   readonly remove: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof removeArgs>,
@@ -209,7 +209,8 @@ export const register = (handlers: Handlers) => ({
   remove: mutation({
     args: removeArgs,
     returns: removeResult,
-    handler: async (ctx, args) => handlers.remove(ctx, args, await requireCaller(ctx, "signed-in")),
+    handler: async (ctx, args) =>
+      handlers.remove(ctx, args, refuseKeys(await requireCaller(ctx, "signed-in"))),
   }),
   rename: mutation({
     args: renameArgs,

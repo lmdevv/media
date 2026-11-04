@@ -19,7 +19,7 @@ import { contentActions, ratingOf } from "./permissions/policy";
 import type { ContentFacts } from "./permissions/policy";
 import { purgeStep, scanAnswer, withLibraryItems, withScanLease } from "./scans";
 
-const SEED_MAX = 1000;
+const SEED_MAX = 200;
 
 const BATCH_MAX = 500;
 
@@ -50,7 +50,7 @@ const checkBatch = (count: number): void => {
  * Makes libraries managed by `managerId`, each with a folder of its own and rated items in it,
  * and queues no scan.
  *
- * @throws Error when asked for none or more than 1,000 libraries.
+ * @throws Error when asked for none or more than 200 libraries.
  */
 export const seed = internalMutation({
   args: {
