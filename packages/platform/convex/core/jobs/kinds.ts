@@ -1,6 +1,8 @@
 import { v } from "convex/values";
 import type { Infer, ObjectType, PropertyValidators } from "convex/values";
 
+import type { ContentDomain } from "../../../commands/scopes";
+
 export const importSource = v.union(v.literal("jellyfin"), v.literal("plex"));
 
 const tagged = <const Kind extends string, Fields extends PropertyValidators>(
@@ -105,6 +107,21 @@ export function defineKind<
 
 const probeRun = { run: v.string(), n: v.number() };
 
+/**
+ * A domain's scan kind. A scan is a reported job: its durable progress is the domain's own rows,
+ * which let a restarted attempt skip unchanged files, so its paths never become job items. Cap 2
+ * lets two libraries of a domain scan at once, and lets a library's new scan start while its
+ * canceled one waits for its worker's next call. One active scan per library, by its dedupe key.
+ */
+const scanKind = <const Kind extends ContentDomain>(kind: Kind) =>
+  defineKind(`${kind}.scan`, {
+    payload: { libraryId: v.id("libraries") },
+    item: null,
+    cap: 2,
+    maxStrikes: 3,
+    dedupe: (payload) => payload.libraryId,
+  });
+
 export const KINDS = [
   defineKind("probe.capped", {
     payload: probeRun,
@@ -128,11 +145,22 @@ export const KINDS = [
     maxStrikes: 3,
     dedupe: (payload) => `import:${payload.source}:${payload.serverId}`,
   }),
+  scanKind("movies"),
+  scanKind("music"),
 ] as const;
 
 type KindDef = (typeof KINDS)[number];
 
 export type JobKind = KindDef["kind"];
+
+/** A job kind that scans a library. */
+export type ScanKind = Extract<JobKind, `${ContentDomain}.scan`>;
+
+/**
+ * The job kind that scans a library of `kind`, the one place a library kind names its scan. It
+ * fails to compile while a domain has no scan kind in `KINDS`.
+ */
+export const scanKindOf = (kind: ContentDomain): ScanKind => `${kind}.scan`;
 
 export const jobKind = v.union(...KINDS.map((def) => v.literal(def.kind)));
 

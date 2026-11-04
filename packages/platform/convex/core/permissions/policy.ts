@@ -41,16 +41,34 @@ export type ContentFacts =
   | { readonly domain: "movies"; readonly rating: Rating }
   | { readonly domain: "music"; readonly explicit: boolean };
 
+/**
+ * Where a thing sits, which decides what a kid's restrictions do to it. Each variant states both
+ * choices, so no resource fails open by leaving a field empty.
+ *
+ * - `library`: a library itself. The allowed-libraries list names it. It has no rating; each of
+ *   its items is checked on its own.
+ * - `item`: a thing in exactly one library, such as a title or a track. Both checks apply, and an
+ *   unrated movie is the fact `unrated`, which `hideUnrated` hides.
+ * - `unplaced`: a thing in no one library, such as a playlist. Its type says what a set
+ *   allowed-libraries list does to it, `hides` or `allows` (its contents are then checked one by
+ *   one), and whether it carries facts of its own or is a `container`.
+ */
+export type Placement =
+  | { readonly in: "library"; readonly library: LibraryId }
+  | { readonly in: "item"; readonly library: LibraryId; readonly facts: ContentFacts }
+  | {
+      readonly in: "unplaced";
+      readonly libraryList: "hides" | "allows";
+      readonly facts: ContentFacts | "container";
+    };
+
 /** A thing in a content domain, with what the loader read about it for this principal. */
 export interface ContentResource {
   readonly on: "content";
   readonly domain: ContentDomain;
   /** The strongest level any grant gives the principal: their own, a group's, or the household's. */
   readonly level: Level | null;
-  /** The library it lives in, which the allowed-libraries restriction compares; null for none. */
-  readonly library: LibraryId | null;
-  /** Null for a container with no rating of its own, such as a library or a playlist. */
-  readonly facts: ContentFacts | null;
+  readonly placement: Placement;
 }
 
 export type TableOf<T extends ResourceType> = (typeof resourceTypes)[T]["table"];
@@ -60,21 +78,18 @@ export interface ResourceRef<T extends ResourceType> {
   readonly id: Id<TableOf<T>>;
 }
 
-type Placement = Pick<ContentResource, "domain" | "library" | "facts">;
+type Placed = Pick<ContentResource, "domain" | "placement">;
 
-const ratingOf = (age: number | null): Rating =>
+/** A movie's minimum viewer age as a rating, unrated when it has none. */
+export const ratingOf = (age: number | null): Rating =>
   age === null ? { kind: "unrated" } : { kind: "rated", age };
 
-type Placements = { readonly [T in ResourceType]: (doc: Doc<TableOf<T>>) => Placement };
+type Placements = { readonly [T in ResourceType]: (doc: Doc<TableOf<T>>) => Placed };
 
 const placements: Placements = {
-  probe: (probe) => ({
-    domain: probe.domain,
-    library: probe._id,
-    facts:
-      probe.domain === "movies"
-        ? { domain: "movies", rating: ratingOf(probe.age) }
-        : { domain: "music", explicit: probe.explicit },
+  library: (library) => ({
+    domain: library.kind,
+    placement: { in: "library", library: library._id },
   }),
 };
 
@@ -84,6 +99,18 @@ export const resourceOf = <T extends ResourceType>(
   doc: Doc<TableOf<T>>,
   level: Level | null,
 ): ContentResource => ({ on: "content", level, ...placements[type](doc) });
+
+/** An item of `library` with `facts`, as `can` sees it at the level the library's grants give. */
+export const itemOf = (
+  library: Doc<"libraries">,
+  level: Level | null,
+  facts: ContentFacts,
+): ContentResource => ({
+  on: "content",
+  domain: library.kind,
+  level,
+  placement: { in: "item", library: library._id, facts },
+});
 
 /** The account an account action changes. */
 export type AccountTarget =
@@ -149,7 +176,7 @@ export const accountActions = [
 ] as const;
 
 /** What can be done to the server as a whole. */
-export const serverActions = ["invite", "manageGroups"] as const;
+export const serverActions = ["invite", "manageGroups", "manageFolders"] as const;
 
 export type ContentAction = (typeof contentActions)[number];
 
@@ -232,6 +259,8 @@ const accountRules: AccountRules = {
 const serverRules: ServerRules = {
   invite: { scope: "admin" },
   manageGroups: { scope: "admin" },
+  /** Creating a library or changing its folders points the server at its own disk. */
+  manageFolders: { scope: "admin" },
 };
 
 const ALLOWED: Decision = { allowed: true };
@@ -246,20 +275,28 @@ const forbidden = (because: Because): Decision => ({
 
 const rank = (level: Level): number => levels.indexOf(level);
 
-const hiddenBy = (limits: Restrictions, resource: ContentResource): boolean => {
-  const { library, facts } = resource;
+const outsideList = (limits: Restrictions, library: LibraryId): boolean =>
+  limits.libraries !== null && !limits.libraries.includes(library);
 
-  if (limits.libraries !== null && library !== null && !limits.libraries.includes(library)) {
-    return true;
+const ratingHides = (limits: Restrictions, facts: ContentFacts): boolean => {
+  if (facts.domain === "music") return facts.explicit && limits.hideExplicitMusic;
+
+  return facts.rating.kind === "unrated"
+    ? limits.hideUnrated
+    : limits.maxMovieAge !== null && facts.rating.age > limits.maxMovieAge;
+};
+
+const hiddenBy = (limits: Restrictions, placement: Placement): boolean => {
+  if (placement.in === "library") return outsideList(limits, placement.library);
+
+  if (placement.in === "item") {
+    return outsideList(limits, placement.library) || ratingHides(limits, placement.facts);
   }
 
-  if (facts?.domain === "movies") {
-    return facts.rating.kind === "unrated"
-      ? limits.hideUnrated
-      : limits.maxMovieAge !== null && facts.rating.age > limits.maxMovieAge;
-  }
-
-  return facts?.domain === "music" && facts.explicit && limits.hideExplicitMusic;
+  return (
+    (limits.libraries !== null && placement.libraryList === "hides") ||
+    (placement.facts !== "container" && ratingHides(limits, placement.facts))
+  );
 };
 
 const decideContent = (
@@ -273,7 +310,7 @@ const decideContent = (
 
   if (resource.level === null) return hidden("no-grant");
 
-  if (principal.restrictions !== null && hiddenBy(principal.restrictions, resource)) {
+  if (principal.restrictions !== null && hiddenBy(principal.restrictions, resource.placement)) {
     return hidden("restricted");
   }
 

@@ -8,6 +8,9 @@ import { ITEM_BATCH_MAX, pickClaim, step } from "./machine";
 import type { ItemWrite, JobEvent, KindQueue, Step } from "./machine";
 import type { JobWork, Lease } from "./model";
 
+/** What every job write needs: the database, and the scheduler for item purges. */
+export type JobCtx = Pick<MutationCtx, "db" | "scheduler">;
+
 export interface Enqueued {
   readonly jobId: Id<"jobs">;
   /** False when the kind's dedupe key matched a queued or running job, whose id this is. */
@@ -26,7 +29,7 @@ const kindRow = (db: DatabaseReader, kind: JobKind): Promise<Doc<"jobKinds"> | n
  * took, which was the oldest queued. Writes nothing when neither moves.
  */
 const moveKindRow = async (
-  ctx: MutationCtx,
+  ctx: JobCtx,
   kind: JobKind,
   move: {
     readonly running: number;
@@ -64,7 +67,7 @@ const activeWithKey = async (db: DatabaseReader, dedupeKey: string): Promise<Doc
  * two index entries, so two concurrent enqueues of one key conflict and Convex serializes them:
  * exactly one inserts.
  */
-export const insertJob = async (ctx: MutationCtx, payload: JobPayload): Promise<Enqueued> => {
+export const insertJob = async (ctx: JobCtx, payload: JobPayload): Promise<Enqueued> => {
   const def = kindDef(payload.kind);
   const dedupeKey = def.dedupeKey(payload);
 
@@ -104,7 +107,7 @@ export const insertJob = async (ctx: MutationCtx, payload: JobPayload): Promise<
 };
 
 const deleteItems = async (
-  ctx: MutationCtx,
+  ctx: JobCtx,
   jobId: Id<"jobs">,
   from: number,
   to: number,
@@ -117,7 +120,7 @@ const deleteItems = async (
   await Promise.all(rows.map((row) => ctx.db.delete("jobItems", row._id)));
 };
 
-const applyWrite = async (ctx: MutationCtx, jobId: Id<"jobs">, write: ItemWrite): Promise<void> => {
+const applyWrite = async (ctx: JobCtx, jobId: Id<"jobs">, write: ItemWrite): Promise<void> => {
   switch (write.type) {
     case "drop":
       await deleteItems(ctx, jobId, write.from, write.to);
@@ -147,11 +150,7 @@ const applyWrite = async (ctx: MutationCtx, jobId: Id<"jobs">, write: ItemWrite)
  * Calls in one mutation must run one after another (`inOrder`), because each reads and writes
  * its kind's row.
  */
-export const applyEvent = async (
-  ctx: MutationCtx,
-  job: Doc<"jobs">,
-  event: JobEvent,
-): Promise<Step> => {
+export const applyEvent = async (ctx: JobCtx, job: Doc<"jobs">, event: JobEvent): Promise<Step> => {
   const result = step(job, event, Date.now(), kindDef(job.payload.kind));
 
   if (!result.ok || !result.changed) return result;
@@ -224,7 +223,7 @@ export type ClaimAnswer =
  * @throws Error when the machine refuses to claim the queued job this call just read, a defect.
  */
 export const claimJob = async (
-  ctx: MutationCtx,
+  ctx: JobCtx,
   kinds: ReadonlyArray<JobKind>,
   workerId: string,
   leaseMs: number,
@@ -258,7 +257,7 @@ export const claimJob = async (
  * batch starts or that none are left.
  */
 export const deleteItemBatch = async (
-  ctx: MutationCtx,
+  ctx: JobCtx,
   jobId: Id<"jobs">,
   from: number,
 ): Promise<{ readonly next: number } | null> => {

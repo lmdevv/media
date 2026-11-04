@@ -262,7 +262,7 @@ const accessFile = (): Emitted => ({
       ["/** A grant level. */", "export type Level = (typeof levels)[number];"].join("\n"),
       shared("level", "`Level` as a Convex validator.", level),
       [
-        "/** Every resource type a grant can name, its table, and whether it is a library. */",
+        "/** Every resource type a grant can name, and the table that holds its rows. */",
         `export const resourceTypes = ${JSON.stringify(resourceTypes)} as const;`,
       ].join("\n"),
       [
@@ -271,12 +271,13 @@ const accessFile = (): Emitted => ({
       ].join("\n"),
       shared("resourceType", "`ResourceType` as a Convex validator.", resourceType),
       shared("resourceId", "The id of a row of any resource type.", resourceId),
-      local("libraryId", "The id of a row of a library type.", libraryId),
-      [
-        "/** The id of something the allowed-libraries restriction lists. */",
-        "export type LibraryId = Infer<typeof libraryId>;",
-      ].join("\n"),
-      shared(
+      local(
+        "libraryId",
+        "A library's id, which the allowed-libraries restriction lists.",
+        libraryId,
+      ),
+      ["/** A library's id. */", "export type LibraryId = Infer<typeof libraryId>;"].join("\n"),
+      local(
         "grantPrincipal",
         "Who a grant reaches: one user, a group's members, or every person on the server but guests.",
         grantPrincipal,

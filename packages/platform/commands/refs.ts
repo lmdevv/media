@@ -10,6 +10,8 @@ import type { Refs as core_accounts_users } from "./core/accounts/users";
 import type { Refs as core_auth_apiKeys } from "./core/auth/apiKeys";
 import type { Refs as core_auth_deviceCodes } from "./core/auth/deviceCodes";
 import type { Refs as core_auth_sessions } from "./core/auth/sessions";
+import type { Refs as core_libraries } from "./core/libraries";
+import type { Refs as core_permissions_grants } from "./core/permissions/grants";
 import type { Refs as core_permissions_groups } from "./core/permissions/groups";
 import type { Refs as core_restrictions } from "./core/restrictions";
 import type { Refs as core_server } from "./core/server";
@@ -57,6 +59,19 @@ export const commandRefs = {
     .current satisfies core_auth_sessions["current"],
   "core.auth.sessions.end": api.core.auth.sessions.end satisfies core_auth_sessions["end"],
   "core.auth.sessions.endAll": api.core.auth.sessions.endAll satisfies core_auth_sessions["endAll"],
+  "core.libraries.create": api.core.libraries.create satisfies core_libraries["create"],
+  "core.libraries.get": api.core.libraries.get satisfies core_libraries["get"],
+  "core.libraries.list": api.core.libraries.list satisfies core_libraries["list"],
+  "core.libraries.remove": api.core.libraries.remove satisfies core_libraries["remove"],
+  "core.libraries.rename": api.core.libraries.rename satisfies core_libraries["rename"],
+  "core.libraries.scan": api.core.libraries.scan satisfies core_libraries["scan"],
+  "core.libraries.setFolders": api.core.libraries.setFolders satisfies core_libraries["setFolders"],
+  "core.permissions.grants.list": api.core.permissions.grants
+    .list satisfies core_permissions_grants["list"],
+  "core.permissions.grants.remove": api.core.permissions.grants
+    .remove satisfies core_permissions_grants["remove"],
+  "core.permissions.grants.set": api.core.permissions.grants
+    .set satisfies core_permissions_grants["set"],
   "core.permissions.groups.addMember": api.core.permissions.groups
     .addMember satisfies core_permissions_groups["addMember"],
   "core.permissions.groups.create": api.core.permissions.groups

@@ -22,6 +22,7 @@ import type {
   AccountResource,
   Because,
   ContentAction,
+  ContentFacts,
   ContentResource,
   Decision,
   Principal,
@@ -78,9 +79,9 @@ const serviceRow: Doc<"users"> = {
   ...generations,
 };
 
-const library1: LibraryId = idOf("accessProbes", "library-1");
+const library1: LibraryId = idOf("libraries", "library-1");
 
-const library2: LibraryId = idOf("accessProbes", "library-2");
+const library2: LibraryId = idOf("libraries", "library-2");
 
 const kidLimits: Restrictions = {
   maxMovieAge: 7,
@@ -172,16 +173,33 @@ const movie = (
   on: "content",
   domain: "movies",
   level,
-  library,
-  facts: { domain: "movies", rating },
+  placement: { in: "item", library, facts: { domain: "movies", rating } },
 });
 
 const song = (level: Level | null, explicit = false, library = library1): ContentResource => ({
   on: "content",
   domain: "music",
   level,
-  library,
-  facts: { domain: "music", explicit },
+  placement: { in: "item", library, facts: { domain: "music", explicit } },
+});
+
+const libraryAt = (
+  domain: ContentDomain,
+  level: Level | null,
+  library = library1,
+): ContentResource => ({ on: "content", domain, level, placement: { in: "library", library } });
+
+/** A thing in no one library, such as a playlist: a container unless given facts. */
+const unplaced = (
+  domain: ContentDomain,
+  level: Level | null,
+  libraryList: "hides" | "allows",
+  facts: ContentFacts | "container" = "container",
+): ContentResource => ({
+  on: "content",
+  domain,
+  level,
+  placement: { in: "unplaced", libraryList, facts },
 });
 
 type Expected = "allowed" | readonly ["hidden" | "forbidden", Because];
@@ -281,6 +299,83 @@ const contentRows: ReadonlyArray<Row<ContentAction, ContentResource>> = [
     action: "view",
     resource: song("view", false, library1),
     expected: "allowed",
+  },
+  {
+    name: "an allowed-libraries list keeps a library it names",
+    principal: as.strictKid,
+    action: "view",
+    resource: libraryAt("music", "view", library1),
+    expected: "allowed",
+  },
+  {
+    name: "an allowed-libraries list hides a library it does not name",
+    principal: as.strictKid,
+    action: "view",
+    resource: libraryAt("movies", "view", library2),
+    expected: ["hidden", "restricted"],
+  },
+  {
+    name: "ratings never hide a library",
+    principal: principalOf(
+      memberRow("rated-kid", {
+        maxMovieAge: 0,
+        hideUnrated: true,
+        hideExplicitMusic: true,
+        libraries: null,
+      }),
+    ),
+    action: "view",
+    resource: libraryAt("movies", "view"),
+    expected: "allowed",
+  },
+  {
+    name: "an allowed-libraries list hides an unplaced thing that it hides",
+    principal: as.strictKid,
+    action: "view",
+    resource: unplaced("music", "view", "hides"),
+    expected: ["hidden", "restricted"],
+  },
+  {
+    name: "an allowed-libraries list keeps an unplaced thing that it allows",
+    principal: as.strictKid,
+    action: "view",
+    resource: unplaced("music", "view", "allows"),
+    expected: "allowed",
+  },
+  {
+    name: "with no allowed-libraries list an unplaced thing that it would hide stays",
+    principal: as.kid,
+    action: "view",
+    resource: unplaced("movies", "view", "hides"),
+    expected: "allowed",
+  },
+  {
+    name: "rating limits pass over an unplaced container",
+    principal: as.kid,
+    action: "play",
+    resource: unplaced("movies", "view", "allows"),
+    expected: "allowed",
+  },
+  {
+    name: "a rating limit hides an unplaced movie rated above it",
+    principal: as.kid,
+    action: "view",
+    resource: unplaced("movies", "view", "allows", { domain: "movies", rating: rated(13) }),
+    expected: ["hidden", "restricted"],
+  },
+  {
+    name: "hiding explicit music hides an unplaced explicit song",
+    principal: as.kid,
+    action: "play",
+    resource: unplaced("music", "view", "allows", { domain: "music", explicit: true }),
+    expected: ["hidden", "restricted"],
+  },
+  {
+    name: "hiding unrated hides an unplaced unrated movie the list allows",
+    principal: as.strictKid,
+    action: "view",
+    resource: unplaced("movies", "view", "allows", { domain: "movies", rating: UNRATED }),
+    expected: ["hidden", "restricted"],
   },
   {
     name: "a music:play key cannot play a movie",
@@ -584,6 +679,27 @@ const serverRows: ReadonlyArray<Row<ServerAction, typeof SERVER>> = [
     resource: SERVER,
     expected: ["forbidden", "scope"],
   },
+  {
+    name: "an admin points libraries at folders",
+    principal: as.admin,
+    action: "manageFolders",
+    resource: SERVER,
+    expected: "allowed",
+  },
+  {
+    name: "a member points no library at a folder",
+    principal: as.member,
+    action: "manageFolders",
+    resource: SERVER,
+    expected: ["forbidden", "scope"],
+  },
+  {
+    name: "an admin key cut to account points no library at a folder",
+    principal: as.adminAccountKey,
+    action: "manageFolders",
+    resource: SERVER,
+    expected: ["forbidden", "scope"],
+  },
 ];
 
 const domains: ReadonlyArray<ContentDomain> = ["movies", "music"];
@@ -594,8 +710,12 @@ const resourcesAt = (level: Level | null): ReadonlyArray<ContentResource> => [
   movie(level, UNRATED),
   song(level, true),
   song(level, false, library2),
-  { on: "content", domain: "movies", level, library: null, facts: null },
-  { on: "content", domain: "music", level, library: null, facts: null },
+  libraryAt("movies", level),
+  libraryAt("music", level, library2),
+  unplaced("movies", level, "hides"),
+  unplaced("music", level, "allows"),
+  unplaced("movies", level, "allows", { domain: "movies", rating: rated(17) }),
+  unplaced("music", level, "hides", { domain: "music", explicit: true }),
 ];
 
 const everyResource = [null, ...levels].flatMap(resourcesAt);
@@ -687,17 +807,24 @@ describe("can", () => {
       ...serverActions.filter((action) => can(service, action, SERVER).allowed),
       ...domains.flatMap((domain) =>
         contentActions.filter(
-          (action) =>
-            can(service, action, {
-              on: "content",
-              domain,
-              level: "manage",
-              library: null,
-              facts: null,
-            }).allowed,
+          (action) => can(service, action, unplaced(domain, "manage", "allows")).allowed,
         ),
       ),
     ]).toEqual([]);
+  });
+});
+
+describe("server actions", () => {
+  it("are an admin's and the owner's alone, managing folders included", () => {
+    const allowed = serverActions.map((action) => [
+      action,
+      Object.entries(as).flatMap(([name, principal]) =>
+        can(principal, action, SERVER).allowed ? [name] : [],
+      ),
+    ]);
+
+    expect(serverActions).toContain("manageFolders");
+    expect(allowed).toEqual(serverActions.map((action) => [action, ["owner", "admin"]]));
   });
 });
 

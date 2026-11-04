@@ -598,6 +598,9 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.3
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

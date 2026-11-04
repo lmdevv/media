@@ -47,3 +47,16 @@ export const incrementCounter = async (
     await db.patch(row._id, { value: row.value + delta });
   }
 };
+
+/**
+ * Deletes every row of the set `name` counts, in the mutation that deletes the last counted rows
+ * or stops counting them. Reads and deletes the shards, 16 or a few more.
+ */
+export const deleteCounter = async (db: DatabaseWriter, name: string): Promise<void> => {
+  const shards = await db
+    .query("counters")
+    .withIndex("by_name_shard", (q) => q.eq("name", name))
+    .collect();
+
+  await Promise.all(shards.map((shard) => db.delete(shard._id)));
+};

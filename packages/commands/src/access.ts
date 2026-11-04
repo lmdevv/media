@@ -5,16 +5,15 @@ export const levels = ["view", "edit", "manage"] as const;
 
 interface ResourceTypeEntry {
   readonly table: string;
-  readonly library: boolean;
 }
 
 /**
- * Every resource type a grant can name. `table` holds its rows. `library` marks a type the
- * allowed-libraries restriction lists. `probe` is the core's internal test seam until libraries
- * exist.
+ * Every resource type a grant can name, and the table that holds its rows. Only containers are
+ * grantable: a library now, a playlist or a collection later. A title or a track has no grants of
+ * its own; it is seen at its library's level.
  */
 export const resourceTypes = {
-  probe: { table: "accessProbes", library: true },
+  library: { table: "libraries" },
 } as const satisfies Readonly<Record<string, ResourceTypeEntry>>;
 
 const registered: ReadonlyArray<readonly [string, ResourceTypeEntry]> =
@@ -29,10 +28,13 @@ export const resourceType = v.union(...registered.map(([type]) => v.literal(type
 /** The id of a row of any registered resource type. */
 export const resourceId = v.union(...registered.map(([, entry]) => v.id(entry.table)));
 
-/** The id of a row of a type the allowed-libraries restriction lists. */
-export const libraryId = v.union(
-  ...registered.flatMap(([, entry]) => (entry.library ? [v.id(entry.table)] : [])),
+/** One grantable thing: its type, and the id of its row in that type's table. */
+export const resourceRef = v.union(
+  ...registered.map(([type, entry]) => v.object({ type: v.literal(type), id: v.id(entry.table) })),
 );
+
+/** A library's id, which the allowed-libraries restriction lists. */
+export const libraryId = v.id("libraries");
 
 /** Who a grant reaches: one user, a group's members, or every person on the server but guests. */
 export const grantPrincipal = v.union(

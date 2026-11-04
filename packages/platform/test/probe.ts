@@ -10,15 +10,22 @@ import type { SignedIn } from "./sign-in";
 import type { CoreStack } from "./stack-env";
 
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
-// stack answered this one as an `accessProbes` id; the backend's `v.id("accessProbes")`
-// validators check it again whenever a test sends it back.
-const isProbeId = (value: unknown): value is Id<"accessProbes"> => Schema.is(Schema.String)(value);
+// stack answered these through a validator of the id's table; the backend's `v.id(...)`
+// validators check each again whenever a test sends it back.
+const isLibraryId = (value: unknown): value is Id<"libraries"> => Schema.is(Schema.String)(value);
 
-const ProbeId = Schema.declare(isProbeId);
+// SAFETY: as `isLibraryId`, for the `probeItems` ids the seam answers.
+const isItemId = (value: unknown): value is Id<"probeItems"> => Schema.is(Schema.String)(value);
+
+const LibraryId = Schema.declare(isLibraryId);
+
+const ItemId = Schema.declare(isItemId);
+
+const Seeded = Schema.Array(Schema.Struct({ libraryId: LibraryId, itemIds: Schema.Array(ItemId) }));
 
 const Opened = Schema.Struct({
-  probeId: ProbeId,
-  name: Schema.String,
+  itemId: ItemId,
+  path: Schema.String,
   level: Schema.Literals(["view", "edit", "manage"]),
 });
 
@@ -32,122 +39,134 @@ const Page = Schema.Struct({
 export interface Session {
   readonly signedIn: SignedIn;
   readonly userId: Id<"users">;
+  readonly username: string;
   readonly sessionId: Id<"authSessions">;
 }
 
-/** A probe to seed: a movie with a minimum viewer age or none, or a song, explicit or not. */
-export type Probe = FunctionArgs<typeof internal.core.permissions.probe.seed>["probes"][number];
+type Library = FunctionArgs<typeof internal.core.libraryProbe.seed>["libraries"][number];
 
-/** A movie probe; `age` null is unrated. */
-export const movie = (name: string, age: number | null): Probe => ({
-  name,
-  domain: "movies",
-  age,
-  explicit: false,
-});
+/** An item to seed: a movie with a minimum viewer age or none, or a song, explicit or not. */
+export type Item = Library["items"][number];
 
-export const song = (name: string, explicit: boolean): Probe => ({
-  name,
-  domain: "music",
-  age: null,
-  explicit,
-});
+/** A movie; `age` null is unrated. */
+export const movie = (name: string, age: number | null): Item => ({ name, age, explicit: false });
+
+export const song = (name: string, explicit: boolean): Item => ({ name, age: null, explicit });
 
 /** The session behind a signed-in client, read through `core.auth.sessions.current`. */
 export const sessionOf = async (signedIn: SignedIn): Promise<Session> => {
   const current = await signedIn.client.query(api.core.auth.sessions.current, {});
 
-  return { signedIn, userId: current.userId, sessionId: current.sessionId };
+  return {
+    signedIn,
+    userId: current.userId,
+    username: current.username,
+    sessionId: current.sessionId,
+  };
 };
 
-/** Seeds probes that `manager` manages, in order. */
-export const seedProbes = (
+/** Seeds libraries that `manager` manages, in order, with no scan queued. */
+export const seedLibraries = (
   stack: CoreStack,
   manager: Session,
-  probes: ReadonlyArray<Probe>,
-): Promise<ReadonlyArray<Id<"accessProbes">>> =>
+  libraries: ReadonlyArray<Library>,
+): Promise<typeof Seeded.Type> =>
   runFunction(
     stack,
-    internal.core.permissions.probe.seed,
-    { managerId: manager.userId, probes: [...probes] },
-    Schema.Array(ProbeId),
+    internal.core.libraryProbe.seed,
+    { managerId: manager.userId, libraries: [...libraries] },
+    Seeded,
   );
 
-/** Opens a probe as `session` would through a command that declares `scope`. */
-export const openProbe = (
+/** Seeds one library that `manager` manages. */
+export const seedLibrary = async (
+  stack: CoreStack,
+  manager: Session,
+  library: Library,
+): Promise<(typeof Seeded.Type)[number]> => {
+  const [seeded] = await seedLibraries(stack, manager, [library]);
+
+  if (seeded === undefined) throw new Error("seed made no library");
+
+  return seeded;
+};
+
+/** Opens an item as `session` would through a command that declares `scope`. */
+export const openItem = (
   stack: CoreStack,
   session: Session,
-  probeId: Id<"accessProbes">,
-  action: FunctionArgs<typeof internal.core.permissions.probe.open>["action"] = "view",
+  itemId: Id<"probeItems">,
+  action: FunctionArgs<typeof internal.core.libraryProbe.open>["action"] = "view",
   scope: CallerScope = "signed-in",
 ): Promise<typeof Opened.Type> =>
   runFunction(
     stack,
-    internal.core.permissions.probe.open,
-    { sessionId: session.sessionId, scope, action, probeId },
+    internal.core.libraryProbe.open,
+    { sessionId: session.sessionId, scope, action, itemId },
     Opened,
   );
 
-/**
- * One page of the probes `session` sees. Calls with another `id` miss the query cache, so each
- * one runs and reads.
- */
-export const probePage = (
+/** Every item of a library `session` sees, page by page. */
+export const visibleItems = async (
   stack: CoreStack,
   session: Session,
-  numItems: number,
+  libraryId: Id<"libraries">,
   cursor: string | null = null,
-  id?: number,
-): Promise<typeof Page.Type> =>
-  runFunction(
+  seen: ReadonlyArray<Id<"probeItems">> = [],
+): Promise<ReadonlyArray<Id<"probeItems">>> => {
+  const page = await runFunction(
     stack,
-    internal.core.permissions.probe.list,
+    internal.core.libraryProbe.page,
     {
       sessionId: session.sessionId,
       scope: "signed-in",
-      paginationOpts: id === undefined ? { numItems, cursor } : { numItems, cursor, id },
+      libraryId,
+      paginationOpts: { numItems: 100, cursor },
     },
     Page,
   );
 
-/** Every probe `session` sees, page by page. */
-export const visibleProbes = async (
-  stack: CoreStack,
-  session: Session,
-  cursor: string | null = null,
-  seen: ReadonlyArray<Id<"accessProbes">> = [],
-): Promise<ReadonlyArray<Id<"accessProbes">>> => {
-  const page = await probePage(stack, session, 100, cursor);
-  const next = [...seen, ...page.page.map((probe) => probe.probeId)];
+  const next = [...seen, ...page.page.map((item) => item.itemId)];
 
-  return page.isDone ? next : visibleProbes(stack, session, page.continueCursor, next);
+  return page.isDone ? next : visibleItems(stack, session, libraryId, page.continueCursor, next);
 };
 
-/** Gives `principal` exactly `level` on a probe, as `session`. */
-export const shareProbe = (
-  stack: CoreStack,
+/** Every library `session` sees through `core.libraries.list`, in pages of `numItems`. */
+export const visibleLibraries = async (
   session: Session,
-  probeId: Id<"accessProbes">,
+  numItems = 100,
+  cursor: string | null = null,
+  seen: ReadonlyArray<Id<"libraries">> = [],
+): Promise<ReadonlyArray<Id<"libraries">>> => {
+  const page = await session.signedIn.client.query(api.core.libraries.list, {
+    paginationOpts: { numItems, cursor },
+  });
+
+  const next = [...seen, ...page.page.map((library) => library.libraryId)];
+
+  return page.isDone ? next : visibleLibraries(session, numItems, page.continueCursor, next);
+};
+
+/** Gives `principal` exactly `level` on a library, as `session`, through `core.permissions.grants.set`. */
+export const share = (
+  session: Session,
+  libraryId: Id<"libraries">,
   principal: GrantPrincipal,
   level: Level,
 ): Promise<null> =>
-  runFunction(
-    stack,
-    internal.core.permissions.probe.share,
-    { sessionId: session.sessionId, probeId, principal, level },
-    Schema.Null,
-  );
+  session.signedIn.client.mutation(api.core.permissions.grants.set, {
+    resource: { type: "library", id: libraryId },
+    principal,
+    level,
+  });
 
-/** Takes `principal`'s grant on a probe away, as `session`. */
-export const unshareProbe = (
-  stack: CoreStack,
+/** Takes `principal`'s grant on a library away, as `session`, through `core.permissions.grants.remove`. */
+export const unshare = (
   session: Session,
-  probeId: Id<"accessProbes">,
+  libraryId: Id<"libraries">,
   principal: GrantPrincipal,
 ): Promise<null> =>
-  runFunction(
-    stack,
-    internal.core.permissions.probe.unshare,
-    { sessionId: session.sessionId, probeId, principal },
-    Schema.Null,
-  );
+  session.signedIn.client.mutation(api.core.permissions.grants.remove, {
+    resource: { type: "library", id: libraryId },
+    principal,
+  });

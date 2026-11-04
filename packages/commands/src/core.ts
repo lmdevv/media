@@ -1,16 +1,35 @@
 import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import { v } from "convex/values";
 
-import { restrictions } from "./access.ts";
+import { grantPrincipal, level, resourceRef, restrictions } from "./access.ts";
 import { action, mutation, query } from "./command.ts";
 import type { Command } from "./command.ts";
-import { assignableRoles, credentialScopes, roles } from "./scopes.ts";
+import { assignableRoles, contentDomains, credentialScopes, roles } from "./scopes.ts";
 
 const credentialScope = v.union(...credentialScopes.map((scope) => v.literal(scope)));
 
 const role = v.union(...roles.map((name) => v.literal(name)));
 
 const assignableRole = v.union(...assignableRoles.map((name) => v.literal(name)));
+
+/** A library's kind is the domain its content belongs to. */
+const libraryKind = v.union(...contentDomains.map((domain) => v.literal(domain)));
+
+const libraryRow = {
+  libraryId: v.id("libraries"),
+  name: v.string(),
+  kind: libraryKind,
+  /** The strongest level the caller's grants give them. */
+  level,
+};
+
+const jobStatus = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("succeeded"),
+  v.literal("failed"),
+  v.literal("canceled"),
+);
 
 /** The core's commands: the server itself, accounts, devices, and the other shared modules. */
 export const core = [
@@ -236,6 +255,95 @@ export const core = [
     scope: "admin",
     args: { groupId: v.id("groups"), userId: v.id("users") },
     result: v.null(),
+  }),
+
+  mutation("core.libraries.create", {
+    summary: "Create a library of movies or music from folders on the server and scan it",
+    scope: "admin",
+    args: { name: v.string(), kind: libraryKind, folders: v.array(v.string()) },
+    result: v.object({ libraryId: v.id("libraries"), scanJobId: v.id("jobs") }),
+  }),
+  query("core.libraries.list", {
+    summary: "List the libraries shared with you",
+    scope: "signed-in",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(v.object(libraryRow)),
+  }),
+  query("core.libraries.get", {
+    summary:
+      "Show a library, how many items it holds, its latest scan, and to its managers its folders",
+    scope: "signed-in",
+    args: { libraryId: v.id("libraries") },
+    result: v.object({
+      ...libraryRow,
+      items: v.number(),
+      folders: v.union(v.array(v.string()), v.null()),
+      scan: v.union(
+        v.object({
+          jobId: v.id("jobs"),
+          status: jobStatus,
+          done: v.number(),
+          total: v.union(v.number(), v.null()),
+          error: v.union(v.string(), v.null()),
+          finishedAt: v.union(v.number(), v.null()),
+        }),
+        v.null(),
+      ),
+    }),
+  }),
+  mutation("core.libraries.rename", {
+    summary: "Rename a library you manage",
+    scope: "signed-in",
+    args: { libraryId: v.id("libraries"), name: v.string() },
+    result: v.null(),
+  }),
+  mutation("core.libraries.setFolders", {
+    summary:
+      "Change the folders of a library you manage; what a removed folder held leaves the library",
+    scope: "admin",
+    args: { libraryId: v.id("libraries"), folders: v.array(v.string()) },
+    result: v.object({ scanJobId: v.union(v.id("jobs"), v.null()) }),
+  }),
+  mutation("core.libraries.scan", {
+    summary: "Scan a library for new, changed, and missing files, or join the scan already queued",
+    scope: "signed-in",
+    args: { libraryId: v.id("libraries") },
+    result: v.object({ jobId: v.id("jobs"), created: v.boolean() }),
+  }),
+  mutation("core.libraries.remove", {
+    summary: "Delete a library you manage and everything it lists; the files on disk stay",
+    scope: "signed-in",
+    args: { libraryId: v.id("libraries") },
+    result: v.null(),
+  }),
+
+  mutation("core.permissions.grants.set", {
+    summary: "Share something you manage with a person, a group, or everyone, at exactly one level",
+    scope: "signed-in",
+    refusesKeys: true,
+    args: { resource: resourceRef, principal: grantPrincipal, level },
+    result: v.null(),
+  }),
+  mutation("core.permissions.grants.remove", {
+    summary: "Stop sharing something you manage with someone, or leave what was shared with you",
+    scope: "signed-in",
+    args: { resource: resourceRef, principal: grantPrincipal },
+    result: v.null(),
+  }),
+  query("core.permissions.grants.list", {
+    summary: "List who something you manage is shared with, and at which level",
+    scope: "signed-in",
+    args: { resource: resourceRef, paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({
+        principal: v.union(
+          v.object({ kind: v.literal("user"), userId: v.id("users"), username: v.string() }),
+          v.object({ kind: v.literal("group"), groupId: v.id("groups"), name: v.string() }),
+          v.object({ kind: v.literal("household") }),
+        ),
+        level,
+      }),
+    ),
   }),
 
   query("core.restrictions.get", {

@@ -125,13 +125,10 @@ Measured on this repo's dev stack:
 
 Left for the first unit that needs each one:
 
-- A domain's reaction to a finished job, such as a scan stamping its library's last scan time.
-  The finishing transition schedules an internal mutation that the domain names per kind. That
-  list stays out of `kinds.ts`, because `schema.ts` imports `kinds.ts` and must not import
-  `convex/_generated`.
-- A helper that checks a lease inside a domain function the server calls, such as a scanner
-  callback. It applies the `check` event through `store.applyEvent` in the callback's mutation,
-  as `items` does, so a cancel it reports also ends the job.
+- A domain's reaction to a finished job. Scans need none: a library points at its newest scan
+  job, whose status is the library's scan state (ADR 0024). A kind that must react schedules an
+  internal mutation that the domain names per kind, in a list outside `kinds.ts`, because
+  `schema.ts` imports `kinds.ts` and must not import `convex/_generated`.
 - A delayed retry and a pause of a whole kind, which music's lyrics lookups need.
 - Deleting finished jobs after a retention period, before trickplay queues thousands of jobs.
 - A command that recounts a kind's `jobKinds` row from its running jobs, for an operator who
@@ -139,6 +136,17 @@ Left for the first unit that needs each one:
   the count.
 - Totals of jobs by status, when a screen shows them. `store.applyEvent` is the one place that
   moves a job between statuses, so the counters go there.
+
+Settled by the libraries build (ADR 0024):
+
+- The lease check inside a domain function the server calls is `withScanLease` in
+  `convex/core/scans.ts`. It applies the `check` event through `store.applyEvent` in the
+  callback's mutation, as `items` does, so a cancel it reports also ends the job.
+- Scan kinds keep the dropped dedupe key and cap 2. A library's new scan may start while its
+  canceled scan's worker has not yet called again, and the old attempt writes nothing after the
+  cancel, because every scanner write runs `withScanLease` first.
+- Job writes take `JobCtx`, the database and the scheduler, so a command handler, whose context
+  has no `auth`, can queue and cancel jobs.
 
 Rejected for this shape:
 

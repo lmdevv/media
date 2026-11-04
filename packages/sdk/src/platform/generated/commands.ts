@@ -313,6 +313,235 @@ const core_auth_sessions_endAll = mutation({
   result: Schema.Null,
 });
 
+const core_libraries_create = mutation({
+  name: "core.libraries.create",
+  path: "core/libraries:create",
+  args: Schema.Struct({
+    name: Schema.String,
+    kind: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+    folders: Schema.Array(Schema.String),
+  }),
+  result: Schema.Struct({
+    libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+    scanJobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+  }),
+});
+
+const core_libraries_get = query({
+  name: "core.libraries.get",
+  path: "core/libraries:get",
+  args: Schema.Struct({ libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")) }),
+  result: Schema.Struct({
+    libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+    name: Schema.String,
+    kind: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+    level: Schema.Union([Schema.Literal("view"), Schema.Literal("edit"), Schema.Literal("manage")]),
+    items: Schema.Finite,
+    folders: Schema.Union([Schema.Array(Schema.String), Schema.Null]),
+    scan: Schema.Union([
+      Schema.Struct({
+        jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+        status: Schema.Union([
+          Schema.Literal("queued"),
+          Schema.Literal("running"),
+          Schema.Literal("succeeded"),
+          Schema.Literal("failed"),
+          Schema.Literal("canceled"),
+        ]),
+        done: Schema.Finite,
+        total: Schema.Union([Schema.Finite, Schema.Null]),
+        error: Schema.Union([Schema.String, Schema.Null]),
+        finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
+      }),
+      Schema.Null,
+    ]),
+  }),
+});
+
+const core_libraries_list = query({
+  name: "core.libraries.list",
+  path: "core/libraries:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+        name: Schema.String,
+        kind: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+        level: Schema.Union([
+          Schema.Literal("view"),
+          Schema.Literal("edit"),
+          Schema.Literal("manage"),
+        ]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const core_libraries_remove = mutation({
+  name: "core.libraries.remove",
+  path: "core/libraries:remove",
+  args: Schema.Struct({ libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")) }),
+  result: Schema.Null,
+});
+
+const core_libraries_rename = mutation({
+  name: "core.libraries.rename",
+  path: "core/libraries:rename",
+  args: Schema.Struct({
+    libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+    name: Schema.String,
+  }),
+  result: Schema.Null,
+});
+
+const core_libraries_scan = mutation({
+  name: "core.libraries.scan",
+  path: "core/libraries:scan",
+  args: Schema.Struct({ libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")) }),
+  result: Schema.Struct({
+    jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+    created: Schema.Boolean,
+  }),
+});
+
+const core_libraries_setFolders = mutation({
+  name: "core.libraries.setFolders",
+  path: "core/libraries:setFolders",
+  args: Schema.Struct({
+    libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+    folders: Schema.Array(Schema.String),
+  }),
+  result: Schema.Struct({
+    scanJobId: Schema.Union([Schema.String.pipe(Schema.brand("Id<jobs>")), Schema.Null]),
+  }),
+});
+
+const core_permissions_grants_list = query({
+  name: "core.permissions.grants.list",
+  path: "core/permissions/grants:list",
+  args: Schema.Struct({
+    resource: Schema.Union([
+      Schema.Struct({
+        type: Schema.Literal("library"),
+        id: Schema.String.pipe(Schema.brand("Id<libraries>")),
+      }),
+    ]),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        principal: Schema.Union([
+          Schema.Struct({
+            kind: Schema.Literal("user"),
+            userId: Schema.String.pipe(Schema.brand("Id<users>")),
+            username: Schema.String,
+          }),
+          Schema.Struct({
+            kind: Schema.Literal("group"),
+            groupId: Schema.String.pipe(Schema.brand("Id<groups>")),
+            name: Schema.String,
+          }),
+          Schema.Struct({ kind: Schema.Literal("household") }),
+        ]),
+        level: Schema.Union([
+          Schema.Literal("view"),
+          Schema.Literal("edit"),
+          Schema.Literal("manage"),
+        ]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const core_permissions_grants_remove = mutation({
+  name: "core.permissions.grants.remove",
+  path: "core/permissions/grants:remove",
+  args: Schema.Struct({
+    resource: Schema.Union([
+      Schema.Struct({
+        type: Schema.Literal("library"),
+        id: Schema.String.pipe(Schema.brand("Id<libraries>")),
+      }),
+    ]),
+    principal: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("user"),
+        userId: Schema.String.pipe(Schema.brand("Id<users>")),
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("group"),
+        groupId: Schema.String.pipe(Schema.brand("Id<groups>")),
+      }),
+      Schema.Struct({ kind: Schema.Literal("household") }),
+    ]),
+  }),
+  result: Schema.Null,
+});
+
+const core_permissions_grants_set = mutation({
+  name: "core.permissions.grants.set",
+  path: "core/permissions/grants:set",
+  args: Schema.Struct({
+    resource: Schema.Union([
+      Schema.Struct({
+        type: Schema.Literal("library"),
+        id: Schema.String.pipe(Schema.brand("Id<libraries>")),
+      }),
+    ]),
+    principal: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("user"),
+        userId: Schema.String.pipe(Schema.brand("Id<users>")),
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("group"),
+        groupId: Schema.String.pipe(Schema.brand("Id<groups>")),
+      }),
+      Schema.Struct({ kind: Schema.Literal("household") }),
+    ]),
+    level: Schema.Union([Schema.Literal("view"), Schema.Literal("edit"), Schema.Literal("manage")]),
+  }),
+  result: Schema.Null,
+});
+
 const core_permissions_groups_addMember = mutation({
   name: "core.permissions.groups.addMember",
   path: "core/permissions/groups:addMember",
@@ -434,7 +663,7 @@ const core_restrictions_get = query({
       hideUnrated: Schema.Boolean,
       hideExplicitMusic: Schema.Boolean,
       libraries: Schema.Union([
-        Schema.Array(Schema.Union([Schema.String.pipe(Schema.brand("Id<accessProbes>"))])),
+        Schema.Array(Schema.String.pipe(Schema.brand("Id<libraries>"))),
         Schema.Null,
       ]),
     }),
@@ -453,7 +682,7 @@ const core_restrictions_set = mutation({
         hideUnrated: Schema.Boolean,
         hideExplicitMusic: Schema.Boolean,
         libraries: Schema.Union([
-          Schema.Array(Schema.Union([Schema.String.pipe(Schema.brand("Id<accessProbes>"))])),
+          Schema.Array(Schema.String.pipe(Schema.brand("Id<libraries>"))),
           Schema.Null,
         ]),
       }),
@@ -538,7 +767,31 @@ export const effectMethods = (method: EffectBuilder) => ({
         endAll: method.mutation(core_auth_sessions_endAll),
       },
     },
+    libraries: {
+      /** `core.libraries.create` (mutation, admin): Create a library of movies or music from folders on the server and scan it. */
+      create: method.mutation(core_libraries_create),
+      /** `core.libraries.get` (query, signed-in): Show a library, how many items it holds, its latest scan, and to its managers its folders. */
+      get: method.query(core_libraries_get),
+      /** `core.libraries.list` (query, signed-in): List the libraries shared with you. */
+      list: method.query(core_libraries_list),
+      /** `core.libraries.remove` (mutation, signed-in): Delete a library you manage and everything it lists; the files on disk stay. */
+      remove: method.mutation(core_libraries_remove),
+      /** `core.libraries.rename` (mutation, signed-in): Rename a library you manage. */
+      rename: method.mutation(core_libraries_rename),
+      /** `core.libraries.scan` (mutation, signed-in): Scan a library for new, changed, and missing files, or join the scan already queued. */
+      scan: method.mutation(core_libraries_scan),
+      /** `core.libraries.setFolders` (mutation, admin): Change the folders of a library you manage; what a removed folder held leaves the library. */
+      setFolders: method.mutation(core_libraries_setFolders),
+    },
     permissions: {
+      grants: {
+        /** `core.permissions.grants.list` (query, signed-in): List who something you manage is shared with, and at which level. */
+        list: method.query(core_permissions_grants_list),
+        /** `core.permissions.grants.remove` (mutation, signed-in): Stop sharing something you manage with someone, or leave what was shared with you. */
+        remove: method.mutation(core_permissions_grants_remove),
+        /** `core.permissions.grants.set` (mutation, signed-in, API keys refused): Share something you manage with a person, a group, or everyone, at exactly one level. */
+        set: method.mutation(core_permissions_grants_set),
+      },
       groups: {
         /** `core.permissions.groups.addMember` (mutation, admin, API keys refused): Add someone to a group; what is shared with it reaches them on their next call. */
         addMember: method.mutation(core_permissions_groups_addMember),
@@ -634,7 +887,31 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         endAll: method.mutation(core_auth_sessions_endAll),
       },
     },
+    libraries: {
+      /** `core.libraries.create` (mutation, admin): Create a library of movies or music from folders on the server and scan it. */
+      create: method.mutation(core_libraries_create),
+      /** `core.libraries.get` (query, signed-in): Show a library, how many items it holds, its latest scan, and to its managers its folders. */
+      get: method.query(core_libraries_get),
+      /** `core.libraries.list` (query, signed-in): List the libraries shared with you. */
+      list: method.query(core_libraries_list),
+      /** `core.libraries.remove` (mutation, signed-in): Delete a library you manage and everything it lists; the files on disk stay. */
+      remove: method.mutation(core_libraries_remove),
+      /** `core.libraries.rename` (mutation, signed-in): Rename a library you manage. */
+      rename: method.mutation(core_libraries_rename),
+      /** `core.libraries.scan` (mutation, signed-in): Scan a library for new, changed, and missing files, or join the scan already queued. */
+      scan: method.mutation(core_libraries_scan),
+      /** `core.libraries.setFolders` (mutation, admin): Change the folders of a library you manage; what a removed folder held leaves the library. */
+      setFolders: method.mutation(core_libraries_setFolders),
+    },
     permissions: {
+      grants: {
+        /** `core.permissions.grants.list` (query, signed-in): List who something you manage is shared with, and at which level. */
+        list: method.query(core_permissions_grants_list),
+        /** `core.permissions.grants.remove` (mutation, signed-in): Stop sharing something you manage with someone, or leave what was shared with you. */
+        remove: method.mutation(core_permissions_grants_remove),
+        /** `core.permissions.grants.set` (mutation, signed-in, API keys refused): Share something you manage with a person, a group, or everyone, at exactly one level. */
+        set: method.mutation(core_permissions_grants_set),
+      },
       groups: {
         /** `core.permissions.groups.addMember` (mutation, admin, API keys refused): Add someone to a group; what is shared with it reaches them on their next call. */
         addMember: method.mutation(core_permissions_groups_addMember),
