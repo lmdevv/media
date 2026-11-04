@@ -25,6 +25,12 @@
     "packages/sdk": {},
     "apps/cli": {
       "entry": ["src/main.ts", "scripts/*.ts"]
+    },
+    "packages/platform": {
+      "entry": ["scripts/*.ts"],
+      "typescript": {
+        "config": ["convex/tsconfig.json"]
+      }
     }
   }
 }

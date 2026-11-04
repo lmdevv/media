@@ -1,0 +1,22 @@
+{
+  "name": "@media/platform",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p convex && tsc --noEmit -p scripts && tsc --noEmit -p test",
+    "test:stack": "MEDIA_STACK_TESTS=1 vitest run --root ../.. packages/platform/test"
+  },
+  "dependencies": {
+    "@auth/core": "^0.41.3",
+    "@convex-dev/auth": "^0.0.96",
+    "convex": "catalog:",
+    "lucia": "^3.2.2"
+  },
+  "devDependencies": {
+    "@media/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "5.0.3"
+  }
+}

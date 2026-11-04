@@ -6,6 +6,7 @@ export default defineConfig({
     include: [
       "{apps,packages}/*/src/**/*.test.{ts,tsx}",
       "packages/backend/test/**/*.test.ts",
+      "packages/platform/test/**/*.test.ts",
       "scripts/*.test.ts",
     ],
     passWithNoTests: true,
