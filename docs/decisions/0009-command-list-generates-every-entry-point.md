@@ -77,9 +77,12 @@ The first generator settled how declarations, outputs, and checks fit together.
 - Lint bans the public `query`, `mutation`, and `action` builders in `packages/platform/convex/`,
   so every public function goes through a contract's `register` and its scope check. The
   server-facing functions get their own guarded builder when the server moves onto the core.
-- Until the permission layers land, the scopes are `public` and `signed-in`. A scoped command's
-  handler receives the caller from `requireCaller` in `convex/core/lib/caller.ts`, which rejects
-  every call until sign-in exists.
+- The scopes are `public`, `signed-in`, and the credential scopes in
+  `packages/commands/src/scopes.ts`, which start with `account` (ADR 0004). A scoped command's
+  handler receives the caller from the sign-in interface in `convex/core/auth/caller.ts`:
+  `requireCaller` for a query or mutation and `requireActionCaller` for an action, which has no
+  `db`. Every handler's `ctx` lacks `auth`, so a handler can learn its caller only from that
+  argument.
 - `pnpm --filter @media/commands check` runs in the pre-commit hook and in CI's `check` job on
   every change. It fails on a stale, missing, or leftover output in any package.
 - `generate` also runs `convex codegen` when the worktree has a dev stack. A command in a new module

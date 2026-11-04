@@ -61,3 +61,5 @@ A kid cannot change their own restrictions. Admins are enough, so there is no gu
 - Unrated content is hidden from a kid when the admin turns that restriction on.
 - A grant to a group reaches every member of the group.
 - A service account is its own principal type. It holds no platform role.
+- `account` is the first credential scope. It lets a session manage its user's own credentials,
+  so a key without it cannot make a key or approve a device that outlives it (ADR 0004).
