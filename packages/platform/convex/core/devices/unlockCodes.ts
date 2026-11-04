@@ -42,7 +42,6 @@ const strikeOf = (db: DatabaseReader, deviceId: Id<"devices">, userId: Id<"users
     .withIndex("by_device_user", (q) => q.eq("deviceId", deviceId).eq("userId", userId))
     .unique();
 
-/** Wrong tries a strike row counts against `code`; a row from an earlier code counts none. */
 const wrongTries = (code: Doc<"unlockCodes">, strike: Doc<"unlockStrikes"> | null): number =>
   strike?.codeId === code._id ? strike.wrong : 0;
 

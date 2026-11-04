@@ -21,14 +21,13 @@ import {
 import { requireServer } from "../permissions/authorize";
 import type { PersonDoc } from "../permissions/policy";
 import { endSession, liveSession } from "../sessions";
+import { dropApprovals } from "./approvals";
 import { DEVICE_PREFIX, NO_DEVICE } from "./facts";
 
 const NAME_MAX = 64;
 
-/** Most people signed in on one personal device at once. */
 const PEOPLE_PER_DEVICE_MAX = 16;
 
-/** The sessions bound to one device that a read takes; `purge` deletes the ended ones. */
 const DEVICE_SESSIONS_READ = 200;
 
 const ENROLLS_PER_HOUR = 20;
@@ -70,7 +69,7 @@ export const signedInOn = async (
  * Binds the caller's session to a personal device, and ends the caller's other sessions there, so
  * each person has one session per device.
  */
-const bind = async (
+const joinDevice = async (
   ctx: Pick<MutationCtx, "db">,
   caller: Caller,
   device: Doc<"devices">,
@@ -117,7 +116,7 @@ export const attach = internalMutation({
 
     if (named !== device.name) await ctx.db.patch(device._id, { name: named });
 
-    await bind(ctx, caller, device);
+    await joinDevice(ctx, caller, device);
 
     return device._id;
   },
@@ -144,7 +143,7 @@ export const insert = internalMutation({
 
     const device = (await ctx.db.get(deviceId)) ?? fail("not_found", NO_DEVICE);
 
-    await bind(ctx, caller, device);
+    await joinDevice(ctx, caller, device);
 
     return deviceId;
   },
@@ -222,14 +221,11 @@ export const purge = internalMutation({
   },
 });
 
-/** A device keeps one live approval; a read takes a few to clear stragglers too. */
-const DEVICE_APPROVALS_READ = 8;
-
 /**
  * Clears what a device kept: its ended sessions, and when it was shared, its approval at once and
  * its unlock-code strikes in scheduled pages.
  */
-const forget = async (
+const purgeLeftovers = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   device: Doc<"devices">,
 ): Promise<void> => {
@@ -243,12 +239,7 @@ const forget = async (
 
   if (device.mode !== "shared") return;
 
-  const approvals = await ctx.db
-    .query("tileApprovals")
-    .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
-    .take(DEVICE_APPROVALS_READ);
-
-  await Promise.all(approvals.map((approval) => ctx.db.delete(approval._id)));
+  await dropApprovals(ctx, deviceId);
 
   await ctx.scheduler.runAfter(0, internal.core.devices.registry.purge, {
     deviceId,
@@ -318,7 +309,7 @@ export const { enroll, list, setMode, remove } = register({
       mode === "shared" ? { ...fields, mode, tile: null } : { ...fields, mode },
     );
 
-    await forget(ctx, device);
+    await purgeLeftovers(ctx, device);
 
     return null;
   },
@@ -328,7 +319,7 @@ export const { enroll, list, setMode, remove } = register({
     const device = (await ctx.db.get(deviceId)) ?? fail("not_found", NO_DEVICE);
 
     await ctx.db.delete(deviceId);
-    await forget(ctx, device);
+    await purgeLeftovers(ctx, device);
 
     return null;
   },

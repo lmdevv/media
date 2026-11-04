@@ -386,7 +386,6 @@ export const proverOf = (person: PersonDoc): Prover => ({
   listed: person.sharedDevices === true,
 });
 
-/** An adult who vouches on shared devices: no restrictions, and listed there or an admin. */
 const vouches = (prover: Prover): boolean =>
   prover.role !== "guest" &&
   !prover.kid &&
@@ -443,7 +442,6 @@ export type Lock =
       readonly opensWith: Opener;
     };
 
-/** Whether `prover` lifts a lock that `opener` names. No adult opens another adult's tile. */
 const accepts = (opener: Opener, prover: Prover, person: Prover): boolean => {
   const self = prover.userId === person.userId;
   const adult = vouches(prover) && (person.kid || self);

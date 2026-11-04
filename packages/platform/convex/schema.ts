@@ -16,7 +16,6 @@ const sessionFields = {
   generation: v.number(),
 };
 
-/** The device a session runs on, at the device's `generation` when the session was bound to it. */
 const boundDevice = v.object({ id: v.id("devices"), generation: v.number() });
 
 const generations = {

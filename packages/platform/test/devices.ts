@@ -11,7 +11,6 @@ import { createPerson, signIn, signInAs } from "./sign-in";
 import type { Person, SignedIn } from "./sign-in";
 import type { CoreStack } from "./stack-env";
 
-/** Limits that make a member a kid. */
 const KID: Restrictions = {
   maxMovieAge: 7,
   hideUnrated: false,

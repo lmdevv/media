@@ -13,12 +13,11 @@ import type { SignedIn } from "../sessions";
 import { NO_TILE, holderOf, listedPeople, releaseTile, requireSharedDevice, tileOf } from "./facts";
 import type { SharedDevice } from "./facts";
 
-/** How long a device waits for an answer, and then to open the tile once approved. */
+/** How long an approval lives: the wait for an answer, then the wait to open the tile. */
 const APPROVAL_MS = 2 * 60 * 1000;
 
 const REQUESTS_PER_HOUR = 60;
 
-/** Most approvals one person's prompt list reads of each kind. */
 const PENDING_MAX = 50;
 
 /** A device keeps one live approval; a read takes a few to clear stragglers too. */
@@ -34,6 +33,16 @@ const approvalsOf = (db: DatabaseReader, deviceId: Id<"devices">) =>
     .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
     .take(DEVICE_APPROVALS_READ);
 
+/** Deletes a device's approvals, when it stops being shared or is removed. */
+export const dropApprovals = async (
+  ctx: Pick<MutationCtx, "db">,
+  deviceId: Id<"devices">,
+): Promise<void> => {
+  const approvals = await approvalsOf(ctx.db, deviceId);
+
+  await Promise.all(approvals.map((approval) => ctx.db.delete(approval._id)));
+};
+
 /** The approval a device is waiting on or just got, unexpired, for its picker. */
 export const currentApproval = async (
   db: DatabaseReader,
@@ -42,7 +51,6 @@ export const currentApproval = async (
 ): Promise<Approval | null> =>
   (await approvalsOf(db, deviceId)).find((approval) => approval.expiresAt > now) ?? null;
 
-/** `approval` as `can` sees it for `answerer`. */
 const resourceOf = (approval: Approval, answerer: PersonDoc): ApprovalResource => ({
   on: "approval",
   intent: approval.intent,
@@ -50,7 +58,6 @@ const resourceOf = (approval: Approval, answerer: PersonDoc): ApprovalResource =
   answererListed: answerer.sharedDevices === true,
 });
 
-/** The person whose tile an `open` approval may name: listed, and locked to their own proof. */
 const openable = (
   listed: ReadonlyArray<PersonDoc>,
   holder: Id<"users"> | null,
@@ -66,7 +73,6 @@ const openable = (
     : person._id;
 };
 
-/** The approval `caller` may answer now, or a refusal. */
 const answerable = async (
   ctx: Pick<QueryCtx, "db">,
   caller: Caller,

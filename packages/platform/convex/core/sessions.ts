@@ -15,7 +15,6 @@ export const SESSION_MS = 30 * DAY_MS;
 /** How long a JWT lasts. */
 export const JWT_MS = 10 * 60 * 1000;
 
-/** How long a tile on a shared device stays open, so a TV is back at its picker by the next day. */
 const TILE_SESSION_MS = 12 * 60 * 60 * 1000;
 
 const PURGE_BATCH = 100;
@@ -67,7 +66,7 @@ const boundDevice = (session: Session): BoundDevice | null =>
  * someone the shared devices list. So a mode change, a removal, a new tile, and an opt-out end
  * sessions without deleting them.
  */
-const carried = (
+const stillOnDevice = (
   session: Session,
   bound: BoundDevice,
   device: Doc<"devices"> | null,
@@ -100,7 +99,7 @@ export const liveSession = async (
 
   if (bound === null) return { session, user };
 
-  return carried(session, bound, await db.get(bound.id), user) ? { session, user } : null;
+  return stillOnDevice(session, bound, await db.get(bound.id), user) ? { session, user } : null;
 };
 
 /** Whether a key still signs in: not ended by a key cut and not expired. */

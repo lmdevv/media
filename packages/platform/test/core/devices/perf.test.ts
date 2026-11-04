@@ -17,7 +17,6 @@ const CODES = 10;
 
 const CALLS = 200;
 
-/** The picker's budget on a shared device that lists 20 people (ADR 0006). */
 const P50_BUDGET_MS = 50;
 
 const median = (values: ReadonlyArray<number>): number =>

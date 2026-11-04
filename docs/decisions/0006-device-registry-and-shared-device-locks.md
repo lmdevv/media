@@ -86,7 +86,8 @@ The registry, the picker, tiles, unlock codes, and approvals are in
 - Opening a tile is a sign-in through the `tile` provider, with the device code, the person, and
   a proof when the tile is locked. The session it opens has the kind `tile`. It holds the person's
   content scopes and never `account` or `admin`, so nothing on a shared device can change an
-  account, register a device, or approve itself. It lasts 12 hours.
+  account, register a device, or approve itself. It lasts 12 hours, so a TV is back at its
+  picker by the next day.
 - A shared device has one slot. Opening a tile puts the new session in the slot and ends the
   session that was there. A tile session is live only while it fills the slot and its person is
   still listed, so opting out signs that person out of every shared device.

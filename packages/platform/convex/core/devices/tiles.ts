@@ -38,7 +38,6 @@ export const checkedProof = v.union(
 /** A proof the `tile` provider checked. */
 export type CheckedProof = Infer<typeof checkedProof>;
 
-/** The person a checked proof names, read again; a password or code changed meanwhile refuses. */
 const proverFor = async (
   ctx: Pick<MutationCtx, "db">,
   device: SharedDevice,
