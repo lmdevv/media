@@ -45,10 +45,7 @@ interface Started {
 }
 
 /** The import a job runs, or null when the job runs none. */
-export const importOfJob = (
-  db: DatabaseReader,
-  jobId: Id<"jobs">,
-): Promise<Doc<"imports"> | null> =>
+const importOfJob = (db: DatabaseReader, jobId: Id<"jobs">): Promise<Doc<"imports"> | null> =>
   db
     .query("imports")
     .withIndex("by_job", (q) => q.eq("jobId", jobId))

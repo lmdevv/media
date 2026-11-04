@@ -13,7 +13,7 @@
 import { v } from "convex/values";
 
 import { paginate } from "../lib/paginate";
-import { serverMutation, serverQuery } from "../lib/server";
+import { serverMutation, serverQuery } from "../lib/serverFacing";
 import { jobItem, jobKind, jobPayload } from "./kinds";
 import { holds } from "./machine";
 import type { Refusal, Step } from "./machine";

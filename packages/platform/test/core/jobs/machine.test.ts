@@ -116,12 +116,23 @@ describe("job machine", () => {
     expect(thrice).toMatchObject({ status: "failed", attempts: 3, error: LAPSED_ERROR });
   });
 
-  it("resets the strikes when a lapsed attempt made progress", () => {
-    const struck = lapse(claim(lapse(claim(queued()))));
-    const progressed = next(report(claim(struck), { progress: { done: 10, total: 100 } }));
+  it("resets the strikes when a lapsed attempt moved its items forward", () => {
+    const struck = lapse(claim(lapse(claim(queued(noItems)))));
+
+    const progressed = next(
+      report(claim(struck), { append: { from: 0, items: items(0, 3), sealed: false } }),
+    );
 
     expect(struck.strikes).toBe(2);
     expect(lapse(progressed)).toMatchObject({ status: "queued", strikes: 0, attempts: 3 });
+  });
+
+  it("strikes a lapsed attempt that only reported counts, which a restart repeats", () => {
+    const struck = lapse(claim(lapse(claim(queued()))));
+    const reportedOnly = next(report(claim(struck), { progress: { done: 10, total: 100 } }));
+
+    expect(reportedOnly).toMatchObject({ work: { done: 10, total: 100 }, progressed: false });
+    expect(lapse(reportedOnly)).toMatchObject({ status: "failed", strikes: 3, attempts: 3 });
   });
 
   it("re-queues a failed attempt while strikes remain, then fails it", () => {

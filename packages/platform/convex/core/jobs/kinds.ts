@@ -171,9 +171,3 @@ export const kindDef = <Kind extends JobKind>(kind: Kind): Extract<KindDef, { ki
 
   return def;
 };
-
-/** Whether a stored payload is of `kind`, narrowing it to that kind's fields. */
-export const isPayloadOf = <Kind extends JobKind>(
-  payload: JobPayload,
-  kind: Kind,
-): payload is PayloadOf<Kind> => payload.kind === kind;

@@ -30,7 +30,7 @@ import type * as core_lib_errors from "../core/lib/errors.js";
 import type * as core_lib_paginate from "../core/lib/paginate.js";
 import type * as core_lib_rateLimit from "../core/lib/rateLimit.js";
 import type * as core_lib_secrets from "../core/lib/secrets.js";
-import type * as core_lib_server from "../core/lib/server.js";
+import type * as core_lib_serverFacing from "../core/lib/serverFacing.js";
 import type * as core_lib_usernames from "../core/lib/usernames.js";
 import type * as core_limitsProbe from "../core/limitsProbe.js";
 import type * as core_schemaMigrations from "../core/schemaMigrations.js";
@@ -68,7 +68,7 @@ declare const fullApi: ApiFromModules<{
   "core/lib/paginate": typeof core_lib_paginate;
   "core/lib/rateLimit": typeof core_lib_rateLimit;
   "core/lib/secrets": typeof core_lib_secrets;
-  "core/lib/server": typeof core_lib_server;
+  "core/lib/serverFacing": typeof core_lib_serverFacing;
   "core/lib/usernames": typeof core_lib_usernames;
   "core/limitsProbe": typeof core_limitsProbe;
   "core/schemaMigrations": typeof core_schemaMigrations;

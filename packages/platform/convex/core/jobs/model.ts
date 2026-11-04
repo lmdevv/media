@@ -62,7 +62,7 @@ export const jobDocument = v.union(
     workerId: v.string(),
     leaseExpiresAt: v.number(),
     claimedAt: v.number(),
-    /** Whether this attempt made durable progress: moved the item watermark, appended, or raised done. */
+    /** Whether this attempt made durable progress: appended items or moved the item watermark. */
     progressed: v.boolean(),
     /**
      * Set by cancel. The job keeps its slot until its worker's next lease call or the lease

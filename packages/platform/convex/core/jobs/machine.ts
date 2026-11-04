@@ -17,9 +17,11 @@
  * expiry, and no claim takes over a running job, so a late renew before the release has no rival
  * holder and keeps its work. After the release, the attempt check refuses it.
  *
- * A lapse strikes only when its attempt made no progress; an attempt that progressed resets the
- * strikes to 0, so a long scan that restarts on every deploy keeps going, and a job that kills its
- * worker before doing anything fails after `maxStrikes` (music's stalls, generalized).
+ * A lapse strikes only when its attempt made durable progress, which only items record: it
+ * appended items or moved the done watermark. Such an attempt resets the strikes to 0, so a long
+ * item job that restarts on every deploy keeps going, and a job that kills its worker before doing
+ * anything new fails after `maxStrikes` (music's stalls, generalized). A reported kind's lapses
+ * always strike.
  */
 import type { JobItem } from "./kinds";
 import type { JobCommon, JobFields, JobWork, Lease } from "./model";
@@ -172,9 +174,11 @@ const reportedWork = (work: Extract<JobWork, { mode: "reported" }>, report: Repo
 
   if (report.progress === undefined) return { work, progressed: false, writes: [] };
 
+  // A reported count is display only. A restarted attempt reports the same counts again, so
+  // treating them as progress would let a job that kills its worker at the same point retry forever.
   return {
     work: { mode: "reported", done: report.progress.done, total: report.progress.total },
-    progressed: report.progress.done > work.done,
+    progressed: false,
     writes: [],
   };
 };
