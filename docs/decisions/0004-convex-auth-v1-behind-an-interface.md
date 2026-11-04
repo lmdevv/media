@@ -166,7 +166,9 @@ redeeming a reset link (ADR 0003). Each is a provider of its own in `convex/core
   and the core's account steps take about 12 ms of the rest.
 - **Held scopes follow the role.** `admin` is the second credential scope (ADR 0005). A password
   session holds every scope its user's role may hold. A key or device session holds its grant cut
-  down to those on every call, so a demotion takes effect on the next call.
+  down to those on every call, so a promotion takes effect on the next call. A demotion bumps both
+  of the person's generations through `endUserCredentials`, which ends every session and key at
+  once, because a grant only cut down would come back with a later promotion.
 - **API keys.** A command declared `refusesKeys` refuses API-key sessions (ADR 0009). These
   commands create a key, approve a device, make a user, a link, a role change, or a handover, or
   change the caller's username or password. A device session is not refused. A password session

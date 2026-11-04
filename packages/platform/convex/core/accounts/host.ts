@@ -9,7 +9,7 @@ import { fail } from "../lib/errors";
 import { hashNewPassword } from "../lib/passwords";
 import { parseUsername } from "../lib/usernames";
 import { resetPassword as storeResetPassword } from "./resetLinks";
-import { insertUser, ownerOf } from "./users";
+import { DEFAULT_ROLE, insertUser, ownerOf } from "./users";
 
 export const insert = internalMutation({
   args: { username: v.string(), hash: v.string(), role: assignableRole },
@@ -24,7 +24,7 @@ export const createUser = internalAction({
     ctx.runMutation(internal.core.accounts.host.insert, {
       username,
       hash: await hashNewPassword(password),
-      role: role ?? "member",
+      role: role ?? DEFAULT_ROLE,
     }),
 });
 

@@ -12,24 +12,30 @@ import { fail } from "../lib/errors";
 import { paginate } from "../lib/paginate";
 import { hashNewPassword, storePassword } from "../lib/passwords";
 import { requireUsername } from "../lib/usernames";
-import { openSession, roleHolds, signedIn } from "../sessions";
+import { endUserCredentials, losesScopes, openSession, roleHolds, signedIn } from "../sessions";
 
 export interface Actor {
   readonly userId: Id<"users">;
   readonly role: Role;
 }
 
+export const DEFAULT_ROLE: AssignableRole = "member";
+
+const managementRefusal = (actor: Actor, target: Doc<"users">): string | null => {
+  if (!roleHolds(actor.role, "admin")) return "Only an admin can change someone's account";
+
+  if (target.role === "owner") return "No admin can change the owner's account";
+
+  return actor.userId === target._id ? "Change your own account from your own settings" : null;
+};
+
 export const manages = (actor: Actor, target: Doc<"users">): boolean =>
-  roleHolds(actor.role, "admin") && actor.userId !== target._id && target.role !== "owner";
+  managementRefusal(actor, target) === null;
 
-const refuseToManage = (actor: Actor, target: Doc<"users">): never => {
-  if (target.role === "owner") {
-    return fail("forbidden", "No admin can change the owner's account");
-  }
+export const requireManages = (actor: Actor, target: Doc<"users">): void => {
+  const refusal = managementRefusal(actor, target);
 
-  return actor.userId === target._id
-    ? fail("forbidden", "Change your own account from your own settings")
-    : fail("forbidden", "Only an admin can change someone's account");
+  if (refusal !== null) fail("forbidden", refusal);
 };
 
 export const ownerOf = (db: DatabaseReader): Promise<Doc<"users"> | null> =>
@@ -111,8 +117,6 @@ export const insert = internalMutation({
   },
 });
 
-const DEFAULT_ROLE: AssignableRole = "member";
-
 export const { create, list, setRole, handOverOwnership } = register({
   create: async (ctx, { username, password, role }) => {
     requireUsername(username);
@@ -144,9 +148,13 @@ export const { create, list, setRole, handOverOwnership } = register({
   setRole: async (ctx, { userId, role }, caller) => {
     const target = (await ctx.db.get(userId)) ?? fail("not_found", "No such user");
 
-    if (!manages(caller, target)) return refuseToManage(caller, target);
+    requireManages(caller, target);
 
-    if (target.role !== role) await ctx.db.patch(target._id, { role });
+    if (target.role === role) return null;
+
+    await ctx.db.patch(target._id, { role });
+
+    if (losesScopes(target.role, role)) await endUserCredentials(ctx, target);
 
     return null;
   },

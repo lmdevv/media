@@ -10,20 +10,13 @@ import { fail } from "../lib/errors";
 import { hashNewPassword } from "../lib/passwords";
 import { requireUsername } from "../lib/usernames";
 import type { SignedIn } from "../sessions";
+import { parseCredentials } from "./password";
 
 type Params = Partial<Record<string, Value | undefined>>;
-
-const setupParams = { username: v.string(), password: v.string() };
 
 const inviteParams = { code: v.string(), username: v.string(), password: v.string() };
 
 const resetParams = { code: v.string(), password: v.string() };
-
-export const parseSetup = internalQuery({
-  args: setupParams,
-  returns: v.object(setupParams),
-  handler: (_ctx, args) => args,
-});
 
 export const parseInvite = internalQuery({
   args: inviteParams,
@@ -36,12 +29,6 @@ export const parseReset = internalQuery({
   returns: v.object(resetParams),
   handler: (_ctx, args) => args,
 });
-
-const parseSetupParams = makeFunctionReference<
-  "query",
-  Params,
-  { readonly username: string; readonly password: string }
->("core/auth/flows:parseSetup");
 
 const parseInviteParams = makeFunctionReference<
   "query",
@@ -58,7 +45,7 @@ const parseResetParams = makeFunctionReference<
 export const setupProvider = ConvexCredentials<DataModel>({
   id: "setup",
   authorize: async (params, ctx): Promise<SignedIn> => {
-    const { username, password } = await ctx.runQuery(parseSetupParams, params);
+    const { username, password } = await ctx.runQuery(parseCredentials, params);
 
     requireUsername(username);
 

@@ -174,6 +174,7 @@ describe.skipIf(stack === undefined)("invites", { timeout: 120_000 }, () => {
     expect(await refusal(signIn(stack, "invite", { code: demoted.code, ...newcomer() }))).toBe(
       "expired",
     );
+    expect(await listsInvite(other, demoted.inviteId)).toBe(false);
 
     const revoked = await other.client.action(api.core.accounts.invites.create, {});
 

@@ -63,6 +63,9 @@ const roleScopes = {
 export const roleHolds = (role: Role, scope: CredentialScope): boolean =>
   roleScopes[role].some((held) => held === scope);
 
+export const losesScopes = (from: Role, to: Role): boolean =>
+  credentialScopes.some((scope) => roleHolds(from, scope) && !roleHolds(to, scope));
+
 export const heldScopes = (session: Session, user: Doc<"users">): Array<CredentialScope> =>
   session.kind === "password"
     ? [...roleScopes[user.role]]
@@ -209,6 +212,19 @@ export const endUserSessions = async (
     await ctx.db.patch(kept._id, { generation });
   }
 
+  await schedulePurge(ctx, user._id, "authSessions");
+};
+
+/** Ends every session and API key of the user. */
+export const endUserCredentials = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  user: Doc<"users">,
+): Promise<void> => {
+  await ctx.db.patch(user._id, {
+    sessionGeneration: user.sessionGeneration + 1,
+    keyGeneration: user.keyGeneration + 1,
+  });
+  await schedulePurge(ctx, user._id, "apiKeys");
   await schedulePurge(ctx, user._id, "authSessions");
 };
 

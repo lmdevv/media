@@ -44,3 +44,20 @@ export const parseSecret = (
 
   return rowId === undefined || secret === undefined ? null : { rowId, secret };
 };
+
+/**
+ * The row a `formatSecret` code names, found by `find`, when the code's secret hashes to the row's
+ * `secretHash`, compared in constant time. Null for every other case alike.
+ */
+export const rowForSecret = async <Row extends { readonly secretHash: string }>(
+  prefix: string,
+  code: string,
+  find: (rowId: string) => Promise<Row | null>,
+): Promise<Row | null> => {
+  const parsed = parseSecret(prefix, code.trim());
+  const row = parsed === null ? null : await find(parsed.rowId);
+
+  if (parsed === null || row === null) return null;
+
+  return constantTimeEqual(row.secretHash, await sha256Hex(parsed.secret)) ? row : null;
+};

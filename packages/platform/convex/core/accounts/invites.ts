@@ -9,15 +9,9 @@ import type { DatabaseReader } from "../../_generated/server";
 import { refuseKeys, requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
 import { paginate } from "../lib/paginate";
-import {
-  constantTimeEqual,
-  formatSecret,
-  parseSecret,
-  randomSecret,
-  sha256Hex,
-} from "../lib/secrets";
+import { formatSecret, randomSecret, rowForSecret, sha256Hex } from "../lib/secrets";
 import { openSession, roleHolds, signedIn } from "../sessions";
-import { insertUser } from "./users";
+import { DEFAULT_ROLE, insertUser } from "./users";
 
 const PREFIX = "mi";
 
@@ -34,33 +28,25 @@ interface OpenInvite {
   readonly invitedBy: Doc<"users">;
 }
 
-const openInvite = async (
+const openInviteFor = async (
   db: DatabaseReader,
-  inviteId: string,
-  secretHash: string,
+  code: string,
   now: number,
-): Promise<OpenInvite | null> => {
-  const id = db.normalizeId("invites", inviteId);
-  const invite = id === null ? null : await db.get(id);
+): Promise<OpenInvite> => {
+  const invite = await rowForSecret(PREFIX, code, async (rowId) => {
+    const id = db.normalizeId("invites", rowId);
 
-  if (invite === null || !constantTimeEqual(invite.secretHash, secretHash)) return null;
+    return id === null ? null : db.get(id);
+  });
 
-  const invitedBy = await db.get(invite.invitedBy);
+  const invitedBy = invite === null ? null : await db.get(invite.invitedBy);
 
-  return invite.expiresAt > now && invitedBy !== null && roleHolds(invitedBy.role, "admin")
+  return invite !== null &&
+    invite.expiresAt > now &&
+    invitedBy !== null &&
+    roleHolds(invitedBy.role, "admin")
     ? { invite, invitedBy }
-    : null;
-};
-
-const openInviteFor = async (db: DatabaseReader, code: string, now: number) => {
-  const parsed = parseSecret(PREFIX, code.trim());
-
-  const found =
-    parsed === null
-      ? null
-      : await openInvite(db, parsed.rowId, await sha256Hex(parsed.secret), now);
-
-  return found ?? fail("expired", DEAD);
+    : fail("expired", DEAD);
 };
 
 export const insert = internalMutation({
@@ -106,7 +92,7 @@ export const { create, lookup, list, revoke } = register({
 
     const { inviteId, expiresAt } = await ctx.runMutation(internal.core.accounts.invites.insert, {
       secretHash: await sha256Hex(secret),
-      role: role ?? "member",
+      role: role ?? DEFAULT_ROLE,
       expiresInDays: expiresInDays ?? DEFAULT_DAYS,
     });
 
@@ -118,30 +104,36 @@ export const { create, lookup, list, revoke } = register({
     return { role: invite.role, invitedBy: invitedBy.username, expiresAt: invite.expiresAt };
   },
   list: async (ctx, { paginationOpts }) => {
-    const now = Date.now();
-
     const page = await paginate(
       ctx.db,
-      { table: "invites", index: "by_expiration", range: (q) => q.gt("expiresAt", now) },
+      { table: "invites", index: "by_expiration", order: "desc" },
       paginationOpts,
     );
 
     const makers = new Map(
       await Promise.all(
         [...new Set(page.page.map((invite) => invite.invitedBy))].map(
-          async (userId) => [userId, (await ctx.db.get(userId))?.username ?? ""] as const,
+          async (userId) => [userId, await ctx.db.get(userId)] as const,
         ),
       ),
     );
 
     return {
       ...page,
-      page: page.page.map((invite) => ({
-        inviteId: invite._id,
-        role: invite.role,
-        invitedBy: makers.get(invite.invitedBy) ?? "",
-        expiresAt: invite.expiresAt,
-      })),
+      page: page.page.flatMap((invite) => {
+        const maker = makers.get(invite.invitedBy);
+
+        return maker !== undefined && maker !== null && roleHolds(maker.role, "admin")
+          ? [
+              {
+                inviteId: invite._id,
+                role: invite.role,
+                invitedBy: maker.username,
+                expiresAt: invite.expiresAt,
+              },
+            ]
+          : [];
+      }),
     };
   },
   revoke: async (ctx, { inviteId }) => {

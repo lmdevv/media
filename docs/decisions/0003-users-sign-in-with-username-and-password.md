@@ -74,7 +74,9 @@ each link and password event does. The code is in `packages/platform/convex/core
 - **Who changes whom.** An admin can make someone else an admin or a member and send them a reset
   link. Nobody changes the owner's role, sends the owner a reset link, or changes their own role.
   Only the owner hands over ownership. The handover patches both users in one transaction, and
-  the old owner stays an admin. `manages` in `accounts/users.ts` holds these rules.
+  the old owner stays an admin. `manages` in `accounts/users.ts` holds these rules. A demotion
+  ends every session and API key the person has, so a key made with `admin` cannot hold it again
+  after a later promotion.
 - **Invites.** `core.accounts.invites.create` returns a code `mi_<inviteId>.<secret>` with 32
   random bytes of secret. The `invites` table stores only the secret's SHA-256, and a lookup by
   id compares it in constant time. The admin picks the role and 1 to 30 days, 7 by default.

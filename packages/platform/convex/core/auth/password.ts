@@ -25,7 +25,7 @@ const UNKNOWN_USERNAME_HASH =
 
 const credentials = { username: v.string(), password: v.string() };
 
-const parseCredentials = makeFunctionReference<
+export const parseCredentials = makeFunctionReference<
   "query",
   Partial<Record<string, Value | undefined>>,
   { readonly username: string; readonly password: string }

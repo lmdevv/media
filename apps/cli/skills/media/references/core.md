@@ -14,7 +14,7 @@ Create an invite link code for someone new, who picks their own username and pas
 
 ## `core.accounts.invites.list`
 
-List the invites that have not expired, soonest to expire first.
+List the invites whose makers are still admins, latest to expire first.
 
 - Kind: query
 - Scope: admin

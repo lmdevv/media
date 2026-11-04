@@ -9,15 +9,9 @@ import { refuseKeys, requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
 import { signInLimit, storePassword } from "../lib/passwords";
 import { clearAttempts } from "../lib/rateLimit";
-import {
-  constantTimeEqual,
-  formatSecret,
-  parseSecret,
-  randomSecret,
-  sha256Hex,
-} from "../lib/secrets";
-import { endUserKeys, endUserSessions, openSession, signedIn } from "../sessions";
-import { manages } from "./users";
+import { formatSecret, randomSecret, rowForSecret, sha256Hex } from "../lib/secrets";
+import { endUserCredentials, openSession, signedIn } from "../sessions";
+import { manages, requireManages } from "./users";
 
 const PREFIX = "mr";
 
@@ -31,18 +25,13 @@ interface OpenLink {
 }
 
 const openLinkFor = async (db: DatabaseReader, code: string, now: number): Promise<OpenLink> => {
-  const parsed = parseSecret(PREFIX, code.trim());
-  const id = parsed === null ? null : db.normalizeId("resetLinks", parsed.rowId);
-  const link = id === null ? null : await db.get(id);
+  const link = await rowForSecret(PREFIX, code, async (rowId) => {
+    const id = db.normalizeId("resetLinks", rowId);
 
-  if (
-    parsed === null ||
-    link === null ||
-    !constantTimeEqual(link.secretHash, await sha256Hex(parsed.secret)) ||
-    link.expiresAt <= now
-  ) {
-    return fail("expired", DEAD);
-  }
+    return id === null ? null : db.get(id);
+  });
+
+  if (link === null || link.expiresAt <= now) return fail("expired", DEAD);
 
   const [user, maker] = await Promise.all([db.get(link.userId), db.get(link.madeBy)]);
 
@@ -60,8 +49,7 @@ export const resetPassword = async (
   hash: string,
 ): Promise<Doc<"users">> => {
   await storePassword(ctx.db, user._id, hash);
-  await endUserSessions(ctx, user);
-  await endUserKeys(ctx, user);
+  await endUserCredentials(ctx, user);
   await clearAttempts(ctx, signInLimit(user.usernameKey));
 
   return (await ctx.db.get(user._id)) ?? fail("not_found", "No such user");
@@ -74,13 +62,7 @@ export const insert = internalMutation({
     const caller = refuseKeys(await requireCaller(ctx, "admin"));
     const user = (await ctx.db.get(userId)) ?? fail("not_found", "No such user");
 
-    if (user.role === "owner") {
-      return fail("forbidden", "The owner resets their password on the server host");
-    }
-
-    if (!manages(caller, user)) {
-      return fail("forbidden", "Change your own password from your own settings");
-    }
+    requireManages(caller, user);
 
     const expiresAt = Date.now() + LINK_MS;
 

@@ -64,10 +64,11 @@ describe.skipIf(stack === undefined)("users", { timeout: 120_000 }, () => {
     expect(await create(`long-${unique()}`, "x".repeat(257))).toBe("invalid_args");
   });
 
-  it("change roles on the person's very next call, their keys included", async () => {
+  it("promote on the person's next call, and demote by ending every session and key", async () => {
     if (stack === undefined) return;
     const admin = await signInAdmin(stack);
-    const person = await signInAs(stack, await createPerson(stack));
+    const credentials = await createPerson(stack);
+    const person = await signInAs(stack, credentials);
     const { userId } = await whoIs(person);
 
     await admin.client.mutation(api.core.accounts.users.setRole, { userId, role: "admin" });
@@ -85,15 +86,23 @@ describe.skipIf(stack === undefined)("users", { timeout: 120_000 }, () => {
 
     await admin.client.mutation(api.core.accounts.users.setRole, { userId, role: "member" });
 
-    expect(await whoIs(person)).toMatchObject({ role: "member", scopes: ["account"] });
-    expect(await whoIs(agent)).toMatchObject({ scopes: ["account"] });
+    expect(await refusal(whoIs(person))).toBe("unauthenticated");
+    expect(await refusal(whoIs(agent))).toBe("unauthenticated");
+
+    const member = await signInAs(stack, credentials);
+
+    expect(await whoIs(member)).toMatchObject({ role: "member", scopes: ["account"] });
     expect(
       await refusal(
-        person.client.query(api.core.accounts.users.list, {
+        member.client.query(api.core.accounts.users.list, {
           paginationOpts: { numItems: 1, cursor: null },
         }),
       ),
     ).toBe("forbidden");
+
+    await admin.client.mutation(api.core.accounts.users.setRole, { userId, role: "admin" });
+
+    expect(await refusal(signIn(stack, "apiKey", { key }))).toBe("unauthenticated");
   });
 
   it("refuse role changes to yourself, from members, and from API keys", async () => {
