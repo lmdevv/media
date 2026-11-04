@@ -170,7 +170,7 @@ Each row is the ADR's own title.
 | [0008](decisions/0008-domains-are-folders-in-one-schema.md)                        | Keep each domain as a folder in one Convex schema                             | D22           |
 | [0009](decisions/0009-command-list-generates-every-entry-point.md)                 | Declare each action once and generate its Convex function and clients         | D23           |
 | [0010](decisions/0010-effect-httpapi-server-with-a-service-principal.md)           | Serve HTTP with Effect HttpApi and sign the server in as a service principal  | D24, D25      |
-| [0011](decisions/0011-one-ticket-format-for-every-byte.md)                         | Use one signed ticket format for every route that serves bytes                | D26           |
+| [0011](decisions/0011-one-ticket-format-for-every-byte.md)                         | Use one signed ticket format for every route that serves bytes                | D26, D46      |
 | [0012](decisions/0012-one-job-framework.md)                                        | Run all background work through one job framework in the core                 | D27           |
 | [0013](decisions/0013-stay-inside-convex-per-call-limits.md)                       | Keep SQLite and build every list to stay inside Convex's per-call limits      | D28           |
 | [0014](decisions/0014-one-server-process-with-per-domain-budgets.md)               | Run one server process with per-domain worker caps and one transcode limit    | D29           |
@@ -198,8 +198,6 @@ an ADR.
   and its JWKS from Convex's HTTP actions origin, a separate port in today's dev stack. The
   register names `/convex` for Convex and `/api` for the server and does not place that origin.
   The deploy image PR in phase 3 settles it.
-- **How a Cast receiver renews its ticket.** Personal tickets last up to 6 hours, and a receiver
-  keeps the URL it was given (ADR 0011). The tickets PR in phase 3 settles it.
 - **How a locked unlock code recovers.** The code locks after 5 wrong tries, and the register does
   not say how it unlocks again (ADR 0006). The devices PR in phase 3 settles it.
 - **What the shared iOS keychain stores.** Each app mints its own session from the shared

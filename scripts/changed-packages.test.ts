@@ -46,6 +46,7 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
       "apps/web",
       "packages/backend",
       "packages/contracts",
+      "packages/platform",
       "packages/sdk",
     ]);
   });

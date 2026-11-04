@@ -44,6 +44,8 @@ import type * as core_limitsProbe from "../core/limitsProbe.js";
 import type * as core_schemaMigrations from "../core/schemaMigrations.js";
 import type * as core_server from "../core/server.js";
 import type * as core_sessions from "../core/sessions.js";
+import type * as core_tickets from "../core/tickets.js";
+import type * as core_ticketsProbe from "../core/ticketsProbe.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 
@@ -90,6 +92,8 @@ declare const fullApi: ApiFromModules<{
   "core/schemaMigrations": typeof core_schemaMigrations;
   "core/server": typeof core_server;
   "core/sessions": typeof core_sessions;
+  "core/tickets": typeof core_tickets;
+  "core/ticketsProbe": typeof core_ticketsProbe;
   crons: typeof crons;
   http: typeof http;
 }>;

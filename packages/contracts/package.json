@@ -12,6 +12,8 @@
     "./content-rating": "./src/content-rating.ts",
     "./clock": "./src/clock.ts",
     "./playback-token": "./src/playback-token.ts",
+    "./ticket": "./src/ticket.ts",
+    "./ticket-vectors": "./src/ticket-vectors.ts",
     "./commands": "./src/commands/registry.ts",
     "./command": "./src/commands/command.ts",
     "./media-service": "./src/media-service.ts",
@@ -29,7 +31,8 @@
     "./models/*": "./src/models/*.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root ../.. packages/contracts/src"
   },
   "dependencies": {
     "effect": "catalog:"
