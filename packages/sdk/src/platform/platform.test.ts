@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Redacted } from "effect";
+import { Context, Effect, Layer, Predicate, Redacted } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -36,6 +36,39 @@ const withPlatform = <A, E>(
         return yield* body(Context.get(context, Platform.Platform), fake);
       }),
     ),
+  );
+
+const RENEWED = jwtExpiringAt(Date.now() + 7_200_000, "user-1|session-1");
+
+/** Signs in, then has the server refuse a command as unauthenticated and answer the refresh with `refresh`. */
+const refusedAfterSignIn = (refresh: Reply) =>
+  withPlatform((platform, fake) =>
+    Effect.gen(function* () {
+      yield* fake.handle("auth:signIn", (request) =>
+        Effect.succeed(Predicate.hasProperty(request.args, "refreshToken") ? refresh : signedIn),
+      );
+      yield* fake.reply(
+        "core/accounts/me:changePassword",
+        Reply.Failure({ code: "unauthenticated", message: "Wrong password" }),
+      );
+      yield* platform.session.signIn(
+        Platform.Credentials.Password({ username: "ada", password: Redacted.make("secret") }),
+      );
+
+      const failure = yield* Effect.flip(
+        platform.core.accounts.me.changePassword({
+          currentPassword: "wrong",
+          newPassword: "new-password",
+        }),
+      );
+
+      return {
+        failure,
+        status: yield* platform.session.currentStatus,
+        calls: (yield* fake.requestsTo("core/accounts/me:changePassword")).length,
+        signIns: (yield* fake.requestsTo("auth:signIn")).map((request) => request.args),
+      };
+    }),
   );
 
 describe("Platform", () => {
@@ -80,6 +113,57 @@ describe("Platform", () => {
       { _tag: "Unauthenticated", message: "unauthenticated" },
       { _tag: "ProtocolError" },
     ]);
+  });
+
+  describe("a command refused as unauthenticated", () => {
+    it("shows signed out at once when the server refuses the refresh", async () => {
+      expect(await refusedAfterSignIn(Reply.Success({ value: { tokens: null } }))).toMatchObject({
+        failure: { _tag: "Unauthenticated", message: "Wrong password" },
+        status: "signedOut",
+        calls: 1,
+        signIns: [
+          { provider: "password", params: { username: "ada", password: "secret" } },
+          { refreshToken: "refresh-1" },
+        ],
+      });
+    });
+
+    it("stays signed in without repeating the call when the refresh renews the session", async () => {
+      const renewed = Reply.Success({
+        value: { tokens: { token: RENEWED, refreshToken: "refresh-2" } },
+      });
+
+      expect(await refusedAfterSignIn(renewed)).toMatchObject({
+        failure: { _tag: "Unauthenticated" },
+        status: "signedIn",
+        calls: 1,
+      });
+    });
+
+    it("stays signed in when the refresh cannot reach the server", async () => {
+      expect(await refusedAfterSignIn(Reply.Drop())).toMatchObject({
+        failure: { _tag: "Unauthenticated" },
+        status: "signedIn",
+        calls: 1,
+      });
+    });
+
+    it("asks for no refresh while signed out", async () => {
+      const answer = await withPlatform((platform, fake) =>
+        Effect.gen(function* () {
+          yield* fake.reply(
+            "core/auth/sessions:current",
+            Reply.Failure({ code: "unauthenticated", message: "Sign in first" }),
+          );
+
+          const failure = yield* Effect.flip(platform.core.auth.sessions.current());
+
+          return { failure, refreshes: (yield* fake.requestsTo("auth:signIn")).length };
+        }),
+      );
+
+      expect(answer).toMatchObject({ failure: { _tag: "Unauthenticated" }, refreshes: 0 });
+    });
   });
 
   it("refuses arguments the command does not take before sending them", async () => {
