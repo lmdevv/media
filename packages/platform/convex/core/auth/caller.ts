@@ -12,7 +12,7 @@ import type { ActionCtx, DatabaseReader, QueryCtx } from "../../_generated/serve
 import { fail } from "../lib/errors";
 import { heldScopes, restrictionsOf } from "../permissions/policy";
 import type { PersonDoc } from "../permissions/policy";
-import { liveSession } from "../sessions";
+import { boundDevice, liveSession } from "../sessions";
 
 const callerValidator = v.object({
   kind: v.literal("person"),
@@ -30,6 +30,11 @@ const callerValidator = v.object({
   scopes: v.array(credentialScope),
   /** The person's restrictions, read live on this call. */
   restrictions: v.union(restrictions, v.null()),
+  /**
+   * The device this session is on, or null for an API key or a session no app registered.
+   * `liveSession` checked that it exists at the session's generation, so it names a live device.
+   */
+  deviceId: v.union(v.id("devices"), v.null()),
 });
 
 /** The signed-in person a scoped command runs as, checked live on this call. */
@@ -64,6 +69,7 @@ export const callerOfSession = async (
     sessionKind: session.kind,
     scopes: heldScopes(session, user),
     restrictions: restrictionsOf(user),
+    deviceId: boundDevice(session)?.id ?? null,
   };
 
   return scope === "signed-in" || caller.scopes.includes(scope)

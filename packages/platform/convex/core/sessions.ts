@@ -57,7 +57,8 @@ const isLive = (session: Session, user: Doc<"users">, now: number): boolean =>
 
 type BoundDevice = NonNullable<Extract<Session, { readonly kind: "tile" }>["device"]>;
 
-const boundDevice = (session: Session): BoundDevice | null =>
+/** The device a session is bound to; an API key is bound to none. */
+export const boundDevice = (session: Session): BoundDevice | null =>
   session.kind === "apiKey" ? null : (session.device ?? null);
 
 /**

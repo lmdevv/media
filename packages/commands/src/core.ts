@@ -5,6 +5,7 @@ import { grantPrincipal, level, resourceRef, restrictions } from "./access.ts";
 import { action, mutation, query } from "./command.ts";
 import type { Command } from "./command.ts";
 import { assignableRoles, contentDomains, credentialScopes, roles } from "./scopes.ts";
+import { settingFields } from "./settings.ts";
 
 const credentialScope = v.union(...credentialScopes.map((scope) => v.literal(scope)));
 
@@ -53,6 +54,11 @@ const sharedTile = v.object({
     v.object({ state: v.literal("open") }),
     v.object({ state: v.literal("locked"), because: v.array(lockReason), opensWith: opener }),
   ),
+});
+
+const settingsView = v.object({
+  user: v.object(settingFields("user", "required")),
+  device: v.union(v.object(settingFields("device", "required")), v.null()),
 });
 
 /** The core's commands: the server itself, accounts, devices, and the other shared modules. */
@@ -532,6 +538,21 @@ export const core = [
     refusesKeys: true,
     args: { approvalId: v.id("tileApprovals") },
     result: v.null(),
+  }),
+
+  query("core.settings.get", {
+    summary:
+      "Show your settings: the ones that follow you to every device, and your own on this device",
+    scope: "signed-in",
+    args: {},
+    result: settingsView,
+  }),
+  mutation("core.settings.set", {
+    summary:
+      "Change some of your settings; each follows you or stays on this device, as the settings table marks it",
+    scope: "signed-in",
+    args: settingFields("all", "optional"),
+    result: settingsView,
   }),
 
   mutation("core.accounts.me.rename", {

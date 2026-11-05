@@ -585,3 +585,23 @@ Show this server's name and version, and whether its owner has set it up.
 - Scope: public
 - Arguments: none
 - Result: `{ name: string; version: string; hasOwner: boolean }`
+
+## `core.settings.get`
+
+Show your settings: the ones that follow you to every device, and your own on this device.
+
+- CLI: `media auth settings get`
+- Kind: query
+- Scope: signed-in
+- Arguments: none
+- Result: `{ user: { subtitleLanguage: string | null; audioLanguage: string | null; subtitleStyle: { size: "small" | "medium" | "large"; color: "white" | "yellow"; backdrop: "none" | "shadow" | "box" }; autoplay: boolean; explicitFilter: boolean; crossfade: number; gapless: boolean }; device: { streamQuality: "auto" | "original" | "high" | "standard" | "low"; downloadQuality: "standard" | "high"; volume: number } | null }`
+
+## `core.settings.set`
+
+Change some of your settings; each follows you or stays on this device, as the settings table marks it.
+
+- CLI: `media auth settings set`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ subtitleLanguage?: string | null; audioLanguage?: string | null; subtitleStyle?: { size: "small" | "medium" | "large"; color: "white" | "yellow"; backdrop: "none" | "shadow" | "box" }; autoplay?: boolean; explicitFilter?: boolean; crossfade?: number; gapless?: boolean; streamQuality?: "auto" | "original" | "high" | "standard" | "low"; downloadQuality?: "standard" | "high"; volume?: number }`
+- Result: `{ user: { subtitleLanguage: string | null; audioLanguage: string | null; subtitleStyle: { size: "small" | "medium" | "large"; color: "white" | "yellow"; backdrop: "none" | "shadow" | "box" }; autoplay: boolean; explicitFilter: boolean; crossfade: number; gapless: boolean }; device: { streamQuality: "auto" | "original" | "high" | "standard" | "low"; downloadQuality: "standard" | "high"; volume: number } | null }`

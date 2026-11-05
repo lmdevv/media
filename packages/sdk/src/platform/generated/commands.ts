@@ -917,6 +917,127 @@ const core_server_info = query({
   result: Schema.Struct({ name: Schema.String, version: Schema.String, hasOwner: Schema.Boolean }),
 });
 
+const core_settings_get = query({
+  name: "core.settings.get",
+  path: "core/settings:get",
+  args: Schema.Struct({}),
+  result: Schema.Struct({
+    user: Schema.Struct({
+      subtitleLanguage: Schema.Union([Schema.String, Schema.Null]),
+      audioLanguage: Schema.Union([Schema.String, Schema.Null]),
+      subtitleStyle: Schema.Struct({
+        size: Schema.Union([
+          Schema.Literal("small"),
+          Schema.Literal("medium"),
+          Schema.Literal("large"),
+        ]),
+        color: Schema.Union([Schema.Literal("white"), Schema.Literal("yellow")]),
+        backdrop: Schema.Union([
+          Schema.Literal("none"),
+          Schema.Literal("shadow"),
+          Schema.Literal("box"),
+        ]),
+      }),
+      autoplay: Schema.Boolean,
+      explicitFilter: Schema.Boolean,
+      crossfade: Schema.Finite,
+      gapless: Schema.Boolean,
+    }),
+    device: Schema.Union([
+      Schema.Struct({
+        streamQuality: Schema.Union([
+          Schema.Literal("auto"),
+          Schema.Literal("original"),
+          Schema.Literal("high"),
+          Schema.Literal("standard"),
+          Schema.Literal("low"),
+        ]),
+        downloadQuality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
+        volume: Schema.Finite,
+      }),
+      Schema.Null,
+    ]),
+  }),
+});
+
+const core_settings_set = mutation({
+  name: "core.settings.set",
+  path: "core/settings:set",
+  args: Schema.Struct({
+    subtitleLanguage: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    audioLanguage: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    subtitleStyle: Schema.optionalKey(
+      Schema.Struct({
+        size: Schema.Union([
+          Schema.Literal("small"),
+          Schema.Literal("medium"),
+          Schema.Literal("large"),
+        ]),
+        color: Schema.Union([Schema.Literal("white"), Schema.Literal("yellow")]),
+        backdrop: Schema.Union([
+          Schema.Literal("none"),
+          Schema.Literal("shadow"),
+          Schema.Literal("box"),
+        ]),
+      }),
+    ),
+    autoplay: Schema.optionalKey(Schema.Boolean),
+    explicitFilter: Schema.optionalKey(Schema.Boolean),
+    crossfade: Schema.optionalKey(Schema.Finite),
+    gapless: Schema.optionalKey(Schema.Boolean),
+    streamQuality: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("auto"),
+        Schema.Literal("original"),
+        Schema.Literal("high"),
+        Schema.Literal("standard"),
+        Schema.Literal("low"),
+      ]),
+    ),
+    downloadQuality: Schema.optionalKey(
+      Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
+    ),
+    volume: Schema.optionalKey(Schema.Finite),
+  }),
+  result: Schema.Struct({
+    user: Schema.Struct({
+      subtitleLanguage: Schema.Union([Schema.String, Schema.Null]),
+      audioLanguage: Schema.Union([Schema.String, Schema.Null]),
+      subtitleStyle: Schema.Struct({
+        size: Schema.Union([
+          Schema.Literal("small"),
+          Schema.Literal("medium"),
+          Schema.Literal("large"),
+        ]),
+        color: Schema.Union([Schema.Literal("white"), Schema.Literal("yellow")]),
+        backdrop: Schema.Union([
+          Schema.Literal("none"),
+          Schema.Literal("shadow"),
+          Schema.Literal("box"),
+        ]),
+      }),
+      autoplay: Schema.Boolean,
+      explicitFilter: Schema.Boolean,
+      crossfade: Schema.Finite,
+      gapless: Schema.Boolean,
+    }),
+    device: Schema.Union([
+      Schema.Struct({
+        streamQuality: Schema.Union([
+          Schema.Literal("auto"),
+          Schema.Literal("original"),
+          Schema.Literal("high"),
+          Schema.Literal("standard"),
+          Schema.Literal("low"),
+        ]),
+        downloadQuality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
+        volume: Schema.Finite,
+      }),
+      Schema.Null,
+    ]),
+  }),
+});
+
 /**
  * Every command as an Effect method, nested by name: `core.server.info` is
  * `platform.core.server.info()`.
@@ -1075,6 +1196,12 @@ export const effectMethods = (method: EffectBuilder) => ({
       /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */
       info: method.query(core_server_info),
     },
+    settings: {
+      /** `core.settings.get` (query, signed-in): Show your settings: the ones that follow you to every device, and your own on this device. */
+      get: method.query(core_settings_get),
+      /** `core.settings.set` (mutation, signed-in): Change some of your settings; each follows you or stays on this device, as the settings table marks it. */
+      set: method.mutation(core_settings_set),
+    },
   },
 });
 
@@ -1232,6 +1359,12 @@ export const promiseMethods = (method: PromiseBuilder) => ({
     server: {
       /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */
       info: method.query(core_server_info),
+    },
+    settings: {
+      /** `core.settings.get` (query, signed-in): Show your settings: the ones that follow you to every device, and your own on this device. */
+      get: method.query(core_settings_get),
+      /** `core.settings.set` (mutation, signed-in): Change some of your settings; each follows you or stays on this device, as the settings table marks it. */
+      set: method.mutation(core_settings_set),
     },
   },
 });

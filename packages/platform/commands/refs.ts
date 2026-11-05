@@ -20,6 +20,7 @@ import type { Refs as core_permissions_grants } from "./core/permissions/grants"
 import type { Refs as core_permissions_groups } from "./core/permissions/groups";
 import type { Refs as core_restrictions } from "./core/restrictions";
 import type { Refs as core_server } from "./core/server";
+import type { Refs as core_settings } from "./core/settings";
 
 /**
  * Every command's `api` reference by name. It fails to compile when a command's Convex module is
@@ -119,4 +120,6 @@ export const commandRefs = {
   "core.restrictions.get": api.core.restrictions.get satisfies core_restrictions["get"],
   "core.restrictions.set": api.core.restrictions.set satisfies core_restrictions["set"],
   "core.server.info": api.core.server.info satisfies core_server["info"],
+  "core.settings.get": api.core.settings.get satisfies core_settings["get"],
+  "core.settings.set": api.core.settings.set satisfies core_settings["set"],
 } as const;

@@ -60,6 +60,7 @@ import type * as core_scans from "../core/scans.js";
 import type * as core_schemaMigrations from "../core/schemaMigrations.js";
 import type * as core_server from "../core/server.js";
 import type * as core_sessions from "../core/sessions.js";
+import type * as core_settings from "../core/settings.js";
 import type * as core_tickets from "../core/tickets.js";
 import type * as core_ticketsProbe from "../core/ticketsProbe.js";
 import type * as crons from "../crons.js";
@@ -124,6 +125,7 @@ declare const fullApi: ApiFromModules<{
   "core/schemaMigrations": typeof core_schemaMigrations;
   "core/server": typeof core_server;
   "core/sessions": typeof core_sessions;
+  "core/settings": typeof core_settings;
   "core/tickets": typeof core_tickets;
   "core/ticketsProbe": typeof core_ticketsProbe;
   crons: typeof crons;

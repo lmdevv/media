@@ -9,6 +9,8 @@ import {
   restrictions,
 } from "../access.ts";
 import { fieldsSource, wireSource } from "../render.ts";
+import { settingRows } from "../settings.ts";
+import type { SettingScope } from "../settings.ts";
 import { wireOf } from "../check.ts";
 import type { CheckedCommand } from "../check.ts";
 import type { CommandKind } from "../command.ts";
@@ -306,11 +308,72 @@ const accessFile = (): Emitted => ({
     ].join("\n\n") + "\n",
 });
 
+const inScope = (scope: SettingScope) => settingRows.filter(([, row]) => row.scope === scope);
+
+const storedFields = (scope: SettingScope): string =>
+  fieldsSource(
+    inScope(scope).map(([name, row]) => ({
+      name,
+      optional: true,
+      wire: wireOf(name, row.value),
+    })),
+  );
+
+const defaults = (scope: SettingScope): string =>
+  `{\n${inScope(scope)
+    .map(([name, row]) => `${name}: ${JSON.stringify(row.default)},`)
+    .join("\n")}\n} as const`;
+
+const settingsFile = (): Emitted => ({
+  path: "settings.ts",
+  text:
+    [
+      `${header}import { v } from "convex/values";`,
+      [
+        "/**",
+        " * Every setting from the settings table (ADR 0019): who holds its value, the domains whose",
+        " * players read it, and what a value must satisfy beyond its validator.",
+        " */",
+        `export const settingTable = {\n${settingRows
+          .map(
+            ([name, row]) =>
+              `${name}: ${JSON.stringify({ scope: row.scope, domains: row.domains, check: row.check })},`,
+          )
+          .join("\n")}\n} as const;`,
+      ].join("\n"),
+      "export type SettingName = keyof typeof settingTable;",
+      [
+        "/** The settings that follow the person, as stored fields; a missing one is its default. */",
+        `export const userSettingFields = ${storedFields("user")};`,
+      ].join("\n"),
+      [
+        "/** The settings a person keeps per device, as stored fields; a missing one is its default. */",
+        `export const deviceSettingFields = ${storedFields("device")};`,
+      ].join("\n"),
+      [
+        "/** The settings that follow the person, in table order. */",
+        `export const userSettingNames = ${tuple(inScope("user").map(([name]) => name))};`,
+      ].join("\n"),
+      [
+        "/** The settings a person keeps per device, in table order. */",
+        `export const deviceSettingNames = ${tuple(inScope("device").map(([name]) => name))};`,
+      ].join("\n"),
+      [
+        "/** Each setting that follows the person, before anyone changed it. */",
+        `export const userSettingDefaults = ${defaults("user")};`,
+      ].join("\n"),
+      [
+        "/** Each setting a person keeps per device, before anyone changed it. */",
+        `export const deviceSettingDefaults = ${defaults("device")};`,
+      ].join("\n"),
+    ].join("\n\n") + "\n",
+});
+
 /**
  * The core's Convex functions: for each Convex module, a contract with the module's validators,
  * its `Handlers` type, and `register`, which the hand-written module at `convex/<module>.ts` calls.
- * Also the scopes and roles, the access validators the schema and the commands share, and
- * `refs.ts`, which checks `api` against the declarations.
+ * Also the scopes and roles, the access validators the schema and the commands share, the settings
+ * table, and `refs.ts`, which checks `api` against the declarations.
  */
 export const platformTarget = (root: string): Target => ({
   root,
@@ -318,12 +381,13 @@ export const platformTarget = (root: string): Target => ({
     const modules = byModule(commands);
 
     return modules.length === 0
-      ? [accessFile(), scopesFile()]
+      ? [accessFile(), scopesFile(), settingsFile()]
       : [
           accessFile(),
           ...modules.map(([module, inModule]) => contract(module, inModule)),
           refsFile(modules),
           scopesFile(),
+          settingsFile(),
         ];
   },
 });

@@ -208,28 +208,54 @@ const deleteStrikes = async (
   return page;
 };
 
+const deleteSettings = async (
+  ctx: Pick<MutationCtx, "db">,
+  deviceId: Id<"devices">,
+  options: PaginationOptions,
+): Promise<PaginationResult<Doc<"deviceSettings">>> => {
+  const page = await paginate(
+    ctx.db,
+    { table: "deviceSettings", index: "by_device_user", range: (q) => q.eq("deviceId", deviceId) },
+    options,
+  );
+
+  await Promise.all(page.page.map((row) => ctx.db.delete(row._id)));
+
+  return page;
+};
+
+type Purger = (
+  ctx: Pick<MutationCtx, "db">,
+  deviceId: Id<"devices">,
+  options: PaginationOptions,
+) => Promise<Pick<PaginationResult<unknown>, "isDone" | "continueCursor">>;
+
+const purgers = {
+  authSessions: (ctx, deviceId, options) => deleteEndedSessions(ctx, deviceId, options, Date.now()),
+  unlockStrikes: deleteStrikes,
+  deviceSettings: deleteSettings,
+} satisfies Record<string, Purger>;
+
 const purgeArgs = {
   deviceId: v.id("devices"),
-  table: v.union(v.literal("authSessions"), v.literal("unlockStrikes")),
+  table: v.union(
+    v.literal("authSessions"),
+    v.literal("unlockStrikes"),
+    v.literal("deviceSettings"),
+  ),
   cursor: v.union(v.string(), v.null()),
 };
 
 /**
  * Deletes what a device change left behind, a page at a time: the sessions bound to the device
- * that ended, then, when strikes are named, every unlock-code strike on it. Liveness already ended
- * those sessions, so this is cleanup.
+ * that ended, every unlock-code strike on it, or, once it is removed, every person's settings on
+ * it. Liveness already ended those sessions, so no one reads the settings meanwhile.
  */
 export const purge = internalMutation({
   args: purgeArgs,
   returns: v.null(),
   handler: async (ctx, { deviceId, table, cursor }) => {
-    const options = { numItems: PURGE_BATCH, cursor };
-    const now = Date.now();
-
-    const page =
-      table === "authSessions"
-        ? await deleteEndedSessions(ctx, deviceId, options, now)
-        : await deleteStrikes(ctx, deviceId, options);
+    const page = await purgers[table](ctx, deviceId, { numItems: PURGE_BATCH, cursor });
 
     if (!page.isDone) {
       await ctx.scheduler.runAfter(0, internal.core.devices.registry.purge, {
@@ -342,6 +368,12 @@ export const { enroll, list, setMode, remove } = register({
 
     await ctx.db.delete(deviceId);
     await purgeLeftovers(ctx, device);
+
+    await ctx.scheduler.runAfter(0, internal.core.devices.registry.purge, {
+      deviceId,
+      table: "deviceSettings",
+      cursor: null,
+    });
 
     return null;
   },
