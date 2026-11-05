@@ -130,7 +130,8 @@ never stored. `lockOf` derives it from three reasons:
   hashes and compares. `𝟕𝟑𝟗𝟏𝟒𝟒𝟖` in mathematical bold is 14 UTF-16 units but hashes as `7391448`,
   so it counts as 7 characters and is refused. Every password rule is checked in
   `core/lib/passwords.ts` on that form: 8 to 256 characters for a new password, and at most 256
-  for one typed to sign in or open a tile, so any password that can be set can also be typed.
+  for one typed to sign in, open a tile, or confirm a password change, so any password that can be
+  set can also be typed.
   Typed input over 2,048 UTF-16 units is refused before it is normalized. NFKC can make a string
   18 times longer, and it joins at most 4 code points into one, so no 256-character password is
   typed longer.

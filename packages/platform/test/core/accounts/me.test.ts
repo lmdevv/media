@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
+import { PASSWORD_MAX } from "../../../convex/core/lib/passwords";
 import { createPerson, refusal, signIn, signInAs, unique } from "../../sign-in";
 import type { SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
@@ -69,6 +70,7 @@ describe.skipIf(stack === undefined)("your own account", { timeout: 120_000 }, (
     const password = `password-${unique()}`;
 
     expect(await change("wrong-password", password)).toBe("unauthenticated");
+    expect(await change("x".repeat(PASSWORD_MAX + 1), password)).toBe("invalid_args");
     expect(await change(person.password, "short")).toBe("invalid_args");
     expect(await change(person.password, password)).toBe("accepted");
 

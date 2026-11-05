@@ -7,6 +7,7 @@ import { callerUser, requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
 import {
   checkNewPassword,
+  checkTypedPassword,
   hashNewPassword,
   passwordHashOf,
   passwordMatches,
@@ -63,6 +64,7 @@ export const { rename, changePassword } = register({
     return null;
   },
   changePassword: async (ctx, { currentPassword, newPassword }) => {
+    checkTypedPassword(currentPassword);
     checkNewPassword(newPassword);
 
     const attempted = await ctx.runMutation(internal.core.accounts.me.attempt, {});
