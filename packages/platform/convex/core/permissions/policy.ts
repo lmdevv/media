@@ -157,7 +157,8 @@ export type Because =
   | "guest"
   | "not-signed-in-here"
   | "no-device"
-  | "shared-device";
+  | "shared-device"
+  | "missing";
 
 /**
  * An access decision. `hidden` answers as if the thing did not exist, so a private thing stays
@@ -640,12 +641,12 @@ export type DeviceMode = Doc<"devices">["mode"];
 
 /**
  * A thing kept on a device, as `can` sees it: the mode of the device the principal's session is on,
- * null for a session on no device, and the thing itself as content.
+ * null for a session on no device, and the thing itself as content, null when no such thing exists.
  */
 export interface DownloadResource {
   readonly on: "download";
   readonly device: DeviceMode | null;
-  readonly item: ContentResource;
+  readonly item: ContentResource | null;
 }
 
 interface DownloadRule {
@@ -672,7 +673,9 @@ const decideDownload = (
 
   if (rule.devices[download.device] === "keeps-nothing") return forbidden("shared-device");
 
-  return decideContent(principal, rule.content, download.item);
+  return download.item === null
+    ? hidden("missing")
+    : decideContent(principal, rule.content, download.item);
 };
 
 const isContentAction = (action: string): action is ContentAction =>

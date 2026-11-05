@@ -668,7 +668,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
 
     const elsewhere = await signInAs(stack, aiko.person);
 
-    expect(await refusal(add(elsewhere, two))).toBe("not_found");
+    expect(await refusal(add(elsewhere, two))).toBe("conflict");
     await expect(add(elsewhere, film)).rejects.toThrow(/on no device/u);
     expect(await refusal(listOf(elsewhere))).toBe("conflict");
     expect(await refusal(fetchOf(elsewhere, film))).toBe("conflict");

@@ -10,6 +10,7 @@ import { can } from "../../../convex/core/permissions/policy";
 import type {
   ContentFacts,
   ContentResource,
+  Decision,
   DeviceMode,
   Principal,
 } from "../../../convex/core/permissions/policy";
@@ -85,8 +86,11 @@ const device = fc.constantFrom<DeviceMode | null>("personal", "shared", null);
 
 const ADULTS_AND_KIDS: ReadonlyArray<Role> = ["owner", "admin", "member"];
 
-const keep = (principal: Principal, mode: DeviceMode | null, thing: ContentResource) =>
+const keep = (principal: Principal, mode: DeviceMode | null, thing: ContentResource | null) =>
   can(principal, "keep", { on: "download", device: mode, item: thing });
+
+const answerOf = (decision: Decision) =>
+  !decision.allowed && decision.refusal === "hidden" ? "hidden" : decision;
 
 describe("the download rule in can", () => {
   it("lets a person keep on a personal device exactly what they may play", () => {
@@ -165,6 +169,20 @@ describe("the download rule in can", () => {
           refusal: "hidden",
           because: "service",
         });
+      }),
+    );
+  });
+
+  it("answers a missing item as it answers one hidden from the principal, for anyone on any device", () => {
+    const server: Principal = { kind: "service", userId: idOf("users", "server"), scopes: [] };
+
+    const anyone = fc.oneof(people([...ADULTS_AND_KIDS, "guest"]), fc.constant(server));
+
+    fc.assert(
+      fc.property(anyone, item, device, (principal, thing, mode) => {
+        expect(answerOf(keep(principal, mode, null))).toEqual(
+          answerOf(keep(principal, mode, { ...thing, level: null })),
+        );
       }),
     );
   });

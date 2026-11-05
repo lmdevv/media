@@ -90,45 +90,48 @@ const deviceOf = async (db: DatabaseReader, caller: Caller): Promise<Doc<"device
 const requireDevice = async (db: DatabaseReader, caller: Caller): Promise<Doc<"devices">> =>
   (await deviceOf(db, caller)) ?? fail("conflict", ON_NO_DEVICE);
 
-interface Judged {
+interface Found {
   readonly source: DownloadSource;
   readonly library: Doc<"libraries">;
+}
+
+interface Judged {
+  readonly found: Found | null;
   readonly decision: Decision;
 }
 
-/** An item and the caller's right to keep it on `device`; null when the item or its library is gone. */
 const judge = async (
   db: DatabaseReader,
   caller: Caller,
   device: Doc<"devices"> | null,
   item: DownloadItem,
   reads: LibraryReads,
-): Promise<Judged | null> => {
+): Promise<Judged> => {
   const source = await sourceOf(db, item, reads.libraryOf);
   const library = source === null ? null : await reads.libraryOf(source.library);
-
-  if (source === null || library === null) return null;
+  const found = source === null || library === null ? null : { source, library };
 
   const decision = can(caller, "keep", {
     on: "download",
     device: device?.mode ?? null,
-    item: itemOf(library, await reads.levelOf(library._id), source.facts),
+    item:
+      found === null
+        ? null
+        : itemOf(found.library, await reads.levelOf(found.library._id), found.source.facts),
   });
 
-  return { source, library, decision };
+  return { found, decision };
 };
 
-const keptOf = (judged: Judged | null, quality: DownloadQuality): Kept => {
-  if (judged === null) return { state: "gone" };
-
-  const { source, decision } = judged;
+const keptOf = ({ found, decision }: Judged, quality: DownloadQuality): Kept => {
+  if (found === null) return { state: "gone" };
 
   return decision.allowed
-    ? { state: "available", source, bytes: bytesAt(source, quality) }
+    ? { state: "available", source: found.source, bytes: bytesAt(found.source, quality) }
     : { state: "expired", because: expiredBecause(decision) };
 };
 
-const refuseAdd = (decision: Refused, domain: ContentDomain): never => {
+const refuseAdd = (decision: Refused, domain: ContentDomain | undefined): never => {
   if (decision.refusal === "hidden") return fail("not_found", NO_ITEM);
 
   if (decision.because === "guest") return fail("forbidden", "Guests cannot download");
@@ -139,7 +142,7 @@ const refuseAdd = (decision: Refused, domain: ContentDomain): never => {
     return fail("forbidden", "A shared device keeps no downloads");
   }
 
-  return decision.because === "scope"
+  return decision.because === "scope" && domain !== undefined
     ? fail("forbidden", `This session lacks the ${contentNeeds("play", domain).scope} scope`)
     : fail("forbidden", "You cannot download this");
 };
@@ -245,15 +248,19 @@ export const { add, list, fetch, remove, usage, setCap } = register({
   add: async (ctx, { item }, caller) => {
     const device = await deviceOf(ctx.db, caller);
 
-    const judged =
-      (await judge(ctx.db, caller, device, item, libraryReads(ctx.db, caller))) ??
-      fail("not_found", NO_ITEM);
+    const { found, decision } = await judge(
+      ctx.db,
+      caller,
+      device,
+      item,
+      libraryReads(ctx.db, caller),
+    );
 
-    const { decision } = judged;
+    if (!decision.allowed) return refuseAdd(decision, found?.library.kind);
 
-    if (!decision.allowed) return refuseAdd(decision, judged.library.kind);
-
-    if (device === null) throw new Error("can let a session on no device keep an item");
+    if (device === null || found === null) {
+      throw new Error("can let a session on no device keep an item, or keep a gone one");
+    }
 
     const [existing, quality, used] = await Promise.all([
       rowOf(ctx.db, device._id, caller.userId, item),
@@ -263,7 +270,7 @@ export const { add, list, fetch, remove, usage, setCap } = register({
 
     if (existing !== null) return null;
 
-    const bytes = bytesAt(judged.source, quality);
+    const bytes = bytesAt(found.source, quality);
     const why = spaceRefusal(used, bytes);
 
     if (why !== null) return fail("conflict", why);
@@ -273,7 +280,7 @@ export const { add, list, fetch, remove, usage, setCap } = register({
       userId: caller.userId,
       item,
       quality,
-      reserved: { bytes, revision: judged.source.revision },
+      reserved: { bytes, revision: found.source.revision },
     });
 
     await moveCounter(ctx.db, bytesCounter(device._id), bytes);
