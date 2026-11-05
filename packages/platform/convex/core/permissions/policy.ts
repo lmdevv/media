@@ -155,7 +155,10 @@ export type Because =
   | "not-yours"
   | "not-adult"
   | "guest"
-  | "not-signed-in-here";
+  | "not-signed-in-here"
+  | "no-device"
+  | "shared-device"
+  | "missing";
 
 /**
  * An access decision. `hidden` answers as if the thing did not exist, so a private thing stays
@@ -628,6 +631,53 @@ const decideSetting = (principal: Principal, setting: SettingResource): Decision
     : forbidden("scope");
 };
 
+/** What can be done with a thing kept on a device for offline play (ADR 0019). */
+export const downloadActions = ["keep"] as const;
+
+export type DownloadAction = (typeof downloadActions)[number];
+
+/** A registered device's mode. */
+export type DeviceMode = Doc<"devices">["mode"];
+
+/**
+ * A thing kept on a device, as `can` sees it: the mode of the device the principal's session is on,
+ * null for a session on no device, and the thing itself as content, null when no such thing exists.
+ */
+export interface DownloadResource {
+  readonly on: "download";
+  readonly device: DeviceMode | null;
+  readonly item: ContentResource | null;
+}
+
+interface DownloadRule {
+  readonly content: ContentAction;
+  readonly devices: { readonly [M in DeviceMode]: "keeps" | "keeps-nothing" };
+}
+
+type DownloadRules = { readonly [A in DownloadAction]: DownloadRule };
+
+const downloadRules: DownloadRules = {
+  keep: { content: "play", devices: { personal: "keeps", shared: "keeps-nothing" } },
+};
+
+const decideDownload = (
+  principal: Principal,
+  rule: DownloadRule,
+  download: DownloadResource,
+): Decision => {
+  if (principal.kind === "service") return hidden("service");
+
+  if (principal.role === "guest") return forbidden("guest");
+
+  if (download.device === null) return forbidden("no-device");
+
+  if (rule.devices[download.device] === "keeps-nothing") return forbidden("shared-device");
+
+  return download.item === null
+    ? hidden("missing")
+    : decideContent(principal, rule.content, download.item);
+};
+
 const isContentAction = (action: string): action is ContentAction =>
   contentActions.some((known) => known === action);
 
@@ -648,6 +698,9 @@ const isDeviceAction = (action: string): action is DeviceAction =>
 
 const isSettingAction = (action: string): action is SettingAction =>
   settingActions.some((known) => known === action);
+
+const isDownloadAction = (action: string): action is DownloadAction =>
+  downloadActions.some((known) => known === action);
 
 /**
  * The one access decision (ADR 0005): role, credential scopes, grants, and restrictions, from
@@ -679,6 +732,11 @@ export function can(
 ): Decision;
 export function can(
   principal: Principal,
+  action: DownloadAction,
+  resource: DownloadResource,
+): Decision;
+export function can(
+  principal: Principal,
   action:
     | ContentAction
     | AccountAction
@@ -686,7 +744,8 @@ export function can(
     | TileAction
     | ApprovalAction
     | DeviceAction
-    | SettingAction,
+    | SettingAction
+    | DownloadAction,
   resource:
     | ContentResource
     | AccountResource
@@ -694,7 +753,8 @@ export function can(
     | TileResource
     | ApprovalResource
     | DeviceResource
-    | SettingResource,
+    | SettingResource
+    | DownloadResource,
 ): Decision {
   if (resource.on === "content" && isContentAction(action)) {
     return decideContent(principal, action, resource);
@@ -722,6 +782,10 @@ export function can(
 
   if (resource.on === "setting" && isSettingAction(action)) {
     return decideSetting(principal, resource);
+  }
+
+  if (resource.on === "download" && isDownloadAction(action)) {
+    return decideDownload(principal, downloadRules[action], resource);
   }
 
   throw new Error(`${action} is not an action on ${resource.on}`);

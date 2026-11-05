@@ -376,6 +376,67 @@ Set or clear your short unlock code, which opens your tile on shared-device lock
 - Arguments: `{ code: string | null }`
 - Result: `null`
 
+## `core.downloads.add`
+
+Keep an item on this device for offline play at its download quality, within the device's download limit.
+
+- CLI: `media auth downloads add`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ item: { kind: "probe"; id: Id<"probeItems"> } }`
+- Result: `null`
+
+## `core.downloads.fetch`
+
+Get a 15-minute download ticket for the current version of an item you keep on this device.
+
+- CLI: `media auth downloads fetch`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ item: { kind: "probe"; id: Id<"probeItems"> } }`
+- Result: `{ state: "available"; revision: string; quality: "standard" | "high"; bytes: number; resource: { kind: "file"; id: string }; ticket: string; expiresAt: number } | { state: "expired"; because: "access" | "restricted" | "device" } | { state: "gone" }`
+
+## `core.downloads.list`
+
+List what you keep on this device, newest first, and whether each item can still play here.
+
+- CLI: `media auth downloads list`
+- Kind: query
+- Scope: signed-in
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ item: { kind: "probe"; id: Id<"probeItems"> }; state: "available"; revision: string; quality: "standard" | "high"; bytes: number; label: string } | { item: { kind: "probe"; id: Id<"probeItems"> }; state: "expired"; because: "access" | "restricted" | "device" } | { item: { kind: "probe"; id: Id<"probeItems"> }; state: "gone" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.downloads.remove`
+
+Stop keeping an item on this device and free the space it takes.
+
+- CLI: `media auth downloads remove`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ item: { kind: "probe"; id: Id<"probeItems"> } }`
+- Result: `null`
+
+## `core.downloads.setCap`
+
+Set how many bytes of downloads a device may keep for everyone on it, or null for the default.
+
+- CLI: `media admin downloads set-cap`
+- Kind: mutation
+- Scope: admin
+- Arguments: `{ deviceId: Id<"devices">; bytes: number | null }`
+- Result: `null`
+
+## `core.downloads.usage`
+
+Show how much of this device's download limit everyone on it uses.
+
+- CLI: `media auth downloads usage`
+- Kind: query
+- Scope: signed-in
+- Arguments: none
+- Result: `{ bytes: number; items: number; capBytes: number; capItems: number }`
+
 ## `core.libraries.create`
 
 Create a library of movies or music from folders on the server and scan it.

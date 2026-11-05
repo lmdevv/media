@@ -1,4 +1,6 @@
 import {
+  downloadItem,
+  downloadKinds,
   grantPrincipal,
   level,
   levels,
@@ -9,7 +11,7 @@ import {
   restrictions,
 } from "../access.ts";
 import { fieldsSource, wireSource } from "../render.ts";
-import { settingRows } from "../settings.ts";
+import { downloadQuality, settingRows } from "../settings.ts";
 import type { SettingScope } from "../settings.ts";
 import { wireOf } from "../check.ts";
 import type { CheckedCommand } from "../check.ts";
@@ -278,6 +280,23 @@ const accessFile = (): Emitted => ({
       ].join("\n"),
       shared("resourceType", "`ResourceType` as a Convex validator.", resourceType),
       shared("resourceId", "The id of a row of any resource type.", resourceId),
+      [
+        "/** Every kind of domain item a device can keep for offline play, the table that holds it, and what its download serves. */",
+        `export const downloadKinds = ${JSON.stringify(downloadKinds)} as const;`,
+      ].join("\n"),
+      [
+        "/** A kind of domain item a device can keep. */",
+        "export type DownloadKind = keyof typeof downloadKinds;",
+      ].join("\n"),
+      shared(
+        "downloadItem",
+        "One item a device can keep: its kind, and the id of its row in that kind's table.",
+        downloadItem,
+      ),
+      [
+        "/** One item a device can keep. */",
+        "export type DownloadItem = Infer<typeof downloadItem>;",
+      ].join("\n"),
       local(
         "libraryId",
         "A library's id, which the allowed-libraries restriction lists.",
@@ -328,7 +347,7 @@ const settingsFile = (): Emitted => ({
   path: "settings.ts",
   text:
     [
-      `${header}import { v } from "convex/values";`,
+      `${header}import { v } from "convex/values";\nimport type { Infer } from "convex/values";`,
       [
         "/**",
         " * Every setting from the settings table (ADR 0019): who holds its value, the domains whose",
@@ -342,6 +361,15 @@ const settingsFile = (): Emitted => ({
           .join("\n")}\n} as const;`,
       ].join("\n"),
       "export type SettingName = keyof typeof settingTable;",
+      shared(
+        "downloadQuality",
+        "The quality a device keeps downloads at, as the `downloadQuality` setting and each download hold it.",
+        downloadQuality,
+      ),
+      [
+        "/** A quality a device keeps downloads at. */",
+        "export type DownloadQuality = Infer<typeof downloadQuality>;",
+      ].join("\n"),
       [
         "/** The settings that follow the person, as stored fields; a missing one is its default. */",
         `export const userSettingFields = ${storedFields("user")};`,

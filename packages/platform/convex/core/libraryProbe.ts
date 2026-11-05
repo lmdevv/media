@@ -8,6 +8,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { internalMutation, internalQuery } from "../_generated/server";
 import type { DatabaseReader } from "../_generated/server";
 import { callerOfSession } from "./auth/caller";
+import type { SourceLoader } from "./downloadSources";
 import { claimFolders } from "./folders";
 import { lease } from "./jobs/model";
 import { fail } from "./lib/errors";
@@ -31,6 +32,23 @@ const factsOf = (library: Doc<"libraries">, item: Doc<"probeItems">): ContentFac
   library.kind === "movies"
     ? { domain: "movies", rating: ratingOf(item.age) }
     : { domain: "music", explicit: item.explicit };
+
+/** The probe seam's download source, until the movies port gives movies' items their own. */
+export const probeSource: SourceLoader<"probe"> = async (db, id, libraryOf) => {
+  const item = await db.get(id);
+  const library = item === null ? null : await libraryOf(item.libraryId);
+
+  if (item === null || library === null) return null;
+
+  return {
+    library: library._id,
+    facts: factsOf(library, item),
+    resource: { kind: "file", id: item._id },
+    revision: `${item.size}:${item.mtime}`,
+    bytes: () => item.size,
+    label: item.path.slice(item.path.lastIndexOf("/") + 1),
+  };
+};
 
 const itemAt = (
   db: DatabaseReader,

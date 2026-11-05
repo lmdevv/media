@@ -2,6 +2,7 @@
 // list and run `pnpm --filter @media/commands generate`.
 
 import { v } from "convex/values";
+import type { Infer } from "convex/values";
 
 /**
  * Every setting from the settings table (ADR 0019): who holds its value, the domains whose
@@ -29,6 +30,12 @@ export const settingTable = {
 } as const;
 
 export type SettingName = keyof typeof settingTable;
+
+/** The quality a device keeps downloads at, as the `downloadQuality` setting and each download hold it. */
+export const downloadQuality = v.union(v.literal("standard"), v.literal("high"));
+
+/** A quality a device keeps downloads at. */
+export type DownloadQuality = Infer<typeof downloadQuality>;
 
 /** The settings that follow the person, as stored fields; a missing one is its default. */
 export const userSettingFields = {

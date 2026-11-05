@@ -64,6 +64,19 @@ export const writeFiles = async (root: string, files: ReadonlyArray<string>): Pr
   );
 };
 
+/** Writes each named file under `root` with exactly its number of bytes. */
+export const writeSized = async (
+  root: string,
+  sizes: Readonly<Record<string, number>>,
+): Promise<void> => {
+  await Promise.all(
+    Object.entries(sizes).map(async ([file, bytes]) => {
+      await mkdir(dirname(join(root, file)), { recursive: true });
+      await writeFile(join(root, file), "x".repeat(bytes));
+    }),
+  );
+};
+
 /** Deletes `files` under `root`, or whole folders with everything in them. */
 export const removeFiles = async (root: string, files: ReadonlyArray<string>): Promise<void> => {
   await Promise.all(files.map((file) => rm(join(root, file), { recursive: true, force: true })));

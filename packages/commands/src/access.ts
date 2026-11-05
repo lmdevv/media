@@ -33,6 +33,38 @@ export const resourceRef = v.union(
   ...registered.map(([type, entry]) => v.object({ type: v.literal(type), id: v.id(entry.table) })),
 );
 
+interface DownloadKindEntry {
+  readonly table: string;
+  readonly serves: string;
+}
+
+/**
+ * Every kind of domain item a device can keep for offline play, the table that holds its rows, and
+ * what its download serves (ADR 0019). `probe` is the core's stand-in for a domain's item, such as
+ * a movie file or a track, until the movies port replaces it with movies' own kinds.
+ */
+export const downloadKinds = {
+  probe: { table: "probeItems", serves: "file" },
+} as const satisfies Readonly<Record<string, DownloadKindEntry>>;
+
+const downloadable: ReadonlyArray<readonly [string, DownloadKindEntry]> =
+  Object.entries(downloadKinds);
+
+/** One item a device can keep: its kind, and the id of its row in that kind's table. */
+export const downloadItem = v.union(
+  ...downloadable.map(([kind, entry]) =>
+    v.object({ kind: v.literal(kind), id: v.id(entry.table) }),
+  ),
+);
+
+/** What a download ticket names: a ticket resource kind some download kind serves, and an id. */
+export const downloadResource = v.object({
+  kind: v.union(
+    ...[...new Set(downloadable.map(([, entry]) => entry.serves))].map((kind) => v.literal(kind)),
+  ),
+  id: v.string(),
+});
+
 /** A library's id, which the allowed-libraries restriction lists. */
 export const libraryId = v.id("libraries");
 

@@ -11,7 +11,7 @@ import {
   userSettingFields,
   userSettingNames,
 } from "../../commands/settings";
-import type { SettingName } from "../../commands/settings";
+import type { DownloadQuality, SettingName } from "../../commands/settings";
 import type { Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import type { Caller } from "./auth/caller";
@@ -116,6 +116,14 @@ const deviceRow = (db: DatabaseReader, deviceId: Id<"devices">, userId: Id<"user
     .query("deviceSettings")
     .withIndex("by_device_user", (q) => q.eq("deviceId", deviceId).eq("userId", userId))
     .unique();
+
+/** The quality a person's downloads on a device are made at: their setting there, or its default. */
+export const downloadQualityOf = async (
+  db: DatabaseReader,
+  deviceId: Id<"devices">,
+  userId: Id<"users">,
+): Promise<DownloadQuality> =>
+  (await deviceRow(db, deviceId, userId))?.downloadQuality ?? DEVICE_DEFAULTS.downloadQuality;
 
 interface Stored {
   readonly user: UserChanges;

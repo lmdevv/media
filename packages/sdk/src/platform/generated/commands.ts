@@ -531,6 +531,156 @@ const core_devices_unlockCodes_set = action({
   result: Schema.Null,
 });
 
+const core_downloads_add = mutation({
+  name: "core.downloads.add",
+  path: "core/downloads:add",
+  args: Schema.Struct({
+    item: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("probe"),
+        id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+      }),
+    ]),
+  }),
+  result: Schema.Null,
+});
+
+const core_downloads_fetch = mutation({
+  name: "core.downloads.fetch",
+  path: "core/downloads:fetch",
+  args: Schema.Struct({
+    item: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("probe"),
+        id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+      }),
+    ]),
+  }),
+  result: Schema.Union([
+    Schema.Struct({
+      state: Schema.Literal("available"),
+      revision: Schema.String,
+      quality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
+      bytes: Schema.Finite,
+      resource: Schema.Struct({ kind: Schema.Union([Schema.Literal("file")]), id: Schema.String }),
+      ticket: Schema.String,
+      expiresAt: Schema.Finite,
+    }),
+    Schema.Struct({
+      state: Schema.Literal("expired"),
+      because: Schema.Union([
+        Schema.Literal("access"),
+        Schema.Literal("restricted"),
+        Schema.Literal("device"),
+      ]),
+    }),
+    Schema.Struct({ state: Schema.Literal("gone") }),
+  ]),
+});
+
+const core_downloads_list = query({
+  name: "core.downloads.list",
+  path: "core/downloads:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Union([
+        Schema.Struct({
+          item: Schema.Union([
+            Schema.Struct({
+              kind: Schema.Literal("probe"),
+              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            }),
+          ]),
+          state: Schema.Literal("available"),
+          revision: Schema.String,
+          quality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
+          bytes: Schema.Finite,
+          label: Schema.String,
+        }),
+        Schema.Struct({
+          item: Schema.Union([
+            Schema.Struct({
+              kind: Schema.Literal("probe"),
+              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            }),
+          ]),
+          state: Schema.Literal("expired"),
+          because: Schema.Union([
+            Schema.Literal("access"),
+            Schema.Literal("restricted"),
+            Schema.Literal("device"),
+          ]),
+        }),
+        Schema.Struct({
+          item: Schema.Union([
+            Schema.Struct({
+              kind: Schema.Literal("probe"),
+              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            }),
+          ]),
+          state: Schema.Literal("gone"),
+        }),
+      ]),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const core_downloads_remove = mutation({
+  name: "core.downloads.remove",
+  path: "core/downloads:remove",
+  args: Schema.Struct({
+    item: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("probe"),
+        id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+      }),
+    ]),
+  }),
+  result: Schema.Null,
+});
+
+const core_downloads_setCap = mutation({
+  name: "core.downloads.setCap",
+  path: "core/downloads:setCap",
+  args: Schema.Struct({
+    deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+    bytes: Schema.Union([Schema.Finite, Schema.Null]),
+  }),
+  result: Schema.Null,
+});
+
+const core_downloads_usage = query({
+  name: "core.downloads.usage",
+  path: "core/downloads:usage",
+  args: Schema.Struct({}),
+  result: Schema.Struct({
+    bytes: Schema.Finite,
+    items: Schema.Finite,
+    capBytes: Schema.Finite,
+    capItems: Schema.Finite,
+  }),
+});
+
 const core_libraries_create = mutation({
   name: "core.libraries.create",
   path: "core/libraries:create",
@@ -1144,6 +1294,20 @@ export const effectMethods = (method: EffectBuilder) => ({
         set: method.action(core_devices_unlockCodes_set),
       },
     },
+    downloads: {
+      /** `core.downloads.add` (mutation, signed-in): Keep an item on this device for offline play at its download quality, within the device's download limit. */
+      add: method.mutation(core_downloads_add),
+      /** `core.downloads.fetch` (mutation, signed-in): Get a 15-minute download ticket for the current version of an item you keep on this device. */
+      fetch: method.mutation(core_downloads_fetch),
+      /** `core.downloads.list` (query, signed-in): List what you keep on this device, newest first, and whether each item can still play here. */
+      list: method.query(core_downloads_list),
+      /** `core.downloads.remove` (mutation, signed-in): Stop keeping an item on this device and free the space it takes. */
+      remove: method.mutation(core_downloads_remove),
+      /** `core.downloads.setCap` (mutation, admin): Set how many bytes of downloads a device may keep for everyone on it, or null for the default. */
+      setCap: method.mutation(core_downloads_setCap),
+      /** `core.downloads.usage` (query, signed-in): Show how much of this device's download limit everyone on it uses. */
+      usage: method.query(core_downloads_usage),
+    },
     libraries: {
       /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
       create: method.mutation(core_libraries_create),
@@ -1307,6 +1471,20 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         /** `core.devices.unlockCodes.set` (action, account, API keys refused): Set or clear your short unlock code, which opens your tile on shared-device lock screens and never signs in. */
         set: method.action(core_devices_unlockCodes_set),
       },
+    },
+    downloads: {
+      /** `core.downloads.add` (mutation, signed-in): Keep an item on this device for offline play at its download quality, within the device's download limit. */
+      add: method.mutation(core_downloads_add),
+      /** `core.downloads.fetch` (mutation, signed-in): Get a 15-minute download ticket for the current version of an item you keep on this device. */
+      fetch: method.mutation(core_downloads_fetch),
+      /** `core.downloads.list` (query, signed-in): List what you keep on this device, newest first, and whether each item can still play here. */
+      list: method.query(core_downloads_list),
+      /** `core.downloads.remove` (mutation, signed-in): Stop keeping an item on this device and free the space it takes. */
+      remove: method.mutation(core_downloads_remove),
+      /** `core.downloads.setCap` (mutation, admin): Set how many bytes of downloads a device may keep for everyone on it, or null for the default. */
+      setCap: method.mutation(core_downloads_setCap),
+      /** `core.downloads.usage` (query, signed-in): Show how much of this device's download limit everyone on it uses. */
+      usage: method.query(core_downloads_usage),
     },
     libraries: {
       /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */

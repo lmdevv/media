@@ -1,9 +1,9 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
-import { level, resourceId, resourceType, restrictions } from "../commands/access";
+import { downloadItem, level, resourceId, resourceType, restrictions } from "../commands/access";
 import { assignableRole, contentDomain, credentialScope } from "../commands/scopes";
-import { deviceSettingFields, userSettingFields } from "../commands/settings";
+import { deviceSettingFields, downloadQuality, userSettingFields } from "../commands/settings";
 import { importSource } from "./core/jobs/kinds";
 import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
 
@@ -288,6 +288,35 @@ export default defineSchema({
     userId: v.id("users"),
     ...deviceSettingFields,
   }).index("by_device_user", ["deviceId", "userId"]),
+
+  /**
+   * One item a person keeps on one device for offline play (ADR 0019). It holds no access state:
+   * `can` decides on every read whether the item may still play there, so a revoked grant or a new
+   * restriction expires it without a write here. Deleted by `remove`, or in pages once its device is
+   * removed. `core/downloads.ts` is its only writer.
+   */
+  downloads: defineTable({
+    deviceId: v.id("devices"),
+    userId: v.id("users"),
+    item: downloadItem,
+    /** The person's `downloadQuality` on the device when they added it; it stays for the row. */
+    quality: downloadQuality,
+    /**
+     * What the item takes against its device's download limit, as its domain estimated it for
+     * `revision`. Fetching a newer revision estimates it again.
+     */
+    reserved: v.object({ bytes: v.number(), revision: v.string() }),
+  })
+    .index("by_device_user", ["deviceId", "userId"])
+    .index("by_device_user_item", ["deviceId", "userId", "item.kind", "item.id"]),
+
+  /**
+   * An admin's limit on the bytes of downloads one device keeps for everyone on it. A device with
+   * no row has the default. `core/downloads.ts` is its only writer.
+   */
+  downloadCaps: defineTable({ deviceId: v.id("devices"), bytes: v.number() }).index("by_device", [
+    "deviceId",
+  ]),
 
   /**
    * A library: a name and the domain its content belongs to. Its folders live in

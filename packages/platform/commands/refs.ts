@@ -15,6 +15,7 @@ import type { Refs as core_devices_picker } from "./core/devices/picker";
 import type { Refs as core_devices_registry } from "./core/devices/registry";
 import type { Refs as core_devices_tiles } from "./core/devices/tiles";
 import type { Refs as core_devices_unlockCodes } from "./core/devices/unlockCodes";
+import type { Refs as core_downloads } from "./core/downloads";
 import type { Refs as core_libraries } from "./core/libraries";
 import type { Refs as core_permissions_grants } from "./core/permissions/grants";
 import type { Refs as core_permissions_groups } from "./core/permissions/groups";
@@ -90,6 +91,12 @@ export const commandRefs = {
     .reset satisfies core_devices_unlockCodes["reset"],
   "core.devices.unlockCodes.set": api.core.devices.unlockCodes
     .set satisfies core_devices_unlockCodes["set"],
+  "core.downloads.add": api.core.downloads.add satisfies core_downloads["add"],
+  "core.downloads.fetch": api.core.downloads.fetch satisfies core_downloads["fetch"],
+  "core.downloads.list": api.core.downloads.list satisfies core_downloads["list"],
+  "core.downloads.remove": api.core.downloads.remove satisfies core_downloads["remove"],
+  "core.downloads.setCap": api.core.downloads.setCap satisfies core_downloads["setCap"],
+  "core.downloads.usage": api.core.downloads.usage satisfies core_downloads["usage"],
   "core.libraries.create": api.core.libraries.create satisfies core_libraries["create"],
   "core.libraries.get": api.core.libraries.get satisfies core_libraries["get"],
   "core.libraries.list": api.core.libraries.list satisfies core_libraries["list"],

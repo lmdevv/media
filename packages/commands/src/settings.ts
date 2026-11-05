@@ -37,6 +37,9 @@ const LANGUAGE = { kind: "language" } as const;
 
 const language = v.union(v.string(), v.null());
 
+/** The quality a device keeps downloads at, as the `downloadQuality` setting and each download hold it. */
+export const downloadQuality = v.union(v.literal("standard"), v.literal("high"));
+
 const quality = v.union(
   v.literal("auto"),
   v.literal("original"),
@@ -125,7 +128,7 @@ const settings = {
   downloadQuality: setting({
     scope: "device",
     domains: ["movies", "music"],
-    value: v.union(v.literal("standard"), v.literal("high")),
+    value: downloadQuality,
     default: "standard",
     check: NONE,
   }),
