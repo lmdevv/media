@@ -347,6 +347,43 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     expect(await requested(again)).toMatchObject({ revision: next.revision, playing: true });
   });
 
+  it("drops a request the device missed while it was offline", async () => {
+    if (stack === undefined) return;
+    const lucia = await member(stack, "lucia");
+    const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
+    const { sessionId } = await sessionOf(laptop.signedIn);
+    const wentQuiet = Date.now() - 2 * ONLINE_MS;
+
+    importRows("connectPlayers", [
+      {
+        deviceId: laptop.deviceId,
+        reporter: sessionId,
+        output: { kind: "local" },
+        playback: { domain: "movies", playing: true, positionMs: 1_000 },
+        settled: 0,
+        reportedAt: wentQuiet,
+      },
+    ]);
+    importRows("connectRequests", [
+      {
+        deviceId: laptop.deviceId,
+        reporter: sessionId,
+        revision: 1,
+        playing: false,
+        positionMs: 1_100,
+        at: wentQuiet + 100,
+      },
+    ]);
+
+    await report(laptop.signedIn, playing(90_000));
+
+    expect(await requested(laptop.signedIn)).toBeNull();
+    expect(targetIn(await targets(lucia.signedIn), laptop.deviceId)?.playback).toMatchObject({
+      playing: true,
+      pending: false,
+    });
+  });
+
   it("refuses what is not a command or a report", async () => {
     if (stack === undefined) return;
     const lucia = await member(stack, "lucia");
