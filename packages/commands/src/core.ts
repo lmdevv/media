@@ -529,6 +529,7 @@ export const core = [
   mutation("core.devices.approvals.deny", {
     summary: "Refuse a shared-device approval",
     scope: "account",
+    refusesKeys: true,
     args: { approvalId: v.id("tileApprovals") },
     result: v.null(),
   }),

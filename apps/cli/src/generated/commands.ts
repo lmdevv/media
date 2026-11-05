@@ -469,7 +469,7 @@ export const generatedCommands = [
     path: ["auth", "approvals", "deny"],
     kind: "mutation",
     scope: "account",
-    refusesKeys: false,
+    refusesKeys: true,
     summary: "Refuse a shared-device approval",
     secrets: [],
     paginated: false,

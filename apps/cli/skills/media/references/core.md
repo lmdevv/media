@@ -254,6 +254,7 @@ Refuse a shared-device approval.
 - CLI: `media auth approvals deny`
 - Kind: mutation
 - Scope: account
+- API keys: refused
 - Arguments: `{ approvalId: Id<"tileApprovals"> }`
 - Result: `null`
 

@@ -989,7 +989,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       approvals: {
         /** `core.devices.approvals.approve` (mutation, account, API keys refused): Approve opening your tile on a shared device, or as an adult let a kid leave theirs. */
         approve: method.mutation(core_devices_approvals_approve),
-        /** `core.devices.approvals.deny` (mutation, account): Refuse a shared-device approval. */
+        /** `core.devices.approvals.deny` (mutation, account, API keys refused): Refuse a shared-device approval. */
         deny: method.mutation(core_devices_approvals_deny),
         /** `core.devices.approvals.pending` (query, account): List the shared-device approvals you can answer now. */
         pending: method.query(core_devices_approvals_pending),
@@ -1147,7 +1147,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       approvals: {
         /** `core.devices.approvals.approve` (mutation, account, API keys refused): Approve opening your tile on a shared device, or as an adult let a kid leave theirs. */
         approve: method.mutation(core_devices_approvals_approve),
-        /** `core.devices.approvals.deny` (mutation, account): Refuse a shared-device approval. */
+        /** `core.devices.approvals.deny` (mutation, account, API keys refused): Refuse a shared-device approval. */
         deny: method.mutation(core_devices_approvals_deny),
         /** `core.devices.approvals.pending` (query, account): List the shared-device approvals you can answer now. */
         pending: method.query(core_devices_approvals_pending),

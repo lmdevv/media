@@ -50,7 +50,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof approveResult> | Promise<Infer<typeof approveResult>>;
 
-  /** `core.devices.approvals.deny` (mutation, account): Refuse a shared-device approval. */
+  /** `core.devices.approvals.deny` (mutation, account, API keys refused): Refuse a shared-device approval. */
   readonly deny: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof denyArgs>,
@@ -110,7 +110,8 @@ export const register = (handlers: Handlers) => ({
   deny: mutation({
     args: denyArgs,
     returns: denyResult,
-    handler: async (ctx, args) => handlers.deny(ctx, args, await requireCaller(ctx, "account")),
+    handler: async (ctx, args) =>
+      handlers.deny(ctx, args, refuseKeys(await requireCaller(ctx, "account"))),
   }),
   pending: query({
     args: pendingArgs,
