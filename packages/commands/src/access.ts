@@ -1,5 +1,7 @@
 import { v } from "convex/values";
 
+import type { ContentDomain } from "./scopes.ts";
+
 /** Grant levels, weakest first. Each level allows what the ones before it allow. */
 export const levels = ["view", "edit", "manage"] as const;
 
@@ -67,6 +69,43 @@ export const downloadResource = v.object({
 
 /** A library's id, which the allowed-libraries restriction lists. */
 export const libraryId = v.id("libraries");
+
+interface ItemTypeEntry {
+  readonly domain: ContentDomain;
+  readonly table: string;
+}
+
+/**
+ * Every type of item a group session can hold, the domain it belongs to, and the table of its
+ * rows: the one list of item types (ADR 0017). The item validators derive from it, and the core's
+ * item loaders fail to compile until a new type has one.
+ */
+export const itemTypes = {
+  probeMovie: { domain: "movies", table: "probeItems" },
+  probeTrack: { domain: "music", table: "probeItems" },
+} as const satisfies Readonly<Record<string, ItemTypeEntry>>;
+
+const registeredItems: ReadonlyArray<readonly [string, ItemTypeEntry]> = Object.entries(itemTypes);
+
+const itemRefOf = ([type, entry]: readonly [string, ItemTypeEntry]) =>
+  v.object({ type: v.literal(type), id: v.id(entry.table) });
+
+const itemDomains = [...new Set(registeredItems.map(([, entry]) => entry.domain))];
+
+/**
+ * An item with the domain it belongs to. Each domain pairs only with its own item types, so an
+ * item of another domain fails the type check, the argument check, and the schema alike.
+ */
+export const domainItem = v.union(
+  ...itemDomains.map((domain) =>
+    v.object({
+      domain: v.literal(domain),
+      ref: v.union(
+        ...registeredItems.flatMap((item) => (item[1].domain === domain ? [itemRefOf(item)] : [])),
+      ),
+    }),
+  ),
+);
 
 /** Who a grant reaches: one user, a group's members, or every person on the server but guests. */
 export const grantPrincipal = v.union(

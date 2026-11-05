@@ -2,6 +2,7 @@ import { paginationOptsValidator, paginationResultValidator } from "convex/serve
 import { v } from "convex/values";
 
 import {
+  domainItem,
   downloadItem,
   downloadResource,
   grantPrincipal,
@@ -113,6 +114,39 @@ const downloadEntry = v.union(
   }),
   v.object({ item: downloadItem, state: v.literal("expired"), because: expiredBecause }),
   v.object({ item: downloadItem, state: v.literal("gone") }),
+);
+
+/** Who may join a group session: anyone with its link, anyone its host lets in, or no one new. */
+const joinSetting = v.union(v.literal("open"), v.literal("approval"), v.literal("locked"));
+
+/** A seat in a group session. Everyone who is not its host is a guest, whatever their role. */
+const togetherRole = v.union(v.literal("host"), v.literal("guest"));
+
+/**
+ * A group session's shared clock. The position at server time `t` is `positionAtAnchorMs + (t -
+ * anchorServerTime) * playbackRate` while playing, and `positionAtAnchorMs` while paused. Each
+ * move bumps `revision`; a client applies only a higher one.
+ */
+const togetherClock = v.object({
+  status: v.union(v.literal("playing"), v.literal("paused")),
+  positionAtAnchorMs: v.number(),
+  anchorServerTime: v.number(),
+  playbackRate: v.number(),
+  revision: v.number(),
+});
+
+const togetherSettings = { join: joinSetting, control: v.boolean(), add: v.boolean() };
+
+/** An item as the caller sees it: null when they may not play it, such as a kid and an R movie. */
+const shownItem = v.union(domainItem, v.null());
+
+/** One move of the clock. A seek and a skip carry the revision the caller saw. */
+const controlOp = v.union(
+  v.object({ kind: v.literal("play") }),
+  v.object({ kind: v.literal("pause") }),
+  v.object({ kind: v.literal("rate"), playbackRate: v.number() }),
+  v.object({ kind: v.literal("seek"), positionMs: v.number(), revision: v.number() }),
+  v.object({ kind: v.literal("next"), revision: v.number() }),
 );
 
 /** The core's commands: the server itself, accounts, devices, and the other shared modules. */
@@ -726,6 +760,134 @@ export const core = [
     scope: "account",
     refusesKeys: true,
     args: { currentPassword: v.string(), newPassword: v.string() },
+    result: v.null(),
+  }),
+  action("core.together.create", {
+    summary:
+      "Start a group session on something you can play, leaving any session you are a guest in, and get its join link",
+    scope: "signed-in",
+    refusesKeys: true,
+    args: {
+      item: domainItem,
+      join: v.optional(joinSetting),
+      control: v.optional(v.boolean()),
+      add: v.optional(v.boolean()),
+    },
+    result: v.object({ sessionId: v.id("togetherSessions"), link: v.string() }),
+  }),
+  mutation("core.together.join", {
+    summary:
+      "Join the group session a link opens, or wait for its host to let you in; leaves your other session in this domain",
+    scope: "signed-in",
+    args: { domain: contentDomain, link: v.string() },
+    result: v.object({ state: v.union(v.literal("joined"), v.literal("pending")) }),
+  }),
+  query("core.together.get", {
+    summary:
+      "Show your group session in a domain: its clock, item, members, settings, link, and what you may do",
+    scope: "signed-in",
+    args: { domain: contentDomain },
+    result: v.union(
+      v.null(),
+      v.object({
+        state: v.literal("pending"),
+        sessionId: v.id("togetherSessions"),
+        host: v.string(),
+      }),
+      v.object({
+        state: v.literal("ended"),
+        sessionId: v.id("togetherSessions"),
+        reason: v.union(v.literal("host-left"), v.literal("abandoned")),
+      }),
+      v.object({
+        state: v.literal("joined"),
+        sessionId: v.id("togetherSessions"),
+        host: v.string(),
+        role: togetherRole,
+        link: v.string(),
+        settings: v.object(togetherSettings),
+        may: v.object({ control: v.boolean(), add: v.boolean(), manage: v.boolean() }),
+        clock: togetherClock,
+        item: shownItem,
+        members: v.array(
+          v.object({
+            userId: v.id("users"),
+            username: v.string(),
+            role: togetherRole,
+            present: v.boolean(),
+          }),
+        ),
+        /** Who waits to be let in; only the host sees them. */
+        pending: v.union(
+          v.array(v.object({ userId: v.id("users"), username: v.string(), present: v.boolean() })),
+          v.null(),
+        ),
+      }),
+    ),
+  }),
+  mutation("core.together.heartbeat", {
+    summary: "Keep yourself present in your group session in a domain and read the server clock",
+    scope: "signed-in",
+    args: { domain: contentDomain },
+    result: v.object({ serverTime: v.number() }),
+  }),
+  mutation("core.together.control", {
+    summary:
+      "Play, pause, seek, change the speed of, or skip to the next item in your group session",
+    scope: "signed-in",
+    args: { domain: contentDomain, op: controlOp },
+    result: togetherClock,
+  }),
+  query("core.together.queue", {
+    summary: "List what plays next in your group session in a domain",
+    scope: "signed-in",
+    args: { domain: contentDomain, paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({
+        entryId: v.id("togetherEntries"),
+        item: shownItem,
+        addedBy: v.union(v.string(), v.null()),
+        removable: v.boolean(),
+      }),
+    ),
+  }),
+  mutation("core.together.add", {
+    summary: "Queue something you can play in your group session, next or at the end",
+    scope: "signed-in",
+    args: { item: domainItem, at: v.optional(v.union(v.literal("next"), v.literal("end"))) },
+    result: v.object({ entryId: v.id("togetherEntries") }),
+  }),
+  mutation("core.together.remove", {
+    summary:
+      "Take an entry out of your group session's queue: any as its host, your own as a guest",
+    scope: "signed-in",
+    args: { domain: contentDomain, entryId: v.id("togetherEntries") },
+    result: v.null(),
+  }),
+  mutation("core.together.admit", {
+    summary: "Let someone waiting to join your group session in, as its host",
+    scope: "signed-in",
+    args: { domain: contentDomain, userId: v.id("users") },
+    result: v.null(),
+  }),
+  mutation("core.together.block", {
+    summary:
+      "Remove someone from your group session or turn their request away, as its host; its link no longer lets them in",
+    scope: "signed-in",
+    args: { domain: contentDomain, userId: v.id("users") },
+    result: v.null(),
+  }),
+  mutation("core.together.configure", {
+    summary:
+      "Set who may join your group session and whether its guests may control playback and add items",
+    scope: "signed-in",
+    args: { domain: contentDomain, ...togetherSettings },
+    result: v.null(),
+  }),
+  mutation("core.together.leave", {
+    summary: "Leave your group session in a domain; when you host it, it ends for everyone",
+    scope: "signed-in",
+    args: { domain: contentDomain },
     result: v.null(),
   }),
 ] as const satisfies ReadonlyArray<Command>;

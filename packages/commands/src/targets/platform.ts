@@ -1,7 +1,9 @@
 import {
   downloadItem,
   downloadKinds,
+  domainItem,
   grantPrincipal,
+  itemTypes,
   level,
   levels,
   libraryId,
@@ -303,6 +305,23 @@ const accessFile = (): Emitted => ({
         libraryId,
       ),
       ["/** A library's id. */", "export type LibraryId = Infer<typeof libraryId>;"].join("\n"),
+      [
+        "/** Every type of item a group session can hold, its domain, and the table of its rows. */",
+        `export const itemTypes = ${JSON.stringify(itemTypes)} as const;`,
+      ].join("\n"),
+      [
+        "/** A type of item a group session can hold. */",
+        "export type ItemType = keyof typeof itemTypes;",
+      ].join("\n"),
+      shared(
+        "domainItem",
+        "An item with its domain; each domain pairs only with its own item types.",
+        domainItem,
+      ),
+      [
+        "/** An item with its domain. */",
+        "export type DomainItem = Infer<typeof domainItem>;",
+      ].join("\n"),
       local(
         "grantPrincipal",
         "Who a grant reaches: one user, a group's members, or every person on the server but guests.",

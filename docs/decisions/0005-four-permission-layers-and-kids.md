@@ -116,7 +116,8 @@ hold its rules, each typed by its list of actions, so a missing or extra row fai
 
 ADR 0006 adds the tile, approval, and device actions, and `listOnSharedDevices`,
 `resetUnlockCode`, and `manageDevices`. ADR 0019 adds `change` on a setting and `keep` on a
-download.
+download. ADR 0017 adds the group-session actions, whose loader is `requireTogether` in
+`together/access.ts`.
 
 The answer is `allowed`, `hidden`, or `forbidden`. Content with no grant, content a restriction
 hides, and any content for a service are `hidden`, which fails `not_found` with the same message

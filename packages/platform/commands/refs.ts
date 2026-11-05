@@ -24,6 +24,7 @@ import type { Refs as core_permissions_groups } from "./core/permissions/groups"
 import type { Refs as core_restrictions } from "./core/restrictions";
 import type { Refs as core_server } from "./core/server";
 import type { Refs as core_settings } from "./core/settings";
+import type { Refs as core_together } from "./core/together";
 
 /**
  * Every command's `api` reference by name. It fails to compile when a command's Convex module is
@@ -138,4 +139,16 @@ export const commandRefs = {
   "core.server.info": api.core.server.info satisfies core_server["info"],
   "core.settings.get": api.core.settings.get satisfies core_settings["get"],
   "core.settings.set": api.core.settings.set satisfies core_settings["set"],
+  "core.together.add": api.core.together.add satisfies core_together["add"],
+  "core.together.admit": api.core.together.admit satisfies core_together["admit"],
+  "core.together.block": api.core.together.block satisfies core_together["block"],
+  "core.together.configure": api.core.together.configure satisfies core_together["configure"],
+  "core.together.control": api.core.together.control satisfies core_together["control"],
+  "core.together.create": api.core.together.create satisfies core_together["create"],
+  "core.together.get": api.core.together.get satisfies core_together["get"],
+  "core.together.heartbeat": api.core.together.heartbeat satisfies core_together["heartbeat"],
+  "core.together.join": api.core.together.join satisfies core_together["join"],
+  "core.together.leave": api.core.together.leave satisfies core_together["leave"],
+  "core.together.queue": api.core.together.queue satisfies core_together["queue"],
+  "core.together.remove": api.core.together.remove satisfies core_together["remove"],
 } as const;

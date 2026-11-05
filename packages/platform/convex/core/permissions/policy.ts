@@ -9,6 +9,7 @@ import type {
 import { domainScopes, roleScopes } from "../../../commands/scopes";
 import type { ContentDomain, ContentVerb, CredentialScope, Role } from "../../../commands/scopes";
 import type { Doc, Id } from "../../_generated/dataModel";
+import type { JoinSetting, Settings } from "../together/model";
 
 /** A user row that is a person: someone with a role who signs in with a password. */
 export type PersonDoc = Extract<Doc<"users">, { readonly kind: "person" }>;
@@ -159,18 +160,25 @@ export type Because =
   | "no-device"
   | "shared-device"
   | "missing"
-  | "no-control";
+  | "outside"
+  | "ended"
+  | "blocked"
+  | "join-setting"
+  | "pending"
+  | "not-host"
+  | "no-control"
+  | "no-add";
 
 /**
  * An access decision. `hidden` answers as if the thing did not exist, so a private thing stays
  * private from everyone, admins included; `forbidden` refuses something the principal can see.
  */
-export type Decision =
+export type Decision<B extends Because = Because> =
   | { readonly allowed: true }
   | {
       readonly allowed: false;
       readonly refusal: "hidden" | "forbidden";
-      readonly because: Because;
+      readonly because: B;
     };
 
 /** What can be done to a thing in a content domain. `manage` shares, renames, and deletes it. */
@@ -274,11 +282,15 @@ const serverRules: ServerRules = {
   manageDevices: { scope: "admin" },
 };
 
-const ALLOWED: Decision = { allowed: true };
+const ALLOWED = { allowed: true } as const;
 
-const hidden = (because: Because): Decision => ({ allowed: false, refusal: "hidden", because });
+const hidden = <B extends Because>(because: B): Decision<B> => ({
+  allowed: false,
+  refusal: "hidden",
+  because,
+});
 
-const forbidden = (because: Because): Decision => ({
+const forbidden = <B extends Because>(because: B): Decision<B> => ({
   allowed: false,
   refusal: "forbidden",
   because,
@@ -715,6 +727,187 @@ const decideDownload = (
     : decideContent(principal, rule.content, download.item);
 };
 
+/**
+ * Where the principal stands in a group session: not in it, removed or turned away by its host,
+ * waiting for the host, or in it as a guest or as its host. A platform guest in it is a guest.
+ */
+export type TogetherPlace = "outside" | "blocked" | "pending" | "guest" | "host";
+
+/** A group session as `can` sees it for the principal. */
+export interface TogetherResource {
+  readonly on: "together";
+  readonly domain: ContentDomain;
+  /** Null for a session the principal would start, or when they are in none. */
+  readonly session: {
+    readonly live: boolean;
+    readonly place: TogetherPlace;
+    readonly settings: Settings;
+    /** The principal queued the entry a `remove` names. */
+    readonly addedIt: boolean;
+  } | null;
+}
+
+/**
+ * What can be done to a group session. `join` enters it and `ask` waits for its host. `see` reads
+ * one's own place in it and keeps one present, pending included; `view` reads its queue. `remove`
+ * takes an entry out of its queue. `admit` lets a waiting person in, and `manage` changes its
+ * settings and removes people.
+ */
+export const togetherActions = [
+  "start",
+  "join",
+  "ask",
+  "see",
+  "view",
+  "leave",
+  "control",
+  "add",
+  "remove",
+  "admit",
+  "manage",
+] as const;
+
+export type TogetherAction = (typeof togetherActions)[number];
+
+/** Why `can` refuses something in a group session. */
+export type TogetherBecause = Extract<
+  Because,
+  | "service"
+  | "outside"
+  | "scope"
+  | "guest"
+  | "ended"
+  | "blocked"
+  | "locked"
+  | "join-setting"
+  | "pending"
+  | "not-host"
+  | "no-control"
+  | "no-add"
+  | "not-yours"
+>;
+
+interface InsideRule {
+  readonly from: "inside";
+  /** `member`: waiting or joined. `joined`: in it. `host`: its host. */
+  readonly who: "member" | "joined" | "host";
+  /** An ended session still allows it. */
+  readonly ended: boolean;
+  /** A locked session still allows it. */
+  readonly locked: boolean;
+  /** What a joined guest needs the host to allow. */
+  readonly guests: "nothing" | "control" | "add";
+  /** A guest does it only to what they queued. */
+  readonly own: boolean;
+  /** `account` also does instead of the domain's play scope, as for leaving. */
+  readonly orAccount: boolean;
+}
+
+type TogetherRule =
+  | { readonly from: "new" }
+  | { readonly from: "outside"; readonly under: JoinSetting }
+  | InsideRule;
+
+type TogetherRules = { readonly [A in TogetherAction]: TogetherRule };
+
+const MEMBER: InsideRule = {
+  from: "inside",
+  who: "member",
+  ended: true,
+  locked: true,
+  guests: "nothing",
+  own: false,
+  orAccount: false,
+};
+
+const LIVE: Omit<InsideRule, "who" | "guests"> = {
+  from: "inside",
+  ended: false,
+  locked: true,
+  own: false,
+  orAccount: false,
+};
+
+const togetherRules: TogetherRules = {
+  start: { from: "new" },
+  join: { from: "outside", under: "open" },
+  ask: { from: "outside", under: "approval" },
+  see: MEMBER,
+  view: { ...MEMBER, who: "joined" },
+  leave: { ...MEMBER, orAccount: true },
+  control: { ...LIVE, who: "joined", guests: "control" },
+  add: { ...LIVE, who: "joined", guests: "add" },
+  remove: { ...LIVE, who: "joined", guests: "add", own: true },
+  /** A locked session takes no new members, approved or not. */
+  admit: { ...LIVE, who: "host", guests: "nothing", locked: false },
+  manage: { ...LIVE, who: "host", guests: "nothing" },
+};
+
+type Session = NonNullable<TogetherResource["session"]>;
+
+const enterSession = (
+  principal: Extract<Principal, { readonly kind: "person" }>,
+  under: JoinSetting,
+  session: Session,
+): Decision<TogetherBecause> => {
+  if (!session.live) return forbidden("ended");
+
+  if (session.place === "host" || session.place === "guest") return ALLOWED;
+
+  if (session.place === "blocked") return forbidden("blocked");
+
+  if (principal.role === "guest") return forbidden("guest");
+
+  if (session.settings.join === under) return ALLOWED;
+
+  return forbidden(session.settings.join === "locked" ? "locked" : "join-setting");
+};
+
+const actInSession = (rule: InsideRule, session: Session): Decision<TogetherBecause> => {
+  const { place, settings } = session;
+
+  if (!session.live && !rule.ended) return forbidden("ended");
+
+  if (place === "pending") return rule.who === "member" ? ALLOWED : forbidden("pending");
+
+  if (rule.who === "host" && place !== "host") return forbidden("not-host");
+
+  if (!rule.locked && settings.join === "locked") return forbidden("locked");
+
+  if (place === "host" || rule.guests === "nothing") return ALLOWED;
+
+  if (rule.guests === "control" && !settings.control) return forbidden("no-control");
+
+  if (rule.guests === "add" && !settings.add) return forbidden("no-add");
+
+  return rule.own && !session.addedIt ? forbidden("not-yours") : ALLOWED;
+};
+
+const decideTogether = (
+  principal: Principal,
+  rule: TogetherRule,
+  { domain, session }: TogetherResource,
+): Decision<TogetherBecause> => {
+  if (principal.kind === "service") return hidden("service");
+
+  const outside = session === null || session.place === "outside" || session.place === "blocked";
+
+  if (rule.from === "inside" && outside) return hidden("outside");
+
+  const viaAccount =
+    rule.from === "inside" && rule.orAccount && principal.scopes.includes("account");
+
+  if (!viaAccount && !principal.scopes.includes(`${domain}:play`)) return forbidden("scope");
+
+  if (rule.from === "new") return principal.role === "guest" ? forbidden("guest") : ALLOWED;
+
+  if (session === null) return hidden("outside");
+
+  return rule.from === "outside"
+    ? enterSession(principal, rule.under, session)
+    : actInSession(rule, session);
+};
+
 const isContentAction = (action: string): action is ContentAction =>
   contentActions.some((known) => known === action);
 
@@ -738,6 +931,9 @@ const isSettingAction = (action: string): action is SettingAction =>
 
 const isDownloadAction = (action: string): action is DownloadAction =>
   downloadActions.some((known) => known === action);
+
+const isTogetherAction = (action: string): action is TogetherAction =>
+  togetherActions.some((known) => known === action);
 
 /**
  * The one access decision (ADR 0005): role, credential scopes, grants, and restrictions, from
@@ -774,6 +970,11 @@ export function can(
 ): Decision;
 export function can(
   principal: Principal,
+  action: TogetherAction,
+  resource: TogetherResource,
+): Decision<TogetherBecause>;
+export function can(
+  principal: Principal,
   action:
     | ContentAction
     | AccountAction
@@ -782,7 +983,8 @@ export function can(
     | ApprovalAction
     | DeviceAction
     | SettingAction
-    | DownloadAction,
+    | DownloadAction
+    | TogetherAction,
   resource:
     | ContentResource
     | AccountResource
@@ -791,7 +993,8 @@ export function can(
     | ApprovalResource
     | DeviceResource
     | SettingResource
-    | DownloadResource,
+    | DownloadResource
+    | TogetherResource,
 ): Decision {
   if (resource.on === "content" && isContentAction(action)) {
     return decideContent(principal, action, resource);
@@ -823,6 +1026,10 @@ export function can(
 
   if (resource.on === "download" && isDownloadAction(action)) {
     return decideDownload(principal, downloadRules[action], resource);
+  }
+
+  if (resource.on === "together" && isTogetherAction(action)) {
+    return decideTogether(principal, togetherRules[action], resource);
   }
 
   throw new Error(`${action} is not an action on ${resource.on}`);

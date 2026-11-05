@@ -43,6 +43,30 @@ const libraryId = v.id("libraries");
 /** A library's id. */
 export type LibraryId = Infer<typeof libraryId>;
 
+/** Every type of item a group session can hold, its domain, and the table of its rows. */
+export const itemTypes = {
+  probeMovie: { domain: "movies", table: "probeItems" },
+  probeTrack: { domain: "music", table: "probeItems" },
+} as const;
+
+/** A type of item a group session can hold. */
+export type ItemType = keyof typeof itemTypes;
+
+/** An item with its domain; each domain pairs only with its own item types. */
+export const domainItem = v.union(
+  v.object({
+    domain: v.literal("movies"),
+    ref: v.union(v.object({ type: v.literal("probeMovie"), id: v.id("probeItems") })),
+  }),
+  v.object({
+    domain: v.literal("music"),
+    ref: v.union(v.object({ type: v.literal("probeTrack"), id: v.id("probeItems") })),
+  }),
+);
+
+/** An item with its domain. */
+export type DomainItem = Infer<typeof domainItem>;
+
 /** Who a grant reaches: one user, a group's members, or every person on the server but guests. */
 const grantPrincipal = v.union(
   v.object({ kind: v.literal("user"), userId: v.id("users") }),
