@@ -158,7 +158,8 @@ export type Because =
   | "not-signed-in-here"
   | "no-device"
   | "shared-device"
-  | "missing";
+  | "missing"
+  | "no-control";
 
 /**
  * An access decision. `hidden` answers as if the thing did not exist, so a private thing stays
@@ -558,7 +559,7 @@ const decideApproval = (principal: Principal, approval: ApprovalResource): Decis
   return vouches(answerer) ? ALLOWED : forbidden("not-adult");
 };
 
-/** What can be done to a registered device. Connect adds its own rows. */
+/** What can be done to a registered device: `control` its playback through Connect (ADR 0018). */
 export const deviceActions = ["control"] as const;
 
 export type DeviceAction = (typeof deviceActions)[number];
@@ -568,37 +569,69 @@ export type DeviceRelation =
   | { readonly mode: "personal"; readonly signedInHere: boolean }
   | { readonly mode: "shared"; readonly listed: boolean };
 
+/** The principal's membership in the group session a device plays (ADR 0017). */
+export interface SessionMembership {
+  /** The session lets this member control playback. */
+  readonly control: boolean;
+}
+
 /** A registered device as `can` sees it for the principal. */
 export interface DeviceResource {
   readonly on: "device";
   readonly relation: DeviceRelation;
+  /** The domain the device plays now, or null when it plays nothing. */
+  readonly domain: ContentDomain | null;
+  /** The principal's membership in the group session the device plays, or null for none. */
+  readonly session: SessionMembership | null;
 }
 
 interface DeviceRule {
-  readonly personal: "signed-in-here" | "nobody";
-  readonly shared: "listed" | "nobody";
+  readonly verb: ContentVerb;
 }
 
 type DeviceRules = { readonly [A in DeviceAction]: DeviceRule };
 
 const deviceRules: DeviceRules = {
-  control: { personal: "signed-in-here", shared: "listed" },
+  control: { verb: "play" },
+};
+
+type PersonPrincipal = Extract<Principal, { readonly kind: "person" }>;
+
+const scopeOf = (domain: ContentDomain, verb: ContentVerb): CredentialScope => `${domain}:${verb}`;
+
+const holdsVerb = (
+  scopes: ReadonlyArray<CredentialScope>,
+  domain: ContentDomain | null,
+  verb: ContentVerb,
+): boolean =>
+  domain === null
+    ? domainScopes.some((scope) => scope.endsWith(`:${verb}`) && scopes.includes(scope))
+    : scopes.includes(scopeOf(domain, verb));
+
+const reachesDevice = (principal: PersonPrincipal, device: DeviceResource): Decision => {
+  if (principal.role === "guest") {
+    if (device.session === null) return hidden("guest");
+
+    return device.session.control ? ALLOWED : forbidden("no-control");
+  }
+
+  const { relation } = device;
+
+  if (relation.mode === "personal") {
+    return relation.signedInHere ? ALLOWED : hidden("not-signed-in-here");
+  }
+
+  return relation.listed ? ALLOWED : hidden("unlisted");
 };
 
 const decideDevice = (principal: Principal, rule: DeviceRule, device: DeviceResource): Decision => {
   if (principal.kind === "service") return hidden("service");
 
-  if (principal.role === "guest") return hidden("guest");
+  const reach = reachesDevice(principal, device);
 
-  const { relation } = device;
+  if (!reach.allowed) return reach;
 
-  if (relation.mode === "personal") {
-    return rule.personal === "signed-in-here" && relation.signedInHere
-      ? ALLOWED
-      : hidden("not-signed-in-here");
-  }
-
-  return rule.shared === "listed" && relation.listed ? ALLOWED : hidden("unlisted");
+  return holdsVerb(principal.scopes, device.domain, rule.verb) ? ALLOWED : forbidden("scope");
 };
 
 export const settingActions = ["change"] as const;

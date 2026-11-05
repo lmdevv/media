@@ -20,12 +20,12 @@ const role = v.union(...roles.map((name) => v.literal(name)));
 
 const assignableRole = v.union(...assignableRoles.map((name) => v.literal(name)));
 
-const libraryKind = v.union(...contentDomains.map((domain) => v.literal(domain)));
+const contentDomain = v.union(...contentDomains.map((domain) => v.literal(domain)));
 
 const libraryRow = {
   libraryId: v.id("libraries"),
   name: v.string(),
-  kind: libraryKind,
+  kind: contentDomain,
   level,
 };
 
@@ -50,6 +50,30 @@ const lockReason = v.union(
 
 /** Whose proof opens a locked tile: its own person, an adult vouching for a kid, or either. */
 const opener = v.union(v.literal("self"), v.literal("adult"), v.literal("self-or-adult"));
+
+/**
+ * Where a device's picture and sound go: the device itself, or a Chromecast or AirPlay receiver it
+ * drives, which Connect reaches through that device (ADR 0018). Safari does not always name an
+ * AirPlay receiver.
+ */
+const connectOutput = v.union(
+  v.object({ kind: v.literal("local") }),
+  v.object({ kind: v.literal("cast"), receiver: v.string() }),
+  v.object({ kind: v.literal("airplay"), receiver: v.union(v.string(), v.null()) }),
+);
+
+const reportedPlayback = v.object({
+  domain: contentDomain,
+  playing: v.boolean(),
+  positionMs: v.number(),
+});
+
+/** Playback in server time: `positionMs` held at `at`, and moves on while `playing`. */
+const anchoredTransport = {
+  playing: v.boolean(),
+  positionMs: v.number(),
+  at: v.number(),
+};
 
 const sharedTile = v.object({
   userId: v.id("users"),
@@ -326,7 +350,7 @@ export const core = [
     summary: "Create a library of movies or music from folders on the server and scan it",
     scope: "admin",
     refusesKeys: true,
-    args: { name: v.string(), kind: libraryKind, folders: v.array(v.string()) },
+    args: { name: v.string(), kind: contentDomain, folders: v.array(v.string()) },
     result: v.object({ libraryId: v.id("libraries"), scanJobId: v.id("jobs") }),
   }),
   query("core.libraries.list", {
@@ -583,6 +607,53 @@ export const core = [
     scope: "signed-in",
     args: settingFields("all", "optional"),
     result: settingsView,
+  }),
+  query("core.connect.targets.list", {
+    summary:
+      "List the online devices you can control with Connect, newest report first, with what each plays and where",
+    scope: "signed-in",
+    args: {},
+    result: v.array(
+      v.object({
+        deviceId: v.id("devices"),
+        name: v.string(),
+        mode: deviceMode,
+        output: connectOutput,
+        playback: v.union(
+          v.null(),
+          v.object({ domain: contentDomain, ...anchoredTransport, pending: v.boolean() }),
+        ),
+        reportedAt: v.number(),
+      }),
+    ),
+  }),
+  mutation("core.connect.targets.control", {
+    summary:
+      "Pause, play, or seek a device you can control; it follows within about a quarter second",
+    scope: "signed-in",
+    args: {
+      deviceId: v.id("devices"),
+      playing: v.optional(v.boolean()),
+      positionMs: v.optional(v.number()),
+    },
+    result: v.object({ revision: v.number() }),
+  }),
+  mutation("core.connect.player.report", {
+    summary:
+      "Report what this device plays, where it plays it, and the newest request it has applied",
+    scope: "signed-in",
+    args: {
+      output: connectOutput,
+      playback: v.union(reportedPlayback, v.null()),
+      applied: v.number(),
+    },
+    result: v.object({ reportedAt: v.number() }),
+  }),
+  query("core.connect.player.requested", {
+    summary: "Show the playback another device asked of this one that it has not applied yet",
+    scope: "signed-in",
+    args: {},
+    result: v.union(v.null(), v.object({ revision: v.number(), ...anchoredTransport })),
   }),
 
   mutation("core.downloads.add", {

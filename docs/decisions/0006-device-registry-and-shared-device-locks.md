@@ -161,10 +161,10 @@ never stored. `lockOf` derives it from three reasons:
 
 ### Control
 
-`can(principal, "control", device)` holds the Connect rule from ADR 0018 for later units. A person
-controls their own personal device, which means one with their live session on it, and a shared
-device that lists them. They never control another person's personal device. Guests control
-nothing until guest sessions exist (ADR 0007). No command uses the rule yet.
+`can(principal, "control", device)` holds the Connect rule from ADR 0018. A person controls
+their own personal device, which means one with their live session on it, and a shared device
+that lists them. They never control another person's personal device. Connect uses the rule, and
+ADR 0018 records how it is built.
 
 ### Actions added to `can`
 
@@ -174,7 +174,7 @@ nothing until guest sessions exist (ADR 0007). No command uses the rule yet.
 | `lock`                | tile     | `admin`, on anyone but a guest                                                   |
 | `unlock`              | tile     | `admin`, and no listed kid locking the tile                                      |
 | `answer`              | approval | `account`; `open` by the tile's person, `leave` by an adult                      |
-| `control`             | device   | a personal device the person is signed in on, or a shared device listing them    |
+| `control`             | device   | as built in ADR 0018: the person's own device or a shared device listing them    |
 | `listOnSharedDevices` | account  | oneself with `account` and no restrictions; otherwise `admin`, on a kid          |
 | `resetUnlockCode`     | account  | `admin`, on anyone in the household                                              |
 | `manageDevices`       | server   | `admin`                                                                          |

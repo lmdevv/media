@@ -18,6 +18,7 @@ import {
   randomSecret,
   sha256Hex,
 } from "../lib/secrets";
+import { dropConnect } from "../connect/player";
 import { requireServer } from "../permissions/authorize";
 import type { PersonDoc } from "../permissions/policy";
 import { purgeDevicePage } from "../downloads";
@@ -272,15 +273,13 @@ export const purge = internalMutation({
   },
 });
 
-/**
- * Clears what a device kept: its ended sessions, and when it was shared, its approval at once and
- * its unlock-code strikes in scheduled pages.
- */
 const purgeLeftovers = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   device: Doc<"devices">,
 ): Promise<void> => {
   const deviceId = device._id;
+
+  await dropConnect(ctx, deviceId);
 
   await ctx.scheduler.runAfter(0, internal.core.devices.registry.purge, {
     deviceId,
