@@ -20,6 +20,7 @@ import {
 } from "../lib/secrets";
 import { requireServer } from "../permissions/authorize";
 import type { PersonDoc } from "../permissions/policy";
+import { purgeDevicePage } from "../downloads";
 import { endSession, liveOnDevice } from "../sessions";
 import { dropApprovals } from "./approvals";
 import { DEVICE_PREFIX, NO_DEVICE } from "./facts";
@@ -234,6 +235,7 @@ const purgers = {
   authSessions: (ctx, deviceId, options) => deleteEndedSessions(ctx, deviceId, options, Date.now()),
   unlockStrikes: deleteStrikes,
   deviceSettings: deleteSettings,
+  downloads: purgeDevicePage,
 } satisfies Record<string, Purger>;
 
 const purgeArgs = {
@@ -242,14 +244,15 @@ const purgeArgs = {
     v.literal("authSessions"),
     v.literal("unlockStrikes"),
     v.literal("deviceSettings"),
+    v.literal("downloads"),
   ),
   cursor: v.union(v.string(), v.null()),
 };
 
 /**
  * Deletes what a device change left behind, a page at a time: the sessions bound to the device
- * that ended, every unlock-code strike on it, or, once it is removed, every person's settings on
- * it. Liveness already ended those sessions, so no one reads the settings meanwhile.
+ * that ended, every unlock-code strike on it, or, once it is removed, every person's settings and
+ * downloads on it. Liveness already ended those sessions, so no one reads them meanwhile.
  */
 export const purge = internalMutation({
   args: purgeArgs,
@@ -369,11 +372,15 @@ export const { enroll, list, setMode, remove } = register({
     await ctx.db.delete(deviceId);
     await purgeLeftovers(ctx, device);
 
-    await ctx.scheduler.runAfter(0, internal.core.devices.registry.purge, {
-      deviceId,
-      table: "deviceSettings",
-      cursor: null,
-    });
+    await Promise.all(
+      (["deviceSettings", "downloads"] as const).map(async (table) =>
+        ctx.scheduler.runAfter(0, internal.core.devices.registry.purge, {
+          deviceId,
+          table,
+          cursor: null,
+        }),
+      ),
+    );
 
     return null;
   },

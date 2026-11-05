@@ -28,6 +28,8 @@ import type * as core_devices_picker from "../core/devices/picker.js";
 import type * as core_devices_registry from "../core/devices/registry.js";
 import type * as core_devices_tiles from "../core/devices/tiles.js";
 import type * as core_devices_unlockCodes from "../core/devices/unlockCodes.js";
+import type * as core_downloadSources from "../core/downloadSources.js";
+import type * as core_downloads from "../core/downloads.js";
 import type * as core_folders from "../core/folders.js";
 import type * as core_imports from "../core/imports.js";
 import type * as core_jobs_admin from "../core/jobs/admin.js";
@@ -93,6 +95,8 @@ declare const fullApi: ApiFromModules<{
   "core/devices/registry": typeof core_devices_registry;
   "core/devices/tiles": typeof core_devices_tiles;
   "core/devices/unlockCodes": typeof core_devices_unlockCodes;
+  "core/downloadSources": typeof core_downloadSources;
+  "core/downloads": typeof core_downloads;
   "core/folders": typeof core_folders;
   "core/imports": typeof core_imports;
   "core/jobs/admin": typeof core_jobs_admin;

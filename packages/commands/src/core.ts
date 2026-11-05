@@ -1,11 +1,18 @@
 import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import { v } from "convex/values";
 
-import { grantPrincipal, level, resourceRef, restrictions } from "./access.ts";
+import {
+  downloadItem,
+  downloadResource,
+  grantPrincipal,
+  level,
+  resourceRef,
+  restrictions,
+} from "./access.ts";
 import { action, mutation, query } from "./command.ts";
 import type { Command } from "./command.ts";
 import { assignableRoles, contentDomains, credentialScopes, roles } from "./scopes.ts";
-import { settingFields } from "./settings.ts";
+import { downloadQuality, settingFields } from "./settings.ts";
 
 const credentialScope = v.union(...credentialScopes.map((scope) => v.literal(scope)));
 
@@ -60,6 +67,29 @@ const settingsView = v.object({
   user: v.object(settingFields("user", "required")),
   device: v.union(v.object(settingFields("device", "required")), v.null()),
 });
+
+/**
+ * Why a kept item may no longer play here: the access behind it ended, a kid's restrictions now
+ * hide it, or its device became shared and keeps nothing.
+ */
+const expiredBecause = v.union(v.literal("access"), v.literal("restricted"), v.literal("device"));
+
+/**
+ * One item kept on this device, as the device should treat its copy: `available` to hold at
+ * `revision`, `expired` to delete, `gone` to delete and remove.
+ */
+const downloadEntry = v.union(
+  v.object({
+    item: downloadItem,
+    state: v.literal("available"),
+    revision: v.string(),
+    quality: downloadQuality,
+    bytes: v.number(),
+    label: v.string(),
+  }),
+  v.object({ item: downloadItem, state: v.literal("expired"), because: expiredBecause }),
+  v.object({ item: downloadItem, state: v.literal("gone") }),
+);
 
 /** The core's commands: the server itself, accounts, devices, and the other shared modules. */
 export const core = [
@@ -553,6 +583,64 @@ export const core = [
     scope: "signed-in",
     args: settingFields("all", "optional"),
     result: settingsView,
+  }),
+
+  mutation("core.downloads.add", {
+    summary:
+      "Keep an item on this device for offline play at its download quality, within the device's download limit",
+    scope: "signed-in",
+    args: { item: downloadItem },
+    result: v.null(),
+  }),
+  query("core.downloads.list", {
+    summary:
+      "List what you keep on this device, newest first, and whether each item can still play here",
+    scope: "signed-in",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(downloadEntry),
+  }),
+  mutation("core.downloads.fetch", {
+    summary:
+      "Get a 15-minute download ticket for the current version of an item you keep on this device",
+    scope: "signed-in",
+    args: { item: downloadItem },
+    result: v.union(
+      v.object({
+        state: v.literal("available"),
+        revision: v.string(),
+        quality: downloadQuality,
+        bytes: v.number(),
+        resource: downloadResource,
+        ticket: v.string(),
+        expiresAt: v.number(),
+      }),
+      v.object({ state: v.literal("expired"), because: expiredBecause }),
+      v.object({ state: v.literal("gone") }),
+    ),
+  }),
+  mutation("core.downloads.remove", {
+    summary: "Stop keeping an item on this device and free the space it takes",
+    scope: "signed-in",
+    args: { item: downloadItem },
+    result: v.null(),
+  }),
+  query("core.downloads.usage", {
+    summary: "Show how much of this device's download limit everyone on it uses",
+    scope: "signed-in",
+    args: {},
+    result: v.object({
+      bytes: v.number(),
+      items: v.number(),
+      capBytes: v.number(),
+      capItems: v.number(),
+    }),
+  }),
+  mutation("core.downloads.setCap", {
+    summary:
+      "Set how many bytes of downloads a device may keep for everyone on it, or null for the default",
+    scope: "admin",
+    args: { deviceId: v.id("devices"), bytes: v.union(v.number(), v.null()) },
+    result: v.null(),
   }),
 
   mutation("core.accounts.me.rename", {

@@ -754,6 +754,199 @@ export const generatedCommands = [
     method: (platform) => platform.core.devices.unlockCodes.set,
   }),
   coreCommand({
+    name: "core.downloads.add",
+    path: ["auth", "downloads", "add"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Keep an item on this device for offline play at its download quality, within the device's download limit",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      item: Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal("probe"),
+          id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+        }),
+      ]),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.downloads.add,
+  }),
+  coreCommand({
+    name: "core.downloads.fetch",
+    path: ["auth", "downloads", "fetch"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Get a 15-minute download ticket for the current version of an item you keep on this device",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      item: Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal("probe"),
+          id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+        }),
+      ]),
+    }),
+    result: Schema.Union([
+      Schema.Struct({
+        state: Schema.Literal("available"),
+        revision: Schema.String,
+        quality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
+        bytes: Schema.Finite,
+        resource: Schema.Struct({
+          kind: Schema.Union([Schema.Literal("file")]),
+          id: Schema.String,
+        }),
+        ticket: Schema.String,
+        expiresAt: Schema.Finite,
+      }),
+      Schema.Struct({
+        state: Schema.Literal("expired"),
+        because: Schema.Union([
+          Schema.Literal("access"),
+          Schema.Literal("restricted"),
+          Schema.Literal("device"),
+        ]),
+      }),
+      Schema.Struct({ state: Schema.Literal("gone") }),
+    ]),
+    method: (platform) => platform.core.downloads.fetch,
+  }),
+  coreCommand({
+    name: "core.downloads.list",
+    path: ["auth", "downloads", "list"],
+    kind: "query",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "List what you keep on this device, newest first, and whether each item can still play here",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Union([
+          Schema.Struct({
+            item: Schema.Union([
+              Schema.Struct({
+                kind: Schema.Literal("probe"),
+                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              }),
+            ]),
+            state: Schema.Literal("available"),
+            revision: Schema.String,
+            quality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
+            bytes: Schema.Finite,
+            label: Schema.String,
+          }),
+          Schema.Struct({
+            item: Schema.Union([
+              Schema.Struct({
+                kind: Schema.Literal("probe"),
+                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              }),
+            ]),
+            state: Schema.Literal("expired"),
+            because: Schema.Union([
+              Schema.Literal("access"),
+              Schema.Literal("restricted"),
+              Schema.Literal("device"),
+            ]),
+          }),
+          Schema.Struct({
+            item: Schema.Union([
+              Schema.Struct({
+                kind: Schema.Literal("probe"),
+                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              }),
+            ]),
+            state: Schema.Literal("gone"),
+          }),
+        ]),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.core.downloads.list,
+  }),
+  coreCommand({
+    name: "core.downloads.remove",
+    path: ["auth", "downloads", "remove"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary: "Stop keeping an item on this device and free the space it takes",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      item: Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal("probe"),
+          id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+        }),
+      ]),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.downloads.remove,
+  }),
+  coreCommand({
+    name: "core.downloads.setCap",
+    path: ["admin", "downloads", "set-cap"],
+    kind: "mutation",
+    scope: "admin",
+    refusesKeys: false,
+    summary:
+      "Set how many bytes of downloads a device may keep for everyone on it, or null for the default",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+      bytes: Schema.Union([Schema.Finite, Schema.Null]),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.downloads.setCap,
+  }),
+  coreCommand({
+    name: "core.downloads.usage",
+    path: ["auth", "downloads", "usage"],
+    kind: "query",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary: "Show how much of this device's download limit everyone on it uses",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({}),
+    result: Schema.Struct({
+      bytes: Schema.Finite,
+      items: Schema.Finite,
+      capBytes: Schema.Finite,
+      capItems: Schema.Finite,
+    }),
+    method: (platform) => platform.core.downloads.usage,
+  }),
+  coreCommand({
     name: "core.libraries.create",
     path: ["admin", "libraries", "create"],
     kind: "mutation",

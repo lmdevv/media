@@ -25,6 +25,18 @@ export const resourceType = v.union(v.literal("library"));
 /** The id of a row of any resource type. */
 export const resourceId = v.union(v.id("libraries"));
 
+/** Every kind of domain item a device can keep for offline play, the table that holds it, and what its download serves. */
+export const downloadKinds = { probe: { table: "probeItems", serves: "file" } } as const;
+
+/** A kind of domain item a device can keep. */
+export type DownloadKind = keyof typeof downloadKinds;
+
+/** One item a device can keep: its kind, and the id of its row in that kind's table. */
+export const downloadItem = v.union(v.object({ kind: v.literal("probe"), id: v.id("probeItems") }));
+
+/** One item a device can keep. */
+export type DownloadItem = Infer<typeof downloadItem>;
+
 /** A library's id, which the allowed-libraries restriction lists. */
 const libraryId = v.id("libraries");
 
