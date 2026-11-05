@@ -185,15 +185,44 @@ export default defineSchema({
     .index("by_group_user", ["groupId", "userId"])
     .index("by_user_group", ["userId", "groupId"]),
 
-  /** The permissions test seam: one grantable thing with the facts restrictions read. */
-  accessProbes: defineTable({
+  /**
+   * A library: a name and the domain its content belongs to. Its folders live in
+   * `libraryFolders`, its item count in `counters`, and who sees it in `grants`.
+   * `core/libraries.ts` is its only writer.
+   */
+  libraries: defineTable({
     name: v.string(),
-    domain: contentDomain,
-    /** Movies: the minimum viewer age, or null when unrated. Music: always null. */
+    kind: contentDomain,
+    /**
+     * The newest scan job made for it, null before the first. That job's status, progress, and
+     * end are the library's scan state.
+     */
+    lastScan: v.union(v.id("jobs"), v.null()),
+  }).index("by_kind", ["kind"]),
+
+  /**
+   * One row per folder of a library, as `core/folders.ts` writes it down, and the only copy of a
+   * library's folders. `by_path` finds a taken folder, one that holds a folder, or one inside it
+   * with point reads and one range, however many libraries exist.
+   */
+  libraryFolders: defineTable({ libraryId: v.id("libraries"), path: v.string() })
+    .index("by_path", ["path"])
+    .index("by_library_path", ["libraryId", "path"]),
+
+  /**
+   * The test seam for what a domain keeps per library item, such as a movie file or a track, until
+   * the movies port: a path a scan found, its size and change time, and the facts restrictions
+   * read. Its domain is its library's kind.
+   */
+  probeItems: defineTable({
+    libraryId: v.id("libraries"),
+    path: v.string(),
+    size: v.number(),
+    mtime: v.number(),
+    /** Movies: the minimum viewer age, or null when unrated. */
     age: v.union(v.number(), v.null()),
-    /** Music: explicit. Movies: always false. */
     explicit: v.boolean(),
-  }),
+  }).index("by_library_path", ["libraryId", "path"]),
 
   counters: defineTable({
     name: v.string(),

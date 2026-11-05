@@ -5,13 +5,12 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { inOrder } from "../../../convex/core/lib/inOrder";
 import {
   movie,
-  openProbe,
-  probePage,
-  seedProbes,
+  seedLibraries,
+  seedLibrary,
   sessionOf,
-  shareProbe,
-  unshareProbe,
-  visibleProbes,
+  share,
+  unshare,
+  visibleLibraries,
 } from "../../probe";
 import type { Session } from "../../probe";
 import { createPerson, refusal, signIn, signInAs, unique } from "../../sign-in";
@@ -26,17 +25,16 @@ const signInSession = async (
   role: "admin" | "member" = "member",
 ) => sessionOf(await signInAs(core, await createPerson(core, label, role)));
 
-const seedOne = async (core: CoreStack, manager: Session, name: string) => {
-  const [probeId] = await seedProbes(core, manager, [movie(name, 0)]);
+const seedOne = async (core: CoreStack, manager: Session, name: string) =>
+  (await seedLibrary(core, manager, { name, kind: "movies", items: [movie(`${name}-film`, 0)] }))
+    .libraryId;
 
-  if (probeId === undefined) throw new Error("seed made no probe");
+const lookUp = (session: Session, libraryId: Id<"libraries">) =>
+  session.signedIn.client.query(api.core.libraries.get, { libraryId });
 
-  return probeId;
-};
-
-const sees = async (core: CoreStack, session: Session, probeId: Id<"accessProbes">) => ({
-  open: await refusal(openProbe(core, session, probeId)),
-  listed: (await visibleProbes(core, session)).includes(probeId),
+const sees = async (session: Session, libraryId: Id<"libraries">) => ({
+  open: await refusal(lookUp(session, libraryId)),
+  listed: (await visibleLibraries(session)).includes(libraryId),
 });
 
 describe.skipIf(stack === undefined)("grants", { timeout: 120_000 }, () => {
@@ -45,7 +43,7 @@ describe.skipIf(stack === undefined)("grants", { timeout: 120_000 }, () => {
     const admin = await signInSession(stack, "admin", "admin");
     const manager = await signInSession(stack, "manager");
     const member = await signInSession(stack, "member");
-    const probeId = await seedOne(stack, manager, "group-shared");
+    const libraryId = await seedOne(stack, manager, "group-shared");
 
     const { groupId } = await admin.signedIn.client.mutation(api.core.permissions.groups.create, {
       name: `family-${unique()}`,
@@ -60,11 +58,11 @@ describe.skipIf(stack === undefined)("grants", { timeout: 120_000 }, () => {
       userId: member.userId,
     });
 
-    expect(await sees(stack, member, probeId)).toEqual({ open: "not_found", listed: false });
+    expect(await sees(member, libraryId)).toEqual({ open: "not_found", listed: false });
 
-    await shareProbe(stack, manager, probeId, { kind: "group", groupId }, "view");
+    await share(manager, libraryId, { kind: "group", groupId }, "view");
 
-    expect(await sees(stack, member, probeId)).toEqual({ open: "accepted", listed: true });
+    expect(await sees(member, libraryId)).toEqual({ open: "accepted", listed: true });
     expect(
       (
         await admin.signedIn.client.query(api.core.permissions.groups.members, {
@@ -79,7 +77,7 @@ describe.skipIf(stack === undefined)("grants", { timeout: 120_000 }, () => {
       userId: member.userId,
     });
 
-    expect(await sees(stack, member, probeId)).toEqual({ open: "not_found", listed: false });
+    expect(await sees(member, libraryId)).toEqual({ open: "not_found", listed: false });
   });
 
   it("stop reaching anyone when their group is removed", async () => {
@@ -87,7 +85,7 @@ describe.skipIf(stack === undefined)("grants", { timeout: 120_000 }, () => {
     const admin = await signInSession(stack, "admin", "admin");
     const manager = await signInSession(stack, "manager");
     const member = await signInSession(stack, "member");
-    const probeId = await seedOne(stack, manager, "group-removed");
+    const libraryId = await seedOne(stack, manager, "group-removed");
 
     const { groupId } = await admin.signedIn.client.mutation(api.core.permissions.groups.create, {
       name: `club-${unique()}`,
@@ -97,75 +95,121 @@ describe.skipIf(stack === undefined)("grants", { timeout: 120_000 }, () => {
       groupId,
       userId: member.userId,
     });
-    await shareProbe(stack, manager, probeId, { kind: "group", groupId }, "edit");
+    await share(manager, libraryId, { kind: "group", groupId }, "edit");
 
-    expect((await openProbe(stack, member, probeId)).level).toBe("edit");
+    expect((await lookUp(member, libraryId)).level).toBe("edit");
 
     await admin.signedIn.client.mutation(api.core.permissions.groups.remove, { groupId });
 
-    expect(await sees(stack, member, probeId)).toEqual({ open: "not_found", listed: false });
-    expect(
-      await refusal(shareProbe(stack, manager, probeId, { kind: "group", groupId }, "view")),
-    ).toBe("not_found");
+    expect(await sees(member, libraryId)).toEqual({ open: "not_found", listed: false });
+    expect(await refusal(share(manager, libraryId, { kind: "group", groupId }, "view"))).toBe(
+      "not_found",
+    );
   });
 
   it("reach every person through the household", async () => {
     if (stack === undefined) return;
     const manager = await signInSession(stack, "manager");
-    const probeId = await seedOne(stack, manager, "household-shared");
+    const libraryId = await seedOne(stack, manager, "household-shared");
 
-    await shareProbe(stack, manager, probeId, { kind: "household" }, "view");
+    await share(manager, libraryId, { kind: "household" }, "view");
 
     const newcomer = await signInSession(stack, "newcomer");
 
-    expect(await sees(stack, newcomer, probeId)).toEqual({ open: "accepted", listed: true });
+    expect(await sees(newcomer, libraryId)).toEqual({ open: "accepted", listed: true });
     expect(
-      await refusal(
-        shareProbe(stack, newcomer, probeId, { kind: "user", userId: newcomer.userId }, "edit"),
-      ),
+      await refusal(share(newcomer, libraryId, { kind: "user", userId: newcomer.userId }, "edit")),
     ).toBe("forbidden");
   });
 
-  it("keep a private thing hidden from admins, in lookups and lists", async () => {
+  it("keep a private library hidden from admins, in lookups and lists", async () => {
     if (stack === undefined) return;
     const admin = await signInSession(stack, "admin", "admin");
     const manager = await signInSession(stack, "manager");
-    const probeId = await seedOne(stack, manager, "private");
+    const libraryId = await seedOne(stack, manager, "private");
 
-    expect(await sees(stack, admin, probeId)).toEqual({ open: "not_found", listed: false });
+    expect(await sees(admin, libraryId)).toEqual({ open: "not_found", listed: false });
     expect(
-      await refusal(
-        shareProbe(stack, admin, probeId, { kind: "user", userId: admin.userId }, "manage"),
-      ),
+      await refusal(share(admin, libraryId, { kind: "user", userId: admin.userId }, "manage")),
     ).toBe("not_found");
-    expect(await sees(stack, manager, probeId)).toEqual({ open: "accepted", listed: true });
+    expect(await sees(manager, libraryId)).toEqual({ open: "accepted", listed: true });
   });
 
   it("keep one manager, and let anyone else leave what was shared with them", async () => {
     if (stack === undefined) return;
     const manager = await signInSession(stack, "manager");
     const friend = await signInSession(stack, "friend");
-    const probeId = await seedOne(stack, manager, "kept");
+    const libraryId = await seedOne(stack, manager, "kept");
     const self = { kind: "user", userId: manager.userId } as const;
     const them = { kind: "user", userId: friend.userId } as const;
 
-    expect(await refusal(unshareProbe(stack, manager, probeId, self))).toBe("conflict");
-    expect(await refusal(shareProbe(stack, manager, probeId, self, "edit"))).toBe("conflict");
-    expect(
-      await refusal(shareProbe(stack, manager, probeId, { kind: "household" }, "manage")),
-    ).toBe("invalid_args");
+    expect(await refusal(unshare(manager, libraryId, self))).toBe("conflict");
+    expect(await refusal(share(manager, libraryId, self, "edit"))).toBe("conflict");
+    expect(await refusal(share(manager, libraryId, { kind: "household" }, "manage"))).toBe(
+      "invalid_args",
+    );
 
-    await shareProbe(stack, manager, probeId, them, "view");
-    await shareProbe(stack, manager, probeId, them, "view");
-    await unshareProbe(stack, friend, probeId, them);
+    await share(manager, libraryId, them, "view");
+    await share(manager, libraryId, them, "view");
+    await unshare(friend, libraryId, them);
 
-    expect(await sees(stack, friend, probeId)).toEqual({ open: "not_found", listed: false });
+    expect(await sees(friend, libraryId)).toEqual({ open: "not_found", listed: false });
 
-    await shareProbe(stack, manager, probeId, them, "manage");
-    await unshareProbe(stack, manager, probeId, self);
+    await share(manager, libraryId, them, "manage");
+    await unshare(manager, libraryId, self);
 
-    expect(await sees(stack, manager, probeId)).toEqual({ open: "not_found", listed: false });
-    expect((await openProbe(stack, friend, probeId, "manage")).level).toBe("manage");
+    expect(await sees(manager, libraryId)).toEqual({ open: "not_found", listed: false });
+    expect((await lookUp(friend, libraryId)).level).toBe("manage");
+  });
+
+  it("list who a library is shared with, to its managers only", async () => {
+    if (stack === undefined) return;
+    const admin = await signInSession(stack, "admin", "admin");
+    const manager = await signInSession(stack, "manager");
+    const friend = await signInSession(stack, "friend");
+    const stranger = await signInSession(stack, "stranger");
+    const libraryId = await seedOne(stack, manager, "listed");
+    const name = `listed-${unique()}`;
+
+    const { groupId } = await admin.signedIn.client.mutation(api.core.permissions.groups.create, {
+      name,
+    });
+
+    await share(manager, libraryId, { kind: "user", userId: friend.userId }, "view");
+    await share(manager, libraryId, { kind: "group", groupId }, "edit");
+    await share(manager, libraryId, { kind: "household" }, "view");
+
+    const sharedWith = (session: Session) =>
+      session.signedIn.client.query(api.core.permissions.grants.list, {
+        resource: { type: "library", id: libraryId },
+        paginationOpts: { numItems: 10, cursor: null },
+      });
+
+    const listed = await sharedWith(manager);
+
+    expect(listed.isDone).toBe(true);
+    expect(listed.page).toHaveLength(4);
+    expect(listed.page).toEqual(
+      expect.arrayContaining([
+        {
+          principal: { kind: "user", userId: manager.userId, username: manager.username },
+          level: "manage",
+        },
+        {
+          principal: { kind: "user", userId: friend.userId, username: friend.username },
+          level: "view",
+        },
+        { principal: { kind: "group", groupId, name }, level: "edit" },
+        { principal: { kind: "household" }, level: "view" },
+      ]),
+    );
+    expect(await refusal(sharedWith(friend))).toBe("forbidden");
+    expect(await refusal(sharedWith(stranger))).toBe("forbidden");
+
+    await unshare(manager, libraryId, { kind: "household" });
+
+    expect(await refusal(sharedWith(stranger))).toBe("not_found");
+    expect(await refusal(sharedWith(admin))).toBe("not_found");
   });
 
   it("list what a person's own, group, and household grants reach, once each, in id order", async () => {
@@ -174,11 +218,13 @@ describe.skipIf(stack === undefined)("grants", { timeout: 120_000 }, () => {
     const manager = await signInSession(stack, "manager");
     const viewer = await signInSession(stack, "viewer");
 
-    const probes = await seedProbes(
-      stack,
-      manager,
-      Array.from({ length: 30 }, (_, n) => movie(`paged-${n}`, 0)),
-    );
+    const libraries = (
+      await seedLibraries(
+        stack,
+        manager,
+        Array.from({ length: 30 }, (_, n) => ({ name: `paged-${n}`, kind: "movies", items: [] })),
+      )
+    ).map((seeded) => seeded.libraryId);
 
     const { groupId } = await admin.signedIn.client.mutation(api.core.permissions.groups.create, {
       name: `paged-${unique()}`,
@@ -188,38 +234,28 @@ describe.skipIf(stack === undefined)("grants", { timeout: 120_000 }, () => {
       groupId,
       userId: viewer.userId,
     });
-    await inOrder(probes.slice(0, 20), async (probeId) =>
-      shareProbe(stack, manager, probeId, { kind: "user", userId: viewer.userId }, "view"),
+    await inOrder(libraries.slice(0, 20), async (libraryId) =>
+      share(manager, libraryId, { kind: "user", userId: viewer.userId }, "view"),
     );
-    await inOrder(probes.slice(10, 25), async (probeId) =>
-      shareProbe(stack, manager, probeId, { kind: "group", groupId }, "edit"),
+    await inOrder(libraries.slice(10, 25), async (libraryId) =>
+      share(manager, libraryId, { kind: "group", groupId }, "edit"),
     );
-    await inOrder(probes.slice(20, 30), async (probeId) =>
-      shareProbe(stack, manager, probeId, { kind: "household" }, "view"),
+    await inOrder(libraries.slice(20, 30), async (libraryId) =>
+      share(manager, libraryId, { kind: "household" }, "view"),
     );
 
-    const walk = async (
-      cursor: string | null = null,
-      seen: ReadonlyArray<Id<"accessProbes">> = [],
-    ): Promise<ReadonlyArray<Id<"accessProbes">>> => {
-      const page = await probePage(stack, viewer, 7, cursor);
-      const next = [...seen, ...page.page.map((probe) => probe.probeId)];
+    const small = await visibleLibraries(viewer, 7);
 
-      return page.isDone ? next : walk(page.continueCursor, next);
-    };
-
-    const small = await walk();
-
-    expect(small).toEqual(await visibleProbes(stack, viewer));
+    expect(small).toEqual(await visibleLibraries(viewer));
     expect(new Set(small).size).toBe(small.length);
     expect(small).toEqual(small.toSorted());
-    expect(probes.filter((probeId) => !small.includes(probeId))).toEqual([]);
+    expect(libraries.filter((libraryId) => !small.includes(libraryId))).toEqual([]);
 
-    const sharedTwice = probes[15];
+    const sharedTwice = libraries[15];
 
-    if (sharedTwice === undefined) throw new Error("seed made too few probes");
+    if (sharedTwice === undefined) throw new Error("seed made too few libraries");
 
-    expect((await openProbe(stack, viewer, sharedTwice)).level).toBe("edit");
+    expect((await lookUp(viewer, sharedTwice)).level).toBe("edit");
   });
 
   it("refuse a group name twice, ignoring case", async () => {

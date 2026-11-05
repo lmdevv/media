@@ -112,6 +112,7 @@ hold its rules, each typed by its list of actions, so a missing or extra row fai
 | `handOverOwnership` | account | `admin` and being the owner; someone else; an admin or a member without restrictions |
 | `invite`            | server  | `admin`                                                                              |
 | `manageGroups`      | server  | `admin`                                                                              |
+| `manageFolders`     | server  | `admin`; making a library or changing its folders (ADR 0024)                         |
 
 The answer is `allowed`, `hidden`, or `forbidden`. Content with no grant, content a restriction
 hides, and any content for a service are `hidden`, which fails `not_found` with the same message
@@ -119,7 +120,7 @@ as a row that does not exist. So a private thing stays invisible to everyone els
 owner included. `forbidden` refuses something the principal can see but may not do.
 
 Handlers never pass rows to `can` themselves. Loaders read the facts and decide:
-`requireContent` and `visiblePage` in `permissions/grants.ts`, and `requireAccount` and
+`requireContent`, `visiblePage`, and `requireItems` in `permissions/grants.ts`, and `requireAccount` and
 `requireServer` in `permissions/authorize.ts`. A link check has no session, so it asks `can` about
 `principalOf(maker)`, the principal the maker's row alone allows.
 
@@ -165,8 +166,14 @@ a service is refused, so no admin can give it a role, a reset link, restrictions
   every person on the server but guests, which covers the libraries both old products shared with
   everyone.
 - Resource types live in one registry, `resourceTypes` in `packages/commands/src/access.ts`. Each
-  entry names its table and whether the allowed-libraries restriction lists it. The validators for
-  resource ids and library ids derive from it.
+  entry names its table. Only containers are grantable: a library now (ADR 0024), a playlist or a
+  collection later. A title or a track has no grants of its own: it is seen at its library's level,
+  through `requireItems`, which decides on the library once and then on each item's facts. So a
+  title list pages the domain's own index after one library check, and never merges grant ranges.
+- `core.permissions.grants.set`, `remove`, and `list` share anything in the registry. Their
+  `resource` is a `{ type, id }` pair derived from the registry, so an id of another table fails
+  validation. `set` refuses API keys, because a leaked key could grant its own person access that
+  outlives the key. `list` needs `manage`, and names each user and group.
 - A grant or revoke needs `manage`. A person who can see something can leave what was shared
   with them. Only a
   person can hold `manage`, and a group or the household gets `view` or `edit`. Removing or
@@ -195,6 +202,18 @@ a service is refused, so no admin can give it a role, a reset link, restrictions
   restrictions. An admin lifts them before promoting the kid or
   handing them ownership.
 - A change applies on the person's next call and ends no session.
+- What restrictions do to a thing depends on where it sits, a `Placement` that every content
+  resource carries, so no check is skipped because a field is empty:
+
+  | Placement  | Allowed-libraries list                                                   | Rating limits                                        |
+  | ---------- | ------------------------------------------------------------------------ | ---------------------------------------------------- |
+  | `library`  | checks the library itself                                                | none: a library has no rating, each item has its own |
+  | `item`     | checks the item's library                                                | checks its facts; an unrated movie is `unrated`      |
+  | `unplaced` | its type chooses: `hides`, or `allows` and each item it holds is checked | its own facts, or none for a `container`             |
+
+  `placements` maps each grantable type to its placement and fails to compile until a new type
+  picks one. A thing in no one library, such as a playlist, is `unplaced` and must state both
+  choices.
 
 ### Reads
 
@@ -208,16 +227,16 @@ a service is refused, so no admin can give it a role, a reset link, restrictions
 
 ### Test seam
 
-`convex/core/permissions/probe.ts` holds `accessProbes`, rows with a domain, a movie age, and an
-explicit flag, in place of libraries and titles until they exist. Its internal functions take a
-real session's id and run `callerOfSession`, which is everything `requireCaller` does after it reads
-the token. A stack test signs in for real, with a password or a key with chosen scopes, and calls
-them with the deployment admin key. The admin key acting as a user identity reaches only public
-functions, and the core allows no public function outside the command list.
+`convex/core/libraryProbe.ts` holds `probeItems`, items in real libraries with a movie age and an
+explicit flag, in place of titles and tracks until they exist (ADR 0024). Its internal `open` and
+`page` take a real session's id and run `callerOfSession`, which is everything `requireCaller` does
+after it reads the token. A stack test signs in for real, with a password or a key with chosen
+scopes, and calls them with the deployment admin key. Libraries themselves are shared and read
+through the real commands. The admin key acting as a user identity reaches only public functions,
+and the core allows no public function outside the command list.
 
 ### Left to later units
 
-- Grant commands and the `library` resource type: p3-libraries.
 - Guest principals and links: p3-guests.
 - The service principal's scope and key: phase 4.
 - Locking shared-device tiles for kids, from `isKid`: p3-devices.

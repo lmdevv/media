@@ -13,26 +13,26 @@ export type Level = (typeof levels)[number];
 /** `Level` as a Convex validator. */
 export const level = v.union(v.literal("view"), v.literal("edit"), v.literal("manage"));
 
-/** Every resource type a grant can name, its table, and whether it is a library. */
-export const resourceTypes = { probe: { table: "accessProbes", library: true } } as const;
+/** Every resource type a grant can name, and the table that holds its rows. */
+export const resourceTypes = { library: { table: "libraries" } } as const;
 
 /** A resource type a grant can name. */
 export type ResourceType = keyof typeof resourceTypes;
 
 /** `ResourceType` as a Convex validator. */
-export const resourceType = v.union(v.literal("probe"));
+export const resourceType = v.union(v.literal("library"));
 
 /** The id of a row of any resource type. */
-export const resourceId = v.union(v.id("accessProbes"));
+export const resourceId = v.union(v.id("libraries"));
 
-/** The id of a row of a library type. */
-const libraryId = v.union(v.id("accessProbes"));
+/** A library's id, which the allowed-libraries restriction lists. */
+const libraryId = v.id("libraries");
 
-/** The id of something the allowed-libraries restriction lists. */
+/** A library's id. */
 export type LibraryId = Infer<typeof libraryId>;
 
 /** Who a grant reaches: one user, a group's members, or every person on the server but guests. */
-export const grantPrincipal = v.union(
+const grantPrincipal = v.union(
   v.object({ kind: v.literal("user"), userId: v.id("users") }),
   v.object({ kind: v.literal("group"), groupId: v.id("groups") }),
   v.object({ kind: v.literal("household") }),
@@ -46,7 +46,7 @@ export const restrictions = v.object({
   maxMovieAge: v.union(v.number(), v.null()),
   hideUnrated: v.boolean(),
   hideExplicitMusic: v.boolean(),
-  libraries: v.union(v.array(v.union(v.id("accessProbes"))), v.null()),
+  libraries: v.union(v.array(v.id("libraries")), v.null()),
 });
 
 /**

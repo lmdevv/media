@@ -3,14 +3,15 @@ import { v } from "convex/values";
 
 import { levels, resourceTypes } from "../../../commands/access";
 import type { GrantPrincipal, Level, ResourceType } from "../../../commands/access";
+import { register } from "../../../commands/core/permissions/grants";
 import { internal } from "../../_generated/api";
 import type { Doc, Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx, QueryCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
 import { PAGE_ROWS_MAX, pageRows, paginate } from "../lib/paginate";
-import { can, contentNeeds, resourceOf } from "./policy";
-import type { ContentAction, Principal, ResourceRef, TableOf } from "./policy";
+import { can, contentNeeds, itemOf, resourceOf } from "./policy";
+import type { ContentAction, ContentFacts, Principal, ResourceRef, TableOf } from "./policy";
 
 /** Most groups one person is in; it bounds the reads of every content check. */
 export const GROUPS_PER_USER_MAX = 16;
@@ -133,6 +134,41 @@ export const requireContent = async <T extends ResourceType>(
   }
 
   return level === null ? fail("not_found", missing) : { doc, level };
+};
+
+/** What a domain decides on the items of one library: the library once, then each item's facts. */
+export interface ItemGate {
+  readonly library: Doc<"libraries">;
+  readonly level: Level;
+  /**
+   * Whether `can` allows the action on an item of the library with these facts. An item it refuses
+   * is hidden: a list drops it, and a lookup answers as for a missing one.
+   */
+  readonly admits: (facts: ContentFacts) => boolean;
+}
+
+/**
+ * Loads `libraryId` and decides `action` on its items for `caller`. An item has no grants of its
+ * own: it is seen at its library's level, so a hidden library fails `not_found` and a missing
+ * scope or level fails `forbidden` here, as `requireContent` does. Each item's facts then go
+ * through `can` in `admits`.
+ */
+export const requireItems = async (
+  ctx: Pick<QueryCtx, "db">,
+  caller: Principal,
+  action: ContentAction,
+  libraryId: Id<"libraries">,
+): Promise<ItemGate> => {
+  const { doc, level } = await requireContent(ctx, caller, action, {
+    type: "library",
+    id: libraryId,
+  });
+
+  return {
+    library: doc,
+    level,
+    admits: (facts) => can(caller, action, itemOf(doc, level, facts)).allowed,
+  };
 };
 
 interface Bounds<T extends ResourceType> {
@@ -373,6 +409,19 @@ export const grantCreator = async <T extends ResourceType>(
   });
 };
 
+/**
+ * Deletes every grant on `ref`, for the mutation that deletes the row itself. A resource has at
+ * most 1,000 grants, so this reads and deletes at most that many.
+ */
+export const deleteGrantsOn = async <T extends ResourceType>(
+  ctx: Pick<MutationCtx, "db">,
+  ref: ResourceRef<T>,
+): Promise<void> => {
+  const grants = await grantsOn(ctx.db, ref);
+
+  await Promise.all(grants.map((row) => ctx.db.delete(row._id)));
+};
+
 /** Schedules deleting every grant of a removed group, a page at a time. */
 export const purgeGrantsOf = async (
   ctx: Pick<MutationCtx, "scheduler">,
@@ -409,5 +458,63 @@ export const purge = internalMutation({
     }
 
     return null;
+  },
+});
+
+type SharedWith =
+  | { readonly kind: "user"; readonly userId: Id<"users">; readonly username: string }
+  | { readonly kind: "group"; readonly groupId: Id<"groups">; readonly name: string }
+  | { readonly kind: "household" };
+
+const sharedWith = async (db: DatabaseReader, key: PrincipalKey): Promise<SharedWith | null> => {
+  if (key === "household") return { kind: "household" };
+
+  const userId = db.normalizeId("users", key);
+
+  if (userId !== null) {
+    const user = await db.get(userId);
+
+    return user?.kind === "person" ? { kind: "user", userId, username: user.username } : null;
+  }
+
+  const groupId = db.normalizeId("groups", key);
+  const group = groupId === null ? null : await db.get(groupId);
+
+  return group === null ? null : { kind: "group", groupId: group._id, name: group.name };
+};
+
+export const { set, remove, list } = register({
+  set: async (ctx, { resource, principal, level }, caller) => {
+    await grant(ctx, caller, resource, principal, level);
+
+    return null;
+  },
+  remove: async (ctx, { resource, principal }, caller) => {
+    await revoke(ctx, caller, resource, principal);
+
+    return null;
+  },
+  list: async (ctx, { resource, paginationOpts }, caller) => {
+    await requireContent(ctx, caller, "manage", resource);
+
+    const page = await paginate(
+      ctx.db,
+      {
+        table: "grants",
+        index: "by_resource_principal",
+        range: (q) => q.eq("resourceType", resource.type).eq("resourceId", resource.id),
+      },
+      paginationOpts,
+    );
+
+    const rows = await Promise.all(
+      page.page.map(async (row) => {
+        const principal = await sharedWith(ctx.db, row.principal);
+
+        return principal === null ? [] : [{ principal, level: row.level }];
+      }),
+    );
+
+    return { ...page, page: rows.flat() };
   },
 });

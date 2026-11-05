@@ -236,6 +236,112 @@ Sign out every password and device session you have, or every other one.
 - Arguments: `{ keepCurrent: boolean }`
 - Result: `null`
 
+## `core.libraries.create`
+
+Create a library of movies or music from folders on the server and scan it.
+
+- CLI: `media admin libraries create`
+- Kind: mutation
+- Scope: admin
+- API keys: refused
+- Arguments: `{ name: string; kind: "movies" | "music"; folders: Array<string> }`
+- Result: `{ libraryId: Id<"libraries">; scanJobId: Id<"jobs"> }`
+
+## `core.libraries.get`
+
+Show a library, how many items it holds, its latest scan, and to its managers its folders.
+
+- CLI: `media auth libraries get`
+- Kind: query
+- Scope: signed-in
+- Arguments: `{ libraryId: Id<"libraries"> }`
+- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number | null; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number | null; total: number | null; error: string | null; finishedAt: number | null } | null }`
+
+## `core.libraries.list`
+
+List the libraries shared with you.
+
+- CLI: `media auth libraries list`
+- Kind: query
+- Scope: signed-in
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.libraries.remove`
+
+Delete a library you manage and everything it lists; the files on disk stay.
+
+- CLI: `media auth libraries remove`
+- Kind: mutation
+- Scope: signed-in
+- API keys: refused
+- Arguments: `{ libraryId: Id<"libraries"> }`
+- Result: `null`
+
+## `core.libraries.rename`
+
+Rename a library you manage.
+
+- CLI: `media auth libraries rename`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ libraryId: Id<"libraries">; name: string }`
+- Result: `null`
+
+## `core.libraries.scan`
+
+Scan a library for new, changed, and missing files, or join the scan already queued.
+
+- CLI: `media auth libraries scan`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ libraryId: Id<"libraries"> }`
+- Result: `{ jobId: Id<"jobs">; created: boolean }`
+
+## `core.libraries.setFolders`
+
+Change the folders of a library you manage; what a removed folder held leaves the library.
+
+- CLI: `media admin libraries set-folders`
+- Kind: mutation
+- Scope: admin
+- API keys: refused
+- Arguments: `{ libraryId: Id<"libraries">; folders: Array<string> }`
+- Result: `{ scanJobId: Id<"jobs"> | null }`
+
+## `core.permissions.grants.list`
+
+List who something you manage is shared with, and at which level.
+
+- CLI: `media auth grants list`
+- Kind: query
+- Scope: signed-in
+- Arguments: `{ resource: { type: "library"; id: Id<"libraries"> }; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ principal: { kind: "user"; userId: Id<"users">; username: string } | { kind: "group"; groupId: Id<"groups">; name: string } | { kind: "household" }; level: "view" | "edit" | "manage" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.permissions.grants.remove`
+
+Stop sharing something you manage with someone, or leave what was shared with you.
+
+- CLI: `media auth grants remove`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ resource: { type: "library"; id: Id<"libraries"> }; principal: { kind: "user"; userId: Id<"users"> } | { kind: "group"; groupId: Id<"groups"> } | { kind: "household" } }`
+- Result: `null`
+
+## `core.permissions.grants.set`
+
+Share something you manage with a person, a group, or everyone, at exactly one level.
+
+- CLI: `media auth grants set`
+- Kind: mutation
+- Scope: signed-in
+- API keys: refused
+- Arguments: `{ resource: { type: "library"; id: Id<"libraries"> }; principal: { kind: "user"; userId: Id<"users"> } | { kind: "group"; groupId: Id<"groups"> } | { kind: "household" }; level: "view" | "edit" | "manage" }`
+- Result: `null`
+
 ## `core.permissions.groups.addMember`
 
 Add someone to a group; what is shared with it reaches them on their next call.
@@ -317,7 +423,7 @@ Show a kid's limits on what they see, yours or as an admin someone else's.
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ userId: Id<"users"> }`
-- Result: `{ maxMovieAge: number | null; hideUnrated: boolean; hideExplicitMusic: boolean; libraries: Array<Id<"accessProbes">> | null } | null`
+- Result: `{ maxMovieAge: number | null; hideUnrated: boolean; hideExplicitMusic: boolean; libraries: Array<Id<"libraries">> | null } | null`
 
 ## `core.restrictions.set`
 
@@ -327,7 +433,7 @@ Limit what a member sees by movie rating, explicit music, and library, or lift t
 - Kind: mutation
 - Scope: admin
 - API keys: refused
-- Arguments: `{ userId: Id<"users">; restrictions: { maxMovieAge: number | null; hideUnrated: boolean; hideExplicitMusic: boolean; libraries: Array<Id<"accessProbes">> | null } | null }`
+- Arguments: `{ userId: Id<"users">; restrictions: { maxMovieAge: number | null; hideUnrated: boolean; hideExplicitMusic: boolean; libraries: Array<Id<"libraries">> | null } | null }`
 - Result: `null`
 
 ## `core.server.info`

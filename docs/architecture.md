@@ -71,7 +71,7 @@ own Convex deployment next to old movies' `packages/backend` (ADR 0023).
 | Tickets     | One signed-URL format for every byte-serving route, with key ids and live revocation                                             | 0011       |
 | Jobs        | Job kinds, typed payloads, leases, attempts, per-kind caps, batched items, the lease-release cron, `schemaMigrations`, `imports` | 0012       |
 | Limits      | Pagination by index, counter tables, batched writes                                                                              | 0013       |
-| Libraries   | Libraries with a `kind`, their folders, and the grants that share them                                                           | 0002, 0005 |
+| Libraries   | Libraries with a `kind`, their folders, the grants that share them, their scan kinds, and their item counts                      | 0024       |
 | Settings    | The table that marks each setting as synced per user or kept per device                                                          | 0019       |
 | Downloads   | Who may download, per-device item lists, storage caps, re-sync, expiry on revocation                                             | 0019       |
 | Together    | Group sessions with join links, roles, join settings, presence, and a shared clock                                               | 0017       |

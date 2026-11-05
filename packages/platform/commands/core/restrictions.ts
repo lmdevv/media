@@ -17,7 +17,7 @@ const getResult = v.union(
     maxMovieAge: v.union(v.number(), v.null()),
     hideUnrated: v.boolean(),
     hideExplicitMusic: v.boolean(),
-    libraries: v.union(v.array(v.union(v.id("accessProbes"))), v.null()),
+    libraries: v.union(v.array(v.id("libraries")), v.null()),
   }),
   v.null(),
 );
@@ -29,7 +29,7 @@ const setArgs = v.object({
       maxMovieAge: v.union(v.number(), v.null()),
       hideUnrated: v.boolean(),
       hideExplicitMusic: v.boolean(),
-      libraries: v.union(v.array(v.union(v.id("accessProbes"))), v.null()),
+      libraries: v.union(v.array(v.id("libraries")), v.null()),
     }),
     v.null(),
   ),

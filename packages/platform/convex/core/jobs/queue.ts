@@ -1,6 +1,6 @@
 import type { Id } from "../../_generated/dataModel";
-import type { MutationCtx } from "../../_generated/server";
 import { applyEvent } from "./store";
+import type { JobCtx } from "./store";
 
 /**
  * Queues a job of `payload.kind`. While a job with the kind's dedupe key is queued or running and
@@ -17,7 +17,7 @@ export type Canceled =
   | { readonly outcome: "notFound" };
 
 /** Cancels a job. Canceling a canceled, finished, or canceling job changes nothing. */
-export const cancel = async (ctx: MutationCtx, jobId: Id<"jobs">): Promise<Canceled> => {
+export const cancel = async (ctx: JobCtx, jobId: Id<"jobs">): Promise<Canceled> => {
   const job = await ctx.db.get("jobs", jobId);
 
   if (job === null) return { outcome: "notFound" };

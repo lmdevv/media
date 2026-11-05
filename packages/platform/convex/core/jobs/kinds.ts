@@ -1,6 +1,8 @@
 import { v } from "convex/values";
 import type { Infer, ObjectType, PropertyValidators } from "convex/values";
 
+import type { ContentDomain } from "../../../commands/scopes";
+
 export const importSource = v.union(v.literal("jellyfin"), v.literal("plex"));
 
 const tagged = <const Kind extends string, Fields extends PropertyValidators>(
@@ -105,6 +107,17 @@ export function defineKind<
 
 const probeRun = { run: v.string(), n: v.number() };
 
+const LIBRARIES_SCANNING_PER_DOMAIN = 2;
+
+const scanKind = <const Kind extends ContentDomain>(kind: Kind) =>
+  defineKind(`${kind}.scan`, {
+    payload: { libraryId: v.id("libraries") },
+    item: null,
+    cap: LIBRARIES_SCANNING_PER_DOMAIN,
+    maxStrikes: 3,
+    dedupe: (payload) => payload.libraryId,
+  });
+
 export const KINDS = [
   defineKind("probe.capped", {
     payload: probeRun,
@@ -128,11 +141,22 @@ export const KINDS = [
     maxStrikes: 3,
     dedupe: (payload) => `import:${payload.source}:${payload.serverId}`,
   }),
+  scanKind("movies"),
+  scanKind("music"),
 ] as const;
 
 type KindDef = (typeof KINDS)[number];
 
 export type JobKind = KindDef["kind"];
+
+/** A job kind that scans a library. */
+export type ScanKind = Extract<JobKind, `${ContentDomain}.scan`>;
+
+/**
+ * The job kind that scans a library of `kind`, the one place a library kind names its scan. It
+ * fails to compile while a domain has no scan kind in `KINDS`.
+ */
+export const scanKindOf = (kind: ContentDomain): ScanKind => `${kind}.scan`;
 
 export const jobKind = v.union(...KINDS.map((def) => v.literal(def.kind)));
 
