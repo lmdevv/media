@@ -78,14 +78,18 @@ export const changed = (current: Transport, change: Change, now: number): Transp
 /** The next request's revision on a device, above every request before it. */
 export const nextRevision = (request: Request | null): number => (request?.revision ?? 0) + 1;
 
-/** The revision a report leaves settled. It never goes down for the same reporter. */
+/**
+ * The revision a report leaves settled. It never goes down for a reporter that stayed online; a new
+ * reporter, or one back from offline, settles every request before it.
+ */
 export const settledAfter = (
   stored: Player | null,
   reporter: Id<"authSessions">,
   applied: number,
   newestRevision: number,
+  now: number,
 ): number =>
-  stored !== null && stored.reporter === reporter
+  stored !== null && stored.reporter === reporter && isOnline(stored, now)
     ? Math.max(stored.settled, applied)
     : newestRevision;
 

@@ -83,6 +83,7 @@ export const { report, requested } = register({
         caller.sessionId,
         parseApplied(applied, newestRevision),
         newestRevision,
+        now,
       ),
       reportedAt: now,
     };

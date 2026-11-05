@@ -4,6 +4,7 @@ import type { Id, TableNames } from "../../../convex/_generated/dataModel";
 import {
   changed,
   nextRevision,
+  ONLINE_MS,
   playbackOf,
   positionAt,
   settledAfter,
@@ -157,12 +158,16 @@ describe("revisions", () => {
   });
 
   it("never go down for one reporter, so a restarted app does not apply a request again", () => {
-    expect(settledAfter(player({ settled: 5 }), LUCIA, 0, 7)).toBe(5);
-    expect(settledAfter(player({ settled: 5 }), LUCIA, 6, 7)).toBe(6);
+    expect(settledAfter(player({ settled: 5 }), LUCIA, 0, 7, 2_000)).toBe(5);
+    expect(settledAfter(player({ settled: 5 }), LUCIA, 6, 7, 2_000)).toBe(6);
+  });
+
+  it("settle every request a reporter missed while it was offline", () => {
+    expect(settledAfter(player({ settled: 5 }), LUCIA, 0, 7, 1_000 + ONLINE_MS + 1)).toBe(7);
   });
 
   it("settle every request made before a new reporter, whatever it says it applied", () => {
-    expect(settledAfter(player({ settled: 5 }), AIKO, 0, 7)).toBe(7);
-    expect(settledAfter(null, AIKO, 0, 2)).toBe(2);
+    expect(settledAfter(player({ settled: 5 }), AIKO, 0, 7, 2_000)).toBe(7);
+    expect(settledAfter(null, AIKO, 0, 2, 2_000)).toBe(2);
   });
 });

@@ -109,8 +109,10 @@ Otherwise the report stands. A late report with an older revision does not undo 
   restarts and reports `applied: 0`, and the pause does not come back. A request the first session
   had not applied when the second one reported is settled too, because the second session's
   playback replaced the one it was for.
-- `settled` never goes down for the same reporting session. An app that restarts and reports
-  `applied: 0` keeps the requests it applied, and `requested` stays null. A report that claims a
+- `settled` never goes down for the same reporting session while it stays online. An app that
+  restarts and reports `applied: 0` keeps the requests it applied, and `requested` stays null. A
+  session that was silent for 30 seconds reports as a new reporter does, so a request it missed
+  while offline never fires when it comes back. A report that claims a
   revision above the newest request fails `invalid_args`.
 - A device that changes what plays on its own, or stops playing, reports `applied` as the newest
   revision `requested` showed it, whether or not it acted on it. So a request sent for one movie
@@ -211,6 +213,8 @@ so a home network adds its own round trip on top.
   person's playback.
 - A pause a session applied stays applied after another session reports on the same device and
   the first app restarts.
+- A device that went offline before it got a pause does not pause when it reports again from the
+  same session.
 - An app that signs in again after an admin changed its device's mode has its reports taken, even
   with the `applied` it kept, and gets the next request under a higher revision.
 - An admin does not control a shared device that does not list them, and does not reach another
