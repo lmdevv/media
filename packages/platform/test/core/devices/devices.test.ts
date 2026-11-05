@@ -57,7 +57,6 @@ const FULL_WIDTH_ZERO = 0xff10;
 
 const MATH_BOLD_ZERO = 0x1d7ce;
 
-/** `digits` in the digit set that starts at `zero`, which Scrypt hashes as the ASCII digits. */
 const digitsIn = (zero: number, digits: string): string =>
   String.fromCodePoint(...Array.from(digits, (digit) => zero + Number(digit)));
 

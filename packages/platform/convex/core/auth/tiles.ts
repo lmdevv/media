@@ -19,7 +19,7 @@ import {
 import { CODE_DIGITS, isUnlockCode } from "../devices/unlockCodes";
 import type { CheckedProof } from "../devices/tiles";
 import { fail } from "../lib/errors";
-import { PASSWORD_MAX, passwordHashOf, passwordMatches, signInLimit } from "../lib/passwords";
+import { checkTypedPassword, passwordHashOf, passwordMatches, signInLimit } from "../lib/passwords";
 import { takeAttempt } from "../lib/rateLimit";
 import { parseSecret, sha256Hex } from "../lib/secrets";
 import type { SignedIn } from "../sessions";
@@ -90,9 +90,7 @@ const checkPassword = async (
   by: Id<"users">,
   password: string,
 ): Promise<CheckedProof> => {
-  if (password.length > PASSWORD_MAX) {
-    return fail("invalid_args", `Use at most ${PASSWORD_MAX} characters for the password`);
-  }
+  checkTypedPassword(password);
 
   const attempt = await ctx.runMutation(internal.core.auth.tiles.passwordAttempt, {
     ...key,

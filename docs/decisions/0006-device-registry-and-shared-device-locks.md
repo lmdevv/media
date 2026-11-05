@@ -126,6 +126,16 @@ never stored. `lockOf` derives it from three reasons:
   sets either one, including a password change, a reset link, a host reset, an invite, and an
   admin-made user, and at every moment, with no comparison to race. The code's longest length is
   derived from the password's shortest, so raising one moves the other.
+- A password's length counts the code points of its NFKC form, because that is the string Scrypt
+  hashes and compares. `𝟕𝟑𝟗𝟏𝟒𝟒𝟖` in mathematical bold is 14 UTF-16 units but hashes as `7391448`,
+  so it counts as 7 characters and is refused. Every password rule is checked in
+  `core/lib/passwords.ts` on that form: 8 to 256 characters for a new password, and at most 256
+  for one typed to sign in or open a tile, so any password that can be set can also be typed.
+  Typed input over 2,048 UTF-16 units is refused before it is normalized. NFKC can make a string
+  18 times longer, and it joins at most 4 code points into one, so no 256-character password is
+  typed longer.
+- An unlock code is ASCII digits only. NFKC leaves them as they are, so the code the core checks
+  is the string it hashes, on `set` and in the `tile` provider alike.
 - The `tile` provider counts a wrong try per person and device (`unlockStrikes`) before it checks
   the digits, so tries made at once never pass 5. Each person also has 20 code tries an hour
   across all devices.
@@ -194,3 +204,5 @@ Rejected in this build:
 - Ending the unlock code whenever the password changes. It keeps the two from being equal, but a
   person can still choose the old code's digits as the new password. The household knows those
   digits, so they would sign in.
+- Counting a password's UTF-16 units as typed. Scrypt hashes the NFKC form, so a password of 7
+  look-alike digits passed as 14 units and then signed in with the 7-digit code they hash as.

@@ -5,10 +5,17 @@ import type { DatabaseReader, DatabaseWriter } from "../../_generated/server";
 import { fail } from "./errors";
 import type { RateLimit } from "./rateLimit";
 
-/** The shortest password anyone can set. */
+/** The shortest password anyone can set, in characters as {@link checkNewPassword} counts them. */
 export const PASSWORD_MIN = 8;
 
+/** The longest password anyone can set, counted like {@link PASSWORD_MIN}. */
 export const PASSWORD_MAX = 256;
+
+/**
+ * No password is typed longer: NFKC joins at most 4 code points into one, and a code point takes at
+ * most 2 UTF-16 units.
+ */
+const TYPED_MAX = PASSWORD_MAX * 4 * 2;
 
 const SIGN_INS_PER_HOUR = 10;
 
@@ -19,9 +26,29 @@ export const signInLimit = (usernameKey: string): RateLimit => ({
   perHour: SIGN_INS_PER_HOUR,
 });
 
+/**
+ * lucia's Scrypt hashes the NFKC form, so length counts its code points. NFKC can make a string 18
+ * times longer, so oversized input is refused before normalizing.
+ */
+const fitsPassword = (password: string, shortest: number): boolean => {
+  if (password.length > TYPED_MAX) return false;
+
+  const length = Array.from(password.normalize("NFKC")).length;
+
+  return length >= shortest && length <= PASSWORD_MAX;
+};
+
+/** Refuses a new password that Scrypt would hash as too few or too many characters. */
 export const checkNewPassword = (password: string): void => {
-  if (password.length < PASSWORD_MIN || password.length > PASSWORD_MAX) {
+  if (!fitsPassword(password, PASSWORD_MIN)) {
     fail("invalid_args", `Use ${PASSWORD_MIN} to ${PASSWORD_MAX} characters for the password`);
+  }
+};
+
+/** Refuses a typed password longer than any password can be, before it is hashed. */
+export const checkTypedPassword = (password: string): void => {
+  if (!fitsPassword(password, 0)) {
+    fail("invalid_args", `Use at most ${PASSWORD_MAX} characters for the password`);
   }
 };
 
