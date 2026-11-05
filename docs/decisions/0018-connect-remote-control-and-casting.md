@@ -170,11 +170,12 @@ applies requests through the Cast or AirPlay sender, as it applies them to its o
 
 ### Delay
 
-On an idle dev stack, 100 pause and play commands from a phone to a shared TV, both on websocket
-clients, after 5 warm-up commands, took 22 ms at the median and 28 ms at p95 from sending the
-command to the TV's subscription seeing it. From sending it to the TV's report of it committing,
-they took 44 ms at the median and 54 ms at p95. `test/core/connect/perf.test.ts` measures both
-on one clock and fails above 250 ms at p95.
+`test/core/connect/perf.test.ts` sends 100 pause and play commands from a phone to a shared TV,
+both on websocket clients, after 5 warm-up commands. It times each on one clock and fails above
+250 ms at p95. In five runs on an idle dev stack, p95 from sending a command to the TV's
+subscription seeing it was 21 to 30 ms. P95 from sending it to the TV's report of it committing
+was 40 to 61 ms. That round trip is two mutation commits and one subscription push on loopback,
+so a home network adds its own round trip on top.
 
 ### Not built yet
 
