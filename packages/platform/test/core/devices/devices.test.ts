@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { roleScopes } from "../../../commands/scopes";
 import { api, internal } from "../../../convex/_generated/api";
 import { inOrder } from "../../../convex/core/lib/inOrder";
+import { PASSWORD_MAX } from "../../../convex/core/lib/passwords";
 import { runFunction } from "../../admin";
 import {
   anonymous,
@@ -51,6 +52,14 @@ const SET_PASSWORD = {
 } satisfies Readonly<
   Record<string, (core: CoreStack, who: Member, password: string) => Promise<void>>
 >;
+
+const FULL_WIDTH_ZERO = 0xff10;
+
+const MATH_BOLD_ZERO = 0x1d7ce;
+
+/** `digits` in the digit set that starts at `zero`, which Scrypt hashes as the ASCII digits. */
+const digitsIn = (zero: number, digits: string): string =>
+  String.fromCodePoint(...Array.from(digits, (digit) => zero + Number(digit)));
 
 const listed = listings();
 
@@ -372,6 +381,53 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
       expect(
         await refusal(signedIn.client.action(api.core.devices.unlockCodes.set, { code: digits })),
       ).toBe("invalid_args");
+    },
+  );
+
+  it.each(Object.entries(SET_PASSWORD))(
+    "refuses a password set by %s that Scrypt hashes as the unlock code",
+    async (_path, setPassword) => {
+      if (stack === undefined) return;
+      const dad = await member(stack, "dad");
+      const code = "7391448";
+
+      await dad.signedIn.client.action(api.core.devices.unlockCodes.set, { code });
+
+      const set = await refusal(setPassword(stack, dad, digitsIn(MATH_BOLD_ZERO, code)));
+      const codeSignIn = await refusal(signInAs(stack, { ...dad.person, password: code }));
+
+      expect({ set, codeSignIn }).toEqual({ set: "invalid_args", codeSignIn: "unauthenticated" });
+    },
+  );
+
+  it.each(Object.entries(SET_PASSWORD))(
+    "takes a longest password of full-width and math digits set by %s, which signs in and opens a tile",
+    async (_path, setPassword) => {
+      if (stack === undefined) return;
+      const admin = await sharedAdmin(stack);
+      const dad = await member(stack, "dad");
+      const half = "7391".repeat(PASSWORD_MAX).slice(0, PASSWORD_MAX / 2);
+      const password = `${digitsIn(FULL_WIDTH_ZERO, half)}${digitsIn(MATH_BOLD_ZERO, half)}`;
+
+      await setPassword(stack, dad, password);
+
+      const signedIn = await signInAs(stack, { ...dad.person, password });
+
+      await listed.adult({ ...dad, signedIn });
+      await listed.kid(admin, await member(stack, "lily"));
+
+      const tv = await sharedDevice(stack, admin);
+
+      const tile = await openTile(stack, tv, dad.userId, {
+        kind: "password",
+        by: dad.userId,
+        password,
+      });
+
+      expect(await tile.client.query(api.core.auth.sessions.current, {})).toMatchObject({
+        userId: dad.userId,
+        kind: "tile",
+      });
     },
   );
 
