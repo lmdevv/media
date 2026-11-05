@@ -110,6 +110,7 @@ describe("moving the shared clock", () => {
   it.each<readonly [string, ControlOp]>([
     ["a negative position", { kind: "seek", positionMs: -1, revision: 3 }],
     ["a position that is not a number", { kind: "seek", positionMs: Number.NaN, revision: 3 }],
+    ["a negative position asked of an older clock", { kind: "seek", positionMs: -1, revision: 2 }],
     ["a rate under half speed", { kind: "rate", playbackRate: 0.25 }],
     ["a rate over double speed", { kind: "rate", playbackRate: 3 }],
     ["a rate that is not a number", { kind: "rate", playbackRate: Number.NaN }],

@@ -76,13 +76,15 @@ export const stepOf = (clock: Clock, op: ControlOp, now: number): Step => {
       : moved({ playbackRate: op.playbackRate, positionAtAnchorMs: positionAt(clock, now) });
   }
 
+  if (op.kind === "seek" && !(Number.isFinite(op.positionMs) && op.positionMs >= 0)) {
+    return fail("invalid_args", "A position is a finite number of milliseconds from 0");
+  }
+
   if (op.revision !== clock.revision) return STALE;
 
-  if (op.kind === "next") return moved({ positionAtAnchorMs: 0 }, true);
-
-  return Number.isFinite(op.positionMs) && op.positionMs >= 0
-    ? moved({ positionAtAnchorMs: op.positionMs })
-    : fail("invalid_args", "A position is a finite number of milliseconds from 0");
+  return op.kind === "next"
+    ? moved({ positionAtAnchorMs: 0 }, true)
+    : moved({ positionAtAnchorMs: op.positionMs });
 };
 
 /** Pauses a playing session where it is, as when its host goes away. */
