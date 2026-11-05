@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { Id, TableNames } from "../../../convex/_generated/dataModel";
 import {
-  appliedAfter,
   changed,
   nextRevision,
   playbackOf,
   positionAt,
+  settledAfter,
 } from "../../../convex/core/connect/playback";
 import type { Player, Request } from "../../../convex/core/connect/playback";
 
@@ -36,7 +36,7 @@ const player = (fields: Partial<Omit<Player, "_id" | "_creationTime">> = {}): Pl
   reporter: LUCIA,
   output: { kind: "local" },
   playback: { domain: "movies", playing: true, positionMs: 60_000 },
-  applied: 0,
+  settled: 0,
   reportedAt: 1_000,
   ...fields,
 });
@@ -76,7 +76,7 @@ describe("what a device plays, as controllers see it", () => {
 
   it("is the report again once the device says it applied the request", () => {
     const paused = player({
-      applied: 1,
+      settled: 1,
       playback: { domain: "movies", playing: false, positionMs: 61_020 },
       reportedAt: 2_040,
     });
@@ -157,12 +157,12 @@ describe("revisions", () => {
   });
 
   it("never go down for one reporter, so a restarted app does not apply a request again", () => {
-    expect(appliedAfter(player({ applied: 5 }), LUCIA, 0, 7)).toBe(5);
-    expect(appliedAfter(player({ applied: 5 }), LUCIA, 6, 7)).toBe(6);
+    expect(settledAfter(player({ settled: 5 }), LUCIA, 0, 7)).toBe(5);
+    expect(settledAfter(player({ settled: 5 }), LUCIA, 6, 7)).toBe(6);
   });
 
   it("settle every request made before a new reporter, whatever it says it applied", () => {
-    expect(appliedAfter(player({ applied: 5 }), AIKO, 0, 7)).toBe(7);
-    expect(appliedAfter(null, AIKO, 0, 2)).toBe(2);
+    expect(settledAfter(player({ settled: 5 }), AIKO, 0, 7)).toBe(7);
+    expect(settledAfter(null, AIKO, 0, 2)).toBe(2);
   });
 });

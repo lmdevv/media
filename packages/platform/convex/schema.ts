@@ -254,11 +254,7 @@ export default defineSchema({
       v.null(),
       v.object({ domain: contentDomain, playing: v.boolean(), positionMs: v.number() }),
     ),
-    /**
-     * Requests up to this revision are settled for `reporter`: it applied them, or they were made
-     * before it started reporting.
-     */
-    applied: v.number(),
+    settled: v.number(),
     /** Server time of the report. */
     reportedAt: v.number(),
   })
@@ -267,9 +263,7 @@ export default defineSchema({
 
   /**
    * The playback controllers last asked of a device, one row per device. Only
-   * `core.connect.targets.control` writes it. It is for the playback of the session that was
-   * reporting when it was made, and stands until that session reports a revision at least as
-   * new or another session reports.
+   * `core.connect.targets.control` writes it.
    */
   connectRequests: defineTable({
     deviceId: v.id("devices"),

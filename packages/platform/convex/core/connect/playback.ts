@@ -34,9 +34,9 @@ export interface Change {
   readonly positionMs?: number | undefined;
 }
 
-/** The request a device's reporter has not applied yet, or null. */
+/** The request a device's reporter has not settled yet, or null. */
 export const pendingRequest = (player: Player, request: Request | null): Request | null =>
-  request !== null && request.reporter === player.reporter && request.revision > player.applied
+  request !== null && request.reporter === player.reporter && request.revision > player.settled
     ? request
     : null;
 
@@ -78,18 +78,16 @@ export const changed = (current: Transport, change: Change, now: number): Transp
 /** The next request's revision on a device, above every request before it. */
 export const nextRevision = (request: Request | null): number => (request?.revision ?? 0) + 1;
 
-/**
- * The revision a report leaves applied. It never goes down for the same reporter. A new reporter
- * starts at `newest`: a request is for the session that was reporting when it was made, so a change
- * of reporter settles every request before it, even for a session that reports again later.
- */
-export const appliedAfter = (
+/** The revision a report leaves settled. It never goes down for the same reporter. */
+export const settledAfter = (
   stored: Player | null,
   reporter: Id<"authSessions">,
-  reported: number,
-  newest: number,
+  applied: number,
+  newestRevision: number,
 ): number =>
-  stored !== null && stored.reporter === reporter ? Math.max(stored.applied, reported) : newest;
+  stored !== null && stored.reporter === reporter
+    ? Math.max(stored.settled, applied)
+    : newestRevision;
 
 /** A position as a command or a report gives it: a finite number of milliseconds, 0 or more. */
 export const parsePosition = (positionMs: number): number =>

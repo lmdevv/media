@@ -273,13 +273,15 @@ export const purge = internalMutation({
   },
 });
 
+/**
+ * Clears what a device kept: its ended sessions, and when it was shared, its approval at once and
+ * its unlock-code strikes in scheduled pages.
+ */
 const purgeLeftovers = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   device: Doc<"devices">,
 ): Promise<void> => {
   const deviceId = device._id;
-
-  await dropConnect(ctx, deviceId);
 
   await ctx.scheduler.runAfter(0, internal.core.devices.registry.purge, {
     deviceId,
@@ -369,6 +371,7 @@ export const { enroll, list, setMode, remove } = register({
     const device = (await ctx.db.get(deviceId)) ?? fail("not_found", NO_DEVICE);
 
     await ctx.db.delete(deviceId);
+    await dropConnect(ctx, deviceId);
     await purgeLeftovers(ctx, device);
 
     await Promise.all(

@@ -7,7 +7,7 @@ import { fail } from "../lib/errors";
 import { can } from "../permissions/policy";
 import { boundDevice } from "../sessions";
 import { deviceFor, playerOf, requestOf } from "./facts";
-import { appliedAfter, parsePosition, pendingRequest } from "./playback";
+import { parsePosition, pendingRequest, settledAfter } from "./playback";
 import type { Player } from "./playback";
 
 const RECEIVER_MAX = 64;
@@ -44,13 +44,13 @@ const parseOutput = (output: Output): Output => {
   };
 };
 
-const parseApplied = (applied: number, newest: number): number => {
+const parseApplied = (applied: number, newestRevision: number): number => {
   if (!Number.isSafeInteger(applied) || applied < 0) {
     return fail("invalid_args", "A revision is a whole number, 0 or more");
   }
 
-  return applied > newest
-    ? fail("invalid_args", `No request after revision ${newest} was made of this device`)
+  return applied > newestRevision
+    ? fail("invalid_args", `No request after revision ${newestRevision} was made of this device`)
     : applied;
 };
 
@@ -65,7 +65,7 @@ export const { report, requested } = register({
       requestOf(ctx.db, device._id),
     ]);
 
-    const newest = request?.revision ?? 0;
+    const newestRevision = request?.revision ?? 0;
     const resource = await deviceFor(ctx.db, device, person, playback?.domain ?? null, now);
 
     if (!can(caller, "report", resource).allowed) {
@@ -78,7 +78,12 @@ export const { report, requested } = register({
       output: parseOutput(output),
       playback:
         playback === null ? null : { ...playback, positionMs: parsePosition(playback.positionMs) },
-      applied: appliedAfter(stored, caller.sessionId, parseApplied(applied, newest), newest),
+      settled: settledAfter(
+        stored,
+        caller.sessionId,
+        parseApplied(applied, newestRevision),
+        newestRevision,
+      ),
       reportedAt: now,
     };
 

@@ -78,9 +78,9 @@ The CLI has them as `media auth player report`, `media auth player requested`,
 Connect keeps two rows per device. Each row has one writer.
 
 - `connectPlayers` is what the device last reported: the session that reported, the output, the
-  playback (`domain`, `playing`, `positionMs`) or null when it plays nothing, the revision up to
-  which requests are settled for that session, and the server time of the report. Only `report` writes it. The session
-  names the device, so no call names a device it is not on. A session on no device, such as an
+  playback (`domain`, `playing`, `positionMs`) or null when it plays nothing, `settled` (the
+  revision up to which requests are done for that session), and the server time of the report.
+  Only `report` writes it. The session names the device, so no call names a device it is not on. A session on no device, such as an
   API key, has no player.
 - `connectRequests` is the playback controllers last asked for: the session it was made for, a
   revision, and `playing` with `positionMs` held at server time `at`. Only `control` writes it.
@@ -94,7 +94,7 @@ second off, plays or pauses, then reports with `applied` set to that revision. A
 the same state, and a device that misses a request in between still ends where the last one says.
 
 What controllers see is merged when they read it. A request stands in for the report while its
-revision is above the one the device applied and it was made for the session that reports now.
+revision is above the device's `settled` and it was made for the session that reports now.
 Otherwise the report stands. A late report with an older revision does not undo a pause.
 
 ### Rules for reports and requests
@@ -102,14 +102,14 @@ Otherwise the report stands. A late report with an older revision does not undo 
 - A request is for the playback of the session that was reporting when it was made. When another
   tile opens on a shared TV, or someone else signs in on the app, the new session reports and none
   of the earlier requests apply to it.
-- A report from a session other than the last reporter starts `applied` at the newest request's
-  revision, whatever revision the report claims. So a change of reporter settles every request
+- A report from a session other than the last reporter sets `settled` to the newest request's
+  revision, whatever revision its `applied` claims. So a change of reporter settles every request
   made before it, including for a session that reports again later. Two people signed in on one
   personal laptop can take turns: the first applies a pause, the second reports, the first app
   restarts and reports `applied: 0`, and the pause does not come back. A request the first session
   had not applied when the second one reported is settled too, because the second session's
   playback replaced the one it was for.
-- `applied` never goes down for the same reporting session. An app that restarts and reports
+- `settled` never goes down for the same reporting session. An app that restarts and reports
   `applied: 0` keeps the requests it applied, and `requested` stays null. A report that claims a
   revision above the newest request fails `invalid_args`.
 - A device that changes what plays on its own, or stops playing, reports `applied` as the newest
@@ -124,10 +124,12 @@ Otherwise the report stands. A late report with an older revision does not undo 
   reporting session is live and that reported in the 30 seconds before it ran. A subscribed query
   runs again when a device it read reports, not as time passes, so a client also treats a target
   silent for 30 seconds as offline by its `reportedAt`.
-- Changing a device's mode or removing it deletes both rows in the same transaction as the change
-  (`dropConnect`, called from the registry's `purgeLeftovers`). The sessions on the device end
-  with the same write, so a command in flight fails `not_found`, and the device's next report
-  fails `unauthenticated`.
+- Removing a device deletes both rows in the same transaction (`dropConnect`). Changing its mode
+  keeps them, so request revisions on a device never start again at 1. The sessions on the device
+  end with either write. A command in flight fails `not_found`, or `conflict` because its reporter
+  ended, and the device's next report fails `unauthenticated`. The app signs in again as a new
+  session, so its first report settles the requests made before the change, and an `applied` it
+  kept from before the change stays at or below the newest revision.
 - Devices report on every change and at least every 10 seconds while the app is open. A report
   is anchored at the server time it arrives. Reports from one client must arrive in the order sent.
   The websocket client sends them in order. Two concurrent reports over HTTP can store the older
@@ -209,6 +211,8 @@ so a home network adds its own round trip on top.
   person's playback.
 - A pause a session applied stays applied after another session reports on the same device and
   the first app restarts.
+- An app that signs in again after an admin changed its device's mode has its reports taken, even
+  with the `applied` it kept, and gets the next request under a higher revision.
 - An admin does not control a shared device that does not list them, and does not reach another
   person's personal device.
 
@@ -224,8 +228,10 @@ Rejected in this build:
 - Listing offline devices. `control` refuses them, so `list` shows only what a command can reach.
 - A device generation on Connect rows. Deleting them in the transaction that changes the device
   is two point reads.
-- `applied` kept per session, in a map on the player row or a row per session. Only the session
+- `settled` kept per session, in a map on the player row or a row per session. Only the session
   a request was made for can apply it, and a change of reporter already ends that playback, so the
   newest revision at the change says everything a per-session count would.
-- Deleting the request when the reporter changes. The next request would reuse revision 1, and a
-  session still holding a higher `applied` would have its report refused.
+- Deleting the request when the reporter changes, or when the device changes mode. The next
+  request would reuse revision 1, so an app that remembers applying revision 1 would take the new
+  request for one it already applied, and an app still holding a higher `applied` would have its
+  reports refused.

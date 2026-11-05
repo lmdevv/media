@@ -256,7 +256,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
         reporter: sessionId,
         output: { kind: "local" },
         playback: { domain: "movies", playing: true, positionMs: 1_000 },
-        applied: 0,
+        settled: 0,
         reportedAt: Date.now() - ONLINE_MS - 1_000,
       },
     ]);
