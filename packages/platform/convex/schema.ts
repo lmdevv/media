@@ -3,6 +3,7 @@ import { v } from "convex/values";
 
 import { level, resourceId, resourceType, restrictions } from "../commands/access";
 import { assignableRole, contentDomain, credentialScope } from "../commands/scopes";
+import { deviceSettingFields, userSettingFields } from "../commands/settings";
 import { importSource } from "./core/jobs/kinds";
 import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
 
@@ -268,6 +269,25 @@ export default defineSchema({
     .index("by_user_expiration", ["userId", "expiresAt"])
     .index("by_intent_expiration", ["intent", "expiresAt"])
     .index("by_expiration", ["expiresAt"]),
+
+  /**
+   * A person's settings that follow them to every device (ADR 0019): at most one row per person,
+   * made by their first change. A missing field is that setting's default. `core/settings.ts` is
+   * its only writer.
+   */
+  userSettings: defineTable({ userId: v.id("users"), ...userSettingFields }).index("by_user", [
+    "userId",
+  ]),
+
+  /**
+   * A person's own settings on one device: at most one row per device and person, deleted with
+   * the device. A missing field is that setting's default. `core/settings.ts` is its only writer.
+   */
+  deviceSettings: defineTable({
+    deviceId: v.id("devices"),
+    userId: v.id("users"),
+    ...deviceSettingFields,
+  }).index("by_device_user", ["deviceId", "userId"]),
 
   /**
    * A library: a name and the domain its content belongs to. Its folders live in

@@ -85,6 +85,8 @@ describe("CLI placement", () => {
       "core.restrictions.get": "auth restrictions get",
       "core.restrictions.set": "admin restrictions set",
       "core.server.info": "auth server info",
+      "core.settings.get": "auth settings get",
+      "core.settings.set": "auth settings set",
     });
   });
 

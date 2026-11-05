@@ -598,6 +598,36 @@ const decideDevice = (principal: Principal, rule: DeviceRule, device: DeviceReso
   return rule.shared === "listed" && relation.listed ? ALLOWED : hidden("unlisted");
 };
 
+export const settingActions = ["change"] as const;
+
+export type SettingAction = (typeof settingActions)[number];
+
+/**
+ * A setting as `can` sees it: whose value it is, and the domains whose players read it, from the
+ * settings table. A per-device value is still one person's, on the device their session is on.
+ */
+export interface SettingResource {
+  readonly on: "setting";
+  readonly owner: Id<"users">;
+  readonly domains: ReadonlyArray<ContentDomain>;
+}
+
+/**
+ * Settings are their person's own, so nobody changes anyone else's, admins included. Changing one
+ * needs `account` or the `play` scope of a domain that reads it, which a tile on a shared device
+ * holds. A restriction never reads one: a preference neither widens nor narrows what a kid sees.
+ */
+const decideSetting = (principal: Principal, setting: SettingResource): Decision => {
+  if (principal.kind === "service") return hidden("service");
+
+  if (principal.userId !== setting.owner) return hidden("not-yours");
+
+  return principal.scopes.includes("account") ||
+    setting.domains.some((domain) => principal.scopes.includes(`${domain}:play`))
+    ? ALLOWED
+    : forbidden("scope");
+};
+
 const isContentAction = (action: string): action is ContentAction =>
   contentActions.some((known) => known === action);
 
@@ -615,6 +645,9 @@ const isApprovalAction = (action: string): action is ApprovalAction =>
 
 const isDeviceAction = (action: string): action is DeviceAction =>
   deviceActions.some((known) => known === action);
+
+const isSettingAction = (action: string): action is SettingAction =>
+  settingActions.some((known) => known === action);
 
 /**
  * The one access decision (ADR 0005): role, credential scopes, grants, and restrictions, from
@@ -641,14 +674,27 @@ export function can(
 export function can(principal: Principal, action: DeviceAction, resource: DeviceResource): Decision;
 export function can(
   principal: Principal,
-  action: ContentAction | AccountAction | ServerAction | TileAction | ApprovalAction | DeviceAction,
+  action: SettingAction,
+  resource: SettingResource,
+): Decision;
+export function can(
+  principal: Principal,
+  action:
+    | ContentAction
+    | AccountAction
+    | ServerAction
+    | TileAction
+    | ApprovalAction
+    | DeviceAction
+    | SettingAction,
   resource:
     | ContentResource
     | AccountResource
     | ServerResource
     | TileResource
     | ApprovalResource
-    | DeviceResource,
+    | DeviceResource
+    | SettingResource,
 ): Decision {
   if (resource.on === "content" && isContentAction(action)) {
     return decideContent(principal, action, resource);
@@ -672,6 +718,10 @@ export function can(
 
   if (resource.on === "device" && isDeviceAction(action)) {
     return decideDevice(principal, deviceRules[action], resource);
+  }
+
+  if (resource.on === "setting" && isSettingAction(action)) {
+    return decideSetting(principal, resource);
   }
 
   throw new Error(`${action} is not an action on ${resource.on}`);

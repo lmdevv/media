@@ -1274,4 +1274,139 @@ export const generatedCommands = [
     }),
     method: (platform) => platform.core.server.info,
   }),
+  coreCommand({
+    name: "core.settings.get",
+    path: ["auth", "settings", "get"],
+    kind: "query",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Show your settings: the ones that follow you to every device, and your own on this device",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({}),
+    result: Schema.Struct({
+      user: Schema.Struct({
+        subtitleLanguage: Schema.Union([Schema.String, Schema.Null]),
+        audioLanguage: Schema.Union([Schema.String, Schema.Null]),
+        subtitleStyle: Schema.Struct({
+          size: Schema.Union([
+            Schema.Literal("small"),
+            Schema.Literal("medium"),
+            Schema.Literal("large"),
+          ]),
+          color: Schema.Union([Schema.Literal("white"), Schema.Literal("yellow")]),
+          backdrop: Schema.Union([
+            Schema.Literal("none"),
+            Schema.Literal("shadow"),
+            Schema.Literal("box"),
+          ]),
+        }),
+        autoplay: Schema.Boolean,
+        explicitFilter: Schema.Boolean,
+        crossfade: Schema.Finite,
+        gapless: Schema.Boolean,
+      }),
+      device: Schema.Union([
+        Schema.Struct({
+          streamQuality: Schema.Union([
+            Schema.Literal("auto"),
+            Schema.Literal("original"),
+            Schema.Literal("high"),
+            Schema.Literal("standard"),
+            Schema.Literal("low"),
+          ]),
+          downloadQuality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
+          volume: Schema.Finite,
+        }),
+        Schema.Null,
+      ]),
+    }),
+    method: (platform) => platform.core.settings.get,
+  }),
+  coreCommand({
+    name: "core.settings.set",
+    path: ["auth", "settings", "set"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Change some of your settings; each follows you or stays on this device, as the settings table marks it",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      subtitleLanguage: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      audioLanguage: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      subtitleStyle: Schema.optionalKey(
+        Schema.Struct({
+          size: Schema.Union([
+            Schema.Literal("small"),
+            Schema.Literal("medium"),
+            Schema.Literal("large"),
+          ]),
+          color: Schema.Union([Schema.Literal("white"), Schema.Literal("yellow")]),
+          backdrop: Schema.Union([
+            Schema.Literal("none"),
+            Schema.Literal("shadow"),
+            Schema.Literal("box"),
+          ]),
+        }),
+      ),
+      autoplay: Schema.optionalKey(Schema.Boolean),
+      explicitFilter: Schema.optionalKey(Schema.Boolean),
+      crossfade: Schema.optionalKey(Schema.Finite),
+      gapless: Schema.optionalKey(Schema.Boolean),
+      streamQuality: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("auto"),
+          Schema.Literal("original"),
+          Schema.Literal("high"),
+          Schema.Literal("standard"),
+          Schema.Literal("low"),
+        ]),
+      ),
+      downloadQuality: Schema.optionalKey(
+        Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
+      ),
+      volume: Schema.optionalKey(Schema.Finite),
+    }),
+    result: Schema.Struct({
+      user: Schema.Struct({
+        subtitleLanguage: Schema.Union([Schema.String, Schema.Null]),
+        audioLanguage: Schema.Union([Schema.String, Schema.Null]),
+        subtitleStyle: Schema.Struct({
+          size: Schema.Union([
+            Schema.Literal("small"),
+            Schema.Literal("medium"),
+            Schema.Literal("large"),
+          ]),
+          color: Schema.Union([Schema.Literal("white"), Schema.Literal("yellow")]),
+          backdrop: Schema.Union([
+            Schema.Literal("none"),
+            Schema.Literal("shadow"),
+            Schema.Literal("box"),
+          ]),
+        }),
+        autoplay: Schema.Boolean,
+        explicitFilter: Schema.Boolean,
+        crossfade: Schema.Finite,
+        gapless: Schema.Boolean,
+      }),
+      device: Schema.Union([
+        Schema.Struct({
+          streamQuality: Schema.Union([
+            Schema.Literal("auto"),
+            Schema.Literal("original"),
+            Schema.Literal("high"),
+            Schema.Literal("standard"),
+            Schema.Literal("low"),
+          ]),
+          downloadQuality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
+          volume: Schema.Finite,
+        }),
+        Schema.Null,
+      ]),
+    }),
+    method: (platform) => platform.core.settings.set,
+  }),
 ];

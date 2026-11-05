@@ -68,6 +68,7 @@ describe("generate", () => {
       "platform/commands/music/playlists.ts",
       "platform/commands/refs.ts",
       "platform/commands/scopes.ts",
+      "platform/commands/settings.ts",
       "sdk/generated/commands.ts",
       "skill/references/core.md",
       "skill/references/music.md",
