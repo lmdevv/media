@@ -188,8 +188,7 @@ export const unshare = (
     principal,
   });
 
-/** Libraries shared at once; each library's grants go in one after another. */
-const SHARING = 24;
+const LIBRARIES_SHARED_AT_ONCE = 24;
 
 /**
  * Puts `viewer` in as many groups as a person may be in, then gives them `view` on each library,
@@ -222,8 +221,9 @@ export const shareThroughEveryGroup = async (
     ...groups.map((groupId): GrantPrincipal => ({ kind: "group", groupId })),
   ];
 
-  const batches = Array.from({ length: Math.ceil(libraryIds.length / SHARING) }, (_, n) =>
-    libraryIds.slice(n * SHARING, (n + 1) * SHARING),
+  const batches = Array.from(
+    { length: Math.ceil(libraryIds.length / LIBRARIES_SHARED_AT_ONCE) },
+    (_, n) => libraryIds.slice(n * LIBRARIES_SHARED_AT_ONCE, (n + 1) * LIBRARIES_SHARED_AT_ONCE),
   );
 
   await inOrder(batches, async (batch) =>

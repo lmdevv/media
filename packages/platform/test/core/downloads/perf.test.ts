@@ -21,7 +21,6 @@ const LISTS = 20;
 
 const FETCHES = 50;
 
-/** The most a list page holds, which a client asks for. */
 const LIST_PAGE = 200;
 
 type Entry = FunctionReturnType<typeof api.core.downloads.list>["page"][number];
@@ -76,7 +75,7 @@ describe.skipIf(stack === undefined)("downloads at scale", { timeout: 900_000 },
     const mark = await logMark(stack);
 
     // Adding a spare item before each list changes the rows it reads, so no list is served from
-    // the query cache, and the page still holds 200 rows from 200 libraries.
+    // the query cache.
     const lists = await inOrder(spare.slice(0, LISTS), async (id) => {
       await client.mutation(api.core.downloads.add, { item: itemOf(id) });
 
@@ -106,7 +105,7 @@ describe.skipIf(stack === undefined)("downloads at scale", { timeout: 900_000 },
       .map((call) => call.reads);
 
     process.stdout.write(
-      `downloads list of 200 rows from ${LIBRARIES} libraries over ${LISTS} uncached calls: ` +
+      `downloads list pages from ${LIBRARIES} libraries over ${LISTS} uncached calls: ` +
         `p50 ${median(lists).toFixed(1)} ms, reads p50 ${median(listReads)} max ${Math.max(...listReads)}\n` +
         `downloads fetch over ${FETCHES} calls: p50 ${median(fetches).toFixed(1)} ms, ` +
         `reads p50 ${median(fetchReads)} max ${Math.max(...fetchReads)}\n`,

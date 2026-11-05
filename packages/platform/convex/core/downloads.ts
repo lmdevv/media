@@ -8,13 +8,13 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { Caller } from "./auth/caller";
 import { NO_DEVICE } from "./devices/facts";
-import { sourceOf } from "./downloadSources";
+import { SOURCE_READS, sourceOf } from "./downloadSources";
 import type { DownloadSource, LibraryReader } from "./downloadSources";
 import { deleteCounter, incrementCounter, readCounter } from "./lib/counters";
 import { fail } from "./lib/errors";
-import { paginate } from "./lib/paginate";
+import { paginate, paginateAtMost } from "./lib/paginate";
 import { requireServer } from "./permissions/authorize";
-import { levelOn, reachOf } from "./permissions/grants";
+import { decidableRows, levelOn, reachOf } from "./permissions/grants";
 import type { Reach } from "./permissions/grants";
 import { can, contentNeeds, itemOf } from "./permissions/policy";
 import type { Decision } from "./permissions/policy";
@@ -26,6 +26,8 @@ const DEFAULT_CAP_BYTES = 64_000_000_000;
 const ITEMS_PER_DEVICE_MAX = 500;
 
 const LIST_PAGE_MAX = 200;
+
+const LIST_ROW_READS = SOURCE_READS + 1;
 
 const DOWNLOAD_TICKET_MS = 15 * 60 * 1000;
 
@@ -291,8 +293,9 @@ export const { add, list, fetch, remove, usage, setCap } = register({
   },
   list: async (ctx, { paginationOpts }, caller) => {
     const device = await requireDevice(ctx.db, caller);
+    const reach = await reachOf(ctx.db, caller);
 
-    const page = await paginate(
+    const page = await paginateAtMost(
       ctx.db,
       {
         table: "downloads",
@@ -300,14 +303,11 @@ export const { add, list, fetch, remove, usage, setCap } = register({
         range: (q) => q.eq("deviceId", device._id).eq("userId", caller.userId),
         order: "desc",
       },
-      {
-        ...paginationOpts,
-        numItems: Math.min(paginationOpts.numItems, LIST_PAGE_MAX),
-        maximumRowsRead: LIST_PAGE_MAX,
-      },
+      paginationOpts,
+      Math.min(LIST_PAGE_MAX, decidableRows(reach, LIST_ROW_READS)),
     );
 
-    const reads = libraryReads(ctx.db, await reachOf(ctx.db, caller));
+    const reads = libraryReads(ctx.db, reach);
 
     const entries = await Promise.all(
       page.page.map(async (row) => {

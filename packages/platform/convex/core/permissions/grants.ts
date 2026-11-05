@@ -90,8 +90,17 @@ export const reachOf = async (db: DatabaseReader, principal: Principal): Promise
   };
 };
 
-/** The most grants `levelOn` reads for one resource. */
-export const grantReads = (reach: Reach): number => reach.direct.length + reach.groups.length;
+const LIST_CALL_READS = 16;
+
+/**
+ * The most rows one page may decide through grants for `reach` when each row reads `rowReads`
+ * documents of its own, so the call reads at most `PAGE_ROWS_MAX` documents and index ranges.
+ */
+export const decidableRows = (reach: Reach, rowReads: number): number =>
+  Math.floor(
+    (PAGE_ROWS_MAX - LIST_CALL_READS - reach.groups.length) /
+      (rowReads + reach.direct.length + reach.groups.length),
+  );
 
 /** The strongest level any grant in `reach` gives on `ref`. */
 export const levelOn = async <T extends ResourceType>(

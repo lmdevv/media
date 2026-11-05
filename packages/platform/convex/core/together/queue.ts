@@ -7,9 +7,8 @@ import type { MutationCtx, QueryCtx } from "../../_generated/server";
 import { asPerson } from "../accounts/users";
 import { incrementCounter, readCounter } from "../lib/counters";
 import { fail } from "../lib/errors";
-import { PAGE_ROWS_MAX, pageRows, paginate } from "../lib/paginate";
-import { grantReads, reachOf } from "../permissions/grants";
-import type { Reach } from "../permissions/grants";
+import { paginateAtMost } from "../lib/paginate";
+import { decidableRows, reachOf } from "../permissions/grants";
 import { ITEM_READS, playableBy, requirePlayable } from "../permissions/items";
 import { can } from "../permissions/policy";
 import type { Principal } from "../permissions/policy";
@@ -83,20 +82,11 @@ export const unqueue = async (
   await incrementCounter(ctx.db, queueCounter(session._id), -1);
 };
 
-const ENTRY_READS = 2;
-
-const CALL_READS = 16;
-
-const queueRows = (reach: Reach): number =>
-  Math.floor(
-    (PAGE_ROWS_MAX - CALL_READS - reach.groups.length) /
-      (ENTRY_READS + ITEM_READS + grantReads(reach)),
-  );
+const ENTRY_READS = ITEM_READS + 2;
 
 /**
- * One page of what plays next in the caller's session in `domain`, as they may see it. A reactive
- * reload up to `endCursor` that outgrows `queueRows` returns an empty `SplitRequired` page, so the
- * client splits it at Convex's `splitCursor`.
+ * One page of what plays next in the caller's session in `domain`, as they may see it, of as many
+ * entries as one call can decide.
  */
 export const queuePage = async (
   ctx: Pick<QueryCtx, "db">,
@@ -106,20 +96,18 @@ export const queuePage = async (
 ) => {
   const { session, place } = await requireTogether(ctx, caller, domain, "view");
   const reach = await reachOf(ctx.db, caller);
-  const rows = queueRows(reach);
   const playable = playableBy(ctx.db, reach);
 
-  const found = await paginate(
+  const found = await paginateAtMost(
     ctx.db,
     {
       table: "togetherEntries",
       index: "by_session_order",
       range: (q) => q.eq("sessionId", session._id),
     },
-    { ...options, numItems: Math.min(pageRows(options.numItems), rows) },
+    options,
+    decidableRows(reach, ENTRY_READS),
   );
-
-  if (found.page.length > rows) return { ...found, page: [], pageStatus: "SplitRequired" as const };
 
   const names = new Map<Id<"users">, Promise<string | null>>();
 
