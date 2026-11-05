@@ -4,7 +4,7 @@ import { asPerson } from "./accounts/users";
 import { fail } from "./lib/errors";
 import { takeAttempt } from "./lib/rateLimit";
 import { constantTimeEqual, formatSecret, parseSecret, randomSecret } from "./lib/secrets";
-import { playableBy } from "./permissions/items";
+import { mayPlay } from "./permissions/items";
 import { can } from "./permissions/policy";
 import { factsOf, memberIn, placeOf, refuse, requireTogether } from "./together/access";
 import { control as move } from "./together/clock";
@@ -118,7 +118,7 @@ export const {
         manage: can(caller, "manage", facts).allowed,
       },
       clock: session.clock,
-      item: (await playableBy(ctx.db, caller)(session.item)) ? session.item : null,
+      item: (await mayPlay(ctx.db, caller, session.item)) ? session.item : null,
       members: await Promise.all(
         joined.map(async (row) => ({
           userId: row.userId,

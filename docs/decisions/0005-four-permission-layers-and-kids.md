@@ -222,8 +222,16 @@ a service is refused, so no admin can give it a role, a reset link, restrictions
 
 ### Reads
 
-- One content check reads 2 grants, the person's own and the household's. Unless one of them is
-  `manage`, it then reads the person's group memberships and one grant per group.
+- A call reads the person's reach once (`reachOf` in `permissions/grants.ts`): their group
+  memberships, one index range and a document per group. Each content check then reads 2 grants,
+  the person's own and the household's, and unless one of them is `manage`, one grant per group.
+  A call that checks many resources reads the memberships once, not once per check.
+- Convex fails a call that reads more than 4,096 index ranges, with "Too many reads". Each
+  `db.get` and each indexed query counts as one, whether it finds a document or not. A list that
+  decides each row through grants sizes its page from what one row's check reads, so the call
+  stays under `PAGE_ROWS_MAX` (1,000) reads and has fewer than that in flight. Its page holds fewer
+  rows the more groups the person is in. The library list below works this way, and so does the
+  group session queue in ADR 0017.
 - A list page merges the index ranges of the person's own, household, and group grants after the
   cursor, so it reads at most 1,000 documents however many grants the table holds. On the dev stack
   with more than 1,000 grants in the table, a 50-row page read 168 documents.

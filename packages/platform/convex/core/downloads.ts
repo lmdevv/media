@@ -14,7 +14,8 @@ import { deleteCounter, incrementCounter, readCounter } from "./lib/counters";
 import { fail } from "./lib/errors";
 import { paginate } from "./lib/paginate";
 import { requireServer } from "./permissions/authorize";
-import { levelOn } from "./permissions/grants";
+import { levelOn, reachOf } from "./permissions/grants";
+import type { Reach } from "./permissions/grants";
 import { can, contentNeeds, itemOf } from "./permissions/policy";
 import type { Decision } from "./permissions/policy";
 import { downloadQualityOf } from "./settings";
@@ -75,9 +76,9 @@ const once = <Key, Value>(load: (key: Key) => Promise<Value>): ((key: Key) => Pr
   };
 };
 
-const libraryReads = (db: DatabaseReader, caller: Caller): LibraryReads => ({
+const libraryReads = (db: DatabaseReader, reach: Reach): LibraryReads => ({
   libraryOf: once(async (libraryId) => db.get(libraryId)),
-  levelOf: once(async (libraryId) => levelOn(db, caller, { type: "library", id: libraryId })),
+  levelOf: once(async (libraryId) => levelOn(db, reach, { type: "library", id: libraryId })),
 });
 
 /** A domain's estimate at `quality`, rounded up to whole bytes. */
@@ -253,7 +254,7 @@ export const { add, list, fetch, remove, usage, setCap } = register({
       caller,
       device,
       item,
-      libraryReads(ctx.db, caller),
+      libraryReads(ctx.db, await reachOf(ctx.db, caller)),
     );
 
     if (!decision.allowed) return refuseAdd(decision, found?.library.kind);
@@ -306,7 +307,7 @@ export const { add, list, fetch, remove, usage, setCap } = register({
       },
     );
 
-    const reads = libraryReads(ctx.db, caller);
+    const reads = libraryReads(ctx.db, await reachOf(ctx.db, caller));
 
     const entries = await Promise.all(
       page.page.map(async (row) => {
@@ -332,7 +333,7 @@ export const { add, list, fetch, remove, usage, setCap } = register({
 
     const [row, judged] = await Promise.all([
       rowOf(ctx.db, device._id, caller.userId, item),
-      judge(ctx.db, caller, device, item, libraryReads(ctx.db, caller)),
+      judge(ctx.db, caller, device, item, libraryReads(ctx.db, await reachOf(ctx.db, caller))),
     ]);
 
     if (row === null) return fail("not_found", NOT_KEPT);

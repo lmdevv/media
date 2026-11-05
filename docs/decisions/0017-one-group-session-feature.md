@@ -137,6 +137,13 @@ music clients adopt it in phase 6.
 - The queue holds up to 500 items to play next, counted in `counters`. `add` puts one first or
   last, and `next` plays the first from its start and takes it out of the queue. Phase 6 adds
   reordering where a client needs it.
+- A queue page holds only as many entries as one call can decide inside `PAGE_ROWS_MAX` reads
+  (ADR 0005). Each entry may cost its row, its item and the item's library, one grant per key of
+  the viewer's reach, and who queued it. That is 44 entries for a person in 16 groups and 164 for
+  one in none. A page that a reactive client reloads up to its end cursor holds every entry up to
+  it. Past that size, it decides none of them and answers `SplitRequired` at the split cursor
+  Convex gives. Convex itself only recommends that split, because it ignores `maximumRowsRead`
+  once an end cursor is set.
 
 ### Actions added to `can`
 
@@ -168,6 +175,13 @@ trip of the last 10. The positions they showed at the same instant differed by 4
 run, the clients counted every heartbeat as a sample. Heartbeats that write wait for their commit
 on the way back, which biased the estimate, and the p95 rose to 5 ms against the rooms' 3 ms. The
 stack suite runs the test for 30 seconds.
+
+The queue was measured at its worst case in `test/core/together/perf.test.ts`. Its 240 items come
+from 240 libraries, and the viewer is in 16 groups with a grant through each. Before the fix, the
+first page failed with Convex's "Too many reads" (limit 4,096) after reading 7,908 documents,
+because each library's check read the viewer's groups again. Now a page holds 44 entries and reads
+901 documents. A reload grown to 89 entries read 109 and asked for a split. The pages it split into
+read at most 901.
 
 ### Edge cases settled in the build
 
