@@ -5,7 +5,8 @@ import type { DatabaseReader, DatabaseWriter } from "../../_generated/server";
 import { fail } from "./errors";
 import type { RateLimit } from "./rateLimit";
 
-const PASSWORD_MIN = 8;
+/** The shortest password anyone can set. */
+export const PASSWORD_MIN = 8;
 
 export const PASSWORD_MAX = 256;
 

@@ -24,7 +24,6 @@ import type { CoreStack } from "../../stack-env";
 
 const stack = coreStackFromEnvFile();
 
-/** Every way a person's password gets set after they exist. */
 const SET_PASSWORD = {
   "their own change": async (_core, who, password) => {
     await who.signedIn.client.action(api.core.accounts.me.changePassword, {

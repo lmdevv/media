@@ -16,7 +16,7 @@ import {
   sharedDeviceById,
   tilePerson,
 } from "../devices/facts";
-import { isUnlockCode } from "../devices/unlockCodes";
+import { CODE_DIGITS, isUnlockCode } from "../devices/unlockCodes";
 import type { CheckedProof } from "../devices/tiles";
 import { fail } from "../lib/errors";
 import { PASSWORD_MAX, passwordHashOf, passwordMatches, signInLimit } from "../lib/passwords";
@@ -118,7 +118,7 @@ const checkCode = async (
 ): Promise<CheckedProof> => {
   const digits = code.trim();
 
-  if (!isUnlockCode(digits)) return fail("invalid_args", "An unlock code is 4 to 8 digits");
+  if (!isUnlockCode(digits)) return fail("invalid_args", `An unlock code is ${CODE_DIGITS}`);
 
   const attempt = await ctx.runMutation(internal.core.devices.unlockCodes.attempt, { ...key, by });
 

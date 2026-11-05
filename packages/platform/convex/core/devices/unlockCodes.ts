@@ -3,11 +3,11 @@ import { v } from "convex/values";
 import { register } from "../../../commands/core/devices/unlockCodes";
 import { internal } from "../../_generated/api";
 import type { Doc, Id } from "../../_generated/dataModel";
-import { internalMutation, internalQuery } from "../../_generated/server";
+import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { refuseKeys, requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
-import { hashUnlockCode, passwordHashOf, passwordMatches } from "../lib/passwords";
+import { PASSWORD_MIN, hashUnlockCode } from "../lib/passwords";
 import { takeAttempt } from "../lib/rateLimit";
 import type { RateLimit } from "../lib/rateLimit";
 import { asPerson } from "../accounts/users";
@@ -20,10 +20,16 @@ export const CODE_TRIES = 5;
 
 const UNLOCKS_PER_HOUR = 20;
 
-const CODE_FORMAT = /^\d{4,8}$/u;
+const CODE_DIGITS_MIN = 4;
 
-/** Whether `typed` has an unlock code's shape: 4 to 8 digits. */
-export const isUnlockCode = (typed: string): boolean => CODE_FORMAT.test(typed);
+const CODE_DIGITS_MAX = PASSWORD_MIN - 1;
+
+/** How many digits an unlock code has, as refusals word it. */
+export const CODE_DIGITS = `${CODE_DIGITS_MIN} to ${CODE_DIGITS_MAX} digits`;
+
+/** Whether `typed` is an unlock code: {@link CODE_DIGITS}. */
+export const isUnlockCode = (typed: string): boolean =>
+  typed.length >= CODE_DIGITS_MIN && typed.length <= CODE_DIGITS_MAX && /^\d+$/u.test(typed);
 
 /** Every unlock-code try a person makes, on any device, takes from this bucket. */
 export const unlockLimit = (userId: Id<"users">): RateLimit => ({
@@ -127,17 +133,6 @@ export const attempt = internalMutation({
   },
 });
 
-/** The caller's password hash, so a new unlock code can be refused when it equals the password. */
-export const callerPasswordHash = internalQuery({
-  args: {},
-  returns: v.union(v.string(), v.null()),
-  handler: async (ctx) => {
-    const caller = refuseKeys(await requireCaller(ctx, "account"));
-
-    return (await passwordHashOf(ctx.db, caller.userId)) ?? null;
-  },
-});
-
 /** Replaces the caller's unlock code with `hash`, or removes it. A new code starts with no strikes. */
 export const store = internalMutation({
   args: { hash: v.union(v.string(), v.null()) },
@@ -165,16 +160,7 @@ export const { set, reset } = register({
     const digits = code.trim();
 
     if (!isUnlockCode(digits)) {
-      return fail("invalid_args", "Use 4 to 8 digits for the unlock code");
-    }
-
-    const password: string | null = await ctx.runQuery(
-      internal.core.devices.unlockCodes.callerPasswordHash,
-      {},
-    );
-
-    if (password !== null && (await passwordMatches(password, digits))) {
-      return fail("invalid_args", "Choose an unlock code that is not your password");
+      return fail("invalid_args", `Use ${CODE_DIGITS} for the unlock code`);
     }
 
     await ctx.runMutation(internal.core.devices.unlockCodes.store, {

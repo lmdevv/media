@@ -118,10 +118,14 @@ never stored. `lockOf` derives it from three reasons:
 
 ### Unlock codes
 
-- `core.devices.unlockCodes.set` takes 4 to 8 digits and stores a Scrypt hash, which the core
-  compares in constant time. It refuses a code that matches the person's password, so a code never
-  signs in, not even by chance. The `password` provider never reads it, and the `tile` provider
+- `core.devices.unlockCodes.set` takes 4 to 7 digits and stores a Scrypt hash, which the core
+  compares in constant time. The `password` provider never reads it, and the `tile` provider
   refuses it on a personal device.
+- An unlock code is one digit shorter than the shortest password, which is 8 characters. So no
+  value is ever both a person's unlock code and their password. This holds on every path that
+  sets either one, including a password change, a reset link, a host reset, an invite, and an
+  admin-made user, and at every moment, with no comparison to race. The code's longest length is
+  derived from the password's shortest, so raising one moves the other.
 - The `tile` provider counts a wrong try per person and device (`unlockStrikes`) before it checks
   the digits, so tries made at once never pass 5. Each person also has 20 code tries an hour
   across all devices.
@@ -183,3 +187,10 @@ Rejected in this build:
 - Ending tile sessions when a kid becomes listed. That fans out over every shared device, and
   ADR 0005 already lets a restriction change end no session.
 - A timer that turns an unlock code back on. D47 names the password, an approval, and an admin.
+- Refusing an unlock code that matches the password. The check read the password in one
+  transaction and stored the code in another, so a password change in between could still make
+  them equal. Changing or resetting the password to the code's digits never checked the code at
+  all, and the code then signed in as the password.
+- Ending the unlock code whenever the password changes. It keeps the two from being equal, but a
+  person can still choose the old code's digits as the new password. The household knows those
+  digits, so they would sign in.
