@@ -559,8 +559,11 @@ const decideApproval = (principal: Principal, approval: ApprovalResource): Decis
   return vouches(answerer) ? ALLOWED : forbidden("not-adult");
 };
 
-/** What can be done to a registered device: `control` its playback through Connect (ADR 0018). */
-export const deviceActions = ["control"] as const;
+/**
+ * What can be done to a registered device through Connect (ADR 0018): `control` its playback, or
+ * `report` what it plays from a session on it.
+ */
+export const deviceActions = ["control", "report"] as const;
 
 export type DeviceAction = (typeof deviceActions)[number];
 
@@ -593,6 +596,7 @@ type DeviceRules = { readonly [A in DeviceAction]: DeviceRule };
 
 const deviceRules: DeviceRules = {
   control: { verb: "play" },
+  report: { verb: "play" },
 };
 
 type PersonPrincipal = Extract<Principal, { readonly kind: "person" }>;

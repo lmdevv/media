@@ -11,6 +11,10 @@ export type Request = Doc<"connectRequests">;
 /** A device that has not reported for this long is offline, and a command to it fails. */
 export const ONLINE_MS = 30_000;
 
+/** Whether the device reported within `ONLINE_MS` of `now`. */
+export const isOnline = (player: Player, now: number): boolean =>
+  now - player.reportedAt <= ONLINE_MS;
+
 /** Play or pause at a position in server time: `positionMs` held at `at`. */
 export interface Transport {
   readonly playing: boolean;
@@ -71,12 +75,8 @@ export const changed = (current: Transport, change: Change, now: number): Transp
   at: now,
 });
 
-/**
- * The next request's revision on a device: above every request before it, and above any revision
- * the reporter claims.
- */
-export const nextRevision = (player: Player, request: Request | null): number =>
-  Math.max(request?.revision ?? 0, player.applied) + 1;
+/** The next request's revision on a device, above every request before it. */
+export const nextRevision = (request: Request | null): number => (request?.revision ?? 0) + 1;
 
 /**
  * The revision a report leaves applied. It never goes down for the same reporter. A new reporter

@@ -121,7 +121,8 @@ export default defineSchema({
     .index("userId", ["userId"])
     .index("by_key", ["keyId"])
     .index("by_expiration", ["expirationTime"])
-    .index("by_device_user", ["device.id", "userId"]),
+    .index("by_device_user", ["device.id", "userId"])
+    .index("by_user_device", ["userId", "device.id"]),
 
   /** Convex Auth's refresh tokens, in its own shape. */
   authRefreshTokens: defineTable({
@@ -235,7 +236,7 @@ export default defineSchema({
         ),
       }),
     ),
-  ),
+  ).index("by_mode", ["mode"]),
 
   /**
    * What a device last said it plays, one row per device (ADR 0018). Only the device writes it,

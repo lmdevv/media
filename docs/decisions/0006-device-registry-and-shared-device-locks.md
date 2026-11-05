@@ -174,7 +174,7 @@ ADR 0018 records how it is built.
 | `lock`                | tile     | `admin`, on anyone but a guest                                                   |
 | `unlock`              | tile     | `admin`, and no listed kid locking the tile                                      |
 | `answer`              | approval | `account`; `open` by the tile's person, `leave` by an adult                      |
-| `control`             | device   | as built in ADR 0018: the person's own device or a shared device listing them    |
+| `control`, `report`   | device   | as built in ADR 0018: the person's own device or a shared device listing them    |
 | `listOnSharedDevices` | account  | oneself with `account` and no restrictions; otherwise `admin`, on a kid          |
 | `resetUnlockCode`     | account  | `admin`, on anyone in the household                                              |
 | `manageDevices`       | server   | `admin`                                                                          |

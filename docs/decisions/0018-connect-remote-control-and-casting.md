@@ -103,16 +103,20 @@ Otherwise the report stands. A late report with an older revision does not undo 
   tile opens on a shared TV, or someone else signs in on the app, the new session reports and none
   of the earlier requests apply to it.
 - `applied` never goes down for the same reporting session. An app that restarts and reports
-  `applied: 0` keeps the requests it applied, and `requested` stays null.
-- A new request's revision is above the last request's and above any revision the device claims
-  to have applied, so no request is born already applied.
+  `applied: 0` keeps the requests it applied, and `requested` stays null. A report that claims a
+  revision above the newest request fails `invalid_args`.
+- A device that changes what plays on its own, or stops playing, reports `applied` as the newest
+  revision `requested` showed it, whether or not it acted on it. So a request sent for one movie
+  never lands on the next one. The core cannot tell new playback from old without item ids, so
+  this is part of the device's contract.
 - `control` refuses a device whose reporting session ended or that has not reported for 30
   seconds (`conflict`, "That device is offline"), and a device that plays nothing (`conflict`).
   So no request waits for a device to come back and then fires late.
-- `list` shows the devices that reported in the 30 seconds before it ran, and only while the
-  session that reported is live. A subscribed query runs again when any device reports, not as
-  time passes, so a client also treats a target silent for 30 seconds as offline by its
-  `reportedAt`.
+- `list` reads only devices the caller might control: those they are signed in on, and every
+  shared device while shared devices list them, at most 64 of each. It shows the ones whose
+  reporting session is live and that reported in the 30 seconds before it ran. A subscribed query
+  runs again when a device it read reports, not as time passes, so a client also treats a target
+  silent for 30 seconds as offline by its `reportedAt`.
 - Changing a device's mode or removing it deletes both rows in the same transaction as the change
   (`dropConnect`, called from the registry's `purgeLeftovers`). The sessions on the device end
   with the same write, so a command in flight fails `not_found`, and the device's next report
@@ -122,9 +126,18 @@ Otherwise the report stands. A late report with an older revision does not undo 
   The websocket client sends them in order. Two concurrent reports over HTTP can store the older
   one, until the next report replaces it.
 
+### What each write wakes
+
+- A report rewrites one `connectPlayers` row. It runs again the `list` of each controller who can
+  reach that device, and the device's own `requested`. It runs nothing that reads `devices` or
+  sessions.
+- A command rewrites one `connectRequests` row. It runs again the same `list` queries and the
+  device's `requested`, which is how the device hears of it.
+
 ### Who controls a device
 
-`can(principal, "control", device)` reads three facts that `connect/targets.ts` loads:
+`can(principal, "control", device)` reads three facts that `deviceFor` in
+`connect/facts.ts` loads:
 
 - the relation: on a personal device, whether the principal has a live session there; on a
   shared device, whether it lists them,
@@ -140,6 +153,12 @@ Otherwise the report stands. A late report with an older revision does not undo 
 
 Then the credential needs `play` in the domain the device plays, or in any domain while it plays
 nothing. A `music:play` API key cannot pause a movie. A kid's restrictions do not change control.
+On a personal device with several people signed in, each of them controls it, whoever's session
+reports, since ADR 0006 counts a personal device as one's own while one is signed in on it.
+
+`can(principal, "report", device)` uses the same reach and scope for the session that reports, so a
+device cannot claim to play a domain its session cannot play, and a controller's scope check reads
+a domain the device could stream.
 A refusal that is `hidden` fails `not_found`, so another person's personal device reads the same
 as a device that does not exist. `list` shows only the devices `control` would allow.
 

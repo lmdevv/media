@@ -18,7 +18,7 @@ import {
   randomSecret,
   sha256Hex,
 } from "../lib/secrets";
-import { dropConnect } from "../connect/player";
+import { dropConnect } from "../connect/facts";
 import { requireServer } from "../permissions/authorize";
 import type { PersonDoc } from "../permissions/policy";
 import { purgeDevicePage } from "../downloads";

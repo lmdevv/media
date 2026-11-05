@@ -151,10 +151,9 @@ describe("a change a controller asks for", () => {
 });
 
 describe("revisions", () => {
-  it("number each request above the last one and above what the device claims", () => {
-    expect(nextRevision(player(), null)).toBe(1);
-    expect(nextRevision(player({ applied: 3 }), request({ revision: 3 }))).toBe(4);
-    expect(nextRevision(player({ applied: 9 }), request({ revision: 3 }))).toBe(10);
+  it("number each request above the last one", () => {
+    expect(nextRevision(null)).toBe(1);
+    expect(nextRevision(request({ revision: 3 }))).toBe(4);
   });
 
   it("never go down for one reporter, so a restarted app does not apply a request again", () => {

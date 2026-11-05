@@ -239,6 +239,24 @@ const rows: ReadonlyArray<Row> = [
   },
 ];
 
+describe("who reports a device's playback", () => {
+  it("is a session on the device that may play what it reports", () => {
+    expect(can(as.tile, "report", device(listed, "music"))).toEqual(ALLOWED);
+    expect(can(as.member, "report", device(own, null))).toEqual(ALLOWED);
+  });
+
+  it("refuses a report of a domain the session cannot play", () => {
+    expect(can(as.musicKey, "report", device(own, "movies"))).toEqual(
+      refused("forbidden", "scope"),
+    );
+  });
+
+  it("refuses guests and services, whose devices are no players", () => {
+    expect(can(as.guest, "report", device(own))).toEqual(refused("hidden", "guest"));
+    expect(can(as.service, "report", device(own))).toEqual(refused("hidden", "service"));
+  });
+});
+
 describe("who controls a device", () => {
   it.each(rows)("$name", ({ principal, device: resource, expected }) => {
     expect(can(principal, "control", resource)).toEqual(expected);

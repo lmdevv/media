@@ -302,6 +302,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     );
     expect(await refusal(report(laptop.signedIn, playing(Number.NaN)))).toBe("invalid_args");
     expect(await refusal(report(laptop.signedIn, playing(0, 1.5)))).toBe("invalid_args");
+    expect(await refusal(report(laptop.signedIn, playing(0, 1)))).toBe("invalid_args");
     expect(
       await refusal(
         report(laptop.signedIn, { ...playing(0), output: { kind: "cast", receiver: " " } }),

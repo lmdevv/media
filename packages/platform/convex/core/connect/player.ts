@@ -1,46 +1,26 @@
 import { register } from "../../../commands/core/connect/player";
-import type { Doc, Id } from "../../_generated/dataModel";
-import type { DatabaseReader, MutationCtx } from "../../_generated/server";
+import type { Doc } from "../../_generated/dataModel";
+import type { DatabaseReader } from "../../_generated/server";
+import { callerUser } from "../auth/caller";
 import type { Caller } from "../auth/caller";
 import { fail } from "../lib/errors";
+import { can } from "../permissions/policy";
+import { boundDevice } from "../sessions";
+import { deviceFor, playerOf, requestOf } from "./facts";
 import { appliedAfter, parsePosition, pendingRequest } from "./playback";
-import type { Player, Request } from "./playback";
+import type { Player } from "./playback";
 
 const RECEIVER_MAX = 64;
 
 type Output = Player["output"];
 
-/** The device's player row, or null before its first report. */
-export const playerOf = (db: DatabaseReader, deviceId: Id<"devices">): Promise<Player | null> =>
-  db
-    .query("connectPlayers")
-    .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
-    .unique();
-
-/** The newest request made of the device, or null before the first. */
-export const requestOf = (db: DatabaseReader, deviceId: Id<"devices">): Promise<Request | null> =>
-  db
-    .query("connectRequests")
-    .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
-    .unique();
-
-/** Forgets what Connect kept for a device: its report and its request. */
-export const dropConnect = async (
-  ctx: Pick<MutationCtx, "db">,
-  deviceId: Id<"devices">,
-): Promise<void> => {
-  const rows: ReadonlyArray<Doc<"connectPlayers"> | Doc<"connectRequests"> | null> =
-    await Promise.all([playerOf(ctx.db, deviceId), requestOf(ctx.db, deviceId)]);
-
-  await Promise.all(rows.flatMap((row) => (row === null ? [] : [ctx.db.delete(row._id)])));
-};
-
-const deviceOfCaller = async (db: DatabaseReader, caller: Caller): Promise<Id<"devices">> => {
+const deviceOfCaller = async (db: DatabaseReader, caller: Caller): Promise<Doc<"devices">> => {
   const session = await db.get(caller.sessionId);
-  const device = session === null || session.kind === "apiKey" ? undefined : session.device;
+  const bound = session === null ? null : boundDevice(session);
+  const device = bound === null ? null : await db.get(bound.id);
 
   return (
-    device?.id ??
+    device ??
     fail("forbidden", "Only an app registered as a device has a player; enroll this app first")
   );
 };
@@ -64,38 +44,58 @@ const parseOutput = (output: Output): Output => {
   };
 };
 
-const parseRevision = (revision: number): number =>
-  Number.isSafeInteger(revision) && revision >= 0
-    ? revision
-    : fail("invalid_args", "A revision is a whole number, 0 or more");
+const parseApplied = (applied: number, newest: number): number => {
+  if (!Number.isSafeInteger(applied) || applied < 0) {
+    return fail("invalid_args", "A revision is a whole number, 0 or more");
+  }
+
+  return applied > newest
+    ? fail("invalid_args", `No request after revision ${newest} was made of this device`)
+    : applied;
+};
 
 export const { report, requested } = register({
   report: async (ctx, { output, playback, applied }, caller) => {
-    const deviceId = await deviceOfCaller(ctx.db, caller);
-    const stored = await playerOf(ctx.db, deviceId);
-    const reportedAt = Date.now();
+    const now = Date.now();
+    const device = await deviceOfCaller(ctx.db, caller);
+
+    const [person, stored, request] = await Promise.all([
+      callerUser(ctx, caller),
+      playerOf(ctx.db, device._id),
+      requestOf(ctx.db, device._id),
+    ]);
+
+    const resource = await deviceFor(ctx.db, device, person, playback?.domain ?? null, now);
+
+    if (!can(caller, "report", resource).allowed) {
+      return fail("forbidden", "This session cannot play what it reports");
+    }
 
     const row = {
-      deviceId,
+      deviceId: device._id,
       reporter: caller.sessionId,
       output: parseOutput(output),
       playback:
         playback === null ? null : { ...playback, positionMs: parsePosition(playback.positionMs) },
-      applied: appliedAfter(stored, caller.sessionId, parseRevision(applied)),
-      reportedAt,
+      applied: appliedAfter(
+        stored,
+        caller.sessionId,
+        parseApplied(applied, request?.revision ?? 0),
+      ),
+      reportedAt: now,
     };
 
     if (stored === null) await ctx.db.insert("connectPlayers", row);
     else await ctx.db.replace(stored._id, row);
 
-    return { reportedAt };
+    return { reportedAt: now };
   },
   requested: async (ctx, _args, caller) => {
-    const deviceId = await deviceOfCaller(ctx.db, caller);
+    const device = await deviceOfCaller(ctx.db, caller);
 
     const [player, request] = await Promise.all([
-      playerOf(ctx.db, deviceId),
-      requestOf(ctx.db, deviceId),
+      playerOf(ctx.db, device._id),
+      requestOf(ctx.db, device._id),
     ]);
 
     const pending = player?.reporter === caller.sessionId ? pendingRequest(player, request) : null;
