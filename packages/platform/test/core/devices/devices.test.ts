@@ -1,8 +1,10 @@
+import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { roleScopes } from "../../../commands/scopes";
-import { api } from "../../../convex/_generated/api";
+import { api, internal } from "../../../convex/_generated/api";
 import { inOrder } from "../../../convex/core/lib/inOrder";
+import { runFunction } from "../../admin";
 import {
   anonymous,
   enroll,
@@ -15,10 +17,41 @@ import {
   sharedTiles,
   tileIn,
 } from "../../devices";
+import type { Member } from "../../devices";
 import { refusal, signIn, signInAs } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
+import type { CoreStack } from "../../stack-env";
 
 const stack = coreStackFromEnvFile();
+
+/** Every way a person's password gets set after they exist. */
+const SET_PASSWORD = {
+  "their own change": async (_core, who, password) => {
+    await who.signedIn.client.action(api.core.accounts.me.changePassword, {
+      currentPassword: who.person.password,
+      newPassword: password,
+    });
+  },
+  "a reset link": async (core, who, password) => {
+    const admin = await sharedAdmin(core);
+
+    const { code } = await admin.signedIn.client.action(api.core.accounts.resetLinks.create, {
+      userId: who.userId,
+    });
+
+    await signIn(core, "reset", { code, password });
+  },
+  "a host reset": async (core, who, password) => {
+    await runFunction(
+      core,
+      internal.core.accounts.host.resetPassword,
+      { username: who.person.username, password },
+      Schema.Struct({ username: Schema.String }),
+    );
+  },
+} satisfies Readonly<
+  Record<string, (core: CoreStack, who: Member, password: string) => Promise<void>>
+>;
 
 const listed = listings();
 
@@ -296,7 +329,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
   it("never lets an unlock code sign in", async () => {
     if (stack === undefined) return;
     const dad = await listed.adult(await member(stack, "dad"));
-    const code = "73914482";
+    const code = "7391448";
 
     await dad.signedIn.client.action(api.core.devices.unlockCodes.set, { code });
 
@@ -309,19 +342,39 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     expect(
       await refusal(openTile(stack, phone, dad.userId, { kind: "code", by: dad.userId, code })),
     ).toBe("forbidden");
-
-    await dad.signedIn.client.action(api.core.accounts.me.changePassword, {
-      currentPassword: dad.person.password,
-      newPassword: code,
-    });
-
-    expect(
-      await refusal(dad.signedIn.client.action(api.core.devices.unlockCodes.set, { code })),
-    ).toBe("invalid_args");
     expect(
       await refusal(dad.signedIn.client.action(api.core.devices.unlockCodes.set, { code: "12ab" })),
     ).toBe("invalid_args");
   });
+
+  it.each(Object.entries(SET_PASSWORD))(
+    "never keeps an unlock code that is also the password set by %s",
+    async (_path, setPassword) => {
+      if (stack === undefined) return;
+      const admin = await sharedAdmin(stack);
+      const dad = await member(stack, "dad");
+      const tv = await sharedDevice(stack, admin);
+      const digits = "73914482";
+
+      const setCode = await refusal(
+        dad.signedIn.client.action(api.core.devices.unlockCodes.set, { code: digits }),
+      );
+
+      await setPassword(stack, dad, digits);
+
+      const signedIn = await signInAs(stack, { ...dad.person, password: digits });
+
+      await listed.adult({ ...dad, signedIn });
+
+      expect({ setCode, code: tileIn(await picker(stack, tv), dad.userId).code }).toEqual({
+        setCode: "invalid_args",
+        code: "none",
+      });
+      expect(
+        await refusal(signedIn.client.action(api.core.devices.unlockCodes.set, { code: digits })),
+      ).toBe("invalid_args");
+    },
+  );
 
   it("opens an adult's tile when that adult approves from another signed-in session", async () => {
     if (stack === undefined) return;
