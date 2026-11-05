@@ -103,7 +103,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
   });
 
   it("lists the core's users as its owner", async () => {
-    const users = await runMovies(["admin", "users", "list"], owner);
+    const users = await runMovies(["admin", "users", "list", "--limit", "1000"], owner);
 
     expect(users.code, users.stderr).toBe(ExitCode.ok);
     expect(Users(users.stdout).page).toContainEqual({ username: ownerName, role: "owner" });
