@@ -17,7 +17,12 @@ const currentResult = v.object({
   username: v.string(),
   role: v.union(v.literal("owner"), v.literal("admin"), v.literal("member"), v.literal("guest")),
   sessionId: v.id("authSessions"),
-  kind: v.union(v.literal("password"), v.literal("apiKey"), v.literal("deviceCode")),
+  kind: v.union(
+    v.literal("password"),
+    v.literal("apiKey"),
+    v.literal("deviceCode"),
+    v.literal("tile"),
+  ),
   scopes: v.array(
     v.union(
       v.literal("account"),

@@ -10,6 +10,11 @@ import type { Refs as core_accounts_users } from "./core/accounts/users";
 import type { Refs as core_auth_apiKeys } from "./core/auth/apiKeys";
 import type { Refs as core_auth_deviceCodes } from "./core/auth/deviceCodes";
 import type { Refs as core_auth_sessions } from "./core/auth/sessions";
+import type { Refs as core_devices_approvals } from "./core/devices/approvals";
+import type { Refs as core_devices_picker } from "./core/devices/picker";
+import type { Refs as core_devices_registry } from "./core/devices/registry";
+import type { Refs as core_devices_tiles } from "./core/devices/tiles";
+import type { Refs as core_devices_unlockCodes } from "./core/devices/unlockCodes";
 import type { Refs as core_libraries } from "./core/libraries";
 import type { Refs as core_permissions_grants } from "./core/permissions/grants";
 import type { Refs as core_permissions_groups } from "./core/permissions/groups";
@@ -59,6 +64,31 @@ export const commandRefs = {
     .current satisfies core_auth_sessions["current"],
   "core.auth.sessions.end": api.core.auth.sessions.end satisfies core_auth_sessions["end"],
   "core.auth.sessions.endAll": api.core.auth.sessions.endAll satisfies core_auth_sessions["endAll"],
+  "core.devices.approvals.approve": api.core.devices.approvals
+    .approve satisfies core_devices_approvals["approve"],
+  "core.devices.approvals.deny": api.core.devices.approvals
+    .deny satisfies core_devices_approvals["deny"],
+  "core.devices.approvals.pending": api.core.devices.approvals
+    .pending satisfies core_devices_approvals["pending"],
+  "core.devices.approvals.request": api.core.devices.approvals
+    .request satisfies core_devices_approvals["request"],
+  "core.devices.picker.show": api.core.devices.picker.show satisfies core_devices_picker["show"],
+  "core.devices.registry.enroll": api.core.devices.registry
+    .enroll satisfies core_devices_registry["enroll"],
+  "core.devices.registry.list": api.core.devices.registry
+    .list satisfies core_devices_registry["list"],
+  "core.devices.registry.remove": api.core.devices.registry
+    .remove satisfies core_devices_registry["remove"],
+  "core.devices.registry.setMode": api.core.devices.registry
+    .setMode satisfies core_devices_registry["setMode"],
+  "core.devices.tiles.setListed": api.core.devices.tiles
+    .setListed satisfies core_devices_tiles["setListed"],
+  "core.devices.tiles.setLock": api.core.devices.tiles
+    .setLock satisfies core_devices_tiles["setLock"],
+  "core.devices.unlockCodes.reset": api.core.devices.unlockCodes
+    .reset satisfies core_devices_unlockCodes["reset"],
+  "core.devices.unlockCodes.set": api.core.devices.unlockCodes
+    .set satisfies core_devices_unlockCodes["set"],
   "core.libraries.create": api.core.libraries.create satisfies core_libraries["create"],
   "core.libraries.get": api.core.libraries.get satisfies core_libraries["get"],
   "core.libraries.list": api.core.libraries.list satisfies core_libraries["list"],

@@ -14,30 +14,35 @@ export const sweep = internalMutation({
   handler: async (ctx) => {
     const now = Date.now();
 
-    const [refreshTokens, deviceCodes, rateLimits, invites, resetLinks] = await Promise.all([
-      ctx.db
-        .query("authRefreshTokens")
-        .withIndex("by_expiration", (q) => q.lt("expirationTime", now))
-        .take(SWEEP_BATCH),
-      ctx.db
-        .query("deviceCodes")
-        .withIndex("by_expiration", (q) => q.lt("expiresAt", now - HOUR_MS))
-        .take(SWEEP_BATCH),
-      ctx.db
-        .query("rateLimits")
-        .withIndex("by_last_attempt", (q) => q.lt("lastAttemptTime", now - HOUR_MS))
-        .take(SWEEP_BATCH),
-      ctx.db
-        .query("invites")
-        .withIndex("by_expiration", (q) => q.lte("expiresAt", now))
-        .take(SWEEP_BATCH),
-      ctx.db
-        .query("resetLinks")
-        .withIndex("by_expiration", (q) => q.lte("expiresAt", now))
-        .take(SWEEP_BATCH),
-    ]);
+    const [refreshTokens, deviceCodes, rateLimits, invites, resetLinks, approvals] =
+      await Promise.all([
+        ctx.db
+          .query("authRefreshTokens")
+          .withIndex("by_expiration", (q) => q.lt("expirationTime", now))
+          .take(SWEEP_BATCH),
+        ctx.db
+          .query("deviceCodes")
+          .withIndex("by_expiration", (q) => q.lt("expiresAt", now - HOUR_MS))
+          .take(SWEEP_BATCH),
+        ctx.db
+          .query("rateLimits")
+          .withIndex("by_last_attempt", (q) => q.lt("lastAttemptTime", now - HOUR_MS))
+          .take(SWEEP_BATCH),
+        ctx.db
+          .query("invites")
+          .withIndex("by_expiration", (q) => q.lte("expiresAt", now))
+          .take(SWEEP_BATCH),
+        ctx.db
+          .query("resetLinks")
+          .withIndex("by_expiration", (q) => q.lte("expiresAt", now))
+          .take(SWEEP_BATCH),
+        ctx.db
+          .query("tileApprovals")
+          .withIndex("by_expiration", (q) => q.lte("expiresAt", now))
+          .take(SWEEP_BATCH),
+      ]);
 
-    const batches = [refreshTokens, deviceCodes, rateLimits, invites, resetLinks];
+    const batches = [refreshTokens, deviceCodes, rateLimits, invites, resetLinks, approvals];
     const swept = batches.flat();
 
     await Promise.all(swept.map((row) => ctx.db.delete(row._id)));

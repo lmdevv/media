@@ -283,6 +283,7 @@ const core_auth_sessions_current = query({
       Schema.Literal("password"),
       Schema.Literal("apiKey"),
       Schema.Literal("deviceCode"),
+      Schema.Literal("tile"),
     ]),
     scopes: Schema.Array(
       Schema.Union([
@@ -310,6 +311,223 @@ const core_auth_sessions_endAll = mutation({
   name: "core.auth.sessions.endAll",
   path: "core/auth/sessions:endAll",
   args: Schema.Struct({ keepCurrent: Schema.Boolean }),
+  result: Schema.Null,
+});
+
+const core_devices_approvals_approve = mutation({
+  name: "core.devices.approvals.approve",
+  path: "core/devices/approvals:approve",
+  args: Schema.Struct({ approvalId: Schema.String.pipe(Schema.brand("Id<tileApprovals>")) }),
+  result: Schema.Null,
+});
+
+const core_devices_approvals_deny = mutation({
+  name: "core.devices.approvals.deny",
+  path: "core/devices/approvals:deny",
+  args: Schema.Struct({ approvalId: Schema.String.pipe(Schema.brand("Id<tileApprovals>")) }),
+  result: Schema.Null,
+});
+
+const core_devices_approvals_pending = query({
+  name: "core.devices.approvals.pending",
+  path: "core/devices/approvals:pending",
+  args: Schema.Struct({}),
+  result: Schema.Array(
+    Schema.Struct({
+      approvalId: Schema.String.pipe(Schema.brand("Id<tileApprovals>")),
+      intent: Schema.Union([Schema.Literal("open"), Schema.Literal("leave")]),
+      deviceName: Schema.String,
+      userId: Schema.String.pipe(Schema.brand("Id<users>")),
+      username: Schema.String,
+      expiresAt: Schema.Finite,
+    }),
+  ),
+});
+
+const core_devices_approvals_request = mutation({
+  name: "core.devices.approvals.request",
+  path: "core/devices/approvals:request",
+  args: Schema.Struct({
+    device: Schema.String,
+    ask: Schema.Union([
+      Schema.Struct({
+        intent: Schema.Literal("open"),
+        userId: Schema.String.pipe(Schema.brand("Id<users>")),
+      }),
+      Schema.Struct({ intent: Schema.Literal("leave") }),
+    ]),
+  }),
+  result: Schema.Struct({
+    approvalId: Schema.String.pipe(Schema.brand("Id<tileApprovals>")),
+    expiresAt: Schema.Finite,
+  }),
+});
+
+const core_devices_picker_show = query({
+  name: "core.devices.picker.show",
+  path: "core/devices/picker:show",
+  args: Schema.Struct({ device: Schema.String }),
+  result: Schema.Union([
+    Schema.Struct({
+      deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+      name: Schema.String,
+      mode: Schema.Literal("personal"),
+      tiles: Schema.Array(
+        Schema.Struct({
+          userId: Schema.String.pipe(Schema.brand("Id<users>")),
+          username: Schema.String,
+        }),
+      ),
+    }),
+    Schema.Struct({
+      deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+      name: Schema.String,
+      mode: Schema.Literal("shared"),
+      holder: Schema.Union([Schema.String.pipe(Schema.brand("Id<users>")), Schema.Null]),
+      tiles: Schema.Array(
+        Schema.Struct({
+          userId: Schema.String.pipe(Schema.brand("Id<users>")),
+          username: Schema.String,
+          kid: Schema.Boolean,
+          code: Schema.Union([
+            Schema.Literal("none"),
+            Schema.Literal("ready"),
+            Schema.Literal("off"),
+          ]),
+          lock: Schema.Union([
+            Schema.Struct({ state: Schema.Literal("open") }),
+            Schema.Struct({
+              state: Schema.Literal("locked"),
+              because: Schema.Array(
+                Schema.Union([
+                  Schema.Literal("admin-rule"),
+                  Schema.Literal("kid-listed"),
+                  Schema.Literal("kid-holds-device"),
+                ]),
+              ),
+              opensWith: Schema.Union([
+                Schema.Literal("self"),
+                Schema.Literal("adult"),
+                Schema.Literal("self-or-adult"),
+              ]),
+            }),
+          ]),
+        }),
+      ),
+      approval: Schema.Union([
+        Schema.Struct({
+          approvalId: Schema.String.pipe(Schema.brand("Id<tileApprovals>")),
+          intent: Schema.Union([Schema.Literal("open"), Schema.Literal("leave")]),
+          userId: Schema.String.pipe(Schema.brand("Id<users>")),
+          state: Schema.Union([
+            Schema.Literal("pending"),
+            Schema.Literal("approved"),
+            Schema.Literal("denied"),
+            Schema.Literal("redeemed"),
+          ]),
+          expiresAt: Schema.Finite,
+        }),
+        Schema.Null,
+      ]),
+    }),
+  ]),
+});
+
+const core_devices_registry_enroll = action({
+  name: "core.devices.registry.enroll",
+  path: "core/devices/registry:enroll",
+  args: Schema.Struct({ name: Schema.String, device: Schema.optionalKey(Schema.String) }),
+  result: Schema.Struct({
+    deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+    device: Schema.String,
+  }),
+});
+
+const core_devices_registry_list = query({
+  name: "core.devices.registry.list",
+  path: "core/devices/registry:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+        name: Schema.String,
+        mode: Schema.Union([Schema.Literal("personal"), Schema.Literal("shared")]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const core_devices_registry_remove = mutation({
+  name: "core.devices.registry.remove",
+  path: "core/devices/registry:remove",
+  args: Schema.Struct({ deviceId: Schema.String.pipe(Schema.brand("Id<devices>")) }),
+  result: Schema.Null,
+});
+
+const core_devices_registry_setMode = mutation({
+  name: "core.devices.registry.setMode",
+  path: "core/devices/registry:setMode",
+  args: Schema.Struct({
+    deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+    mode: Schema.Union([Schema.Literal("personal"), Schema.Literal("shared")]),
+  }),
+  result: Schema.Null,
+});
+
+const core_devices_tiles_setListed = mutation({
+  name: "core.devices.tiles.setListed",
+  path: "core/devices/tiles:setListed",
+  args: Schema.Struct({
+    userId: Schema.String.pipe(Schema.brand("Id<users>")),
+    listed: Schema.Boolean,
+  }),
+  result: Schema.Null,
+});
+
+const core_devices_tiles_setLock = mutation({
+  name: "core.devices.tiles.setLock",
+  path: "core/devices/tiles:setLock",
+  args: Schema.Struct({
+    userId: Schema.String.pipe(Schema.brand("Id<users>")),
+    locked: Schema.Boolean,
+  }),
+  result: Schema.Null,
+});
+
+const core_devices_unlockCodes_reset = mutation({
+  name: "core.devices.unlockCodes.reset",
+  path: "core/devices/unlockCodes:reset",
+  args: Schema.Struct({
+    deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+    userId: Schema.String.pipe(Schema.brand("Id<users>")),
+  }),
+  result: Schema.Null,
+});
+
+const core_devices_unlockCodes_set = action({
+  name: "core.devices.unlockCodes.set",
+  path: "core/devices/unlockCodes:set",
+  args: Schema.Struct({ code: Schema.Union([Schema.String, Schema.Null]) }),
   result: Schema.Null,
 });
 
@@ -767,6 +985,44 @@ export const effectMethods = (method: EffectBuilder) => ({
         endAll: method.mutation(core_auth_sessions_endAll),
       },
     },
+    devices: {
+      approvals: {
+        /** `core.devices.approvals.approve` (mutation, account, API keys refused): Approve opening your tile on a shared device, or as an adult let a kid leave theirs. */
+        approve: method.mutation(core_devices_approvals_approve),
+        /** `core.devices.approvals.deny` (mutation, account, API keys refused): Refuse a shared-device approval. */
+        deny: method.mutation(core_devices_approvals_deny),
+        /** `core.devices.approvals.pending` (query, account): List the shared-device approvals you can answer now. */
+        pending: method.query(core_devices_approvals_pending),
+        /** `core.devices.approvals.request` (mutation, public): From a shared device, ask someone signed in elsewhere to open their locked tile, or an adult to let a kid leave. */
+        request: method.mutation(core_devices_approvals_request),
+      },
+      picker: {
+        /** `core.devices.picker.show` (query, public): Show a device's picker: who is signed in on it, or on a shared device who opted in, which tiles are locked, and its approval. */
+        show: method.query(core_devices_picker_show),
+      },
+      registry: {
+        /** `core.devices.registry.enroll` (action, account, API keys refused): Register this app as a personal device, or find it again by its device code, and sign this session in on it. */
+        enroll: method.action(core_devices_registry_enroll),
+        /** `core.devices.registry.list` (query, admin): List every registered device and whether it is shared, newest first. */
+        list: method.query(core_devices_registry_list),
+        /** `core.devices.registry.remove` (mutation, admin, API keys refused): Forget a device and sign everyone on it out. */
+        remove: method.mutation(core_devices_registry_remove),
+        /** `core.devices.registry.setMode` (mutation, admin, API keys refused): Make a device shared, so its picker lists everyone who opted in, or personal again; either way everyone on it is signed out. */
+        setMode: method.mutation(core_devices_registry_setMode),
+      },
+      tiles: {
+        /** `core.devices.tiles.setListed` (mutation, account, API keys refused): Put yourself on every shared device's picker or take yourself off; an admin decides it for a kid. */
+        setListed: method.mutation(core_devices_tiles_setListed),
+        /** `core.devices.tiles.setLock` (mutation, admin, API keys refused): Require someone's tile on shared devices to open with a proof, or stop; the lock a listed kid causes stays. */
+        setLock: method.mutation(core_devices_tiles_setLock),
+      },
+      unlockCodes: {
+        /** `core.devices.unlockCodes.reset` (mutation, admin, API keys refused): Turn someone's unlock code back on for one shared device after 5 wrong tries. */
+        reset: method.mutation(core_devices_unlockCodes_reset),
+        /** `core.devices.unlockCodes.set` (action, account, API keys refused): Set or clear your short unlock code, which opens your tile on shared-device lock screens and never signs in. */
+        set: method.action(core_devices_unlockCodes_set),
+      },
+    },
     libraries: {
       /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
       create: method.mutation(core_libraries_create),
@@ -885,6 +1141,44 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         end: method.mutation(core_auth_sessions_end),
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
+      },
+    },
+    devices: {
+      approvals: {
+        /** `core.devices.approvals.approve` (mutation, account, API keys refused): Approve opening your tile on a shared device, or as an adult let a kid leave theirs. */
+        approve: method.mutation(core_devices_approvals_approve),
+        /** `core.devices.approvals.deny` (mutation, account, API keys refused): Refuse a shared-device approval. */
+        deny: method.mutation(core_devices_approvals_deny),
+        /** `core.devices.approvals.pending` (query, account): List the shared-device approvals you can answer now. */
+        pending: method.query(core_devices_approvals_pending),
+        /** `core.devices.approvals.request` (mutation, public): From a shared device, ask someone signed in elsewhere to open their locked tile, or an adult to let a kid leave. */
+        request: method.mutation(core_devices_approvals_request),
+      },
+      picker: {
+        /** `core.devices.picker.show` (query, public): Show a device's picker: who is signed in on it, or on a shared device who opted in, which tiles are locked, and its approval. */
+        show: method.query(core_devices_picker_show),
+      },
+      registry: {
+        /** `core.devices.registry.enroll` (action, account, API keys refused): Register this app as a personal device, or find it again by its device code, and sign this session in on it. */
+        enroll: method.action(core_devices_registry_enroll),
+        /** `core.devices.registry.list` (query, admin): List every registered device and whether it is shared, newest first. */
+        list: method.query(core_devices_registry_list),
+        /** `core.devices.registry.remove` (mutation, admin, API keys refused): Forget a device and sign everyone on it out. */
+        remove: method.mutation(core_devices_registry_remove),
+        /** `core.devices.registry.setMode` (mutation, admin, API keys refused): Make a device shared, so its picker lists everyone who opted in, or personal again; either way everyone on it is signed out. */
+        setMode: method.mutation(core_devices_registry_setMode),
+      },
+      tiles: {
+        /** `core.devices.tiles.setListed` (mutation, account, API keys refused): Put yourself on every shared device's picker or take yourself off; an admin decides it for a kid. */
+        setListed: method.mutation(core_devices_tiles_setListed),
+        /** `core.devices.tiles.setLock` (mutation, admin, API keys refused): Require someone's tile on shared devices to open with a proof, or stop; the lock a listed kid causes stays. */
+        setLock: method.mutation(core_devices_tiles_setLock),
+      },
+      unlockCodes: {
+        /** `core.devices.unlockCodes.reset` (mutation, admin, API keys refused): Turn someone's unlock code back on for one shared device after 5 wrong tries. */
+        reset: method.mutation(core_devices_unlockCodes_reset),
+        /** `core.devices.unlockCodes.set` (action, account, API keys refused): Set or clear your short unlock code, which opens your tile on shared-device lock screens and never signs in. */
+        set: method.action(core_devices_unlockCodes_set),
       },
     },
     libraries: {

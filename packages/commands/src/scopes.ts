@@ -19,7 +19,8 @@ type ContentVerb = (typeof contentVerbs)[number];
 
 type DomainScope = `${ContentDomain}:${ContentVerb}`;
 
-const domainScopes: ReadonlyArray<DomainScope> = contentDomains.flatMap((domain) =>
+/** Every content domain's scopes: what a session on a shared device may hold (ADR 0006). */
+export const domainScopes: ReadonlyArray<DomainScope> = contentDomains.flatMap((domain) =>
   contentVerbs.map((verb) => `${domain}:${verb}` as const),
 );
 

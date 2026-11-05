@@ -198,8 +198,6 @@ an ADR.
   and its JWKS from Convex's HTTP actions origin, a separate port in today's dev stack. The
   register names `/convex` for Convex and `/api` for the server and does not place that origin.
   The deploy image PR in phase 3 settles it.
-- **How a locked unlock code recovers.** The code locks after 5 wrong tries, and the register does
-  not say how it unlocks again (ADR 0006). The devices PR in phase 3 settles it.
 - **What the shared iOS keychain stores.** Each app mints its own session from the shared
   keychain (ADR 0020). The register does not say which credential the keychain holds or what
   signing out of one app does to the other. The movies port settles it with `@media/mobile-core`.

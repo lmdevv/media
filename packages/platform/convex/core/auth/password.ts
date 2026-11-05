@@ -7,7 +7,7 @@ import { internal } from "../../_generated/api";
 import type { DataModel } from "../../_generated/dataModel";
 import { internalMutation, internalQuery } from "../../_generated/server";
 import { fail } from "../lib/errors";
-import { PASSWORD_MAX, passwordHashOf, passwordMatches, signInLimit } from "../lib/passwords";
+import { checkTypedPassword, passwordHashOf, passwordMatches, signInLimit } from "../lib/passwords";
 import { refundAttempt, takeAttempt } from "../lib/rateLimit";
 import { parseUsername } from "../lib/usernames";
 import { openSession, signedIn } from "../sessions";
@@ -47,9 +47,7 @@ export const passwordProvider = ConvexCredentials<DataModel>({
   authorize: async (params, ctx): Promise<SignedIn> => {
     const { username, password } = await ctx.runQuery(parseCredentials, params);
 
-    if (password.length > PASSWORD_MAX) {
-      return fail("invalid_args", `Use at most ${PASSWORD_MAX} characters for the password`);
-    }
+    checkTypedPassword(password);
 
     const parsed = parseUsername(username);
 

@@ -1,9 +1,11 @@
 import { Schema } from "effect";
+import { Scrypt } from "lucia";
 import { describe, expect, it } from "vitest";
 
 import { roleScopes } from "../../../commands/scopes";
-import { api } from "../../../convex/_generated/api";
-import { createPerson, refusal, signIn, signInAs } from "../../sign-in";
+import { api, internal } from "../../../convex/_generated/api";
+import { runFunction } from "../../admin";
+import { createPerson, refusal, signIn, signInAs, unique } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 
 const stack = coreStackFromEnvFile();
@@ -118,6 +120,30 @@ describe.skipIf(stack === undefined)("password sign-in", { timeout: 120_000 }, (
     // server error instead of `rate_limited`; either way it never reaches the password check.
     expect(tries.filter((code) => code === "unauthenticated")).toHaveLength(10);
     expect(tries.filter((code) => code === "accepted")).toHaveLength(0);
+  });
+
+  it("takes a password set when the rule counted UTF-16 units, to sign in and to change it", async () => {
+    if (stack === undefined) return;
+    const person = await createPerson(stack);
+    const password = "\uFB03".repeat(100);
+
+    await runFunction(
+      stack,
+      internal.core.accounts.host.storeReset,
+      { username: person.username, hash: await new Scrypt().hash(password) },
+      Schema.Struct({ username: Schema.String }),
+    );
+
+    const signedIn = await signInAs(stack, { ...person, password });
+
+    expect(
+      await refusal(
+        signedIn.client.action(api.core.accounts.me.changePassword, {
+          currentPassword: password,
+          newPassword: `password-${unique()}`,
+        }),
+      ),
+    ).toBe("accepted");
   });
 
   it("gives back the try a successful sign-in took", async () => {

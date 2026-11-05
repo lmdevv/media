@@ -114,6 +114,9 @@ hold its rules, each typed by its list of actions, so a missing or extra row fai
 | `manageGroups`      | server  | `admin`                                                                              |
 | `manageFolders`     | server  | `admin`; making a library or changing its folders (ADR 0024)                         |
 
+ADR 0006 adds the tile, approval, and device actions, and `listOnSharedDevices`,
+`resetUnlockCode`, and `manageDevices`.
+
 The answer is `allowed`, `hidden`, or `forbidden`. Content with no grant, content a restriction
 hides, and any content for a service are `hidden`, which fails `not_found` with the same message
 as a row that does not exist. So a private thing stays invisible to everyone else, admins and the
@@ -239,7 +242,7 @@ and the core allows no public function outside the command list.
 
 - Guest principals and links: p3-guests.
 - The service principal's scope and key: phase 4.
-- Locking shared-device tiles for kids, from `isKid`: p3-devices.
+- Locking shared-device tiles for kids, from `isKid`: built, see ADR 0006.
 
 ### Edge cases settled
 

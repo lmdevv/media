@@ -13,9 +13,18 @@ import type {
 
 const accountRefusal = (action: AccountAction, because: Because, target: AccountTarget): string => {
   if (because === "scope") {
+    if (action === "listOnSharedDevices") return "Only an admin lists a kid on shared devices";
+
     return action === "viewRestrictions"
       ? "Only an admin can see someone else's restrictions"
       : "Only an admin can change someone's account";
+  }
+
+  if (
+    action === "listOnSharedDevices" &&
+    (because === "target-role" || because === "unrestricted-target")
+  ) {
+    return "Adults choose for themselves whether shared devices list them";
   }
 
   if (because === "actor") return "Only the owner hands over ownership";

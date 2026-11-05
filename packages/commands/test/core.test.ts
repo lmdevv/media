@@ -11,6 +11,8 @@ describe("the core's commands", () => {
       "core.auth.deviceCodes.start",
       "core.accounts.invites.lookup",
       "core.accounts.resetLinks.lookup",
+      "core.devices.picker.show",
+      "core.devices.approvals.request",
     ]);
   });
 });
