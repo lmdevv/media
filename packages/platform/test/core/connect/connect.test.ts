@@ -289,6 +289,29 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     expect(await requested(laptop.signedIn)).toBeNull();
   });
 
+  it("keeps a request applied when another person reported on the device in between", async () => {
+    if (stack === undefined) return;
+    const lucia = await member(stack, "lucia");
+    const aiko = await member(stack, "aiko");
+    const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
+    const aikoOnLaptop = await signInAs(stack, aiko.person);
+
+    await enroll(aikoOnLaptop, "Laptop", laptop.device);
+    await report(laptop.signedIn, playing(10_000));
+
+    const { revision } = await control(lucia.signedIn, laptop.deviceId, { playing: false });
+
+    await report(laptop.signedIn, paused(10_050, revision));
+    await report(aikoOnLaptop, playing(0));
+    await report(laptop.signedIn, paused(10_050, 0));
+
+    expect(await requested(laptop.signedIn)).toBeNull();
+    expect(targetIn(await targets(lucia.signedIn), laptop.deviceId)?.playback).toMatchObject({
+      playing: false,
+      pending: false,
+    });
+  });
+
   it("refuses what is not a command or a report", async () => {
     if (stack === undefined) return;
     const lucia = await member(stack, "lucia");
