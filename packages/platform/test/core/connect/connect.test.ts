@@ -312,6 +312,41 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     });
   });
 
+  it("takes reports from an app signed in again after its device changed mode", async () => {
+    if (stack === undefined) return;
+    const admin = await sharedAdmin(stack);
+    const lucia = await member(stack, "lucia");
+    const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
+
+    await report(laptop.signedIn, playing(10_000));
+
+    const { revision } = await control(lucia.signedIn, laptop.deviceId, { playing: false });
+
+    await report(laptop.signedIn, paused(10_050, revision));
+
+    const setMode = (mode: "personal" | "shared") =>
+      admin.signedIn.client.mutation(api.core.devices.registry.setMode, {
+        deviceId: laptop.deviceId,
+        mode,
+      });
+
+    await setMode("shared");
+    await setMode("personal");
+
+    const again = await signInAs(stack, lucia.person);
+
+    await enroll(again, "Laptop", laptop.device);
+
+    expect(await refusal(report(again, paused(10_050, revision)))).toBe("accepted");
+    expect(await refusal(report(again, paused(10_050, revision)))).toBe("accepted");
+    expect(await requested(again)).toBeNull();
+
+    const next = await control(lucia.signedIn, laptop.deviceId, { playing: true });
+
+    expect(next.revision).toBeGreaterThan(revision);
+    expect(await requested(again)).toMatchObject({ revision: next.revision, playing: true });
+  });
+
   it("refuses what is not a command or a report", async () => {
     if (stack === undefined) return;
     const lucia = await member(stack, "lucia");
