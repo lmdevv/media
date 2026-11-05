@@ -50,7 +50,12 @@ the server keeps its file access until phase 4 (D50).
   `manage` on the library, checked first, so someone with no grant gets `not_found` whatever their
   role. Renaming, sharing, and removing need `manage`; scanning needs `edit`; reading needs `view`.
   Each also needs the library's domain scope, such as `music:edit`.
-- An admin sees no library they hold no grant on, in `list`, in `get`, or through a refusal.
+- An admin sees no library they hold no grant on, in `list`, in `get`, or through a refusal, with
+  one exception. Pointing a library at folders tells the admin whether some library already covers
+  a folder, private ones included. Admins choose folders on the server's own disk, so they can
+  already see which folders hold media, and a generic error would not hide it either, because a
+  successful create is still distinguishable. Privacy from admins covers a library's name,
+  contents, members and counts, not whether its folders are in use.
 - `get` shows the folders, and a failed scan's error, which may name them, only to a manager,
   because they are the server's disk layout. It shows a kid no item count and no scan progress,
   because both would count what their restrictions hide.
