@@ -1,6 +1,7 @@
 import type { TicketRequest } from "@media/contracts/ticket";
 import { ConvexClient } from "convex/browser";
 import type { FunctionReturnType } from "convex/server";
+import { ConvexError } from "convex/values";
 import { Schema } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -14,7 +15,7 @@ import type { Device, Member } from "../../devices";
 import { movie, openItem, seedLibrary, share, unshare, visibleItems } from "../../probe";
 import type { Session } from "../../probe";
 import { importRows, newestRows } from "../../rows";
-import { refusal, signInAs, unique } from "../../sign-in";
+import { refusal, signIn, signInAs, unique } from "../../sign-in";
 import type { SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
@@ -48,6 +49,20 @@ const fetchOf = (who: SignedIn, id: Id<"probeItems">) =>
 
 const removeOf = (who: SignedIn, id: Id<"probeItems">): Promise<null> =>
   who.client.mutation(api.core.downloads.remove, { item: itemOf(id) });
+
+const Refusal = Schema.Struct({ code: Schema.String, message: Schema.String });
+
+const answerOf = (call: Promise<unknown>): Promise<string> =>
+  call.then(
+    () => "accepted",
+    (cause: unknown) => {
+      if (!(cause instanceof ConvexError)) return `failed: ${String(cause)}`;
+
+      const { code, message } = Schema.decodeUnknownSync(Refusal)(cause.data);
+
+      return `${code}: ${message}`;
+    },
+  );
 
 const usageOf = (who: SignedIn): Promise<Usage> => who.client.query(api.core.downloads.usage, {});
 
@@ -658,5 +673,68 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     expect(await refusal(listOf(elsewhere))).toBe("conflict");
     expect(await refusal(fetchOf(elsewhere, film))).toBe("conflict");
     expect(await refusal(usageOf(elsewhere))).toBe("conflict");
+  });
+
+  it("answers a guest, a shared-device tile, and a session on no device alike for a missing item and a hidden one", async () => {
+    if (stack === undefined) return;
+
+    const admin = await sharedAdmin(stack);
+
+    const seedOne = async (
+      name: string,
+    ): Promise<{ libraryId: Id<"libraries">; id: Id<"probeItems"> }> => {
+      const seeded = await seedLibrary(stack, admin, {
+        name: `${name}-${unique()}`,
+        kind: "movies",
+        items: [movie(`${name}.mkv`, 0)],
+      });
+
+      const [id] = seeded.itemIds;
+
+      if (id === undefined) throw new Error("no item seeded");
+
+      return { libraryId: seeded.libraryId, id };
+    };
+
+    const hidden = await seedOne("private");
+    const missing = await seedOne("removed");
+
+    await admin.signedIn.client.mutation(api.core.libraries.remove, {
+      libraryId: missing.libraryId,
+    });
+
+    const guest = await importedGuest(stack);
+
+    const kai = await onDevice(stack, "kai-tile", "Den TV");
+
+    await listed.adult({ ...kai, signedIn: await signInAs(stack, kai.person) });
+    await admin.signedIn.client.mutation(api.core.devices.registry.setMode, {
+      deviceId: kai.device.deviceId,
+      mode: "shared",
+    });
+
+    const tile = await openTile(stack, kai.device, kai.userId);
+
+    const keyed = await member(stack, "keyed");
+
+    const { key } = await keyed.signedIn.client.action(api.core.auth.apiKeys.create, {
+      name: "downloads",
+      scopes: ["movies:play"],
+    });
+
+    const deviceless = await signIn(stack, "apiKey", { key });
+
+    const answersFor = async (id: Id<"probeItems">) => ({
+      guest: await answerOf(add(guest, id)),
+      tile: await answerOf(add(tile, id)),
+      deviceless: await answerOf(add(deviceless, id)),
+    });
+
+    const toMissing = await answersFor(missing.id);
+
+    expect(await answersFor(hidden.id)).toEqual(toMissing);
+    expect(
+      [toMissing.guest, toMissing.tile, toMissing.deviceless].map((said) => said.split(":")[0]),
+    ).toEqual(["forbidden", "forbidden", "conflict"]);
   });
 });
