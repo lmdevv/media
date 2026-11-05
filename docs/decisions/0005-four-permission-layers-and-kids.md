@@ -115,7 +115,8 @@ hold its rules, each typed by its list of actions, so a missing or extra row fai
 | `manageFolders`     | server  | `admin`; making a library or changing its folders (ADR 0024)                         |
 
 ADR 0006 adds the tile, approval, and device actions, and `listOnSharedDevices`,
-`resetUnlockCode`, and `manageDevices`.
+`resetUnlockCode`, and `manageDevices`. ADR 0019 adds `change` on a setting and `keep` on a
+download.
 
 The answer is `allowed`, `hidden`, or `forbidden`. Content with no grant, content a restriction
 hides, and any content for a service are `hidden`, which fails `not_found` with the same message
