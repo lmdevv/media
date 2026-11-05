@@ -157,12 +157,12 @@ describe("revisions", () => {
   });
 
   it("never go down for one reporter, so a restarted app does not apply a request again", () => {
-    expect(appliedAfter(player({ applied: 5 }), LUCIA, 0)).toBe(5);
-    expect(appliedAfter(player({ applied: 5 }), LUCIA, 6)).toBe(6);
+    expect(appliedAfter(player({ applied: 5 }), LUCIA, 0, 7)).toBe(5);
+    expect(appliedAfter(player({ applied: 5 }), LUCIA, 6, 7)).toBe(6);
   });
 
-  it("start from a new reporter's own count", () => {
-    expect(appliedAfter(player({ applied: 5 }), AIKO, 0)).toBe(0);
-    expect(appliedAfter(null, AIKO, 2)).toBe(2);
+  it("settle every request made before a new reporter, whatever it says it applied", () => {
+    expect(appliedAfter(player({ applied: 5 }), AIKO, 0, 7)).toBe(7);
+    expect(appliedAfter(null, AIKO, 0, 2)).toBe(2);
   });
 });

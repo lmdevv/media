@@ -65,6 +65,7 @@ export const { report, requested } = register({
       requestOf(ctx.db, device._id),
     ]);
 
+    const newest = request?.revision ?? 0;
     const resource = await deviceFor(ctx.db, device, person, playback?.domain ?? null, now);
 
     if (!can(caller, "report", resource).allowed) {
@@ -77,11 +78,7 @@ export const { report, requested } = register({
       output: parseOutput(output),
       playback:
         playback === null ? null : { ...playback, positionMs: parsePosition(playback.positionMs) },
-      applied: appliedAfter(
-        stored,
-        caller.sessionId,
-        parseApplied(applied, request?.revision ?? 0),
-      ),
+      applied: appliedAfter(stored, caller.sessionId, parseApplied(applied, newest), newest),
       reportedAt: now,
     };
 

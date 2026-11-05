@@ -78,8 +78,8 @@ The CLI has them as `media auth player report`, `media auth player requested`,
 Connect keeps two rows per device. Each row has one writer.
 
 - `connectPlayers` is what the device last reported: the session that reported, the output, the
-  playback (`domain`, `playing`, `positionMs`) or null when it plays nothing, the newest request
-  revision it applied, and the server time of the report. Only `report` writes it. The session
+  playback (`domain`, `playing`, `positionMs`) or null when it plays nothing, the revision up to
+  which requests are settled for that session, and the server time of the report. Only `report` writes it. The session
   names the device, so no call names a device it is not on. A session on no device, such as an
   API key, has no player.
 - `connectRequests` is the playback controllers last asked for: the session it was made for, a
@@ -102,6 +102,13 @@ Otherwise the report stands. A late report with an older revision does not undo 
 - A request is for the playback of the session that was reporting when it was made. When another
   tile opens on a shared TV, or someone else signs in on the app, the new session reports and none
   of the earlier requests apply to it.
+- A report from a session other than the last reporter starts `applied` at the newest request's
+  revision, whatever revision the report claims. So a change of reporter settles every request
+  made before it, including for a session that reports again later. Two people signed in on one
+  personal laptop can take turns: the first applies a pause, the second reports, the first app
+  restarts and reports `applied: 0`, and the pause does not come back. A request the first session
+  had not applied when the second one reported is settled too, because the second session's
+  playback replaced the one it was for.
 - `applied` never goes down for the same reporting session. An app that restarts and reports
   `applied: 0` keeps the requests it applied, and `requested` stays null. A report that claims a
   revision above the newest request fails `invalid_args`.
@@ -200,6 +207,8 @@ so a home network adds its own round trip on top.
   device.
 - A pause sent to a TV whose tile changed before it applied the pause does not pause the next
   person's playback.
+- A pause a session applied stays applied after another session reports on the same device and
+  the first app restarts.
 - An admin does not control a shared device that does not list them, and does not reach another
   person's personal device.
 
@@ -215,3 +224,8 @@ Rejected in this build:
 - Listing offline devices. `control` refuses them, so `list` shows only what a command can reach.
 - A device generation on Connect rows. Deleting them in the transaction that changes the device
   is two point reads.
+- `applied` kept per session, in a map on the player row or a row per session. Only the session
+  a request was made for can apply it, and a change of reporter already ends that playback, so the
+  newest revision at the change says everything a per-session count would.
+- Deleting the request when the reporter changes. The next request would reuse revision 1, and a
+  session still holding a higher `applied` would have its report refused.

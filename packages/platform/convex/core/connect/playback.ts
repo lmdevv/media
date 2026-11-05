@@ -80,14 +80,16 @@ export const nextRevision = (request: Request | null): number => (request?.revis
 
 /**
  * The revision a report leaves applied. It never goes down for the same reporter. A new reporter
- * starts from its own count.
+ * starts at `newest`: a request is for the session that was reporting when it was made, so a change
+ * of reporter settles every request before it, even for a session that reports again later.
  */
 export const appliedAfter = (
   stored: Player | null,
   reporter: Id<"authSessions">,
   reported: number,
+  newest: number,
 ): number =>
-  stored !== null && stored.reporter === reporter ? Math.max(stored.applied, reported) : reported;
+  stored !== null && stored.reporter === reporter ? Math.max(stored.applied, reported) : newest;
 
 /** A position as a command or a report gives it: a finite number of milliseconds, 0 or more. */
 export const parsePosition = (positionMs: number): number =>
