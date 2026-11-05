@@ -26,29 +26,24 @@ export const signInLimit = (usernameKey: string): RateLimit => ({
   perHour: SIGN_INS_PER_HOUR,
 });
 
-/**
- * lucia's Scrypt hashes the NFKC form, so length counts its code points. NFKC can make a string 18
- * times longer, so oversized input is refused before normalizing.
- */
-const fitsPassword = (password: string, shortest: number): boolean => {
-  if (password.length > TYPED_MAX) return false;
-
-  const length = Array.from(password.normalize("NFKC")).length;
-
-  return length >= shortest && length <= PASSWORD_MAX;
-};
-
-/** Refuses a new password that Scrypt would hash as too few or too many characters. */
-export const checkNewPassword = (password: string): void => {
-  if (!fitsPassword(password, PASSWORD_MIN)) {
-    fail("invalid_args", `Use ${PASSWORD_MIN} to ${PASSWORD_MAX} characters for the password`);
+/** Refuses typed input too long to be any password, before NFKC can make it 18 times longer. */
+export const checkTypedPassword = (password: string): void => {
+  if (password.length > TYPED_MAX) {
+    fail("invalid_args", `Use at most ${PASSWORD_MAX} characters for the password`);
   }
 };
 
-/** Refuses a typed password longer than any password can be, before it is hashed. */
-export const checkTypedPassword = (password: string): void => {
-  if (!fitsPassword(password, 0)) {
-    fail("invalid_args", `Use at most ${PASSWORD_MAX} characters for the password`);
+/**
+ * Refuses a new password unless it has {@link PASSWORD_MIN} to {@link PASSWORD_MAX} characters,
+ * counted as the code points of its NFKC form, which is the string lucia's Scrypt hashes.
+ */
+export const checkNewPassword = (password: string): void => {
+  checkTypedPassword(password);
+
+  const length = Array.from(password.normalize("NFKC")).length;
+
+  if (length < PASSWORD_MIN || length > PASSWORD_MAX) {
+    fail("invalid_args", `Use ${PASSWORD_MIN} to ${PASSWORD_MAX} characters for the password`);
   }
 };
 

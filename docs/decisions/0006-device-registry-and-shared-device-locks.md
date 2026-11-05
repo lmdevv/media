@@ -128,13 +128,12 @@ never stored. `lockOf` derives it from three reasons:
   derived from the password's shortest, so raising one moves the other.
 - A password's length counts the code points of its NFKC form, because that is the string Scrypt
   hashes and compares. `𝟕𝟑𝟗𝟏𝟒𝟒𝟖` in mathematical bold is 14 UTF-16 units but hashes as `7391448`,
-  so it counts as 7 characters and is refused. Every password rule is checked in
-  `core/lib/passwords.ts` on that form: 8 to 256 characters for a new password, and at most 256
-  for one typed to sign in, open a tile, or confirm a password change, so any password that can be
-  set can also be typed.
-  Typed input over 2,048 UTF-16 units is refused before it is normalized. NFKC can make a string
-  18 times longer, and it joins at most 4 code points into one, so no 256-character password is
-  typed longer.
+  so it counts as 7 characters and is refused. `checkNewPassword` in `core/lib/passwords.ts`
+  applies the rule, 8 to 256 characters, on that form for every path that sets a password.
+- A password typed to sign in, open a tile, or confirm a password change is refused only when it is
+  over 2,048 UTF-16 units, before it is normalized, since NFKC can make a string 18 times longer.
+  No password is typed longer: NFKC joins at most 4 code points into one. A password set when the
+  rule counted 256 UTF-16 units also fits, so it still signs in.
 - An unlock code is ASCII digits only. NFKC leaves them as they are, so the code the core checks
   is the string it hashes, on `set` and in the `tile` provider alike.
 - The `tile` provider counts a wrong try per person and device (`unlockStrikes`) before it checks
@@ -207,3 +206,5 @@ Rejected in this build:
   digits, so they would sign in.
 - Counting a password's UTF-16 units as typed. Scrypt hashes the NFKC form, so a password of 7
   look-alike digits passed as 14 units and then signed in with the 7-digit code they hash as.
+- Refusing a typed password over 256 NFKC characters at sign-in. A password set under the 256-unit
+  rule can normalize longer, such as 100 `ﬃ` ligatures, and its person could no longer sign in.

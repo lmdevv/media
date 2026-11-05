@@ -90,7 +90,7 @@ describe("password length", () => {
       fc.property(typedDigits(PASSWORD_MAX + 1, PASSWORD_MAX * 2), (typed) => {
         expect(asPassword(typed)).toEqual({
           newPassword: "invalid_args",
-          typedPassword: "invalid_args",
+          typedPassword: "accepted",
         });
       }),
     );
@@ -110,6 +110,17 @@ describe("password length", () => {
     });
     expect(asPassword(typed)).toEqual({ newPassword: "accepted", typedPassword: "accepted" });
     expect(asPassword(`${typed}a`)).toEqual({
+      newPassword: "invalid_args",
+      typedPassword: "accepted",
+    });
+  });
+
+  it("lets a password set when the rule counted UTF-16 units be typed, but nothing far longer", () => {
+    expect(asPassword("\uFB03".repeat(100))).toEqual({
+      newPassword: "invalid_args",
+      typedPassword: "accepted",
+    });
+    expect(asPassword("x".repeat(PASSWORD_MAX * 8 + 1))).toEqual({
       newPassword: "invalid_args",
       typedPassword: "invalid_args",
     });
