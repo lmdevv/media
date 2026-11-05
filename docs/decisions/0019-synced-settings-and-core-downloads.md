@@ -182,6 +182,14 @@ are `forbidden` (`no-device`, `shared-device`). Then the item is decided as `pla
 grant or a restriction is `hidden`, a missing `<domain>:play` scope is `forbidden`. The rule table
 holds `shared: keeps-nothing`, so letting tiles download later is one edit there.
 
+The item comes last, and `can` also decides an item that does not exist. The caller passes `item:
+null`, and once the caller and the device pass, the answer is `hidden` (`missing`). So a missing
+item and one the caller cannot see get the same answer from every command, for every caller. A
+guest, a tile on a shared device, and a session on no device are refused for both alike. Anyone else
+gets `not_found` "No such item" for both. Ordering the checks inside `can` was not enough. `add`
+used to answer `not_found` for a missing item before it asked `can`, so a guest, a tile, or an API
+key could tell from the refusal whether an item they cannot see exists.
+
 `add`, `list`, and `fetch` all ask `keep`, with the caller's session as the principal. So a kept
 item can never reach more than playing it would.
 
@@ -217,8 +225,14 @@ A device deletes a local copy that no entry lists only after it has read every p
 
 - Every command but `setCap` takes an item, not a row id, and finds the row by the caller's device
   and person. No command names another person's row.
+- `add` decides `keep` before it looks for the caller's row. Adding an item already kept changes
+  nothing while `keep` allows it, and is refused like any other add once the item has expired.
 - A session on no device, such as an API key, gets `conflict` ("register this app first") for any
-  item that exists.
+  item, whether or not it exists.
+- `list` and `fetch` read only the caller's own rows, and `remove` answers the same whether or not a
+  row exists. They tell `gone` from `expired` only for an item the person added, which `add` let
+  them see then. A person who lost access can learn that such an item was later deleted, and no
+  more. The device needs the difference to know whether the item can come back.
 - The commands are `signed-in`, like the settings commands, because the item's domain decides which
   `play` scope `keep` needs.
 - A ticket lasts 15 minutes because a download is admitted on each request (ADR 0011). A transfer
