@@ -1144,40 +1144,42 @@ const make = Effect.gen(function* () {
     lease: Scope.Closeable,
   ) {
     yield* session.lock.withPermits(1)(
-      Effect.gen(function* () {
-        const encoder = yield* Ref.get(session.encoder);
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const encoder = yield* Ref.get(session.encoder);
 
-        if (
-          isClosed(session.scope) ||
-          !Encoder.$is("Running")(encoder) ||
-          encoder.lease !== lease
-        ) {
-          return;
-        }
+          if (
+            isClosed(session.scope) ||
+            !Encoder.$is("Running")(encoder) ||
+            encoder.lease !== lease
+          ) {
+            return;
+          }
 
-        const run = yield* Ref.get(session.generation);
-        const keptInit = yield* keepInit(session, run);
+          const run = yield* Ref.get(session.generation);
+          const keptInit = yield* keepInit(session, run);
 
-        if (isClosed(session.scope)) {
-          if (Option.isSome(keptInit)) yield* fs.remove(keptInit.value).pipe(Effect.ignore);
+          if (isClosed(session.scope)) {
+            if (Option.isSome(keptInit)) yield* fs.remove(keptInit.value).pipe(Effect.ignore);
 
-          return;
-        }
+            return;
+          }
 
-        yield* stopEncoder(session, lease, keptInit);
+          yield* stopEncoder(session, lease, keptInit);
 
-        yield* Effect.logInfo(LogEvent.streamYielded).pipe(
-          Effect.annotateLogs({
-            sessionId: session.sessionId,
-            userId: session.userId,
-            streamId: session.streamId,
-            generation: run.number,
-            segment: yield* Ref.get(session.requested),
-          }),
-        );
-      }),
+          yield* Effect.logInfo(LogEvent.streamYielded).pipe(
+            Effect.annotateLogs({
+              sessionId: session.sessionId,
+              userId: session.userId,
+              streamId: session.streamId,
+              generation: run.number,
+              segment: yield* Ref.get(session.requested),
+            }),
+          );
+        }),
+      ),
     );
-  }, Effect.uninterruptible);
+  });
 
   const yieldWhenDisplaced = (session: Session, lease: Scope.Closeable, held: EncoderSlots.Held) =>
     session.audience === "guest"
