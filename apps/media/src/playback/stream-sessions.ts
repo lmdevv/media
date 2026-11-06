@@ -1438,6 +1438,12 @@ const make = Effect.gen(function* () {
 
     yield* held.ready;
 
+    if (yield* held.isDisplaced) {
+      return yield* new TranscodeCapacityReached({
+        limit: (transcoding ? transcodes : copies).limit,
+      });
+    }
+
     const segmentIndex = segmentAt(segmentPlan, quickStart);
 
     const generation =

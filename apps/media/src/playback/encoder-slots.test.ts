@@ -117,6 +117,74 @@ describe("encoder slots", () => {
       }),
   );
 
+  it.effect("a household stream takes every guest slot it needs, a session's older one too", () =>
+    Effect.gen(function* () {
+      const pool = yield* EncoderSlots.make(1);
+      const oldScope = yield* Scope.make();
+      const newScope = yield* Scope.make();
+      const old = yield* pool.guest(oldScope, claimant("old", 1, { session: "guest" }));
+
+      const renegotiated = yield* pool.guest(
+        newScope,
+        claimant("new", 2, { session: "guest", registered: false }),
+      );
+
+      const held = yield* pool.household(yield* Scope.make(), claimant("household", 3));
+      const ready = yield* Effect.forkChild(held.ready);
+
+      assert.isTrue(yield* old.isDisplaced, "the session's older stream yields");
+      assert.isTrue(yield* renegotiated.isDisplaced, "the stream credited its slot yields too");
+
+      yield* close(oldScope);
+      assert.isTrue(yield* stillRunning(ready), "the renegotiated stream's slot is still held");
+
+      yield* close(newScope);
+      yield* Fiber.join(ready);
+    }),
+  );
+
+  it.effect("a taken slot counts against everyone else until its guest's encoder stops", () =>
+    Effect.gen(function* () {
+      const pool = yield* EncoderSlots.make(1);
+      const guestScope = yield* Scope.make();
+      yield* pool.guest(guestScope, claimant("guest", 1));
+      const household = yield* Scope.make();
+      yield* pool.household(household, claimant("household", 2));
+      yield* close(household);
+
+      assert.isTrue(
+        yield* Effect.isFailure(pool.household(yield* Scope.make(), claimant("second", 3))),
+        "the displaced guest's encoder may still run",
+      );
+
+      const waiting = yield* Effect.forkChild(pool.guest(yield* Scope.make(), claimant("next", 4)));
+
+      assert.isTrue(yield* stillRunning(waiting), "a waiting guest is not seated over it");
+
+      yield* close(guestScope);
+      yield* Fiber.join(waiting);
+    }),
+  );
+
+  it.effect(
+    "a guest credited its session's slot is seated ahead of an older guest that waits",
+    () =>
+      Effect.gen(function* () {
+        const pool = yield* EncoderSlots.make(1);
+        yield* pool.guest(yield* Scope.make(), claimant("first", 5, { session: "a" }));
+
+        const older = yield* Effect.forkChild(
+          pool.guest(yield* Scope.make(), claimant("older", 3, { session: "b" })),
+        );
+
+        assert.isTrue(yield* stillRunning(older));
+
+        yield* pool.guest(yield* Scope.make(), claimant("renegotiated", 6, { session: "a" }));
+
+        assert.isTrue(yield* stillRunning(older), "the older guest still waits for a slot");
+      }),
+  );
+
   it.effect("household streams that fill the limit refuse another and leave guests waiting", () =>
     Effect.gen(function* () {
       const pool = yield* EncoderSlots.make(1);

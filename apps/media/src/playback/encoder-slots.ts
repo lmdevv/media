@@ -32,14 +32,16 @@ export interface Held {
    * its session. Never completes for a household holder.
    */
   readonly displaced: Effect.Effect<void>;
+  /** Whether a household stream took this slot already; a starting holder then gives up. */
+  readonly isDisplaced: Effect.Effect<boolean>;
 }
 
 interface Pool {
   readonly limit: number;
   /**
-   * Takes a slot until `scope` closes, without waiting. When the limit is reached and a guest holds
-   * a counted slot, takes the newest guest's slot, a registered guest's before a starting one's.
-   * Fails when household streams hold every counted slot.
+   * Takes a slot until `scope` closes, without waiting. When the limit is reached, takes the slots
+   * of the newest guests, registered guests' before starting ones', until it fits. Fails, taking
+   * none, when guests' slots are not enough.
    */
   readonly household: (
     scope: Scope.Scope,
@@ -47,7 +49,8 @@ interface Pool {
   ) => Effect.Effect<Held, TranscodeCapacityReached>;
   /**
    * Takes a slot until `scope` closes, first waiting in a line served lowest ticket first while the
-   * limit is reached or an older guest waits. The wait can be interrupted, and the caller bounds
+   * limit is reached or an older guest waits. A waiter credited its own session's slot fits sooner
+   * and is seated ahead of older waiters that do not fit. The wait can be interrupted, and the caller bounds
    * it. Closing `scope` leaves the line, ending the wait, or frees the slot.
    */
   readonly guest: (scope: Scope.Scope, claimant: Claimant) => Effect.Effect<Held>;
@@ -75,7 +78,7 @@ interface State {
 
 type HouseholdDecision = Data.TaggedEnum<{
   Admit: {};
-  Displace: { readonly victim: Slot };
+  Displace: { readonly victims: ReadonlyArray<Slot> };
   Full: {};
 }>;
 
@@ -85,7 +88,7 @@ const creditedTo = (slot: Slot, claimant: Claimant): boolean =>
   slot.claimant.sessionId === claimant.sessionId && slot.claimant.ticket <= claimant.ticket;
 
 const counts = (slot: Slot, claimant: Claimant): boolean =>
-  slot.takenBy === null && !creditedTo(slot, claimant);
+  slot.takenBy !== claimant.streamId && !creditedTo(slot, claimant);
 
 const countedAgainst = (slots: ReadonlyMap<StreamId, Slot>, claimant: Claimant) =>
   [...slots.values()].filter((slot) => counts(slot, claimant));
@@ -102,24 +105,37 @@ const runningFirst = (guests: ReadonlyArray<Slot>): Slot | undefined =>
 
 const decideHousehold = (state: State, claimant: Claimant, limit: number): HouseholdDecision => {
   const counted = countedAgainst(state.slots, claimant);
+  const victims: Array<Slot> = [];
 
-  if (counted.length < limit) return HouseholdDecision.Admit();
-  const victim = runningFirst(counted.filter((slot) => slot.audience === "guest"));
+  while (counted.length - victims.length >= limit) {
+    const victim = runningFirst(
+      counted.filter(
+        (slot) => slot.audience === "guest" && slot.takenBy === null && !victims.includes(slot),
+      ),
+    );
 
-  return victim === undefined ? HouseholdDecision.Full() : HouseholdDecision.Displace({ victim });
+    if (victim === undefined) return HouseholdDecision.Full();
+    victims.push(victim);
+  }
+
+  return victims.length === 0 ? HouseholdDecision.Admit() : HouseholdDecision.Displace({ victims });
 };
 
 const fillLine = (state: State, limit: number): readonly [ReadonlyArray<Waiter>, State] => {
   const slots = new Map(state.slots);
-  let seated = 0;
+  const seated: Array<Waiter> = [];
+  const line: Array<Waiter> = [];
 
   for (const waiter of state.line) {
-    if (countedAgainst(slots, waiter.slot.claimant).length >= limit) break;
-    slots.set(waiter.slot.claimant.streamId, waiter.slot);
-    seated += 1;
+    if (countedAgainst(slots, waiter.slot.claimant).length < limit) {
+      slots.set(waiter.slot.claimant.streamId, waiter.slot);
+      seated.push(waiter);
+    } else {
+      line.push(waiter);
+    }
   }
 
-  return [state.line.slice(0, seated), { slots, line: state.line.slice(seated) }];
+  return [seated, { slots, line }];
 };
 
 const joinLine = (state: State, waiter: Waiter): State => {
@@ -166,7 +182,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
       Effect.andThen(Deferred.succeed(slot.freed, undefined)),
     );
 
-  const heldBy = (slot: Slot, victim: Slot | null): Held => ({
+  const heldBy = (slot: Slot, victims: ReadonlyArray<Slot>): Held => ({
     ready: Ref.get(state).pipe(
       Effect.flatMap(({ slots }) =>
         Effect.forEach(
@@ -177,7 +193,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
                 other.claimant.sessionId === slot.claimant.sessionId &&
                 other.claimant.ticket < slot.claimant.ticket,
             ),
-            ...(victim === null ? [] : [victim]),
+            ...victims,
           ],
           (credited) => Deferred.await(credited.freed),
           { discard: true },
@@ -185,6 +201,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
       ),
     ),
     displaced: slot.audience === "guest" ? Deferred.await(slot.displaced) : Effect.never,
+    isDisplaced: Deferred.isDone(slot.displaced),
   });
 
   const household = (scope: Scope.Scope, claimant: Claimant) =>
@@ -200,26 +217,29 @@ export const make = Effect.fnUntraced(function* (limit: number) {
               decided,
               { ...current, slots: new Map(current.slots).set(claimant.streamId, slot) },
             ] as const,
-          Displace: ({ victim }) =>
-            [
-              decided,
-              {
-                ...current,
-                slots: new Map(current.slots)
-                  .set(victim.claimant.streamId, { ...victim, takenBy: claimant.streamId })
-                  .set(claimant.streamId, slot),
-              },
-            ] as const,
+          Displace: ({ victims }) => {
+            const slots = new Map(current.slots);
+
+            for (const victim of victims) {
+              slots.set(victim.claimant.streamId, { ...victim, takenBy: claimant.streamId });
+            }
+
+            return [decided, { ...current, slots: slots.set(claimant.streamId, slot) }] as const;
+          },
           Full: () => [decided, current] as const,
         });
       });
 
       return yield* HouseholdDecision.$match(decision, {
-        Admit: () => Scope.addFinalizer(scope, leave(slot)).pipe(Effect.as(heldBy(slot, null))),
-        Displace: ({ victim }) =>
+        Admit: () => Scope.addFinalizer(scope, leave(slot)).pipe(Effect.as(heldBy(slot, []))),
+        Displace: ({ victims }) =>
           Scope.addFinalizer(scope, leave(slot)).pipe(
-            Effect.andThen(Deferred.succeed(victim.displaced, undefined)),
-            Effect.as(heldBy(slot, victim)),
+            Effect.andThen(
+              Effect.forEach(victims, (victim) => Deferred.succeed(victim.displaced, undefined), {
+                discard: true,
+              }),
+            ),
+            Effect.as(heldBy(slot, victims)),
           ),
         Full: () => Effect.fail(new TranscodeCapacityReached({ limit })),
       });
@@ -244,7 +264,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
         yield* Scope.addFinalizer(scope, finalize);
         yield* restore(Deferred.await(waiter.settled)).pipe(Effect.onInterrupt(() => finalize));
 
-        return heldBy(slot, null);
+        return heldBy(slot, []);
       }),
     );
 

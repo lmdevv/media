@@ -16,11 +16,11 @@ mount media read-only.
 - Each domain has its own caps, so a music rescan cannot starve a transcode.
 - Each job kind runs in one pool, and each pool has its own cap. Music adds its pools in phase 5.
 
-  | Pool                | Job kinds                         | Cap                           |
-  | ------------------- | --------------------------------- | ----------------------------- |
-  | `movies`            | scan, metadata, person, migration | 2                             |
-  | `movies.background` | trickplay                         | `MEDIA_TRICKPLAY_CONCURRENCY` |
-  | `server`            | backup                            | 1                             |
+  | Pool                | Job kinds                         | Cap                     |
+  | ------------------- | --------------------------------- | ----------------------- |
+  | `movies`            | scan, metadata, person, migration | 2                       |
+  | `movies.background` | trickplay                         | `TRICKPLAY_CONCURRENCY` |
+  | `server`            | backup                            | 1                       |
 
 - One server-wide transcode limit covers every domain. Guests have the lowest priority under it
   (ADR 0007). The remux limit follows the same rules.
@@ -51,10 +51,15 @@ mount media read-only.
   guest's stream from the ticket's session alone (ADR 0007).
 - Waiting guests form one line, served by ticket, the negotiation that started each stream. A
   guest that resumes its stream keeps its ticket, so it goes ahead of guests that started later.
-- A household stream that finds the limit reached while guests hold slots takes the newest guest's
-  slot, preferring a guest whose stream already plays over one still starting. That guest's encoder
-  stops and its session stays. Its next segment request waits in the line. The household stream's
-  encoder starts only after the guest's has stopped, so the limit is never exceeded.
+- A household stream that finds the limit reached while guests hold slots takes the newest guests'
+  slots until it fits, preferring guests whose streams already play over ones still starting. Each
+  such guest's encoder stops and its session stays. Its next segment request waits in the line. A
+  guest still starting gives up its start instead. The household stream's encoder starts only after
+  those guests' encoders have stopped, and a taken slot counts against every other stream until
+  then, so the limit is never exceeded. Household streams leave the limit as it is when guests'
+  slots are not enough.
+- A guest whose own session already holds a slot fits sooner, so it is seated ahead of older
+  waiters that do not fit yet.
 - A guest waits up to 20 seconds to start a stream, then fails with capacity reached. A guest
   resuming a stream waits up to 30 seconds, then its segment request fails as not ready and the
   session stays for the player's retry.

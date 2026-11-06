@@ -3,7 +3,8 @@ import { Context, Effect, Layer, type Redacted, Ref, Schedule, Semaphore } from 
 
 /**
  * `signed-in` once the core accepted the server's key; `signed-out` while it signs in, and after
- * the core refused the key.
+ * the core refused the key. The server learns that the core ended its session only from a call,
+ * so the status is as of the latest sign-in or call.
  */
 export type Status = "signed-in" | "signed-out";
 
@@ -12,8 +13,8 @@ export interface Interface {
   readonly status: Effect.Effect<Status>;
   /**
    * Runs `call` with the core's client as the service. When the core answers that the session
-   * ended, signs in once more with the key and runs `call` again; a key the core refuses then
-   * fails the call with `Unauthenticated`.
+   * ended, signs in once more with the key and runs `call` again. A key the core refuses then
+   * fails the call with `Unauthenticated`, and signing in goes on in the background with backoff.
    */
   readonly run: <A>(
     call: (platform: Platform.Interface) => Effect.Effect<A, Platform.PlatformError>,
@@ -58,7 +59,12 @@ const make = Effect.fn("CoreSession.make")(function* (options: Options) {
       }),
     );
 
-  yield* Effect.forkScoped(signIn(0).pipe(Effect.retry(backoff)));
+  const scope = yield* Effect.scope;
+
+  const keepSigningIn = (seen: number) =>
+    signIn(seen).pipe(Effect.retry(backoff), Effect.forkIn(scope), Effect.asVoid);
+
+  yield* keepSigningIn(0);
 
   const run: Interface["run"] = Effect.fn("CoreSession.run")(function* <A>(
     call: (client: Platform.Interface) => Effect.Effect<A, Platform.PlatformError>,
@@ -66,7 +72,12 @@ const make = Effect.fn("CoreSession.make")(function* (options: Options) {
     const seen = yield* Ref.get(generation);
 
     return yield* call(platform).pipe(
-      Effect.catchTag("Unauthenticated", () => signIn(seen).pipe(Effect.andThen(call(platform)))),
+      Effect.catchTag("Unauthenticated", () =>
+        signIn(seen).pipe(
+          Effect.tapError(() => Ref.get(generation).pipe(Effect.flatMap(keepSigningIn))),
+          Effect.andThen(call(platform)),
+        ),
+      ),
     );
   });
 
