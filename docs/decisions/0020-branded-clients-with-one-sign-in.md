@@ -127,8 +127,15 @@ refresh token and its calls, and the browser only has to make every tab stop usi
   a key, so a later sign-in is never lost to what an earlier read found.
 - **Signing out** writes the revocation first and shows signed out at once, even if the server
   call fails. The client then calls the server, and on failure retries in the background, starting
-  after a second and backing off to every 30 seconds, until the server confirms or another client
-  records that it did.
+  after a second and backing off to every 30 seconds, until the server confirms.
+- **A pending sign-out belongs to the browser, not to a slot.** Signing out also writes
+  `media.signOut:<session>` with the session's tokens and the key it was signed in under. It sits
+  outside every session key, so forgetting a slot or disposing that slot's client keeps it.
+  - Every client takes over every pending sign-out when it starts and whenever another tab writes
+    one, and retries it until the server confirms. Confirming deletes the record.
+  - The record serves only to end the session on the server. No read that loads a session looks
+    there, so nothing signs in or calls with it, and the session's own revocation keeps it out of
+    every slot.
 - **Every token passes a check.** A client checks for a revocation of its session before it hands
   any token to a caller, and again after it writes a renewal. A client that finds one drops the
   session at once and ends it on the server the same way, after a second's wait, so the client that

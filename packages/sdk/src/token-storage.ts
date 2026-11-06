@@ -76,9 +76,20 @@ export interface Interface {
    * using it, whatever later writes of its tokens say.
    */
   readonly revoke: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
-  /** Records that the server ended a revoked `session`, and forgets its tokens. */
+  /**
+   * Records that the server ended a revoked `session`, and forgets its tokens and its pending
+   * sign-out.
+   */
   readonly confirmRevoked: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
   readonly revocation: (session: StoredSession) => Effect.Effect<Revocation, TokenStorageError>;
+  /** Whether `session` still waits for the server to confirm its sign-out. */
+  readonly signOutPending: (session: StoredSession) => Effect.Effect<boolean, TokenStorageError>;
+  /**
+   * Every session signed out anywhere in the store whose sign-out the server has not confirmed,
+   * whichever key it was signed in under. These credentials serve only to end the session on the
+   * server; nothing signs in or calls with them.
+   */
+  readonly pendingSignOuts: Effect.Effect<ReadonlyArray<StoredSession>, TokenStorageError>;
   /**
    * Emits once it starts listening, then whenever the stored session may have changed outside
    * this client, such as another tab writing the same key. The first emission covers changes made
@@ -110,6 +121,8 @@ export const owned = (store: {
   revoke: () => store.clear,
   confirmRevoked: () => Effect.void,
   revocation: () => Effect.succeed("none"),
+  signOutPending: () => Effect.succeed(false),
+  pendingSignOuts: Effect.succeed([]),
   changed: Stream.never,
 });
 
@@ -149,6 +162,8 @@ export interface KeyValueStore {
    * store that one client owns.
    */
   readonly subscribe?: (key: string, onChange: () => void) => () => void;
+  /** Every key the store holds, so a shared store can find sign-outs other clients left pending. */
+  readonly keys?: () => ReadonlyArray<string> | Promise<ReadonlyArray<string>>;
 }
 
 const SerializedSession = Schema.fromJsonString(
@@ -239,6 +254,20 @@ const attempt = <A>(operation: TokenStorageError["operation"], run: () => Promis
 
 const Revoked = Schema.fromJsonString(Schema.Struct({ revokedAt: Schema.Finite }));
 
+/**
+ * The store-wide prefix of pending sign-outs. It sits outside every session key, so forgetting a
+ * slot keeps them, and no read that loads a session looks there.
+ */
+const PENDING = "media.signOut";
+
+const PendingSignOut = Schema.fromJsonString(
+  Schema.Struct({ key: Schema.String, token: Schema.String, refreshToken: Schema.String }),
+);
+
+const decodePending = Schema.decodeUnknownOption(PendingSignOut);
+
+const encodePending = Schema.encodeSync(PendingSignOut);
+
 const encodeRevoked = Schema.encodeSync(Revoked);
 
 /**
@@ -261,6 +290,14 @@ const sharedKeys = (store: KeyValueStore, key: string): Interface => {
     const text = await store.getItem(tokensKey(id));
 
     return text === null ? Option.none() : parseStoredSession(text);
+  };
+
+  const pendingKey = (id: string) => `${PENDING}:${id}`;
+
+  const pendingOf = async (id: string) => {
+    const text = await store.getItem(pendingKey(id));
+
+    return text === null ? Option.none() : decodePending(text);
   };
 
   const revocationOf = async (id: string): Promise<Revocation> => {
@@ -300,19 +337,62 @@ const sharedKeys = (store: KeyValueStore, key: string): Interface => {
             if ((await store.getItem(revokedKey(id))) === null) {
               await store.setItem(revokedKey(id), encodeRevoked({ revokedAt }));
             }
+
+            if ((await store.getItem(pendingKey(id))) === null) {
+              await store.setItem(
+                pendingKey(id),
+                encodePending({
+                  key,
+                  token: Redacted.value(session.token),
+                  refreshToken: Redacted.value(session.refreshToken),
+                }),
+              );
+            }
           }),
         ),
       ),
     confirmRevoked: (session) =>
       Effect.flatMap(idOf(session, "clear"), (id) =>
         attempt("clear", async () => {
-          await store.setItem(confirmedKey(id), "1");
-          await store.removeItem(tokensKey(id));
+          const signedInAt = Option.match(await pendingOf(id), {
+            onNone: () => key,
+            onSome: (pending) => pending.key,
+          });
+
+          await store.setItem(`${signedInAt}:${id}:confirmed`, "1");
+          await store.removeItem(`${signedInAt}:${id}`);
+          await store.removeItem(pendingKey(id));
         }),
       ),
     revocation: (session) =>
       Effect.flatMap(idOf(session, "load"), (id) => attempt("load", () => revocationOf(id))),
-    changed: changesOf(store, key),
+    signOutPending: (session) =>
+      Effect.flatMap(idOf(session, "load"), (id) =>
+        attempt("load", async () => Option.isSome(await pendingOf(id))),
+      ),
+    pendingSignOuts: attempt("load", async () => {
+      const all = store.keys === undefined ? [] : await store.keys();
+
+      const found = await Promise.all(
+        all
+          .filter((each) => each.startsWith(`${PENDING}:`))
+          .map(async (each) => {
+            const text = await store.getItem(each);
+
+            return text === null ? Option.none() : decodePending(text);
+          }),
+      );
+
+      return found.flatMap((pending) =>
+        Option.toArray(
+          Option.map(pending, ({ token, refreshToken }) => ({
+            token: Redacted.make(token),
+            refreshToken: Redacted.make(refreshToken),
+          })),
+        ),
+      );
+    }),
+    changed: Stream.merge(changesOf(store, key), changesOf(store, PENDING)),
   };
 };
 

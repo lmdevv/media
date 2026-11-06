@@ -192,4 +192,51 @@ describe("token storage shared between tabs", () => {
       adaTokens: false,
     });
   });
+
+  it("keeps a pending sign-out outside every session key until the server confirms it", async () => {
+    const tabs = makeBrowserTabs({ count: 1, processes: "shared", delivery: "at once" });
+
+    const answer = await Effect.runPromise(
+      Effect.gen(function* () {
+        const slot = yield* Effect.scoped(Layer.build(layerKeyValue(tabs.tab(0), "slot-1"))).pipe(
+          Effect.map((context) => Context.get(context, TokenStorage)),
+        );
+
+        const elsewhere = yield* Effect.scoped(
+          Layer.build(layerKeyValue(tabs.tab(0), "slot-2")),
+        ).pipe(Effect.map((context) => Context.get(context, TokenStorage)));
+
+        yield* slot.save(ada);
+        yield* slot.revoke(ada);
+
+        for (const key of Array.from(tabs.items.keys())) {
+          if (key.startsWith("slot-1") && !key.endsWith(":revoked")) {
+            yield* Effect.promise(async () => tabs.tab(0).removeItem(key));
+          }
+        }
+
+        const pending = (yield* elsewhere.pendingSignOuts).map((held) =>
+          Redacted.value(held.refreshToken),
+        );
+
+        const loadedElsewhere = yield* elsewhere.load;
+
+        yield* elsewhere.confirmRevoked(ada);
+
+        return {
+          pending,
+          loadedElsewhere,
+          after: yield* elsewhere.pendingSignOuts,
+          confirmed: tabs.items.has("slot-1:ada|session-1:confirmed"),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      pending: ["refresh-1"],
+      loadedElsewhere: Option.none(),
+      after: [],
+      confirmed: true,
+    });
+  });
 });

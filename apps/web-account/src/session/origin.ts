@@ -217,6 +217,7 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
     },
     sessions: {
       getItem: (key) => storage.getItem(key),
+      keys: () => Array.from({ length: storage.length }, (_, index) => storage.key(index) ?? ""),
       setItem: (key, value) => {
         storage.setItem(key, value);
       },

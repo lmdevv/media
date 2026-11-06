@@ -2,6 +2,7 @@ import {
   Context,
   Deferred,
   Effect,
+  Exit,
   Fiber,
   Layer,
   Option,
@@ -9,8 +10,8 @@ import {
   Redacted,
   Ref,
   Schedule,
+  Scope,
 } from "effect";
-import type { Scope } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
@@ -106,12 +107,16 @@ const fakeCore = Effect.gen(function* () {
   return { fake, down, live, answerSignIns };
 });
 
-const openClient = (fake: FakeConvex.FakeConvex, store: TokenStorage.KeyValueStore) =>
+const openClient = (
+  fake: FakeConvex.FakeConvex,
+  store: TokenStorage.KeyValueStore,
+  key: string = KEY,
+) =>
   Layer.build(
     Platform.layer({
       url: fake.url,
       connection: "http",
-      storage: TokenStorage.layerKeyValue(store, KEY),
+      storage: TokenStorage.layerKeyValue(store, key),
     }),
   ).pipe(Effect.map((context) => Context.get(context, Platform.Platform)));
 
@@ -417,6 +422,76 @@ const step: fc.Arbitrary<Step> = fc.oneof(
   fc.record({ kind: fc.constant("deliver" as const), tab: tabIndex }),
   fc.record({ kind: fc.constant("call" as const), tab: tabIndex }),
 );
+
+describe("a sign-out the server could not confirm", () => {
+  it.each(["the same tab", "another tab"] as const)(
+    "is finished from %s after the slot is forgotten and its client disposed",
+    async (where) => {
+      const answer = await run(
+        Effect.gen(function* () {
+          const { fake, down, live } = yield* fakeCore;
+
+          const tabs = BrowserTabs.makeBrowserTabs({
+            count: 2,
+            processes: "shared",
+            delivery: "at once",
+          });
+
+          const signingOut = yield* Scope.make();
+          const first = yield* openClient(fake, tabs.tab(0)).pipe(Scope.provide(signingOut));
+
+          yield* first.session.signIn(password("ada"));
+          const ada = yield* bearerOf(first, fake);
+
+          yield* Ref.set(down, true);
+          yield* first.session.signOut;
+          yield* Scope.close(signingOut, Exit.void);
+
+          for (const key of Array.from(tabs.items.keys())) {
+            if (
+              key === KEY ||
+              (key.startsWith(`${KEY}:`) && !/:(?:revoked|confirmed)$/u.test(key))
+            ) {
+              yield* Effect.promise(async () => tabs.tab(0).removeItem(key));
+            }
+          }
+
+          yield* Ref.set(down, false);
+
+          const next = yield* openClient(
+            fake,
+            tabs.tab(where === "the same tab" ? 0 : 1),
+            "media.session.another-slot",
+          );
+
+          return {
+            ended: yield* eventually(
+              Effect.sync(() => Option.exists(ada, (subject) => !live(subject))),
+              5_000,
+            ),
+            next: yield* next.session.currentStatus,
+            pendingLeft: yield* eventually(
+              Effect.sync(
+                () => ![...tabs.items.keys()].some((key) => key.startsWith("media.signOut:")),
+              ),
+            ),
+            usedAfterSignOut: (yield* fake.requestsTo("core/server:info")).filter((call) =>
+              sameSubject(subjectOf(call.authorization), ada),
+            ).length,
+          };
+        }),
+      );
+
+      expect(answer).toStrictEqual({
+        ended: true,
+        next: "signedOut",
+        pendingLeft: true,
+        usedAfterSignOut: 1,
+      });
+    },
+    15_000,
+  );
+});
 
 describe("any interleaving of tabs sharing one session store", () => {
   it("never authorizes as a session a tab has read was signed out, and never loses the last sign-in", async () => {

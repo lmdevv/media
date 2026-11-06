@@ -115,6 +115,7 @@ export const makeBrowserTabs = (options: {
       });
     },
     setItem: (key, value) => write(index, key, value),
+    keys: () => [...viewOf(index).keys()],
     removeItem: (key) => write(index, key, null),
     subscribe: (key, onChange) => {
       const listener = { key, onChange };
