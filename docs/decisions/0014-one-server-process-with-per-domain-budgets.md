@@ -55,8 +55,8 @@ mount media read-only.
   slots until it fits, preferring guests whose streams already play over ones still starting. Each
   such guest's encoder stops and its session stays. Its next segment request waits in the line. A
   guest still starting gives up its start instead. The household stream's encoder starts only after
-  those guests' encoders have stopped, and a taken slot counts against every other stream until
-  then, so the limit is never exceeded. Household streams leave the limit as it is when guests'
+  those guests' encoders have stopped. A taken slot and the stream that took it count as one slot,
+  and the taken one counts on its own if that stream leaves first, so the limit is never exceeded. Household streams leave the limit as it is when guests'
   slots are not enough.
 - A guest whose own session already holds a slot fits sooner, so it is seated ahead of older
   waiters that do not fit yet.

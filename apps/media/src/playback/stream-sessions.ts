@@ -1052,6 +1052,12 @@ const make = Effect.gen(function* () {
 
     yield* held.ready;
 
+    if (yield* held.isDisplaced) {
+      yield* Scope.close(lease, Exit.void);
+
+      return yield* new SegmentNotReady({ index });
+    }
+
     // The player holds this generation's init segment from the lost encoder, and software segments
     // do not decode under it, so a fallback moves to the next generation. When software cannot
     // play the file at all, the negotiation the player falls back to says why.
@@ -1179,7 +1185,13 @@ const make = Effect.gen(function* () {
   }, Effect.uninterruptible);
 
   const yieldWhenDisplaced = (session: Session, lease: Scope.Closeable, held: EncoderSlots.Held) =>
-    held.displaced.pipe(Effect.andThen(yieldEncoder(session, lease)), Effect.forkIn(lease));
+    session.audience === "guest"
+      ? held.displaced.pipe(
+          Effect.andThen(yieldEncoder(session, lease)),
+          Effect.forkIn(lease),
+          Effect.asVoid,
+        )
+      : Effect.void;
 
   const release = Effect.fn("StreamSessions.release")(function* (session: Session) {
     yield* session.lock.withPermitsIfAvailable(1)(

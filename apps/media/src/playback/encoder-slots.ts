@@ -77,8 +77,7 @@ interface State {
 }
 
 type HouseholdDecision = Data.TaggedEnum<{
-  Admit: {};
-  Displace: { readonly victims: ReadonlyArray<Slot> };
+  Take: { readonly victims: ReadonlyArray<Slot> };
   Full: {};
 }>;
 
@@ -87,11 +86,14 @@ const HouseholdDecision = Data.taggedEnum<HouseholdDecision>();
 const creditedTo = (slot: Slot, claimant: Claimant): boolean =>
   slot.claimant.sessionId === claimant.sessionId && slot.claimant.ticket <= claimant.ticket;
 
-const counts = (slot: Slot, claimant: Claimant): boolean =>
-  slot.takenBy !== claimant.streamId && !creditedTo(slot, claimant);
+/** A taken slot and its taker stand for one encoder; the taken one counts once its taker left. */
+const counts = (slot: Slot, claimant: Claimant, slots: ReadonlyMap<StreamId, Slot>): boolean =>
+  slot.takenBy === null
+    ? !creditedTo(slot, claimant)
+    : slot.takenBy !== claimant.streamId && !slots.has(slot.takenBy);
 
 const countedAgainst = (slots: ReadonlyMap<StreamId, Slot>, claimant: Claimant) =>
-  [...slots.values()].filter((slot) => counts(slot, claimant));
+  [...slots.values()].filter((slot) => counts(slot, claimant, slots));
 
 const newest = (slots: ReadonlyArray<Slot>): Slot | undefined =>
   slots.reduce<Slot | undefined>(
@@ -118,7 +120,7 @@ const decideHousehold = (state: State, claimant: Claimant, limit: number): House
     victims.push(victim);
   }
 
-  return victims.length === 0 ? HouseholdDecision.Admit() : HouseholdDecision.Displace({ victims });
+  return HouseholdDecision.Take({ victims });
 };
 
 const fillLine = (state: State, limit: number): readonly [ReadonlyArray<Waiter>, State] => {
@@ -212,12 +214,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
         const decided = decideHousehold(current, claimant, limit);
 
         return HouseholdDecision.$match(decided, {
-          Admit: () =>
-            [
-              decided,
-              { ...current, slots: new Map(current.slots).set(claimant.streamId, slot) },
-            ] as const,
-          Displace: ({ victims }) => {
+          Take: ({ victims }) => {
             const slots = new Map(current.slots);
 
             for (const victim of victims) {
@@ -231,8 +228,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
       });
 
       return yield* HouseholdDecision.$match(decision, {
-        Admit: () => Scope.addFinalizer(scope, leave(slot)).pipe(Effect.as(heldBy(slot, []))),
-        Displace: ({ victims }) =>
+        Take: ({ victims }) =>
           Scope.addFinalizer(scope, leave(slot)).pipe(
             Effect.andThen(
               Effect.forEach(victims, (victim) => Deferred.succeed(victim.displaced, undefined), {

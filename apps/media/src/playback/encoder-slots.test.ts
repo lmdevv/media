@@ -143,6 +143,22 @@ describe("encoder slots", () => {
     }),
   );
 
+  it.effect("a second household stream takes another guest's slot while the first yields", () =>
+    Effect.gen(function* () {
+      const pool = yield* EncoderSlots.make(2);
+      const older = yield* pool.guest(yield* Scope.make(), claimant("older", 1));
+      const newer = yield* pool.guest(yield* Scope.make(), claimant("newer", 2));
+      yield* pool.household(yield* Scope.make(), claimant("first", 3));
+
+      assert.isTrue(yield* newer.isDisplaced);
+      assert.isFalse(yield* older.isDisplaced);
+
+      yield* pool.household(yield* Scope.make(), claimant("second", 4));
+
+      assert.isTrue(yield* older.isDisplaced, "the second household stream is not refused");
+    }),
+  );
+
   it.effect("a taken slot counts against everyone else until its guest's encoder stops", () =>
     Effect.gen(function* () {
       const pool = yield* EncoderSlots.make(1);

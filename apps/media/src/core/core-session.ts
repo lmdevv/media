@@ -1,5 +1,14 @@
 import { Platform, TokenStorage } from "@media/sdk/effect";
-import { Context, Effect, Layer, type Redacted, Ref, Schedule, Semaphore } from "effect";
+import {
+  Context,
+  Effect,
+  FiberHandle,
+  Layer,
+  type Redacted,
+  Ref,
+  Schedule,
+  Semaphore,
+} from "effect";
 
 /**
  * `signed-in` once the core accepted the server's key; `signed-out` while it signs in, and after
@@ -59,10 +68,12 @@ const make = Effect.fn("CoreSession.make")(function* (options: Options) {
       }),
     );
 
-  const scope = yield* Effect.scope;
+  const retrying = yield* FiberHandle.make<void>();
 
   const keepSigningIn = (seen: number) =>
-    signIn(seen).pipe(Effect.retry(backoff), Effect.forkIn(scope), Effect.asVoid);
+    FiberHandle.run(retrying, signIn(seen).pipe(Effect.retry(backoff)), {
+      onlyIfMissing: true,
+    }).pipe(Effect.asVoid);
 
   yield* keepSigningIn(0);
 
