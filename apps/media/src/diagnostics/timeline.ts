@@ -162,6 +162,15 @@ const RULES = new Map<string, Rule>([
     },
   ],
   [
+    LogEvent.streamYielded,
+    {
+      kind: "stream-moved",
+      source: "server",
+      summary: () =>
+        "Encoder stopped: a household stream took its slot; the stream stays and restarts on the next request",
+    },
+  ],
+  [
     LogEvent.streamResumed,
     {
       kind: "stream-moved",

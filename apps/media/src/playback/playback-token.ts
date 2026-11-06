@@ -11,6 +11,7 @@ import {
 import { Context, Data, Effect, Layer, Option, Redacted } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
+import type { Audience } from "./encoder-slots.ts";
 import * as EndedSessions from "./ended-sessions.ts";
 
 /** What a token is for: streaming a file, or downloading it to keep on a device. */
@@ -32,6 +33,8 @@ export interface PlaybackGrant {
   readonly fileId: MediaFileId;
   readonly sessionId: PlaybackSessionId;
   readonly purpose: TokenPurpose;
+  /** Who the stream plays for; every old movies token is the household's. */
+  readonly audience: Audience;
   /** Expiry in milliseconds since the epoch. */
   readonly expiresAt: number;
 }
@@ -110,6 +113,7 @@ export const make = Effect.fn("PlaybackTokenVerifier.make")(function* (
       fileId: payload.fid,
       sessionId: payload.sid,
       purpose,
+      audience: "household",
       expiresAt: payload.exp,
     } satisfies PlaybackGrant;
   });

@@ -1,5 +1,5 @@
 import { assert, describe, layer } from "@effect/vitest";
-import { Effect, Fiber, Layer, Predicate, Redacted, Result } from "effect";
+import { Effect, Fiber, Layer, Option, Predicate, Redacted, Result } from "effect";
 
 import { type ClientCapabilities } from "@media/contracts/media-playback";
 
@@ -191,6 +191,9 @@ const setup = Effect.gen(function* () {
   };
 });
 
+const stillWaiting = <A, E>(fiber: Fiber.Fiber<A, E>) =>
+  Fiber.await(fiber).pipe(Effect.timeoutOption("1 second"), Effect.map(Option.isNone));
+
 describe.skipIf(!hasFfmpeg)("slot credit", () => {
   layer(subject, { excludeTestServices: true, timeout: "120 seconds" })((it) => {
     it.effect(
@@ -298,6 +301,77 @@ describe.skipIf(!hasFfmpeg)("slot credit", () => {
             }),
           ),
         ),
+      60_000,
+    );
+
+    it.effect(
+      "a guest stream waits behind a household one and starts once it stops",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const { grant, request } = yield* setup;
+          const guest = { ...(yield* setup).grant, audience: "guest" as const };
+
+          const start = (as: PlaybackToken.PlaybackGrant) =>
+            Effect.gen(function* () {
+              const negotiation = yield* sessions.negotiate(as);
+
+              return yield* negotiation.start(request);
+            }).pipe(Effect.scoped);
+
+          const household = yield* start(grant);
+          const waiting = yield* Effect.forkChild(start(guest));
+
+          assert.isTrue(yield* stillWaiting(waiting), "MAX_CONCURRENT_REMUXES=1 is taken");
+
+          yield* sessions.stop(household.streamId, grant);
+          const started = yield* Fiber.join(waiting);
+
+          assert.strictEqual(yield* sessions.activeCount, 1);
+
+          yield* sessions.stop(started.streamId, guest);
+        }),
+      60_000,
+    );
+
+    it.effect(
+      "a household stream takes a guest's slot, and the guest resumes once it stops",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const { grant, request } = yield* setup;
+          const guest = { ...(yield* setup).grant, audience: "guest" as const };
+
+          const start = (as: PlaybackToken.PlaybackGrant) =>
+            Effect.gen(function* () {
+              const negotiation = yield* sessions.negotiate(as);
+
+              return yield* negotiation.start(request);
+            }).pipe(Effect.scoped);
+
+          const playing = yield* start(guest);
+          const { streamId, generation, segmentIndex } = playing;
+          yield* sessions.segment(streamId, generation, segmentIndex, guest);
+
+          const household = yield* start(grant);
+
+          assert.strictEqual(yield* sessions.activeCount, 1, "the guest's encoder stopped");
+          yield* sessions.playlist(streamId, generation, guest);
+
+          const next = yield* Effect.forkChild(
+            sessions.segment(streamId, generation, segmentIndex, guest),
+          );
+
+          assert.isTrue(yield* stillWaiting(next), "the guest waits for the slot");
+
+          yield* sessions.stop(household.streamId, grant);
+          const served = yield* Fiber.join(next);
+
+          assert.isAbove(served.paths.length, 0);
+          assert.strictEqual(yield* sessions.activeCount, 1);
+
+          yield* sessions.stop(streamId, guest);
+        }),
       60_000,
     );
   });

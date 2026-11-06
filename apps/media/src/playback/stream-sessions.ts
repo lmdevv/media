@@ -59,6 +59,7 @@ import {
   segmentAt,
 } from "./hls-plan.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
+import * as EncoderSlots from "./encoder-slots.ts";
 import { AudioPlan, decidePlayback, PlaybackPlan, VideoPlan } from "./playback-decision.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
 import type { PlaybackGrant } from "./playback-token.ts";
@@ -67,15 +68,6 @@ import * as StreamLiveness from "./stream-liveness.ts";
 import * as StreamOwners from "./stream-owners.ts";
 import * as TranscodeSpace from "./transcode-space.ts";
 import { hlsCommandArgs } from "./transcode-command.ts";
-
-interface Claim {
-  readonly sessionId: PlaybackSessionId;
-  readonly ticket: number;
-  /** Whether its stream registered; only then can it run an encoder. */
-  readonly registered: boolean;
-  /** Completes once the slot is free, so the encoder it covered stopped. */
-  readonly freed: Deferred.Deferred<void>;
-}
 
 interface StartRequest {
   readonly file: ResolvedMediaFile;
@@ -258,6 +250,7 @@ interface Session {
   readonly sessionId: PlaybackSessionId;
   /** The ticket of the negotiation that started it. */
   readonly ticket: number;
+  readonly audience: EncoderSlots.Audience;
   readonly userId: UserId;
   readonly fileId: MediaFileId;
   readonly file: ResolvedMediaFile;
@@ -309,8 +302,8 @@ const make = Effect.gen(function* () {
   const owners = yield* StreamOwners.Service;
   const reports = yield* SessionReports.Service;
   const sessions = yield* Ref.make<ReadonlyMap<StreamId, Session>>(new Map());
-  const transcodes = yield* Ref.make<ReadonlyMap<StreamId, Claim>>(new Map());
-  const copies = yield* Ref.make<ReadonlyMap<StreamId, Claim>>(new Map());
+  const transcodes = yield* EncoderSlots.make(config.maxConcurrentTranscodes);
+  const copies = yield* EncoderSlots.make(config.maxConcurrentRemuxes);
   const registry = yield* Semaphore.make(1);
 
   /**
@@ -977,73 +970,28 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * Claims a slot for `streamId` until `scope` closes. Slots held for an older negotiation of the
-   * same session do not count: one still starting never registers, and a new stream starts its
-   * encoder only after the registered ones are free (see `awaitCredited`). Deciding that in the
-   * same update as the claim keeps a slot released meanwhile from being credited as well.
+   * Takes a slot until `lease` closes. A guest waits in line for at most `wait`, interruptibly,
+   * then fails as a household stream does at once when household streams hold every slot.
    */
-  const acquireSlot = (
-    scope: Scope.Scope,
+  const claimSlot = (
+    lease: Scope.Scope,
     transcoding: boolean,
-    streamId: StreamId,
-    holder: Omit<Claim, "freed">,
-  ) => {
-    const slots = transcoding ? transcodes : copies;
-    const limit = transcoding ? config.maxConcurrentTranscodes : config.maxConcurrentRemuxes;
+    audience: EncoderSlots.Audience,
+    claimant: EncoderSlots.Claimant,
+    wait: Duration.Duration,
+  ): Effect.Effect<EncoderSlots.Held, TranscodeCapacityReached> => {
+    const pool = transcoding ? transcodes : copies;
 
-    const counted = (other: Claim) =>
-      other.sessionId !== holder.sessionId || other.ticket > holder.ticket;
-
-    return Deferred.make<void>().pipe(
-      Effect.flatMap((freed) =>
-        Ref.modify(slots, (holders) =>
-          [...holders.values()].filter(counted).length < limit
-            ? ([true, new Map(holders).set(streamId, { ...holder, freed })] as const)
-            : ([false, holders] as const),
-        ).pipe(
-          Effect.tap((acquired) =>
-            acquired
-              ? Scope.addFinalizer(
-                  scope,
-                  Ref.update(slots, (holders) => {
-                    const next = new Map(holders);
-                    next.delete(streamId);
-
-                    return next;
-                  }).pipe(Effect.andThen(Deferred.succeed(freed, undefined))),
-                )
-              : Effect.void,
-          ),
-        ),
-      ),
-      Effect.uninterruptible,
-      Effect.flatMap((acquired) =>
-        acquired ? Effect.void : Effect.fail(new TranscodeCapacityReached({ limit })),
-      ),
-    );
+    return audience === "household"
+      ? pool.household(lease, claimant)
+      : pool.guest(lease, claimant).pipe(
+          Effect.timeoutOrElse({
+            duration: wait,
+            orElse: () => Effect.fail(new TranscodeCapacityReached({ limit: pool.limit })),
+          }),
+          Effect.interruptible,
+        );
   };
-
-  /**
-   * Waits until the slots `holder` was credited for its session's older registered streams are
-   * free. A new stream's encoder may start only then: a negotiation in between may have begun
-   * closing one of them, and nothing else keeps this encoder from overlapping that one. Once a
-   * stream registered no older one can, so a later resume needs no wait.
-   */
-  const awaitCredited = (transcoding: boolean, holder: Pick<Claim, "sessionId" | "ticket">) =>
-    Ref.get(transcoding ? transcodes : copies).pipe(
-      Effect.flatMap((holders) =>
-        Effect.forEach(
-          [...holders.values()].filter(
-            (other) =>
-              other.registered &&
-              other.sessionId === holder.sessionId &&
-              other.ticket < holder.ticket,
-          ),
-          (other) => Deferred.await(other.freed),
-          { discard: true },
-        ),
-      ),
-    );
 
   const revive = Effect.fn("StreamSessions.revive")(function* (
     session: Session,
@@ -1075,19 +1023,34 @@ const make = Effect.gen(function* () {
         Effect.andThen(end("resume-refused")),
       );
 
-    yield* space.check(0).pipe(
+    const held = yield* space.check(0).pipe(
       Effect.andThen(
-        acquireSlot(lease, transcoding, session.streamId, {
-          sessionId: session.sessionId,
-          ticket: session.ticket,
-          registered: true,
-        }),
+        claimSlot(
+          lease,
+          transcoding,
+          session.audience,
+          {
+            streamId: session.streamId,
+            sessionId: session.sessionId,
+            ticket: session.ticket,
+            registered: true,
+          },
+          SEGMENT_WAIT,
+        ),
       ),
+      Effect.onInterrupt(() => Scope.close(lease, Exit.void)),
       Effect.catchTags({
-        TranscodeCapacityReached: () => refused("TranscodeCapacityReached"),
+        TranscodeCapacityReached: () =>
+          session.audience === "household"
+            ? refused("TranscodeCapacityReached")
+            : Scope.close(lease, Exit.void).pipe(
+                Effect.andThen(Effect.fail(new SegmentNotReady({ index }))),
+              ),
         InsufficientTranscodeSpace: () => refused("InsufficientTranscodeSpace"),
       }),
     );
+
+    yield* held.ready;
 
     // The player holds this generation's init segment from the lost encoder, and software segments
     // do not decode under it, so a fallback moves to the next generation. When software cannot
@@ -1105,6 +1068,7 @@ const make = Effect.gen(function* () {
     );
 
     yield* Ref.set(session.encoder, Encoder.Running({ lease }));
+    yield* yieldWhenDisplaced(session, lease, held);
 
     yield* Effect.logInfo(LogEvent.streamResumed).pipe(
       Effect.annotateLogs({
@@ -1162,6 +1126,61 @@ const make = Effect.gen(function* () {
     return copied ? Option.some(kept) : Option.none();
   });
 
+  const stopEncoder = Effect.fnUntraced(function* (
+    session: Session,
+    lease: Scope.Closeable,
+    keptInit: Option.Option<string>,
+  ) {
+    yield* Ref.set(
+      session.encoder,
+      Encoder.Released({ since: yield* Clock.currentTimeMillis, keptInit }),
+    );
+    yield* Scope.close(lease, Exit.void);
+  });
+
+  const yieldEncoder = Effect.fn("StreamSessions.yieldEncoder")(function* (
+    session: Session,
+    lease: Scope.Closeable,
+  ) {
+    yield* session.lock.withPermits(1)(
+      Effect.gen(function* () {
+        const encoder = yield* Ref.get(session.encoder);
+
+        if (
+          isClosed(session.scope) ||
+          !Encoder.$is("Running")(encoder) ||
+          encoder.lease !== lease
+        ) {
+          return;
+        }
+
+        const run = yield* Ref.get(session.generation);
+        const keptInit = yield* keepInit(session, run);
+
+        if (isClosed(session.scope)) {
+          if (Option.isSome(keptInit)) yield* fs.remove(keptInit.value).pipe(Effect.ignore);
+
+          return;
+        }
+
+        yield* stopEncoder(session, lease, keptInit);
+
+        yield* Effect.logInfo(LogEvent.streamYielded).pipe(
+          Effect.annotateLogs({
+            sessionId: session.sessionId,
+            userId: session.userId,
+            streamId: session.streamId,
+            generation: run.number,
+            segment: yield* Ref.get(session.requested),
+          }),
+        );
+      }),
+    );
+  }, Effect.uninterruptible);
+
+  const yieldWhenDisplaced = (session: Session, lease: Scope.Closeable, held: EncoderSlots.Held) =>
+    held.displaced.pipe(Effect.andThen(yieldEncoder(session, lease)), Effect.forkIn(lease));
+
   const release = Effect.fn("StreamSessions.release")(function* (session: Session) {
     yield* session.lock.withPermitsIfAvailable(1)(
       Effect.gen(function* () {
@@ -1184,11 +1203,7 @@ const make = Effect.gen(function* () {
 
         if (StreamLiveness.holdsEncoder(moment)) return;
 
-        yield* Ref.set(
-          session.encoder,
-          Encoder.Released({ since: yield* Clock.currentTimeMillis, keptInit }),
-        );
-        yield* Scope.close(encoder.lease, Exit.void);
+        yield* stopEncoder(session, encoder.lease, keptInit);
 
         yield* Effect.logInfo(LogEvent.streamReleased).pipe(
           Effect.annotateLogs({
@@ -1208,13 +1223,9 @@ const make = Effect.gen(function* () {
   }, Effect.uninterruptible);
 
   const markRegistered = Effect.fnUntraced(function* (session: Session) {
-    yield* Ref.update(isEncode(yield* Ref.get(session.video)) ? transcodes : copies, (holders) => {
-      const claim = holders.get(session.streamId);
-
-      return claim === undefined
-        ? holders
-        : new Map(holders).set(session.streamId, { ...claim, registered: true });
-    });
+    yield* (isEncode(yield* Ref.get(session.video)) ? transcodes : copies).register(
+      session.streamId,
+    );
   });
 
   /**
@@ -1317,11 +1328,14 @@ const make = Effect.gen(function* () {
     );
 
     const lease = yield* Scope.fork(scope, "sequential");
-    yield* acquireSlot(lease, transcoding, streamId, {
-      sessionId: grant.sessionId,
-      ticket,
-      registered: false,
-    });
+
+    const held = yield* claimSlot(
+      lease,
+      transcoding,
+      grant.audience,
+      { streamId, sessionId: grant.sessionId, ticket, registered: false },
+      START_WAIT,
+    );
 
     yield* space.check(0);
 
@@ -1360,6 +1374,7 @@ const make = Effect.gen(function* () {
       streamId,
       sessionId: grant.sessionId,
       ticket,
+      audience: grant.audience,
       userId: grant.userId,
       fileId: grant.fileId,
       file,
@@ -1421,7 +1436,7 @@ const make = Effect.gen(function* () {
       Effect.forkIn(scope),
     );
 
-    yield* awaitCredited(transcoding, { sessionId: grant.sessionId, ticket });
+    yield* held.ready;
 
     const segmentIndex = segmentAt(segmentPlan, quickStart);
 
@@ -1430,6 +1445,7 @@ const make = Effect.gen(function* () {
         ? yield* firstSegment(session, lease, segmentIndex)
         : yield* startGeneration(session, lease, 1, segmentIndex);
 
+    yield* yieldWhenDisplaced(session, lease, held);
     const mode = yield* Ref.get(session.mode);
 
     yield* reporter.report(

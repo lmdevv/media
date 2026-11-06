@@ -6,6 +6,7 @@ export const LogEvent = {
   streamMoved: "Stream.moved",
   streamReleased: "Stream.released",
   streamResumed: "Stream.resumed",
+  streamYielded: "Stream.yielded",
   resumeRefused: "Stream.resume_refused",
   streamEnded: "Stream.ended",
   modeChanged: "Stream.mode_changed",

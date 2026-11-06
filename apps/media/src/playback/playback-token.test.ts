@@ -71,6 +71,7 @@ layer(EndedSessions.layerNone)("PlaybackToken", (it) => {
         fileId: "file_1",
         sessionId: "session_1",
         purpose: "play",
+        audience: "household",
         expiresAt: 21_601_000,
       });
     }),

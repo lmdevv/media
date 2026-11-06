@@ -14,8 +14,16 @@ mount media read-only.
 
 - One server process runs worker pools and ffmpeg child processes.
 - Each domain has its own caps, so a music rescan cannot starve a transcode.
+- Each job kind runs in one pool, and each pool has its own cap. Music adds its pools in phase 5.
+
+  | Pool                | Job kinds                         | Cap                           |
+  | ------------------- | --------------------------------- | ----------------------------- |
+  | `movies`            | scan, metadata, person, migration | 2                             |
+  | `movies.background` | trickplay                         | `MEDIA_TRICKPLAY_CONCURRENCY` |
+  | `server`            | backup                            | 1                             |
+
 - One server-wide transcode limit covers every domain. Guests have the lowest priority under it
-  (ADR 0007).
+  (ADR 0007). The remux limit follows the same rules.
 - Media mounts stay read-only.
 - The sandbox stays.
 
@@ -36,7 +44,21 @@ mount media read-only.
 ## Edge cases settled
 
 - A rescan that hits its domain's cap waits. It does not take a transcode's slot.
+- A job whose pool is full stays pending. It never takes another pool's slot, so scrub thumbnails
+  never hold up a scan, and a backup never waits for one.
 - A guest stream is the first to wait when the transcode limit is reached. The core's
   `core/tickets:sessionStatus` answers `guest: true` for a guest's session, so the server knows a
   guest's stream from the ticket's session alone (ADR 0007).
+- Waiting guests form one line, served by ticket, the negotiation that started each stream. A
+  guest that resumes its stream keeps its ticket, so it goes ahead of guests that started later.
+- A household stream that finds the limit reached while guests hold slots takes the newest guest's
+  slot, preferring a guest whose stream already plays over one still starting. That guest's encoder
+  stops and its session stays. Its next segment request waits in the line. The household stream's
+  encoder starts only after the guest's has stopped, so the limit is never exceeded.
+- A guest waits up to 20 seconds to start a stream, then fails with capacity reached. A guest
+  resuming a stream waits up to 30 seconds, then its segment request fails as not ready and the
+  session stays for the player's retry.
+- When household streams fill the limit, another household stream is refused at once, a household
+  resume ends its session, and guests wait.
+- Until the server checks core tickets (phase 4), every stream it serves is a household stream.
 - Original media stays read-only to the server.
