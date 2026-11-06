@@ -1,7 +1,7 @@
 import { PlatformProvider, usePlatform } from "@media/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
 import { Predicate } from "effect";
-import { createContext, use, useState, useSyncExternalStore } from "react";
+import { createContext, use, useMemo, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import { deviceName } from "./device-name";
@@ -55,16 +55,23 @@ export function AccountProvider({
   const origin = useSyncExternalStore(store.subscribe, store.read, store.read);
   const [staging, setStaging] = useState(() => ({ fresh: freshSlot, slot: newSlot() }));
 
-  if (freshSlot !== staging.fresh) {
-    const taken = [...origin.people.values()].includes(staging.slot);
+  const taken = [...origin.people.values()].includes(staging.slot);
 
-    setStaging({ fresh: freshSlot, slot: freshSlot && taken ? newSlot() : staging.slot });
+  // A slot promoted to a person is theirs. Entering a fresh-slot page again, or losing the active
+  // person, needs a new one; the page that promotes the slot keeps it until it navigates away.
+  const entering = freshSlot && !staging.fresh;
+  const needsNew = taken && (entering || (!freshSlot && origin.active === null));
+
+  if (freshSlot !== staging.fresh || needsNew) {
+    setStaging({ fresh: freshSlot, slot: needsNew ? newSlot() : staging.slot });
   }
 
   const slot = freshSlot || origin.active === null ? staging.slot : origin.active;
 
+  const context = useMemo(() => ({ store, origin, slot }), [store, origin, slot]);
+
   return (
-    <Context value={{ store, origin, slot }}>
+    <Context value={context}>
       <PlatformProvider url={url} storage={store.sessions} storageKey={store.sessionKey(slot)}>
         {children}
       </PlatformProvider>
@@ -110,11 +117,12 @@ export const useAccountActions = (): AccountActions => {
   const platform = usePlatform();
   const navigate = useNavigate();
 
-  const establish = async (): Promise<void> => {
-    const me = await platform.core.auth.sessions.current();
+  /** Reads who signed in and registers this browser; a sign-in that cannot finish is ended. */
+  const register = async (): Promise<UserId> => {
+    try {
+      const me = await platform.core.auth.sessions.current();
 
-    if (me.kind !== "tile") {
-      try {
+      if (me.kind !== "tile") {
         const device = store.read().device;
 
         const enrolled = await platform.core.devices.registry.enroll(
@@ -122,16 +130,22 @@ export const useAccountActions = (): AccountActions => {
         );
 
         store.setDevice(enrolled.device);
-      } catch (cause) {
-        await platform.session.signOut();
-
-        if (Predicate.isTagged(cause, "Conflict")) throw new SharedDeviceError();
-
-        throw cause;
       }
-    }
 
-    store.promote(slot, me.userId);
+      return me.userId;
+    } catch (cause) {
+      await platform.session.signOut();
+
+      if (Predicate.isTagged(cause, "Conflict")) throw new SharedDeviceError();
+
+      throw cause;
+    }
+  };
+
+  const establish = async (): Promise<void> => {
+    const userId = await register();
+
+    store.promote(slot, userId);
     await navigate({ to: "/" });
   };
 

@@ -112,20 +112,6 @@ describe("the origin store", () => {
     expect(storage.getItem(store.sessionKey(adaSlot))).toBe("ada tokens");
   });
 
-  it("forgets everyone but keeps the device when it becomes shared", () => {
-    const storage = new MemoryStorage();
-    const store = makeOriginStore(storage, new EventTarget());
-    const slot = newSlot();
-
-    store.setDevice("dv_1.secret");
-    storage.setItem(store.sessionKey(slot), "tokens");
-    store.promote(slot, ada);
-    store.forgetAll();
-
-    expect(store.read()).toStrictEqual({ device: "dv_1.secret", active: null, people: new Map() });
-    expect(storage.getItem(store.sessionKey(slot))).toBeNull();
-  });
-
   it("tells this tab of another tab's switch", () => {
     const storage = new MemoryStorage();
     const events = new EventTarget();

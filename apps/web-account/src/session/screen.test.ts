@@ -1,4 +1,4 @@
-import { Forbidden, Unauthenticated } from "@media/contracts/errors";
+import { Forbidden, NotFound, Unauthenticated } from "@media/contracts/errors";
 import type { QueryState } from "@media/sdk/react";
 import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
@@ -11,7 +11,7 @@ import type {
   SharedTile,
   UserId,
 } from "./platform-types";
-import { repairsOf, screenOf } from "./screen";
+import { deviceUnknown, screenOf } from "./screen";
 import type { ScreenInputs } from "./screen";
 
 const userId = Brand.nominal<UserId>();
@@ -225,8 +225,18 @@ describe("which screen shows", () => {
   });
 });
 
-describe("what this browser repairs", () => {
-  it("forgets people whose sessions on this device ended", () => {
+describe("when this browser forgets its device", () => {
+  it("forgets a device code the core no longer knows", () => {
+    const picker: QueryState<PickerView> = {
+      status: "error",
+      error: new NotFound({ message: "No such device" }),
+      retry,
+    };
+
+    expect(deviceUnknown(inputs({ device: "dv", picker }))).toBe(true);
+  });
+
+  it("keeps people the picker does not list yet, since another tab may have just added them", () => {
     const picker = success<PickerView>({
       deviceId,
       name: "Firefox on Linux",
@@ -234,47 +244,6 @@ describe("what this browser repairs", () => {
       tiles: [{ userId: ada, username: "ada" }],
     });
 
-    expect(
-      repairsOf(inputs({ device: "dv", picker, held: new Set([ada, kid]) }), ada),
-    ).toStrictEqual([{ kind: "forget", userIds: [kid] }]);
-  });
-
-  it("forgets everyone once the device became shared", () => {
-    expect(
-      repairsOf(
-        inputs({ device: "dv", picker: success(shared([tile({})])), held: new Set([ada]) }),
-        ada,
-      ),
-    ).toStrictEqual([{ kind: "forgetAll" }]);
-  });
-
-  it("keeps the person whose tile holds a shared device", () => {
-    expect(
-      repairsOf(
-        inputs({
-          status: "signedIn",
-          me: success(meAs(["movies:read"], "tile")),
-          device: "dv",
-          picker: success(shared([tile({})])),
-          held: new Set([ada]),
-        }),
-        ada,
-      ),
-    ).toStrictEqual([]);
-  });
-
-  it("repairs nothing while the session is still being read", () => {
-    expect(
-      repairsOf(
-        inputs({
-          status: "signedIn",
-          me: loading,
-          device: "dv",
-          picker: success(shared([tile({})])),
-          held: new Set([ada]),
-        }),
-        ada,
-      ),
-    ).toStrictEqual([]);
+    expect(deviceUnknown(inputs({ device: "dv", picker, held: new Set([ada, kid]) }))).toBe(false);
   });
 });

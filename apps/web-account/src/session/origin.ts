@@ -50,8 +50,6 @@ export interface OriginStore {
   readonly activate: (slot: SlotId) => void;
   /** Forgets `userId`'s slot and session here, and the active slot when it was theirs. */
   readonly forget: (userId: UserId) => void;
-  /** Forgets every person and session here and keeps the device code. */
-  readonly forgetAll: () => void;
   readonly setDevice: (code: string) => void;
   readonly clearDevice: () => void;
 }
@@ -97,12 +95,19 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
   const listeners = new Set<() => void>();
   const keyListeners = new Set<{ readonly key: string; readonly onChange: () => void }>();
 
+  let cached: Snapshot | null = null;
+
+  // Storage is read again only after a write here or another tab's `storage` event for our keys.
+  let stale = true;
+
   const notify = (key: string | null) => {
     for (const listener of keyListeners) {
       if (key === null || listener.key === key) listener.onChange();
     }
 
     if (isOurs(key)) {
+      stale = true;
+
       for (const listener of listeners) listener();
     }
   };
@@ -111,8 +116,6 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
     if (value === null) storage.removeItem(key);
     else storage.setItem(key, value);
   };
-
-  let cached: Snapshot | null = null;
 
   const snapshot = (): Snapshot => {
     const people = new Map<UserId, SlotId>();
@@ -144,9 +147,13 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
   };
 
   const read = (): Origin => {
-    const next = snapshot();
+    if (cached === null || stale) {
+      const next = snapshot();
 
-    if (cached === null || cached.raw !== next.raw) cached = next;
+      stale = false;
+
+      if (cached === null || cached.raw !== next.raw) cached = next;
+    }
 
     return cached.origin;
   };
@@ -220,14 +227,6 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
     },
     activate: (slot) => change([[ACTIVE, slot]]),
     forget: (userId) => change(slotsOf(userId)),
-    forgetAll: () =>
-      change([
-        ...[...read().people].flatMap(([userId, slot]) => [
-          [`${PERSON}${userId}`, null] as const,
-          [sessionKey(slot), null] as const,
-        ]),
-        [ACTIVE, null],
-      ]),
     setDevice: (code) => change([[DEVICE, code]]),
     clearDevice: () => change([[DEVICE, null]]),
   };

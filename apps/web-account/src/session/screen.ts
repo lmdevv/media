@@ -203,44 +203,11 @@ export const screenOf = (inputs: ScreenInputs): Screen => {
   };
 };
 
-/** A fix to this browser's storage that the inputs prove is needed. */
-export type Repair =
-  /** The core no longer knows this device: forget its code. */
-  | { readonly kind: "clearDevice" }
-  /** The device became shared: every personal session here has ended. */
-  | { readonly kind: "forgetAll" }
-  /** People this browser holds whose sessions on the device have ended. */
-  | { readonly kind: "forget"; readonly userIds: ReadonlyArray<UserId> };
-
-/** The repairs `inputs` call for; none while anything is still loading. */
-export const repairsOf = (inputs: ScreenInputs, active: UserId | null): ReadonlyArray<Repair> => {
-  const { picker } = inputs;
-
-  if (picker.status === "error") {
-    return Predicate.isTagged(picker.error, "NotFound") ? [{ kind: "clearDevice" }] : [];
-  }
-
-  if (picker.status !== "success") return [];
-
-  const settled =
-    inputs.status === "signedOut" ||
-    (inputs.status === "signedIn" && inputs.me.status === "success");
-
-  if (!settled) return [];
-
-  const view = picker.data;
-
-  if (view.mode === "shared") {
-    const onTile = inputs.me.status === "success" && inputs.me.data.kind === "tile";
-    const others = [...inputs.held].filter((userId) => !onTile || userId !== active);
-
-    if (others.length === 0) return [];
-
-    return onTile ? [{ kind: "forget", userIds: others }] : [{ kind: "forgetAll" }];
-  }
-
-  const listed = new Set(view.tiles.map((tile) => tile.userId));
-  const ended = [...inputs.held].filter((userId) => !listed.has(userId) && userId !== active);
-
-  return ended.length === 0 ? [] : [{ kind: "forget", userIds: ended }];
-};
+/**
+ * Whether the core no longer knows this browser's device, so its code should go. Sessions that
+ * ended stay stored until someone signs in on their slot again: a newer sign-in can reach another
+ * tab's storage before its picker catches up, so a picker that does not list someone yet is no
+ * proof their session ended.
+ */
+export const deviceUnknown = (inputs: ScreenInputs): boolean =>
+  inputs.picker.status === "error" && Predicate.isTagged(inputs.picker.error, "NotFound");

@@ -14,9 +14,8 @@ import { BlankPage, UnreachableScreen } from "@/screens/states";
 
 import { useAccountStore, useOrigin, useSlot } from "./account";
 import { MeContext } from "./me";
-import type { Origin, OriginStore } from "./origin";
-import { isRenewing, repairsOf, screenOf } from "./screen";
-import type { Intent, Need, Repair, Screen, ScreenInputs } from "./screen";
+import { deviceUnknown, isRenewing, screenOf } from "./screen";
+import type { Intent, Need, Screen, ScreenInputs } from "./screen";
 import type { UserId } from "./platform-types";
 
 const NEEDS: ReadonlyArray<Need> = ["public", "anyone", "account", "admin"];
@@ -54,21 +53,17 @@ const useIntent = (): Intent => {
   return { kind: "page", need: route.need };
 };
 
-const activePerson = (origin: Origin): UserId | null =>
-  [...origin.people].find(([, slot]) => slot === origin.active)?.[0] ?? null;
-
-/**
- * Applies the storage repairs the inputs prove are needed. Each repair removes what made it
- * needed, so the next render asks for none.
- */
-const useRepairs = (inputs: ScreenInputs, active: UserId | null): void => {
+/** Forgets this browser's device code once the core says it no longer knows the device. */
+const useForgetUnknownDevice = (inputs: ScreenInputs): void => {
   const store = useAccountStore();
-  const repairs = repairsOf(inputs, active);
+  const unknown = deviceUnknown(inputs);
 
   useEffect(() => {
-    for (const repair of repairs) applyRepair(store, repair);
-  }, [repairs, store]);
+    if (unknown) store.clearDevice();
+  }, [unknown, store]);
 };
+
+const ASK_AGAIN_MS = 1000;
 
 /**
  * Asks who is signed in again after the server refused the session while the client still holds
@@ -77,22 +72,13 @@ const useRepairs = (inputs: ScreenInputs, active: UserId | null): void => {
  */
 const useAskAgain = (me: ScreenInputs["me"]): void => {
   useEffect(() => {
-    if (me.status === "error" && isRenewing(me.error)) me.retry();
-  }, [me]);
-};
+    const timer =
+      me.status === "error" && isRenewing(me.error)
+        ? setTimeout(me.retry, ASK_AGAIN_MS)
+        : undefined;
 
-const applyRepair = (store: OriginStore, repair: Repair): void => {
-  switch (repair.kind) {
-    case "clearDevice":
-      store.clearDevice();
-      break;
-    case "forgetAll":
-      store.forgetAll();
-      break;
-    case "forget":
-      for (const userId of repair.userIds) store.forget(userId);
-      break;
-  }
+    return () => clearTimeout(timer);
+  }, [me]);
 };
 
 const render: (screen: Screen) => ReactNode = Match.type<Screen>().pipe(
@@ -147,7 +133,7 @@ export function Gate() {
     slotHeld: [...origin.people.values()].includes(slot),
   };
 
-  useRepairs(inputs, activePerson(origin));
+  useForgetUnknownDevice(inputs);
   useAskAgain(me);
 
   return render(screenOf(inputs));

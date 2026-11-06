@@ -29,7 +29,7 @@ function DevicePage() {
   return (
     <SettingsFrame>
       <PageHeader title="Approve a device" />
-      <DeviceApproval initial={codeLetters(code ?? "")} />
+      <DeviceApproval key={code ?? ""} initial={codeLetters(code ?? "")} />
     </SettingsFrame>
   );
 }
