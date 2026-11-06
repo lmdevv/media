@@ -1,30 +1,27 @@
 import type { PlaybackSessionId } from "@media/contracts/ids";
-import { type StreamId, TranscodeCapacityReached } from "@media/contracts/media-playback";
+import { TranscodeCapacityReached } from "@media/contracts/media-playback";
 import { Data, Deferred, Effect, Ref, Scope } from "effect";
 
 /** Who a stream plays for, which sets its priority under a limit (ADR 0007, ADR 0014). */
 export type Audience = "household" | "guest";
 
 export interface Claimant {
-  readonly streamId: StreamId;
-  /** A newer stream of a session is credited the slots its session's older streams hold. */
+  /** A newer stream of a session takes over the places its session's older streams hold. */
   readonly sessionId: PlaybackSessionId;
   /**
    * The negotiation that started the stream, kept across resumes; higher is newer. It orders
    * guests: the line serves the lowest first, and the highest running guest is displaced first.
    */
   readonly ticket: number;
-  /** False while a new stream is still starting; true for a resume. */
-  readonly registered: boolean;
 }
 
 /** A held slot, until the scope it was taken for closes. */
 export interface Held {
   /**
-   * Completes once every slot this holder was credited is free: its session's older registered
-   * streams, and the guest it displaced, if any. Start the encoder only after it: a negotiation in
-   * between may have begun closing one of them, and nothing else keeps the encoders from
-   * overlapping. Once a stream registered no older one can, so a resume waits only for a guest.
+   * Completes once the holder may start its encoder, which is while fewer encoders than the limit
+   * run, and counts it running from then on. Start the encoder only after it: the slots this one
+   * took over may still be stopping theirs. Also completes, counting nothing, once the slot is
+   * freed or displaced; the holder then starts no encoder.
    */
   readonly ready: Effect.Effect<void>;
   /**
@@ -32,7 +29,7 @@ export interface Held {
    * its session. Never completes for a household holder.
    */
   readonly displaced: Effect.Effect<void>;
-  /** Whether a household stream took this slot already; a starting holder then gives up. */
+  /** Whether a household stream took this slot already; a holder not running yet then gives up. */
   readonly isDisplaced: Effect.Effect<boolean>;
 }
 
@@ -40,7 +37,7 @@ interface Pool {
   readonly limit: number;
   /**
    * Takes a slot until `scope` closes, without waiting. When the limit is reached, takes the slots
-   * of the newest guests, registered guests' before starting ones', until it fits. Fails, taking
+   * of the newest guests, running guests' before starting ones', until it fits. Fails, taking
    * none, when guests' slots are not enough.
    */
   readonly household: (
@@ -49,21 +46,21 @@ interface Pool {
   ) => Effect.Effect<Held, TranscodeCapacityReached>;
   /**
    * Takes a slot until `scope` closes, first waiting in a line served lowest ticket first while the
-   * limit is reached or an older guest waits. A waiter credited its own session's slot fits sooner
-   * and is seated ahead of older waiters that do not fit. The wait can be interrupted, and the caller bounds
-   * it. Closing `scope` leaves the line, ending the wait, or frees the slot.
+   * limit is reached or an older guest waits. A waiter whose session already holds a slot fits
+   * sooner and is seated ahead of older waiters that do not fit. The wait can be interrupted, and
+   * the caller bounds it. Closing `scope` leaves the line, ending the wait, or frees the slot.
    */
   readonly guest: (scope: Scope.Scope, claimant: Claimant) => Effect.Effect<Held>;
-  /** Marks `streamId`'s slot registered: its stream may now run an encoder. */
-  readonly register: (streamId: StreamId) => Effect.Effect<void>;
 }
 
 interface Slot {
+  readonly id: number;
   readonly claimant: Claimant;
   readonly audience: Audience;
   readonly freed: Deferred.Deferred<void>;
   readonly displaced: Deferred.Deferred<void>;
-  readonly takenBy: StreamId | null;
+  readonly takenOverBy: number | null;
+  readonly running: boolean;
 }
 
 interface Waiter {
@@ -72,9 +69,16 @@ interface Waiter {
 }
 
 interface State {
-  readonly slots: ReadonlyMap<StreamId, Slot>;
+  readonly slots: ReadonlyMap<number, Slot>;
   readonly line: ReadonlyArray<Waiter>;
 }
+
+type Turn = Data.TaggedEnum<{
+  Go: {};
+  Wait: { readonly until: ReadonlyArray<Deferred.Deferred<void>> };
+}>;
+
+const Turn = Data.taggedEnum<Turn>();
 
 type HouseholdDecision = Data.TaggedEnum<{
   Take: { readonly victims: ReadonlyArray<Slot> };
@@ -83,17 +87,13 @@ type HouseholdDecision = Data.TaggedEnum<{
 
 const HouseholdDecision = Data.taggedEnum<HouseholdDecision>();
 
-const creditedTo = (slot: Slot, claimant: Claimant): boolean =>
-  slot.claimant.sessionId === claimant.sessionId && slot.claimant.ticket <= claimant.ticket;
+const takesOver = (claimant: Claimant, slot: Slot): boolean =>
+  slot.takenOverBy === null &&
+  slot.claimant.sessionId === claimant.sessionId &&
+  slot.claimant.ticket <= claimant.ticket;
 
-/** A taken slot and its taker stand for one encoder; the taken one counts once its taker left. */
-const counts = (slot: Slot, claimant: Claimant, slots: ReadonlyMap<StreamId, Slot>): boolean =>
-  slot.takenBy === null
-    ? !creditedTo(slot, claimant)
-    : slot.takenBy !== claimant.streamId && !slots.has(slot.takenBy);
-
-const countedAgainst = (slots: ReadonlyMap<StreamId, Slot>, claimant: Claimant) =>
-  [...slots.values()].filter((slot) => counts(slot, claimant, slots));
+const placesAgainst = (slots: ReadonlyMap<number, Slot>, claimant: Claimant) =>
+  [...slots.values()].filter((slot) => slot.takenOverBy === null && !takesOver(claimant, slot));
 
 const newest = (slots: ReadonlyArray<Slot>): Slot | undefined =>
   slots.reduce<Slot | undefined>(
@@ -103,17 +103,15 @@ const newest = (slots: ReadonlyArray<Slot>): Slot | undefined =>
   );
 
 const runningFirst = (guests: ReadonlyArray<Slot>): Slot | undefined =>
-  newest(guests.filter((slot) => slot.claimant.registered)) ?? newest(guests);
+  newest(guests.filter((slot) => slot.running)) ?? newest(guests);
 
 const decideHousehold = (state: State, claimant: Claimant, limit: number): HouseholdDecision => {
-  const counted = countedAgainst(state.slots, claimant);
+  const places = placesAgainst(state.slots, claimant);
   const victims: Array<Slot> = [];
 
-  while (counted.length - victims.length >= limit) {
+  while (places.length - victims.length >= limit) {
     const victim = runningFirst(
-      counted.filter(
-        (slot) => slot.audience === "guest" && slot.takenBy === null && !victims.includes(slot),
-      ),
+      places.filter((slot) => slot.audience === "guest" && !victims.includes(slot)),
     );
 
     if (victim === undefined) return HouseholdDecision.Full();
@@ -123,14 +121,30 @@ const decideHousehold = (state: State, claimant: Claimant, limit: number): House
   return HouseholdDecision.Take({ victims });
 };
 
+const seat = (
+  slots: ReadonlyMap<number, Slot>,
+  slot: Slot,
+  victims: ReadonlyArray<Slot>,
+): ReadonlyMap<number, Slot> => {
+  const seated = new Map(slots);
+
+  for (const other of slots.values()) {
+    if (victims.includes(other) || takesOver(slot.claimant, other)) {
+      seated.set(other.id, { ...other, takenOverBy: slot.id });
+    }
+  }
+
+  return seated.set(slot.id, slot);
+};
+
 const fillLine = (state: State, limit: number): readonly [ReadonlyArray<Waiter>, State] => {
-  const slots = new Map(state.slots);
+  let slots = state.slots;
   const seated: Array<Waiter> = [];
   const line: Array<Waiter> = [];
 
   for (const waiter of state.line) {
-    if (countedAgainst(slots, waiter.slot.claimant).length < limit) {
-      slots.set(waiter.slot.claimant.streamId, waiter.slot);
+    if (placesAgainst(slots, waiter.slot.claimant).length < limit) {
+      slots = seat(slots, waiter.slot, []);
       seated.push(waiter);
     } else {
       line.push(waiter);
@@ -148,14 +162,35 @@ const joinLine = (state: State, waiter: Waiter): State => {
   return { ...state, line: [...state.line.slice(0, at), waiter, ...state.line.slice(at)] };
 };
 
-const remove = (state: State, freed: Deferred.Deferred<void>): State => {
-  const slots = new Map(state.slots);
+const remove = (state: State, id: number): State => {
+  const leaving = state.slots.get(id);
+  const slots = new Map<number, Slot>();
 
-  for (const [streamId, slot] of slots) {
-    if (slot.freed === freed) slots.delete(streamId);
+  for (const slot of state.slots.values()) {
+    if (slot.id === id) continue;
+    slots.set(
+      slot.id,
+      slot.takenOverBy === id ? { ...slot, takenOverBy: leaving?.takenOverBy ?? null } : slot,
+    );
   }
 
-  return { slots, line: state.line.filter((waiter) => waiter.slot.freed !== freed) };
+  return { slots, line: state.line.filter((waiter) => waiter.slot.id !== id) };
+};
+
+const startIfRoom = (state: State, id: number, limit: number): readonly [Turn, State] => {
+  const slot = state.slots.get(id);
+
+  if (slot === undefined || slot.running) return [Turn.Go(), state];
+  const running = [...state.slots.values()].filter((other) => other.running);
+
+  if (running.length < limit) {
+    return [
+      Turn.Go(),
+      { ...state, slots: new Map(state.slots).set(id, { ...slot, running: true }) },
+    ];
+  }
+
+  return [Turn.Wait({ until: [slot.freed, ...running.map((other) => other.freed)] }), state];
 };
 
 const settle = (waiters: ReadonlyArray<Waiter>) =>
@@ -163,45 +198,54 @@ const settle = (waiters: ReadonlyArray<Waiter>) =>
     discard: true,
   });
 
-const slotFor = (claimant: Claimant, audience: Audience) =>
-  Effect.all({ freed: Deferred.make<void>(), displaced: Deferred.make<void>() }).pipe(
-    Effect.map(({ freed, displaced }): Slot => ({
-      claimant,
-      audience,
-      freed,
-      displaced,
-      takenBy: null,
-    })),
-  );
-
 /** Builds a limit of `limit` running encoders, a whole number of at least 1. */
 export const make = Effect.fnUntraced(function* (limit: number) {
   const state = yield* Ref.make<State>({ slots: new Map(), line: [] });
+  const ids = yield* Ref.make(0);
+
+  const slotFor = (claimant: Claimant, audience: Audience) =>
+    Effect.all({
+      id: Ref.getAndUpdate(ids, (id) => id + 1),
+      freed: Deferred.make<void>(),
+      displaced: Deferred.make<void>(),
+    }).pipe(
+      Effect.map(({ id, freed, displaced }): Slot => ({
+        id,
+        claimant,
+        audience,
+        freed,
+        displaced,
+        takenOverBy: null,
+        running: false,
+      })),
+    );
 
   const leave = (slot: Slot) =>
-    Ref.modify(state, (current) => fillLine(remove(current, slot.freed), limit)).pipe(
+    Ref.modify(state, (current) => fillLine(remove(current, slot.id), limit)).pipe(
       Effect.flatMap(settle),
       Effect.andThen(Deferred.succeed(slot.freed, undefined)),
     );
 
-  const heldBy = (slot: Slot, victims: ReadonlyArray<Slot>): Held => ({
-    ready: Ref.get(state).pipe(
-      Effect.flatMap(({ slots }) =>
-        Effect.forEach(
-          [
-            ...[...slots.values()].filter(
-              (other) =>
-                other.claimant.registered &&
-                other.claimant.sessionId === slot.claimant.sessionId &&
-                other.claimant.ticket < slot.claimant.ticket,
-            ),
-            ...victims,
-          ],
-          (credited) => Deferred.await(credited.freed),
-          { discard: true },
-        ),
+  const ready = (slot: Slot): Effect.Effect<void> =>
+    Deferred.isDone(slot.displaced).pipe(
+      Effect.flatMap((displaced) =>
+        displaced
+          ? Effect.succeed(Turn.Go())
+          : Ref.modify(state, (current) => startIfRoom(current, slot.id, limit)),
       ),
-    ),
+      Effect.flatMap(
+        Turn.$match({
+          Go: () => Effect.void,
+          Wait: ({ until }) =>
+            Effect.raceAll([slot.displaced, ...until].map((one) => Deferred.await(one))).pipe(
+              Effect.andThen(Effect.suspend(() => ready(slot))),
+            ),
+        }),
+      ),
+    );
+
+  const heldBy = (slot: Slot): Held => ({
+    ready: ready(slot),
     displaced: slot.audience === "guest" ? Deferred.await(slot.displaced) : Effect.never,
     isDisplaced: Deferred.isDone(slot.displaced),
   });
@@ -214,15 +258,8 @@ export const make = Effect.fnUntraced(function* (limit: number) {
         const decided = decideHousehold(current, claimant, limit);
 
         return HouseholdDecision.$match(decided, {
-          Take: ({ victims }) => {
-            const slots = new Map(current.slots);
-
-            for (const victim of victims) {
-              slots.set(victim.claimant.streamId, { ...victim, takenBy: claimant.streamId });
-            }
-
-            return [decided, { ...current, slots: slots.set(claimant.streamId, slot) }] as const;
-          },
+          Take: ({ victims }) =>
+            [decided, { ...current, slots: seat(current.slots, slot, victims) }] as const,
           Full: () => [decided, current] as const,
         });
       });
@@ -235,7 +272,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
                 discard: true,
               }),
             ),
-            Effect.as(heldBy(slot, victims)),
+            Effect.as(heldBy(slot)),
           ),
         Full: () => Effect.fail(new TranscodeCapacityReached({ limit })),
       });
@@ -260,24 +297,9 @@ export const make = Effect.fnUntraced(function* (limit: number) {
         yield* Scope.addFinalizer(scope, finalize);
         yield* restore(Deferred.await(waiter.settled)).pipe(Effect.onInterrupt(() => finalize));
 
-        return heldBy(slot, []);
+        return heldBy(slot);
       }),
     );
 
-  const register = (streamId: StreamId) =>
-    Ref.update(state, (current) => {
-      const slot = current.slots.get(streamId);
-
-      return slot === undefined
-        ? current
-        : {
-            ...current,
-            slots: new Map(current.slots).set(streamId, {
-              ...slot,
-              claimant: { ...slot.claimant, registered: true },
-            }),
-          };
-    });
-
-  return { limit, household, guest, register } satisfies Pool;
+  return { limit, household, guest } satisfies Pool;
 });

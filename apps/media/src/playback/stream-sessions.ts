@@ -1029,12 +1029,7 @@ const make = Effect.gen(function* () {
           lease,
           transcoding,
           session.audience,
-          {
-            streamId: session.streamId,
-            sessionId: session.sessionId,
-            ticket: session.ticket,
-            registered: true,
-          },
+          { sessionId: session.sessionId, ticket: session.ticket },
           SEGMENT_WAIT,
         ),
       ),
@@ -1234,12 +1229,6 @@ const make = Effect.gen(function* () {
     );
   }, Effect.uninterruptible);
 
-  const markRegistered = Effect.fnUntraced(function* (session: Session) {
-    yield* (isEncode(yield* Ref.get(session.video)) ? transcodes : copies).register(
-      session.streamId,
-    );
-  });
-
   /**
    * Unless a newer negotiation of the session began, takes the session's streams out of the
    * registry and registers `next` in their place; none when one did.
@@ -1275,7 +1264,6 @@ const make = Effect.gen(function* () {
 
         if (Option.isSome(next)) {
           yield* owners.opened(next.value.streamId, sessionId);
-          yield* markRegistered(next.value);
         }
 
         return Option.some(previous);
@@ -1345,7 +1333,7 @@ const make = Effect.gen(function* () {
       lease,
       transcoding,
       grant.audience,
-      { streamId, sessionId: grant.sessionId, ticket, registered: false },
+      { sessionId: grant.sessionId, ticket },
       START_WAIT,
     );
 
