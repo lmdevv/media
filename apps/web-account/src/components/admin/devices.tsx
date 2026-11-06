@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/shell";
 import type { UserId } from "@/session/platform-types";
 
 import { useActions } from "./action";
-import { usePages } from "./pages";
+import { useAllPages, usePages } from "./pages";
 import type { Paged } from "./pages";
 import { ItemRow, Notice, PagedList, SelectField } from "./parts";
 import type { Device, DeviceMode, User } from "./types";
@@ -37,7 +37,7 @@ export function DevicesScreen() {
   const registry = platform.core.devices.registry;
   const devices = usePages(registry.list, (paginationOpts) => ({ paginationOpts }));
 
-  const users = usePages(platform.core.accounts.users.list, (paginationOpts) => ({
+  const users = useAllPages(platform.core.accounts.users.list, (paginationOpts) => ({
     paginationOpts,
   }));
 

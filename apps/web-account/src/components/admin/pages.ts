@@ -1,5 +1,5 @@
 import type { QueryState } from "@media/sdk/react";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { describeFailure } from "@/lib/failure";
 
@@ -183,4 +183,23 @@ export const usePages = <Args, Row>(
   const { store } = current;
 
   return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+};
+
+/**
+ * Follows every page of a paginated core query, loading the next page as soon as one arrives. For
+ * lists a picker must offer whole, such as the people and groups to share with, which stay small
+ * in a household.
+ */
+export const useAllPages = <Args, Row>(
+  query: PagedQuery<Args, Row>,
+  argsAt: (paginationOpts: PageOpts) => Args,
+): Paged<Row> => {
+  const paged = usePages(query, argsAt);
+  const load = paged.status === "ready" && paged.next.kind === "more" ? paged.next.load : null;
+
+  useEffect(() => {
+    load?.();
+  }, [load]);
+
+  return paged;
 };

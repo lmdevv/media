@@ -74,7 +74,7 @@ test("accepting an invite lands the new person on the picker", async ({ page }) 
   }
 });
 
-test("approving a device code signs the waiting device in", async ({ page }) => {
+test("a CLI link signs in, then approves its code on the same page", async ({ page }) => {
   if (stack === null) return;
 
   const person = await createPerson(stack, "lucia");
@@ -84,10 +84,12 @@ test("approving a device code signs the waiting device in", async ({ page }) => 
     const pending = await device.session.startDeviceSignIn("media CLI on e2e");
     const signedIn = pending.complete();
 
-    await signIn(page, person);
-    await expect(page.getByRole("heading", { name: "Who's here?" })).toBeVisible();
-
     await page.goto(`/device?code=${pending.userCode.replace("-", "")}`);
+    await page.getByLabel("Username").fill(person.username);
+    await page.getByLabel("Password", { exact: true }).fill(person.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+
+    await expect(page).toHaveURL(/\/device\?code=/u);
     await page.getByRole("button", { name: "Approve" }).click();
     await expect(
       page.getByRole("heading", { name: "media CLI on e2e is signed in." }),

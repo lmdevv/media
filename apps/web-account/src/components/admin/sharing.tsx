@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { useActions } from "./action";
 import { LEVEL_LABELS } from "./libraries";
-import { usePages } from "./pages";
+import { useAllPages, usePages } from "./pages";
 import type { Paged } from "./pages";
 import { ItemRow, PagedList, Section, SelectField } from "./parts";
 import type { Choice } from "./parts";
@@ -63,11 +63,11 @@ export function Sharing({ libraryId }: { readonly libraryId: LibraryId }) {
   const resource = { type: "library", id: libraryId } as const;
   const grants = usePages(grantsApi.list, (paginationOpts) => ({ resource, paginationOpts }));
 
-  const users = usePages(platform.core.accounts.users.list, (paginationOpts) => ({
+  const users = useAllPages(platform.core.accounts.users.list, (paginationOpts) => ({
     paginationOpts,
   }));
 
-  const groups = usePages(platform.core.permissions.groups.list, (paginationOpts) => ({
+  const groups = useAllPages(platform.core.permissions.groups.list, (paginationOpts) => ({
     paginationOpts,
   }));
 

@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/shell";
 import type { UserId } from "@/session/platform-types";
 
 import { useActions } from "./action";
-import { usePages } from "./pages";
+import { useAllPages, usePages } from "./pages";
 import type { Paged } from "./pages";
 import { ItemRow, Muted, Notice, PagedList, SelectField } from "./parts";
 import type { Group, Member, User } from "./types";
@@ -137,7 +137,7 @@ function GroupPanel({ group }: { readonly group: Group }) {
   const { groupId } = group;
   const members = usePages(groups.members, (paginationOpts) => ({ groupId, paginationOpts }));
 
-  const users = usePages(platform.core.accounts.users.list, (paginationOpts) => ({
+  const users = useAllPages(platform.core.accounts.users.list, (paginationOpts) => ({
     paginationOpts,
   }));
 

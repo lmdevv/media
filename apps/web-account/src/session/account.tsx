@@ -1,5 +1,5 @@
 import { PlatformProvider, usePlatform } from "@media/sdk/react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { Predicate } from "effect";
 import { createContext, use, useMemo, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
@@ -79,6 +79,12 @@ export function AccountProvider({
   );
 }
 
+const onPickerAfterSignIn = (pathname: string): boolean =>
+  pathname === "/" ||
+  pathname === "/add" ||
+  pathname.startsWith("/invite/") ||
+  pathname.startsWith("/reset/");
+
 /** A password sign-in, a first owner, an invite, or a reset link. */
 type SignIn =
   | { readonly kind: "password"; readonly username: string; readonly password: string }
@@ -116,6 +122,7 @@ export const useAccountActions = (): AccountActions => {
   const { store, origin, slot } = useAccountContext();
   const platform = usePlatform();
   const navigate = useNavigate();
+  const router = useRouter();
 
   /** Reads who signed in and registers this browser; a sign-in that cannot finish is ended. */
   const register = async (): Promise<UserId> => {
@@ -146,7 +153,10 @@ export const useAccountActions = (): AccountActions => {
     const userId = await register();
 
     store.promote(slot, userId);
-    await navigate({ to: "/" });
+
+    // A page that asked for a sign-in, such as /device from a CLI's link, shows once it is done;
+    // the picker, Add someone, an invite, and a reset link go on to the picker.
+    if (onPickerAfterSignIn(router.state.location.pathname)) await navigate({ to: "/" });
   };
 
   return {
