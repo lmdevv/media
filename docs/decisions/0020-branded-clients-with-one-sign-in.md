@@ -75,10 +75,14 @@ and is their only writer, except the session keys, which only the SDK writes.
   people the core says are signed in on this device. Choosing one moves `media.active` to their
   slot and opens a new client on it, with no password. Add someone signs another person in on a
   fresh slot.
-- **A shared browser.** When an admin makes the device shared, every session on it ends. The
-  client forgets every person but keeps the device code, and `/` shows the shared picker, whose
-  tiles open through the core's `tile` provider (`Credentials.Tile` in the SDK). The device's one
-  slot holds the open tile, and opening another tile replaces it.
+- **A shared browser.** When an admin makes the device shared, every session on it ends, and `/`
+  shows the shared picker, whose tiles open through the core's `tile` provider
+  (`Credentials.Tile` in the SDK). The device's one slot holds the open tile, and opening another
+  tile replaces it.
+- **Ended sessions stay stored** until someone signs in on their slot again, and only a device the
+  core no longer knows makes the client forget its code. Another tab's new sign-in can reach this
+  tab's storage before this tab's picker lists the person, so a picker that leaves someone out is
+  no proof their session ended.
 - **The screen** is one pure function of the server's answer, the session, the picker, and the
   route (`session/screen.ts`). Each route declares what it needs: nothing, a sign-in, an account
   session, or an admin. A tile session never has the `account` scope, so account pages tell it to
