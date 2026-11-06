@@ -715,7 +715,15 @@ const make = Effect.gen(function* () {
         if (current !== generation) return current;
         const encoder = yield* Ref.get(session.encoder);
 
-        if (!Encoder.$is("Running")(encoder)) return yield* new SegmentNotReady({ index });
+        if (!Encoder.$is("Running")(encoder)) {
+          if (session.audience === "guest") return yield* new SegmentNotReady({ index });
+
+          return yield* Effect.die(
+            new Error(
+              "StreamSessions.encoderFailed: the current run of a released household stream failed under a request, but only a displaced guest yields a run that a request has counted itself into",
+            ),
+          );
+        }
 
         const mode = yield* Ref.get(session.mode);
 
