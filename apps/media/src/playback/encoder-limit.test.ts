@@ -110,11 +110,23 @@ const tools = Layer.effect(
   ),
 );
 
+const RUN_FOLDER = /\/transcode\/[^/]+\/\d+$/u;
+
+const folders = { failNext: false };
+
 const heldInitCopies = Layer.effect(
   FileSystem.FileSystem,
   Effect.map(FileSystem.FileSystem, (real) =>
     FileSystem.FileSystem.of({
       ...real,
+      makeDirectory: (target, options) =>
+        folders.failNext && RUN_FOLDER.test(target)
+          ? Effect.suspend(() => {
+              folders.failNext = false;
+
+              return Effect.die(new Error("no space left on the transcode disk"));
+            })
+          : real.makeDirectory(target, options),
       writeFile: (to, bytes, options) =>
         copies.armed && KEPT_INIT.test(to)
           ? Effect.suspend(() => {
@@ -375,6 +387,45 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
       );
     });
   }
+
+  layer(subject(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
+    it.effect(
+      "a seek that fails partway leaves no encoder or place behind, and a later seek moves the stream",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const who = yield* viewer("household");
+          const started = yield* playing(who);
+
+          folders.failNext = true;
+
+          const failed = yield* sessions.seek(started.streamId, 6, who.grant).pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(failed), `the seek fails: ${String(failed)}`);
+
+          const live = yield* Effect.sync(() => encoders.live).pipe(
+            Effect.repeat({
+              until: (count) => count === 0,
+              schedule: Schedule.spaced("100 millis"),
+              times: 50,
+            }),
+          );
+
+          assert.strictEqual(live, 0, "encoders left running");
+
+          const moved = yield* sessions.seek(started.streamId, 6, who.grant);
+          const index = segmentAt(moved.plan, who.request.file.probe.startSeconds + 6);
+
+          yield* sessions
+            .segment(started.streamId, moved.generation, index, who.grant)
+            .pipe(Effect.timeout("15 seconds"));
+
+          assert.isAtMost(encoders.peak, 1, "encoders running at once");
+          yield* sessions.stop(started.streamId, who.grant);
+        }).pipe(Effect.ensuring(Effect.sync(() => (folders.failNext = false)))),
+      60_000,
+    );
+  });
 
   for (const ending of ["stopped", "replaced"] as const) {
     layer(subject(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {

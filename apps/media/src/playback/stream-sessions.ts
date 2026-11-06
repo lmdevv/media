@@ -1160,7 +1160,24 @@ const make = Effect.gen(function* () {
   ) {
     const opened = yield* openRun(session);
     const run: Run = { ...opened, held: yield* encoder.run.held.renew(opened.scope) };
-    const started = yield* startGeneration(session, run, Option.some(encoder.run), number, index);
+
+    const started = yield* startGeneration(
+      session,
+      run,
+      Option.some(encoder.run),
+      number,
+      index,
+    ).pipe(
+      Effect.onError(() =>
+        Clock.currentTimeMillis.pipe(
+          Effect.flatMap((since) =>
+            Ref.set(session.encoder, Encoder.Released({ since, keptInit: Option.none() })),
+          ),
+          Effect.andThen(beginStop(session, run)),
+          Effect.andThen(beginStop(session, encoder.run)),
+        ),
+      ),
+    );
 
     if (Option.isNone(started)) {
       yield* stopEncoder(session, run, Option.none());
@@ -1235,7 +1252,10 @@ const make = Effect.gen(function* () {
         current.number + (lost ? 1 : 0),
         index,
       );
-    }).pipe(Effect.catchTag("UnsupportedPlayback", () => end("failed")));
+    }).pipe(
+      Effect.onError(() => beginStop(session, claimed)),
+      Effect.catchTag("UnsupportedPlayback", () => end("failed")),
+    );
 
     if (Option.isNone(started)) {
       yield* stopEncoder(session, claimed, Option.none());
