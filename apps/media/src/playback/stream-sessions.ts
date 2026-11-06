@@ -187,6 +187,16 @@ const SEGMENT_WAIT = Duration.seconds(30);
 
 const START_WAIT = Duration.seconds(20);
 
+/**
+ * Effect's Node process release sends `SIGKILL`, again after `forceKillAfter`, then waits for the
+ * exit without a bound, as for ffmpeg stuck in disk I/O.
+ */
+const STOP_WAIT = Duration.seconds(3);
+
+const KEEP_INIT_WAIT = Duration.seconds(2);
+
+const READY_WAIT = Duration.times(Duration.sum(KEEP_INIT_WAIT, STOP_WAIT), 2);
+
 const FRAGMENT_FILE = /^f\d+\.m4s$/;
 
 /**
@@ -298,6 +308,11 @@ const isClosed = (scope: Scope.Scope): boolean => Predicate.isTagged(scope.state
 
 const closeApart = (scope: Scope.Closeable) =>
   Scope.close(scope, Exit.void).pipe(Effect.forkDetach);
+
+const awaitClose = (closing: Fiber.Fiber<void>) =>
+  Effect.interruptible(Fiber.await(closing).pipe(Effect.timeoutOption(STOP_WAIT), Effect.asVoid));
+
+const closeWithin = (scope: Scope.Closeable) => closeApart(scope).pipe(Effect.flatMap(awaitClose));
 
 /** None when `scope` already closed; a close that begins while `effect` runs waits for it. */
 const whileOpen = <A, E, R>(scope: Scope.Scope, effect: Effect.Effect<A, E, R>) =>
@@ -426,12 +441,13 @@ const make = Effect.gen(function* () {
       return [true, next] as const;
     });
 
-    yield* Scope.close(session.scope, Exit.void);
-
-    if (removed) {
-      yield* owners.closed(session.streamId);
-      yield* reportEnded(session, reason);
-    }
+    yield* closeWithin(session.scope).pipe(
+      Effect.ensuring(
+        removed
+          ? owners.closed(session.streamId).pipe(Effect.andThen(reportEnded(session, reason)))
+          : Effect.void,
+      ),
+    );
   }, Effect.uninterruptible);
 
   const videoTimingOf = Effect.fnUntraced(function* (generation: Generation) {
@@ -682,10 +698,20 @@ const make = Effect.gen(function* () {
 
     const previousClosing = yield* closeApart(previous.scope);
 
-    yield* run.held.ready;
+    const ready = yield* run.held.ready.pipe(Effect.timeoutOption(READY_WAIT));
 
-    if (yield* run.held.isDisplaced) {
-      yield* Fiber.await(previousClosing);
+    if (Option.isNone(ready)) {
+      yield* Effect.logWarning("StreamSessions.encoder_wait_timed_out").pipe(
+        Effect.annotateLogs({
+          sessionId: session.sessionId,
+          streamId: session.streamId,
+          generation: number,
+        }),
+      );
+    }
+
+    if (Option.isNone(ready) || (yield* run.held.isDisplaced)) {
+      yield* awaitClose(previousClosing);
 
       return Option.none<Generation>();
     }
@@ -699,7 +725,7 @@ const make = Effect.gen(function* () {
     );
 
     if (Option.isNone(started)) {
-      yield* Fiber.await(previousClosing);
+      yield* awaitClose(previousClosing);
 
       return yield* closed;
     }
@@ -720,7 +746,7 @@ const make = Effect.gen(function* () {
     }
 
     yield* yieldWhenDisplaced(session, lease, run);
-    yield* Fiber.await(previousClosing);
+    yield* awaitClose(previousClosing);
 
     return Option.some(generation);
   });
@@ -1157,12 +1183,12 @@ const make = Effect.gen(function* () {
         index,
       );
     }).pipe(
-      Effect.onError(() => Scope.close(lease, Exit.void)),
+      Effect.onError(() => closeWithin(lease)),
       Effect.catchTag("UnsupportedPlayback", () => end("failed")),
     );
 
     if (Option.isNone(started)) {
-      yield* Scope.close(lease, Exit.void);
+      yield* closeWithin(lease);
 
       return yield* new SegmentNotReady({ index });
     }
@@ -1227,6 +1253,9 @@ const make = Effect.gen(function* () {
     return copied ? Option.some(kept) : Option.none();
   });
 
+  const keepInitWithin = (session: Session, run: Generation) =>
+    keepInit(session, run).pipe(Effect.timeoutOption(KEEP_INIT_WAIT), Effect.map(Option.flatten));
+
   const stopEncoder = Effect.fnUntraced(function* (
     session: Session,
     lease: Scope.Closeable,
@@ -1236,48 +1265,50 @@ const make = Effect.gen(function* () {
       session.encoder,
       Encoder.Released({ since: yield* Clock.currentTimeMillis, keptInit }),
     );
-    yield* Scope.close(lease, Exit.void);
-  });
+    yield* closeWithin(lease);
+  }, Effect.uninterruptible);
 
   const yieldEncoder = Effect.fn("StreamSessions.yieldEncoder")(function* (
     session: Session,
     lease: Scope.Closeable,
   ) {
     yield* session.lock.withPermits(1)(
-      Effect.uninterruptible(
-        Effect.gen(function* () {
-          const encoder = yield* Ref.get(session.encoder);
+      Effect.gen(function* () {
+        const encoder = yield* Ref.get(session.encoder);
 
-          if (
-            isClosed(session.scope) ||
-            !Encoder.$is("Running")(encoder) ||
-            encoder.lease !== lease
-          ) {
-            return;
-          }
+        if (
+          isClosed(session.scope) ||
+          !Encoder.$is("Running")(encoder) ||
+          encoder.lease !== lease
+        ) {
+          return;
+        }
 
-          const run = yield* Ref.get(session.generation);
-          const keptInit = yield* keepInit(session, run);
+        const run = yield* Ref.get(session.generation);
+        const keptInit = yield* keepInitWithin(session, run);
 
-          if (isClosed(session.scope)) {
-            if (Option.isSome(keptInit)) yield* fs.remove(keptInit.value).pipe(Effect.ignore);
+        yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            if (isClosed(session.scope)) {
+              if (Option.isSome(keptInit)) yield* fs.remove(keptInit.value).pipe(Effect.ignore);
 
-            return;
-          }
+              return;
+            }
 
-          yield* stopEncoder(session, lease, keptInit);
+            yield* Effect.logInfo(LogEvent.streamYielded).pipe(
+              Effect.annotateLogs({
+                sessionId: session.sessionId,
+                userId: session.userId,
+                streamId: session.streamId,
+                generation: run.number,
+                segment: yield* Ref.get(session.requested),
+              }),
+            );
 
-          yield* Effect.logInfo(LogEvent.streamYielded).pipe(
-            Effect.annotateLogs({
-              sessionId: session.sessionId,
-              userId: session.userId,
-              streamId: session.streamId,
-              generation: run.number,
-              segment: yield* Ref.get(session.requested),
-            }),
-          );
-        }),
-      ),
+            yield* stopEncoder(session, lease, keptInit);
+          }),
+        );
+      }),
     );
   });
 
@@ -1299,37 +1330,41 @@ const make = Effect.gen(function* () {
 
         if (StreamLiveness.holdsEncoder(yield* snapshotOf(session))) return;
         const run = yield* Ref.get(session.generation);
-        const keptInit = yield* keepInit(session, run);
+        const keptInit = yield* keepInitWithin(session, run);
 
-        // A close does not wait for the lock, and its folder removal may have run before the copy.
-        if (isClosed(session.scope)) {
-          if (Option.isSome(keptInit)) yield* fs.remove(keptInit.value).pipe(Effect.ignore);
+        yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            // A close does not wait for the lock, and its folder removal may have run before the copy.
+            if (isClosed(session.scope)) {
+              if (Option.isSome(keptInit)) yield* fs.remove(keptInit.value).pipe(Effect.ignore);
 
-          return;
-        }
+              return;
+            }
 
-        const moment = yield* snapshotOf(session);
+            const moment = yield* snapshotOf(session);
 
-        if (StreamLiveness.holdsEncoder(moment)) return;
+            if (StreamLiveness.holdsEncoder(moment)) return;
 
-        yield* stopEncoder(session, encoder.lease, keptInit);
+            yield* stopEncoder(session, encoder.lease, keptInit);
 
-        yield* Effect.logInfo(LogEvent.streamReleased).pipe(
-          Effect.annotateLogs({
-            sessionId: session.sessionId,
-            userId: session.userId,
-            streamId: session.streamId,
-            generation: run.number,
-            segment: yield* Ref.get(session.requested),
-            liveness: moment.liveness,
-            inFlight: moment.inFlight,
-            lastRequestAgeMs: moment.lastRequestAgeMs,
-            lastProgressAgeMs: moment.lastProgressAgeMs,
+            yield* Effect.logInfo(LogEvent.streamReleased).pipe(
+              Effect.annotateLogs({
+                sessionId: session.sessionId,
+                userId: session.userId,
+                streamId: session.streamId,
+                generation: run.number,
+                segment: yield* Ref.get(session.requested),
+                liveness: moment.liveness,
+                inFlight: moment.inFlight,
+                lastRequestAgeMs: moment.lastRequestAgeMs,
+                lastProgressAgeMs: moment.lastProgressAgeMs,
+              }),
+            );
           }),
         );
       }),
     );
-  }, Effect.uninterruptible);
+  });
 
   /**
    * Unless a newer negotiation of the session began, takes the session's streams out of the
@@ -1378,8 +1413,9 @@ const make = Effect.gen(function* () {
       (existing) =>
         Effect.gen(function* () {
           yield* stopAdmitting(existing, () => true);
-          yield* Scope.close(existing.scope, Exit.void);
-          yield* reportEnded(existing, "replaced");
+          yield* closeWithin(existing.scope).pipe(
+            Effect.ensuring(reportEnded(existing, "replaced")),
+          );
         }),
       { discard: true },
     );

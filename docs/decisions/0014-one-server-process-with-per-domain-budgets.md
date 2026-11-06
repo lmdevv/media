@@ -67,6 +67,13 @@ mount media read-only.
   exited. A seek or a resume starts a new run in the stream's own place. While the limit is
   reached, that run starts once the stream's previous encoder stopped. Below the limit it starts
   at once.
+- A stop waits at most 3 seconds. ffmpeg gets `SIGKILL` at once. When its exit is still unknown
+  after that, the stop returns and the encoder keeps its slot until it exits.
+- A yield or a release spends at most 2 seconds keeping the run's init segment, then stops
+  without it. The player's next request then starts a new run.
+- A new encoder waits at most 10 seconds for the encoders whose places it took. Past that, a
+  start fails with capacity reached, and a seek or a resume fails as not ready while the session
+  stays.
 - A guest whose own session already holds a slot fits sooner, so it is seated ahead of older
   waiters that do not fit yet.
 - A guest waits up to 20 seconds to start a stream, then fails with capacity reached. A guest

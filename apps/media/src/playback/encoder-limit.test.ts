@@ -1,5 +1,5 @@
 import { assert, describe, layer } from "@effect/vitest";
-import { Cause, Effect, Exit, Fiber, Layer, Option, Predicate, Redacted } from "effect";
+import { Cause, Effect, Exit, Fiber, FileSystem, Layer, Option, Predicate, Redacted } from "effect";
 
 import type { ClientCapabilities } from "@media/contracts/media-playback";
 
@@ -32,9 +32,25 @@ const holdNextExit = () => {
   exits.release = Promise.withResolvers<void>();
 };
 
+const KEPT_INIT = /init-\d+\.mp4\.tmp$/u;
+
+const copies = {
+  armed: false,
+  reached: Promise.withResolvers<void>(),
+  release: Promise.withResolvers<void>(),
+};
+
+const holdNextInitCopy = () => {
+  copies.armed = true;
+  copies.reached = Promise.withResolvers<void>();
+  copies.release = Promise.withResolvers<void>();
+};
+
 const releaseHolds = Effect.sync(() => {
   exits.armed = false;
   exits.release.resolve();
+  copies.armed = false;
+  copies.release.resolve();
 });
 
 const tools = Layer.effect(
@@ -82,9 +98,28 @@ const tools = Layer.effect(
   ),
 );
 
+const heldInitCopies = Layer.effect(
+  FileSystem.FileSystem,
+  Effect.map(FileSystem.FileSystem, (real) =>
+    FileSystem.FileSystem.of({
+      ...real,
+      writeFile: (to, bytes, options) =>
+        copies.armed && KEPT_INIT.test(to)
+          ? Effect.suspend(() => {
+              copies.armed = false;
+              copies.reached.resolve();
+
+              return Effect.promise(() => copies.release.promise);
+            }).pipe(Effect.andThen(real.writeFile(to, bytes, options)))
+          : real.writeFile(to, bytes, options),
+    }),
+  ),
+);
+
 const subject = () =>
   Layer.fresh(StreamSessions.layer).pipe(
     Layer.provideMerge(tools),
+    Layer.provide(heldInitCopies),
     Layer.provideMerge(
       MediaTestServer.layer({
         FFMPEG_PATH: stallsAfterFirstFragment,
@@ -198,6 +233,62 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
   });
 
   layer(subject(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
+    it.effect(
+      "a household stream starts in bounded time while the guest it displaced cannot keep its init",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const guest = yield* viewer("guest");
+          const household = yield* viewer("household");
+          const kept = yield* playing(guest);
+
+          holdNextInitCopy();
+          const taking = yield* Effect.forkChild(start(household));
+          yield* Effect.promise(() => copies.reached.promise);
+
+          const taken = yield* Fiber.join(taking).pipe(Effect.timeout("15 seconds"));
+
+          yield* sessions.stop(kept.streamId, guest.grant).pipe(Effect.timeout("10 seconds"));
+          yield* sessions.stop(taken.streamId, household.grant);
+        }).pipe(Effect.ensuring(releaseHolds)),
+      60_000,
+    );
+  });
+
+  layer(subject(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
+    it.effect(
+      "stopping ends in bounded time while an encoder's exit is unconfirmed, and its slot stays taken until then",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const guest = yield* viewer("guest");
+          const stopped = yield* playing(guest);
+
+          yield* watchEncoders;
+          holdNextExit();
+          yield* sessions.stop(stopped.streamId, guest.grant).pipe(Effect.timeout("10 seconds"));
+
+          const refused = yield* start(yield* viewer("household")).pipe(
+            Effect.timeout("20 seconds"),
+            Effect.exit,
+          );
+
+          assert.isTrue(
+            failsWith(refused, "TranscodeCapacityReached"),
+            `a household stream finds the slot still taken: ${String(refused)}`,
+          );
+
+          yield* releaseHolds;
+
+          const household = yield* viewer("household");
+          const after = yield* start(household).pipe(Effect.timeout("10 seconds"));
+
+          assert.isAtMost(encoders.peak, 1, "encoders running at once");
+          yield* sessions.stop(after.streamId, household.grant);
+        }).pipe(Effect.ensuring(releaseHolds)),
+      60_000,
+    );
+
     it.effect(
       "a seek waiting for its slot starts no encoder once its stream stops",
       () =>
