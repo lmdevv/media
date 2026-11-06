@@ -427,13 +427,17 @@ describe("encoder slots", () => {
   );
 
   it.effect(
-    "never runs more encoders than the limit, whatever streams start, seek, yield or stop",
+    "never runs more encoders than the limit, whatever streams start, seek, yield or stop, even mid-step",
     () =>
       Effect.gen(function* () {
+        let cut = 0;
+
         for (const limit of [1, 2, 3]) {
           for (let seed = 0; seed < SEEDS; seed += 1) {
             const run = yield* simulate(limit).pipe(Random.withSeed(seed));
             const label = `limit ${String(limit)}, seed ${String(seed)}`;
+
+            cut += run.cut;
 
             assert.isAtMost(run.peak, limit, `${label}: running encoders`);
             assert.isAtMost(
@@ -449,6 +453,8 @@ describe("encoder slots", () => {
             assert.isTrue(run.freed, `${label}: every slot is free again`);
           }
         }
+
+        assert.isAbove(cut, 0, "stops that cut a start, seek or resume short");
       }),
     120_000,
   );
@@ -478,6 +484,8 @@ interface Stream {
   status: Status;
   run: Scope.Closeable | undefined;
   held: EncoderSlots.Held | undefined;
+  readonly runs: Set<Scope.Closeable>;
+  readonly transitions: Set<Fiber.Fiber<void>>;
 }
 
 const simulate = (limit: number) =>
@@ -488,13 +496,36 @@ const simulate = (limit: number) =>
     const streams: Array<Stream> = [];
     const latest = new Map<string, number>();
     const actors: Array<Fiber.Fiber<void>> = [];
+    const cut = { transitions: 0 };
     let tickets = 0;
 
-    const end = (stream: Stream) =>
-      Effect.suspend(() => {
-        stream.status = "ended";
+    const open = (stream: Stream) =>
+      Scope.make().pipe(Effect.tap((run) => Effect.sync(() => stream.runs.add(run))));
 
-        return stream.run === undefined ? Effect.void : close(stream.run);
+    const transition = (stream: Stream, effect: Effect.Effect<void>) =>
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(effect);
+
+        stream.transitions.add(fiber);
+        actors.push(fiber);
+        fiber.addObserver(() => stream.transitions.delete(fiber));
+      });
+
+    const end = (stream: Stream) =>
+      Effect.gen(function* () {
+        stream.status = "ended";
+        const self = yield* Effect.fiber;
+
+        for (const fiber of stream.transitions) {
+          if (fiber === self) continue;
+          cut.transitions += 1;
+          yield* Fiber.interrupt(fiber);
+        }
+
+        yield* Effect.forEach(stream.runs, close, {
+          concurrency: "unbounded",
+          discard: true,
+        });
       });
 
     const claim = (
@@ -581,7 +612,7 @@ const simulate = (limit: number) =>
 
     const occupy = (stream: Stream, resume: boolean) =>
       Effect.gen(function* () {
-        const run = yield* Scope.make();
+        const run = yield* open(stream);
         stream.run = run;
         const { sessionId, ticket } = stream.claimant;
         const claimed = yield* claim(stream, run, resume).pipe(Effect.result);
@@ -630,18 +661,21 @@ const simulate = (limit: number) =>
         const held = stream.held;
 
         if (previous === undefined || held === undefined) return;
-        const run = yield* Scope.make();
+        const run = yield* open(stream);
         const renewed = yield* held.renew(run);
 
-        stream.run = run;
-        stream.held = renewed;
         stream.status = "starting";
         yield* Effect.forkDetach(close(previous));
 
-        if (yield* begin(stream, run, renewed)) return;
+        if (yield* begin(stream, run, renewed)) {
+          stream.run = run;
+          stream.held = renewed;
+
+          return;
+        }
 
         yield* Effect.sync(() => {
-          if (stream.run === run && stream.status === "starting") stream.status = "released";
+          if (stream.run === previous && stream.status === "starting") stream.status = "released";
         });
         yield* close(run);
       });
@@ -657,10 +691,12 @@ const simulate = (limit: number) =>
           status: "starting",
           run: undefined,
           held: undefined,
+          runs: new Set(),
+          transitions: new Set(),
         };
 
         streams.push(stream);
-        actors.push(yield* Effect.forkChild(occupy(stream, false)));
+        yield* transition(stream, occupy(stream, false));
       });
 
     const some = (status: Status) =>
@@ -693,14 +729,21 @@ const simulate = (limit: number) =>
 
         if (current !== undefined) {
           current.status = "starting";
-          actors.push(yield* Effect.forkChild(occupy(current, true)));
+          yield* transition(current, occupy(current, true));
         }
       } else if (move === 5) {
         const current = yield* some("running");
 
-        if (current !== undefined) actors.push(yield* Effect.forkChild(seek(current)));
+        if (current !== undefined) yield* transition(current, seek(current));
       } else {
-        const current = (yield* some("running")) ?? (yield* some("released"));
+        const status = (["starting", "running", "released"] as const)[
+          yield* Random.nextIntBetween(0, 3, { halfOpen: true })
+        ];
+
+        const current =
+          (yield* some(status ?? "running")) ??
+          (yield* some("running")) ??
+          (yield* some("released"));
 
         if (current !== undefined) yield* Effect.forkChild(end(current));
       }
@@ -734,5 +777,6 @@ const simulate = (limit: number) =>
       householdWait: waits.household,
       stuck,
       freed: waiting.every((still) => !still),
+      cut: cut.transitions,
     };
   });
