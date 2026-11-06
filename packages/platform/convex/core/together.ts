@@ -161,27 +161,13 @@ export const {
 
     return null;
   },
-  block: async (ctx, { domain, userId }, caller) => {
-    const { session } = await requireTogether(ctx, caller, domain, "manage");
-
-    if (userId === session.hostId) {
-      return fail("invalid_args", "The host cannot remove themselves; leave to end the session");
-    }
-
-    const row = await memberIn(ctx.db, userId, domain);
-
-    if (row?.sessionId === session._id) await dropMember(ctx, row);
-
-    if (session.blocked.includes(userId)) return null;
-
-    if (session.blocked.length >= BLOCKED_MAX) {
-      return fail("conflict", "This group session has turned away as many people as it can");
-    }
-
-    await ctx.db.patch(session._id, { blocked: [...session.blocked, userId] });
-
-    return null;
-  },
+  block: async (ctx, { domain, userId }) =>
+    (await ctx.runMutation(internal.core.together.members.turnAway, { domain, userId }))
+      ? null
+      : fail(
+          "conflict",
+          `They are out, but this group session already turns away ${BLOCKED_MAX} people, as many as it can, so its link could let them back in; lock the session to keep everyone new out`,
+        ),
   configure: async (ctx, { domain, join: joining, control: controls, add: adds }, caller) => {
     const { session } = await requireTogether(ctx, caller, domain, "manage");
     const { settings } = session;

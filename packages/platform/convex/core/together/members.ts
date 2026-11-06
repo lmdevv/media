@@ -1,9 +1,14 @@
+import { v } from "convex/values";
+
+import { contentDomain } from "../../../commands/scopes";
 import type { Id } from "../../_generated/dataModel";
+import { internalMutation } from "../../_generated/server";
 import type { MutationCtx, QueryCtx } from "../../_generated/server";
+import { requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
-import { memberIn } from "./access";
+import { memberIn, requireTogether } from "./access";
 import type { MemberDoc, SessionDoc } from "./access";
-import { MEMBERS_MAX, PENDING_MAX } from "./model";
+import { BLOCKED_MAX, MEMBERS_MAX, PENDING_MAX } from "./model";
 
 type State = MemberDoc["state"];
 
@@ -130,3 +135,34 @@ export const enter = async (
 
   return state;
 };
+
+/**
+ * `block`'s write, as the caller hosting the session in `domain`: takes `userId` out of it, joined
+ * or waiting, and keeps its link from letting them in again while the list of people turned away
+ * has room. Answers whether it does; the removal commits either way, so a full list never keeps
+ * someone in the session.
+ */
+export const turnAway = internalMutation({
+  args: { domain: contentDomain, userId: v.id("users") },
+  returns: v.boolean(),
+  handler: async (ctx, { domain, userId }) => {
+    const caller = await requireCaller(ctx, "signed-in");
+    const { session } = await requireTogether(ctx, caller, domain, "manage");
+
+    if (userId === session.hostId) {
+      return fail("invalid_args", "The host cannot remove themselves; leave to end the session");
+    }
+
+    const row = await memberIn(ctx.db, userId, domain);
+
+    if (row?.sessionId === session._id) await dropMember(ctx, row);
+
+    if (session.blocked.includes(userId)) return true;
+
+    if (session.blocked.length >= BLOCKED_MAX) return false;
+
+    await ctx.db.patch(session._id, { blocked: [...session.blocked, userId] });
+
+    return true;
+  },
+});

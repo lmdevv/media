@@ -69,7 +69,9 @@ music clients adopt it in phase 6.
   no schema change. Until then, `can` refuses a platform guest the join link.
 - Sessions hold at most 50 members and 20 people waiting. The host can remove anyone, or turn a
   request away (`core.together.block`). The link then refuses them for the session's life, up to
-  100 people.
+  100 people. Past 100, `block` still takes the person out and then fails `conflict`, telling the
+  host to lock the session, because the link could let them back in. `block` is an action that
+  removes in its own mutation, so a full list never rolls the removal back.
 
 ### The join link
 

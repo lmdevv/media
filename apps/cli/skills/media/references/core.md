@@ -732,7 +732,7 @@ Let someone waiting to join your group session in, as its host.
 Remove someone from your group session or turn their request away, as its host; its link no longer lets them in.
 
 - CLI: `media auth together block`
-- Kind: mutation
+- Kind: action
 - Scope: signed-in
 - Arguments: `{ domain: "movies" | "music"; userId: Id<"users"> }`
 - Result: `null`

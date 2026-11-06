@@ -870,7 +870,7 @@ export const core = [
     args: { domain: contentDomain, userId: v.id("users") },
     result: v.null(),
   }),
-  mutation("core.together.block", {
+  action("core.together.block", {
     summary:
       "Remove someone from your group session or turn their request away, as its host; its link no longer lets them in",
     scope: "signed-in",

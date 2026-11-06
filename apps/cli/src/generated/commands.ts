@@ -1766,7 +1766,7 @@ export const generatedCommands = [
   coreCommand({
     name: "core.together.block",
     path: ["auth", "together", "block"],
-    kind: "mutation",
+    kind: "action",
     scope: "signed-in",
     refusesKeys: false,
     summary:
