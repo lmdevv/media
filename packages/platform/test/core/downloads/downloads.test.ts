@@ -9,12 +9,12 @@ import type { DownloadItem } from "../../../commands/access";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { inOrder } from "../../../convex/core/lib/inOrder";
-import { hashNewPassword } from "../../../convex/core/lib/passwords";
 import { enroll, listings, member, openTile, sharedAdmin } from "../../devices";
 import type { Device, Member } from "../../devices";
 import { movie, openItem, seedLibrary, share, unshare, visibleItems } from "../../probe";
 import type { Session } from "../../probe";
-import { importRows, newestRows } from "../../rows";
+import { guestOf } from "../../guests";
+import { newestRows } from "../../rows";
 import { refusal, signIn, signInAs, unique } from "../../sign-in";
 import type { SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
@@ -134,40 +134,6 @@ const libraryOnDisk = async (
   };
 
   return { root, libraryId, idOf };
-};
-
-const UserRow = Schema.fromJsonString(
-  Schema.Struct({ _id: Schema.String, username: Schema.optional(Schema.String) }),
-);
-
-// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
-// stack's export wrote this one as a `users` id; the backend checks it again when a row names it.
-const isUserId = (value: string): value is Id<"users"> => value.length > 0;
-
-const importedGuest = async (core: CoreStack): Promise<SignedIn> => {
-  const username = `guest-${unique()}`;
-  const password = `password-${unique()}`;
-
-  importRows("users", [
-    {
-      kind: "person",
-      username,
-      usernameKey: username,
-      role: "guest",
-      sessionGeneration: 0,
-      keyGeneration: 0,
-    },
-  ]);
-
-  const row = newestRows("users", 50)
-    .map((line) => Schema.decodeSync(UserRow)(line))
-    .find((user) => user.username === username);
-
-  if (row === undefined || !isUserId(row._id)) throw new Error("the guest row was not imported");
-
-  importRows("passwords", [{ userId: row._id, hash: await hashNewPassword(password) }]);
-
-  return signInAs(core, { username, password });
 };
 
 const DeviceRow = Schema.fromJsonString(
@@ -423,10 +389,9 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
   it("refuses a guest", async () => {
     if (stack === undefined) return;
 
-    const admin = await sharedAdmin(stack);
-    const visitor = await importedGuest(stack);
+    const sharer = await member(stack, "sharer", "admin");
 
-    const films = await seedLibrary(stack, admin, {
+    const films = await seedLibrary(stack, sharer, {
       name: `shared-${unique()}`,
       kind: "movies",
       items: [movie("trailer.mkv", 0)],
@@ -435,6 +400,10 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     const [trailer] = films.itemIds;
 
     if (trailer === undefined) throw new Error("no item seeded");
+
+    const visitor = (
+      await guestOf(stack, sharer, { domain: "movies", ref: { type: "probeMovie", id: trailer } })
+    ).signedIn;
 
     await expect(add(visitor, trailer)).rejects.toThrow(/Guests cannot download/u);
     expect(await refusal(add(visitor, trailer))).toBe("forbidden");
@@ -703,7 +672,21 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
       libraryId: missing.libraryId,
     });
 
-    const guest = await importedGuest(stack);
+    const sharer = await member(stack, "sharer", "admin");
+
+    const shelf = await seedLibrary(stack, sharer, {
+      name: `shared-${unique()}`,
+      kind: "movies",
+      items: [movie("shared.mkv", 0)],
+    });
+
+    const [shared] = shelf.itemIds;
+
+    if (shared === undefined) throw new Error("no item seeded");
+
+    const guest = (
+      await guestOf(stack, sharer, { domain: "movies", ref: { type: "probeMovie", id: shared } })
+    ).signedIn;
 
     const kai = await onDevice(stack, "kai-tile", "Den TV");
 

@@ -65,11 +65,13 @@ music clients adopt it in phase 6.
   guest, whatever their platform role. The host leaving (`core.together.leave`) ends the session
   for everyone. A guest leaving removes only them.
 - A platform guest (ADR 0007) becomes a member through `enter` in `together/members.ts`, the one
-  insert path, once p3-guests checks their share link. Member rows hold a `users` id, so guests need
-  no schema change. Until then, `can` refuses a platform guest the join link.
+  insert path, when they open a share link that names the session. Member rows hold a `users` id,
+  so guests need no schema change. `can` refuses a platform guest the join link.
 - Sessions hold at most 50 members and 20 people waiting. The host can remove anyone, or turn a
   request away (`core.together.block`). The link then refuses them for the session's life, up to
-  100 people.
+  100 people. Past 100, `block` still takes the person out and then fails `conflict`, telling the
+  host to lock the session, because the link could let them back in. `block` is an action that
+  removes in its own mutation, so a full list never rolls the removal back.
 
 ### The join link
 
@@ -210,5 +212,28 @@ Left for later units:
 - Phase 6: players and their follower policy (movies' `DRIFT_THRESHOLDS`), buffering, end of item,
   the next-episode countdown, autoplay, history, and moving `positionAt` and the timings into
   `@media/contracts` for the clients.
-- p3-guests: share links that name a session, calling `enter`, and the level a guest plays the
-  session's items at.
+- p3-guests, done: see "Guests in group sessions" below.
+
+## Guests in group sessions (amended 2026-11-06)
+
+- The host shares a session with `core.guests.links.create({ target: { kind: "session", domain }
+  })`. The link names the session they host by id.
+- Opening the link decides `join`, then `ask`, with the new `invited` fact, and enters the guest
+  through `enter` under the join setting. Open joins, approval waits for the host, and locked
+  refuses. A blocked guest stays out. A guest never enters through an `mt_` join link.
+- A platform guest plays the session's item and what its queue holds, at the host's level: the
+  host's grants and restrictions are the ceiling. `can` refuses a platform guest `add` and
+  `remove` (`platformGuests` in the rule table), since a guest cannot browse for anything to add.
+  `control` follows the host's switch, as for every guest.
+- `core.together.get` marks each member who came through a share link `linkGuest`.
+- Revoking the link takes its guests out of the session, so a leaked link cannot keep seats. A
+  guest member counts only while their link holds: `get` lists no guest whose link died, the seat
+  count skips them, and the next `enter` deletes their row, whether or not they still send
+  heartbeats. The presence sweep also drops a silent guest whose link stopped holding.
+- Blocking a guest removes that guest, but the link can let its holder in again under a new name.
+  The host revokes the link or locks the session to keep them out.
+
+| Action          | On       | Change                                                |
+| --------------- | -------- | ----------------------------------------------------- |
+| `join`, `ask`   | together | a platform guest needs the `invited` fact             |
+| `add`, `remove` | together | refused to a platform guest, whatever the host allows |

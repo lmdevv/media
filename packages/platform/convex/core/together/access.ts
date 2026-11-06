@@ -24,7 +24,10 @@ const refusals = {
   service: ["not_found", NOT_IN],
   outside: ["not_found", NOT_IN],
   scope: ["forbidden", "This session lacks the scope to play in this domain"],
-  guest: ["forbidden", "A guest joins a group session only from the link shared with them"],
+  guest: [
+    "forbidden",
+    "A guest from a share link joins only through it, and cannot start a session or queue items",
+  ],
   ended: ["expired", "This group session has ended"],
   blocked: ["forbidden", "The host removed you from this group session"],
   locked: ["forbidden", "This group session is locked and takes no new members"],
@@ -71,15 +74,29 @@ export const placeOf = (
   return session.blocked.includes(userId) ? "blocked" : "outside";
 };
 
+/** What `factsOf` adds about the principal beyond where they stand. */
+export interface Standing {
+  /** They queued the entry a `remove` names. */
+  readonly addedIt?: boolean;
+  /** They are a guest whose share link names this session; only opening the link says so. */
+  readonly invited?: boolean;
+}
+
 /** The facts `can` reads about `session` for someone standing at `place` in it. */
 export const factsOf = (
   session: SessionDoc,
   place: TogetherPlace,
-  addedIt = false,
+  { addedIt = false, invited = false }: Standing = {},
 ): TogetherResource => ({
   on: "together",
   domain: session.item.domain,
-  session: { live: session.state === "live", place, settings: session.settings, addedIt },
+  session: {
+    live: session.state === "live",
+    place,
+    settings: session.settings,
+    addedIt,
+    invited,
+  },
 });
 
 /** The caller's session in a domain, their row in it, and where they stand. */
@@ -111,7 +128,7 @@ export const requireTogether = async (
   }
 
   const place = placeOf(session, caller.userId, member);
-  const decision = can(caller, action, factsOf(session, place, addedIt));
+  const decision = can(caller, action, factsOf(session, place, { addedIt }));
 
   return decision.allowed ? { session, member, place } : refuse(decision);
 };

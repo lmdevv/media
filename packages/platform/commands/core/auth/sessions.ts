@@ -22,6 +22,7 @@ const currentResult = v.object({
     v.literal("apiKey"),
     v.literal("deviceCode"),
     v.literal("tile"),
+    v.literal("guest"),
   ),
   scopes: v.array(
     v.union(

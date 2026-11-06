@@ -134,6 +134,7 @@ const getResult = v.union(
         username: v.string(),
         role: v.union(v.literal("host"), v.literal("guest")),
         present: v.boolean(),
+        linkGuest: v.boolean(),
       }),
     ),
     pending: v.union(
@@ -222,9 +223,9 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof admitResult> | Promise<Infer<typeof admitResult>>;
 
-  /** `core.together.block` (mutation, signed-in): Remove someone from your group session or turn their request away, as its host; its link no longer lets them in. */
+  /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in. */
   readonly block: (
-    ctx: Omit<MutationCtx, "auth">,
+    ctx: Omit<ActionCtx, "auth">,
     args: Infer<typeof blockArgs>,
     caller: Caller,
   ) => Infer<typeof blockResult> | Promise<Infer<typeof blockResult>>;
@@ -308,7 +309,7 @@ export interface Refs {
     Infer<typeof admitResult>
   >;
   readonly block: FunctionReference<
-    "mutation",
+    "action",
     "public",
     Infer<typeof blockArgs>,
     Infer<typeof blockResult>
@@ -381,10 +382,11 @@ export const register = (handlers: Handlers) => ({
     returns: admitResult,
     handler: async (ctx, args) => handlers.admit(ctx, args, await requireCaller(ctx, "signed-in")),
   }),
-  block: mutation({
+  block: action({
     args: blockArgs,
     returns: blockResult,
-    handler: async (ctx, args) => handlers.block(ctx, args, await requireCaller(ctx, "signed-in")),
+    handler: async (ctx, args) =>
+      handlers.block(ctx, args, await requireActionCaller(ctx, "signed-in")),
   }),
   configure: mutation({
     args: configureArgs,

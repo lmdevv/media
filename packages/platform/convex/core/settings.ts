@@ -95,6 +95,14 @@ export const refusalOf = (name: SettingName, changes: Changes): string | null =>
     : `${name} takes a ${whole ? "whole number" : "number"} from ${min} to ${max}`;
 };
 
+const READ_BY = [...new Set(NAMES.flatMap((name) => settingTable[name].domains))];
+
+const requireSee = (caller: Caller): void => {
+  const decision = can(caller, "see", { on: "setting", owner: caller.userId, domains: READ_BY });
+
+  if (!decision.allowed) fail("forbidden", "This session keeps no settings");
+};
+
 const requireChange = (caller: Caller, name: SettingName): void => {
   const decision = can(caller, "change", {
     on: "setting",
@@ -182,7 +190,11 @@ const parseChanges = (caller: Caller, changes: Changes): Stored => {
 };
 
 export const { get, set } = register({
-  get: async (ctx, _args, caller) => viewOf(caller, valuesOf(await storedFor(ctx.db, caller))),
+  get: async (ctx, _args, caller) => {
+    requireSee(caller);
+
+    return viewOf(caller, valuesOf(await storedFor(ctx.db, caller)));
+  },
   set: async (ctx, args, caller) => {
     const changes = parseChanges(caller, args);
     const rows = await storedFor(ctx.db, caller);

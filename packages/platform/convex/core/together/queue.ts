@@ -72,7 +72,7 @@ export const unqueue = async (
   const found = await ctx.db.get(entryId);
   const entry = found?.sessionId === session._id ? found : null;
   const ownIt = entry === null || entry.addedBy === caller.userId;
-  const decision = can(caller, "remove", factsOf(session, place, ownIt));
+  const decision = can(caller, "remove", factsOf(session, place, { addedIt: ownIt }));
 
   if (!decision.allowed) refuse(decision);
 
@@ -125,8 +125,11 @@ export const queuePage = async (
       entryId: entry._id,
       item: (await playable(entry.item)) ? entry.item : null,
       addedBy: await nameOf(entry.addedBy),
-      removable: can(caller, "remove", factsOf(session, place, entry.addedBy === caller.userId))
-        .allowed,
+      removable: can(
+        caller,
+        "remove",
+        factsOf(session, place, { addedIt: entry.addedBy === caller.userId }),
+      ).allowed,
     })),
   );
 

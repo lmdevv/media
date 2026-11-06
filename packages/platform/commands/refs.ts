@@ -18,6 +18,8 @@ import type { Refs as core_devices_registry } from "./core/devices/registry";
 import type { Refs as core_devices_tiles } from "./core/devices/tiles";
 import type { Refs as core_devices_unlockCodes } from "./core/devices/unlockCodes";
 import type { Refs as core_downloads } from "./core/downloads";
+import type { Refs as core_guests } from "./core/guests";
+import type { Refs as core_guests_links } from "./core/guests/links";
 import type { Refs as core_libraries } from "./core/libraries";
 import type { Refs as core_permissions_grants } from "./core/permissions/grants";
 import type { Refs as core_permissions_groups } from "./core/permissions/groups";
@@ -107,6 +109,15 @@ export const commandRefs = {
   "core.downloads.remove": api.core.downloads.remove satisfies core_downloads["remove"],
   "core.downloads.setCap": api.core.downloads.setCap satisfies core_downloads["setCap"],
   "core.downloads.usage": api.core.downloads.usage satisfies core_downloads["usage"],
+  "core.guests.allow": api.core.guests.allow satisfies core_guests["allow"],
+  "core.guests.configure": api.core.guests.configure satisfies core_guests["configure"],
+  "core.guests.current": api.core.guests.current satisfies core_guests["current"],
+  "core.guests.status": api.core.guests.status satisfies core_guests["status"],
+  "core.guests.links.activity": api.core.guests.links
+    .activity satisfies core_guests_links["activity"],
+  "core.guests.links.create": api.core.guests.links.create satisfies core_guests_links["create"],
+  "core.guests.links.list": api.core.guests.links.list satisfies core_guests_links["list"],
+  "core.guests.links.revoke": api.core.guests.links.revoke satisfies core_guests_links["revoke"],
   "core.libraries.create": api.core.libraries.create satisfies core_libraries["create"],
   "core.libraries.get": api.core.libraries.get satisfies core_libraries["get"],
   "core.libraries.list": api.core.libraries.list satisfies core_libraries["list"],

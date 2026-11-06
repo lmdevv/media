@@ -18,6 +18,8 @@ const inviteParams = { code: v.string(), username: v.string(), password: v.strin
 
 const resetParams = { code: v.string(), password: v.string() };
 
+const guestParams = { code: v.string(), name: v.string() };
+
 export const parseInvite = internalQuery({
   args: inviteParams,
   returns: v.object(inviteParams),
@@ -27,6 +29,13 @@ export const parseInvite = internalQuery({
 export const parseReset = internalQuery({
   args: resetParams,
   returns: v.object(resetParams),
+  handler: (_ctx, args) => args,
+});
+
+/** Checks the `guest` provider's params' shape. */
+export const parseGuest = internalQuery({
+  args: guestParams,
+  returns: v.object(guestParams),
   handler: (_ctx, args) => args,
 });
 
@@ -41,6 +50,12 @@ const parseResetParams = makeFunctionReference<
   Params,
   { readonly code: string; readonly password: string }
 >("core/auth/flows:parseReset");
+
+const parseGuestParams = makeFunctionReference<
+  "query",
+  Params,
+  { readonly code: string; readonly name: string }
+>("core/auth/flows:parseGuest");
 
 export const setupProvider = ConvexCredentials<DataModel>({
   id: "setup",
@@ -87,5 +102,18 @@ export const resetProvider = ConvexCredentials<DataModel>({
       code,
       hash: await hashNewPassword(password),
     });
+  },
+});
+
+/**
+ * A guest opening a share link under the name they give (ADR 0007). Each open lets a new guest in;
+ * the core opens the session, which ends no later than the link.
+ */
+export const guestProvider = ConvexCredentials<DataModel>({
+  id: "guest",
+  authorize: async (params, ctx): Promise<SignedIn> => {
+    const { code, name } = await ctx.runQuery(parseGuestParams, params);
+
+    return ctx.runMutation(internal.core.guests.links.open, { code, name });
   },
 });

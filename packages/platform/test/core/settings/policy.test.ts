@@ -27,6 +27,9 @@ const aiko = (scopes: ReadonlyArray<CredentialScope>, role: "member" | "guest" =
 const decide = (principal: Principal, name: SettingName, owner = AIKO) =>
   can(principal, "change", { on: "setting", owner, domains: settingTable[name].domains });
 
+const see = (principal: Principal, owner = AIKO) =>
+  can(principal, "see", { on: "setting", owner, domains: ["movies", "music"] });
+
 describe("the settings rule in can", () => {
   it("hides another person's settings, from admins too", () => {
     const admin: Principal = {
@@ -55,7 +58,6 @@ describe("the settings rule in can", () => {
     expect(decide(aiko(["account"]), "crossfade")).toEqual({ allowed: true });
     expect(decide(aiko(["music:play"]), "crossfade")).toEqual({ allowed: true });
     expect(decide(aiko(["movies:play"]), "autoplay")).toEqual({ allowed: true });
-    expect(decide(aiko(["music:play"], "guest"), "volume")).toEqual({ allowed: true });
     expect(decide(aiko(["music:play"]), "subtitleStyle")).toEqual({
       allowed: false,
       refusal: "forbidden",
@@ -64,5 +66,20 @@ describe("the settings rule in can", () => {
     expect(decide(aiko(["movies:read", "movies:edit"]), "audioLanguage")).toMatchObject({
       because: "scope",
     });
+  });
+
+  it("shows a person their own settings whatever their scopes", () => {
+    expect(see(aiko(["movies:read"]))).toEqual({ allowed: true });
+    expect(see(aiko(["music:play"]))).toEqual({ allowed: true });
+    expect(see(aiko(["account"]), userId("someone"))).toMatchObject({ because: "not-yours" });
+  });
+
+  it("refuses a guest from a share link every setting, to see or to change", () => {
+    const guest = aiko(["movies:play", "music:play"], "guest");
+    const refused = { allowed: false, refusal: "forbidden", because: "guest" };
+
+    expect(see(guest)).toEqual(refused);
+    expect(decide(guest, "volume")).toEqual(refused);
+    expect(decide(guest, "subtitleLanguage")).toEqual(refused);
   });
 });

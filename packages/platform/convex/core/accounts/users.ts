@@ -8,6 +8,7 @@ import type { Doc } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { refuseKeys, requireCaller } from "../auth/caller";
+import { GUEST_KEYS_FROM } from "../guests/model";
 import { fail } from "../lib/errors";
 import { paginate } from "../lib/paginate";
 import { hashNewPassword, storePassword } from "../lib/passwords";
@@ -18,6 +19,20 @@ import type { PersonDoc } from "../permissions/policy";
 import { endUserCredentials, openSession, signedIn } from "../sessions";
 
 export const DEFAULT_ROLE: AssignableRole = "member";
+
+type HouseholdRole = Exclude<Role, "guest">;
+
+const changeRole = async (
+  ctx: Pick<MutationCtx, "db">,
+  person: PersonDoc,
+  role: HouseholdRole,
+): Promise<void> => {
+  if (person.role === "member" && person.sharesWithGuests === true && role !== "member") {
+    await ctx.db.patch(person._id, { sharesWithGuests: undefined });
+  }
+
+  await ctx.db.patch(person._id, { role });
+};
 
 /** A user row as a person, or null for a service or nobody. */
 export const asPerson = (user: Doc<"users"> | null): PersonDoc | null =>
@@ -42,7 +57,7 @@ const refuseTakenKey = async (db: DatabaseReader, usernameKey: string): Promise<
 
 export const insertUser = async (
   ctx: Pick<MutationCtx, "db">,
-  user: { readonly username: string; readonly hash: string; readonly role: Role },
+  user: { readonly username: string; readonly hash: string; readonly role: HouseholdRole },
 ): Promise<PersonDoc> => {
   const parsed = requireUsername(user.username);
   const hasOwner = (await ownerOf(ctx.db)) !== null;
@@ -123,7 +138,7 @@ export const { create, list, setRole, handOverOwnership } = register({
       {
         table: "users",
         index: "by_kind_username_key",
-        range: (q) => q.eq("kind", "person"),
+        range: (q) => q.eq("kind", "person").lt("usernameKey", GUEST_KEYS_FROM),
       },
       paginationOpts,
     );
@@ -147,7 +162,7 @@ export const { create, list, setRole, handOverOwnership } = register({
 
     if (target.role === role) return null;
 
-    await ctx.db.patch(target._id, { role });
+    await changeRole(ctx, target, role);
 
     if (endsCredentials(target.role, role)) await endUserCredentials(ctx, target);
 
@@ -156,7 +171,7 @@ export const { create, list, setRole, handOverOwnership } = register({
   handOverOwnership: async (ctx, { userId }, caller) => {
     const target = await requireAccount(ctx, caller, "handOverOwnership", userId);
 
-    await ctx.db.patch(target._id, { role: "owner" });
+    await changeRole(ctx, target, "owner");
     await ctx.db.patch(caller.userId, { role: "admin" });
 
     return null;

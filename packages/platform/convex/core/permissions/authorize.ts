@@ -41,6 +41,10 @@ const accountRefusal = (action: AccountAction, because: Because, target: Account
 
   if (because === "restricted-target") return "Lift this person's restrictions first";
 
+  if (action === "allowSharing" && target.kind === "person" && target.role !== "guest") {
+    return "Owners and admins always may share with guests; only a member needs allowing";
+  }
+
   if (target.kind === "person" && target.role === "owner") {
     return "No admin can change the owner's account";
   }

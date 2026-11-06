@@ -97,13 +97,22 @@ export const {
 
     if (place === "pending") return { state: "pending", sessionId: session._id, host };
 
+    const now = Date.now();
+
     const [joined, waiting] = await Promise.all([
-      membersIn(ctx, session._id, "joined"),
-      place === "host" ? membersIn(ctx, session._id, "pending") : null,
+      membersIn(ctx, session._id, "joined", now),
+      place === "host" ? membersIn(ctx, session._id, "pending", now) : null,
     ]);
 
-    const named = async (row: (typeof joined)[number]) =>
-      asPerson(await ctx.db.get(row.userId))?.username ?? "";
+    const people = new Map(
+      await Promise.all(
+        [...joined, ...(waiting ?? [])].map(
+          async (row) => [row.userId, asPerson(await ctx.db.get(row.userId))] as const,
+        ),
+      ),
+    );
+
+    const named = (row: (typeof joined)[number]) => people.get(row.userId)?.username ?? "";
 
     return {
       state: "joined",
@@ -119,24 +128,21 @@ export const {
       },
       clock: session.clock,
       item: (await mayPlay(ctx.db, caller, session.item)) ? session.item : null,
-      members: await Promise.all(
-        joined.map(async (row) => ({
-          userId: row.userId,
-          username: await named(row),
-          role: row.userId === session.hostId ? "host" : "guest",
-          present: row.awaySince === null,
-        })),
-      ),
+      members: joined.map((row) => ({
+        userId: row.userId,
+        username: named(row),
+        role: row.userId === session.hostId ? "host" : "guest",
+        present: row.awaySince === null,
+        linkGuest: people.get(row.userId)?.role === "guest",
+      })),
       pending:
         waiting === null
           ? null
-          : await Promise.all(
-              waiting.map(async (row) => ({
-                userId: row.userId,
-                username: await named(row),
-                present: row.awaySince === null,
-              })),
-            ),
+          : waiting.map((row) => ({
+              userId: row.userId,
+              username: named(row),
+              present: row.awaySince === null,
+            })),
     };
   },
   heartbeat: (ctx, { domain }, caller) => beat(ctx, caller, domain),
@@ -157,31 +163,17 @@ export const {
 
     if (row?.sessionId !== session._id) return fail("not_found", NO_REQUEST);
 
-    await admitMember(ctx, row);
+    await admitMember(ctx, row, Date.now());
 
     return null;
   },
-  block: async (ctx, { domain, userId }, caller) => {
-    const { session } = await requireTogether(ctx, caller, domain, "manage");
-
-    if (userId === session.hostId) {
-      return fail("invalid_args", "The host cannot remove themselves; leave to end the session");
-    }
-
-    const row = await memberIn(ctx.db, userId, domain);
-
-    if (row?.sessionId === session._id) await dropMember(ctx, row);
-
-    if (session.blocked.includes(userId)) return null;
-
-    if (session.blocked.length >= BLOCKED_MAX) {
-      return fail("conflict", "This group session has turned away as many people as it can");
-    }
-
-    await ctx.db.patch(session._id, { blocked: [...session.blocked, userId] });
-
-    return null;
-  },
+  block: async (ctx, { domain, userId }) =>
+    (await ctx.runMutation(internal.core.together.members.turnAway, { domain, userId }))
+      ? null
+      : fail(
+          "conflict",
+          `They are out, but this group session already turns away ${BLOCKED_MAX} people, as many as it can, so its link could let them back in; lock the session to keep everyone new out`,
+        ),
   configure: async (ctx, { domain, join: joining, control: controls, add: adds }, caller) => {
     const { session } = await requireTogether(ctx, caller, domain, "manage");
     const { settings } = session;

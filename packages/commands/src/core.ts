@@ -149,6 +149,23 @@ const controlOp = v.union(
   v.object({ kind: v.literal("next"), revision: v.number() }),
 );
 
+/** What a share link names (ADR 0007): an item its maker can play, or a group session they host. */
+const shareTarget = v.union(
+  v.object({ kind: v.literal("item"), item: domainItem }),
+  v.object({ kind: v.literal("session"), domain: contentDomain }),
+);
+
+/**
+ * Whether a share link still opens: `open`, `revoked`, `expired`, or `dead` when guest links were
+ * turned off since it was made or its maker lost the right to make it.
+ */
+const linkState = v.union(
+  v.literal("open"),
+  v.literal("revoked"),
+  v.literal("expired"),
+  v.literal("dead"),
+);
+
 /** The core's commands: the server itself, accounts, devices, and the other shared modules. */
 export const core = [
   query("core.server.info", {
@@ -172,6 +189,7 @@ export const core = [
         v.literal("apiKey"),
         v.literal("deviceCode"),
         v.literal("tile"),
+        v.literal("guest"),
       ),
       scopes: v.array(credentialScope),
     }),
@@ -815,6 +833,8 @@ export const core = [
             username: v.string(),
             role: togetherRole,
             present: v.boolean(),
+            /** A guest a share link let in, named by what they typed, not someone in the household. */
+            linkGuest: v.boolean(),
           }),
         ),
         /** Who waits to be let in; only the host sees them. */
@@ -870,9 +890,9 @@ export const core = [
     args: { domain: contentDomain, userId: v.id("users") },
     result: v.null(),
   }),
-  mutation("core.together.block", {
+  action("core.together.block", {
     summary:
-      "Remove someone from your group session or turn their request away, as its host; its link no longer lets them in",
+      "Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in",
     scope: "signed-in",
     args: { domain: contentDomain, userId: v.id("users") },
     result: v.null(),
@@ -888,6 +908,90 @@ export const core = [
     summary: "Leave your group session in a domain; when you host it, it ends for everyone",
     scope: "signed-in",
     args: { domain: contentDomain },
+    result: v.null(),
+  }),
+  query("core.guests.status", {
+    summary: "Show whether guest links are on, the address they use, and whether you may make them",
+    scope: "account",
+    args: {},
+    result: v.object({
+      enabled: v.boolean(),
+      address: v.union(v.string(), v.null()),
+      mayShare: v.boolean(),
+    }),
+  }),
+  mutation("core.guests.configure", {
+    summary:
+      "Turn guest links on or off and set the address they use; turning them off ends every link made so far",
+    scope: "admin",
+    refusesKeys: true,
+    args: { enabled: v.boolean(), address: v.union(v.string(), v.null()) },
+    result: v.null(),
+  }),
+  mutation("core.guests.allow", {
+    summary:
+      "Let a member make guest links, or stop them; stopping signs them out and ends the links they made",
+    scope: "admin",
+    refusesKeys: true,
+    args: { userId: v.id("users"), allowed: v.boolean() },
+    result: v.null(),
+  }),
+  query("core.guests.current", {
+    summary: "Show a guest what their share link names, who shared it, and when it stops working",
+    scope: "signed-in",
+    args: {},
+    result: v.union(
+      v.null(),
+      v.object({
+        name: v.string(),
+        sharedBy: v.string(),
+        target: shareTarget,
+        expiresAt: v.number(),
+      }),
+    ),
+  }),
+  action("core.guests.links.create", {
+    summary:
+      "Make a guest link to something you can play or to the group session you host, shown only this once",
+    scope: "account",
+    refusesKeys: true,
+    args: { target: shareTarget, expiresInDays: v.optional(v.number()) },
+    result: v.object({ linkId: v.id("shareLinks"), url: v.string(), expiresAt: v.number() }),
+  }),
+  query("core.guests.links.list", {
+    summary: "List the guest links you made, or as an admin everyone's, newest first",
+    scope: "account",
+    args: {
+      whose: v.union(v.literal("mine"), v.literal("everyone")),
+      paginationOpts: paginationOptsValidator,
+    },
+    result: paginationResultValidator(
+      v.object({
+        linkId: v.id("shareLinks"),
+        madeBy: v.string(),
+        kind: v.union(v.literal("item"), v.literal("session")),
+        domain: contentDomain,
+        /** What it names; only its maker sees this, so an admin never sees someone's content. */
+        target: v.union(shareTarget, v.null()),
+        state: linkState,
+        madeAt: v.number(),
+        expiresAt: v.number(),
+      }),
+    ),
+  }),
+  query("core.guests.links.activity", {
+    summary: "List who opened a guest link and when, as its maker or an admin",
+    scope: "account",
+    args: { linkId: v.id("shareLinks"), paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({ guestId: v.id("users"), name: v.string(), openedAt: v.number() }),
+    ),
+  }),
+  mutation("core.guests.links.revoke", {
+    summary:
+      "Revoke a guest link, yours or as an admin anyone's; its guests are signed out at once",
+    scope: "account",
+    args: { linkId: v.id("shareLinks") },
     result: v.null(),
   }),
 ] as const satisfies ReadonlyArray<Command>;

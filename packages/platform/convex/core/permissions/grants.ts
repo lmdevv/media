@@ -8,10 +8,22 @@ import { internal } from "../../_generated/api";
 import type { Doc, Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx, QueryCtx } from "../../_generated/server";
+import type { LinkDoc } from "../guests/model";
+import { guestLinkOf } from "../guests/standing";
+import type { ShareStanding } from "../guests/standing";
 import { fail } from "../lib/errors";
 import { PAGE_ROWS_MAX, pageRows, paginate } from "../lib/paginate";
+import { memberIn, placeOf } from "../together/access";
+import type { SessionDoc } from "../together/access";
 import { can, contentNeeds, itemOf, resourceOf } from "./policy";
-import type { ContentAction, ContentFacts, Principal, ResourceRef, TableOf } from "./policy";
+import type {
+  ContentAction,
+  ContentFacts,
+  Principal,
+  ResourceRef,
+  ShareSeat,
+  TableOf,
+} from "./policy";
 
 /** Most groups one person is in; it bounds the reads of every content check. */
 export const GROUPS_PER_USER_MAX = 16;
@@ -72,35 +84,101 @@ export const groupsOf = async (
       .take(GROUPS_PER_USER_MAX)
   ).map((member) => member.groupId);
 
-/** Whose grants reach a principal. Read it once per call and share it across every check. */
+/**
+ * What a guest's share link lends them (ADR 0007): the link, its standing, its maker's own reach,
+ * and for a session link the session and where the guest sits in it. Each item a guest asks for
+ * is decided at what the maker may play.
+ */
+export interface Lent {
+  readonly link: LinkDoc;
+  readonly standing: ShareStanding;
+  readonly maker: Reach;
+  readonly session: { readonly doc: SessionDoc; readonly seat: ShareSeat } | null;
+}
+
+/**
+ * Whose grants reach a principal. Read it once per call and share it across every check. A guest
+ * holds no grant, so `direct` and `groups` are empty and every list and every grant check hides
+ * everything from them; what they may play comes only from `lent`.
+ */
 export interface Reach {
   readonly principal: Principal;
   readonly direct: ReadonlyArray<PrincipalKey>;
   readonly groups: ReadonlyArray<Id<"groups">>;
+  /** A guest's share link; null for everyone else, and for a guest whose link or maker is gone. */
+  readonly lent: Lent | null;
 }
 
-/** Reads `principal`'s reach: 1 index range and a document per group. */
-export const reachOf = async (db: DatabaseReader, principal: Principal): Promise<Reach> => {
-  if (principal.kind === "service") return { principal, direct: [], groups: [] };
+const householdReach = async (db: DatabaseReader, principal: Principal): Promise<Reach> => ({
+  principal,
+  direct: [principal.userId, "household"],
+  groups: await groupsOf(db, principal.userId),
+  lent: null,
+});
+
+const seatIn = async (
+  db: DatabaseReader,
+  session: SessionDoc,
+  guestId: Id<"users">,
+): Promise<ShareSeat> => ({
+  place: placeOf(session, guestId, await memberIn(db, guestId, session.item.domain)),
+  live: session.state === "live",
+});
+
+const lentTo = async (db: DatabaseReader, guestId: Id<"users">): Promise<Lent | null> => {
+  const guest = await db.get(guestId);
+
+  if (guest?.kind !== "person" || guest.role !== "guest") return null;
+
+  const found = await guestLinkOf(db, guest, Date.now());
+
+  if (found === null) return null;
+
+  const { link, standing } = found;
+  const session = link.target.kind === "session" ? await db.get(link.target.sessionId) : null;
 
   return {
-    principal,
-    direct: principal.role === "guest" ? [principal.userId] : [principal.userId, "household"],
-    groups: await groupsOf(db, principal.userId),
+    link,
+    standing,
+    maker: await householdReach(db, standing.maker.principal),
+    session: session === null ? null : { doc: session, seat: await seatIn(db, session, guestId) },
   };
 };
 
-const LIST_CALL_READS = 16;
+/**
+ * Reads `principal`'s reach: 1 index range and a document per group. For a guest it reads their
+ * row, their link, the switch, its maker, the maker's groups, and a session link's session and seat.
+ */
+export const reachOf = async (db: DatabaseReader, principal: Principal): Promise<Reach> => {
+  if (principal.kind === "service") return { principal, direct: [], groups: [], lent: null };
+
+  if (principal.role === "guest") {
+    return { principal, direct: [], groups: [], lent: await lentTo(db, principal.userId) };
+  }
+
+  return householdReach(db, principal);
+};
+
+/** What a list call reads besides its rows: the caller, their session, and the page's own reads. */
+export const LIST_CALL_READS = 16;
+
+/** What a guest's row costs on top of its maker's: the read that says whether the link covers it. */
+export const LENT_ROW_READS = 1;
 
 /**
  * The most rows one page may decide through grants for `reach` when each row reads `rowReads`
- * documents of its own, so the call reads at most `PAGE_ROWS_MAX` documents and index ranges.
+ * documents of its own, so the call reads at most `PAGE_ROWS_MAX` documents and index ranges. A
+ * guest's rows are decided through its maker's grants.
  */
-export const decidableRows = (reach: Reach, rowReads: number): number =>
-  Math.floor(
-    (PAGE_ROWS_MAX - LIST_CALL_READS - reach.groups.length) /
-      (rowReads + reach.direct.length + reach.groups.length),
+export const decidableRows = (reach: Reach, rowReads: number): number => {
+  const charged = reach.lent?.maker ?? reach;
+  const lentReads = reach.lent === null ? 0 : LENT_ROW_READS;
+
+  return Math.floor(
+    (PAGE_ROWS_MAX - LIST_CALL_READS - charged.groups.length) /
+      (rowReads + lentReads + charged.direct.length + charged.groups.length),
   );
+};
 
 /** The strongest level any grant in `reach` gives on `ref`. */
 export const levelOn = async <T extends ResourceType>(

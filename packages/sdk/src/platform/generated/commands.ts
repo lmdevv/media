@@ -284,6 +284,7 @@ const core_auth_sessions_current = query({
       Schema.Literal("apiKey"),
       Schema.Literal("deviceCode"),
       Schema.Literal("tile"),
+      Schema.Literal("guest"),
     ]),
     scopes: Schema.Array(
       Schema.Union([
@@ -761,6 +762,240 @@ const core_downloads_usage = query({
     items: Schema.Finite,
     capBytes: Schema.Finite,
     capItems: Schema.Finite,
+  }),
+});
+
+const core_guests_allow = mutation({
+  name: "core.guests.allow",
+  path: "core/guests:allow",
+  args: Schema.Struct({
+    userId: Schema.String.pipe(Schema.brand("Id<users>")),
+    allowed: Schema.Boolean,
+  }),
+  result: Schema.Null,
+});
+
+const core_guests_configure = mutation({
+  name: "core.guests.configure",
+  path: "core/guests:configure",
+  args: Schema.Struct({
+    enabled: Schema.Boolean,
+    address: Schema.Union([Schema.String, Schema.Null]),
+  }),
+  result: Schema.Null,
+});
+
+const core_guests_current = query({
+  name: "core.guests.current",
+  path: "core/guests:current",
+  args: Schema.Struct({}),
+  result: Schema.Union([
+    Schema.Null,
+    Schema.Struct({
+      name: Schema.String,
+      sharedBy: Schema.String,
+      target: Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal("item"),
+          item: Schema.Union([
+            Schema.Struct({
+              domain: Schema.Literal("movies"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("probeMovie"),
+                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                }),
+              ]),
+            }),
+            Schema.Struct({
+              domain: Schema.Literal("music"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("probeTrack"),
+                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                }),
+              ]),
+            }),
+          ]),
+        }),
+        Schema.Struct({
+          kind: Schema.Literal("session"),
+          domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+        }),
+      ]),
+      expiresAt: Schema.Finite,
+    }),
+  ]),
+});
+
+const core_guests_links_activity = query({
+  name: "core.guests.links.activity",
+  path: "core/guests/links:activity",
+  args: Schema.Struct({
+    linkId: Schema.String.pipe(Schema.brand("Id<shareLinks>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        guestId: Schema.String.pipe(Schema.brand("Id<users>")),
+        name: Schema.String,
+        openedAt: Schema.Finite,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const core_guests_links_create = action({
+  name: "core.guests.links.create",
+  path: "core/guests/links:create",
+  args: Schema.Struct({
+    target: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("item"),
+        item: Schema.Union([
+          Schema.Struct({
+            domain: Schema.Literal("movies"),
+            ref: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("probeMovie"),
+                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              }),
+            ]),
+          }),
+          Schema.Struct({
+            domain: Schema.Literal("music"),
+            ref: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("probeTrack"),
+                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              }),
+            ]),
+          }),
+        ]),
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("session"),
+        domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      }),
+    ]),
+    expiresInDays: Schema.optionalKey(Schema.Finite),
+  }),
+  result: Schema.Struct({
+    linkId: Schema.String.pipe(Schema.brand("Id<shareLinks>")),
+    url: Schema.String,
+    expiresAt: Schema.Finite,
+  }),
+});
+
+const core_guests_links_list = query({
+  name: "core.guests.links.list",
+  path: "core/guests/links:list",
+  args: Schema.Struct({
+    whose: Schema.Union([Schema.Literal("mine"), Schema.Literal("everyone")]),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        linkId: Schema.String.pipe(Schema.brand("Id<shareLinks>")),
+        madeBy: Schema.String,
+        kind: Schema.Union([Schema.Literal("item"), Schema.Literal("session")]),
+        domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+        target: Schema.Union([
+          Schema.Union([
+            Schema.Struct({
+              kind: Schema.Literal("item"),
+              item: Schema.Union([
+                Schema.Struct({
+                  domain: Schema.Literal("movies"),
+                  ref: Schema.Union([
+                    Schema.Struct({
+                      type: Schema.Literal("probeMovie"),
+                      id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                    }),
+                  ]),
+                }),
+                Schema.Struct({
+                  domain: Schema.Literal("music"),
+                  ref: Schema.Union([
+                    Schema.Struct({
+                      type: Schema.Literal("probeTrack"),
+                      id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                    }),
+                  ]),
+                }),
+              ]),
+            }),
+            Schema.Struct({
+              kind: Schema.Literal("session"),
+              domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+            }),
+          ]),
+          Schema.Null,
+        ]),
+        state: Schema.Union([
+          Schema.Literal("open"),
+          Schema.Literal("revoked"),
+          Schema.Literal("expired"),
+          Schema.Literal("dead"),
+        ]),
+        madeAt: Schema.Finite,
+        expiresAt: Schema.Finite,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const core_guests_links_revoke = mutation({
+  name: "core.guests.links.revoke",
+  path: "core/guests/links:revoke",
+  args: Schema.Struct({ linkId: Schema.String.pipe(Schema.brand("Id<shareLinks>")) }),
+  result: Schema.Null,
+});
+
+const core_guests_status = query({
+  name: "core.guests.status",
+  path: "core/guests:status",
+  args: Schema.Struct({}),
+  result: Schema.Struct({
+    enabled: Schema.Boolean,
+    address: Schema.Union([Schema.String, Schema.Null]),
+    mayShare: Schema.Boolean,
   }),
 });
 
@@ -1310,7 +1545,7 @@ const core_together_admit = mutation({
   result: Schema.Null,
 });
 
-const core_together_block = mutation({
+const core_together_block = action({
   name: "core.together.block",
   path: "core/together:block",
   args: Schema.Struct({
@@ -1468,6 +1703,7 @@ const core_together_get = query({
           username: Schema.String,
           role: Schema.Union([Schema.Literal("host"), Schema.Literal("guest")]),
           present: Schema.Boolean,
+          linkGuest: Schema.Boolean,
         }),
       ),
       pending: Schema.Union([
@@ -1716,6 +1952,26 @@ export const effectMethods = (method: EffectBuilder) => ({
       /** `core.downloads.usage` (query, signed-in): Show how much of this device's download limit everyone on it uses. */
       usage: method.query(core_downloads_usage),
     },
+    guests: {
+      /** `core.guests.allow` (mutation, admin, API keys refused): Let a member make guest links, or stop them; stopping signs them out and ends the links they made. */
+      allow: method.mutation(core_guests_allow),
+      /** `core.guests.configure` (mutation, admin, API keys refused): Turn guest links on or off and set the address they use; turning them off ends every link made so far. */
+      configure: method.mutation(core_guests_configure),
+      /** `core.guests.current` (query, signed-in): Show a guest what their share link names, who shared it, and when it stops working. */
+      current: method.query(core_guests_current),
+      links: {
+        /** `core.guests.links.activity` (query, account): List who opened a guest link and when, as its maker or an admin. */
+        activity: method.query(core_guests_links_activity),
+        /** `core.guests.links.create` (action, account, API keys refused): Make a guest link to something you can play or to the group session you host, shown only this once. */
+        create: method.action(core_guests_links_create),
+        /** `core.guests.links.list` (query, account): List the guest links you made, or as an admin everyone's, newest first. */
+        list: method.query(core_guests_links_list),
+        /** `core.guests.links.revoke` (mutation, account): Revoke a guest link, yours or as an admin anyone's; its guests are signed out at once. */
+        revoke: method.mutation(core_guests_links_revoke),
+      },
+      /** `core.guests.status` (query, account): Show whether guest links are on, the address they use, and whether you may make them. */
+      status: method.query(core_guests_status),
+    },
     libraries: {
       /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
       create: method.mutation(core_libraries_create),
@@ -1779,8 +2035,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       add: method.mutation(core_together_add),
       /** `core.together.admit` (mutation, signed-in): Let someone waiting to join your group session in, as its host. */
       admit: method.mutation(core_together_admit),
-      /** `core.together.block` (mutation, signed-in): Remove someone from your group session or turn their request away, as its host; its link no longer lets them in. */
-      block: method.mutation(core_together_block),
+      /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in. */
+      block: method.action(core_together_block),
       /** `core.together.configure` (mutation, signed-in): Set who may join your group session and whether its guests may control playback and add items. */
       configure: method.mutation(core_together_configure),
       /** `core.together.control` (mutation, signed-in): Play, pause, seek, change the speed of, or skip to the next item in your group session. */
@@ -1934,6 +2190,26 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       /** `core.downloads.usage` (query, signed-in): Show how much of this device's download limit everyone on it uses. */
       usage: method.query(core_downloads_usage),
     },
+    guests: {
+      /** `core.guests.allow` (mutation, admin, API keys refused): Let a member make guest links, or stop them; stopping signs them out and ends the links they made. */
+      allow: method.mutation(core_guests_allow),
+      /** `core.guests.configure` (mutation, admin, API keys refused): Turn guest links on or off and set the address they use; turning them off ends every link made so far. */
+      configure: method.mutation(core_guests_configure),
+      /** `core.guests.current` (query, signed-in): Show a guest what their share link names, who shared it, and when it stops working. */
+      current: method.query(core_guests_current),
+      links: {
+        /** `core.guests.links.activity` (query, account): List who opened a guest link and when, as its maker or an admin. */
+        activity: method.query(core_guests_links_activity),
+        /** `core.guests.links.create` (action, account, API keys refused): Make a guest link to something you can play or to the group session you host, shown only this once. */
+        create: method.action(core_guests_links_create),
+        /** `core.guests.links.list` (query, account): List the guest links you made, or as an admin everyone's, newest first. */
+        list: method.query(core_guests_links_list),
+        /** `core.guests.links.revoke` (mutation, account): Revoke a guest link, yours or as an admin anyone's; its guests are signed out at once. */
+        revoke: method.mutation(core_guests_links_revoke),
+      },
+      /** `core.guests.status` (query, account): Show whether guest links are on, the address they use, and whether you may make them. */
+      status: method.query(core_guests_status),
+    },
     libraries: {
       /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
       create: method.mutation(core_libraries_create),
@@ -1997,8 +2273,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       add: method.mutation(core_together_add),
       /** `core.together.admit` (mutation, signed-in): Let someone waiting to join your group session in, as its host. */
       admit: method.mutation(core_together_admit),
-      /** `core.together.block` (mutation, signed-in): Remove someone from your group session or turn their request away, as its host; its link no longer lets them in. */
-      block: method.mutation(core_together_block),
+      /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in. */
+      block: method.action(core_together_block),
       /** `core.together.configure` (mutation, signed-in): Set who may join your group session and whether its guests may control playback and add items. */
       configure: method.mutation(core_together_configure),
       /** `core.together.control` (mutation, signed-in): Play, pause, seek, change the speed of, or skip to the next item in your group session. */

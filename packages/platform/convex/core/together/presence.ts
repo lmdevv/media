@@ -8,6 +8,7 @@ import { inOrder } from "../lib/inOrder";
 import type { Principal } from "../permissions/policy";
 import { requireTogether } from "./access";
 import { pauseSession } from "./clock";
+import { guestLinkDied } from "./members";
 import { ABANDON_MS, BEAT_WRITE_MS, PRESENT_MS } from "./model";
 import { endSession } from "./sessions";
 
@@ -51,7 +52,8 @@ export const heartbeat = async (
 
 /**
  * Marks away the members silent for `PRESENT_MS` as of `asOf` (now, or a later time a
- * test passes instead of waiting), and drops the people waiting who left. A host going away
+ * test passes instead of waiting), and drops the people waiting who left and the guests whose
+ * share link stopped holding. A host going away
  * pauses a playing session where it is, and the session ends if they stay away `ABANDON_MS`. Writes use the real time; `asOf` only picks
  * who is silent. A full batch runs the next one at once.
  */
@@ -74,7 +76,7 @@ export const sweep = internalMutation({
 
       if (member === null || session?.state !== "live") return;
 
-      if (member.state === "pending") {
+      if (member.state === "pending" || (await guestLinkDied(ctx.db, member.userId, now))) {
         await ctx.db.delete(member._id);
 
         return;

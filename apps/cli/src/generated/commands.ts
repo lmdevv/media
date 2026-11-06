@@ -409,6 +409,7 @@ export const generatedCommands = [
         Schema.Literal("apiKey"),
         Schema.Literal("deviceCode"),
         Schema.Literal("tile"),
+        Schema.Literal("guest"),
       ]),
       scopes: Schema.Array(
         Schema.Union([
@@ -1055,6 +1056,292 @@ export const generatedCommands = [
       capItems: Schema.Finite,
     }),
     method: (platform) => platform.core.downloads.usage,
+  }),
+  coreCommand({
+    name: "core.guests.allow",
+    path: ["admin", "guests", "allow"],
+    kind: "mutation",
+    scope: "admin",
+    refusesKeys: true,
+    summary:
+      "Let a member make guest links, or stop them; stopping signs them out and ends the links they made",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      userId: Schema.String.pipe(Schema.brand("Id<users>")),
+      allowed: Schema.Boolean,
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.guests.allow,
+  }),
+  coreCommand({
+    name: "core.guests.configure",
+    path: ["admin", "guests", "configure"],
+    kind: "mutation",
+    scope: "admin",
+    refusesKeys: true,
+    summary:
+      "Turn guest links on or off and set the address they use; turning them off ends every link made so far",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      enabled: Schema.Boolean,
+      address: Schema.Union([Schema.String, Schema.Null]),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.guests.configure,
+  }),
+  coreCommand({
+    name: "core.guests.current",
+    path: ["auth", "guests", "current"],
+    kind: "query",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary: "Show a guest what their share link names, who shared it, and when it stops working",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({}),
+    result: Schema.Union([
+      Schema.Null,
+      Schema.Struct({
+        name: Schema.String,
+        sharedBy: Schema.String,
+        target: Schema.Union([
+          Schema.Struct({
+            kind: Schema.Literal("item"),
+            item: Schema.Union([
+              Schema.Struct({
+                domain: Schema.Literal("movies"),
+                ref: Schema.Union([
+                  Schema.Struct({
+                    type: Schema.Literal("probeMovie"),
+                    id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  }),
+                ]),
+              }),
+              Schema.Struct({
+                domain: Schema.Literal("music"),
+                ref: Schema.Union([
+                  Schema.Struct({
+                    type: Schema.Literal("probeTrack"),
+                    id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  }),
+                ]),
+              }),
+            ]),
+          }),
+          Schema.Struct({
+            kind: Schema.Literal("session"),
+            domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+          }),
+        ]),
+        expiresAt: Schema.Finite,
+      }),
+    ]),
+    method: (platform) => platform.core.guests.current,
+  }),
+  coreCommand({
+    name: "core.guests.links.activity",
+    path: ["auth", "links", "activity"],
+    kind: "query",
+    scope: "account",
+    refusesKeys: false,
+    summary: "List who opened a guest link and when, as its maker or an admin",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      linkId: Schema.String.pipe(Schema.brand("Id<shareLinks>")),
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          guestId: Schema.String.pipe(Schema.brand("Id<users>")),
+          name: Schema.String,
+          openedAt: Schema.Finite,
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.core.guests.links.activity,
+  }),
+  coreCommand({
+    name: "core.guests.links.create",
+    path: ["auth", "links", "create"],
+    kind: "action",
+    scope: "account",
+    refusesKeys: true,
+    summary:
+      "Make a guest link to something you can play or to the group session you host, shown only this once",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      target: Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal("item"),
+          item: Schema.Union([
+            Schema.Struct({
+              domain: Schema.Literal("movies"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("probeMovie"),
+                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                }),
+              ]),
+            }),
+            Schema.Struct({
+              domain: Schema.Literal("music"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("probeTrack"),
+                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                }),
+              ]),
+            }),
+          ]),
+        }),
+        Schema.Struct({
+          kind: Schema.Literal("session"),
+          domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+        }),
+      ]),
+      expiresInDays: Schema.optionalKey(Schema.Finite),
+    }),
+    result: Schema.Struct({
+      linkId: Schema.String.pipe(Schema.brand("Id<shareLinks>")),
+      url: Schema.String,
+      expiresAt: Schema.Finite,
+    }),
+    method: (platform) => platform.core.guests.links.create,
+  }),
+  coreCommand({
+    name: "core.guests.links.list",
+    path: ["auth", "links", "list"],
+    kind: "query",
+    scope: "account",
+    refusesKeys: false,
+    summary: "List the guest links you made, or as an admin everyone's, newest first",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      whose: Schema.Union([Schema.Literal("mine"), Schema.Literal("everyone")]),
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          linkId: Schema.String.pipe(Schema.brand("Id<shareLinks>")),
+          madeBy: Schema.String,
+          kind: Schema.Union([Schema.Literal("item"), Schema.Literal("session")]),
+          domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+          target: Schema.Union([
+            Schema.Union([
+              Schema.Struct({
+                kind: Schema.Literal("item"),
+                item: Schema.Union([
+                  Schema.Struct({
+                    domain: Schema.Literal("movies"),
+                    ref: Schema.Union([
+                      Schema.Struct({
+                        type: Schema.Literal("probeMovie"),
+                        id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                      }),
+                    ]),
+                  }),
+                  Schema.Struct({
+                    domain: Schema.Literal("music"),
+                    ref: Schema.Union([
+                      Schema.Struct({
+                        type: Schema.Literal("probeTrack"),
+                        id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                      }),
+                    ]),
+                  }),
+                ]),
+              }),
+              Schema.Struct({
+                kind: Schema.Literal("session"),
+                domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+              }),
+            ]),
+            Schema.Null,
+          ]),
+          state: Schema.Union([
+            Schema.Literal("open"),
+            Schema.Literal("revoked"),
+            Schema.Literal("expired"),
+            Schema.Literal("dead"),
+          ]),
+          madeAt: Schema.Finite,
+          expiresAt: Schema.Finite,
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.core.guests.links.list,
+  }),
+  coreCommand({
+    name: "core.guests.links.revoke",
+    path: ["auth", "links", "revoke"],
+    kind: "mutation",
+    scope: "account",
+    refusesKeys: false,
+    summary:
+      "Revoke a guest link, yours or as an admin anyone's; its guests are signed out at once",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({ linkId: Schema.String.pipe(Schema.brand("Id<shareLinks>")) }),
+    result: Schema.Null,
+    method: (platform) => platform.core.guests.links.revoke,
+  }),
+  coreCommand({
+    name: "core.guests.status",
+    path: ["auth", "guests", "status"],
+    kind: "query",
+    scope: "account",
+    refusesKeys: false,
+    summary: "Show whether guest links are on, the address they use, and whether you may make them",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({}),
+    result: Schema.Struct({
+      enabled: Schema.Boolean,
+      address: Schema.Union([Schema.String, Schema.Null]),
+      mayShare: Schema.Boolean,
+    }),
+    method: (platform) => platform.core.guests.status,
   }),
   coreCommand({
     name: "core.libraries.create",
@@ -1766,11 +2053,11 @@ export const generatedCommands = [
   coreCommand({
     name: "core.together.block",
     path: ["auth", "together", "block"],
-    kind: "mutation",
+    kind: "action",
     scope: "signed-in",
     refusesKeys: false,
     summary:
-      "Remove someone from your group session or turn their request away, as its host; its link no longer lets them in",
+      "Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in",
     secrets: [],
     paginated: false,
     args: Schema.Struct({
@@ -1964,6 +2251,7 @@ export const generatedCommands = [
             username: Schema.String,
             role: Schema.Union([Schema.Literal("host"), Schema.Literal("guest")]),
             present: Schema.Boolean,
+            linkGuest: Schema.Boolean,
           }),
         ),
         pending: Schema.Union([
