@@ -461,7 +461,7 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
             yield* sessions.seek(started.streamId, seconds, who.grant);
           }
 
-          const owned = yield* sessions.runCount.pipe(
+          const owned = yield* sessions.runsAwaitingExit.pipe(
             Effect.repeat({
               until: (count) => count <= 1,
               schedule: Schedule.spaced("100 millis"),

@@ -167,8 +167,7 @@ export interface Interface {
   ) => Effect.Effect<void, StreamNotFound | StreamAccessDenied>;
   /** Number of streams whose encoder runs; a released stream waiting for its player is not one. */
   readonly activeCount: Effect.Effect<number>;
-  /** Number of ffmpeg runs of open streams whose exit is not known yet, stopping ones included. */
-  readonly runCount: Effect.Effect<number>;
+  readonly runsAwaitingExit: Effect.Effect<number>;
 }
 
 /** The stream session manager. */
@@ -1866,7 +1865,7 @@ const make = Effect.gen(function* () {
       ),
       Effect.map((running) => running.length),
     ),
-    runCount: Ref.get(sessions).pipe(
+    runsAwaitingExit: Ref.get(sessions).pipe(
       Effect.flatMap((current) =>
         Effect.forEach(current.values(), (session) =>
           Ref.get(session.runs).pipe(Effect.map(({ live }) => live.size)),
