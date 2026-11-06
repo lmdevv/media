@@ -128,6 +128,23 @@ meantime must not write its renewed tokens over a sign-out it has not heard of y
 - A sign-out whose server call fails still clears this browser, then logs
   `Auth.serverSignOutFailed`.
 
+### Links carry their secret in the fragment
+
+An invite is `/invite#mi_<id>.<secret>`, and a reset link is `/reset#mr_<id>.<secret>`.
+
+- The browser never sends a fragment, so the secret appears in no request line, proxy log, or
+  `Referer`.
+- Before the router starts, `session/link-secret.ts` moves the secret into memory and replaces the
+  history entry with the bare page. The address bar and history never hold it after the first
+  load. Signing in from either page replaces the entry again with `/`. A reload drops the secret,
+  and the page asks for the link again.
+- Every page sets `Referrer-Policy: no-referrer`, through a meta tag in `index.html` and a header
+  from the Vite dev and preview servers. The production server sends the header once it serves
+  this client (phase 4).
+- `/device?code=` keeps its code in the query. The user code is not a credential. Only the
+  device code, which never leaves the waiting client, redeems the sign-in, and approving needs a
+  signed-in account. RFC 8628 puts the same code in its `verification_uri_complete`.
+
 ### Rejected
 
 - Keeping the people of a browser in the SDK. The CLI and the iOS apps hold one person each, so
@@ -139,3 +156,5 @@ meantime must not write its renewed tokens over a sign-out it has not heard of y
 - A separate generation counter or sign-out marker beside each session key. The tokens already
   identify every write, since each sign-in and each refresh issues new ones, so comparing them is
   the check.
+- Secrets in the path or the query. Both reach the server's request log and any proxy in the
+  first request, and stay in history until the link expires.

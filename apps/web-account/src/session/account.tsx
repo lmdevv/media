@@ -80,10 +80,7 @@ export function AccountProvider({
 }
 
 const onPickerAfterSignIn = (pathname: string): boolean =>
-  pathname === "/" ||
-  pathname === "/add" ||
-  pathname.startsWith("/invite/") ||
-  pathname.startsWith("/reset/");
+  pathname === "/" || pathname === "/add" || pathname === "/invite" || pathname === "/reset";
 
 /** A password sign-in, a first owner, an invite, or a reset link. */
 type SignIn =
@@ -156,7 +153,9 @@ export const useAccountActions = (): AccountActions => {
 
     // A page that asked for a sign-in, such as /device from a CLI's link, shows once it is done;
     // the picker, Add someone, an invite, and a reset link go on to the picker.
-    if (onPickerAfterSignIn(router.state.location.pathname)) await navigate({ to: "/" });
+    if (onPickerAfterSignIn(router.state.location.pathname)) {
+      await navigate({ to: "/", replace: true });
+    }
   };
 
   return {

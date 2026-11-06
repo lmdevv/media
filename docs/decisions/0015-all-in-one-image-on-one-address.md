@@ -25,13 +25,13 @@ belong to no single product.
 - **Web addresses.**
   - A shared account client at `/` holds sign in, the picker, invites, device approval, and admin.
     It links to `/movies` and `/music`.
-  - The platform routes `/invite/:code`, `/device`, and `/reset/:token` belong to the account
-    client.
+  - The platform routes `/invite`, `/device`, and `/reset` belong to the account client. Invite
+    and reset links carry their code in the fragment (ADR 0020).
 
 ## Consequences
 
 - An install exposes one port, and every web client shares one origin (ADR 0020).
-- `/invite/:code` exists once, so the two products' clashing routes resolve to one.
+- `/invite` exists once, so the two products' clashing routes resolve to one.
 - Convex Auth's HTTP routes run on Convex's HTTP actions origin, which the path list does not
   place yet (`docs/architecture.md`, "Open").
 - The Compose file shrinks to the image plus optional sidecars. The two-port Compose layout goes.

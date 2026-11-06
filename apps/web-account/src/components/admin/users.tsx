@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 
 import { PageHeader } from "@/components/shell";
 import { describeFailure } from "@/lib/failure";
+import { secretLink } from "@/session/link-secret";
 import { useMe } from "@/session/me";
 import type { UserId } from "@/session/platform-types";
 
@@ -224,7 +225,10 @@ function PanelActions({
     );
 
     if (made !== undefined) {
-      setReset({ url: `${location.origin}/reset/${made.code}`, expiresAt: made.expiresAt });
+      setReset({
+        url: secretLink(location.origin, "/reset", made.code),
+        expiresAt: made.expiresAt,
+      });
     }
   };
 
@@ -491,7 +495,10 @@ function AddSomeone() {
     );
 
     if (made !== undefined) {
-      setInvite({ url: `${location.origin}/invite/${made.code}`, expiresAt: made.expiresAt });
+      setInvite({
+        url: secretLink(location.origin, "/invite", made.code),
+        expiresAt: made.expiresAt,
+      });
     }
   };
 

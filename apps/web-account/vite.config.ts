@@ -5,6 +5,8 @@ import { defineConfig, loadEnv } from "vite";
 
 const DEFAULT_PORT = 3002;
 
+const SECURITY_HEADERS = { "Referrer-Policy": "no-referrer" };
+
 const parsePort = (value: string | undefined): number => {
   if (value === undefined || value === "") return DEFAULT_PORT;
 
@@ -21,7 +23,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, import.meta.dirname, "");
 
   return {
-    server: { port: parsePort(env["ACCOUNT_PORT"]) },
+    server: { port: parsePort(env["ACCOUNT_PORT"]), headers: SECURITY_HEADERS },
+    preview: { headers: SECURITY_HEADERS },
     resolve: { tsconfigPaths: true },
     plugins: [
       tailwindcss(),

@@ -196,10 +196,10 @@ describe("UserPanelView", () => {
 
   it("shows a reset link once with Copy", () => {
     const text = textOf(
-      <UserPanelView {...props} reset={{ url: "https://media.test/reset/abc", expiresAt: 0 }} />,
+      <UserPanelView {...props} reset={{ url: "https://media.test/reset#abc", expiresAt: 0 }} />,
     );
 
-    expect(text).toContain("Reset link https://media.test/reset/abc Copy");
+    expect(text).toContain("Reset link https://media.test/reset#abc Copy");
     expect(text).toContain("It shows only this once.");
     expect(text).not.toContain("Make a reset link");
   });
@@ -228,9 +228,9 @@ describe("AddSomeoneView", () => {
   });
 
   it("shows the invite link once it is made", () => {
-    const markup = addSomeone({ url: "https://media.test/invite/xyz", expiresAt: 0 });
+    const markup = addSomeone({ url: "https://media.test/invite#xyz", expiresAt: 0 });
 
-    expect(markup).toContain("https://media.test/invite/xyz");
+    expect(markup).toContain("https://media.test/invite#xyz");
     expect(markup).not.toContain("Create invite link");
   });
 });

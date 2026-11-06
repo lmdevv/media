@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isDisabled, renderPage } from "./render";
 import { InviteView } from "./invite";
 import type { Invite } from "./invite";
+import { MissingLink } from "./link-page";
 import type { LinkForm, LinkState } from "./link-page";
 
 const form: LinkForm = {
@@ -57,5 +58,12 @@ describe("InviteView", () => {
 
   it("shows a blank page while looking the invite up", () => {
     expect(page({ kind: "loading" })).toContain('aria-busy="true"');
+  });
+
+  it("asks for the link again on a page that no longer holds it", () => {
+    const html = renderPage(<MissingLink />);
+
+    expect(html).toContain("Open your link again.");
+    expect(html).not.toContain("no longer works");
   });
 });

@@ -54,6 +54,16 @@ export function EndedLink({ title, next }: { readonly title: string; readonly ne
   );
 }
 
+/** A link page opened without its link, as after a reload, which drops the link's secret. */
+export function MissingLink() {
+  return (
+    <EndedLink
+      title="Open your link again."
+      next="This page lets go of the link once it opens, so a reload loses it."
+    />
+  );
+}
+
 /** What the person types into an open link's form, and how its submit goes. */
 export interface LinkForm {
   readonly username: string;

@@ -4,6 +4,7 @@ import { HeadContent, createRootRouteWithContext, useRouterState } from "@tansta
 import { PLATFORM_URL } from "@/env";
 import { AccountProvider } from "@/session/account";
 import { Gate } from "@/session/gate";
+import type { LinkSecret } from "@/session/link-secret";
 import type { OriginStore } from "@/session/origin";
 import type { Need } from "@/session/screen";
 
@@ -12,6 +13,8 @@ import "../index.css";
 /** What every route can read from the router context. */
 export interface RouterAppContext {
   readonly origin: OriginStore;
+  /** The secret of the invite or reset link this page opened with, taken out of the address. */
+  readonly linkSecret: LinkSecret | null;
 }
 
 declare module "@tanstack/react-router" {

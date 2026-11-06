@@ -8,14 +8,14 @@ import { Route as AddRouteImport } from './routes/add'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as DeviceRouteImport } from './routes/device'
 import { Route as HomeRouteImport } from './routes/home'
+import { Route as InviteRouteImport } from './routes/invite'
+import { Route as ResetRouteImport } from './routes/reset'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminDevicesRouteImport } from './routes/admin.devices'
 import { Route as AdminGroupsRouteImport } from './routes/admin.groups'
 import { Route as AdminGuestsRouteImport } from './routes/admin.guests'
 import { Route as AdminLibrariesRouteImport } from './routes/admin.libraries'
-import { Route as InviteCodeRouteImport } from './routes/invite.$code'
-import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as TileUserIdRouteImport } from './routes/tile.$userId'
 import { Route as AdminLibrariesLibraryIdRouteImport } from './routes/admin.libraries_.$libraryId'
 
@@ -42,6 +42,16 @@ const DeviceRoute = DeviceRouteImport.update({
 const HomeRoute = HomeRouteImport.update({
   id: '/home',
   path: '/home',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InviteRoute = InviteRouteImport.update({
+  id: '/invite',
+  path: '/invite',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetRoute = ResetRouteImport.update({
+  id: '/reset',
+  path: '/reset',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -74,16 +84,6 @@ const AdminLibrariesRoute = AdminLibrariesRouteImport.update({
   path: '/libraries',
   getParentRoute: () => AdminRoute,
 } as any)
-const InviteCodeRoute = InviteCodeRouteImport.update({
-  id: '/invite/$code',
-  path: '/invite/$code',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ResetTokenRoute = ResetTokenRouteImport.update({
-  id: '/reset/$token',
-  path: '/reset/$token',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const TileUserIdRoute = TileUserIdRouteImport.update({
   id: '/tile/$userId',
   path: '/tile/$userId',
@@ -101,13 +101,13 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteWithChildren
   '/device': typeof DeviceRoute
   '/home': typeof HomeRoute
+  '/invite': typeof InviteRoute
+  '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
   '/admin/guests': typeof AdminGuestsRoute
   '/admin/libraries': typeof AdminLibrariesRoute
-  '/invite/$code': typeof InviteCodeRoute
-  '/reset/$token': typeof ResetTokenRoute
   '/tile/$userId': typeof TileUserIdRoute
   '/admin/': typeof AdminIndexRoute
   '/admin/libraries/$libraryId': typeof AdminLibrariesLibraryIdRoute
@@ -117,13 +117,13 @@ export interface FileRoutesByTo {
   '/add': typeof AddRoute
   '/device': typeof DeviceRoute
   '/home': typeof HomeRoute
+  '/invite': typeof InviteRoute
+  '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
   '/admin/guests': typeof AdminGuestsRoute
   '/admin/libraries': typeof AdminLibrariesRoute
-  '/invite/$code': typeof InviteCodeRoute
-  '/reset/$token': typeof ResetTokenRoute
   '/tile/$userId': typeof TileUserIdRoute
   '/admin': typeof AdminIndexRoute
   '/admin/libraries/$libraryId': typeof AdminLibrariesLibraryIdRoute
@@ -135,13 +135,13 @@ export interface FileRoutesById {
   '/admin': typeof AdminRouteWithChildren
   '/device': typeof DeviceRoute
   '/home': typeof HomeRoute
+  '/invite': typeof InviteRoute
+  '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
   '/admin/guests': typeof AdminGuestsRoute
   '/admin/libraries': typeof AdminLibrariesRoute
-  '/invite/$code': typeof InviteCodeRoute
-  '/reset/$token': typeof ResetTokenRoute
   '/tile/$userId': typeof TileUserIdRoute
   '/admin/': typeof AdminIndexRoute
   '/admin/libraries_/$libraryId': typeof AdminLibrariesLibraryIdRoute
@@ -154,13 +154,13 @@ export interface FileRouteTypes {
     | '/admin'
     | '/device'
     | '/home'
+    | '/invite'
+    | '/reset'
     | '/settings'
     | '/admin/devices'
     | '/admin/groups'
     | '/admin/guests'
     | '/admin/libraries'
-    | '/invite/$code'
-    | '/reset/$token'
     | '/tile/$userId'
     | '/admin/'
     | '/admin/libraries/$libraryId'
@@ -170,13 +170,13 @@ export interface FileRouteTypes {
     | '/add'
     | '/device'
     | '/home'
+    | '/invite'
+    | '/reset'
     | '/settings'
     | '/admin/devices'
     | '/admin/groups'
     | '/admin/guests'
     | '/admin/libraries'
-    | '/invite/$code'
-    | '/reset/$token'
     | '/tile/$userId'
     | '/admin'
     | '/admin/libraries/$libraryId'
@@ -187,13 +187,13 @@ export interface FileRouteTypes {
     | '/admin'
     | '/device'
     | '/home'
+    | '/invite'
+    | '/reset'
     | '/settings'
     | '/admin/devices'
     | '/admin/groups'
     | '/admin/guests'
     | '/admin/libraries'
-    | '/invite/$code'
-    | '/reset/$token'
     | '/tile/$userId'
     | '/admin/'
     | '/admin/libraries_/$libraryId'
@@ -205,9 +205,9 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
   DeviceRoute: typeof DeviceRoute
   HomeRoute: typeof HomeRoute
+  InviteRoute: typeof InviteRoute
+  ResetRoute: typeof ResetRoute
   SettingsRoute: typeof SettingsRoute
-  InviteCodeRoute: typeof InviteCodeRoute
-  ResetTokenRoute: typeof ResetTokenRoute
   TileUserIdRoute: typeof TileUserIdRoute
 }
 
@@ -246,6 +246,20 @@ declare module '@tanstack/react-router' {
       path: '/home'
       fullPath: '/home'
       preLoaderRoute: typeof HomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invite': {
+      id: '/invite'
+      path: '/invite'
+      fullPath: '/invite'
+      preLoaderRoute: typeof InviteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset': {
+      id: '/reset'
+      path: '/reset'
+      fullPath: '/reset'
+      preLoaderRoute: typeof ResetRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -290,20 +304,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminLibrariesRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/invite/$code': {
-      id: '/invite/$code'
-      path: '/invite/$code'
-      fullPath: '/invite/$code'
-      preLoaderRoute: typeof InviteCodeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reset/$token': {
-      id: '/reset/$token'
-      path: '/reset/$token'
-      fullPath: '/reset/$token'
-      preLoaderRoute: typeof ResetTokenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/tile/$userId': {
       id: '/tile/$userId'
       path: '/tile/$userId'
@@ -347,9 +347,9 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
   DeviceRoute: DeviceRoute,
   HomeRoute: HomeRoute,
+  InviteRoute: InviteRoute,
+  ResetRoute: ResetRoute,
   SettingsRoute: SettingsRoute,
-  InviteCodeRoute: InviteCodeRoute,
-  ResetTokenRoute: ResetTokenRoute,
   TileUserIdRoute: TileUserIdRoute,
 }
 export const routeTree = rootRouteImport
