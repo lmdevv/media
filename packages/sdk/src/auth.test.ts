@@ -626,6 +626,24 @@ describe("Auth", () => {
       }),
     ));
 
+  it("stores the next renewal once storing works again", () =>
+    withAuth(signedInWith(EXPIRING), ({ fake, memory, auth }) =>
+      Effect.gen(function* () {
+        const latest = jwtExpiringAt(START + 7_200_000, "alex-renewed");
+
+        yield* fake.reply("auth:signIn", tokens(RENEWED, ROTATED));
+        memory.failWrites(true);
+        yield* Effect.exit(auth.accessToken(false));
+        memory.failWrites(false);
+        yield* fake.reply("auth:signIn", tokens(latest, "refresh-3"));
+
+        expect(reveal(yield* auth.accessToken(true))).toBe(latest);
+        expect(memory.saved()).toStrictEqual(
+          Option.some({ token: latest, refreshToken: "refresh-3" }),
+        );
+      }),
+    ));
+
   it("authorizes calls with the renewed token even when storing it fails", () =>
     withAuth(signedInWith(EXPIRING), ({ fake, memory }) =>
       Effect.gen(function* () {

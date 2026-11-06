@@ -1,4 +1,17 @@
-import { Brand, Context, Effect, Layer, Option, Predicate, Redacted, Stream } from "effect";
+import {
+  Brand,
+  Context,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Option,
+  Predicate,
+  Redacted,
+  Ref,
+  Schedule,
+  Stream,
+} from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -472,8 +485,64 @@ const originStore = (stored: Option.Option<string>): KeyValueStore => {
   };
 };
 
+/**
+ * One origin's `localStorage` as browser tabs see it: each tab has its own view, and a write
+ * reaches the other tabs' subscribers, never the writer's, only once `deliver` runs, the way a
+ * `storage` event arrives as a later task.
+ */
+const browserTabs = (stored: Option.Option<string>) => {
+  const items = new Map<string, string>();
+  const listeners = new Set<{ readonly tab: number; readonly onChange: () => void }>();
+  const queued: Array<() => void> = [];
+
+  if (Option.isSome(stored)) {
+    items.set(
+      KEY,
+      TokenStorage.serializeSession({
+        token: Redacted.make(stored.value),
+        refreshToken: Redacted.make("refresh-1"),
+      }),
+    );
+  }
+
+  const tab = (id: number): KeyValueStore => {
+    const changed = () => {
+      for (const listener of listeners) if (listener.tab !== id) queued.push(listener.onChange);
+    };
+
+    return {
+      getItem: (key) => items.get(key) ?? null,
+      setItem: (key, value) => {
+        items.set(key, value);
+        changed();
+      },
+      removeItem: (key) => {
+        items.delete(key);
+        changed();
+      },
+      subscribe: (_key, onChange) => {
+        const listener = { tab: id, onChange };
+
+        listeners.add(listener);
+
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+  };
+
+  return {
+    tabs: [tab(1), tab(2)] as const,
+    stored: () => items.get(KEY) ?? null,
+    deliver: () => {
+      for (const onChange of queued.splice(0)) onChange();
+    },
+  };
+};
+
 const withTwoClients = <A, E>(
-  store: KeyValueStore,
+  store: KeyValueStore | readonly [KeyValueStore, KeyValueStore],
   body: (
     first: Platform.Interface,
     second: Platform.Interface,
@@ -487,16 +556,19 @@ const withTwoClients = <A, E>(
 
         yield* fake.reply("core/server:info", Reply.Success({ value: SERVER }));
 
-        const open = Layer.build(
-          Platform.layer({
-            url: fake.url,
-            connection: "http",
-            storage: TokenStorage.layerKeyValue(store, KEY),
-          }),
-        ).pipe(Effect.map((context) => Context.get(context, Platform.Platform)));
+        const [firstStore, secondStore] = "getItem" in store ? [store, store] : store;
 
-        const first = yield* open;
-        const second = yield* open;
+        const open = (tab: KeyValueStore) =>
+          Layer.build(
+            Platform.layer({
+              url: fake.url,
+              connection: "http",
+              storage: TokenStorage.layerKeyValue(tab, KEY),
+            }),
+          ).pipe(Effect.map((context) => Context.get(context, Platform.Platform)));
+
+        const first = yield* open(firstStore);
+        const second = yield* open(secondStore);
 
         return yield* body(first, second, fake);
       }),
@@ -530,6 +602,15 @@ const refreshTokensSpent = (fake: FakeConvex.FakeConvex) =>
 const refusedOnce = (platform: Platform.Interface) =>
   Effect.flip(
     platform.core.accounts.me.changePassword({ currentPassword: "old", newPassword: "new-one" }),
+  );
+
+const unauthenticated = Reply.Failure({ code: "unauthenticated", message: "Token expired" });
+
+const eventually = <E>(check: Effect.Effect<boolean, E>) =>
+  check.pipe(
+    Effect.repeat({ until: (done) => done, schedule: Schedule.spaced(10) }),
+    Effect.timeoutOption(1_000),
+    Effect.map(Option.isSome),
   );
 
 const answerSignIns = (fake: FakeConvex.FakeConvex) =>
@@ -577,6 +658,89 @@ describe("two clients on one store", () => {
     );
 
     expect(answer).toStrictEqual([`Bearer ${TOKEN}`]);
+  });
+
+  it("stays signed out when the other client's refresh lands before the sign-out reaches it", async () => {
+    const origin = browserTabs(Option.some(TOKEN));
+
+    const answer = await withTwoClients(origin.tabs, (first, second, fake) =>
+      Effect.gen(function* () {
+        const release = yield* Deferred.make<void>();
+
+        yield* fake.handle("auth:signIn", (request) =>
+          Predicate.hasProperty(request.args, "refreshToken")
+            ? Deferred.await(release).pipe(Effect.as(renewed))
+            : Effect.succeed(signedIn),
+        );
+        yield* fake.reply("core/accounts/me:changePassword", unauthenticated);
+        yield* fake.reply("auth:signOut", Reply.Failure({ code: "internal", message: "Down" }));
+
+        const call = yield* Effect.forkChild(refusedOnce(second));
+
+        yield* eventually(Effect.map(refreshTokensSpent(fake), (spent) => spent.length > 0));
+        yield* first.session.signOut;
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.await(call);
+        origin.deliver();
+
+        return {
+          second: yield* eventually(
+            Effect.map(second.session.currentStatus, (status) => status === "signedOut"),
+          ),
+          first: yield* first.session.currentStatus,
+          stored: origin.stored(),
+          endedRenewal: yield* eventually(
+            Effect.map(fake.requestsTo("auth:signOut"), (requests) =>
+              requests.some((request) => request.authorization === `Bearer ${RENEWED}`),
+            ),
+          ),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      second: true,
+      first: "signedOut",
+      stored: null,
+      endedRenewal: true,
+    });
+  });
+
+  it("keeps the other client's renewal when its own refresh of the old token is refused", async () => {
+    const origin = browserTabs(Option.some(TOKEN));
+
+    const answer = await withTwoClients(origin.tabs, (first, second, fake) =>
+      Effect.gen(function* () {
+        const refreshes = yield* Ref.make(0);
+
+        yield* fake.handle("auth:signIn", () =>
+          Ref.getAndUpdate(refreshes, (count) => count + 1).pipe(
+            Effect.map((count) =>
+              count === 0 ? renewed : Reply.Success({ value: { tokens: null } }),
+            ),
+          ),
+        );
+        yield* fake.reply("core/accounts/me:changePassword", unauthenticated);
+        yield* refusedOnce(first);
+        yield* refusedOnce(second);
+        origin.deliver();
+
+        return {
+          stored: Option.map(
+            Option.flatMap(Option.fromNullishOr(origin.stored()), TokenStorage.parseStoredSession),
+            (stored) => Redacted.value(stored.refreshToken),
+          ),
+          second: yield* callsWith(second, fake, RENEWED),
+          first: yield* first.session.currentStatus,
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      stored: Option.some("refresh-2"),
+      second: true,
+      first: "signedIn",
+    });
   });
 
   it("adopts another person's sign-in from the other client", async () => {

@@ -9,7 +9,13 @@ const router = createRouter({
   routeTree,
   defaultPreload: "intent",
   scrollRestoration: true,
-  context: { origin: makeOriginStore(window.localStorage, window) },
+  context: {
+    origin: makeOriginStore(
+      window.localStorage,
+      window,
+      window.isSecureContext ? navigator.locks : null,
+    ),
+  },
 });
 
 declare module "@tanstack/react-router" {

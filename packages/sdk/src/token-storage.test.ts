@@ -72,4 +72,60 @@ describe("key-value token storage", () => {
 
     expect(failure).toMatchObject({ _tag: "TokenStorageError", operation: "load" });
   });
+
+  it("replaces the session only while the store still holds the expected one", async () => {
+    const store = memoryStore();
+    const renewed = { token: Redacted.make("jwt-2"), refreshToken: Redacted.make("refresh-2") };
+
+    const answer = await Effect.runPromise(
+      Effect.gen(function* () {
+        const storage = yield* storageOver(store);
+
+        yield* storage.save(session);
+        const stale = yield* storage.replace(Option.some(renewed), Option.none());
+        const renewing = yield* storage.replace(Option.some(session), Option.some(renewed));
+        const afterRenewal = store.items.get("s");
+        const clearing = yield* storage.replace(Option.some(renewed), Option.none());
+
+        return { stale, renewing, afterRenewal, clearing, afterClear: store.items.get("s") };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      stale: false,
+      renewing: true,
+      afterRenewal: '{"token":"jwt-2","refreshToken":"refresh-2"}',
+      clearing: true,
+      afterClear: undefined,
+    });
+  });
+
+  it("checks the stored session inside the store's exclusive section", async () => {
+    const store = memoryStore();
+
+    const signedOutWhileWaiting: KeyValueStore = {
+      ...store,
+      exclusive: async (_key, write) => {
+        store.items.delete("s");
+
+        return write();
+      },
+    };
+
+    store.items.set("s", '{"token":"jwt","refreshToken":"refresh"}');
+
+    const answer = await Effect.runPromise(
+      Effect.gen(function* () {
+        const storage = yield* storageOver(signedOutWhileWaiting);
+        const renewed = { token: Redacted.make("jwt-2"), refreshToken: Redacted.make("refresh-2") };
+
+        return yield* storage.replace(Option.some(session), Option.some(renewed));
+      }),
+    );
+
+    expect({ wrote: answer, stored: store.items.get("s") }).toStrictEqual({
+      wrote: false,
+      stored: undefined,
+    });
+  });
 });

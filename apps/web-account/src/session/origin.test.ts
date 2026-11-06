@@ -45,7 +45,7 @@ const bo = userId("user-bo");
 
 describe("the origin store", () => {
   it("makes a signed-in slot its person's and the active one", () => {
-    const store = makeOriginStore(new MemoryStorage(), new EventTarget());
+    const store = makeOriginStore(new MemoryStorage(), new EventTarget(), null);
     const slot = newSlot();
 
     store.promote(slot, ada);
@@ -58,7 +58,7 @@ describe("the origin store", () => {
   });
 
   it("keeps the same snapshot until a key changes", () => {
-    const store = makeOriginStore(new MemoryStorage(), new EventTarget());
+    const store = makeOriginStore(new MemoryStorage(), new EventTarget(), null);
     const before = store.read();
 
     expect(store.read()).toBe(before);
@@ -71,7 +71,7 @@ describe("the origin store", () => {
 
   it("drops a person's older session when they sign in on another slot", () => {
     const storage = new MemoryStorage();
-    const store = makeOriginStore(storage, new EventTarget());
+    const store = makeOriginStore(storage, new EventTarget(), null);
     const first = newSlot();
     const second = newSlot();
 
@@ -84,7 +84,7 @@ describe("the origin store", () => {
   });
 
   it("gives a shared device's one slot to the tile opened last", () => {
-    const store = makeOriginStore(new MemoryStorage(), new EventTarget());
+    const store = makeOriginStore(new MemoryStorage(), new EventTarget(), null);
     const slot = newSlot();
 
     store.promote(slot, ada);
@@ -95,7 +95,7 @@ describe("the origin store", () => {
 
   it("forgets one person and leaves the others signed in here", () => {
     const storage = new MemoryStorage();
-    const store = makeOriginStore(storage, new EventTarget());
+    const store = makeOriginStore(storage, new EventTarget(), null);
     const adaSlot = newSlot();
     const boSlot = newSlot();
 
@@ -115,7 +115,7 @@ describe("the origin store", () => {
   it("tells this tab of another tab's switch", () => {
     const storage = new MemoryStorage();
     const events = new EventTarget();
-    const store = makeOriginStore(storage, events);
+    const store = makeOriginStore(storage, events, null);
     const seen: Array<string | null> = [];
     const slot = newSlot();
 
@@ -129,7 +129,7 @@ describe("the origin store", () => {
   it("tells a session's engine when another tab writes or removes that session", () => {
     const storage = new MemoryStorage();
     const events = new EventTarget();
-    const store = makeOriginStore(storage, events);
+    const store = makeOriginStore(storage, events, null);
     const slot = newSlot();
     const other = newSlot();
     let changes = 0;
@@ -147,7 +147,7 @@ describe("the origin store", () => {
 
   it("ignores another storage area's events", () => {
     const events = new EventTarget();
-    const store = makeOriginStore(new MemoryStorage(), events);
+    const store = makeOriginStore(new MemoryStorage(), events, null);
     let changes = 0;
 
     store.subscribe(() => {

@@ -90,8 +90,19 @@ export type StorageEvents = Pick<EventTarget, "addEventListener" | "removeEventL
 /** A slot no one has used: a random id. */
 export const newSlot = (): SlotId => SlotId(crypto.randomUUID());
 
-/** The origin's account state over `storage`, told of other tabs' writes by `events`. */
-export const makeOriginStore = (storage: Storage, events: StorageEvents): OriginStore => {
+/** What serializes the tabs' session writes: `navigator.locks` where the browser offers it. */
+export type SessionLocks = Pick<LockManager, "request">;
+
+/**
+ * The origin's account state over `storage`, told of other tabs' writes by `events`. With
+ * `locks`, a tab writes a session only while it holds that session's lock, so a refresh that
+ * finishes in one tab cannot overwrite another tab's sign-out between reading and writing.
+ */
+export const makeOriginStore = (
+  storage: Storage,
+  events: StorageEvents,
+  locks: SessionLocks | null,
+): OriginStore => {
   const listeners = new Set<() => void>();
   const keyListeners = new Set<{ readonly key: string; readonly onChange: () => void }>();
 
@@ -208,6 +219,7 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
           keyListeners.delete(listener);
         };
       },
+      exclusive: (key, run) => (locks === null ? run() : locks.request(`${key}.lock`, run)),
     },
     sessionKey,
     promote: (slot, userId) => {

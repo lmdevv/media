@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { TokenStorage } from "@media/sdk/effect";
-import { Config, Effect, Layer, Option, Redacted, Result, Schema, Stream, Struct } from "effect";
+import { Config, Effect, Layer, Option, Redacted, Result, Schema, Struct } from "effect";
 
 import { ConfigFileError } from "./cli-errors";
 import { readTextFile, writePrivateFile } from "./files";
@@ -244,58 +244,59 @@ export const layerProfileStorage = (
 ): Layer.Layer<TokenStorage.TokenStorage> =>
   Layer.succeed(
     TokenStorage.TokenStorage,
-    TokenStorage.TokenStorage.of({
-      load: loadConfig(path).pipe(
-        Effect.map((config) =>
-          Option.flatMap(Option.fromNullishOr(config.profiles[name]?.session), (session) =>
-            TokenStorage.parseStoredSession(JSON.stringify(session)),
+    TokenStorage.TokenStorage.of(
+      TokenStorage.owned({
+        load: loadConfig(path).pipe(
+          Effect.map((config) =>
+            Option.flatMap(Option.fromNullishOr(config.profiles[name]?.session), (session) =>
+              TokenStorage.parseStoredSession(JSON.stringify(session)),
+            ),
           ),
-        ),
-        Effect.mapError(
-          (cause) =>
-            new TokenStorage.TokenStorageError({
-              operation: "load",
-              message: cause.message,
-              cause,
-            }),
-        ),
-      ),
-      save: (session) =>
-        updateProfile(path, name, (profile) =>
-          Option.map(
-            Option.orElse(profile, () => create),
-            (base): StoredProfile =>
-              Struct.assign(base, {
-                session: {
-                  token: Redacted.value(session.token),
-                  refreshToken: Redacted.value(session.refreshToken),
-                },
-              }),
-          ),
-        ).pipe(
-          Effect.asVoid,
           Effect.mapError(
             (cause) =>
               new TokenStorage.TokenStorageError({
-                operation: "save",
+                operation: "load",
                 message: cause.message,
                 cause,
               }),
           ),
         ),
-      clear: updateProfile(path, name, (profile) =>
-        Option.map(profile, ({ session: _session, ...rest }) => rest),
-      ).pipe(
-        Effect.asVoid,
-        Effect.mapError(
-          (cause) =>
-            new TokenStorage.TokenStorageError({
-              operation: "clear",
-              message: cause.message,
-              cause,
-            }),
+        save: (session) =>
+          updateProfile(path, name, (profile) =>
+            Option.map(
+              Option.orElse(profile, () => create),
+              (base): StoredProfile =>
+                Struct.assign(base, {
+                  session: {
+                    token: Redacted.value(session.token),
+                    refreshToken: Redacted.value(session.refreshToken),
+                  },
+                }),
+            ),
+          ).pipe(
+            Effect.asVoid,
+            Effect.mapError(
+              (cause) =>
+                new TokenStorage.TokenStorageError({
+                  operation: "save",
+                  message: cause.message,
+                  cause,
+                }),
+            ),
+          ),
+        clear: updateProfile(path, name, (profile) =>
+          Option.map(profile, ({ session: _session, ...rest }) => rest),
+        ).pipe(
+          Effect.asVoid,
+          Effect.mapError(
+            (cause) =>
+              new TokenStorage.TokenStorageError({
+                operation: "clear",
+                message: cause.message,
+                cause,
+              }),
+          ),
         ),
-      ),
-      changed: Stream.never,
-    }),
+      }),
+    ),
   );

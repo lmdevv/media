@@ -193,12 +193,6 @@ const isSameSession = (a: StoredSession, b: StoredSession): boolean => {
   return Option.isSome(held) && Option.contains(sessionOf(b), held.value);
 };
 
-const sameStored = Option.makeEquivalence<StoredSession>(
-  (a, b) =>
-    Redacted.value(a.token) === Redacted.value(b.token) &&
-    Redacted.value(a.refreshToken) === Redacted.value(b.refreshToken),
-);
-
 const isExpiring = (token: string, now: number): boolean =>
   Option.match(tokenExpiry(token), {
     onNone: () => false,
@@ -322,7 +316,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
    * What this client last read from or wrote to the store. The store differs from it only after
    * another writer, such as another tab, and differs from `session` after a write here failed.
    */
-  const known = yield* Ref.make(Option.none<StoredSession>());
+  const lastStored = yield* Ref.make(Option.none<StoredSession>());
   const refreshing = yield* Semaphore.make(1);
 
   const lastAttempt = yield* Ref.make<{
@@ -420,13 +414,10 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     yield* SubscriptionRef.set(reconnecting, false);
   });
 
-  const save = (next: StoredSession) =>
-    storage.save(next).pipe(Effect.andThen(Ref.set(known, Option.some(next))));
-
   const forget = Effect.fn("Auth.forget")(function* () {
     yield* adopt(Option.none());
     yield* storage.clear;
-    yield* Ref.set(known, Option.none());
+    yield* Ref.set(lastStored, Option.none());
   });
 
   /**
@@ -528,7 +519,14 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
         : Option.some(ended.token);
 
       if (Option.isSome(token)) yield* callGateway(SIGN_OUT, {}, token);
-    }).pipe(Effect.timeoutOption(SERVER_SIGN_OUT_TIMEOUT), Effect.ignore);
+    }).pipe(
+      Effect.timeout(SERVER_SIGN_OUT_TIMEOUT),
+      Effect.catch((error) =>
+        Effect.logWarning("Auth.serverSignOutFailed").pipe(
+          Effect.annotateLogs({ reason: error.message }),
+        ),
+      ),
+    );
 
   const commitRefresh = Effect.fn("Auth.commitRefresh")(function* (
     seen: StoredSession,
@@ -549,14 +547,36 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       return Option.map(current, (held) => held.token);
     }
 
+    const expected = yield* Ref.get(lastStored);
+
+    const holdRenewed = (renewed: StoredSession) =>
+      Ref.set(session, Option.some(renewed)).pipe(Effect.andThen(reconnect));
+
     return yield* RefreshOutcome.$match(outcome, {
       Renewed: ({ session: renewed }) =>
-        Ref.set(session, Option.some(renewed)).pipe(
-          Effect.andThen(reconnect),
-          Effect.andThen(save(renewed)),
-          Effect.as(Option.some(renewed.token)),
+        storage.replace(expected, Option.some(renewed)).pipe(
+          Effect.tapError(() => holdRenewed(renewed)),
+          Effect.flatMap((wrote) =>
+            wrote
+              ? holdRenewed(renewed).pipe(
+                  Effect.andThen(Ref.set(lastStored, Option.some(renewed))),
+                  Effect.as(Option.some(renewed.token)),
+                )
+              : giveWayToStore(Option.some(renewed)),
+          ),
         ),
-      Refused: () => forget().pipe(Effect.as(Option.none<Redacted.Redacted>())),
+      Refused: () =>
+        storage.replace(expected, Option.none()).pipe(
+          Effect.tapError(() => adopt(Option.none())),
+          Effect.flatMap((wrote) =>
+            wrote
+              ? adopt(Option.none()).pipe(
+                  Effect.andThen(Ref.set(lastStored, Option.none())),
+                  Effect.as(Option.none<Redacted.Redacted>()),
+                )
+              : giveWayToStore(Option.none()),
+          ),
+        ),
       Kept: () => Effect.succeedSome(seen.token),
       Stalled: () => runSignedOut(seen).pipe(Effect.as(Option.none<Redacted.Redacted>())),
     });
@@ -585,13 +605,13 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
    * touching the connection or the status; another session, or none, goes through `adopt`. It
    * never saves, clears, or ends a session on the server, because the writer did that.
    */
-  const follow = Effect.fn("Auth.follow")(function* () {
-    const stored = yield* storage.load;
-
-    if (sameStored(stored, yield* Ref.getAndSet(known, stored))) return;
+  const adoptStored = Effect.fn("Auth.adoptStored")(function* (
+    stored: Option.Option<StoredSession>,
+  ) {
+    if (TokenStorage.sameStored(stored, yield* Ref.getAndSet(lastStored, stored))) return;
     const held = yield* Ref.get(session);
 
-    if (sameStored(stored, held)) return;
+    if (TokenStorage.sameStored(stored, held)) return;
 
     if (Option.isSome(stored) && Option.isSome(held) && isSameSession(held.value, stored.value)) {
       yield* Ref.set(session, stored);
@@ -600,7 +620,27 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     } else {
       yield* adopt(stored);
     }
+  });
+
+  const follow = Effect.fn("Auth.follow")(function* () {
+    yield* adoptStored(yield* storage.load);
   }, committing.withPermits(1));
+
+  const endUnlessStored = (renewed: StoredSession, stored: Option.Option<StoredSession>) =>
+    Option.exists(stored, (held) => isSameSession(held, renewed))
+      ? Effect.void
+      : Effect.asVoid(Effect.forkIn(endOnServer(renewed), scope));
+
+  const giveWayToStore = Effect.fn("Auth.giveWayToStore")(function* (
+    renewed: Option.Option<StoredSession>,
+  ) {
+    const stored = yield* storage.load;
+
+    if (Option.isSome(renewed)) yield* endUnlessStored(renewed.value, stored);
+    yield* adoptStored(stored);
+
+    return yield* currentToken;
+  });
 
   /**
    * Retries the refresh of `seen` until the server renews or refuses it, or the session changes,
@@ -688,7 +728,11 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       });
     }
 
-    return yield* committing.withPermits(1)(save(opened.value).pipe(Effect.andThen(adopt(opened))));
+    return yield* committing.withPermits(1)(
+      storage
+        .save(opened.value)
+        .pipe(Effect.andThen(Ref.set(lastStored, opened)), Effect.andThen(adopt(opened))),
+    );
   });
 
   const signOut = Effect.fn("Auth.signOut")(function* () {
@@ -708,7 +752,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
   const stored = yield* storage.load;
 
-  yield* Ref.set(known, stored);
+  yield* Ref.set(lastStored, stored);
   yield* adopt(stored);
   yield* Effect.forkIn(
     Stream.runForEach(storage.changed, () =>
