@@ -54,16 +54,25 @@ class MediaServiceKeyMissing extends Schema.TaggedError<MediaServiceKeyMissing>(
   }
 }
 
-const jobHandlers = Effect.all([
-  Effect.all([
+const jobs = Effect.gen(function* () {
+  const config = yield* MediaConfig.Service;
+
+  const always = yield* Effect.all([
     ScanJob.handler,
     MetadataJob.handler,
     PersonJob.handler,
     MigrationJob.handler,
     BackupJob.handler,
-  ]),
-  TrickplayJob.handlers,
-]).pipe(Effect.map(([always, trickplay]) => [...always, ...trickplay]));
+  ]);
+
+  const caps: JobWorker.PoolCaps = {
+    movies: 2,
+    "movies.background": config.trickplay.concurrency,
+    server: 1,
+  };
+
+  return { handlers: [...always, ...(yield* TrickplayJob.handlers)], caps };
+});
 
 const commandRoutes = Layer.mergeAll(
   MetadataRoutes.layer,
@@ -78,7 +87,7 @@ const commandRoutes = Layer.mergeAll(
 const convexMode = (options: MediaBackend.Options) =>
   Layer.mergeAll(
     HttpServer.layer(commandRoutes),
-    JobWorker.layer(jobHandlers),
+    JobWorker.layer(jobs),
     LibrarySync.layer,
     TrickplaySweep.layer,
     Backups.layerSyncOnStart,
