@@ -103,7 +103,9 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
 
   const notify = (key: string | null) => {
     for (const listener of keyListeners) {
-      if (key === null || listener.key === key) listener.onChange();
+      if (key === null || key === listener.key || key.startsWith(`${listener.key}:`)) {
+        listener.onChange();
+      }
     }
 
     if (isOurs(key)) {

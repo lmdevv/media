@@ -98,17 +98,16 @@ describe("the config file", () => {
           TokenStorage.TokenStorage,
         );
 
-        yield* storage.save({
-          token: Redacted.make("jwt"),
-          refreshToken: Redacted.make("refresh"),
-        });
+        const session = { token: Redacted.make("jwt"), refreshToken: Redacted.make("refresh") };
+
+        yield* storage.save(session);
         expect((yield* loadConfig(path)).profiles["work"]?.session).toStrictEqual({
           token: "jwt",
           refreshToken: "refresh",
         });
         expect(Option.isSome(yield* storage.load)).toBe(true);
 
-        yield* storage.clear;
+        yield* storage.revoke(session);
         expect((yield* loadConfig(path)).profiles["work"]).toStrictEqual(config.profiles["work"]);
       }),
     );

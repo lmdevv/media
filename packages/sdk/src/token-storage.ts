@@ -1,4 +1,5 @@
 import {
+  Clock,
   Context,
   Effect,
   Layer,
@@ -50,27 +51,34 @@ export class TokenStorageError extends Schema.TaggedError<TokenStorageError>()(
   },
 ) {}
 
+/**
+ * Whether a session was signed out in this store: not at all, signed out here with the server not
+ * yet confirming it, or confirmed by the server.
+ */
+export type Revocation = "none" | "pending" | "confirmed";
+
 /** Persists the current session's tokens. */
 export interface Interface {
-  /** The stored session; none when signed out or when the stored value is unreadable. */
+  /** The current session; none when signed out, when it was revoked, or when it is unreadable. */
   readonly load: Effect.Effect<Option.Option<StoredSession>, TokenStorageError>;
+  /** Makes a new sign-in the current session. */
   readonly save: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
-  readonly clear: Effect.Effect<void, TokenStorageError>;
   /**
-   * Clears the store after `session` signed out, and keeps that sign-in out of it for good: a
-   * write of the same session that lands later, such as another tab's renewal that started before
-   * the sign-out, loads as no session.
+   * Stores `renewed`, a renewal of the session in `expected`, only while the store still holds
+   * `expected` for that session; whether it did. It never changes which session is current.
    */
-  readonly end: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
-  /**
-   * Saves `next`, or clears the store for none, only while it still holds `expected` (none: no
-   * session); whether it did. A refresh commits its result this way, so it never overwrites what
-   * another writer stored meanwhile, such as another tab's sign-out.
-   */
-  readonly replace: (
-    expected: Option.Option<StoredSession>,
-    next: Option.Option<StoredSession>,
+  readonly renew: (
+    expected: StoredSession,
+    renewed: StoredSession,
   ) => Effect.Effect<boolean, TokenStorageError>;
+  /**
+   * Signs `session` out of the store for good. Every client that reads the store afterwards stops
+   * using it, whatever later writes of its tokens say.
+   */
+  readonly revoke: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
+  /** Records that the server ended a revoked `session`, and forgets its tokens. */
+  readonly confirmRevoked: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
+  readonly revocation: (session: StoredSession) => Effect.Effect<Revocation, TokenStorageError>;
   /**
    * Emits once it starts listening, then whenever the stored session may have changed outside
    * this client, such as another tab writing the same key. The first emission covers changes made
@@ -88,13 +96,20 @@ export const sameStored = Option.makeEquivalence<StoredSession>(
 
 /**
  * A store that only this client reads and writes, from its `load`, `save`, and `clear`. Nothing
- * else changes it, so `replace` writes without checking and `changed` never emits.
+ * else writes it, so a renewal is saved without checking, revoking clears it, and `changed` never
+ * emits.
  */
-export const owned = (store: Pick<Interface, "load" | "save" | "clear">): Interface => ({
-  ...store,
-  end: () => store.clear,
-  replace: (_expected, next) =>
-    Option.match(next, { onNone: () => store.clear, onSome: store.save }).pipe(Effect.as(true)),
+export const owned = (store: {
+  readonly load: Interface["load"];
+  readonly save: Interface["save"];
+  readonly clear: Effect.Effect<void, TokenStorageError>;
+}): Interface => ({
+  load: store.load,
+  save: store.save,
+  renew: (_expected, renewed) => Effect.as(store.save(renewed), true),
+  revoke: () => store.clear,
+  confirmRevoked: () => Effect.void,
+  revocation: () => Effect.succeed("none"),
   changed: Stream.never,
 });
 
@@ -128,9 +143,10 @@ export interface KeyValueStore {
   readonly setItem: (key: string, value: string) => void | Promise<void>;
   readonly removeItem: (key: string) => void | Promise<void>;
   /**
-   * Calls `onChange` when `key` may have changed underneath this client, such as another tab
-   * writing `localStorage`, and returns the unsubscribe. A store without it is read only at start,
-   * so it suits a store that one client owns.
+   * Calls `onChange` when `key`, or a key that starts with `key:`, may have changed underneath
+   * this client, such as another tab writing `localStorage`, and returns the unsubscribe. A store
+   * with it is shared between clients; a store without it is read only at start, so it suits a
+   * store that one client owns.
    */
   readonly subscribe?: (key: string, onChange: () => void) => () => void;
 }
@@ -185,100 +201,128 @@ const failure =
   (cause: unknown): TokenStorageError =>
     new TokenStorageError({ operation, message, cause });
 
-/** How many signed-out sessions a key remembers. */
-const ENDED_KEPT = 16;
-
-const EndedSessions = Schema.fromJsonString(Schema.Array(Schema.String));
-
-const decodeEnded = Schema.decodeUnknownOption(EndedSessions);
-
-const encodeEnded = Schema.encodeSync(EndedSessions);
-
-const hasEnded = (ended: ReadonlyArray<string>, session: StoredSession): boolean =>
-  Option.exists(sessionOf(session), (id) => ended.includes(id));
-
-/**
- * Stores the session under `key` in a string key-value store, and the sessions signed out there
- * under `<key>.ended`. A store several clients share, such as `localStorage` across tabs, offers
- * no atomic write, so a renewal can land after another tab's sign-out; the ended list makes such a
- * session load as none, and the read that finds it removes it.
- */
-export const layerKeyValue = (store: KeyValueStore, key: string): Layer.Layer<TokenStorage> => {
-  const endedKey = `${key}.ended`;
-
-  const readEnded = async (): Promise<ReadonlyArray<string>> => {
-    const text = await store.getItem(endedKey);
-
-    return text === null ? [] : Option.getOrElse(decodeEnded(text), () => []);
-  };
-
-  const read = async (): Promise<Option.Option<StoredSession>> => {
-    const text = await store.getItem(key);
-    const held = text === null ? Option.none() : parseStoredSession(text);
-
-    if (Option.isNone(held) || !hasEnded(await readEnded(), held.value)) return held;
-    await store.removeItem(key);
-
-    return Option.none();
-  };
-
-  const write = async (next: Option.Option<StoredSession>) =>
-    Option.isSome(next) ? store.setItem(key, serializeSession(next.value)) : store.removeItem(key);
-
-  const markEnded = async (session: StoredSession, ended: boolean) => {
-    const id = sessionOf(session);
-
-    if (Option.isNone(id)) return;
-    const before = await readEnded();
-    const others = before.filter((held) => held !== id.value);
-
-    if (!ended && others.length === before.length) return;
-    await store.setItem(
-      endedKey,
-      encodeEnded(ended ? [...others, id.value].slice(-ENDED_KEPT) : others),
-    );
-  };
-
-  const clear = Effect.tryPromise({
-    try: () => write(Option.none()),
-    catch: failure("clear", "Token storage failed to clear the session"),
+/** One key holding the session, for a store only this client uses. */
+const singleKey = (store: KeyValueStore, key: string): Interface =>
+  owned({
+    load: Effect.tryPromise({
+      try: async () => store.getItem(key),
+      catch: failure("load", "Token storage failed to load the session"),
+    }).pipe(Effect.map((text) => (text === null ? Option.none() : parseStoredSession(text)))),
+    save: (session) =>
+      Effect.tryPromise({
+        try: async () => store.setItem(key, serializeSession(session)),
+        catch: failure("save", "Token storage failed to save the session"),
+      }),
+    clear: Effect.tryPromise({
+      try: async () => store.removeItem(key),
+      catch: failure("clear", "Token storage failed to clear the session"),
+    }),
   });
 
-  return Layer.succeed(
-    TokenStorage,
-    TokenStorage.of({
-      load: Effect.tryPromise({
-        try: read,
-        catch: failure("load", "Token storage failed to load the session"),
-      }),
-      save: (session) =>
-        Effect.tryPromise({
-          try: async () => {
-            await markEnded(session, false);
-            await write(Option.some(session));
-          },
-          catch: failure("save", "Token storage failed to save the session"),
+const idOf = (session: StoredSession, operation: TokenStorageError["operation"]) =>
+  Effect.fromOption(sessionOf(session)).pipe(
+    Effect.mapError(
+      (cause) =>
+        new TokenStorageError({
+          operation,
+          message: "Token storage cannot name a session whose token has no subject",
+          cause,
         }),
-      clear,
-      end: (session) =>
-        Effect.tryPromise(() => markEnded(session, true)).pipe(
-          Effect.catch(() => Effect.logWarning("TokenStorage.endedSessionNotKept")),
-          Effect.andThen(clear),
-        ),
-      replace: (expected, next) =>
-        Effect.tryPromise({
-          try: async () => {
-            if (!sameStored(await read(), expected)) return false;
-            await write(next);
-
-            return true;
-          },
-          catch: failure(
-            Option.isSome(next) ? "save" : "clear",
-            "Token storage failed to replace the session",
-          ),
-        }),
-      changed: changesOf(store, key),
-    }),
+    ),
   );
+
+const attempt = <A>(operation: TokenStorageError["operation"], run: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: run,
+    catch: failure(operation, `Token storage failed to ${operation} the session`),
+  });
+
+const Revoked = Schema.fromJsonString(Schema.Struct({ revokedAt: Schema.Finite }));
+
+const encodeRevoked = Schema.encodeSync(Revoked);
+
+/**
+ * The session under `key` in a store several clients share, such as `localStorage` across tabs,
+ * which has no atomic compare-and-set. Each key has one kind of writer, and nothing deletes a key
+ * because of what a read found:
+ *
+ * - `key` names the current session. Only a sign-in writes it.
+ * - `key:<session>` holds that session's tokens. A sign-in creates it, a renewal of that session
+ *   replaces it, and the server confirming its sign-out removes it.
+ * - `key:<session>:revoked` is written once, when the session signs out, and never changes.
+ * - `key:<session>:confirmed` is written once, when the server confirms the sign-out.
+ */
+const sharedKeys = (store: KeyValueStore, key: string): Interface => {
+  const tokensKey = (id: string) => `${key}:${id}`;
+  const revokedKey = (id: string) => `${key}:${id}:revoked`;
+  const confirmedKey = (id: string) => `${key}:${id}:confirmed`;
+
+  const tokensOf = async (id: string) => {
+    const text = await store.getItem(tokensKey(id));
+
+    return text === null ? Option.none() : parseStoredSession(text);
+  };
+
+  const revocationOf = async (id: string): Promise<Revocation> => {
+    if ((await store.getItem(confirmedKey(id))) !== null) return "confirmed";
+
+    return (await store.getItem(revokedKey(id))) === null ? "none" : "pending";
+  };
+
+  return {
+    load: attempt("load", async () => {
+      const id = await store.getItem(key);
+
+      if (id === null || (await revocationOf(id)) !== "none") return Option.none();
+
+      return tokensOf(id);
+    }),
+    save: (session) =>
+      Effect.flatMap(idOf(session, "save"), (id) =>
+        attempt("save", async () => {
+          await store.setItem(tokensKey(id), serializeSession(session));
+          await store.setItem(key, id);
+        }),
+      ),
+    renew: (expected, renewed) =>
+      Effect.flatMap(idOf(renewed, "save"), (id) =>
+        attempt("save", async () => {
+          if (!sameStored(await tokensOf(id), Option.some(expected))) return false;
+          await store.setItem(tokensKey(id), serializeSession(renewed));
+
+          return true;
+        }),
+      ),
+    revoke: (session) =>
+      Effect.flatMap(idOf(session, "clear"), (id) =>
+        Effect.flatMap(Clock.currentTimeMillis, (revokedAt) =>
+          attempt("clear", async () => {
+            if ((await store.getItem(revokedKey(id))) === null) {
+              await store.setItem(revokedKey(id), encodeRevoked({ revokedAt }));
+            }
+          }),
+        ),
+      ),
+    confirmRevoked: (session) =>
+      Effect.flatMap(idOf(session, "clear"), (id) =>
+        attempt("clear", async () => {
+          await store.setItem(confirmedKey(id), "1");
+          await store.removeItem(tokensKey(id));
+        }),
+      ),
+    revocation: (session) =>
+      Effect.flatMap(idOf(session, "load"), (id) => attempt("load", () => revocationOf(id))),
+    changed: changesOf(store, key),
+  };
 };
+
+/**
+ * Stores the session under `key` in a string key-value store. A store that can announce other
+ * clients' writes (`subscribe`) is shared, so it gets the layout of `sharedKeys`; any other store
+ * keeps the session under `key` alone.
+ */
+export const layerKeyValue = (store: KeyValueStore, key: string): Layer.Layer<TokenStorage> =>
+  Layer.succeed(
+    TokenStorage,
+    TokenStorage.of(store.subscribe === undefined ? singleKey(store, key) : sharedKeys(store, key)),
+  );

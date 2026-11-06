@@ -126,7 +126,7 @@ describe("the origin store", () => {
     expect(seen).toStrictEqual([slot]);
   });
 
-  it("tells a session's engine when another tab writes or removes that session", () => {
+  it("tells a session's engine when another tab writes or removes that session or its keys", () => {
     const storage = new MemoryStorage();
     const events = new EventTarget();
     const store = makeOriginStore(storage, events);
@@ -138,11 +138,13 @@ describe("the origin store", () => {
       changes += 1;
     });
     events.dispatchEvent(storageEvent(storage, store.sessionKey(other)));
+    events.dispatchEvent(storageEvent(storage, `${store.sessionKey(other)}:ada|s1:revoked`));
     events.dispatchEvent(storageEvent(storage, store.sessionKey(slot)));
+    events.dispatchEvent(storageEvent(storage, `${store.sessionKey(slot)}:ada|s1:revoked`));
     store.promote(slot, ada);
     store.forget(ada);
 
-    expect(changes).toBe(2);
+    expect(changes).toBe(3);
   });
 
   it("ignores another storage area's events", () => {

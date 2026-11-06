@@ -28,6 +28,20 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     );
   });
 
+  it("refuses to refresh a signed-out session", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+
+    await signedIn.client.action(api.auth.signOut, {});
+
+    const refreshed = await new ConvexHttpClient(stack.url, { logger: false }).action(
+      api.auth.signIn,
+      { refreshToken: signedIn.refreshToken },
+    );
+
+    expect(refreshed.tokens).toBeNull();
+  });
+
   it("refuses a session another session ended, and refuses to refresh it", async () => {
     if (stack === undefined) return;
     const person = await createPerson(stack);

@@ -59,12 +59,13 @@ platform SDK. Its session layer is `apps/web-account/src/session/`.
 One origin's `localStorage` holds every client's sign-in state. `session/origin.ts` names every key
 and is their only writer, except the session keys, which only the SDK writes.
 
-| Key                      | Holds                                          |
-| ------------------------ | ---------------------------------------------- |
-| `media.device`           | this browser's device code, `dv_<id>.<secret>` |
-| `media.active`           | the slot every client on the origin acts as    |
-| `media.person.<userId>`  | the slot that holds that person's session      |
-| `media.session.<slotId>` | the SDK's tokens for one sign-in               |
+| Key                                 | Holds                                          |
+| ----------------------------------- | ---------------------------------------------- |
+| `media.device`                      | this browser's device code, `dv_<id>.<secret>` |
+| `media.active`                      | the slot every client on the origin acts as    |
+| `media.person.<userId>`             | the slot that holds that person's session      |
+| `media.session.<slotId>`            | the SDK's session for one sign-in              |
+| `media.session.<slotId>:<session>…` | that session's tokens and revocation (below)   |
 
 - **A slot** is a random local name for one sign-in's tokens. A password, setup, invite, or reset
   sign-in starts before the client knows whose session it is, so the key cannot carry the
@@ -107,33 +108,46 @@ and is their only writer, except the session keys, which only the SDK writes.
 
 ### A sign-out holds across tabs
 
-Another tab's `storage` event arrives later, as its own task. Tabs in separate processes also read
-their own copy of `localStorage`, which catches up only with that event, and `localStorage` has no
-atomic write. A refresh that finishes in the meantime must not bring back a session that another
-tab signed out.
+`localStorage` has no atomic compare-and-set. Another tab's `storage` event arrives later, as its
+own task, and tabs in separate processes read their own copy of the store, which catches up only
+with that event. So no shared value that several tabs rewrite can be race-free. The core is the
+authority instead: a sign-out ends the session on the server, the server then refuses its
+refresh token and its calls, and the browser only has to make every tab stop using it.
 
-- `TokenStorage.replace(expected, next)` writes only while the store still holds what this client
-  last stored. The SDK commits every refresh this way: renewed tokens, or a clear after the server
-  refused the refresh token. A refresh that loses adopts what the store holds. If the store holds
-  no session or another one, the client also ends the session it just renewed on the server.
-- Signing out goes through `TokenStorage.end`. It adds the session's id (the token's `sub`) to
-  `<key>.ended`, which keeps the last 16, then clears the key, so a tab that sees the removal
-  already sees the id. A session on that list loads as none, and the read that finds it removes
-  it. So a renewal written by a tab that had not yet seen the sign-out comes to nothing in every
-  tab once the writes reach it. Signing in again with the same session, as an API key does, takes
-  it off the list. In the account client each sign-out leaves one small `.ended` key for its slot.
-- A client that follows another tab's sign-out ends the session it held on the server too. The
-  signing-out tab may have failed to reach the server, and the follower may hold a renewal that
-  tab never saw. Each open tab sends one sign-out, and the extra ones fail harmlessly.
+- **One writer per key.** A store that can announce other clients' writes (`subscribe`) gets this
+  layout under its key `K`. A store without `subscribe`, such as old movies' and the iOS app's,
+  keeps the session under `K` alone, as before.
+  - `K` names the current session (the token's `sub`). Only a sign-in writes it.
+  - `K:<session>` holds that session's tokens. A sign-in creates it. A renewal of that session
+    replaces it, only while it still holds the tokens the renewal started from.
+  - `K:<session>:revoked` is written once when the session signs out, and never changes.
+  - `K:<session>:confirmed` is written once when the server confirms the sign-out, which also
+    removes `K:<session>`.
+- **Reads change nothing.** A session with a revocation loads as none. No read deletes or rewrites
+  a key, so a later sign-in is never lost to what an earlier read found.
+- **Signing out** writes the revocation first and shows signed out at once, even if the server
+  call fails. The client then calls the server, and on failure retries in the background, starting
+  after a second and backing off to every 30 seconds, until the server confirms or another client
+  records that it did.
+- **Every token passes a check.** A client checks for a revocation of its session before it hands
+  any token to a caller, and again after it writes a renewal. A client that finds one drops the
+  session at once and ends it on the server the same way, after a second's wait, so the client that
+  signed out usually confirms it first and the others send nothing.
+- **What this guarantees.** Once the server confirms a sign-out, no credential of that session
+  works anywhere. Before that, every tab stops using it as soon as it reads storage, which it does
+  before every token it uses. The window left is a tab that has not yet read storage. While the
+  server cannot be reached, nothing reaches it either.
+- A refresh the server refuses is recorded as a confirmed revocation, unless the store shows that
+  another tab renewed the session first. A tab reading a stale copy can still revoke a session
+  another tab just renewed. That tab then signs out and the person signs in again. This never
+  keeps a session alive.
+- Revocations are never deleted while the session's refresh token could still work, 30 days in the
+  core. Nothing sweeps them yet. Each sign-out leaves one small key.
 - None of this needs a secure context. Over plain HTTP on a LAN or tailnet address, which installs
   support, `navigator.locks`, `crypto.randomUUID`, `crypto.subtle`, and `navigator.clipboard` are
   missing. The client uses none of them unguarded. Slot ids come from `randomUuid` and copying from
   `copyText` in `@media/ui/lib/secure-context`, which `apps/web` shares. The Playwright suite runs
   a second time against the host's non-loopback address over plain HTTP.
-- A sign-out whose server call fails still clears this browser, then logs
-  `Auth.serverSignOutFailed`.
-- A refused refresh that read a stale copy of the store can still clear a renewal another tab
-  wrote. That tab then signs out, and the person signs in again. It never keeps a session alive.
 
 ### Links carry their secret in the fragment
 
@@ -151,6 +165,10 @@ An invite is `/invite#mi_<id>.<secret>`, and a reset link is `/reset#mr_<id>.<se
 - `/device?code=` keeps its code in the query. The user code is not a credential. Only the
   device code, which never leaves the waiting client, redeems the sign-in, and approving needs a
   signed-in account. RFC 8628 puts the same code in its `verification_uri_complete`.
+- Old path links, `/invite/<code>` and `/reset/<code>`, are refused. Installs start fresh (D03).
+- The account client's Playwright specs that open these links keep no trace, screenshot, video, or
+  page snapshot of a failure. After every run, a check reads `test-results`, traces included, and
+  fails the run and deletes any file that holds an invite, reset, device, or group-session code.
 
 ### Rejected
 
@@ -161,6 +179,8 @@ An invite is `/invite#mi_<id>.<secret>`, and a reset link is `/reset#mr_<id>.<se
 - A BroadcastChannel beside `storage` events. The events already reach every other tab for exactly
   the keys that change.
 - Web Locks around each write. They exist only in secure contexts, and a lock does not make
-  another process's copy of `localStorage` current, so the ended list has to hold without one.
+  another process's copy of `localStorage` current.
+- A shared list of ended sessions. Two tabs that sign out at once each rewrite the list without
+  the other's entry, and a read that cleans up after it can delete a newer sign-in.
 - Secrets in the path or the query. Both reach the server's request log and any proxy in the
   first request, and stay in history until the link expires.

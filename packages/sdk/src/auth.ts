@@ -21,8 +21,10 @@ import {
   Duration,
   Effect,
   FiberHandle,
+  FiberMap,
   Layer,
   Option,
+  Predicate,
   Redacted,
   Ref,
   Schedule,
@@ -263,6 +265,9 @@ const renewalSchedule = Schedule.min([
 
 const SERVER_SIGN_OUT_TIMEOUT = Duration.seconds(10);
 
+/** A sign-out refused with one of these found nothing to end: the server no longer knows it. */
+const SESSION_GONE = ["Unauthenticated", "Forbidden", "Expired"] as const;
+
 const logStorageFailure = (error: TokenStorage.TokenStorageError): Effect.Effect<void> =>
   Effect.logWarning("Auth.tokenStorageFailed").pipe(
     Effect.annotateLogs({ operation: error.operation, message: error.message }),
@@ -323,6 +328,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
   const reconnecting = yield* SubscriptionRef.make(false);
   const renewal = yield* FiberHandle.make<void>();
+  const ending = yield* FiberMap.make<string>();
 
   const callGateway = Effect.fn("Auth.callGateway")(function* (
     path: FunctionPath,
@@ -395,12 +401,6 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     yield* transport.setAuth(Option.isSome(next) ? tokenSource : null);
     yield* SubscriptionRef.set(status, Option.isSome(next) ? "signedIn" : "signedOut");
     yield* SubscriptionRef.set(reconnecting, false);
-  });
-
-  const forget = Effect.fn("Auth.forget")(function* (ended: Option.Option<StoredSession>) {
-    yield* adopt(Option.none());
-    yield* Option.match(ended, { onNone: () => storage.clear, onSome: storage.end });
-    yield* Ref.set(lastStored, Option.none());
   });
 
   /**
@@ -487,7 +487,8 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       }),
     );
 
-  const endOnServer = (ended: StoredSession): Effect.Effect<void> =>
+  /** Ends `ended` on the server; whether the server no longer knows it. */
+  const endOnServer = (ended: StoredSession): Effect.Effect<boolean> =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
 
@@ -502,14 +503,71 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
         : Option.some(ended.token);
 
       if (Option.isSome(token)) yield* callGateway(SIGN_OUT, {}, token);
+
+      return true;
     }).pipe(
       Effect.timeout(SERVER_SIGN_OUT_TIMEOUT),
       Effect.catch((error) =>
-        Effect.logWarning("Auth.serverSignOutFailed").pipe(
-          Effect.annotateLogs({ reason: error.message }),
-        ),
+        SESSION_GONE.some((tag) => Predicate.isTagged(error, tag))
+          ? Effect.succeed(true)
+          : Effect.logWarning("Auth.serverSignOutFailed").pipe(
+              Effect.annotateLogs({ reason: error.message }),
+              Effect.as(false),
+            ),
       ),
     );
+
+  /**
+   * Ends a revoked `ended` on the server, retrying until the server confirms it or another client
+   * records that it did. A store that tracks no revocations gets one attempt.
+   */
+  const endUntilConfirmed = (ended: StoredSession): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const before = yield* storage.revocation(ended);
+
+      if (before === "confirmed") return true;
+
+      if (yield* endOnServer(ended)) {
+        yield* storage.confirmRevoked(ended);
+
+        return true;
+      }
+
+      return before !== "pending";
+    }).pipe(
+      Effect.catchTag("TokenStorageError", (error) =>
+        logStorageFailure(error).pipe(Effect.as(false)),
+      ),
+      Effect.repeat({ schedule: renewalSchedule, until: (done) => done }),
+      Effect.asVoid,
+    );
+
+  /**
+   * Ends `ended` on the server in the background, once per session, starting after `wait`. A
+   * client that learned of another's sign-out waits, so the signing-out client usually confirms it
+   * and the others send nothing.
+   */
+  const endInBackground = (
+    ended: StoredSession,
+    wait: Duration.Duration = Duration.zero,
+  ): Effect.Effect<void> =>
+    Effect.asVoid(
+      FiberMap.run(
+        ending,
+        Option.getOrElse(sessionOf(ended), () => Redacted.value(ended.refreshToken)),
+        Effect.delay(endUntilConfirmed(ended), wait),
+        { onlyIfMissing: true },
+      ),
+    );
+
+  /** Stops using `revoked` at once, then ends it on the server in the background. */
+  const drop = Effect.fn("Auth.drop")(function* (revoked: StoredSession) {
+    if (Option.exists(yield* Ref.get(session), (held) => isSameSession(held, revoked))) {
+      yield* adopt(Option.none());
+    }
+
+    yield* endInBackground(revoked, Duration.seconds(1));
+  });
 
   const commitRefresh = Effect.fn("Auth.commitRefresh")(function* (
     seen: StoredSession,
@@ -524,42 +582,55 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
         RefreshOutcome.$is("Renewed")(outcome) &&
         !Option.exists(current, (held) => isSameSession(held, outcome.session))
       ) {
-        yield* Effect.forkIn(endOnServer(outcome.session), scope);
+        yield* endInBackground(outcome.session);
       }
 
       return Option.map(current, (held) => held.token);
     }
-
-    const expected = yield* Ref.get(lastStored);
 
     const holdRenewed = (renewed: StoredSession) =>
       Ref.set(session, Option.some(renewed)).pipe(Effect.andThen(reconnect));
 
     return yield* RefreshOutcome.$match(outcome, {
       Renewed: ({ session: renewed }) =>
-        storage.replace(expected, Option.some(renewed)).pipe(
-          Effect.tapError(() => holdRenewed(renewed)),
-          Effect.flatMap((wrote) =>
-            wrote
-              ? holdRenewed(renewed).pipe(
-                  Effect.andThen(Ref.set(lastStored, Option.some(renewed))),
-                  Effect.as(Option.some(renewed.token)),
-                )
-              : giveWayToStore(Option.some(renewed)),
-          ),
-        ),
+        Effect.gen(function* () {
+          const expected = Option.getOrElse(yield* Ref.get(lastStored), () => seen);
+
+          const wrote = yield* storage
+            .renew(expected, renewed)
+            .pipe(Effect.tapError(() => holdRenewed(renewed)));
+
+          if (!wrote) return yield* giveWayToStore(Option.some(renewed));
+          yield* Ref.set(lastStored, Option.some(renewed));
+
+          if ((yield* storage.revocation(renewed)) !== "none") {
+            yield* drop(renewed);
+
+            return Option.none<Redacted.Redacted>();
+          }
+
+          yield* holdRenewed(renewed);
+
+          return Option.some(renewed.token);
+        }),
       Refused: () =>
-        storage.replace(expected, Option.none()).pipe(
-          Effect.tapError(() => adopt(Option.none())),
-          Effect.flatMap((wrote) =>
-            wrote
-              ? adopt(Option.none()).pipe(
-                  Effect.andThen(Ref.set(lastStored, Option.none())),
-                  Effect.as(Option.none<Redacted.Redacted>()),
-                )
-              : giveWayToStore(Option.none()),
-          ),
-        ),
+        Effect.gen(function* () {
+          const stored = yield* storage.load;
+
+          // Another client renewed this session first, so its refresh token is the live one.
+          if (
+            Option.exists(stored, (held) => isSameSession(held, seen)) &&
+            !TokenStorage.sameStored(stored, yield* Ref.get(lastStored))
+          ) {
+            return yield* giveWayToStore(Option.none());
+          }
+
+          yield* adopt(Option.none());
+          yield* storage.revoke(seen);
+          yield* storage.confirmRevoked(seen);
+
+          return Option.none<Redacted.Redacted>();
+        }).pipe(Effect.tapError(() => adopt(Option.none()))),
       Kept: () => Effect.succeedSome(seen.token),
       Stalled: () => runSignedOut(seen).pipe(Effect.as(Option.none<Redacted.Redacted>())),
     });
@@ -605,26 +676,21 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     }
   });
 
-  /**
-   * Follows another writer. A session held here that the store no longer holds is also ended on
-   * the server, since the tab that signed it out may not have reached the server, and this client
-   * may hold a renewal that tab never saw.
-   */
+  /** Follows another writer. A held session that another client revoked is dropped. */
   const follow = Effect.fn("Auth.follow")(function* () {
-    const stored = yield* storage.load;
     const held = yield* Ref.get(session);
 
-    yield* adoptStored(stored);
-
-    if (Option.isSome(held) && Option.isNone(stored)) {
-      yield* Effect.forkIn(endOnServer(held.value), scope);
+    if (Option.isSome(held) && (yield* storage.revocation(held.value)) !== "none") {
+      yield* drop(held.value);
     }
+
+    yield* adoptStored(yield* storage.load);
   }, committing.withPermits(1));
 
   const endUnlessStored = (renewed: StoredSession, stored: Option.Option<StoredSession>) =>
     Option.exists(stored, (held) => isSameSession(held, renewed))
       ? Effect.void
-      : Effect.asVoid(Effect.forkIn(endOnServer(renewed), scope));
+      : endInBackground(renewed);
 
   const giveWayToStore = Effect.fn("Auth.giveWayToStore")(function* (
     renewed: Option.Option<StoredSession>,
@@ -703,11 +769,28 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       const { finished: generation } = yield* Ref.get(lastAttempt);
       const now = yield* Clock.currentTimeMillis;
 
-      if (!forceRefresh && !isExpiring(Redacted.value(current.value.token), now)) {
-        return Option.some(current.value.token);
-      }
+      const token =
+        !forceRefresh && !isExpiring(Redacted.value(current.value.token), now)
+          ? Option.some(current.value.token)
+          : yield* refresh(current.value, generation, forceRefresh);
 
-      return yield* refresh(current.value, generation, forceRefresh);
+      return yield* unlessRevoked(token);
+    });
+  }
+
+  /** `token`, unless the session held now was revoked, which drops it. */
+  function unlessRevoked(
+    token: Option.Option<Redacted.Redacted>,
+  ): Effect.Effect<Option.Option<Redacted.Redacted>, TokenStorage.TokenStorageError> {
+    return Effect.gen(function* () {
+      const held = yield* Ref.get(session);
+
+      if (Option.isNone(token) || Option.isNone(held)) return token;
+
+      if ((yield* storage.revocation(held.value)) === "none") return token;
+      yield* committing.withPermits(1)(drop(held.value));
+
+      return Option.none();
     });
   }
 
@@ -730,19 +813,33 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     );
   });
 
+  /**
+   * Revokes the session in the store first, so every client stops using it, then ends it on the
+   * server, retrying in the background while the server cannot confirm it.
+   */
   const signOut = Effect.fn("Auth.signOut")(function* () {
-    const { ended, cleared } = yield* committing.withPermits(1)(
+    const ended = yield* committing.withPermits(1)(
       Effect.gen(function* () {
         const current = yield* Ref.get(session);
-        const exit = yield* Effect.exit(forget(current));
 
-        return { ended: current, cleared: exit };
+        yield* adopt(Option.none());
+
+        return current;
       }),
     );
 
-    if (Option.isSome(ended)) yield* endOnServer(ended.value);
+    if (Option.isNone(ended)) return yield* Effect.void;
+    const revoked = yield* Effect.exit(storage.revoke(ended.value));
 
-    return yield* cleared;
+    if (yield* endOnServer(ended.value)) {
+      yield* storage
+        .confirmRevoked(ended.value)
+        .pipe(Effect.catchTag("TokenStorageError", logStorageFailure));
+    } else {
+      yield* endInBackground(ended.value, Duration.seconds(1));
+    }
+
+    return yield* revoked;
   });
 
   const stored = yield* storage.load;

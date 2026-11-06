@@ -1,9 +1,10 @@
 import { Context, Effect, Layer, Option, Redacted } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { makeBrowserTabs } from "./testing/browser-tabs";
 import { jwtExpiringAt } from "./testing/fake-convex";
 import type { KeyValueStore } from "./token-storage";
-import { layerKeyValue, serializeSession, TokenStorage } from "./token-storage";
+import { layerKeyValue, TokenStorage } from "./token-storage";
 
 const memoryStore = (): KeyValueStore & { readonly items: Map<string, string> } => {
   const items = new Map<string, string>();
@@ -28,7 +29,7 @@ const storageOver = (store: KeyValueStore) =>
   );
 
 describe("key-value token storage", () => {
-  it("round-trips a session and clears it", async () => {
+  it("round-trips a session and clears it on sign-out", async () => {
     const store = memoryStore();
 
     await Effect.runPromise(
@@ -44,7 +45,7 @@ describe("key-value token storage", () => {
           Option.some("refresh"),
         );
 
-        yield* storage.clear;
+        yield* storage.revoke(session);
         expect(yield* storage.load).toStrictEqual(Option.none());
       }),
     );
@@ -73,67 +74,122 @@ describe("key-value token storage", () => {
 
     expect(failure).toMatchObject({ _tag: "TokenStorageError", operation: "load" });
   });
+});
 
-  it("replaces the session only while the store still holds the expected one", async () => {
-    const store = memoryStore();
-    const renewed = { token: Redacted.make("jwt-2"), refreshToken: Redacted.make("refresh-2") };
+const signedInAs = (subject: string, refreshToken: string) => ({
+  token: Redacted.make(jwtExpiringAt(Date.now() + 3_600_000, subject)),
+  refreshToken: Redacted.make(refreshToken),
+});
+
+const ada = signedInAs("ada|session-1", "refresh-1");
+
+const adaRenewed = signedInAs("ada|session-1", "refresh-2");
+
+const bo = signedInAs("bo|session-2", "refresh-3");
+
+const refreshTokenOf = (loaded: Option.Option<{ readonly refreshToken: Redacted.Redacted }>) =>
+  Option.map(loaded, (held) => Redacted.value(held.refreshToken));
+
+describe("token storage shared between tabs", () => {
+  it("renews a session only while it still holds the tokens the renewal started from", async () => {
+    const tabs = makeBrowserTabs({ count: 1, processes: "shared", delivery: "at once" });
 
     const answer = await Effect.runPromise(
       Effect.gen(function* () {
-        const storage = yield* storageOver(store);
+        const storage = yield* storageOver(tabs.tab(0));
 
-        yield* storage.save(session);
-        const stale = yield* storage.replace(Option.some(renewed), Option.none());
-        const renewing = yield* storage.replace(Option.some(session), Option.some(renewed));
-        const afterRenewal = store.items.get("s");
-        const clearing = yield* storage.replace(Option.some(renewed), Option.none());
+        yield* storage.save(ada);
+        const stale = yield* storage.renew(adaRenewed, ada);
+        const renewing = yield* storage.renew(ada, adaRenewed);
 
-        return { stale, renewing, afterRenewal, clearing, afterClear: store.items.get("s") };
+        return { stale, renewing, loaded: refreshTokenOf(yield* storage.load) };
       }),
     );
 
     expect(answer).toStrictEqual({
       stale: false,
       renewing: true,
-      afterRenewal: '{"token":"jwt-2","refreshToken":"refresh-2"}',
-      clearing: true,
-      afterClear: undefined,
+      loaded: Option.some("refresh-2"),
     });
   });
 
-  it("keeps a signed-out session out even when a renewal of it lands later", async () => {
-    const store = memoryStore();
-
-    const signedIn = {
-      token: Redacted.make(jwtExpiringAt(Date.now() + 3_600_000, "ada|session-1")),
-      refreshToken: Redacted.make("refresh-1"),
-    };
-
-    const renewed = {
-      token: Redacted.make(jwtExpiringAt(Date.now() + 7_200_000, "ada|session-1")),
-      refreshToken: Redacted.make("refresh-2"),
-    };
+  it("keeps a revoked session out, whatever writes of its tokens land later", async () => {
+    const tabs = makeBrowserTabs({ count: 2, processes: "separate", delivery: "manual" });
 
     const answer = await Effect.runPromise(
       Effect.gen(function* () {
-        const tab = yield* storageOver(store);
+        const signingOut = yield* storageOver(tabs.tab(0));
+        const renewing = yield* storageOver(tabs.tab(1));
 
-        yield* tab.save(signedIn);
-        yield* tab.end(signedIn);
-        store.items.set("s", serializeSession(renewed));
-        const afterLate = yield* tab.load;
-        const leftover = store.items.get("s");
+        yield* signingOut.save(ada);
+        tabs.deliver();
+        yield* signingOut.revoke(ada);
+        const late = yield* renewing.renew(ada, adaRenewed);
 
-        yield* tab.save(signedIn);
+        tabs.deliver();
 
-        return { afterLate, leftover, signedInAgain: Option.isSome(yield* tab.load) };
+        return {
+          late,
+          loaded: yield* renewing.load,
+          revocation: yield* renewing.revocation(adaRenewed),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({ late: true, loaded: Option.none(), revocation: "pending" });
+  });
+
+  it("keeps both revocations when two tabs sign out different sessions at once", async () => {
+    const tabs = makeBrowserTabs({ count: 3, processes: "separate", delivery: "manual" });
+
+    const answer = await Effect.runPromise(
+      Effect.gen(function* () {
+        const first = yield* storageOver(tabs.tab(0));
+        const second = yield* storageOver(tabs.tab(1));
+        const reader = yield* storageOver(tabs.tab(2));
+
+        yield* first.save(ada);
+        tabs.deliver();
+        yield* second.save(bo);
+        yield* first.revoke(ada);
+        yield* second.revoke(bo);
+        tabs.deliver();
+
+        return {
+          ada: yield* reader.revocation(ada),
+          bo: yield* reader.revocation(bo),
+          loaded: yield* reader.load,
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({ ada: "pending", bo: "pending", loaded: Option.none() });
+  });
+
+  it("loads a sign-in made after a revocation, and drops tokens once the server confirms", async () => {
+    const tabs = makeBrowserTabs({ count: 1, processes: "shared", delivery: "at once" });
+
+    const answer = await Effect.runPromise(
+      Effect.gen(function* () {
+        const storage = yield* storageOver(tabs.tab(0));
+
+        yield* storage.save(ada);
+        yield* storage.revoke(ada);
+        yield* storage.confirmRevoked(ada);
+        yield* storage.save(bo);
+
+        return {
+          loaded: refreshTokenOf(yield* storage.load),
+          ada: yield* storage.revocation(ada),
+          adaTokens: [...tabs.items.values()].some((value) => value.includes("refresh-1")),
+        };
       }),
     );
 
     expect(answer).toStrictEqual({
-      afterLate: Option.none(),
-      leftover: undefined,
-      signedInAgain: true,
+      loaded: Option.some("refresh-3"),
+      ada: "confirmed",
+      adaTokens: false,
     });
   });
 });
