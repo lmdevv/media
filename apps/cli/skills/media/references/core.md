@@ -236,6 +236,46 @@ Sign out every password and device session you have, or every other one.
 - Arguments: `{ keepCurrent: boolean }`
 - Result: `null`
 
+## `core.connect.player.report`
+
+Report what this device plays, where it plays it, and the newest request it has applied.
+
+- CLI: `media auth player report`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ output: { kind: "local" } | { kind: "cast"; receiver: string } | { kind: "airplay"; receiver: string | null }; playback: { domain: "movies" | "music"; playing: boolean; positionMs: number } | null; applied: number }`
+- Result: `{ reportedAt: number }`
+
+## `core.connect.player.requested`
+
+Show the playback another device asked of this one that it has not applied yet.
+
+- CLI: `media auth player requested`
+- Kind: query
+- Scope: signed-in
+- Arguments: none
+- Result: `null | { revision: number; playing: boolean; positionMs: number; at: number }`
+
+## `core.connect.targets.control`
+
+Pause, play, or seek a device you can control; it follows within about a quarter second.
+
+- CLI: `media auth targets control`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ deviceId: Id<"devices">; playing?: boolean; positionMs?: number }`
+- Result: `{ revision: number }`
+
+## `core.connect.targets.list`
+
+List the online devices you can control with Connect, newest report first, with what each plays and where.
+
+- CLI: `media auth targets list`
+- Kind: query
+- Scope: signed-in
+- Arguments: none
+- Result: `Array<{ deviceId: Id<"devices">; name: string; mode: "personal" | "shared"; output: { kind: "local" } | { kind: "cast"; receiver: string } | { kind: "airplay"; receiver: string | null }; playback: null | { domain: "movies" | "music"; playing: boolean; positionMs: number; at: number; pending: boolean }; reportedAt: number }>`
+
 ## `core.devices.approvals.approve`
 
 Approve opening your tile on a shared device, or as an adult let a kid leave theirs.

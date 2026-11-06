@@ -14,7 +14,6 @@ import {
 import type {
   ApprovalIntent,
   Decision,
-  DeviceRelation,
   Principal,
   Prover,
   TileAction,
@@ -124,9 +123,6 @@ const answers = (
     userId,
     answererListed: listed,
   });
-
-const controls = (user: Doc<"users">, relation: DeviceRelation): Decision =>
-  can(principalOf(user), "control", { on: "device", relation });
 
 const lists = (actor: Doc<"users">, target: Doc<"users">): Decision =>
   can(principalOf(actor), "listOnSharedDevices", accountTarget(target));
@@ -311,31 +307,6 @@ describe("answering a shared device's approval", () => {
         userId: rows.dad._id,
         answererListed: true,
       }),
-    ).toEqual(refused("hidden", "service"));
-  });
-});
-
-describe("controlling a device", () => {
-  it("reaches one's own personal device always and another person's never", () => {
-    expect(controls(rows.dad, { mode: "personal", signedInHere: true })).toEqual(ALLOWED);
-    expect(controls(rows.owner, { mode: "personal", signedInHere: false })).toEqual(
-      refused("hidden", "not-signed-in-here"),
-    );
-  });
-
-  it("reaches a shared device for anyone it lists, kids included", () => {
-    expect(controls(rows.lily, { mode: "shared", listed: true })).toEqual(ALLOWED);
-    expect(controls(rows.admin, { mode: "shared", listed: false })).toEqual(
-      refused("hidden", "unlisted"),
-    );
-  });
-
-  it("refuses guests and services until guest sessions exist", () => {
-    expect(controls(rows.guest, { mode: "shared", listed: true })).toEqual(
-      refused("hidden", "guest"),
-    );
-    expect(
-      can(service, "control", { on: "device", relation: { mode: "personal", signedInHere: true } }),
     ).toEqual(refused("hidden", "service"));
   });
 });

@@ -63,6 +63,12 @@ const approvalFields = {
   expiresAt: v.number(),
 };
 
+const connectOutput = v.union(
+  v.object({ kind: v.literal("local") }),
+  v.object({ kind: v.literal("cast"), receiver: v.string() }),
+  v.object({ kind: v.literal("airplay"), receiver: v.union(v.string(), v.null()) }),
+);
+
 /**
  * The core's tables. On the paths the core uses, Convex Auth touches only `users`, `authSessions`,
  * and `authRefreshTokens`, so its other tables are left out.
@@ -115,7 +121,8 @@ export default defineSchema({
     .index("userId", ["userId"])
     .index("by_key", ["keyId"])
     .index("by_expiration", ["expirationTime"])
-    .index("by_device_user", ["device.id", "userId"]),
+    .index("by_device_user", ["device.id", "userId"])
+    .index("by_user_device", ["userId", "device.id"]),
 
   /** Convex Auth's refresh tokens, in its own shape. */
   authRefreshTokens: defineTable({
@@ -229,7 +236,45 @@ export default defineSchema({
         ),
       }),
     ),
-  ),
+  ).index("by_mode", ["mode"]),
+
+  /**
+   * What a device last said it plays, one row per device (ADR 0018). Only the device writes it,
+   * through `core.connect.player.report` from a session bound to it, and it lives apart from
+   * `devices`, whose row every authenticated call reads. `core/devices/registry.ts` deletes it
+   * when the device changes mode or goes.
+   */
+  connectPlayers: defineTable({
+    deviceId: v.id("devices"),
+    /** The session that reported; the device is no target once that session ends. */
+    reporter: v.id("authSessions"),
+    output: connectOutput,
+    /** Null while the device plays nothing. Its position held at `reportedAt`. */
+    playback: v.union(
+      v.null(),
+      v.object({ domain: contentDomain, playing: v.boolean(), positionMs: v.number() }),
+    ),
+    settled: v.number(),
+    /** Server time of the report. */
+    reportedAt: v.number(),
+  })
+    .index("by_device", ["deviceId"])
+    .index("by_reported", ["reportedAt"]),
+
+  /**
+   * The playback controllers last asked of a device, one row per device. Only
+   * `core.connect.targets.control` writes it.
+   */
+  connectRequests: defineTable({
+    deviceId: v.id("devices"),
+    reporter: v.id("authSessions"),
+    /** Higher than every revision before it on this device. */
+    revision: v.number(),
+    playing: v.boolean(),
+    /** The position at `at`, server time; it moves on from there while `playing`. */
+    positionMs: v.number(),
+    at: v.number(),
+  }).index("by_device", ["deviceId"]),
 
   /** A person's unlock code as a Scrypt hash. It opens their tile on a lock screen and never signs in. */
   unlockCodes: defineTable({ userId: v.id("users"), hash: v.string() }).index("by_user", [

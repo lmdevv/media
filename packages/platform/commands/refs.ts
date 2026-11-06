@@ -10,6 +10,8 @@ import type { Refs as core_accounts_users } from "./core/accounts/users";
 import type { Refs as core_auth_apiKeys } from "./core/auth/apiKeys";
 import type { Refs as core_auth_deviceCodes } from "./core/auth/deviceCodes";
 import type { Refs as core_auth_sessions } from "./core/auth/sessions";
+import type { Refs as core_connect_player } from "./core/connect/player";
+import type { Refs as core_connect_targets } from "./core/connect/targets";
 import type { Refs as core_devices_approvals } from "./core/devices/approvals";
 import type { Refs as core_devices_picker } from "./core/devices/picker";
 import type { Refs as core_devices_registry } from "./core/devices/registry";
@@ -66,6 +68,13 @@ export const commandRefs = {
     .current satisfies core_auth_sessions["current"],
   "core.auth.sessions.end": api.core.auth.sessions.end satisfies core_auth_sessions["end"],
   "core.auth.sessions.endAll": api.core.auth.sessions.endAll satisfies core_auth_sessions["endAll"],
+  "core.connect.player.report": api.core.connect.player
+    .report satisfies core_connect_player["report"],
+  "core.connect.player.requested": api.core.connect.player
+    .requested satisfies core_connect_player["requested"],
+  "core.connect.targets.control": api.core.connect.targets
+    .control satisfies core_connect_targets["control"],
+  "core.connect.targets.list": api.core.connect.targets.list satisfies core_connect_targets["list"],
   "core.devices.approvals.approve": api.core.devices.approvals
     .approve satisfies core_devices_approvals["approve"],
   "core.devices.approvals.deny": api.core.devices.approvals

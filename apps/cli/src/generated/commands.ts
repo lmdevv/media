@@ -452,6 +452,116 @@ export const generatedCommands = [
     method: (platform) => platform.core.auth.sessions.endAll,
   }),
   coreCommand({
+    name: "core.connect.player.report",
+    path: ["auth", "player", "report"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Report what this device plays, where it plays it, and the newest request it has applied",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      output: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal("local") }),
+        Schema.Struct({ kind: Schema.Literal("cast"), receiver: Schema.String }),
+        Schema.Struct({
+          kind: Schema.Literal("airplay"),
+          receiver: Schema.Union([Schema.String, Schema.Null]),
+        }),
+      ]),
+      playback: Schema.Union([
+        Schema.Struct({
+          domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+          playing: Schema.Boolean,
+          positionMs: Schema.Finite,
+        }),
+        Schema.Null,
+      ]),
+      applied: Schema.Finite,
+    }),
+    result: Schema.Struct({ reportedAt: Schema.Finite }),
+    method: (platform) => platform.core.connect.player.report,
+  }),
+  coreCommand({
+    name: "core.connect.player.requested",
+    path: ["auth", "player", "requested"],
+    kind: "query",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary: "Show the playback another device asked of this one that it has not applied yet",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({}),
+    result: Schema.Union([
+      Schema.Null,
+      Schema.Struct({
+        revision: Schema.Finite,
+        playing: Schema.Boolean,
+        positionMs: Schema.Finite,
+        at: Schema.Finite,
+      }),
+    ]),
+    method: (platform) => platform.core.connect.player.requested,
+  }),
+  coreCommand({
+    name: "core.connect.targets.control",
+    path: ["auth", "targets", "control"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Pause, play, or seek a device you can control; it follows within about a quarter second",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+      playing: Schema.optionalKey(Schema.Boolean),
+      positionMs: Schema.optionalKey(Schema.Finite),
+    }),
+    result: Schema.Struct({ revision: Schema.Finite }),
+    method: (platform) => platform.core.connect.targets.control,
+  }),
+  coreCommand({
+    name: "core.connect.targets.list",
+    path: ["auth", "targets", "list"],
+    kind: "query",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "List the online devices you can control with Connect, newest report first, with what each plays and where",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({}),
+    result: Schema.Array(
+      Schema.Struct({
+        deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+        name: Schema.String,
+        mode: Schema.Union([Schema.Literal("personal"), Schema.Literal("shared")]),
+        output: Schema.Union([
+          Schema.Struct({ kind: Schema.Literal("local") }),
+          Schema.Struct({ kind: Schema.Literal("cast"), receiver: Schema.String }),
+          Schema.Struct({
+            kind: Schema.Literal("airplay"),
+            receiver: Schema.Union([Schema.String, Schema.Null]),
+          }),
+        ]),
+        playback: Schema.Union([
+          Schema.Null,
+          Schema.Struct({
+            domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+            playing: Schema.Boolean,
+            positionMs: Schema.Finite,
+            at: Schema.Finite,
+            pending: Schema.Boolean,
+          }),
+        ]),
+        reportedAt: Schema.Finite,
+      }),
+    ),
+    method: (platform) => platform.core.connect.targets.list,
+  }),
+  coreCommand({
     name: "core.devices.approvals.approve",
     path: ["auth", "approvals", "approve"],
     kind: "mutation",

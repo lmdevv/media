@@ -314,6 +314,89 @@ const core_auth_sessions_endAll = mutation({
   result: Schema.Null,
 });
 
+const core_connect_player_report = mutation({
+  name: "core.connect.player.report",
+  path: "core/connect/player:report",
+  args: Schema.Struct({
+    output: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("local") }),
+      Schema.Struct({ kind: Schema.Literal("cast"), receiver: Schema.String }),
+      Schema.Struct({
+        kind: Schema.Literal("airplay"),
+        receiver: Schema.Union([Schema.String, Schema.Null]),
+      }),
+    ]),
+    playback: Schema.Union([
+      Schema.Struct({
+        domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+        playing: Schema.Boolean,
+        positionMs: Schema.Finite,
+      }),
+      Schema.Null,
+    ]),
+    applied: Schema.Finite,
+  }),
+  result: Schema.Struct({ reportedAt: Schema.Finite }),
+});
+
+const core_connect_player_requested = query({
+  name: "core.connect.player.requested",
+  path: "core/connect/player:requested",
+  args: Schema.Struct({}),
+  result: Schema.Union([
+    Schema.Null,
+    Schema.Struct({
+      revision: Schema.Finite,
+      playing: Schema.Boolean,
+      positionMs: Schema.Finite,
+      at: Schema.Finite,
+    }),
+  ]),
+});
+
+const core_connect_targets_control = mutation({
+  name: "core.connect.targets.control",
+  path: "core/connect/targets:control",
+  args: Schema.Struct({
+    deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+    playing: Schema.optionalKey(Schema.Boolean),
+    positionMs: Schema.optionalKey(Schema.Finite),
+  }),
+  result: Schema.Struct({ revision: Schema.Finite }),
+});
+
+const core_connect_targets_list = query({
+  name: "core.connect.targets.list",
+  path: "core/connect/targets:list",
+  args: Schema.Struct({}),
+  result: Schema.Array(
+    Schema.Struct({
+      deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+      name: Schema.String,
+      mode: Schema.Union([Schema.Literal("personal"), Schema.Literal("shared")]),
+      output: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal("local") }),
+        Schema.Struct({ kind: Schema.Literal("cast"), receiver: Schema.String }),
+        Schema.Struct({
+          kind: Schema.Literal("airplay"),
+          receiver: Schema.Union([Schema.String, Schema.Null]),
+        }),
+      ]),
+      playback: Schema.Union([
+        Schema.Null,
+        Schema.Struct({
+          domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+          playing: Schema.Boolean,
+          positionMs: Schema.Finite,
+          at: Schema.Finite,
+          pending: Schema.Boolean,
+        }),
+      ]),
+      reportedAt: Schema.Finite,
+    }),
+  ),
+});
+
 const core_devices_approvals_approve = mutation({
   name: "core.devices.approvals.approve",
   path: "core/devices/approvals:approve",
@@ -1256,6 +1339,20 @@ export const effectMethods = (method: EffectBuilder) => ({
         endAll: method.mutation(core_auth_sessions_endAll),
       },
     },
+    connect: {
+      player: {
+        /** `core.connect.player.report` (mutation, signed-in): Report what this device plays, where it plays it, and the newest request it has applied. */
+        report: method.mutation(core_connect_player_report),
+        /** `core.connect.player.requested` (query, signed-in): Show the playback another device asked of this one that it has not applied yet. */
+        requested: method.query(core_connect_player_requested),
+      },
+      targets: {
+        /** `core.connect.targets.control` (mutation, signed-in): Pause, play, or seek a device you can control; it follows within about a quarter second. */
+        control: method.mutation(core_connect_targets_control),
+        /** `core.connect.targets.list` (query, signed-in): List the online devices you can control with Connect, newest report first, with what each plays and where. */
+        list: method.query(core_connect_targets_list),
+      },
+    },
     devices: {
       approvals: {
         /** `core.devices.approvals.approve` (mutation, account, API keys refused): Approve opening your tile on a shared device, or as an adult let a kid leave theirs. */
@@ -1432,6 +1529,20 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         end: method.mutation(core_auth_sessions_end),
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
+      },
+    },
+    connect: {
+      player: {
+        /** `core.connect.player.report` (mutation, signed-in): Report what this device plays, where it plays it, and the newest request it has applied. */
+        report: method.mutation(core_connect_player_report),
+        /** `core.connect.player.requested` (query, signed-in): Show the playback another device asked of this one that it has not applied yet. */
+        requested: method.query(core_connect_player_requested),
+      },
+      targets: {
+        /** `core.connect.targets.control` (mutation, signed-in): Pause, play, or seek a device you can control; it follows within about a quarter second. */
+        control: method.mutation(core_connect_targets_control),
+        /** `core.connect.targets.list` (query, signed-in): List the online devices you can control with Connect, newest report first, with what each plays and where. */
+        list: method.query(core_connect_targets_list),
       },
     },
     devices: {

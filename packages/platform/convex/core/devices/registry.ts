@@ -18,6 +18,7 @@ import {
   randomSecret,
   sha256Hex,
 } from "../lib/secrets";
+import { dropConnect } from "../connect/facts";
 import { requireServer } from "../permissions/authorize";
 import type { PersonDoc } from "../permissions/policy";
 import { purgeDevicePage } from "../downloads";
@@ -370,6 +371,7 @@ export const { enroll, list, setMode, remove } = register({
     const device = (await ctx.db.get(deviceId)) ?? fail("not_found", NO_DEVICE);
 
     await ctx.db.delete(deviceId);
+    await dropConnect(ctx, deviceId);
     await purgeLeftovers(ctx, device);
 
     await Promise.all(
