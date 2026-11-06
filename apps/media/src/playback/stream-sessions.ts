@@ -167,6 +167,8 @@ export interface Interface {
   ) => Effect.Effect<void, StreamNotFound | StreamAccessDenied>;
   /** Number of streams whose encoder runs; a released stream waiting for its player is not one. */
   readonly activeCount: Effect.Effect<number>;
+  /** Number of ffmpeg runs of open streams whose exit is not known yet, stopping ones included. */
+  readonly runCount: Effect.Effect<number>;
 }
 
 /** The stream session manager. */
@@ -246,7 +248,7 @@ interface Run extends RunScope {
 }
 
 interface Runs {
-  readonly live: ReadonlySet<RunScope>;
+  readonly live: ReadonlyMap<Scope.Closeable, RunScope>;
   readonly sealed: boolean;
 }
 
@@ -323,9 +325,9 @@ const hardwareOf = (mode: PlaybackMode): HardwareAcceleration.HardwareEncoder | 
 
 const isClosed = (scope: Scope.Scope): boolean => Predicate.isTagged(scope.state, "Closed");
 
-const without = <A>(set: ReadonlySet<A>, item: A): ReadonlySet<A> => {
-  const next = new Set(set);
-  next.delete(item);
+const without = <K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> => {
+  const next = new Map(map);
+  next.delete(key);
 
   return next;
 };
@@ -336,9 +338,10 @@ const beginStop = (stream: Lifecycle, run: RunScope) =>
       ? Effect.void
       : Scope.close(run.scope, Exit.void).pipe(
           Effect.ensuring(
-            Ref.update(stream.runs, (runs) => ({ ...runs, live: without(runs.live, run) })).pipe(
-              Effect.andThen(Deferred.succeed(run.stopped, undefined)),
-            ),
+            Ref.update(stream.runs, (runs) => ({
+              ...runs,
+              live: without(runs.live, run.scope),
+            })).pipe(Effect.andThen(Deferred.succeed(run.stopped, undefined))),
           ),
           Effect.forkDetach,
           Effect.asVoid,
@@ -445,7 +448,7 @@ const make = Effect.gen(function* () {
     const opened = yield* Ref.modify(stream.runs, (runs) =>
       runs.sealed
         ? ([false, runs] as const)
-        : ([true, { ...runs, live: new Set(runs.live).add(run) }] as const),
+        : ([true, { ...runs, live: new Map(runs.live).set(run.scope, run) }] as const),
     );
 
     if (!opened) return yield* new StreamNotFound({ streamId: stream.streamId });
@@ -461,7 +464,7 @@ const make = Effect.gen(function* () {
         first
           ? Effect.gen(function* () {
               yield* Scope.close(stream.scope, Exit.void);
-              const { live } = yield* Ref.get(stream.runs);
+              const live = [...(yield* Ref.get(stream.runs)).live.values()];
 
               yield* Effect.forEach(live, (run) => beginStop(stream, run), { discard: true });
               yield* Effect.forEach(live, (run) => Deferred.await(run.stopped), { discard: true });
@@ -1474,7 +1477,7 @@ const make = Effect.gen(function* () {
     const stream: Lifecycle = {
       streamId,
       scope: yield* Scope.make("sequential"),
-      runs: yield* Ref.make<Runs>({ live: new Set(), sealed: false }),
+      runs: yield* Ref.make<Runs>({ live: new Map(), sealed: false }),
       directory: path.join(config.transcodeDir, streamId),
       torndown: yield* Deferred.make<void>(),
     };
@@ -1862,6 +1865,14 @@ const make = Effect.gen(function* () {
         ),
       ),
       Effect.map((running) => running.length),
+    ),
+    runCount: Ref.get(sessions).pipe(
+      Effect.flatMap((current) =>
+        Effect.forEach(current.values(), (session) =>
+          Ref.get(session.runs).pipe(Effect.map(({ live }) => live.size)),
+        ),
+      ),
+      Effect.map((counts) => counts.reduce((total, count) => total + count, 0)),
     ),
   });
 });

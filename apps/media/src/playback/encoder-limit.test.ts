@@ -427,6 +427,34 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
     );
   });
 
+  layer(subject(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
+    it.effect(
+      "a stream keeps only the runs whose exit is not known yet, however often it seeks",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const who = yield* viewer("household");
+          const started = yield* playing(who);
+
+          for (const seconds of [6, 0, 6, 0, 6]) {
+            yield* sessions.seek(started.streamId, seconds, who.grant);
+          }
+
+          const owned = yield* sessions.runCount.pipe(
+            Effect.repeat({
+              until: (count) => count <= 1,
+              schedule: Schedule.spaced("100 millis"),
+              times: 50,
+            }),
+          );
+
+          assert.strictEqual(owned, 1, "runs the stream still owns");
+          yield* sessions.stop(started.streamId, who.grant);
+        }),
+      60_000,
+    );
+  });
+
   for (const ending of ["stopped", "replaced"] as const) {
     layer(subject(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
       it.effect(
