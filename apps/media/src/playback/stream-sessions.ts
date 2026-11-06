@@ -354,8 +354,7 @@ const beginStop = (stream: Lifecycle, run: RunScope) =>
         ),
   ).pipe(Effect.uninterruptible);
 
-/** Answers `late()` once `wait` passed; the steps the request waits on belong to its stream. */
-const answerWithin =
+const stopWaitingAfter =
   <L>(wait: Duration.Duration, late: () => L) =>
   <A, E, R>(request: Effect.Effect<A, E, R>) =>
     request.pipe(Effect.timeoutOrElse({ duration: wait, orElse: () => Effect.fail(late()) }));
@@ -1088,7 +1087,10 @@ const make = Effect.gen(function* () {
           admit(session, grant.expiresAt),
           () =>
             f(session).pipe(
-              answerWithin(SEGMENT_WAIT, () => new SegmentNotReady({ index: notReady(session) })),
+              stopWaitingAfter(
+                SEGMENT_WAIT,
+                () => new SegmentNotReady({ index: notReady(session) }),
+              ),
             ),
           () => leave(session),
         ),
@@ -1642,7 +1644,7 @@ const make = Effect.gen(function* () {
       return hardwareOf(plan.mode) !== undefined
         ? yield* firstSegment(session, first.value, segmentIndex)
         : first.value;
-    }).pipe(answerWithin(FIRST_RUN_WAIT, refused));
+    }).pipe(stopWaitingAfter(FIRST_RUN_WAIT, refused));
 
     const mode = yield* Ref.get(session.mode);
 
