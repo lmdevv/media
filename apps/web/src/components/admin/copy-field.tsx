@@ -3,7 +3,7 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { copyText } from "@/lib/secure-context";
+import { copyText } from "@media/ui/lib/secure-context";
 
 const COPIED_MS = 2000;
 

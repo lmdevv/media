@@ -1,8 +1,9 @@
 import { Context, Effect, Layer, Option, Redacted } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { jwtExpiringAt } from "./testing/fake-convex";
 import type { KeyValueStore } from "./token-storage";
-import { layerKeyValue, TokenStorage } from "./token-storage";
+import { layerKeyValue, serializeSession, TokenStorage } from "./token-storage";
 
 const memoryStore = (): KeyValueStore & { readonly items: Map<string, string> } => {
   const items = new Map<string, string>();
@@ -100,32 +101,39 @@ describe("key-value token storage", () => {
     });
   });
 
-  it("checks the stored session inside the store's exclusive section", async () => {
+  it("keeps a signed-out session out even when a renewal of it lands later", async () => {
     const store = memoryStore();
 
-    const signedOutWhileWaiting: KeyValueStore = {
-      ...store,
-      exclusive: async (_key, write) => {
-        store.items.delete("s");
-
-        return write();
-      },
+    const signedIn = {
+      token: Redacted.make(jwtExpiringAt(Date.now() + 3_600_000, "ada|session-1")),
+      refreshToken: Redacted.make("refresh-1"),
     };
 
-    store.items.set("s", '{"token":"jwt","refreshToken":"refresh"}');
+    const renewed = {
+      token: Redacted.make(jwtExpiringAt(Date.now() + 7_200_000, "ada|session-1")),
+      refreshToken: Redacted.make("refresh-2"),
+    };
 
     const answer = await Effect.runPromise(
       Effect.gen(function* () {
-        const storage = yield* storageOver(signedOutWhileWaiting);
-        const renewed = { token: Redacted.make("jwt-2"), refreshToken: Redacted.make("refresh-2") };
+        const tab = yield* storageOver(store);
 
-        return yield* storage.replace(Option.some(session), Option.some(renewed));
+        yield* tab.save(signedIn);
+        yield* tab.end(signedIn);
+        store.items.set("s", serializeSession(renewed));
+        const afterLate = yield* tab.load;
+        const leftover = store.items.get("s");
+
+        yield* tab.save(signedIn);
+
+        return { afterLate, leftover, signedInAgain: Option.isSome(yield* tab.load) };
       }),
     );
 
-    expect({ wrote: answer, stored: store.items.get("s") }).toStrictEqual({
-      wrote: false,
-      stored: undefined,
+    expect(answer).toStrictEqual({
+      afterLate: Option.none(),
+      leftover: undefined,
+      signedInAgain: true,
     });
   });
 });

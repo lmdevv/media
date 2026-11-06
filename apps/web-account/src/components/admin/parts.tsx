@@ -1,5 +1,6 @@
 import { Button } from "@media/ui/components/button";
 import { Skeleton } from "@media/ui/components/skeleton";
+import { copyText } from "@media/ui/lib/secure-context";
 import { cn } from "@media/ui/lib/utils";
 import { CheckIcon, ChevronDownIcon, CopyIcon, TriangleAlertIcon } from "lucide-react";
 import { useId, useState } from "react";
@@ -225,30 +226,6 @@ export function SelectField<Value extends string>({
 }
 
 const COPIED_MS = 2000;
-
-/** Copies `text`, falling back to a selected text field where the Clipboard API is missing (HTTP). */
-const copyText = async (text: string): Promise<void> => {
-  if (window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-
-    return;
-  }
-
-  const field = document.createElement("textarea");
-
-  field.value = text;
-  field.readOnly = true;
-  field.setAttribute("aria-hidden", "true");
-  field.className = "fixed inset-0 opacity-0";
-  document.body.append(field);
-  field.select();
-
-  try {
-    if (!document.execCommand("copy")) throw new Error("Copy refused");
-  } finally {
-    field.remove();
-  }
-};
 
 /**
  * A one-line mono value with a Copy button at its end, for a link shown once. The value is

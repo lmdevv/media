@@ -486,12 +486,15 @@ const originStore = (stored: Option.Option<string>): KeyValueStore => {
 };
 
 /**
- * One origin's `localStorage` as browser tabs see it: each tab has its own view, and a write
- * reaches the other tabs' subscribers, never the writer's, only once `deliver` runs, the way a
- * `storage` event arrives as a later task.
+ * One origin's `localStorage` as two browser tabs see it. A write reaches the other tab's
+ * subscribers, never the writer's, only once `deliver` runs, the way a `storage` event arrives as
+ * a later task. Tabs in one process share the items, so the other tab reads a write at once. Tabs
+ * in separate processes each read their own copy, which catches up with every write only at
+ * `deliver`, so a tab can write over a change it has not seen yet.
  */
-const browserTabs = (stored: Option.Option<string>) => {
+const browserTabs = (stored: Option.Option<string>, processes: "shared" | "separate") => {
   const items = new Map<string, string>();
+  const views = [new Map<string, string>(), new Map<string, string>()] as const;
   const listeners = new Set<{ readonly tab: number; readonly onChange: () => void }>();
   const queued: Array<() => void> = [];
 
@@ -505,18 +508,32 @@ const browserTabs = (stored: Option.Option<string>) => {
     );
   }
 
-  const tab = (id: number): KeyValueStore => {
+  const catchUp = () => {
+    for (const view of views) {
+      view.clear();
+
+      for (const [key, value] of items) view.set(key, value);
+    }
+  };
+
+  catchUp();
+
+  const tab = (id: 0 | 1): KeyValueStore => {
+    const view = processes === "shared" ? items : views[id];
+
     const changed = () => {
       for (const listener of listeners) if (listener.tab !== id) queued.push(listener.onChange);
     };
 
     return {
-      getItem: (key) => items.get(key) ?? null,
+      getItem: (key) => view.get(key) ?? null,
       setItem: (key, value) => {
+        view.set(key, value);
         items.set(key, value);
         changed();
       },
       removeItem: (key) => {
+        view.delete(key);
         items.delete(key);
         changed();
       },
@@ -533,9 +550,11 @@ const browserTabs = (stored: Option.Option<string>) => {
   };
 
   return {
-    tabs: [tab(1), tab(2)] as const,
+    tabs: [tab(0), tab(1)] as const,
     stored: () => items.get(KEY) ?? null,
     deliver: () => {
+      catchUp();
+
       for (const onChange of queued.splice(0)) onChange();
     },
   };
@@ -646,68 +665,72 @@ describe("two clients on one store", () => {
     expect(answer).toStrictEqual({ followed: true, spent: ["refresh-1"], status: "signedIn" });
   });
 
-  it("signs out when the other client signs out, leaving the server to it", async () => {
+  it("signs out when the other client signs out, and ends the session it held too", async () => {
     const answer = await withTwoClients(originStore(Option.some(TOKEN)), (first, second, fake) =>
       Effect.gen(function* () {
         yield* fake.reply("auth:signOut", Reply.Success({ value: null }));
         yield* first.session.signOut;
         yield* reaches(second, "signedOut");
+        yield* eventually(Effect.map(fake.requestsTo("auth:signOut"), (sent) => sent.length > 1));
 
         return (yield* fake.requestsTo("auth:signOut")).map((request) => request.authorization);
       }),
     );
 
-    expect(answer).toStrictEqual([`Bearer ${TOKEN}`]);
+    expect(answer).toStrictEqual([`Bearer ${TOKEN}`, `Bearer ${TOKEN}`]);
   });
 
-  it("stays signed out when the other client's refresh lands before the sign-out reaches it", async () => {
-    const origin = browserTabs(Option.some(TOKEN));
+  it.each(["shared", "separate"] as const)(
+    "stays signed out when the other client's refresh lands before the sign-out reaches it (%s processes)",
+    async (processes) => {
+      const origin = browserTabs(Option.some(TOKEN), processes);
 
-    const answer = await withTwoClients(origin.tabs, (first, second, fake) =>
-      Effect.gen(function* () {
-        const release = yield* Deferred.make<void>();
+      const answer = await withTwoClients(origin.tabs, (first, second, fake) =>
+        Effect.gen(function* () {
+          const release = yield* Deferred.make<void>();
 
-        yield* fake.handle("auth:signIn", (request) =>
-          Predicate.hasProperty(request.args, "refreshToken")
-            ? Deferred.await(release).pipe(Effect.as(renewed))
-            : Effect.succeed(signedIn),
-        );
-        yield* fake.reply("core/accounts/me:changePassword", unauthenticated);
-        yield* fake.reply("auth:signOut", Reply.Failure({ code: "internal", message: "Down" }));
+          yield* fake.handle("auth:signIn", (request) =>
+            Predicate.hasProperty(request.args, "refreshToken")
+              ? Deferred.await(release).pipe(Effect.as(renewed))
+              : Effect.succeed(signedIn),
+          );
+          yield* fake.reply("core/accounts/me:changePassword", unauthenticated);
+          yield* fake.reply("auth:signOut", Reply.Failure({ code: "internal", message: "Down" }));
 
-        const call = yield* Effect.forkChild(refusedOnce(second));
+          const call = yield* Effect.forkChild(refusedOnce(second));
 
-        yield* eventually(Effect.map(refreshTokensSpent(fake), (spent) => spent.length > 0));
-        yield* first.session.signOut;
-        yield* Deferred.succeed(release, undefined);
-        yield* Fiber.await(call);
-        origin.deliver();
+          yield* eventually(Effect.map(refreshTokensSpent(fake), (spent) => spent.length > 0));
+          yield* first.session.signOut;
+          yield* Deferred.succeed(release, undefined);
+          yield* Fiber.await(call);
+          origin.deliver();
 
-        return {
-          second: yield* eventually(
-            Effect.map(second.session.currentStatus, (status) => status === "signedOut"),
-          ),
-          first: yield* first.session.currentStatus,
-          stored: origin.stored(),
-          endedRenewal: yield* eventually(
-            Effect.map(fake.requestsTo("auth:signOut"), (requests) =>
-              requests.some((request) => request.authorization === `Bearer ${RENEWED}`),
+          return {
+            second: yield* eventually(
+              Effect.map(second.session.currentStatus, (status) => status === "signedOut"),
             ),
-          ),
-        };
-      }),
-    );
+            first: yield* first.session.currentStatus,
+            stored: origin.stored(),
+            endedRenewal: yield* eventually(
+              Effect.map(fake.requestsTo("auth:signOut"), (requests) =>
+                requests.some((request) => request.authorization === `Bearer ${RENEWED}`),
+              ),
+            ),
+          };
+        }),
+      );
 
-    expect(answer).toStrictEqual({
-      second: true,
-      first: "signedOut",
-      stored: null,
-      endedRenewal: true,
-    });
-  });
+      expect(answer).toStrictEqual({
+        second: true,
+        first: "signedOut",
+        stored: null,
+        endedRenewal: true,
+      });
+    },
+  );
 
   it("keeps the other client's renewal when its own refresh of the old token is refused", async () => {
-    const origin = browserTabs(Option.some(TOKEN));
+    const origin = browserTabs(Option.some(TOKEN), "shared");
 
     const answer = await withTwoClients(origin.tabs, (first, second, fake) =>
       Effect.gen(function* () {

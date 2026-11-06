@@ -107,26 +107,32 @@ and is their only writer, except the session keys, which only the SDK writes.
 
 ### A sign-out holds across tabs
 
-Another tab's `storage` event arrives later, as its own task. A refresh that finishes in the
-meantime must not write its renewed tokens over a sign-out it has not heard of yet.
+Another tab's `storage` event arrives later, as its own task. Tabs in separate processes also read
+their own copy of `localStorage`, which catches up only with that event, and `localStorage` has no
+atomic write. A refresh that finishes in the meantime must not bring back a session that another
+tab signed out.
 
-- `TokenStorage.replace(expected, next)` writes only while the store still holds `expected`. The
-  SDK commits every refresh this way: renewed tokens, or a clear after the server refused the
-  refresh token. Sign-in and sign-out still write without checking, because they replace
-  whatever was there.
-- When the store holds something else, the refresh lost to another writer, and the client adopts
-  what the store holds. If the store holds no session or another session, the client ends the
-  session it just renewed on the server. That also ends it when the tab that signed out could not
-  reach the server. If the store holds the same session with other tokens, another tab renewed it
-  first, and the client keeps those.
-- `KeyValueStore.exclusive` runs each session write, the check included, under a lock. The
-  account client passes `navigator.locks`, so tabs in separate processes cannot interleave a
-  check and a write. Web Locks exist only in secure contexts. Over plain HTTP on a LAN address the
-  client has no lock, and the check and write run in one task, which no other tab in the same
-  process can split. A tab in another process can still write between them, a window of one read
-  and one write.
+- `TokenStorage.replace(expected, next)` writes only while the store still holds what this client
+  last stored. The SDK commits every refresh this way: renewed tokens, or a clear after the server
+  refused the refresh token. A refresh that loses adopts what the store holds. If the store holds
+  no session or another one, the client also ends the session it just renewed on the server.
+- Signing out goes through `TokenStorage.end`. It clears the key and adds the session's id (the
+  token's `sub`) to `<key>.ended`, which keeps the last 16. A session on that list loads as none,
+  and the read that finds it removes it. So a renewal written by a tab that had not yet seen the
+  sign-out comes to nothing in every tab once the writes reach it. Signing in again with the same
+  session, as an API key does, takes it off the list.
+- A client that follows another tab's sign-out ends the session it held on the server too. The
+  signing-out tab may have failed to reach the server, and the follower may hold a renewal that
+  tab never saw. Each open tab sends one sign-out, and the extra ones fail harmlessly.
+- None of this needs a secure context. Over plain HTTP on a LAN or tailnet address, which installs
+  support, `navigator.locks`, `crypto.randomUUID`, `crypto.subtle`, and `navigator.clipboard` are
+  missing. The client uses none of them unguarded. Slot ids come from `randomUuid` and copying from
+  `copyText` in `@media/ui/lib/secure-context`, which `apps/web` shares. The Playwright suite runs
+  a second time against the host's non-loopback address over plain HTTP.
 - A sign-out whose server call fails still clears this browser, then logs
   `Auth.serverSignOutFailed`.
+- A refused refresh that read a stale copy of the store can still clear a renewal another tab
+  wrote. That tab then signs out, and the person signs in again. It never keeps a session alive.
 
 ### Links carry their secret in the fragment
 
@@ -153,8 +159,7 @@ An invite is `/invite#mi_<id>.<secret>`, and a reset link is `/reset#mr_<id>.<se
   stash goes stale at the first refresh, and Convex Auth then ends the session as reused.
 - A BroadcastChannel beside `storage` events. The events already reach every other tab for exactly
   the keys that change.
-- A separate generation counter or sign-out marker beside each session key. The tokens already
-  identify every write, since each sign-in and each refresh issues new ones, so comparing them is
-  the check.
+- Web Locks around each write. They exist only in secure contexts, and a lock does not make
+  another process's copy of `localStorage` current, so the ended list has to hold without one.
 - Secrets in the path or the query. Both reach the server's request log and any proxy in the
   first request, and stay in history until the link expires.

@@ -1,10 +1,44 @@
-import { Context, Effect, Layer, Option, Queue, Redacted, Ref, Schema, Stream } from "effect";
+import {
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Queue,
+  Redacted,
+  Ref,
+  Result,
+  Schema,
+  Stream,
+} from "effect";
+import * as Base64Url from "effect/encoding/Base64Url";
 
 /** A Convex Auth session: the short-lived JWT and the refresh token that renews it. */
 export interface StoredSession {
   readonly token: Redacted.Redacted;
   readonly refreshToken: Redacted.Redacted;
 }
+
+/** The JSON text of a token's claims, when it reads as a JWT. */
+export const tokenPayload = (token: string): Option.Option<string> => {
+  const [, payload] = token.split(".");
+
+  if (payload === undefined) return Option.none();
+  const text = Base64Url.decodeString(payload);
+
+  return Result.isSuccess(text) ? Option.some(text.success) : Option.none();
+};
+
+/** Convex Auth signs `sub` as `userId|sessionId`, so equal subjects name one session. */
+const decodeSubject = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ sub: Schema.String })),
+);
+
+/** The account and session `session` signs in as, which a renewal keeps. */
+export const sessionOf = (session: StoredSession): Option.Option<string> =>
+  Option.map(
+    Option.flatMap(tokenPayload(Redacted.value(session.token)), decodeSubject),
+    (claims) => claims.sub,
+  );
 
 /** Reading or writing the token store failed. */
 export class TokenStorageError extends Schema.TaggedError<TokenStorageError>()(
@@ -22,6 +56,12 @@ export interface Interface {
   readonly load: Effect.Effect<Option.Option<StoredSession>, TokenStorageError>;
   readonly save: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
   readonly clear: Effect.Effect<void, TokenStorageError>;
+  /**
+   * Clears the store after `session` signed out, and keeps that sign-in out of it for good: a
+   * write of the same session that lands later, such as another tab's renewal that started before
+   * the sign-out, loads as no session.
+   */
+  readonly end: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
   /**
    * Saves `next`, or clears the store for none, only while it still holds `expected` (none: no
    * session); whether it did. A refresh commits its result this way, so it never overwrites what
@@ -52,6 +92,7 @@ export const sameStored = Option.makeEquivalence<StoredSession>(
  */
 export const owned = (store: Pick<Interface, "load" | "save" | "clear">): Interface => ({
   ...store,
+  end: () => store.clear,
   replace: (_expected, next) =>
     Option.match(next, { onNone: () => store.clear, onSome: store.save }).pipe(Effect.as(true)),
   changed: Stream.never,
@@ -92,13 +133,6 @@ export interface KeyValueStore {
    * so it suits a store that one client owns.
    */
   readonly subscribe?: (key: string, onChange: () => void) => () => void;
-  /**
-   * Runs `write` while no other client writes `key`, such as under a Web Lock, and settles with
-   * its result. Every write to the session goes through it. Without it, a write that checks the
-   * stored value first trusts that nothing runs between its read and its write, which holds for
-   * `localStorage` within one tab.
-   */
-  readonly exclusive?: <A>(key: string, write: () => Promise<A>) => Promise<A>;
 }
 
 const SerializedSession = Schema.fromJsonString(
@@ -151,19 +185,59 @@ const failure =
   (cause: unknown): TokenStorageError =>
     new TokenStorageError({ operation, message, cause });
 
-/** Stores the session under `key` in a string key-value store. */
+/** How many signed-out sessions a key remembers. */
+const ENDED_KEPT = 16;
+
+const EndedSessions = Schema.fromJsonString(Schema.Array(Schema.String));
+
+const decodeEnded = Schema.decodeUnknownOption(EndedSessions);
+
+const encodeEnded = Schema.encodeSync(EndedSessions);
+
+const hasEnded = (ended: ReadonlyArray<string>, session: StoredSession): boolean =>
+  Option.exists(sessionOf(session), (id) => ended.includes(id));
+
+/**
+ * Stores the session under `key` in a string key-value store, and the sessions signed out there
+ * under `<key>.ended`. A store several clients share, such as `localStorage` across tabs, offers
+ * no atomic write, so a renewal can land after another tab's sign-out; the ended list makes such a
+ * session load as none, and the read that finds it removes it.
+ */
 export const layerKeyValue = (store: KeyValueStore, key: string): Layer.Layer<TokenStorage> => {
-  const exclusively = <A>(write: () => Promise<A>): Promise<A> =>
-    store.exclusive === undefined ? write() : store.exclusive(key, write);
+  const endedKey = `${key}.ended`;
 
-  const read = async () => {
+  const readEnded = async (): Promise<ReadonlyArray<string>> => {
+    const text = await store.getItem(endedKey);
+
+    return text === null ? [] : Option.getOrElse(decodeEnded(text), () => []);
+  };
+
+  const read = async (): Promise<Option.Option<StoredSession>> => {
     const text = await store.getItem(key);
+    const held = text === null ? Option.none() : parseStoredSession(text);
 
-    return text === null ? Option.none() : parseStoredSession(text);
+    if (Option.isNone(held) || !hasEnded(await readEnded(), held.value)) return held;
+    await store.removeItem(key);
+
+    return Option.none();
   };
 
   const write = async (next: Option.Option<StoredSession>) =>
     Option.isSome(next) ? store.setItem(key, serializeSession(next.value)) : store.removeItem(key);
+
+  const markEnded = async (session: StoredSession, ended: boolean) => {
+    const id = sessionOf(session);
+
+    if (Option.isNone(id)) return;
+    const before = await readEnded();
+    const others = before.filter((held) => held !== id.value);
+
+    if (!ended && others.length === before.length) return;
+    await store.setItem(
+      endedKey,
+      encodeEnded(ended ? [...others, id.value].slice(-ENDED_KEPT) : others),
+    );
+  };
 
   return Layer.succeed(
     TokenStorage,
@@ -174,22 +248,35 @@ export const layerKeyValue = (store: KeyValueStore, key: string): Layer.Layer<To
       }),
       save: (session) =>
         Effect.tryPromise({
-          try: () => exclusively(() => write(Option.some(session))),
+          try: async () => {
+            await markEnded(session, false);
+            await write(Option.some(session));
+          },
           catch: failure("save", "Token storage failed to save the session"),
         }),
       clear: Effect.tryPromise({
-        try: () => exclusively(() => write(Option.none())),
+        try: () => write(Option.none()),
         catch: failure("clear", "Token storage failed to clear the session"),
       }),
+      end: (session) =>
+        Effect.tryPromise({
+          try: () => write(Option.none()),
+          catch: failure("clear", "Token storage failed to clear the session"),
+        }).pipe(
+          Effect.andThen(
+            Effect.tryPromise(() => markEnded(session, true)).pipe(
+              Effect.catch(() => Effect.logWarning("TokenStorage.endedSessionNotKept")),
+            ),
+          ),
+        ),
       replace: (expected, next) =>
         Effect.tryPromise({
-          try: () =>
-            exclusively(async () => {
-              if (!sameStored(await read(), expected)) return false;
-              await write(next);
+          try: async () => {
+            if (!sameStored(await read(), expected)) return false;
+            await write(next);
 
-              return true;
-            }),
+            return true;
+          },
           catch: failure(
             Option.isSome(next) ? "save" : "clear",
             "Token storage failed to replace the session",

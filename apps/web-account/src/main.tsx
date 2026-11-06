@@ -19,11 +19,7 @@ const router = createRouter({
   defaultPreload: "intent",
   scrollRestoration: true,
   context: {
-    origin: makeOriginStore(
-      window.localStorage,
-      window,
-      window.isSecureContext ? navigator.locks : null,
-    ),
+    origin: makeOriginStore(window.localStorage, window),
     linkSecret,
   },
 });

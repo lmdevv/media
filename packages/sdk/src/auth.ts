@@ -25,14 +25,12 @@ import {
   Option,
   Redacted,
   Ref,
-  Result,
   Schedule,
   Schema,
   Semaphore,
   Stream,
   SubscriptionRef,
 } from "effect";
-import * as Base64Url from "effect/encoding/Base64Url";
 
 import * as ConvexTransport from "./convex-transport";
 import type { CallError } from "./sdk-errors";
@@ -160,32 +158,17 @@ const RefreshResult = Schema.Struct({ tokens: Schema.NullOr(Tokens) });
 
 const ExpiryClaims = Schema.Struct({ exp: Schema.Finite });
 
-/** Convex Auth signs `sub` as `userId|sessionId`, so equal subjects name one session. */
-const SubjectClaims = Schema.Struct({ sub: Schema.String });
-
 const decodeExpiry = Schema.decodeUnknownOption(Schema.fromJsonString(ExpiryClaims));
-
-const decodeSubject = Schema.decodeUnknownOption(Schema.fromJsonString(SubjectClaims));
 
 const EXPIRY_MARGIN_MS = 60_000;
 
-const tokenPayload = (token: string): Option.Option<string> => {
-  const [, payload] = token.split(".");
-
-  if (payload === undefined) return Option.none();
-  const text = Base64Url.decodeString(payload);
-
-  return Result.isSuccess(text) ? Option.some(text.success) : Option.none();
-};
-
 const tokenExpiry = (token: string): Option.Option<number> =>
-  Option.map(Option.flatMap(tokenPayload(token), decodeExpiry), (claims) => claims.exp * 1000);
-
-const sessionOf = (session: StoredSession): Option.Option<string> =>
   Option.map(
-    Option.flatMap(tokenPayload(Redacted.value(session.token)), decodeSubject),
-    (claims) => claims.sub,
+    Option.flatMap(TokenStorage.tokenPayload(token), decodeExpiry),
+    (claims) => claims.exp * 1000,
   );
+
+const { sessionOf } = TokenStorage;
 
 const isSameSession = (a: StoredSession, b: StoredSession): boolean => {
   const held = sessionOf(a);
@@ -414,9 +397,9 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     yield* SubscriptionRef.set(reconnecting, false);
   });
 
-  const forget = Effect.fn("Auth.forget")(function* () {
+  const forget = Effect.fn("Auth.forget")(function* (ended: Option.Option<StoredSession>) {
     yield* adopt(Option.none());
-    yield* storage.clear;
+    yield* Option.match(ended, { onNone: () => storage.clear, onSome: storage.end });
     yield* Ref.set(lastStored, Option.none());
   });
 
@@ -622,8 +605,20 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     }
   });
 
+  /**
+   * Follows another writer. A session held here that the store no longer holds is also ended on
+   * the server, since the tab that signed it out may not have reached the server, and this client
+   * may hold a renewal that tab never saw.
+   */
   const follow = Effect.fn("Auth.follow")(function* () {
-    yield* adoptStored(yield* storage.load);
+    const stored = yield* storage.load;
+    const held = yield* Ref.get(session);
+
+    yield* adoptStored(stored);
+
+    if (Option.isSome(held) && Option.isNone(stored)) {
+      yield* Effect.forkIn(endOnServer(held.value), scope);
+    }
   }, committing.withPermits(1));
 
   const endUnlessStored = (renewed: StoredSession, stored: Option.Option<StoredSession>) =>
@@ -739,7 +734,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     const { ended, cleared } = yield* committing.withPermits(1)(
       Effect.gen(function* () {
         const current = yield* Ref.get(session);
-        const exit = yield* Effect.exit(forget());
+        const exit = yield* Effect.exit(forget(current));
 
         return { ended: current, cleared: exit };
       }),
