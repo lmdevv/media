@@ -58,7 +58,8 @@ mount media read-only.
   start instead. Household streams leave the limit as it is when guests' slots are not enough.
 - A taken slot counts as part of the stream that took it, and so does the slot of a stream that a
   newer one in its session replaces. If the taker leaves before that slot is free, the slot passes
-  to whoever took the taker's own slot. Failing that, it counts on its own.
+  to whoever took the taker's own slot, and a guest's slot that passes to a household stream
+  yields as a taken one does. Failing that, it counts on its own.
 - An encoder starts only while fewer encoders than the limit run, counting every one not yet
   stopped. Taken and replaced encoders that are still stopping hold back the streams that took
   their slots, so the limit is never exceeded.

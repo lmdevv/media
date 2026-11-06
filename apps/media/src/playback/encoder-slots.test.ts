@@ -345,6 +345,41 @@ describe("encoder slots", () => {
   );
 
   it.effect(
+    "a guest's older slot passes to the household stream that displaced its renegotiation",
+    () =>
+      Effect.gen(function* () {
+        const pool = yield* EncoderSlots.make(1);
+        const oldScope = yield* Scope.make();
+        const old = yield* pool.guest(oldScope, claimant("old", 1, { session: "guest" }));
+        yield* old.ready;
+        const renegotiatedScope = yield* Scope.make();
+        yield* pool.guest(renegotiatedScope, claimant("new", 2, { session: "guest" }));
+        const held = yield* pool.household(yield* Scope.make(), claimant("household", 3));
+        const ready = yield* Effect.forkChild(held.ready);
+        yield* close(renegotiatedScope);
+
+        assert.isTrue(yield* old.isDisplaced, "the renegotiation never replaced the older stream");
+        assert.isTrue(yield* stillRunning(ready), "the older stream's encoder still runs");
+
+        yield* close(oldScope);
+        yield* Fiber.join(ready);
+      }),
+  );
+
+  it.effect("a household stream whose scope already closed takes no guest's slot", () =>
+    Effect.gen(function* () {
+      const pool = yield* EncoderSlots.make(1);
+      const guest = yield* pool.guest(yield* Scope.make(), claimant("guest", 1));
+      yield* guest.ready;
+      const closed = yield* Scope.make();
+      yield* close(closed);
+      yield* pool.household(closed, claimant("household", 2));
+
+      assert.isFalse(yield* guest.isDisplaced);
+    }),
+  );
+
+  it.effect(
     "never runs more encoders than the limit, whatever streams start, yield or stop",
     () =>
       Effect.gen(function* () {

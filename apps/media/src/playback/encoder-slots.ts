@@ -1,6 +1,6 @@
 import type { PlaybackSessionId } from "@media/contracts/ids";
 import { TranscodeCapacityReached } from "@media/contracts/media-playback";
-import { Data, Deferred, Effect, Ref, Scope } from "effect";
+import { Data, Deferred, Effect, Predicate, Ref, Scope } from "effect";
 
 /** Who a stream plays for, which sets its priority under a limit (ADR 0007, ADR 0014). */
 export type Audience = "household" | "guest";
@@ -83,6 +83,7 @@ const Turn = Data.taggedEnum<Turn>();
 type HouseholdDecision = Data.TaggedEnum<{
   Take: { readonly victims: ReadonlyArray<Slot> };
   Full: {};
+  Closed: {};
 }>;
 
 const HouseholdDecision = Data.taggedEnum<HouseholdDecision>();
@@ -162,19 +163,24 @@ const joinLine = (state: State, waiter: Waiter): State => {
   return { ...state, line: [...state.line.slice(0, at), waiter, ...state.line.slice(at)] };
 };
 
-const remove = (state: State, id: number): State => {
-  const leaving = state.slots.get(id);
+const remove = (state: State, id: number): readonly [ReadonlyArray<Slot>, State] => {
+  const taker = state.slots.get(id)?.takenOverBy ?? null;
+  const toHousehold = taker !== null && state.slots.get(taker)?.audience === "household";
   const slots = new Map<number, Slot>();
+  const displaced: Array<Slot> = [];
 
   for (const slot of state.slots.values()) {
     if (slot.id === id) continue;
-    slots.set(
-      slot.id,
-      slot.takenOverBy === id ? { ...slot, takenOverBy: leaving?.takenOverBy ?? null } : slot,
-    );
+
+    if (slot.takenOverBy === id) {
+      if (toHousehold && slot.audience === "guest") displaced.push(slot);
+      slots.set(slot.id, { ...slot, takenOverBy: taker });
+    } else {
+      slots.set(slot.id, slot);
+    }
   }
 
-  return { slots, line: state.line.filter((waiter) => waiter.slot.id !== id) };
+  return [displaced, { slots, line: state.line.filter((waiter) => waiter.slot.id !== id) }];
 };
 
 const startIfRoom = (state: State, id: number, limit: number): readonly [Turn, State] => {
@@ -197,6 +203,9 @@ const settle = (waiters: ReadonlyArray<Waiter>) =>
   Effect.forEach(waiters, (waiter) => Deferred.succeed(waiter.settled, undefined), {
     discard: true,
   });
+
+const displace = (slots: ReadonlyArray<Slot>) =>
+  Effect.forEach(slots, (slot) => Deferred.succeed(slot.displaced, undefined), { discard: true });
 
 /** Builds a limit of `limit` running encoders, a whole number of at least 1. */
 export const make = Effect.fnUntraced(function* (limit: number) {
@@ -221,8 +230,15 @@ export const make = Effect.fnUntraced(function* (limit: number) {
     );
 
   const leave = (slot: Slot) =>
-    Ref.modify(state, (current) => fillLine(remove(current, slot.id), limit)).pipe(
-      Effect.flatMap(settle),
+    Ref.modify(state, (current) => {
+      const [displaced, left] = remove(current, slot.id);
+      const [seated, next] = fillLine(left, limit);
+
+      return [{ displaced, seated }, next] as const;
+    }).pipe(
+      Effect.flatMap(({ displaced, seated }) =>
+        Effect.andThen(displace(displaced), settle(seated)),
+      ),
       Effect.andThen(Deferred.succeed(slot.freed, undefined)),
     );
 
@@ -255,26 +271,28 @@ export const make = Effect.fnUntraced(function* (limit: number) {
       const slot = yield* slotFor(claimant, "household");
 
       const decision = yield* Ref.modify(state, (current) => {
+        if (Predicate.isTagged(scope.state, "Closed")) {
+          return [HouseholdDecision.Closed(), current] as const;
+        }
+
         const decided = decideHousehold(current, claimant, limit);
 
         return HouseholdDecision.$match(decided, {
           Take: ({ victims }) =>
             [decided, { ...current, slots: seat(current.slots, slot, victims) }] as const,
           Full: () => [decided, current] as const,
+          Closed: () => [decided, current] as const,
         });
       });
 
       return yield* HouseholdDecision.$match(decision, {
         Take: ({ victims }) =>
           Scope.addFinalizer(scope, leave(slot)).pipe(
-            Effect.andThen(
-              Effect.forEach(victims, (victim) => Deferred.succeed(victim.displaced, undefined), {
-                discard: true,
-              }),
-            ),
+            Effect.andThen(displace(victims)),
             Effect.as(heldBy(slot)),
           ),
         Full: () => Effect.fail(new TranscodeCapacityReached({ limit })),
+        Closed: () => Effect.succeed(heldBy(slot)),
       });
     }).pipe(Effect.uninterruptible);
 
