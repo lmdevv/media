@@ -199,6 +199,8 @@ const KEEP_INIT_WAIT = Duration.seconds(2);
 
 const READY_WAIT = Duration.times(Duration.sum(KEEP_INIT_WAIT, STOP_WAIT), 2);
 
+const FIRST_RUN_WAIT = Duration.sum(READY_WAIT, Duration.times(START_WAIT, 2));
+
 const FRAGMENT_FILE = /^f\d+\.m4s$/;
 
 /**
@@ -322,6 +324,8 @@ const HARDWARE_MODES: Partial<Record<PlaybackMode, HardwareAcceleration.Hardware
 const hardwareOf = (mode: PlaybackMode): HardwareAcceleration.HardwareEncoder | undefined =>
   HARDWARE_MODES[mode];
 
+const noSegment = (): number => -1;
+
 const isClosed = (scope: Scope.Scope): boolean => Predicate.isTagged(scope.state, "Closed");
 
 const without = <K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> => {
@@ -346,6 +350,12 @@ const beginStop = (stream: Lifecycle, run: RunScope) =>
           Effect.asVoid,
         ),
   ).pipe(Effect.uninterruptible);
+
+/** Answers `late()` once `wait` passed; the steps the request waits on belong to its stream. */
+const answerWithin =
+  <L>(wait: Duration.Duration, late: () => L) =>
+  <A, E, R>(request: Effect.Effect<A, E, R>) =>
+    request.pipe(Effect.timeoutOrElse({ duration: wait, orElse: () => Effect.fail(late()) }));
 
 const awaitStopped = (run: RunScope) =>
   Effect.interruptible(
@@ -1074,13 +1084,17 @@ const make = Effect.gen(function* () {
   const using = <A, E>(
     streamId: StreamId,
     grant: PlaybackGrant,
+    notReady: (session: Session) => number,
     f: (session: Session) => Effect.Effect<A, E>,
   ) =>
     lookup(streamId, grant).pipe(
       Effect.flatMap((session) =>
         Effect.acquireUseRelease(
           admit(session, grant.expiresAt),
-          () => f(session),
+          () =>
+            f(session).pipe(
+              answerWithin(SEGMENT_WAIT, () => new SegmentNotReady({ index: notReady(session) })),
+            ),
           () => leave(session),
         ),
       ),
@@ -1619,23 +1633,21 @@ const make = Effect.gen(function* () {
 
     const segmentIndex = segmentAt(segmentPlan, quickStart);
 
-    const first = yield* transition(
-      session,
-      startGeneration(session, run, Option.none(), 1, segmentIndex),
-    );
+    const refused = () =>
+      new TranscodeCapacityReached({ limit: (transcoding ? transcodes : copies).limit });
 
-    if (Option.isNone(first)) {
-      return yield* new TranscodeCapacityReached({
-        limit: (transcoding ? transcodes : copies).limit,
-      });
-    }
+    const generation = yield* Effect.gen(function* () {
+      const first = yield* transition(
+        session,
+        startGeneration(session, run, Option.none(), 1, segmentIndex),
+      );
 
-    const started = first.value;
+      if (Option.isNone(first)) return yield* refused();
 
-    const generation =
-      hardwareOf(plan.mode) !== undefined
-        ? yield* firstSegment(session, started, segmentIndex)
-        : started;
+      return hardwareOf(plan.mode) !== undefined
+        ? yield* firstSegment(session, first.value, segmentIndex)
+        : first.value;
+    }).pipe(answerWithin(FIRST_RUN_WAIT, refused));
 
     const mode = yield* Ref.get(session.mode);
 
@@ -1657,7 +1669,7 @@ const make = Effect.gen(function* () {
     generation: number,
     grant: PlaybackGrant,
   ) {
-    return yield* using(streamId, grant, (session) =>
+    return yield* using(streamId, grant, noSegment, (session) =>
       currentGeneration(session, generation).pipe(
         Effect.as({ streamId, generation, plan: session.plan } satisfies StreamView),
       ),
@@ -1692,7 +1704,7 @@ const make = Effect.gen(function* () {
     generation: number,
     grant: PlaybackGrant,
   ) {
-    return yield* using(streamId, grant, (session) =>
+    return yield* using(streamId, grant, noSegment, (session) =>
       Effect.gen(function* () {
         const initPath = yield* InitSource.$match(yield* initSource(session, generation), {
           Kept: ({ file }) => Effect.succeed(file),
@@ -1723,26 +1735,30 @@ const make = Effect.gen(function* () {
     index: number,
     grant: PlaybackGrant,
   ) {
-    return yield* using(streamId, grant, (session) =>
-      Effect.gen(function* () {
-        if (!Number.isInteger(index) || index < 0 || index >= session.plan.starts.length) {
-          return yield* new SegmentNotFound({ index });
-        }
+    return yield* using(
+      streamId,
+      grant,
+      () => index,
+      (session) =>
+        Effect.gen(function* () {
+          if (!Number.isInteger(index) || index < 0 || index >= session.plan.starts.length) {
+            return yield* new SegmentNotFound({ index });
+          }
 
-        yield* currentGeneration(session, generation);
-        yield* Ref.update(session.requested, (furthest) => Math.max(furthest, index));
-        const covering = yield* ensureCovers(session, index);
+          yield* currentGeneration(session, generation);
+          yield* Ref.update(session.requested, (furthest) => Math.max(furthest, index));
+          const covering = yield* ensureCovers(session, index);
 
-        if (covering.number !== generation) {
-          return yield* new StreamGenerationGone({
-            streamId,
-            generation,
-            currentGeneration: covering.number,
-          });
-        }
+          if (covering.number !== generation) {
+            return yield* new StreamGenerationGone({
+              streamId,
+              generation,
+              currentGeneration: covering.number,
+            });
+          }
 
-        return yield* awaitSegment(session, covering, index, SEGMENT_WAIT);
-      }),
+          return yield* awaitSegment(session, covering, index, SEGMENT_WAIT);
+        }),
     );
   });
 
@@ -1751,9 +1767,12 @@ const make = Effect.gen(function* () {
     seconds: number,
     grant: PlaybackGrant,
   ) {
-    return yield* using(streamId, grant, (session) =>
+    const indexOf = (session: Session) =>
+      segmentAt(session.plan, session.file.probe.startSeconds + seconds);
+
+    return yield* using(streamId, grant, indexOf, (session) =>
       Effect.gen(function* () {
-        const index = segmentAt(session.plan, session.file.probe.startSeconds + seconds);
+        const index = indexOf(session);
         const covering = yield* ensureCovers(session, index);
         yield* Effect.annotateCurrentSpan({
           streamId,

@@ -123,6 +123,23 @@ const smallTurns = Effect.provideService(Scheduler.MaxOpsBeforeYield, 3);
 
 const MOVE_TURNS = Array.from({ length: 40 }, (_, turn) => turn);
 
+const stalledRemovals = {
+  armed: false,
+  reached: Promise.withResolvers<void>(),
+  release: Promise.withResolvers<void>(),
+};
+
+const stallNextMoveRemoval = () => {
+  stalledRemovals.armed = true;
+  stalledRemovals.reached = Promise.withResolvers<void>();
+  stalledRemovals.release = Promise.withResolvers<void>();
+};
+
+const releaseStalledRemovals = Effect.sync(() => {
+  stalledRemovals.armed = false;
+  stalledRemovals.release.resolve();
+});
+
 const holdNextMove = () => {
   moves.armed = true;
   moves.reached = Promise.withResolvers<void>();
@@ -134,12 +151,19 @@ const heldInitCopies = Layer.effect(
     FileSystem.FileSystem.of({
       ...real,
       remove: (target, options) =>
-        moves.armed && KEPT_INIT_OF_MOVE.test(target)
-          ? Effect.sync(() => {
-              moves.armed = false;
-              moves.reached.resolve();
-            }).pipe(Effect.andThen(Effect.forEach(MOVE_TURNS, () => Effect.yieldNow)))
-          : real.remove(target, options),
+        stalledRemovals.armed && KEPT_INIT_OF_MOVE.test(target)
+          ? Effect.suspend(() => {
+              stalledRemovals.armed = false;
+              stalledRemovals.reached.resolve();
+
+              return Effect.promise(() => stalledRemovals.release.promise);
+            }).pipe(Effect.andThen(real.remove(target, options)))
+          : moves.armed && KEPT_INIT_OF_MOVE.test(target)
+            ? Effect.sync(() => {
+                moves.armed = false;
+                moves.reached.resolve();
+              }).pipe(Effect.andThen(Effect.forEach(MOVE_TURNS, () => Effect.yieldNow)))
+            : real.remove(target, options),
       makeDirectory: (target, options) =>
         folders.failNext && RUN_FOLDER.test(target)
           ? Effect.suspend(() => {
@@ -520,6 +544,58 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
 
           yield* sessions.stop(after.streamId, household.grant);
         }).pipe(Effect.ensuring(Effect.sync(() => (moves.armed = false)))),
+      120_000,
+    );
+  });
+
+  layer(subject(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
+    it.effect(
+      "requests answer within their bound while a seek's step waits on a stalled disk, and the stream recovers",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const who = yield* viewer("household");
+          const started = yield* playing(who);
+          const view = yield* sessions.playlist(started.streamId, started.generation, who.grant);
+          const index = segmentAt(view.plan, who.request.file.probe.startSeconds + 6);
+
+          stallNextMoveRemoval();
+
+          const seeking = yield* Effect.forkChild(
+            sessions.seek(started.streamId, 6, who.grant).pipe(Effect.exit),
+          );
+
+          yield* Effect.promise(() => stalledRemovals.reached.promise);
+
+          const queued = yield* Effect.forkChild(
+            sessions
+              .segment(started.streamId, started.generation + 1, index, who.grant)
+              .pipe(Effect.exit),
+          );
+
+          const answered = yield* Fiber.join(queued).pipe(Effect.timeout("35 seconds"));
+          const sought = yield* Fiber.join(seeking).pipe(Effect.timeout("5 seconds"));
+
+          assert.isTrue(
+            failsWith(answered, "SegmentNotReady"),
+            `the queued segment request answers not ready: ${String(answered)}`,
+          );
+          assert.isTrue(
+            failsWith(sought, "SegmentNotReady"),
+            `the seek answers not ready: ${String(sought)}`,
+          );
+
+          yield* releaseStalledRemovals;
+
+          const moved = yield* sessions.seek(started.streamId, 6, who.grant);
+
+          assert.isAbove(moved.generation, started.generation, "the seek's step finished");
+
+          yield* sessions
+            .segment(started.streamId, moved.generation, index, who.grant)
+            .pipe(Effect.timeout("15 seconds"));
+          yield* sessions.stop(started.streamId, who.grant);
+        }).pipe(Effect.ensuring(releaseStalledRemovals)),
       120_000,
     );
   });

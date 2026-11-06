@@ -430,7 +430,7 @@ describe("encoder slots", () => {
   );
 
   it.effect(
-    "never runs more encoders than the limit, whatever streams start, seek, yield or stop, even mid-step",
+    "never runs more encoders than the limit, whatever streams start, seek, yield or stop, even mid-step or on a stalled disk",
     () =>
       Effect.gen(function* () {
         let cut = 0;
@@ -476,6 +476,8 @@ const YIELD_MAX_MS = 3000;
 const STOP_MAX_MS = 1000;
 
 const STALLED_STOP_MS = 20_000;
+
+const STALLED_DISK_MS = 40_000;
 
 const HOUSEHOLD_WAIT_BOUND_MS = YIELD_MAX_MS + STALLED_STOP_MS + 1000;
 
@@ -674,6 +676,11 @@ const simulate = (limit: number) =>
         const renewed = yield* held.renew(run);
 
         stream.status = "starting";
+
+        if ((yield* Random.nextIntBetween(0, 8, { halfOpen: true })) === 0) {
+          yield* Effect.sleep(Duration.millis(STALLED_DISK_MS));
+        }
+
         yield* beginStop(stream, previous);
 
         if (yield* begin(stream, run, renewed)) {
