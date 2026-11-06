@@ -665,7 +665,7 @@ const decideDevice = (principal: Principal, rule: DeviceRule, device: DeviceReso
   return holdsVerb(principal.scopes, device.domain, rule.verb) ? ALLOWED : forbidden("scope");
 };
 
-export const settingActions = ["change"] as const;
+export const settingActions = ["see", "change"] as const;
 
 export type SettingAction = (typeof settingActions)[number];
 
@@ -680,14 +680,23 @@ export interface SettingResource {
 }
 
 /**
- * Settings are their person's own, so nobody changes anyone else's, admins included. Changing one
- * needs `account` or the `play` scope of a domain that reads it, which a tile on a shared device
- * holds. A restriction never reads one: a preference neither widens nor narrows what a kid sees.
+ * Settings are their person's own, so nobody sees or changes anyone else's, admins included.
+ * Changing one needs `account` or the `play` scope of a domain that reads it, which a tile on a
+ * shared device holds. A restriction never reads one: a preference neither widens nor narrows what
+ * a kid sees.
  */
-const decideSetting = (principal: Principal, setting: SettingResource): Decision => {
+const decideSetting = (
+  principal: Principal,
+  action: SettingAction,
+  setting: SettingResource,
+): Decision => {
   if (principal.kind === "service") return hidden("service");
 
   if (principal.userId !== setting.owner) return hidden("not-yours");
+
+  if (principal.role === "guest") return forbidden("guest");
+
+  if (action === "see") return ALLOWED;
 
   return principal.scopes.includes("account") ||
     setting.domains.some((domain) => principal.scopes.includes(`${domain}:play`))
@@ -1269,7 +1278,7 @@ export function can(
   }
 
   if (resource.on === "setting" && isSettingAction(action)) {
-    return decideSetting(principal, resource);
+    return decideSetting(principal, action, resource);
   }
 
   if (resource.on === "download" && isDownloadAction(action)) {

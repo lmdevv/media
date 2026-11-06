@@ -2,29 +2,17 @@ import { v } from "convex/values";
 
 import type { ContentDomain } from "../../../commands/scopes";
 import { internal } from "../../_generated/api";
-import type { Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { MutationCtx } from "../../_generated/server";
-import { linkHolds } from "../guests/standing";
 import { inOrder } from "../lib/inOrder";
 import type { Principal } from "../permissions/policy";
 import { requireTogether } from "./access";
 import { pauseSession } from "./clock";
+import { guestLinkDied } from "./members";
 import { ABANDON_MS, BEAT_WRITE_MS, PRESENT_MS } from "./model";
 import { endSession } from "./sessions";
 
 const SWEEP_MAX = 100;
-
-/** A guest whose share link no longer holds, who will never come back to their seat. */
-const linkFailed = async (
-  ctx: Pick<MutationCtx, "db">,
-  userId: Id<"users">,
-  now: number,
-): Promise<boolean> => {
-  const user = await ctx.db.get(userId);
-
-  return user?.kind === "person" && user.role === "guest" && !(await linkHolds(ctx.db, user, now));
-};
 
 /**
  * Keeps the caller present in their session in `domain` and answers the server's clock, which a
@@ -88,7 +76,7 @@ export const sweep = internalMutation({
 
       if (member === null || session?.state !== "live") return;
 
-      if (member.state === "pending" || (await linkFailed(ctx, member.userId, now))) {
+      if (member.state === "pending" || (await guestLinkDied(ctx.db, member.userId, now))) {
         await ctx.db.delete(member._id);
 
         return;

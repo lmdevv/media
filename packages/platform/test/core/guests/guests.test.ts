@@ -8,7 +8,7 @@ import { api, internal } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { GUESTS_PER_LINK_MAX } from "../../../convex/core/guests/model";
 import { inOrder } from "../../../convex/core/lib/inOrder";
-import { PRESENT_MS } from "../../../convex/core/together/model";
+import { MEMBERS_MAX, PRESENT_MS } from "../../../convex/core/together/model";
 import { runFunction } from "../../admin";
 import { member } from "../../devices";
 import type { Member } from "../../devices";
@@ -499,6 +499,50 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
         host.userId,
       ]);
       expect(await refusal(currentOf(guest))).toBe("unauthenticated");
+    } finally {
+      await host.signedIn.client.mutation(api.core.together.leave, { domain: "movies" });
+    }
+  });
+
+  it("keeps no seat for a guest who went quiet before their link stopped holding", async () => {
+    if (stack === undefined) return;
+    const { admin: host, shared } = await shelf(stack);
+
+    await host.signedIn.client.action(api.core.together.create, { item: shared });
+
+    try {
+      const gone = await openLink(
+        stack,
+        (await makeLink(host, { kind: "session", domain: "movies" })).code,
+        "Sam",
+      );
+
+      await runFunction(
+        stack,
+        internal.core.together.presence.sweep,
+        { asOf: Date.now() + PRESENT_MS + 1000 },
+        Schema.Null,
+      );
+      await configureAs(host, false);
+      await configureAs(host, true);
+
+      const even = await makeLink(host, { kind: "session", domain: "movies" });
+      const odd = await makeLink(host, { kind: "session", domain: "movies" });
+
+      const answers = await inOrder(
+        Array.from({ length: MEMBERS_MAX }, (_, index) => index),
+        async (index) =>
+          refusal(openLink(stack, (index % 2 === 0 ? even : odd).code, `Guest ${index}`)),
+      );
+
+      expect(answers.filter((answer) => answer === "accepted")).toHaveLength(MEMBERS_MAX - 1);
+      expect(answers.at(-1)).toBe("conflict");
+
+      const after = await host.signedIn.client.query(api.core.together.get, { domain: "movies" });
+      const seated = after?.state === "joined" ? after.members.map((row) => row.userId) : [];
+
+      expect(seated).toHaveLength(MEMBERS_MAX);
+      expect(seated).not.toContain(gone.userId);
     } finally {
       await host.signedIn.client.mutation(api.core.together.leave, { domain: "movies" });
     }

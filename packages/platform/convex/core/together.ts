@@ -97,9 +97,11 @@ export const {
 
     if (place === "pending") return { state: "pending", sessionId: session._id, host };
 
+    const now = Date.now();
+
     const [joined, waiting] = await Promise.all([
-      membersIn(ctx, session._id, "joined"),
-      place === "host" ? membersIn(ctx, session._id, "pending") : null,
+      membersIn(ctx, session._id, "joined", now),
+      place === "host" ? membersIn(ctx, session._id, "pending", now) : null,
     ]);
 
     const people = new Map(
@@ -161,7 +163,7 @@ export const {
 
     if (row?.sessionId !== session._id) return fail("not_found", NO_REQUEST);
 
-    await admitMember(ctx, row);
+    await admitMember(ctx, row, Date.now());
 
     return null;
   },

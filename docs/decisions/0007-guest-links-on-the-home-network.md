@@ -103,6 +103,10 @@ links in phase 7.
   `read` scope, a guest cannot browse, search, make keys, or register or approve a device.
   Downloads refuse guests (ADR 0019). A guest holds no device, and only the web client has a
   guest flow, which is what web only means in the core.
+- A guest keeps no settings. The settings rule in `can` refuses a guest `see` and `change`, so
+  `core.settings.get` and `core.settings.set` answer `forbidden` and no settings row names a
+  guest. This adds `see` to the setting actions of ADR 0019, where reading had no rule. A
+  household session, an API key, and a tile still read their own settings with any scope.
 - `core.guests.current` tells a guest's client what the link names, who shared it, and when it
   stops working.
 
@@ -141,8 +145,11 @@ links in phase 7.
   `linkGuest`, so a typed name cannot pass for someone in the household.
 - Blocking a guest removes that guest. The link can let its holder in again as a new guest, so a
   host who wants them out for good revokes the link or locks the session.
-- A guest whose link stops holding loses their seat when the presence sweep finds them silent,
-  within about 40 seconds, so a switched-off link or a stopped maker leaves no seats taken.
+- A guest's seat lasts only while their link holds. `core.together.get` and the seat count read
+  each guest member's link, so a link that expires, a switch turned off, or a maker who lost the
+  right to share frees the seat at once, even for a guest who went quiet before it died. The next
+  person to enter the session deletes the dead rows, and the presence sweep drops a silent guest
+  whose link stopped holding.
 
 ### Limits
 
@@ -152,8 +159,12 @@ links in phase 7.
 - `@media/contracts/rate-limit` holds the per-address budgets for calls that need no session:
   `signIn` (10 at once, then one every 5 seconds) and `public` (60 at once, then 2 a second),
   and `admit`, a pure token bucket. The core never sees a client address, so the server applies
-  them from phase 4. Sign-in calls travel over the Convex WebSocket today, which no per-path HTTP
-  limit can count, so phase 4 decides where sign-ins pass an address-aware limit.
+  them from phase 4.
+- Until phase 4, nothing limits sign-ins per address. The `guest` provider, like every Convex
+  Auth sign-in, travels over the Convex WebSocket or `auth:signIn`, which no per-path HTTP limit
+  can count, and `@media/contracts/rate-limit` has no caller in production. Only the per-link and
+  per-maker limits in the core apply. Phase 4 routes sign-ins through a boundary that knows the
+  address and applies the `signIn` budget there.
 
 ### Rules in `can`
 

@@ -16,8 +16,10 @@ import { refusalOf } from "../../../convex/core/settings";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { enroll, listings, member, openTile, sharedAdmin, sharedDevice } from "../../devices";
 import type { Member } from "../../devices";
+import { guestOf } from "../../guests";
+import { movie, seedLibrary } from "../../probe";
 import { newestRows } from "../../rows";
-import { refusal, signIn, signInAs } from "../../sign-in";
+import { refusal, signIn, signInAs, unique } from "../../sign-in";
 import type { SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 
@@ -280,6 +282,31 @@ describe.skipIf(stack === undefined)("settings", { timeout: 120_000 }, () => {
     expect(await refusal(set(speaker, { volume: 0.5 }))).toBe("conflict");
     expect(await refusal(set(speaker, { gapless: false, volume: 0.5 }))).toBe("conflict");
     expect((await get(person.signedIn.client)).user.gapless).toBe(true);
+  });
+
+  it("refuse a guest from a share link any setting, to read or to change", async () => {
+    if (stack === undefined) return;
+
+    const maker = await sharedAdmin(stack);
+
+    const films = await seedLibrary(stack, maker, {
+      name: `guest-settings-${unique()}`,
+      kind: "movies",
+      items: [movie("shared.mkv", 0)],
+    });
+
+    const [itemId] = films.itemIds;
+
+    if (itemId === undefined) throw new Error("seeded no item");
+
+    const guest = await guestOf(stack, maker, {
+      domain: "movies",
+      ref: { type: "probeMovie", id: itemId },
+    });
+
+    expect(await refusal(get(guest.signedIn.client))).toBe("forbidden");
+    expect(await refusal(set(guest.signedIn.client, { autoplay: false }))).toBe("forbidden");
+    expect(await refusal(set(guest.signedIn.client, { volume: 0.25 }))).toBe("forbidden");
   });
 
   it("leave a kid's restrictions alone when the kid turns the explicit filter off", async () => {
