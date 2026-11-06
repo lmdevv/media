@@ -71,6 +71,7 @@ import type * as core_restrictions from "../core/restrictions.js";
 import type * as core_scans from "../core/scans.js";
 import type * as core_schemaMigrations from "../core/schemaMigrations.js";
 import type * as core_server from "../core/server.js";
+import type * as core_serviceProbe from "../core/serviceProbe.js";
 import type * as core_sessions from "../core/sessions.js";
 import type * as core_settings from "../core/settings.js";
 import type * as core_tickets from "../core/tickets.js";
@@ -156,6 +157,7 @@ declare const fullApi: ApiFromModules<{
   "core/scans": typeof core_scans;
   "core/schemaMigrations": typeof core_schemaMigrations;
   "core/server": typeof core_server;
+  "core/serviceProbe": typeof core_serviceProbe;
   "core/sessions": typeof core_sessions;
   "core/settings": typeof core_settings;
   "core/tickets": typeof core_tickets;

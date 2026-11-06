@@ -4,13 +4,13 @@ import type { Infer } from "convex/values";
 
 import { restrictions } from "../../../commands/access";
 import { callerScope, credentialScope, role } from "../../../commands/scopes";
-import type { CallerScope } from "../../../commands/scopes";
+import type { CallerScope, ServiceScope } from "../../../commands/scopes";
 import { internal } from "../../_generated/api";
 import type { Id } from "../../_generated/dataModel";
 import { internalQuery } from "../../_generated/server";
 import type { ActionCtx, DatabaseReader, QueryCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
-import { heldScopes, restrictionsOf } from "../permissions/policy";
+import { heldScopes, heldServiceScopes, restrictionsOf } from "../permissions/policy";
 import type { PersonDoc } from "../permissions/policy";
 import { boundDevice, liveSession } from "../sessions";
 
@@ -75,6 +75,42 @@ export const callerOfSession = async (
 
   return scope === "signed-in" || caller.scopes.includes(scope)
     ? caller
+    : fail("forbidden", `This session lacks the ${scope} scope`);
+};
+
+/** The service principal a server function runs as, checked live on this call. */
+export interface ServiceCaller {
+  readonly kind: "service";
+  readonly userId: Id<"users">;
+  readonly name: string;
+  readonly sessionId: Id<"authSessions">;
+  readonly scopes: ReadonlyArray<ServiceScope>;
+}
+
+/**
+ * The service principal of a session, or a refusal: `unauthenticated` when the session is not
+ * live, `forbidden` for a person's session or a service's that lacks `scope`. The mirror of
+ * `callerOfSession`: commands refuse services, and server functions refuse persons.
+ */
+export const serviceOfSession = async (
+  db: DatabaseReader,
+  sessionId: Id<"authSessions">,
+  scope: ServiceScope,
+): Promise<ServiceCaller> => {
+  const live = await liveSession(db, sessionId, Date.now());
+
+  if (live === null) return fail("unauthenticated", "This session has ended; sign in again");
+
+  const { session, user } = live;
+
+  if (user.kind !== "service") {
+    return fail("forbidden", "Only a service principal runs server functions");
+  }
+
+  const scopes = heldServiceScopes(session, user);
+
+  return scopes.includes(scope)
+    ? { kind: "service", userId: user._id, name: user.name, sessionId, scopes }
     : fail("forbidden", `This session lacks the ${scope} scope`);
 };
 

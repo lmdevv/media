@@ -2,7 +2,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 import { downloadItem, level, resourceId, resourceType, restrictions } from "../commands/access";
-import { assignableRole, contentDomain, credentialScope } from "../commands/scopes";
+import { assignableRole, contentDomain, credentialScope, keyScope } from "../commands/scopes";
 import { deviceSettingFields, downloadQuality, userSettingFields } from "../commands/settings";
 import { guestAccessDocument, linkDocument } from "./core/guests/model";
 import { importSource } from "./core/jobs/kinds";
@@ -120,7 +120,7 @@ export default defineSchema({
         ...sessionFields,
         kind: v.literal("apiKey"),
         keyId: v.id("apiKeys"),
-        scopes: v.array(credentialScope),
+        scopes: v.array(keyScope),
       }),
       v.object({
         ...sessionFields,
@@ -167,7 +167,7 @@ export default defineSchema({
     userId: v.id("users"),
     name: v.string(),
     secretHash: v.string(),
-    scopes: v.array(credentialScope),
+    scopes: v.array(keyScope),
     /** The user's `keyGeneration` when the key was made. */
     generation: v.number(),
     expiresAt: v.optional(v.number()),

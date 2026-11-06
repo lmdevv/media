@@ -29,6 +29,7 @@ import {
   roleScopes,
   roles,
   scopes,
+  serviceScopes,
 } from "../scopes.ts";
 import { GENERATED_NOTE } from "../note.ts";
 
@@ -211,6 +212,22 @@ const scopesFile = (): Emitted => {
         [
           "/** `CredentialScope` as a Convex validator, for stored credentials and their arguments. */",
           `export const credentialScope = ${literalValidator(credentialScopes)};`,
+        ].join("\n"),
+        [
+          "/** The scopes only a service principal's API key holds. No role allows one. */",
+          `export const serviceScopes = ${tuple(serviceScopes)};`,
+        ].join("\n"),
+        [
+          "/** A scope only a service principal's API key holds. */",
+          "export type ServiceScope = (typeof serviceScopes)[number];",
+        ].join("\n"),
+        [
+          "/** `ServiceScope` as a Convex validator. */",
+          `export const serviceScope = ${literalValidator(serviceScopes)};`,
+        ].join("\n"),
+        [
+          "/** A scope an API key can hold, a credential scope or a service scope, as a Convex validator. */",
+          "export const keyScope = v.union(credentialScope, serviceScope);",
         ].join("\n"),
         [
           "/** The content domains' scopes, the only scopes a session on a shared device holds. */",
