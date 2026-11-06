@@ -37,32 +37,31 @@ export const useAccountStore = (): OriginStore => useAccountContext().store;
 
 /**
  * Runs the platform client on the active slot, or on a fresh one while no one is active or while
- * `adding` someone. Switching the active person changes the slot, which opens a new client for
+ * the page signs someone new in. Switching the active person changes the slot, which opens a new client for
  * the tree, so a person's session never shares a client with another's.
  */
 export function AccountProvider({
   store,
   url,
-  adding,
+  freshSlot,
   children,
 }: {
   readonly store: OriginStore;
   readonly url: string;
-  readonly adding: boolean;
+  /** The page signs someone new in: adding someone, an invite, or a reset link. */
+  readonly freshSlot: boolean;
   readonly children: ReactNode;
 }) {
   const origin = useSyncExternalStore(store.subscribe, store.read, store.read);
-  const [staging, setStaging] = useState(() => ({ adding, slot: newSlot() }));
+  const [staging, setStaging] = useState(() => ({ fresh: freshSlot, slot: newSlot() }));
 
-  // A slot promoted to a person is theirs; entering `/add` again needs a fresh one. It changes only
-  // on entering, so the sign-in that promotes it keeps its client until it navigates away.
-  if (adding !== staging.adding) {
+  if (freshSlot !== staging.fresh) {
     const taken = [...origin.people.values()].includes(staging.slot);
 
-    setStaging({ adding, slot: adding && taken ? newSlot() : staging.slot });
+    setStaging({ fresh: freshSlot, slot: freshSlot && taken ? newSlot() : staging.slot });
   }
 
-  const slot = adding || origin.active === null ? staging.slot : origin.active;
+  const slot = freshSlot || origin.active === null ? staging.slot : origin.active;
 
   return (
     <Context value={{ store, origin, slot }}>

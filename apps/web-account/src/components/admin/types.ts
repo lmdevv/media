@@ -10,7 +10,6 @@ type Core = PlatformSdk["core"];
 /** A user as the users list shows them. */
 export type User = RowOf<Core["accounts"]["users"]["list"]>;
 
-/** A platform role. */
 export type Role = User["role"];
 
 /** A role an admin can give. */
@@ -19,7 +18,6 @@ export type AssignableRole = Parameters<Core["accounts"]["users"]["setRole"]>[0]
 /** An invite that still works. */
 export type Invite = RowOf<Core["accounts"]["invites"]["list"]>;
 
-/** A group of people. */
 export type Group = RowOf<Core["permissions"]["groups"]["list"]>;
 
 /** A person in a group. */
@@ -28,7 +26,6 @@ export type Member = RowOf<Core["permissions"]["groups"]["members"]>;
 /** A library as the libraries list shows it. */
 export type Library = RowOf<Core["libraries"]["list"]>;
 
-/** A library's id. */
 export type LibraryId = Library["libraryId"];
 
 /** A content domain, the kind of a library. */
@@ -49,10 +46,8 @@ export type Principal = Parameters<Core["permissions"]["grants"]["set"]>[0]["pri
 /** A kid's limits. */
 export type Restrictions = NonNullable<Result<Core["restrictions"]["get"]>>;
 
-/** A registered device. */
 export type Device = RowOf<Core["devices"]["registry"]["list"]>;
 
-/** A device's mode. */
 export type DeviceMode = Device["mode"];
 
 /** Whether guest links are on and their address. */

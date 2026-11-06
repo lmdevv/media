@@ -33,9 +33,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 function RootComponent() {
   const { origin } = Route.useRouteContext();
 
-  // Adding someone, accepting an invite, and using a reset link each sign a new session in, so
-  // they run on a fresh slot and leave the active person's session alone.
-  const adding = useRouterState({
+  const freshSlot = useRouterState({
     select: (state) =>
       state.matches.some(
         (match) => match.staticData.intent === "add" || match.staticData.need === "public",
@@ -45,7 +43,7 @@ function RootComponent() {
   return (
     <>
       <HeadContent />
-      <AccountProvider store={origin} url={PLATFORM_URL} adding={adding}>
+      <AccountProvider store={origin} url={PLATFORM_URL} freshSlot={freshSlot}>
         <Gate />
       </AccountProvider>
       <Toaster />

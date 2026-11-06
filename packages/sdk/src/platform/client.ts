@@ -32,7 +32,6 @@ export type TileProof = Data.TaggedEnum<{
   Approval: { readonly approvalId: Id<"tileApprovals"> };
 }>;
 
-/** Constructors and matchers for `TileProof`. */
 export const TileProof = Data.taggedEnum<TileProof>();
 
 /** What to sign in with. Each case is one of the platform's sign-in providers. */

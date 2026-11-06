@@ -144,10 +144,7 @@ export function ItemRow({
   );
 }
 
-/**
- * A warning-tinted line with a triangle, such as “You won’t see this link again”. It is a tint,
- * never a colored stripe.
- */
+/** A warning-tinted line with a triangle, such as “You won’t see this link again”. */
 export function Notice({
   children,
   action,

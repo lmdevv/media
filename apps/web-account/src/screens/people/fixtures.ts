@@ -2,7 +2,6 @@ import { Brand } from "effect";
 
 import type { Approval, SharedPicker, SharedTile, UserId } from "@/session/platform-types";
 
-/** A person's id, for tests. */
 export const userId: (raw: string) => UserId = Brand.nominal<UserId>();
 
 const approvalId: (raw: string) => Approval["approvalId"] = Brand.nominal<Approval["approvalId"]>();
@@ -51,7 +50,6 @@ export const approval = (
   ...fields,
 });
 
-/** An approval id, for tests. */
 export const anApprovalId = approvalId;
 
 /** The text of each button in `html`, and whether it is disabled. */

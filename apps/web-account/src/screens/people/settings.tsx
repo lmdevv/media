@@ -120,7 +120,6 @@ export function PasswordSection({
 }) {
   return (
     <Section title="Password">
-      {/* A changed password remounts the form, so neither password stays on screen. */}
       <PasswordForm
         key={status.kind === "done" ? "done" : "form"}
         status={status}

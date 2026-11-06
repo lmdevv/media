@@ -1,11 +1,10 @@
-import { ProfileTile } from "@media/ui/components/profile-tile";
+import { AddProfileTile, ProfileTile } from "@media/ui/components/profile-tile";
 import { useNavigate } from "@tanstack/react-router";
 
 import { useAccountActions } from "@/session/account";
 import type { UserId } from "@/session/platform-types";
 import type { PersonalTile } from "@/session/screen";
 
-import { AddPersonTile } from "./people/add-person-tile";
 import { PICKER_GRID, PickerPage } from "./people/picker-page";
 
 /**
@@ -35,7 +34,7 @@ export function PersonalPickerView({
           </li>
         ))}
         <li>
-          <AddPersonTile onClick={onAdd} />
+          <AddProfileTile label="Add someone" onClick={onAdd} />
         </li>
       </ul>
     </PickerPage>

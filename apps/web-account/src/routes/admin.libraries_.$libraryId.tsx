@@ -4,7 +4,6 @@ import { Brand } from "effect";
 import { LibraryScreen } from "@/components/admin/library";
 import type { LibraryId } from "@/components/admin/types";
 
-// The core checks the id on every call, and answers a malformed or unknown one as a missing library.
 const libraryId = Brand.nominal<LibraryId>();
 
 function Library() {

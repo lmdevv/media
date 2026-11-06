@@ -93,7 +93,6 @@ const changesOf = (store: KeyValueStore, key: string): Stream.Stream<void> => {
 
   if (subscribe === undefined) return Stream.never;
 
-  // A burst of changes needs one read of the store, so only the latest is kept.
   return Stream.callback<void>(
     (queue) =>
       Effect.acquireRelease(

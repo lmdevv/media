@@ -8,13 +8,11 @@ export type ServerInfo = Result<PlatformSdk["core"]["server"]["info"]>;
 /** Who is signed in, how, and with which scopes. */
 export type Me = Result<PlatformSdk["core"]["auth"]["sessions"]["current"]>;
 
-/** A person's id in the core. */
 export type UserId = Me["userId"];
 
 /** A device's picker as the core shows it. */
 export type PickerView = Result<PlatformSdk["core"]["devices"]["picker"]["show"]>;
 
-/** A shared device's picker. */
 export type SharedPicker = Extract<PickerView, { readonly mode: "shared" }>;
 
 /** One person's tile on a shared device. */

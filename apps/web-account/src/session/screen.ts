@@ -13,6 +13,8 @@ import type {
 
 type AuthStatus = ReturnType<typeof usePlatformStatus>;
 
+type QueryError = Extract<QueryState<unknown>, { readonly status: "error" }>["error"];
+
 /**
  * What a page needs before it shows: nothing (`public`), a sign-in of any kind (`anyone`), a
  * session that can change an account (`account`, which a shared-device tile session never has), or
@@ -79,6 +81,13 @@ export type Screen =
   | { readonly kind: "page"; readonly me: Me | null };
 
 const LOADING: Screen = { kind: "loading" };
+
+/**
+ * The server refused a session the client still holds: the SDK is renewing it, or a tile that
+ * opened on this shared device replaced it. Either way the status settles, so the gate waits.
+ */
+export const isRenewing = (error: QueryError): boolean =>
+  Predicate.isTagged(error, "Unauthenticated");
 
 const pageFor = (need: Need, me: Me): Screen => {
   if (need === "admin" && !me.scopes.includes("admin")) {
@@ -170,12 +179,8 @@ export const screenOf = (inputs: ScreenInputs): Screen => {
 
   if (me.status === "loading") return LOADING;
 
-  // A refused session is being renewed or replaced, such as by a tile opening on this shared
-  // device; the gate asks again, and the status turns signed out if the renewal fails.
   if (me.status === "error") {
-    return Predicate.isTagged(me.error, "Unauthenticated")
-      ? LOADING
-      : { kind: "unreachable", retry: me.retry };
+    return isRenewing(me.error) ? LOADING : { kind: "unreachable", retry: me.retry };
   }
 
   if (intent.kind === "page") return pageFor(intent.need, me.data);

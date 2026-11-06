@@ -1,6 +1,6 @@
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { Outlet, useRouterState } from "@tanstack/react-router";
-import { Brand, Match, Predicate } from "effect";
+import { Brand, Match } from "effect";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 
@@ -15,7 +15,7 @@ import { BlankPage, UnreachableScreen } from "@/screens/states";
 import { useAccountStore, useOrigin, useSlot } from "./account";
 import { MeContext } from "./me";
 import type { Origin, OriginStore } from "./origin";
-import { repairsOf, screenOf } from "./screen";
+import { isRenewing, repairsOf, screenOf } from "./screen";
 import type { Intent, Need, Repair, Screen, ScreenInputs } from "./screen";
 import type { UserId } from "./platform-types";
 
@@ -48,7 +48,6 @@ const useIntent = (): Intent => {
   if (route.intent === "add") return { kind: "add" };
 
   if (route.intent === "tile" && route.userId !== undefined) {
-    // A forged id matches no tile, and the gate shows the picker.
     return { kind: "tile", userId: Brand.nominal<UserId>()(route.userId) };
   }
 
@@ -78,7 +77,7 @@ const useRepairs = (inputs: ScreenInputs, active: UserId | null): void => {
  */
 const useAskAgain = (me: ScreenInputs["me"]): void => {
   useEffect(() => {
-    if (me.status === "error" && Predicate.isTagged(me.error, "Unauthenticated")) me.retry();
+    if (me.status === "error" && isRenewing(me.error)) me.retry();
   }, [me]);
 };
 
