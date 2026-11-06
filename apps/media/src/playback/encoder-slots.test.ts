@@ -1,16 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import {
-  Clock,
-  Duration,
-  Effect,
-  Exit,
-  Fiber,
-  Option,
-  Predicate,
-  Random,
-  Result,
-  Scope,
-} from "effect";
+import { Clock, Duration, Effect, Exit, Fiber, Predicate, Random, Result, Scope } from "effect";
 import { TestClock } from "effect/testing";
 
 import { PlaybackSessionId } from "@media/contracts/ids";
@@ -41,6 +30,53 @@ const close = (scope: Scope.Closeable) => Scope.close(scope, Exit.void);
 const isClosed = (scope: Scope.Scope) => Predicate.isTagged(scope.state, "Closed");
 
 describe("encoder slots", () => {
+  it.effect("a stream's next encoder takes its place and starts once the current one stopped", () =>
+    Effect.gen(function* () {
+      const pool = yield* EncoderSlots.make(1);
+      const current = yield* Scope.make();
+      const held = yield* pool.household(current, claimant("household", 1));
+      yield* held.ready;
+
+      const renewed = yield* held.renew(yield* Scope.make());
+      const starting = yield* Effect.forkChild(renewed.ready);
+
+      assert.isTrue(yield* stillRunning(starting), "the next encoder waits for the current one");
+
+      const refused = yield* pool
+        .household(yield* Scope.make(), claimant("other", 2))
+        .pipe(Effect.result);
+
+      assert.isTrue(Result.isFailure(refused), "the stream keeps its place");
+
+      yield* close(current);
+      yield* Fiber.join(starting);
+
+      assert.isFalse(yield* renewed.isDisplaced);
+    }),
+  );
+
+  it.effect("a guest's next encoder gives up at once when a household stream took its place", () =>
+    Effect.gen(function* () {
+      const pool = yield* EncoderSlots.make(1);
+      const guest = yield* Scope.make();
+      const held = yield* pool.guest(guest, claimant("guest", 1));
+      yield* held.ready;
+
+      const household = yield* pool.household(yield* Scope.make(), claimant("household", 2));
+      const renewed = yield* held.renew(yield* Scope.make());
+
+      yield* renewed.ready;
+      assert.isTrue(yield* renewed.isDisplaced, "the next encoder gives up");
+
+      const starting = yield* Effect.forkChild(household.ready);
+
+      assert.isTrue(yield* stillRunning(starting), "the household waits for the guest's encoder");
+
+      yield* close(guest);
+      yield* Fiber.join(starting);
+    }),
+  );
+
   it.effect("a guest waits while the limit is reached, and starts when a slot frees", () =>
     Effect.gen(function* () {
       const pool = yield* EncoderSlots.make(1);
@@ -597,20 +633,12 @@ const simulate = (limit: number) =>
         const run = yield* Scope.make();
         const renewed = yield* held.renew(run);
 
-        if (Option.isNone(renewed)) {
-          stream.status = "released";
-          yield* close(run);
-          yield* close(previous);
-
-          return;
-        }
-
         stream.run = run;
-        stream.held = renewed.value;
+        stream.held = renewed;
         stream.status = "starting";
         yield* Effect.forkDetach(close(previous));
 
-        if (yield* begin(stream, run, renewed.value)) return;
+        if (yield* begin(stream, run, renewed)) return;
 
         yield* Effect.sync(() => {
           if (stream.run === run && stream.status === "starting") stream.status = "released";

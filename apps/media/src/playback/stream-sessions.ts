@@ -1096,20 +1096,15 @@ const make = Effect.gen(function* () {
   ) {
     const scope = yield* Scope.fork(encoder.lease, "sequential");
     const held = yield* encoder.slot.renew(scope);
+    const started = yield* startGeneration(session, encoder.lease, { scope, held }, number, index);
 
-    const started = yield* Option.match(held, {
-      onNone: () => Effect.succeed(Option.none<Generation>()),
-      onSome: (renewed) =>
-        startGeneration(session, encoder.lease, { scope, held: renewed }, number, index),
-    });
-
-    if (Option.isNone(held) || Option.isNone(started)) {
+    if (Option.isNone(started)) {
       yield* stopEncoder(session, encoder.lease, Option.none());
 
       return yield* new SegmentNotReady({ index });
     }
 
-    yield* Ref.set(session.encoder, Encoder.Running({ lease: encoder.lease, slot: held.value }));
+    yield* Ref.set(session.encoder, Encoder.Running({ lease: encoder.lease, slot: held }));
 
     return started.value;
   });
@@ -1188,7 +1183,7 @@ const make = Effect.gen(function* () {
     );
 
     if (Option.isNone(started)) {
-      yield* closeWithin(lease);
+      yield* stopEncoder(session, lease, Option.none());
 
       return yield* new SegmentNotReady({ index });
     }

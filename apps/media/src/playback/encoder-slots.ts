@@ -1,6 +1,6 @@
 import type { PlaybackSessionId } from "@media/contracts/ids";
 import { TranscodeCapacityReached } from "@media/contracts/media-playback";
-import { Data, Deferred, Effect, Option, Predicate, Ref, Scope } from "effect";
+import { Data, Deferred, Effect, Predicate, Ref, Scope } from "effect";
 
 /** Who a stream plays for, which sets its priority under a limit (ADR 0007, ADR 0014). */
 export type Audience = "household" | "guest";
@@ -34,10 +34,11 @@ export interface Held {
   /**
    * Takes this slot's place for the holder's next encoder, until `scope` closes, without waiting.
    * This slot keeps counting until it is freed, so the next encoder's `ready` waits for this one's
-   * encoder to stop while the limit is reached. None, taking nothing, once this slot lost its
-   * place: a household stream took it, or a newer stream of the session did.
+   * encoder to stop while the limit is reached. Once this slot lost its place, because a household
+   * stream or a newer stream of the session took it, the new slot is displaced at once and takes
+   * nothing.
    */
-  readonly renew: (scope: Scope.Scope) => Effect.Effect<Option.Option<Held>>;
+  readonly renew: (scope: Scope.Scope) => Effect.Effect<Held>;
 }
 
 interface Pool {
@@ -297,10 +298,13 @@ export const make = Effect.fnUntraced(function* (limit: number) {
         return [true, { ...current, slots }] as const;
       });
 
-      if (!renewed) return Option.none<Held>();
-      yield* Scope.addFinalizer(scope, leave(slot));
+      if (renewed) {
+        yield* Scope.addFinalizer(scope, leave(slot));
+      } else {
+        yield* Deferred.succeed(slot.displaced, undefined);
+      }
 
-      return Option.some(heldBy(slot));
+      return heldBy(slot);
     }).pipe(Effect.uninterruptible);
 
   const household = (scope: Scope.Scope, claimant: Claimant) =>
