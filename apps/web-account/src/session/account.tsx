@@ -1,0 +1,189 @@
+import { PlatformProvider, usePlatform } from "@media/sdk/react";
+import { useNavigate } from "@tanstack/react-router";
+import { Predicate } from "effect";
+import { createContext, use, useState, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
+
+import { deviceName } from "./device-name";
+import { newSlot } from "./origin";
+import type { Origin, OriginStore, SlotId } from "./origin";
+import type { TileProof, UserId } from "./platform-types";
+
+interface AccountContext {
+  readonly store: OriginStore;
+  readonly origin: Origin;
+  /** The slot this tab's client runs on. */
+  readonly slot: SlotId;
+}
+
+const Context = createContext<AccountContext | null>(null);
+
+const useAccountContext = (): AccountContext => {
+  const context = use(Context);
+
+  if (context === null) throw new Error("useAccount must be used inside AccountProvider");
+
+  return context;
+};
+
+/** This browser's account state, kept current across tabs. */
+export const useOrigin = (): Origin => useAccountContext().origin;
+
+/** The slot this tab's client runs on. */
+export const useSlot = (): SlotId => useAccountContext().slot;
+
+/** The store behind `useOrigin`, for the gate's repairs. */
+export const useAccountStore = (): OriginStore => useAccountContext().store;
+
+/**
+ * Runs the platform client on the active slot, or on a fresh one while no one is active or while
+ * `adding` someone. Switching the active person changes the slot, which opens a new client for
+ * the tree, so a person's session never shares a client with another's.
+ */
+export function AccountProvider({
+  store,
+  url,
+  adding,
+  children,
+}: {
+  readonly store: OriginStore;
+  readonly url: string;
+  readonly adding: boolean;
+  readonly children: ReactNode;
+}) {
+  const origin = useSyncExternalStore(store.subscribe, store.read, store.read);
+  const [staging, setStaging] = useState(() => ({ adding, slot: newSlot() }));
+
+  // A slot promoted to a person is theirs; entering `/add` again needs a fresh one. It changes only
+  // on entering, so the sign-in that promotes it keeps its client until it navigates away.
+  if (adding !== staging.adding) {
+    const taken = [...origin.people.values()].includes(staging.slot);
+
+    setStaging({ adding, slot: adding && taken ? newSlot() : staging.slot });
+  }
+
+  const slot = adding || origin.active === null ? staging.slot : origin.active;
+
+  return (
+    <Context value={{ store, origin, slot }}>
+      <PlatformProvider url={url} storage={store.sessions} storageKey={store.sessionKey(slot)}>
+        {children}
+      </PlatformProvider>
+    </Context>
+  );
+}
+
+/** A password sign-in, a first owner, an invite, or a reset link. */
+type SignIn =
+  | { readonly kind: "password"; readonly username: string; readonly password: string }
+  | { readonly kind: "setUpOwner"; readonly username: string; readonly password: string }
+  | {
+      readonly kind: "invite";
+      readonly code: string;
+      readonly username: string;
+      readonly password: string;
+    }
+  | { readonly kind: "reset"; readonly code: string; readonly password: string };
+
+/** The sign-in worked, but this browser is a shared device, which opens tiles instead. */
+export class SharedDeviceError extends Error {
+  constructor() {
+    super("This browser is a shared device. Choose your tile instead.");
+    this.name = "SharedDeviceError";
+  }
+}
+
+/** Who this browser acts as, and the ways to change it. */
+export interface AccountActions {
+  /** Signs in, registers this browser as a device, and makes the person active. */
+  readonly signIn: (signIn: SignIn) => Promise<void>;
+  /** Acts as a person this browser already holds a session for, with no password. */
+  readonly switchTo: (userId: UserId) => void;
+  /** Opens a person's tile on this shared device, with a proof for a locked tile. */
+  readonly openTile: (userId: UserId, proof?: TileProof) => Promise<void>;
+  /** Signs the active person out here; others on this browser stay. */
+  readonly signOut: (userId: UserId) => Promise<void>;
+}
+
+/** The actions on this browser's people, for the current client. */
+export const useAccountActions = (): AccountActions => {
+  const { store, origin, slot } = useAccountContext();
+  const platform = usePlatform();
+  const navigate = useNavigate();
+
+  const establish = async (): Promise<void> => {
+    const me = await platform.core.auth.sessions.current();
+
+    if (me.kind !== "tile") {
+      try {
+        const device = store.read().device;
+
+        const enrolled = await platform.core.devices.registry.enroll(
+          device === null ? { name: deviceName() } : { name: deviceName(), device },
+        );
+
+        store.setDevice(enrolled.device);
+      } catch (cause) {
+        await platform.session.signOut();
+
+        if (Predicate.isTagged(cause, "Conflict")) throw new SharedDeviceError();
+
+        throw cause;
+      }
+    }
+
+    store.promote(slot, me.userId);
+    await navigate({ to: "/" });
+  };
+
+  return {
+    signIn: async (signIn) => {
+      const { session } = platform;
+
+      switch (signIn.kind) {
+        case "password":
+          await session.signInWithPassword(signIn);
+          break;
+        case "setUpOwner":
+          await session.setUpOwner(signIn);
+          break;
+        case "invite":
+          await session.acceptInvite(signIn);
+          break;
+        case "reset":
+          await session.resetPassword(signIn);
+          break;
+      }
+
+      await establish();
+    },
+    switchTo: (userId) => {
+      const held = origin.people.get(userId);
+
+      if (held === undefined) {
+        void navigate({ to: "/add" });
+
+        return;
+      }
+
+      store.activate(held);
+      void navigate({ to: "/home" });
+    },
+    openTile: async (userId, proof) => {
+      const device = store.read().device;
+
+      if (device === null) throw new SharedDeviceError();
+
+      await platform.session.openTile(
+        proof === undefined ? { device, userId } : { device, userId, proof },
+      );
+      store.promote(slot, userId);
+      await navigate({ to: "/home" });
+    },
+    signOut: async (userId) => {
+      await platform.session.signOut();
+      store.forget(userId);
+      await navigate({ to: "/" });
+    },
+  };
+};

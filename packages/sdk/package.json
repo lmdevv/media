@@ -4,6 +4,7 @@
   "private": true,
   "description": "Effect core SDK with effect, react, and promise entry points, shared by every client.",
   "type": "module",
+  "sideEffects": false,
   "exports": {
     "./effect": "./src/effect.ts",
     "./react": "./src/react.tsx",

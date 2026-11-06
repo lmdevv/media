@@ -1,0 +1,38 @@
+{
+  "name": "@media/web-account",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "serve": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root ../.. apps/web-account/src",
+    "test:e2e": "playwright test --pass-with-no-tests"
+  },
+  "dependencies": {
+    "@media/sdk": "workspace:*",
+    "@media/ui": "workspace:*",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-router": "^1.170.32",
+    "effect": "catalog:",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "sonner": "catalog:"
+  },
+  "devDependencies": {
+    "@media/config": "workspace:*",
+    "@media/contracts": "workspace:*",
+    "@playwright/test": "1.64.0",
+    "@tanstack/router-plugin": "^1.168.35",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "catalog:",
+    "vite": "^8.2.2",
+    "vitest": "5.0.3"
+  }
+}
