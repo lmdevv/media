@@ -67,8 +67,14 @@ mount media read-only.
   exited. A seek or a resume starts a new run in the stream's own place. While the limit is
   reached, that run starts once the stream's previous encoder stopped. Below the limit it starts
   at once.
+- A stream's encoder changes one step at a time, on a fiber the stream owns: the first run, a seek
+  or a resume that starts a new run, a hardware fallback, a release, and a yield. A request only
+  waits for the step it asked for. When the player disconnects mid-seek, the step still finishes,
+  and the stream's next request finds it done.
 - A stop waits at most 3 seconds. ffmpeg gets `SIGKILL` at once. When its exit is still unknown
-  after that, the stop returns and the encoder keeps its slot until it exits.
+  after that, the stop returns and the encoder keeps its slot until it exits. The stream's files
+  stay until every run it started has exited, including a run a seek was still stopping, and only
+  then are they deleted. A replaced stream ends the same way.
 - A yield or a release spends at most 2 seconds keeping the run's init segment, then stops
   without it. The player's next request then starts a new run.
 - A new encoder waits at most 10 seconds for the encoders whose places it took. Past that, a

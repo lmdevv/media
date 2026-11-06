@@ -1009,6 +1009,8 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
           return stop(stream).pipe(
             Effect.andThen(Deferred.succeed(stopped, undefined)),
             Effect.provideContext(context),
+            Effect.forkDetach,
+            Effect.andThen(Deferred.await(stopped)),
           );
         };
 
