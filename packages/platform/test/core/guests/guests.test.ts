@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import type { DomainItem } from "../../../commands/access";
 import { api, internal } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { GUESTS_PER_LINK_MAX } from "../../../convex/core/guests/model";
 import { inOrder } from "../../../convex/core/lib/inOrder";
+import { PRESENT_MS } from "../../../convex/core/together/model";
 import { runFunction } from "../../admin";
 import { member } from "../../devices";
 import type { Member } from "../../devices";
@@ -313,6 +315,31 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
     expect(answers.filter((answer) => answer === "rate_limited")).toHaveLength(1);
   });
 
+  it("answers a full link's dead code like any other dead code", async () => {
+    if (stack === undefined) return;
+    const { admin, shared } = await shelf(stack);
+    const made = await makeLink(admin, { kind: "item", item: shared });
+
+    importRows(
+      "users",
+      Array.from({ length: GUESTS_PER_LINK_MAX }, (_, index) => ({
+        kind: "person" as const,
+        role: "guest" as const,
+        username: `Planted ${index}`,
+        usernameKey: `~${made.linkId}.${index + 1}`,
+        link: made.linkId,
+        sessionGeneration: 0,
+        keyGeneration: 0,
+      })),
+    );
+
+    expect(await refusal(openLink(stack, made.code, "Sam"))).toBe("conflict");
+
+    await revokeAs(admin, made.linkId);
+
+    expect(await refusal(openLink(stack, made.code, "Sam"))).toBe("expired");
+  });
+
   it("shows a link's activity to its maker and admins, and what it names only to its maker", async () => {
     if (stack === undefined) return;
     const { admin, libraryId, shared } = await shelf(stack);
@@ -442,6 +469,36 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
         host.userId,
       ]);
       expect(after?.state === "joined" ? after.pending : null).toEqual([]);
+    } finally {
+      await host.signedIn.client.mutation(api.core.together.leave, { domain: "movies" });
+    }
+  });
+
+  it("frees a seat once its guest's link stops holding and the guest goes quiet", async () => {
+    if (stack === undefined) return;
+    const { admin: host, shared } = await shelf(stack);
+
+    await host.signedIn.client.action(api.core.together.create, { item: shared });
+
+    try {
+      const made = await makeLink(host, { kind: "session", domain: "movies" });
+      const guest = await openLink(stack, made.code, "Sam");
+
+      await configureAs(host, false);
+      await configureAs(host, true);
+      await runFunction(
+        stack,
+        internal.core.together.presence.sweep,
+        { asOf: Date.now() + PRESENT_MS + 1000 },
+        Schema.Null,
+      );
+
+      const after = await host.signedIn.client.query(api.core.together.get, { domain: "movies" });
+
+      expect(after?.state === "joined" ? after.members.map((row) => row.userId) : null).toEqual([
+        host.userId,
+      ]);
+      expect(await refusal(currentOf(guest))).toBe("unauthenticated");
     } finally {
       await host.signedIn.client.mutation(api.core.together.leave, { domain: "movies" });
     }

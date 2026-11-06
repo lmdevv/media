@@ -226,7 +226,10 @@ Left for later units:
   `remove` (`platformGuests` in the rule table), since a guest cannot browse for anything to add.
   `control` follows the host's switch, as for every guest.
 - `core.together.get` marks each member who came through a share link `linkGuest`.
-- Revoking the link takes its guests out of the session, so a leaked link cannot keep seats.
+- Revoking the link takes its guests out of the session, so a leaked link cannot keep seats. The
+  presence sweep drops a silent guest whose link stopped holding for any other reason.
+- Blocking a guest removes that guest, but the link can let its holder in again under a new name.
+  The host revokes the link or locks the session to keep them out.
 
 | Action          | On       | Change                                                |
 | --------------- | -------- | ----------------------------------------------------- |

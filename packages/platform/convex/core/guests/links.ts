@@ -48,7 +48,7 @@ const LIST_ROW_READS = 2;
 
 const LIST_ROWS = Math.floor((PAGE_ROWS_MAX - LIST_CALL_READS) / LIST_ROW_READS);
 
-const domainOf = (target: StoredTarget) =>
+const domainOf = (target: ShareTarget | StoredTarget) =>
   target.kind === "item" ? target.item.domain : target.domain;
 
 const storedFor = async (
@@ -113,11 +113,9 @@ export const insert = internalMutation({
       storedFor(ctx.db, caller, target),
     ]);
 
-    const domain = target.kind === "item" ? target.item.domain : target.domain;
-
     const facts: ShareTargetFacts =
       stored === null
-        ? { kind: "session", session: { on: "together", domain, session: null } }
+        ? { kind: "session", session: { on: "together", domain: domainOf(target), session: null } }
         : await targetAs(ctx.db, await reachOf(ctx.db, caller), stored);
 
     const making = can(caller, "make", {
@@ -199,10 +197,6 @@ export const open = internalMutation({
 
     const earlier = await guestsOf(ctx.db, link._id);
 
-    if (earlier.length >= GUESTS_PER_LINK_MAX) {
-      return fail("conflict", "This link has let in as many guests as it can");
-    }
-
     const guestId = await ctx.db.insert("users", {
       kind: "person",
       role: "guest",
@@ -231,6 +225,10 @@ export const open = internalMutation({
 
     if (!can(principal, "open", { ...standing, about: { kind: "target", target } }).allowed) {
       return fail("expired", DEAD);
+    }
+
+    if (earlier.length >= GUESTS_PER_LINK_MAX) {
+      return fail("conflict", "This link has let in as many guests as it can");
     }
 
     const limit = { identifier: `guest-open:${link._id}`, perHour: OPENS_PER_LINK_PER_HOUR };

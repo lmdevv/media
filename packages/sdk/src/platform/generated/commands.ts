@@ -2035,7 +2035,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       add: method.mutation(core_together_add),
       /** `core.together.admit` (mutation, signed-in): Let someone waiting to join your group session in, as its host. */
       admit: method.mutation(core_together_admit),
-      /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its link no longer lets them in. */
+      /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in. */
       block: method.action(core_together_block),
       /** `core.together.configure` (mutation, signed-in): Set who may join your group session and whether its guests may control playback and add items. */
       configure: method.mutation(core_together_configure),
@@ -2273,7 +2273,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       add: method.mutation(core_together_add),
       /** `core.together.admit` (mutation, signed-in): Let someone waiting to join your group session in, as its host. */
       admit: method.mutation(core_together_admit),
-      /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its link no longer lets them in. */
+      /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in. */
       block: method.action(core_together_block),
       /** `core.together.configure` (mutation, signed-in): Set who may join your group session and whether its guests may control playback and add items. */
       configure: method.mutation(core_together_configure),

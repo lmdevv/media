@@ -127,7 +127,13 @@ export const guestKeyOf = (linkId: Id<"shareLinks">, guestNumber: number): strin
 /** Below every guest's usernameKey and above every household one. */
 export const GUEST_KEYS_FROM = "~";
 
-const UNPRINTABLE = /[\p{C}\p{Zl}\p{Zp}]/u;
+/**
+ * Control, private-use, unassigned, and surrogate code points, line and paragraph separators, and
+ * the bidirectional controls that reorder what others see. Zero-width joiners stay: emoji
+ * sequences and several scripts need them.
+ */
+const UNPRINTABLE =
+  /[\p{Cc}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
 /** A display name as a guest typed it: trimmed, 1 to `NAME_MAX` code points, all printable. */
 export const requireGuestName = (typed: string): string => {

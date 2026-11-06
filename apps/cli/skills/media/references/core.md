@@ -814,7 +814,7 @@ Let someone waiting to join your group session in, as its host.
 
 ## `core.together.block`
 
-Remove someone from your group session or turn their request away, as its host; its link no longer lets them in.
+Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in.
 
 - CLI: `media auth together block`
 - Kind: action

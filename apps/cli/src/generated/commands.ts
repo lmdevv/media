@@ -2057,7 +2057,7 @@ export const generatedCommands = [
     scope: "signed-in",
     refusesKeys: false,
     summary:
-      "Remove someone from your group session or turn their request away, as its host; its link no longer lets them in",
+      "Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in",
     secrets: [],
     paginated: false,
     args: Schema.Struct({

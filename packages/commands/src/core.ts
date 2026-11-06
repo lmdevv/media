@@ -892,7 +892,7 @@ export const core = [
   }),
   action("core.together.block", {
     summary:
-      "Remove someone from your group session or turn their request away, as its host; its link no longer lets them in",
+      "Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in",
     scope: "signed-in",
     args: { domain: contentDomain, userId: v.id("users") },
     result: v.null(),

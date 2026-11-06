@@ -223,7 +223,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof admitResult> | Promise<Infer<typeof admitResult>>;
 
-  /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its link no longer lets them in. */
+  /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in. */
   readonly block: (
     ctx: Omit<ActionCtx, "auth">,
     args: Infer<typeof blockArgs>,

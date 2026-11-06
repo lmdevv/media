@@ -6,9 +6,8 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { LinkDoc } from "./guests/model";
-import { guestLinkOf } from "./guests/standing";
+import { linkHolds } from "./guests/standing";
 import { paginate } from "./lib/paginate";
-import { can, principalOf } from "./permissions/policy";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -115,12 +114,7 @@ const fitsUser = async (
 
   if (session.kind !== "guest") return false;
 
-  const lent = await guestLinkOf(db, user, now);
-
-  return (
-    lent !== null &&
-    can(principalOf(user), "hold", { ...lent.standing, about: { kind: "standing" } }).allowed
-  );
+  return linkHolds(db, user, now);
 };
 
 /** A session and its user when the session is live, or null. */

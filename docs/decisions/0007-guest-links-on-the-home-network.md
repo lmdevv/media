@@ -89,8 +89,10 @@ links in phase 7.
 ### Guests
 
 - A guest is a `users` row of kind `person` and role `guest` that names its link. Each open lets
-  a new guest in. `username` holds the name they typed: 1 to 32 printable characters after NFKC
-  normalization, not unique. `usernameKey` is `~<linkId>.<n>`, outside the username grammar, so
+  a new guest in. `username` holds the name they typed: 1 to 32 characters after NFKC
+  normalization, not unique. A name refuses control, private-use, and unassigned characters, line
+  and paragraph separators, and the bidirectional controls that reorder what others see. It keeps
+  zero-width joiners, which emoji sequences and several scripts need. `usernameKey` is `~<linkId>.<n>`, outside the username grammar, so
   password sign-in never finds a guest and a display name cannot collide with a household
   username. `core.accounts.users.list` stops below `~`, so it lists no guest.
 - A guest signs in with the `guest` provider and `{ code, name }`. One mutation finds the link,
@@ -137,11 +139,16 @@ links in phase 7.
 - A guest controls playback when the host allows it, and never adds or removes queue entries,
   since a guest cannot browse for anything to add. `core.together.get` marks a guest member
   `linkGuest`, so a typed name cannot pass for someone in the household.
+- Blocking a guest removes that guest. The link can let its holder in again as a new guest, so a
+  host who wants them out for good revokes the link or locks the session.
+- A guest whose link stops holding loses their seat when the presence sweep finds them silent,
+  within about 40 seconds, so a switched-off link or a stopped maker leaves no seats taken.
 
 ### Limits
 
 - The core lets 30 guests in per link per hour, counting only guests who got in, and 50 per link
-  in all. A person makes at most 30 links an hour.
+  in all. A link at its limit still answers a dead code like any other dead code. A person makes
+  at most 30 links an hour.
 - `@media/contracts/rate-limit` holds the per-address budgets for calls that need no session:
   `signIn` (10 at once, then one every 5 seconds) and `public` (60 at once, then 2 a second),
   and `admit`, a pure token bucket. The core never sees a client address, so the server applies

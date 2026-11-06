@@ -1,6 +1,6 @@
 import type { Doc } from "../../_generated/dataModel";
 import type { DatabaseReader } from "../../_generated/server";
-import { principalOf } from "../permissions/policy";
+import { can, principalOf } from "../permissions/policy";
 import type { PersonDoc, Principal, ShareResource } from "../permissions/policy";
 import { guestAccessOf, switchedOnFor } from "./model";
 import type { GuestAccess, LinkDoc } from "./model";
@@ -86,4 +86,18 @@ export const guestLinkOf = async (
     link === null ? null : standingOf(link, access, await db.get(link.maker), guest, now);
 
   return link === null || standing === null ? null : { link, standing };
+};
+
+/** Whether the link that let `guest` in still holds for them: the live check on a guest. */
+export const linkHolds = async (
+  db: DatabaseReader,
+  guest: GuestDoc,
+  now: number,
+): Promise<boolean> => {
+  const found = await guestLinkOf(db, guest, now);
+
+  return (
+    found !== null &&
+    can(principalOf(guest), "hold", { ...found.standing, about: { kind: "standing" } }).allowed
+  );
 };

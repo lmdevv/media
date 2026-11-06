@@ -2,8 +2,10 @@ import { v } from "convex/values";
 
 import type { ContentDomain } from "../../../commands/scopes";
 import { internal } from "../../_generated/api";
+import type { Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { MutationCtx } from "../../_generated/server";
+import { linkHolds } from "../guests/standing";
 import { inOrder } from "../lib/inOrder";
 import type { Principal } from "../permissions/policy";
 import { requireTogether } from "./access";
@@ -12,6 +14,17 @@ import { ABANDON_MS, BEAT_WRITE_MS, PRESENT_MS } from "./model";
 import { endSession } from "./sessions";
 
 const SWEEP_MAX = 100;
+
+/** A guest whose share link no longer holds, who will never come back to their seat. */
+const linkFailed = async (
+  ctx: Pick<MutationCtx, "db">,
+  userId: Id<"users">,
+  now: number,
+): Promise<boolean> => {
+  const user = await ctx.db.get(userId);
+
+  return user?.kind === "person" && user.role === "guest" && !(await linkHolds(ctx.db, user, now));
+};
 
 /**
  * Keeps the caller present in their session in `domain` and answers the server's clock, which a
@@ -51,7 +64,8 @@ export const heartbeat = async (
 
 /**
  * Marks away the members silent for `PRESENT_MS` as of `asOf` (now, or a later time a
- * test passes instead of waiting), and drops the people waiting who left. A host going away
+ * test passes instead of waiting), and drops the people waiting who left and the guests whose
+ * share link stopped holding. A host going away
  * pauses a playing session where it is, and the session ends if they stay away `ABANDON_MS`. Writes use the real time; `asOf` only picks
  * who is silent. A full batch runs the next one at once.
  */
@@ -74,7 +88,7 @@ export const sweep = internalMutation({
 
       if (member === null || session?.state !== "live") return;
 
-      if (member.state === "pending") {
+      if (member.state === "pending" || (await linkFailed(ctx, member.userId, now))) {
         await ctx.db.delete(member._id);
 
         return;
