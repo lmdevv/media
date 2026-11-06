@@ -835,7 +835,12 @@ const make = Effect.gen(function* () {
         } satisfies SegmentFiles;
       }
 
-      if ((yield* Clock.currentTimeMillis) > deadline) return yield* new SegmentNotReady({ index });
+      const stopped = isClosed(generation.scope);
+
+      if (stopped || (yield* Clock.currentTimeMillis) > deadline) {
+        return yield* new SegmentNotReady({ index });
+      }
+
       yield* Deferred.await(wake).pipe(Effect.timeoutOption(pollInterval));
     }
   });
@@ -945,11 +950,11 @@ const make = Effect.gen(function* () {
 
   const firstSegment = Effect.fn("StreamSessions.firstSegment")(function* (
     session: Session,
-    lease: Scope.Scope,
+    started: Generation,
     segmentIndex: number,
   ) {
     yield* Effect.annotateCurrentSpan({ streamId: session.streamId, segmentIndex });
-    let generation = yield* startGeneration(session, lease, 1, segmentIndex);
+    let generation = started;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const ready = yield* awaitSegment(session, generation, segmentIndex, START_WAIT).pipe(
@@ -1447,13 +1452,14 @@ const make = Effect.gen(function* () {
     }
 
     const segmentIndex = segmentAt(segmentPlan, quickStart);
+    const started = yield* startGeneration(session, lease, 1, segmentIndex);
+    yield* yieldWhenDisplaced(session, lease, held);
 
     const generation =
       hardwareOf(plan.mode) !== undefined
-        ? yield* firstSegment(session, lease, segmentIndex)
-        : yield* startGeneration(session, lease, 1, segmentIndex);
+        ? yield* firstSegment(session, started, segmentIndex)
+        : started;
 
-    yield* yieldWhenDisplaced(session, lease, held);
     const mode = yield* Ref.get(session.mode);
 
     yield* reporter.report(

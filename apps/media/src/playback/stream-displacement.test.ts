@@ -1,5 +1,5 @@
-import { describe, layer } from "@effect/vitest";
-import { Effect, Fiber, FileSystem, Redacted } from "effect";
+import { assert, describe, layer } from "@effect/vitest";
+import { Effect, Fiber, FileSystem, Path, Redacted, Schedule } from "effect";
 
 import type { ClientCapabilities } from "@media/contracts/media-playback";
 
@@ -9,6 +9,7 @@ import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
 import { signTestToken } from "../testing/test-config.ts";
 import { resolveInsideRoots } from "./file-resolver.ts";
+import type { HardwareEncoder } from "./hardware-acceleration.ts";
 import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
 import * as PlaybackToken from "./playback-token.ts";
 import * as StreamSessions from "./stream-sessions.ts";
@@ -58,7 +59,7 @@ const smallScreen: ClientCapabilities = {
   mse: true,
 };
 
-const viewer = (audience: PlaybackToken.PlaybackGrant["audience"]) =>
+const viewer = (audience: PlaybackToken.PlaybackGrant["audience"], hardware?: HardwareEncoder) =>
   Effect.gen(function* () {
     const server = yield* MediaTestServer.Service;
     const { library } = yield* FixtureWorkspace.Service;
@@ -77,7 +78,7 @@ const viewer = (audience: PlaybackToken.PlaybackGrant["audience"]) =>
 
     const plan = decidePlayback(file.probe, smallScreen, {
       audioIndex: undefined,
-      hardware: undefined,
+      hardware,
       softwareToneMapping: false,
     });
 
@@ -107,6 +108,25 @@ const start = ({ grant, request }: Viewer) =>
       Effect.scoped,
     ),
   );
+
+const firstFragmentWritten = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const { transcodeDir } = yield* MediaTestServer.Service;
+  const streams = yield* fs.readDirectory(transcodeDir);
+
+  return yield* Effect.forEach(streams, (stream) =>
+    fs.exists(path.join(transcodeDir, stream, "1", "f0.m4s")),
+  );
+}).pipe(
+  Effect.filterOrFail(
+    (written) => written.includes(true),
+    () => "no fragment written yet",
+  ),
+  Effect.retry(Schedule.spaced("100 millis")),
+  Effect.timeout("15 seconds"),
+  Effect.orDie,
+);
 
 const server = MediaTestServer.layer(
   {
@@ -147,6 +167,32 @@ describe.skipIf(!hasFfmpeg)("stream displacement", () => {
           yield* sessions.stop(taken.streamId, household.grant);
           yield* sessions.stop(playing.streamId, guest.grant);
         }).pipe(Effect.ensuring(Effect.sync(() => copies.resume.resolve()))),
+      60_000,
+    );
+  });
+
+  layer(server, { excludeTestServices: true, timeout: "120 seconds" })((it) => {
+    it.effect(
+      "a household stream takes a guest's slot without waiting out the guest's slow first segment",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const guest = yield* viewer("guest", "qsv");
+          const household = yield* viewer("household");
+
+          assert.strictEqual(guest.request.plan.mode, "transcode-qsv");
+
+          const starting = yield* Effect.forkChild(start(guest));
+          yield* firstFragmentWritten;
+
+          const taken = yield* start(household).pipe(Effect.timeout("8 seconds"));
+          const kept = yield* Fiber.join(starting).pipe(Effect.timeout("8 seconds"));
+
+          yield* sessions.playlist(kept.streamId, kept.generation, guest.grant);
+
+          yield* sessions.stop(taken.streamId, household.grant);
+          yield* sessions.stop(kept.streamId, guest.grant);
+        }),
       60_000,
     );
   });
