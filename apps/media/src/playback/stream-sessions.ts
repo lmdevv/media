@@ -715,13 +715,7 @@ const make = Effect.gen(function* () {
         if (current !== generation) return current;
         const encoder = yield* Ref.get(session.encoder);
 
-        if (!Encoder.$is("Running")(encoder)) {
-          return yield* Effect.die(
-            new Error(
-              "StreamSessions.encoderFailed: the current run of a released stream failed under a request, but a release never takes a run that a request has counted itself into",
-            ),
-          );
-        }
+        if (!Encoder.$is("Running")(encoder)) return yield* new SegmentNotReady({ index });
 
         const mode = yield* Ref.get(session.mode);
 

@@ -1,5 +1,16 @@
 import { assert, describe, layer } from "@effect/vitest";
-import { Effect, Fiber, FileSystem, Path, Redacted, Schedule } from "effect";
+import {
+  Cause,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Option,
+  Path,
+  Predicate,
+  Redacted,
+  Schedule,
+} from "effect";
 
 import type { ClientCapabilities } from "@media/contracts/media-playback";
 
@@ -20,6 +31,8 @@ const stallsAfterFirstFragment = await writeFakeFfmpeg({
   hlsStallsAfterFragments: 1,
   qsvFailsFromSeconds: 1_000_000,
 });
+
+const failsOnCue = await writeFakeFfmpeg({ hlsStallsAfterFragments: 1, hlsStallsUntilCue: true });
 
 const KEPT_INIT = /init-\d+\.mp4\.tmp$/u;
 
@@ -193,6 +206,65 @@ describe.skipIf(!hasFfmpeg)("stream displacement", () => {
           yield* sessions.stop(taken.streamId, household.grant);
           yield* sessions.stop(kept.streamId, guest.grant);
         }),
+      60_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer(
+      { FFMPEG_PATH: failsOnCue, MAX_CONCURRENT_TRANSCODES: "1" },
+      { fileSystem: heldInitCopies },
+    ),
+    { excludeTestServices: true, timeout: "120 seconds" },
+  )((it) => {
+    it.effect(
+      "a guest's segment request answers not ready when its encoder fails while it is displaced",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const guest = yield* viewer("guest");
+          const household = yield* viewer("household");
+          const playing = yield* start(guest);
+          const { streamId, generation, segmentIndex } = playing;
+          const view = yield* sessions.playlist(streamId, generation, guest.grant);
+
+          assert.isAbove(
+            view.plan.starts.length,
+            segmentIndex + 1,
+            "the stream has a next segment",
+          );
+
+          yield* sessions.segment(streamId, generation, segmentIndex, guest.grant);
+
+          const waiting = yield* Effect.forkChild(
+            sessions.segment(streamId, generation, segmentIndex + 1, guest.grant).pipe(Effect.exit),
+          );
+
+          holdNextInitCopy();
+          const taking = yield* Effect.forkChild(start(household));
+          yield* Effect.promise(() => copies.reached.promise);
+          yield* fs.writeFileString(path.join(path.dirname(failsOnCue), "cue"), "");
+          yield* Effect.sleep("500 millis");
+          copies.resume.resolve();
+
+          const answered = yield* Fiber.join(waiting).pipe(Effect.timeout("10 seconds"));
+
+          const failure = Exit.isFailure(answered)
+            ? Cause.findErrorOption(answered.cause)
+            : Option.none();
+
+          assert.isTrue(
+            Option.exists(failure, Predicate.isTagged("SegmentNotReady")),
+            `the player retries the segment: ${String(answered)}`,
+          );
+
+          const taken = yield* Fiber.join(taking).pipe(Effect.timeout("10 seconds"));
+
+          yield* sessions.stop(taken.streamId, household.grant);
+          yield* sessions.stop(streamId, guest.grant);
+        }).pipe(Effect.ensuring(Effect.sync(() => copies.resume.resolve()))),
       60_000,
     );
   });
