@@ -170,7 +170,13 @@ export const screenOf = (inputs: ScreenInputs): Screen => {
 
   if (me.status === "loading") return LOADING;
 
-  if (me.status === "error") return { kind: "unreachable", retry: me.retry };
+  // A refused session is being renewed or replaced, such as by a tile opening on this shared
+  // device; the gate asks again, and the status turns signed out if the renewal fails.
+  if (me.status === "error") {
+    return Predicate.isTagged(me.error, "Unauthenticated")
+      ? LOADING
+      : { kind: "unreachable", retry: me.retry };
+  }
 
   if (intent.kind === "page") return pageFor(intent.need, me.data);
 

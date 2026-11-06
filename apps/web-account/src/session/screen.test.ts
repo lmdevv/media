@@ -1,4 +1,4 @@
-import { Unauthenticated } from "@media/contracts/errors";
+import { Forbidden, Unauthenticated } from "@media/contracts/errors";
 import type { QueryState } from "@media/sdk/react";
 import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
@@ -204,10 +204,20 @@ describe("which screen shows", () => {
     ).toStrictEqual({ kind: "signIn", adding: true });
   });
 
-  it("asks to try again when the server does not answer", () => {
+  it("waits while a refused session is renewed or replaced", () => {
+    const me: QueryState<Me> = {
+      status: "error",
+      error: new Unauthenticated({ message: "ended" }),
+      retry,
+    };
+
+    expect(screenOf(inputs({ status: "signedIn", me }))).toStrictEqual({ kind: "loading" });
+  });
+
+  it("asks to try again when the server fails", () => {
     const server: QueryState<ServerInfo> = {
       status: "error",
-      error: new Unauthenticated({ message: "down" }),
+      error: new Forbidden({ message: "down" }),
       retry,
     };
 

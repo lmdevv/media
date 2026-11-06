@@ -1,6 +1,6 @@
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { Outlet, useRouterState } from "@tanstack/react-router";
-import { Brand, Match } from "effect";
+import { Brand, Match, Predicate } from "effect";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 
@@ -71,6 +71,17 @@ const useRepairs = (inputs: ScreenInputs, active: UserId | null): void => {
   }, [repairs, store]);
 };
 
+/**
+ * Asks who is signed in again after the server refused the session while the client still holds
+ * one: the session was renewed, or a tile opened on this shared device replaced it. A session that
+ * really ended fails its renewal, and the status turns signed out instead.
+ */
+const useAskAgain = (me: ScreenInputs["me"]): void => {
+  useEffect(() => {
+    if (me.status === "error" && Predicate.isTagged(me.error, "Unauthenticated")) me.retry();
+  }, [me]);
+};
+
 const applyRepair = (store: OriginStore, repair: Repair): void => {
   switch (repair.kind) {
     case "clearDevice":
@@ -138,6 +149,7 @@ export function Gate() {
   };
 
   useRepairs(inputs, activePerson(origin));
+  useAskAgain(me);
 
   return render(screenOf(inputs));
 }
