@@ -46,7 +46,8 @@ interface Pool {
   /**
    * Takes a slot until `scope` closes, without waiting. When the limit is reached, takes the slots
    * of the newest guests, running guests' before starting ones', until it fits. Fails, taking
-   * none, when guests' slots are not enough.
+   * none, when guests' slots are not enough. On a scope that already closed it takes nothing, and
+   * the slot it returns is displaced, so its holder starts no encoder.
    */
   readonly household: (
     scope: Scope.Scope,
@@ -333,7 +334,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
             Effect.as(heldBy(slot)),
           ),
         Full: () => Effect.fail(new TranscodeCapacityReached({ limit })),
-        Closed: () => Effect.succeed(heldBy(slot)),
+        Closed: () => Deferred.succeed(slot.displaced, undefined).pipe(Effect.as(heldBy(slot))),
       });
     }).pipe(Effect.uninterruptible);
 
