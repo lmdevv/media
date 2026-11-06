@@ -10,6 +10,14 @@ const PAGE_SIZE = 25;
 export interface PageOpts {
   readonly numItems: number;
   readonly cursor: string | null;
+  /** Where the page ends, once a later page starts there; Convex then keeps that boundary. */
+  readonly endCursor?: string;
+}
+
+/** Where a page starts, and where it ends once the page after it is loaded. */
+export interface PageSpan {
+  readonly cursor: string | null;
+  readonly endCursor?: string;
 }
 
 /** One page of a paginated core query's result. */
@@ -97,42 +105,74 @@ interface PagedStore<Row> {
   readonly getSnapshot: () => Paged<Row>;
 }
 
+/** A loaded page: its subscription, and while a pinned one starts, the open-ended one before it. */
+interface Loaded<Row> {
+  readonly watch: Watch<PageOf<Row>>;
+  readonly before: Watch<PageOf<Row>> | null;
+}
+
 /**
- * One store over a list's pages. Load more adds a page to the subscriptions already running, so
- * the pages above keep their subscription and the end Convex pinned for them. Its snapshot stays
- * the same object until a page changes, as `useSyncExternalStore` needs.
+ * One store over a list's pages. Loading the next page pins the page above to end where the next
+ * one starts, so a row that moves into or out of the pages above never shows twice or goes
+ * missing. The open-ended subscription keeps serving the page until the pinned one answers. Its
+ * snapshot stays the same object until a page changes, as `useSyncExternalStore` needs.
  *
- * @param pageAfter - Follows the page that starts at a cursor.
+ * @param pageAt - Follows the page that starts at a cursor, ended at `endCursor` when given.
  */
 export const pagedStore = <Row>(
-  first: Watch<PageOf<Row>>,
-  pageAfter: (cursor: string) => Watch<PageOf<Row>>,
+  pageAt: (span: PageSpan) => Watch<PageOf<Row>>,
 ): PagedStore<Row> => {
-  const watches = [first];
-  const asked = new Set<string>();
+  const pages: Array<Loaded<Row>> = [{ watch: pageAt({ cursor: null }), before: null }];
+  const starts: Array<string | null> = [null];
   const listening = new Map<() => void, Array<() => void>>();
   let inputs: ReadonlyArray<QueryState<PageOf<Row>>> = [];
   let output: Paged<Row> = { status: "loading" };
 
-  const more = (cursor: string): void => {
-    if (asked.has(cursor)) return;
-
-    asked.add(cursor);
-
-    const watch = pageAfter(cursor);
-
-    watches.push(watch);
-
+  const listen = (watch: Watch<PageOf<Row>>): void => {
     for (const [onChange, stops] of listening) stops.push(watch.subscribe(onChange));
+  };
+
+  const stateOf = (loaded: Loaded<Row>): QueryState<PageOf<Row>> => {
+    const state = loaded.watch.getSnapshot();
+
+    return state.status === "loading" && loaded.before !== null
+      ? loaded.before.getSnapshot()
+      : state;
+  };
+
+  const more = (cursor: string): void => {
+    if (starts.includes(cursor)) return;
+
+    const last = pages.length - 1;
+    const above = pages[last];
+    const start = starts[last];
+
+    if (above !== undefined && start !== undefined) {
+      const pinned = pageAt({ cursor: start, endCursor: cursor });
+
+      pages[last] = { watch: pinned, before: above.watch };
+      listen(pinned);
+    }
+
+    const next = pageAt({ cursor });
+
+    pages.push({ watch: next, before: null });
+    starts.push(cursor);
+    listen(next);
 
     for (const onChange of listening.keys()) onChange();
   };
+
+  const watches = (): ReadonlyArray<Watch<PageOf<Row>>> =>
+    pages.flatMap((loaded) =>
+      loaded.before === null ? [loaded.watch] : [loaded.watch, loaded.before],
+    );
 
   return {
     subscribe: (onChange) => {
       listening.set(
         onChange,
-        watches.map((watch) => watch.subscribe(onChange)),
+        watches().map((watch) => watch.subscribe(onChange)),
       );
 
       return () => {
@@ -142,7 +182,7 @@ export const pagedStore = <Row>(
       };
     },
     getSnapshot: () => {
-      const next = watches.map((watch) => watch.getSnapshot());
+      const next = pages.map(stateOf);
 
       if (next.length !== inputs.length || next.some((state, index) => state !== inputs[index])) {
         inputs = next;
@@ -156,7 +196,7 @@ export const pagedStore = <Row>(
 
 /**
  * Follows a paginated core query page by page. Each page is its own subscription from the cursor
- * the page before ended at, so Convex keeps every loaded page's end where it was as rows change.
+ * the page before ended at, pinned to end where the page after it starts.
  *
  * @param argsAt - The query's arguments for a page's `paginationOpts`.
  */
@@ -167,9 +207,7 @@ export const usePages = <Args, Row>(
   const key = JSON.stringify(argsAt({ numItems: PAGE_SIZE, cursor: null }));
 
   const open = (): PagedStore<Row> =>
-    pagedStore(query.watch(argsAt({ numItems: PAGE_SIZE, cursor: null })), (cursor) =>
-      query.watch(argsAt({ numItems: PAGE_SIZE, cursor })),
-    );
+    pagedStore((span) => query.watch(argsAt({ numItems: PAGE_SIZE, ...span })));
 
   // State rather than a memo: React may drop a memo, which would restart every page's subscription.
   const [held, setHeld] = useState(() => ({ query, key, store: open() }));

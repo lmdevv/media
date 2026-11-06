@@ -2,6 +2,7 @@ import type { QueryState } from "@media/sdk/react";
 import { describe, expect, it } from "vitest";
 
 import { combinePages, pagedStore } from "./pages";
+import type { PageSpan } from "./pages";
 import type { PageOf, Watch } from "./pages";
 
 type Page = PageOf<string>;
@@ -100,7 +101,7 @@ describe("combinePages", () => {
 describe("pagedStore", () => {
   it("returns the same snapshot until a page changes, then the new rows", () => {
     const first = watchOf(page(["a"], true));
-    const store = pagedStore(first.watch, () => watchOf({ status: "loading" }).watch);
+    const store = pagedStore(() => first.watch);
     const before = store.getSnapshot();
 
     expect(store.getSnapshot()).toBe(before);
@@ -111,13 +112,16 @@ describe("pagedStore", () => {
     expect(store.getSnapshot()).toMatchObject({ rows: ["a", "b"] });
   });
 
-  it("loads the next page from the first page's end, keeping the first page's subscription", () => {
+  it("loads the next page from the first page's end and pins the first page to end there", () => {
     const first = watchOf(page(["a"], false, "after-a"));
+    const pinned = watchOf({ status: "loading" });
     const second = watchOf({ status: "loading" });
-    const asked: Array<string> = [];
+    const asked: Array<PageSpan> = [];
 
-    const store = pagedStore(first.watch, (cursor) => {
-      asked.push(cursor);
+    const store = pagedStore((span) => {
+      asked.push(span);
+
+      if (span.cursor === null) return span.endCursor === undefined ? first.watch : pinned.watch;
 
       return second.watch;
     });
@@ -135,18 +139,23 @@ describe("pagedStore", () => {
       list.next.load();
     }
 
-    expect(asked).toEqual(["after-a"]);
-    expect(first.listening()).toBe(1);
+    expect(asked).toEqual([
+      { cursor: null },
+      { cursor: null, endCursor: "after-a" },
+      { cursor: "after-a" },
+    ]);
+    expect(pinned.listening()).toBe(1);
     expect(second.listening()).toBe(1);
     expect(store.getSnapshot()).toMatchObject({ rows: ["a"], next: { kind: "loading" } });
 
     second.publish(page(["b"], true));
+    pinned.publish(page(["a", "a2"], false, "after-a"));
 
-    expect(changes).toBe(2);
-    expect(store.getSnapshot()).toMatchObject({ rows: ["a", "b"], next: { kind: "done" } });
+    expect(changes).toBe(3);
+    expect(store.getSnapshot()).toMatchObject({ rows: ["a", "a2", "b"], next: { kind: "done" } });
 
     stop();
 
-    expect(first.listening() + second.listening()).toBe(0);
+    expect(first.listening() + pinned.listening() + second.listening()).toBe(0);
   });
 });
