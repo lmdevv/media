@@ -64,6 +64,8 @@ export type {
   PlatformReset,
   PlatformSdk,
   PlatformSession,
+  PlatformTile,
+  PlatformTileProof,
 } from "./platform/promise";
 
 export type { PendingDeviceLogin } from "./device-login";

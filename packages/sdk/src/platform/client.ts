@@ -5,6 +5,7 @@ import {
   Effect,
   Layer,
   Match,
+  Option,
   Redacted,
   Schedule,
   Schema,
@@ -18,8 +19,21 @@ import * as ConvexTransport from "../convex-transport";
 import type { CallError, TransportError } from "../sdk-errors";
 import { ProtocolError } from "../sdk-errors";
 import type { TokenStorage, TokenStorageError } from "../token-storage";
-import type { Command, EffectBuilder, Params, PlatformError } from "./command";
+import type { Command, EffectBuilder, Id, Params, PlatformError } from "./command";
 import { effectMethods } from "./generated/commands";
+
+/** What lets a person past their tile's lock on a shared device. */
+export type TileProof = Data.TaggedEnum<{
+  /** The password of `by`, the person themself or an adult who may open the tile. */
+  Password: { readonly by: Id<"users">; readonly password: Redacted.Redacted };
+  /** The unlock code of `by`, which works only on this device. */
+  Code: { readonly by: Id<"users">; readonly code: Redacted.Redacted };
+  /** An `open` request that someone approved from another device. */
+  Approval: { readonly approvalId: Id<"tileApprovals"> };
+}>;
+
+/** Constructors and matchers for `TileProof`. */
+export const TileProof = Data.taggedEnum<TileProof>();
 
 /** What to sign in with. Each case is one of the platform's sign-in providers. */
 export type Credentials = Data.TaggedEnum<{
@@ -37,6 +51,18 @@ export type Credentials = Data.TaggedEnum<{
   };
   /** A new password from a reset link code, as `core.accounts.resetLinks.create` shows it once. */
   Reset: { readonly code: Redacted.Redacted; readonly password: Redacted.Redacted };
+  /**
+   * Opens the tile of `userId` on the shared device whose code is `device`, as a tile session
+   * with content scopes only. It ends the session that held the device's slot. A locked tile
+   * without a proof that lifts the lock fails with `Forbidden`, and a wrong password or code with
+   * `Unauthenticated`. An approval fails with `Expired` once used or expired, and with
+   * `ProtocolError` while still pending or after a refusal: redeem only an approved one.
+   */
+  Tile: {
+    readonly device: Redacted.Redacted;
+    readonly userId: Id<"users">;
+    readonly proof: Option.Option<TileProof>;
+  };
 }>;
 
 /** Constructors and matchers for `Credentials`. */
@@ -142,6 +168,13 @@ const toPlatformError =
       ),
       Match.orElse((other) => other),
     );
+
+const tileProofParams = (proof: TileProof) =>
+  TileProof.$match(proof, {
+    Password: ({ by, password }) => ({ kind: "password", by, password: Redacted.value(password) }),
+    Code: ({ by, code }) => ({ kind: "code", by, code: Redacted.value(code) }),
+    Approval: ({ approvalId }) => ({ kind: "approval", approvalId }),
+  });
 
 const askAgain = (error: CallError | SignInWaiting | TokenStorageError): boolean =>
   Match.value(error).pipe(
@@ -249,6 +282,17 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
         Reset: ({ code, password }) => ({
           provider: "reset",
           params: { code: Redacted.value(code), password: Redacted.value(password) },
+        }),
+        Tile: ({ device, userId, proof }) => ({
+          provider: "tile",
+          params: {
+            device: Redacted.value(device),
+            userId,
+            ...Option.match(proof, {
+              onNone: () => ({}),
+              onSome: (value) => ({ proof: tileProofParams(value) }),
+            }),
+          },
         }),
       }),
     );

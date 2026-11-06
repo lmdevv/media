@@ -1,12 +1,14 @@
-import { Context, Effect, Layer, Predicate, Redacted } from "effect";
+import { Brand, Context, Effect, Layer, Option, Predicate, Redacted, Stream } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
 import * as FakeConvex from "../testing/fake-convex";
 import { jwtExpiringAt, Reply } from "../testing/fake-convex";
 import * as TokenStorage from "../token-storage";
+import type { KeyValueStore } from "../token-storage";
 import * as Platform from "./platform";
 import { createPlatform } from "./promise";
+import type { Id } from "./command";
 
 const TOKEN = jwtExpiringAt(Date.now() + 3_600_000, "user-1|session-1");
 
@@ -420,5 +422,235 @@ describe("createPlatform", () => {
       refused: { _tag: "Forbidden", message: "This session lacks the account scope" },
       watched: { status: "success", data: SERVER },
     });
+  });
+});
+
+const KEY = "media.session";
+
+const renewed = Reply.Success({
+  value: { tokens: { token: RENEWED, refreshToken: "refresh-2" } },
+});
+
+/** One origin's `localStorage`, telling each subscriber of a key about every write to it. */
+const originStore = (stored: Option.Option<string>): KeyValueStore => {
+  const items = new Map<string, string>();
+  const listeners = new Set<{ readonly key: string; readonly onChange: () => void }>();
+
+  if (Option.isSome(stored)) {
+    items.set(
+      KEY,
+      TokenStorage.serializeSession({
+        token: Redacted.make(stored.value),
+        refreshToken: Redacted.make("refresh-1"),
+      }),
+    );
+  }
+
+  const changed = (key: string) => {
+    for (const listener of listeners) if (listener.key === key) listener.onChange();
+  };
+
+  return {
+    getItem: (key) => items.get(key) ?? null,
+    setItem: (key, value) => {
+      items.set(key, value);
+      changed(key);
+    },
+    removeItem: (key) => {
+      items.delete(key);
+      changed(key);
+    },
+    subscribe: (key, onChange) => {
+      const listener = { key, onChange };
+
+      listeners.add(listener);
+
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+};
+
+const withTwoClients = <A, E>(
+  store: KeyValueStore,
+  body: (
+    first: Platform.Interface,
+    second: Platform.Interface,
+    fake: FakeConvex.FakeConvex,
+  ) => Effect.Effect<A, E, Scope.Scope>,
+): Promise<A> =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fake = yield* FakeConvex.make;
+
+        yield* fake.reply("core/server:info", Reply.Success({ value: SERVER }));
+
+        const open = Layer.build(
+          Platform.layer({
+            url: fake.url,
+            connection: "http",
+            storage: TokenStorage.layerKeyValue(store, KEY),
+          }),
+        ).pipe(Effect.map((context) => Context.get(context, Platform.Platform)));
+
+        const first = yield* open;
+        const second = yield* open;
+
+        return yield* body(first, second, fake);
+      }),
+    ),
+  );
+
+const reaches = (platform: Platform.Interface, status: "signedIn" | "signedOut") =>
+  Stream.runHead(Stream.filter(platform.session.status, (current) => current === status));
+
+/** Calls until the client authorizes with `token`; whether it did within half a second. */
+const callsWith = (platform: Platform.Interface, fake: FakeConvex.FakeConvex, token: string) =>
+  Effect.gen(function* () {
+    for (let tries = 0; tries < 50; tries += 1) {
+      yield* platform.core.server.info();
+      const calls = yield* fake.requestsTo("core/server:info");
+
+      if (calls.at(-1)?.authorization === `Bearer ${token}`) return true;
+      yield* Effect.sleep(10);
+    }
+
+    return false;
+  });
+
+const refreshTokensSpent = (fake: FakeConvex.FakeConvex) =>
+  Effect.map(fake.requestsTo("auth:signIn"), (requests) =>
+    requests.flatMap((request) =>
+      Predicate.hasProperty(request.args, "refreshToken") ? [request.args.refreshToken] : [],
+    ),
+  );
+
+const refusedOnce = (platform: Platform.Interface) =>
+  Effect.flip(
+    platform.core.accounts.me.changePassword({ currentPassword: "old", newPassword: "new-one" }),
+  );
+
+const answerSignIns = (fake: FakeConvex.FakeConvex) =>
+  Effect.gen(function* () {
+    yield* fake.handle("auth:signIn", (request) =>
+      Effect.succeed(Predicate.hasProperty(request.args, "refreshToken") ? renewed : signedIn),
+    );
+    yield* fake.reply(
+      "core/accounts/me:changePassword",
+      Reply.Failure({ code: "unauthenticated", message: "Token expired" }),
+    );
+  });
+
+describe("two clients on one store", () => {
+  it("follows the other client's refresh without spending the old refresh token", async () => {
+    const answer = await withTwoClients(originStore(Option.none()), (first, second, fake) =>
+      Effect.gen(function* () {
+        yield* answerSignIns(fake);
+        yield* first.session.signIn(
+          Platform.Credentials.Password({ username: "ada", password: Redacted.make("secret") }),
+        );
+        yield* reaches(second, "signedIn");
+        yield* refusedOnce(first);
+
+        return {
+          followed: yield* callsWith(second, fake, RENEWED),
+          spent: yield* refreshTokensSpent(fake),
+          status: yield* second.session.currentStatus,
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({ followed: true, spent: ["refresh-1"], status: "signedIn" });
+  });
+
+  it("signs out when the other client signs out, leaving the server to it", async () => {
+    const answer = await withTwoClients(originStore(Option.some(TOKEN)), (first, second, fake) =>
+      Effect.gen(function* () {
+        yield* fake.reply("auth:signOut", Reply.Success({ value: null }));
+        yield* first.session.signOut;
+        yield* reaches(second, "signedOut");
+
+        return (yield* fake.requestsTo("auth:signOut")).map((request) => request.authorization);
+      }),
+    );
+
+    expect(answer).toStrictEqual([`Bearer ${TOKEN}`]);
+  });
+
+  it("adopts another person's sign-in from the other client", async () => {
+    const bo = jwtExpiringAt(Date.now() + 3_600_000, "user-2|session-2");
+
+    const followed = await withTwoClients(originStore(Option.some(TOKEN)), (first, second, fake) =>
+      Effect.gen(function* () {
+        yield* fake.reply(
+          "auth:signIn",
+          Reply.Success({ value: { tokens: { token: bo, refreshToken: "bo-refresh" } } }),
+        );
+        yield* first.session.signIn(
+          Platform.Credentials.Password({ username: "bo", password: Redacted.make("secret") }),
+        );
+
+        return yield* callsWith(second, fake, bo);
+      }),
+    );
+
+    expect(followed).toBe(true);
+  });
+});
+
+describe("opening a tile", () => {
+  it("sends the tile provider the device, the person, and the proof given", async () => {
+    const ada = Brand.nominal<Id<"users">>()("user-1");
+    const approvalId = Brand.nominal<Id<"tileApprovals">>()("approval-1");
+
+    const signIns = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+
+          yield* fake.reply("auth:signIn", signedIn);
+          const platform = createPlatform({ url: fake.url, connection: "http" });
+
+          yield* Effect.promise(async () => {
+            await platform.session.openTile({ device: "dv_1.secret", userId: ada });
+            await platform.session.openTile({
+              device: "dv_1.secret",
+              userId: ada,
+              proof: { kind: "password", by: ada, password: "secret" },
+            });
+            await platform.session.openTile({
+              device: "dv_1.secret",
+              userId: ada,
+              proof: { kind: "code", by: ada, code: "1234" },
+            });
+            await platform.session.openTile({
+              device: "dv_1.secret",
+              userId: ada,
+              proof: { kind: "approval", approvalId },
+            });
+            await platform.dispose();
+          });
+
+          return (yield* fake.requestsTo("auth:signIn")).map((request) => request.args);
+        }),
+      ),
+    );
+
+    const tile = { provider: "tile", params: { device: "dv_1.secret", userId: "user-1" } };
+
+    expect(signIns).toStrictEqual([
+      tile,
+      {
+        ...tile,
+        params: { ...tile.params, proof: { kind: "password", by: "user-1", password: "secret" } },
+      },
+      { ...tile, params: { ...tile.params, proof: { kind: "code", by: "user-1", code: "1234" } } },
+      {
+        ...tile,
+        params: { ...tile.params, proof: { kind: "approval", approvalId: "approval-1" } },
+      },
+    ]);
   });
 });

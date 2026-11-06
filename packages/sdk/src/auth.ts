@@ -29,9 +29,9 @@ import {
   Schedule,
   Schema,
   Semaphore,
+  Stream,
   SubscriptionRef,
 } from "effect";
-import type { Stream } from "effect";
 import * as Base64Url from "effect/encoding/Base64Url";
 
 import * as ConvexTransport from "./convex-transport";
@@ -193,6 +193,12 @@ const isSameSession = (a: StoredSession, b: StoredSession): boolean => {
   return Option.isSome(held) && Option.contains(sessionOf(b), held.value);
 };
 
+const sameStored = Option.makeEquivalence<StoredSession>(
+  (a, b) =>
+    Redacted.value(a.token) === Redacted.value(b.token) &&
+    Redacted.value(a.refreshToken) === Redacted.value(b.refreshToken),
+);
+
 const isExpiring = (token: string, now: number): boolean =>
   Option.match(tokenExpiry(token), {
     onNone: () => false,
@@ -311,6 +317,12 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
   const gateway = new ConvexHttpClient(options.convexUrl, { logger: false });
   const status = yield* SubscriptionRef.make<AuthStatus>("loading");
   const session = yield* Ref.make(Option.none<StoredSession>());
+
+  /**
+   * What this client last read from or wrote to the store. The store differs from it only after
+   * another writer, such as another tab, and differs from `session` after a write here failed.
+   */
+  const known = yield* Ref.make(Option.none<StoredSession>());
   const refreshing = yield* Semaphore.make(1);
 
   const lastAttempt = yield* Ref.make<{
@@ -408,9 +420,13 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     yield* SubscriptionRef.set(reconnecting, false);
   });
 
+  const save = (next: StoredSession) =>
+    storage.save(next).pipe(Effect.andThen(Ref.set(known, Option.some(next))));
+
   const forget = Effect.fn("Auth.forget")(function* () {
     yield* adopt(Option.none());
     yield* storage.clear;
+    yield* Ref.set(known, Option.none());
   });
 
   /**
@@ -537,7 +553,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       Renewed: ({ session: renewed }) =>
         Ref.set(session, Option.some(renewed)).pipe(
           Effect.andThen(reconnect),
-          Effect.andThen(storage.save(renewed)),
+          Effect.andThen(save(renewed)),
           Effect.as(Option.some(renewed.token)),
         ),
       Refused: () => forget().pipe(Effect.as(Option.none<Redacted.Redacted>())),
@@ -563,6 +579,28 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     yield* SubscriptionRef.set(reconnecting, false);
     yield* Effect.logInfo("Auth.reconnected");
   });
+
+  /**
+   * Adopts what another writer put in the store. The same session takes the renewed tokens without
+   * touching the connection or the status; another session, or none, goes through `adopt`. It
+   * never saves, clears, or ends a session on the server, because the writer did that.
+   */
+  const follow = Effect.fn("Auth.follow")(function* () {
+    const stored = yield* storage.load;
+
+    if (sameStored(stored, yield* Ref.getAndSet(known, stored))) return;
+    const held = yield* Ref.get(session);
+
+    if (sameStored(stored, held)) return;
+
+    if (Option.isSome(stored) && Option.isSome(held) && isSameSession(held.value, stored.value)) {
+      yield* Ref.set(session, stored);
+      yield* Ref.set(failing, Option.none());
+      yield* reconnect;
+    } else {
+      yield* adopt(stored);
+    }
+  }, committing.withPermits(1));
 
   /**
    * Retries the refresh of `seen` until the server renews or refuses it, or the session changes,
@@ -650,9 +688,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       });
     }
 
-    return yield* committing.withPermits(1)(
-      storage.save(opened.value).pipe(Effect.andThen(adopt(opened))),
-    );
+    return yield* committing.withPermits(1)(save(opened.value).pipe(Effect.andThen(adopt(opened))));
   });
 
   const signOut = Effect.fn("Auth.signOut")(function* () {
@@ -672,7 +708,14 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
   const stored = yield* storage.load;
 
+  yield* Ref.set(known, stored);
   yield* adopt(stored);
+  yield* Effect.forkIn(
+    Stream.runForEach(storage.changed, () =>
+      follow().pipe(Effect.catchTag("TokenStorageError", logStorageFailure)),
+    ),
+    scope,
+  );
 
   const engine: Engine = {
     status: SubscriptionRef.changes(status),

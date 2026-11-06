@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import type { Unauthenticated } from "@media/contracts/errors";
 import { Platform, TokenStorage } from "@media/sdk/effect";
-import { Context, Effect, Layer, Option, Redacted, Result, Schema } from "effect";
+import { Context, Effect, Layer, Option, Redacted, Result, Schema, Stream } from "effect";
 
 import { ConfigFileError, NotLoggedIn, UsageError } from "../cli-errors";
 import type { Environment } from "../config";
@@ -141,6 +141,7 @@ const layerSessionFile = (
           },
         }).pipe(Effect.mapError(storageError("save"))),
       clear: writeStored(path, { url }).pipe(Effect.mapError(storageError("clear"))),
+      changed: Stream.never,
     }),
   );
 
@@ -154,6 +155,7 @@ const layerHolding = (
       load: Effect.succeedSome(session),
       save: () => Effect.void,
       clear: Effect.void,
+      changed: Stream.never,
     }),
   );
 

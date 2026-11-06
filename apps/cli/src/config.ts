@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { TokenStorage } from "@media/sdk/effect";
-import { Config, Effect, Layer, Option, Redacted, Result, Schema, Struct } from "effect";
+import { Config, Effect, Layer, Option, Redacted, Result, Schema, Stream, Struct } from "effect";
 
 import { ConfigFileError } from "./cli-errors";
 import { readTextFile, writePrivateFile } from "./files";
@@ -296,5 +296,6 @@ export const layerProfileStorage = (
             }),
         ),
       ),
+      changed: Stream.never,
     }),
   );

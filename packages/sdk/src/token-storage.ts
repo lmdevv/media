@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Redacted, Ref, Schema } from "effect";
+import { Context, Effect, Layer, Option, Queue, Redacted, Ref, Schema, Stream } from "effect";
 
 /** A Convex Auth session: the short-lived JWT and the refresh token that renews it. */
 export interface StoredSession {
@@ -22,6 +22,12 @@ export interface Interface {
   readonly load: Effect.Effect<Option.Option<StoredSession>, TokenStorageError>;
   readonly save: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
   readonly clear: Effect.Effect<void, TokenStorageError>;
+  /**
+   * Emits once it starts listening, then whenever the stored session may have changed outside
+   * this client, such as another tab writing the same key. The first emission covers changes made
+   * before it listened. Never emits for a store that cannot tell.
+   */
+  readonly changed: Stream.Stream<void>;
 }
 
 /** The token store the SDK's auth reads and writes. */
@@ -39,6 +45,7 @@ export const layerMemory: Layer.Layer<TokenStorage> = Layer.effect(
       load: Ref.get(current),
       save: (session) => Ref.set(current, Option.some(session)),
       clear: Ref.set(current, Option.none()),
+      changed: Stream.never,
     });
   }),
 );
@@ -51,6 +58,12 @@ export interface KeyValueStore {
   readonly getItem: (key: string) => string | null | Promise<string | null>;
   readonly setItem: (key: string, value: string) => void | Promise<void>;
   readonly removeItem: (key: string) => void | Promise<void>;
+  /**
+   * Calls `onChange` when `key` may have changed underneath this client, such as another tab
+   * writing `localStorage`, and returns the unsubscribe. A store without it is read only at start,
+   * so it suits a store that one client owns.
+   */
+  readonly subscribe?: (key: string, onChange: () => void) => () => void;
 }
 
 const SerializedSession = Schema.fromJsonString(
@@ -74,6 +87,30 @@ export const serializeSession = (session: StoredSession): string =>
     token: Redacted.value(session.token),
     refreshToken: Redacted.value(session.refreshToken),
   });
+
+const changesOf = (store: KeyValueStore, key: string): Stream.Stream<void> => {
+  const { subscribe } = store;
+
+  if (subscribe === undefined) return Stream.never;
+
+  // A burst of changes needs one read of the store, so only the latest is kept.
+  return Stream.callback<void>(
+    (queue) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const unsubscribe = subscribe(key, () => {
+            Queue.offerUnsafe(queue, undefined);
+          });
+
+          Queue.offerUnsafe(queue, undefined);
+
+          return unsubscribe;
+        }),
+        (unsubscribe) => Effect.sync(unsubscribe),
+      ),
+    { bufferSize: 1, strategy: "sliding" },
+  );
+};
 
 /** Stores the session under `key` in a string key-value store. */
 export const layerKeyValue = (store: KeyValueStore, key: string): Layer.Layer<TokenStorage> =>
@@ -108,5 +145,6 @@ export const layerKeyValue = (store: KeyValueStore, key: string): Layer.Layer<To
             cause,
           }),
       }),
+      changed: changesOf(store, key),
     }),
   );
