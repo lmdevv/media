@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { createPlatform } from "@media/sdk/promise";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Schema } from "effect";
@@ -70,4 +71,12 @@ export const createPerson = async (
   await createUserAsHost(stack, { ...person, role });
 
   return person;
+};
+
+/** Signs `person` in at `/` through the sign-in form. */
+export const signIn = async (page: Page, person: Person): Promise<void> => {
+  await page.goto("/");
+  await page.getByLabel("Username").fill(person.username);
+  await page.getByLabel("Password", { exact: true }).fill(person.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
 };

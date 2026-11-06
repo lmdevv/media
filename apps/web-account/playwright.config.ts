@@ -37,8 +37,13 @@ const platformUrl = stack?.platformUrl ?? "http://127.0.0.1:3214";
  * The account client against the worktree's core (`scripts/dev-stack.sh up`): sign in, accepting
  * an invite, and approving a device sign-in. It skips without a stack.
  */
+// A failed test's error context holds the page's text, such as an admin page's invite link.
+process.env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1";
+
 export default defineConfig({
   testDir: "./e2e",
+  outputDir: "./test-results",
+  globalTeardown: "./e2e/global-teardown.ts",
   fullyParallel: true,
   forbidOnly: Boolean(process.env["CI"]),
   timeout: 60_000,
