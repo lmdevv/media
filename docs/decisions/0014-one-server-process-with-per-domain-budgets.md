@@ -52,12 +52,16 @@ mount media read-only.
 - Waiting guests form one line, served by ticket, the negotiation that started each stream. A
   guest that resumes its stream keeps its ticket, so it goes ahead of guests that started later.
 - A household stream that finds the limit reached while guests hold slots takes the newest guests'
-  slots until it fits, preferring guests whose streams already play over ones still starting. Each
-  such guest's encoder stops and its session stays. Its next segment request waits in the line. A
-  guest still starting gives up its start instead. The household stream's encoder starts only after
-  those guests' encoders have stopped. A taken slot and the stream that took it count as one slot,
-  and the taken one counts on its own if that stream leaves first, so the limit is never exceeded. Household streams leave the limit as it is when guests'
-  slots are not enough.
+  slots until it fits, preferring guests whose encoders already run over ones still starting. Each
+  such guest's encoder stops, even mid-start or under a waiting request, and its session stays.
+  Its next segment request waits in the line. A guest whose encoder has not started gives up its
+  start instead. Household streams leave the limit as it is when guests' slots are not enough.
+- A taken slot counts as part of the stream that took it, and so does the slot of a stream that a
+  newer one in its session replaces. If the taker leaves before that slot is free, the slot passes
+  to whoever took the taker's own slot. Failing that, it counts on its own.
+- An encoder starts only while fewer encoders than the limit run, counting every one not yet
+  stopped. Taken and replaced encoders that are still stopping hold back the streams that took
+  their slots, so the limit is never exceeded.
 - A guest whose own session already holds a slot fits sooner, so it is seated ahead of older
   waiters that do not fit yet.
 - A guest waits up to 20 seconds to start a stream, then fails with capacity reached. A guest
