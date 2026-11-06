@@ -239,6 +239,11 @@ export const layerKeyValue = (store: KeyValueStore, key: string): Layer.Layer<To
     );
   };
 
+  const clear = Effect.tryPromise({
+    try: () => write(Option.none()),
+    catch: failure("clear", "Token storage failed to clear the session"),
+  });
+
   return Layer.succeed(
     TokenStorage,
     TokenStorage.of({
@@ -254,20 +259,11 @@ export const layerKeyValue = (store: KeyValueStore, key: string): Layer.Layer<To
           },
           catch: failure("save", "Token storage failed to save the session"),
         }),
-      clear: Effect.tryPromise({
-        try: () => write(Option.none()),
-        catch: failure("clear", "Token storage failed to clear the session"),
-      }),
+      clear,
       end: (session) =>
-        Effect.tryPromise({
-          try: () => write(Option.none()),
-          catch: failure("clear", "Token storage failed to clear the session"),
-        }).pipe(
-          Effect.andThen(
-            Effect.tryPromise(() => markEnded(session, true)).pipe(
-              Effect.catch(() => Effect.logWarning("TokenStorage.endedSessionNotKept")),
-            ),
-          ),
+        Effect.tryPromise(() => markEnded(session, true)).pipe(
+          Effect.catch(() => Effect.logWarning("TokenStorage.endedSessionNotKept")),
+          Effect.andThen(clear),
         ),
       replace: (expected, next) =>
         Effect.tryPromise({

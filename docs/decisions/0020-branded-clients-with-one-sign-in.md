@@ -116,11 +116,12 @@ tab signed out.
   last stored. The SDK commits every refresh this way: renewed tokens, or a clear after the server
   refused the refresh token. A refresh that loses adopts what the store holds. If the store holds
   no session or another one, the client also ends the session it just renewed on the server.
-- Signing out goes through `TokenStorage.end`. It clears the key and adds the session's id (the
-  token's `sub`) to `<key>.ended`, which keeps the last 16. A session on that list loads as none,
-  and the read that finds it removes it. So a renewal written by a tab that had not yet seen the
-  sign-out comes to nothing in every tab once the writes reach it. Signing in again with the same
-  session, as an API key does, takes it off the list.
+- Signing out goes through `TokenStorage.end`. It adds the session's id (the token's `sub`) to
+  `<key>.ended`, which keeps the last 16, then clears the key, so a tab that sees the removal
+  already sees the id. A session on that list loads as none, and the read that finds it removes
+  it. So a renewal written by a tab that had not yet seen the sign-out comes to nothing in every
+  tab once the writes reach it. Signing in again with the same session, as an API key does, takes
+  it off the list. In the account client each sign-out leaves one small `.ended` key for its slot.
 - A client that follows another tab's sign-out ends the session it held on the server too. The
   signing-out tab may have failed to reach the server, and the follower may hold a renewal that
   tab never saw. Each open tab sends one sign-out, and the extra ones fail harmlessly.
