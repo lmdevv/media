@@ -264,14 +264,12 @@ const assertExplained = (records: ReadonlyArray<LogRecord>) => {
   }
 };
 
-const runFolder = Effect.fn(function* (streamId: string, generation: number) {
+const runFolder = Effect.fn(function* (streamId: string, run: number) {
   const server = yield* MediaTestServer.Service;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
-  return yield* fs
-    .exists(path.join(server.transcodeDir, streamId, String(generation)))
-    .pipe(Effect.orDie);
+  return yield* fs.exists(path.join(server.transcodeDir, streamId, String(run))).pipe(Effect.orDie);
 });
 
 const playing = Effect.fn(function* (sid: string) {
@@ -723,7 +721,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
             assert.lengthOf(yield* logsOf("Stream.released", stream.streamId), 1);
             assert.strictEqual(yield* status(stream.file("4.m4s")), 200);
             assert.lengthOf(yield* logsOf("Stream.resumed", stream.streamId), 1);
-            assert.isTrue(yield* runFolder(stream.streamId, 1), "the second run");
+            assert.isTrue(yield* runFolder(stream.streamId, 2), "the second run's folder");
 
             const second = yield* fetched(stream.file("init.mp4"));
 
@@ -829,7 +827,11 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
             .readDirectory(path.join(server.transcodeDir, stream.streamId))
             .pipe(Effect.orDie);
 
-          assert.includeMembers(["2", "init-2.mp4"], names, "generation 2's files only");
+          assert.includeMembers(
+            ["3", "init-2.mp4"],
+            names,
+            "the third run's folder and generation 2's init only",
+          );
 
           yield* stop(stream);
         }),

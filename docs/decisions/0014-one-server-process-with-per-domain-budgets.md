@@ -63,6 +63,10 @@ mount media read-only.
 - An encoder starts only while fewer encoders than the limit run, counting every one not yet
   stopped. Taken and replaced encoders that are still stopping hold back the streams that took
   their slots, so the limit is never exceeded.
+- Every ffmpeg run holds its own slot, and the slot frees only once the server knows the process
+  exited. A seek or a resume starts a new run in the stream's own place. While the limit is
+  reached, that run starts once the stream's previous encoder stopped. Below the limit it starts
+  at once.
 - A guest whose own session already holds a slot fits sooner, so it is seated ahead of older
   waiters that do not fit yet.
 - A guest waits up to 20 seconds to start a stream, then fails with capacity reached. A guest

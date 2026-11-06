@@ -1,5 +1,16 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Duration, Effect, Exit, Fiber, Predicate, Random, Result, Scope } from "effect";
+import {
+  Clock,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Option,
+  Predicate,
+  Random,
+  Result,
+  Scope,
+} from "effect";
 import { TestClock } from "effect/testing";
 
 import { PlaybackSessionId } from "@media/contracts/ids";
@@ -380,7 +391,7 @@ describe("encoder slots", () => {
   );
 
   it.effect(
-    "never runs more encoders than the limit, whatever streams start, yield or stop",
+    "never runs more encoders than the limit, whatever streams start, seek, yield or stop",
     () =>
       Effect.gen(function* () {
         for (const limit of [1, 2, 3]) {
@@ -389,6 +400,11 @@ describe("encoder slots", () => {
             const label = `limit ${String(limit)}, seed ${String(seed)}`;
 
             assert.isAtMost(run.peak, limit, `${label}: running encoders`);
+            assert.isAtMost(
+              run.householdWait,
+              HOUSEHOLD_WAIT_BOUND_MS,
+              `${label}: a household stream's wait for the encoders whose places it took`,
+            );
             assert.strictEqual(
               run.stuck,
               0,
@@ -398,7 +414,7 @@ describe("encoder slots", () => {
           }
         }
       }),
-    60_000,
+    120_000,
   );
 });
 
@@ -410,19 +426,29 @@ const GUEST_START_WAIT = Duration.seconds(20);
 
 const GUEST_RESUME_WAIT = Duration.seconds(30);
 
+const YIELD_MAX_MS = 3000;
+
+const STOP_MAX_MS = 1000;
+
+const STALLED_STOP_MS = 20_000;
+
+const HOUSEHOLD_WAIT_BOUND_MS = YIELD_MAX_MS + STALLED_STOP_MS + 1000;
+
 type Status = "starting" | "running" | "released" | "ended";
 
 interface Stream {
   readonly claimant: EncoderSlots.Claimant;
   readonly audience: EncoderSlots.Audience;
   status: Status;
-  lease: Scope.Closeable | undefined;
+  run: Scope.Closeable | undefined;
+  held: EncoderSlots.Held | undefined;
 }
 
 const simulate = (limit: number) =>
   Effect.gen(function* () {
     const pool = yield* EncoderSlots.make(limit);
     const encoders = { live: 0, peak: 0 };
+    const waits = { household: 0 };
     const streams: Array<Stream> = [];
     const latest = new Map<string, number>();
     const actors: Array<Fiber.Fiber<void>> = [];
@@ -432,44 +458,34 @@ const simulate = (limit: number) =>
       Effect.suspend(() => {
         stream.status = "ended";
 
-        return stream.lease === undefined ? Effect.void : close(stream.lease);
+        return stream.run === undefined ? Effect.void : close(stream.run);
       });
 
     const claim = (
       stream: Stream,
-      lease: Scope.Scope,
+      run: Scope.Scope,
       resume: boolean,
     ): Effect.Effect<EncoderSlots.Held, TranscodeCapacityReached> =>
       stream.audience === "household"
-        ? pool.household(lease, stream.claimant)
-        : pool.guest(lease, stream.claimant).pipe(
+        ? pool.household(run, stream.claimant)
+        : pool.guest(run, stream.claimant).pipe(
             Effect.timeoutOrElse({
               duration: resume ? GUEST_RESUME_WAIT : GUEST_START_WAIT,
               orElse: () => Effect.fail(new TranscodeCapacityReached({ limit })),
             }),
           );
 
-    const occupy = (stream: Stream, resume: boolean) =>
+    const stopsLater = (run: Scope.Scope) =>
       Effect.gen(function* () {
-        const lease = yield* Scope.make();
-        stream.lease = lease;
-        const { sessionId, ticket } = stream.claimant;
-        const claimed = yield* claim(stream, lease, resume).pipe(Effect.result);
-
-        if (Result.isFailure(claimed)) {
-          yield* close(lease);
-
-          if (!resume) stream.status = "ended";
-
-          return;
-        }
-
-        const held = claimed.success;
         const started = { value: false };
-        const stopsAfter = Duration.millis(yield* Random.nextIntBetween(0, 1000));
+        const stalled = (yield* Random.nextIntBetween(0, 8, { halfOpen: true })) === 0;
+
+        const stopsAfter = Duration.millis(
+          stalled ? STALLED_STOP_MS : yield* Random.nextIntBetween(0, STOP_MAX_MS),
+        );
 
         yield* Scope.addFinalizer(
-          lease,
+          run,
           Effect.suspend(() =>
             started.value
               ? Effect.sleep(stopsAfter).pipe(
@@ -482,6 +498,67 @@ const simulate = (limit: number) =>
               : Effect.void,
           ),
         );
+
+        return started;
+      });
+
+    const begin = (stream: Stream, run: Scope.Closeable, held: EncoderSlots.Held) =>
+      Effect.gen(function* () {
+        const started = yield* stopsLater(run);
+        const since = yield* Clock.currentTimeMillis;
+
+        yield* held.ready;
+
+        if (stream.audience === "household") {
+          waits.household = Math.max(waits.household, (yield* Clock.currentTimeMillis) - since);
+        }
+
+        const displaced = yield* held.isDisplaced;
+
+        const running = yield* Effect.sync(() => {
+          if (displaced || isClosed(run)) return false;
+          started.value = true;
+          encoders.live += 1;
+          encoders.peak = Math.max(encoders.peak, encoders.live);
+          stream.status = "running";
+
+          return true;
+        });
+
+        if (!running) return false;
+
+        const yieldsAfter = Duration.millis(yield* Random.nextIntBetween(0, YIELD_MAX_MS));
+
+        yield* held.displaced.pipe(
+          Effect.andThen(Effect.sleep(yieldsAfter)),
+          Effect.andThen(
+            Effect.sync(() => {
+              if (stream.run === run && stream.status === "running") stream.status = "released";
+            }),
+          ),
+          Effect.andThen(close(run)),
+          Effect.forkIn(run),
+        );
+
+        return true;
+      });
+
+    const occupy = (stream: Stream, resume: boolean) =>
+      Effect.gen(function* () {
+        const run = yield* Scope.make();
+        stream.run = run;
+        const { sessionId, ticket } = stream.claimant;
+        const claimed = yield* claim(stream, run, resume).pipe(Effect.result);
+
+        if (Result.isFailure(claimed)) {
+          yield* close(run);
+
+          if (!resume) stream.status = "ended";
+
+          return;
+        }
+
+        stream.held = claimed.success;
 
         if (!resume) {
           if (stream.status === "ended" || latest.get(sessionId) !== ticket) {
@@ -502,44 +579,46 @@ const simulate = (limit: number) =>
           );
         }
 
-        yield* held.ready;
-        const displaced = yield* held.isDisplaced;
+        if (yield* begin(stream, run, claimed.success)) return;
 
-        const running = yield* Effect.sync(() => {
-          if (displaced || isClosed(lease)) return false;
-          started.value = true;
-          encoders.live += 1;
-          encoders.peak = Math.max(encoders.peak, encoders.live);
-          stream.status = "running";
+        if (resume) {
+          yield* close(run);
+        } else {
+          yield* end(stream);
+        }
+      });
 
-          return true;
-        });
+    const seek = (stream: Stream) =>
+      Effect.gen(function* () {
+        const previous = stream.run;
+        const held = stream.held;
 
-        if (!running) {
-          if (resume) {
-            yield* close(lease);
-          } else {
-            yield* end(stream);
-          }
+        if (previous === undefined || held === undefined) return;
+        const run = yield* Scope.make();
+        const renewed = yield* held.renew(run);
+
+        if (Option.isNone(renewed)) {
+          stream.status = "released";
+          yield* close(run);
+          yield* close(previous);
 
           return;
         }
 
-        const yieldsAfter = Duration.millis(yield* Random.nextIntBetween(0, 3000));
+        stream.run = run;
+        stream.held = renewed.value;
+        stream.status = "starting";
+        yield* Effect.forkDetach(close(previous));
 
-        yield* held.displaced.pipe(
-          Effect.andThen(Effect.sleep(yieldsAfter)),
-          Effect.andThen(
-            Effect.sync(() => {
-              if (stream.status === "running") stream.status = "released";
-            }),
-          ),
-          Effect.andThen(close(lease)),
-          Effect.forkIn(lease),
-        );
+        if (yield* begin(stream, run, renewed.value)) return;
+
+        yield* Effect.sync(() => {
+          if (stream.run === run && stream.status === "starting") stream.status = "released";
+        });
+        yield* close(run);
       });
 
-    const begin = (sessionId: string, audience: EncoderSlots.Audience) =>
+    const negotiate = (sessionId: string, audience: EncoderSlots.Audience) =>
       Effect.gen(function* () {
         tickets += 1;
         latest.set(sessionId, tickets);
@@ -548,7 +627,8 @@ const simulate = (limit: number) =>
           claimant: claimant(`s${String(tickets)}`, tickets, { session: sessionId }),
           audience,
           status: "starting",
-          lease: undefined,
+          run: undefined,
+          held: undefined,
         };
 
         streams.push(stream);
@@ -565,20 +645,20 @@ const simulate = (limit: number) =>
       });
 
     for (let step = 0; step < STEPS; step += 1) {
-      const move = yield* Random.nextIntBetween(0, 6, { halfOpen: true });
+      const move = yield* Random.nextIntBetween(0, 7, { halfOpen: true });
 
       if (move <= 1) {
-        yield* begin(`p${String(step)}`, move === 0 ? "household" : "guest");
+        yield* negotiate(`p${String(step)}`, move === 0 ? "household" : "guest");
       } else if (move === 2) {
         const current = (yield* some("running")) ?? (yield* some("starting"));
 
-        if (current !== undefined) yield* begin(current.claimant.sessionId, current.audience);
+        if (current !== undefined) yield* negotiate(current.claimant.sessionId, current.audience);
       } else if (move === 3) {
         const current = yield* some("running");
 
-        if (current !== undefined && current.lease !== undefined) {
+        if (current !== undefined && current.run !== undefined) {
           current.status = "released";
-          yield* Effect.forkChild(close(current.lease));
+          yield* Effect.forkChild(close(current.run));
         }
       } else if (move === 4) {
         const current = yield* some("released");
@@ -587,6 +667,10 @@ const simulate = (limit: number) =>
           current.status = "starting";
           actors.push(yield* Effect.forkChild(occupy(current, true)));
         }
+      } else if (move === 5) {
+        const current = yield* some("running");
+
+        if (current !== undefined) actors.push(yield* Effect.forkChild(seek(current)));
       } else {
         const current = (yield* some("running")) ?? (yield* some("released"));
 
@@ -617,5 +701,10 @@ const simulate = (limit: number) =>
 
     yield* close(afterwards);
 
-    return { peak: encoders.peak, stuck, freed: waiting.every((still) => !still) };
+    return {
+      peak: encoders.peak,
+      householdWait: waits.household,
+      stuck,
+      freed: waiting.every((still) => !still),
+    };
   });

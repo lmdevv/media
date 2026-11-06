@@ -22,6 +22,7 @@ import {
   Duration,
   Effect,
   Exit,
+  Fiber,
   FileSystem,
   Layer,
   Option,
@@ -223,8 +224,13 @@ interface Generation {
   readonly paused: Ref.Ref<boolean>;
 }
 
+interface Run {
+  readonly scope: Scope.Closeable;
+  readonly held: EncoderSlots.Held;
+}
+
 type Encoder = Data.TaggedEnum<{
-  Running: { readonly lease: Scope.Closeable };
+  Running: { readonly lease: Scope.Closeable; readonly slot: EncoderSlots.Held };
   Released: { readonly since: number; readonly keptInit: Option.Option<string> };
 }>;
 
@@ -270,6 +276,7 @@ interface Session {
   readonly liveness: Ref.Ref<StreamLiveness.Liveness>;
   readonly requested: Ref.Ref<number>;
   readonly served: Ref.Ref<boolean>;
+  readonly runFolders: Ref.Ref<number>;
 }
 
 interface Produced {
@@ -288,6 +295,32 @@ const hardwareOf = (mode: PlaybackMode): HardwareAcceleration.HardwareEncoder | 
   HARDWARE_MODES[mode];
 
 const isClosed = (scope: Scope.Scope): boolean => Predicate.isTagged(scope.state, "Closed");
+
+const closeApart = (scope: Scope.Closeable) =>
+  Scope.close(scope, Exit.void).pipe(Effect.forkDetach);
+
+/** None when `scope` already closed; a close that begins while `effect` runs waits for it. */
+const whileOpen = <A, E, R>(scope: Scope.Scope, effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const running = MutableRef.make(false);
+    const done = yield* Deferred.make<void>();
+
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.suspend(() => (MutableRef.get(running) ? Deferred.await(done) : Effect.void)),
+    );
+
+    const open = yield* Effect.sync(() => {
+      if (isClosed(scope)) return false;
+      MutableRef.set(running, true);
+
+      return true;
+    });
+
+    if (!open) return Option.none<A>();
+
+    return Option.some(yield* effect.pipe(Effect.ensuring(Deferred.succeed(done, undefined))));
+  });
 
 const make = Effect.gen(function* () {
   const config = yield* MediaConfig.Service;
@@ -525,12 +558,14 @@ const make = Effect.gen(function* () {
 
   const startGeneration = Effect.fn("StreamSessions.startGeneration")(function* (
     session: Session,
-    lease: Scope.Scope,
+    lease: Scope.Closeable,
+    run: Run,
     number: number,
     startSegment: number,
   ) {
-    const directory = path.join(config.transcodeDir, session.streamId, String(number));
-    const scope = yield* Scope.fork(lease, "sequential");
+    const folder = yield* Ref.updateAndGet(session.runFolders, (made) => made + 1);
+    const directory = path.join(config.transcodeDir, session.streamId, String(folder));
+    const scope = run.scope;
     const closed = new StreamNotFound({ streamId: session.streamId });
 
     // A closed session hands out a closed scope, whose finalizers would run before the folder exists.
@@ -608,21 +643,7 @@ const make = Effect.gen(function* () {
       Scope.provide(scope),
     );
 
-    const running = yield* tools.startFfmpeg(args).pipe(
-      Scope.provide(scope),
-      Effect.catch((error) => Deferred.fail(exit, error).pipe(Effect.as(undefined))),
-    );
-
-    yield* Scope.addFinalizer(scope, Effect.sync(wakeWaits));
-
-    if (running !== undefined) {
-      yield* running.exit.pipe(
-        Effect.exit,
-        Effect.flatMap((result) => Deferred.done(exit, result)),
-        Effect.andThen(Effect.sync(wakeWaits)),
-        Effect.forkIn(scope),
-      );
-    }
+    const suspender = MutableRef.make<(paused: boolean) => Effect.Effect<void>>(() => Effect.void);
 
     const generation: Generation = {
       number,
@@ -638,7 +659,7 @@ const make = Effect.gen(function* () {
       wake,
       endUnknownLogged: MutableRef.make(false),
       videoTiming: MutableRef.make(Option.none<VideoTiming>()),
-      suspend: running === undefined ? () => Effect.void : running.suspend,
+      suspend: (paused) => Effect.suspend(() => MutableRef.get(suspender)(paused)),
       paused: yield* Ref.make(false),
     };
 
@@ -659,9 +680,49 @@ const make = Effect.gen(function* () {
       );
     }
 
-    yield* Scope.close(previous.scope, Exit.void);
+    const previousClosing = yield* closeApart(previous.scope);
 
-    return generation;
+    yield* run.held.ready;
+
+    if (yield* run.held.isDisplaced) {
+      yield* Fiber.await(previousClosing);
+
+      return Option.none<Generation>();
+    }
+
+    const started = yield* whileOpen(
+      scope,
+      tools.startFfmpeg(args).pipe(
+        Scope.provide(scope),
+        Effect.catch((error) => Deferred.fail(exit, error).pipe(Effect.as(undefined))),
+      ),
+    );
+
+    if (Option.isNone(started)) {
+      yield* Fiber.await(previousClosing);
+
+      return yield* closed;
+    }
+
+    const running = started.value;
+
+    yield* Scope.addFinalizer(scope, Effect.sync(wakeWaits));
+
+    if (running !== undefined) {
+      MutableRef.set(suspender, running.suspend);
+
+      yield* running.exit.pipe(
+        Effect.exit,
+        Effect.flatMap((result) => Deferred.done(exit, result)),
+        Effect.andThen(Effect.sync(wakeWaits)),
+        Effect.forkIn(scope),
+      );
+    }
+
+    yield* yieldWhenDisplaced(session, lease, run);
+    yield* Fiber.await(previousClosing);
+
+    return Option.some(generation);
   });
 
   const fallBackToSoftware = Effect.fn("StreamSessions.fallBackToSoftware")(function* (
@@ -752,7 +813,7 @@ const make = Effect.gen(function* () {
         yield* hardware.markUnavailable(hardwareEncoder, detail);
         yield* fallBackToSoftware(session);
 
-        return yield* startGeneration(session, encoder.lease, generation.number + 1, index);
+        return yield* nextGeneration(session, encoder, generation.number + 1, index);
       }),
     );
 
@@ -976,29 +1037,56 @@ const make = Effect.gen(function* () {
     return generation;
   });
 
-  /**
-   * Takes a slot until `lease` closes. A guest waits in line for at most `wait`, interruptibly,
-   * then fails as a household stream does at once when household streams hold every slot.
-   */
-  const claimSlot = (
+  const claimRun = (
     lease: Scope.Scope,
     transcoding: boolean,
     audience: EncoderSlots.Audience,
     claimant: EncoderSlots.Claimant,
     wait: Duration.Duration,
-  ): Effect.Effect<EncoderSlots.Held, TranscodeCapacityReached> => {
+  ): Effect.Effect<Run, TranscodeCapacityReached> => {
     const pool = transcoding ? transcodes : copies;
 
-    return audience === "household"
-      ? pool.household(lease, claimant)
-      : pool.guest(lease, claimant).pipe(
-          Effect.timeoutOrElse({
-            duration: wait,
-            orElse: () => Effect.fail(new TranscodeCapacityReached({ limit: pool.limit })),
-          }),
-          Effect.interruptible,
-        );
+    return Scope.fork(lease, "sequential").pipe(
+      Effect.flatMap((scope) =>
+        (audience === "household"
+          ? pool.household(scope, claimant)
+          : pool.guest(scope, claimant).pipe(
+              Effect.timeoutOrElse({
+                duration: wait,
+                orElse: () => Effect.fail(new TranscodeCapacityReached({ limit: pool.limit })),
+              }),
+              Effect.interruptible,
+            )
+        ).pipe(Effect.map((held): Run => ({ scope, held }))),
+      ),
+    );
   };
+
+  const nextGeneration = Effect.fnUntraced(function* (
+    session: Session,
+    encoder: Encoder & { readonly _tag: "Running" },
+    number: number,
+    index: number,
+  ) {
+    const scope = yield* Scope.fork(encoder.lease, "sequential");
+    const held = yield* encoder.slot.renew(scope);
+
+    const started = yield* Option.match(held, {
+      onNone: () => Effect.succeed(Option.none<Generation>()),
+      onSome: (renewed) =>
+        startGeneration(session, encoder.lease, { scope, held: renewed }, number, index),
+    });
+
+    if (Option.isNone(held) || Option.isNone(started)) {
+      yield* stopEncoder(session, encoder.lease, Option.none());
+
+      return yield* new SegmentNotReady({ index });
+    }
+
+    yield* Ref.set(session.encoder, Encoder.Running({ lease: encoder.lease, slot: held.value }));
+
+    return started.value;
+  });
 
   const revive = Effect.fn("StreamSessions.revive")(function* (
     session: Session,
@@ -1030,9 +1118,9 @@ const make = Effect.gen(function* () {
         Effect.andThen(end("resume-refused")),
       );
 
-    const held = yield* space.check(0).pipe(
+    const claimed = yield* space.check(0).pipe(
       Effect.andThen(
-        claimSlot(
+        claimRun(
           lease,
           transcoding,
           session.audience,
@@ -1052,31 +1140,36 @@ const make = Effect.gen(function* () {
       }),
     );
 
-    yield* held.ready;
-
-    if (yield* held.isDisplaced) {
-      yield* Scope.close(lease, Exit.void);
-
-      return yield* new SegmentNotReady({ index });
-    }
-
     // The player holds this generation's init segment from the lost encoder, and software segments
     // do not decode under it, so a fallback moves to the next generation. When software cannot
     // play the file at all, the negotiation the player falls back to says why.
-    const run = yield* Effect.gen(function* () {
+    const started = yield* Effect.gen(function* () {
       const used = hardwareOf(yield* Ref.get(session.mode));
       const lost = used !== undefined && used !== (yield* hardware.encoder);
 
       if (lost) yield* fallBackToSoftware(session);
 
-      return yield* startGeneration(session, lease, current.number + (lost ? 1 : 0), index);
+      return yield* startGeneration(
+        session,
+        lease,
+        claimed,
+        current.number + (lost ? 1 : 0),
+        index,
+      );
     }).pipe(
       Effect.onError(() => Scope.close(lease, Exit.void)),
       Effect.catchTag("UnsupportedPlayback", () => end("failed")),
     );
 
-    yield* Ref.set(session.encoder, Encoder.Running({ lease }));
-    yield* yieldWhenDisplaced(session, lease, held);
+    if (Option.isNone(started)) {
+      yield* Scope.close(lease, Exit.void);
+
+      return yield* new SegmentNotReady({ index });
+    }
+
+    const run = started.value;
+
+    yield* Ref.set(session.encoder, Encoder.Running({ lease, slot: claimed.held }));
 
     yield* Effect.logInfo(LogEvent.streamResumed).pipe(
       Effect.annotateLogs({
@@ -1106,7 +1199,7 @@ const make = Effect.gen(function* () {
         if (index >= current.startSegment && index <= produced.head + LOOKAHEAD_SEGMENTS)
           return current;
 
-        return yield* startGeneration(session, encoder.lease, current.number + 1, index);
+        return yield* nextGeneration(session, encoder, current.number + 1, index);
       }),
     );
   });
@@ -1188,11 +1281,11 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const yieldWhenDisplaced = (session: Session, lease: Scope.Closeable, held: EncoderSlots.Held) =>
+  const yieldWhenDisplaced = (session: Session, lease: Scope.Closeable, run: Run) =>
     session.audience === "guest"
-      ? held.displaced.pipe(
+      ? run.held.displaced.pipe(
           Effect.andThen(yieldEncoder(session, lease)),
-          Effect.forkIn(lease),
+          Effect.forkIn(run.scope),
           Effect.asVoid,
         )
       : Effect.void;
@@ -1338,7 +1431,7 @@ const make = Effect.gen(function* () {
 
     const lease = yield* Scope.fork(scope, "sequential");
 
-    const held = yield* claimSlot(
+    const run = yield* claimRun(
       lease,
       transcoding,
       grant.audience,
@@ -1398,7 +1491,7 @@ const make = Effect.gen(function* () {
       audio: plan.audio,
       generation: yield* Ref.make(placeholder),
       lock: yield* Semaphore.make(1),
-      encoder: yield* Ref.make<Encoder>(Encoder.Running({ lease })),
+      encoder: yield* Ref.make<Encoder>(Encoder.Running({ lease, slot: run.held })),
       use: yield* Ref.make<Admission>({
         inFlight: 1,
         lastRequestAt: now,
@@ -1408,6 +1501,7 @@ const make = Effect.gen(function* () {
       liveness: yield* Ref.make<StreamLiveness.Liveness>(StreamLiveness.Liveness.Unknown()),
       requested: yield* Ref.make(0),
       served: yield* Ref.make(false),
+      runFolders: yield* Ref.make(0),
     };
 
     yield* throttle(session).pipe(
@@ -1430,8 +1524,6 @@ const make = Effect.gen(function* () {
 
     if (Option.isNone(replaced)) return yield* new StreamNotFound({ streamId });
 
-    // Effect's `forkIn` does not interrupt a fiber that closes its own scope; it ends after the
-    // close.
     yield* reports.follow(grant.sessionId).pipe(
       Stream.takeUntil(StreamLiveness.SessionReport.$is("Ended")),
       Stream.runForEach((report) =>
@@ -1445,17 +1537,16 @@ const make = Effect.gen(function* () {
       Effect.forkIn(scope),
     );
 
-    yield* held.ready;
+    const segmentIndex = segmentAt(segmentPlan, quickStart);
+    const first = yield* startGeneration(session, lease, run, 1, segmentIndex);
 
-    if (yield* held.isDisplaced) {
+    if (Option.isNone(first)) {
       return yield* new TranscodeCapacityReached({
         limit: (transcoding ? transcodes : copies).limit,
       });
     }
 
-    const segmentIndex = segmentAt(segmentPlan, quickStart);
-    const started = yield* startGeneration(session, lease, 1, segmentIndex);
-    yield* yieldWhenDisplaced(session, lease, held);
+    const started = first.value;
 
     const generation =
       hardwareOf(plan.mode) !== undefined

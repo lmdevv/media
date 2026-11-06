@@ -1,6 +1,6 @@
 import type { PlaybackSessionId } from "@media/contracts/ids";
 import { TranscodeCapacityReached } from "@media/contracts/media-playback";
-import { Data, Deferred, Effect, Predicate, Ref, Scope } from "effect";
+import { Data, Deferred, Effect, Option, Predicate, Ref, Scope } from "effect";
 
 /** Who a stream plays for, which sets its priority under a limit (ADR 0007, ADR 0014). */
 export type Audience = "household" | "guest";
@@ -31,6 +31,13 @@ export interface Held {
   readonly displaced: Effect.Effect<void>;
   /** Whether a household stream took this slot already; a holder not running yet then gives up. */
   readonly isDisplaced: Effect.Effect<boolean>;
+  /**
+   * Takes this slot's place for the holder's next encoder, until `scope` closes, without waiting.
+   * This slot keeps counting until it is freed, so the next encoder's `ready` waits for this one's
+   * encoder to stop while the limit is reached. None, taking nothing, once this slot lost its
+   * place: a household stream took it, or a newer stream of the session did.
+   */
+  readonly renew: (scope: Scope.Scope) => Effect.Effect<Option.Option<Held>>;
 }
 
 interface Pool {
@@ -264,7 +271,37 @@ export const make = Effect.fnUntraced(function* (limit: number) {
     ready: ready(slot),
     displaced: slot.audience === "guest" ? Deferred.await(slot.displaced) : Effect.never,
     isDisplaced: Deferred.isDone(slot.displaced),
+    renew: (scope) => renew(slot, scope),
   });
+
+  const renew = (previous: Slot, scope: Scope.Scope) =>
+    Effect.gen(function* () {
+      const slot = yield* slotFor(previous.claimant, previous.audience);
+
+      const renewed = yield* Ref.modify(state, (current) => {
+        const place = current.slots.get(previous.id);
+
+        if (
+          Predicate.isTagged(scope.state, "Closed") ||
+          place === undefined ||
+          place.takenOverBy !== null ||
+          Deferred.isDoneUnsafe(place.displaced)
+        ) {
+          return [false, current] as const;
+        }
+
+        const slots = new Map(current.slots)
+          .set(place.id, { ...place, takenOverBy: slot.id })
+          .set(slot.id, slot);
+
+        return [true, { ...current, slots }] as const;
+      });
+
+      if (!renewed) return Option.none<Held>();
+      yield* Scope.addFinalizer(scope, leave(slot));
+
+      return Option.some(heldBy(slot));
+    }).pipe(Effect.uninterruptible);
 
   const household = (scope: Scope.Scope, claimant: Claimant) =>
     Effect.gen(function* () {
