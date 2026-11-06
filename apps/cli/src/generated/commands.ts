@@ -1712,4 +1712,402 @@ export const generatedCommands = [
     }),
     method: (platform) => platform.core.settings.set,
   }),
+  coreCommand({
+    name: "core.together.add",
+    path: ["auth", "together", "add"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary: "Queue something you can play in your group session, next or at the end",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      item: Schema.Union([
+        Schema.Struct({
+          domain: Schema.Literal("movies"),
+          ref: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("probeMovie"),
+              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            }),
+          ]),
+        }),
+        Schema.Struct({
+          domain: Schema.Literal("music"),
+          ref: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("probeTrack"),
+              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            }),
+          ]),
+        }),
+      ]),
+      at: Schema.optionalKey(Schema.Union([Schema.Literal("next"), Schema.Literal("end")])),
+    }),
+    result: Schema.Struct({ entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")) }),
+    method: (platform) => platform.core.together.add,
+  }),
+  coreCommand({
+    name: "core.together.admit",
+    path: ["auth", "together", "admit"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary: "Let someone waiting to join your group session in, as its host",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      userId: Schema.String.pipe(Schema.brand("Id<users>")),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.together.admit,
+  }),
+  coreCommand({
+    name: "core.together.block",
+    path: ["auth", "together", "block"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Remove someone from your group session or turn their request away, as its host; its link no longer lets them in",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      userId: Schema.String.pipe(Schema.brand("Id<users>")),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.together.block,
+  }),
+  coreCommand({
+    name: "core.together.configure",
+    path: ["auth", "together", "configure"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Set who may join your group session and whether its guests may control playback and add items",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      join: Schema.Union([
+        Schema.Literal("open"),
+        Schema.Literal("approval"),
+        Schema.Literal("locked"),
+      ]),
+      control: Schema.Boolean,
+      add: Schema.Boolean,
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.together.configure,
+  }),
+  coreCommand({
+    name: "core.together.control",
+    path: ["auth", "together", "control"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Play, pause, seek, change the speed of, or skip to the next item in your group session",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      op: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal("play") }),
+        Schema.Struct({ kind: Schema.Literal("pause") }),
+        Schema.Struct({ kind: Schema.Literal("rate"), playbackRate: Schema.Finite }),
+        Schema.Struct({
+          kind: Schema.Literal("seek"),
+          positionMs: Schema.Finite,
+          revision: Schema.Finite,
+        }),
+        Schema.Struct({ kind: Schema.Literal("next"), revision: Schema.Finite }),
+      ]),
+    }),
+    result: Schema.Struct({
+      status: Schema.Union([Schema.Literal("playing"), Schema.Literal("paused")]),
+      positionAtAnchorMs: Schema.Finite,
+      anchorServerTime: Schema.Finite,
+      playbackRate: Schema.Finite,
+      revision: Schema.Finite,
+    }),
+    method: (platform) => platform.core.together.control,
+  }),
+  coreCommand({
+    name: "core.together.create",
+    path: ["auth", "together", "create"],
+    kind: "action",
+    scope: "signed-in",
+    refusesKeys: true,
+    summary:
+      "Start a group session on something you can play, leaving any session you are a guest in, and get its join link",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      item: Schema.Union([
+        Schema.Struct({
+          domain: Schema.Literal("movies"),
+          ref: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("probeMovie"),
+              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            }),
+          ]),
+        }),
+        Schema.Struct({
+          domain: Schema.Literal("music"),
+          ref: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("probeTrack"),
+              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            }),
+          ]),
+        }),
+      ]),
+      join: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("open"),
+          Schema.Literal("approval"),
+          Schema.Literal("locked"),
+        ]),
+      ),
+      control: Schema.optionalKey(Schema.Boolean),
+      add: Schema.optionalKey(Schema.Boolean),
+    }),
+    result: Schema.Struct({
+      sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+      link: Schema.String,
+    }),
+    method: (platform) => platform.core.together.create,
+  }),
+  coreCommand({
+    name: "core.together.get",
+    path: ["auth", "together", "get"],
+    kind: "query",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Show your group session in a domain: its clock, item, members, settings, link, and what you may do",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+    }),
+    result: Schema.Union([
+      Schema.Null,
+      Schema.Struct({
+        state: Schema.Literal("pending"),
+        sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+        host: Schema.String,
+      }),
+      Schema.Struct({
+        state: Schema.Literal("ended"),
+        sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+        reason: Schema.Union([Schema.Literal("host-left"), Schema.Literal("abandoned")]),
+      }),
+      Schema.Struct({
+        state: Schema.Literal("joined"),
+        sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+        host: Schema.String,
+        role: Schema.Union([Schema.Literal("host"), Schema.Literal("guest")]),
+        link: Schema.String,
+        settings: Schema.Struct({
+          join: Schema.Union([
+            Schema.Literal("open"),
+            Schema.Literal("approval"),
+            Schema.Literal("locked"),
+          ]),
+          control: Schema.Boolean,
+          add: Schema.Boolean,
+        }),
+        may: Schema.Struct({
+          control: Schema.Boolean,
+          add: Schema.Boolean,
+          manage: Schema.Boolean,
+        }),
+        clock: Schema.Struct({
+          status: Schema.Union([Schema.Literal("playing"), Schema.Literal("paused")]),
+          positionAtAnchorMs: Schema.Finite,
+          anchorServerTime: Schema.Finite,
+          playbackRate: Schema.Finite,
+          revision: Schema.Finite,
+        }),
+        item: Schema.Union([
+          Schema.Union([
+            Schema.Struct({
+              domain: Schema.Literal("movies"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("probeMovie"),
+                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                }),
+              ]),
+            }),
+            Schema.Struct({
+              domain: Schema.Literal("music"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("probeTrack"),
+                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                }),
+              ]),
+            }),
+          ]),
+          Schema.Null,
+        ]),
+        members: Schema.Array(
+          Schema.Struct({
+            userId: Schema.String.pipe(Schema.brand("Id<users>")),
+            username: Schema.String,
+            role: Schema.Union([Schema.Literal("host"), Schema.Literal("guest")]),
+            present: Schema.Boolean,
+          }),
+        ),
+        pending: Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              userId: Schema.String.pipe(Schema.brand("Id<users>")),
+              username: Schema.String,
+              present: Schema.Boolean,
+            }),
+          ),
+          Schema.Null,
+        ]),
+      }),
+    ]),
+    method: (platform) => platform.core.together.get,
+  }),
+  coreCommand({
+    name: "core.together.heartbeat",
+    path: ["auth", "together", "heartbeat"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary: "Keep yourself present in your group session in a domain and read the server clock",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+    }),
+    result: Schema.Struct({ serverTime: Schema.Finite }),
+    method: (platform) => platform.core.together.heartbeat,
+  }),
+  coreCommand({
+    name: "core.together.join",
+    path: ["auth", "together", "join"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Join the group session a link opens, or wait for its host to let you in; leaves your other session in this domain",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      link: Schema.String,
+    }),
+    result: Schema.Struct({
+      state: Schema.Union([Schema.Literal("joined"), Schema.Literal("pending")]),
+    }),
+    method: (platform) => platform.core.together.join,
+  }),
+  coreCommand({
+    name: "core.together.leave",
+    path: ["auth", "together", "leave"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary: "Leave your group session in a domain; when you host it, it ends for everyone",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.together.leave,
+  }),
+  coreCommand({
+    name: "core.together.queue",
+    path: ["auth", "together", "queue"],
+    kind: "query",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary: "List what plays next in your group session in a domain",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")),
+          item: Schema.Union([
+            Schema.Union([
+              Schema.Struct({
+                domain: Schema.Literal("movies"),
+                ref: Schema.Union([
+                  Schema.Struct({
+                    type: Schema.Literal("probeMovie"),
+                    id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  }),
+                ]),
+              }),
+              Schema.Struct({
+                domain: Schema.Literal("music"),
+                ref: Schema.Union([
+                  Schema.Struct({
+                    type: Schema.Literal("probeTrack"),
+                    id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  }),
+                ]),
+              }),
+            ]),
+            Schema.Null,
+          ]),
+          addedBy: Schema.Union([Schema.String, Schema.Null]),
+          removable: Schema.Boolean,
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.core.together.queue,
+  }),
+  coreCommand({
+    name: "core.together.remove",
+    path: ["auth", "together", "remove"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Take an entry out of your group session's queue: any as its host, your own as a guest",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.together.remove,
+  }),
 ];

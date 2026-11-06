@@ -58,3 +58,25 @@ export const paginate = <Table extends TableNames, Index extends IndexNames<Tabl
       maximumRowsRead: Math.min(options.maximumRowsRead ?? PAGE_ROWS_MAX, PAGE_ROWS_MAX),
     });
 };
+
+/**
+ * Reads one page of at most `rows` rows. Convex ignores `maximumRowsRead` when a reactive client
+ * reloads up to its `endCursor`, so past `rows` this returns an empty `SplitRequired` page and the
+ * client splits it at Convex's `splitCursor`.
+ */
+export const paginateAtMost = async <
+  Table extends TableNames,
+  Index extends IndexNames<TableInfo<Table>>,
+>(
+  db: DatabaseReader,
+  list: IndexedList<Table, Index>,
+  options: PaginationOptions,
+  rows: number,
+): Promise<PaginationResult<Doc<Table>>> => {
+  const found = await paginate(db, list, {
+    ...options,
+    numItems: Math.min(pageRows(options.numItems), rows),
+  });
+
+  return found.page.length > rows ? { ...found, page: [], pageStatus: "SplitRequired" } : found;
+};

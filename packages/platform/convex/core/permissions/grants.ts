@@ -72,33 +72,50 @@ export const groupsOf = async (
       .take(GROUPS_PER_USER_MAX)
   ).map((member) => member.groupId);
 
-const directKeys = (principal: Principal): ReadonlyArray<PrincipalKey> =>
-  principal.kind === "service"
-    ? []
-    : principal.role === "guest"
-      ? [principal.userId]
-      : [principal.userId, "household"];
+/** Whose grants reach a principal. Read it once per call and share it across every check. */
+export interface Reach {
+  readonly principal: Principal;
+  readonly direct: ReadonlyArray<PrincipalKey>;
+  readonly groups: ReadonlyArray<Id<"groups">>;
+}
+
+/** Reads `principal`'s reach: 1 index range and a document per group. */
+export const reachOf = async (db: DatabaseReader, principal: Principal): Promise<Reach> => {
+  if (principal.kind === "service") return { principal, direct: [], groups: [] };
+
+  return {
+    principal,
+    direct: principal.role === "guest" ? [principal.userId] : [principal.userId, "household"],
+    groups: await groupsOf(db, principal.userId),
+  };
+};
+
+const LIST_CALL_READS = 16;
 
 /**
- * The strongest level any grant gives `principal` on `ref`: their own, the household's (not for
- * guests), or one of their groups'. A service gets none. Reads 2 grants, then, unless one of them
- * is `manage`, the person's groups and one grant per group.
+ * The most rows one page may decide through grants for `reach` when each row reads `rowReads`
+ * documents of its own, so the call reads at most `PAGE_ROWS_MAX` documents and index ranges.
  */
+export const decidableRows = (reach: Reach, rowReads: number): number =>
+  Math.floor(
+    (PAGE_ROWS_MAX - LIST_CALL_READS - reach.groups.length) /
+      (rowReads + reach.direct.length + reach.groups.length),
+  );
+
+/** The strongest level any grant in `reach` gives on `ref`. */
 export const levelOn = async <T extends ResourceType>(
   db: DatabaseReader,
-  principal: Principal,
+  reach: Reach,
   ref: ResourceRef<T>,
 ): Promise<Level | null> => {
-  const [directGrants, groups] = await Promise.all([
-    Promise.all(directKeys(principal).map(async (key) => grantOn(db, ref, key))),
-    principal.kind === "service" ? [] : groupsOf(db, principal.userId),
-  ]);
-
+  const directGrants = await Promise.all(reach.direct.map(async (key) => grantOn(db, ref, key)));
   const direct = strongest(directGrants.map((grant) => grant?.level ?? null));
 
   if (direct === "manage") return direct;
 
-  const viaGroups = await Promise.all(groups.map(async (groupId) => grantOn(db, ref, groupId)));
+  const viaGroups = await Promise.all(
+    reach.groups.map(async (groupId) => grantOn(db, ref, groupId)),
+  );
 
   return strongest([direct, ...viaGroups.map((grant) => grant?.level ?? null)]);
 };
@@ -115,8 +132,9 @@ export const requireContent = async <T extends ResourceType>(
   ref: ResourceRef<T>,
 ): Promise<Visible<T>> => {
   const missing = `No such ${ref.type}`;
-  const doc = (await ctx.db.get(ref.id)) ?? fail("not_found", missing);
-  const level = await levelOn(ctx.db, caller, ref);
+  const [found, reach] = await Promise.all([ctx.db.get(ref.id), reachOf(ctx.db, caller)]);
+  const doc = found ?? fail("not_found", missing);
+  const level = await levelOn(ctx.db, reach, ref);
   const resource = resourceOf(ref.type, doc, level);
   const decision = can(caller, action, resource);
 
@@ -224,9 +242,9 @@ export const visiblePage = async <T extends ResourceType>(
     through: boundOf(ctx.db, type, options.endCursor),
   };
 
-  const groups = principal.kind === "service" ? [] : await groupsOf(ctx.db, principal.userId);
-  const keys = [...directKeys(principal), ...groups];
-  const fits = Math.floor((PAGE_ROWS_MAX - groups.length - keys.length) / (keys.length + 1));
+  const reach = await reachOf(ctx.db, principal);
+  const keys = [...reach.direct, ...reach.groups];
+  const fits = Math.floor((PAGE_ROWS_MAX - reach.groups.length - keys.length) / (keys.length + 1));
 
   const rows =
     bounds.through === null ? Math.max(1, Math.min(pageRows(options.numItems), fits)) : fits;

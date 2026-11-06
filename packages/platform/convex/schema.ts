@@ -6,6 +6,12 @@ import { assignableRole, contentDomain, credentialScope } from "../commands/scop
 import { deviceSettingFields, downloadQuality, userSettingFields } from "../commands/settings";
 import { importSource } from "./core/jobs/kinds";
 import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
+import {
+  beatDocument,
+  entryDocument,
+  memberDocument,
+  sessionDocument,
+} from "./core/together/model";
 
 const sessionFields = {
   userId: v.id("users"),
@@ -430,6 +436,23 @@ export default defineSchema({
     cursor: v.union(v.string(), v.null()),
     done: v.boolean(),
   }).index("by_name", ["name"]),
+
+  /**
+   * A group session (ADR 0017), found by id from its link or from a member row.
+   * `core/together/` is its only writer.
+   */
+  togetherSessions: defineTable(sessionDocument),
+
+  togetherMembers: defineTable(memberDocument)
+    .index("by_user_domain", ["userId", "domain"])
+    .index("by_session_state", ["sessionId", "state"]),
+
+  togetherBeats: defineTable(beatDocument)
+    .index("by_member", ["memberId"])
+    .index("by_session", ["sessionId"])
+    .index("by_seen", ["seenAt"]),
+
+  togetherEntries: defineTable(entryDocument).index("by_session_order", ["sessionId", "order"]),
 
   imports: defineTable({
     source: importSource,

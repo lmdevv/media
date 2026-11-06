@@ -97,6 +97,18 @@ describe("CLI placement", () => {
       "core.server.info": "auth server info",
       "core.settings.get": "auth settings get",
       "core.settings.set": "auth settings set",
+      "core.together.add": "auth together add",
+      "core.together.admit": "auth together admit",
+      "core.together.block": "auth together block",
+      "core.together.configure": "auth together configure",
+      "core.together.control": "auth together control",
+      "core.together.create": "auth together create",
+      "core.together.get": "auth together get",
+      "core.together.heartbeat": "auth together heartbeat",
+      "core.together.join": "auth together join",
+      "core.together.leave": "auth together leave",
+      "core.together.queue": "auth together queue",
+      "core.together.remove": "auth together remove",
     });
   });
 
@@ -139,6 +151,7 @@ describe("CLI placement", () => {
       "core.permissions.grants.list",
       "core.permissions.groups.list",
       "core.permissions.groups.members",
+      "core.together.queue",
     ]);
   });
 });

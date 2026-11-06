@@ -12,4 +12,11 @@ crons.interval(
   internal.core.jobs.leases.releaseExpired,
 );
 
+crons.interval(
+  "mark silent group-session members away",
+  { seconds: 10 },
+  internal.core.together.presence.sweep,
+  {},
+);
+
 export default crons;

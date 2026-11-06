@@ -46,15 +46,24 @@ export type SourceLoader<K extends DownloadKind> = (
   libraryOf: LibraryReader,
 ) => Promise<DownloadSource<K> | null>;
 
-type SourceLoaders = { readonly [K in DownloadKind]: SourceLoader<K> };
+/** How one download kind is described: a loader, and the most documents it reads. */
+interface Source<K extends DownloadKind> {
+  readonly reads: number;
+  readonly load: SourceLoader<K>;
+}
+
+type SourceLoaders = { readonly [K in DownloadKind]: Source<K> };
 
 const loaders: SourceLoaders = {
-  probe: probeSource,
+  probe: { reads: 2, load: probeSource },
 };
+
+/** The most documents describing one item reads. */
+export const SOURCE_READS = Math.max(...Object.values(loaders).map((source) => source.reads));
 
 /** The item as its domain describes it now, or null when it is gone. */
 export const sourceOf = <K extends DownloadKind>(
   db: DatabaseReader,
   item: ItemOf<K>,
   libraryOf: LibraryReader,
-): Promise<DownloadSource<K> | null> => loaders[item.kind](db, item.id, libraryOf);
+): Promise<DownloadSource<K> | null> => loaders[item.kind].load(db, item.id, libraryOf);

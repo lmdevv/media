@@ -28,7 +28,8 @@ const KNOWN_PAGE = 1000;
 
 const scannedFile = v.object({ path: v.string(), size: v.number(), mtime: v.number() });
 
-const factsOf = (library: Doc<"libraries">, item: Doc<"probeItems">): ContentFacts =>
+/** The facts restrictions read about a probe item, in its library's domain. */
+export const probeFacts = (library: Doc<"libraries">, item: Doc<"probeItems">): ContentFacts =>
   library.kind === "movies"
     ? { domain: "movies", rating: ratingOf(item.age) }
     : { domain: "music", explicit: item.explicit };
@@ -42,7 +43,7 @@ export const probeSource: SourceLoader<"probe"> = async (db, id, libraryOf) => {
 
   return {
     library: library._id,
-    facts: factsOf(library, item),
+    facts: probeFacts(library, item),
     resource: { kind: "file", id: item._id },
     revision: `${item.size}:${item.mtime}`,
     bytes: () => item.size,
@@ -142,7 +143,7 @@ export const open = internalQuery({
     const item = (await ctx.db.get(itemId)) ?? fail("not_found", "No such item");
     const gate = await requireItems(ctx, caller, action, item.libraryId);
 
-    if (!gate.admits(factsOf(gate.library, item))) fail("not_found", "No such item");
+    if (!gate.admits(probeFacts(gate.library, item))) fail("not_found", "No such item");
 
     return { itemId: item._id, path: item.path, level: gate.level };
   },
@@ -174,7 +175,7 @@ export const page = internalQuery({
     return {
       ...found,
       page: found.page
-        .filter((item) => gate.admits(factsOf(gate.library, item)))
+        .filter((item) => gate.admits(probeFacts(gate.library, item)))
         .map((item) => ({ itemId: item._id, path: item.path, level: gate.level })),
     };
   },

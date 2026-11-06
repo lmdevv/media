@@ -706,3 +706,125 @@ Change some of your settings; each follows you or stays on this device, as the s
 - Scope: signed-in
 - Arguments: `{ subtitleLanguage?: string | null; audioLanguage?: string | null; subtitleStyle?: { size: "small" | "medium" | "large"; color: "white" | "yellow"; backdrop: "none" | "shadow" | "box" }; autoplay?: boolean; explicitFilter?: boolean; crossfade?: number; gapless?: boolean; streamQuality?: "auto" | "original" | "high" | "standard" | "low"; downloadQuality?: "standard" | "high"; volume?: number }`
 - Result: `{ user: { subtitleLanguage: string | null; audioLanguage: string | null; subtitleStyle: { size: "small" | "medium" | "large"; color: "white" | "yellow"; backdrop: "none" | "shadow" | "box" }; autoplay: boolean; explicitFilter: boolean; crossfade: number; gapless: boolean }; device: { streamQuality: "auto" | "original" | "high" | "standard" | "low"; downloadQuality: "standard" | "high"; volume: number } | null }`
+
+## `core.together.add`
+
+Queue something you can play in your group session, next or at the end.
+
+- CLI: `media auth together add`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ item: { domain: "movies"; ref: { type: "probeMovie"; id: Id<"probeItems"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } }; at?: "next" | "end" }`
+- Result: `{ entryId: Id<"togetherEntries"> }`
+
+## `core.together.admit`
+
+Let someone waiting to join your group session in, as its host.
+
+- CLI: `media auth together admit`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; userId: Id<"users"> }`
+- Result: `null`
+
+## `core.together.block`
+
+Remove someone from your group session or turn their request away, as its host; its link no longer lets them in.
+
+- CLI: `media auth together block`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; userId: Id<"users"> }`
+- Result: `null`
+
+## `core.together.configure`
+
+Set who may join your group session and whether its guests may control playback and add items.
+
+- CLI: `media auth together configure`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; join: "open" | "approval" | "locked"; control: boolean; add: boolean }`
+- Result: `null`
+
+## `core.together.control`
+
+Play, pause, seek, change the speed of, or skip to the next item in your group session.
+
+- CLI: `media auth together control`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; op: { kind: "play" } | { kind: "pause" } | { kind: "rate"; playbackRate: number } | { kind: "seek"; positionMs: number; revision: number } | { kind: "next"; revision: number } }`
+- Result: `{ status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }`
+
+## `core.together.create`
+
+Start a group session on something you can play, leaving any session you are a guest in, and get its join link.
+
+- CLI: `media auth together create`
+- Kind: action
+- Scope: signed-in
+- API keys: refused
+- Arguments: `{ item: { domain: "movies"; ref: { type: "probeMovie"; id: Id<"probeItems"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } }; join?: "open" | "approval" | "locked"; control?: boolean; add?: boolean }`
+- Result: `{ sessionId: Id<"togetherSessions">; link: string }`
+
+## `core.together.get`
+
+Show your group session in a domain: its clock, item, members, settings, link, and what you may do.
+
+- CLI: `media auth together get`
+- Kind: query
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music" }`
+- Result: `null | { state: "pending"; sessionId: Id<"togetherSessions">; host: string } | { state: "ended"; sessionId: Id<"togetherSessions">; reason: "host-left" | "abandoned" } | { state: "joined"; sessionId: Id<"togetherSessions">; host: string; role: "host" | "guest"; link: string; settings: { join: "open" | "approval" | "locked"; control: boolean; add: boolean }; may: { control: boolean; add: boolean; manage: boolean }; clock: { status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }; item: { domain: "movies"; ref: { type: "probeMovie"; id: Id<"probeItems"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } | null; members: Array<{ userId: Id<"users">; username: string; role: "host" | "guest"; present: boolean }>; pending: Array<{ userId: Id<"users">; username: string; present: boolean }> | null }`
+
+## `core.together.heartbeat`
+
+Keep yourself present in your group session in a domain and read the server clock.
+
+- CLI: `media auth together heartbeat`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music" }`
+- Result: `{ serverTime: number }`
+
+## `core.together.join`
+
+Join the group session a link opens, or wait for its host to let you in; leaves your other session in this domain.
+
+- CLI: `media auth together join`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; link: string }`
+- Result: `{ state: "joined" | "pending" }`
+
+## `core.together.leave`
+
+Leave your group session in a domain; when you host it, it ends for everyone.
+
+- CLI: `media auth together leave`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music" }`
+- Result: `null`
+
+## `core.together.queue`
+
+List what plays next in your group session in a domain.
+
+- CLI: `media auth together queue`
+- Kind: query
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ entryId: Id<"togetherEntries">; item: { domain: "movies"; ref: { type: "probeMovie"; id: Id<"probeItems"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } | null; addedBy: string | null; removable: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.together.remove`
+
+Take an entry out of your group session's queue: any as its host, your own as a guest.
+
+- CLI: `media auth together remove`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; entryId: Id<"togetherEntries"> }`
+- Result: `null`
