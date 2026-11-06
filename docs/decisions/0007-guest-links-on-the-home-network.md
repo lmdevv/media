@@ -145,11 +145,13 @@ links in phase 7.
   `linkGuest`, so a typed name cannot pass for someone in the household.
 - Blocking a guest removes that guest. The link can let its holder in again as a new guest, so a
   host who wants them out for good revokes the link or locks the session.
-- A guest's seat lasts only while their link holds. `core.together.get` and the seat count read
-  each guest member's link, so a link that expires, a switch turned off, or a maker who lost the
-  right to share frees the seat at once, even for a guest who went quiet before it died. The next
-  person to enter the session deletes the dead rows, and the presence sweep drops a silent guest
-  whose link stopped holding.
+- A guest's seat lasts only while their link holds. The seat count reads each guest member's
+  link, so a link that expires, a switch turned off, or a maker who lost the right to share frees
+  the seat at once, even for a guest who went quiet before it died. The next person to enter the
+  session deletes the dead rows, and the presence sweep drops a silent guest whose link stopped
+  holding. `core.together.get` skips the same guests and reruns when a link, the switch, or a
+  maker changes. Convex does not rerun a query as time passes, so a guest whose link only expired
+  leaves an open view at the session's next change.
 
 ### Limits
 
