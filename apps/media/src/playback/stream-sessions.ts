@@ -199,7 +199,10 @@ const KEEP_INIT_WAIT = Duration.seconds(2);
 
 const READY_WAIT = Duration.times(Duration.sum(KEEP_INIT_WAIT, STOP_WAIT), 2);
 
-const FIRST_RUN_WAIT = Duration.sum(READY_WAIT, Duration.times(START_WAIT, 2));
+const FIRST_RUN_WAIT = Duration.sum(
+  Duration.times(Duration.sum(READY_WAIT, START_WAIT), 2),
+  STOP_WAIT,
+);
 
 const FRAGMENT_FILE = /^f\d+\.m4s$/;
 
@@ -407,7 +410,7 @@ const make = Effect.gen(function* () {
   const idleMillis = Duration.toMillis(config.streamIdleTimeout);
 
   const keptInitOf = (session: Session, generation: number) =>
-    path.join(config.transcodeDir, session.streamId, `init-${generation}.mp4`);
+    path.join(session.directory, `init-${generation}.mp4`);
 
   const snapshotOf = Effect.fnUntraced(function* (session: Session) {
     return StreamLiveness.snapshot(
@@ -875,15 +878,7 @@ const make = Effect.gen(function* () {
         if (current !== generation) return current;
         const encoder = yield* Ref.get(session.encoder);
 
-        if (!Encoder.$is("Running")(encoder)) {
-          if (session.audience === "guest") return yield* new SegmentNotReady({ index });
-
-          return yield* Effect.die(
-            new Error(
-              "StreamSessions.encoderFailed: the current run of a released household stream failed under a request, but only a displaced guest yields a run that a request has counted itself into",
-            ),
-          );
-        }
+        if (!Encoder.$is("Running")(encoder)) return yield* new SegmentNotReady({ index });
 
         const mode = yield* Ref.get(session.mode);
 

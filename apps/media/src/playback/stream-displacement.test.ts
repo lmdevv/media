@@ -34,6 +34,41 @@ const stallsAfterFirstFragment = await writeFakeFfmpeg({
 
 const failsOnCue = await writeFakeFfmpeg({ hlsStallsAfterFragments: 1, hlsStallsUntilCue: true });
 
+const failsOnCueDuringMove = await writeFakeFfmpeg({
+  hlsStallsAfterFragments: 1,
+  hlsStallsUntilCue: true,
+});
+
+const RUN_FOLDER = /\/transcode\/[^/]+\/\d+$/u;
+
+const folders = {
+  armed: false,
+  reached: Promise.withResolvers<void>(),
+  fail: Promise.withResolvers<void>(),
+};
+
+const failNextRunFolderOnCue = () => {
+  folders.armed = true;
+  folders.reached = Promise.withResolvers<void>();
+  folders.fail = Promise.withResolvers<void>();
+};
+
+const failingRunFolders = (real: FileSystem.FileSystem): FileSystem.FileSystem =>
+  FileSystem.FileSystem.of({
+    ...real,
+    makeDirectory: (target, options) =>
+      folders.armed && RUN_FOLDER.test(target)
+        ? Effect.suspend(() => {
+            folders.armed = false;
+            folders.reached.resolve();
+
+            return Effect.promise(() => folders.fail.promise).pipe(
+              Effect.andThen(Effect.die(new Error("no space left on the transcode disk"))),
+            );
+          })
+        : real.makeDirectory(target, options),
+  });
+
 const KEPT_INIT = /init-\d+\.mp4\.tmp$/u;
 
 const copies = {
@@ -265,6 +300,61 @@ describe.skipIf(!hasFfmpeg)("stream displacement", () => {
           yield* sessions.stop(taken.streamId, household.grant);
           yield* sessions.stop(streamId, guest.grant);
         }).pipe(Effect.ensuring(Effect.sync(() => copies.resume.resolve()))),
+      60_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer(
+      { FFMPEG_PATH: failsOnCueDuringMove, MAX_CONCURRENT_TRANSCODES: "2" },
+      { fileSystem: failingRunFolders },
+    ),
+    { excludeTestServices: true, timeout: "120 seconds" },
+  )((it) => {
+    it.effect(
+      "a household segment request answers not ready when its encoder fails while a move fails partway",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const household = yield* viewer("household");
+          const { streamId, generation, segmentIndex } = yield* start(household);
+
+          yield* sessions.segment(streamId, generation, segmentIndex, household.grant);
+
+          const waiting = yield* Effect.forkChild(
+            sessions
+              .segment(streamId, generation, segmentIndex + 1, household.grant)
+              .pipe(Effect.exit),
+          );
+
+          yield* Effect.sleep("300 millis");
+          failNextRunFolderOnCue();
+
+          const seeking = yield* Effect.forkChild(
+            sessions.seek(streamId, 6, household.grant).pipe(Effect.exit),
+          );
+
+          yield* Effect.promise(() => folders.reached.promise);
+          yield* fs.writeFileString(path.join(path.dirname(failsOnCueDuringMove), "cue"), "");
+          yield* Effect.sleep("500 millis");
+          folders.fail.resolve();
+
+          const answered = yield* Fiber.join(waiting).pipe(Effect.timeout("10 seconds"));
+
+          const failure = Exit.isFailure(answered)
+            ? Cause.findErrorOption(answered.cause)
+            : Option.none();
+
+          assert.isTrue(
+            Option.exists(failure, Predicate.isTagged("SegmentNotReady")),
+            `the player retries the segment: ${String(answered)}`,
+          );
+
+          yield* Fiber.join(seeking).pipe(Effect.timeout("10 seconds"));
+          yield* sessions.stop(streamId, household.grant);
+        }).pipe(Effect.ensuring(Effect.sync(() => folders.fail.resolve()))),
       60_000,
     );
   });

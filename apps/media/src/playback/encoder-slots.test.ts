@@ -413,20 +413,22 @@ describe("encoder slots", () => {
       }),
   );
 
-  it.effect(
-    "a household stream whose scope already closed takes no guest's slot and starts no encoder",
-    () =>
-      Effect.gen(function* () {
-        const pool = yield* EncoderSlots.make(1);
-        const guest = yield* pool.guest(yield* Scope.make(), claimant("guest", 1));
-        yield* guest.ready;
-        const closed = yield* Scope.make();
-        yield* close(closed);
-        const household = yield* pool.household(closed, claimant("household", 2));
+  it.effect("a stream whose scope already closed takes no slot and starts no encoder", () =>
+    Effect.gen(function* () {
+      const pool = yield* EncoderSlots.make(1);
+      const guest = yield* pool.guest(yield* Scope.make(), claimant("guest", 1));
+      yield* guest.ready;
+      const closed = yield* Scope.make();
+      yield* close(closed);
+      const household = yield* pool.household(closed, claimant("household", 2));
 
-        assert.isFalse(yield* guest.isDisplaced);
-        assert.isTrue(yield* household.isDisplaced, "the late household's holder gives up");
-      }),
+      assert.isFalse(yield* guest.isDisplaced);
+      assert.isTrue(yield* household.isDisplaced, "the late household's holder gives up");
+
+      const lateGuest = yield* pool.guest(closed, claimant("late guest", 3));
+
+      assert.isTrue(yield* lateGuest.isDisplaced, "the late guest's holder gives up");
+    }),
   );
 
   it.effect(

@@ -73,7 +73,8 @@ mount media read-only.
   and the stream's next request finds it done.
 - A segment, init, or seek request answers within 30 seconds, counting its wait for a step already
   in progress, such as one stuck on a hung disk. Past that it fails as not ready, and the step goes
-  on. A start waits at most 50 seconds for its first run, then fails with capacity reached.
+  on. A start waits at most 63 seconds for its first run, enough for a hardware run to fail and its
+  software fallback to start, then fails with capacity reached.
 - A stop waits at most 3 seconds. ffmpeg gets `SIGKILL` at once. When its exit is still unknown
   after that, the stop returns and the encoder keeps its slot until it exits. The stream's files
   stay until every run it started has exited, including a run a seek was still stopping, and only

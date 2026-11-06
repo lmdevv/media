@@ -57,7 +57,8 @@ interface Pool {
    * Takes a slot until `scope` closes, first waiting in a line served lowest ticket first while the
    * limit is reached or an older guest waits. A waiter whose session already holds a slot fits
    * sooner and is seated ahead of older waiters that do not fit. The wait can be interrupted, and
-   * the caller bounds it. Closing `scope` leaves the line, ending the wait, or frees the slot.
+   * the caller bounds it. Closing `scope` leaves the line, ending the wait, or frees the slot. On a
+   * scope that already closed it takes nothing, and the slot it returns is displaced.
    */
   readonly guest: (scope: Scope.Scope, claimant: Claimant) => Effect.Effect<Held>;
 }
@@ -342,6 +343,13 @@ export const make = Effect.fnUntraced(function* (limit: number) {
     Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
         const slot = yield* slotFor(claimant, "guest");
+
+        if (Predicate.isTagged(scope.state, "Closed")) {
+          yield* Deferred.succeed(slot.displaced, undefined);
+
+          return heldBy(slot);
+        }
+
         const waiter: Waiter = { slot, settled: yield* Deferred.make<void>() };
 
         const seated = yield* Ref.modify(state, (current) =>
