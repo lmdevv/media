@@ -134,6 +134,7 @@ const getResult = v.union(
         username: v.string(),
         role: v.union(v.literal("host"), v.literal("guest")),
         present: v.boolean(),
+        linkGuest: v.boolean(),
       }),
     ),
     pending: v.union(

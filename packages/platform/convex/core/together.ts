@@ -102,8 +102,15 @@ export const {
       place === "host" ? membersIn(ctx, session._id, "pending") : null,
     ]);
 
-    const named = async (row: (typeof joined)[number]) =>
-      asPerson(await ctx.db.get(row.userId))?.username ?? "";
+    const people = new Map(
+      await Promise.all(
+        [...joined, ...(waiting ?? [])].map(
+          async (row) => [row.userId, asPerson(await ctx.db.get(row.userId))] as const,
+        ),
+      ),
+    );
+
+    const named = (row: (typeof joined)[number]) => people.get(row.userId)?.username ?? "";
 
     return {
       state: "joined",
@@ -119,24 +126,21 @@ export const {
       },
       clock: session.clock,
       item: (await mayPlay(ctx.db, caller, session.item)) ? session.item : null,
-      members: await Promise.all(
-        joined.map(async (row) => ({
-          userId: row.userId,
-          username: await named(row),
-          role: row.userId === session.hostId ? "host" : "guest",
-          present: row.awaySince === null,
-        })),
-      ),
+      members: joined.map((row) => ({
+        userId: row.userId,
+        username: named(row),
+        role: row.userId === session.hostId ? "host" : "guest",
+        present: row.awaySince === null,
+        linkGuest: people.get(row.userId)?.role === "guest",
+      })),
       pending:
         waiting === null
           ? null
-          : await Promise.all(
-              waiting.map(async (row) => ({
-                userId: row.userId,
-                username: await named(row),
-                present: row.awaySince === null,
-              })),
-            ),
+          : waiting.map((row) => ({
+              userId: row.userId,
+              username: named(row),
+              present: row.awaySince === null,
+            })),
     };
   },
   heartbeat: (ctx, { domain }, caller) => beat(ctx, caller, domain),

@@ -117,7 +117,8 @@ hold its rules, each typed by its list of actions, so a missing or extra row fai
 ADR 0006 adds the tile, approval, and device actions, and `listOnSharedDevices`,
 `resetUnlockCode`, and `manageDevices`. ADR 0019 adds `change` on a setting and `keep` on a
 download. ADR 0017 adds the group-session actions, whose loader is `requireTogether` in
-`together/access.ts`.
+`together/access.ts`. ADR 0007 adds `configureGuests`, `allowSharing`, and the share-link actions
+`offer`, `make`, `open`, `hold`, `play`, `audit`, `revoke`, and `see`.
 
 The answer is `allowed`, `hidden`, or `forbidden`. Content with no grant, content a restriction
 hides, and any content for a service are `hidden`, which fails `not_found` with the same message
@@ -254,7 +255,8 @@ and the core allows no public function outside the command list.
 
 ### Left to later units
 
-- Guest principals and links: p3-guests.
+- Guest principals and links: built, see ADR 0007. A guest holds no grant (`keyOf` refuses one),
+  so their reach has no keys and what they may play comes only from their link.
 - The service principal's scope and key: phase 4.
 - Locking shared-device tiles for kids, from `isKid`: built, see ADR 0006.
 

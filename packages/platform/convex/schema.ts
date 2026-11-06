@@ -4,6 +4,7 @@ import { v } from "convex/values";
 import { downloadItem, level, resourceId, resourceType, restrictions } from "../commands/access";
 import { assignableRole, contentDomain, credentialScope } from "../commands/scopes";
 import { deviceSettingFields, downloadQuality, userSettingFields } from "../commands/settings";
+import { guestAccessDocument, linkDocument } from "./core/guests/model";
 import { importSource } from "./core/jobs/kinds";
 import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
 import {
@@ -91,18 +92,26 @@ export default defineSchema({
         ...personFields,
         role: v.literal("member"),
         restrictions: v.optional(restrictions),
+        /**
+         * An admin let this member make guest links (ADR 0007). Owners and admins always may, so a
+         * promotion clears it.
+         */
+        sharesWithGuests: v.optional(v.literal(true)),
       }),
-      v.object({
-        ...personFields,
-        role: v.union(v.literal("owner"), v.literal("admin"), v.literal("guest")),
-      }),
+      v.object({ ...personFields, role: v.union(v.literal("owner"), v.literal("admin")) }),
+      /**
+       * A guest a share link let in. `username` is the name they typed, not unique; `usernameKey`
+       * is `~<linkId>.<n>`, outside the username grammar, so no sign-in ever finds it.
+       */
+      v.object({ ...personFields, role: v.literal("guest"), link: v.id("shareLinks") }),
       v.object({ kind: v.literal("service"), name: v.string(), ...generations }),
     ),
   )
     .index("by_username_key", ["usernameKey"])
     .index("by_role", ["role"])
     .index("by_kind_username_key", ["kind", "usernameKey"])
-    .index("by_shared_devices", ["sharedDevices", "usernameKey"]),
+    .index("by_shared_devices", ["sharedDevices", "usernameKey"])
+    .index("by_link", ["link"]),
 
   authSessions: defineTable(
     v.union(
@@ -122,6 +131,8 @@ export default defineSchema({
       }),
       /** A tile opened on a shared device. Its scopes are its person's content scopes, never stored. */
       v.object({ ...sessionFields, kind: v.literal("tile"), device: boundDevice }),
+      /** A guest's, opened by a share link; it ends no later than the link and only while it holds. */
+      v.object({ ...sessionFields, kind: v.literal("guest") }),
     ),
   )
     .index("userId", ["userId"])
@@ -452,7 +463,14 @@ export default defineSchema({
     .index("by_session", ["sessionId"])
     .index("by_seen", ["seenAt"]),
 
-  togetherEntries: defineTable(entryDocument).index("by_session_order", ["sessionId", "order"]),
+  togetherEntries: defineTable(entryDocument)
+    .index("by_session_order", ["sessionId", "order"])
+    .index("by_session_item", ["sessionId", "item.ref.type", "item.ref.id"]),
+
+  /** Share links that let guests in (ADR 0007). `core/guests/` is their only writer. */
+  shareLinks: defineTable(linkDocument).index("by_maker", ["maker"]),
+
+  guestAccess: defineTable(guestAccessDocument),
 
   imports: defineTable({
     source: importSource,

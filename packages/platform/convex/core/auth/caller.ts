@@ -25,6 +25,7 @@ const callerValidator = v.object({
     v.literal("apiKey"),
     v.literal("deviceCode"),
     v.literal("tile"),
+    v.literal("guest"),
   ),
   /** The credential scopes the session holds now; `signed-in` is implied. */
   scopes: v.array(credentialScope),

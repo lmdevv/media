@@ -167,7 +167,13 @@ export type Because =
   | "pending"
   | "not-host"
   | "no-control"
-  | "no-add";
+  | "no-add"
+  | "switched-off"
+  | "not-allowed"
+  | "unbacked"
+  | "revoked"
+  | "expired"
+  | "not-shared";
 
 /**
  * An access decision. `hidden` answers as if the thing did not exist, so a private thing stays
@@ -195,10 +201,17 @@ export const accountActions = [
   "handOverOwnership",
   "listOnSharedDevices",
   "resetUnlockCode",
+  "allowSharing",
 ] as const;
 
 /** What can be done to the server as a whole. */
-export const serverActions = ["invite", "manageGroups", "manageFolders", "manageDevices"] as const;
+export const serverActions = [
+  "invite",
+  "manageGroups",
+  "manageFolders",
+  "manageDevices",
+  "configureGuests",
+] as const;
 
 export type ContentAction = (typeof contentActions)[number];
 
@@ -273,6 +286,7 @@ const accountRules: AccountRules = {
   },
   listOnSharedDevices: { scope: "admin", self: "adult", targets: ["member"], restricted: "only" },
   resetUnlockCode: { scope: "admin", self: "allow", targets: HOUSEHOLD, restricted: "any" },
+  allowSharing: { scope: "admin", self: "refuse", targets: ["member"], restricted: "any" },
 };
 
 const serverRules: ServerRules = {
@@ -280,6 +294,7 @@ const serverRules: ServerRules = {
   manageGroups: { scope: "admin" },
   manageFolders: { scope: "admin" },
   manageDevices: { scope: "admin" },
+  configureGuests: { scope: "admin" },
 };
 
 const ALLOWED = { allowed: true } as const;
@@ -744,6 +759,8 @@ export interface TogetherResource {
     readonly settings: Settings;
     /** The principal queued the entry a `remove` names. */
     readonly addedIt: boolean;
+    /** The principal is a guest whose share link names this session (ADR 0007). */
+    readonly invited: boolean;
   } | null;
 }
 
@@ -801,6 +818,11 @@ interface InsideRule {
   readonly own: boolean;
   /** `account` also does instead of the domain's play scope, as for leaving. */
   readonly orAccount: boolean;
+  /**
+   * A guest a share link let in may do it. Such a guest cannot browse, so they have nothing of their
+   * own to queue.
+   */
+  readonly platformGuests: boolean;
 }
 
 type TogetherRule =
@@ -818,6 +840,7 @@ const MEMBER: InsideRule = {
   guests: "nothing",
   own: false,
   orAccount: false,
+  platformGuests: true,
 };
 
 const LIVE: Omit<InsideRule, "who" | "guests"> = {
@@ -826,6 +849,7 @@ const LIVE: Omit<InsideRule, "who" | "guests"> = {
   locked: true,
   own: false,
   orAccount: false,
+  platformGuests: true,
 };
 
 const togetherRules: TogetherRules = {
@@ -836,8 +860,8 @@ const togetherRules: TogetherRules = {
   view: { ...MEMBER, who: "joined" },
   leave: { ...MEMBER, orAccount: true },
   control: { ...LIVE, who: "joined", guests: "control" },
-  add: { ...LIVE, who: "joined", guests: "add" },
-  remove: { ...LIVE, who: "joined", guests: "add", own: true },
+  add: { ...LIVE, who: "joined", guests: "add", platformGuests: false },
+  remove: { ...LIVE, who: "joined", guests: "add", own: true, platformGuests: false },
   /** A locked session takes no new members, approved or not. */
   admit: { ...LIVE, who: "host", guests: "nothing", locked: false },
   manage: { ...LIVE, who: "host", guests: "nothing" },
@@ -856,17 +880,23 @@ const enterSession = (
 
   if (session.place === "blocked") return forbidden("blocked");
 
-  if (principal.role === "guest") return forbidden("guest");
+  if (principal.role === "guest" && !session.invited) return forbidden("guest");
 
   if (session.settings.join === under) return ALLOWED;
 
   return forbidden(session.settings.join === "locked" ? "locked" : "join-setting");
 };
 
-const actInSession = (rule: InsideRule, session: Session): Decision<TogetherBecause> => {
+const actInSession = (
+  principal: PersonPrincipal,
+  rule: InsideRule,
+  session: Session,
+): Decision<TogetherBecause> => {
   const { place, settings } = session;
 
   if (!session.live && !rule.ended) return forbidden("ended");
+
+  if (principal.role === "guest" && !rule.platformGuests) return forbidden("guest");
 
   if (place === "pending") return rule.who === "member" ? ALLOWED : forbidden("pending");
 
@@ -905,7 +935,209 @@ const decideTogether = (
 
   return rule.from === "outside"
     ? enterSession(principal, rule.under, session)
-    : actInSession(rule, session);
+    : actInSession(principal, rule, session);
+};
+
+const shareRoles = {
+  owner: "always",
+  admin: "always",
+  member: "when-allowed",
+  guest: "never",
+} as const satisfies { readonly [R in Role]: "always" | "when-allowed" | "never" };
+
+/** The maker of a share link as `can` sees it. */
+export interface ShareMaker {
+  /**
+   * Making a link: the caller, with the scopes their session holds. Otherwise what the maker's row
+   * alone allows, since the maker has no session in the call.
+   */
+  readonly principal: PersonPrincipal;
+  /** An admin allowed this member to make guest links; owners and admins need no such allowance. */
+  readonly allowed: boolean;
+  /** The maker's session generation still matches the link's stamp; true for a link being made. */
+  readonly backs: boolean;
+}
+
+/** What a link names, as its maker reaches it now. */
+export type ShareTargetFacts =
+  | { readonly kind: "item"; readonly content: ContentResource | null }
+  /** The group session, with the maker's place in it. */
+  | { readonly kind: "session"; readonly session: TogetherResource };
+
+/** Where a guest sits in the group session their link names. */
+export interface ShareSeat {
+  readonly place: TogetherPlace;
+  readonly live: boolean;
+}
+
+/**
+ * What a share action is about, beyond the link itself. `standing`: nothing. `target`: what the
+ * link names. `item`: one item a guest asks to play, whether the link covers it, the item as the
+ * maker sees it (null when it does not exist), and for a session link where the guest sits.
+ */
+export type ShareAbout =
+  | { readonly kind: "standing" }
+  | { readonly kind: "target"; readonly target: ShareTargetFacts }
+  | {
+      readonly kind: "item";
+      readonly covered: boolean;
+      readonly content: ContentResource | null;
+      readonly seat: ShareSeat | null;
+    };
+
+/** A share link as `can` sees it, made of facts `core/guests/facts.ts` loads. */
+export interface ShareResource {
+  readonly on: "share";
+  /** Guest links are on, and have stayed on since the link was made; a new link always has. */
+  readonly switchedOn: boolean;
+  readonly maker: ShareMaker;
+  /** `new` while the link is being made; `mine` when the principal is a guest it let in. */
+  readonly link: "new" | { readonly state: "open" | "revoked" | "expired"; readonly mine: boolean };
+  readonly about: ShareAbout;
+}
+
+/**
+ * What can be done through a share link. `offer` asks whether the caller may make links at all,
+ * and `make` makes one. `open` lets a new guest in, `hold` keeps a guest's session live on every
+ * call, and `play` plays one item.
+ */
+export const shareActions = ["offer", "make", "open", "hold", "play"] as const;
+
+export type ShareAction = (typeof shareActions)[number];
+
+interface ShareRule {
+  readonly by: "maker" | "guest";
+  readonly about: ShareAbout["kind"];
+}
+
+type ShareRules = { readonly [A in ShareAction]: ShareRule };
+
+const shareRules: ShareRules = {
+  offer: { by: "maker", about: "standing" },
+  make: { by: "maker", about: "target" },
+  open: { by: "guest", about: "target" },
+  hold: { by: "guest", about: "standing" },
+  play: { by: "guest", about: "item" },
+};
+
+/**
+ * Whether a link stands: guest links on since it was made, its maker still may and still backs it,
+ * and it is open. Every share decision starts here; a list shows it as the link's state.
+ */
+export const linkStanding = (share: Omit<ShareResource, "about">): Decision => {
+  if (!share.switchedOn) return forbidden("switched-off");
+
+  const may = shareRoles[share.maker.principal.role];
+
+  if (may === "never" || (may === "when-allowed" && !share.maker.allowed)) {
+    return forbidden("not-allowed");
+  }
+
+  if (!share.maker.backs) return forbidden("unbacked");
+
+  return share.link !== "new" && share.link.state !== "open"
+    ? forbidden(share.link.state)
+    : ALLOWED;
+};
+
+const reachesTarget = (maker: PersonPrincipal, target: ShareTargetFacts): Decision => {
+  if (target.kind === "session") return decideTogether(maker, togetherRules.manage, target.session);
+
+  return target.content === null ? hidden("missing") : decideContent(maker, "play", target.content);
+};
+
+const playsItem = (
+  guest: PersonPrincipal,
+  maker: PersonPrincipal,
+  asked: Extract<ShareAbout, { readonly kind: "item" }>,
+): Decision => {
+  const { content, seat } = asked;
+
+  if (!asked.covered || content === null) return hidden("not-shared");
+
+  if (seat !== null) {
+    if (!seat.live) return forbidden("ended");
+
+    if (seat.place === "pending") return forbidden("pending");
+
+    if (seat.place !== "guest") return hidden("outside");
+  }
+
+  if (!guest.scopes.includes(`${content.domain}:play`)) return forbidden("scope");
+
+  return decideContent(maker, "play", content);
+};
+
+const decideShare = (principal: Principal, rule: ShareRule, share: ShareResource): Decision => {
+  if (principal.kind === "service") return hidden("service");
+
+  const { about, link, maker } = share;
+
+  if (rule.about !== about.kind) {
+    throw new Error(`A share link's ${about.kind} facts cannot decide ${rule.about}`);
+  }
+
+  if (rule.by === "maker") {
+    if (principal.role === "guest") return forbidden("guest");
+
+    if (link !== "new" || principal.userId !== maker.principal.userId) {
+      throw new Error("Making a link decides a new link for its own maker");
+    }
+
+    if (!principal.scopes.includes("account")) return forbidden("scope");
+  } else if (principal.role !== "guest" || link === "new" || !link.mine) {
+    return hidden("not-yours");
+  }
+
+  const stands = linkStanding(share);
+
+  if (!stands.allowed || about.kind === "standing") return stands;
+
+  return about.kind === "target"
+    ? reachesTarget(maker.principal, about.target)
+    : playsItem(principal, maker.principal, about);
+};
+
+/** What can be done to a link as a record: read its activity, revoke it, or see what it names. */
+export const shareRecordActions = ["audit", "revoke", "see"] as const;
+
+export type ShareRecordAction = (typeof shareRecordActions)[number];
+
+/** A link as a record: its maker, or null for every link at once, as listing everyone's asks. */
+export interface ShareRecordResource {
+  readonly on: "shareRecord";
+  readonly maker: Id<"users"> | null;
+}
+
+interface ShareRecordRule {
+  /** Who may do it to someone else's links. Nobody sees another person's content, admins included. */
+  readonly others: "admin" | "nobody";
+}
+
+type ShareRecordRules = { readonly [A in ShareRecordAction]: ShareRecordRule };
+
+const shareRecordRules: ShareRecordRules = {
+  audit: { others: "admin" },
+  revoke: { others: "admin" },
+  see: { others: "nobody" },
+};
+
+const decideShareRecord = (
+  principal: Principal,
+  rule: ShareRecordRule,
+  record: ShareRecordResource,
+): Decision => {
+  if (principal.kind === "service") return hidden("service");
+
+  if (principal.role === "guest") return hidden("guest");
+
+  if (record.maker === principal.userId) {
+    return principal.scopes.includes("account") ? ALLOWED : forbidden("scope");
+  }
+
+  return rule.others === "admin" && principal.scopes.includes("admin")
+    ? ALLOWED
+    : hidden("not-yours");
 };
 
 const isContentAction = (action: string): action is ContentAction =>
@@ -934,6 +1166,12 @@ const isDownloadAction = (action: string): action is DownloadAction =>
 
 const isTogetherAction = (action: string): action is TogetherAction =>
   togetherActions.some((known) => known === action);
+
+const isShareAction = (action: string): action is ShareAction =>
+  shareActions.some((known) => known === action);
+
+const isShareRecordAction = (action: string): action is ShareRecordAction =>
+  shareRecordActions.some((known) => known === action);
 
 /**
  * The one access decision (ADR 0005): role, credential scopes, grants, and restrictions, from
@@ -973,6 +1211,12 @@ export function can(
   action: TogetherAction,
   resource: TogetherResource,
 ): Decision<TogetherBecause>;
+export function can(principal: Principal, action: ShareAction, resource: ShareResource): Decision;
+export function can(
+  principal: Principal,
+  action: ShareRecordAction,
+  resource: ShareRecordResource,
+): Decision;
 export function can(
   principal: Principal,
   action:
@@ -984,7 +1228,9 @@ export function can(
     | DeviceAction
     | SettingAction
     | DownloadAction
-    | TogetherAction,
+    | TogetherAction
+    | ShareAction
+    | ShareRecordAction,
   resource:
     | ContentResource
     | AccountResource
@@ -994,7 +1240,9 @@ export function can(
     | DeviceResource
     | SettingResource
     | DownloadResource
-    | TogetherResource,
+    | TogetherResource
+    | ShareResource
+    | ShareRecordResource,
 ): Decision {
   if (resource.on === "content" && isContentAction(action)) {
     return decideContent(principal, action, resource);
@@ -1032,6 +1280,14 @@ export function can(
     return decideTogether(principal, togetherRules[action], resource);
   }
 
+  if (resource.on === "share" && isShareAction(action)) {
+    return decideShare(principal, shareRules[action], resource);
+  }
+
+  if (resource.on === "shareRecord" && isShareRecordAction(action)) {
+    return decideShareRecord(principal, shareRecordRules[action], resource);
+  }
+
   throw new Error(`${action} is not an action on ${resource.on}`);
 }
 
@@ -1043,9 +1299,9 @@ const allowedScopes = (user: Doc<"users">): ReadonlyArray<CredentialScope> =>
   user.kind === "service" ? NO_SCOPES : roleScopes[user.role];
 
 /**
- * The scopes a session holds now: a password session holds its role's, a tile on a shared device
- * only its role's content scopes, and an API key or a device sign-in the ones it was given that its
- * role still allows. A service holds none yet.
+ * The scopes a session holds now: a password or guest session holds its role's, a tile on a shared
+ * device only its role's content scopes, and an API key or a device sign-in the ones it was given
+ * that its role still allows. A service holds none yet.
  */
 export const heldScopes = (
   session: Doc<"authSessions">,
@@ -1056,6 +1312,8 @@ export const heldScopes = (
   if (session.kind === "password") return [...allowed];
 
   if (session.kind === "tile") return allowed.filter((scope) => DOMAIN_SCOPES.includes(scope));
+
+  if (session.kind === "guest") return [...allowed];
 
   return session.scopes.filter((scope) => allowed.includes(scope));
 };

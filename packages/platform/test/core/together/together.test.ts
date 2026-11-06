@@ -61,7 +61,6 @@ const ServiceRow = Schema.fromJsonString(
 // stack's export wrote this one as a `users` id; the backend checks it again when a call names it.
 const isUserId = (value: string): value is Id<"users"> => value.length > 0;
 
-/** `count` new users no session has seen, planted as service rows so none needs a password. */
 const plantedStrangers = (count: number): ReadonlyArray<Id<"users">> => {
   const prefix = `stranger-${unique()}-`;
 
@@ -88,7 +87,6 @@ const plantedStrangers = (count: number): ReadonlyArray<Id<"users">> => {
 
 const ErrorData = Schema.Struct({ code: Schema.String, message: Schema.String });
 
-/** The code and message a call was refused with; fails the test when it was not refused. */
 const failureOf = async (
   call: Promise<unknown>,
 ): Promise<{ readonly code: string; readonly message: string }> => {

@@ -36,5 +36,7 @@ mount media read-only.
 ## Edge cases settled
 
 - A rescan that hits its domain's cap waits. It does not take a transcode's slot.
-- A guest stream is the first to wait when the transcode limit is reached.
+- A guest stream is the first to wait when the transcode limit is reached. The core's
+  `core/tickets:sessionStatus` answers `guest: true` for a guest's session, so the server knows a
+  guest's stream from the ticket's session alone (ADR 0007).
 - Original media stays read-only to the server.

@@ -5,9 +5,9 @@ import type { DatabaseReader } from "../../_generated/server";
 import { probeFacts } from "../libraryProbe";
 import { fail } from "../lib/errors";
 import { levelOn, reachOf } from "./grants";
-import type { Reach } from "./grants";
+import type { Lent, Reach } from "./grants";
 import { can, itemOf } from "./policy";
-import type { ContentFacts, Principal } from "./policy";
+import type { ContentFacts, ContentResource, Principal } from "./policy";
 
 type RefOf<T extends ItemType> = Extract<DomainItem["ref"], { readonly type: T }>;
 
@@ -59,21 +59,16 @@ const placeOf = <T extends ItemType>(
   ref: { readonly type: T; readonly id: IdOf[T] },
 ): Promise<Placed | null> => loaders[ref.type].load(db, ref.id);
 
-/**
- * Decides for the principal of `reach` whether they may play each item asked about: it exists in
- * a library of its domain, and `can` allows `play` on it at the level their grants give on that
- * library. One checker reads each library's grants once.
- */
-export const playableBy = (
+const contentFor = (
   db: DatabaseReader,
   reach: Reach,
-): ((item: DomainItem) => Promise<boolean>) => {
+): ((item: DomainItem) => Promise<ContentResource | null>) => {
   const levels = new Map<Id<"libraries">, Promise<Level | null>>();
 
   return async (item) => {
     const placed = await placeOf(db, item.ref);
 
-    if (placed === null) return false;
+    if (placed === null) return null;
 
     const { library } = placed;
 
@@ -82,9 +77,82 @@ export const playableBy = (
 
     levels.set(library._id, level);
 
-    return can(reach.principal, "play", itemOf(library, await level, placed.facts)).allowed;
+    return itemOf(library, await level, placed.facts);
   };
 };
+
+const sameItem = (left: DomainItem, right: DomainItem): boolean =>
+  left.domain === right.domain && left.ref.type === right.ref.type && left.ref.id === right.ref.id;
+
+const covers = async (db: DatabaseReader, lent: Lent, item: DomainItem): Promise<boolean> => {
+  const { target } = lent.link;
+
+  if (target.kind === "item") return sameItem(target.item, item);
+
+  const { session } = lent;
+
+  if (session === null) return false;
+
+  if (sameItem(session.doc.item, item)) return true;
+
+  const queued = await db
+    .query("togetherEntries")
+    .withIndex("by_session_item", (q) =>
+      q
+        .eq("sessionId", session.doc._id)
+        .eq("item.ref.type", item.ref.type)
+        .eq("item.ref.id", item.ref.id),
+    )
+    .first();
+
+  return queued !== null;
+};
+
+const lentPlayable = (
+  db: DatabaseReader,
+  guest: Principal,
+  lent: Lent,
+): ((item: DomainItem) => Promise<boolean>) => {
+  const asMaker = contentFor(db, lent.maker);
+
+  return async (item) => {
+    const covered = await covers(db, lent, item);
+    const content = covered ? await asMaker(item) : null;
+
+    return can(guest, "play", {
+      ...lent.standing,
+      about: { kind: "item", covered, content, seat: lent.session?.seat ?? null },
+    }).allowed;
+  };
+};
+
+/**
+ * Decides for the principal of `reach` whether they may play each item asked about: it exists in
+ * a library of its domain, and `can` allows `play` on it at the level their grants give on that
+ * library. A guest is decided through their share link instead. One checker reads each library's
+ * grants once.
+ */
+export const playableBy = (
+  db: DatabaseReader,
+  reach: Reach,
+): ((item: DomainItem) => Promise<boolean>) => {
+  if (reach.lent !== null) return lentPlayable(db, reach.principal, reach.lent);
+
+  const asCaller = contentFor(db, reach);
+
+  return async (item) => {
+    const content = await asCaller(item);
+
+    return content !== null && can(reach.principal, "play", content).allowed;
+  };
+};
+
+/** `item` as the principal of `reach` sees it, at their grants' level, or null when it is gone. */
+export const contentAs = (
+  db: DatabaseReader,
+  reach: Reach,
+  item: DomainItem,
+): Promise<ContentResource | null> => contentFor(db, reach)(item);
 
 /** Whether `viewer` may play `item`, for a call that decides one item. */
 export const mayPlay = async (

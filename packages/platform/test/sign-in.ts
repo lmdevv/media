@@ -83,7 +83,7 @@ const clientWith = (stack: CoreStack, token: string): ConvexHttpClient => {
 /** Signs in with a provider and its params; rejects as `auth:signIn` does. */
 export const signIn = async (
   stack: CoreStack,
-  provider: "password" | "apiKey" | "deviceCode" | "setup" | "invite" | "reset" | "tile",
+  provider: "password" | "apiKey" | "deviceCode" | "setup" | "invite" | "reset" | "tile" | "guest",
   params: Readonly<Record<string, Value>>,
 ): Promise<SignedIn> => {
   const result = await new ConvexHttpClient(stack.url, { logger: false }).action(api.auth.signIn, {

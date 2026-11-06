@@ -5,7 +5,10 @@ import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
+import type { LinkDoc } from "./guests/model";
+import { guestLinkOf } from "./guests/standing";
 import { paginate } from "./lib/paginate";
+import { can, principalOf } from "./permissions/policy";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -45,7 +48,8 @@ export type Opening =
       readonly kind: "deviceCode";
       readonly code: Extract<Doc<"deviceCodes">, { readonly state: "approved" }>;
     }
-  | { readonly kind: "tile"; readonly device: Doc<"devices"> };
+  | { readonly kind: "tile"; readonly device: Doc<"devices"> }
+  | { readonly kind: "guest"; readonly link: LinkDoc };
 
 const currentGeneration = (kind: SessionKind, user: Doc<"users">): number =>
   kind === "apiKey" ? user.keyGeneration : user.sessionGeneration;
@@ -59,7 +63,7 @@ type BoundDevice = NonNullable<Extract<Session, { readonly kind: "tile" }>["devi
 
 /** The device a session is bound to; an API key is bound to none. */
 export const boundDevice = (session: Session): BoundDevice | null =>
-  session.kind === "apiKey" ? null : (session.device ?? null);
+  session.kind === "apiKey" || session.kind === "guest" ? null : (session.device ?? null);
 
 /**
  * Whether the device a session is bound to still carries it (ADR 0006): the device exists at the
@@ -101,6 +105,24 @@ export const liveOnDevice = (
   );
 };
 
+const fitsUser = async (
+  db: DatabaseReader,
+  session: Session,
+  user: Doc<"users">,
+  now: number,
+): Promise<boolean> => {
+  if (user.kind !== "person" || user.role !== "guest") return session.kind !== "guest";
+
+  if (session.kind !== "guest") return false;
+
+  const lent = await guestLinkOf(db, user, now);
+
+  return (
+    lent !== null &&
+    can(principalOf(user), "hold", { ...lent.standing, about: { kind: "standing" } }).allowed
+  );
+};
+
 /** A session and its user when the session is live, or null. */
 export const liveSession = async (
   db: DatabaseReader,
@@ -111,6 +133,8 @@ export const liveSession = async (
   const user = session === null ? null : await db.get(session.userId);
 
   if (session === null || user === null || !isLive(session, user, now)) return null;
+
+  if (!(await fitsUser(db, session, user, now))) return null;
 
   const bound = boundDevice(session);
 
@@ -167,6 +191,15 @@ export const openSession = async (
     await endKeySessionsBeyondNewest(ctx, opening.key._id);
 
     return sessionId;
+  }
+
+  if (opening.kind === "guest") {
+    return ctx.db.insert("authSessions", {
+      ...fields,
+      kind: "guest",
+      expirationTime: Math.min(fields.expirationTime, opening.link.expiresAt),
+      generation: user.sessionGeneration,
+    });
   }
 
   if (opening.kind === "tile") {

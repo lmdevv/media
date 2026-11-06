@@ -44,6 +44,8 @@ const person = (name: string, role: Role, kid = false): Doc<"users"> => {
     keyGeneration: 0,
   };
 
+  if (role === "guest") return { ...fields, role, link: idOf("shareLinks", `${name}-link`) };
+
   if (role !== "member") return { ...fields, role };
 
   return kid ? { ...fields, role, restrictions: KID } : { ...fields, role };

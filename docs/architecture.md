@@ -112,17 +112,18 @@ only (ADR 0017).
 
 The image serves every path from one port.
 
-| Path            | Served by                                               |
-| --------------- | ------------------------------------------------------- |
-| `/`             | `apps/web-account`                                      |
-| `/invite/:code` | `apps/web-account`, accepting an invite                 |
-| `/device`       | `apps/web-account`, approving a device code             |
-| `/reset/:token` | `apps/web-account`, a one-time reset link               |
-| `/movies`       | `apps/web-movies`                                       |
-| `/music`        | `apps/web-music`                                        |
-| `/convex`       | the Convex backend                                      |
-| `/api`          | `@media/server`, its HttpApi routes                     |
-| `/media`        | `@media/server`, byte-serving routes that take a ticket |
+| Path            | Served by                                                  |
+| --------------- | ---------------------------------------------------------- |
+| `/`             | `apps/web-account`                                         |
+| `/invite/:code` | `apps/web-account`, accepting an invite                    |
+| `/device`       | `apps/web-account`, approving a device code                |
+| `/reset/:token` | `apps/web-account`, a one-time reset link                  |
+| `/guest`        | `apps/web-account`, a guest link, its code in the fragment |
+| `/movies`       | `apps/web-movies`                                          |
+| `/music`        | `apps/web-music`                                           |
+| `/convex`       | the Convex backend                                         |
+| `/api`          | `@media/server`, its HttpApi routes                        |
+| `/media`        | `@media/server`, byte-serving routes that take a ticket    |
 
 Guest links use a configurable guest address. v1 runs on the home network or Tailscale, and
 Tailscale Funnel can open guest links (ADR 0007).

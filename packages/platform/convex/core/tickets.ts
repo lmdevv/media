@@ -108,7 +108,8 @@ export const issueShareableTicket = async (resource: ArtworkResource): Promise<I
 export const sessionStatus = serverQuery({
   args: { userId: v.string(), sessionId: v.string() },
   returns: v.union(
-    v.object({ state: v.literal("live"), endsAt: v.number() }),
+    /** `guest`: a share link's guest holds it, so the server ranks its streams last (ADR 0014). */
+    v.object({ state: v.literal("live"), endsAt: v.number(), guest: v.boolean() }),
     v.object({ state: v.literal("ended") }),
   ),
   handler: async (ctx, { userId, sessionId }) => {
@@ -116,7 +117,11 @@ export const sessionStatus = serverQuery({
     const live = id === null ? null : await liveSession(ctx.db, id, Date.now());
 
     return live !== null && live.session.userId === userId
-      ? { state: "live" as const, endsAt: live.session.expirationTime }
+      ? {
+          state: "live" as const,
+          endsAt: live.session.expirationTime,
+          guest: live.session.kind === "guest",
+        }
       : { state: "ended" as const };
   },
 });

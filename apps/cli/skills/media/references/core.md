@@ -214,7 +214,7 @@ Show who is signed in, how, and with which scopes.
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit"> }`
+- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "guest"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit"> }`
 
 ## `core.auth.sessions.end`
 
@@ -476,6 +476,91 @@ Show how much of this device's download limit everyone on it uses.
 - Scope: signed-in
 - Arguments: none
 - Result: `{ bytes: number; items: number; capBytes: number; capItems: number }`
+
+## `core.guests.allow`
+
+Let a member make guest links, or stop them; stopping signs them out and ends the links they made.
+
+- CLI: `media admin guests allow`
+- Kind: mutation
+- Scope: admin
+- API keys: refused
+- Arguments: `{ userId: Id<"users">; allowed: boolean }`
+- Result: `null`
+
+## `core.guests.configure`
+
+Turn guest links on or off and set the address they use; turning them off ends every link made so far.
+
+- CLI: `media admin guests configure`
+- Kind: mutation
+- Scope: admin
+- API keys: refused
+- Arguments: `{ enabled: boolean; address: string | null }`
+- Result: `null`
+
+## `core.guests.current`
+
+Show a guest what their share link names, who shared it, and when it stops working.
+
+- CLI: `media auth guests current`
+- Kind: query
+- Scope: signed-in
+- Arguments: none
+- Result: `null | { name: string; sharedBy: string; target: { kind: "item"; item: { domain: "movies"; ref: { type: "probeMovie"; id: Id<"probeItems"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } } | { kind: "session"; domain: "movies" | "music" }; expiresAt: number }`
+
+## `core.guests.links.activity`
+
+List who opened a guest link and when, as its maker or an admin.
+
+- CLI: `media auth links activity`
+- Kind: query
+- Scope: account
+- Arguments: `{ linkId: Id<"shareLinks">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ guestId: Id<"users">; name: string; openedAt: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.guests.links.create`
+
+Make a guest link to something you can play or to the group session you host, shown only this once.
+
+- CLI: `media auth links create`
+- Kind: action
+- Scope: account
+- API keys: refused
+- Arguments: `{ target: { kind: "item"; item: { domain: "movies"; ref: { type: "probeMovie"; id: Id<"probeItems"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } } | { kind: "session"; domain: "movies" | "music" }; expiresInDays?: number }`
+- Result: `{ linkId: Id<"shareLinks">; url: string; expiresAt: number }`
+
+## `core.guests.links.list`
+
+List the guest links you made, or as an admin everyone's, newest first.
+
+- CLI: `media auth links list`
+- Kind: query
+- Scope: account
+- Arguments: `{ whose: "mine" | "everyone"; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ linkId: Id<"shareLinks">; madeBy: string; kind: "item" | "session"; domain: "movies" | "music"; target: { kind: "item"; item: { domain: "movies"; ref: { type: "probeMovie"; id: Id<"probeItems"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } } | { kind: "session"; domain: "movies" | "music" } | null; state: "open" | "revoked" | "expired" | "dead"; madeAt: number; expiresAt: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.guests.links.revoke`
+
+Revoke a guest link, yours or as an admin anyone's; its guests are signed out at once.
+
+- CLI: `media auth links revoke`
+- Kind: mutation
+- Scope: account
+- Arguments: `{ linkId: Id<"shareLinks"> }`
+- Result: `null`
+
+## `core.guests.status`
+
+Show whether guest links are on, the address they use, and whether you may make them.
+
+- CLI: `media auth guests status`
+- Kind: query
+- Scope: account
+- Arguments: none
+- Result: `{ enabled: boolean; address: string | null; mayShare: boolean }`
 
 ## `core.libraries.create`
 
@@ -776,7 +861,7 @@ Show your group session in a domain: its clock, item, members, settings, link, a
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ domain: "movies" | "music" }`
-- Result: `null | { state: "pending"; sessionId: Id<"togetherSessions">; host: string } | { state: "ended"; sessionId: Id<"togetherSessions">; reason: "host-left" | "abandoned" } | { state: "joined"; sessionId: Id<"togetherSessions">; host: string; role: "host" | "guest"; link: string; settings: { join: "open" | "approval" | "locked"; control: boolean; add: boolean }; may: { control: boolean; add: boolean; manage: boolean }; clock: { status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }; item: { domain: "movies"; ref: { type: "probeMovie"; id: Id<"probeItems"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } | null; members: Array<{ userId: Id<"users">; username: string; role: "host" | "guest"; present: boolean }>; pending: Array<{ userId: Id<"users">; username: string; present: boolean }> | null }`
+- Result: `null | { state: "pending"; sessionId: Id<"togetherSessions">; host: string } | { state: "ended"; sessionId: Id<"togetherSessions">; reason: "host-left" | "abandoned" } | { state: "joined"; sessionId: Id<"togetherSessions">; host: string; role: "host" | "guest"; link: string; settings: { join: "open" | "approval" | "locked"; control: boolean; add: boolean }; may: { control: boolean; add: boolean; manage: boolean }; clock: { status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }; item: { domain: "movies"; ref: { type: "probeMovie"; id: Id<"probeItems"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } | null; members: Array<{ userId: Id<"users">; username: string; role: "host" | "guest"; present: boolean; linkGuest: boolean }>; pending: Array<{ userId: Id<"users">; username: string; present: boolean }> | null }`
 
 ## `core.together.heartbeat`
 

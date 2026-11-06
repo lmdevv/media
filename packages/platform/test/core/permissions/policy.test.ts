@@ -45,15 +45,20 @@ const idOf = <Table extends TableNames>(table: Table, name: string): Id<Table> =
 
 const generations = { sessionGeneration: 0, keyGeneration: 0 };
 
-const personRow = (name: string, role: Exclude<Role, "member">): Doc<"users"> => ({
-  _id: idOf("users", name),
-  _creationTime: 0,
-  kind: "person",
-  username: name,
-  usernameKey: name,
-  role,
-  ...generations,
-});
+const personRow = (name: string, role: Exclude<Role, "member">): Doc<"users"> => {
+  const fields = {
+    _id: idOf("users", name),
+    _creationTime: 0,
+    kind: "person" as const,
+    username: name,
+    usernameKey: name,
+    ...generations,
+  };
+
+  return role === "guest"
+    ? { ...fields, role, link: idOf("shareLinks", `${name}-link`) }
+    : { ...fields, role };
+};
 
 const memberRow = (name: string, restrictions?: Restrictions): Doc<"users"> => {
   const row: Extract<Doc<"users">, { readonly role: "member" }> = {

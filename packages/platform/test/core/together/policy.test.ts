@@ -67,6 +67,7 @@ const sessionAt = (facts: In, domain: TogetherResource["domain"] = "movies"): To
       add: facts.add ?? false,
     },
     addedIt: facts.addedIt ?? false,
+    invited: false,
   },
 });
 
