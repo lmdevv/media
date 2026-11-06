@@ -142,7 +142,11 @@ refresh token and its calls, and the browser only has to make every tab stop usi
   another tab just renewed. That tab then signs out and the person signs in again. This never
   keeps a session alive.
 - Revocations are never deleted while the session's refresh token could still work, 30 days in the
-  core. Nothing sweeps them yet. Each sign-out leaves one small key.
+  core. Nothing sweeps them yet, so each sign-out leaves two small keys. A session id revoked in a
+  store never loads there again. Every sign-in in the account client starts a new session, so
+  this only matters for an API key, which reuses its session. When the account client forgets a
+  slot or a person moves to a new one, it removes that slot's token keys and keeps its
+  revocations.
 - None of this needs a secure context. Over plain HTTP on a LAN or tailnet address, which installs
   support, `navigator.locks`, `crypto.randomUUID`, `crypto.subtle`, and `navigator.clipboard` are
   missing. The client uses none of them unguarded. Slot ids come from `randomUuid` and copying from

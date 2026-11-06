@@ -11,6 +11,15 @@ test.skip(stack === null, "needs scripts/dev-stack.sh up");
 // These pages hold invite and reset codes, so a failure keeps no trace, screenshot, or video.
 test.use({ trace: "off", screenshot: "off", video: "off" });
 
+/** Opens a link that carries a secret. A failed navigation names the URL, so its error is replaced. */
+const open = async (page: Page, link: string): Promise<void> => {
+  try {
+    await page.goto(link);
+  } catch {
+    throw new Error("Opening the link failed");
+  }
+};
+
 test("accepting an invite lands the new person on the picker", async ({ page }) => {
   if (stack === null) return;
 
@@ -23,7 +32,7 @@ test("accepting an invite lands the new person on the picker", async ({ page }) 
 
     const username = `sam-${Math.random().toString(36).slice(2, 8)}`;
 
-    await page.goto(`/invite#${code}`);
+    await open(page, `/invite#${code}`);
     await expect(page.getByRole("heading", { name: "You're invited." })).toBeVisible();
     await page.getByLabel("Username").fill(username);
     await page.getByLabel("Password", { exact: true }).fill("a long enough password");
@@ -70,7 +79,7 @@ test("an invite link keeps its code out of requests, referrers, the address, and
   const username = `sam-${Math.random().toString(36).slice(2, 8)}`;
 
   try {
-    await invitee.goto(link);
+    await open(invitee, link);
     await expect(invitee.getByRole("heading", { name: "You're invited." })).toBeVisible();
     expect(invitee.url().includes(code), "the address holds the code after opening").toBe(false);
 
@@ -108,7 +117,7 @@ test("a reset link keeps its code out of requests, referrers, the address, and h
     await platform.session.signInWithPassword(admin);
     const { code } = await platform.core.accounts.resetLinks.create({ userId });
 
-    await page.goto(`/reset#${code}`);
+    await open(page, `/reset#${code}`);
     await expect(page.getByRole("heading", { name: "Set a new password." })).toBeVisible();
     expect(page.url().includes(code), "the address holds the code after opening").toBe(false);
 

@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { inflateRawSync } from "node:zlib";
 
 /**
- * The core's one-time secrets: invite (`mi_`), reset (`mr_`), device (`dv_`), and group-session
- * (`mt_`) codes, an id then a secret of at least 16 URL-safe characters.
+ * The core's secrets: invites (`mi_`), reset links (`mr_`), devices (`dv_`), device codes (`dc_`),
+ * API keys (`mk_`), guest links (`mg_`), and group-session links (`mt_`), each an id then a secret
+ * of at least 16 URL-safe characters. Nothing bounds the start, so `%23mi_…` matches too.
  */
-const SECRET = /\b(?:mi|mr|dv|mt)_[a-z0-9]{8,}\.[\w-]{16,}/u;
+const SECRET = /(?:mi|mr|dv|dc|mk|mg|mt)_[a-z0-9]{8,}\.[\w-]{16,}/u;
 
 const ZIP_END = 0x06_05_4b_50;
 
@@ -14,11 +15,17 @@ const ZIP_ENTRY = 0x02_01_4b_50;
 
 const DEFLATE = 8;
 
-/** The uncompressed bytes of each entry of a zip archive, such as a Playwright trace. */
+const ZIP_START = 0x04_03_4b_50;
+
+/**
+ * The uncompressed bytes of each entry of a zip archive, such as a Playwright trace. Throws on an
+ * archive it cannot read.
+ */
 const zipEntries = (zip: Buffer): ReadonlyArray<Buffer> => {
+  if (zip.length < 4 || zip.readUInt32LE(0) !== ZIP_START) return [];
   const end = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
 
-  if (end < 0 || zip.readUInt32LE(end) !== ZIP_END) return [];
+  if (end < 0 || zip.readUInt32LE(end) !== ZIP_END) throw new Error("No zip directory");
 
   const count = zip.readUInt16LE(end + 10);
   const entries: Array<Buffer> = [];
@@ -44,6 +51,15 @@ const zipEntries = (zip: Buffer): ReadonlyArray<Buffer> => {
 const holdsSecret = (bytes: Buffer): boolean =>
   SECRET.test(bytes.toString("latin1")) || zipEntries(bytes).some(holdsSecret);
 
+/** Whether `bytes` hold a secret, counting a file it cannot read through as one that does. */
+const mayHoldSecret = (bytes: Buffer): boolean => {
+  try {
+    return holdsSecret(bytes);
+  } catch {
+    return true;
+  }
+};
+
 const filesUnder = async (directory: string): Promise<ReadonlyArray<string>> => {
   const entries = await readdir(directory, { withFileTypes: true, recursive: true }).catch(
     () => [],
@@ -59,7 +75,7 @@ export const filesHoldingSecrets = async (directory: string): Promise<ReadonlyAr
   const files = await filesUnder(directory);
 
   const found = await Promise.all(
-    files.map(async (file) => (holdsSecret(await readFile(file)) ? [file] : [])),
+    files.map(async (file) => (mayHoldSecret(await readFile(file)) ? [file] : [])),
   );
 
   return found.flat();

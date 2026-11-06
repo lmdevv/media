@@ -818,25 +818,28 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
    * server, retrying in the background while the server cannot confirm it.
    */
   const signOut = Effect.fn("Auth.signOut")(function* () {
-    const ended = yield* committing.withPermits(1)(
+    const { ended, revoked } = yield* committing.withPermits(1)(
       Effect.gen(function* () {
         const current = yield* Ref.get(session);
 
+        const exit = yield* Effect.exit(
+          Option.match(current, { onNone: () => Effect.void, onSome: storage.revoke }),
+        );
+
         yield* adopt(Option.none());
 
-        return current;
+        return { ended: current, revoked: exit };
       }),
     );
 
-    if (Option.isNone(ended)) return yield* Effect.void;
-    const revoked = yield* Effect.exit(storage.revoke(ended.value));
-
-    if (yield* endOnServer(ended.value)) {
-      yield* storage
-        .confirmRevoked(ended.value)
-        .pipe(Effect.catchTag("TokenStorageError", logStorageFailure));
-    } else {
-      yield* endInBackground(ended.value, Duration.seconds(1));
+    if (Option.isSome(ended)) {
+      if (yield* endOnServer(ended.value)) {
+        yield* storage
+          .confirmRevoked(ended.value)
+          .pipe(Effect.catchTag("TokenStorageError", logStorageFailure));
+      } else {
+        yield* endInBackground(ended.value, Duration.seconds(1));
+      }
     }
 
     return yield* revoked;

@@ -93,6 +93,27 @@ describe("the origin store", () => {
     expect(store.read().people).toStrictEqual(new Map([[bo, slot]]));
   });
 
+  it("drops a forgotten slot's tokens but keeps its sessions' revocations", () => {
+    const storage = new MemoryStorage();
+    const store = makeOriginStore(storage, new EventTarget());
+    const slot = newSlot();
+    const key = store.sessionKey(slot);
+
+    store.promote(slot, userId("ada"));
+    storage.setItem(key, "ada|s1");
+    storage.setItem(`${key}:ada|s1`, "tokens");
+    storage.setItem(`${key}:ada|s0`, "older tokens");
+    storage.setItem(`${key}:ada|s0:revoked`, "revoked");
+    storage.setItem(`${key}:ada|s0:confirmed`, "1");
+    store.forget(userId("ada"));
+
+    expect(
+      Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
+        (each) => each?.startsWith(key) === true,
+      ),
+    ).toStrictEqual([`${key}:ada|s0:revoked`, `${key}:ada|s0:confirmed`]);
+  });
+
   it("forgets one person and leaves the others signed in here", () => {
     const storage = new MemoryStorage();
     const store = makeOriginStore(storage, new EventTarget());

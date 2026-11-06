@@ -173,6 +173,27 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
     for (const [key] of writes) notify(key);
   };
 
+  /**
+   * Removes a slot nobody uses any more: its session and each of its sessions' tokens. The SDK's
+   * revocation records stay, so a renewal that lands later still loads as no session.
+   */
+  const dropSlot = (slot: SlotId): ReadonlyArray<readonly [string, null]> => {
+    const prefix = `${sessionKey(slot)}:`;
+    const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index));
+
+    return [
+      [sessionKey(slot), null],
+      ...keys.flatMap((key) =>
+        key !== null &&
+        key.startsWith(prefix) &&
+        !key.endsWith(":revoked") &&
+        !key.endsWith(":confirmed")
+          ? [[key, null] as const]
+          : [],
+      ),
+    ];
+  };
+
   const slotsOf = (userId: UserId): ReadonlyArray<readonly [string, string | null]> => {
     const slot = read().people.get(userId);
 
@@ -180,7 +201,7 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
 
     return [
       [`${PERSON}${userId}`, null],
-      [sessionKey(slot), null],
+      ...dropSlot(slot),
       ...(read().active === slot ? [[ACTIVE, null] as const] : []),
     ];
   };
@@ -223,7 +244,7 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
 
       change([
         ...others,
-        ...(before === undefined || before === slot ? [] : [[sessionKey(before), null] as const]),
+        ...(before === undefined || before === slot ? [] : dropSlot(before)),
         [`${PERSON}${userId}`, slot],
         [ACTIVE, slot],
       ]);
