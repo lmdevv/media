@@ -346,7 +346,7 @@ const beginStop = (stream: Lifecycle, run: RunScope) =>
           Effect.forkDetach,
           Effect.asVoid,
         ),
-  );
+  ).pipe(Effect.uninterruptible);
 
 const awaitStopped = (run: RunScope) =>
   Effect.interruptible(

@@ -10,6 +10,7 @@ import {
   Predicate,
   Redacted,
   Schedule,
+  Scheduler,
 } from "effect";
 
 import type { ClientCapabilities } from "@media/contracts/media-playback";
@@ -114,11 +115,31 @@ const RUN_FOLDER = /\/transcode\/[^/]+\/\d+$/u;
 
 const folders = { failNext: false };
 
+const KEPT_INIT_OF_MOVE = /\/init-\d+\.mp4$/u;
+
+const moves = { armed: false, reached: Promise.withResolvers<void>() };
+
+const smallTurns = Effect.provideService(Scheduler.MaxOpsBeforeYield, 3);
+
+const MOVE_TURNS = Array.from({ length: 40 }, (_, turn) => turn);
+
+const holdNextMove = () => {
+  moves.armed = true;
+  moves.reached = Promise.withResolvers<void>();
+};
+
 const heldInitCopies = Layer.effect(
   FileSystem.FileSystem,
   Effect.map(FileSystem.FileSystem, (real) =>
     FileSystem.FileSystem.of({
       ...real,
+      remove: (target, options) =>
+        moves.armed && KEPT_INIT_OF_MOVE.test(target)
+          ? Effect.sync(() => {
+              moves.armed = false;
+              moves.reached.resolve();
+            }).pipe(Effect.andThen(Effect.forEach(MOVE_TURNS, () => Effect.yieldNow)))
+          : real.remove(target, options),
       makeDirectory: (target, options) =>
         folders.failNext && RUN_FOLDER.test(target)
           ? Effect.suspend(() => {
@@ -452,6 +473,54 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
           yield* sessions.stop(started.streamId, who.grant);
         }),
       60_000,
+    );
+
+    it.effect(
+      "a stop that lands while a seek begins stopping the previous run still stops that run",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const server = yield* MediaTestServer.Service;
+          const fs = yield* FileSystem.FileSystem;
+
+          for (let turns = 0; turns < MOVE_TURNS.length + 40; turns += 1) {
+            const who = yield* viewer("household");
+            const started = yield* playing(who);
+
+            holdNextMove();
+
+            const seeking = yield* Effect.forkChild(
+              sessions.seek(started.streamId, 6, who.grant).pipe(Effect.exit, smallTurns),
+            );
+
+            yield* Effect.promise(() => moves.reached.promise);
+
+            for (let turn = 0; turn < turns; turn += 1) yield* Effect.yieldNow;
+
+            yield* sessions
+              .stop(started.streamId, who.grant)
+              .pipe(smallTurns, Effect.timeout("10 seconds"));
+            yield* Fiber.join(seeking).pipe(Effect.timeout("15 seconds"));
+
+            const gone = yield* fs.exists(`${server.transcodeDir}/${started.streamId}`).pipe(
+              Effect.orDie,
+              Effect.repeat({
+                until: (exists) => !exists,
+                schedule: Schedule.spaced("50 millis"),
+                times: 100,
+              }),
+              Effect.map((exists) => !exists),
+            );
+
+            assert.isTrue(gone, `after ${String(turns)} turns: the stream's teardown finished`);
+          }
+
+          const household = yield* viewer("household");
+          const after = yield* start(household).pipe(Effect.timeout("15 seconds"));
+
+          yield* sessions.stop(after.streamId, household.grant);
+        }).pipe(Effect.ensuring(Effect.sync(() => (moves.armed = false)))),
+      120_000,
     );
   });
 

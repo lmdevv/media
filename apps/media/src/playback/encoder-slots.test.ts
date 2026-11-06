@@ -486,6 +486,7 @@ interface Stream {
   held: EncoderSlots.Held | undefined;
   readonly runs: Set<Scope.Closeable>;
   readonly transitions: Set<Fiber.Fiber<void>>;
+  readonly stopping: Set<Scope.Closeable>;
 }
 
 const simulate = (limit: number) =>
@@ -511,6 +512,14 @@ const simulate = (limit: number) =>
         fiber.addObserver(() => stream.transitions.delete(fiber));
       });
 
+    const beginStop = (stream: Stream, run: Scope.Closeable) =>
+      Effect.suspend(() => {
+        if (stream.stopping.has(run)) return Effect.void;
+        stream.stopping.add(run);
+
+        return Effect.forkDetach(close(run));
+      }).pipe(Effect.uninterruptible);
+
     const end = (stream: Stream) =>
       Effect.gen(function* () {
         stream.status = "ended";
@@ -522,10 +531,7 @@ const simulate = (limit: number) =>
           yield* Fiber.interrupt(fiber);
         }
 
-        yield* Effect.forEach(stream.runs, close, {
-          concurrency: "unbounded",
-          discard: true,
-        });
+        yield* Effect.forEach(stream.runs, (run) => beginStop(stream, run), { discard: true });
       });
 
     const claim = (
@@ -665,7 +671,7 @@ const simulate = (limit: number) =>
         const renewed = yield* held.renew(run);
 
         stream.status = "starting";
-        yield* Effect.forkDetach(close(previous));
+        yield* beginStop(stream, previous);
 
         if (yield* begin(stream, run, renewed)) {
           stream.run = run;
@@ -693,6 +699,7 @@ const simulate = (limit: number) =>
           held: undefined,
           runs: new Set(),
           transitions: new Set(),
+          stopping: new Set(),
         };
 
         streams.push(stream);
@@ -734,7 +741,16 @@ const simulate = (limit: number) =>
       } else if (move === 5) {
         const current = yield* some("running");
 
-        if (current !== undefined) yield* transition(current, seek(current));
+        if (current !== undefined) {
+          yield* transition(current, seek(current));
+
+          if ((yield* Random.nextIntBetween(0, 3, { halfOpen: true })) === 0) {
+            const turns = yield* Random.nextIntBetween(0, 12, { halfOpen: true });
+
+            for (let turn = 0; turn < turns; turn += 1) yield* Effect.yieldNow;
+            yield* Effect.forkChild(end(current));
+          }
+        }
       } else {
         const status = (["starting", "running", "released"] as const)[
           yield* Random.nextIntBetween(0, 3, { halfOpen: true })
