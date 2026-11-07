@@ -1,5 +1,5 @@
 import { assert, describe, layer } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option, Predicate, Redacted, Result } from "effect";
+import { Effect, Fiber, FileSystem, Layer, Option, Predicate, Redacted, Result } from "effect";
 
 import { type ClientCapabilities } from "@media/contracts/media-playback";
 
@@ -14,7 +14,6 @@ import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
 import * as PlaybackToken from "./playback-token.ts";
 import * as StreamOwners from "./stream-owners.ts";
 import * as StreamSessions from "./stream-sessions.ts";
-import * as TranscodeSpace from "./transcode-space.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -30,18 +29,23 @@ const holdNextStart = () => {
   pending.held = Promise.withResolvers<void>();
 };
 
-const space = Layer.effect(
-  TranscodeSpace.Service,
-  Effect.map(TranscodeSpace.Service, (real) =>
-    TranscodeSpace.Service.of({
+const RUN_FOLDER = /\/transcode\/[^/]+\/\d+$/u;
+
+const heldFirstRuns = Layer.effect(
+  FileSystem.FileSystem,
+  Effect.map(FileSystem.FileSystem, (real) =>
+    FileSystem.FileSystem.of({
       ...real,
-      check: (bytes) =>
+      makeDirectory: (target, options) =>
         Effect.suspend(() => {
-          if (!pending.armed || bytes !== 0) return real.check(bytes);
+          if (!pending.armed || !RUN_FOLDER.test(target))
+            return real.makeDirectory(target, options);
           pending.armed = false;
           pending.holding.resolve();
 
-          return Effect.promise(() => pending.held.promise).pipe(Effect.andThen(real.check(bytes)));
+          return Effect.promise(() => pending.held.promise).pipe(
+            Effect.andThen(real.makeDirectory(target, options)),
+          );
         }),
     }),
   ),
@@ -137,7 +141,7 @@ const tools = Layer.effect(
 const subject = Layer.fresh(StreamSessions.layer).pipe(
   Layer.provideMerge(tools),
   Layer.provideMerge(owners),
-  Layer.provideMerge(space),
+  Layer.provide(heldFirstRuns),
   Layer.provideMerge(MediaTestServer.layer({ MAX_CONCURRENT_REMUXES: "1" })),
 );
 

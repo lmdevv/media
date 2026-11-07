@@ -408,6 +408,11 @@ const make = Effect.gen(function* () {
 
   const idleMillis = Duration.toMillis(config.streamIdleTimeout);
 
+  const startWait = Duration.sum(
+    Duration.sum(START_WAIT, config.fileScanTimeout),
+    Duration.sum(STOP_WAIT, FIRST_RUN_WAIT),
+  );
+
   const keptInitOf = (session: Session, generation: number) =>
     path.join(session.directory, `init-${generation}.mp4`);
 
@@ -1493,8 +1498,10 @@ const make = Effect.gen(function* () {
     };
 
     const registered = yield* Ref.make(Option.none<Session>());
+    const limit = (isEncode(request.plan.video) ? transcodes : copies).limit;
 
     return yield* startIn(stream, registered, grant, ticket, request).pipe(
+      stopWaitingAfter(startWait, () => new TranscodeCapacityReached({ limit })),
       Effect.onExit((exit) =>
         Ref.get(registered).pipe(
           Effect.flatMap(
@@ -1523,14 +1530,6 @@ const make = Effect.gen(function* () {
     const transcoding = isEncode(plan.video);
     const { streamId, scope } = stream;
 
-    const run = yield* claimRun(
-      stream,
-      transcoding,
-      grant.audience,
-      { sessionId: grant.sessionId, ticket },
-      START_WAIT,
-    );
-
     yield* space.check(0);
 
     const quickStart = file.probe.startSeconds + request.startSeconds;
@@ -1543,6 +1542,14 @@ const make = Effect.gen(function* () {
           file.probe.durationSeconds,
           { quickStart },
         );
+
+    const run = yield* claimRun(
+      stream,
+      transcoding,
+      grant.audience,
+      { sessionId: grant.sessionId, ticket },
+      START_WAIT,
+    );
 
     const placeholder: Generation = {
       number: 0,
@@ -1633,18 +1640,17 @@ const make = Effect.gen(function* () {
     const refused = () =>
       new TranscodeCapacityReached({ limit: (transcoding ? transcodes : copies).limit });
 
-    const generation = yield* Effect.gen(function* () {
-      const first = yield* transition(
-        session,
-        startGeneration(session, run, Option.none(), 1, segmentIndex),
-      );
+    const first = yield* transition(
+      session,
+      startGeneration(session, run, Option.none(), 1, segmentIndex),
+    );
 
-      if (Option.isNone(first)) return yield* refused();
+    if (Option.isNone(first)) return yield* refused();
 
-      return hardwareOf(plan.mode) !== undefined
+    const generation =
+      hardwareOf(plan.mode) !== undefined
         ? yield* firstSegment(session, first.value, segmentIndex)
         : first.value;
-    }).pipe(stopWaitingAfter(FIRST_RUN_WAIT, refused));
 
     const mode = yield* Ref.get(session.mode);
 

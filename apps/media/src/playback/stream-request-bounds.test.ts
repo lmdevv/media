@@ -23,6 +23,7 @@ import { resolveInsideRoots } from "./file-resolver.ts";
 import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
 import * as PlaybackToken from "./playback-token.ts";
 import * as StreamSessions from "./stream-sessions.ts";
+import * as TranscodeSpace from "./transcode-space.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -42,9 +43,23 @@ const stallNextFirstFragmentOpen = () => {
   opens.release = Promise.withResolvers<void>();
 };
 
+const checks = {
+  armed: false,
+  reached: Promise.withResolvers<void>(),
+  release: Promise.withResolvers<void>(),
+};
+
+const stallNextSpaceCheck = () => {
+  checks.armed = true;
+  checks.reached = Promise.withResolvers<void>();
+  checks.release = Promise.withResolvers<void>();
+};
+
 const releaseStalls = Effect.sync(() => {
   opens.armed = false;
   opens.release.resolve();
+  checks.armed = false;
+  checks.release.resolve();
 });
 
 const stalledOpens = Layer.effect(
@@ -67,7 +82,26 @@ const stalledOpens = Layer.effect(
   ),
 );
 
+const stalledChecks = Layer.effect(
+  TranscodeSpace.Service,
+  Effect.map(TranscodeSpace.Service, (real) =>
+    TranscodeSpace.Service.of({
+      ...real,
+      check: (bytes) =>
+        checks.armed
+          ? Effect.suspend(() => {
+              checks.armed = false;
+              checks.reached.resolve();
+
+              return Effect.promise(() => checks.release.promise);
+            }).pipe(Effect.andThen(real.check(bytes)))
+          : real.check(bytes),
+    }),
+  ),
+);
+
 const subject = Layer.fresh(StreamSessions.layer).pipe(
+  Layer.provideMerge(stalledChecks),
   Layer.provide(stalledOpens),
   Layer.provideMerge(
     MediaTestServer.layer({
@@ -188,6 +222,40 @@ describe.skipIf(!hasFfmpeg)("stream request bounds", () => {
           assert.isTrue(gone, "the stream's teardown finished");
         }).pipe(Effect.ensuring(releaseStalls)),
       90_000,
+    );
+
+    it.effect(
+      "a start held in its disk check holds no slot, so another household start plays",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const held = yield* viewer;
+          const other = yield* viewer;
+
+          stallNextSpaceCheck();
+
+          const holding = yield* Effect.forkChild(start(held).pipe(Effect.exit));
+
+          yield* Effect.promise(() => checks.reached.promise);
+
+          const playing = yield* start(other).pipe(Effect.timeout("15 seconds"));
+
+          yield* sessions.segment(
+            playing.streamId,
+            playing.generation,
+            playing.segmentIndex,
+            other.grant,
+          );
+          yield* sessions.stop(playing.streamId, other.grant);
+          yield* releaseStalls;
+
+          const resumed = yield* Fiber.join(holding).pipe(Effect.timeout("15 seconds"));
+
+          assert.isTrue(Exit.isSuccess(resumed), `the held start goes on: ${String(resumed)}`);
+
+          if (Exit.isSuccess(resumed)) yield* sessions.stop(resumed.value.streamId, held.grant);
+        }).pipe(Effect.ensuring(releaseStalls)),
+      60_000,
     );
   });
 });
