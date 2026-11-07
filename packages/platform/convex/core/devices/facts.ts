@@ -117,7 +117,9 @@ export const requireOpen = async (
 
   if (decision.allowed) return;
 
-  fail(decision.refusal === "hidden" ? "not_found" : "forbidden", lockedMessage(tile));
+  if (decision.refusal === "hidden") fail("not_found", NO_TILE);
+
+  fail("forbidden", lockedMessage(tile));
 };
 
 const tileRefusal = (decision: Extract<Decision, { readonly allowed: false }>): never => {

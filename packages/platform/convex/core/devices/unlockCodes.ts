@@ -8,7 +8,7 @@ import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { refuseKeys, requireCaller } from "../auth/caller";
 import { fail } from "../lib/errors";
 import { PASSWORD_MIN, hashUnlockCode } from "../lib/passwords";
-import { takeAttempt } from "../lib/rateLimit";
+import { refundAttempt, takeAttempt } from "../lib/rateLimit";
 import type { RateLimit } from "../lib/rateLimit";
 import { asPerson } from "../accounts/users";
 import { requireAccount } from "../permissions/authorize";
@@ -83,11 +83,6 @@ export const clearStrikes = async (
   if (strike !== null) await ctx.db.delete(strike._id);
 };
 
-/**
- * Takes one wrong try before the action checks the digits, so tries made at once never pass 5,
- * and a right code gives it back by clearing the count. A code that could not open the tile even
- * when right is refused first and costs no try.
- */
 export const attempt = internalMutation({
   args: { deviceId: v.string(), secretHash: v.string(), userId: v.id("users"), by: v.id("users") },
   returns: v.union(
@@ -96,6 +91,7 @@ export const attempt = internalMutation({
     v.object({ kind: v.literal("limited") }),
     v.object({
       kind: v.literal("ready"),
+      deviceId: v.id("devices"),
       codeId: v.id("unlockCodes"),
       hash: v.string(),
       left: v.number(),
@@ -126,10 +122,22 @@ export const attempt = internalMutation({
 
     return {
       kind: "ready" as const,
+      deviceId: device._id,
       codeId: code._id,
       hash: code.hash,
       left: CODE_TRIES - wrong - 1,
     };
+  },
+});
+
+export const refundRightCode = internalMutation({
+  args: { deviceId: v.id("devices"), by: v.id("users") },
+  returns: v.null(),
+  handler: async (ctx, { deviceId, by }) => {
+    await clearStrikes(ctx, deviceId, by);
+    await refundAttempt(ctx, unlockLimit(by), Date.now());
+
+    return null;
   },
 });
 
