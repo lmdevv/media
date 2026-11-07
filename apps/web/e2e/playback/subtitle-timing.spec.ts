@@ -252,6 +252,31 @@ const repeat = async (times: number, act: () => Promise<void>): Promise<void> =>
   await repeat(times - 1, act);
 };
 
+/**
+ * Waits until a stream the player just switched to plays past `seconds`. While its start seek is
+ * under way the element already reports the target and not paused, so a pause then lands inside
+ * the seek (ADS-173) instead of on a playing stream.
+ */
+const expectSwitchedPlayingPast = async (target: Page, seconds: number): Promise<void> => {
+  await expect
+    .poll(
+      async () =>
+        target
+          .getByTestId("player-video")
+          .evaluate(
+            (element, past) =>
+              element instanceof HTMLVideoElement &&
+              !element.paused &&
+              !element.seeking &&
+              element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA &&
+              element.currentTime > past,
+            seconds,
+          ),
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+};
+
 const openPaused = async (target: Page, name: string): Promise<void> => {
   await target.goto(`/watch/${titleId(name)}?start=0`);
   await expectPlayingPast(target, 0.5);
@@ -356,7 +381,7 @@ test("the delay holds through seeks, playing, and a quality change to an hls.js 
   await expect
     .poll(() => streams.slice(before).at(-1))
     .toMatchObject({ mode: "transcode-software", height: 480 });
-  await expectPlayingPast(page, 11);
+  await expectSwitchedPlayingPast(page, 11);
   await page.getByTestId("player").press("k");
 
   await expect
