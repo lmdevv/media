@@ -135,7 +135,7 @@ export const GUEST_KEYS_FROM = "~";
 const UNPRINTABLE =
   /[\p{Cc}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
-const VISIBLE = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{M}]/u;
+const VISIBLE = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{M}\u2800]/u;
 
 export const requireGuestName = (typed: string): string => {
   const name = typed.normalize("NFKC").trim();

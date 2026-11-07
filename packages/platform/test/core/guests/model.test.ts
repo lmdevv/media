@@ -25,6 +25,7 @@ describe("the name a guest gives", () => {
     ["only a zero-width joiner", "\u200D"],
     ["only a Hangul filler", "\u3164"],
     ["only a soft hyphen and a combining mark", "\u00AD\u0301"],
+    ["only blank Braille patterns", "\u2800\u2800"],
   ])("refuses %s", (_name, typed) => {
     expect(() => requireGuestName(typed)).toThrow(/printable/u);
   });

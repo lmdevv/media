@@ -123,8 +123,11 @@ Otherwise the report stands. A late report with an older revision does not undo 
   seconds (`conflict`, "That device is offline"), and a device that plays nothing (`conflict`).
   So no request waits for a device to come back and then fires late.
 - `list` reads only devices the caller might control: those they have a session on, and every
-  shared device while shared devices list them, at most 64 of each. It walks the caller's sessions
-  one device at a time, one read each, so ended sessions piled on one device never hide another.
+  shared device while shared devices list them, at most 64 of each. It walks the caller's
+  sessions one device at a time, reading that device's newest session and the device, and counts
+  a device only while that session is live; a device's newest session ends last. So ended
+  sessions, piled on one device or spread over many, never crowd out a live device, unless more
+  than 192 of the caller's devices have only ended sessions.
   It shows the ones whose reporting session is live and that reported in the 30 seconds before it
   ran. A subscribed query runs again when a device it read reports, not as time passes, so a
   client also treats a target silent for 30 seconds as offline by its `reportedAt`.

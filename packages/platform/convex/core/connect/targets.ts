@@ -6,45 +6,67 @@ import { NO_DEVICE } from "../devices/facts";
 import { fail } from "../lib/errors";
 import { can } from "../permissions/policy";
 import type { DeviceResource, PersonDoc, Principal } from "../permissions/policy";
-import { boundDevice } from "../sessions";
+import { boundDevice, liveOnDevice } from "../sessions";
 import { deviceFor, playerOf, reporting, requestOf } from "./facts";
 import { changed, isOnline, nextRevision, parsePosition, playbackOf } from "./playback";
 import type { Change } from "./playback";
 
 const BOUND_DEVICES_READ = 64;
 
+const ENDED_DEVICES_SKIPPED = 192;
+
 const SHARED_DEVICES_READ = 64;
 
 /**
  * Sessions bound to a device sort after those on none, so the descending walk ends at the first
- * session on no device.
+ * session on no device. A device's newest session ends last, so when it has ended, the person's
+ * older sessions there have too.
  */
-const boundBelow = async (
+const liveBoundBelow = async (
   db: DatabaseReader,
-  userId: Id<"users">,
+  person: PersonDoc,
   below: Id<"devices"> | null,
   left: number,
+  skips: number,
+  now: number,
 ): Promise<ReadonlyArray<Id<"devices">>> => {
   if (left === 0) return [];
 
   const session = await db
     .query("authSessions")
     .withIndex("by_user_device", (q) =>
-      below === null ? q.eq("userId", userId) : q.eq("userId", userId).lt("device.id", below),
+      below === null
+        ? q.eq("userId", person._id)
+        : q.eq("userId", person._id).lt("device.id", below),
     )
     .order("desc")
     .first();
 
   const deviceId = session === null ? null : (boundDevice(session)?.id ?? null);
 
-  return deviceId === null ? [] : [deviceId, ...(await boundBelow(db, userId, deviceId, left - 1))];
+  if (session === null || deviceId === null) return [];
+
+  const device = await db.get(deviceId);
+
+  if (device !== null && liveOnDevice(session, person, device, now)) {
+    return [deviceId, ...(await liveBoundBelow(db, person, deviceId, left - 1, skips, now))];
+  }
+
+  return skips === 0 ? [] : liveBoundBelow(db, person, deviceId, left, skips - 1, now);
 };
 
 const reachable = async (
   db: DatabaseReader,
   person: PersonDoc,
 ): Promise<ReadonlyArray<Id<"devices">>> => {
-  const bound = await boundBelow(db, person._id, null, BOUND_DEVICES_READ);
+  const bound = await liveBoundBelow(
+    db,
+    person,
+    null,
+    BOUND_DEVICES_READ,
+    ENDED_DEVICES_SKIPPED,
+    Date.now(),
+  );
 
   const shared: ReadonlyArray<Doc<"devices">> =
     person.sharedDevices === true
