@@ -24,7 +24,16 @@ const sessionFields = {
   generation: v.number(),
 };
 
-const boundDevice = v.object({ id: v.id("devices"), generation: v.number() });
+const boundDevice = v.object({
+  id: v.id("devices"),
+  generation: v.number(),
+  /**
+   * The session's number in the order sessions took the device: joined a personal device, or took
+   * a shared device's tile. A later one ends this session there, so a client keeps the highest.
+   * Absent on a session bound before the count began.
+   */
+  joined: v.optional(v.number()),
+});
 
 const generations = {
   /** Bumped when every password and device session of the user ends. */
@@ -60,6 +69,11 @@ const deviceFields = {
   secretHash: v.string(),
   /** Bumped by every mode change; a session bound at another generation has ended. */
   generation: v.number(),
+  /**
+   * Sessions that have joined this device so far, absent before the first. Each join takes the
+   * next number and ends the person's earlier session here, so a client keeps the highest.
+   */
+  joins: v.optional(v.number()),
 };
 
 const approvalFields = {

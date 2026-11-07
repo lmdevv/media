@@ -51,6 +51,7 @@ describe("CLI placement", () => {
       "core.auth.deviceCodes.start": "auth device-codes start",
       "core.auth.sessions.current": "auth sessions current",
       "core.auth.sessions.end": "auth sessions end",
+      "core.auth.sessions.revoke": "auth sessions revoke",
       "core.auth.sessions.endAll": "auth sessions end-all",
       "core.connect.player.report": "auth player report",
       "core.connect.player.requested": "auth player requested",
@@ -136,6 +137,29 @@ describe("CLI placement", () => {
       "core.accounts.users.remove: refused, its CLI path `media admin users remove` is also core.people.users.remove's (rename a module or function)",
       "core.people.users.remove: refused, its CLI path `media admin users remove` is also core.accounts.users.remove's (rename a module or function)",
     ]);
+  });
+
+  it("keeps every credential argument off the command line", () => {
+    expect(
+      Object.fromEntries(
+        placed.flatMap((command) => {
+          const fields = secretsOf(command.args).map((secret) => secret.field);
+
+          return fields.length === 0 ? [] : [[command.name, fields]];
+        }),
+      ),
+    ).toEqual({
+      "core.accounts.invites.lookup": ["code"],
+      "core.accounts.me.changePassword": ["currentPassword", "newPassword"],
+      "core.accounts.resetLinks.lookup": ["code"],
+      "core.accounts.users.create": ["password"],
+      "core.auth.sessions.revoke": ["refreshToken"],
+      "core.devices.approvals.request": ["device"],
+      "core.devices.picker.show": ["device"],
+      "core.devices.registry.enroll": ["device"],
+      "core.devices.unlockCodes.set": ["code"],
+      "core.together.join": ["link"],
+    });
   });
 
   it("keeps password arguments off the command line and pages lists", () => {

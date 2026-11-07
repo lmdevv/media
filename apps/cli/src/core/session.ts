@@ -119,29 +119,31 @@ const layerSessionFile = (
 ): Layer.Layer<TokenStorage.TokenStorage> =>
   Layer.succeed(
     TokenStorage.TokenStorage,
-    TokenStorage.TokenStorage.of({
-      load:
-        start === "signedOut"
-          ? Effect.succeedNone
-          : readStored(path).pipe(
-              Effect.map((stored) =>
-                Option.flatMap(
-                  Option.filter(stored, (file) => file.url === url),
-                  (file) => Option.map(Option.fromNullishOr(file.session), toSession),
+    TokenStorage.TokenStorage.of(
+      TokenStorage.owned({
+        load:
+          start === "signedOut"
+            ? Effect.succeedNone
+            : readStored(path).pipe(
+                Effect.map((stored) =>
+                  Option.flatMap(
+                    Option.filter(stored, (file) => file.url === url),
+                    (file) => Option.map(Option.fromNullishOr(file.session), toSession),
+                  ),
                 ),
+                Effect.mapError(storageError("load")),
               ),
-              Effect.mapError(storageError("load")),
-            ),
-      save: (session) =>
-        writeStored(path, {
-          url,
-          session: {
-            token: Redacted.value(session.token),
-            refreshToken: Redacted.value(session.refreshToken),
-          },
-        }).pipe(Effect.mapError(storageError("save"))),
-      clear: writeStored(path, { url }).pipe(Effect.mapError(storageError("clear"))),
-    }),
+        save: (session) =>
+          writeStored(path, {
+            url,
+            session: {
+              token: Redacted.value(session.token),
+              refreshToken: Redacted.value(session.refreshToken),
+            },
+          }).pipe(Effect.mapError(storageError("save"))),
+        clear: writeStored(path, { url }).pipe(Effect.mapError(storageError("clear"))),
+      }),
+    ),
   );
 
 /** Holds `session` for one sign-out and writes nothing. */
@@ -150,11 +152,13 @@ const layerHolding = (
 ): Layer.Layer<TokenStorage.TokenStorage> =>
   Layer.succeed(
     TokenStorage.TokenStorage,
-    TokenStorage.TokenStorage.of({
-      load: Effect.succeedSome(session),
-      save: () => Effect.void,
-      clear: Effect.void,
-    }),
+    TokenStorage.TokenStorage.of(
+      TokenStorage.owned({
+        load: Effect.succeedSome(session),
+        save: () => Effect.void,
+        clear: Effect.void,
+      }),
+    ),
   );
 
 /** A session store failure, reported as the session file it concerns. */

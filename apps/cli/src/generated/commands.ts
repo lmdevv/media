@@ -76,7 +76,7 @@ export const generatedCommands = [
     scope: "public",
     refusesKeys: false,
     summary: "Show what an invite code offers, or refuse it when it no longer works",
-    secrets: [],
+    secrets: [{ field: "code", variable: "MEDIA_ARG_CODE" }],
     paginated: false,
     args: Schema.Struct({ code: Schema.String }),
     result: Schema.Struct({
@@ -148,7 +148,7 @@ export const generatedCommands = [
     scope: "public",
     refusesKeys: false,
     summary: "Show whose password a reset code sets, or refuse it when it no longer works",
-    secrets: [],
+    secrets: [{ field: "code", variable: "MEDIA_ARG_CODE" }],
     paginated: false,
     args: Schema.Struct({ code: Schema.String }),
     result: Schema.Struct({ username: Schema.String, expiresAt: Schema.Finite }),
@@ -390,7 +390,7 @@ export const generatedCommands = [
     kind: "query",
     scope: "signed-in",
     refusesKeys: false,
-    summary: "Show who is signed in, how, and with which scopes",
+    summary: "Show who is signed in, how, with which scopes, and on which device in what order",
     secrets: [],
     paginated: false,
     args: Schema.Struct({}),
@@ -423,6 +423,13 @@ export const generatedCommands = [
           Schema.Literal("music:edit"),
         ]),
       ),
+      device: Schema.Union([
+        Schema.Null,
+        Schema.Struct({
+          deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+          joinSequence: Schema.Finite,
+        }),
+      ]),
     }),
     method: (platform) => platform.core.auth.sessions.current,
   }),
@@ -451,6 +458,20 @@ export const generatedCommands = [
     args: Schema.Struct({ keepCurrent: Schema.Boolean }),
     result: Schema.Null,
     method: (platform) => platform.core.auth.sessions.endAll,
+  }),
+  coreCommand({
+    name: "core.auth.sessions.revoke",
+    path: ["auth", "sessions", "revoke"],
+    kind: "mutation",
+    scope: "public",
+    refusesKeys: false,
+    summary:
+      "End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended",
+    secrets: [{ field: "refreshToken", variable: "MEDIA_ARG_REFRESH_TOKEN" }],
+    paginated: false,
+    args: Schema.Struct({ refreshToken: Schema.String }),
+    result: Schema.Struct({ confirmed: Schema.Literal(true) }),
+    method: (platform) => platform.core.auth.sessions.revoke,
   }),
   coreCommand({
     name: "core.connect.player.report",
@@ -624,7 +645,7 @@ export const generatedCommands = [
     refusesKeys: false,
     summary:
       "From a shared device, ask someone signed in elsewhere to open their locked tile, or an adult to let a kid leave",
-    secrets: [],
+    secrets: [{ field: "device", variable: "MEDIA_ARG_DEVICE" }],
     paginated: false,
     args: Schema.Struct({
       device: Schema.String,
@@ -650,7 +671,7 @@ export const generatedCommands = [
     refusesKeys: false,
     summary:
       "Show a device's picker: who is signed in on it, or on a shared device who opted in, which tiles are locked, and its approval",
-    secrets: [],
+    secrets: [{ field: "device", variable: "MEDIA_ARG_DEVICE" }],
     paginated: false,
     args: Schema.Struct({ device: Schema.String }),
     result: Schema.Union([
@@ -727,12 +748,13 @@ export const generatedCommands = [
     refusesKeys: true,
     summary:
       "Register this app as a personal device, or find it again by its device code, and sign this session in on it",
-    secrets: [],
+    secrets: [{ field: "device", variable: "MEDIA_ARG_DEVICE", optional: true }],
     paginated: false,
     args: Schema.Struct({ name: Schema.String, device: Schema.optionalKey(Schema.String) }),
     result: Schema.Struct({
       deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
       device: Schema.String,
+      joinSequence: Schema.Finite,
     }),
     method: (platform) => platform.core.devices.registry.enroll,
   }),
@@ -864,7 +886,7 @@ export const generatedCommands = [
     refusesKeys: true,
     summary:
       "Set or clear your short unlock code, which opens your tile on shared-device lock screens and never signs in",
-    secrets: [],
+    secrets: [{ field: "code", variable: "MEDIA_ARG_CODE", clearable: true }],
     paginated: false,
     args: Schema.Struct({ code: Schema.Union([Schema.String, Schema.Null]) }),
     result: Schema.Null,
@@ -2297,7 +2319,7 @@ export const generatedCommands = [
     refusesKeys: false,
     summary:
       "Join the group session a link opens, or wait for its host to let you in; leaves your other session in this domain",
-    secrets: [],
+    secrets: [{ field: "link", variable: "MEDIA_ARG_LINK" }],
     paginated: false,
     args: Schema.Struct({
       domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),

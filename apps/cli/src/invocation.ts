@@ -84,14 +84,12 @@ export const requirePositional = (
   );
 
 /**
- * A secret from the environment variable `variable` or, when stdin is piped, from stdin. `what`
- * names the secret in messages, such as `password`.
- *
- * @returns The secret, or a usage error when the variable is set but blank, stdin is a terminal,
- * or the piped secret is empty. A blank variable never falls through to stdin: an inherited pipe
- * that never closes would wait forever.
+ * A secret from the environment variable `variable` or, when stdin is piped, from stdin; none when
+ * neither gives one, as when stdin is a terminal or empty. `what` names the secret in messages.
+ * A blank variable is a usage error and never falls through to stdin: an inherited pipe that
+ * never closes would wait forever.
  */
-export const readSecret = Effect.fn("Cli.readSecret")(function* (
+export const secretGiven = Effect.fn("Cli.secretGiven")(function* (
   invocation: Invocation,
   variable: string,
   what: string,
@@ -110,11 +108,7 @@ export const readSecret = Effect.fn("Cli.readSecret")(function* (
     return yield* usage(invocation, `${variable} is set but empty; unset it or set the ${what}`);
   }
 
-  if (Option.isSome(fromEnv)) return fromEnv.value;
-
-  if (process.stdin.isTTY) {
-    return yield* usage(invocation, `Pipe the ${what} on stdin or set ${variable}`);
-  }
+  if (Option.isSome(fromEnv) || process.stdin.isTTY) return fromEnv;
 
   const text = yield* Effect.tryPromise({
     try: readStdin,
@@ -124,9 +118,31 @@ export const readSecret = Effect.fn("Cli.readSecret")(function* (
 
   const secret = text.trim();
 
-  if (secret.length === 0) return yield* usage(invocation, `The ${what} on stdin is empty`);
+  return secret.length === 0 ? Option.none() : Option.some(Redacted.make(secret));
+});
 
-  return Redacted.make(secret);
+/**
+ * A secret from the environment variable `variable` or, when stdin is piped, from stdin. `what`
+ * names the secret in messages, such as `password`.
+ *
+ * @returns The secret, or a usage error when the variable is set but blank, stdin is a terminal,
+ * or the piped secret is empty.
+ */
+export const readSecret = Effect.fn("Cli.readSecret")(function* (
+  invocation: Invocation,
+  variable: string,
+  what: string,
+) {
+  const given = yield* secretGiven(invocation, variable, what);
+
+  if (Option.isSome(given)) return given.value;
+
+  return yield* usage(
+    invocation,
+    process.stdin.isTTY
+      ? `Pipe the ${what} on stdin or set ${variable}`
+      : `The ${what} on stdin is empty`,
+  );
 });
 
 /**

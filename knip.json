@@ -12,6 +12,7 @@
       "project": ["src/**/*.ts", "scripts/**/*.ts"]
     },
     "apps/web": {},
+    "apps/web-account": {},
     "apps/mobile": {
       "entry": ["src/app/**/*.tsx"],
       "project": ["src/**/*.{ts,tsx,css}"]

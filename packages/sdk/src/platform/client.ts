@@ -5,6 +5,7 @@ import {
   Effect,
   Layer,
   Match,
+  Option,
   Redacted,
   Schedule,
   Schema,
@@ -18,8 +19,20 @@ import * as ConvexTransport from "../convex-transport";
 import type { CallError, TransportError } from "../sdk-errors";
 import { ProtocolError } from "../sdk-errors";
 import type { TokenStorage, TokenStorageError } from "../token-storage";
-import type { Command, EffectBuilder, Params, PlatformError } from "./command";
+import type { Command, EffectBuilder, Id, Params, PlatformError } from "./command";
 import { effectMethods } from "./generated/commands";
+
+/** What lets a person past their tile's lock on a shared device. */
+export type TileProof = Data.TaggedEnum<{
+  /** The password of `by`, the person themself or an adult who may open the tile. */
+  Password: { readonly by: Id<"users">; readonly password: Redacted.Redacted };
+  /** The unlock code of `by`, which works only on this device. */
+  Code: { readonly by: Id<"users">; readonly code: Redacted.Redacted };
+  /** An `open` request that someone approved from another device. */
+  Approval: { readonly approvalId: Id<"tileApprovals"> };
+}>;
+
+export const TileProof = Data.taggedEnum<TileProof>();
 
 /** What to sign in with. Each case is one of the platform's sign-in providers. */
 export type Credentials = Data.TaggedEnum<{
@@ -37,6 +50,18 @@ export type Credentials = Data.TaggedEnum<{
   };
   /** A new password from a reset link code, as `core.accounts.resetLinks.create` shows it once. */
   Reset: { readonly code: Redacted.Redacted; readonly password: Redacted.Redacted };
+  /**
+   * Opens the tile of `userId` on the shared device whose code is `device`, as a tile session
+   * with content scopes only. It ends the session that held the device's slot. A locked tile
+   * without a proof that lifts the lock fails with `Forbidden`, and a wrong password or code with
+   * `Unauthenticated`. An approval fails with `Expired` once used or expired, and with
+   * `ProtocolError` while still pending or after a refusal: redeem only an approved one.
+   */
+  Tile: {
+    readonly device: Redacted.Redacted;
+    readonly userId: Id<"users">;
+    readonly proof: Option.Option<TileProof>;
+  };
 }>;
 
 /** Constructors and matchers for `Credentials`. */
@@ -71,18 +96,26 @@ export interface Session {
   readonly status: Stream.Stream<AuthStatus>;
   /** The status now, without waiting for a change. */
   readonly currentStatus: Effect.Effect<AuthStatus>;
+  /** The session the client holds now, as its token's subject; none while signed out. */
+  readonly currentSession: Effect.Effect<Option.Option<string>>;
   /**
-   * Signs in and stores the session. Refused credentials fail with `Unauthenticated`, a setup once
-   * the server has an owner with `Conflict`, and a used or expired invite or reset code with
+   * Signs in and stores the session; the session it stored, as its token's subject
+   * `<userId>|<sessionId>`. Refused credentials fail with `Unauthenticated`, a setup once the
+   * server has an owner with `Conflict`, and a used or expired invite or reset code with
    * `Expired`.
    */
   readonly signIn: (
     credentials: Credentials,
-  ) => Effect.Effect<void, PlatformError | TokenStorageError>;
+  ) => Effect.Effect<Option.Option<string>, PlatformError | TokenStorageError>;
   /** Starts a device sign-in named `clientName`, as the person approving it will see it. */
   readonly startDeviceSignIn: (clientName: string) => Effect.Effect<DeviceSignIn, PlatformError>;
   /** Ends the session on the server when reachable, then forgets it locally. */
   readonly signOut: Effect.Effect<void, TokenStorageError>;
+  /**
+   * Signs out as `signOut` does, but only while the client's session is `session`, as `signIn`
+   * named it; whether it did.
+   */
+  readonly signOutSession: (session: string) => Effect.Effect<boolean, TokenStorageError>;
 }
 
 /** Runs platform commands as the signed-in session. */
@@ -143,6 +176,13 @@ const toPlatformError =
       Match.orElse((other) => other),
     );
 
+const tileProofParams = (proof: TileProof) =>
+  TileProof.$match(proof, {
+    Password: ({ by, password }) => ({ kind: "password", by, password: Redacted.value(password) }),
+    Code: ({ by, code }) => ({ kind: "code", by, code: Redacted.value(code) }),
+    Approval: ({ approvalId }) => ({ kind: "approval", approvalId }),
+  });
+
 const askAgain = (error: CallError | SignInWaiting | TokenStorageError): boolean =>
   Match.value(error).pipe(
     Match.tags({
@@ -175,7 +215,7 @@ const effectBuilder = (client: Pick<Interface, "run" | "watch">): EffectBuilder 
 
 const make = Effect.fn("Platform.make")(function* (url: string) {
   const transport = yield* ConvexTransport.ConvexTransport;
-  const engine = yield* Auth.makeEngine({ convexUrl: url });
+  const engine = yield* Auth.makeEngine({ convexUrl: url, revoke: "core/auth/sessions:revoke" });
 
   const refreshAfterRefusal = engine
     .accessToken(true)
@@ -250,6 +290,17 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
           provider: "reset",
           params: { code: Redacted.value(code), password: Redacted.value(password) },
         }),
+        Tile: ({ device, userId, proof }) => ({
+          provider: "tile",
+          params: {
+            device: Redacted.value(device),
+            userId,
+            ...Option.match(proof, {
+              onNone: () => ({}),
+              onSome: (value) => ({ proof: tileProofParams(value) }),
+            }),
+          },
+        }),
       }),
     );
 
@@ -259,6 +310,7 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
     const complete = engine
       .open({ provider: "deviceCode", params: { deviceCode: started.deviceCode } })
       .pipe(
+        Effect.asVoid,
         Effect.retry({
           schedule: Schedule.spaced(Duration.seconds(started.intervalSeconds)),
           while: askAgain,
@@ -299,9 +351,11 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
     session: {
       status: engine.status,
       currentStatus: engine.currentStatus,
+      currentSession: engine.currentIdentity,
       signIn,
       startDeviceSignIn,
       signOut: engine.signOut,
+      signOutSession: engine.signOutSession,
     },
   });
 });

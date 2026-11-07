@@ -298,6 +298,13 @@ const core_auth_sessions_current = query({
         Schema.Literal("music:edit"),
       ]),
     ),
+    device: Schema.Union([
+      Schema.Null,
+      Schema.Struct({
+        deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+        joinSequence: Schema.Finite,
+      }),
+    ]),
   }),
 });
 
@@ -313,6 +320,13 @@ const core_auth_sessions_endAll = mutation({
   path: "core/auth/sessions:endAll",
   args: Schema.Struct({ keepCurrent: Schema.Boolean }),
   result: Schema.Null,
+});
+
+const core_auth_sessions_revoke = mutation({
+  name: "core.auth.sessions.revoke",
+  path: "core/auth/sessions:revoke",
+  args: Schema.Struct({ refreshToken: Schema.String }),
+  result: Schema.Struct({ confirmed: Schema.Literal(true) }),
 });
 
 const core_connect_player_report = mutation({
@@ -530,6 +544,7 @@ const core_devices_registry_enroll = action({
   result: Schema.Struct({
     deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
     device: Schema.String,
+    joinSequence: Schema.Finite,
   }),
 });
 
@@ -1884,12 +1899,14 @@ export const effectMethods = (method: EffectBuilder) => ({
         start: method.action(core_auth_deviceCodes_start),
       },
       sessions: {
-        /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, and with which scopes. */
+        /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, with which scopes, and on which device in what order. */
         current: method.query(core_auth_sessions_current),
         /** `core.auth.sessions.end` (mutation, account): Sign out one of your sessions. */
         end: method.mutation(core_auth_sessions_end),
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
+        /** `core.auth.sessions.revoke` (mutation, public): End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended. */
+        revoke: method.mutation(core_auth_sessions_revoke),
       },
     },
     connect: {
@@ -2122,12 +2139,14 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         start: method.action(core_auth_deviceCodes_start),
       },
       sessions: {
-        /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, and with which scopes. */
+        /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, with which scopes, and on which device in what order. */
         current: method.query(core_auth_sessions_current),
         /** `core.auth.sessions.end` (mutation, account): Sign out one of your sessions. */
         end: method.mutation(core_auth_sessions_end),
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
+        /** `core.auth.sessions.revoke` (mutation, public): End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended. */
+        revoke: method.mutation(core_auth_sessions_revoke),
       },
     },
     connect: {

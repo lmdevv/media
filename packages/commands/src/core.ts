@@ -176,7 +176,7 @@ export const core = [
   }),
 
   query("core.auth.sessions.current", {
-    summary: "Show who is signed in, how, and with which scopes",
+    summary: "Show who is signed in, how, with which scopes, and on which device in what order",
     scope: "signed-in",
     args: {},
     result: v.object({
@@ -192,6 +192,7 @@ export const core = [
         v.literal("guest"),
       ),
       scopes: v.array(credentialScope),
+      device: v.union(v.null(), v.object({ deviceId: v.id("devices"), joinSequence: v.number() })),
     }),
   }),
   mutation("core.auth.sessions.end", {
@@ -199,6 +200,13 @@ export const core = [
     scope: "account",
     args: { sessionId: v.id("authSessions") },
     result: v.null(),
+  }),
+  mutation("core.auth.sessions.revoke", {
+    summary:
+      "End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended",
+    scope: "public",
+    args: { refreshToken: v.string() },
+    result: v.object({ confirmed: v.literal(true) }),
   }),
   mutation("core.auth.sessions.endAll", {
     summary: "Sign out every password and device session you have, or every other one",
@@ -511,7 +519,7 @@ export const core = [
     scope: "account",
     refusesKeys: true,
     args: { name: v.string(), device: v.optional(v.string()) },
-    result: v.object({ deviceId: v.id("devices"), device: v.string() }),
+    result: v.object({ deviceId: v.id("devices"), device: v.string(), joinSequence: v.number() }),
   }),
   query("core.devices.registry.list", {
     summary: "List every registered device and whether it is shared, newest first",

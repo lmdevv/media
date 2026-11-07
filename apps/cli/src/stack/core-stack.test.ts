@@ -47,6 +47,8 @@ const SignedIn = parse(
   Schema.Struct({ session: Schema.Struct({ username: Schema.String, kind: Schema.String }) }),
 );
 
+const Enrolled = parse(Schema.Struct({ deviceId: Schema.String, device: Schema.String }));
+
 const DeviceCode = parse(
   Schema.Struct({ event: Schema.Literal("device_code"), userCode: Schema.String }),
 );
@@ -182,6 +184,25 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
 
     expect(Session(session.stdout)).toMatchObject({ username: ownerName, kind: "deviceCode" });
   }, 30_000);
+
+  it("enrolls a new device without a device code, and finds it again by its code", async () => {
+    const home = await install();
+
+    expect((await login(home, ownerName)).code).toBe(ExitCode.ok);
+
+    const created = await runMovies(["auth", "registry", "enroll", "--name", "laptop"], home);
+
+    expect(created.code, created.stderr).toBe(ExitCode.ok);
+    const first = Enrolled(created.stdout);
+
+    const again = await runMovies(["auth", "registry", "enroll", "--name", "laptop"], {
+      ...home,
+      MEDIA_ARG_DEVICE: first.device,
+    });
+
+    expect(again.code, again.stderr).toBe(ExitCode.ok);
+    expect(Enrolled(again.stdout).deviceId).toBe(first.deviceId);
+  });
 
   it("signs out, and signing out again changes nothing", async () => {
     const home = await install();

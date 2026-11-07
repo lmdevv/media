@@ -45,8 +45,10 @@ describe.skipIf(stack === undefined)("password sign-in", { timeout: 120_000 }, (
       role: "member",
       kind: "password",
       scopes: roleScopes.member,
+      device: null,
     });
     expect(Object.keys(callers[0] ?? {}).toSorted()).toEqual([
+      "device",
       "kind",
       "role",
       "scopes",

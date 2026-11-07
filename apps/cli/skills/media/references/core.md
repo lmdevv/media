@@ -32,6 +32,7 @@ Show what an invite code offers, or refuse it when it no longer works.
 - Kind: query
 - Scope: public
 - Arguments: `{ code: string }`
+- Secret: `code` from `MEDIA_ARG_CODE` or stdin, never a flag
 - Result: `{ role: "admin" | "member"; invitedBy: string; expiresAt: number }`
 
 ## `core.accounts.invites.revoke`
@@ -87,6 +88,7 @@ Show whose password a reset code sets, or refuse it when it no longer works.
 - Kind: query
 - Scope: public
 - Arguments: `{ code: string }`
+- Secret: `code` from `MEDIA_ARG_CODE` or stdin, never a flag
 - Result: `{ username: string; expiresAt: number }`
 
 ## `core.accounts.users.create`
@@ -208,13 +210,13 @@ Start a device sign-in and return its user code and secret device code.
 
 ## `core.auth.sessions.current`
 
-Show who is signed in, how, and with which scopes.
+Show who is signed in, how, with which scopes, and on which device in what order.
 
 - CLI: `media auth sessions current`
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "guest"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit"> }`
+- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "guest"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; device: null | { deviceId: Id<"devices">; joinSequence: number } }`
 
 ## `core.auth.sessions.end`
 
@@ -235,6 +237,17 @@ Sign out every password and device session you have, or every other one.
 - Scope: account
 - Arguments: `{ keepCurrent: boolean }`
 - Result: `null`
+
+## `core.auth.sessions.revoke`
+
+End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended.
+
+- CLI: `media auth sessions revoke`
+- Kind: mutation
+- Scope: public
+- Arguments: `{ refreshToken: string }`
+- Secret: `refreshToken` from `MEDIA_ARG_REFRESH_TOKEN` or stdin, never a flag
+- Result: `{ confirmed: true }`
 
 ## `core.connect.player.report`
 
@@ -316,6 +329,7 @@ From a shared device, ask someone signed in elsewhere to open their locked tile,
 - Kind: mutation
 - Scope: public
 - Arguments: `{ device: string; ask: { intent: "open"; userId: Id<"users"> } | { intent: "leave" } }`
+- Secret: `device` from `MEDIA_ARG_DEVICE` or stdin, never a flag
 - Result: `{ approvalId: Id<"tileApprovals">; expiresAt: number }`
 
 ## `core.devices.picker.show`
@@ -326,6 +340,7 @@ Show a device's picker: who is signed in on it, or on a shared device who opted 
 - Kind: query
 - Scope: public
 - Arguments: `{ device: string }`
+- Secret: `device` from `MEDIA_ARG_DEVICE` or stdin, never a flag
 - Result: `{ deviceId: Id<"devices">; name: string; mode: "personal"; tiles: Array<{ userId: Id<"users">; username: string }> } | { deviceId: Id<"devices">; name: string; mode: "shared"; holder: Id<"users"> | null; tiles: Array<{ userId: Id<"users">; username: string; kid: boolean; code: "none" | "ready" | "off"; lock: { state: "open" } | { state: "locked"; because: Array<"admin-rule" | "kid-listed" | "kid-holds-device">; opensWith: "self" | "adult" | "self-or-adult" } }>; approval: { approvalId: Id<"tileApprovals">; intent: "open" | "leave"; userId: Id<"users">; state: "pending" | "approved" | "denied" | "redeemed"; expiresAt: number } | null }`
 
 ## `core.devices.registry.enroll`
@@ -337,7 +352,8 @@ Register this app as a personal device, or find it again by its device code, and
 - Scope: account
 - API keys: refused
 - Arguments: `{ name: string; device?: string }`
-- Result: `{ deviceId: Id<"devices">; device: string }`
+- Secret: `device` from `MEDIA_ARG_DEVICE` or stdin, never a flag; leave both unset to omit it
+- Result: `{ deviceId: Id<"devices">; device: string; joinSequence: number }`
 
 ## `core.devices.registry.list`
 
@@ -414,6 +430,7 @@ Set or clear your short unlock code, which opens your tile on shared-device lock
 - Scope: account
 - API keys: refused
 - Arguments: `{ code: string | null }`
+- Secret: `code` from `MEDIA_ARG_CODE` or stdin, never a flag; `--json '{"code":null}'` clears it
 - Result: `null`
 
 ## `core.downloads.add`
@@ -881,6 +898,7 @@ Join the group session a link opens, or wait for its host to let you in; leaves 
 - Kind: mutation
 - Scope: signed-in
 - Arguments: `{ domain: "movies" | "music"; link: string }`
+- Secret: `link` from `MEDIA_ARG_LINK` or stdin, never a flag
 - Result: `{ state: "joined" | "pending" }`
 
 ## `core.together.leave`

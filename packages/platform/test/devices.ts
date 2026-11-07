@@ -27,6 +27,8 @@ export interface Member extends Session {
 export interface Device {
   readonly deviceId: Id<"devices">;
   readonly device: string;
+  /** The enrolling session's place in the order sessions joined the device. */
+  readonly joinSequence: number;
 }
 
 /** What a picker shows. */

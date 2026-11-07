@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Predicate, Redacted } from "effect";
+import { Brand, Context, Effect, Layer, Predicate, Redacted } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -7,6 +7,7 @@ import { jwtExpiringAt, Reply } from "../testing/fake-convex";
 import * as TokenStorage from "../token-storage";
 import * as Platform from "./platform";
 import { createPlatform } from "./promise";
+import type { Id } from "./command";
 
 const TOKEN = jwtExpiringAt(Date.now() + 3_600_000, "user-1|session-1");
 
@@ -193,6 +194,7 @@ describe("Platform", () => {
               sessionId: "session-1",
               kind: "password",
               scopes: ["account"],
+              device: null,
             },
           }),
         );
@@ -420,5 +422,60 @@ describe("createPlatform", () => {
       refused: { _tag: "Forbidden", message: "This session lacks the account scope" },
       watched: { status: "success", data: SERVER },
     });
+  });
+});
+
+describe("opening a tile", () => {
+  it("sends the tile provider the device, the person, and the proof given", async () => {
+    const ada = Brand.nominal<Id<"users">>()("user-1");
+    const approvalId = Brand.nominal<Id<"tileApprovals">>()("approval-1");
+
+    const signIns = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+
+          yield* fake.reply("auth:signIn", signedIn);
+          const platform = createPlatform({ url: fake.url, connection: "http" });
+
+          yield* Effect.promise(async () => {
+            await platform.session.openTile({ device: "dv_1.secret", userId: ada });
+            await platform.session.openTile({
+              device: "dv_1.secret",
+              userId: ada,
+              proof: { kind: "password", by: ada, password: "secret" },
+            });
+            await platform.session.openTile({
+              device: "dv_1.secret",
+              userId: ada,
+              proof: { kind: "code", by: ada, code: "1234" },
+            });
+            await platform.session.openTile({
+              device: "dv_1.secret",
+              userId: ada,
+              proof: { kind: "approval", approvalId },
+            });
+            await platform.dispose();
+          });
+
+          return (yield* fake.requestsTo("auth:signIn")).map((request) => request.args);
+        }),
+      ),
+    );
+
+    const tile = { provider: "tile", params: { device: "dv_1.secret", userId: "user-1" } };
+
+    expect(signIns).toStrictEqual([
+      tile,
+      {
+        ...tile,
+        params: { ...tile.params, proof: { kind: "password", by: "user-1", password: "secret" } },
+      },
+      { ...tile, params: { ...tile.params, proof: { kind: "code", by: "user-1", code: "1234" } } },
+      {
+        ...tile,
+        params: { ...tile.params, proof: { kind: "approval", approvalId: "approval-1" } },
+      },
+    ]);
   });
 });

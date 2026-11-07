@@ -22,7 +22,7 @@ export const layer = (options: Client.Options): Layer.Layer<Platform, Client.Ope
     ),
   ).pipe(Layer.provide(Client.layer(options)));
 
-export { Credentials, DeviceSignInRefused } from "./client";
+export { Credentials, DeviceSignInRefused, TileProof } from "./client";
 
 export type { DeviceSignIn, OpenError, Options, Session } from "./client";
 

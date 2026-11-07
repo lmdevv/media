@@ -27,7 +27,7 @@ const storageOver = (store: KeyValueStore) =>
   );
 
 describe("key-value token storage", () => {
-  it("round-trips a session and clears it", async () => {
+  it("round-trips a session and clears it on sign-out", async () => {
     const store = memoryStore();
 
     await Effect.runPromise(
@@ -43,7 +43,7 @@ describe("key-value token storage", () => {
           Option.some("refresh"),
         );
 
-        yield* storage.clear;
+        yield* storage.revoke(session);
         expect(yield* storage.load).toStrictEqual(Option.none());
       }),
     );

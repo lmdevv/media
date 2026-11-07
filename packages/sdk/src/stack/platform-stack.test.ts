@@ -384,4 +384,42 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
 
     expect(answer).toMatchObject({ username: person.username, kind: "deviceCode" });
   });
+
+  it("opens a person's tile on a shared device with their password", async () => {
+    const admin = await createPlatformPerson(
+      stack ?? { url, adminKey: "" },
+      "sdk-tv-admin",
+      "admin",
+    );
+
+    const person = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-tile");
+
+    const answer = await scoped(
+      Effect.gen(function* () {
+        const host = yield* signedInAs(admin);
+        const viewer = yield* signedInAs(person);
+        const tv = yield* host.core.devices.registry.enroll({ name: "Living room TV" });
+        const { userId } = yield* viewer.core.auth.sessions.current();
+
+        yield* viewer.core.devices.tiles.setListed({ userId, listed: true });
+        yield* host.core.devices.registry.setMode({ deviceId: tv.deviceId, mode: "shared" });
+
+        const shared = yield* open();
+
+        yield* shared.session.signIn(
+          Platform.Credentials.Tile({
+            device: Redacted.make(tv.device),
+            userId,
+            proof: Option.some(
+              Platform.TileProof.Password({ by: userId, password: Redacted.make(person.password) }),
+            ),
+          }),
+        );
+
+        return yield* shared.core.auth.sessions.current();
+      }),
+    );
+
+    expect(answer).toMatchObject({ username: person.username, kind: "tile" });
+  });
 });
