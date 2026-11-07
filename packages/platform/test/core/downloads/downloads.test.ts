@@ -310,7 +310,6 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     const aiko = await onDevice(stack, "aiko-cap", "Family iPad");
     const bob = await member(stack, "bob-cap");
 
-    // A device holds one session, so each person signing in on the iPad ends the other's there.
     const takeTurn = async (who: Member): Promise<SignedIn> => {
       const here = await signInAs(stack, who.person);
 

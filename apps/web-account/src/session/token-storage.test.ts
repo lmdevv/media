@@ -21,7 +21,6 @@ const adaRenewed = sessionAs("ada|session-1", "refresh-2");
 
 const bo = sessionAs("bo|session-2", "refresh-3");
 
-/** Where the core bound a session: on `deviceId`, `sequence`th, from the device `basedOn`. */
 const boundOn = (
   deviceId: string,
   sequence: number,
@@ -39,7 +38,6 @@ const storageOf = (store: SharedStore) =>
 const keep = (store: SharedStore, session: Storage.StoredSession, order: Storage.DeviceOrder) =>
   Effect.promise(() => Storage.keepSession(store, session, order));
 
-/** The session a tab's storage loads, as its token's subject. */
 const loadedIn = (storage: Storage.Interface) =>
   Effect.map(storage.load, (loaded) => Option.flatMap(loaded, Storage.sessionOf));
 
@@ -93,7 +91,6 @@ describe("the browser's one session, shared between tabs in IndexedDB", () => {
         const tile = boundOn("tv", 7);
         const first = yield* storageOf(tabs.tab(0));
 
-        // Two tabs redeemed one approved tile, which the core answers with one session.
         const again = yield* keep(tabs.tab(0), ada, tile);
         const twice = yield* keep(tabs.tab(1), ada, tile);
 
@@ -128,13 +125,11 @@ describe("the browser's one session, shared between tabs in IndexedDB", () => {
         const cy = sessionAs("cy|session-3");
         const dee = sessionAs("dee|session-4");
 
-        // Two tabs of a new browser enroll at once, each registering its own device.
         const fresh = yield* Effect.all([
           keep(tabs.tab(0), ada, boundOn("laptop", 1, null)),
           keep(tabs.tab(1), bo, boundOn("other", 1, null)),
         ]);
 
-        // The core forgot the laptop, so a sign-in from it enrolled a new device.
         const moved = yield* keep(tabs.tab(2), cy, boundOn("new-laptop", 1, "laptop"));
         const stale = yield* keep(tabs.tab(0), dee, boundOn("newer-laptop", 1, "laptop"));
 
@@ -294,7 +289,6 @@ const TABS = 3;
 
 const tab = fc.integer({ min: 0, max: TABS - 1 });
 
-// Sign-ins and keeps come most often, so answers overtake each other on the device.
 const step: fc.Arbitrary<Step> = fc.oneof(
   { weight: 4, arbitrary: fc.record({ kind: fc.constant("signIn" as const), tab }) },
   { weight: 4, arbitrary: fc.record({ kind: fc.constant("keep" as const), pick: fc.nat() }) },
@@ -319,7 +313,6 @@ describe("any interleaving of sign-ins, late answers, renewals, sign-outs, and d
     await fc.assert(
       fc.asyncProperty(
         fc.array(step, { minLength: 4, maxLength: 30 }),
-        // Each tab's clock runs up to 60 days off; nothing in the store may depend on it.
         fc.array(fc.integer({ min: -60 * DAY, max: 60 * DAY }), {
           minLength: TABS,
           maxLength: TABS,
@@ -344,10 +337,8 @@ describe("any interleaving of sign-ins, late answers, renewals, sign-outs, and d
                 return storage;
               };
 
-              // The core: the devices it knows, each counting the sessions bound to it, and the
-              // sessions a later bind on their device ended.
-              const counts = new Map<string, number>();
-              const boundTo = new Map<string, Array<string>>();
+              const lastNumberOn = new Map<string, number>();
+              const liveOn = new Map<string, string>();
               const superseded = new Set<string>();
               let devicesMade = 0;
               let made = 0;
@@ -388,25 +379,25 @@ describe("any interleaving of sign-ins, late answers, renewals, sign-outs, and d
               for (const next of steps) {
                 switch (next.kind) {
                   case "signIn": {
-                    // The tab enrolls with the device it keeps; a device the core forgot, or
-                    // none, gets a new one.
                     const kept = yield* Effect.promise(() =>
                       Storage.readDevice(tabs.tab(next.tab)),
                     );
 
-                    const known = kept !== null && counts.has(kept.id);
+                    const known = kept !== null && lastNumberOn.has(kept.id);
 
                     if (!known) devicesMade += 1;
                     const deviceId = known ? kept.id : `device-${devicesMade}`;
-                    const sequence = (counts.get(deviceId) ?? 0) + 1;
+                    const sequence = (lastNumberOn.get(deviceId) ?? 0) + 1;
 
                     made += 1;
                     const id = `person-${made % 2}|s${made}`;
 
-                    counts.set(deviceId, sequence);
+                    lastNumberOn.set(deviceId, sequence);
 
-                    for (const earlier of boundTo.get(deviceId) ?? []) superseded.add(earlier);
-                    boundTo.set(deviceId, [id]);
+                    const earlier = liveOn.get(deviceId);
+
+                    if (earlier !== undefined) superseded.add(earlier);
+                    liveOn.set(deviceId, id);
                     waiting.push({
                       tab: next.tab,
                       session: sessionAs(id),
@@ -467,8 +458,8 @@ describe("any interleaving of sign-ins, late answers, renewals, sign-outs, and d
                   }
 
                   case "forgetDevice":
-                    counts.clear();
-                    boundTo.clear();
+                    lastNumberOn.clear();
+                    liveOn.clear();
                     break;
                 }
 

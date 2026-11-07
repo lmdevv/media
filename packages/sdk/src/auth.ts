@@ -605,10 +605,6 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       ),
     );
 
-  /**
-   * Takes over every sign-out left pending in the store, such as one whose client was disposed
-   * before the server could confirm it, or a session another sign-in replaced.
-   */
   const resumePendingSignOuts = Effect.gen(function* () {
     for (const ended of yield* storage.pendingSignOuts) {
       yield* endInBackground(ended, true, Duration.seconds(1));

@@ -12,7 +12,6 @@ import type { TileProof, UserId } from "./platform-types";
 
 interface AccountContext {
   readonly store: BrowserStore;
-  /** The core's URL, for the client a new sign-in starts on. */
   readonly url: string;
   readonly device: BrowserDevice | null;
 }
@@ -52,7 +51,7 @@ export function AccountProvider({
   );
 }
 
-const leavesAfterSignIn = (pathname: string): boolean =>
+const returnsToStartAfterSignIn = (pathname: string): boolean =>
   pathname === "/" || pathname === "/invite" || pathname === "/reset";
 
 /** A password sign-in, a first owner, an invite, or a reset link. */
@@ -85,7 +84,6 @@ export interface AccountActions {
   readonly signOut: () => Promise<void>;
 }
 
-/** Signs in as `signIn` says, on `opener`. */
 const signInWith = (opener: PlatformSdk): ((signIn: SignIn) => Promise<void>) =>
   Match.type<SignIn>().pipe(
     Match.discriminatorsExhaustive("kind")({
@@ -103,12 +101,7 @@ export const useAccountActions = (): AccountActions => {
   const navigate = useNavigate();
   const router = useRouter();
 
-  /**
-   * Signs a new session in on a client of its own, where `start` also has the core bind it to this
-   * browser's device, then keeps it as the browser's one session if the core bound it after the
-   * session kept now. A session that fails on the way, or loses, is ended on the core.
-   */
-  const keepNew = async (
+  const signInThenKeep = async (
     start: (opener: PlatformSdk, kept: BrowserDevice | null) => Promise<DeviceOrder>,
   ): Promise<void> => {
     const kept = await readDevice(store.sessions);
@@ -132,7 +125,7 @@ export const useAccountActions = (): AccountActions => {
 
   return {
     signIn: async (signIn) => {
-      await keepNew(async (opener, kept) => {
+      await signInThenKeep(async (opener, kept) => {
         await signInWith(opener)(signIn);
 
         const name = deviceName();
@@ -151,14 +144,12 @@ export const useAccountActions = (): AccountActions => {
         };
       });
 
-      // A page that asked for a sign-in, such as /device from a CLI's link, shows once it is done;
-      // sign-in, an invite, and a reset link go on to the start page.
-      if (leavesAfterSignIn(router.state.location.pathname)) {
+      if (returnsToStartAfterSignIn(router.state.location.pathname)) {
         await navigate({ to: "/", replace: true });
       }
     },
     openTile: async (userId, proof) => {
-      await keepNew(async (opener, kept) => {
+      await signInThenKeep(async (opener, kept) => {
         if (kept === null) throw new SharedDeviceError();
 
         await opener.session.openTile(
@@ -182,7 +173,6 @@ export const useAccountActions = (): AccountActions => {
       await navigate({ to: "/home" });
     },
     signOut: async () => {
-      // Returns once the store holds the sign-out; the core is told in the background.
       try {
         await platform.session.signOut();
       } finally {

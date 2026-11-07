@@ -246,19 +246,12 @@ export interface DeviceOrder {
   readonly basedOn: string | null;
 }
 
-/** The browser's device, as `BrowserDevice`. */
 const DEVICE = "media.device";
 
-/** The browser's one session, whoever's; absent while signed out. */
 const SESSION = "media.session";
 
-/**
- * A sign-out, one per session id. Never deleted, so a session signed out here can never be kept
- * again, however late an answer for it lands and whatever any tab's clock says (ADR 0020).
- */
 const REVOKED = "media.revoked:";
 
-/** A sign-out the core has not confirmed, with the session's tokens, for any client to finish. */
 const PENDING = "media.signOut:";
 
 const StoredDevice = Schema.fromJsonString(
@@ -281,10 +274,6 @@ const holds = async (tx: SharedTransaction, id: string): Promise<boolean> =>
 const isRevoked = async (tx: SharedTransaction, id: string): Promise<boolean> =>
   (await tx.get(`${REVOKED}${id}`)) !== undefined;
 
-/**
- * Signs session `id` out inside `tx`: the first time, its revocation and its pending sign-out,
- * which any client finishes with the core; and the browser's session while it is this one.
- */
 const signOutIn = async (tx: SharedTransaction, id: string, session: StoredSession) => {
   if (!(await isRevoked(tx, id))) {
     await tx.set(`${REVOKED}${id}`, "revoked");

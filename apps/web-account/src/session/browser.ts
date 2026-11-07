@@ -22,7 +22,6 @@ const UNAVAILABLE = () =>
     new Error("This browser can't keep a sign-in right now. Reload the page to try again."),
   );
 
-/** The store when IndexedDB cannot open, as in some private modes: it holds nothing. */
 const unavailable: SharedStore = {
   read: UNAVAILABLE,
   write: UNAVAILABLE,

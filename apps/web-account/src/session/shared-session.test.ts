@@ -142,14 +142,12 @@ const clientOver = (fake: FakeConvex.FakeConvex, storage: Layer.Layer<TokenStora
     Effect.map((context) => Context.get(context, Platform.Platform)),
   );
 
-/** A tab's client on the browser's one session. */
 const openClient = (fake: FakeConvex.FakeConvex, store: SharedStore) =>
   clientOver(fake, TokenStorage.layerShared(store));
 
 const password = (username: string) =>
   Platform.Credentials.Password({ username, password: Redacted.make("secret") });
 
-/** Where the core bound a sign-in on the browser's laptop: `sequence`th. */
 const onLaptop = (sequence: number): TokenStorage.DeviceOrder => ({
   deviceId: "laptop",
   code: "dv_laptop.secret",
@@ -157,7 +155,6 @@ const onLaptop = (sequence: number): TokenStorage.DeviceOrder => ({
   basedOn: "laptop",
 });
 
-/** Signs `username` in as the account client does, on a client of its own. */
 const signInHeld = (fake: FakeConvex.FakeConvex, username: string) =>
   Effect.gen(function* () {
     const held = TokenStorage.holdSignIn();
@@ -168,11 +165,9 @@ const signInHeld = (fake: FakeConvex.FakeConvex, username: string) =>
     return held;
   });
 
-/** Keeps a held sign-in as the browser's session, `sequence`th on its device; whether it did. */
 const keepOn = (store: SharedStore, held: TokenStorage.HeldSignIn, sequence: number) =>
   Effect.promise(() => held.keep(store, onLaptop(sequence)));
 
-/** Signs `username` in and keeps the session, `sequence`th on the device; whether it did. */
 const signInOn = (
   fake: FakeConvex.FakeConvex,
   store: SharedStore,
@@ -218,6 +213,12 @@ const tabsOf = (count: number, delivery: "manual" | "at once") =>
 
 const keysOf = (tabs: BrowserTabs.BrowserTabs) =>
   Effect.promise(async () => [...(await tabs.items()).keys()]);
+
+const stillSignedIn = (
+  subject: string,
+  live: (subject: string) => boolean,
+  keys: ReadonlyArray<string>,
+): boolean => live(subject) && !keys.includes(`media.revoked:${subject}`);
 
 /** Gates the next refresh at the server until `release`, so another tab can act meanwhile. */
 const gateRefresh = (fake: FakeConvex.FakeConvex, renewal: string) =>
@@ -399,7 +400,6 @@ describe("clients sharing one session store", () => {
         tabs.deliver();
         yield* settle;
 
-        // Bo's answer waits until Ada has signed out.
         yield* fake.handle("auth:signIn", () =>
           Effect.gen(function* () {
             yield* Deferred.await(release);
@@ -460,7 +460,6 @@ describe("two sign-ins at once", () => {
             openClient(fake, tabs.tab(index)),
           );
 
-          // Ada's sign-in bound to the laptop 4th and Bo's 5th; their answers land in either order.
           const signIns = {
             ada: { held: yield* signInHeld(fake, "ada"), sequence: 4, tab: 0 },
             bo: { held: yield* signInHeld(fake, "bo"), sequence: 5, tab: 1 },
@@ -789,7 +788,6 @@ describe("any interleaving of three tabs sharing the browser's one session", () 
 
                 switch (next.kind) {
                   case "signIn": {
-                    // Each sign-in binds after the last, so the browser keeps every one.
                     sequence += 1;
                     yield* on(next.tab)(signInOn(fake, tabs.tab(next.tab), next.person, sequence));
                     lastSignIn = Option.flatMap(yield* reader.load, TokenStorage.sessionOf);
@@ -839,11 +837,8 @@ describe("any interleaving of three tabs sharing the browser's one session", () 
               return {
                 violations,
                 observer: yield* bearerOf(observer, fake),
-                // A refused stale refresh may revoke the last sign-in on purpose; only one the
-                // store and the core both still hold must survive.
-                lastSignIn: Option.filter(
-                  lastSignIn,
-                  (subject) => live(subject) && !keys.includes(`media.revoked:${subject}`),
+                lastSignIn: Option.filter(lastSignIn, (subject) =>
+                  stillSignedIn(subject, live, keys),
                 ),
               };
             }),

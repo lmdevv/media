@@ -15,10 +15,6 @@ test.skip(stack === null, "needs scripts/dev-stack.sh up");
 const home = (tab: Page, person: Person) =>
   expect(tab.getByRole("heading", { name: `Hi, ${person.username}.` })).toBeVisible();
 
-/**
- * Keeps the token of the session this browser holds now inside the page, under `name`, so a later
- * check can ask the core about it without the test ever reading it.
- */
 const rememberSession = (tab: Page, name: string) =>
   tab.evaluate(
     (key) =>
@@ -39,7 +35,6 @@ const rememberSession = (tab: Page, name: string) =>
     name,
   );
 
-/** Whether the session remembered under `name` still answers on the core, asked from the page. */
 const rememberedWorks = (tab: Page, core: Stack, name: string) =>
   tab.evaluate(
     async ({ key, url }) => {
@@ -90,6 +85,21 @@ test("switching person signs the first out on the core, then signs the next in",
   await expect.poll(() => rememberedWorks(page, stack, "first")).toBe(false);
 });
 
+const holdEnrollments = async (tab: Page) => {
+  const { promise: released, resolve: release } = Promise.withResolvers<void>();
+  const { promise: held, resolve: holding } = Promise.withResolvers<void>();
+
+  await tab.route("**/api/action", async (route) => {
+    if (!(route.request().postData() ?? "").includes("registry:enroll")) return route.fallback();
+
+    holding();
+    await released;
+    await route.continue();
+  });
+
+  return { held, release };
+};
+
 const fillIn = async (tab: Page, person: Person): Promise<void> => {
   await tab.goto("/");
   await tab.getByLabel("Username").fill(person.username);
@@ -106,27 +116,17 @@ test("two tabs signing in at once leave only the session the core bound last, an
   const later = await createPerson(stack, "lucia");
   const sooner = await createPerson(stack, "aiko");
   const other = await context.newPage();
-  const { promise: released, resolve: release } = Promise.withResolvers<void>();
-  const { promise: holding, resolve: held } = Promise.withResolvers<void>();
 
-  // This browser is already a device, so both sign-ins join it. The first tab's enrollment waits
-  // until the other tab's sign-in is kept, so the core binds the first tab's sign-in last.
   await signIn(page, enrolled);
   await home(page, enrolled);
   await page.getByRole("button", { name: "Sign out" }).click();
 
-  await page.route("**/api/action", async (route) => {
-    if (!(route.request().postData() ?? "").includes("registry:enroll")) return route.fallback();
-
-    held();
-    await released;
-    await route.continue();
-  });
+  const { held, release } = await holdEnrollments(page);
 
   try {
     await Promise.all([fillIn(page, later), fillIn(other, sooner)]);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await holding;
+    await held;
     await other.getByRole("button", { name: "Sign in" }).click();
     await home(other, sooner);
     await rememberSession(other, "sooner");
@@ -180,7 +180,6 @@ const listOnSharedDevices = async (core: Stack, person: Person) => {
 
 type DeviceRowId = Parameters<PlatformSdk["core"]["devices"]["registry"]["setMode"]>[0]["deviceId"];
 
-/** This browser's device id, read from its record in the page; the code itself stays there. */
 const deviceIdOf = (tab: Page) =>
   tab.evaluate(
     () =>
@@ -199,7 +198,6 @@ const deviceIdOf = (tab: Page) =>
       }),
   );
 
-/** Signs `admin` in on `tab`, makes the browser's device shared, and opens its picker. */
 const makeShared = async (tab: Page, admin: Person, host: PlatformSdk): Promise<void> => {
   await signIn(tab, admin);
   await home(tab, admin);
