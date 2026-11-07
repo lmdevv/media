@@ -1,4 +1,4 @@
-import { chmod } from "node:fs/promises";
+import { chmod, rename } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { BuildOptions } from "esbuild";
@@ -27,9 +27,14 @@ if (process.argv.includes("--watch")) {
 
   await watcher.watch();
 } else {
-  const { metafile } = await build({ ...options, metafile: true });
+  // esbuild rewrites its outfile in place, so a CLI started while another build runs, as when two
+  // test files build at once, could load half a file. Building beside it and renaming swaps the
+  // whole file at once.
+  const building = `${outfile}.${process.pid}.tmp`;
+  const { metafile } = await build({ ...options, outfile: building, metafile: true });
 
-  await chmod(outfile, 0o755);
+  await chmod(building, 0o755);
+  await rename(building, outfile);
 
   await writeThirdPartyLicenses(metafile, join(root, "dist", "THIRD_PARTY_LICENSES.md"));
 }
