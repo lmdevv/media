@@ -26,6 +26,8 @@ export type CoreGroup = (typeof coreGroups)[number];
 interface Secret {
   readonly field: string;
   readonly variable: string;
+  /** Null clears the field and reveals nothing, so it may come in `--json`. */
+  readonly clearable?: true;
 }
 
 type Kind = "query" | "mutation" | "action";
@@ -193,7 +195,11 @@ export const wireArgsOf = Effect.fn("Core.wireArgs")(function* (
   const flags = flagsOf(command);
   const given = yield* Effect.fromResult(buildArgs(flags, invocation.tokens, command.path, {}));
 
-  const leaked = command.secrets.find((secret) => given[secret.field] !== undefined);
+  const clears = (secret: Secret) => secret.clearable === true && given[secret.field] === null;
+
+  const leaked = command.secrets.find(
+    (secret) => given[secret.field] !== undefined && !clears(secret),
+  );
 
   if (leaked !== undefined) {
     return yield* usage(
@@ -206,15 +212,17 @@ export const wireArgsOf = Effect.fn("Core.wireArgs")(function* (
     ? [["paginationOpts", yield* pageOf(invocation, given)]]
     : [];
 
-  const secrets = yield* Effect.forEach(command.secrets, (secret) =>
-    Effect.map(
-      secretOf(
-        invocation,
-        secret,
-        command.secrets.length === 1 ? "allowed" : "shared with another secret",
+  const secrets = yield* Effect.forEach(
+    command.secrets.filter((secret) => !clears(secret)),
+    (secret) =>
+      Effect.map(
+        secretOf(
+          invocation,
+          secret,
+          command.secrets.length === 1 ? "allowed" : "shared with another secret",
+        ),
+        (value) => [secret.field, Redacted.value(value)] as const,
       ),
-      (value) => [secret.field, Redacted.value(value)] as const,
-    ),
   );
 
   const wire: WireArgs = Object.fromEntries([...Object.entries(given), ...page, ...secrets]);

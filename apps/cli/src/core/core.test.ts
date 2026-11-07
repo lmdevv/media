@@ -187,6 +187,49 @@ describe("a core command", () => {
     expect(inJson.stderr).toContain("MEDIA_ARG_PASSWORD");
   });
 
+  it("never takes a refresh token, code, device, or link on the command line", async () => {
+    const refused = await Promise.all(
+      [
+        ["auth", "sessions", "revoke", "--refresh-token", "token-1"],
+        ["auth", "sessions", "revoke", "--json", '{"refreshToken":"token-1"}'],
+        ["auth", "invites", "lookup", "--code", "mi_1.secret"],
+        ["auth", "picker", "show", "--device", "dv_1.secret"],
+        ["auth", "unlock-codes", "set", "--json", '{"code":"1234"}'],
+      ].map((argv) => media(argv)),
+    );
+
+    expect(refused.map((run) => run.code)).toStrictEqual(refused.map(() => ExitCode.usage));
+    expect(refused[1]?.stderr).toContain("MEDIA_ARG_REFRESH_TOKEN");
+
+    const clearing = await media(["auth", "unlock-codes", "set", "--json", '{"code":null}']);
+
+    expect(clearing.code).not.toBe(ExitCode.usage);
+  });
+
+  it("sends a refresh token from the environment", async () => {
+    const answer = await withFakeCore((fake) =>
+      Effect.gen(function* () {
+        yield* fake.reply(
+          "core/auth/sessions:revoke",
+          Reply.Success({ value: { confirmed: true } }),
+        );
+
+        const env = { ...freshHome(), MEDIA_CORE_URL: fake.url };
+
+        const revoke = yield* Effect.promise(() =>
+          media(["auth", "sessions", "revoke"], { ...env, MEDIA_ARG_REFRESH_TOKEN: "token-1" }),
+        );
+
+        return {
+          revoke: revoke.code,
+          sent: (yield* fake.requestsTo("core/auth/sessions:revoke")).map((call) => call.args),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({ revoke: ExitCode.ok, sent: [{ refreshToken: "token-1" }] });
+  });
+
   it("runs as the stored session through the platform SDK", async () => {
     const answer = await withFakeCore((fake) =>
       Effect.gen(function* () {

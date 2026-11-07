@@ -43,25 +43,42 @@ export interface Secret {
   readonly field: string;
   /** `MEDIA_ARG_` and the field in upper snake case: `newPassword` is `MEDIA_ARG_NEW_PASSWORD`. */
   readonly variable: string;
+  /** The field also takes null, which reveals nothing, so `--json` may clear it. */
+  readonly clearable?: true;
 }
 
-const SECRET = /password$/iu;
+const isNullableString = (wire: WireField["wire"]): boolean =>
+  wire.kind === "union" &&
+  wire.members.length === 2 &&
+  wire.members.some((member) => member.kind === "string") &&
+  wire.members.some((member) => member.kind === "null");
+
+/** A name that ends like a credential: a password, a token, or a secret. */
+const CREDENTIAL = /(?:password|token|secret)$/iu;
+
+/**
+ * Arguments named for what they carry rather than for being secret: an invite, reset, or unlock
+ * code, a shared device's code (`dv_`), and a group-session link (`mt_`). A user code is the short
+ * code a person reads off a device, which redeems nothing, so it is not one of them.
+ */
+const SECRET_NAMES: ReadonlySet<string> = new Set(["code", "device", "link"]);
 
 /**
  * The arguments a flag would leak into shell history and the process list: every string field
- * whose name ends in `password`.
+ * named like a credential, and the codes and links in `SECRET_NAMES`.
  */
 export const secretsOf = (args: ReadonlyArray<WireField>): ReadonlyArray<Secret> =>
-  args.flatMap((field) =>
-    SECRET.test(field.name) && field.wire.kind === "string"
-      ? [
-          {
-            field: field.name,
-            variable: `MEDIA_ARG_${kebab(field.name).replaceAll("-", "_").toUpperCase()}`,
-          },
-        ]
-      : [],
-  );
+  args.flatMap((field) => {
+    if (!CREDENTIAL.test(field.name) && !SECRET_NAMES.has(field.name)) return [];
+
+    const variable = `MEDIA_ARG_${kebab(field.name).replaceAll("-", "_").toUpperCase()}`;
+
+    if (field.wire.kind === "string") return [{ field: field.name, variable }];
+
+    return isNullableString(field.wire)
+      ? [{ field: field.name, variable, clearable: true as const }]
+      : [];
+  });
 
 /** A Convex paginated query takes `paginationOpts`; the CLI gives it `--limit` and `--cursor`. */
 export const isPaginated = (args: ReadonlyArray<WireField>): boolean =>

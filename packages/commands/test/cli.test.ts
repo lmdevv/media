@@ -139,6 +139,29 @@ describe("CLI placement", () => {
     ]);
   });
 
+  it("keeps every credential argument off the command line", () => {
+    expect(
+      Object.fromEntries(
+        placed.flatMap((command) => {
+          const fields = secretsOf(command.args).map((secret) => secret.field);
+
+          return fields.length === 0 ? [] : [[command.name, fields]];
+        }),
+      ),
+    ).toEqual({
+      "core.accounts.invites.lookup": ["code"],
+      "core.accounts.me.changePassword": ["currentPassword", "newPassword"],
+      "core.accounts.resetLinks.lookup": ["code"],
+      "core.accounts.users.create": ["password"],
+      "core.auth.sessions.revoke": ["refreshToken"],
+      "core.devices.approvals.request": ["device"],
+      "core.devices.picker.show": ["device"],
+      "core.devices.registry.enroll": ["device"],
+      "core.devices.unlockCodes.set": ["code"],
+      "core.together.join": ["link"],
+    });
+  });
+
   it("keeps password arguments off the command line and pages lists", () => {
     const named = (name: string) => placed.find((command) => command.name === name)?.args ?? [];
 
