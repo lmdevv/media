@@ -15,12 +15,12 @@ import {
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import type { SharedStore } from "../shared-store";
-import * as BrowserTabs from "../testing/browser-tabs";
-import * as FakeConvex from "../testing/fake-convex";
-import { jwtExpiringAt, Reply } from "../testing/fake-convex";
-import * as TokenStorage from "../token-storage";
-import * as Platform from "./platform";
+import { Platform, TokenStorage } from "@media/sdk/effect";
+import type { SharedStore } from "@media/sdk/promise";
+import * as FakeConvex from "@media/sdk/testing/fake-convex";
+import { jwtExpiringAt, Reply } from "@media/sdk/testing/fake-convex";
+
+import * as BrowserTabs from "./testing/browser-tabs";
 
 const KEY = "media.session.slot";
 

@@ -545,6 +545,9 @@ importers:
       fake-indexeddb:
         specifier: 6.2.7
         version: 6.2.7
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -696,9 +699,6 @@ importers:
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0
-      fake-indexeddb:
-        specifier: 6.2.7
-        version: 6.2.7
       fast-check:
         specifier: 4.10.2
         version: 4.10.2

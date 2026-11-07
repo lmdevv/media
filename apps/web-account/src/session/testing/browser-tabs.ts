@@ -5,25 +5,9 @@
  * runs, the way a `BroadcastChannel` message arrives as a later task, unless delivery is `at once`.
  * `fill` makes writes fail as a full store does, rolling their transaction back.
  */
-import { Predicate } from "effect";
-
-import type { Channel, IdbFactory, SharedStore } from "../shared-store";
-import { openIndexedDb } from "../shared-store";
-
-// SAFETY: a type predicate, not checked by the compiler. fake-indexeddb's FDBFactory implements
-// IndexedDB's factory; its published types name the DOM's IndexedDB types, which the SDK compiles
-// without, so the part the store uses is named here.
-const isFactoryClass = (value: unknown): value is new () => IdbFactory =>
-  Predicate.isFunction(value);
-
-const fakeFactory = async (): Promise<IdbFactory> => {
-  const loaded: unknown = await import("fake-indexeddb");
-  const factory = Predicate.hasProperty(loaded, "IDBFactory") ? loaded.IDBFactory : undefined;
-
-  if (!isFactoryClass(factory)) throw new Error("fake-indexeddb has no FDBFactory");
-
-  return new factory();
-};
+import { openIndexedDb } from "@media/sdk/promise";
+import type { Channel, SharedStore } from "@media/sdk/promise";
+import { IDBFactory } from "fake-indexeddb";
 
 /** The tabs and the controls over what they hear and whether writes fit. */
 export interface BrowserTabs {
@@ -43,7 +27,7 @@ export const makeBrowserTabs = async (options: {
   readonly count: number;
   readonly delivery: "manual" | "at once";
 }): Promise<BrowserTabs> => {
-  const indexedDB = await fakeFactory();
+  const indexedDB = new IDBFactory();
   const indices = Array.from({ length: options.count }, (_, index) => index);
   const queued = indices.map((): Array<() => void> => []);
   const listeners: Array<() => void> = [];

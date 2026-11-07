@@ -32,6 +32,7 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "^6.1.1",
     "fake-indexeddb": "6.2.7",
+    "fast-check": "4.10.2",
     "typescript": "catalog:",
     "vite": "^8.2.2",
     "vitest": "5.0.3"
