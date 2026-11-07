@@ -54,12 +54,12 @@ const opener = v.union(v.literal("self"), v.literal("adult"), v.literal("self-or
 
 /**
  * Where a device's picture and sound go: the device itself, or a Chromecast or AirPlay receiver it
- * drives, which Connect reaches through that device (ADR 0018). Safari does not always name an
- * AirPlay receiver.
+ * drives, which Connect reaches through that device (ADR 0018). A receiver may have no name, as
+ * Safari leaves some AirPlay receivers.
  */
 const connectOutput = v.union(
   v.object({ kind: v.literal("local") }),
-  v.object({ kind: v.literal("cast"), receiver: v.string() }),
+  v.object({ kind: v.literal("cast"), receiver: v.union(v.string(), v.null()) }),
   v.object({ kind: v.literal("airplay"), receiver: v.union(v.string(), v.null()) }),
 );
 

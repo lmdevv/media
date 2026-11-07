@@ -465,7 +465,10 @@ export const generatedCommands = [
     args: Schema.Struct({
       output: Schema.Union([
         Schema.Struct({ kind: Schema.Literal("local") }),
-        Schema.Struct({ kind: Schema.Literal("cast"), receiver: Schema.String }),
+        Schema.Struct({
+          kind: Schema.Literal("cast"),
+          receiver: Schema.Union([Schema.String, Schema.Null]),
+        }),
         Schema.Struct({
           kind: Schema.Literal("airplay"),
           receiver: Schema.Union([Schema.String, Schema.Null]),
@@ -541,7 +544,10 @@ export const generatedCommands = [
         mode: Schema.Union([Schema.Literal("personal"), Schema.Literal("shared")]),
         output: Schema.Union([
           Schema.Struct({ kind: Schema.Literal("local") }),
-          Schema.Struct({ kind: Schema.Literal("cast"), receiver: Schema.String }),
+          Schema.Struct({
+            kind: Schema.Literal("cast"),
+            receiver: Schema.Union([Schema.String, Schema.Null]),
+          }),
           Schema.Struct({
             kind: Schema.Literal("airplay"),
             receiver: Schema.Union([Schema.String, Schema.Null]),

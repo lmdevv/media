@@ -13,7 +13,7 @@ import type { Caller } from "../../../convex/core/auth/caller";
 const reportArgs = v.object({
   output: v.union(
     v.object({ kind: v.literal("local") }),
-    v.object({ kind: v.literal("cast"), receiver: v.string() }),
+    v.object({ kind: v.literal("cast"), receiver: v.union(v.string(), v.null()) }),
     v.object({ kind: v.literal("airplay"), receiver: v.union(v.string(), v.null()) }),
   ),
   playback: v.union(

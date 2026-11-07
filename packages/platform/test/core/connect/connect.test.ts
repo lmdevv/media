@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { ONLINE_MS } from "../../../convex/core/connect/playback";
 import { inOrder } from "../../../convex/core/lib/inOrder";
 import { control, playing, report, targetIn, targets } from "../../connect";
+import type { Report } from "../../connect";
 import { enroll, listings, member, openTile, sharedAdmin, sharedDevice } from "../../devices";
 import { sessionOf } from "../../probe";
 import { importRows, newestRows } from "../../rows";
@@ -398,12 +400,58 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     expect(await refusal(report(laptop.signedIn, playing(Number.NaN)))).toBe("invalid_args");
     expect(await refusal(report(laptop.signedIn, playing(0, 1.5)))).toBe("invalid_args");
     expect(await refusal(report(laptop.signedIn, playing(0, 1)))).toBe("invalid_args");
-    expect(
-      await refusal(
-        report(laptop.signedIn, { ...playing(0), output: { kind: "cast", receiver: " " } }),
-      ),
-    ).toBe("invalid_args");
     expect(await refusal(report(lucia.signedIn, playing(0)))).toBe("forbidden");
     expect(await refusal(requested(lucia.signedIn))).toBe("forbidden");
+  });
+
+  it("keeps a report whose receiver has no name, or too long a one", async () => {
+    if (stack === undefined) return;
+    const lucia = await member(stack, "lucia");
+    const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
+
+    const shown = async (output: Report["output"]) => {
+      await report(laptop.signedIn, { ...playing(0), output });
+
+      return targetIn(await targets(lucia.signedIn), laptop.deviceId)?.output;
+    };
+
+    expect(await shown({ kind: "cast", receiver: " " })).toEqual({ kind: "cast", receiver: null });
+    expect(await shown({ kind: "airplay", receiver: "" })).toEqual({
+      kind: "airplay",
+      receiver: null,
+    });
+    expect(await shown({ kind: "cast", receiver: ` ${"\u{1F4FA}".repeat(70)} ` })).toEqual({
+      kind: "cast",
+      receiver: "\u{1F4FA}".repeat(64),
+    });
+  });
+
+  it("lists a live device however many ended sessions a person has elsewhere", async () => {
+    if (stack === undefined) return;
+    const lucia = await member(stack, "lucia");
+    const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
+
+    const sortsAfter = async (): Promise<Id<"devices">> => {
+      const { deviceId } = await enroll(await signInAs(stack, lucia.person), "Old phone");
+
+      return deviceId > laptop.deviceId ? deviceId : sortsAfter();
+    };
+
+    const old = await sortsAfter();
+
+    importRows(
+      "authSessions",
+      Array.from({ length: 64 }, () => ({
+        userId: lucia.userId,
+        expirationTime: Date.now() + 24 * 60 * 60 * 1000,
+        generation: -1,
+        kind: "password" as const,
+        device: { id: old, generation: 0 },
+      })),
+    );
+
+    await report(laptop.signedIn, playing(1_000));
+
+    expect(targetIn(await targets(lucia.signedIn), laptop.deviceId)?.name).toBe("Laptop");
   });
 });

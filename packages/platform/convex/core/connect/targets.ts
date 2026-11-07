@@ -11,24 +11,40 @@ import { deviceFor, playerOf, reporting, requestOf } from "./facts";
 import { changed, isOnline, nextRevision, parsePosition, playbackOf } from "./playback";
 import type { Change } from "./playback";
 
-const BOUND_SESSIONS_READ = 64;
+const BOUND_DEVICES_READ = 64;
 
 const SHARED_DEVICES_READ = 64;
 
 /**
- * The devices `person` might control: the ones they are signed in on, and every shared device
- * while shared devices list them. Sessions bound to a device sort after those on none, so the
- * descending read meets them first.
+ * Sessions bound to a device sort after those on none, so the descending walk ends at the first
+ * session on no device.
  */
+const boundBelow = async (
+  db: DatabaseReader,
+  userId: Id<"users">,
+  below: Id<"devices"> | null,
+  left: number,
+): Promise<ReadonlyArray<Id<"devices">>> => {
+  if (left === 0) return [];
+
+  const session = await db
+    .query("authSessions")
+    .withIndex("by_user_device", (q) =>
+      below === null ? q.eq("userId", userId) : q.eq("userId", userId).lt("device.id", below),
+    )
+    .order("desc")
+    .first();
+
+  const deviceId = session === null ? null : (boundDevice(session)?.id ?? null);
+
+  return deviceId === null ? [] : [deviceId, ...(await boundBelow(db, userId, deviceId, left - 1))];
+};
+
 const reachable = async (
   db: DatabaseReader,
   person: PersonDoc,
 ): Promise<ReadonlyArray<Id<"devices">>> => {
-  const sessions = await db
-    .query("authSessions")
-    .withIndex("by_user_device", (q) => q.eq("userId", person._id))
-    .order("desc")
-    .take(BOUND_SESSIONS_READ);
+  const bound = await boundBelow(db, person._id, null, BOUND_DEVICES_READ);
 
   const shared: ReadonlyArray<Doc<"devices">> =
     person.sharedDevices === true
@@ -37,8 +53,6 @@ const reachable = async (
           .withIndex("by_mode", (q) => q.eq("mode", "shared"))
           .take(SHARED_DEVICES_READ)
       : [];
-
-  const bound = sessions.flatMap((session) => boundDevice(session)?.id ?? []);
 
   return [...new Set([...bound, ...shared.map((device) => device._id)])];
 };
