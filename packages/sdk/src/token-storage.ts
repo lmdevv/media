@@ -1,5 +1,4 @@
 import {
-  Clock,
   Context,
   Effect,
   Layer,
@@ -66,12 +65,10 @@ export interface Interface {
   /** The current session; none when signed out, when it was revoked, or when it is unreadable. */
   readonly load: Effect.Effect<Option.Option<StoredSession>, TokenStorageError>;
   /**
-   * Makes a new sign-in the current session; whether it did. A session that was signed out here
-   * is never stored again, as when another tab signed out the session a late answer carries. In a
-   * store others write, a sign-in never replaces another live session its key holds: it goes to
-   * a fresh key, an empty one, one whose session is over, or the one holding that same session.
+   * Makes a new sign-in the current session. The browser's shared store refuses it: a session
+   * enters there only with its device order (`keepSession`).
    */
-  readonly save: (session: StoredSession) => Effect.Effect<boolean, TokenStorageError>;
+  readonly save: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
   /**
    * Stores `renewed`, a renewal of the session in `expected`, only while the store still holds
    * `expected` for that session; whether it did. It never changes which session is current.
@@ -94,9 +91,8 @@ export interface Interface {
   /** Whether `session` still waits for the server to confirm its sign-out. */
   readonly signOutPending: (session: StoredSession) => Effect.Effect<boolean, TokenStorageError>;
   /**
-   * Every session signed out anywhere in the store whose sign-out the server has not confirmed,
-   * whichever key it was signed in under. These credentials serve only to end the session on the
-   * server; nothing signs in or calls with them.
+   * Every session signed out in the store whose sign-out the server has not confirmed. These
+   * credentials serve only to end the session on the server; nothing signs in or calls with them.
    */
   readonly pendingSignOuts: Effect.Effect<ReadonlyArray<StoredSession>, TokenStorageError>;
   /**
@@ -125,7 +121,7 @@ export const owned = (store: {
   readonly clear: Effect.Effect<void, TokenStorageError>;
 }): Interface => ({
   load: store.load,
-  save: (session) => Effect.as(store.save(session), true),
+  save: store.save,
   renew: (_expected, renewed) => Effect.as(store.save(renewed), true),
   revoke: () => store.clear,
   confirmRevoked: () => Effect.void,
@@ -229,124 +225,178 @@ const idOf = (session: StoredSession, operation: TokenStorageError["operation"])
     ),
   );
 
-const Revoked = Schema.fromJsonString(
-  Schema.Struct({
-    revokedAt: Schema.Finite,
-    slot: Schema.String,
-    confirmedAt: Schema.optionalKey(Schema.Finite),
-  }),
-);
+/**
+ * The browser's device: its id, its code `dv_<id>.<secret>`, and the number of the last session the
+ * core bound to it that this browser kept.
+ */
+export interface BrowserDevice {
+  readonly id: string;
+  readonly code: string;
+  readonly sequence: number;
+}
 
-const decodeRevoked = Schema.decodeUnknownOption(Revoked);
+/** Where and in what order the core bound a new session to this browser's device. */
+export interface DeviceOrder {
+  readonly deviceId: string;
+  /** The device's code, `dv_<id>.<secret>`. */
+  readonly code: string;
+  /** The session's number on the device. The core ends the device's earlier sessions. */
+  readonly sequence: number;
+  /** The device this browser kept when the sign-in began; null when it kept none. */
+  readonly basedOn: string | null;
+}
 
-const encodeRevoked = Schema.encodeSync(Revoked);
+/** The browser's device, as `BrowserDevice`. */
+const DEVICE = "media.device";
 
-const PendingSignOut = Schema.fromJsonString(
-  Schema.Struct({ slot: Schema.String, token: Schema.String, refreshToken: Schema.String }),
-);
-
-const decodePending = Schema.decodeUnknownOption(PendingSignOut);
-
-const encodePending = Schema.encodeSync(PendingSignOut);
+/** The browser's one session, whoever's; absent while signed out. */
+const SESSION = "media.session";
 
 /**
- * Revocations, one per session id, whichever slot it was signed in under. They are a few bytes
- * each and never deleted, so a session signed out here can never be stored again, however late
- * an answer for it lands and whatever any tab's clock says (ADR 0020).
+ * A sign-out, one per session id. Never deleted, so a session signed out here can never be kept
+ * again, however late an answer for it lands and whatever any tab's clock says (ADR 0020).
  */
 const REVOKED = "media.revoked:";
 
-/** Sign-outs the core has not confirmed, one per session id, for any client to finish. */
+/** A sign-out the core has not confirmed, with the session's tokens, for any client to finish. */
 const PENDING = "media.signOut:";
 
-const SlotRecord = Schema.fromJsonString(
-  Schema.Struct({ session: Schema.String, user: Schema.String }),
+const StoredDevice = Schema.fromJsonString(
+  Schema.Struct({ id: Schema.String, code: Schema.String, sequence: Schema.Int }),
 );
 
-const decodeSlot = Schema.decodeUnknownOption(SlotRecord);
+const decodeDevice = Schema.decodeUnknownOption(StoredDevice);
 
-const encodeSlot = Schema.encodeSync(SlotRecord);
+const encodeDevice = Schema.encodeSync(StoredDevice);
 
-/** What a slot holds: its session and whose it is. */
-export interface SlotHolding {
-  readonly session: string;
-  readonly user: string;
-}
+const deviceIn = async (tx: SharedTransaction): Promise<Option.Option<BrowserDevice>> =>
+  Option.flatMap(Option.fromNullishOr(await tx.get(DEVICE)), decodeDevice);
 
-/** What the slot under `key` holds, read inside `tx`; none for an empty or unreadable slot. */
-export const slotHolding = async (
-  tx: SharedTransaction,
-  key: string,
-): Promise<Option.Option<SlotHolding>> =>
-  Option.flatMap(Option.fromNullishOr(await tx.get(key)), decodeSlot);
+const sessionIn = async (tx: SharedTransaction): Promise<Option.Option<StoredSession>> =>
+  Option.flatMap(Option.fromNullishOr(await tx.get(SESSION)), parseStoredSession);
 
-const tokensIn = async (tx: SharedTransaction, key: string) =>
-  Option.flatMap(Option.fromNullishOr(await tx.get(key)), parseStoredSession);
+const holds = async (tx: SharedTransaction, id: string): Promise<boolean> =>
+  Option.contains(Option.flatMap(await sessionIn(tx), sessionOf), id);
 
-const revokedIn = async (tx: SharedTransaction, id: string) =>
-  Option.flatMap(Option.fromNullishOr(await tx.get(`${REVOKED}${id}`)), decodeRevoked);
+const isRevoked = async (tx: SharedTransaction, id: string): Promise<boolean> =>
+  (await tx.get(`${REVOKED}${id}`)) !== undefined;
 
 /**
- * Moves `session`'s tokens and the record naming it from the slot under `from` to the empty slot
- * under `to`, inside `tx`, so its refresh token keeps one owner; whether `from` held it.
+ * Signs session `id` out inside `tx`: the first time, its revocation and its pending sign-out,
+ * which any client finishes with the core; and the browser's session while it is this one.
  */
-export const moveSession = async (
-  tx: SharedTransaction,
-  from: string,
-  to: string,
-  session: string,
-): Promise<boolean> => {
-  const held = await slotHolding(tx, from);
-  const tokens = await tx.get(`${from}:${session}`);
+const signOutIn = async (tx: SharedTransaction, id: string, session: StoredSession) => {
+  if (!(await isRevoked(tx, id))) {
+    await tx.set(`${REVOKED}${id}`, "revoked");
+    await tx.set(`${PENDING}${id}`, serializeSession(session));
+  }
 
-  if (Option.isNone(held) || held.value.session !== session || tokens === undefined) return false;
-
-  await tx.set(`${to}:${session}`, tokens);
-  await tx.set(to, encodeSlot(held.value));
-  await tx.remove(`${from}:${session}`);
-  await tx.remove(from);
-
-  return true;
+  if (await holds(tx, id)) await tx.remove(SESSION);
 };
 
+/** This browser's device; null before a sign-in kept one. */
+export const readDevice = async (store: SharedStore): Promise<BrowserDevice | null> =>
+  Option.getOrNull(await store.read(deviceIn));
+
 /**
- * Records inside `tx` that the core ended `session`, signed in under the slot `slot`, at `at`: a
- * confirmed revocation, so every client holding it stops and no answer for it is stored again,
- * and its tokens go. `at` is for the record only; nothing decides by it.
+ * Makes `session` the browser's one session, as `order` places it; whether it did (ADR 0020). It
+ * does only when the core bound it after the session kept now: on the same device, with a higher
+ * number; or on a new device enrolled from the one kept, when the core no longer knew that one.
+ * A session signed out here never comes back, and keeping the session held now changes nothing.
+ * The session it replaces, or a session that lost, is signed out in the same transaction, so a
+ * client ends it with the core even if it is still live there. No client clock decides anything.
  */
-export const endedByCore = async (
-  tx: SharedTransaction,
-  session: string,
-  slot: string,
-  at: number,
-): Promise<void> => {
-  const revokedAt = Option.match(await revokedIn(tx, session), {
-    onNone: () => at,
-    onSome: (record) => record.revokedAt,
+export const keepSession = (
+  store: SharedStore,
+  session: StoredSession,
+  order: DeviceOrder,
+): Promise<boolean> =>
+  store.write(async (tx) => {
+    const id = Option.getOrNull(sessionOf(session));
+
+    if (id === null || (await isRevoked(tx, id))) return false;
+
+    if (await holds(tx, id)) return true;
+
+    const newer = Option.match(await deviceIn(tx), {
+      onNone: () => true,
+      onSome: (kept) =>
+        kept.id === order.deviceId ? order.sequence > kept.sequence : kept.id === order.basedOn,
+    });
+
+    if (!newer) {
+      await signOutIn(tx, id, session);
+
+      return false;
+    }
+
+    const replaced = await sessionIn(tx);
+    const replacedId = Option.flatMap(replaced, sessionOf);
+
+    if (Option.isSome(replaced) && Option.isSome(replacedId)) {
+      await signOutIn(tx, replacedId.value, replaced.value);
+    }
+
+    await tx.set(
+      DEVICE,
+      encodeDevice({ id: order.deviceId, code: order.code, sequence: order.sequence }),
+    );
+    await tx.set(SESSION, serializeSession(session));
+
+    return true;
   });
 
-  await tx.set(`${REVOKED}${session}`, encodeRevoked({ revokedAt, slot, confirmedAt: at }));
-  await tx.remove(`${PENDING}${session}`);
-  await tx.remove(`${slot}:${session}`);
+/** A sign-in held in memory until the browser keeps it with its device order. */
+export interface HeldSignIn {
+  /** The store a client of its own signs in on. */
+  readonly storage: KeyValueStore;
+  /** Keeps the session that client holds in `store`, as `keepSession` does; whether it did. */
+  readonly keep: (store: SharedStore, order: DeviceOrder) => Promise<boolean>;
+}
+
+/**
+ * A place in memory for a new sign-in. A browser learns a session's order only after it signs in,
+ * when the core binds it to the device, so a client of its own signs in here first.
+ */
+export const holdSignIn = (): HeldSignIn => {
+  const held = new Map<string, string>();
+
+  return {
+    storage: {
+      getItem: (key) => held.get(key) ?? null,
+      setItem: (key, value) => {
+        held.set(key, value);
+      },
+      removeItem: (key) => {
+        held.delete(key);
+      },
+    },
+    keep: async (store, order) => {
+      const [session] = [...held.values()].flatMap((text) =>
+        Option.toArray(parseStoredSession(text)),
+      );
+
+      return session === undefined ? false : keepSession(store, session, order);
+    },
+  };
 };
 
 /**
- * The session of slot `slot` in a store the origin's clients share (ADR 0020). Every operation is
- * one transaction, so a check and the write it guards never interleave with another client's:
+ * The browser's one session, in a store every client on the origin shares (ADR 0020). Every
+ * operation is one transaction, so a check and the write it guards never interleave with another
+ * client's:
  *
- * - `slot` names the slot's current session. Only a sign-in writes it.
- * - `slot:<session>` holds that session's tokens. A renewal replaces them only while they are
- *   still the ones it started from and no revocation exists; a sign-out deletes them.
- * - `media.revoked:<session>` records a sign-out, and the core's confirmation once it comes.
- * - `media.signOut:<session>` holds a sign-out the core has not confirmed, for any client to
- *   finish, wherever its slot went. Nothing that loads a session reads it.
+ * - `media.device` is the browser's device and the number of the session kept last, and
+ *   `media.session` that session's tokens. Only `keepSession` puts a session there.
+ * - A renewal replaces the tokens only while they are still the ones it started from and the
+ *   session has no revocation.
+ * - `media.revoked:<session>` records a sign-out and is never deleted, and
+ *   `media.signOut:<session>` holds it until the core confirms, for any client to finish.
  *
  * A store that cannot be read loads no session, and a token check that cannot read it counts the
  * session as revoked.
  */
-export const layerShared = (store: SharedStore, slot: string): Layer.Layer<TokenStorage> => {
-  const tokensKey = (id: string) => `${slot}:${id}`;
-
+export const layerShared = (store: SharedStore): Layer.Layer<TokenStorage> => {
   const attempt = <A>(
     operation: TokenStorageError["operation"],
     mode: "read" | "write",
@@ -355,12 +405,6 @@ export const layerShared = (store: SharedStore, slot: string): Layer.Layer<Token
     Effect.tryPromise({
       try: () => (mode === "read" ? store.read(run) : store.write(run)),
       catch: failure(operation, `Token storage failed to ${operation} the session`),
-    });
-
-  const revocationIn = async (tx: SharedTransaction, id: string): Promise<Revocation> =>
-    Option.match(await revokedIn(tx, id), {
-      onSome: (record) => (record.confirmedAt === undefined ? "pending" : "confirmed"),
-      onNone: async () => (Option.isSome(await tokensIn(tx, tokensKey(id))) ? "none" : "missing"),
     });
 
   const changed = Stream.callback<void>(
@@ -384,111 +428,64 @@ export const layerShared = (store: SharedStore, slot: string): Layer.Layer<Token
     TokenStorage,
     TokenStorage.of({
       load: attempt("load", "read", async (tx) => {
-        const held = await slotHolding(tx, slot);
+        const held = await sessionIn(tx);
+        const id = Option.getOrNull(Option.flatMap(held, sessionOf));
 
-        if (Option.isNone(held) || Option.isSome(await revokedIn(tx, held.value.session))) {
-          return Option.none();
-        }
-
-        return tokensIn(tx, tokensKey(held.value.session));
+        return id === null || (await isRevoked(tx, id)) ? Option.none<StoredSession>() : held;
       }).pipe(Effect.orElseSucceed(() => Option.none<StoredSession>())),
-      save: (session) =>
-        Effect.flatMap(idOf(session, "save"), (id) =>
-          attempt("save", "write", async (tx) => {
-            if (Option.isSome(await revokedIn(tx, id))) return false;
-
-            const held = await slotHolding(tx, slot);
-
-            // Another session this key holds stays, unless it is over: signed out here, or with
-            // its tokens gone. Only promotion, by the core's join order, moves a person between
-            // sessions.
-            if (Option.isSome(held) && held.value.session !== id) {
-              const over =
-                Option.isSome(await revokedIn(tx, held.value.session)) ||
-                Option.isNone(await tokensIn(tx, tokensKey(held.value.session)));
-
-              if (!over) return false;
-            }
-
-            const user = id.split("|")[0] ?? id;
-
-            await tx.set(tokensKey(id), serializeSession(session));
-            await tx.set(slot, encodeSlot({ session: id, user }));
-
-            return true;
+      save: () =>
+        Effect.fail(
+          new TokenStorageError({
+            operation: "save",
+            message:
+              "A browser keeps a new session only with its device order: sign in on a client of its own, then keep it",
+            cause: null,
           }),
         ),
       renew: (expected, renewed) =>
         Effect.flatMap(idOf(renewed, "save"), (id) =>
           attempt("save", "write", async (tx) => {
-            if (Option.isSome(await revokedIn(tx, id))) return false;
+            if (await isRevoked(tx, id)) return false;
 
-            if (!sameStored(await tokensIn(tx, tokensKey(id)), Option.some(expected))) return false;
-            await tx.set(tokensKey(id), serializeSession(renewed));
+            if (!sameStored(await sessionIn(tx), Option.some(expected))) return false;
+            await tx.set(SESSION, serializeSession(renewed));
 
             return true;
           }),
         ),
       revoke: (session) =>
         Effect.flatMap(idOf(session, "clear"), (id) =>
-          Effect.flatMap(Clock.currentTimeMillis, (revokedAt) =>
-            attempt("clear", "write", async (tx) => {
-              if (Option.isNone(await revokedIn(tx, id))) {
-                await tx.set(`${REVOKED}${id}`, encodeRevoked({ revokedAt, slot }));
-              }
-
-              if ((await tx.get(`${PENDING}${id}`)) === undefined) {
-                await tx.set(
-                  `${PENDING}${id}`,
-                  encodePending({
-                    slot,
-                    token: Redacted.value(session.token),
-                    refreshToken: Redacted.value(session.refreshToken),
-                  }),
-                );
-              }
-
-              await tx.remove(tokensKey(id));
-            }).pipe(
-              // A full store refuses the records, so deleting the tokens alone frees space and
-              // leaves nothing to load; the caller keeps retrying the records.
-              Effect.tapError(() =>
-                Effect.ignore(attempt("clear", "write", (tx) => tx.remove(tokensKey(id)))),
+          attempt("clear", "write", (tx) => signOutIn(tx, id, session)).pipe(
+            // A full store refuses the records, so deleting the tokens alone frees space and
+            // leaves nothing to load; the caller keeps retrying the records.
+            Effect.tapError(() =>
+              Effect.ignore(
+                attempt("clear", "write", async (tx) => {
+                  if (await holds(tx, id)) await tx.remove(SESSION);
+                }),
               ),
             ),
           ),
         ),
       confirmRevoked: (session) =>
         Effect.flatMap(idOf(session, "clear"), (id) =>
-          Effect.flatMap(Clock.currentTimeMillis, (confirmedAt) =>
-            attempt("clear", "write", async (tx) => {
-              const pending = Option.flatMap(
-                Option.fromNullishOr(await tx.get(`${PENDING}${id}`)),
-                decodePending,
-              );
+          attempt("clear", "write", async (tx) => {
+            if (!(await isRevoked(tx, id))) await tx.set(`${REVOKED}${id}`, "revoked");
 
-              const signedInAt = Option.match(pending, {
-                onNone: () => slot,
-                onSome: (each) => each.slot,
-              });
+            await tx.remove(`${PENDING}${id}`);
 
-              const revokedAt = Option.match(await revokedIn(tx, id), {
-                onNone: () => confirmedAt,
-                onSome: (record) => record.revokedAt,
-              });
-
-              await tx.set(
-                `${REVOKED}${id}`,
-                encodeRevoked({ revokedAt, slot: signedInAt, confirmedAt }),
-              );
-              await tx.remove(`${signedInAt}:${id}`);
-              await tx.remove(`${PENDING}${id}`);
-            }),
-          ),
+            if (await holds(tx, id)) await tx.remove(SESSION);
+          }),
         ),
       revocation: (session) =>
         Effect.flatMap(idOf(session, "load"), (id) =>
-          attempt("load", "read", (tx) => revocationIn(tx, id)),
+          attempt("load", "read", async (tx): Promise<Revocation> => {
+            if (await isRevoked(tx, id)) {
+              return (await tx.get(`${PENDING}${id}`)) === undefined ? "confirmed" : "pending";
+            }
+
+            return (await holds(tx, id)) ? "none" : "missing";
+          }),
         ),
       signOutPending: (session) =>
         Effect.flatMap(idOf(session, "load"), (id) =>
@@ -499,15 +496,7 @@ export const layerShared = (store: SharedStore, slot: string): Layer.Layer<Token
         const found = await Promise.all(keys.map((key) => tx.get(key)));
 
         return found.flatMap((text) =>
-          Option.toArray(
-            Option.map(
-              Option.flatMap(Option.fromNullishOr(text), decodePending),
-              ({ token, refreshToken }) => ({
-                token: Redacted.make(token),
-                refreshToken: Redacted.make(refreshToken),
-              }),
-            ),
-          ),
+          Option.toArray(Option.flatMap(Option.fromNullishOr(text), parseStoredSession)),
         );
       }),
       changed,

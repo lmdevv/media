@@ -12,70 +12,82 @@ const stack = stackEnv();
 
 test.skip(stack === null, "needs scripts/dev-stack.sh up");
 
-test("signing in at / shows the picker with the signed-in person", async ({ page }) => {
+const home = (tab: Page, person: Person) =>
+  expect(tab.getByRole("heading", { name: `Hi, ${person.username}.` })).toBeVisible();
+
+/**
+ * Keeps the token of the session this browser holds now inside the page, under `name`, so a later
+ * check can ask the core about it without the test ever reading it.
+ */
+const rememberSession = (tab: Page, name: string) =>
+  tab.evaluate(
+    (key) =>
+      new Promise<void>((resolve, reject) => {
+        const opening = indexedDB.open("media");
+
+        opening.addEventListener("error", () => reject(new Error("IndexedDB did not open")));
+        opening.addEventListener("success", () => {
+          const read = opening.result.transaction("kv").objectStore("kv").get("media.session");
+
+          read.addEventListener("error", () => reject(new Error("IndexedDB did not read")));
+          read.addEventListener("success", () => {
+            sessionStorage.setItem(key, /"token":"([^"]+)"/u.exec(String(read.result))?.[1] ?? "");
+            resolve();
+          });
+        });
+      }),
+    name,
+  );
+
+/** Whether the session remembered under `name` still answers on the core, asked from the page. */
+const rememberedWorks = (tab: Page, core: Stack, name: string) =>
+  tab.evaluate(
+    async ({ key, url }) => {
+      const response = await fetch(`${url}/api/query`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionStorage.getItem(key) ?? ""}`,
+        },
+        body: JSON.stringify({ path: "core/auth/sessions:current", args: {}, format: "json" }),
+      });
+
+      return (await response.text()).includes('"status":"success"');
+    },
+    { key: name, url: core.platformUrl },
+  );
+
+test("signing in at / goes to the person's home", async ({ page }) => {
   if (stack === null) return;
 
   const person = await createPerson(stack, "lucia");
 
   await signIn(page, person);
 
-  await expect(page.getByRole("heading", { name: "Who's here?" })).toBeVisible();
-  await expect(page.getByRole("button", { name: person.username, exact: true })).toBeVisible();
-});
-
-test("a second person signed in on this browser joins the picker", async ({ page }) => {
-  if (stack === null) return;
-
-  const first = await createPerson(stack, "mateo");
-  const second = await createPerson(stack, "aiko");
-
-  await signIn(page, first);
-  await expect(page.getByRole("button", { name: first.username, exact: true })).toBeVisible();
-
-  await page.goto("/add");
-  await page.getByLabel("Username").fill(second.username);
-  await page.getByLabel("Password", { exact: true }).fill(second.password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-
-  await expect(page.getByRole("button", { name: first.username, exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: second.username, exact: true })).toBeVisible();
-
-  await page.getByRole("button", { name: first.username, exact: true }).click();
+  await home(page, person);
   await expect(page).toHaveURL(/\/home$/u);
-  await expect(page.getByRole("link", { name: `${first.username}, switch person` })).toBeVisible();
 });
 
-test("choosing a saved person from a CLI link's page keeps the page and its code", async ({
+test("switching person signs the first out on the core, then signs the next in", async ({
   page,
 }) => {
   if (stack === null) return;
 
   const first = await createPerson(stack, "mateo");
   const second = await createPerson(stack, "aiko");
-  const device = openPlatform(stack);
 
-  try {
-    await signIn(page, first);
-    await expect(page.getByRole("button", { name: first.username, exact: true })).toBeVisible();
-    await page.goto("/add");
-    await page.getByLabel("Username").fill(second.username);
-    await page.getByLabel("Password", { exact: true }).fill(second.password);
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await page.getByRole("button", { name: second.username, exact: true }).click();
-    await page.getByRole("button", { name: "Sign out" }).click();
-    await expect(page.getByRole("button", { name: first.username, exact: true })).toBeVisible();
+  await signIn(page, first);
+  await home(page, first);
+  await rememberSession(page, "first");
+  expect(await rememberedWorks(page, stack, "first")).toBe(true);
 
-    const pending = await device.session.startDeviceSignIn("media CLI on e2e");
-    const code = pending.userCode.replace("-", "");
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByLabel("Username").fill(second.username);
+  await page.getByLabel("Password", { exact: true }).fill(second.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
 
-    await page.goto(`/device?code=${code}`);
-    await page.getByRole("button", { name: first.username, exact: true }).click();
-
-    await expect(page.getByRole("button", { name: "Approve" })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/device\\?code=${code}$`, "u"));
-  } finally {
-    await device.dispose();
-  }
+  await home(page, second);
+  await expect.poll(() => rememberedWorks(page, stack, "first")).toBe(false);
 });
 
 const fillIn = async (tab: Page, person: Person): Promise<void> => {
@@ -84,88 +96,49 @@ const fillIn = async (tab: Page, person: Person): Promise<void> => {
   await tab.getByLabel("Password", { exact: true }).fill(person.password);
 };
 
-test("two people signing in at once on a new browser both join its picker", async ({
-  page,
-  context,
-}) => {
-  if (stack === null) return;
-
-  const first = await createPerson(stack, "mateo");
-  const second = await createPerson(stack, "aiko");
-  const other = await context.newPage();
-
-  await Promise.all([fillIn(page, first), fillIn(other, second)]);
-  await Promise.all([
-    page.getByRole("button", { name: "Sign in" }).click(),
-    other.getByRole("button", { name: "Sign in" }).click(),
-  ]);
-  await Promise.all(
-    [page, other].flatMap((tab) =>
-      [first, second].map((person) =>
-        expect(tab.getByRole("button", { name: person.username, exact: true })).toBeVisible(),
-      ),
-    ),
-  );
-
-  await page.reload();
-  await expect(page.getByRole("button", { name: first.username, exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: second.username, exact: true })).toBeVisible();
-});
-
-test("two tabs signing one person in keep the session the core kept, whichever promotes first", async ({
+test("two tabs signing in at once leave only the session the core bound last, and end the other", async ({
   page,
   context,
 }) => {
   if (stack === null) return;
 
   const enrolled = await createPerson(stack, "mateo");
-  const person = await createPerson(stack, "lucia");
-  const late = await context.newPage();
-  const held: Array<() => void> = [];
-  let holding = true;
+  const later = await createPerson(stack, "lucia");
+  const sooner = await createPerson(stack, "aiko");
+  const other = await context.newPage();
+  const { promise: released, resolve: release } = Promise.withResolvers<void>();
+  const { promise: holding, resolve: held } = Promise.withResolvers<void>();
 
-  // The late tab's enrollment waits on the wire, after its sign-in is saved, until the other tab
-  // has signed the same person in, enrolled, and promoted.
-  await late.routeWebSocket(/\/api\/[^/]+\/sync/u, (socket) => {
-    const server = socket.connectToServer();
+  // This browser is already a device, so both sign-ins join it. The first tab's enrollment waits
+  // until the other tab's sign-in is kept, so the core binds the first tab's sign-in last.
+  await signIn(page, enrolled);
+  await home(page, enrolled);
+  await page.getByRole("button", { name: "Sign out" }).click();
 
-    socket.onMessage((message) => {
-      if (holding && message.toString().includes("registry:enroll")) {
-        held.push(() => server.send(message));
+  await page.route("**/api/action", async (route) => {
+    if (!(route.request().postData() ?? "").includes("registry:enroll")) return route.fallback();
 
-        return;
-      }
-
-      server.send(message);
-    });
+    held();
+    await released;
+    await route.continue();
   });
 
-  await signIn(page, enrolled);
-  await expect(page.getByRole("button", { name: enrolled.username, exact: true })).toBeVisible();
+  try {
+    await Promise.all([fillIn(page, later), fillIn(other, sooner)]);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await holding;
+    await other.getByRole("button", { name: "Sign in" }).click();
+    await home(other, sooner);
+    await rememberSession(other, "sooner");
 
-  const signInOn = async (tab: Page) => {
-    await tab.goto("/add");
-    await tab.getByLabel("Username").fill(person.username);
-    await tab.getByLabel("Password", { exact: true }).fill(person.password);
-    await tab.getByRole("button", { name: "Sign in" }).click();
-  };
-
-  await signInOn(late);
-  await expect.poll(() => held.length).toBe(1);
-
-  await signInOn(page);
-  await expect(page.getByRole("button", { name: person.username, exact: true })).toBeVisible();
-
-  holding = false;
-
-  for (const send of held.splice(0)) send();
-
-  await expect(late.getByRole("heading", { name: "Who's here?" })).toBeVisible();
-
-  await page.reload();
-  await page.getByRole("button", { name: person.username, exact: true }).click();
-  await expect(page).toHaveURL(/\/home$/u);
-  await expect(page.getByRole("link", { name: `${person.username}, switch person` })).toBeVisible();
+    release();
+    await home(other, later);
+    await page.reload();
+    await home(page, later);
+    await expect.poll(() => rememberedWorks(other, stack, "sooner")).toBe(false);
+  } finally {
+    release();
+  }
 });
 
 /**
@@ -207,36 +180,38 @@ const listOnSharedDevices = async (core: Stack, person: Person) => {
 
 type DeviceRowId = Parameters<PlatformSdk["core"]["devices"]["registry"]["setMode"]>[0]["deviceId"];
 
-/**
- * The keys of this browser's shared store, and its device id from the device code it keeps; the
- * code itself stays in the page.
- */
-const readStore = (tab: Page) =>
+/** This browser's device id, read from its record in the page; the code itself stays there. */
+const deviceIdOf = (tab: Page) =>
   tab.evaluate(
     () =>
-      new Promise<{ readonly keys: ReadonlyArray<string>; readonly deviceId: string }>(
-        (resolve, reject) => {
-          const opening = indexedDB.open("media");
+      new Promise<string>((resolve, reject) => {
+        const opening = indexedDB.open("media");
 
-          opening.addEventListener("error", () => reject(new Error("IndexedDB did not open")));
-          opening.addEventListener("success", () => {
-            const kv = opening.result.transaction("kv").objectStore("kv");
-            const keys = kv.getAllKeys();
-            const device = kv.get("media.device");
+        opening.addEventListener("error", () => reject(new Error("IndexedDB did not open")));
+        opening.addEventListener("success", () => {
+          const read = opening.result.transaction("kv").objectStore("kv").get("media.device");
 
-            device.addEventListener("error", () => reject(new Error("IndexedDB did not read")));
-            device.addEventListener("success", () =>
-              resolve({
-                keys: keys.result.map(String),
-                deviceId: String(device.result).split(".")[0]?.slice(3) ?? "",
-              }),
-            );
+          read.addEventListener("error", () => reject(new Error("IndexedDB did not read")));
+          read.addEventListener("success", () => {
+            resolve(/"id":"([^"]+)"/u.exec(String(read.result))?.[1] ?? "");
           });
-        },
-      ),
+        });
+      }),
   );
 
-test("a shared device opens each tile on a slot of its own, and drops the tile it replaced", async ({
+/** Signs `admin` in on `tab`, makes the browser's device shared, and opens its picker. */
+const makeShared = async (tab: Page, admin: Person, host: PlatformSdk): Promise<void> => {
+  await signIn(tab, admin);
+  await home(tab, admin);
+  await host.session.signInWithPassword(admin);
+  await host.core.devices.registry.setMode({
+    deviceId: Brand.nominal<DeviceRowId>()(await deviceIdOf(tab)),
+    mode: "shared",
+  });
+  await tab.goto("/");
+};
+
+test("a shared device opens one tile at a time, and ends the tile it replaced", async ({
   page,
 }) => {
   if (stack === null) return;
@@ -248,30 +223,18 @@ test("a shared device opens each tile on a slot of its own, and drops the tile i
   const host = openPlatform(stack);
 
   try {
-    await signIn(page, admin);
-    await expect(page.getByRole("button", { name: admin.username, exact: true })).toBeVisible();
-
-    await host.session.signInWithPassword(admin);
-    await host.core.devices.registry.setMode({
-      deviceId: Brand.nominal<DeviceRowId>()((await readStore(page)).deviceId),
-      mode: "shared",
-    });
-
-    await page.reload();
+    await makeShared(page, admin, host);
     await page.getByRole("button", { name: ada.username, exact: true }).click();
-    await expect(page.getByRole("link", { name: `${ada.username}, switch person` })).toBeVisible();
+    await home(page, ada);
+    await rememberSession(page, "ada");
 
-    await page.getByRole("link", { name: `${ada.username}, switch person` }).click();
+    await page.goto("/");
     await page.getByRole("button", { name: bo.username, exact: true }).click();
-    await expect(page.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+    await home(page, bo);
 
     await page.reload();
-    await expect(page.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
-
-    const { keys } = await readStore(page);
-    const tokens = keys.filter((key) => /^media\.session\.[^:]+:/u.test(key));
-
-    expect(tokens).toHaveLength(1);
+    await home(page, bo);
+    expect(await rememberedWorks(page, stack, "ada")).toBe(false);
   } finally {
     await Promise.all(unlist.map((step) => step()));
     await host.dispose();
@@ -305,27 +268,19 @@ test("two tabs opening tiles at once keep the tile the core opened last", async 
   });
 
   try {
-    await signIn(page, admin);
-    await expect(page.getByRole("button", { name: admin.username, exact: true })).toBeVisible();
-    await host.session.signInWithPassword(admin);
-    await host.core.devices.registry.setMode({
-      deviceId: Brand.nominal<DeviceRowId>()((await readStore(page)).deviceId),
-      mode: "shared",
-    });
-
-    await page.reload();
+    await makeShared(page, admin, host);
     await other.goto("/");
     await page.getByRole("button", { name: ada.username, exact: true }).click();
     await reachedCore;
 
     await other.getByRole("button", { name: bo.username, exact: true }).click();
-    await expect(other.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+    await home(other, bo);
 
     release();
     await expect(page.getByRole("button", { name: ada.username, exact: true })).toBeVisible();
 
     await other.reload();
-    await expect(other.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+    await home(other, bo);
   } finally {
     release();
     await Promise.all(unlist.map((step) => step()));
@@ -361,97 +316,19 @@ test("an older tile that registers last never replaces the tile the core opened 
   });
 
   try {
-    await signIn(page, admin);
-    await expect(page.getByRole("button", { name: admin.username, exact: true })).toBeVisible();
-    await host.session.signInWithPassword(admin);
-    await host.core.devices.registry.setMode({
-      deviceId: Brand.nominal<DeviceRowId>()((await readStore(page)).deviceId),
-      mode: "shared",
-    });
-
-    await page.reload();
+    await makeShared(page, admin, host);
     await other.goto("/");
     await page.getByRole("button", { name: ada.username, exact: true }).click();
     await reachedCore;
 
     await other.getByRole("button", { name: bo.username, exact: true }).click();
-    await expect(other.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+    await home(other, bo);
 
     release();
     await expect(page.getByRole("button", { name: ada.username, exact: true })).toBeVisible();
 
     await other.reload();
-    await expect(other.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
-  } finally {
-    release();
-    await Promise.all(unlist.map((step) => step()));
-    await host.dispose();
-  }
-});
-
-test("three tabs on a shared device keep only the tile the core holds, whatever each tab saw", async ({
-  page,
-  context,
-}) => {
-  if (stack === null) return;
-
-  const admin = await createPerson(stack, "admin", "admin");
-
-  const [ada, bo, cy] = await Promise.all(
-    ["ada", "bo", "cy"].map((label) => createPerson(stack, label)),
-  );
-
-  if (ada === undefined || bo === undefined || cy === undefined) throw new Error("No people");
-
-  const unlist = await Promise.all(
-    [ada, bo, cy].map((person) => listOnSharedDevices(stack, person)),
-  );
-
-  const host = openPlatform(stack);
-  const second = await context.newPage();
-  const third = await context.newPage();
-  const { promise: released, resolve: release } = Promise.withResolvers<void>();
-  const { promise: asked, resolve: ask } = Promise.withResolvers<void>();
-
-  // The third tab's tile request leaves only once the second tab's tile is promoted.
-  await third.route("**/api/action", async (route) => {
-    if (!(route.request().postData() ?? "").includes('"tile"')) return route.fallback();
-
-    ask();
-    await released;
-    await route.continue();
-  });
-
-  try {
-    await signIn(page, admin);
-    await expect(page.getByRole("button", { name: admin.username, exact: true })).toBeVisible();
-    await host.session.signInWithPassword(admin);
-    await host.core.devices.registry.setMode({
-      deviceId: Brand.nominal<DeviceRowId>()((await readStore(page)).deviceId),
-      mode: "shared",
-    });
-
-    await page.reload();
-    await page.getByRole("button", { name: ada.username, exact: true }).click();
-    await expect(page.getByRole("link", { name: `${ada.username}, switch person` })).toBeVisible();
-
-    // Every tab holds Ada's tile; the second and third each open another.
-    await Promise.all([second.goto("/"), third.goto("/")]);
-    await third.getByRole("button", { name: cy.username, exact: true }).click();
-    await asked;
-    await second.getByRole("button", { name: bo.username, exact: true }).click();
-    await expect(second.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
-
-    release();
-    await expect(third.getByRole("link", { name: `${cy.username}, switch person` })).toBeVisible();
-
-    await page.reload();
-    await expect(page.getByRole("link", { name: `${cy.username}, switch person` })).toBeVisible();
-
-    const { keys } = await readStore(page);
-    const tokens = keys.filter((key) => /^media\.session\.[^:]+:/u.test(key));
-
-    expect(tokens.map((key) => key.split(":").slice(1).join(":").split("|")[0])).toHaveLength(1);
+    await home(other, bo);
   } finally {
     release();
     await Promise.all(unlist.map((step) => step()));
@@ -469,8 +346,7 @@ test("two tabs share one sign-in, and a sign-out in one signs the other out", as
   const other = await context.newPage();
 
   await signIn(page, person);
-  await page.getByRole("button", { name: person.username, exact: true }).click();
-  await expect(page).toHaveURL(/\/home$/u);
+  await home(page, person);
 
   await other.goto("/home");
   await expect(other.getByRole("button", { name: "Sign out" })).toBeVisible();

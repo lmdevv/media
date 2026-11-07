@@ -27,18 +27,8 @@ export type Intent =
   | { readonly kind: "page"; readonly need: Need }
   /** `/`: who is using this device. */
   | { readonly kind: "picker" }
-  /** `/add`: sign someone else in on this browser. */
-  | { readonly kind: "add" }
   /** `/tile/$userId`: a locked tile on a shared device. */
   | { readonly kind: "tile"; readonly userId: UserId };
-
-/** A tile on a personal device's picker. */
-export interface PersonalTile {
-  readonly userId: UserId;
-  readonly username: string;
-  /** This browser holds the person's session, so the tile opens without a password. */
-  readonly here: boolean;
-}
 
 /** Everything that decides the screen. */
 export interface ScreenInputs {
@@ -51,13 +41,6 @@ export interface ScreenInputs {
   readonly device: string | null;
   /** Skipped (loading) without a device code. */
   readonly picker: QueryState<PickerView>;
-  /** The people whose session this browser holds. */
-  readonly held: ReadonlySet<UserId>;
-  /**
-   * Whether the client's slot belongs to a person. A sign-in that has not finished registering
-   * this browser yet runs on a slot no one holds, and counts as signed out until it does.
-   */
-  readonly slotHeld: boolean;
 }
 
 /** The one screen to show. */
@@ -65,8 +48,9 @@ export type Screen =
   | { readonly kind: "loading" }
   | { readonly kind: "unreachable"; readonly retry: () => void }
   | { readonly kind: "setUpOwner" }
-  | { readonly kind: "signIn"; readonly adding: boolean }
-  | { readonly kind: "personalPicker"; readonly tiles: ReadonlyArray<PersonalTile> }
+  | { readonly kind: "signIn" }
+  /** `/` signed in on a personal device, which goes to the person's home. */
+  | { readonly kind: "home" }
   | { readonly kind: "sharedPicker"; readonly picker: SharedPicker }
   | {
       readonly kind: "tileLock";
@@ -101,37 +85,26 @@ const pageFor = (need: Need, me: Me): Screen => {
   return { kind: "page", me };
 };
 
-const personalTiles = (
-  picker: Extract<PickerView, { readonly mode: "personal" }>,
-  held: ReadonlySet<UserId>,
-): ReadonlyArray<PersonalTile> =>
-  picker.tiles.map((tile) => ({ ...tile, here: held.has(tile.userId) }));
+const SIGN_IN: Screen = { kind: "signIn" };
 
 const signedOutScreen = (inputs: ScreenInputs): Screen => {
   const { intent, picker, device } = inputs;
 
-  if (intent.kind === "add") return { kind: "signIn", adding: inputs.held.size > 0 };
-
-  if (device === null) return { kind: "signIn", adding: false };
+  if (device === null) return SIGN_IN;
 
   if (picker.status === "loading") return LOADING;
 
   if (picker.status === "error") {
     return Predicate.isTagged(picker.error, "NotFound")
-      ? { kind: "signIn", adding: false }
+      ? SIGN_IN
       : { kind: "unreachable", retry: picker.retry };
   }
 
   const view = picker.data;
 
-  if (view.mode === "shared")
-    return sharedScreen(intent, view) ?? { kind: "sharedPicker", picker: view };
-
-  const tiles = personalTiles(view, inputs.held);
-
-  return tiles.some((tile) => tile.here)
-    ? { kind: "personalPicker", tiles }
-    : { kind: "signIn", adding: false };
+  return view.mode === "shared"
+    ? (sharedScreen(intent, view) ?? { kind: "sharedPicker", picker: view })
+    : SIGN_IN;
 };
 
 /** A shared device's lock screen when the route asks for a locked tile. */
@@ -154,9 +127,9 @@ const sharedScreen = (intent: Intent, view: SharedPicker): Screen | null => {
 
 /**
  * The screen for `inputs`. Public pages show at once. Otherwise the server must answer, have an
- * owner, and the session must be read. Signed out, a browser with people on it shows its picker
- * and one without shows sign-in. Signed in, `/` shows the picker and pages check the session's
- * scopes. A shared device always shows its own picker, whose tiles open as tile sessions.
+ * owner, and the session must be read. Signed out, a shared device shows its picker and any other
+ * browser shows sign-in. Signed in, pages check the session's scopes, and `/` shows a shared
+ * device's picker, whose tiles open as tile sessions, or goes home on a personal one.
  */
 export const screenOf = (inputs: ScreenInputs): Screen => {
   const { intent, server, status, me, picker } = inputs;
@@ -173,9 +146,7 @@ export const screenOf = (inputs: ScreenInputs): Screen => {
 
   if (status === "loading") return LOADING;
 
-  if (status === "signedOut" || !inputs.slotHeld) return signedOutScreen(inputs);
-
-  if (intent.kind === "add") return { kind: "signIn", adding: true };
+  if (status === "signedOut") return signedOutScreen(inputs);
 
   if (me.status === "loading") return LOADING;
 
@@ -187,27 +158,9 @@ export const screenOf = (inputs: ScreenInputs): Screen => {
 
   if (picker.status === "loading" && inputs.device !== null) return LOADING;
 
-  if (picker.status === "success") {
-    const view = picker.data;
-
-    if (view.mode === "shared") {
-      return sharedScreen(intent, view) ?? { kind: "sharedPicker", picker: view };
-    }
-
-    return { kind: "personalPicker", tiles: personalTiles(view, inputs.held) };
+  if (picker.status === "success" && picker.data.mode === "shared") {
+    return sharedScreen(intent, picker.data) ?? { kind: "sharedPicker", picker: picker.data };
   }
 
-  return {
-    kind: "personalPicker",
-    tiles: [{ userId: me.data.userId, username: me.data.username, here: true }],
-  };
+  return { kind: "home" };
 };
-
-/**
- * Whether the core no longer knows this browser's device, so its code should go. Sessions that
- * ended stay stored until someone signs in on their slot again: a newer sign-in can reach another
- * tab's storage before its picker catches up, so a picker that does not list someone yet is no
- * proof their session ended.
- */
-export const deviceUnknown = (inputs: ScreenInputs): boolean =>
-  inputs.picker.status === "error" && Predicate.isTagged(inputs.picker.error, "NotFound");

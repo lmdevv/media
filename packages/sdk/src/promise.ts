@@ -58,9 +58,9 @@ export { createPlatform } from "./platform/promise";
 
 export { openIndexedDb } from "./shared-store";
 
-export { endedByCore, moveSession, slotHolding } from "./token-storage";
+export { holdSignIn, readDevice } from "./token-storage";
 
-export type { SlotHolding } from "./token-storage";
+export type { BrowserDevice, DeviceOrder, HeldSignIn } from "./token-storage";
 
 export type { Channel, IdbFactory, SharedStore, SharedTransaction } from "./shared-store";
 
@@ -74,7 +74,6 @@ export type {
   PlatformSession,
   PlatformTile,
   PlatformTileProof,
-  SignedInSession,
 } from "./platform/promise";
 
 export type { PendingDeviceLogin } from "./device-login";

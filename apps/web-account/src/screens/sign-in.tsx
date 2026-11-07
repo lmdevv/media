@@ -1,5 +1,3 @@
-import { buttonVariants } from "@media/ui/lib/button-variants";
-import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AuthPage, PageTitle } from "@/components/auth-page";
@@ -11,8 +9,8 @@ import type { Submission } from "./entry/submission";
 
 const LINES = { Unauthenticated: "Wrong username or password." } as const;
 
-/** Sign in with a username and password; `adding` signs someone else in on this browser. */
-export function SignInScreen({ adding }: { readonly adding: boolean }) {
+/** Sign in with a username and password. */
+export function SignInScreen() {
   const { signIn } = useAccountActions();
   const { submission, submit, edit } = useSubmission(LINES);
   const [username, setUsername] = useState("");
@@ -20,7 +18,6 @@ export function SignInScreen({ adding }: { readonly adding: boolean }) {
 
   return (
     <SignInView
-      adding={adding}
       username={username}
       password={password}
       submission={submission}
@@ -41,7 +38,6 @@ export function SignInScreen({ adding }: { readonly adding: boolean }) {
 
 /** The sign-in page for `submission`, without the session it signs in to. */
 export function SignInView({
-  adding,
   username,
   password,
   submission,
@@ -49,7 +45,6 @@ export function SignInView({
   onPasswordChange,
   onSubmit,
 }: {
-  readonly adding: boolean;
   readonly username: string;
   readonly password: string;
   readonly submission: Submission;
@@ -59,27 +54,17 @@ export function SignInView({
 }) {
   return (
     <AuthPage>
-      <PageTitle>{adding ? "Add someone." : "Sign in."}</PageTitle>
-      <div className="flex flex-col gap-4">
-        <AccountForm
-          fields="signIn"
-          username={username}
-          password={password}
-          submission={submission}
-          submitLabel="Sign in"
-          onUsernameChange={onUsernameChange}
-          onPasswordChange={onPasswordChange}
-          onSubmit={onSubmit}
-        />
-        {adding ? (
-          <Link
-            to="/"
-            className={buttonVariants({ variant: "subtle", size: "lg", className: "w-full" })}
-          >
-            Cancel
-          </Link>
-        ) : null}
-      </div>
+      <PageTitle>Sign in.</PageTitle>
+      <AccountForm
+        fields="signIn"
+        username={username}
+        password={password}
+        submission={submission}
+        submitLabel="Sign in"
+        onUsernameChange={onUsernameChange}
+        onPasswordChange={onPasswordChange}
+        onSubmit={onSubmit}
+      />
     </AuthPage>
   );
 }

@@ -4,7 +4,6 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AddRouteImport } from './routes/add'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as DeviceRouteImport } from './routes/device'
 import { Route as HomeRouteImport } from './routes/home'
@@ -22,11 +21,6 @@ import { Route as AdminLibrariesLibraryIdRouteImport } from './routes/admin.libr
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AddRoute = AddRouteImport.update({
-  id: '/add',
-  path: '/add',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -97,7 +91,6 @@ const AdminLibrariesLibraryIdRoute = AdminLibrariesLibraryIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/add': typeof AddRoute
   '/admin': typeof AdminRouteWithChildren
   '/device': typeof DeviceRoute
   '/home': typeof HomeRoute
@@ -114,7 +107,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/add': typeof AddRoute
   '/device': typeof DeviceRoute
   '/home': typeof HomeRoute
   '/invite': typeof InviteRoute
@@ -131,7 +123,6 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/add': typeof AddRoute
   '/admin': typeof AdminRouteWithChildren
   '/device': typeof DeviceRoute
   '/home': typeof HomeRoute
@@ -150,7 +141,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/add'
     | '/admin'
     | '/device'
     | '/home'
@@ -167,7 +157,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/add'
     | '/device'
     | '/home'
     | '/invite'
@@ -183,7 +172,6 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/add'
     | '/admin'
     | '/device'
     | '/home'
@@ -201,7 +189,6 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AddRoute: typeof AddRoute
   AdminRoute: typeof AdminRouteWithChildren
   DeviceRoute: typeof DeviceRoute
   HomeRoute: typeof HomeRoute
@@ -218,13 +205,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/add': {
-      id: '/add'
-      path: '/add'
-      fullPath: '/add'
-      preLoaderRoute: typeof AddRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -343,7 +323,6 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AddRoute: AddRoute,
   AdminRoute: AdminRouteWithChildren,
   DeviceRoute: DeviceRoute,
   HomeRoute: HomeRoute,

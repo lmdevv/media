@@ -1,20 +1,19 @@
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
-import { Outlet, useRouterState } from "@tanstack/react-router";
+import { Navigate, Outlet, useRouterState } from "@tanstack/react-router";
 import { Brand, Match } from "effect";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 
 import { NeedsAccountScreen } from "@/screens/needs-account";
-import { PersonalPickerScreen } from "@/screens/personal-picker";
 import { SetUpOwnerScreen } from "@/screens/set-up-owner";
 import { SharedPickerScreen } from "@/screens/shared-picker";
 import { SignInScreen } from "@/screens/sign-in";
 import { TileLockScreen } from "@/screens/tile-lock";
 import { BlankPage, UnreachableScreen } from "@/screens/states";
 
-import { useAccountStore, useOrigin, useSlot } from "./account";
+import { useDevice } from "./account";
 import { MeContext } from "./me";
-import { deviceUnknown, isRenewing, screenOf } from "./screen";
+import { isRenewing, screenOf } from "./screen";
 import type { Intent, Need, Screen, ScreenInputs } from "./screen";
 import type { UserId } from "./platform-types";
 
@@ -44,23 +43,11 @@ const useIntent = (): Intent => {
 
   if (route.intent === "picker") return { kind: "picker" };
 
-  if (route.intent === "add") return { kind: "add" };
-
   if (route.intent === "tile" && route.userId !== undefined) {
     return { kind: "tile", userId: Brand.nominal<UserId>()(route.userId) };
   }
 
   return { kind: "page", need: route.need };
-};
-
-/** Forgets this browser's device code once the core says it no longer knows the device. */
-const useForgetUnknownDevice = (inputs: ScreenInputs): void => {
-  const store = useAccountStore();
-  const unknown = deviceUnknown(inputs);
-
-  useEffect(() => {
-    if (unknown) void store.clearDevice();
-  }, [unknown, store]);
 };
 
 const ASK_AGAIN_MS = 1000;
@@ -86,8 +73,8 @@ const render: (screen: Screen) => ReactNode = Match.type<Screen>().pipe(
     loading: () => <BlankPage />,
     unreachable: ({ retry }) => <UnreachableScreen retry={retry} />,
     setUpOwner: () => <SetUpOwnerScreen />,
-    signIn: ({ adding }) => <SignInScreen adding={adding} />,
-    personalPicker: ({ tiles }) => <PersonalPickerScreen tiles={tiles} />,
+    signIn: () => <SignInScreen />,
+    home: () => <Navigate to="/home" replace />,
     sharedPicker: ({ picker }) => <SharedPickerScreen picker={picker} />,
     tileLock: ({ picker, tile, approval }) => (
       <TileLockScreen picker={picker} tile={tile} approval={approval} />
@@ -106,8 +93,7 @@ const render: (screen: Screen) => ReactNode = Match.type<Screen>().pipe(
 export function Gate() {
   const platform = usePlatform();
   const status = usePlatformStatus();
-  const origin = useOrigin();
-  const slot = useSlot();
+  const device = useDevice()?.code ?? null;
   const intent = useIntent();
 
   const server = usePlatformQuery(platform.core.server.info);
@@ -119,22 +105,10 @@ export function Gate() {
 
   const picker = usePlatformQuery(
     platform.core.devices.picker.show,
-    ...(origin.device === null ? (["skip"] as const) : [{ device: origin.device }]),
+    ...(device === null ? (["skip"] as const) : [{ device }]),
   );
 
-  const inputs: ScreenInputs = {
-    intent,
-    server,
-    status,
-    me,
-    device: origin.device,
-    picker,
-    held: new Set(origin.people.keys()),
-    slotHeld: [...origin.people.values()].includes(slot),
-  };
-
-  useForgetUnknownDevice(inputs);
   useAskAgain(me);
 
-  return render(screenOf(inputs));
+  return render(screenOf({ intent, server, status, me, device, picker }));
 }

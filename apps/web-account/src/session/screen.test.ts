@@ -11,7 +11,7 @@ import type {
   SharedTile,
   UserId,
 } from "./platform-types";
-import { deviceUnknown, screenOf } from "./screen";
+import { screenOf } from "./screen";
 import type { ScreenInputs } from "./screen";
 
 const userId = Brand.nominal<UserId>();
@@ -63,8 +63,6 @@ const base: ScreenInputs = {
   me: loading,
   device: null,
   picker: loading,
-  held: new Set(),
-  slotHeld: true,
 };
 
 const inputs = (overrides: Partial<ScreenInputs>): ScreenInputs => ({ ...base, ...overrides });
@@ -83,36 +81,31 @@ describe("which screen shows", () => {
   });
 
   it("asks a browser with no one on it to sign in", () => {
-    expect(screenOf(inputs({}))).toStrictEqual({ kind: "signIn", adding: false });
+    expect(screenOf(inputs({}))).toStrictEqual({ kind: "signIn" });
   });
 
-  it("keeps showing sign-in until a new sign-in has registered this browser", () => {
-    expect(
-      screenOf(inputs({ status: "signedIn", me: success(meAs(["account"])), slotHeld: false })),
-    ).toStrictEqual({ kind: "signIn", adding: false });
-  });
-
-  it("shows a personal device's picker with the people this browser holds", () => {
+  it("asks a personal device whose person signed out to sign in, and shows no one saved", () => {
     const picker = success<PickerView>({
       deviceId,
       name: "Firefox on Linux",
       mode: "personal",
-      tiles: [
-        { userId: ada, username: "ada" },
-        { userId: kid, username: "kid" },
-      ],
+      tiles: [{ userId: ada, username: "ada" }],
     });
 
-    expect(screenOf(inputs({ device: "dv_1.x", picker, held: new Set([ada]) }))).toStrictEqual({
-      kind: "personalPicker",
-      tiles: [
-        { userId: ada, username: "ada", here: true },
-        { userId: kid, username: "kid", here: false },
-      ],
-    });
+    expect(screenOf(inputs({ device: "dv_1.x", picker }))).toStrictEqual({ kind: "signIn" });
   });
 
-  it("shows a signed-in person the picker at /", () => {
+  it("asks to sign in on a device code the core no longer knows", () => {
+    const picker: QueryState<PickerView> = {
+      status: "error",
+      error: new NotFound({ message: "No such device" }),
+      retry,
+    };
+
+    expect(screenOf(inputs({ device: "dv_1.x", picker }))).toStrictEqual({ kind: "signIn" });
+  });
+
+  it("sends a signed-in person on a personal device home from /", () => {
     const picker = success<PickerView>({
       deviceId,
       name: "Firefox on Linux",
@@ -122,18 +115,24 @@ describe("which screen shows", () => {
 
     expect(
       screenOf(
+        inputs({ status: "signedIn", me: success(meAs(["account"])), device: "dv_1.x", picker }),
+      ),
+    ).toStrictEqual({ kind: "home" });
+  });
+
+  it("shows a tile session the shared device's picker at /, to open another tile", () => {
+    const view = shared([tile({})]);
+
+    expect(
+      screenOf(
         inputs({
           status: "signedIn",
-          me: success(meAs(["account"])),
+          me: success(meAs(["movies:read"], "tile")),
           device: "dv_1.x",
-          picker,
-          held: new Set([ada]),
+          picker: success(view),
         }),
       ),
-    ).toStrictEqual({
-      kind: "personalPicker",
-      tiles: [{ userId: ada, username: "ada", here: true }],
-    });
+    ).toStrictEqual({ kind: "sharedPicker", picker: view });
   });
 
   it("shows a shared device's picker while its slot is empty", () => {
@@ -197,14 +196,6 @@ describe("which screen shows", () => {
     ).toMatchObject({ kind: "page" });
   });
 
-  it("signs someone else in on /add while another person is active", () => {
-    expect(
-      screenOf(
-        inputs({ intent: { kind: "add" }, status: "signedIn", me: success(meAs(["account"])) }),
-      ),
-    ).toStrictEqual({ kind: "signIn", adding: true });
-  });
-
   it("waits while a refused session is renewed or replaced", () => {
     const me: QueryState<Me> = {
       status: "error",
@@ -223,28 +214,5 @@ describe("which screen shows", () => {
     };
 
     expect(screenOf(inputs({ server }))).toStrictEqual({ kind: "unreachable", retry });
-  });
-});
-
-describe("when this browser forgets its device", () => {
-  it("forgets a device code the core no longer knows", () => {
-    const picker: QueryState<PickerView> = {
-      status: "error",
-      error: new NotFound({ message: "No such device" }),
-      retry,
-    };
-
-    expect(deviceUnknown(inputs({ device: "dv", picker }))).toBe(true);
-  });
-
-  it("keeps people the picker does not list yet, since another tab may have just added them", () => {
-    const picker = success<PickerView>({
-      deviceId,
-      name: "Firefox on Linux",
-      mode: "personal",
-      tiles: [{ userId: ada, username: "ada" }],
-    });
-
-    expect(deviceUnknown(inputs({ device: "dv", picker, held: new Set([ada, kid]) }))).toBe(false);
   });
 });

@@ -13,7 +13,6 @@ import {
   Scope,
 } from "effect";
 import * as fc from "fast-check";
-import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { Platform, TokenStorage } from "@media/sdk/effect";
@@ -22,8 +21,7 @@ import * as FakeConvex from "@media/sdk/testing/fake-convex";
 import { jwtExpiringAt, Reply } from "@media/sdk/testing/fake-convex";
 
 import * as BrowserTabs from "./testing/browser-tabs";
-
-const KEY = "media.session.slot";
+import { DAY, onClockSkewedBy } from "./testing/clock";
 
 const SERVER = { name: "[media]", version: "0.2.0", hasOwner: true };
 
@@ -139,17 +137,48 @@ const fakeCore = (tokenLifetime = 3_600_000) =>
     return { fake, down, live, answerSignIns };
   });
 
-const openClient = (fake: FakeConvex.FakeConvex, store: SharedStore, key: string = KEY) =>
-  Layer.build(
-    Platform.layer({
-      url: fake.url,
-      connection: "http",
-      storage: TokenStorage.layerShared(store, key),
-    }),
-  ).pipe(Effect.map((context) => Context.get(context, Platform.Platform)));
+const clientOver = (fake: FakeConvex.FakeConvex, storage: Layer.Layer<TokenStorage.TokenStorage>) =>
+  Layer.build(Platform.layer({ url: fake.url, connection: "http", storage })).pipe(
+    Effect.map((context) => Context.get(context, Platform.Platform)),
+  );
+
+/** A tab's client on the browser's one session. */
+const openClient = (fake: FakeConvex.FakeConvex, store: SharedStore) =>
+  clientOver(fake, TokenStorage.layerShared(store));
 
 const password = (username: string) =>
   Platform.Credentials.Password({ username, password: Redacted.make("secret") });
+
+/** Where the core bound a sign-in on the browser's laptop: `sequence`th. */
+const onLaptop = (sequence: number): TokenStorage.DeviceOrder => ({
+  deviceId: "laptop",
+  code: "dv_laptop.secret",
+  sequence,
+  basedOn: "laptop",
+});
+
+/** Signs `username` in as the account client does, on a client of its own. */
+const signInHeld = (fake: FakeConvex.FakeConvex, username: string) =>
+  Effect.gen(function* () {
+    const held = TokenStorage.holdSignIn();
+    const opener = yield* clientOver(fake, TokenStorage.layerKeyValue(held.storage, "held"));
+
+    yield* opener.session.signIn(password(username));
+
+    return held;
+  });
+
+/** Keeps a held sign-in as the browser's session, `sequence`th on its device; whether it did. */
+const keepOn = (store: SharedStore, held: TokenStorage.HeldSignIn, sequence: number) =>
+  Effect.promise(() => held.keep(store, onLaptop(sequence)));
+
+/** Signs `username` in and keeps the session, `sequence`th on the device; whether it did. */
+const signInOn = (
+  fake: FakeConvex.FakeConvex,
+  store: SharedStore,
+  username: string,
+  sequence: number,
+) => Effect.flatMap(signInHeld(fake, username), (held) => keepOn(store, held, sequence));
 
 /** The session a call from `platform` authorizes as now, if any. */
 const bearerOf = (platform: Platform.Interface, fake: FakeConvex.FakeConvex) =>
@@ -215,7 +244,7 @@ describe("clients sharing one session store", () => {
         const first = yield* openClient(fake, tabs.tab(0));
         const second = yield* openClient(fake, tabs.tab(1));
 
-        yield* first.session.signIn(password("ada"));
+        yield* signInOn(fake, tabs.tab(0), "ada", 1);
         yield* settle;
         yield* refreshOnce(first);
         yield* settle;
@@ -242,7 +271,7 @@ describe("clients sharing one session store", () => {
         const first = yield* openClient(fake, tabs.tab(0));
         const second = yield* openClient(fake, tabs.tab(1));
 
-        yield* first.session.signIn(password("ada"));
+        yield* signInOn(fake, tabs.tab(0), "ada", 1);
         yield* settle;
         yield* first.session.signOut;
         yield* Effect.sleep(1_500);
@@ -257,7 +286,7 @@ describe("clients sharing one session store", () => {
     expect(answer).toStrictEqual({ second: "signedOut", signOuts: 1 });
   });
 
-  it("drops a renewal that lands after another tab's failed sign-out, and ends it on the server", async () => {
+  it("leaves no usable session anywhere when one tab signs out during another's renewal", async () => {
     const answer = await run(
       Effect.gen(function* () {
         const { fake, down, live, answerSignIns } = yield* fakeCore();
@@ -265,7 +294,7 @@ describe("clients sharing one session store", () => {
         const first = yield* openClient(fake, tabs.tab(0));
         const second = yield* openClient(fake, tabs.tab(1));
 
-        yield* first.session.signIn(password("ada"));
+        yield* signInOn(fake, tabs.tab(0), "ada", 1);
         tabs.deliver();
         yield* settle;
         const ada = yield* bearerOf(second, fake);
@@ -293,6 +322,7 @@ describe("clients sharing one session store", () => {
         const observer = yield* openClient(fake, tabs.tab(2));
 
         return {
+          first: Option.isNone(yield* bearerOf(first, fake)),
           second: Option.isNone(yield* bearerOf(second, fake)),
           observer: yield* observer.session.currentStatus,
           ended: yield* eventually(
@@ -303,42 +333,13 @@ describe("clients sharing one session store", () => {
       }),
     );
 
-    expect(answer).toStrictEqual({ second: true, observer: "signedOut", ended: true });
+    expect(answer).toStrictEqual({
+      first: true,
+      second: true,
+      observer: "signedOut",
+      ended: true,
+    });
   }, 15_000);
-
-  it("keeps both sign-outs when two sessions on two keys sign out at once", async () => {
-    const answer = await run(
-      Effect.gen(function* () {
-        const { fake, down } = yield* fakeCore();
-        const tabs = yield* tabsOf(5, "manual");
-        const ada = yield* openClient(fake, tabs.tab(0));
-        const bo = yield* openClient(fake, tabs.tab(1), `${KEY}-bo`);
-        const late = yield* openClient(fake, tabs.tab(2));
-
-        yield* ada.session.signIn(password("ada"));
-        tabs.deliver();
-        yield* settle;
-        yield* bo.session.signIn(password("bo"));
-        yield* Ref.set(down, true);
-        yield* ada.session.signOut;
-        yield* bo.session.signOut;
-        yield* refreshOnce(late);
-        tabs.deliver();
-        yield* settle;
-
-        const observer = yield* openClient(fake, tabs.tab(3));
-        const boObserver = yield* openClient(fake, tabs.tab(4), `${KEY}-bo`);
-
-        return {
-          observer: yield* observer.session.currentStatus,
-          boObserver: yield* boObserver.session.currentStatus,
-          late: Option.isNone(yield* bearerOf(late, fake)),
-        };
-      }),
-    );
-
-    expect(answer).toStrictEqual({ observer: "signedOut", boObserver: "signedOut", late: true });
-  });
 
   it("never brings back a session whose sign-out could only delete it, whatever renewal lands later", async () => {
     const answer = await run(
@@ -348,7 +349,7 @@ describe("clients sharing one session store", () => {
         const first = yield* openClient(fake, tabs.tab(0));
         const second = yield* openClient(fake, tabs.tab(1));
 
-        yield* first.session.signIn(password("ada"));
+        yield* signInOn(fake, tabs.tab(0), "ada", 1);
         tabs.deliver();
         yield* settle;
         const ada = yield* bearerOf(second, fake);
@@ -385,7 +386,7 @@ describe("clients sharing one session store", () => {
     expect(answer).toStrictEqual({ observer: false, second: false });
   });
 
-  it("keeps a sign-in whose answer reached the same key once this tab signed out", async () => {
+  it("keeps a newer sign-in whose answer lands after this tab signed out", async () => {
     const answer = await run(
       Effect.gen(function* () {
         const { fake, answerSignIns } = yield* fakeCore();
@@ -394,11 +395,11 @@ describe("clients sharing one session store", () => {
         const second = yield* openClient(fake, tabs.tab(1));
         const release = yield* Deferred.make<void>();
 
-        yield* first.session.signIn(password("ada"));
+        yield* signInOn(fake, tabs.tab(0), "ada", 1);
         tabs.deliver();
         yield* settle;
 
-        // Bo's answer waits until Ada has signed out; a key holding a live session takes no other.
+        // Bo's answer waits until Ada has signed out.
         yield* fake.handle("auth:signIn", () =>
           Effect.gen(function* () {
             yield* Deferred.await(release);
@@ -414,12 +415,13 @@ describe("clients sharing one session store", () => {
           }),
         );
 
-        const signingIn = yield* Effect.forkChild(second.session.signIn(password("bo")));
+        const signingIn = yield* Effect.forkChild(signInOn(fake, tabs.tab(1), "bo", 2));
 
         yield* settle;
         yield* first.session.signOut;
         yield* Deferred.succeed(release, undefined);
-        yield* Fiber.join(signingIn);
+        const kept = yield* Fiber.join(signingIn);
+
         yield* answerSignIns;
         tabs.deliver();
         yield* settle;
@@ -427,25 +429,90 @@ describe("clients sharing one session store", () => {
         const observer = yield* openClient(fake, tabs.tab(2));
 
         return {
+          kept,
           second: Option.map(yield* bearerOf(second, fake), (subject) => subject.split("|")[0]),
           observer: Option.map(yield* bearerOf(observer, fake), (subject) => subject.split("|")[0]),
         };
       }),
     );
 
-    expect(answer).toStrictEqual({ second: Option.some("bo"), observer: Option.some("bo") });
+    expect(answer).toStrictEqual({
+      kept: true,
+      second: Option.some("bo"),
+      observer: Option.some("bo"),
+    });
   });
 });
 
+describe("two sign-ins at once", () => {
+  it.each([
+    ["the older one keeps first", "ada"],
+    ["the newer one keeps first", "bo"],
+  ] as const)(
+    "leave only the session the core bound last, and end the other on the core: %s",
+    async (_, keepsFirst) => {
+      const answer = await run(
+        Effect.gen(function* () {
+          const { fake, live } = yield* fakeCore();
+          const tabs = yield* tabsOf(3, "at once");
+
+          const clients = yield* Effect.forEach([0, 1], (index) =>
+            openClient(fake, tabs.tab(index)),
+          );
+
+          // Ada's sign-in bound to the laptop 4th and Bo's 5th; their answers land in either order.
+          const signIns = {
+            ada: { held: yield* signInHeld(fake, "ada"), sequence: 4, tab: 0 },
+            bo: { held: yield* signInHeld(fake, "bo"), sequence: 5, tab: 1 },
+          };
+
+          const order = keepsFirst === "ada" ? (["ada", "bo"] as const) : (["bo", "ada"] as const);
+
+          const kept = yield* Effect.forEach(order, (who) =>
+            keepOn(tabs.tab(signIns[who].tab), signIns[who].held, signIns[who].sequence),
+          );
+
+          yield* settle;
+
+          const signedIn = yield* Effect.forEach(clients, (client) => bearerOf(client, fake));
+          const observer = yield* openClient(fake, tabs.tab(2));
+
+          return {
+            kept,
+            signedIn,
+            observer: yield* bearerOf(observer, fake),
+            adaEnded: yield* eventually(
+              Effect.sync(() => !live("ada|session-1")),
+              5_000,
+            ),
+            boLive: live("bo|session-2"),
+          };
+        }),
+      );
+
+      const bo = Option.some("bo|session-2");
+
+      expect(answer).toStrictEqual({
+        kept: keepsFirst === "ada" ? [true, true] : [true, false],
+        signedIn: [bo, bo],
+        observer: bo,
+        adaEnded: true,
+        boLive: true,
+      });
+    },
+    15_000,
+  );
+});
+
 describe("a sign-in answered late", () => {
-  it("never stores a session another tab signed out while the answer was on its way", async () => {
+  it("is refused for a session another tab signed out while the answer was on its way", async () => {
     const answer = await run(
       Effect.gen(function* () {
         const { fake } = yield* fakeCore();
         const tabs = yield* tabsOf(3, "manual");
-        const first = yield* openClient(fake, tabs.tab(0));
         const second = yield* openClient(fake, tabs.tab(1));
-        const shared = jwtExpiringAt(Date.now() + 3_600_000, "user-ada|session-tile");
+        const first = yield* openClient(fake, tabs.tab(0));
+        const tile = jwtExpiringAt(Date.now() + 3_600_000, "user-ada|session-tile");
         const late = yield* Deferred.make<void>();
         const answered = yield* Ref.make(0);
 
@@ -457,21 +524,19 @@ describe("a sign-in answered late", () => {
             }
 
             return Reply.Success({
-              value: { tokens: { token: shared, refreshToken: "refresh-tile" } },
+              value: { tokens: { token: tile, refreshToken: "refresh-tile" } },
             });
           }),
         );
 
-        yield* first.session.signIn(password("ada"));
-
-        const signingIn = yield* Effect.forkChild(
-          Effect.exit(second.session.signIn(password("ada"))),
-        );
+        yield* signInOn(fake, tabs.tab(0), "ada", 3);
+        yield* settle;
+        const signingIn = yield* Effect.forkChild(signInOn(fake, tabs.tab(1), "ada", 3));
 
         yield* settle;
         yield* first.session.signOut;
         yield* Deferred.succeed(late, undefined);
-        const signedIn = yield* Fiber.join(signingIn);
+        const kept = yield* Fiber.join(signingIn);
 
         tabs.deliver();
         yield* settle;
@@ -479,8 +544,8 @@ describe("a sign-in answered late", () => {
         const observer = yield* openClient(fake, tabs.tab(2));
 
         return {
-          refused: Exit.isFailure(signedIn),
-          storedAgain: (yield* keysOf(tabs)).includes(`${KEY}:user-ada|session-tile`),
+          kept,
+          stored: (yield* Effect.promise(() => tabs.items())).has("media.session"),
           second: yield* second.session.currentStatus,
           secondCalls: Option.isNone(yield* bearerOf(second, fake)),
           observer: yield* observer.session.currentStatus,
@@ -489,8 +554,8 @@ describe("a sign-in answered late", () => {
     );
 
     expect(answer).toStrictEqual({
-      refused: true,
-      storedAgain: false,
+      kept: false,
+      stored: false,
       second: "signedOut",
       secondCalls: true,
       observer: "signedOut",
@@ -500,7 +565,7 @@ describe("a sign-in answered late", () => {
 
 describe("a sign-out the server could not confirm", () => {
   it.each(["the same tab", "another tab"] as const)(
-    "is finished from %s after the slot is forgotten and its client disposed",
+    "is finished from %s after the client that signed out is gone",
     async (where) => {
       const answer = await run(
         Effect.gen(function* () {
@@ -509,30 +574,16 @@ describe("a sign-out the server could not confirm", () => {
           const signingOut = yield* Scope.make();
           const first = yield* openClient(fake, tabs.tab(0)).pipe(Scope.provide(signingOut));
 
-          yield* first.session.signIn(password("ada"));
+          yield* signInOn(fake, tabs.tab(0), "ada", 1);
+          yield* settle;
           const ada = yield* bearerOf(first, fake);
 
           yield* Ref.set(down, true);
           yield* first.session.signOut;
           yield* Scope.close(signingOut, Exit.void);
-
-          yield* Effect.promise(() =>
-            tabs.tab(0).write(async (tx) => {
-              const slotKeys = (await tx.keys()).filter(
-                (key) => key === KEY || key.startsWith(`${KEY}:`),
-              );
-
-              await Promise.all(slotKeys.map((key) => tx.remove(key)));
-            }),
-          );
-
           yield* Ref.set(down, false);
 
-          const next = yield* openClient(
-            fake,
-            tabs.tab(where === "the same tab" ? 0 : 1),
-            "media.session.another-slot",
-          );
+          const next = yield* openClient(fake, tabs.tab(where === "the same tab" ? 0 : 1));
 
           return {
             ended: yield* eventually(
@@ -572,7 +623,8 @@ describe("a sign-out that cannot be stored or confirmed at first", () => {
         const tabs = yield* tabsOf(3, "at once");
         const first = yield* openClient(fake, tabs.tab(0));
 
-        yield* first.session.signIn(password("ada"));
+        yield* signInOn(fake, tabs.tab(0), "ada", 1);
+        yield* settle;
         const ada = yield* bearerOf(first, fake);
 
         yield* Ref.set(down, true);
@@ -618,7 +670,7 @@ describe("a sign-out that cannot be stored or confirmed at first", () => {
         const first = yield* openClient(fake, tabs.tab(0));
         const second = yield* openClient(fake, tabs.tab(1));
 
-        yield* first.session.signIn(password("ada"));
+        yield* signInOn(fake, tabs.tab(0), "ada", 1);
         tabs.deliver();
         yield* settle;
         const before = yield* bearerOf(second, fake);
@@ -645,7 +697,7 @@ describe("a sign-out that cannot be stored or confirmed at first", () => {
         const first = yield* openClient(fake, tabs.tab(0));
         const second = yield* openClient(fake, tabs.tab(1));
 
-        yield* first.session.signIn(password("ada"));
+        yield* signInOn(fake, tabs.tab(0), "ada", 1);
         tabs.deliver();
         yield* settle;
         const ada = yield* bearerOf(second, fake);
@@ -692,176 +744,116 @@ const step: fc.Arbitrary<Step> = fc.oneof(
   fc.record({ kind: fc.constant("call" as const), tab: tabIndex }),
 );
 
-describe("any interleaving of tabs sharing one session store", () => {
-  it("never authorizes as a session once it was signed out, and never loses the last sign-in", async () => {
+describe("any interleaving of three tabs sharing the browser's one session", () => {
+  it("never authorizes as a session once it was signed out, and never loses the last sign-in, whatever each tab's clock says", async () => {
     await fc.assert(
-      fc.asyncProperty(fc.array(step, { minLength: 4, maxLength: 14 }), async (steps) => {
-        const outcome = await run(
-          Effect.gen(function* () {
-            const { fake, down, live } = yield* fakeCore();
-            const tabs = yield* tabsOf(TABS + 1, "manual");
+      fc.asyncProperty(
+        fc.array(step, { minLength: 4, maxLength: 14 }),
+        fc.array(fc.integer({ min: -60 * DAY, max: 60 * DAY }), {
+          minLength: TABS,
+          maxLength: TABS,
+        }),
+        async (steps, skews) => {
+          const on = (index: number) => onClockSkewedBy(skews[index] ?? 0);
 
-            const clients = yield* Effect.forEach(
-              Array.from({ length: TABS }, (_, index) => index),
-              (index) => openClient(fake, tabs.tab(index)),
-            );
-
-            const revoked = new Set<string>();
-            const violations: Array<string> = [];
-            let lastSignIn: Option.Option<string> = Option.none();
-
-            const check = (tab: number, subject: Option.Option<string>) => {
-              for (const held of Option.toArray(subject)) {
-                if (revoked.has(held)) violations.push(`tab ${tab} used ${held}`);
-              }
-            };
-
-            for (const next of steps) {
-              const client = clients[next.tab];
-
-              if (client === undefined) continue;
-
-              switch (next.kind) {
-                case "signIn": {
-                  // A key holding a live session takes no other sign-in; only a stored one counts.
-                  const stored = yield* Effect.option(client.session.signIn(password(next.person)));
-
-                  if (Option.isSome(stored) && Option.isSome(stored.value)) {
-                    lastSignIn = stored.value;
-                  }
-
-                  break;
-                }
-
-                case "refresh":
-                  yield* refreshOnce(client);
-                  break;
-                case "signOut": {
-                  const held = yield* bearerOf(client, fake);
-
-                  check(next.tab, held);
-                  yield* Ref.set(down, next.serverDown);
-                  yield* Effect.ignore(client.session.signOut);
-
-                  for (const subject of Option.toArray(held)) {
-                    revoked.add(subject);
-
-                    if (Option.contains(lastSignIn, subject)) lastSignIn = Option.none();
-                  }
-
-                  break;
-                }
-
-                case "deliver":
-                  tabs.deliver(next.tab);
-                  break;
-                case "call":
-                  check(next.tab, yield* bearerOf(client, fake));
-                  break;
-              }
-
-              yield* settle;
-            }
-
-            tabs.deliver();
-            yield* settle;
-
-            for (const [index, client] of clients.entries()) {
-              check(index, yield* bearerOf(client, fake));
-            }
-
-            const keys = yield* keysOf(tabs);
-            const observer = yield* openClient(fake, tabs.tab(TABS));
-
-            return {
-              violations,
-              observer: yield* bearerOf(observer, fake),
-              // A refused stale refresh may revoke the last sign-in on purpose; only one the
-              // store and the core both still hold must survive.
-              lastSignIn: Option.filter(
-                lastSignIn,
-                (subject) => live(subject) && !keys.includes(`media.revoked:${subject}`),
-              ),
-            };
-          }),
-        );
-
-        expect(outcome.violations).toStrictEqual([]);
-        expect(outcome.observer).toStrictEqual(outcome.lastSignIn);
-      }),
-      { numRuns: 40 },
-    );
-  }, 120_000);
-});
-
-describe("a sign-in's answer", () => {
-  it("names the session it stored, and a sign-out of another session leaves it", async () => {
-    const answer = await run(
-      Effect.gen(function* () {
-        const { fake } = yield* fakeCore();
-        const tabs = yield* tabsOf(1, "at once");
-        const client = yield* openClient(fake, tabs.tab(0));
-        const signedIn = yield* client.session.signIn(password("ada"));
-        const other = yield* client.session.signOutSession("ada|session-9");
-
-        return { signedIn, other, current: yield* client.session.currentSession };
-      }),
-    );
-
-    expect(answer).toStrictEqual({
-      signedIn: Option.some("ada|session-1"),
-      other: false,
-      current: Option.some("ada|session-1"),
-    });
-  });
-
-  it("is stored when a valid answer lands ten minutes after its request, as in a suspended tab", async () => {
-    const answer = await run(
-      Effect.gen(function* () {
-        const testClock = yield* Layer.build(TestClock.layer());
-
-        return yield* Effect.gen(function* () {
-          yield* TestClock.setTime(Date.now());
-          const { fake } = yield* fakeCore();
-          const tabs = yield* tabsOf(2, "at once");
-          const client = yield* openClient(fake, tabs.tab(0));
-          const arrived = yield* Deferred.make<void>();
-          const release = yield* Deferred.make<void>();
-
-          yield* fake.handle("auth:signIn", () =>
+          const outcome = await run(
             Effect.gen(function* () {
-              yield* Deferred.succeed(arrived, undefined);
-              yield* Deferred.await(release);
+              const { fake, down, live } = yield* fakeCore();
+              const tabs = yield* tabsOf(TABS + 1, "manual");
 
-              return Reply.Success({
-                value: {
-                  tokens: {
-                    token: jwtExpiringAt(Date.now() + 3_600_000, "ada|session-late"),
-                    refreshToken: "refresh-late",
-                  },
-                },
-              });
+              const clients = yield* Effect.forEach(
+                Array.from({ length: TABS }, (_, index) => index),
+                (index) => on(index)(openClient(fake, tabs.tab(index))),
+              );
+
+              const reader = yield* Effect.map(
+                Layer.build(TokenStorage.layerShared(tabs.tab(TABS))),
+                (context) => Context.get(context, TokenStorage.TokenStorage),
+              );
+
+              const revoked = new Set<string>();
+              const violations: Array<string> = [];
+              let lastSignIn: Option.Option<string> = Option.none();
+              let sequence = 0;
+
+              const check = (tab: number, subject: Option.Option<string>) => {
+                for (const held of Option.toArray(subject)) {
+                  if (revoked.has(held)) violations.push(`tab ${tab} used ${held}`);
+                }
+              };
+
+              for (const next of steps) {
+                const client = clients[next.tab];
+
+                if (client === undefined) continue;
+
+                switch (next.kind) {
+                  case "signIn": {
+                    // Each sign-in binds after the last, so the browser keeps every one.
+                    sequence += 1;
+                    yield* on(next.tab)(signInOn(fake, tabs.tab(next.tab), next.person, sequence));
+                    lastSignIn = Option.flatMap(yield* reader.load, TokenStorage.sessionOf);
+                    break;
+                  }
+
+                  case "refresh":
+                    yield* on(next.tab)(refreshOnce(client));
+                    break;
+                  case "signOut": {
+                    const held = yield* on(next.tab)(bearerOf(client, fake));
+
+                    check(next.tab, held);
+                    yield* Ref.set(down, next.serverDown);
+                    yield* on(next.tab)(Effect.ignore(client.session.signOut));
+
+                    for (const subject of Option.toArray(held)) {
+                      revoked.add(subject);
+
+                      if (Option.contains(lastSignIn, subject)) lastSignIn = Option.none();
+                    }
+
+                    break;
+                  }
+
+                  case "deliver":
+                    tabs.deliver(next.tab);
+                    break;
+                  case "call":
+                    check(next.tab, yield* on(next.tab)(bearerOf(client, fake)));
+                    break;
+                }
+
+                yield* settle;
+              }
+
+              tabs.deliver();
+              yield* settle;
+
+              for (const [index, client] of clients.entries()) {
+                check(index, yield* on(index)(bearerOf(client, fake)));
+              }
+
+              const keys = yield* keysOf(tabs);
+              const observer = yield* openClient(fake, tabs.tab(TABS));
+
+              return {
+                violations,
+                observer: yield* bearerOf(observer, fake),
+                // A refused stale refresh may revoke the last sign-in on purpose; only one the
+                // store and the core both still hold must survive.
+                lastSignIn: Option.filter(
+                  lastSignIn,
+                  (subject) => live(subject) && !keys.includes(`media.revoked:${subject}`),
+                ),
+              };
             }),
           );
 
-          const signingIn = yield* Effect.forkChild(
-            Effect.exit(client.session.signIn(password("ada"))),
-          );
-
-          yield* Deferred.await(arrived);
-          yield* TestClock.adjust(10 * 60 * 1000);
-          yield* Deferred.succeed(release, undefined);
-          const signedIn = yield* Fiber.join(signingIn);
-
-          return {
-            refused: Exit.isFailure(signedIn),
-            stored: (yield* keysOf(tabs)).some((key) => key.endsWith(":ada|session-late")),
-            status: yield* client.session.currentStatus,
-          };
-        }).pipe(Effect.provideContext(testClock));
-      }),
+          expect(outcome.violations).toStrictEqual([]);
+          expect(outcome.observer).toStrictEqual(outcome.lastSignIn);
+        },
+      ),
+      { numRuns: 40 },
     );
-
-    expect(answer).toStrictEqual({ refused: false, stored: true, status: "signedIn" });
-  });
+  }, 120_000);
 });

@@ -3,7 +3,7 @@ import { Button } from "@media/ui/components/button";
 import { TopBar, TopBarLink } from "@media/ui/components/top-bar";
 import { Wordmark } from "@media/ui/components/wordmark";
 import { cn } from "@media/ui/lib/utils";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import type { LinkProps } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import { Fragment, useState } from "react";
@@ -93,7 +93,6 @@ function Approvals() {
 export function Shell({ children }: { readonly children: ReactNode }) {
   const me = useMe();
   const { signOut } = useAccountActions();
-  const path = useRouterState({ select: (state) => state.location.pathname });
   const [leaving, setLeaving] = useState(false);
 
   const leave = async (): Promise<void> => {
@@ -124,13 +123,7 @@ export function Shell({ children }: { readonly children: ReactNode }) {
           ))}
           actions={
             <>
-              <TopBarLink
-                active={path === "/"}
-                render={<Link to="/" />}
-                aria-label={`${me.username}, switch person`}
-              >
-                {me.username}
-              </TopBarLink>
+              <TopBarLink render={<span />}>{me.username}</TopBarLink>
               <Button variant="ghost" size="xs" disabled={leaving} onClick={() => void leave()}>
                 Sign out
               </Button>

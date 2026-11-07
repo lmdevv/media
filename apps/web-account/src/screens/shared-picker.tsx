@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import { Lede } from "@/components/auth-page";
 import { describeFailure } from "@/lib/failure";
-import { useAccountActions, useOrigin } from "@/session/account";
+import { useAccountActions, useDevice } from "@/session/account";
 import type { SharedPicker, SharedTile } from "@/session/platform-types";
 
 import { useAction } from "./people/action";
@@ -98,7 +98,7 @@ export function SharedPickerView({
 /** A shared device's picker: everyone listed, with locks. */
 export function SharedPickerScreen({ picker }: { readonly picker: SharedPicker }) {
   const platform = usePlatform();
-  const { device } = useOrigin();
+  const device = useDevice()?.code ?? null;
   const { openTile } = useAccountActions();
   const navigate = useNavigate();
   const opening = useAction(openTile);

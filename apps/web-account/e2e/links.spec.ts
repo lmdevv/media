@@ -17,7 +17,7 @@ const open = async (page: Page, link: string): Promise<void> => {
   }
 };
 
-test("accepting an invite lands the new person on the picker", async ({ page }) => {
+test("accepting an invite lands the new person at home", async ({ page }) => {
   if (stack === null) return;
 
   const admin = await createPerson(stack, "admin", "admin");
@@ -35,8 +35,7 @@ test("accepting an invite lands the new person on the picker", async ({ page }) 
     await page.getByLabel("Password", { exact: true }).fill(newSecret());
     await page.getByRole("button", { name: "Create account" }).click();
 
-    await expect(page.getByRole("heading", { name: "Who's here?" })).toBeVisible();
-    await expect(page.getByRole("button", { name: username, exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: `Hi, ${username}.` })).toBeVisible();
   } finally {
     await platform.dispose();
   }
@@ -61,7 +60,6 @@ test("an invite link keeps its code out of requests, referrers, the address, and
   const admin = await createPerson(stack, "admin", "admin");
 
   await signIn(page, admin);
-  await page.getByRole("button", { name: admin.username, exact: true }).click();
   await expect(page).toHaveURL(/\/home$/u);
   await page.goto("/admin");
   await page.getByRole("button", { name: "Create invite link" }).click();
@@ -83,7 +81,7 @@ test("an invite link keeps its code out of requests, referrers, the address, and
     await invitee.getByLabel("Username").fill(username);
     await invitee.getByLabel("Password", { exact: true }).fill(newSecret());
     await invitee.getByRole("button", { name: "Create account" }).click();
-    await expect(invitee.getByRole("button", { name: username, exact: true })).toBeVisible();
+    await expect(invitee.getByRole("heading", { name: `Hi, ${username}.` })).toBeVisible();
 
     await invitee.goBack();
     expect(invitee.url().includes(code), "history holds the code").toBe(false);
@@ -120,7 +118,7 @@ test("a reset link keeps its code out of requests, referrers, the address, and h
 
     await page.getByLabel("New password").fill(newSecret());
     await page.getByRole("button", { name: "Set password" }).click();
-    await expect(page.getByRole("button", { name: person.username, exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: `Hi, ${person.username}.` })).toBeVisible();
 
     await page.goBack();
     expect(page.url().includes(code), "history holds the code").toBe(false);

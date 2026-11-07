@@ -5,7 +5,7 @@ import ReactDOM from "react-dom/client";
 import { openIndexedDb } from "@media/sdk/promise";
 
 import { showsLinkSecret, takeLinkSecret } from "./session/link-secret";
-import { openOriginStore } from "./session/origin";
+import { openBrowserStore } from "./session/browser";
 import { routeTree } from "./routeTree.gen";
 
 const linkSecret = takeLinkSecret(window.location, window.history);
@@ -34,14 +34,14 @@ const shared = await openIndexedDb({
   },
 }).catch(() => null);
 
-const origin = await openOriginStore(shared);
+const store = await openBrowserStore(shared);
 
 const router = createRouter({
   routeTree,
   defaultPreload: "intent",
   scrollRestoration: true,
   context: {
-    origin,
+    store,
     linkSecret,
   },
 });

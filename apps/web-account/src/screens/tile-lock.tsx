@@ -8,7 +8,7 @@ import type { FormEvent } from "react";
 import { AuthPage, Lede, PageTitle, PasswordField } from "@/components/auth-page";
 import { SelectField } from "@/components/admin/parts";
 import { describeFailure } from "@/lib/failure";
-import { useAccountActions, useOrigin } from "@/session/account";
+import { useAccountActions, useDevice } from "@/session/account";
 import type { Approval, SharedPicker, SharedTile, TileProof } from "@/session/platform-types";
 
 import { useAction } from "./people/action";
@@ -242,7 +242,7 @@ function TileLock({
   readonly approval: Approval | null;
 }) {
   const platform = usePlatform();
-  const { device } = useOrigin();
+  const device = useDevice()?.code ?? null;
   const { openTile } = useAccountActions();
   const navigate = useNavigate();
   const [chosen, setChosen] = useState<UserId | null>(null);
