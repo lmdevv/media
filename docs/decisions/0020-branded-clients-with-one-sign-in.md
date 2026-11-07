@@ -60,15 +60,16 @@ One origin's IndexedDB database `media` holds every client's sign-in state, in o
 `kv` of string keys. `session/origin.ts` names the origin's keys, and the SDK's `layerShared`
 names the session keys. `localStorage` holds nothing credential-bearing.
 
-| Key                                | Holds                                                 |
-| ---------------------------------- | ----------------------------------------------------- |
-| `media.device`                     | this browser's device code, `dv_<id>.<secret>`        |
-| `media.active`                     | the slot every client on the origin acts as           |
-| `media.person.<userId>`            | the slot that holds that person's session             |
-| `media.session.<slotId>`           | the session id the slot holds now                     |
-| `media.session.<slotId>:<session>` | that session's tokens                                 |
-| `media.revoked:<session>`          | a sign-out, and the core's confirmation once it comes |
-| `media.signOut:<session>`          | a sign-out the core has not confirmed, for any client |
+| Key                                | Holds                                                                        |
+| ---------------------------------- | ---------------------------------------------------------------------------- |
+| `media.device`                     | this browser's device code, `dv_<id>.<secret>`                               |
+| `media.active`                     | the slot every client on the origin acts as                                  |
+| `media.person.<userId>`            | the slot that holds that person's session                                    |
+| `media.session.<slotId>`           | the slot's session: its id, its person, and that person's sign-in generation |
+| `media.session.<slotId>:<session>` | that session's tokens                                                        |
+| `media.revoked:<session>`          | a sign-out, and the core's confirmation once it comes                        |
+| `media.signOut:<session>`          | a sign-out the core has not confirmed, for any client                        |
+| `media.generation:<userId>`        | the person's sign-in counter, raised by each sign-in                         |
 
 - **A slot** is a random local name for one sign-in's tokens. A password, setup, invite, or reset
   sign-in starts before the client knows whose session it is, so the key cannot carry the
@@ -119,16 +120,21 @@ every tab of the origin, and which works outside secure contexts.
 
 - **Every change is one transaction** that reads what it decides on and writes in the same
   transaction, so no other tab's write lands between the check and the write.
-  - A sign-in writes the session's tokens and the slot's session id.
+  - A sign-in refuses a session that has a revocation, before it writes anything, and the client
+    then counts as signed out. Otherwise it raises the person's sign-in generation and writes the
+    tokens and the slot's session, person, and generation.
   - A renewal writes new tokens only while the stored tokens are still the ones the refresh
     started from and no revocation exists.
   - A sign-out writes the revocation and the pending sign-out and deletes the tokens. If that
     transaction fails, as when storage is full, nothing of it lands. A second transaction then
     deletes the tokens alone, which frees space. The client stays signed out, and its retry keeps
     writing the records again.
-  - The origin's promote, forget, and switch decide from what they read inside their own
-    transaction. Forgetting a slot deletes only the mappings and the active slot that still point
-    at it.
+  - Every change names what it expects and does nothing if the store no longer matches. A promote
+    goes ahead only while the slot holds that person's newest sign-in generation, so a sign-in
+    another tab finished later keeps the person. A slot that lost that way is forgotten. The person's older slot goes too, unless another sign-in has taken it since. A forget
+    names the slot and the session it signed out, and goes ahead only while the slot still holds
+    that session, so a session another tab saved there since stays. It then deletes only the
+    mappings and the active slot that still point at the slot.
   - The sweep deletes a revocation 31 days after the sign-out, past the core's 30-day limit on a
     session and an unused refresh token. It also drops the oldest confirmed revocations past 64.
 - **Every token passes a transactional check.** Before a client hands out any token, the
@@ -152,8 +158,9 @@ every tab of the origin, and which works outside secure contexts.
   key, and this command has no caller.
 - **The account client forgets the slot it signed out of**, which is its own client's slot. The
   forget transaction leaves a slot another tab signed the person in on meanwhile.
-- **Without IndexedDB**, as in some private modes, the browser keeps no sign-in and shows signed
-  out. It never falls back to `localStorage`. The CLI's and old movies' stores are unchanged: a
+- **Without IndexedDB**, as in some private modes, or when it has not opened within five seconds,
+  as when another tab blocks it, the browser keeps no sign-in and shows signed out. A sign-in then
+  says to reload the page. It never falls back to `localStorage`. The CLI's and old movies' stores are unchanged: a
   store one client owns keeps the session under one key.
 - **What this guarantees.** Once the core confirms a sign-out, no credential of that session works
   anywhere. Before that, every tab stops using it at its next token, which first reads the store

@@ -1,6 +1,7 @@
+import { latestGeneration, slotHolding } from "@media/sdk/promise";
 import type { SharedStore, SharedTransaction } from "@media/sdk/promise";
 import { randomUuid } from "@media/ui/lib/secure-context";
-import { Brand } from "effect";
+import { Brand, Option } from "effect";
 
 import type { UserId } from "./platform-types";
 
@@ -44,19 +45,23 @@ export interface OriginStore {
   /** The key a slot's session lives under. */
   readonly sessionKey: (slot: SlotId) => string;
   /**
-   * Makes `slot` the one holding `userId`, and the active slot. A different slot that held
-   * `userId` before goes, since the core keeps one session per person per device, and so does
-   * whoever `slot` held before, as on a shared device whose one slot a new tile took. Idempotent.
+   * Makes `slot` the one holding `userId`, and the active slot; whether it did. It does only while
+   * `slot` holds that person's newest sign-in, so a sign-in another tab finished later wins. A
+   * different slot that held `userId` before goes, since the core keeps one session per person per
+   * device, and so does whoever `slot` held before, as on a shared device whose one slot a new tile
+   * took. Idempotent.
    */
-  readonly promote: (slot: SlotId, userId: UserId) => Promise<void>;
+  readonly promote: (slot: SlotId, userId: UserId) => Promise<boolean>;
+  /** The session `slot` holds now, if any. */
+  readonly sessionIn: (slot: SlotId) => Promise<string | null>;
   /** Makes `slot` the one every client acts as. */
   readonly activate: (slot: SlotId) => Promise<void>;
   /**
-   * Forgets `slot` here: its session, whoever it still held, and the active slot while it is this
-   * one, all as the store holds them at that moment. A person's newer slot, as from signing in
-   * again in another tab meanwhile, is left alone.
+   * Forgets `slot` here, but only while it still holds `session` or nothing: its session, whoever
+   * it still held, and the active slot while it is this one, all as the store holds them at that
+   * moment. A slot that took another session since, or a person's newer slot, is left alone.
    */
-  readonly forget: (slot: SlotId) => Promise<void>;
+  readonly forget: (slot: SlotId, session: string | null) => Promise<void>;
   readonly setDevice: (code: string) => Promise<void>;
   readonly clearDevice: () => Promise<void>;
 }
@@ -74,7 +79,9 @@ const sessionKey = (slot: SlotId): string => `${SESSION}${slot}`;
 const EMPTY: Origin = { device: null, active: null, people: new Map() };
 
 const UNAVAILABLE = () =>
-  Promise.reject(new Error("This browser keeps no sign-in: IndexedDB is unavailable"));
+  Promise.reject(
+    new Error("This browser can't keep a sign-in right now. Reload the page to try again."),
+  );
 
 /** The store when IndexedDB cannot open, as in some private modes: it holds nothing. */
 const unavailable: SharedStore = {
@@ -147,9 +154,12 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
     void refresh();
   });
 
-  const change = async (run: (tx: SharedTransaction) => Promise<void>): Promise<void> => {
-    await (shared ?? unavailable).write(run);
+  const change = async <A>(run: (tx: SharedTransaction) => Promise<A>): Promise<A> => {
+    const result = await (shared ?? unavailable).write(run);
+
     await refresh();
+
+    return result;
   };
 
   return {
@@ -165,27 +175,56 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
     sessionKey,
     promote: (slot, userId) =>
       change(async (tx) => {
+        const held = await slotHolding(tx, sessionKey(slot));
+
+        if (
+          Option.isNone(held) ||
+          held.value.user !== userId ||
+          held.value.generation < (await latestGeneration(tx, userId))
+        ) {
+          return false;
+        }
+
         const { people } = await originIn(tx);
         const before = people.get(userId);
 
         await Promise.all(
-          [...people].flatMap(([other, held]) =>
-            held === slot && other !== userId ? [tx.remove(`${PERSON}${other}`)] : [],
+          [...people].flatMap(([other, slotHeld]) =>
+            slotHeld === slot && other !== userId ? [tx.remove(`${PERSON}${other}`)] : [],
           ),
         );
 
-        if (before !== undefined && before !== slot) await dropSlot(tx, before);
+        // The person's older slot goes, unless another sign-in has taken it since.
+        if (before !== undefined && before !== slot) {
+          const there = await slotHolding(tx, sessionKey(before));
+
+          if (Option.isNone(there) || there.value.user === userId) await dropSlot(tx, before);
+        }
+
         await tx.set(`${PERSON}${userId}`, slot);
         await tx.set(ACTIVE, slot);
+
+        return true;
       }),
+    sessionIn: async (slot) =>
+      Option.match(
+        await (shared ?? unavailable)
+          .read((tx) => slotHolding(tx, sessionKey(slot)))
+          .catch(() => Option.none()),
+        { onNone: () => null, onSome: (held) => held.session },
+      ),
     activate: (slot) => change((tx) => tx.set(ACTIVE, slot)),
-    forget: (slot) =>
+    forget: (slot, session) =>
       change(async (tx) => {
+        const held = await slotHolding(tx, sessionKey(slot));
+
+        if (Option.exists(held, (holding) => holding.session !== session)) return;
+
         const { people, active } = await originIn(tx);
 
         await Promise.all(
-          [...people].flatMap(([person, held]) =>
-            held === slot ? [tx.remove(`${PERSON}${person}`)] : [],
+          [...people].flatMap(([person, slotHeld]) =>
+            slotHeld === slot ? [tx.remove(`${PERSON}${person}`)] : [],
           ),
         );
         await dropSlot(tx, slot);

@@ -58,6 +58,10 @@ export { createPlatform } from "./platform/promise";
 
 export { openIndexedDb } from "./shared-store";
 
+export { latestGeneration, slotHolding } from "./token-storage";
+
+export type { SlotHolding } from "./token-storage";
+
 export type { Channel, IdbFactory, SharedStore, SharedTransaction } from "./shared-store";
 
 export type {

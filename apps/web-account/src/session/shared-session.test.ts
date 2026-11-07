@@ -411,6 +411,67 @@ describe("clients sharing one session store", () => {
   });
 });
 
+describe("a sign-in answered late", () => {
+  it("never stores a session another tab signed out while the answer was on its way", async () => {
+    const answer = await run(
+      Effect.gen(function* () {
+        const { fake } = yield* fakeCore();
+        const tabs = yield* tabsOf(3, "manual");
+        const first = yield* openClient(fake, tabs.tab(0));
+        const second = yield* openClient(fake, tabs.tab(1));
+        const shared = jwtExpiringAt(Date.now() + 3_600_000, "user-ada|session-tile");
+        const late = yield* Deferred.make<void>();
+        const answered = yield* Ref.make(0);
+
+        // Both tabs redeem the same approved tile opening, so the core answers both with one session.
+        yield* fake.handle("auth:signIn", () =>
+          Effect.gen(function* () {
+            if ((yield* Ref.getAndUpdate(answered, (count) => count + 1)) > 0) {
+              yield* Deferred.await(late);
+            }
+
+            return Reply.Success({
+              value: { tokens: { token: shared, refreshToken: "refresh-tile" } },
+            });
+          }),
+        );
+
+        yield* first.session.signIn(password("ada"));
+
+        const signingIn = yield* Effect.forkChild(
+          Effect.exit(second.session.signIn(password("ada"))),
+        );
+
+        yield* settle;
+        yield* first.session.signOut;
+        yield* Deferred.succeed(late, undefined);
+        const signedIn = yield* Fiber.join(signingIn);
+
+        tabs.deliver();
+        yield* settle;
+
+        const observer = yield* openClient(fake, tabs.tab(2));
+
+        return {
+          refused: Exit.isFailure(signedIn),
+          storedAgain: (yield* keysOf(tabs)).includes(`${KEY}:user-ada|session-tile`),
+          second: yield* second.session.currentStatus,
+          secondCalls: Option.isNone(yield* bearerOf(second, fake)),
+          observer: yield* observer.session.currentStatus,
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      refused: true,
+      storedAgain: false,
+      second: "signedOut",
+      secondCalls: true,
+      observer: "signedOut",
+    });
+  });
+});
+
 describe("a sign-out the server could not confirm", () => {
   it.each(["the same tab", "another tab"] as const)(
     "is finished from %s after the slot is forgotten and its client disposed",

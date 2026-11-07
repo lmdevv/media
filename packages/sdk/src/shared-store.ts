@@ -94,9 +94,18 @@ const settle = <T>(request: IdbRequest<T>): Promise<T> =>
     });
   });
 
+/** How long an open may wait, as when another tab blocks it, before the store counts as unavailable. */
+const OPEN_TIMEOUT_MS = 5000;
+
 const opened = (factory: IdbFactory, name: string): Promise<IdbDatabase> =>
   new Promise((resolve, reject) => {
     const request = factory.open(name, VERSION);
+    let late = false;
+
+    const timer = setTimeout(() => {
+      late = true;
+      reject(new Error("IndexedDB did not open in time"));
+    }, OPEN_TIMEOUT_MS);
 
     request.addEventListener("upgradeneeded", () => {
       if (!request.result.objectStoreNames.contains(STORE)) {
@@ -105,17 +114,22 @@ const opened = (factory: IdbFactory, name: string): Promise<IdbDatabase> =>
     });
 
     request.addEventListener("success", () => {
-      resolve(request.result);
+      clearTimeout(timer);
+
+      if (late) request.result.close();
+      else resolve(request.result);
     });
 
     request.addEventListener("error", () => {
+      clearTimeout(timer);
       reject(request.error);
     });
   });
 
 /**
  * Opens the shared store `name` in `indexedDB`, with `channel` telling the other clients when a
- * write commits. Rejects when IndexedDB cannot open it, as in some private modes.
+ * write commits. Rejects when IndexedDB cannot open it, as in some private modes, or has not
+ * opened it within five seconds, as when another tab blocks it.
  */
 export const openIndexedDb = async (options: {
   readonly indexedDB: IdbFactory;

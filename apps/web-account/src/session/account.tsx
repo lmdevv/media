@@ -149,7 +149,9 @@ export const useAccountActions = (): AccountActions => {
   const establish = async (): Promise<void> => {
     const userId = await register();
 
-    await store.promote(slot, userId);
+    // A sign-in of the same person that another tab finished later keeps the person; this slot's
+    // older session then goes.
+    if (!(await store.promote(slot, userId))) await store.forget(slot, await store.sessionIn(slot));
 
     // A page that asked for a sign-in, such as /device from a CLI's link, shows once it is done;
     // the picker, Add someone, an invite, and a reset link go on to the picker.
@@ -203,15 +205,17 @@ export const useAccountActions = (): AccountActions => {
     },
     signOut: async () => {
       // This client's slot holds the session being signed out. Another tab may sign the person in
-      // on a new slot meanwhile, and `forget` decides inside its transaction, so that one stays.
+      // on a new slot, or open a tile in this slot, meanwhile; `forget` names the session and
+      // decides inside its transaction, so either stays.
       // Signing out returns once the store holds the revocation; the server is told in the
       // background, so nothing here waits on the server.
       const signingOut = slot;
+      const session = await store.sessionIn(signingOut);
 
       try {
         await platform.session.signOut();
       } finally {
-        await store.forget(signingOut);
+        await store.forget(signingOut, session);
         await navigate({ to: "/" });
       }
     },

@@ -876,11 +876,21 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       });
     }
 
-    return yield* committing.withPermits(1)(
-      storage
-        .save(opened.value)
-        .pipe(Effect.andThen(Ref.set(lastStored, opened)), Effect.andThen(adopt(opened))),
+    const stored = yield* committing.withPermits(1)(
+      Effect.gen(function* () {
+        if (!(yield* storage.save(opened.value))) return false;
+        yield* Ref.set(lastStored, opened);
+        yield* adopt(opened);
+
+        return true;
+      }),
     );
+
+    if (stored) return yield* Effect.void;
+
+    return yield* new Unauthenticated({
+      message: "Sign-in refused: this session was signed out on this device meanwhile",
+    });
   });
 
   /**

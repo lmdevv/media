@@ -65,8 +65,11 @@ export type Revocation = "none" | "pending" | "confirmed" | "missing";
 export interface Interface {
   /** The current session; none when signed out, when it was revoked, or when it is unreadable. */
   readonly load: Effect.Effect<Option.Option<StoredSession>, TokenStorageError>;
-  /** Makes a new sign-in the current session. */
-  readonly save: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
+  /**
+   * Makes a new sign-in the current session; whether it did. A session that was signed out here
+   * is never stored again, as when another tab signed out the session a late answer carries.
+   */
+  readonly save: (session: StoredSession) => Effect.Effect<boolean, TokenStorageError>;
   /**
    * Stores `renewed`, a renewal of the session in `expected`, only while the store still holds
    * `expected` for that session; whether it did. It never changes which session is current.
@@ -121,11 +124,11 @@ export const sameStored = Option.makeEquivalence<StoredSession>(
  */
 export const owned = (store: {
   readonly load: Interface["load"];
-  readonly save: Interface["save"];
+  readonly save: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
   readonly clear: Effect.Effect<void, TokenStorageError>;
 }): Interface => ({
   load: store.load,
-  save: store.save,
+  save: (session) => Effect.as(store.save(session), true),
   renew: (_expected, renewed) => Effect.as(store.save(renewed), true),
   revoke: () => store.clear,
   confirmRevoked: () => Effect.void,
@@ -265,6 +268,35 @@ const REVOKED = "media.revoked:";
 /** Sign-outs the core has not confirmed, one per session id, for any client to finish. */
 const PENDING = "media.signOut:";
 
+const SlotRecord = Schema.fromJsonString(
+  Schema.Struct({ session: Schema.String, user: Schema.String, generation: Schema.Finite }),
+);
+
+const decodeSlot = Schema.decodeUnknownOption(SlotRecord);
+
+const encodeSlot = Schema.encodeSync(SlotRecord);
+
+/** What a slot holds: its session, whose it is, and which of that person's sign-ins it was. */
+export interface SlotHolding {
+  readonly session: string;
+  readonly user: string;
+  readonly generation: number;
+}
+
+/** The person's sign-in counter, raised inside each sign-in's transaction. */
+const GENERATION = "media.generation:";
+
+/** What the slot under `key` holds, read inside `tx`; none for an empty or unreadable slot. */
+export const slotHolding = async (
+  tx: SharedTransaction,
+  key: string,
+): Promise<Option.Option<SlotHolding>> =>
+  Option.flatMap(Option.fromNullishOr(await tx.get(key)), decodeSlot);
+
+/** The newest sign-in generation of `user`, read inside `tx`; 0 before any. */
+export const latestGeneration = async (tx: SharedTransaction, user: string): Promise<number> =>
+  Number((await tx.get(`${GENERATION}${user}`)) ?? "0") || 0;
+
 const tokensIn = async (tx: SharedTransaction, key: string) =>
   Option.flatMap(Option.fromNullishOr(await tx.get(key)), parseStoredSession);
 
@@ -325,17 +357,27 @@ export const layerShared = (store: SharedStore, slot: string): Layer.Layer<Token
     TokenStorage,
     TokenStorage.of({
       load: attempt("load", "read", async (tx) => {
-        const id = await tx.get(slot);
+        const held = await slotHolding(tx, slot);
 
-        if (id === undefined || Option.isSome(await revokedIn(tx, id))) return Option.none();
+        if (Option.isNone(held) || Option.isSome(await revokedIn(tx, held.value.session))) {
+          return Option.none();
+        }
 
-        return tokensIn(tx, tokensKey(id));
+        return tokensIn(tx, tokensKey(held.value.session));
       }).pipe(Effect.orElseSucceed(() => Option.none<StoredSession>())),
       save: (session) =>
         Effect.flatMap(idOf(session, "save"), (id) =>
           attempt("save", "write", async (tx) => {
+            if (Option.isSome(await revokedIn(tx, id))) return false;
+
+            const user = id.split("|")[0] ?? id;
+            const generation = (await latestGeneration(tx, user)) + 1;
+
+            await tx.set(`${GENERATION}${user}`, String(generation));
             await tx.set(tokensKey(id), serializeSession(session));
-            await tx.set(slot, id);
+            await tx.set(slot, encodeSlot({ session: id, user, generation }));
+
+            return true;
           }),
         ),
       renew: (expected, renewed) =>

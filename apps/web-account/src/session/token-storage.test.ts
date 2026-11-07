@@ -1,9 +1,10 @@
 import { TokenStorage as Storage } from "@media/sdk/effect";
+import { openIndexedDb } from "@media/sdk/promise";
 import type { SharedStore } from "@media/sdk/promise";
 import { jwtExpiringAt } from "@media/sdk/testing/fake-convex";
 import { Context, Effect, Exit, Layer, Option, Redacted } from "effect";
 import { TestClock } from "effect/testing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { makeBrowserTabs } from "./testing/browser-tabs";
 import type { BrowserTabs } from "./testing/browser-tabs";
@@ -99,7 +100,7 @@ describe("token storage shared between tabs in IndexedDB", () => {
 
     expect(answer).toStrictEqual({
       revoked: true,
-      keys: ["s"],
+      keys: ["media.generation:ada", "s"],
       revocation: "missing",
       late: false,
     });
@@ -219,14 +220,73 @@ describe("token storage shared between tabs in IndexedDB", () => {
 
     expect(answer).toStrictEqual({
       before: [
+        "media.generation:ada",
+        "media.generation:bo",
+        "media.generation:cleo",
         "media.revoked:ada|session-1",
         "media.revoked:cleo|session-3",
         "media.signOut:cleo|session-3",
         "s",
         "s:bo|session-2",
       ],
-      after: ["s", "s:bo|session-2"],
+      after: [
+        "media.generation:ada",
+        "media.generation:bo",
+        "media.generation:cleo",
+        "s",
+        "s:bo|session-2",
+      ],
       loaded: Option.some("refresh-3"),
     });
+  });
+
+  it("never stores a session again once it was signed out here", async () => {
+    const answer = await Effect.runPromise(
+      Effect.gen(function* () {
+        const tabs = yield* tabsOf(2);
+        const signingOut = yield* sharedOver(tabs.tab(0));
+        const late = yield* sharedOver(tabs.tab(1));
+
+        yield* signingOut.save(ada);
+        yield* signingOut.revoke(ada);
+
+        return {
+          stored: yield* late.save(ada),
+          loaded: yield* late.load,
+          tokens: (yield* keysOf(tabs)).includes("s:ada|session-1"),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({ stored: false, loaded: Option.none(), tokens: false });
+  });
+});
+
+describe("opening IndexedDB", () => {
+  it("gives up after five seconds when the open never finishes, as when another tab blocks it", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const opening = openIndexedDb({
+        indexedDB: {
+          open: () => ({
+            get result(): never {
+              throw new Error("A stalled open has no database");
+            },
+            error: undefined,
+            addEventListener: () => undefined,
+          }),
+        },
+        name: "media",
+        channel: () => ({ post: () => undefined, close: () => undefined }),
+      });
+
+      const settled = expect(opening).rejects.toThrow("did not open in time");
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
