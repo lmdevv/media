@@ -306,13 +306,13 @@ describe("clients sharing one session store", () => {
     expect(answer).toStrictEqual({ second: true, observer: "signedOut", ended: true });
   }, 15_000);
 
-  it("keeps both sign-outs when two sessions on one key sign out at once", async () => {
+  it("keeps both sign-outs when two sessions on two keys sign out at once", async () => {
     const answer = await run(
       Effect.gen(function* () {
         const { fake, down } = yield* fakeCore();
-        const tabs = yield* tabsOf(4, "manual");
+        const tabs = yield* tabsOf(5, "manual");
         const ada = yield* openClient(fake, tabs.tab(0));
-        const bo = yield* openClient(fake, tabs.tab(1));
+        const bo = yield* openClient(fake, tabs.tab(1), `${KEY}-bo`);
         const late = yield* openClient(fake, tabs.tab(2));
 
         yield* ada.session.signIn(password("ada"));
@@ -327,15 +327,17 @@ describe("clients sharing one session store", () => {
         yield* settle;
 
         const observer = yield* openClient(fake, tabs.tab(3));
+        const boObserver = yield* openClient(fake, tabs.tab(4), `${KEY}-bo`);
 
         return {
           observer: yield* observer.session.currentStatus,
+          boObserver: yield* boObserver.session.currentStatus,
           late: Option.isNone(yield* bearerOf(late, fake)),
         };
       }),
     );
 
-    expect(answer).toStrictEqual({ observer: "signedOut", late: true });
+    expect(answer).toStrictEqual({ observer: "signedOut", boObserver: "signedOut", late: true });
   });
 
   it("never brings back a session whose sign-out could only delete it, whatever renewal lands later", async () => {
@@ -383,19 +385,42 @@ describe("clients sharing one session store", () => {
     expect(answer).toStrictEqual({ observer: false, second: false });
   });
 
-  it("keeps a sign-in another tab made on the same key while this tab signed out", async () => {
+  it("keeps a sign-in whose answer reached the same key once this tab signed out", async () => {
     const answer = await run(
       Effect.gen(function* () {
-        const { fake } = yield* fakeCore();
+        const { fake, answerSignIns } = yield* fakeCore();
         const tabs = yield* tabsOf(3, "manual");
         const first = yield* openClient(fake, tabs.tab(0));
         const second = yield* openClient(fake, tabs.tab(1));
+        const release = yield* Deferred.make<void>();
 
         yield* first.session.signIn(password("ada"));
         tabs.deliver();
         yield* settle;
-        yield* second.session.signIn(password("bo"));
+
+        // Bo's answer waits until Ada has signed out; a key holding a live session takes no other.
+        yield* fake.handle("auth:signIn", () =>
+          Effect.gen(function* () {
+            yield* Deferred.await(release);
+
+            return Reply.Success({
+              value: {
+                tokens: {
+                  token: jwtExpiringAt(Date.now() + 3_600_000, "bo|session-late"),
+                  refreshToken: "refresh-bo",
+                },
+              },
+            });
+          }),
+        );
+
+        const signingIn = yield* Effect.forkChild(second.session.signIn(password("bo")));
+
+        yield* settle;
         yield* first.session.signOut;
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(signingIn);
+        yield* answerSignIns;
         tabs.deliver();
         yield* settle;
 
@@ -698,8 +723,13 @@ describe("any interleaving of tabs sharing one session store", () => {
 
               switch (next.kind) {
                 case "signIn": {
-                  yield* Effect.ignore(client.session.signIn(password(next.person)));
-                  lastSignIn = yield* bearerOf(client, fake);
+                  // A key holding a live session takes no other sign-in; only a stored one counts.
+                  const stored = yield* Effect.option(client.session.signIn(password(next.person)));
+
+                  if (Option.isSome(stored) && Option.isSome(stored.value)) {
+                    lastSignIn = stored.value;
+                  }
+
                   break;
                 }
 
@@ -785,7 +815,7 @@ describe("a sign-in's answer", () => {
     });
   });
 
-  it("is refused when it lands more than five minutes after its request began", async () => {
+  it("is stored when a valid answer lands ten minutes after its request, as in a suspended tab", async () => {
     const answer = await run(
       Effect.gen(function* () {
         const testClock = yield* Layer.build(TestClock.layer());
@@ -819,7 +849,7 @@ describe("a sign-in's answer", () => {
           );
 
           yield* Deferred.await(arrived);
-          yield* TestClock.adjust(5 * 60 * 1000 + 1);
+          yield* TestClock.adjust(10 * 60 * 1000);
           yield* Deferred.succeed(release, undefined);
           const signedIn = yield* Fiber.join(signingIn);
 
@@ -832,6 +862,6 @@ describe("a sign-in's answer", () => {
       }),
     );
 
-    expect(answer).toStrictEqual({ refused: true, stored: false, status: "signedOut" });
+    expect(answer).toStrictEqual({ refused: false, stored: true, status: "signedIn" });
   });
 });

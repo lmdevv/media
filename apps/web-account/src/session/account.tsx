@@ -1,3 +1,4 @@
+import { createPlatform } from "@media/sdk/promise";
 import { PlatformProvider, usePlatform } from "@media/sdk/react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { Match, Predicate } from "effect";
@@ -12,6 +13,8 @@ import { settleSignIn } from "./sign-in";
 
 interface AccountContext {
   readonly store: OriginStore;
+  /** The core's URL, for a client of a slot other than this tab's. */
+  readonly url: string;
   readonly origin: Origin;
   /** The slot this tab's client runs on. */
   readonly slot: SlotId;
@@ -75,7 +78,7 @@ export function AccountProvider({
 
   const slot = pinned ?? (freshSlot || origin.active === null ? staging.slot : origin.active);
 
-  const context = useMemo(() => ({ store, origin, slot, pin }), [store, origin, slot]);
+  const context = useMemo(() => ({ store, url, origin, slot, pin }), [store, url, origin, slot]);
 
   return (
     <Context value={context}>
@@ -123,7 +126,7 @@ export interface AccountActions {
 
 /** The actions on this browser's people, for the current client. */
 export const useAccountActions = (): AccountActions => {
-  const { store, origin, slot, pin } = useAccountContext();
+  const { store, url, origin, slot, pin } = useAccountContext();
   const platform = usePlatform();
   const navigate = useNavigate();
   const router = useRouter();
@@ -227,11 +230,34 @@ export const useAccountActions = (): AccountActions => {
 
       if (device === null) throw new SharedDeviceError();
 
-      const session = await platform.session.openTile(
-        proof === undefined ? { device, userId } : { device, userId, proof },
-      );
+      // A tile signs in on a slot of its own, since a sign-in never replaces the session another
+      // slot holds. Opening it ends the tile session this device held, so once the new one is
+      // the person's, the slot of the one it replaced goes, by that session's name.
+      const replaced = await platform.session.currentSession();
+      const fresh = newSlot();
 
-      if (session !== null) await settleSignIn(store, slot, { userId, session, joined: null });
+      const opener = createPlatform({
+        url,
+        connection: "http",
+        storage: store.sessions,
+        storageKey: store.sessionKey(fresh),
+      });
+
+      try {
+        const session = await opener.session.openTile(
+          proof === undefined ? { device, userId } : { device, userId, proof },
+        );
+
+        const settled =
+          session !== null && (await settleSignIn(store, fresh, { userId, session, joined: null }));
+
+        if (settled && replaced !== null && replaced !== session) {
+          await store.forget(slot, replaced);
+        }
+      } finally {
+        await opener.dispose();
+      }
+
       await navigate({ to: "/home" });
     },
     signOut: async () => {

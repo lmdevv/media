@@ -11,6 +11,7 @@ import { newSlot, openOriginStore } from "./origin";
 import type { OriginStore } from "./origin";
 import type { UserId } from "./platform-types";
 import { settleSignIn } from "./sign-in";
+import { DAY, onClockSkewedBy } from "./testing/clock";
 
 const userId = Brand.nominal<UserId>();
 
@@ -106,7 +107,7 @@ const signIn = async (
 ) => {
   const sessions = await sessionsOf(shared, store, slot);
 
-  await Effect.runPromise(sessions.save(sessionAs(subject), Date.now()));
+  await Effect.runPromise(sessions.save(sessionAs(subject)));
 };
 
 const refreshOf = (loaded: Option.Option<{ readonly refreshToken: Redacted.Redacted }>) =>
@@ -134,8 +135,8 @@ const twoSignIns = async () => {
   const firstSessions = await sessionsOf(firstDb, first, firstSlot);
   const secondSessions = await sessionsOf(secondDb, second, secondSlot);
 
-  await Effect.runPromise(firstSessions.save(sessionAs("user-ada|session-1"), Date.now()));
-  await Effect.runPromise(secondSessions.save(sessionAs("user-ada|session-2"), Date.now()));
+  await Effect.runPromise(firstSessions.save(sessionAs("user-ada|session-1")));
+  await Effect.runPromise(secondSessions.save(sessionAs("user-ada|session-2")));
 
   return { first, second, firstSlot, secondSlot, firstSessions, secondSessions, deliver };
 };
@@ -181,16 +182,29 @@ describe("the origin store", () => {
     expect(store.read().people).toStrictEqual(new Map([[ada, second]]));
   });
 
-  it("gives a shared device's one slot to the tile opened last", async () => {
+  it("moves a shared device to the tile opened last, on a slot of its own", async () => {
     const { store, shared } = await one();
-    const slot = newSlot();
+    const first = newSlot();
+    const second = newSlot();
 
-    await signIn(shared, store, slot, "user-ada|s1");
-    await store.promote(slot, { userId: ada, session: "user-ada|s1", joined: null });
-    await signIn(shared, store, slot, "user-bo|s2");
-    await store.promote(slot, { userId: bo, session: "user-bo|s2", joined: null });
+    await signIn(shared, store, first, "user-ada|s1");
+    await settleSignIn(store, first, { userId: ada, session: "user-ada|s1", joined: null });
 
-    expect(store.read().people).toStrictEqual(new Map([[bo, slot]]));
+    // The next tile signs in on a fresh slot, since its sign-in may not replace Ada's session.
+    await signIn(shared, store, first, "user-bo|s2");
+    await signIn(shared, store, second, "user-bo|s2");
+    await settleSignIn(store, second, { userId: bo, session: "user-bo|s2", joined: null });
+
+    // Opening it ended Ada's tile, so the account client forgets that slot by Ada's session.
+    await store.forget(first, "user-ada|s1");
+
+    expect({
+      origin: store.read(),
+      first: (await keysOf(shared)).filter((key) => key.startsWith(store.sessionKey(first))),
+    }).toStrictEqual({
+      origin: { device: null, active: second, people: new Map([[bo, second]]) },
+      first: [],
+    });
   });
 
   it("drops a forgotten slot's tokens but keeps the sessions' revocations", async () => {
@@ -435,12 +449,17 @@ describe("the origin store", () => {
     const second = sessionAs("user-ada|session-2");
 
     // The first sign-in saves and joins at 1; its enrollment answer is held.
-    await Effect.runPromise((await sessionsOf(lostDb, lost, slot)).save(first, Date.now()));
+    const lostSessions = await sessionsOf(lostDb, lost, slot);
 
-    // The second signs into the same slot, joins at 2, which ends the first, and promotes.
+    await Effect.runPromise(lostSessions.save(first));
+
+    // The slot takes no other sign-in while it holds the first session; once that is signed out
+    // here, the second signs into the slot, joins at 2, and promotes.
     const keptSessions = await sessionsOf(keptDb, kept, slot);
+    const refusedWhileLive = await Effect.runPromise(keptSessions.save(second));
 
-    await Effect.runPromise(keptSessions.save(second, Date.now()));
+    await Effect.runPromise(lostSessions.revoke(first));
+    await Effect.runPromise(keptSessions.save(second));
     await settleSignIn(kept, slot, {
       userId: ada,
       session: "user-ada|session-2",
@@ -460,10 +479,12 @@ describe("the origin store", () => {
     });
 
     expect({
+      refusedWhileLive,
       settled,
       people: lost.read().people,
       loaded: refreshOf(await Effect.runPromise(keptSessions.load)),
     }).toStrictEqual({
+      refusedWhileLive: false,
       settled: false,
       people: new Map([[ada, slot]]),
       loaded: Option.some("refresh-user-ada|session-2b"),
@@ -490,10 +511,10 @@ describe("the origin store", () => {
     const there = await sessionsOf(second, opening, slot);
     const adaSession = sessionAs("user-ada|session-1");
 
-    await Effect.runPromise(here.save(adaSession, Date.now()));
+    await Effect.runPromise(here.save(adaSession));
     await signingOut.promote(slot, { userId: ada, session: "user-ada|session-1", joined: null });
     await Effect.runPromise(here.revoke(adaSession));
-    await Effect.runPromise(there.save(sessionAs("user-bo|session-2"), Date.now()));
+    await Effect.runPromise(there.save(sessionAs("user-bo|session-2")));
     await opening.promote(slot, { userId: bo, session: "user-bo|session-2", joined: null });
     await signingOut.forget(slot, "user-ada|session-1");
 
@@ -567,223 +588,233 @@ const later = <A>(work: () => Promise<A>) => Effect.promise(work);
 describe("any interleaving of sign-ins, joins, promotions, sign-outs, and forgets across tabs", () => {
   it("never loads a signed-out session, and keeps the sign-in whose session the core kept", async () => {
     await fc.assert(
-      fc.asyncProperty(fc.array(step, { minLength: 4, maxLength: 30 }), async (steps) => {
-        const { stores, shared, deliver } = await tabs(TABS);
+      fc.asyncProperty(
+        fc.array(step, { minLength: 4, maxLength: 30 }),
+        // Each tab's clock runs up to 60 days off; nothing in the store may depend on it.
+        fc.array(fc.integer({ min: -60 * DAY, max: 60 * DAY }), {
+          minLength: TABS,
+          maxLength: TABS,
+        }),
+        async (steps, skews) => {
+          const { stores, shared, deliver } = await tabs(TABS);
 
-        const at = (tab: number) => {
-          const store = stores[tab];
-          const db = shared[tab];
+          const on = (tab: number) => onClockSkewedBy(skews[tab] ?? 0);
 
-          if (store === undefined || db === undefined) throw new Error("No tab");
+          const at = (tab: number) => {
+            const store = stores[tab];
+            const db = shared[tab];
 
-          return { store, db };
-        };
+            if (store === undefined || db === undefined) throw new Error("No tab");
 
-        const storage = (tab: number, slot: ReturnType<typeof newSlot>) =>
-          later(() => sessionsOf(at(tab).db, at(tab).store, slot));
+            return { store, db };
+          };
 
-        const violations = await sequence(
-          Effect.gen(function* () {
-            const sessions = new Map<string, ReturnType<typeof sessionAs>>();
+          const storage = (tab: number, slot: ReturnType<typeof newSlot>) =>
+            later(() => sessionsOf(at(tab).db, at(tab).store, slot));
 
-            const signedIn: Array<{
-              person: "ada" | "bo";
-              slot: ReturnType<typeof newSlot>;
-              session: string;
-            }> = [];
+          const violations = await sequence(
+            Effect.gen(function* () {
+              const sessions = new Map<string, ReturnType<typeof sessionAs>>();
 
-            const joining: Array<{
-              tab: number;
-              person: "ada" | "bo";
-              slot: ReturnType<typeof newSlot>;
-              session: string;
-            }> = [];
+              const signedIn: Array<{
+                person: "ada" | "bo";
+                slot: ReturnType<typeof newSlot>;
+                session: string;
+              }> = [];
 
-            const promotions: Array<{
-              tab: number;
-              person: "ada" | "bo";
-              slot: ReturnType<typeof newSlot>;
-              session: string;
-              sequence: number;
-            }> = [];
+              const joining: Array<{
+                tab: number;
+                person: "ada" | "bo";
+                slot: ReturnType<typeof newSlot>;
+                session: string;
+              }> = [];
 
-            // The core's order: each join takes the next number and ends the person's earlier
-            // session on the device, so the person's last join is the session still live.
-            const joined: Array<{
-              person: "ada" | "bo";
-              slot: ReturnType<typeof newSlot>;
-              session: string;
-            }> = [];
+              const promotions: Array<{
+                tab: number;
+                person: "ada" | "bo";
+                slot: ReturnType<typeof newSlot>;
+                session: string;
+                sequence: number;
+              }> = [];
 
-            const forgets: Array<{
-              tab: number;
-              slot: ReturnType<typeof newSlot>;
-              session: string | null;
-            }> = [];
+              // The core's order: each join takes the next number and ends the person's earlier
+              // session on the device, so the person's last join is the session still live.
+              const joined: Array<{
+                person: "ada" | "bo";
+                slot: ReturnType<typeof newSlot>;
+                session: string;
+              }> = [];
 
-            const revoked = new Set<string>();
-            const lastSaved = new Map<string, string>();
-            const found: Array<string> = [];
-            let made = 0;
+              const forgets: Array<{
+                tab: number;
+                slot: ReturnType<typeof newSlot>;
+                session: string | null;
+              }> = [];
 
-            const runJoin = (index: number) => {
-              const [join] = joining.splice(index % joining.length, 1);
+              const revoked = new Set<string>();
+              const lastSaved = new Map<string, string>();
+              const found: Array<string> = [];
+              let made = 0;
 
-              if (join === undefined) return;
-              joined.push(join);
-              promotions.push({ ...join, sequence: joined.length });
-            };
+              const runJoin = (index: number) => {
+                const [join] = joining.splice(index % joining.length, 1);
 
-            const runPromotion = (index: number) =>
-              Effect.gen(function* () {
-                const [promotion] = promotions.splice(index % promotions.length, 1);
+                if (join === undefined) return;
+                joined.push(join);
+                promotions.push({ ...join, sequence: joined.length });
+              };
 
-                if (promotion === undefined) return;
-                const { store } = at(promotion.tab);
+              const runPromotion = (index: number) =>
+                Effect.gen(function* () {
+                  const [promotion] = promotions.splice(index % promotions.length, 1);
 
-                // The account client's own settling of a finished sign-in.
-                yield* later(() =>
-                  settleSignIn(store, promotion.slot, {
-                    userId: PEOPLE[promotion.person],
-                    session: promotion.session,
-                    joined: { deviceId: "device-1", sequence: promotion.sequence },
-                  }),
-                );
-              });
+                  if (promotion === undefined) return;
+                  const { store } = at(promotion.tab);
 
-            const runForget = (index: number) =>
-              Effect.gen(function* () {
-                const [forget] = forgets.splice(index % forgets.length, 1);
+                  // The account client's own settling of a finished sign-in.
+                  yield* later(() =>
+                    settleSignIn(store, promotion.slot, {
+                      userId: PEOPLE[promotion.person],
+                      session: promotion.session,
+                      joined: { deviceId: "device-1", sequence: promotion.sequence },
+                    }),
+                  );
+                });
 
-                if (forget === undefined) return;
-                yield* later(() => at(forget.tab).store.forget(forget.slot, forget.session));
-              });
+              const runForget = (index: number) =>
+                Effect.gen(function* () {
+                  const [forget] = forgets.splice(index % forgets.length, 1);
 
-            for (const next of steps) {
-              switch (next.kind) {
-                case "signIn": {
-                  const { store } = at(next.tab);
-                  const slot = next.reuse ? (store.read().active ?? newSlot()) : newSlot();
+                  if (forget === undefined) return;
+                  yield* later(() => at(forget.tab).store.forget(forget.slot, forget.session));
+                });
 
-                  made += 1;
-                  const session = `user-${next.person}|s${made}`;
-                  const tokens = sessionAs(session);
+              for (const next of steps) {
+                switch (next.kind) {
+                  case "signIn": {
+                    const { store } = at(next.tab);
+                    const slot = next.reuse ? (store.read().active ?? newSlot()) : newSlot();
 
-                  sessions.set(session, tokens);
+                    made += 1;
+                    const session = `user-${next.person}|s${made}`;
+                    const tokens = sessionAs(session);
 
-                  if (yield* (yield* storage(next.tab, slot)).save(tokens, Date.now())) {
-                    signedIn.push({ person: next.person, slot, session });
-                    lastSaved.set(slot, session);
-                    joining.push({ tab: next.tab, person: next.person, slot, session });
+                    sessions.set(session, tokens);
+
+                    if (yield* on(next.tab)((yield* storage(next.tab, slot)).save(tokens))) {
+                      signedIn.push({ person: next.person, slot, session });
+                      lastSaved.set(slot, session);
+                      joining.push({ tab: next.tab, person: next.person, slot, session });
+                    }
+
+                    break;
                   }
 
-                  break;
-                }
+                  case "join":
+                    runJoin(next.pick);
+                    break;
+                  case "promote":
+                    if (promotions.length > 0) yield* runPromotion(next.pick);
+                    break;
+                  case "renew": {
+                    const renewing = signedIn[next.pick % Math.max(signedIn.length, 1)];
 
-                case "join":
-                  runJoin(next.pick);
-                  break;
-                case "promote":
-                  if (promotions.length > 0) yield* runPromotion(next.pick);
-                  break;
-                case "renew": {
-                  const renewing = signedIn[next.pick % Math.max(signedIn.length, 1)];
+                    const tokens =
+                      renewing === undefined ? undefined : sessions.get(renewing.session);
 
-                  const tokens =
-                    renewing === undefined ? undefined : sessions.get(renewing.session);
+                    if (renewing === undefined || tokens === undefined) break;
+                    made += 1;
 
-                  if (renewing === undefined || tokens === undefined) break;
-                  made += 1;
+                    const renewed = { ...tokens, refreshToken: Redacted.make(`refresh-r${made}`) };
+                    const renewer = yield* storage(next.tab, renewing.slot);
 
-                  const renewed = { ...tokens, refreshToken: Redacted.make(`refresh-r${made}`) };
-                  const renewer = yield* storage(next.tab, renewing.slot);
+                    if (yield* on(next.tab)(renewer.renew(tokens, renewed))) {
+                      sessions.set(renewing.session, renewed);
+                    }
 
-                  if (yield* renewer.renew(tokens, renewed)) {
-                    sessions.set(renewing.session, renewed);
+                    break;
                   }
 
-                  break;
-                }
+                  case "signOut": {
+                    const { store } = at(next.tab);
+                    const slot = store.read().active;
 
-                case "signOut": {
-                  const { store } = at(next.tab);
-                  const slot = store.read().active;
+                    if (slot === null) break;
+                    const session = yield* later(() => sessionIn(store, slot));
+                    const tokens = session === null ? undefined : sessions.get(session);
 
-                  if (slot === null) break;
-                  const session = yield* later(() => sessionIn(store, slot));
-                  const tokens = session === null ? undefined : sessions.get(session);
-
-                  if (session === null || tokens === undefined) break;
-                  yield* (yield* storage(next.tab, slot)).revoke(tokens);
-                  revoked.add(session);
-                  forgets.push({ tab: next.tab, slot, session });
-                  break;
-                }
-
-                case "forget":
-                  if (forgets.length > 0) yield* runForget(next.pick);
-                  break;
-                case "lateAnswer": {
-                  const late = [...revoked][next.pick % Math.max(revoked.size, 1)];
-                  const where = signedIn.find((each) => each.session === late);
-                  const tokens = late === undefined ? undefined : sessions.get(late);
-
-                  if (where === undefined || tokens === undefined) break;
-
-                  if (yield* (yield* storage(0, where.slot)).save(tokens, Date.now())) {
-                    found.push(`a late answer stored ${where.session} again`);
+                    if (session === null || tokens === undefined) break;
+                    yield* on(next.tab)((yield* storage(next.tab, slot)).revoke(tokens));
+                    revoked.add(session);
+                    forgets.push({ tab: next.tab, slot, session });
+                    break;
                   }
 
-                  break;
+                  case "forget":
+                    if (forgets.length > 0) yield* runForget(next.pick);
+                    break;
+                  case "lateAnswer": {
+                    const late = [...revoked][next.pick % Math.max(revoked.size, 1)];
+                    const where = signedIn.find((each) => each.session === late);
+                    const tokens = late === undefined ? undefined : sessions.get(late);
+
+                    if (where === undefined || tokens === undefined) break;
+
+                    if (yield* on(0)((yield* storage(0, where.slot)).save(tokens))) {
+                      found.push(`a late answer stored ${where.session} again`);
+                    }
+
+                    break;
+                  }
+
+                  case "deliver":
+                    yield* later(deliver);
+                    break;
                 }
-
-                case "deliver":
-                  yield* later(deliver);
-                  break;
               }
-            }
 
-            while (joining.length > 0) runJoin(0);
+              while (joining.length > 0) runJoin(0);
 
-            while (promotions.length > 0) yield* runPromotion(0);
+              while (promotions.length > 0) yield* runPromotion(0);
 
-            while (forgets.length > 0) yield* runForget(0);
-            yield* later(deliver);
+              while (forgets.length > 0) yield* runForget(0);
+              yield* later(deliver);
 
-            const { store } = at(0);
+              const { store } = at(0);
 
-            for (const { slot } of signedIn) {
-              const loaded = yield* (yield* storage(0, slot)).load;
-              const held = yield* later(() => sessionIn(store, slot));
+              for (const { slot } of signedIn) {
+                const loaded = yield* on(0)((yield* storage(0, slot)).load);
+                const held = yield* later(() => sessionIn(store, slot));
 
-              if (Option.isSome(loaded) && held !== null && revoked.has(held)) {
-                found.push(`slot ${slot} loads signed-out ${held}`);
+                if (Option.isSome(loaded) && held !== null && revoked.has(held)) {
+                  found.push(`slot ${slot} loads signed-out ${held}`);
+                }
               }
-            }
 
-            for (const person of ["ada", "bo"] as const) {
-              const newest = joined.findLast((each) => each.person === person);
+              for (const person of ["ada", "bo"] as const) {
+                const newest = joined.findLast((each) => each.person === person);
 
-              // Only a later sign-in on the same slot, or signing this one out, may take it away.
-              if (newest === undefined || revoked.has(newest.session)) continue;
+                // Only a later sign-in on the same slot, or signing this one out, may take it away.
+                if (newest === undefined || revoked.has(newest.session)) continue;
 
-              if (lastSaved.get(newest.slot) !== newest.session) continue;
-              const held = yield* later(() => sessionIn(store, newest.slot));
+                if (lastSaved.get(newest.slot) !== newest.session) continue;
+                const held = yield* later(() => sessionIn(store, newest.slot));
 
-              if (
-                held !== newest.session ||
-                store.read().people.get(PEOPLE[person]) !== newest.slot
-              ) {
-                found.push(`${person}'s live session ${newest.session} lost its slot`);
+                if (
+                  held !== newest.session ||
+                  store.read().people.get(PEOPLE[person]) !== newest.slot
+                ) {
+                  found.push(`${person}'s live session ${newest.session} lost its slot`);
+                }
               }
-            }
 
-            return found;
-          }),
-        );
+              return found;
+            }),
+          );
 
-        expect(violations).toStrictEqual([]);
-      }),
+          expect(violations).toStrictEqual([]);
+        },
+      ),
       { numRuns: 100 },
     );
   }, 120_000);

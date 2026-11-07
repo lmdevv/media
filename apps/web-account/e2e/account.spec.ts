@@ -1,9 +1,12 @@
+import type { PlatformSdk } from "@media/sdk/promise";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { Brand } from "effect";
 
 import { createPerson, openPlatform, signIn } from "./people";
 import type { Person } from "./people";
 import { stackEnv } from "./stack";
+import type { Stack } from "./stack";
 
 const stack = stackEnv();
 
@@ -163,6 +166,94 @@ test("two tabs signing one person in keep the session the core kept, whichever p
   await page.getByRole("button", { name: person.username, exact: true }).click();
   await expect(page).toHaveURL(/\/home$/u);
   await expect(page.getByRole("link", { name: `${person.username}, switch person` })).toBeVisible();
+});
+
+/** Puts `person` on every shared device's picker; the returned step takes them off again. */
+const listOnSharedDevices = async (core: Stack, person: Person) => {
+  const platform = openPlatform(core);
+
+  await platform.session.signInWithPassword(person);
+  const { userId } = await platform.core.auth.sessions.current();
+
+  await platform.core.devices.tiles.setListed({ userId, listed: true });
+
+  return async () => {
+    await platform.core.devices.tiles.setListed({ userId, listed: false });
+    await platform.dispose();
+  };
+};
+
+type DeviceRowId = Parameters<PlatformSdk["core"]["devices"]["registry"]["setMode"]>[0]["deviceId"];
+
+/**
+ * The keys of this browser's shared store, and its device id from the device code it keeps; the
+ * code itself stays in the page.
+ */
+const readStore = (tab: Page) =>
+  tab.evaluate(
+    () =>
+      new Promise<{ readonly keys: ReadonlyArray<string>; readonly deviceId: string }>(
+        (resolve, reject) => {
+          const opening = indexedDB.open("media");
+
+          opening.addEventListener("error", () => reject(new Error("IndexedDB did not open")));
+          opening.addEventListener("success", () => {
+            const kv = opening.result.transaction("kv").objectStore("kv");
+            const keys = kv.getAllKeys();
+            const device = kv.get("media.device");
+
+            device.addEventListener("error", () => reject(new Error("IndexedDB did not read")));
+            device.addEventListener("success", () =>
+              resolve({
+                keys: keys.result.map(String),
+                deviceId: String(device.result).split(".")[0]?.slice(3) ?? "",
+              }),
+            );
+          });
+        },
+      ),
+  );
+
+test("a shared device opens each tile on a slot of its own, and drops the tile it replaced", async ({
+  page,
+}) => {
+  if (stack === null) return;
+
+  const admin = await createPerson(stack, "admin", "admin");
+  const ada = await createPerson(stack, "ada");
+  const bo = await createPerson(stack, "bo");
+  const unlist = await Promise.all([ada, bo].map((person) => listOnSharedDevices(stack, person)));
+  const host = openPlatform(stack);
+
+  try {
+    await signIn(page, admin);
+    await expect(page.getByRole("button", { name: admin.username, exact: true })).toBeVisible();
+
+    await host.session.signInWithPassword(admin);
+    await host.core.devices.registry.setMode({
+      deviceId: Brand.nominal<DeviceRowId>()((await readStore(page)).deviceId),
+      mode: "shared",
+    });
+
+    await page.reload();
+    await page.getByRole("button", { name: ada.username, exact: true }).click();
+    await expect(page.getByRole("link", { name: `${ada.username}, switch person` })).toBeVisible();
+
+    await page.getByRole("link", { name: `${ada.username}, switch person` }).click();
+    await page.getByRole("button", { name: bo.username, exact: true }).click();
+    await expect(page.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+
+    const { keys } = await readStore(page);
+    const tokens = keys.filter((key) => /^media\.session\.[^:]+:/u.test(key));
+
+    expect(tokens).toHaveLength(1);
+  } finally {
+    await Promise.all(unlist.map((step) => step()));
+    await host.dispose();
+  }
 });
 
 test("two tabs share one sign-in, and a sign-out in one signs the other out", async ({

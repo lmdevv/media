@@ -122,11 +122,14 @@ every tab of the origin, and which works outside secure contexts.
 - **Every change is one transaction** that reads what it decides on and writes in the same
   transaction, so no other tab's write lands between the check and the write.
   - A sign-in refuses a session that has a revocation, before it writes anything, and the client
-    then counts as signed out. It also refuses an answer whose request began more than five
-    minutes earlier; the client stamps the time before it asks. A revocation is kept for 31 days,
-    so it is still there whenever an answer for its session can land. Otherwise the sign-in raises
-    the person's sign-in generation and writes the tokens and the slot's session, person, and
-    generation, and it answers the session it stored.
+    then counts as signed out. It never replaces another live session its slot holds: every
+    sign-in goes to a fresh slot, an empty one, one whose session is over (signed out here, or its
+    tokens gone), or the one already holding that same session. A tile on a shared device signs in
+    on a fresh slot through a short-lived client, and the slot of the tile it replaced is then
+    forgotten by that session's name. Otherwise the sign-in raises the person's sign-in
+    generation and writes the tokens and the slot's session, person, and generation, and it
+    answers the session it stored. However late an answer lands, it is judged by these records
+    alone.
   - A renewal writes new tokens only while the stored tokens are still the ones the refresh
     started from and no revocation exists.
   - A sign-out writes the revocation and the pending sign-out and deletes the tokens. If that
@@ -147,9 +150,8 @@ every tab of the origin, and which works outside secure contexts.
     names the slot and the session it signed out, and goes ahead only while the slot still holds
     that session, so a session another tab saved there since stays. It then deletes only the
     mappings and the active slot that still point at the slot.
-  - The sweep deletes a revocation 31 days after the sign-out, past the core's 30-day limit on a
-    session and an unused refresh token, and never sooner. Time alone bounds the records; no
-    count drops one that a late answer still needs.
+  - Revocations are never deleted. Each is a few bytes, and a deleted one would let a late answer
+    for its session be stored again.
 - **Every token passes a transactional check.** Before a client hands out any token, the
   in-memory one included, it reads the session's state in a transaction. The token goes out only
   while the store holds that session's tokens and no revocation. A client that finds the session
@@ -185,6 +187,12 @@ every tab of the origin, and which works outside secure contexts.
   as when another tab blocks it, the browser keeps no sign-in and shows signed out. A sign-in then
   says to reload the page. It never falls back to `localStorage`. The CLI's and old movies' stores are unchanged: a
   store one client owns keeps the session under one key.
+- **No client clock is trusted.** Nothing in the store decides by a tab's wall clock, which may
+  be days off or jump: no record expires, and no answer is refused for its age. The core's join
+  order picks the live session, since only a promotion changes which session a person uses and a
+  lower join never replaces a higher one. A revoked session id can never be stored again in this
+  browser. A slot no sign-in may replace keeps the session it holds until that session's own
+  sign-out or a lost sign-in's forget, by its own id, removes it.
 - **What this guarantees.** Once the core confirms a sign-out, no credential of that session works
   anywhere. Before that, every tab stops using it at its next token, which first reads the store
   in a transaction. No renewal can bring it back, because a renewal commits only over the exact

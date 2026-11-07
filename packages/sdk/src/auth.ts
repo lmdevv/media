@@ -876,8 +876,6 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
   }
 
   const open = Effect.fn("Auth.open")(function* (request: SignInRequest) {
-    const requestedAt = yield* Clock.currentTimeMillis;
-
     const opened = yield* requestTokens(
       { provider: request.provider, params: request.params },
       SignInResult,
@@ -891,7 +889,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
     const stored = yield* committing.withPermits(1)(
       Effect.gen(function* () {
-        if (!(yield* storage.save(opened.value, requestedAt))) return false;
+        if (!(yield* storage.save(opened.value))) return false;
         yield* Ref.set(lastStored, opened);
         yield* adopt(opened);
 
@@ -903,7 +901,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
     return yield* new Unauthenticated({
       message:
-        "Sign-in refused: this session was signed out on this device meanwhile, or the answer came too late",
+        "Sign-in refused: this session was signed out on this device meanwhile, or another sign-in holds its place",
     });
   });
 
@@ -965,10 +963,6 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
   yield* Ref.set(lastStored, stored);
   yield* adopt(stored);
-  yield* Effect.forkIn(
-    storage.sweep.pipe(Effect.catchTag("TokenStorageError", logStorageFailure)),
-    scope,
-  );
   yield* Effect.forkIn(
     Stream.runForEach(storage.changed, () =>
       follow().pipe(Effect.catchTag("TokenStorageError", logStorageFailure)),

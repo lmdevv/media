@@ -66,16 +66,12 @@ export interface Interface {
   /** The current session; none when signed out, when it was revoked, or when it is unreadable. */
   readonly load: Effect.Effect<Option.Option<StoredSession>, TokenStorageError>;
   /**
-   * Makes a new sign-in the current session; whether it did. `requestedAt` is when the sign-in
-   * request that answered with `session` began. A session that was signed out here is never
-   * stored again, as when another tab signed out the session a late answer carries, and a store
-   * that others write refuses an answer whose request began more than five minutes before, so
-   * no answer outlives the record of its session's sign-out.
+   * Makes a new sign-in the current session; whether it did. A session that was signed out here
+   * is never stored again, as when another tab signed out the session a late answer carries. In a
+   * store others write, a sign-in never replaces another live session its key holds: it goes to
+   * a fresh key, an empty one, one whose session is over, or the one holding that same session.
    */
-  readonly save: (
-    session: StoredSession,
-    requestedAt: number,
-  ) => Effect.Effect<boolean, TokenStorageError>;
+  readonly save: (session: StoredSession) => Effect.Effect<boolean, TokenStorageError>;
   /**
    * Stores `renewed`, a renewal of the session in `expected`, only while the store still holds
    * `expected` for that session; whether it did. It never changes which session is current.
@@ -103,11 +99,6 @@ export interface Interface {
    * server; nothing signs in or calls with them.
    */
   readonly pendingSignOuts: Effect.Effect<ReadonlyArray<StoredSession>, TokenStorageError>;
-  /**
-   * Deletes revocation records once the sessions they name can no longer work anywhere, by age
-   * alone. It never deletes the record of a session that could still be live.
-   */
-  readonly sweep: Effect.Effect<void, TokenStorageError>;
   /**
    * Emits once it starts listening, then whenever the stored session may have changed outside
    * this client, such as another tab writing the same key. The first emission covers changes made
@@ -141,7 +132,6 @@ export const owned = (store: {
   revocation: () => Effect.succeed("none"),
   signOutPending: () => Effect.succeed(false),
   pendingSignOuts: Effect.succeed([]),
-  sweep: Effect.void,
   changed: Stream.never,
 });
 
@@ -260,18 +250,10 @@ const decodePending = Schema.decodeUnknownOption(PendingSignOut);
 const encodePending = Schema.encodeSync(PendingSignOut);
 
 /**
- * How long after a sign-out its session can surely no longer work: the core's 30-day limit on a
- * session and on an unused refresh token, and a day's margin.
+ * Revocations, one per session id, whichever slot it was signed in under. They are a few bytes
+ * each and never deleted, so a session signed out here can never be stored again, however late
+ * an answer for it lands and whatever any tab's clock says (ADR 0020).
  */
-const REVOCATION_KEPT_MS = 31 * 24 * 60 * 60 * 1000;
-
-/**
- * How long a sign-in's answer may take, from its request, to be stored. Far shorter than
- * `REVOCATION_KEPT_MS`, so a session's sign-out is still on record when any answer for it lands.
- */
-const SIGN_IN_ANSWER_MS = 5 * 60 * 1000;
-
-/** Revocations, one per session id, whichever slot it was signed in under. */
 const REVOKED = "media.revoked:";
 
 /** Sign-outs the core has not confirmed, one per session id, for any client to finish. */
@@ -374,12 +356,23 @@ export const layerShared = (store: SharedStore, slot: string): Layer.Layer<Token
 
         return tokensIn(tx, tokensKey(held.value.session));
       }).pipe(Effect.orElseSucceed(() => Option.none<StoredSession>())),
-      save: (session, requestedAt) =>
-        Effect.flatMap(Effect.zip(idOf(session, "save"), Clock.currentTimeMillis), ([id, now]) =>
+      save: (session) =>
+        Effect.flatMap(idOf(session, "save"), (id) =>
           attempt("save", "write", async (tx) => {
-            if (now - requestedAt > SIGN_IN_ANSWER_MS) return false;
-
             if (Option.isSome(await revokedIn(tx, id))) return false;
+
+            const held = await slotHolding(tx, slot);
+
+            // Another session this key holds stays, unless it is over: signed out here, or with
+            // its tokens gone. Only promotion, by the core's join order, moves a person between
+            // sessions.
+            if (Option.isSome(held) && held.value.session !== id) {
+              const over =
+                Option.isSome(await revokedIn(tx, held.value.session)) ||
+                Option.isNone(await tokensIn(tx, tokensKey(held.value.session)));
+
+              if (!over) return false;
+            }
 
             const user = id.split("|")[0] ?? id;
             const generation = (await latestGeneration(tx, user)) + 1;
@@ -483,32 +476,6 @@ export const layerShared = (store: SharedStore, slot: string): Layer.Layer<Token
           ),
         );
       }),
-      sweep: Effect.flatMap(Clock.currentTimeMillis, (now) =>
-        attempt("clear", "write", async (tx) => {
-          const keys = (await tx.keys()).filter((key) => key.startsWith(REVOKED));
-
-          const records = (
-            await Promise.all(
-              keys.map(async (key) => ({
-                id: key.slice(REVOKED.length),
-                record: Option.flatMap(Option.fromNullishOr(await tx.get(key)), decodeRevoked),
-              })),
-            )
-          ).flatMap(({ id, record }) =>
-            Option.toArray(Option.map(record, (each) => ({ id, ...each }))),
-          );
-
-          const expired = records.filter((each) => now - each.revokedAt > REVOCATION_KEPT_MS);
-
-          await Promise.all(
-            expired.flatMap((each) => [
-              tx.remove(`${REVOKED}${each.id}`),
-              tx.remove(`${PENDING}${each.id}`),
-              tx.remove(`${each.slot}:${each.id}`),
-            ]),
-          );
-        }),
-      ),
       changed,
     }),
   );

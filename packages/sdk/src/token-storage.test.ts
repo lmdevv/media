@@ -34,7 +34,7 @@ describe("key-value token storage", () => {
       Effect.gen(function* () {
         const storage = yield* storageOver(store);
 
-        yield* storage.save(session, 0);
+        yield* storage.save(session);
         expect(store.items.get("s")).toContain("refresh");
 
         const loaded = yield* storage.load;
