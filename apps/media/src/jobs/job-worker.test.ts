@@ -1,11 +1,11 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Layer, Ref, Stream } from "effect";
+import { Deferred, Duration, Effect, Layer, Queue, Ref, Stream, SubscriptionRef } from "effect";
 import { TestClock } from "effect/testing";
 
 import { Conflict } from "@media/contracts/errors";
-import { JobId, LibraryId } from "@media/contracts/ids";
-import type { Job, JobProgress } from "@media/contracts/models/jobs";
+import { JobId, LibraryId, MediaFileId } from "@media/contracts/ids";
+import type { Job, JobPayload, JobProgress } from "@media/contracts/models/jobs";
 import { EpochMillis } from "@media/contracts/units";
 import { type CallError, TransportError } from "@media/sdk/effect";
 
@@ -25,6 +25,8 @@ const job: Job = {
   startedAt: null,
   finishedAt: null,
 };
+
+const caps: JobWorker.PoolCaps = { movies: 2, "movies.background": 1, server: 1 };
 
 type Write =
   | { readonly name: "claim" }
@@ -73,13 +75,95 @@ const startWorker = Effect.fnUntraced(function* (
   );
 
   yield* Layer.build(
-    JobWorker.layer(Effect.succeed([{ kind: "scan", run } satisfies JobWorker.JobHandler])).pipe(
+    JobWorker.layer(
+      Effect.succeed({ handlers: [{ kind: "scan", run } satisfies JobWorker.JobHandler], caps }),
+    ).pipe(Layer.provide(backend), Layer.provide(NodeServices.layer)),
+  );
+
+  return { writes: Ref.get(writes) };
+});
+
+const pendingJob = (id: string, payload: JobPayload): Job => ({
+  id: JobId.make(id),
+  kind: payload.kind,
+  status: "pending",
+  payload,
+  progress: { done: 0, total: null, message: null },
+  error: null,
+  requestedBy: null,
+  attempts: 0,
+  createdAt: EpochMillis.make(0),
+  startedAt: null,
+  finishedAt: null,
+});
+
+const thumbnails = (fileId: string): JobPayload => ({
+  kind: "trickplay",
+  fileId: MediaFileId.make(fileId),
+});
+
+const startPools = Effect.fnUntraced(function* (jobs: ReadonlyArray<Job>) {
+  const pending = yield* SubscriptionRef.make(jobs);
+  const started = yield* Queue.unbounded<string>();
+
+  const finish = new Map(
+    yield* Effect.forEach(jobs, (queued) =>
+      Deferred.make<string>().pipe(Effect.map((done) => [queued.id, done] as const)),
+    ),
+  );
+
+  const ok = { ok: true as const };
+
+  const finisher = (id: JobId) => {
+    const done = finish.get(id);
+
+    return done === undefined ? Effect.die(`No job ${id}`) : Effect.succeed(done);
+  };
+
+  const run: JobWorker.JobHandler["run"] = ({ job: claim }) =>
+    Queue.offer(started, claim.id).pipe(
+      Effect.andThen(finisher(claim.id)),
+      Effect.flatMap(Deferred.await),
+    );
+
+  const backend = MemoryBackend.layer(
+    {
+      "mediaService.claimJob": ({ jobId }) =>
+        SubscriptionRef.modify(pending, (queued) => {
+          const claim = queued.find((candidate) => candidate.id === jobId);
+
+          return claim === undefined
+            ? [null, queued]
+            : [
+                { job: claim, library: null, leaseExpiresAt: EpochMillis.make(60_000) },
+                queued.filter((candidate) => candidate !== claim),
+              ];
+        }),
+      "mediaService.renewLease": () =>
+        Effect.succeed({ cancelled: false, leaseExpiresAt: EpochMillis.make(0) }),
+      "mediaService.completeJob": () => Effect.succeed(ok),
+    },
+    { "mediaService.pendingJobs": () => SubscriptionRef.changes(pending) },
+  );
+
+  const handlers = [...new Set(jobs.map((queued) => queued.kind))].map(
+    (kind): JobWorker.JobHandler => ({ kind, run }),
+  );
+
+  yield* Layer.build(
+    JobWorker.layer(Effect.succeed({ handlers, caps })).pipe(
       Layer.provide(backend),
       Layer.provide(NodeServices.layer),
     ),
   );
 
-  return { writes: Ref.get(writes) };
+  return {
+    nextStarted: (count: number) =>
+      Effect.replicateEffect(Queue.take(started), count).pipe(Effect.map((ids) => new Set(ids))),
+    unseen: Queue.clear(started),
+    finish: (id: string) =>
+      finisher(JobId.make(id)).pipe(Effect.flatMap((done) => Deferred.succeed(done, "done"))),
+  };
 });
 
 const advance = (duration: Duration.Input) =>
@@ -208,6 +292,42 @@ describe("job worker", () => {
         error: "The job stopped on an internal error",
         retry: false,
       });
+    }),
+  );
+
+  it.effect("holds a job whose pool is full while another pool's job starts", () =>
+    Effect.gen(function* () {
+      const { nextStarted, unseen, finish } = yield* startPools([
+        pendingJob("scan_1", job.payload),
+        pendingJob("scan_2", job.payload),
+        pendingJob("scan_3", job.payload),
+        pendingJob("backup_1", { kind: "backup", trigger: "nightly" }),
+        pendingJob("backup_2", { kind: "backup", trigger: "manual" }),
+      ]);
+
+      assert.deepStrictEqual(yield* nextStarted(3), new Set(["scan_1", "scan_2", "backup_1"]));
+
+      yield* finish("backup_1");
+
+      assert.deepStrictEqual(yield* nextStarted(1), new Set(["backup_2"]));
+      assert.deepStrictEqual(yield* unseen, []);
+
+      yield* finish("scan_1");
+
+      assert.deepStrictEqual(yield* nextStarted(1), new Set(["scan_3"]));
+    }),
+  );
+
+  it.effect("runs scrub thumbnails in their own pool, so they never hold up a scan", () =>
+    Effect.gen(function* () {
+      const { nextStarted, unseen } = yield* startPools([
+        pendingJob("trickplay_1", thumbnails("file_1")),
+        pendingJob("trickplay_2", thumbnails("file_2")),
+        pendingJob("scan_1", job.payload),
+      ]);
+
+      assert.deepStrictEqual(yield* nextStarted(2), new Set(["trickplay_1", "scan_1"]));
+      assert.deepStrictEqual(yield* unseen, []);
     }),
   );
 });

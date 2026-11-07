@@ -29,14 +29,30 @@ export class JobFailed extends Schema.TaggedError<JobFailed>()("JobFailed", {
   retry: Schema.Boolean,
 }) {}
 
+type JobDomain = "movies" | "server";
+
+type JobPool = JobDomain | `${Exclude<JobDomain, "server">}.background`;
+
+const jobPools = {
+  scan: "movies",
+  metadata: "movies",
+  person: "movies",
+  migration: "movies",
+  trickplay: "movies.background",
+  backup: "server",
+} as const satisfies Record<JobKind, JobPool>;
+
+type PoolName = (typeof jobPools)[JobKind];
+
+/**
+ * The most jobs each pool runs at once; each a whole number of at least 1. A job whose pool is
+ * full waits, and never takes another pool's slot.
+ */
+export type PoolCaps = { readonly [Pool in PoolName]: number };
+
 /** Runs the jobs of one kind. */
 export interface JobHandler {
   readonly kind: JobKind;
-  /**
-   * Jobs of this kind run in their own slots, this many at once, instead of sharing the worker's
-   * slots with other kinds; for long, low-priority work such as scrub thumbnails.
-   */
-  readonly concurrency?: number;
   /**
    * Runs a claimed job and returns the message recorded when it succeeds. `workerId` holds the
    * lease, for functions that require it; `reportProgress` replaces what the next lease renewal
@@ -62,23 +78,24 @@ const LEASE_MS = 60_000;
 
 const RENEW_EVERY = Duration.seconds(15);
 
-const MAX_RUNNING = 2;
-
 const RESCAN_EVERY = Duration.seconds(30);
 
 const EMPTY_PROGRESS: JobProgress = { done: 0, total: null, message: null };
 
-const make = Effect.fn("JobWorker.make")(function* (handlers: ReadonlyArray<JobHandler>) {
+const make = Effect.fn("JobWorker.make")(function* ({
+  handlers,
+  caps,
+}: {
+  readonly handlers: ReadonlyArray<JobHandler>;
+  readonly caps: PoolCaps;
+}) {
   const backend = yield* MediaBackend.Service;
   const crypto = yield* Crypto.Crypto;
   const suffix = Buffer.from(yield* crypto.randomBytes(6).pipe(Effect.orDie)).toString("hex");
   const workerId = `${hostname()}:${String(process.pid)}:${suffix}`;
   const byKind = new Map(handlers.map((handler) => [handler.kind, handler]));
   const pending = yield* Ref.make<ReadonlyArray<Job>>([]);
-  const running = yield* Ref.make<ReadonlyMap<JobId, JobKind | null>>(new Map());
-
-  const poolOf = (handler: JobHandler): readonly [JobKind | null, number] =>
-    handler.concurrency === undefined ? [null, MAX_RUNNING] : [handler.kind, handler.concurrency];
+  const running = yield* Ref.make<ReadonlyMap<JobId, PoolName>>(new Map());
 
   const wake = yield* Queue.sliding<void>(1);
 
@@ -206,12 +223,12 @@ const make = Effect.fn("JobWorker.make")(function* (handlers: ReadonlyArray<JobH
       const handler = byKind.get(job.kind);
 
       if (handler === undefined) continue;
-      const [pool, limit] = poolOf(handler);
+      const pool = jobPools[job.kind];
 
       const start = yield* Ref.modify(running, (current) => {
         const inPool = [...current.values()].filter((held) => held === pool).length;
 
-        return current.has(job.id) || inPool >= limit
+        return current.has(job.id) || inPool >= caps[pool]
           ? [false, current]
           : [true, new Map(current).set(job.id, pool)];
       });
@@ -251,8 +268,12 @@ const make = Effect.fn("JobWorker.make")(function* (handlers: ReadonlyArray<JobH
   yield* Effect.logInfo("JobWorker.ready").pipe(Effect.annotateLogs({ workerId }));
 });
 
-/** Runs jobs with `handlers` for the lifetime of the layer. */
+/** Runs jobs with `handlers` for the lifetime of the layer, each pool capped by `caps`. */
 export const layer = <R>(
-  handlers: Effect.Effect<ReadonlyArray<JobHandler>, never, R>,
+  setup: Effect.Effect<
+    { readonly handlers: ReadonlyArray<JobHandler>; readonly caps: PoolCaps },
+    never,
+    R
+  >,
 ): Layer.Layer<never, never, R | MediaBackend.Service | Crypto.Crypto> =>
-  Layer.effectDiscard(Effect.flatMap(handlers, make));
+  Layer.effectDiscard(Effect.flatMap(setup, make));

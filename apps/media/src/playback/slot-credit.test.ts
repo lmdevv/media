@@ -1,5 +1,5 @@
 import { assert, describe, layer } from "@effect/vitest";
-import { Effect, Fiber, Layer, Predicate, Redacted, Result } from "effect";
+import { Effect, Fiber, FileSystem, Layer, Option, Predicate, Redacted, Result } from "effect";
 
 import { type ClientCapabilities } from "@media/contracts/media-playback";
 
@@ -14,7 +14,6 @@ import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
 import * as PlaybackToken from "./playback-token.ts";
 import * as StreamOwners from "./stream-owners.ts";
 import * as StreamSessions from "./stream-sessions.ts";
-import * as TranscodeSpace from "./transcode-space.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -30,18 +29,23 @@ const holdNextStart = () => {
   pending.held = Promise.withResolvers<void>();
 };
 
-const space = Layer.effect(
-  TranscodeSpace.Service,
-  Effect.map(TranscodeSpace.Service, (real) =>
-    TranscodeSpace.Service.of({
+const RUN_FOLDER = /\/transcode\/[^/]+\/\d+$/u;
+
+const heldFirstRuns = Layer.effect(
+  FileSystem.FileSystem,
+  Effect.map(FileSystem.FileSystem, (real) =>
+    FileSystem.FileSystem.of({
       ...real,
-      check: (bytes) =>
+      makeDirectory: (target, options) =>
         Effect.suspend(() => {
-          if (!pending.armed || bytes !== 0) return real.check(bytes);
+          if (!pending.armed || !RUN_FOLDER.test(target))
+            return real.makeDirectory(target, options);
           pending.armed = false;
           pending.holding.resolve();
 
-          return Effect.promise(() => pending.held.promise).pipe(Effect.andThen(real.check(bytes)));
+          return Effect.promise(() => pending.held.promise).pipe(
+            Effect.andThen(real.makeDirectory(target, options)),
+          );
         }),
     }),
   ),
@@ -137,7 +141,7 @@ const tools = Layer.effect(
 const subject = Layer.fresh(StreamSessions.layer).pipe(
   Layer.provideMerge(tools),
   Layer.provideMerge(owners),
-  Layer.provideMerge(space),
+  Layer.provide(heldFirstRuns),
   Layer.provideMerge(MediaTestServer.layer({ MAX_CONCURRENT_REMUXES: "1" })),
 );
 
@@ -190,6 +194,9 @@ const setup = Effect.gen(function* () {
     },
   };
 });
+
+const stillWaiting = <A, E>(fiber: Fiber.Fiber<A, E>) =>
+  Fiber.await(fiber).pipe(Effect.timeoutOption("1 second"), Effect.map(Option.isNone));
 
 describe.skipIf(!hasFfmpeg)("slot credit", () => {
   layer(subject, { excludeTestServices: true, timeout: "120 seconds" })((it) => {
@@ -298,6 +305,77 @@ describe.skipIf(!hasFfmpeg)("slot credit", () => {
             }),
           ),
         ),
+      60_000,
+    );
+
+    it.effect(
+      "a guest stream waits behind a household one and starts once it stops",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const { grant, request } = yield* setup;
+          const guest = { ...(yield* setup).grant, audience: "guest" as const };
+
+          const start = (as: PlaybackToken.PlaybackGrant) =>
+            Effect.gen(function* () {
+              const negotiation = yield* sessions.negotiate(as);
+
+              return yield* negotiation.start(request);
+            }).pipe(Effect.scoped);
+
+          const household = yield* start(grant);
+          const waiting = yield* Effect.forkChild(start(guest));
+
+          assert.isTrue(yield* stillWaiting(waiting), "MAX_CONCURRENT_REMUXES=1 is taken");
+
+          yield* sessions.stop(household.streamId, grant);
+          const started = yield* Fiber.join(waiting);
+
+          assert.strictEqual(yield* sessions.activeCount, 1);
+
+          yield* sessions.stop(started.streamId, guest);
+        }),
+      60_000,
+    );
+
+    it.effect(
+      "a household stream takes a guest's slot, and the guest resumes once it stops",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const { grant, request } = yield* setup;
+          const guest = { ...(yield* setup).grant, audience: "guest" as const };
+
+          const start = (as: PlaybackToken.PlaybackGrant) =>
+            Effect.gen(function* () {
+              const negotiation = yield* sessions.negotiate(as);
+
+              return yield* negotiation.start(request);
+            }).pipe(Effect.scoped);
+
+          const playing = yield* start(guest);
+          const { streamId, generation, segmentIndex } = playing;
+          yield* sessions.segment(streamId, generation, segmentIndex, guest);
+
+          const household = yield* start(grant);
+
+          assert.strictEqual(yield* sessions.activeCount, 1, "the guest's encoder stopped");
+          yield* sessions.playlist(streamId, generation, guest);
+
+          const next = yield* Effect.forkChild(
+            sessions.segment(streamId, generation, segmentIndex, guest),
+          );
+
+          assert.isTrue(yield* stillWaiting(next), "the guest waits for the slot");
+
+          yield* sessions.stop(household.streamId, grant);
+          const served = yield* Fiber.join(next);
+
+          assert.isAbove(served.paths.length, 0);
+          assert.strictEqual(yield* sessions.activeCount, 1);
+
+          yield* sessions.stop(streamId, guest);
+        }),
       60_000,
     );
   });

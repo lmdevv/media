@@ -1048,11 +1048,17 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
                   entry.annotations["streamId"] === stream.streamId,
               );
 
-            const generation = resumed?.annotations["generation"];
+            if (resumed === undefined) return assert.fail("the stream was not revived");
 
-            if (!Predicate.isNumber(generation)) return assert.fail("the stream was not revived");
+            const folder = path.join(server.transcodeDir, stream.streamId ?? "");
 
-            const run = path.join(server.transcodeDir, stream.streamId ?? "", String(generation));
+            const newest = Math.max(
+              ...(yield* fs.readDirectory(folder))
+                .filter((name) => /^\d+$/u.test(name))
+                .map(Number),
+            );
+
+            const run = path.join(folder, String(newest));
 
             const fragments = (yield* fs.readDirectory(run)).filter((name) =>
               name.endsWith(".m4s"),

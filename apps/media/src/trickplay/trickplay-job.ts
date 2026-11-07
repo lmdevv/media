@@ -91,13 +91,12 @@ export const handlers: Effect.Effect<
     | Path.Path
   >();
 
-  const { interval, concurrency, enabled } = config.trickplay;
+  const { interval, enabled } = config.trickplay;
 
   if (!enabled) return [];
 
   const handler = {
     kind: "trickplay",
-    concurrency,
     run: Effect.fn("TrickplayJob.run")(function* (claim, workerId, reportProgress) {
       const { job } = claim;
 

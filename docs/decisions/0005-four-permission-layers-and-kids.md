@@ -1,7 +1,8 @@
 # 0005. Check access in four layers and make kids restricted users
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the first role and the `admin` scope,
-  and again the same day with the permissions as built.
+  and again the same day with the permissions as built. Amended 2026-11-06 with the service
+  principal's scope and key.
 - Decisions: D16, D17
 
 ## Context
@@ -161,9 +162,22 @@ Handlers never pass rows to `can` themselves. Loaders read the facts and decide:
 
 A service principal is a `users` row with `kind: "service"` and a `name`. It has no role,
 username, password, or restrictions, so the schema cannot give it a role.
-`core/accounts/host:createService` makes one. It holds no scope yet, and `requireCaller` refuses
-its sessions. The server move in phase 4 adds its scope and API key (D50). Every account action on
-a service is refused, so no admin can give it a role, a reset link, restrictions, or ownership.
+`core/accounts/host:createService` makes one. Every account action on a service is refused, so no
+admin can give it a role, a reset link, restrictions, or ownership.
+
+- A service signs in only with an API key that `core/auth/apiKeys:issueServiceKey` issues (ADR
+  0010). The key holds `media-service`, the one service scope, listed in `serviceScopes` in
+  `packages/commands/src/scopes.ts`. No role allows a service scope and no command requires one,
+  so `heldScopes` never gives one to a person. `apiKeys.create` takes credential scopes only, so a
+  person cannot ask for it.
+- A stored key and the session it opens hold `keyScope`: a credential scope or a service scope.
+  `heldScopes` keeps a service at no credential scope, so `requireCaller` still refuses its
+  sessions and every command answers it `forbidden`. `heldServiceScopes` reads the service scopes
+  of a service's key session.
+- `serviceOfSession` in `core/auth/caller.ts` is `callerOfSession`'s mirror: `unauthenticated`
+  when the session is not live, `forbidden` for a person, or for a service whose key lacks the
+  scope. Server functions stay internal until the server moves onto the core in phase 4 (D50);
+  until then `core/serviceProbe:whoami` runs `serviceOfSession` for a stack test's real session.
 
 ### Grants and groups
 
@@ -257,7 +271,8 @@ and the core allows no public function outside the command list.
 
 - Guest principals and links: built, see ADR 0007. A guest holds no grant (`keyOf` refuses one),
   so their reach has no keys and what they may play comes only from their link.
-- The service principal's scope and key: phase 4.
+- Public server functions guarded by `media-service`, and the guard that reads their token:
+  phase 4.
 - Locking shared-device tiles for kids, from `isKid`: built, see ADR 0006.
 
 ### Edge cases settled
@@ -283,4 +298,3 @@ Rejected in this build:
 - A table of each person's effective level per resource. A household grant would write a row per
   person, and a group change a row per resource shared with the group.
 - Admins who see all content, and a `play` or `edit` scope that needs `read`.
-- A `server` scope now. Nothing checks it until the server moves onto the core.

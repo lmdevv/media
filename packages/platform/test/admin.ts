@@ -100,7 +100,10 @@ type LogEntry = (typeof FunctionLog.Type)["entries"][number];
 /** The backend keeps the latest 1,000 log entries; one read returns at most that many. */
 const LOG_BUFFER_ENTRIES = 1000;
 
-const logSince = async (stack: CoreStack, cursor: number): Promise<typeof FunctionLog.Type> => {
+const logSince = async (
+  stack: CoreStack,
+  cursor: number,
+): Promise<{ readonly body: string; readonly page: typeof FunctionLog.Type }> => {
   const response = await fetch(`${stack.url}/api/stream_function_logs?cursor=${cursor}`, {
     headers: { Authorization: `Convex ${stack.adminKey}` },
   });
@@ -109,7 +112,7 @@ const logSince = async (stack: CoreStack, cursor: number): Promise<typeof Functi
 
   if (!response.ok) throw new Error(`The function log answered HTTP ${response.status}: ${body}`);
 
-  return decodeLog(JSON.parse(body));
+  return { body, page: decodeLog(JSON.parse(body)) };
 };
 
 export interface LogMark {
@@ -118,7 +121,7 @@ export interface LogMark {
 }
 
 export const logMark = async (stack: CoreStack): Promise<LogMark> => ({
-  cursor: (await logSince(stack, 0)).newCursor,
+  cursor: (await logSince(stack, 0)).page.newCursor,
   at: Date.now(),
 });
 
@@ -145,24 +148,29 @@ export interface LogFollower {
    * served from the query cache, which reads nothing.
    */
   readonly usage: (callable: AdminCallable) => ReadonlyArray<CallUsage>;
+  /** Every page read so far as the backend answered it, every field of every entry included. */
+  readonly text: () => string;
 }
 
 /** Follows the function log from `mark`. Read it often enough that 1,000 entries never pile up. */
 export const followLog = (stack: CoreStack, mark: LogMark): LogFollower => {
   const entries: Array<LogEntry> = [];
+  const bodies: Array<string> = [];
   let cursor = mark.cursor;
 
   return {
     catchUp: async () => {
-      const page = await logSince(stack, cursor);
+      const { body, page } = await logSince(stack, cursor);
 
       if (page.entries.length >= LOG_BUFFER_ENTRIES) {
         throw new Error("The function log dropped entries; read it more often");
       }
 
       entries.push(...page.entries);
+      bodies.push(body);
       cursor = page.newCursor;
     },
+    text: () => bodies.join("\n"),
     usage: (callable) => {
       const identifier = getFunctionName(callable);
 
@@ -216,4 +224,30 @@ export const usageSince = async (
   };
 
   return logged();
+};
+
+/**
+ * Everything logged after `mark` as the backend answered it, read once a committed call to `last`
+ * that started after the mark has been logged. Make `last` the final call of what the test reads.
+ */
+export const logTextSince = async (
+  stack: CoreStack,
+  mark: LogMark,
+  last: AdminCallable,
+  timeoutMs = 30_000,
+): Promise<string> => {
+  const log = followLog(stack, mark);
+  const deadline = Date.now() + timeoutMs;
+
+  const read = async (): Promise<string> => {
+    if (log.usage(last).some((call) => call.committed)) return log.text();
+
+    if (Date.now() > deadline) throw new Error(`No ${getFunctionName(last)} call was logged`);
+
+    await log.catchUp();
+
+    return read();
+  };
+
+  return read();
 };

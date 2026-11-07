@@ -6,8 +6,9 @@ import type { Value } from "convex/values";
 import { register } from "../../../commands/core/auth/apiKeys";
 import { credentialScope } from "../../../commands/scopes";
 import { internal } from "../../_generated/api";
-import type { DataModel } from "../../_generated/dataModel";
-import { internalMutation, internalQuery } from "../../_generated/server";
+import type { DataModel, Doc, Id } from "../../_generated/dataModel";
+import { internalAction, internalMutation, internalQuery } from "../../_generated/server";
+import type { MutationCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
 import {
   constantTimeEqual,
@@ -29,6 +30,10 @@ const NAME_MAX = 64;
 const EXPIRY_DAYS_MAX = 365;
 
 const BAD_KEY = "This API key does not work";
+
+const WORKING_SERVICE_KEYS_MAX = 4;
+
+const retirement = v.union(v.literal("on-first-use"), v.literal("now"));
 
 const keyParams = { key: v.string() };
 
@@ -63,7 +68,27 @@ export const apiKeyProvider = ConvexCredentials<DataModel>({
   },
 });
 
-/** Signs in with a key into a new session of its own. Null when the key fails. */
+const deleteKey = async (ctx: Pick<MutationCtx, "db">, keyId: Id<"apiKeys">): Promise<void> => {
+  await endKeySessions(ctx, keyId);
+  await ctx.db.delete(keyId);
+};
+
+const retireKeysBefore = async (
+  ctx: Pick<MutationCtx, "db">,
+  key: Doc<"apiKeys">,
+): Promise<void> => {
+  const earlier = await ctx.db
+    .query("apiKeys")
+    .withIndex("by_user", (q) => q.eq("userId", key.userId).lt("_creationTime", key._creationTime))
+    .collect();
+
+  await Promise.all(earlier.map((retired) => deleteKey(ctx, retired._id)));
+};
+
+/**
+ * Signs in with a key into a new session of its own. Null when the key fails. A service's key
+ * retires the service's earlier keys, so the first sign-in with a new key completes a rotation.
+ */
 export const redeem = internalMutation({
   args: { keyId: v.string(), secretHash: v.string() },
   returns: v.union(v.null(), v.object({ userId: v.id("users"), sessionId: v.id("authSessions") })),
@@ -78,10 +103,75 @@ export const redeem = internalMutation({
 
     if (user === null || !keyWorks(key, user, now)) return null;
 
+    if (user.kind === "service") await retireKeysBefore(ctx, key);
+
     return {
       userId: user._id,
       sessionId: await openSession(ctx, user, { kind: "apiKey", key }, now),
     };
+  },
+});
+
+/**
+ * Stores a new key for a service, holding `media-service` and never expiring. With
+ * `on-first-use`, the service's earlier keys keep working until this key first signs in, so the
+ * server keeps running while the operator swaps its key. With `now`, they and their sessions end
+ * in this transaction, for a key that leaked.
+ */
+export const storeServiceKey = internalMutation({
+  args: { serviceId: v.id("users"), retire: retirement, secretHash: v.string() },
+  returns: v.id("apiKeys"),
+  handler: async (ctx, { serviceId, retire, secretHash }) => {
+    const service = await ctx.db.get(serviceId);
+
+    if (service?.kind !== "service") return fail("not_found", "No such service");
+
+    const now = Date.now();
+
+    const held = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_user", (q) => q.eq("userId", serviceId))
+      .collect();
+
+    if (retire === "now") {
+      await Promise.all(held.map((key) => deleteKey(ctx, key._id)));
+    } else if (
+      held.filter((key) => keyWorks(key, service, now)).length >= WORKING_SERVICE_KEYS_MAX
+    ) {
+      return fail(
+        "conflict",
+        `This service already holds ${WORKING_SERVICE_KEYS_MAX} keys; sign the server in with its newest key, or issue one with retire now`,
+      );
+    }
+
+    return ctx.db.insert("apiKeys", {
+      userId: serviceId,
+      name: service.name,
+      secretHash,
+      scopes: ["media-service"],
+      generation: service.keyGeneration,
+    });
+  },
+});
+
+/**
+ * Issues an API key for a service and returns it, the only time it is shown; the core stores its
+ * hash. A host function: the operator runs it with `convex run` and hands the key to the server.
+ * `retire` defaults to `on-first-use`.
+ */
+export const issueServiceKey = internalAction({
+  args: { serviceId: v.id("users"), retire: v.optional(retirement) },
+  returns: v.object({ keyId: v.id("apiKeys"), key: v.string() }),
+  handler: async (ctx, { serviceId, retire }) => {
+    const secret = randomSecret(32);
+
+    const keyId: Id<"apiKeys"> = await ctx.runMutation(internal.core.auth.apiKeys.storeServiceKey, {
+      serviceId,
+      retire: retire ?? "on-first-use",
+      secretHash: await sha256Hex(secret),
+    });
+
+    return { keyId, key: formatSecret(PREFIX, keyId, secret) };
   },
 });
 
@@ -150,8 +240,7 @@ export const { create, revoke, endAll } = register({
 
     if (key?.userId !== caller.userId) return fail("not_found", "No such API key");
 
-    await endKeySessions(ctx, keyId);
-    await ctx.db.delete(keyId);
+    await deleteKey(ctx, keyId);
 
     return null;
   },
