@@ -17,17 +17,9 @@ export const { current, end, endAll, revoke } = register({
       sessionId: caller.sessionId,
       kind: caller.sessionKind,
       scopes: caller.scopes,
-      // Where the session took a device, its number there, and what a later number ends: a
-      // tile is ended by any later tile on the device, whoever's; a personal join only by the
-      // same person's later join.
+      // Where the session took a device, and its number there: a later one ends it.
       device:
-        bound?.joined === undefined
-          ? null
-          : {
-              deviceId: bound.id,
-              joinSequence: bound.joined,
-              scope: caller.sessionKind === "tile" ? ("device" as const) : ("person" as const),
-            },
+        bound?.joined === undefined ? null : { deviceId: bound.id, joinSequence: bound.joined },
     };
   },
   end: async (ctx, { sessionId }, caller) => {

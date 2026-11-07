@@ -216,7 +216,7 @@ Show who is signed in, how, with which scopes, and on which device in what order
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "guest"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; device: null | { deviceId: Id<"devices">; joinSequence: number; scope: "person" | "device" } }`
+- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "guest"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; device: null | { deviceId: Id<"devices">; joinSequence: number } }`
 
 ## `core.auth.sessions.end`
 

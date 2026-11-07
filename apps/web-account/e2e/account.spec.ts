@@ -389,6 +389,76 @@ test("an older tile that registers last never replaces the tile the core opened 
   }
 });
 
+test("three tabs on a shared device keep only the tile the core holds, whatever each tab saw", async ({
+  page,
+  context,
+}) => {
+  if (stack === null) return;
+
+  const admin = await createPerson(stack, "admin", "admin");
+
+  const [ada, bo, cy] = await Promise.all(
+    ["ada", "bo", "cy"].map((label) => createPerson(stack, label)),
+  );
+
+  if (ada === undefined || bo === undefined || cy === undefined) throw new Error("No people");
+
+  const unlist = await Promise.all(
+    [ada, bo, cy].map((person) => listOnSharedDevices(stack, person)),
+  );
+
+  const host = openPlatform(stack);
+  const second = await context.newPage();
+  const third = await context.newPage();
+  const { promise: released, resolve: release } = Promise.withResolvers<void>();
+  const { promise: asked, resolve: ask } = Promise.withResolvers<void>();
+
+  // The third tab's tile request leaves only once the second tab's tile is promoted.
+  await third.route("**/api/action", async (route) => {
+    if (!(route.request().postData() ?? "").includes('"tile"')) return route.fallback();
+
+    ask();
+    await released;
+    await route.continue();
+  });
+
+  try {
+    await signIn(page, admin);
+    await expect(page.getByRole("button", { name: admin.username, exact: true })).toBeVisible();
+    await host.session.signInWithPassword(admin);
+    await host.core.devices.registry.setMode({
+      deviceId: Brand.nominal<DeviceRowId>()((await readStore(page)).deviceId),
+      mode: "shared",
+    });
+
+    await page.reload();
+    await page.getByRole("button", { name: ada.username, exact: true }).click();
+    await expect(page.getByRole("link", { name: `${ada.username}, switch person` })).toBeVisible();
+
+    // Every tab holds Ada's tile; the second and third each open another.
+    await Promise.all([second.goto("/"), third.goto("/")]);
+    await third.getByRole("button", { name: cy.username, exact: true }).click();
+    await asked;
+    await second.getByRole("button", { name: bo.username, exact: true }).click();
+    await expect(second.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+
+    release();
+    await expect(third.getByRole("link", { name: `${cy.username}, switch person` })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole("link", { name: `${cy.username}, switch person` })).toBeVisible();
+
+    const { keys } = await readStore(page);
+    const tokens = keys.filter((key) => /^media\.session\.[^:]+:/u.test(key));
+
+    expect(tokens.map((key) => key.split(":").slice(1).join(":").split("|")[0])).toHaveLength(1);
+  } finally {
+    release();
+    await Promise.all(unlist.map((step) => step()));
+    await host.dispose();
+  }
+});
+
 test("two tabs share one sign-in, and a sign-out in one signs the other out", async ({
   page,
   context,

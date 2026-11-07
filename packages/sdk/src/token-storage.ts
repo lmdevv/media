@@ -287,6 +287,50 @@ const revokedIn = async (tx: SharedTransaction, id: string) =>
   Option.flatMap(Option.fromNullishOr(await tx.get(`${REVOKED}${id}`)), decodeRevoked);
 
 /**
+ * Moves `session`'s tokens and the record naming it from the slot under `from` to the empty slot
+ * under `to`, inside `tx`, so its refresh token keeps one owner; whether `from` held it.
+ */
+export const moveSession = async (
+  tx: SharedTransaction,
+  from: string,
+  to: string,
+  session: string,
+): Promise<boolean> => {
+  const held = await slotHolding(tx, from);
+  const tokens = await tx.get(`${from}:${session}`);
+
+  if (Option.isNone(held) || held.value.session !== session || tokens === undefined) return false;
+
+  await tx.set(`${to}:${session}`, tokens);
+  await tx.set(to, encodeSlot(held.value));
+  await tx.remove(`${from}:${session}`);
+  await tx.remove(from);
+
+  return true;
+};
+
+/**
+ * Records inside `tx` that the core ended `session`, signed in under the slot `slot`, at `at`: a
+ * confirmed revocation, so every client holding it stops and no answer for it is stored again,
+ * and its tokens go. `at` is for the record only; nothing decides by it.
+ */
+export const endedByCore = async (
+  tx: SharedTransaction,
+  session: string,
+  slot: string,
+  at: number,
+): Promise<void> => {
+  const revokedAt = Option.match(await revokedIn(tx, session), {
+    onNone: () => at,
+    onSome: (record) => record.revokedAt,
+  });
+
+  await tx.set(`${REVOKED}${session}`, encodeRevoked({ revokedAt, slot, confirmedAt: at }));
+  await tx.remove(`${PENDING}${session}`);
+  await tx.remove(`${slot}:${session}`);
+};
+
+/**
  * The session of slot `slot` in a store the origin's clients share (ADR 0020). Every operation is
  * one transaction, so a check and the write it guards never interleave with another client's:
  *

@@ -1,5 +1,4 @@
 import { createPlatform } from "@media/sdk/promise";
-import type { PlatformSdk } from "@media/sdk/promise";
 import { PlatformProvider, usePlatform } from "@media/sdk/react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { Match, Predicate } from "effect";
@@ -133,55 +132,50 @@ export const useAccountActions = (): AccountActions => {
   const router = useRouter();
 
   /**
-   * Registers this browser, through `client`, for the sign-in that stored `session`, with where
-   * and in what order the core bound it to the device: by enrolling on a personal device, or as
-   * the tile it opened on a shared one. Null when another sign-in took the client's slot before it
-   * could, which settles the slot itself. A registration that cannot finish signs out this session
-   * alone.
+   * Enrolls this browser for the session the client holds: on the device it keeps, or a new one.
+   * The first device kept wins when tabs enroll at once, and this session moves onto it; a kept
+   * device the core no longer knows gives way to the one just enrolled. Answers the join and the
+   * device epoch it was made under.
    */
-  const register = async (client: PlatformSdk, session: string): Promise<SignedIn | null> => {
+  const enrollHere = async (): Promise<SignedIn["joined"]> => {
+    const { enroll } = platform.core.devices.registry;
+    const name = deviceName();
+    const device = store.read().device;
+    const first = await enroll(device === null ? { name } : { name, device });
+    const kept = await store.claimDevice(first.device, first.deviceId);
+
+    if (kept.code === first.device) {
+      return { deviceId: first.deviceId, epoch: kept.epoch, sequence: first.joinSequence };
+    }
+
+    const again = await enroll({ name, device: kept.code });
+
+    if (again.deviceId === kept.deviceId) {
+      return { deviceId: again.deviceId, epoch: kept.epoch, sequence: again.joinSequence };
+    }
+
+    // The kept device is gone from the core, which enrolled a new one; the browser moves to it.
+    await store.clearDevice(kept.epoch);
+    const moved = await store.claimDevice(again.device, again.deviceId);
+
+    return { deviceId: again.deviceId, epoch: moved.epoch, sequence: again.joinSequence };
+  };
+
+  /**
+   * Registers this browser for the personal sign-in that stored `session`, with where and in what
+   * order the core joined it to the device; null when another sign-in took this client's slot
+   * before it could, which settles the slot itself. A registration that cannot finish signs out
+   * this session alone.
+   */
+  const register = async (session: string): Promise<SignedIn | null> => {
     try {
-      const me = await client.core.auth.sessions.current();
+      const me = await platform.core.auth.sessions.current();
 
       if (`${me.userId}|${me.sessionId}` !== session) return null;
 
-      if (me.kind === "tile") {
-        if (me.device === null) throw new Error("The server bound this tile to no device.");
-
-        return {
-          userId: me.userId,
-          session,
-          joined: {
-            deviceId: me.device.deviceId,
-            sequence: me.device.joinSequence,
-            scope: me.device.scope,
-          },
-        };
-      }
-
-      const { enroll } = client.core.devices.registry;
-      const device = store.read().device;
-
-      const enrolled = await enroll(
-        device === null ? { name: deviceName() } : { name: deviceName(), device },
-      );
-
-      // Another tab may have enrolled this browser at the same moment. The first device kept
-      // wins, and this session moves onto it, so the picker lists everyone signed in here. The
-      // device this tab enrolled is left for an admin to remove.
-      const kept = await store.claimDevice(enrolled.device);
-
-      const joined =
-        kept === enrolled.device ? enrolled : await enroll({ name: deviceName(), device: kept });
-
-      return {
-        userId: me.userId,
-        session,
-        // An enrollment is a personal join, which only the same person's later join ends.
-        joined: { deviceId: joined.deviceId, sequence: joined.joinSequence, scope: "person" },
-      };
+      return { userId: me.userId, session, joined: await enrollHere() };
     } catch (cause) {
-      await client.session.signOutSession(session);
+      await platform.session.signOutSession(session);
 
       if (Predicate.isTagged(cause, "Conflict")) throw new SharedDeviceError();
 
@@ -195,7 +189,7 @@ export const useAccountActions = (): AccountActions => {
 
     // Of two sign-ins of one person, the core kept the one that joined the device later,
     // whichever tab promotes first; when that is another tab's, this session's slot goes.
-    const signedIn = await register(platform, session);
+    const signedIn = await register(session);
 
     if (signedIn !== null) await settleSignIn(store, slot, signedIn);
 
@@ -242,44 +236,53 @@ export const useAccountActions = (): AccountActions => {
       void store.activate(held).then(() => (stay ? undefined : navigate({ to: "/home" })));
     },
     openTile: async (userId, proof) => {
-      const device = store.read().device;
+      const kept = await store.currentDevice();
 
-      if (device === null) throw new SharedDeviceError();
+      if (kept === null) throw new SharedDeviceError();
 
-      // A tile signs in on a slot of its own, since a sign-in never replaces the session another
-      // slot holds. Opening it ends the tile session this device held, so once the new one is
-      // the person's, the slot of the one it replaced goes, by that session's name.
-      const replaced = await platform.session.currentSession();
-      const fresh = newSlot();
+      // The tile signs in on a slot of its own, then moves into the device's one tile slot only
+      // if the core opened it after the tile there, whoever's; that tile is recorded as ended.
+      const staging = newSlot();
 
       const opener = createPlatform({
         url,
         connection: "http",
         storage: store.sessions,
-        storageKey: store.sessionKey(fresh),
+        storageKey: store.sessionKey(staging),
       });
 
       try {
         const session = await opener.session.openTile(
-          proof === undefined ? { device, userId } : { device, userId, proof },
+          proof === undefined
+            ? { device: kept.code, userId }
+            : { device: kept.code, userId, proof },
         );
 
         if (session === null) throw new Error("The server's answer named no session. Try again.");
 
-        // Of two tiles opened at once, the core kept the one it opened later; when that is the
-        // other, this tile's session already ended, and registering it fails and signs it out.
-        const signedIn = await register(opener, session).catch(async (cause: unknown) => {
-          await store.forget(fresh, session);
+        const me = await opener.core.auth.sessions.current().catch(async (cause: unknown) => {
+          await opener.session.signOutSession(session);
+          await store.forget(staging, session);
 
           throw cause;
         });
 
-        const settled = signedIn !== null && (await settleSignIn(store, fresh, signedIn));
+        const installed =
+          me.device !== null &&
+          `${me.userId}|${me.sessionId}` === session &&
+          (await store.installTile({
+            userId,
+            session,
+            deviceId: me.device.deviceId,
+            epoch: kept.epoch,
+            sequence: me.device.joinSequence,
+            from: staging,
+          }));
 
-        if (!settled) await store.forget(fresh, session);
+        if (!installed) {
+          await store.forget(staging, session);
 
-        if (settled && replaced !== null && replaced !== session) {
-          await store.forget(slot, replaced);
+          throw new Error("Someone else opened their tile on this device at the same moment.");
         }
       } finally {
         await opener.dispose();

@@ -63,14 +63,17 @@ names the session keys. `localStorage` holds nothing credential-bearing.
 | Key                                | Holds                                                                        |
 | ---------------------------------- | ---------------------------------------------------------------------------- |
 | `media.device`                     | this browser's device code, `dv_<id>.<secret>`                               |
+| `media.deviceId`                   | the kept device's id                                                         |
+| `media.deviceEpoch`                | raised whenever the kept device is set or cleared                            |
 | `media.active`                     | the slot every client on the origin acts as                                  |
 | `media.person.<userId>`            | the slot that holds that person's session                                    |
 | `media.session.<slotId>`           | the slot's session: its id and its person                                    |
 | `media.session.<slotId>:<session>` | that session's tokens                                                        |
-| `media.tile.<deviceId>`            | the last tile promoted on a shared device, whoever's: its number and session |
+| `media.tile.<deviceId>`            | the number and session of the tile in the device's one tile slot, whoever's  |
+| `media.personal.<deviceId>`        | the highest personal join promoted on the device, anyone's                   |
 | `media.revoked:<session>`          | a sign-out, and the core's confirmation once it comes                        |
 | `media.signOut:<session>`          | a sign-out the core has not confirmed, for any client                        |
-| `media.joined.<userId>`            | the last device join promoted for the person: device, number, and session    |
+| `media.joined.<userId>`            | the person's last personal join promoted: device, epoch, number, and session |
 
 - **A slot** is a random local name for one sign-in's tokens. A password, setup, invite, or reset
   sign-in starts before the client knows whose session it is, so the key cannot carry the
@@ -125,8 +128,8 @@ every tab of the origin, and which works outside secure contexts.
     then counts as signed out. It never replaces another live session its slot holds: every
     sign-in goes to a fresh slot, an empty one, one whose session is over (signed out here, or its
     tokens gone), or the one already holding that same session. A tile on a shared device signs in
-    on a fresh slot through a short-lived client, and the slot of the tile it replaced is then
-    forgotten by that session's name. Otherwise the sign-in writes the tokens and the slot's
+    on a fresh slot through a short-lived client and is then installed in the device's tile slot
+    (below). Otherwise the sign-in writes the tokens and the slot's
     session and person, and it answers the session it stored. However late an answer lands, it is judged by these records
     alone.
   - A renewal writes new tokens only while the stored tokens are still the ones the refresh
@@ -135,26 +138,37 @@ every tab of the origin, and which works outside secure contexts.
     transaction fails, as when storage is full, nothing of it lands. A second transaction then
     deletes the tokens alone, which frees space. The client stays signed out, and its retry keeps
     writing the records again.
-  - Every change names what it expects and does nothing if the store no longer matches. A promote
-    goes ahead only while the slot holds that person, and only for the sign-in whose session the
-    core kept. The core decides that, not the tabs. Every session the core binds to a device
-    takes the next number on the device's count, kept on the device row: a personal device's
-    join, which ends the person's earlier session there (ADR 0006), and a shared device's tile,
-    which ends the tile session the device held. Enrollment answers the number
-    (`joinSequence`), and `core.auth.sessions.current` names the device and number of any bound
-    session, as a tile's, and what a later number ends: `person` for a personal join, ended only
-    by the same person's later join there, and `device` for a tile, ended by any later tile there,
-    whoever's. A promote compares the number within that scope, in its transaction: a personal
-    join against the person's last promoted join on that device (`media.joined.<userId>`), a tile
-    against the device's last promoted tile (`media.tile.<deviceId>`). It goes ahead only when
-    the number is higher, whichever tab saved or promotes first. A personal join on another
-    device counts as newer, since a cleared device code is never used again.
-    There is no local counter or clock to fall back on. A slot that lost is forgotten. The person's older slot goes too, but only while it still holds the session last
-    promoted, so another person's sign-in, or a newer one of this person, saved there since stays.
-    The last join outlives a sign-out, so an ended session that answers late is never promoted. A forget
-    names the slot and the session it signed out, and goes ahead only while the slot still holds
-    that session, so a session another tab saved there since stays. It then deletes only the
-    mappings and the active slot that still point at the slot.
+  - Every change names what it expects and does nothing if the store no longer matches. The
+    core decides which session lives, not the tabs, and the browser mirrors its two units of
+    exclusivity. Every session the core binds to a device takes the next number on the device's
+    count, kept on the device row. Enrollment answers the number (`joinSequence`), and
+    `core.auth.sessions.current` names the device and number of any bound session, as a tile's.
+    - **A personal device: one session per person.** A join ends the person's earlier session
+      there (ADR 0006). A promote goes ahead only while the slot holds that very session, only
+      while the browser still keeps the device and epoch the join was made under, and only when
+      the number is higher than the person's last promoted join there (`media.joined.<userId>`).
+    - **A shared device: one tile, whoever's.** A tile ends the tile the device held. The browser
+      keeps one tile slot per device, `tile-<deviceId>`. Installing a tile moves it there from its
+      own sign-in's slot only while the browser still keeps the device and epoch it was opened
+      under, and only when its number is higher than the slot's (`media.tile.<deviceId>`). In
+      the same transaction the tile it replaces is recorded as ended (a confirmed revocation, so
+      no answer for it is stored again) and its tokens go. A tile that loses is recorded as ended
+      and its slot goes. No cleanup infers what was replaced from a tab's own state.
+    - **The device fence.** The browser keeps the device's id and an epoch, raised whenever the
+      kept device is set or cleared, as when the core no longer knows it. A join or tile obtained
+      for another device or epoch is dropped, its session forgotten by its own id. Clearing the
+      device also ends its tile, since the core ended everything on a device it forgot.
+    - **Switching modes.** One count orders everything on a device, and switching it between
+      personal and shared ends everyone on it. So a tile older than a personal join promoted
+      there (`media.personal.<deviceId>`) is over and does not install, and installing a tile ends
+      the personal sessions promoted there before it. A personal join older than the device's
+      tile does not promote, and promoting a newer one ends that tile.
+      There is no local counter or clock to fall back on. A slot that lost is forgotten. The person's older slot goes too, but only while it still holds the session last
+      promoted, so another person's sign-in, or a newer one of this person, saved there since stays.
+      The last join outlives a sign-out, so an ended session that answers late is never promoted. A forget
+      names the slot and the session it signed out, and goes ahead only while the slot still holds
+      that session, so a session another tab saved there since stays. It then deletes only the
+      mappings and the active slot that still point at the slot.
   - Revocations are never deleted. Each is a few bytes, and a deleted one would let a late answer
     for its session be stored again.
 - **Every token passes a transactional check.** Before a client hands out any token, the
@@ -177,9 +191,11 @@ every tab of the origin, and which works outside secure contexts.
   whose token it was not given. ADR 0006's refusal of API keys concerns a caller acting with a
   key, and this command has no caller.
 - **One device code per browser.** The first sign-in enrolls the browser and keeps its device code
-  only if none is kept yet, in one transaction. A tab that enrolled at the same moment and lost
-  enrolls again with the kept code, so its session joins that device and the picker lists both
-  people. The device it enrolled first is left for an admin to remove. While a sign-in finishes,
+  and id only if none is kept yet, in one transaction that raises the epoch. A tab that enrolled at
+  the same moment and lost enrolls again with the kept code, so its session joins that device and
+  the picker lists both people. If the core no longer knows the kept device, it enrolls a new one;
+  the browser then clears the old one for that epoch and keeps the new one. The device a tab
+  enrolled first is left for an admin to remove. While a sign-in finishes,
   its tab stays on its slot, so another tab's sign-in cannot switch it away.
 - **The account client names the session in everything it deletes.** A sign-in carries the
   session its answer stored through registration, promotion, and cleanup: the core must say that

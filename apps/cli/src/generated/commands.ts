@@ -428,7 +428,6 @@ export const generatedCommands = [
         Schema.Struct({
           deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
           joinSequence: Schema.Finite,
-          scope: Schema.Union([Schema.Literal("person"), Schema.Literal("device")]),
         }),
       ]),
     }),

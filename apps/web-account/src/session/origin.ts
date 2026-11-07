@@ -1,4 +1,4 @@
-import { slotHolding } from "@media/sdk/promise";
+import { endedByCore, moveSession, slotHolding } from "@media/sdk/promise";
 import type { SharedStore, SharedTransaction } from "@media/sdk/promise";
 import { randomUuid } from "@media/ui/lib/secure-context";
 import { Brand, Option, Schema } from "effect";
@@ -17,25 +17,48 @@ const SlotId = Brand.nominal<SlotId>();
 const UserId = Brand.nominal<UserId>();
 
 /**
- * Where the core bound a sign-in to this browser's device, its place in the order sessions took
- * it, and what a later number ends, as the core says: `person`, a personal join, ended only by
- * the same person's later join there; `device`, a shared device's tile, ended by any later tile
- * there, whoever's. The core keeps the higher number's session live within that scope.
+ * Where a personal sign-in joined this browser's device and its number there, under the device
+ * epoch the browser kept it at. The core keeps live only the person's highest join on a device,
+ * so a promotion compares numbers, but only for the device the browser still keeps.
  */
 interface Joined {
   readonly deviceId: string;
+  readonly epoch: number;
   readonly sequence: number;
-  readonly scope: "person" | "device";
 }
 
 /**
- * A finished sign-in on a slot: whose it is, the session it stored as its token's subject, and
- * where and in what order the core bound it to this browser's device.
+ * A finished personal sign-in on a slot: whose it is, the session it stored as its token's
+ * subject, and where and in what order the core joined it to this browser's device.
  */
 export interface SignedIn {
   readonly userId: UserId;
   readonly session: string;
   readonly joined: Joined;
+}
+
+/**
+ * A tile the core opened on this shared device: whose, its session, the device, the epoch the
+ * browser kept the device at when it asked, the tile's number there, and the slot its sign-in
+ * stored it in.
+ */
+interface OpenedTile {
+  readonly userId: UserId;
+  readonly session: string;
+  readonly deviceId: string;
+  readonly epoch: number;
+  readonly sequence: number;
+  readonly from: SlotId;
+}
+
+/**
+ * The device this browser keeps: its code, its id, and its epoch, which changes whenever the
+ * kept device is set or cleared, so a result obtained for an earlier one is told apart.
+ */
+interface KeptDevice {
+  readonly code: string;
+  readonly deviceId: string;
+  readonly epoch: number;
 }
 
 /** What this browser holds for every client on the origin. */
@@ -67,14 +90,22 @@ export interface OriginStore {
   /** The key a slot's session lives under. */
   readonly sessionKey: (slot: SlotId) => string;
   /**
-   * Makes `slot` the one holding the person of `signedIn`, and the active slot; whether it did. It
-   * does only while `slot` still holds that very session, and only for the sign-in whose session
-   * the core kept: one bound to this device later than any promoted before, by the core's order,
-   * whatever order the tabs promote in. No local clock or counter decides. A different slot that
-   * held the person before goes, since the core keeps one session per person per device, and so
-   * does whoever `slot` held before. Idempotent.
+   * Makes `slot` the one holding the person of a personal sign-in, and the active slot; whether it
+   * did. It does only while `slot` still holds that very session, while the browser still keeps
+   * the device and epoch the join was made under, and only when the join is higher than the
+   * person's last promoted one there: the core keeps one session per person per device, the
+   * highest. No local clock or counter decides. The person's older slot goes, and so does whoever
+   * `slot` held before. Idempotent.
    */
   readonly promote: (slot: SlotId, signedIn: SignedIn) => Promise<boolean>;
+  /**
+   * Puts an opened tile in this shared device's one tile slot, and makes it the active slot;
+   * whether it did. It does only while the browser still keeps the device and epoch the tile was
+   * opened under, and only when the tile's number is higher than the slot's: the core keeps one
+   * tile per device, the highest, whoever's. The tile it replaces is recorded as ended and its
+   * tokens go, in the same transaction; a tile that lost is recorded as ended and its slot goes.
+   */
+  readonly installTile: (tile: OpenedTile) => Promise<boolean>;
   /** Makes `slot` the one every client acts as. */
   readonly activate: (slot: SlotId) => Promise<void>;
   /**
@@ -84,14 +115,25 @@ export interface OriginStore {
    */
   readonly forget: (slot: SlotId, session: string | null) => Promise<void>;
   /**
-   * Keeps `code` as this browser's device code unless one is already kept, and answers the code
-   * kept. Two tabs that enroll at once both end up with the first one.
+   * Keeps device `deviceId`, whose code is `code`, unless one is already kept, and answers the
+   * device kept with its epoch. Two tabs that enroll at once both end up with the first one.
    */
-  readonly claimDevice: (code: string) => Promise<string>;
-  readonly clearDevice: () => Promise<void>;
+  readonly claimDevice: (code: string, deviceId: string) => Promise<KeptDevice>;
+  /** The device kept now, read in a transaction; null while none is. */
+  readonly currentDevice: () => Promise<KeptDevice | null>;
+  /**
+   * Forgets the kept device and moves to a new epoch; with `epoch`, only while the device kept is
+   * still the one of that epoch.
+   */
+  readonly clearDevice: (epoch?: number) => Promise<void>;
 }
 
 const DEVICE = "media.device";
+
+const DEVICE_ID = "media.deviceId";
+
+/** Raised whenever the kept device is set or cleared. */
+const DEVICE_EPOCH = "media.deviceEpoch";
 
 const ACTIVE = "media.active";
 
@@ -101,9 +143,14 @@ const SESSION = "media.session.";
 
 const JOINED = "media.joined.";
 
-/** The last join promoted for a person, and the session it promoted. */
+/** The last personal join promoted for a person: its device, epoch, number, and session. */
 const StoredJoin = Schema.fromJsonString(
-  Schema.Struct({ deviceId: Schema.String, sequence: Schema.Int, session: Schema.String }),
+  Schema.Struct({
+    deviceId: Schema.String,
+    epoch: Schema.Int,
+    sequence: Schema.Int,
+    session: Schema.String,
+  }),
 );
 
 const decodeJoin = Schema.decodeUnknownOption(StoredJoin);
@@ -113,7 +160,7 @@ const encodeJoin = Schema.encodeSync(StoredJoin);
 const lastJoin = async (tx: SharedTransaction, userId: UserId) =>
   Option.flatMap(Option.fromNullishOr(await tx.get(`${JOINED}${userId}`)), decodeJoin);
 
-/** The last tile promoted on a shared device, whoever's: the scope a tile's number orders. */
+/** The number and session of the tile in a shared device's one tile slot, whoever's. */
 const TILE = "media.tile.";
 
 const StoredTile = Schema.fromJsonString(
@@ -127,7 +174,42 @@ const encodeTile = Schema.encodeSync(StoredTile);
 const lastTile = async (tx: SharedTransaction, deviceId: string) =>
   Option.flatMap(Option.fromNullishOr(await tx.get(`${TILE}${deviceId}`)), decodeTile);
 
+/**
+ * The highest personal join promoted on a device, anyone's. One count orders everything bound to
+ * a device, and switching it between personal and shared ends everyone on it, so a tile older
+ * than this join, or a join older than the device's tile, is over.
+ */
+const PERSONAL = "media.personal.";
+
+const highestPersonal = async (tx: SharedTransaction, deviceId: string): Promise<number> =>
+  Number((await tx.get(`${PERSONAL}${deviceId}`)) ?? "0") || 0;
+
+const tileNumber = async (tx: SharedTransaction, deviceId: string): Promise<number> =>
+  Option.match(await lastTile(tx, deviceId), { onNone: () => 0, onSome: (tile) => tile.sequence });
+
 const sessionKey = (slot: SlotId): string => `${SESSION}${slot}`;
+
+/** A shared device's one tile slot, named by the device. */
+const tileSlot = (deviceId: string): SlotId => SlotId(`tile-${deviceId}`);
+
+const epochIn = async (tx: SharedTransaction): Promise<number> =>
+  Number((await tx.get(DEVICE_EPOCH)) ?? "0") || 0;
+
+const keptIn = async (tx: SharedTransaction): Promise<KeptDevice | null> => {
+  const code = await tx.get(DEVICE);
+  const deviceId = await tx.get(DEVICE_ID);
+
+  return code === undefined || deviceId === undefined
+    ? null
+    : { code, deviceId, epoch: await epochIn(tx) };
+};
+
+/** Whether the browser still keeps `deviceId` at `epoch`. */
+const stillKept = async (tx: SharedTransaction, deviceId: string, epoch: number) => {
+  const kept = await keptIn(tx);
+
+  return kept !== null && kept.deviceId === deviceId && kept.epoch === epoch;
+};
 
 const EMPTY: Origin = { device: null, active: null, people: new Map() };
 
@@ -186,6 +268,76 @@ const dropSlot = async (tx: SharedTransaction, slot: SlotId): Promise<void> => {
 };
 
 /**
+ * Records the device's tile as ended, and removes its tile slot, the mappings that point at it,
+ * and the active slot while it is this one: but only while the slot still holds that tile's
+ * session, so another sign-in saved there since stays.
+ */
+const dropTile = async (tx: SharedTransaction, deviceId: string, at: number): Promise<void> => {
+  const slot = tileSlot(deviceId);
+  const held = await slotHolding(tx, sessionKey(slot));
+  const tile = await lastTile(tx, deviceId);
+
+  const isTile = Option.exists(held, (holding) =>
+    Option.exists(tile, (recorded) => recorded.session === holding.session),
+  );
+
+  if (!isTile) return;
+
+  const { people, active } = await originIn(tx);
+
+  await Promise.all([
+    ...Option.toArray(held).map((holding) =>
+      endedByCore(tx, holding.session, sessionKey(slot), at),
+    ),
+    ...[...people].flatMap(([person, slotHeld]) =>
+      slotHeld === slot ? [tx.remove(`${PERSON}${person}`)] : [],
+    ),
+  ]);
+  await dropSlot(tx, slot);
+
+  if (active === slot) await tx.remove(ACTIVE);
+};
+
+/**
+ * Records as ended every personal session promoted on the tile's device before it, and removes
+ * their slots and mappings: the device switched to shared since, which ended them.
+ */
+const dropPersonalBefore = async (
+  tx: SharedTransaction,
+  tile: OpenedTile,
+  at: number,
+): Promise<void> => {
+  const { people, active } = await originIn(tx);
+
+  const ended = await Promise.all(
+    [...people].map(async ([person, slot]) => {
+      const join = await lastJoin(tx, person);
+      const held = await slotHolding(tx, sessionKey(slot));
+
+      return Option.match(join, {
+        onNone: () => [],
+        onSome: (last) =>
+          last.deviceId === tile.deviceId &&
+          last.sequence < tile.sequence &&
+          Option.exists(held, (holding) => holding.session === last.session)
+            ? [{ person, slot, session: last.session }]
+            : [],
+      });
+    }),
+  );
+
+  await Promise.all(
+    ended.flat().map(async ({ person, slot, session }) => {
+      await endedByCore(tx, session, sessionKey(slot), at);
+      await tx.remove(`${PERSON}${person}`);
+      await dropSlot(tx, slot);
+
+      if (active === slot) await tx.remove(ACTIVE);
+    }),
+  );
+};
+
+/**
  * The origin's account state over `shared`, read once before it returns. Without IndexedDB
  * (`null`) it holds nothing and every change fails, so the browser shows signed out.
  */
@@ -234,23 +386,21 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
           return false;
         }
 
+        // A join made for a device the browser no longer keeps never promotes.
+        if (!(await stillKept(tx, joined.deviceId, joined.epoch))) return false;
+
+        // A tile the device took after this join ended it, as switching to shared does.
+        if ((await tileNumber(tx, joined.deviceId)) > joined.sequence) return false;
+
         const last = await lastJoin(tx, userId);
 
-        // The core's order alone decides; a join on another device is newer, since the browser
-        // keeps one device code and a cleared one is never used again.
-        // A number is compared within what it ends: a tile against the device's last tile,
-        // whoever's; a personal join against the person's last join on the device.
-        const kept =
-          joined.scope === "device"
-            ? Option.match(await lastTile(tx, joined.deviceId), {
-                onNone: () => true,
-                onSome: (stored) => stored.sequence < joined.sequence,
-              })
-            : Option.match(last, {
-                onNone: () => true,
-                onSome: (stored) =>
-                  stored.deviceId !== joined.deviceId || stored.sequence < joined.sequence,
-              });
+        const kept = Option.match(last, {
+          onNone: () => true,
+          onSome: (stored) =>
+            stored.deviceId !== joined.deviceId ||
+            stored.epoch !== joined.epoch ||
+            stored.sequence < joined.sequence,
+        });
 
         if (!kept) return false;
 
@@ -281,20 +431,69 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
           if (stale) await dropSlot(tx, before);
         }
 
+        // The tile the device held before this join is over: the device switched to personal.
+        if (slot !== tileSlot(joined.deviceId)) await dropTile(tx, joined.deviceId, Date.now());
+
         await tx.set(`${PERSON}${userId}`, slot);
         await tx.set(ACTIVE, slot);
-
+        await tx.set(`${JOINED}${userId}`, encodeJoin({ ...joined, session }));
         await tx.set(
-          `${JOINED}${userId}`,
-          encodeJoin({ deviceId: joined.deviceId, sequence: joined.sequence, session }),
+          `${PERSONAL}${joined.deviceId}`,
+          String(Math.max(joined.sequence, await highestPersonal(tx, joined.deviceId))),
         );
 
-        if (joined.scope === "device") {
-          await tx.set(
-            `${TILE}${joined.deviceId}`,
-            encodeTile({ sequence: joined.sequence, session }),
-          );
+        return true;
+      }),
+    installTile: (tile) =>
+      change(async (tx) => {
+        const from = sessionKey(tile.from);
+        const slot = tileSlot(tile.deviceId);
+        const into = sessionKey(slot);
+        const now = Date.now();
+        const staged = await slotHolding(tx, from);
+
+        if (Option.isNone(staged) || staged.value.session !== tile.session) return false;
+
+        // Newer than the tile there, whoever's, and than any personal join promoted on the device,
+        // which a switch to personal after this tile would have ended it for.
+        const newer =
+          (await stillKept(tx, tile.deviceId, tile.epoch)) &&
+          (await tileNumber(tx, tile.deviceId)) < tile.sequence &&
+          (await highestPersonal(tx, tile.deviceId)) < tile.sequence;
+
+        // A tile that lost is over on the core already: no answer for it may come back.
+        if (!newer) {
+          await endedByCore(tx, tile.session, from, now);
+          await dropSlot(tx, tile.from);
+
+          return false;
         }
+
+        const replaced = await slotHolding(tx, into);
+
+        await Promise.all(
+          Option.toArray(replaced).flatMap((held) =>
+            held.session === tile.session ? [] : [endedByCore(tx, held.session, into, now)],
+          ),
+        );
+
+        await dropSlot(tx, slot);
+        await moveSession(tx, from, into, tile.session);
+        await dropPersonalBefore(tx, tile, now);
+
+        const { people } = await originIn(tx);
+
+        await Promise.all(
+          [...people].flatMap(([person, slotHeld]) =>
+            slotHeld === slot ? [tx.remove(`${PERSON}${person}`)] : [],
+          ),
+        );
+        await tx.set(`${PERSON}${tile.userId}`, slot);
+        await tx.set(ACTIVE, slot);
+        await tx.set(
+          `${TILE}${tile.deviceId}`,
+          encodeTile({ sequence: tile.sequence, session: tile.session }),
+        );
 
         return true;
       }),
@@ -316,15 +515,33 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
 
         if (active === slot) await tx.remove(ACTIVE);
       }),
-    claimDevice: (code) =>
+    claimDevice: (code, deviceId) =>
       change(async (tx) => {
-        const kept = await tx.get(DEVICE);
+        const kept = await keptIn(tx);
 
-        if (kept !== undefined) return kept;
+        if (kept !== null) return kept;
+
+        const epoch = (await epochIn(tx)) + 1;
+
         await tx.set(DEVICE, code);
+        await tx.set(DEVICE_ID, deviceId);
+        await tx.set(DEVICE_EPOCH, String(epoch));
 
-        return code;
+        return { code, deviceId, epoch };
       }),
-    clearDevice: () => change((tx) => tx.remove(DEVICE)),
+    currentDevice: () => (shared ?? unavailable).read(keptIn),
+    clearDevice: (epoch) =>
+      change(async (tx) => {
+        const kept = await keptIn(tx);
+
+        if (epoch !== undefined && kept?.epoch !== epoch) return;
+
+        // The core no longer knows the device, so the tile it held is over too.
+        if (kept !== null) await dropTile(tx, kept.deviceId, Date.now());
+
+        await tx.remove(DEVICE);
+        await tx.remove(DEVICE_ID);
+        await tx.set(DEVICE_EPOCH, String((await epochIn(tx)) + 1));
+      }),
   };
 };

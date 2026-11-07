@@ -20,24 +20,31 @@ const ada = userId("user-ada");
 const bo = userId("user-bo");
 
 /** The `sequence`th join of a session to this browser's device, as the core answers enroll. */
-const joinedAs = (sequence: number, deviceId = "device-1") => ({
-  deviceId,
-  sequence,
-  scope: "person" as const,
-});
+/** The device the test tabs keep, at epoch 1, unless a test starts with none. */
+const DEVICE_CODE = "dv_device-1.secret";
 
-/** The `sequence`th taking of a shared device, as the core numbers a tile it opens. */
-const tileAs = (sequence: number, deviceId = "device-1") => ({
+/** The `sequence`th join to the kept device, as the core answers enroll. */
+const joinedAs = (sequence: number, deviceId = "device-1", epoch = 1) => ({
   deviceId,
+  epoch,
   sequence,
-  scope: "device" as const,
 });
 
 /**
  * Tabs of one origin over one fake IndexedDB. A tab hears another tab's commit only when
  * `deliver` runs, as a `BroadcastChannel` message arrives later.
  */
-const tabs = async (count: number) => {
+const cy = userId("user-cy");
+
+/** A tile the core opened as the `sequence`th taking of the kept device, staged in `from`. */
+const tileAs = (
+  person: UserId,
+  session: string,
+  sequence: number,
+  from: ReturnType<typeof newSlot>,
+) => ({ userId: person, session, deviceId: "device-1", epoch: 1, sequence, from });
+
+const tabs = async (count: number, { device = true }: { readonly device?: boolean } = {}) => {
   const indexedDB = new IDBFactory();
   const listeners: Array<() => void> = [];
   const queued: Array<Array<() => void>> = Array.from({ length: count }, () => []);
@@ -65,6 +72,8 @@ const tabs = async (count: number) => {
 
   const stores = await Promise.all(shared.map((store) => openOriginStore(store)));
 
+  if (device) await stores[0]?.claimDevice(DEVICE_CODE, "device-1");
+
   return {
     stores,
     shared,
@@ -76,8 +85,10 @@ const tabs = async (count: number) => {
   };
 };
 
-const one = async (): Promise<{ store: OriginStore; shared: SharedStore }> => {
-  const { stores, shared } = await tabs(1);
+const one = async (
+  options: { readonly device?: boolean } = {},
+): Promise<{ store: OriginStore; shared: SharedStore }> => {
+  const { stores, shared } = await tabs(1, options);
   const [store] = stores;
   const [first] = shared;
 
@@ -161,19 +172,19 @@ describe("the origin store", () => {
     await store.promote(slot, { userId: ada, session: "user-ada|s1", joined: joinedAs(1) });
 
     expect(store.read()).toStrictEqual({
-      device: null,
+      device: DEVICE_CODE,
       active: slot,
       people: new Map([[ada, slot]]),
     });
   });
 
   it("keeps the same snapshot until something changes", async () => {
-    const { store } = await one();
+    const { store } = await one({ device: false });
     const before = store.read();
 
     expect(store.read()).toBe(before);
 
-    await store.claimDevice("dv_1.secret");
+    await store.claimDevice("dv_1.secret", "1");
 
     expect(store.read()).not.toBe(before);
     expect(store.read().device).toBe("dv_1.secret");
@@ -193,67 +204,170 @@ describe("the origin store", () => {
     expect(store.read().people).toStrictEqual(new Map([[ada, second]]));
   });
 
-  it("keeps the tile the core opened last, whoever's it is, though an older one promotes after", async () => {
+  it("puts each tile in the device's one tile slot, ending the tile it replaced", async () => {
+    const { store, shared } = await one();
+    const adaStaging = newSlot();
+    const boStaging = newSlot();
+
+    await signIn(shared, store, adaStaging, "user-ada|tile-2");
+    const first = await store.installTile(tileAs(ada, "user-ada|tile-2", 2, adaStaging));
+    const tileSlot = store.read().active;
+
+    await signIn(shared, store, boStaging, "user-bo|tile-3");
+    const second = await store.installTile(tileAs(bo, "user-bo|tile-3", 3, boStaging));
+
+    if (tileSlot === null) throw new Error("No tile slot");
+
+    expect({
+      first,
+      second,
+      origin: store.read(),
+      loaded: refreshOf(await Effect.runPromise((await sessionsOf(shared, store, tileSlot)).load)),
+      keys: (await keysOf(shared)).filter((key) => key.includes("|tile-")).toSorted(),
+      again: await Effect.runPromise(
+        (await sessionsOf(shared, store, newSlot())).save(sessionAs("user-ada|tile-2")),
+      ),
+    }).toStrictEqual({
+      first: true,
+      second: true,
+      origin: { device: DEVICE_CODE, active: tileSlot, people: new Map([[bo, tileSlot]]) },
+      loaded: Option.some("refresh-user-bo|tile-3"),
+      keys: [
+        "media.revoked:user-ada|tile-2",
+        `${store.sessionKey(tileSlot)}:user-bo|tile-3`,
+      ].toSorted(),
+      again: false,
+    });
+  });
+
+  it("keeps the tile the core opened last, whoever's, whatever order three tabs install in", async () => {
     const {
-      stores: [older, newer],
-      shared: [olderDb, newerDb],
+      stores: [holding, opening, late],
+      shared: [holdingDb, openingDb, lateDb],
       deliver,
-    } = await tabs(2);
+    } = await tabs(3);
 
     if (
-      older === undefined ||
-      newer === undefined ||
-      olderDb === undefined ||
-      newerDb === undefined
+      holding === undefined ||
+      opening === undefined ||
+      late === undefined ||
+      holdingDb === undefined ||
+      openingDb === undefined ||
+      lateDb === undefined
     ) {
       throw new Error("No tab");
     }
 
-    const adaSlot = newSlot();
-    const boSlot = newSlot();
+    const x = newSlot();
+    const y = newSlot();
+    const z = newSlot();
 
-    await signIn(olderDb, older, adaSlot, "user-ada|tile-2");
-    await signIn(newerDb, newer, boSlot, "user-bo|tile-3");
+    // Every tab holds Ada's tile X; Bo's Y and Cy's Z open, Z after Y on the core.
+    await signIn(holdingDb, holding, x, "user-ada|tile-2");
+    await holding.installTile(tileAs(ada, "user-ada|tile-2", 2, x));
+    await deliver();
+    await signIn(openingDb, opening, y, "user-bo|tile-3");
+    await signIn(lateDb, late, z, "user-cy|tile-4");
 
-    // Bo's tile, which the core opened last and which ended Ada's, promotes first.
-    await settleSignIn(newer, boSlot, { userId: bo, session: "user-bo|tile-3", joined: tileAs(3) });
+    const installed = {
+      y: await opening.installTile(tileAs(bo, "user-bo|tile-3", 3, y)),
+      z: await late.installTile(tileAs(cy, "user-cy|tile-4", 4, z)),
+    };
 
-    const settled = await settleSignIn(older, adaSlot, {
+    await deliver();
+    const tileSlot = holding.read().active;
+
+    if (tileSlot === null) throw new Error("No tile slot");
+
+    const tokens = (await keysOf(holdingDb)).filter((key) => /^media\.session\.[^:]+:/u.test(key));
+
+    expect({ installed, people: holding.read().people, tokens }).toStrictEqual({
+      installed: { y: true, z: true },
+      people: new Map([[cy, tileSlot]]),
+      tokens: [`${holding.sessionKey(tileSlot)}:user-cy|tile-4`],
+    });
+  });
+
+  it("drops a tile the core opened before the one installed, though it installs after", async () => {
+    const { store, shared } = await one();
+    const older = newSlot();
+    const newer = newSlot();
+
+    await signIn(shared, store, older, "user-bo|tile-3");
+    await signIn(shared, store, newer, "user-cy|tile-4");
+    await store.installTile(tileAs(cy, "user-cy|tile-4", 4, newer));
+
+    const late = await store.installTile(tileAs(bo, "user-bo|tile-3", 3, older));
+    const tokens = (await keysOf(shared)).filter((key) => /^media\.session\.[^:]+:/u.test(key));
+
+    expect({
+      late,
+      people: store.read().people,
+      tokens: tokens.length,
+      revoked: (await keysOf(shared)).includes("media.revoked:user-bo|tile-3"),
+    }).toStrictEqual({
+      late: false,
+      people: new Map([[cy, store.read().active]]),
+      tokens: 1,
+      revoked: true,
+    });
+  });
+
+  it("drops a join from a device this browser left, though its tab promotes after the new device's", async () => {
+    const {
+      stores: [suspended, current],
+      shared: [suspendedDb, currentDb],
+      deliver,
+    } = await tabs(2, { device: false });
+
+    if (
+      suspended === undefined ||
+      current === undefined ||
+      suspendedDb === undefined ||
+      currentDb === undefined
+    ) {
+      throw new Error("No tab");
+    }
+
+    const oldSlot = newSlot();
+    const newSlotHere = newSlot();
+
+    // The suspended tab enrolled device 1 and joined there; then device 1 is removed.
+    await suspended.claimDevice("dv_d1.secret", "d1");
+    await signIn(suspendedDb, suspended, oldSlot, "user-ada|session-d1");
+    await current.clearDevice();
+
+    // Another tab enrolls device 2, and Ada's new session there promotes.
+    const kept = await current.claimDevice("dv_d2.secret", "d2");
+
+    await signIn(currentDb, current, newSlotHere, "user-ada|session-d2");
+    await settleSignIn(current, newSlotHere, {
       userId: ada,
-      session: "user-ada|tile-2",
-      joined: tileAs(2),
+      session: "user-ada|session-d2",
+      joined: { deviceId: "d2", epoch: kept.epoch, sequence: 1 },
+    });
+
+    // The suspended tab resumes with its device 1 result.
+    const settled = await settleSignIn(suspended, oldSlot, {
+      userId: ada,
+      session: "user-ada|session-d1",
+      joined: { deviceId: "d1", epoch: 1, sequence: 5 },
     });
 
     await deliver();
 
-    expect({ settled, origin: newer.read() }).toStrictEqual({
-      settled: false,
-      origin: { device: null, active: boSlot, people: new Map([[bo, boSlot]]) },
-    });
-  });
-
-  it("moves a shared device to the tile opened last, on a slot of its own", async () => {
-    const { store, shared } = await one();
-    const first = newSlot();
-    const second = newSlot();
-
-    await signIn(shared, store, first, "user-ada|s1");
-    await settleSignIn(store, first, { userId: ada, session: "user-ada|s1", joined: joinedAs(1) });
-
-    // The next tile signs in on a fresh slot, since its sign-in may not replace Ada's session.
-    await signIn(shared, store, first, "user-bo|s2");
-    await signIn(shared, store, second, "user-bo|s2");
-    await settleSignIn(store, second, { userId: bo, session: "user-bo|s2", joined: joinedAs(2) });
-
-    // Opening it ended Ada's tile, so the account client forgets that slot by Ada's session.
-    await store.forget(first, "user-ada|s1");
-
     expect({
-      origin: store.read(),
-      first: (await keysOf(shared)).filter((key) => key.startsWith(store.sessionKey(first))),
+      settled,
+      origin: current.read(),
+      kept: (await keysOf(currentDb)).includes(current.sessionKey(newSlotHere)),
     }).toStrictEqual({
-      origin: { device: null, active: second, people: new Map([[bo, second]]) },
-      first: [],
+      settled: false,
+      origin: {
+        device: "dv_d2.secret",
+        active: newSlotHere,
+        people: new Map([[ada, newSlotHere]]),
+      },
+      kept: true,
     });
   });
 
@@ -272,7 +386,11 @@ describe("the origin store", () => {
     await store.forget(slot, "user-ada|s1");
 
     expect((await keysOf(shared)).toSorted()).toStrictEqual([
+      "media.device",
+      "media.deviceEpoch",
+      "media.deviceId",
       "media.joined.user-ada",
+      "media.personal.device-1",
       "media.revoked:user-ada|s0",
       "media.signOut:user-ada|s0",
     ]);
@@ -290,7 +408,7 @@ describe("the origin store", () => {
     await store.forget(boSlot, "user-bo|s2");
 
     expect(store.read()).toStrictEqual({
-      device: null,
+      device: DEVICE_CODE,
       active: null,
       people: new Map([[ada, adaSlot]]),
     });
@@ -323,8 +441,8 @@ describe("the origin store", () => {
     await deliver();
 
     expect({ here: signingOut.read(), there: signingIn.read() }).toStrictEqual({
-      here: { device: null, active: fresh, people: new Map([[ada, fresh]]) },
-      there: { device: null, active: fresh, people: new Map([[ada, fresh]]) },
+      here: { device: DEVICE_CODE, active: fresh, people: new Map([[ada, fresh]]) },
+      there: { device: DEVICE_CODE, active: fresh, people: new Map([[ada, fresh]]) },
     });
     expect(await keysOf(store)).toContain(signingOut.sessionKey(fresh));
   });
@@ -332,18 +450,18 @@ describe("the origin store", () => {
   it("keeps the first device two tabs enroll at once, and tells both which one it is", async () => {
     const {
       stores: [here, there],
-    } = await tabs(2);
+    } = await tabs(2, { device: false });
 
     if (here === undefined || there === undefined) throw new Error("No tab");
 
     const kept = await Promise.all([
-      here.claimDevice("dv_1.first"),
-      there.claimDevice("dv_2.second"),
+      here.claimDevice("dv_1.first", "1"),
+      there.claimDevice("dv_2.second", "2"),
     ]);
 
     expect({ kept, stored: here.read().device }).toStrictEqual({
       kept: [kept[0], kept[0]],
-      stored: kept[0],
+      stored: kept[0].code,
     });
   });
 
@@ -402,8 +520,8 @@ describe("the origin store", () => {
       kept: refreshOf(await Effect.runPromise(firstSessions.load)),
       ended: refreshOf(await Effect.runPromise(secondSessions.load)),
     }).toStrictEqual({
-      here: { device: null, active: firstSlot, people: new Map([[ada, firstSlot]]) },
-      there: { device: null, active: firstSlot, people: new Map([[ada, firstSlot]]) },
+      here: { device: DEVICE_CODE, active: firstSlot, people: new Map([[ada, firstSlot]]) },
+      there: { device: DEVICE_CODE, active: firstSlot, people: new Map([[ada, firstSlot]]) },
       kept: Option.some("refresh-user-ada|session-1"),
       ended: Option.none(),
     });
@@ -432,25 +550,27 @@ describe("the origin store", () => {
       origin: first.read(),
       kept: refreshOf(await Effect.runPromise(secondSessions.load)),
     }).toStrictEqual({
-      origin: { device: null, active: secondSlot, people: new Map([[ada, secondSlot]]) },
+      origin: { device: DEVICE_CODE, active: secondSlot, people: new Map([[ada, secondSlot]]) },
       kept: Option.some("refresh-user-ada|session-2"),
     });
   });
 
-  it("promotes a sign-in that joined another device, as after the browser's device was cleared", async () => {
+  it("promotes a join on the device kept now, though the last promoted was higher on the one before", async () => {
     const { first, second, firstSlot, secondSlot } = await twoSignIns();
 
     await second.promote(secondSlot, {
       userId: ada,
       session: "user-ada|session-2",
-      joined: joinedAs(5, "device-old"),
+      joined: joinedAs(5),
     });
+    await first.clearDevice();
+    const kept = await first.claimDevice("dv_device-2.secret", "device-2");
 
     expect(
       await first.promote(firstSlot, {
         userId: ada,
         session: "user-ada|session-1",
-        joined: joinedAs(1, "device-new"),
+        joined: joinedAs(1, "device-2", kept.epoch),
       }),
     ).toBe(true);
     expect(first.read().people).toStrictEqual(new Map([[ada, firstSlot]]));
@@ -594,6 +714,9 @@ type Step =
   | { readonly kind: "signOut"; readonly tab: number }
   | { readonly kind: "forget"; readonly pick: number }
   | { readonly kind: "lateAnswer"; readonly pick: number }
+  | { readonly kind: "openTile"; readonly tab: number; readonly person: "cy" | "dee" }
+  | { readonly kind: "install"; readonly pick: number }
+  | { readonly kind: "replaceDevice"; readonly tab: number }
   | { readonly kind: "deliver" };
 
 const TABS = 3;
@@ -629,17 +752,41 @@ const step: fc.Arbitrary<Step> = fc.oneof(
   { weight: 1, arbitrary: fc.record({ kind: fc.constant("forget" as const), pick: fc.nat() }) },
   { weight: 1, arbitrary: fc.record({ kind: fc.constant("lateAnswer" as const), pick: fc.nat() }) },
   { weight: 1, arbitrary: fc.record({ kind: fc.constant("deliver" as const) }) },
+  // Several people's tiles race on the device, and the device may be removed and enrolled again
+  // while joins and tiles wait to be promoted.
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant("openTile" as const),
+      tab: fc.integer({ min: 0, max: TABS - 1 }),
+      person: fc.constantFrom("cy" as const, "dee" as const),
+    }),
+  },
+  { weight: 2, arbitrary: fc.record({ kind: fc.constant("install" as const), pick: fc.nat() }) },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant("replaceDevice" as const),
+      tab: fc.integer({ min: 0, max: TABS - 1 }),
+    }),
+  },
 );
 
-const PEOPLE = { ada, bo } as const;
+const dee = userId("user-dee");
+
+const PEOPLE = { ada, bo, cy, dee } as const;
+
+const SESSION_PREFIX = "media.session.";
+
+type Joining = ReturnType<typeof joinedAs>;
 
 /** Runs `body` as one Effect, so its steps run in order without awaiting inside a loop. */
 const sequence = <A, E>(body: Effect.Effect<A, E>) => Effect.runPromise(body);
 
 const later = <A>(work: () => Promise<A>) => Effect.promise(work);
 
-describe("any interleaving of sign-ins, joins, promotions, sign-outs, and forgets across tabs", () => {
-  it("never loads a signed-out session, and keeps the sign-in whose session the core kept", async () => {
+describe("any interleaving of sign-ins, joins, tiles, device changes, sign-outs, and forgets across tabs", () => {
+  it("never loads a signed-out or ended session, and keeps the sessions the core kept", async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.array(step, { minLength: 4, maxLength: 30 }),
@@ -687,16 +834,58 @@ describe("any interleaving of sign-ins, joins, promotions, sign-outs, and forget
                 person: "ada" | "bo";
                 slot: ReturnType<typeof newSlot>;
                 session: string;
-                sequence: number;
+                joined: Joining;
               }> = [];
 
-              // The core's order: each join takes the next number and ends the person's earlier
-              // session on the device, so the person's last join is the session still live.
+              // The core's order: each device counts every join and tile; a join ends the
+              // person's earlier session there, a tile the tile before it, whoever's.
               const joined: Array<{
                 person: "ada" | "bo";
                 slot: ReturnType<typeof newSlot>;
                 session: string;
+                joined: Joining;
               }> = [];
+
+              const counts = new Map<string, number>();
+
+              const tileHeld = new Map<
+                string,
+                { person: "cy" | "dee"; session: string; epoch: number; sequence: number }
+              >();
+
+              // A device is personal or shared; switching ends everyone on it. So a tile after a
+              // personal join, or a join after a tile, ends what came before on that device.
+              const lastJoinOn = new Map<string, number>();
+
+              const endedTiles = new Set<string>();
+
+              const installs: Array<Parameters<OriginStore["installTile"]>[0] & { tab: number }> =
+                [];
+
+              let devicesMade = 1;
+
+              const numberOn = (deviceId: string) => {
+                const next = (counts.get(deviceId) ?? 0) + 1;
+
+                counts.set(deviceId, next);
+
+                return next;
+              };
+
+              /** The device a tab's store keeps, or a new one it enrolls and keeps. */
+              const keptBy = (tab: number) =>
+                later(async () => {
+                  const { store } = at(tab);
+                  const kept = await store.currentDevice();
+
+                  if (kept !== null) return kept;
+                  devicesMade += 1;
+
+                  return store.claimDevice(
+                    `dv_device-${devicesMade}.secret`,
+                    `device-${devicesMade}`,
+                  );
+                });
 
               const forgets: Array<{
                 tab: number;
@@ -709,13 +898,26 @@ describe("any interleaving of sign-ins, joins, promotions, sign-outs, and forget
               const found: Array<string> = [];
               let made = 0;
 
-              const runJoin = (index: number) => {
-                const [join] = joining.splice(index % joining.length, 1);
+              const runJoin = (index: number) =>
+                Effect.gen(function* () {
+                  const [join] = joining.splice(index % joining.length, 1);
 
-                if (join === undefined) return;
-                joined.push(join);
-                promotions.push({ ...join, sequence: joined.length });
-              };
+                  if (join === undefined) return;
+                  const kept = yield* keptBy(join.tab);
+                  const numbered = joinedAs(numberOn(kept.deviceId), kept.deviceId, kept.epoch);
+
+                  lastJoinOn.set(kept.deviceId, numbered.sequence);
+                  joined.push({ ...join, joined: numbered });
+                  promotions.push({ ...join, joined: numbered });
+                });
+
+              const runInstall = (index: number) =>
+                Effect.gen(function* () {
+                  const [tile] = installs.splice(index % installs.length, 1);
+
+                  if (tile === undefined) return;
+                  yield* later(() => at(tile.tab).store.installTile(tile));
+                });
 
               const runPromotion = (index: number) =>
                 Effect.gen(function* () {
@@ -729,11 +931,7 @@ describe("any interleaving of sign-ins, joins, promotions, sign-outs, and forget
                     settleSignIn(store, promotion.slot, {
                       userId: PEOPLE[promotion.person],
                       session: promotion.session,
-                      joined: {
-                        deviceId: "device-1",
-                        sequence: promotion.sequence,
-                        scope: "person",
-                      },
+                      joined: promotion.joined,
                     }),
                   );
                 });
@@ -768,7 +966,50 @@ describe("any interleaving of sign-ins, joins, promotions, sign-outs, and forget
                   }
 
                   case "join":
-                    runJoin(next.pick);
+                    if (joining.length > 0) yield* runJoin(next.pick);
+                    break;
+                  case "openTile": {
+                    const kept = yield* keptBy(next.tab);
+                    const sequenceHere = numberOn(kept.deviceId);
+
+                    made += 1;
+                    const session = `user-${next.person}|t${made}`;
+                    const tokens = sessionAs(session);
+                    const staging = newSlot();
+                    const before = tileHeld.get(kept.deviceId);
+
+                    sessions.set(session, tokens);
+
+                    if (before !== undefined) endedTiles.add(before.session);
+                    tileHeld.set(kept.deviceId, {
+                      person: next.person,
+                      session,
+                      epoch: kept.epoch,
+                      sequence: sequenceHere,
+                    });
+
+                    if (yield* on(next.tab)((yield* storage(next.tab, staging)).save(tokens))) {
+                      installs.push({
+                        tab: next.tab,
+                        userId: PEOPLE[next.person],
+                        session,
+                        deviceId: kept.deviceId,
+                        epoch: kept.epoch,
+                        sequence: sequenceHere,
+                        from: staging,
+                      });
+                    }
+
+                    break;
+                  }
+
+                  case "install":
+                    if (installs.length > 0) yield* runInstall(next.pick);
+                    break;
+                  case "replaceDevice":
+                    // The core forgets the device and every session on it; this tab's client
+                    // hears the device is unknown and clears it, as the gate does.
+                    yield* later(() => at(next.tab).store.clearDevice());
                     break;
                   case "promote":
                     if (promotions.length > 0) yield* runPromotion(next.pick);
@@ -830,9 +1071,11 @@ describe("any interleaving of sign-ins, joins, promotions, sign-outs, and forget
                 }
               }
 
-              while (joining.length > 0) runJoin(0);
+              while (joining.length > 0) yield* runJoin(0);
 
               while (promotions.length > 0) yield* runPromotion(0);
+
+              while (installs.length > 0) yield* runInstall(0);
 
               while (forgets.length > 0) yield* runForget(0);
               yield* later(deliver);
@@ -848,8 +1091,52 @@ describe("any interleaving of sign-ins, joins, promotions, sign-outs, and forget
                 }
               }
 
+              const finalDevice = yield* later(() => store.currentDevice());
+              const keys = yield* later(() => keysOf(at(0).db));
+
+              const onFinalDevice = (join: Joining) =>
+                finalDevice !== null &&
+                join.deviceId === finalDevice.deviceId &&
+                join.epoch === finalDevice.epoch;
+
+              for (const ended of endedTiles) {
+                if (
+                  keys.some((key) => key.startsWith(SESSION_PREFIX) && key.endsWith(`:${ended}`))
+                ) {
+                  found.push(`the ended tile ${ended} keeps its tokens`);
+                }
+              }
+
+              const liveTile =
+                finalDevice === null ? undefined : tileHeld.get(finalDevice.deviceId);
+
+              if (
+                finalDevice !== null &&
+                liveTile !== undefined &&
+                liveTile.epoch === finalDevice.epoch &&
+                liveTile.sequence > (lastJoinOn.get(finalDevice.deviceId) ?? 0) &&
+                !revoked.has(liveTile.session)
+              ) {
+                const slot = store.read().people.get(PEOPLE[liveTile.person]);
+                const held = slot === undefined ? null : yield* later(() => sessionIn(store, slot));
+
+                if (held !== liveTile.session) {
+                  found.push(`the live tile ${liveTile.session} is not ${liveTile.person}'s`);
+                }
+              }
+
               for (const person of ["ada", "bo"] as const) {
-                const newest = joined.findLast((each) => each.person === person);
+                const newest = joined.findLast(
+                  (each) => each.person === person && onFinalDevice(each.joined),
+                );
+
+                // A tile opened on the device after it ended it, as switching modes does.
+                if (
+                  newest !== undefined &&
+                  (tileHeld.get(newest.joined.deviceId)?.sequence ?? 0) > newest.joined.sequence
+                ) {
+                  continue;
+                }
 
                 // Only a later sign-in on the same slot, or signing this one out, may take it away.
                 if (newest === undefined || revoked.has(newest.session)) continue;
