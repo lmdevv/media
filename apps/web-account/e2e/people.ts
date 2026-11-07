@@ -11,11 +11,17 @@ export interface Person {
   readonly password: string;
 }
 
+/**
+ * A password no one has used, marked so the results check (`secrets.ts`) can find it wherever it
+ * lands.
+ */
+export const newSecret = (): string => `e2e-secret-${Math.random().toString(36).slice(2, 14)}`;
+
 /** Fresh credentials no one holds yet, under a username that starts with `label`. */
 const newPerson = (label: string): Person => {
   const unique = Math.random().toString(36).slice(2, 10);
 
-  return { username: `${label}-${unique}`, password: `password-${unique}` };
+  return { username: `${label}-${unique}`, password: newSecret() };
 };
 
 const HostAnswer = Schema.fromJsonString(

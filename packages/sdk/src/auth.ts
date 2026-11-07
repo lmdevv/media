@@ -20,6 +20,7 @@ import {
   Data,
   Duration,
   Effect,
+  Exit,
   FiberHandle,
   FiberMap,
   Layer,
@@ -224,6 +225,12 @@ export interface Options {
    * before the connection runs signed out while Auth keeps renewing; one minute when absent.
    */
   readonly refreshFailureLimit?: Duration.Duration;
+  /**
+   * The deployment's mutation that ends a session from any of its refresh tokens, as the core's
+   * `core.auth.sessions.revoke` does. Without it, a sign-out calls `auth:signOut` with the
+   * session's token.
+   */
+  readonly revoke?: FunctionPath;
 }
 
 type RefreshOutcome = Data.TaggedEnum<{
@@ -334,16 +341,19 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     path: FunctionPath,
     args: Readonly<Record<string, Value>>,
     token: Option.Option<Redacted.Redacted>,
+    kind: "action" | "mutation" = "action",
   ) {
     return yield* Effect.tryPromise({
       try: () => {
         if (Option.isSome(token)) gateway.setAuth(Redacted.value(token.value));
         else gateway.clearAuth();
 
-        return gateway.action(
-          makeFunctionReference<"action", typeof args, Schema.Json>(path),
-          args,
-        );
+        return kind === "action"
+          ? gateway.action(makeFunctionReference<"action", typeof args, Schema.Json>(path), args)
+          : gateway.mutation(
+              makeFunctionReference<"mutation", typeof args, Schema.Json>(path),
+              args,
+            );
       },
       catch: (cause) =>
         Option.match(cause instanceof ConvexError ? decodeWaiting(cause.data) : Option.none(), {
@@ -383,7 +393,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
   ): Effect.Effect<Option.Option<Redacted.Redacted>> =>
     token.pipe(
       Effect.catchTag("TokenStorageError", (error) =>
-        logStorageFailure(error).pipe(Effect.andThen(currentToken)),
+        logStorageFailure(error).pipe(Effect.andThen(currentToken), Effect.flatMap(unlessRevoked)),
       ),
     );
 
@@ -487,9 +497,24 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       }),
     );
 
-  /** Ends `ended` on the server; whether the server no longer knows it. */
+  /**
+   * Ends `ended` on the server; whether the server confirmed it. With `revoke`, any of the
+   * session's refresh tokens ends it, however other clients rotated them since. Without it, the
+   * session's token signs it out, renewed first when it is about to expire.
+   */
   const endOnServer = (ended: StoredSession): Effect.Effect<boolean> =>
     Effect.gen(function* () {
+      if (options.revoke !== undefined) {
+        yield* callGateway(
+          options.revoke,
+          { refreshToken: Redacted.value(ended.refreshToken) },
+          Option.none(),
+          "mutation",
+        );
+
+        return true;
+      }
+
       const now = yield* Clock.currentTimeMillis;
 
       const token = isExpiring(Redacted.value(ended.token), now)
@@ -508,7 +533,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     }).pipe(
       Effect.timeout(SERVER_SIGN_OUT_TIMEOUT),
       Effect.catch((error) =>
-        SESSION_GONE.some((tag) => Predicate.isTagged(error, tag))
+        options.revoke === undefined && SESSION_GONE.some((tag) => Predicate.isTagged(error, tag))
           ? Effect.succeed(true)
           : Effect.logWarning("Auth.serverSignOutFailed").pipe(
               Effect.annotateLogs({ reason: error.message }),
@@ -518,30 +543,47 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     );
 
   /**
-   * Ends `ended` on the server. A sign-out (`signedOut`) is retried while the store holds it as
-   * pending, until the server confirms it or another client records that it did; a renewal that
-   * was let go of gets one attempt.
+   * Ends `ended` on the server. A sign-out (`signedOut`) is retried until the server confirms it or
+   * another client records that it did. Until its revocation is stored (`recorded`), each try
+   * writes it again, and nothing but the server's answer stops the retries. A renewal that was let
+   * go of gets one attempt.
    */
-  const endUntilConfirmed = (ended: StoredSession, signedOut: boolean): Effect.Effect<void> =>
+  const endUntilConfirmed = (
+    ended: StoredSession,
+    signedOut: boolean,
+    recorded: boolean,
+  ): Effect.Effect<void> =>
     Effect.gen(function* () {
-      const pending = yield* storage.signOutPending(ended);
+      const stored = yield* Ref.make(recorded);
 
-      if (signedOut && !pending) return true;
+      return yield* Effect.gen(function* () {
+        if (signedOut && !(yield* Ref.get(stored))) {
+          const wrote = yield* Effect.exit(storage.revoke(ended));
 
-      if (yield* endOnServer(ended)) {
-        if (pending) yield* storage.confirmRevoked(ended);
+          yield* Ref.set(stored, Exit.isSuccess(wrote));
+        }
 
-        return true;
-      }
+        if (
+          signedOut &&
+          (yield* Ref.get(stored)) &&
+          !(yield* storage.signOutPending(ended).pipe(Effect.orElseSucceed(() => true)))
+        ) {
+          return true;
+        }
 
-      return !pending || !(yield* storage.signOutPending(ended));
-    }).pipe(
-      Effect.catchTag("TokenStorageError", (error) =>
-        logStorageFailure(error).pipe(Effect.as(false)),
-      ),
-      Effect.repeat({ schedule: renewalSchedule, until: (done) => done }),
-      Effect.asVoid,
-    );
+        if (yield* endOnServer(ended)) {
+          if (signedOut) {
+            yield* storage
+              .confirmRevoked(ended)
+              .pipe(Effect.catchTag("TokenStorageError", logStorageFailure));
+          }
+
+          return true;
+        }
+
+        return !signedOut;
+      }).pipe(Effect.repeat({ schedule: renewalSchedule, until: (done) => done }));
+    }).pipe(Effect.asVoid);
 
   /**
    * Ends `ended` on the server in the background, once per session, starting after `wait`. A
@@ -552,12 +594,13 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     ended: StoredSession,
     signedOut: boolean,
     wait: Duration.Duration = Duration.zero,
+    recorded = true,
   ): Effect.Effect<void> =>
     Effect.asVoid(
       FiberMap.run(
         ending,
         Option.getOrElse(sessionOf(ended), () => Redacted.value(ended.refreshToken)),
-        Effect.delay(endUntilConfirmed(ended, signedOut), wait),
+        Effect.delay(endUntilConfirmed(ended, signedOut, recorded), wait),
         { onlyIfMissing: true },
       ),
     );
@@ -637,9 +680,12 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
             return yield* giveWayToStore(Option.none());
           }
 
+          // A refused refresh token proves nothing about the session, which may still be live, so
+          // it is signed out like any other and ended on the server.
           yield* adopt(Option.none());
-          yield* storage.revoke(seen);
-          yield* storage.confirmRevoked(seen);
+          const recorded = yield* Effect.exit(storage.revoke(seen));
+
+          yield* endInBackground(seen, true, Duration.zero, Exit.isSuccess(recorded));
 
           return Option.none<Redacted.Redacted>();
         }).pipe(Effect.tapError(() => adopt(Option.none()))),
@@ -791,16 +837,27 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     });
   }
 
-  /** `token`, unless the session held now was revoked, which drops it. */
+  /**
+   * `token`, unless the session held now was revoked, which drops it. A check that cannot read
+   * the store counts as revoked, so no token leaves unchecked.
+   */
   function unlessRevoked(
     token: Option.Option<Redacted.Redacted>,
-  ): Effect.Effect<Option.Option<Redacted.Redacted>, TokenStorage.TokenStorageError> {
+  ): Effect.Effect<Option.Option<Redacted.Redacted>> {
     return Effect.gen(function* () {
       const held = yield* Ref.get(session);
 
       if (Option.isNone(token) || Option.isNone(held)) return token;
 
-      if ((yield* storage.revocation(held.value)) === "none") return token;
+      const revocation = yield* storage
+        .revocation(held.value)
+        .pipe(
+          Effect.catchTag("TokenStorageError", (error) =>
+            logStorageFailure(error).pipe(Effect.as("pending" as const)),
+          ),
+        );
+
+      if (revocation === "none") return token;
       yield* committing.withPermits(1)(drop(held.value));
 
       return Option.none();
@@ -851,7 +908,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
           .confirmRevoked(ended.value)
           .pipe(Effect.catchTag("TokenStorageError", logStorageFailure));
       } else {
-        yield* endInBackground(ended.value, true, Duration.seconds(1));
+        yield* endInBackground(ended.value, true, Duration.seconds(1), Exit.isSuccess(revoked));
       }
     }
 
@@ -862,6 +919,10 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
   yield* Ref.set(lastStored, stored);
   yield* adopt(stored);
+  yield* Effect.forkIn(
+    storage.sweep.pipe(Effect.catchTag("TokenStorageError", logStorageFailure)),
+    scope,
+  );
   yield* Effect.forkIn(
     Stream.runForEach(storage.changed, () =>
       follow().pipe(Effect.catchTag("TokenStorageError", logStorageFailure)),

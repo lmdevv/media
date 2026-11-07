@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, Option, Redacted } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { makeBrowserTabs } from "./testing/browser-tabs";
@@ -237,6 +238,59 @@ describe("token storage shared between tabs", () => {
       loadedElsewhere: Option.none(),
       after: [],
       confirmed: true,
+    });
+  });
+
+  it("sweeps revocations only once their sessions can no longer work, and never a live session", async () => {
+    const tabs = makeBrowserTabs({ count: 1, processes: "shared", delivery: "at once" });
+    const cleo = signedInAs("cleo|session-3", "refresh-4");
+    const DAY = 24 * 60 * 60 * 1000;
+
+    const sessionKeys = () =>
+      [...tabs.items.keys()].filter((key) => key.startsWith("s:")).toSorted();
+
+    const answer = await Effect.runPromise(
+      Effect.gen(function* () {
+        const testClock = yield* Layer.build(TestClock.layer());
+
+        return yield* Effect.gen(function* () {
+          yield* TestClock.setTime(Date.now());
+          const storage = yield* storageOver(tabs.tab(0));
+
+          yield* storage.save(ada);
+          yield* storage.revoke(ada);
+          yield* storage.confirmRevoked(ada);
+          yield* storage.save(cleo);
+          yield* storage.revoke(cleo);
+          yield* storage.save(bo);
+          yield* TestClock.adjust(30 * DAY);
+          yield* storage.sweep;
+          const before = sessionKeys();
+
+          yield* TestClock.adjust(2 * DAY);
+          yield* storage.sweep;
+
+          return {
+            before,
+            after: sessionKeys(),
+            pending: (yield* storage.pendingSignOuts).length,
+            loaded: refreshTokenOf(yield* storage.load),
+          };
+        }).pipe(Effect.provideContext(testClock));
+      }).pipe(Effect.scoped),
+    );
+
+    expect(answer).toStrictEqual({
+      before: [
+        "s:ada|session-1:confirmed",
+        "s:ada|session-1:revoked",
+        "s:bo|session-2",
+        "s:cleo|session-3",
+        "s:cleo|session-3:revoked",
+      ],
+      after: ["s:bo|session-2"],
+      pending: 0,
+      loaded: Option.some("refresh-3"),
     });
   });
 });

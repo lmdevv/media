@@ -47,7 +47,14 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env["CI"]),
   timeout: 60_000,
-  use: { baseURL: `http://localhost:${port}`, trace: "retain-on-failure", launchOptions },
+  // Pages and requests carry passwords, tokens, and link codes, so a failure keeps only text.
+  use: {
+    baseURL: `http://localhost:${port}`,
+    trace: "off",
+    screenshot: "off",
+    video: "off",
+    launchOptions,
+  },
   projects: [
     { name: "desktop", use: desktop },
     ...(lanAddress === undefined

@@ -126,8 +126,22 @@ refresh token and its calls, and the browser only has to make every tab stop usi
 - **Reads change nothing.** A session with a revocation loads as none. No read deletes or rewrites
   a key, so a later sign-in is never lost to what an earlier read found.
 - **Signing out** writes the revocation first and shows signed out at once, even if the server
-  call fails. The client then calls the server, and on failure retries in the background, starting
-  after a second and backing off to every 30 seconds, until the server confirms.
+  call fails. The client then asks the core to end the session, and on failure retries in the
+  background, starting after a second and backing off to every 30 seconds, until the core confirms.
+- **Only the core's revoke confirms.** `core.auth.sessions.revoke` takes any refresh token the
+  session ever had, deletes the session and all its refresh tokens, and answers `confirmed` whether
+  or not it had already ended. Convex Auth keeps a rotated or invalidated token's row until the
+  session ends, so an old token still proves the session. A refresh that comes back empty proves
+  nothing: Convex Auth refuses a token spent outside its reuse window but keeps the session alive.
+  So a refused refresh is treated as a sign-out, and the session is revoked like any other. The
+  command needs no session, because the refresh token is the proof. It cannot end a session whose
+  token it was not given. ADR 0006's refusal of API keys concerns a caller acting with a key, and
+  this command has no caller.
+- **Storage that fails, fails closed.** When the revocation or the pending record cannot be
+  written, as in a full `localStorage`, the session's tokens are removed first, which frees space,
+  and the records are tried again. The retry stays alive in memory and writes the records again on
+  every attempt. A revocation check that cannot read the store counts as revoked, and no token
+  leaves the client unchecked, the in-memory fallback included.
 - **A pending sign-out belongs to the browser, not to a slot.** Signing out also writes
   `media.signOut:<session>` with the session's tokens and the key it was signed in under. It sits
   outside every session key, so forgetting a slot or disposing that slot's client keeps it.
@@ -144,13 +158,17 @@ refresh token and its calls, and the browser only has to make every tab stop usi
   works anywhere. Before that, every tab stops using it as soon as it reads storage, which it does
   before every token it uses. The window left is a tab that has not yet read storage. While the
   server cannot be reached, nothing reaches it either.
-- A refresh the server refuses is recorded as a confirmed revocation, unless the store shows that
-  another tab renewed the session first. A tab reading a stale copy can still revoke a session
-  another tab just renewed. That tab then signs out and the person signs in again. This never
-  keeps a session alive.
-- Revocations are never deleted while the session's refresh token could still work, 30 days in the
-  core. Nothing sweeps them yet, so each sign-out leaves two small keys. A session id revoked in a
-  store never loads there again. Every sign-in in the account client starts a new session, so
+- A refresh the server refuses becomes a revocation, unless the store shows that another tab
+  renewed the session first. A tab reading a stale copy can still revoke a session another tab
+  just renewed. That tab then signs out and the person signs in again. This never keeps a session
+  alive.
+- **Sweeping.** Each client sweeps the store's revocation records when it starts. It deletes a
+  record, with that session's leftover tokens and pending sign-out, 31 days after the sign-out:
+  the core's 30-day limit on a session and on an unused refresh token, plus a day. Past 64
+  confirmed revocations it also drops the oldest confirmed ones, whose sessions the core already
+  ended. It never deletes a key that names the current session, or a session revoked less than 31
+  days ago that the core has not confirmed. A session id revoked in a
+  store does not load there again until its record is swept. Every sign-in in the account client starts a new session, so
   this only matters for an API key, which reuses its session. When the account client forgets a
   slot or a person moves to a new one, it removes that slot's token keys and keeps its
   revocations.
@@ -177,9 +195,11 @@ An invite is `/invite#mi_<id>.<secret>`, and a reset link is `/reset#mr_<id>.<se
   device code, which never leaves the waiting client, redeems the sign-in, and approving needs a
   signed-in account. RFC 8628 puts the same code in its `verification_uri_complete`.
 - Old path links, `/invite/<code>` and `/reset/<code>`, are refused. Installs start fresh (D03).
-- The account client's Playwright specs that open these links keep no trace, screenshot, video, or
-  page snapshot of a failure. After every run, a check reads `test-results`, traces included, and
-  fails the run and deletes any file that holds an invite, reset, device, or group-session code.
+- The account client's Playwright project keeps no trace, screenshot, video, or page snapshot of a
+  failure, only text, because its pages and requests carry passwords, tokens, and link codes. After
+  every run, a check reads `test-results`, which is what CI uploads, traces included. It fails the
+  run and deletes any file that holds a core secret, a JWT, a Convex Auth refresh token, or one of
+  the passwords the tests make.
 
 ### Rejected
 

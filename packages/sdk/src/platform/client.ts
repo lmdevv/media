@@ -207,7 +207,7 @@ const effectBuilder = (client: Pick<Interface, "run" | "watch">): EffectBuilder 
 
 const make = Effect.fn("Platform.make")(function* (url: string) {
   const transport = yield* ConvexTransport.ConvexTransport;
-  const engine = yield* Auth.makeEngine({ convexUrl: url });
+  const engine = yield* Auth.makeEngine({ convexUrl: url, revoke: "core/auth/sessions:revoke" });
 
   const refreshAfterRefusal = engine
     .accessToken(true)

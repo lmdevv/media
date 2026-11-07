@@ -34,78 +34,108 @@ const subjectOf = (authorization: string | undefined): Option.Option<string> =>
  * A core that keeps sessions: a password sign-in starts one, a refresh renews a live one and
  * refuses an ended one, and a sign-out ends one unless the server is down.
  */
-const fakeCore = Effect.gen(function* () {
-  const fake = yield* FakeConvex.make;
-  const sessions = new Map<string, { live: boolean; refreshTokens: Set<string> }>();
-  const down = yield* Ref.make(false);
-  let issued = 0;
+const fakeCore = (tokenLifetime = 3_600_000) =>
+  Effect.gen(function* () {
+    const fake = yield* FakeConvex.make;
 
-  const issue = (subject: string) => {
-    issued += 1;
-    const refreshToken = `refresh-${issued}`;
+    const sessions = new Map<
+      string,
+      { live: boolean; refreshTokens: Set<string>; used: Set<string> }
+    >();
 
-    sessions.get(subject)?.refreshTokens.add(refreshToken);
+    const down = yield* Ref.make(false);
+    let issued = 0;
 
-    return Reply.Success({
-      value: {
-        tokens: {
-          token: jwtExpiringAt(Date.now() + 3_600_000 + issued * 1000, subject),
-          refreshToken,
+    const issue = (subject: string) => {
+      issued += 1;
+      const refreshToken = `refresh-${issued}`;
+
+      sessions.get(subject)?.refreshTokens.add(refreshToken);
+
+      return Reply.Success({
+        value: {
+          tokens: {
+            token: jwtExpiringAt(Date.now() + tokenLifetime + issued * 1000, subject),
+            refreshToken,
+          },
         },
-      },
-    });
-  };
+      });
+    };
 
-  yield* fake.reply("core/server:info", Reply.Success({ value: SERVER }));
-  yield* fake.reply(
-    "core/accounts/me:changePassword",
-    Reply.Failure({ code: "unauthenticated", message: "Token expired" }),
-  );
+    yield* fake.reply("core/server:info", Reply.Success({ value: SERVER }));
+    yield* fake.reply(
+      "core/accounts/me:changePassword",
+      Reply.Failure({ code: "unauthenticated", message: "Token expired" }),
+    );
 
-  const answerSignIns = fake.handle("auth:signIn", (request) =>
-    Effect.sync(() => {
-      const { args } = request;
+    const answerSignIns = fake.handle("auth:signIn", (request) =>
+      Effect.sync(() => {
+        const { args } = request;
 
-      if (Predicate.hasProperty(args, "refreshToken")) {
-        const found = [...sessions].find(
-          ([, held]) => held.live && held.refreshTokens.has(String(args.refreshToken)),
-        );
+        if (Predicate.hasProperty(args, "refreshToken")) {
+          const presented = String(args.refreshToken);
 
-        return found === undefined ? Reply.Success({ value: { tokens: null } }) : issue(found[0]);
-      }
+          const found = [...sessions].find(
+            ([, held]) => held.live && held.refreshTokens.has(presented),
+          );
 
-      const username =
-        Predicate.hasProperty(args, "params") && Predicate.hasProperty(args.params, "username")
-          ? String(args.params.username)
-          : "someone";
+          // As Convex Auth does past its reuse window, a spent token is refused and the session kept.
+          if (found === undefined || found[1].used.has(presented)) {
+            return Reply.Success({ value: { tokens: null } });
+          }
 
-      const subject = `${username}|session-${issued + 1}`;
+          found[1].used.add(presented);
 
-      sessions.set(subject, { live: true, refreshTokens: new Set() });
+          return issue(found[0]);
+        }
 
-      return issue(subject);
-    }),
-  );
+        const username =
+          Predicate.hasProperty(args, "params") && Predicate.hasProperty(args.params, "username")
+            ? String(args.params.username)
+            : "someone";
 
-  yield* answerSignIns;
-  yield* fake.handle("auth:signOut", (request) =>
-    Effect.gen(function* () {
-      if (yield* Ref.get(down)) return Reply.Failure({ code: "internal", message: "Down" });
+        const subject = `${username}|session-${issued + 1}`;
 
-      for (const subject of Option.toArray(subjectOf(request.authorization))) {
-        const held = sessions.get(subject);
+        sessions.set(subject, { live: true, refreshTokens: new Set(), used: new Set() });
 
-        if (held !== undefined) held.live = false;
-      }
+        return issue(subject);
+      }),
+    );
 
-      return Reply.Success({ value: null });
-    }),
-  );
+    yield* answerSignIns;
+    yield* fake.handle("core/auth/sessions:revoke", (request) =>
+      Effect.gen(function* () {
+        if (yield* Ref.get(down)) return Reply.Failure({ code: "internal", message: "Down" });
 
-  const live = (subject: string) => sessions.get(subject)?.live === true;
+        const presented = Predicate.hasProperty(request.args, "refreshToken")
+          ? String(request.args.refreshToken)
+          : "";
 
-  return { fake, down, live, answerSignIns };
-});
+        for (const held of sessions.values()) {
+          if (held.refreshTokens.has(presented)) held.live = false;
+        }
+
+        return Reply.Success({ value: { confirmed: true } });
+      }),
+    );
+    yield* fake.handle("auth:signOut", (request) =>
+      Effect.gen(function* () {
+        if (yield* Ref.get(down)) return Reply.Failure({ code: "internal", message: "Down" });
+
+        for (const subject of Option.toArray(subjectOf(request.authorization))) {
+          const held = sessions.get(subject);
+
+          if (held !== undefined) held.live = false;
+        }
+
+        return Reply.Success({ value: null });
+      }),
+    );
+
+    const live = (subject: string) => sessions.get(subject)?.live === true;
+
+    return { fake, down, live, answerSignIns };
+  });
 
 const openClient = (
   fake: FakeConvex.FakeConvex,
@@ -147,10 +177,9 @@ const eventually = <E>(check: Effect.Effect<boolean, E>, within = 1_000) =>
     Effect.map(Option.isSome),
   );
 
+/** The sign-outs the core was asked for: each a refresh token to revoke. */
 const signedOutRequests = (fake: FakeConvex.FakeConvex) =>
-  Effect.map(fake.requestsTo("auth:signOut"), (requests) =>
-    requests.flatMap((request) => Option.toArray(subjectOf(request.authorization))),
-  );
+  fake.requestsTo("core/auth/sessions:revoke");
 
 const sameSubject = Option.makeEquivalence<string>((a, b) => a === b);
 
@@ -161,7 +190,7 @@ describe("clients sharing one session store", () => {
   it("follows the other client's refresh without spending the old refresh token", async () => {
     const answer = await run(
       Effect.gen(function* () {
-        const { fake } = yield* fakeCore;
+        const { fake } = yield* fakeCore();
 
         const tabs = BrowserTabs.makeBrowserTabs({
           count: 2,
@@ -194,7 +223,7 @@ describe("clients sharing one session store", () => {
   it("signs out when the other client signs out, leaving the server to it", async () => {
     const answer = await run(
       Effect.gen(function* () {
-        const { fake } = yield* fakeCore;
+        const { fake } = yield* fakeCore();
 
         const tabs = BrowserTabs.makeBrowserTabs({
           count: 2,
@@ -225,7 +254,7 @@ describe("clients sharing one session store", () => {
     async (processes) => {
       const answer = await run(
         Effect.gen(function* () {
-          const { fake, down, live } = yield* fakeCore;
+          const { fake, down, live } = yield* fakeCore();
           const tabs = BrowserTabs.makeBrowserTabs({ count: 3, processes, delivery: "manual" });
           const first = yield* openClient(fake, tabs.tab(0));
           const second = yield* openClient(fake, tabs.tab(1));
@@ -276,7 +305,7 @@ describe("clients sharing one session store", () => {
   it("keeps both sign-outs when two sessions on one key sign out at once", async () => {
     const answer = await run(
       Effect.gen(function* () {
-        const { fake, down } = yield* fakeCore;
+        const { fake, down } = yield* fakeCore();
 
         const tabs = BrowserTabs.makeBrowserTabs({
           count: 4,
@@ -316,7 +345,7 @@ describe("clients sharing one session store", () => {
    * writes the renewal: the window an asynchronous store leaves between a check and a write.
    */
   const renewalAcrossSignOut = Effect.gen(function* () {
-    const { fake, down, answerSignIns } = yield* fakeCore;
+    const { fake, down, answerSignIns } = yield* fakeCore();
     const tabs = BrowserTabs.makeBrowserTabs({ count: 3, processes: "shared", delivery: "manual" });
     const first = yield* openClient(fake, tabs.tab(0));
     const second = yield* openClient(fake, tabs.tab(1));
@@ -429,7 +458,7 @@ describe("a sign-out the server could not confirm", () => {
     async (where) => {
       const answer = await run(
         Effect.gen(function* () {
-          const { fake, down, live } = yield* fakeCore;
+          const { fake, down, live } = yield* fakeCore();
 
           const tabs = BrowserTabs.makeBrowserTabs({
             count: 2,
@@ -493,6 +522,95 @@ describe("a sign-out the server could not confirm", () => {
   );
 });
 
+describe("a sign-out that cannot be stored or confirmed at first", () => {
+  it("leaves nothing that loads when storage is full, and ends the session once both recover", async () => {
+    const answer = await run(
+      Effect.gen(function* () {
+        const { fake, down, live } = yield* fakeCore();
+
+        const tabs = BrowserTabs.makeBrowserTabs({
+          count: 3,
+          processes: "shared",
+          delivery: "at once",
+        });
+
+        const first = yield* openClient(fake, tabs.tab(0));
+
+        yield* first.session.signIn(password("ada"));
+        const ada = yield* bearerOf(first, fake);
+
+        yield* Ref.set(down, true);
+        tabs.fill(true);
+        yield* Effect.ignore(first.session.signOut);
+        tabs.fill(false);
+
+        const other = yield* openClient(fake, tabs.tab(1));
+        const otherStatus = yield* other.session.currentStatus;
+
+        yield* Ref.set(down, false);
+
+        return {
+          first: yield* first.session.currentStatus,
+          other: otherStatus,
+          ended: yield* eventually(
+            Effect.sync(() => Option.exists(ada, (subject) => !live(subject))),
+            5_000,
+          ),
+          pendingLeft: yield* eventually(
+            Effect.sync(
+              () => ![...tabs.items.keys()].some((key) => key.startsWith("media.signOut:")),
+            ),
+          ),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      first: "signedOut",
+      other: "signedOut",
+      ended: true,
+      pendingLeft: true,
+    });
+  }, 15_000);
+
+  it("ends the session with the refresh token it signed out with, though other tabs rotated it since", async () => {
+    const answer = await run(
+      Effect.gen(function* () {
+        const { fake, down, live } = yield* fakeCore(45_000);
+
+        const tabs = BrowserTabs.makeBrowserTabs({
+          count: 2,
+          processes: "separate",
+          delivery: "manual",
+        });
+
+        const first = yield* openClient(fake, tabs.tab(0));
+        const second = yield* openClient(fake, tabs.tab(1));
+
+        yield* first.session.signIn(password("ada"));
+        tabs.deliver();
+        yield* settle;
+        const ada = yield* bearerOf(second, fake);
+
+        yield* refreshOnce(second);
+        yield* refreshOnce(second);
+        yield* Ref.set(down, true);
+        yield* Effect.ignore(first.session.signOut);
+        yield* Ref.set(down, false);
+
+        return {
+          ended: yield* eventually(
+            Effect.sync(() => Option.exists(ada, (subject) => !live(subject))),
+            5_000,
+          ),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({ ended: true });
+  }, 15_000);
+});
+
 describe("any interleaving of tabs sharing one session store", () => {
   it("never authorizes as a session a tab has read was signed out, and never loses the last sign-in", async () => {
     await fc.assert(
@@ -502,7 +620,7 @@ describe("any interleaving of tabs sharing one session store", () => {
         async (processes, steps) => {
           const outcome = await run(
             Effect.gen(function* () {
-              const { fake, down } = yield* fakeCore;
+              const { fake, down, live } = yield* fakeCore();
 
               const tabs = BrowserTabs.makeBrowserTabs({
                 count: TABS + 1,
@@ -584,7 +702,7 @@ describe("any interleaving of tabs sharing one session store", () => {
               return {
                 violations,
                 observer: yield* bearerOf(observer, fake),
-                lastSignIn,
+                lastSignIn: Option.filter(lastSignIn, live),
               };
             }),
           );

@@ -3,11 +3,17 @@ import { join } from "node:path";
 import { inflateRawSync } from "node:zlib";
 
 /**
- * The core's secrets: invites (`mi_`), reset links (`mr_`), devices (`dv_`), device codes (`dc_`),
- * API keys (`mk_`), guest links (`mg_`), and group-session links (`mt_`), each an id then a secret
- * of at least 16 URL-safe characters. Nothing bounds the start, so `%23mi_…` matches too.
+ * What a run must never keep: the core's secrets (invites `mi_`, reset links `mr_`, devices `dv_`,
+ * device codes `dc_`, API keys `mk_`, guest links `mg_`, group-session links `mt_`, each an id then
+ * a secret), any JWT, any Convex Auth refresh token (two ids joined by `|`), and the passwords the
+ * tests make (`newSecret`). Nothing bounds a match's start, so `%23mi_…` matches too.
  */
-const SECRET = /(?:mi|mr|dv|dc|mk|mg|mt)_[a-z0-9]{8,}\.[\w-]{16,}/u;
+const SECRETS = [
+  /(?:mi|mr|dv|dc|mk|mg|mt)_[a-z0-9]{8,}\.[\w-]{16,}/u,
+  /eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}/u,
+  /[a-z0-9]{32}(?:\||%7C)[a-z0-9]{32}/iu,
+  /e2e-secret-[a-z0-9]{6,}/u,
+];
 
 const ZIP_END = 0x06_05_4b_50;
 
@@ -49,7 +55,8 @@ const zipEntries = (zip: Buffer): ReadonlyArray<Buffer> => {
 };
 
 const holdsSecret = (bytes: Buffer): boolean =>
-  SECRET.test(bytes.toString("latin1")) || zipEntries(bytes).some(holdsSecret);
+  SECRETS.some((secret) => secret.test(bytes.toString("latin1"))) ||
+  zipEntries(bytes).some(holdsSecret);
 
 /** Whether `bytes` hold a secret, counting a file it cannot read through as one that does. */
 const mayHoldSecret = (bytes: Buffer): boolean => {

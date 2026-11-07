@@ -24,6 +24,8 @@ export interface BrowserTabs {
    * settles only on the returned release, which settles every held read in order.
    */
   readonly hold: (index: number, holds: (key: string) => boolean) => () => void;
+  /** While on, every `setItem` throws as a full `localStorage` does; removing still works. */
+  readonly fill: (full: boolean) => void;
   /** How many writes the browser has applied. */
   readonly writes: () => number;
   /** How many of the browser's writes tab `index` can read. */
@@ -92,7 +94,11 @@ export const makeBrowserTabs = (options: {
     for (const each of index === undefined ? indices : [index]) deliverTo(each);
   };
 
+  let full = false;
+
   const write = (by: number, key: string, value: string | null) => {
+    if (full && value !== null) throw new Error("QuotaExceededError: the quota has been exceeded");
+
     const entry = { by, key, value };
 
     apply(items, entry);
@@ -132,6 +138,9 @@ export const makeBrowserTabs = (options: {
     tab,
     items,
     deliver,
+    fill: (next) => {
+      full = next;
+    },
     writes: () => log.length,
     seen: (index) => (options.processes === "shared" ? log.length : (delivered[index] ?? 0)),
     hold: (index, holds) => {

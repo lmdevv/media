@@ -247,7 +247,11 @@ describe("a core command", () => {
           media(["auth", "login", "--server", fake.url, "--username", "ada"], env),
         );
 
-        return { run, url: fake.url, signOuts: (yield* fake.requestsTo("auth:signOut")).length };
+        return {
+          run,
+          url: fake.url,
+          signOuts: (yield* fake.requestsTo("core/auth/sessions:revoke")).length,
+        };
       }),
     );
 
@@ -262,13 +266,20 @@ describe("a core command", () => {
     const answer = await withFakeCore((fake) =>
       Effect.gen(function* () {
         yield* storeSession(env, fake.url);
-        yield* fake.reply("auth:signOut", Reply.Success({ value: null }));
+        yield* fake.reply(
+          "core/auth/sessions:revoke",
+          Reply.Success({ value: { confirmed: true } }),
+        );
 
         const run = yield* Effect.promise(() =>
           media(["auth", "logout"], { ...env, MEDIA_CORE_API_KEY: "mk_1.secret" }),
         );
 
-        return { run, url: fake.url, signOuts: (yield* fake.requestsTo("auth:signOut")).length };
+        return {
+          run,
+          url: fake.url,
+          signOuts: (yield* fake.requestsTo("core/auth/sessions:revoke")).length,
+        };
       }),
     );
 

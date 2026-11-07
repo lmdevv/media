@@ -91,6 +91,11 @@ export interface Interface {
    */
   readonly pendingSignOuts: Effect.Effect<ReadonlyArray<StoredSession>, TokenStorageError>;
   /**
+   * Deletes revocation records once the sessions they name can no longer work anywhere, and the
+   * oldest confirmed ones past a cap. It never deletes a session that could still be live.
+   */
+  readonly sweep: Effect.Effect<void, TokenStorageError>;
+  /**
    * Emits once it starts listening, then whenever the stored session may have changed outside
    * this client, such as another tab writing the same key. The first emission covers changes made
    * before it listened. Never emits for a store that cannot tell.
@@ -123,6 +128,7 @@ export const owned = (store: {
   revocation: () => Effect.succeed("none"),
   signOutPending: () => Effect.succeed(false),
   pendingSignOuts: Effect.succeed([]),
+  sweep: Effect.void,
   changed: Stream.never,
 });
 
@@ -252,7 +258,26 @@ const attempt = <A>(operation: TokenStorageError["operation"], run: () => Promis
     catch: failure(operation, `Token storage failed to ${operation} the session`),
   });
 
-const Revoked = Schema.fromJsonString(Schema.Struct({ revokedAt: Schema.Finite }));
+const Revoked = Schema.fromJsonString(
+  Schema.Struct({ revokedAt: Schema.Finite, key: Schema.String, id: Schema.String }),
+);
+
+const decodeRevoked = Schema.decodeUnknownOption(Revoked);
+
+const Confirmed = Schema.fromJsonString(Schema.Struct({ confirmedAt: Schema.Finite }));
+
+const decodeConfirmed = Schema.decodeUnknownOption(Confirmed);
+
+const encodeConfirmed = Schema.encodeSync(Confirmed);
+
+/**
+ * How long after a sign-out its session can surely no longer work: the core's 30-day limit on a
+ * session and on an unused refresh token, and a day's margin.
+ */
+const REVOCATION_KEPT_MS = 31 * 24 * 60 * 60 * 1000;
+
+/** How many confirmed revocations a store keeps before it drops the oldest. */
+const CONFIRMED_KEPT = 64;
 
 /**
  * The store-wide prefix of pending sign-outs. It sits outside every session key, so forgetting a
@@ -332,10 +357,10 @@ const sharedKeys = (store: KeyValueStore, key: string): Interface => {
       ),
     revoke: (session) =>
       Effect.flatMap(idOf(session, "clear"), (id) =>
-        Effect.flatMap(Clock.currentTimeMillis, (revokedAt) =>
-          attempt("clear", async () => {
+        Effect.flatMap(Clock.currentTimeMillis, (revokedAt) => {
+          const record = async () => {
             if ((await store.getItem(revokedKey(id))) === null) {
-              await store.setItem(revokedKey(id), encodeRevoked({ revokedAt }));
+              await store.setItem(revokedKey(id), encodeRevoked({ revokedAt, key, id }));
             }
 
             if ((await store.getItem(pendingKey(id))) === null) {
@@ -348,8 +373,19 @@ const sharedKeys = (store: KeyValueStore, key: string): Interface => {
                 }),
               );
             }
-          }),
-        ),
+          };
+
+          // A full store refuses the records, so the session's tokens go first: removing frees
+          // space, and with them gone nothing loads the session even if the records never land.
+          return attempt("clear", async () => {
+            try {
+              await record();
+            } catch {
+              await store.removeItem(tokensKey(id));
+              await record();
+            }
+          });
+        }),
       ),
     confirmRevoked: (session) =>
       Effect.flatMap(idOf(session, "clear"), (id) =>
@@ -359,7 +395,10 @@ const sharedKeys = (store: KeyValueStore, key: string): Interface => {
             onSome: (pending) => pending.key,
           });
 
-          await store.setItem(`${signedInAt}:${id}:confirmed`, "1");
+          await store.setItem(
+            `${signedInAt}:${id}:confirmed`,
+            encodeConfirmed({ confirmedAt: Date.now() }),
+          );
           await store.removeItem(`${signedInAt}:${id}`);
           await store.removeItem(pendingKey(id));
         }),
@@ -392,6 +431,50 @@ const sharedKeys = (store: KeyValueStore, key: string): Interface => {
         ),
       );
     }),
+    sweep: Effect.flatMap(Clock.currentTimeMillis, (now) =>
+      attempt("clear", async () => {
+        const all = store.keys === undefined ? [] : await store.keys();
+
+        const revoked = await Promise.all(
+          all
+            .filter((each) => each.endsWith(":revoked"))
+            .map(async (each) => decodeRevoked((await store.getItem(each)) ?? "")),
+        );
+
+        const records = revoked.flatMap((each) => Option.toArray(each));
+
+        const forget = async (record: { readonly key: string; readonly id: string }) => {
+          await store.removeItem(`${record.key}:${record.id}`);
+          await store.removeItem(pendingKey(record.id));
+          await store.removeItem(`${record.key}:${record.id}:confirmed`);
+          await store.removeItem(`${record.key}:${record.id}:revoked`);
+        };
+
+        const confirmed = await Promise.all(
+          records.map(async (record) => ({
+            record,
+            confirmedAt: Option.map(
+              decodeConfirmed((await store.getItem(`${record.key}:${record.id}:confirmed`)) ?? ""),
+              (each) => each.confirmedAt,
+            ),
+          })),
+        );
+
+        const overCap = confirmed
+          .flatMap(({ record, confirmedAt }) =>
+            Option.toArray(Option.map(confirmedAt, (at) => ({ record, at }))),
+          )
+          .toSorted((a, b) => b.at - a.at)
+          .slice(CONFIRMED_KEPT)
+          .map(({ record }) => record);
+
+        await Promise.all(
+          [...records.filter((each) => now - each.revokedAt > REVOCATION_KEPT_MS), ...overCap].map(
+            forget,
+          ),
+        );
+      }),
+    ),
     changed: Stream.merge(changesOf(store, key), changesOf(store, PENDING)),
   };
 };

@@ -203,9 +203,12 @@ export const useAccountActions = (): AccountActions => {
       await navigate({ to: "/home" });
     },
     signOut: async (userId) => {
-      await platform.session.signOut();
-      store.forget(userId);
-      await navigate({ to: "/" });
+      try {
+        await platform.session.signOut();
+      } finally {
+        store.forget(userId);
+        await navigate({ to: "/" });
+      }
     },
   };
 };

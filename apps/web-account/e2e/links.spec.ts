@@ -1,15 +1,12 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { createPerson, openPlatform, signIn } from "./people";
+import { createPerson, newSecret, openPlatform, signIn } from "./people";
 import { stackEnv } from "./stack";
 
 const stack = stackEnv();
 
 test.skip(stack === null, "needs scripts/dev-stack.sh up");
-
-// These pages hold invite and reset codes, so a failure keeps no trace, screenshot, or video.
-test.use({ trace: "off", screenshot: "off", video: "off" });
 
 /** Opens a link that carries a secret. A failed navigation names the URL, so its error is replaced. */
 const open = async (page: Page, link: string): Promise<void> => {
@@ -35,7 +32,7 @@ test("accepting an invite lands the new person on the picker", async ({ page }) 
     await open(page, `/invite#${code}`);
     await expect(page.getByRole("heading", { name: "You're invited." })).toBeVisible();
     await page.getByLabel("Username").fill(username);
-    await page.getByLabel("Password", { exact: true }).fill("a long enough password");
+    await page.getByLabel("Password", { exact: true }).fill(newSecret());
     await page.getByRole("button", { name: "Create account" }).click();
 
     await expect(page.getByRole("heading", { name: "Who's here?" })).toBeVisible();
@@ -84,7 +81,7 @@ test("an invite link keeps its code out of requests, referrers, the address, and
     expect(invitee.url().includes(code), "the address holds the code after opening").toBe(false);
 
     await invitee.getByLabel("Username").fill(username);
-    await invitee.getByLabel("Password", { exact: true }).fill("a long enough password");
+    await invitee.getByLabel("Password", { exact: true }).fill(newSecret());
     await invitee.getByRole("button", { name: "Create account" }).click();
     await expect(invitee.getByRole("button", { name: username, exact: true })).toBeVisible();
 
@@ -121,7 +118,7 @@ test("a reset link keeps its code out of requests, referrers, the address, and h
     await expect(page.getByRole("heading", { name: "Set a new password." })).toBeVisible();
     expect(page.url().includes(code), "the address holds the code after opening").toBe(false);
 
-    await page.getByLabel("New password").fill("a new long password");
+    await page.getByLabel("New password").fill(newSecret());
     await page.getByRole("button", { name: "Set password" }).click();
     await expect(page.getByRole("button", { name: person.username, exact: true })).toBeVisible();
 
