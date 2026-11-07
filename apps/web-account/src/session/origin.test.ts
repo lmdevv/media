@@ -105,13 +105,31 @@ describe("the origin store", () => {
     storage.setItem(`${key}:ada|s0`, "older tokens");
     storage.setItem(`${key}:ada|s0:revoked`, "revoked");
     storage.setItem(`${key}:ada|s0:confirmed`, "1");
-    store.forget(userId("ada"));
+    store.forget(slot);
 
     expect(
       Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
         (each) => each?.startsWith(key) === true,
       ),
     ).toStrictEqual([`${key}:ada|s0:revoked`, `${key}:ada|s0:confirmed`]);
+  });
+
+  it("forgets the slot a person signed out of, not the one they signed in on since", () => {
+    const storage = new MemoryStorage();
+    const store = makeOriginStore(storage, new EventTarget());
+    const signingOut = newSlot();
+    const signedInAgain = newSlot();
+
+    store.promote(signingOut, ada);
+    store.promote(signedInAgain, ada);
+    storage.setItem(store.sessionKey(signedInAgain), "ada|s2");
+    store.forget(signingOut);
+
+    expect({
+      person: store.read().people.get(ada),
+      active: store.read().active,
+      session: storage.getItem(store.sessionKey(signedInAgain)),
+    }).toStrictEqual({ person: signedInAgain, active: signedInAgain, session: "ada|s2" });
   });
 
   it("forgets one person and leaves the others signed in here", () => {
@@ -123,7 +141,7 @@ describe("the origin store", () => {
     storage.setItem(store.sessionKey(adaSlot), "ada tokens");
     store.promote(adaSlot, ada);
     store.promote(boSlot, bo);
-    store.forget(bo);
+    store.forget(boSlot);
 
     expect(store.read()).toStrictEqual({
       device: null,
@@ -163,7 +181,7 @@ describe("the origin store", () => {
     events.dispatchEvent(storageEvent(storage, store.sessionKey(slot)));
     events.dispatchEvent(storageEvent(storage, `${store.sessionKey(slot)}:ada|s1:revoked`));
     store.promote(slot, ada);
-    store.forget(ada);
+    store.forget(slot);
 
     expect(changes).toBe(3);
   });

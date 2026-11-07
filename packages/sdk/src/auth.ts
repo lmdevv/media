@@ -885,7 +885,9 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
   /**
    * Revokes the session in the store first, so every client stops using it, then ends it on the
-   * server, retrying in the background while the server cannot confirm it.
+   * server. Where the store keeps the sign-out pending for any client to finish, this returns once
+   * it is stored and the server is told in the background; otherwise it waits for one attempt and
+   * retries in the background while the server cannot confirm it.
    */
   const signOut = Effect.fn("Auth.signOut")(function* () {
     const { ended, revoked } = yield* committing.withPermits(1)(
@@ -902,14 +904,20 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       }),
     );
 
-    if (Option.isSome(ended)) {
-      if (yield* endOnServer(ended.value)) {
-        yield* storage
-          .confirmRevoked(ended.value)
-          .pipe(Effect.catchTag("TokenStorageError", logStorageFailure));
-      } else {
-        yield* endInBackground(ended.value, true, Duration.seconds(1), Exit.isSuccess(revoked));
-      }
+    if (Option.isNone(ended)) return yield* revoked;
+
+    const handedOver =
+      Exit.isSuccess(revoked) &&
+      (yield* storage.signOutPending(ended.value).pipe(Effect.orElseSucceed(() => false)));
+
+    if (handedOver) {
+      yield* endInBackground(ended.value, true);
+    } else if (yield* endOnServer(ended.value)) {
+      yield* storage
+        .confirmRevoked(ended.value)
+        .pipe(Effect.catchTag("TokenStorageError", logStorageFailure));
+    } else {
+      yield* endInBackground(ended.value, true, Duration.seconds(1), Exit.isSuccess(revoked));
     }
 
     return yield* revoked;

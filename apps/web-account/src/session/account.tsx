@@ -203,10 +203,15 @@ export const useAccountActions = (): AccountActions => {
       await navigate({ to: "/home" });
     },
     signOut: async (userId) => {
+      // The slot is fixed now: another tab may sign this person in on a new slot meanwhile, and
+      // that one must stay. Signing out returns once this browser holds the revocation, and the
+      // server is told in the background, so nothing here waits on the server.
+      const signingOut = store.read().people.get(userId);
+
       try {
         await platform.session.signOut();
       } finally {
-        store.forget(userId);
+        if (signingOut !== undefined) store.forget(signingOut);
         await navigate({ to: "/" });
       }
     },

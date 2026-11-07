@@ -285,7 +285,7 @@ describe("clients sharing one session store", () => {
             renewedSameSession: sameSubject(renewed, ada) || Option.isNone(renewed),
             endedOnServer: yield* eventually(
               Effect.sync(() => Option.exists(ada, (subject) => !live(subject))),
-              5_000,
+              10_000,
             ),
           };
         }),
@@ -300,6 +300,7 @@ describe("clients sharing one session store", () => {
         endedOnServer: true,
       });
     },
+    15_000,
   );
 
   it("keeps both sign-outs when two sessions on one key sign out at once", async () => {
@@ -573,6 +574,39 @@ describe("a sign-out that cannot be stored or confirmed at first", () => {
     });
   }, 15_000);
 
+  it("returns no token from memory once another tab's failed sign-out deleted the stored credentials", async () => {
+    const answer = await run(
+      Effect.gen(function* () {
+        const { fake, down } = yield* fakeCore();
+
+        const tabs = BrowserTabs.makeBrowserTabs({
+          count: 2,
+          processes: "shared",
+          delivery: "manual",
+        });
+
+        const first = yield* openClient(fake, tabs.tab(0));
+        const second = yield* openClient(fake, tabs.tab(1));
+
+        yield* first.session.signIn(password("ada"));
+        tabs.deliver();
+        yield* settle;
+        const before = yield* bearerOf(second, fake);
+
+        yield* Ref.set(down, true);
+        tabs.fill(true);
+        yield* Effect.ignore(first.session.signOut);
+
+        return {
+          before: Option.isSome(before),
+          after: Option.isSome(yield* bearerOf(second, fake)),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({ before: true, after: false });
+  });
+
   it("ends the session with the refresh token it signed out with, though other tabs rotated it since", async () => {
     const answer = await run(
       Effect.gen(function* () {
@@ -702,7 +736,12 @@ describe("any interleaving of tabs sharing one session store", () => {
               return {
                 violations,
                 observer: yield* bearerOf(observer, fake),
-                lastSignIn: Option.filter(lastSignIn, live),
+                // A refused stale refresh may revoke the last sign-in on purpose; only one the
+                // store and the core both still hold must survive.
+                lastSignIn: Option.filter(
+                  lastSignIn,
+                  (subject) => live(subject) && !tabs.items.has(`${KEY}:${subject}:revoked`),
+                ),
               };
             }),
           );

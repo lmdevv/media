@@ -49,8 +49,12 @@ export interface OriginStore {
   readonly promote: (slot: SlotId, userId: UserId) => void;
   /** Makes `slot` the one every client acts as. */
   readonly activate: (slot: SlotId) => void;
-  /** Forgets `userId`'s slot and session here, and the active slot when it was theirs. */
-  readonly forget: (userId: UserId) => void;
+  /**
+   * Forgets `slot` here: its session, whoever it held, and the active slot when it was this one.
+   * It names the slot rather than a person, so a person's newer slot, as from signing in again in
+   * another tab meanwhile, is left alone.
+   */
+  readonly forget: (slot: SlotId) => void;
   readonly setDevice: (code: string) => void;
   readonly clearDevice: () => void;
 }
@@ -194,15 +198,15 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
     ];
   };
 
-  const slotsOf = (userId: UserId): ReadonlyArray<readonly [string, string | null]> => {
-    const slot = read().people.get(userId);
-
-    if (slot === undefined) return [];
+  const forgetting = (slot: SlotId): ReadonlyArray<readonly [string, string | null]> => {
+    const { people, active } = read();
 
     return [
-      [`${PERSON}${userId}`, null],
+      ...[...people].flatMap(([person, held]) =>
+        held === slot ? [[`${PERSON}${person}`, null] as const] : [],
+      ),
       ...dropSlot(slot),
-      ...(read().active === slot ? [[ACTIVE, null] as const] : []),
+      ...(active === slot ? [[ACTIVE, null] as const] : []),
     ];
   };
 
@@ -251,7 +255,7 @@ export const makeOriginStore = (storage: Storage, events: StorageEvents): Origin
       ]);
     },
     activate: (slot) => change([[ACTIVE, slot]]),
-    forget: (userId) => change(slotsOf(userId)),
+    forget: (slot) => change(forgetting(slot)),
     setDevice: (code) => change([[DEVICE, code]]),
     clearDevice: () => change([[DEVICE, null]]),
   };

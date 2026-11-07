@@ -52,10 +52,12 @@ export class TokenStorageError extends Schema.TaggedError<TokenStorageError>()(
 ) {}
 
 /**
- * Whether a session was signed out in this store: not at all, signed out here with the server not
- * yet confirming it, or confirmed by the server.
+ * Whether a session may still be used from this store: `none` while the store holds its
+ * credentials and no sign-out; `pending` once signed out here, until the server confirms;
+ * `confirmed` after; `missing` when the store no longer holds its credentials at all, as after a
+ * sign-out that could only delete them. Anything but `none` means stop using it.
  */
-export type Revocation = "none" | "pending" | "confirmed";
+export type Revocation = "none" | "pending" | "confirmed" | "missing";
 
 /** Persists the current session's tokens. */
 export interface Interface {
@@ -328,7 +330,9 @@ const sharedKeys = (store: KeyValueStore, key: string): Interface => {
   const revocationOf = async (id: string): Promise<Revocation> => {
     if ((await store.getItem(confirmedKey(id))) !== null) return "confirmed";
 
-    return (await store.getItem(revokedKey(id))) === null ? "none" : "pending";
+    if ((await store.getItem(revokedKey(id))) !== null) return "pending";
+
+    return (await store.getItem(tokensKey(id))) === null ? "missing" : "none";
   };
 
   return {

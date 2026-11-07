@@ -126,8 +126,13 @@ refresh token and its calls, and the browser only has to make every tab stop usi
 - **Reads change nothing.** A session with a revocation loads as none. No read deletes or rewrites
   a key, so a later sign-in is never lost to what an earlier read found.
 - **Signing out** writes the revocation first and shows signed out at once, even if the server
-  call fails. The client then asks the core to end the session, and on failure retries in the
-  background, starting after a second and backing off to every 30 seconds, until the core confirms.
+  call fails. Once the pending sign-out is stored, `signOut` returns, and the client asks the core
+  to end the session in the background. On failure it retries, backing off from a second to every
+  30 seconds, until the core confirms. A store that keeps no pending sign-outs, such as the CLI's,
+  waits for one attempt instead.
+- **The account client forgets the slot it signed out of.** It fixes that slot when sign-out
+  starts and forgets only that slot afterwards. Another tab may sign the same person in on a new
+  slot meanwhile, and that slot stays.
 - **Only the core's revoke confirms.** `core.auth.sessions.revoke` takes any refresh token the
   session ever had, deletes the session and all its refresh tokens, and answers `confirmed` whether
   or not it had already ended. Convex Auth keeps a rotated or invalidated token's row until the
@@ -150,10 +155,13 @@ refresh token and its calls, and the browser only has to make every tab stop usi
   - The record serves only to end the session on the server. No read that loads a session looks
     there, so nothing signs in or calls with it, and the session's own revocation keeps it out of
     every slot.
-- **Every token passes a check.** A client checks for a revocation of its session before it hands
-  any token to a caller, and again after it writes a renewal. A client that finds one drops the
-  session at once and ends it on the server the same way, after a second's wait, so the client that
-  signed out usually confirms it first and the others send nothing.
+- **Every token passes a check.** A client checks its session before it hands any token to a
+  caller, the in-memory one included, and again after it writes a renewal. The token goes out only
+  while the store still holds that session's credentials and no revocation. A sign-out that could
+  only delete the credentials, as with storage full, therefore stops every tab too. A client that
+  finds the session revoked or gone drops it at once. If a sign-out is pending, it ends the session
+  on the server the same way, after a second's wait, so the client that signed out usually
+  confirms it first and the others send nothing.
 - **What this guarantees.** Once the server confirms a sign-out, no credential of that session
   works anywhere. Before that, every tab stops using it as soon as it reads storage, which it does
   before every token it uses. The window left is a tab that has not yet read storage. While the
