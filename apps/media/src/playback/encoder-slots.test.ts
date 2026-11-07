@@ -449,7 +449,7 @@ describe("encoder slots", () => {
   );
 
   it.effect(
-    "never runs more encoders than the limit, whatever streams start, seek, yield or stop, even mid-step or on a stalled disk",
+    "never runs more encoders than the limit, whatever streams start, seek, yield or stop, even mid-step, on a stalled disk, or under a stalled read",
     () =>
       Effect.gen(function* () {
         let cut = 0;
@@ -473,6 +473,11 @@ describe("encoder slots", () => {
               `${label}: streams still waiting after everything stopped`,
             );
             assert.isTrue(run.freed, `${label}: every slot is free again`);
+            assert.isAtMost(
+              run.processStop,
+              STALLED_STOP_MS,
+              `${label}: a run's process stops without waiting for its readers`,
+            );
           }
         }
 
@@ -498,6 +503,8 @@ const STALLED_STOP_MS = 20_000;
 
 const STALLED_DISK_MS = 40_000;
 
+const STALLED_READ_MS = 60_000;
+
 const HOUSEHOLD_WAIT_BOUND_MS = YIELD_MAX_MS + STALLED_STOP_MS + 1000;
 
 type Status = "starting" | "running" | "released" | "ended";
@@ -517,15 +524,31 @@ const simulate = (limit: number) =>
   Effect.gen(function* () {
     const pool = yield* EncoderSlots.make(limit);
     const encoders = { live: 0, peak: 0 };
-    const waits = { household: 0 };
+    const waits = { household: 0, processStop: 0 };
     const streams: Array<Stream> = [];
     const latest = new Map<string, number>();
     const actors: Array<Fiber.Fiber<void>> = [];
     const cut = { transitions: 0 };
     let tickets = 0;
 
+    const readers = new Map<Scope.Closeable, Scope.Closeable>();
+
     const open = (stream: Stream) =>
-      Scope.make().pipe(Effect.tap((run) => Effect.sync(() => stream.runs.add(run))));
+      Effect.gen(function* () {
+        const run = yield* Scope.make();
+
+        readers.set(run, yield* Scope.make());
+        stream.runs.add(run);
+
+        if ((yield* Random.nextIntBetween(0, 6, { halfOpen: true })) === 0) {
+          yield* Effect.sleep(Duration.millis(STALLED_READ_MS)).pipe(
+            Effect.uninterruptible,
+            Effect.forkIn(readers.get(run) ?? run),
+          );
+        }
+
+        return run;
+      });
 
     const transition = (stream: Stream, effect: Effect.Effect<void>) =>
       Effect.gen(function* () {
@@ -537,11 +560,24 @@ const simulate = (limit: number) =>
       });
 
     const beginStop = (stream: Stream, run: Scope.Closeable) =>
-      Effect.suspend(() => {
-        if (stream.stopping.has(run)) return Effect.void;
+      Effect.gen(function* () {
+        if (stream.stopping.has(run)) return;
         stream.stopping.add(run);
 
-        return Effect.forkDetach(close(run));
+        const reading = readers.get(run);
+        const began = yield* Clock.currentTimeMillis;
+
+        const stopsProcess = Effect.gen(function* () {
+          yield* close(run);
+          waits.processStop = Math.max(waits.processStop, (yield* Clock.currentTimeMillis) - began);
+        });
+
+        yield* Effect.forkDetach(
+          Effect.all([stopsProcess, reading === undefined ? Effect.void : close(reading)], {
+            concurrency: "unbounded",
+            discard: true,
+          }),
+        );
       }).pipe(Effect.uninterruptible);
 
     const end = (stream: Stream) =>
@@ -820,6 +856,7 @@ const simulate = (limit: number) =>
     return {
       peak: encoders.peak,
       householdWait: waits.household,
+      processStop: waits.processStop,
       stuck,
       freed: waiting.every((still) => !still),
       cut: cut.transitions,

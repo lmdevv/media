@@ -218,4 +218,56 @@ describe.skipIf(!hasFfmpeg)("stream readers", () => {
       60_000,
     );
   });
+
+  layer(subject({ STREAM_IDLE_SECONDS: "1" }), {
+    excludeTestServices: true,
+    timeout: "120 seconds",
+  })((it) => {
+    it.effect(
+      "a stopped run keeps its folder until a read of its files ends",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const server = yield* MediaTestServer.Service;
+          const who = yield* viewer;
+
+          stallNextFirstRunOpen();
+
+          const started = yield* start(who);
+          const runFolder = `${server.transcodeDir}/${started.streamId}/1`;
+
+          yield* Effect.promise(() => opens.reached.promise);
+
+          assert.strictEqual(
+            yield* until(
+              Effect.sync(() => encoders.live),
+              (live) => live === 0,
+            ),
+            0,
+            "the idle release stopped the encoder while the read is held",
+          );
+
+          const removedEarly = yield* exists(runFolder).pipe(
+            Effect.repeat({
+              until: (present) => !present,
+              schedule: Schedule.spaced("100 millis"),
+              times: 20,
+            }),
+            Effect.map((present) => !present),
+          );
+
+          assert.isFalse(removedEarly, "the run's folder outlives the held read");
+
+          yield* releaseOpens;
+
+          assert.isFalse(
+            yield* until(exists(runFolder), (present) => !present),
+            "the run's folder goes once the read ends",
+          );
+
+          yield* sessions.stop(started.streamId, who.grant);
+        }).pipe(Effect.ensuring(releaseOpens)),
+      60_000,
+    );
+  });
 });

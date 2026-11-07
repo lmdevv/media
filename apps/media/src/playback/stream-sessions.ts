@@ -230,6 +230,7 @@ interface Generation {
   readonly from: number;
   readonly directory: string;
   readonly scope: Scope.Closeable;
+  readonly readers: Scope.Closeable;
   readonly exit: Deferred.Deferred<void, MediaTools.MediaToolFailed>;
   readonly fragments: Ref.Ref<ReadonlyArray<Fragment>>;
   readonly refreshLock: Semaphore.Semaphore;
@@ -243,6 +244,8 @@ interface Generation {
 
 interface RunScope {
   readonly scope: Scope.Closeable;
+  readonly readers: Scope.Closeable;
+  readonly files: Scope.Closeable;
   readonly stopping: MutableRef.MutableRef<boolean>;
   readonly stopped: Deferred.Deferred<void>;
 }
@@ -342,7 +345,11 @@ const beginStop = (stream: Lifecycle, run: RunScope) =>
   Effect.suspend(() =>
     MutableRef.getAndSet(run.stopping, true)
       ? Effect.void
-      : Scope.close(run.scope, Exit.void).pipe(
+      : Effect.all([Scope.close(run.scope, Exit.void), Scope.close(run.readers, Exit.void)], {
+          concurrency: "unbounded",
+          discard: true,
+        }).pipe(
+          Effect.andThen(Scope.close(run.files, Exit.void)),
           Effect.ensuring(
             Ref.update(stream.runs, (runs) => ({
               ...runs,
@@ -375,6 +382,17 @@ const whileOpen = <A, E, R>(scope: Scope.Scope, effect: Effect.Effect<A, E, R>) 
 
     return Option.some(yield* effect.pipe(Effect.ensuring(Deferred.succeed(done, undefined))));
   });
+
+const readerOf = <A, E>(generation: Generation, read: Effect.Effect<A, E>) =>
+  read.pipe(
+    Effect.forkIn(generation.readers),
+    Effect.flatMap(Fiber.await),
+    Effect.flatMap((exit): Effect.Effect<Option.Option<A>, E> =>
+      Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+        ? Effect.succeedNone
+        : Effect.asSome(exit),
+    ),
+  );
 
 const stopWaitingAfter =
   <L>(wait: Duration.Duration, late: () => L) =>
@@ -479,6 +497,8 @@ const make = Effect.gen(function* () {
   const openRun = Effect.fnUntraced(function* (stream: Lifecycle) {
     const run: RunScope = {
       scope: yield* Scope.make("sequential"),
+      readers: yield* Scope.make(),
+      files: yield* Scope.make(),
       stopping: MutableRef.make(false),
       stopped: yield* Deferred.make<void>(),
     };
@@ -700,7 +720,10 @@ const make = Effect.gen(function* () {
     const directory = path.join(session.directory, String(folder));
     const scope = run.scope;
 
-    yield* Scope.addFinalizer(scope, fs.remove(directory, { recursive: true }).pipe(Effect.ignore));
+    yield* Scope.addFinalizer(
+      run.files,
+      fs.remove(directory, { recursive: true }).pipe(Effect.ignore),
+    );
     yield* fs.makeDirectory(directory, { recursive: true }).pipe(Effect.orDie);
 
     const video = session.file.probe.video;
@@ -777,6 +800,7 @@ const make = Effect.gen(function* () {
       from,
       directory,
       scope,
+      readers: run.readers,
       exit,
       fragments: yield* Ref.make<ReadonlyArray<Fragment>>([]),
       refreshLock: yield* Semaphore.make(1),
@@ -978,7 +1002,8 @@ const make = Effect.gen(function* () {
 
       const wake = MutableRef.get(generation.wake);
       const finished = yield* Deferred.isDone(generation.exit);
-      const parsed = yield* onStreamFiber(session, refreshFragments(generation));
+      const refreshed = yield* readerOf(generation, refreshFragments(generation));
+      const parsed = Option.getOrElse(refreshed, () => false);
       const fragments = yield* Ref.get(generation.fragments);
       const produced = producedRange(session, generation, fragments);
       const next = session.plan.starts[index + 1];
@@ -1047,7 +1072,7 @@ const make = Effect.gen(function* () {
     const generation = yield* Ref.get(session.generation);
 
     if (generation.number === 0 || (yield* Deferred.isDone(generation.exit))) return;
-    yield* refreshFragments(generation);
+    yield* readerOf(generation, refreshFragments(generation));
     const produced = producedRange(session, generation, yield* Ref.get(generation.fragments));
     const requested = yield* Ref.get(session.requested);
     const startOf = (index: number) => session.plan.starts[index] ?? session.plan.end;
@@ -1339,7 +1364,7 @@ const make = Effect.gen(function* () {
 
         if (Encoder.$is("Released")(encoder)) return yield* revive(session, encoder, index);
         const current = yield* Ref.get(session.generation);
-        yield* refreshFragments(current);
+        yield* readerOf(current, refreshFragments(current));
         const produced = producedRange(session, current, yield* Ref.get(current.fragments));
 
         if (index >= current.startSegment && index <= produced.head + LOOKAHEAD_SEGMENTS)
@@ -1374,7 +1399,11 @@ const make = Effect.gen(function* () {
   });
 
   const keepInitWithin = (session: Session, run: Generation) =>
-    keepInit(session, run).pipe(Effect.timeoutOption(KEEP_INIT_WAIT), Effect.map(Option.flatten));
+    readerOf(run, keepInit(session, run)).pipe(
+      Effect.map(Option.flatten),
+      Effect.timeoutOption(KEEP_INIT_WAIT),
+      Effect.map(Option.flatten),
+    );
 
   const stopEncoder = Effect.fnUntraced(function* (
     session: Session,
@@ -1590,6 +1619,7 @@ const make = Effect.gen(function* () {
       from: segmentPlan.starts[0] ?? segmentPlan.end,
       directory: "",
       scope: run.scope,
+      readers: run.readers,
       exit: yield* Deferred.make<void, MediaTools.MediaToolFailed>(),
       fragments: yield* Ref.make<ReadonlyArray<Fragment>>([]),
       refreshLock: yield* Semaphore.make(1),
