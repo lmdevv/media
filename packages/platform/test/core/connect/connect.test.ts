@@ -1,17 +1,26 @@
+import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { ONLINE_MS } from "../../../convex/core/connect/playback";
 import { inOrder } from "../../../convex/core/lib/inOrder";
 import { control, playing, report, targetIn, targets } from "../../connect";
+import type { Report } from "../../connect";
 import { enroll, listings, member, openTile, sharedAdmin, sharedDevice } from "../../devices";
 import { sessionOf } from "../../probe";
 import { importRows, newestRows } from "../../rows";
-import { refusal, signInAs } from "../../sign-in";
+import { refusal, signInAs, unique } from "../../sign-in";
 import type { SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 
 const stack = coreStackFromEnvFile();
+
+const DeviceRow = Schema.fromJsonString(Schema.Struct({ _id: Schema.String, name: Schema.String }));
+
+// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
+// stack's export wrote this one as a `devices` id; the backend checks it again when a row names it.
+const isDeviceId = (value: string): value is Id<"devices"> => value.length > 0;
 
 const listed = listings();
 
@@ -398,12 +407,81 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     expect(await refusal(report(laptop.signedIn, playing(Number.NaN)))).toBe("invalid_args");
     expect(await refusal(report(laptop.signedIn, playing(0, 1.5)))).toBe("invalid_args");
     expect(await refusal(report(laptop.signedIn, playing(0, 1)))).toBe("invalid_args");
-    expect(
-      await refusal(
-        report(laptop.signedIn, { ...playing(0), output: { kind: "cast", receiver: " " } }),
-      ),
-    ).toBe("invalid_args");
     expect(await refusal(report(lucia.signedIn, playing(0)))).toBe("forbidden");
     expect(await refusal(requested(lucia.signedIn))).toBe("forbidden");
+  });
+
+  it("keeps a report whose receiver has no name, or too long a one", async () => {
+    if (stack === undefined) return;
+    const lucia = await member(stack, "lucia");
+    const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
+
+    const shown = async (output: Report["output"]) => {
+      await report(laptop.signedIn, { ...playing(0), output });
+
+      return targetIn(await targets(lucia.signedIn), laptop.deviceId)?.output;
+    };
+
+    expect(await shown({ kind: "cast", receiver: " " })).toEqual({ kind: "cast", receiver: null });
+    expect(await shown({ kind: "airplay", receiver: "" })).toEqual({
+      kind: "airplay",
+      receiver: null,
+    });
+    expect(await shown({ kind: "cast", receiver: ` ${"\u{1F4FA}".repeat(70)} ` })).toEqual({
+      kind: "cast",
+      receiver: "\u{1F4FA}".repeat(64),
+    });
+  });
+
+  it("lists a live device however many ended sessions a person has elsewhere", async () => {
+    if (stack === undefined) return;
+    const lucia = await member(stack, "lucia");
+    const prefix = `planted-${unique()}-`;
+
+    importRows(
+      "devices",
+      Array.from({ length: 300 }, (_, index) => ({
+        name: `${prefix}${index}`,
+        secretHash: "planted",
+        generation: 0,
+        mode: "personal" as const,
+      })),
+    );
+
+    const planted = newestRows("devices", 400)
+      .map((line) => Schema.decodeSync(DeviceRow)(line))
+      .flatMap((row) => (row.name.startsWith(prefix) && isDeviceId(row._id) ? [row._id] : []));
+
+    const laptopBelow = async (tries: number) => {
+      const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
+      const above = planted.filter((deviceId) => deviceId > laptop.deviceId);
+
+      if (above.length > 64) return { laptop, above };
+
+      if (tries === 0) throw new Error(`no laptop sorted below 65 planted devices`);
+
+      return laptopBelow(tries - 1);
+    };
+
+    const { laptop, above } = await laptopBelow(20);
+
+    const ended = (deviceId: Id<"devices">) => ({
+      userId: lucia.userId,
+      expirationTime: Date.now() + 24 * 60 * 60 * 1000,
+      generation: -1,
+      kind: "password" as const,
+      device: { id: deviceId, generation: 0 },
+    });
+
+    const [crowded = laptop.deviceId] = above;
+
+    importRows("authSessions", [
+      ...Array.from({ length: 64 }, () => ended(crowded)),
+      ...above.slice(0, 100).map(ended),
+    ]);
+
+    await report(laptop.signedIn, playing(1_000));
+
+    expect(targetIn(await targets(lucia.signedIn), laptop.deviceId)?.name).toBe("Laptop");
   });
 });

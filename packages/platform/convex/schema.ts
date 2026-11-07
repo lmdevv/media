@@ -72,7 +72,7 @@ const approvalFields = {
 
 const connectOutput = v.union(
   v.object({ kind: v.literal("local") }),
-  v.object({ kind: v.literal("cast"), receiver: v.string() }),
+  v.object({ kind: v.literal("cast"), receiver: v.union(v.string(), v.null()) }),
   v.object({ kind: v.literal("airplay"), receiver: v.union(v.string(), v.null()) }),
 );
 
@@ -328,8 +328,8 @@ export default defineSchema({
     ),
   )
     .index("by_device", ["deviceId"])
-    .index("by_user_expiration", ["userId", "expiresAt"])
-    .index("by_intent_expiration", ["intent", "expiresAt"])
+    .index("by_user_intent_state_expiration", ["userId", "intent", "state", "expiresAt"])
+    .index("by_intent_state_expiration", ["intent", "state", "expiresAt"])
     .index("by_expiration", ["expiresAt"]),
 
   /**

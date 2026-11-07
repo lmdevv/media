@@ -8,7 +8,7 @@ import { api, internal } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { GUESTS_PER_LINK_MAX } from "../../../convex/core/guests/model";
 import { inOrder } from "../../../convex/core/lib/inOrder";
-import { MEMBERS_MAX, PRESENT_MS } from "../../../convex/core/together/model";
+import { BLOCKED_MAX, MEMBERS_MAX, PRESENT_MS } from "../../../convex/core/together/model";
 import { runFunction } from "../../admin";
 import { member } from "../../devices";
 import type { Member } from "../../devices";
@@ -16,9 +16,10 @@ import { GUEST_ADDRESS, guestsOn, makeLink, openLink } from "../../guests";
 import { movie, openItem, seedLibrary, share, visibleItems, visibleLibraries } from "../../probe";
 import type { Session } from "../../probe";
 import { importRows, newestRows } from "../../rows";
-import { refusal, unique } from "../../sign-in";
+import { failureOf, refusal, signIn, unique } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
+import { plantedStrangers } from "../../together";
 
 const stack = coreStackFromEnvFile();
 
@@ -579,5 +580,79 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
         guest.signedIn.client.mutation(api.core.together.join, { domain: "movies", link }),
       ),
     ).toBe("forbidden");
+  });
+
+  it("tells an API key it cannot share, since only a signed-in person makes links", async () => {
+    if (stack === undefined) return;
+    const { admin, shared } = await shelf(stack);
+
+    const { key } = await admin.signedIn.client.action(api.core.auth.apiKeys.create, {
+      name: "agent",
+      scopes: ["account", "movies:play"],
+    });
+
+    const agent = await signIn(stack, "apiKey", { key });
+
+    expect((await admin.signedIn.client.query(api.core.guests.status, {})).mayShare).toBe(true);
+    expect((await agent.client.query(api.core.guests.status, {})).mayShare).toBe(false);
+    expect(
+      await refusal(
+        agent.client.action(api.core.guests.links.create, {
+          target: { kind: "item", item: shared },
+        }),
+      ),
+    ).toBe("forbidden");
+  });
+
+  it("tells someone still waiting to join that only the host shares the session", async () => {
+    if (stack === undefined) return;
+    const { admin: host, libraryId, shared } = await shelf(stack);
+    const aide = await member(stack, "aide", "admin");
+
+    await share(host, libraryId, { kind: "user", userId: aide.userId }, "view");
+
+    const { link } = await host.signedIn.client.action(api.core.together.create, {
+      item: shared,
+      join: "approval",
+    });
+
+    try {
+      expect(
+        await aide.signedIn.client.mutation(api.core.together.join, { domain: "movies", link }),
+      ).toEqual({ state: "pending" });
+      expect(await failureOf(makeLink(aide, { kind: "session", domain: "movies" }))).toEqual({
+        code: "forbidden",
+        message: "Only the host can share a group session",
+      });
+    } finally {
+      await host.signedIn.client.mutation(api.core.together.leave, { domain: "movies" });
+    }
+  });
+
+  it("removes a link's guest without spending one of the session's turned-away places", async () => {
+    if (stack === undefined) return;
+    const { admin: host, shared } = await shelf(stack);
+
+    await host.signedIn.client.action(api.core.together.create, { item: shared });
+
+    try {
+      const block = (userId: Id<"users">) =>
+        host.signedIn.client.action(api.core.together.block, { domain: "movies", userId });
+
+      await inOrder(plantedStrangers(BLOCKED_MAX), block);
+
+      const made = await makeLink(host, { kind: "session", domain: "movies" });
+      const guest = await openLink(stack, made.code, "Sam");
+
+      expect(await refusal(block(guest.userId))).toBe("accepted");
+
+      const after = await host.signedIn.client.query(api.core.together.get, { domain: "movies" });
+
+      expect(after?.state === "joined" ? after.members.map((row) => row.userId) : null).toEqual([
+        host.userId,
+      ]);
+    } finally {
+      await host.signedIn.client.mutation(api.core.together.leave, { domain: "movies" });
+    }
   });
 });

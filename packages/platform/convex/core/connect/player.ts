@@ -25,24 +25,14 @@ const deviceOfCaller = async (db: DatabaseReader, caller: Caller): Promise<Doc<"
   );
 };
 
-const receiverName = (name: string): string => {
-  const trimmed = name.trim();
+const receiverName = (name: string | null): string | null => {
+  const trimmed = name?.trim() ?? "";
 
-  return trimmed.length === 0 || trimmed.length > RECEIVER_MAX
-    ? fail("invalid_args", `Name the receiver with 1 to ${RECEIVER_MAX} characters`)
-    : trimmed;
+  return trimmed === "" ? null : Array.from(trimmed).slice(0, RECEIVER_MAX).join("").trimEnd();
 };
 
-const parseOutput = (output: Output): Output => {
-  if (output.kind === "local") return output;
-
-  if (output.kind === "cast") return { kind: "cast", receiver: receiverName(output.receiver) };
-
-  return {
-    kind: "airplay",
-    receiver: output.receiver === null ? null : receiverName(output.receiver),
-  };
-};
+const parseOutput = (output: Output): Output =>
+  output.kind === "local" ? output : { kind: output.kind, receiver: receiverName(output.receiver) };
 
 const parseApplied = (applied: number, newestRevision: number): number => {
   if (!Number.isSafeInteger(applied) || applied < 0) {

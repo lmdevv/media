@@ -17,7 +17,11 @@ export const { status, configure, allow, current } = register({
       about: { kind: "standing" },
     });
 
-    return { enabled: access.enabled, address: access.address, mayShare: offer.allowed };
+    return {
+      enabled: access.enabled,
+      address: access.address,
+      mayShare: offer.allowed && caller.sessionKind !== "apiKey",
+    };
   },
   configure: async (ctx, { enabled, address }, caller) => {
     requireServer(caller, "configureGuests");

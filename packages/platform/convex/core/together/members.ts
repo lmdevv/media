@@ -5,7 +5,7 @@ import type { Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx, QueryCtx } from "../../_generated/server";
 import { requireCaller } from "../auth/caller";
-import { linkHolds } from "../guests/standing";
+import { isGuest, linkHolds } from "../guests/standing";
 import { fail } from "../lib/errors";
 import { memberIn, requireTogether } from "./access";
 import type { MemberDoc, SessionDoc } from "./access";
@@ -24,7 +24,7 @@ export const guestLinkDied = async (
 ): Promise<boolean> => {
   const user = await db.get(userId);
 
-  return user?.kind === "person" && user.role === "guest" && !(await linkHolds(db, user, now));
+  return isGuest(user) && !(await linkHolds(db, user, now));
 };
 
 interface Seats {
@@ -173,12 +173,6 @@ export const enter = async (
   return state;
 };
 
-/**
- * `block`'s write, as the caller hosting the session in `domain`: takes `userId` out of it, joined
- * or waiting, and keeps its link from letting them in again while the list of people turned away
- * has room. Answers whether it does; the removal commits either way, so a full list never keeps
- * someone in the session.
- */
 export const turnAway = internalMutation({
   args: { domain: contentDomain, userId: v.id("users") },
   returns: v.boolean(),
@@ -193,6 +187,10 @@ export const turnAway = internalMutation({
     const row = await memberIn(ctx.db, userId, domain);
 
     if (row?.sessionId === session._id) await dropMember(ctx, row);
+
+    const user = await ctx.db.get(userId);
+
+    if (isGuest(user)) return true;
 
     if (session.blocked.includes(userId)) return true;
 

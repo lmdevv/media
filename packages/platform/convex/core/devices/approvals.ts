@@ -4,6 +4,7 @@ import type { DatabaseReader, MutationCtx, QueryCtx } from "../../_generated/ser
 import type { Caller } from "../auth/caller";
 import { callerUser } from "../auth/caller";
 import { fail } from "../lib/errors";
+import { PAGE_ROWS_MAX } from "../lib/paginate";
 import { takeAttempt } from "../lib/rateLimit";
 import { can, lockOf, proverOf } from "../permissions/policy";
 import type { ApprovalResource, PersonDoc, Prover } from "../permissions/policy";
@@ -18,7 +19,11 @@ const APPROVAL_MS = 2 * 60 * 1000;
 
 const REQUESTS_PER_HOUR = 60;
 
-const PENDING_MAX = 50;
+const READS_PER_PROMPT = 3;
+
+const PROMPT_LISTS = 2;
+
+const PENDING_MAX = Math.floor(PAGE_ROWS_MAX / PROMPT_LISTS / READS_PER_PROMPT);
 
 /** A device keeps one live approval; a read takes a few to clear stragglers too. */
 const DEVICE_APPROVALS_READ = 8;
@@ -104,6 +109,17 @@ const answerable = async (
 const answered = (approval: Approval, me: PersonDoc): boolean =>
   approval.state !== "pending" && approval.answeredBy === me._id;
 
+type Approved = Extract<Approval, { readonly state: "approved" }>;
+
+const approverStillBacking = async (
+  db: DatabaseReader,
+  approval: Approved,
+): Promise<PersonDoc | null> => {
+  const approver = asPerson(await db.get(approval.answeredBy));
+
+  return approver?.sessionGeneration === approval.generation ? approver : null;
+};
+
 /** What a tile sign-in with an approval proves, or the session a retry gets again. */
 export type Redeemed =
   | { readonly kind: "prover"; readonly prover: Prover }
@@ -146,11 +162,11 @@ export const redeemable = async (
       : { kind: "again", signedIn: { userId: person._id, sessionId: approval.sessionId } };
   }
 
-  const approver = asPerson(await ctx.db.get(approval.answeredBy));
+  const approver = await approverStillBacking(ctx.db, approval);
 
-  return approver?.sessionGeneration === approval.generation
-    ? { kind: "prover", prover: proverOf(approver) }
-    : fail("expired", "Whoever approved has signed out everywhere since; ask again");
+  return approver === null
+    ? fail("expired", "Whoever approved has signed out everywhere since; ask again")
+    : { kind: "prover", prover: proverOf(approver) };
 };
 
 /** Marks an approved `open` approval used by the tile session it opened. */
@@ -194,14 +210,22 @@ export const { request, pending, approve, deny } = register({
 
     const kept = await approvalsOf(ctx.db, device._id);
 
-    const live = kept.find(
-      (approval) =>
-        approval.intent === ask.intent &&
-        approval.userId === userId &&
-        approval.expiresAt > now &&
-        (approval.state === "pending" ||
-          (approval.state === "approved" && approval.intent === "open")),
-    );
+    const stands = async (approval: Approval): Promise<boolean> => {
+      if (approval.intent !== ask.intent || approval.userId !== userId) return false;
+
+      if (approval.expiresAt <= now) return false;
+
+      if (approval.state === "pending") return true;
+
+      return (
+        approval.state === "approved" &&
+        approval.intent === "open" &&
+        (await approverStillBacking(ctx.db, approval)) !== null
+      );
+    };
+
+    const standing = await Promise.all(kept.map(stands));
+    const live = kept.find((_approval, index) => standing[index] === true);
 
     if (live !== undefined) return { approvalId: live._id, expiresAt: live.expiresAt };
 
@@ -226,17 +250,20 @@ export const { request, pending, approve, deny } = register({
     const [mine, leaves] = await Promise.all([
       ctx.db
         .query("tileApprovals")
-        .withIndex("by_user_expiration", (q) => q.eq("userId", me._id).gt("expiresAt", now))
+        .withIndex("by_user_intent_state_expiration", (q) =>
+          q.eq("userId", me._id).eq("intent", "open").eq("state", "pending").gt("expiresAt", now),
+        )
         .take(PENDING_MAX),
       ctx.db
         .query("tileApprovals")
-        .withIndex("by_intent_expiration", (q) => q.eq("intent", "leave").gt("expiresAt", now))
+        .withIndex("by_intent_state_expiration", (q) =>
+          q.eq("intent", "leave").eq("state", "pending").gt("expiresAt", now),
+        )
         .take(PENDING_MAX),
     ]);
 
-    const open = [...mine.filter((approval) => approval.intent === "open"), ...leaves].filter(
-      (approval) =>
-        approval.state === "pending" && can(caller, "answer", resourceOf(approval, me)).allowed,
+    const open = [...mine, ...leaves].filter(
+      (approval) => can(caller, "answer", resourceOf(approval, me)).allowed,
     );
 
     const prompts = await Promise.all(
