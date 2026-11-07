@@ -747,6 +747,7 @@ export const generatedCommands = [
     result: Schema.Struct({
       deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
       device: Schema.String,
+      joinSequence: Schema.Finite,
     }),
     method: (platform) => platform.core.devices.registry.enroll,
   }),

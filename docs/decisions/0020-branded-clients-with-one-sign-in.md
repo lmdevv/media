@@ -70,6 +70,7 @@ names the session keys. `localStorage` holds nothing credential-bearing.
 | `media.revoked:<session>`          | a sign-out, and the core's confirmation once it comes                        |
 | `media.signOut:<session>`          | a sign-out the core has not confirmed, for any client                        |
 | `media.generation:<userId>`        | the person's sign-in counter, raised by each sign-in                         |
+| `media.joined.<userId>`            | the last device join promoted for the person: device, number, and session    |
 
 - **A slot** is a random local name for one sign-in's tokens. A password, setup, invite, or reset
   sign-in starts before the client knows whose session it is, so the key cannot carry the
@@ -130,8 +131,16 @@ every tab of the origin, and which works outside secure contexts.
     deletes the tokens alone, which frees space. The client stays signed out, and its retry keeps
     writing the records again.
   - Every change names what it expects and does nothing if the store no longer matches. A promote
-    goes ahead only while the slot holds that person's newest sign-in generation, so a sign-in
-    another tab finished later keeps the person. A slot that lost that way is forgotten. The person's older slot goes too, unless another sign-in has taken it since. A forget
+    goes ahead only while the slot holds that person, and only for the sign-in whose session the
+    core kept. The core decides that, not the tabs: each enrollment answers its join's number on
+    the device (`joinSequence`, counted on the device row), and a join ends the person's earlier
+    session there (ADR 0006). So a promote goes ahead only with a higher number than the person's
+    last promoted join on that device, whichever tab saved or promotes first. A join on another
+    device counts as newer, since a cleared device code is never used again. A tile, which
+    enrolls nothing, goes by the person's newest sign-in generation instead. A slot that lost is
+    forgotten. The person's older slot goes too, but only while it still holds the session last
+    promoted, so another person's sign-in, or a newer one of this person, saved there since stays.
+    The last join outlives a sign-out, so an ended session that answers late is never promoted. A forget
     names the slot and the session it signed out, and goes ahead only while the slot still holds
     that session, so a session another tab saved there since stays. It then deletes only the
     mappings and the active slot that still point at the slot.

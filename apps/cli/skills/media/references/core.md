@@ -353,7 +353,7 @@ Register this app as a personal device, or find it again by its device code, and
 - API keys: refused
 - Arguments: `{ name: string; device?: string }`
 - Secret: `device` from `MEDIA_ARG_DEVICE` or stdin, never a flag; leave both unset to omit it
-- Result: `{ deviceId: Id<"devices">; device: string }`
+- Result: `{ deviceId: Id<"devices">; device: string; joinSequence: number }`
 
 ## `core.devices.registry.list`
 

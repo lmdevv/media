@@ -60,6 +60,11 @@ const deviceFields = {
   secretHash: v.string(),
   /** Bumped by every mode change; a session bound at another generation has ended. */
   generation: v.number(),
+  /**
+   * Sessions that have joined this device so far, absent before the first. Each join takes the
+   * next number and ends the person's earlier session here, so a client keeps the highest.
+   */
+  joins: v.optional(v.number()),
 };
 
 const approvalFields = {

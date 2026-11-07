@@ -109,6 +109,62 @@ test("two people signing in at once on a new browser both join its picker", asyn
   await expect(page.getByRole("button", { name: second.username, exact: true })).toBeVisible();
 });
 
+test("two tabs signing one person in keep the session the core kept, whichever promotes first", async ({
+  page,
+  context,
+}) => {
+  if (stack === null) return;
+
+  const enrolled = await createPerson(stack, "mateo");
+  const person = await createPerson(stack, "lucia");
+  const late = await context.newPage();
+  const held: Array<() => void> = [];
+  let holding = true;
+
+  // The late tab's enrollment waits on the wire, after its sign-in is saved, until the other tab
+  // has signed the same person in, enrolled, and promoted.
+  await late.routeWebSocket(/\/api\/[^/]+\/sync/u, (socket) => {
+    const server = socket.connectToServer();
+
+    socket.onMessage((message) => {
+      if (holding && message.toString().includes("registry:enroll")) {
+        held.push(() => server.send(message));
+
+        return;
+      }
+
+      server.send(message);
+    });
+  });
+
+  await signIn(page, enrolled);
+  await expect(page.getByRole("button", { name: enrolled.username, exact: true })).toBeVisible();
+
+  const signInOn = async (tab: Page) => {
+    await tab.goto("/add");
+    await tab.getByLabel("Username").fill(person.username);
+    await tab.getByLabel("Password", { exact: true }).fill(person.password);
+    await tab.getByRole("button", { name: "Sign in" }).click();
+  };
+
+  await signInOn(late);
+  await expect.poll(() => held.length).toBe(1);
+
+  await signInOn(page);
+  await expect(page.getByRole("button", { name: person.username, exact: true })).toBeVisible();
+
+  holding = false;
+
+  for (const send of held.splice(0)) send();
+
+  await expect(late.getByRole("heading", { name: "Who's here?" })).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: person.username, exact: true }).click();
+  await expect(page).toHaveURL(/\/home$/u);
+  await expect(page.getByRole("link", { name: `${person.username}, switch person` })).toBeVisible();
+});
+
 test("two tabs share one sign-in, and a sign-out in one signs the other out", async ({
   page,
   context,

@@ -537,6 +537,7 @@ const core_devices_registry_enroll = action({
   result: Schema.Struct({
     deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
     device: Schema.String,
+    joinSequence: Schema.Finite,
   }),
 });
 

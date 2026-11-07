@@ -518,7 +518,7 @@ export const core = [
     scope: "account",
     refusesKeys: true,
     args: { name: v.string(), device: v.optional(v.string()) },
-    result: v.object({ deviceId: v.id("devices"), device: v.string() }),
+    result: v.object({ deviceId: v.id("devices"), device: v.string(), joinSequence: v.number() }),
   }),
   query("core.devices.registry.list", {
     summary: "List every registered device and whether it is shared, newest first",

@@ -17,6 +17,9 @@ const ada = userId("user-ada");
 
 const bo = userId("user-bo");
 
+/** The `sequence`th join of a session to this browser's device, as the core answers enroll. */
+const joinedAs = (sequence: number, deviceId = "device-1") => ({ deviceId, sequence });
+
 /**
  * Tabs of one origin over one fake IndexedDB. A tab hears another tab's commit only when
  * `deliver` runs, as a `BroadcastChannel` message arrives later.
@@ -101,13 +104,41 @@ const signIn = async (
 const refreshOf = (loaded: Option.Option<{ readonly refreshToken: Redacted.Redacted }>) =>
   Option.map(loaded, (held) => Redacted.value(held.refreshToken));
 
+/** Two tabs that each saved a sign-in of Ada, each on its own slot, before either promoted. */
+const twoSignIns = async () => {
+  const {
+    stores: [first, second],
+    shared: [firstDb, secondDb],
+    deliver,
+  } = await tabs(2);
+
+  if (
+    first === undefined ||
+    second === undefined ||
+    firstDb === undefined ||
+    secondDb === undefined
+  ) {
+    throw new Error("No tab");
+  }
+
+  const firstSlot = newSlot();
+  const secondSlot = newSlot();
+  const firstSessions = await sessionsOf(firstDb, first, firstSlot);
+  const secondSessions = await sessionsOf(secondDb, second, secondSlot);
+
+  await Effect.runPromise(firstSessions.save(sessionAs("user-ada|session-1")));
+  await Effect.runPromise(secondSessions.save(sessionAs("user-ada|session-2")));
+
+  return { first, second, firstSlot, secondSlot, firstSessions, secondSessions, deliver };
+};
+
 describe("the origin store", () => {
   it("makes a signed-in slot its person's and the active one", async () => {
     const { store, shared } = await one();
     const slot = newSlot();
 
     await signIn(shared, store, slot, "user-ada|s1");
-    await store.promote(slot, ada);
+    await store.promote(slot, ada, joinedAs(1));
 
     expect(store.read()).toStrictEqual({
       device: null,
@@ -134,9 +165,9 @@ describe("the origin store", () => {
     const second = newSlot();
 
     await signIn(shared, store, first, "user-ada|s1");
-    await store.promote(first, ada);
+    await store.promote(first, ada, joinedAs(1));
     await signIn(shared, store, second, "user-ada|s2");
-    await store.promote(second, ada);
+    await store.promote(second, ada, joinedAs(2));
 
     expect(await keysOf(shared)).not.toContain(store.sessionKey(first));
     expect(store.read().people).toStrictEqual(new Map([[ada, second]]));
@@ -147,9 +178,9 @@ describe("the origin store", () => {
     const slot = newSlot();
 
     await signIn(shared, store, slot, "user-ada|s1");
-    await store.promote(slot, ada);
+    await store.promote(slot, ada, null);
     await signIn(shared, store, slot, "user-bo|s2");
-    await store.promote(slot, bo);
+    await store.promote(slot, bo, null);
 
     expect(store.read().people).toStrictEqual(new Map([[bo, slot]]));
   });
@@ -160,7 +191,7 @@ describe("the origin store", () => {
     const key = store.sessionKey(slot);
 
     await signIn(shared, store, slot, "user-ada|s1");
-    await store.promote(slot, ada);
+    await store.promote(slot, ada, joinedAs(1));
     await shared.write(async (tx) => {
       await tx.set(`${key}:user-ada|s0`, "older tokens");
       await tx.set("media.revoked:user-ada|s0", "revoked");
@@ -170,6 +201,7 @@ describe("the origin store", () => {
 
     expect((await keysOf(shared)).toSorted()).toStrictEqual([
       "media.generation:user-ada",
+      "media.joined.user-ada",
       "media.revoked:user-ada|s0",
       "media.signOut:user-ada|s0",
     ]);
@@ -181,9 +213,9 @@ describe("the origin store", () => {
     const boSlot = newSlot();
 
     await signIn(shared, store, adaSlot, "user-ada|s1");
-    await store.promote(adaSlot, ada);
+    await store.promote(adaSlot, ada, joinedAs(1));
     await signIn(shared, store, boSlot, "user-bo|s2");
-    await store.promote(boSlot, bo);
+    await store.promote(boSlot, bo, joinedAs(2));
     await store.forget(boSlot, "user-bo|s2");
 
     expect(store.read()).toStrictEqual({
@@ -209,10 +241,10 @@ describe("the origin store", () => {
     const fresh = newSlot();
 
     await signIn(store, signingOut, old, "user-ada|s1");
-    await signingOut.promote(old, ada);
+    await signingOut.promote(old, ada, joinedAs(1));
     await deliver();
     await signIn(store, signingIn, fresh, "user-ada|s2");
-    await signingIn.promote(fresh, ada);
+    await signingIn.promote(fresh, ada, joinedAs(2));
 
     expect(signingOut.read().active).toBe(old);
 
@@ -266,39 +298,65 @@ describe("the origin store", () => {
     const store = await openOriginStore(null);
 
     expect(store.read()).toStrictEqual({ device: null, active: null, people: new Map() });
-    await expect(store.promote(newSlot(), ada)).rejects.toThrow("can't keep a sign-in");
+    await expect(store.promote(newSlot(), ada, null)).rejects.toThrow("can't keep a sign-in");
     await expect(store.sessions.read((tx) => tx.keys())).rejects.toThrow();
   });
 
-  it("does not promote a sign-in that a newer one for the same person overtook", async () => {
-    const {
-      stores: [slow, fast],
-      shared: [first, second],
-      deliver,
-    } = await tabs(2);
+  it("keeps the sign-in that joined the device last, though its tab saved first and promotes last", async () => {
+    const { first, second, firstSlot, secondSlot, firstSessions, secondSessions, deliver } =
+      await twoSignIns();
 
-    if (slow === undefined || fast === undefined || first === undefined || second === undefined) {
-      throw new Error("No tab");
-    }
-
-    const slowSlot = newSlot();
-    const fastSlot = newSlot();
-    const slowSessions = await sessionsOf(first, slow, slowSlot);
-    const fastSessions = await sessionsOf(second, fast, fastSlot);
-
-    await Effect.runPromise(slowSessions.save(sessionAs("user-ada|session-1")));
-    await Effect.runPromise(fastSessions.save(sessionAs("user-ada|session-2")));
-    await fast.promote(fastSlot, ada);
-    await slow.promote(slowSlot, ada);
+    // The second tab enrolls and promotes; then the first tab's enrollment ends that session.
+    expect(await second.promote(secondSlot, ada, joinedAs(1))).toBe(true);
+    expect(await first.promote(firstSlot, ada, joinedAs(2))).toBe(true);
     await deliver();
 
     expect({
-      origin: slow.read(),
-      fastSession: refreshOf(await Effect.runPromise(fastSessions.load)),
+      here: first.read(),
+      there: second.read(),
+      kept: refreshOf(await Effect.runPromise(firstSessions.load)),
+      ended: refreshOf(await Effect.runPromise(secondSessions.load)),
     }).toStrictEqual({
-      origin: { device: null, active: fastSlot, people: new Map([[ada, fastSlot]]) },
-      fastSession: Option.some("refresh-user-ada|session-2"),
+      here: { device: null, active: firstSlot, people: new Map([[ada, firstSlot]]) },
+      there: { device: null, active: firstSlot, people: new Map([[ada, firstSlot]]) },
+      kept: Option.some("refresh-user-ada|session-1"),
+      ended: Option.none(),
     });
+  });
+
+  it("does not promote a sign-in that joined the device before the one promoted", async () => {
+    const { first, second, firstSlot, secondSlot, secondSessions, deliver } = await twoSignIns();
+
+    expect(await second.promote(secondSlot, ada, joinedAs(2))).toBe(true);
+    expect(await first.promote(firstSlot, ada, joinedAs(1))).toBe(false);
+    await deliver();
+
+    expect({
+      origin: first.read(),
+      kept: refreshOf(await Effect.runPromise(secondSessions.load)),
+    }).toStrictEqual({
+      origin: { device: null, active: secondSlot, people: new Map([[ada, secondSlot]]) },
+      kept: Option.some("refresh-user-ada|session-2"),
+    });
+  });
+
+  it("promotes a sign-in that joined another device, as after the browser's device was cleared", async () => {
+    const { first, second, firstSlot, secondSlot } = await twoSignIns();
+
+    await second.promote(secondSlot, ada, joinedAs(5, "device-old"));
+
+    expect(await first.promote(firstSlot, ada, joinedAs(1, "device-new"))).toBe(true);
+    expect(first.read().people).toStrictEqual(new Map([[ada, firstSlot]]));
+  });
+
+  it("keeps a sign-out's last join, so an ended session that answers late is not promoted", async () => {
+    const { first, second, firstSlot, secondSlot } = await twoSignIns();
+
+    await second.promote(secondSlot, ada, joinedAs(2));
+    await second.forget(secondSlot, "user-ada|session-2");
+
+    expect(await first.promote(firstSlot, ada, joinedAs(1))).toBe(false);
+    expect(first.read().people).toStrictEqual(new Map());
   });
 
   it("does not forget a slot that took a newer session since the sign-out began", async () => {
@@ -322,10 +380,10 @@ describe("the origin store", () => {
     const adaSession = sessionAs("user-ada|session-1");
 
     await Effect.runPromise(here.save(adaSession));
-    await signingOut.promote(slot, ada);
+    await signingOut.promote(slot, ada, null);
     await Effect.runPromise(here.revoke(adaSession));
     await Effect.runPromise(there.save(sessionAs("user-bo|session-2")));
-    await opening.promote(slot, bo);
+    await opening.promote(slot, bo, null);
     await signingOut.forget(slot, "user-ada|session-1");
 
     expect({
@@ -345,6 +403,7 @@ type Step =
       readonly person: "ada" | "bo";
       readonly reuse: boolean;
     }
+  | { readonly kind: "join"; readonly pick: number }
   | { readonly kind: "promote"; readonly pick: number }
   | { readonly kind: "signOut"; readonly tab: number }
   | { readonly kind: "forget"; readonly pick: number }
@@ -360,6 +419,7 @@ const step: fc.Arbitrary<Step> = fc.oneof(
     person: fc.constantFrom("ada" as const, "bo" as const),
     reuse: fc.boolean(),
   }),
+  fc.record({ kind: fc.constant("join" as const), pick: fc.nat() }),
   fc.record({ kind: fc.constant("promote" as const), pick: fc.nat() }),
   fc.record({ kind: fc.constant("signOut" as const), tab: fc.integer({ min: 0, max: TABS - 1 }) }),
   fc.record({ kind: fc.constant("forget" as const), pick: fc.nat() }),
@@ -374,8 +434,8 @@ const sequence = <A, E>(body: Effect.Effect<A, E>) => Effect.runPromise(body);
 
 const later = <A>(work: () => Promise<A>) => Effect.promise(work);
 
-describe("any interleaving of sign-ins, promotions, sign-outs, and forgets across tabs", () => {
-  it("never loads a signed-out session, and keeps each person's newest sign-in", async () => {
+describe("any interleaving of sign-ins, joins, promotions, sign-outs, and forgets across tabs", () => {
+  it("never loads a signed-out session, and keeps the sign-in whose session the core kept", async () => {
     await fc.assert(
       fc.asyncProperty(fc.array(step, { minLength: 4, maxLength: 20 }), async (steps) => {
         const { stores, shared, deliver } = await tabs(TABS);
@@ -402,8 +462,24 @@ describe("any interleaving of sign-ins, promotions, sign-outs, and forgets acros
               session: string;
             }> = [];
 
+            const joining: Array<{
+              tab: number;
+              person: "ada" | "bo";
+              slot: ReturnType<typeof newSlot>;
+              session: string;
+            }> = [];
+
             const promotions: Array<{
               tab: number;
+              person: "ada" | "bo";
+              slot: ReturnType<typeof newSlot>;
+              session: string;
+              sequence: number;
+            }> = [];
+
+            // The core's order: each join takes the next number and ends the person's earlier
+            // session on the device, so the person's last join is the session still live.
+            const joined: Array<{
               person: "ada" | "bo";
               slot: ReturnType<typeof newSlot>;
               session: string;
@@ -420,6 +496,14 @@ describe("any interleaving of sign-ins, promotions, sign-outs, and forgets acros
             const found: Array<string> = [];
             let made = 0;
 
+            const runJoin = (index: number) => {
+              const [join] = joining.splice(index % joining.length, 1);
+
+              if (join === undefined) return;
+              joined.push(join);
+              promotions.push({ ...join, sequence: joined.length });
+            };
+
             const runPromotion = (index: number) =>
               Effect.gen(function* () {
                 const [promotion] = promotions.splice(index % promotions.length, 1);
@@ -428,7 +512,10 @@ describe("any interleaving of sign-ins, promotions, sign-outs, and forgets acros
                 const { store } = at(promotion.tab);
 
                 const promoted = yield* later(() =>
-                  store.promote(promotion.slot, PEOPLE[promotion.person]),
+                  store.promote(promotion.slot, PEOPLE[promotion.person], {
+                    deviceId: "device-1",
+                    sequence: promotion.sequence,
+                  }),
                 );
 
                 if (!promoted) yield* later(() => store.forget(promotion.slot, promotion.session));
@@ -457,12 +544,15 @@ describe("any interleaving of sign-ins, promotions, sign-outs, and forgets acros
                   if (yield* (yield* storage(next.tab, slot)).save(tokens)) {
                     signedIn.push({ person: next.person, slot, session });
                     lastSaved.set(slot, session);
-                    promotions.push({ tab: next.tab, person: next.person, slot, session });
+                    joining.push({ tab: next.tab, person: next.person, slot, session });
                   }
 
                   break;
                 }
 
+                case "join":
+                  runJoin(next.pick);
+                  break;
                 case "promote":
                   if (promotions.length > 0) yield* runPromotion(next.pick);
                   break;
@@ -504,6 +594,8 @@ describe("any interleaving of sign-ins, promotions, sign-outs, and forgets acros
               }
             }
 
+            while (joining.length > 0) runJoin(0);
+
             while (promotions.length > 0) yield* runPromotion(0);
 
             while (forgets.length > 0) yield* runForget(0);
@@ -521,7 +613,7 @@ describe("any interleaving of sign-ins, promotions, sign-outs, and forgets acros
             }
 
             for (const person of ["ada", "bo"] as const) {
-              const newest = signedIn.findLast((each) => each.person === person);
+              const newest = joined.findLast((each) => each.person === person);
 
               // Only a later sign-in on the same slot, or signing this one out, may take it away.
               if (newest === undefined || revoked.has(newest.session)) continue;
@@ -533,7 +625,7 @@ describe("any interleaving of sign-ins, promotions, sign-outs, and forgets acros
                 held !== newest.session ||
                 store.read().people.get(PEOPLE[person]) !== newest.slot
               ) {
-                found.push(`${person}'s newest sign-in ${newest.session} lost its slot`);
+                found.push(`${person}'s live session ${newest.session} lost its slot`);
               }
             }
 

@@ -1,7 +1,7 @@
 import { latestGeneration, slotHolding } from "@media/sdk/promise";
 import type { SharedStore, SharedTransaction } from "@media/sdk/promise";
 import { randomUuid } from "@media/ui/lib/secure-context";
-import { Brand, Option } from "effect";
+import { Brand, Option, Schema } from "effect";
 
 import type { UserId } from "./platform-types";
 
@@ -15,6 +15,15 @@ export type SlotId = string & Brand.Brand<"SlotId">;
 const SlotId = Brand.nominal<SlotId>();
 
 const UserId = Brand.nominal<UserId>();
+
+/**
+ * Where the core joined a sign-in to this browser's device, and its place in the order sessions
+ * joined it. Of two sign-ins of one person there, the core kept the later join's session live.
+ */
+export interface Joined {
+  readonly deviceId: string;
+  readonly sequence: number;
+}
 
 /** What this browser holds for every client on the origin. */
 export interface Origin {
@@ -46,12 +55,14 @@ export interface OriginStore {
   readonly sessionKey: (slot: SlotId) => string;
   /**
    * Makes `slot` the one holding `userId`, and the active slot; whether it did. It does only while
-   * `slot` holds that person's newest sign-in, so a sign-in another tab finished later wins. A
-   * different slot that held `userId` before goes, since the core keeps one session per person per
-   * device, and so does whoever `slot` held before, as on a shared device whose one slot a new tile
-   * took. Idempotent.
+   * `slot` still holds that person, and only for the sign-in whose session the core kept: with
+   * `joined`, one that joined this device later than any promoted before, whatever order the tabs
+   * promote in; without it, as for a tile, the person's newest sign-in here. A different slot
+   * that held `userId` before goes, since the core keeps one session per person per device, and so
+   * does whoever `slot` held before, as on a shared device whose one slot a new tile took.
+   * Idempotent.
    */
-  readonly promote: (slot: SlotId, userId: UserId) => Promise<boolean>;
+  readonly promote: (slot: SlotId, userId: UserId, joined: Joined | null) => Promise<boolean>;
   /** The session `slot` holds now, if any. */
   readonly sessionIn: (slot: SlotId) => Promise<string | null>;
   /** Makes `slot` the one every client acts as. */
@@ -77,6 +88,20 @@ const ACTIVE = "media.active";
 const PERSON = "media.person.";
 
 const SESSION = "media.session.";
+
+const JOINED = "media.joined.";
+
+/** The last join promoted for a person, and the session it promoted. */
+const StoredJoin = Schema.fromJsonString(
+  Schema.Struct({ deviceId: Schema.String, sequence: Schema.Int, session: Schema.String }),
+);
+
+const decodeJoin = Schema.decodeUnknownOption(StoredJoin);
+
+const encodeJoin = Schema.encodeSync(StoredJoin);
+
+const lastJoin = async (tx: SharedTransaction, userId: UserId) =>
+  Option.flatMap(Option.fromNullishOr(await tx.get(`${JOINED}${userId}`)), decodeJoin);
 
 const sessionKey = (slot: SlotId): string => `${SESSION}${slot}`;
 
@@ -177,17 +202,26 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
     },
     sessions: shared ?? unavailable,
     sessionKey,
-    promote: (slot, userId) =>
+    promote: (slot, userId, joined) =>
       change(async (tx) => {
         const held = await slotHolding(tx, sessionKey(slot));
 
-        if (
-          Option.isNone(held) ||
-          held.value.user !== userId ||
-          held.value.generation < (await latestGeneration(tx, userId))
-        ) {
-          return false;
-        }
+        if (Option.isNone(held) || held.value.user !== userId) return false;
+
+        const last = await lastJoin(tx, userId);
+
+        // A join on another device is newer: the browser keeps one device code, and a cleared one
+        // is never used again.
+        const kept =
+          joined === null
+            ? held.value.generation >= (await latestGeneration(tx, userId))
+            : Option.match(last, {
+                onNone: () => true,
+                onSome: (stored) =>
+                  stored.deviceId !== joined.deviceId || stored.sequence < joined.sequence,
+              });
+
+        if (!kept) return false;
 
         const { people } = await originIn(tx);
         const before = people.get(userId);
@@ -198,15 +232,33 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
           ),
         );
 
-        // The person's older slot goes, unless another sign-in has taken it since.
+        // The person's older slot goes, unless another sign-in has taken it since: another
+        // person's, or one of this person's saved there after the session last promoted.
         if (before !== undefined && before !== slot) {
           const there = await slotHolding(tx, sessionKey(before));
 
-          if (Option.isNone(there) || there.value.user === userId) await dropSlot(tx, before);
+          const stale = Option.match(there, {
+            onNone: () => true,
+            onSome: (holding) =>
+              holding.user === userId &&
+              Option.match(last, {
+                onNone: () => true,
+                onSome: (stored) => stored.session === holding.session,
+              }),
+          });
+
+          if (stale) await dropSlot(tx, before);
         }
 
         await tx.set(`${PERSON}${userId}`, slot);
         await tx.set(ACTIVE, slot);
+
+        if (joined !== null) {
+          await tx.set(
+            `${JOINED}${userId}`,
+            encodeJoin({ ...joined, session: held.value.session }),
+          );
+        }
 
         return true;
       }),

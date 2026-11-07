@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 
 import { deviceName } from "./device-name";
 import { newSlot } from "./origin";
-import type { Origin, OriginStore, SlotId } from "./origin";
+import type { Joined, Origin, OriginStore, SlotId } from "./origin";
 import type { TileProof, UserId } from "./platform-types";
 
 interface AccountContext {
@@ -127,28 +127,35 @@ export const useAccountActions = (): AccountActions => {
   const navigate = useNavigate();
   const router = useRouter();
 
-  /** Reads who signed in and registers this browser; a sign-in that cannot finish is ended. */
-  const register = async (): Promise<UserId> => {
+  /**
+   * Reads who signed in and registers this browser, with where the core joined the session to its
+   * device; a sign-in that cannot finish is ended.
+   */
+  const register = async (): Promise<{ userId: UserId; joined: Joined | null }> => {
     try {
       const me = await platform.core.auth.sessions.current();
 
-      if (me.kind !== "tile") {
-        const { enroll } = platform.core.devices.registry;
-        const device = store.read().device;
+      if (me.kind === "tile") return { userId: me.userId, joined: null };
 
-        const enrolled = await enroll(
-          device === null ? { name: deviceName() } : { name: deviceName(), device },
-        );
+      const { enroll } = platform.core.devices.registry;
+      const device = store.read().device;
 
-        // Another tab may have enrolled this browser at the same moment. The first device kept
-        // wins, and this session moves onto it, so the picker lists everyone signed in here. The
-        // device this tab enrolled is left for an admin to remove.
-        const kept = await store.claimDevice(enrolled.device);
+      const enrolled = await enroll(
+        device === null ? { name: deviceName() } : { name: deviceName(), device },
+      );
 
-        if (kept !== enrolled.device) await enroll({ name: deviceName(), device: kept });
-      }
+      // Another tab may have enrolled this browser at the same moment. The first device kept
+      // wins, and this session moves onto it, so the picker lists everyone signed in here. The
+      // device this tab enrolled is left for an admin to remove.
+      const kept = await store.claimDevice(enrolled.device);
 
-      return me.userId;
+      const joined =
+        kept === enrolled.device ? enrolled : await enroll({ name: deviceName(), device: kept });
+
+      return {
+        userId: me.userId,
+        joined: { deviceId: joined.deviceId, sequence: joined.joinSequence },
+      };
     } catch (cause) {
       await platform.session.signOut();
 
@@ -159,11 +166,13 @@ export const useAccountActions = (): AccountActions => {
   };
 
   const establish = async (): Promise<void> => {
-    const userId = await register();
+    const { userId, joined } = await register();
 
-    // A sign-in of the same person that another tab finished later keeps the person; this slot's
-    // older session then goes.
-    if (!(await store.promote(slot, userId))) await store.forget(slot, await store.sessionIn(slot));
+    // Of two sign-ins of one person, the core kept the one that joined the device later, whichever
+    // tab promotes first; when that is another tab's, this slot's ended session goes.
+    if (!(await store.promote(slot, userId, joined))) {
+      await store.forget(slot, await store.sessionIn(slot));
+    }
 
     // A page that asked for a sign-in, such as /device from a CLI's link, shows once it is done;
     // the picker, Add someone, an invite, and a reset link go on to the picker.
@@ -222,7 +231,7 @@ export const useAccountActions = (): AccountActions => {
       await platform.session.openTile(
         proof === undefined ? { device, userId } : { device, userId, proof },
       );
-      await store.promote(slot, userId);
+      await store.promote(slot, userId, null);
       await navigate({ to: "/home" });
     },
     signOut: async () => {
