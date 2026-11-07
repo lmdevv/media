@@ -42,6 +42,61 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     expect(refreshed.tokens).toBeNull();
   });
 
+  it("revokes a session from a refresh token that was rotated and invalidated since", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const anonymous = () => new ConvexHttpClient(stack.url, { logger: false });
+    const refresh = (refreshToken: string) => anonymous().action(api.auth.signIn, { refreshToken });
+
+    const first = await refresh(signedIn.refreshToken);
+    const second = await refresh(first.tokens?.refreshToken ?? "");
+
+    await new Promise((resolve) => setTimeout(resolve, 11_000));
+
+    const late = await refresh(signedIn.refreshToken);
+    const issued = new ConvexHttpClient(stack.url, { logger: false });
+
+    issued.setAuth(second.tokens?.token ?? "");
+    const stillLive = await issued.query(api.core.auth.sessions.current, {});
+
+    expect({
+      rotated: first.tokens !== null && second.tokens !== null,
+      late: late.tokens,
+      stillLive: stillLive.sessionId.length > 0,
+    }).toStrictEqual({ rotated: true, late: null, stillLive: true });
+
+    expect(
+      await anonymous().mutation(api.core.auth.sessions.revoke, {
+        refreshToken: signedIn.refreshToken,
+      }),
+    ).toStrictEqual({ confirmed: true });
+    expect(await refusal(issued.query(api.core.auth.sessions.current, {}))).toBe("unauthenticated");
+    expect((await refresh(second.tokens?.refreshToken ?? "")).tokens).toBeNull();
+    expect(
+      await anonymous().mutation(api.core.auth.sessions.revoke, {
+        refreshToken: signedIn.refreshToken,
+      }),
+    ).toStrictEqual({ confirmed: true });
+  }, 60_000);
+
+  it("never revokes a session from a token of another session", async () => {
+    if (stack === undefined) return;
+    const victim = await signInAs(stack, await createPerson(stack));
+    const attacker = await signInAs(stack, await createPerson(stack));
+    const { sessionId } = await victim.client.query(api.core.auth.sessions.current, {});
+    const [attackerToken] = attacker.refreshToken.split("|");
+
+    expect(
+      await new ConvexHttpClient(stack.url, { logger: false }).mutation(
+        api.core.auth.sessions.revoke,
+        { refreshToken: `${attackerToken ?? ""}|${sessionId}` },
+      ),
+    ).toStrictEqual({ confirmed: true });
+    expect(await victim.client.query(api.core.auth.sessions.current, {})).toMatchObject({
+      sessionId,
+    });
+  });
+
   it("refuses a session another session ended, and refuses to refresh it", async () => {
     if (stack === undefined) return;
     const person = await createPerson(stack);

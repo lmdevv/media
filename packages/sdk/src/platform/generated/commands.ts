@@ -315,6 +315,13 @@ const core_auth_sessions_endAll = mutation({
   result: Schema.Null,
 });
 
+const core_auth_sessions_revoke = mutation({
+  name: "core.auth.sessions.revoke",
+  path: "core/auth/sessions:revoke",
+  args: Schema.Struct({ refreshToken: Schema.String }),
+  result: Schema.Struct({ confirmed: Schema.Literal(true) }),
+});
+
 const core_connect_player_report = mutation({
   name: "core.connect.player.report",
   path: "core/connect/player:report",
@@ -1884,6 +1891,8 @@ export const effectMethods = (method: EffectBuilder) => ({
         end: method.mutation(core_auth_sessions_end),
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
+        /** `core.auth.sessions.revoke` (mutation, public): End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended. */
+        revoke: method.mutation(core_auth_sessions_revoke),
       },
     },
     connect: {
@@ -2122,6 +2131,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         end: method.mutation(core_auth_sessions_end),
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
+        /** `core.auth.sessions.revoke` (mutation, public): End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended. */
+        revoke: method.mutation(core_auth_sessions_revoke),
       },
     },
     connect: {

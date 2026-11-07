@@ -46,6 +46,10 @@ const endAllArgs = v.object({ keepCurrent: v.boolean() });
 
 const endAllResult = v.null();
 
+const revokeArgs = v.object({ refreshToken: v.string() });
+
+const revokeResult = v.object({ confirmed: v.literal(true) });
+
 /** The handlers `convex/core/auth/sessions.ts` passes to `register`, one per `core.auth.sessions` command. */
 export interface Handlers {
   /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, and with which scopes. */
@@ -68,6 +72,12 @@ export interface Handlers {
     args: Infer<typeof endAllArgs>,
     caller: Caller,
   ) => Infer<typeof endAllResult> | Promise<Infer<typeof endAllResult>>;
+
+  /** `core.auth.sessions.revoke` (mutation, public): End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended. */
+  readonly revoke: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof revokeArgs>,
+  ) => Infer<typeof revokeResult> | Promise<Infer<typeof revokeResult>>;
 }
 
 /** The `api` reference of each `core.auth.sessions` command; `commands/refs.ts` checks them. */
@@ -90,6 +100,12 @@ export interface Refs {
     Infer<typeof endAllArgs>,
     Infer<typeof endAllResult>
   >;
+  readonly revoke: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof revokeArgs>,
+    Infer<typeof revokeResult>
+  >;
 }
 
 /** Registers the `core.auth.sessions` commands as public Convex functions with their declared arguments and result. */
@@ -109,5 +125,10 @@ export const register = (handlers: Handlers) => ({
     args: endAllArgs,
     returns: endAllResult,
     handler: async (ctx, args) => handlers.endAll(ctx, args, await requireCaller(ctx, "account")),
+  }),
+  revoke: mutation({
+    args: revokeArgs,
+    returns: revokeResult,
+    handler: async (ctx, args) => handlers.revoke(ctx, args),
   }),
 });

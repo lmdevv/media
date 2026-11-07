@@ -71,6 +71,7 @@ export const commandRefs = {
     .current satisfies core_auth_sessions["current"],
   "core.auth.sessions.end": api.core.auth.sessions.end satisfies core_auth_sessions["end"],
   "core.auth.sessions.endAll": api.core.auth.sessions.endAll satisfies core_auth_sessions["endAll"],
+  "core.auth.sessions.revoke": api.core.auth.sessions.revoke satisfies core_auth_sessions["revoke"],
   "core.connect.player.report": api.core.connect.player
     .report satisfies core_connect_player["report"],
   "core.connect.player.requested": api.core.connect.player

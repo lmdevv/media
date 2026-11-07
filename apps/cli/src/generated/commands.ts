@@ -453,6 +453,20 @@ export const generatedCommands = [
     method: (platform) => platform.core.auth.sessions.endAll,
   }),
   coreCommand({
+    name: "core.auth.sessions.revoke",
+    path: ["auth", "sessions", "revoke"],
+    kind: "mutation",
+    scope: "public",
+    refusesKeys: false,
+    summary:
+      "End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({ refreshToken: Schema.String }),
+    result: Schema.Struct({ confirmed: Schema.Literal(true) }),
+    method: (platform) => platform.core.auth.sessions.revoke,
+  }),
+  coreCommand({
     name: "core.connect.player.report",
     path: ["auth", "player", "report"],
     kind: "mutation",

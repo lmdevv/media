@@ -236,6 +236,16 @@ Sign out every password and device session you have, or every other one.
 - Arguments: `{ keepCurrent: boolean }`
 - Result: `null`
 
+## `core.auth.sessions.revoke`
+
+End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended.
+
+- CLI: `media auth sessions revoke`
+- Kind: mutation
+- Scope: public
+- Arguments: `{ refreshToken: string }`
+- Result: `{ confirmed: true }`
+
 ## `core.connect.player.report`
 
 Report what this device plays, where it plays it, and the newest request it has applied.

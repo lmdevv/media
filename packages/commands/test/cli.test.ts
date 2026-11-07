@@ -51,6 +51,7 @@ describe("CLI placement", () => {
       "core.auth.deviceCodes.start": "auth device-codes start",
       "core.auth.sessions.current": "auth sessions current",
       "core.auth.sessions.end": "auth sessions end",
+      "core.auth.sessions.revoke": "auth sessions revoke",
       "core.auth.sessions.endAll": "auth sessions end-all",
       "core.connect.player.report": "auth player report",
       "core.connect.player.requested": "auth player requested",

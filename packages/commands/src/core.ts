@@ -200,6 +200,13 @@ export const core = [
     args: { sessionId: v.id("authSessions") },
     result: v.null(),
   }),
+  mutation("core.auth.sessions.revoke", {
+    summary:
+      "End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended",
+    scope: "public",
+    args: { refreshToken: v.string() },
+    result: v.object({ confirmed: v.literal(true) }),
+  }),
   mutation("core.auth.sessions.endAll", {
     summary: "Sign out every password and device session you have, or every other one",
     scope: "account",
