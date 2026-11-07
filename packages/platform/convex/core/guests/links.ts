@@ -77,7 +77,9 @@ const refuseMake = (
     return fail("forbidden", "An admin has not let you share with guests");
   }
 
-  if (because === "not-host") return fail("forbidden", "Only the host can share a group session");
+  if (because === "not-host" || because === "pending") {
+    return fail("forbidden", "Only the host can share a group session");
+  }
 
   if (because === "ended") return fail("expired", "This group session has ended");
 

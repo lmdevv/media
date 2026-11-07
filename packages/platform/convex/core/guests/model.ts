@@ -135,12 +135,13 @@ export const GUEST_KEYS_FROM = "~";
 const UNPRINTABLE =
   /[\p{Cc}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
-/** A display name as a guest typed it: trimmed, 1 to `NAME_MAX` code points, all printable. */
+const VISIBLE = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{M}]/u;
+
 export const requireGuestName = (typed: string): string => {
   const name = typed.normalize("NFKC").trim();
   const length = Array.from(name).length;
 
-  return length >= 1 && length <= NAME_MAX && !UNPRINTABLE.test(name)
+  return length >= 1 && length <= NAME_MAX && !UNPRINTABLE.test(name) && VISIBLE.test(name)
     ? name
     : fail("invalid_args", `Give a name of 1 to ${NAME_MAX} printable characters`);
 };

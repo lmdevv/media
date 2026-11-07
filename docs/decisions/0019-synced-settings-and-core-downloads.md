@@ -1,7 +1,7 @@
 # 0019. Mark which settings sync per user and run downloads as a core service
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the settings table as built, and again
-  with downloads as built.
+  with downloads as built. Amended 2026-11-07 with the `see` rule.
 - Decisions: D36, D37
 
 ## Context
@@ -119,12 +119,13 @@ value's validator, its default, and any check beyond the validator.
 
 ### The rule in `can`
 
-| Action   | On      | Needs                                                                                  |
-| -------- | ------- | -------------------------------------------------------------------------------------- |
-| `change` | setting | the setting's own person, with `account` or the `play` scope of a domain that reads it |
+| Action   | On      | Needs                                                                                                      |
+| -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `see`    | setting | the setting's own person, who is not a guest                                                               |
+| `change` | setting | the setting's own person, who is not a guest, with `account` or the `play` scope of a domain that reads it |
 
-- Reading needs no rule of its own. `get` shows only the caller's settings, so any live session
-  reads them.
+- `get` decides `see` on the caller's own settings, so any live household session reads them and
+  a guest from a share link reads none (ADR 0007). It needs no scope.
 - Both commands are `signed-in`, because a tile on a shared device holds only domain scopes and
   must still read the subtitle language and change its volume.
 - So a `movies:read` API key reads settings and changes none, and a `music:play` key changes

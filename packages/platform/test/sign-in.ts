@@ -102,6 +102,8 @@ export const signInAs = (stack: CoreStack, person: Person): Promise<SignedIn> =>
 
 const ErrorData = Schema.Struct({ code: Schema.String });
 
+const RefusalData = Schema.Struct({ code: Schema.String, message: Schema.String });
+
 /** The `code` a call was refused with, or `"accepted"` when it was not refused. */
 export const refusal = async (call: Promise<unknown>): Promise<string> =>
   call.then(
@@ -111,3 +113,17 @@ export const refusal = async (call: Promise<unknown>): Promise<string> =>
         ? Schema.decodeUnknownSync(ErrorData)(cause.data).code
         : `failed: ${String(cause)}`,
   );
+
+export const failureOf = async (
+  call: Promise<unknown>,
+): Promise<{ readonly code: string; readonly message: string }> => {
+  try {
+    await call;
+  } catch (cause) {
+    if (cause instanceof ConvexError) return Schema.decodeUnknownSync(RefusalData)(cause.data);
+
+    throw cause;
+  }
+
+  throw new Error("the call was not refused");
+};

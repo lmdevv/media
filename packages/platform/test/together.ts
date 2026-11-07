@@ -1,5 +1,6 @@
 import { ConvexClient } from "convex/browser";
 import type { FunctionReturnType } from "convex/server";
+import { Schema } from "effect";
 
 import type { DomainItem } from "../commands/access";
 import type { ContentDomain } from "../commands/scopes";
@@ -8,6 +9,8 @@ import type { Id } from "../convex/_generated/dataModel";
 import { member, sharedAdmin } from "./devices";
 import type { Member } from "./devices";
 import { movie, seedLibrary, share, song } from "./probe";
+import { importRows, newestRows } from "./rows";
+import { unique } from "./sign-in";
 import type { CoreStack } from "./stack-env";
 
 /** What `core.together.get` answers. */
@@ -191,4 +194,36 @@ export const waitFor = async (holds: () => boolean, timeoutMs: number): Promise<
   await sleep(5);
 
   return waitFor(holds, timeoutMs - 5);
+};
+
+const ServiceRow = Schema.fromJsonString(
+  Schema.Struct({ _id: Schema.String, name: Schema.optional(Schema.String) }),
+);
+
+// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
+// stack's export wrote this one as a `users` id; the backend checks it again when a call names it.
+const isUserId = (value: string): value is Id<"users"> => value.length > 0;
+
+export const plantedStrangers = (count: number): ReadonlyArray<Id<"users">> => {
+  const prefix = `stranger-${unique()}-`;
+
+  importRows(
+    "users",
+    Array.from({ length: count }, (_, index) => ({
+      kind: "service" as const,
+      name: `${prefix}${index}`,
+      sessionGeneration: 0,
+      keyGeneration: 0,
+    })),
+  );
+
+  const ids = newestRows("users", count + 100)
+    .map((line) => Schema.decodeSync(ServiceRow)(line))
+    .flatMap((row) =>
+      row.name?.startsWith(prefix) === true && isUserId(row._id) ? [row._id] : [],
+    );
+
+  if (ids.length !== count) throw new Error(`planted ${ids.length} of ${count} strangers`);
+
+  return ids;
 };

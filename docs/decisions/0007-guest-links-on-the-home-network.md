@@ -1,6 +1,6 @@
 # 0007. Build guests into identity and keep v1 on the home network or Tailscale
 
-- Status: Accepted, 2026-11-03
+- Status: Accepted, 2026-11-03. Amended 2026-11-07 with the phase 3 review fixes.
 - Decisions: D20, D21
 
 ## Context
@@ -84,7 +84,10 @@ links in phase 7.
   a password change, and a demotion end a maker's links the same way. A promotion clears the
   member's allowance.
 - Making a link needs the `account` scope and refuses API keys, so no key, shared-device tile, or
-  guest makes one.
+  guest makes one. `core.guests.status` answers `mayShare: false` to an API key for the same
+  reason.
+- Only the host shares a group session. Someone still waiting to be let in is told so, as anyone
+  else in the session is.
 
 ### Guests
 
@@ -92,7 +95,8 @@ links in phase 7.
   a new guest in. `username` holds the name they typed: 1 to 32 characters after NFKC
   normalization, not unique. A name refuses control, private-use, and unassigned characters, line
   and paragraph separators, and the bidirectional controls that reorder what others see. It keeps
-  zero-width joiners, which emoji sequences and several scripts need. `usernameKey` is `~<linkId>.<n>`, outside the username grammar, so
+  zero-width joiners, which emoji sequences and several scripts need, and needs at least one
+  visible character, so a name of zero-width spaces or fillers alone cannot show blank. `usernameKey` is `~<linkId>.<n>`, outside the username grammar, so
   password sign-in never finds a guest and a display name cannot collide with a household
   username. `core.accounts.users.list` stops below `~`, so it lists no guest.
 - A guest signs in with the `guest` provider and `{ code, name }`. One mutation finds the link,
@@ -143,8 +147,9 @@ links in phase 7.
 - A guest controls playback when the host allows it, and never adds or removes queue entries,
   since a guest cannot browse for anything to add. `core.together.get` marks a guest member
   `linkGuest`, so a typed name cannot pass for someone in the household.
-- Blocking a guest removes that guest. The link can let its holder in again as a new guest, so a
-  host who wants them out for good revokes the link or locks the session.
+- Blocking a guest removes that guest and takes no place on the session's list of people turned
+  away. The link can let its holder in again as a new guest, so a host who wants them out for good
+  revokes the link or locks the session.
 - A guest's seat lasts only while their link holds. The seat count reads each guest member's
   link, so a link that expires, a switch turned off, or a maker who lost the right to share frees
   the seat at once, even for a guest who went quiet before it died. The next person to enter the
