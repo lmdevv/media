@@ -29,8 +29,6 @@ import { DEVICE_PREFIX, NO_DEVICE } from "./facts";
 
 const NAME_MAX = 64;
 
-const PEOPLE_PER_DEVICE_MAX = 16;
-
 const DEVICE_SESSIONS_READ = 200;
 
 const ENROLLS_PER_HOUR = 20;
@@ -84,9 +82,9 @@ export const signedInOn = async (
 };
 
 /**
- * Binds the caller's session to a personal device, and ends the caller's other sessions there, so
- * each person has one session per device. Answers the join's number on the device: a later join
- * of the person ends this session, so of two sign-ins the higher number is the one still live.
+ * Binds the caller's session to a personal device and ends every other session there, whoever's,
+ * so a device holds one session (ADR 0006). Answers the join's number on the device: a later join
+ * ends this session, so of two sign-ins the higher number is the one still live.
  */
 const joinDevice = async (
   ctx: Pick<MutationCtx, "db">,
@@ -95,19 +93,9 @@ const joinDevice = async (
 ): Promise<number> => {
   const here = await signedInOn(ctx.db, device, Date.now());
 
-  const others = new Set(
-    here.flatMap(({ person }) => (person._id === caller.userId ? [] : [person._id])),
-  );
-
-  if (others.size >= PEOPLE_PER_DEVICE_MAX) {
-    fail("conflict", `${PEOPLE_PER_DEVICE_MAX} people are already signed in on this device`);
-  }
-
   await Promise.all(
-    here.flatMap(({ sessionId, person }) =>
-      person._id === caller.userId && sessionId !== caller.sessionId
-        ? [endSession(ctx, sessionId)]
-        : [],
+    here.flatMap(({ sessionId }) =>
+      sessionId === caller.sessionId ? [] : [endSession(ctx, sessionId)],
     ),
   );
 

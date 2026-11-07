@@ -77,7 +77,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     await listed.clear();
   });
 
-  it("registers personal devices whose picker lists only the people signed in on them", async () => {
+  it("registers personal devices that hold one session each: a join ends whoever was signed in", async () => {
     if (stack === undefined) return;
     const ada = await member(stack, "ada");
     const bo = await member(stack, "bo");
@@ -90,23 +90,23 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     expect(again).toEqual({ ...laptop, joinSequence: 2 });
 
     const shown = await picker(stack, laptop);
-    const names = shown.tiles.map((tile) => tile.username);
 
     expect(shown).toMatchObject({ mode: "personal", name: "Shared laptop" });
-    expect(names).toEqual([ada.person.username, bo.person.username].toSorted());
+    expect(shown.tiles.map((tile) => tile.username)).toEqual([bo.person.username]);
+    expect(await refusal(ada.signedIn.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
 
-    await ada.signedIn.client.mutation(api.core.auth.sessions.end, { sessionId: ada.sessionId });
+    await bo.signedIn.client.mutation(api.core.auth.sessions.end, { sessionId: bo.sessionId });
 
-    expect((await picker(stack, laptop)).tiles.map((tile) => tile.username)).toEqual([
-      bo.person.username,
-    ]);
+    expect((await picker(stack, laptop)).tiles).toEqual([]);
     expect(await refusal(enroll(cy.signedIn, "x", `${laptop.device}x`))).toBe("accepted");
     expect(await refusal(picker(stack, { ...laptop, device: `${laptop.device}x` }))).toBe(
       "not_found",
     );
   });
 
-  it("numbers each join of a device, and keeps live only the person's last join there", async () => {
+  it("numbers each join of a device, and keeps live only its last join", async () => {
     if (stack === undefined) return;
     const admin = await sharedAdmin(stack);
     const ada = await member(stack, "ada");

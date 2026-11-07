@@ -303,14 +303,21 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     });
   });
 
-  it("refuses a download past the device's limit, and counts everyone on the device", async () => {
+  it("refuses a download past the device's limit, and counts everyone who uses the device", async () => {
     if (stack === undefined) return;
 
     const admin = await sharedAdmin(stack);
     const aiko = await onDevice(stack, "aiko-cap", "Family iPad");
     const bob = await member(stack, "bob-cap");
 
-    await enroll(bob.signedIn, "Family iPad", aiko.device.device);
+    // A device holds one session, so each person signing in on the iPad ends the other's there.
+    const takeTurn = async (who: Member): Promise<SignedIn> => {
+      const here = await signInAs(stack, who.person);
+
+      await enroll(here, "Family iPad", aiko.device.device);
+
+      return here;
+    };
 
     const disk = await libraryOnDisk(stack, admin, { "a.mkv": 400, "b.mkv": 400, "c.mkv": 400 });
 
@@ -325,38 +332,46 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
 
     await add(aiko.signedIn, disk.idOf("a.mkv"));
     await add(aiko.signedIn, disk.idOf("a.mkv"));
-    await add(bob.signedIn, disk.idOf("b.mkv"));
 
-    expect(await usageOf(aiko.signedIn)).toEqual({
+    const bobFirst = await takeTurn(bob);
+
+    await add(bobFirst, disk.idOf("b.mkv"));
+
+    expect(await usageOf(bobFirst)).toEqual({
       bytes: 800,
       items: 2,
       capBytes: 1000,
       capItems: 500,
     });
 
-    const refused = add(aiko.signedIn, disk.idOf("c.mkv"));
+    const aikoAgain = await takeTurn(aiko);
+    const refused = add(aikoAgain, disk.idOf("c.mkv"));
 
     await expect(refused).rejects.toThrow(/take 800 bytes of its 1\.0 KB limit/u);
-    expect(await refusal(add(aiko.signedIn, disk.idOf("c.mkv")))).toBe("conflict");
-    expect(await statesOf(bob.signedIn)).toEqual({ [disk.idOf("b.mkv")]: "available" });
+    expect(await refusal(add(aikoAgain, disk.idOf("c.mkv")))).toBe("conflict");
 
-    await removeOf(bob.signedIn, disk.idOf("b.mkv"));
-    await add(aiko.signedIn, disk.idOf("c.mkv"));
+    const bobAgain = await takeTurn(bob);
 
-    expect(await usageOf(bob.signedIn)).toMatchObject({ bytes: 800, items: 2 });
-    expect(await refusal(add(bob.signedIn, disk.idOf("b.mkv")))).toBe("conflict");
+    expect(await statesOf(bobAgain)).toEqual({ [disk.idOf("b.mkv")]: "available" });
+    await removeOf(bobAgain, disk.idOf("b.mkv"));
+    await add(await takeTurn(aiko), disk.idOf("c.mkv"));
+
+    const bobLast = await takeTurn(bob);
+
+    expect(await usageOf(bobLast)).toMatchObject({ bytes: 800, items: 2 });
+    expect(await refusal(add(bobLast, disk.idOf("b.mkv")))).toBe("conflict");
 
     await admin.signedIn.client.mutation(api.core.downloads.setCap, {
       deviceId: aiko.device.deviceId,
       bytes: null,
     });
 
-    await add(bob.signedIn, disk.idOf("b.mkv"));
+    await add(bobLast, disk.idOf("b.mkv"));
 
-    expect(await usageOf(bob.signedIn)).toMatchObject({ bytes: 1200, items: 3 });
+    expect(await usageOf(bobLast)).toMatchObject({ bytes: 1200, items: 3 });
     expect(
       await refusal(
-        aiko.signedIn.client.mutation(api.core.downloads.setCap, {
+        (await signInAs(stack, aiko.person)).client.mutation(api.core.downloads.setCap, {
           deviceId: aiko.device.deviceId,
           bytes: 1,
         }),
@@ -451,7 +466,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     expect(await usageOf(aiko.signedIn)).toMatchObject({ bytes: 250, items: 1 });
   });
 
-  it("lists each device's own downloads, and each person's own on a shared iPad", async () => {
+  it("lists each device's own downloads, and each person's own on a laptop they take turns on", async () => {
     if (stack === undefined) return;
 
     const admin = await sharedAdmin(stack);
@@ -482,8 +497,13 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     await add(bob.signedIn, one);
 
     expect(await statesOf(bob.signedIn)).toEqual({ [one]: "available" });
-    expect(await statesOf(laptopSession)).toEqual({ [two]: "available", [three]: "available" });
     expect(await usageOf(bob.signedIn)).toMatchObject({ items: 3 });
+
+    const aikoBack = await signInAs(stack, aiko.person);
+
+    await enroll(aikoBack, "Laptop", laptop.device);
+
+    expect(await statesOf(aikoBack)).toEqual({ [two]: "available", [three]: "available" });
   });
 
   it("issues a 15-minute download ticket that a play route and its expiry refuse", async () => {
@@ -538,12 +558,11 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     const aiko = await onDevice(stack, "aiko-remove", "Old phone");
     const bob = await member(stack, "bob-remove");
 
-    await enroll(bob.signedIn, "Old phone", aiko.device.device);
-
     const films = await sharedLibrary(stack, admin, aiko, 120);
 
     await share(admin, films.libraryId, { kind: "user", userId: bob.userId }, "view");
     await Promise.all(films.itemIds.slice(0, 110).map(async (id) => add(aiko.signedIn, id)));
+    await enroll(bob.signedIn, "Old phone", aiko.device.device);
     await Promise.all(films.itemIds.slice(100).map(async (id) => add(bob.signedIn, id)));
     await admin.signedIn.client.mutation(api.core.downloads.setCap, {
       deviceId: aiko.device.deviceId,
@@ -569,7 +588,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
       30_000,
     );
 
-    expect(await refusal(listOf(aiko.signedIn))).toBe("unauthenticated");
+    expect(await refusal(listOf(bob.signedIn))).toBe("unauthenticated");
   });
 
   it("keeps nothing on a shared device, and gives a device made personal again its downloads back", async () => {
