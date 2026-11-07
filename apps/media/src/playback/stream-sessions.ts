@@ -800,7 +800,7 @@ const make = Effect.gen(function* () {
       );
     }
 
-    if (Option.isNone(ready) || (yield* run.held.isDisplaced)) {
+    if (Option.isNone(ready) || (yield* run.held.isLost)) {
       yield* awaitPrevious;
 
       return Option.none<Generation>();

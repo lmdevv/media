@@ -51,7 +51,7 @@ describe("encoder slots", () => {
       yield* close(current);
       yield* Fiber.join(starting);
 
-      assert.isFalse(yield* renewed.isDisplaced);
+      assert.isFalse(yield* renewed.isLost);
     }),
   );
 
@@ -66,7 +66,7 @@ describe("encoder slots", () => {
       const renewed = yield* held.renew(yield* Scope.make());
 
       yield* renewed.ready;
-      assert.isTrue(yield* renewed.isDisplaced, "the next encoder gives up");
+      assert.isTrue(yield* renewed.isLost, "the next encoder gives up");
 
       const starting = yield* Effect.forkChild(household.ready);
 
@@ -181,7 +181,7 @@ describe("encoder slots", () => {
         const held = yield* pool.household(yield* Scope.make(), claimant("household", 3));
         const ready = yield* Effect.forkChild(held.ready);
 
-        assert.isTrue(yield* renegotiated.isDisplaced, "the stream that took over the slot yields");
+        assert.isTrue(yield* renegotiated.isLost, "the stream that took over the slot yields");
         assert.isTrue(yield* stillRunning(ready), "the session's older encoder still runs");
 
         yield* close(oldScope);
@@ -201,12 +201,12 @@ describe("encoder slots", () => {
       const newer = yield* pool.guest(yield* Scope.make(), claimant("newer", 2));
       yield* pool.household(yield* Scope.make(), claimant("first", 3));
 
-      assert.isTrue(yield* newer.isDisplaced);
-      assert.isFalse(yield* older.isDisplaced);
+      assert.isTrue(yield* newer.isLost);
+      assert.isFalse(yield* older.isLost);
 
       yield* pool.household(yield* Scope.make(), claimant("second", 4));
 
-      assert.isTrue(yield* older.isDisplaced, "the second household stream is not refused");
+      assert.isTrue(yield* older.isLost, "the second household stream is not refused");
     }),
   );
 
@@ -308,7 +308,7 @@ describe("encoder slots", () => {
       const held = yield* Fiber.join(waiting);
 
       yield* held.ready;
-      assert.isTrue(yield* held.isDisplaced, "the holder gives up");
+      assert.isTrue(yield* held.isLost, "the holder gives up");
     }),
   );
 
@@ -404,7 +404,7 @@ describe("encoder slots", () => {
       yield* close(firstScope);
       yield* pool.household(yield* Scope.make(), claimant("other", 5));
 
-      assert.isTrue(yield* kept.isDisplaced, "the other household stream takes the guest left");
+      assert.isTrue(yield* kept.isLost, "the other household stream takes the guest left");
     }),
   );
 
@@ -422,7 +422,7 @@ describe("encoder slots", () => {
         const ready = yield* Effect.forkChild(held.ready);
         yield* close(renegotiatedScope);
 
-        assert.isTrue(yield* old.isDisplaced, "the renegotiation never replaced the older stream");
+        assert.isTrue(yield* old.isLost, "the renegotiation never replaced the older stream");
         assert.isTrue(yield* stillRunning(ready), "the older stream's encoder still runs");
 
         yield* close(oldScope);
@@ -439,12 +439,12 @@ describe("encoder slots", () => {
       yield* close(closed);
       const household = yield* pool.household(closed, claimant("household", 2));
 
-      assert.isFalse(yield* guest.isDisplaced);
-      assert.isTrue(yield* household.isDisplaced, "the late household's holder gives up");
+      assert.isFalse(yield* guest.isLost);
+      assert.isTrue(yield* household.isLost, "the late household's holder gives up");
 
       const lateGuest = yield* pool.guest(closed, claimant("late guest", 3));
 
-      assert.isTrue(yield* lateGuest.isDisplaced, "the late guest's holder gives up");
+      assert.isTrue(yield* lateGuest.isLost, "the late guest's holder gives up");
     }),
   );
 
@@ -610,7 +610,7 @@ const simulate = (limit: number) =>
           waits.household = Math.max(waits.household, (yield* Clock.currentTimeMillis) - since);
         }
 
-        const displaced = yield* held.isDisplaced;
+        const displaced = yield* held.isLost;
 
         const running = yield* Effect.sync(() => {
           if (displaced || isClosed(run)) return false;

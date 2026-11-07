@@ -29,11 +29,7 @@ export interface Held {
    * its session. Never completes for a household holder.
    */
   readonly displaced: Effect.Effect<void>;
-  /**
-   * Whether a household stream took this slot or it was freed already; a holder not running yet then
-   * gives up.
-   */
-  readonly isDisplaced: Effect.Effect<boolean>;
+  readonly isLost: Effect.Effect<boolean>;
   /**
    * Takes this slot's place for the holder's next encoder, until `scope` closes, without waiting.
    * This slot keeps counting until it is freed, so the next encoder's `ready` waits for this one's
@@ -276,7 +272,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
   const heldBy = (slot: Slot): Held => ({
     ready: ready(slot),
     displaced: slot.audience === "guest" ? Deferred.await(slot.displaced) : Effect.never,
-    isDisplaced: Effect.zipWith(
+    isLost: Effect.zipWith(
       Deferred.isDone(slot.displaced),
       Deferred.isDone(slot.freed),
       (displaced, freed) => displaced || freed,
