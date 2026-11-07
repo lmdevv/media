@@ -17,7 +17,7 @@ import type { ConfigFileError, UsageError } from "../cli-errors";
 import type { FlagSet, WireArgs } from "../flags";
 import { buildArgs, deriveFlags, flagTypeLabel, flagUsage, withoutFields } from "../flags";
 import type { Invocation, ShortcutCommand } from "../invocation";
-import { readSecret, stringFlag, usage } from "../invocation";
+import { secretGiven, stringFlag, usage } from "../invocation";
 import type { coreGroups } from "../generated/groups";
 
 /** A generated command's group word. */
@@ -28,6 +28,8 @@ interface Secret {
   readonly variable: string;
   /** Null clears the field and reveals nothing, so it may come in `--json`. */
   readonly clearable?: true;
+  /** Left out when neither its variable nor stdin gives it. */
+  readonly optional?: true;
 }
 
 type Kind = "query" | "mutation" | "action";
@@ -172,18 +174,48 @@ const pageOf = Effect.fn("Core.page")(function* (invocation: Invocation, given: 
   return paginationOpts;
 });
 
+const required = (
+  invocation: Invocation,
+  secret: Secret,
+  given: Option.Option<Redacted.Redacted>,
+  missing: string,
+): Effect.Effect<Option.Option<Redacted.Redacted>, UsageError> =>
+  Option.isSome(given) || secret.optional === true
+    ? Effect.succeed(given)
+    : Effect.fail(usage(invocation, missing));
+
+/**
+ * A secret from its variable or, for a command's only secret, stdin. Absent, an optional secret is
+ * none and any other is a usage error.
+ */
 const secretOf = (
   invocation: Invocation,
   secret: Secret,
   fromStdin: "allowed" | "shared with another secret",
-): Effect.Effect<Redacted.Redacted, UsageError | ConfigFileError> =>
+): Effect.Effect<Option.Option<Redacted.Redacted>, UsageError | ConfigFileError> =>
   fromStdin === "allowed"
-    ? readSecret(invocation, secret.variable, secret.field)
-    : Config.Redacted(secret.variable).pipe(
-        Effect.mapError(() => usage(invocation, `Set ${secret.variable} to the ${secret.field}`)),
+    ? Effect.flatMap(secretGiven(invocation, secret.variable, secret.field), (given) =>
+        required(
+          invocation,
+          secret,
+          given,
+          process.stdin.isTTY
+            ? `Pipe the ${secret.field} on stdin or set ${secret.variable}`
+            : `The ${secret.field} on stdin is empty`,
+        ),
+      )
+    : Config.option(Config.Redacted(secret.variable)).pipe(
+        Effect.orElseSucceed(() => Option.none<Redacted.Redacted>()),
         Effect.filterOrFail(
-          (value) => Redacted.value(value).trim().length > 0,
+          (value) =>
+            Option.match(value, {
+              onNone: () => true,
+              onSome: (each) => Redacted.value(each).trim().length > 0,
+            }),
           () => usage(invocation, `${secret.variable} is set but empty`),
+        ),
+        Effect.flatMap((given) =>
+          required(invocation, secret, given, `Set ${secret.variable} to the ${secret.field}`),
         ),
       );
 
@@ -221,11 +253,14 @@ export const wireArgsOf = Effect.fn("Core.wireArgs")(function* (
           secret,
           command.secrets.length === 1 ? "allowed" : "shared with another secret",
         ),
-        (value) => [secret.field, Redacted.value(value)] as const,
+        (value) =>
+          Option.toArray(
+            Option.map(value, (each) => [secret.field, Redacted.value(each)] as const),
+          ),
       ),
   );
 
-  const wire: WireArgs = Object.fromEntries([...Object.entries(given), ...page, ...secrets]);
+  const wire: WireArgs = Object.fromEntries([...Object.entries(given), ...page, ...secrets.flat()]);
 
   return wire;
 });

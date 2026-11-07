@@ -45,6 +45,8 @@ export interface Secret {
   readonly variable: string;
   /** The field also takes null, which reveals nothing, so `--json` may clear it. */
   readonly clearable?: true;
+  /** The command runs without it: when neither the variable nor stdin gives it, it is left out. */
+  readonly optional?: true;
 }
 
 const isNullableString = (wire: WireField["wire"]): boolean =>
@@ -73,11 +75,14 @@ export const secretsOf = (args: ReadonlyArray<WireField>): ReadonlyArray<Secret>
 
     const variable = `MEDIA_ARG_${kebab(field.name).replaceAll("-", "_").toUpperCase()}`;
 
-    if (field.wire.kind === "string") return [{ field: field.name, variable }];
+    const clearable = isNullableString(field.wire);
 
-    return isNullableString(field.wire)
-      ? [{ field: field.name, variable, clearable: true as const }]
-      : [];
+    if (field.wire.kind !== "string" && !clearable) return [];
+
+    const optional = field.optional ? ({ optional: true } as const) : undefined;
+    const clears = clearable ? ({ clearable: true } as const) : undefined;
+
+    return [Object.assign({ field: field.name, variable }, optional, clears) satisfies Secret];
   });
 
 /** A Convex paginated query takes `paginationOpts`; the CLI gives it `--limit` and `--cursor`. */

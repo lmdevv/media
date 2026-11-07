@@ -735,7 +735,7 @@ export const generatedCommands = [
     refusesKeys: true,
     summary:
       "Register this app as a personal device, or find it again by its device code, and sign this session in on it",
-    secrets: [{ field: "device", variable: "MEDIA_ARG_DEVICE" }],
+    secrets: [{ field: "device", variable: "MEDIA_ARG_DEVICE", optional: true }],
     paginated: false,
     args: Schema.Struct({ name: Schema.String, device: Schema.optionalKey(Schema.String) }),
     result: Schema.Struct({

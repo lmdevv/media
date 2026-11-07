@@ -31,7 +31,7 @@ const entry = (command: CheckedCommand): string =>
       `- Arguments: ${command.args.length === 0 ? "none" : codeSpan(fieldsType(command.args))}`,
       ...secretsOf(command.args).map(
         (secret, _, secrets) =>
-          `- Secret: ${codeSpan(secret.field)} from ${codeSpan(secret.variable)}${secrets.length === 1 ? " or stdin" : ""}, never a flag${secret.clearable === true ? `; \`--json '{"${secret.field}":null}'\` clears it` : ""}`,
+          `- Secret: ${codeSpan(secret.field)} from ${codeSpan(secret.variable)}${secrets.length === 1 ? " or stdin" : ""}, never a flag${secret.optional === true ? "; leave both unset to omit it" : ""}${secret.clearable === true ? `; \`--json '{"${secret.field}":null}'\` clears it` : ""}`,
       ),
       ...(isPaginated(command.args)
         ? ["- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`"]
