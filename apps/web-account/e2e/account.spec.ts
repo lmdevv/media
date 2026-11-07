@@ -42,6 +42,39 @@ test("a second person signed in on this browser joins the picker", async ({ page
   await expect(page.getByRole("link", { name: `${first.username}, switch person` })).toBeVisible();
 });
 
+test("choosing a saved person from a CLI link's page keeps the page and its code", async ({
+  page,
+}) => {
+  if (stack === null) return;
+
+  const first = await createPerson(stack, "mateo");
+  const second = await createPerson(stack, "aiko");
+  const device = openPlatform(stack);
+
+  try {
+    await signIn(page, first);
+    await expect(page.getByRole("button", { name: first.username, exact: true })).toBeVisible();
+    await page.goto("/add");
+    await page.getByLabel("Username").fill(second.username);
+    await page.getByLabel("Password", { exact: true }).fill(second.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("button", { name: second.username, exact: true }).click();
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page.getByRole("button", { name: first.username, exact: true })).toBeVisible();
+
+    const pending = await device.session.startDeviceSignIn("media CLI on e2e");
+    const code = pending.userCode.replace("-", "");
+
+    await page.goto(`/device?code=${code}`);
+    await page.getByRole("button", { name: first.username, exact: true }).click();
+
+    await expect(page.getByRole("button", { name: "Approve" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/device\\?code=${code}$`, "u"));
+  } finally {
+    await device.dispose();
+  }
+});
+
 const fillIn = async (tab: Page, person: Person): Promise<void> => {
   await tab.goto("/");
   await tab.getByLabel("Username").fill(person.username);

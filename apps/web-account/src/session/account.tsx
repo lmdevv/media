@@ -208,7 +208,11 @@ export const useAccountActions = (): AccountActions => {
         return;
       }
 
-      void store.activate(held).then(() => navigate({ to: "/home" }));
+      // From the picker the person goes home; from a page that asked for a sign-in, such as
+      // /device from a CLI's link, they stay on it with its search.
+      const stay = !onPickerAfterSignIn(router.state.location.pathname);
+
+      void store.activate(held).then(() => (stay ? undefined : navigate({ to: "/home" })));
     },
     openTile: async (userId, proof) => {
       const device = store.read().device;
