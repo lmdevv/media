@@ -82,32 +82,46 @@ export interface PlatformSession {
   readonly status: () => Promise<AuthStatus>;
   /** Calls `listener` with the current status and every change. */
   readonly onStatus: (listener: (status: AuthStatus) => void) => Stop;
-  /** Signs in with a username and password. Rejects with `Unauthenticated` when refused. */
-  readonly signInWithPassword: (credentials: PlatformPassword) => Promise<void>;
+  /** The session the client holds now, as its token's subject; null while signed out. */
+  readonly currentSession: () => Promise<SignedInSession>;
+  /**
+   * Signs in with a username and password. Resolves with the session it stored, as its token's
+   * subject `<userId>|<sessionId>`, as every sign-in here does. Rejects with `Unauthenticated`
+   * when refused.
+   */
+  readonly signInWithPassword: (credentials: PlatformPassword) => Promise<SignedInSession>;
   /** Signs in with an API key. Rejects with `Unauthenticated` when the key is refused. */
-  readonly signInWithApiKey: (key: string) => Promise<void>;
+  readonly signInWithApiKey: (key: string) => Promise<SignedInSession>;
   /**
    * Creates the server's first account as its owner and signs in. Rejects with `Conflict` once the
    * server has an owner.
    */
-  readonly setUpOwner: (credentials: PlatformPassword) => Promise<void>;
+  readonly setUpOwner: (credentials: PlatformPassword) => Promise<SignedInSession>;
   /** Creates an account from an invite and signs in. Rejects with `Expired` for a dead invite. */
-  readonly acceptInvite: (invite: PlatformInvite) => Promise<void>;
+  readonly acceptInvite: (invite: PlatformInvite) => Promise<SignedInSession>;
   /**
    * Sets a new password from a reset link and signs in, ending the account's other sessions and
    * keys. Rejects with `Expired` for a used or expired link.
    */
-  readonly resetPassword: (reset: PlatformReset) => Promise<void>;
+  readonly resetPassword: (reset: PlatformReset) => Promise<SignedInSession>;
   /** Starts a device sign-in named `clientName`, as the person approving it will see it. */
   readonly startDeviceSignIn: (clientName: string) => Promise<PendingDeviceSignIn>;
   /**
    * Opens a tile on a shared device and signs in as its person, ending the session that held the
    * device. Rejects with `Forbidden` for a locked tile without a proof that lifts the lock.
    */
-  readonly openTile: (tile: PlatformTile) => Promise<void>;
+  readonly openTile: (tile: PlatformTile) => Promise<SignedInSession>;
   /** Ends the session on the server when reachable, then forgets it locally. */
   readonly signOut: () => Promise<void>;
+  /**
+   * Signs out as `signOut` does, but only while the client's session is `session`, as a sign-in
+   * named it; whether it did.
+   */
+  readonly signOutSession: (session: string) => Promise<boolean>;
 }
+
+/** The session a sign-in stored, as its token's subject; null when the token names none. */
+export type SignedInSession = string | null;
 
 type PromiseMethods = ReturnType<typeof promiseMethods>;
 
@@ -150,6 +164,10 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
   const withClient = <A, E>(f: (client: Client.Interface) => Effect.Effect<A, E>) =>
     runtime.runPromise(Effect.flatMap(Client.Client, f));
 
+  const signedIn = <E>(
+    f: (client: Client.Interface) => Effect.Effect<Option.Option<string>, E>,
+  ): Promise<SignedInSession> => withClient((client) => Effect.map(f(client), Option.getOrNull));
+
   const call =
     <Kind extends FunctionKind, Args, Result>(command: Command<Kind, Args, Result>) =>
     (...params: Params<Args>) =>
@@ -185,24 +203,26 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
     session: {
       status: () => withClient((client) => client.session.currentStatus),
       onStatus,
+      currentSession: () =>
+        withClient((client) => Effect.map(client.session.currentSession, Option.getOrNull)),
       signInWithPassword: ({ username, password }) =>
-        withClient((client) =>
+        signedIn((client) =>
           client.session.signIn(
             Client.Credentials.Password({ username, password: Redacted.make(password) }),
           ),
         ),
       signInWithApiKey: (key) =>
-        withClient((client) =>
+        signedIn((client) =>
           client.session.signIn(Client.Credentials.ApiKey({ key: Redacted.make(key) })),
         ),
       setUpOwner: ({ username, password }) =>
-        withClient((client) =>
+        signedIn((client) =>
           client.session.signIn(
             Client.Credentials.Setup({ username, password: Redacted.make(password) }),
           ),
         ),
       acceptInvite: ({ code, username, password }) =>
-        withClient((client) =>
+        signedIn((client) =>
           client.session.signIn(
             Client.Credentials.Invite({
               code: Redacted.make(code),
@@ -212,7 +232,7 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
           ),
         ),
       resetPassword: ({ code, password }) =>
-        withClient((client) =>
+        signedIn((client) =>
           client.session.signIn(
             Client.Credentials.Reset({
               code: Redacted.make(code),
@@ -230,7 +250,7 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
         };
       },
       openTile: ({ device, userId, proof }) =>
-        withClient((client) =>
+        signedIn((client) =>
           client.session.signIn(
             Client.Credentials.Tile({
               device: Redacted.make(device),
@@ -240,6 +260,7 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
           ),
         ),
       signOut: () => withClient((client) => client.session.signOut),
+      signOutSession: (session) => withClient((client) => client.session.signOutSession(session)),
     },
     dispose: () => runtime.dispose(),
   };

@@ -122,8 +122,11 @@ every tab of the origin, and which works outside secure contexts.
 - **Every change is one transaction** that reads what it decides on and writes in the same
   transaction, so no other tab's write lands between the check and the write.
   - A sign-in refuses a session that has a revocation, before it writes anything, and the client
-    then counts as signed out. Otherwise it raises the person's sign-in generation and writes the
-    tokens and the slot's session, person, and generation.
+    then counts as signed out. It also refuses an answer whose request began more than five
+    minutes earlier; the client stamps the time before it asks. A revocation is kept for 31 days,
+    so it is still there whenever an answer for its session can land. Otherwise the sign-in raises
+    the person's sign-in generation and writes the tokens and the slot's session, person, and
+    generation, and it answers the session it stored.
   - A renewal writes new tokens only while the stored tokens are still the ones the refresh
     started from and no revocation exists.
   - A sign-out writes the revocation and the pending sign-out and deletes the tokens. If that
@@ -145,7 +148,8 @@ every tab of the origin, and which works outside secure contexts.
     that session, so a session another tab saved there since stays. It then deletes only the
     mappings and the active slot that still point at the slot.
   - The sweep deletes a revocation 31 days after the sign-out, past the core's 30-day limit on a
-    session and an unused refresh token. It also drops the oldest confirmed revocations past 64.
+    session and an unused refresh token, and never sooner. Time alone bounds the records; no
+    count drops one that a late answer still needs.
 - **Every token passes a transactional check.** Before a client hands out any token, the
   in-memory one included, it reads the session's state in a transaction. The token goes out only
   while the store holds that session's tokens and no revocation. A client that finds the session
@@ -170,8 +174,13 @@ every tab of the origin, and which works outside secure contexts.
   enrolls again with the kept code, so its session joins that device and the picker lists both
   people. The device it enrolled first is left for an admin to remove. While a sign-in finishes,
   its tab stays on its slot, so another tab's sign-in cannot switch it away.
-- **The account client forgets the slot it signed out of**, which is its own client's slot. The
-  forget transaction leaves a slot another tab signed the person in on meanwhile.
+- **The account client names the session in everything it deletes.** A sign-in carries the
+  session its answer stored through registration, promotion, and cleanup: the core must say that
+  same session is signed in before the browser enrolls, a promotion needs the slot to hold it, and
+  a sign-in that lost forgets its slot only while the slot still holds it, or signs out that
+  session alone. A sign-out names the session the client holds, signs out only that one, and
+  forgets its slot only while the slot holds it. Nothing decides what to delete from what a slot
+  holds by then, so a session another tab saved or renewed there meanwhile stays.
 - **Without IndexedDB**, as in some private modes, or when it has not opened within five seconds,
   as when another tab blocks it, the browser keeps no sign-in and shows signed out. A sign-in then
   says to reload the page. It never falls back to `localStorage`. The CLI's and old movies' stores are unchanged: a

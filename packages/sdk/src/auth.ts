@@ -286,12 +286,23 @@ const logStorageFailure = (error: TokenStorage.TokenStorageError): Effect.Effect
  */
 export interface Engine extends Omit<Interface, "signIn"> {
   /**
-   * Signs in with `request` and stores the session. A provider that refuses fails with its
-   * refusal, such as `Unauthenticated`; one that has not decided yet fails with `SignInWaiting`.
+   * Signs in with `request` and stores the session; the session it stored, as its token's
+   * subject. A provider that refuses fails with its refusal, such as `Unauthenticated`; one that
+   * has not decided yet fails with `SignInWaiting`.
    */
   readonly open: (
     request: SignInRequest,
-  ) => Effect.Effect<void, CallError | SignInWaiting | TokenStorage.TokenStorageError>;
+  ) => Effect.Effect<
+    Option.Option<string>,
+    CallError | SignInWaiting | TokenStorage.TokenStorageError
+  >;
+  /**
+   * Signs out as `signOut` does, but only while the client's session is `session`, named by its
+   * token's subject; whether it did. Another session the store moved the client to stays.
+   */
+  readonly signOutSession: (
+    session: string,
+  ) => Effect.Effect<boolean, TokenStorage.TokenStorageError>;
 }
 
 /**
@@ -865,6 +876,8 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
   }
 
   const open = Effect.fn("Auth.open")(function* (request: SignInRequest) {
+    const requestedAt = yield* Clock.currentTimeMillis;
+
     const opened = yield* requestTokens(
       { provider: request.provider, params: request.params },
       SignInResult,
@@ -878,7 +891,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
     const stored = yield* committing.withPermits(1)(
       Effect.gen(function* () {
-        if (!(yield* storage.save(opened.value))) return false;
+        if (!(yield* storage.save(opened.value, requestedAt))) return false;
         yield* Ref.set(lastStored, opened);
         yield* adopt(opened);
 
@@ -886,10 +899,11 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       }),
     );
 
-    if (stored) return yield* Effect.void;
+    if (stored) return sessionOf(opened.value);
 
     return yield* new Unauthenticated({
-      message: "Sign-in refused: this session was signed out on this device meanwhile",
+      message:
+        "Sign-in refused: this session was signed out on this device meanwhile, or the answer came too late",
     });
   });
 
@@ -899,10 +913,18 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
    * it is stored and the server is told in the background; otherwise it waits for one attempt and
    * retries in the background while the server cannot confirm it.
    */
-  const signOut = Effect.fn("Auth.signOut")(function* () {
+  const signOut = Effect.fn("Auth.signOut")(function* (expected: Option.Option<string>) {
     const { ended, revoked } = yield* committing.withPermits(1)(
       Effect.gen(function* () {
-        const current = yield* Ref.get(session);
+        const current = Option.filter(
+          yield* Ref.get(session),
+          (held) => Option.isNone(expected) || Option.contains(sessionOf(held), expected.value),
+        );
+
+        // A sign-out of a named session leaves whatever other session the client holds now.
+        if (Option.isNone(current) && Option.isSome(expected)) {
+          return { ended: current, revoked: Exit.void };
+        }
 
         const exit = yield* Effect.exit(
           Option.match(current, { onNone: () => Effect.void, onSome: storage.revoke }),
@@ -914,7 +936,11 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       }),
     );
 
-    if (Option.isNone(ended)) return yield* revoked;
+    if (Option.isNone(ended)) {
+      yield* revoked;
+
+      return false;
+    }
 
     const handedOver =
       Exit.isSuccess(revoked) &&
@@ -930,7 +956,9 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       yield* endInBackground(ended.value, true, Duration.seconds(1), Exit.isSuccess(revoked));
     }
 
-    return yield* revoked;
+    yield* revoked;
+
+    return true;
   });
 
   const stored = yield* storage.load;
@@ -955,7 +983,8 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     isReconnecting: SubscriptionRef.get(reconnecting),
     currentIdentity: Effect.map(Ref.get(session), Option.flatMap(sessionOf)),
     open,
-    signOut: signOut(),
+    signOut: Effect.asVoid(signOut(Option.none())),
+    signOutSession: (ended) => signOut(Option.some(ended)),
     accessToken,
   };
 
@@ -987,11 +1016,10 @@ export const make = Effect.fn("Auth.make")(function* (options: Options) {
     isReconnecting: engine.isReconnecting,
     currentIdentity: engine.currentIdentity,
     signIn: (credentials) =>
-      engine
-        .open(providerParams(credentials))
-        .pipe(
-          Effect.catchTag("SignInWaiting", (waiting) => Effect.fail(unexpectedWaiting(waiting))),
-        ),
+      engine.open(providerParams(credentials)).pipe(
+        Effect.asVoid,
+        Effect.catchTag("SignInWaiting", (waiting) => Effect.fail(unexpectedWaiting(waiting))),
+      ),
     signOut: engine.signOut,
     accessToken: engine.accessToken,
   });

@@ -2,7 +2,7 @@ import { TokenStorage as Storage } from "@media/sdk/effect";
 import { openIndexedDb } from "@media/sdk/promise";
 import type { SharedStore } from "@media/sdk/promise";
 import { jwtExpiringAt } from "@media/sdk/testing/fake-convex";
-import { Context, Effect, Exit, Layer, Option, Redacted } from "effect";
+import { Clock, Context, Effect, Exit, Layer, Option, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it, vi } from "vitest";
 
@@ -40,7 +40,7 @@ describe("token storage shared between tabs in IndexedDB", () => {
         const tabs = yield* tabsOf(1);
         const storage = yield* sharedOver(tabs.tab(0));
 
-        yield* storage.save(ada);
+        yield* storage.save(ada, yield* Clock.currentTimeMillis);
         const stale = yield* storage.renew(adaRenewed, ada);
         const renewing = yield* storage.renew(ada, adaRenewed);
 
@@ -62,7 +62,7 @@ describe("token storage shared between tabs in IndexedDB", () => {
         const signingOut = yield* sharedOver(tabs.tab(0));
         const renewing = yield* sharedOver(tabs.tab(1));
 
-        yield* signingOut.save(ada);
+        yield* signingOut.save(ada, yield* Clock.currentTimeMillis);
         yield* signingOut.revoke(ada);
 
         return {
@@ -83,7 +83,7 @@ describe("token storage shared between tabs in IndexedDB", () => {
         const signingOut = yield* sharedOver(tabs.tab(0));
         const other = yield* sharedOver(tabs.tab(1));
 
-        yield* signingOut.save(ada);
+        yield* signingOut.save(ada, yield* Clock.currentTimeMillis);
         tabs.fill(true);
         const revoked = yield* Effect.exit(signingOut.revoke(ada));
 
@@ -114,8 +114,8 @@ describe("token storage shared between tabs in IndexedDB", () => {
         const second = yield* sharedOver(tabs.tab(1));
         const reader = yield* sharedOver(tabs.tab(2));
 
-        yield* first.save(ada);
-        yield* second.save(bo);
+        yield* first.save(ada, yield* Clock.currentTimeMillis);
+        yield* second.save(bo, yield* Clock.currentTimeMillis);
         yield* Effect.all([first.revoke(ada), second.revoke(bo)], { concurrency: "unbounded" });
 
         return {
@@ -135,7 +135,7 @@ describe("token storage shared between tabs in IndexedDB", () => {
         const tabs = yield* tabsOf(1);
         const storage = yield* sharedOver(tabs.tab(0));
 
-        yield* storage.save(ada);
+        yield* storage.save(ada, yield* Clock.currentTimeMillis);
         yield* storage.revoke(ada);
 
         const pending = (yield* storage.pendingSignOuts).map((held) =>
@@ -143,7 +143,7 @@ describe("token storage shared between tabs in IndexedDB", () => {
         );
 
         yield* storage.confirmRevoked(ada);
-        yield* storage.save(bo);
+        yield* storage.save(bo, yield* Clock.currentTimeMillis);
 
         return {
           pending,
@@ -169,7 +169,7 @@ describe("token storage shared between tabs in IndexedDB", () => {
         const slot = yield* sharedOver(tabs.tab(0), "slot-1");
         const elsewhere = yield* sharedOver(tabs.tab(0), "slot-2");
 
-        yield* slot.save(ada);
+        yield* slot.save(ada, yield* Clock.currentTimeMillis);
         yield* slot.revoke(ada);
 
         return {
@@ -196,12 +196,12 @@ describe("token storage shared between tabs in IndexedDB", () => {
           const tabs = yield* tabsOf(1);
           const storage = yield* sharedOver(tabs.tab(0));
 
-          yield* storage.save(ada);
+          yield* storage.save(ada, yield* Clock.currentTimeMillis);
           yield* storage.revoke(ada);
           yield* storage.confirmRevoked(ada);
-          yield* storage.save(cleo);
+          yield* storage.save(cleo, yield* Clock.currentTimeMillis);
           yield* storage.revoke(cleo);
-          yield* storage.save(bo);
+          yield* storage.save(bo, yield* Clock.currentTimeMillis);
           yield* TestClock.adjust(30 * DAY);
           yield* storage.sweep;
           const before = (yield* keysOf(tabs)).toSorted();
@@ -247,11 +247,11 @@ describe("token storage shared between tabs in IndexedDB", () => {
         const signingOut = yield* sharedOver(tabs.tab(0));
         const late = yield* sharedOver(tabs.tab(1));
 
-        yield* signingOut.save(ada);
+        yield* signingOut.save(ada, yield* Clock.currentTimeMillis);
         yield* signingOut.revoke(ada);
 
         return {
-          stored: yield* late.save(ada),
+          stored: yield* late.save(ada, yield* Clock.currentTimeMillis),
           loaded: yield* late.load,
           tokens: (yield* keysOf(tabs)).includes("s:ada|session-1"),
         };
@@ -259,6 +259,74 @@ describe("token storage shared between tabs in IndexedDB", () => {
     );
 
     expect(answer).toStrictEqual({ stored: false, loaded: Option.none(), tokens: false });
+  });
+  it("never stores a session signed out here again, however many sign-outs were confirmed since", async () => {
+    const answer = await Effect.runPromise(
+      Effect.gen(function* () {
+        const tabs = yield* tabsOf(3);
+        const late = yield* sharedOver(tabs.tab(0));
+        const signingOut = yield* sharedOver(tabs.tab(1), "other");
+        const sweeping = yield* sharedOver(tabs.tab(2), "third");
+
+        // The late tab's sign-in request starts; its answer for Ada's session arrives last.
+        const requestedAt = yield* Clock.currentTimeMillis;
+
+        yield* signingOut.save(ada, requestedAt);
+        yield* signingOut.revoke(ada);
+        yield* signingOut.confirmRevoked(ada);
+
+        yield* Effect.forEach(
+          Array.from({ length: 65 }, (_, index) =>
+            signedInAs(`cleo|session-${index + 10}`, `refresh-${index + 10}`),
+          ),
+          (each) =>
+            Effect.gen(function* () {
+              yield* signingOut.save(each, yield* Clock.currentTimeMillis);
+              yield* signingOut.revoke(each);
+              yield* signingOut.confirmRevoked(each);
+            }),
+          { discard: true },
+        );
+        yield* sweeping.sweep;
+
+        return {
+          stored: yield* late.save(ada, requestedAt),
+          loaded: yield* late.load,
+          revocation: yield* late.revocation(ada),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({ stored: false, loaded: Option.none(), revocation: "confirmed" });
+  });
+
+  it("refuses a sign-in answer whose request began more than five minutes ago", async () => {
+    const answer = await Effect.runPromise(
+      Effect.gen(function* () {
+        const testClock = yield* Layer.build(TestClock.layer());
+
+        return yield* Effect.gen(function* () {
+          yield* TestClock.setTime(Date.now());
+          const tabs = yield* tabsOf(1);
+          const storage = yield* sharedOver(tabs.tab(0));
+          const requestedAt = yield* Clock.currentTimeMillis;
+
+          yield* TestClock.adjust(5 * 60 * 1000 + 1);
+          const late = yield* storage.save(bo, requestedAt);
+          const loadedLate = yield* storage.load;
+          const fresh = yield* storage.save(bo, yield* Clock.currentTimeMillis);
+
+          return { late, loadedLate, fresh, loaded: refreshTokenOf(yield* storage.load) };
+        }).pipe(Effect.provideContext(testClock));
+      }).pipe(Effect.scoped),
+    );
+
+    expect(answer).toStrictEqual({
+      late: false,
+      loadedLate: Option.none(),
+      fresh: true,
+      loaded: Option.some("refresh-3"),
+    });
   });
 });
 

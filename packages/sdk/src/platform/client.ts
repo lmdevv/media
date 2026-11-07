@@ -96,18 +96,26 @@ export interface Session {
   readonly status: Stream.Stream<AuthStatus>;
   /** The status now, without waiting for a change. */
   readonly currentStatus: Effect.Effect<AuthStatus>;
+  /** The session the client holds now, as its token's subject; none while signed out. */
+  readonly currentSession: Effect.Effect<Option.Option<string>>;
   /**
-   * Signs in and stores the session. Refused credentials fail with `Unauthenticated`, a setup once
-   * the server has an owner with `Conflict`, and a used or expired invite or reset code with
+   * Signs in and stores the session; the session it stored, as its token's subject
+   * `<userId>|<sessionId>`. Refused credentials fail with `Unauthenticated`, a setup once the
+   * server has an owner with `Conflict`, and a used or expired invite or reset code with
    * `Expired`.
    */
   readonly signIn: (
     credentials: Credentials,
-  ) => Effect.Effect<void, PlatformError | TokenStorageError>;
+  ) => Effect.Effect<Option.Option<string>, PlatformError | TokenStorageError>;
   /** Starts a device sign-in named `clientName`, as the person approving it will see it. */
   readonly startDeviceSignIn: (clientName: string) => Effect.Effect<DeviceSignIn, PlatformError>;
   /** Ends the session on the server when reachable, then forgets it locally. */
   readonly signOut: Effect.Effect<void, TokenStorageError>;
+  /**
+   * Signs out as `signOut` does, but only while the client's session is `session`, as `signIn`
+   * named it; whether it did.
+   */
+  readonly signOutSession: (session: string) => Effect.Effect<boolean, TokenStorageError>;
 }
 
 /** Runs platform commands as the signed-in session. */
@@ -302,6 +310,7 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
     const complete = engine
       .open({ provider: "deviceCode", params: { deviceCode: started.deviceCode } })
       .pipe(
+        Effect.asVoid,
         Effect.retry({
           schedule: Schedule.spaced(Duration.seconds(started.intervalSeconds)),
           while: askAgain,
@@ -342,9 +351,11 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
     session: {
       status: engine.status,
       currentStatus: engine.currentStatus,
+      currentSession: engine.currentIdentity,
       signIn,
       startDeviceSignIn,
       signOut: engine.signOut,
+      signOutSession: engine.signOutSession,
     },
   });
 });

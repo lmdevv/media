@@ -74,6 +74,7 @@ export type {
   PlatformSession,
   PlatformTile,
   PlatformTileProof,
+  SignedInSession,
 } from "./platform/promise";
 
 export type { PendingDeviceLogin } from "./device-login";

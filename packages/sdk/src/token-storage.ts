@@ -66,10 +66,16 @@ export interface Interface {
   /** The current session; none when signed out, when it was revoked, or when it is unreadable. */
   readonly load: Effect.Effect<Option.Option<StoredSession>, TokenStorageError>;
   /**
-   * Makes a new sign-in the current session; whether it did. A session that was signed out here
-   * is never stored again, as when another tab signed out the session a late answer carries.
+   * Makes a new sign-in the current session; whether it did. `requestedAt` is when the sign-in
+   * request that answered with `session` began. A session that was signed out here is never
+   * stored again, as when another tab signed out the session a late answer carries, and a store
+   * that others write refuses an answer whose request began more than five minutes before, so
+   * no answer outlives the record of its session's sign-out.
    */
-  readonly save: (session: StoredSession) => Effect.Effect<boolean, TokenStorageError>;
+  readonly save: (
+    session: StoredSession,
+    requestedAt: number,
+  ) => Effect.Effect<boolean, TokenStorageError>;
   /**
    * Stores `renewed`, a renewal of the session in `expected`, only while the store still holds
    * `expected` for that session; whether it did. It never changes which session is current.
@@ -98,8 +104,8 @@ export interface Interface {
    */
   readonly pendingSignOuts: Effect.Effect<ReadonlyArray<StoredSession>, TokenStorageError>;
   /**
-   * Deletes revocation records once the sessions they name can no longer work anywhere, and the
-   * oldest confirmed ones past a cap. It never deletes a session that could still be live.
+   * Deletes revocation records once the sessions they name can no longer work anywhere, by age
+   * alone. It never deletes the record of a session that could still be live.
    */
   readonly sweep: Effect.Effect<void, TokenStorageError>;
   /**
@@ -259,8 +265,11 @@ const encodePending = Schema.encodeSync(PendingSignOut);
  */
 const REVOCATION_KEPT_MS = 31 * 24 * 60 * 60 * 1000;
 
-/** How many confirmed revocations a store keeps before it drops the oldest. */
-const CONFIRMED_KEPT = 64;
+/**
+ * How long a sign-in's answer may take, from its request, to be stored. Far shorter than
+ * `REVOCATION_KEPT_MS`, so a session's sign-out is still on record when any answer for it lands.
+ */
+const SIGN_IN_ANSWER_MS = 5 * 60 * 1000;
 
 /** Revocations, one per session id, whichever slot it was signed in under. */
 const REVOKED = "media.revoked:";
@@ -365,9 +374,11 @@ export const layerShared = (store: SharedStore, slot: string): Layer.Layer<Token
 
         return tokensIn(tx, tokensKey(held.value.session));
       }).pipe(Effect.orElseSucceed(() => Option.none<StoredSession>())),
-      save: (session) =>
-        Effect.flatMap(idOf(session, "save"), (id) =>
+      save: (session, requestedAt) =>
+        Effect.flatMap(Effect.zip(idOf(session, "save"), Clock.currentTimeMillis), ([id, now]) =>
           attempt("save", "write", async (tx) => {
+            if (now - requestedAt > SIGN_IN_ANSWER_MS) return false;
+
             if (Option.isSome(await revokedIn(tx, id))) return false;
 
             const user = id.split("|")[0] ?? id;
@@ -489,13 +500,8 @@ export const layerShared = (store: SharedStore, slot: string): Layer.Layer<Token
 
           const expired = records.filter((each) => now - each.revokedAt > REVOCATION_KEPT_MS);
 
-          const overCap = records
-            .filter((each) => each.confirmedAt !== undefined)
-            .toSorted((a, b) => (b.confirmedAt ?? 0) - (a.confirmedAt ?? 0))
-            .slice(CONFIRMED_KEPT);
-
           await Promise.all(
-            [...expired, ...overCap].flatMap((each) => [
+            expired.flatMap((each) => [
               tx.remove(`${REVOKED}${each.id}`),
               tx.remove(`${PENDING}${each.id}`),
               tx.remove(`${each.slot}:${each.id}`),

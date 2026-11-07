@@ -20,9 +20,19 @@ const UserId = Brand.nominal<UserId>();
  * Where the core joined a sign-in to this browser's device, and its place in the order sessions
  * joined it. Of two sign-ins of one person there, the core kept the later join's session live.
  */
-export interface Joined {
+interface Joined {
   readonly deviceId: string;
   readonly sequence: number;
+}
+
+/**
+ * A finished sign-in on a slot: whose it is, the session it stored as its token's subject, and
+ * where the core joined it, if it enrolled.
+ */
+export interface SignedIn {
+  readonly userId: UserId;
+  readonly session: string;
+  readonly joined: Joined | null;
 }
 
 /** What this browser holds for every client on the origin. */
@@ -54,17 +64,15 @@ export interface OriginStore {
   /** The key a slot's session lives under. */
   readonly sessionKey: (slot: SlotId) => string;
   /**
-   * Makes `slot` the one holding `userId`, and the active slot; whether it did. It does only while
-   * `slot` still holds that person, and only for the sign-in whose session the core kept: with
-   * `joined`, one that joined this device later than any promoted before, whatever order the tabs
-   * promote in; without it, as for a tile, the person's newest sign-in here. A different slot
-   * that held `userId` before goes, since the core keeps one session per person per device, and so
-   * does whoever `slot` held before, as on a shared device whose one slot a new tile took.
-   * Idempotent.
+   * Makes `slot` the one holding the person of `signedIn`, and the active slot; whether it did. It
+   * does only while `slot` still holds that very session, and only for the sign-in whose session
+   * the core kept: with a join, one that joined this device later than any promoted before,
+   * whatever order the tabs promote in; without, as for a tile, the person's newest sign-in here.
+   * A different slot that held the person before goes, since the core keeps one session per
+   * person per device, and so does whoever `slot` held before, as on a shared device whose one
+   * slot a new tile took. Idempotent.
    */
-  readonly promote: (slot: SlotId, userId: UserId, joined: Joined | null) => Promise<boolean>;
-  /** The session `slot` holds now, if any. */
-  readonly sessionIn: (slot: SlotId) => Promise<string | null>;
+  readonly promote: (slot: SlotId, signedIn: SignedIn) => Promise<boolean>;
   /** Makes `slot` the one every client acts as. */
   readonly activate: (slot: SlotId) => Promise<void>;
   /**
@@ -202,11 +210,13 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
     },
     sessions: shared ?? unavailable,
     sessionKey,
-    promote: (slot, userId, joined) =>
+    promote: (slot, { userId, session, joined }) =>
       change(async (tx) => {
         const held = await slotHolding(tx, sessionKey(slot));
 
-        if (Option.isNone(held) || held.value.user !== userId) return false;
+        if (Option.isNone(held) || held.value.user !== userId || held.value.session !== session) {
+          return false;
+        }
 
         const last = await lastJoin(tx, userId);
 
@@ -254,21 +264,11 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
         await tx.set(ACTIVE, slot);
 
         if (joined !== null) {
-          await tx.set(
-            `${JOINED}${userId}`,
-            encodeJoin({ ...joined, session: held.value.session }),
-          );
+          await tx.set(`${JOINED}${userId}`, encodeJoin({ ...joined, session }));
         }
 
         return true;
       }),
-    sessionIn: async (slot) =>
-      Option.match(
-        await (shared ?? unavailable)
-          .read((tx) => slotHolding(tx, sessionKey(slot)))
-          .catch(() => Option.none()),
-        { onNone: () => null, onSome: (held) => held.session },
-      ),
     activate: (slot) => change((tx) => tx.set(ACTIVE, slot)),
     forget: (slot, session) =>
       change(async (tx) => {

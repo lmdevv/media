@@ -13,6 +13,7 @@ import {
   Scope,
 } from "effect";
 import * as fc from "fast-check";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { Platform, TokenStorage } from "@media/sdk/effect";
@@ -761,4 +762,76 @@ describe("any interleaving of tabs sharing one session store", () => {
       { numRuns: 40 },
     );
   }, 120_000);
+});
+
+describe("a sign-in's answer", () => {
+  it("names the session it stored, and a sign-out of another session leaves it", async () => {
+    const answer = await run(
+      Effect.gen(function* () {
+        const { fake } = yield* fakeCore();
+        const tabs = yield* tabsOf(1, "at once");
+        const client = yield* openClient(fake, tabs.tab(0));
+        const signedIn = yield* client.session.signIn(password("ada"));
+        const other = yield* client.session.signOutSession("ada|session-9");
+
+        return { signedIn, other, current: yield* client.session.currentSession };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      signedIn: Option.some("ada|session-1"),
+      other: false,
+      current: Option.some("ada|session-1"),
+    });
+  });
+
+  it("is refused when it lands more than five minutes after its request began", async () => {
+    const answer = await run(
+      Effect.gen(function* () {
+        const testClock = yield* Layer.build(TestClock.layer());
+
+        return yield* Effect.gen(function* () {
+          yield* TestClock.setTime(Date.now());
+          const { fake } = yield* fakeCore();
+          const tabs = yield* tabsOf(2, "at once");
+          const client = yield* openClient(fake, tabs.tab(0));
+          const arrived = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+
+          yield* fake.handle("auth:signIn", () =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(arrived, undefined);
+              yield* Deferred.await(release);
+
+              return Reply.Success({
+                value: {
+                  tokens: {
+                    token: jwtExpiringAt(Date.now() + 3_600_000, "ada|session-late"),
+                    refreshToken: "refresh-late",
+                  },
+                },
+              });
+            }),
+          );
+
+          const signingIn = yield* Effect.forkChild(
+            Effect.exit(client.session.signIn(password("ada"))),
+          );
+
+          yield* Deferred.await(arrived);
+          yield* TestClock.adjust(5 * 60 * 1000 + 1);
+          yield* Deferred.succeed(release, undefined);
+          const signedIn = yield* Fiber.join(signingIn);
+
+          return {
+            refused: Exit.isFailure(signedIn),
+            stored: (yield* keysOf(tabs)).some((key) => key.endsWith(":ada|session-late")),
+            status: yield* client.session.currentStatus,
+          };
+        }).pipe(Effect.provideContext(testClock));
+      }),
+    );
+
+    expect(answer).toStrictEqual({ refused: true, stored: false, status: "signedOut" });
+  });
 });

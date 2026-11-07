@@ -1,13 +1,14 @@
 import { PlatformProvider, usePlatform } from "@media/sdk/react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { Predicate } from "effect";
+import { Match, Predicate } from "effect";
 import { createContext, use, useMemo, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import { deviceName } from "./device-name";
 import { newSlot } from "./origin";
-import type { Joined, Origin, OriginStore, SlotId } from "./origin";
+import type { Origin, OriginStore, SignedIn, SlotId } from "./origin";
 import type { TileProof, UserId } from "./platform-types";
+import { settleSignIn } from "./sign-in";
 
 interface AccountContext {
   readonly store: OriginStore;
@@ -128,14 +129,17 @@ export const useAccountActions = (): AccountActions => {
   const router = useRouter();
 
   /**
-   * Reads who signed in and registers this browser, with where the core joined the session to its
-   * device; a sign-in that cannot finish is ended.
+   * Registers this browser for the sign-in that stored `session`, with where the core joined it;
+   * null when another sign-in took this slot before it could, which settles the slot itself. A
+   * registration that cannot finish signs out this session alone.
    */
-  const register = async (): Promise<{ userId: UserId; joined: Joined | null }> => {
+  const register = async (session: string): Promise<SignedIn | null> => {
     try {
       const me = await platform.core.auth.sessions.current();
 
-      if (me.kind === "tile") return { userId: me.userId, joined: null };
+      if (`${me.userId}|${me.sessionId}` !== session) return null;
+
+      if (me.kind === "tile") return { userId: me.userId, session, joined: null };
 
       const { enroll } = platform.core.devices.registry;
       const device = store.read().device;
@@ -154,10 +158,11 @@ export const useAccountActions = (): AccountActions => {
 
       return {
         userId: me.userId,
+        session,
         joined: { deviceId: joined.deviceId, sequence: joined.joinSequence },
       };
     } catch (cause) {
-      await platform.session.signOut();
+      await platform.session.signOutSession(session);
 
       if (Predicate.isTagged(cause, "Conflict")) throw new SharedDeviceError();
 
@@ -165,14 +170,15 @@ export const useAccountActions = (): AccountActions => {
     }
   };
 
-  const establish = async (): Promise<void> => {
-    const { userId, joined } = await register();
+  /** Settles the sign-in that stored `session`, then leaves the sign-in page. */
+  const establish = async (session: string | null): Promise<void> => {
+    if (session === null) throw new Error("The server's answer named no session. Sign in again.");
 
-    // Of two sign-ins of one person, the core kept the one that joined the device later, whichever
-    // tab promotes first; when that is another tab's, this slot's ended session goes.
-    if (!(await store.promote(slot, userId, joined))) {
-      await store.forget(slot, await store.sessionIn(slot));
-    }
+    // Of two sign-ins of one person, the core kept the one that joined the device later,
+    // whichever tab promotes first; when that is another tab's, this session's slot goes.
+    const signedIn = await register(session);
+
+    if (signedIn !== null) await settleSignIn(store, slot, signedIn);
 
     // A page that asked for a sign-in, such as /device from a CLI's link, shows once it is done;
     // the picker, Add someone, an invite, and a reset link go on to the picker.
@@ -181,29 +187,22 @@ export const useAccountActions = (): AccountActions => {
     }
   };
 
+  /** Signs in as `signIn` says; the session it stored. */
+  const signInWith: (signIn: SignIn) => Promise<string | null> = Match.type<SignIn>().pipe(
+    Match.discriminatorsExhaustive("kind")({
+      password: (password) => platform.session.signInWithPassword(password),
+      setUpOwner: (owner) => platform.session.setUpOwner(owner),
+      invite: (invite) => platform.session.acceptInvite(invite),
+      reset: (reset) => platform.session.resetPassword(reset),
+    }),
+  );
+
   return {
     signIn: async (signIn) => {
-      const { session } = platform;
-
       pin(slot);
 
       try {
-        switch (signIn.kind) {
-          case "password":
-            await session.signInWithPassword(signIn);
-            break;
-          case "setUpOwner":
-            await session.setUpOwner(signIn);
-            break;
-          case "invite":
-            await session.acceptInvite(signIn);
-            break;
-          case "reset":
-            await session.resetPassword(signIn);
-            break;
-        }
-
-        await establish();
+        await establish(await signInWith(signIn));
       } finally {
         pin(null);
       }
@@ -228,23 +227,23 @@ export const useAccountActions = (): AccountActions => {
 
       if (device === null) throw new SharedDeviceError();
 
-      await platform.session.openTile(
+      const session = await platform.session.openTile(
         proof === undefined ? { device, userId } : { device, userId, proof },
       );
-      await store.promote(slot, userId, null);
+
+      if (session !== null) await settleSignIn(store, slot, { userId, session, joined: null });
       await navigate({ to: "/home" });
     },
     signOut: async () => {
-      // This client's slot holds the session being signed out. Another tab may sign the person in
-      // on a new slot, or open a tile in this slot, meanwhile; `forget` names the session and
-      // decides inside its transaction, so either stays.
-      // Signing out returns once the store holds the revocation; the server is told in the
-      // background, so nothing here waits on the server.
+      // Signs out the session this client holds and forgets its slot, both by that session's
+      // name: another tab may sign the person in on a new slot, or open a tile in this slot,
+      // meanwhile, and that session stays. Signing out returns once the store holds the
+      // revocation; the server is told in the background.
       const signingOut = slot;
-      const session = await store.sessionIn(signingOut);
+      const session = await platform.session.currentSession();
 
       try {
-        await platform.session.signOut();
+        if (session !== null) await platform.session.signOutSession(session);
       } finally {
         await store.forget(signingOut, session);
         await navigate({ to: "/" });
