@@ -151,7 +151,11 @@ export const useAccountActions = (): AccountActions => {
         return {
           userId: me.userId,
           session,
-          joined: { deviceId: me.device.deviceId, sequence: me.device.joinSequence },
+          joined: {
+            deviceId: me.device.deviceId,
+            sequence: me.device.joinSequence,
+            scope: me.device.scope,
+          },
         };
       }
 
@@ -173,7 +177,8 @@ export const useAccountActions = (): AccountActions => {
       return {
         userId: me.userId,
         session,
-        joined: { deviceId: joined.deviceId, sequence: joined.joinSequence },
+        // An enrollment is a personal join, which only the same person's later join ends.
+        joined: { deviceId: joined.deviceId, sequence: joined.joinSequence, scope: "person" },
       };
     } catch (cause) {
       await client.session.signOutSession(session);

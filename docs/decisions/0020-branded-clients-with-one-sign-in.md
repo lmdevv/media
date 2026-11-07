@@ -60,16 +60,17 @@ One origin's IndexedDB database `media` holds every client's sign-in state, in o
 `kv` of string keys. `session/origin.ts` names the origin's keys, and the SDK's `layerShared`
 names the session keys. `localStorage` holds nothing credential-bearing.
 
-| Key                                | Holds                                                                     |
-| ---------------------------------- | ------------------------------------------------------------------------- |
-| `media.device`                     | this browser's device code, `dv_<id>.<secret>`                            |
-| `media.active`                     | the slot every client on the origin acts as                               |
-| `media.person.<userId>`            | the slot that holds that person's session                                 |
-| `media.session.<slotId>`           | the slot's session: its id and its person                                 |
-| `media.session.<slotId>:<session>` | that session's tokens                                                     |
-| `media.revoked:<session>`          | a sign-out, and the core's confirmation once it comes                     |
-| `media.signOut:<session>`          | a sign-out the core has not confirmed, for any client                     |
-| `media.joined.<userId>`            | the last device join promoted for the person: device, number, and session |
+| Key                                | Holds                                                                        |
+| ---------------------------------- | ---------------------------------------------------------------------------- |
+| `media.device`                     | this browser's device code, `dv_<id>.<secret>`                               |
+| `media.active`                     | the slot every client on the origin acts as                                  |
+| `media.person.<userId>`            | the slot that holds that person's session                                    |
+| `media.session.<slotId>`           | the slot's session: its id and its person                                    |
+| `media.session.<slotId>:<session>` | that session's tokens                                                        |
+| `media.tile.<deviceId>`            | the last tile promoted on a shared device, whoever's: its number and session |
+| `media.revoked:<session>`          | a sign-out, and the core's confirmation once it comes                        |
+| `media.signOut:<session>`          | a sign-out the core has not confirmed, for any client                        |
+| `media.joined.<userId>`            | the last device join promoted for the person: device, number, and session    |
 
 - **A slot** is a random local name for one sign-in's tokens. A password, setup, invite, or reset
   sign-in starts before the client knows whose session it is, so the key cannot carry the
@@ -141,9 +142,13 @@ every tab of the origin, and which works outside secure contexts.
     join, which ends the person's earlier session there (ADR 0006), and a shared device's tile,
     which ends the tile session the device held. Enrollment answers the number
     (`joinSequence`), and `core.auth.sessions.current` names the device and number of any bound
-    session, as a tile's. A promote needs that number and goes ahead only when it is higher than
-    the person's last promoted one on that device, whichever tab saved or promotes first. A
-    number on another device counts as newer, since a cleared device code is never used again.
+    session, as a tile's, and what a later number ends: `person` for a personal join, ended only
+    by the same person's later join there, and `device` for a tile, ended by any later tile there,
+    whoever's. A promote compares the number within that scope, in its transaction: a personal
+    join against the person's last promoted join on that device (`media.joined.<userId>`), a tile
+    against the device's last promoted tile (`media.tile.<deviceId>`). It goes ahead only when
+    the number is higher, whichever tab saved or promotes first. A personal join on another
+    device counts as newer, since a cleared device code is never used again.
     There is no local counter or clock to fall back on. A slot that lost is forgotten. The person's older slot goes too, but only while it still holds the session last
     promoted, so another person's sign-in, or a newer one of this person, saved there since stays.
     The last join outlives a sign-out, so an ended session that answers late is never promoted. A forget

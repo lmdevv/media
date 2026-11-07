@@ -333,6 +333,62 @@ test("two tabs opening tiles at once keep the tile the core opened last", async 
   }
 });
 
+test("an older tile that registers last never replaces the tile the core opened after it", async ({
+  page,
+  context,
+}) => {
+  if (stack === null) return;
+
+  const admin = await createPerson(stack, "admin", "admin");
+  const ada = await createPerson(stack, "ada");
+  const bo = await createPerson(stack, "bo");
+  const unlist = await Promise.all([ada, bo].map((person) => listOnSharedDevices(stack, person)));
+  const host = openPlatform(stack);
+  const other = await context.newPage();
+  const { promise: released, resolve: release } = Promise.withResolvers<void>();
+  const { promise: reachedCore, resolve: opened } = Promise.withResolvers<void>();
+
+  // Tab A's tile opens and asks the core for its number before tab B opens; the answer, naming
+  // Ada's tile still live, waits until tab B's tile is promoted.
+  await page.route("**/api/query", async (route) => {
+    if (!(route.request().postData() ?? "").includes("sessions:current")) return route.fallback();
+
+    const response = await route.fetch();
+
+    opened();
+    await released;
+    await route.fulfill({ response });
+  });
+
+  try {
+    await signIn(page, admin);
+    await expect(page.getByRole("button", { name: admin.username, exact: true })).toBeVisible();
+    await host.session.signInWithPassword(admin);
+    await host.core.devices.registry.setMode({
+      deviceId: Brand.nominal<DeviceRowId>()((await readStore(page)).deviceId),
+      mode: "shared",
+    });
+
+    await page.reload();
+    await other.goto("/");
+    await page.getByRole("button", { name: ada.username, exact: true }).click();
+    await reachedCore;
+
+    await other.getByRole("button", { name: bo.username, exact: true }).click();
+    await expect(other.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+
+    release();
+    await expect(page.getByRole("button", { name: ada.username, exact: true })).toBeVisible();
+
+    await other.reload();
+    await expect(other.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+  } finally {
+    release();
+    await Promise.all(unlist.map((step) => step()));
+    await host.dispose();
+  }
+});
+
 test("two tabs share one sign-in, and a sign-out in one signs the other out", async ({
   page,
   context,

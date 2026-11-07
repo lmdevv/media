@@ -17,13 +17,15 @@ const SlotId = Brand.nominal<SlotId>();
 const UserId = Brand.nominal<UserId>();
 
 /**
- * Where the core bound a sign-in to this browser's device, and its place in the order sessions
- * took it: joined a personal device, or took a shared device's tile. A later one ends the earlier
- * session there, so the core keeps the higher one's live.
+ * Where the core bound a sign-in to this browser's device, its place in the order sessions took
+ * it, and what a later number ends, as the core says: `person`, a personal join, ended only by
+ * the same person's later join there; `device`, a shared device's tile, ended by any later tile
+ * there, whoever's. The core keeps the higher number's session live within that scope.
  */
 interface Joined {
   readonly deviceId: string;
   readonly sequence: number;
+  readonly scope: "person" | "device";
 }
 
 /**
@@ -110,6 +112,20 @@ const encodeJoin = Schema.encodeSync(StoredJoin);
 
 const lastJoin = async (tx: SharedTransaction, userId: UserId) =>
   Option.flatMap(Option.fromNullishOr(await tx.get(`${JOINED}${userId}`)), decodeJoin);
+
+/** The last tile promoted on a shared device, whoever's: the scope a tile's number orders. */
+const TILE = "media.tile.";
+
+const StoredTile = Schema.fromJsonString(
+  Schema.Struct({ sequence: Schema.Int, session: Schema.String }),
+);
+
+const decodeTile = Schema.decodeUnknownOption(StoredTile);
+
+const encodeTile = Schema.encodeSync(StoredTile);
+
+const lastTile = async (tx: SharedTransaction, deviceId: string) =>
+  Option.flatMap(Option.fromNullishOr(await tx.get(`${TILE}${deviceId}`)), decodeTile);
 
 const sessionKey = (slot: SlotId): string => `${SESSION}${slot}`;
 
@@ -222,11 +238,19 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
 
         // The core's order alone decides; a join on another device is newer, since the browser
         // keeps one device code and a cleared one is never used again.
-        const kept = Option.match(last, {
-          onNone: () => true,
-          onSome: (stored) =>
-            stored.deviceId !== joined.deviceId || stored.sequence < joined.sequence,
-        });
+        // A number is compared within what it ends: a tile against the device's last tile,
+        // whoever's; a personal join against the person's last join on the device.
+        const kept =
+          joined.scope === "device"
+            ? Option.match(await lastTile(tx, joined.deviceId), {
+                onNone: () => true,
+                onSome: (stored) => stored.sequence < joined.sequence,
+              })
+            : Option.match(last, {
+                onNone: () => true,
+                onSome: (stored) =>
+                  stored.deviceId !== joined.deviceId || stored.sequence < joined.sequence,
+              });
 
         if (!kept) return false;
 
@@ -260,7 +284,17 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
         await tx.set(`${PERSON}${userId}`, slot);
         await tx.set(ACTIVE, slot);
 
-        await tx.set(`${JOINED}${userId}`, encodeJoin({ ...joined, session }));
+        await tx.set(
+          `${JOINED}${userId}`,
+          encodeJoin({ deviceId: joined.deviceId, sequence: joined.sequence, session }),
+        );
+
+        if (joined.scope === "device") {
+          await tx.set(
+            `${TILE}${joined.deviceId}`,
+            encodeTile({ sequence: joined.sequence, session }),
+          );
+        }
 
         return true;
       }),

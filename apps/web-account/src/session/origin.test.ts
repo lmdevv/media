@@ -20,7 +20,18 @@ const ada = userId("user-ada");
 const bo = userId("user-bo");
 
 /** The `sequence`th join of a session to this browser's device, as the core answers enroll. */
-const joinedAs = (sequence: number, deviceId = "device-1") => ({ deviceId, sequence });
+const joinedAs = (sequence: number, deviceId = "device-1") => ({
+  deviceId,
+  sequence,
+  scope: "person" as const,
+});
+
+/** The `sequence`th taking of a shared device, as the core numbers a tile it opens. */
+const tileAs = (sequence: number, deviceId = "device-1") => ({
+  deviceId,
+  sequence,
+  scope: "device" as const,
+});
 
 /**
  * Tabs of one origin over one fake IndexedDB. A tab hears another tab's commit only when
@@ -180,6 +191,45 @@ describe("the origin store", () => {
 
     expect(await keysOf(shared)).not.toContain(store.sessionKey(first));
     expect(store.read().people).toStrictEqual(new Map([[ada, second]]));
+  });
+
+  it("keeps the tile the core opened last, whoever's it is, though an older one promotes after", async () => {
+    const {
+      stores: [older, newer],
+      shared: [olderDb, newerDb],
+      deliver,
+    } = await tabs(2);
+
+    if (
+      older === undefined ||
+      newer === undefined ||
+      olderDb === undefined ||
+      newerDb === undefined
+    ) {
+      throw new Error("No tab");
+    }
+
+    const adaSlot = newSlot();
+    const boSlot = newSlot();
+
+    await signIn(olderDb, older, adaSlot, "user-ada|tile-2");
+    await signIn(newerDb, newer, boSlot, "user-bo|tile-3");
+
+    // Bo's tile, which the core opened last and which ended Ada's, promotes first.
+    await settleSignIn(newer, boSlot, { userId: bo, session: "user-bo|tile-3", joined: tileAs(3) });
+
+    const settled = await settleSignIn(older, adaSlot, {
+      userId: ada,
+      session: "user-ada|tile-2",
+      joined: tileAs(2),
+    });
+
+    await deliver();
+
+    expect({ settled, origin: newer.read() }).toStrictEqual({
+      settled: false,
+      origin: { device: null, active: boSlot, people: new Map([[bo, boSlot]]) },
+    });
   });
 
   it("moves a shared device to the tile opened last, on a slot of its own", async () => {
@@ -679,7 +729,11 @@ describe("any interleaving of sign-ins, joins, promotions, sign-outs, and forget
                     settleSignIn(store, promotion.slot, {
                       userId: PEOPLE[promotion.person],
                       session: promotion.session,
-                      joined: { deviceId: "device-1", sequence: promotion.sequence },
+                      joined: {
+                        deviceId: "device-1",
+                        sequence: promotion.sequence,
+                        scope: "person",
+                      },
                     }),
                   );
                 });

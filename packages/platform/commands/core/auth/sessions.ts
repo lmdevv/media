@@ -36,7 +36,14 @@ const currentResult = v.object({
       v.literal("music:edit"),
     ),
   ),
-  device: v.union(v.null(), v.object({ deviceId: v.id("devices"), joinSequence: v.number() })),
+  device: v.union(
+    v.null(),
+    v.object({
+      deviceId: v.id("devices"),
+      joinSequence: v.number(),
+      scope: v.union(v.literal("person"), v.literal("device")),
+    }),
+  ),
 });
 
 const endArgs = v.object({ sessionId: v.id("authSessions") });

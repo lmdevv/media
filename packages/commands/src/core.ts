@@ -192,7 +192,14 @@ export const core = [
         v.literal("guest"),
       ),
       scopes: v.array(credentialScope),
-      device: v.union(v.null(), v.object({ deviceId: v.id("devices"), joinSequence: v.number() })),
+      device: v.union(
+        v.null(),
+        v.object({
+          deviceId: v.id("devices"),
+          joinSequence: v.number(),
+          scope: v.union(v.literal("person"), v.literal("device")),
+        }),
+      ),
     }),
   }),
   mutation("core.auth.sessions.end", {

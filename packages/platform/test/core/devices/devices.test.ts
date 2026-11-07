@@ -126,7 +126,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     );
     expect(await savedFirst.client.query(api.core.auth.sessions.current, {})).toMatchObject({
       userId: ada.userId,
-      device: { deviceId: laptop.deviceId, joinSequence: 3 },
+      device: { deviceId: laptop.deviceId, joinSequence: 3, scope: "person" },
     });
 
     const setMode = (mode: "personal" | "shared") =>
@@ -159,8 +159,8 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
       bo: (await currentOf(boTile)).device,
       adaAfter: await refusal(currentOf(adaTile)),
     }).toStrictEqual({
-      ada: { deviceId: tv.deviceId, joinSequence: 2 },
-      bo: { deviceId: tv.deviceId, joinSequence: 3 },
+      ada: { deviceId: tv.deviceId, joinSequence: 2, scope: "device" },
+      bo: { deviceId: tv.deviceId, joinSequence: 3, scope: "device" },
       adaAfter: "unauthenticated",
     });
   });
