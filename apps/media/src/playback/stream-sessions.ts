@@ -1156,10 +1156,7 @@ const make = Effect.gen(function* () {
         (audience === "household"
           ? pool.household(opened.scope, claimant)
           : pool.guest(opened.scope, claimant).pipe(
-              Effect.timeoutOrElse({
-                duration: wait,
-                orElse: () => Effect.fail(new TranscodeCapacityReached({ limit: pool.limit })),
-              }),
+              stopWaitingAfter(wait, () => new TranscodeCapacityReached({ limit: pool.limit })),
               Effect.interruptible,
             )
         ).pipe(

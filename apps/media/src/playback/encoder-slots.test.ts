@@ -295,6 +295,23 @@ describe("encoder slots", () => {
     }),
   );
 
+  it.effect("a guest whose scope closes while it waits starts no encoder", () =>
+    Effect.gen(function* () {
+      const pool = yield* EncoderSlots.make(1);
+      yield* pool.household(yield* Scope.make(), claimant("household", 1));
+      const scope = yield* Scope.make();
+      const waiting = yield* Effect.forkChild(pool.guest(scope, claimant("guest", 2)));
+
+      yield* stillRunning(waiting);
+      yield* close(scope);
+
+      const held = yield* Fiber.join(waiting);
+
+      yield* held.ready;
+      assert.isTrue(yield* held.isDisplaced, "the holder gives up");
+    }),
+  );
+
   it.effect("an interrupted wait leaves the line", () =>
     Effect.gen(function* () {
       const pool = yield* EncoderSlots.make(1);
