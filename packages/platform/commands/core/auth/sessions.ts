@@ -36,6 +36,7 @@ const currentResult = v.object({
       v.literal("music:edit"),
     ),
   ),
+  device: v.union(v.null(), v.object({ deviceId: v.id("devices"), joinSequence: v.number() })),
 });
 
 const endArgs = v.object({ sessionId: v.id("authSessions") });
@@ -52,7 +53,7 @@ const revokeResult = v.object({ confirmed: v.literal(true) });
 
 /** The handlers `convex/core/auth/sessions.ts` passes to `register`, one per `core.auth.sessions` command. */
 export interface Handlers {
-  /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, and with which scopes. */
+  /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, with which scopes, and on which device in what order. */
   readonly current: (
     ctx: Omit<QueryCtx, "auth">,
     args: Record<string, never>,

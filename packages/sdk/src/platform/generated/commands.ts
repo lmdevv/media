@@ -298,6 +298,13 @@ const core_auth_sessions_current = query({
         Schema.Literal("music:edit"),
       ]),
     ),
+    device: Schema.Union([
+      Schema.Null,
+      Schema.Struct({
+        deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+        joinSequence: Schema.Finite,
+      }),
+    ]),
   }),
 });
 
@@ -1892,7 +1899,7 @@ export const effectMethods = (method: EffectBuilder) => ({
         start: method.action(core_auth_deviceCodes_start),
       },
       sessions: {
-        /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, and with which scopes. */
+        /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, with which scopes, and on which device in what order. */
         current: method.query(core_auth_sessions_current),
         /** `core.auth.sessions.end` (mutation, account): Sign out one of your sessions. */
         end: method.mutation(core_auth_sessions_end),
@@ -2132,7 +2139,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         start: method.action(core_auth_deviceCodes_start),
       },
       sessions: {
-        /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, and with which scopes. */
+        /** `core.auth.sessions.current` (query, signed-in): Show who is signed in, how, with which scopes, and on which device in what order. */
         current: method.query(core_auth_sessions_current),
         /** `core.auth.sessions.end` (mutation, account): Sign out one of your sessions. */
         end: method.mutation(core_auth_sessions_end),

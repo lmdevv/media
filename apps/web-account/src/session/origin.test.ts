@@ -188,12 +188,12 @@ describe("the origin store", () => {
     const second = newSlot();
 
     await signIn(shared, store, first, "user-ada|s1");
-    await settleSignIn(store, first, { userId: ada, session: "user-ada|s1", joined: null });
+    await settleSignIn(store, first, { userId: ada, session: "user-ada|s1", joined: joinedAs(1) });
 
     // The next tile signs in on a fresh slot, since its sign-in may not replace Ada's session.
     await signIn(shared, store, first, "user-bo|s2");
     await signIn(shared, store, second, "user-bo|s2");
-    await settleSignIn(store, second, { userId: bo, session: "user-bo|s2", joined: null });
+    await settleSignIn(store, second, { userId: bo, session: "user-bo|s2", joined: joinedAs(2) });
 
     // Opening it ended Ada's tile, so the account client forgets that slot by Ada's session.
     await store.forget(first, "user-ada|s1");
@@ -222,7 +222,6 @@ describe("the origin store", () => {
     await store.forget(slot, "user-ada|s1");
 
     expect((await keysOf(shared)).toSorted()).toStrictEqual([
-      "media.generation:user-ada",
       "media.joined.user-ada",
       "media.revoked:user-ada|s0",
       "media.signOut:user-ada|s0",
@@ -321,7 +320,7 @@ describe("the origin store", () => {
 
     expect(store.read()).toStrictEqual({ device: null, active: null, people: new Map() });
     await expect(
-      store.promote(newSlot(), { userId: ada, session: "user-ada|s1", joined: null }),
+      store.promote(newSlot(), { userId: ada, session: "user-ada|s1", joined: joinedAs(1) }),
     ).rejects.toThrow("can't keep a sign-in");
     await expect(store.sessions.read((tx) => tx.keys())).rejects.toThrow();
   });
@@ -512,10 +511,14 @@ describe("the origin store", () => {
     const adaSession = sessionAs("user-ada|session-1");
 
     await Effect.runPromise(here.save(adaSession));
-    await signingOut.promote(slot, { userId: ada, session: "user-ada|session-1", joined: null });
+    await signingOut.promote(slot, {
+      userId: ada,
+      session: "user-ada|session-1",
+      joined: joinedAs(1),
+    });
     await Effect.runPromise(here.revoke(adaSession));
     await Effect.runPromise(there.save(sessionAs("user-bo|session-2")));
-    await opening.promote(slot, { userId: bo, session: "user-bo|session-2", joined: null });
+    await opening.promote(slot, { userId: bo, session: "user-bo|session-2", joined: joinedAs(2) });
     await signingOut.forget(slot, "user-ada|session-1");
 
     expect({

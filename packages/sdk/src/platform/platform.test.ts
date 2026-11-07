@@ -194,6 +194,7 @@ describe("Platform", () => {
               sessionId: "session-1",
               kind: "password",
               scopes: ["account"],
+              device: null,
             },
           }),
         );

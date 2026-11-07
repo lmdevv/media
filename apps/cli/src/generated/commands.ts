@@ -390,7 +390,7 @@ export const generatedCommands = [
     kind: "query",
     scope: "signed-in",
     refusesKeys: false,
-    summary: "Show who is signed in, how, and with which scopes",
+    summary: "Show who is signed in, how, with which scopes, and on which device in what order",
     secrets: [],
     paginated: false,
     args: Schema.Struct({}),
@@ -423,6 +423,13 @@ export const generatedCommands = [
           Schema.Literal("music:edit"),
         ]),
       ),
+      device: Schema.Union([
+        Schema.Null,
+        Schema.Struct({
+          deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+          joinSequence: Schema.Finite,
+        }),
+      ]),
     }),
     method: (platform) => platform.core.auth.sessions.current,
   }),

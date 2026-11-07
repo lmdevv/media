@@ -24,7 +24,16 @@ const sessionFields = {
   generation: v.number(),
 };
 
-const boundDevice = v.object({ id: v.id("devices"), generation: v.number() });
+const boundDevice = v.object({
+  id: v.id("devices"),
+  generation: v.number(),
+  /**
+   * The session's number in the order sessions took the device: joined a personal device, or took
+   * a shared device's tile. A later one ends this session there, so a client keeps the highest.
+   * Absent on a session bound before the count began.
+   */
+  joined: v.optional(v.number()),
+});
 
 const generations = {
   /** Bumped when every password and device session of the user ends. */

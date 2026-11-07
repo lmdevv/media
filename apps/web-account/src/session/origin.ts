@@ -1,4 +1,4 @@
-import { latestGeneration, slotHolding } from "@media/sdk/promise";
+import { slotHolding } from "@media/sdk/promise";
 import type { SharedStore, SharedTransaction } from "@media/sdk/promise";
 import { randomUuid } from "@media/ui/lib/secure-context";
 import { Brand, Option, Schema } from "effect";
@@ -17,8 +17,9 @@ const SlotId = Brand.nominal<SlotId>();
 const UserId = Brand.nominal<UserId>();
 
 /**
- * Where the core joined a sign-in to this browser's device, and its place in the order sessions
- * joined it. Of two sign-ins of one person there, the core kept the later join's session live.
+ * Where the core bound a sign-in to this browser's device, and its place in the order sessions
+ * took it: joined a personal device, or took a shared device's tile. A later one ends the earlier
+ * session there, so the core keeps the higher one's live.
  */
 interface Joined {
   readonly deviceId: string;
@@ -27,12 +28,12 @@ interface Joined {
 
 /**
  * A finished sign-in on a slot: whose it is, the session it stored as its token's subject, and
- * where the core joined it, if it enrolled.
+ * where and in what order the core bound it to this browser's device.
  */
 export interface SignedIn {
   readonly userId: UserId;
   readonly session: string;
-  readonly joined: Joined | null;
+  readonly joined: Joined;
 }
 
 /** What this browser holds for every client on the origin. */
@@ -66,11 +67,10 @@ export interface OriginStore {
   /**
    * Makes `slot` the one holding the person of `signedIn`, and the active slot; whether it did. It
    * does only while `slot` still holds that very session, and only for the sign-in whose session
-   * the core kept: with a join, one that joined this device later than any promoted before,
-   * whatever order the tabs promote in; without, as for a tile, the person's newest sign-in here.
-   * A different slot that held the person before goes, since the core keeps one session per
-   * person per device, and so does whoever `slot` held before, as on a shared device whose one
-   * slot a new tile took. Idempotent.
+   * the core kept: one bound to this device later than any promoted before, by the core's order,
+   * whatever order the tabs promote in. No local clock or counter decides. A different slot that
+   * held the person before goes, since the core keeps one session per person per device, and so
+   * does whoever `slot` held before. Idempotent.
    */
   readonly promote: (slot: SlotId, signedIn: SignedIn) => Promise<boolean>;
   /** Makes `slot` the one every client acts as. */
@@ -220,16 +220,13 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
 
         const last = await lastJoin(tx, userId);
 
-        // A join on another device is newer: the browser keeps one device code, and a cleared one
-        // is never used again.
-        const kept =
-          joined === null
-            ? held.value.generation >= (await latestGeneration(tx, userId))
-            : Option.match(last, {
-                onNone: () => true,
-                onSome: (stored) =>
-                  stored.deviceId !== joined.deviceId || stored.sequence < joined.sequence,
-              });
+        // The core's order alone decides; a join on another device is newer, since the browser
+        // keeps one device code and a cleared one is never used again.
+        const kept = Option.match(last, {
+          onNone: () => true,
+          onSome: (stored) =>
+            stored.deviceId !== joined.deviceId || stored.sequence < joined.sequence,
+        });
 
         if (!kept) return false;
 
@@ -263,9 +260,7 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
         await tx.set(`${PERSON}${userId}`, slot);
         await tx.set(ACTIVE, slot);
 
-        if (joined !== null) {
-          await tx.set(`${JOINED}${userId}`, encodeJoin({ ...joined, session }));
-        }
+        await tx.set(`${JOINED}${userId}`, encodeJoin({ ...joined, session }));
 
         return true;
       }),

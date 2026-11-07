@@ -70,6 +70,8 @@ const CONTENT_SCOPES = roleScopes.member.filter((scope) => scope !== "account");
 
 const LOCKED_BY_KID = { state: "locked", because: ["kid-listed"], opensWith: "self" };
 
+const currentOf = (tile: SignedIn) => tile.client.query(api.core.auth.sessions.current, {});
+
 describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
   afterEach(async () => {
     await listed.clear();
@@ -124,6 +126,7 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     );
     expect(await savedFirst.client.query(api.core.auth.sessions.current, {})).toMatchObject({
       userId: ada.userId,
+      device: { deviceId: laptop.deviceId, joinSequence: 3 },
     });
 
     const setMode = (mode: "personal" | "shared") =>
@@ -138,6 +141,28 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     const afterModes = await enroll(await signInAs(stack, ada.person), "Laptop", laptop.device);
 
     expect(afterModes.joinSequence).toBe(4);
+  });
+
+  it("numbers each tile a shared device opens after its joins, and keeps open only the highest", async () => {
+    if (stack === undefined) return;
+    const admin = await sharedAdmin(stack);
+    const ada = await listed.adult(await member(stack, "ada"));
+    const bo = await listed.adult(await member(stack, "bo"));
+    const tv = await sharedDevice(stack, admin);
+
+    const adaTile = await openTile(stack, tv, ada.userId);
+    const adaOpened = (await currentOf(adaTile)).device;
+    const boTile = await openTile(stack, tv, bo.userId);
+
+    expect({
+      ada: adaOpened,
+      bo: (await currentOf(boTile)).device,
+      adaAfter: await refusal(currentOf(adaTile)),
+    }).toStrictEqual({
+      ada: { deviceId: tv.deviceId, joinSequence: 2 },
+      bo: { deviceId: tv.deviceId, joinSequence: 3 },
+      adaAfter: "unauthenticated",
+    });
   });
 
   it("lists on a shared device only the people who opted in", async () => {

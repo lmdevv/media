@@ -111,13 +111,12 @@ const joinDevice = async (
     ),
   );
 
-  await ctx.db.patch(caller.sessionId, {
-    device: { id: device._id, generation: device.generation },
-  });
-
   const joined = (device.joins ?? 0) + 1;
 
   await ctx.db.patch(device._id, { joins: joined });
+  await ctx.db.patch(caller.sessionId, {
+    device: { id: device._id, generation: device.generation, joined },
+  });
 
   return joined;
 };
@@ -170,7 +169,9 @@ export const insert = internalMutation({
       mode: "personal",
     });
 
-    await ctx.db.patch(caller.sessionId, { device: { id: deviceId, generation } });
+    await ctx.db.patch(caller.sessionId, {
+      device: { id: deviceId, generation, joined: joinSequence },
+    });
 
     return { deviceId, joinSequence };
   },

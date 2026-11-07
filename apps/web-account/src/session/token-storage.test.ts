@@ -101,7 +101,7 @@ describe("token storage shared between tabs in IndexedDB", () => {
 
     expect(answer).toStrictEqual({
       revoked: true,
-      keys: ["media.generation:ada", "s"],
+      keys: ["s"],
       revocation: "missing",
       late: false,
     });
@@ -217,9 +217,6 @@ describe("token storage shared between tabs in IndexedDB", () => {
     );
 
     const kept = [
-      "media.generation:ada",
-      "media.generation:bo",
-      "media.generation:cleo",
       "media.revoked:ada|session-1",
       "media.revoked:cleo|session-3",
       "media.signOut:cleo|session-3",

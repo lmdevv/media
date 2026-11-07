@@ -260,22 +260,18 @@ const REVOKED = "media.revoked:";
 const PENDING = "media.signOut:";
 
 const SlotRecord = Schema.fromJsonString(
-  Schema.Struct({ session: Schema.String, user: Schema.String, generation: Schema.Finite }),
+  Schema.Struct({ session: Schema.String, user: Schema.String }),
 );
 
 const decodeSlot = Schema.decodeUnknownOption(SlotRecord);
 
 const encodeSlot = Schema.encodeSync(SlotRecord);
 
-/** What a slot holds: its session, whose it is, and which of that person's sign-ins it was. */
+/** What a slot holds: its session and whose it is. */
 export interface SlotHolding {
   readonly session: string;
   readonly user: string;
-  readonly generation: number;
 }
-
-/** The person's sign-in counter, raised inside each sign-in's transaction. */
-const GENERATION = "media.generation:";
 
 /** What the slot under `key` holds, read inside `tx`; none for an empty or unreadable slot. */
 export const slotHolding = async (
@@ -283,10 +279,6 @@ export const slotHolding = async (
   key: string,
 ): Promise<Option.Option<SlotHolding>> =>
   Option.flatMap(Option.fromNullishOr(await tx.get(key)), decodeSlot);
-
-/** The newest sign-in generation of `user`, read inside `tx`; 0 before any. */
-export const latestGeneration = async (tx: SharedTransaction, user: string): Promise<number> =>
-  Number((await tx.get(`${GENERATION}${user}`)) ?? "0") || 0;
 
 const tokensIn = async (tx: SharedTransaction, key: string) =>
   Option.flatMap(Option.fromNullishOr(await tx.get(key)), parseStoredSession);
@@ -375,11 +367,9 @@ export const layerShared = (store: SharedStore, slot: string): Layer.Layer<Token
             }
 
             const user = id.split("|")[0] ?? id;
-            const generation = (await latestGeneration(tx, user)) + 1;
 
-            await tx.set(`${GENERATION}${user}`, String(generation));
             await tx.set(tokensKey(id), serializeSession(session));
-            await tx.set(slot, encodeSlot({ session: id, user, generation }));
+            await tx.set(slot, encodeSlot({ session: id, user }));
 
             return true;
           }),

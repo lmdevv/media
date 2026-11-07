@@ -33,6 +33,7 @@ const meAs = (scopes: Me["scopes"], kind: Me["kind"] = "password"): Me => ({
   sessionId: Brand.nominal<Me["sessionId"]>()("session-1"),
   kind,
   scopes,
+  device: null,
 });
 
 const deviceId = Brand.nominal<SharedPicker["deviceId"]>()("device-1");

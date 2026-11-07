@@ -60,17 +60,16 @@ One origin's IndexedDB database `media` holds every client's sign-in state, in o
 `kv` of string keys. `session/origin.ts` names the origin's keys, and the SDK's `layerShared`
 names the session keys. `localStorage` holds nothing credential-bearing.
 
-| Key                                | Holds                                                                        |
-| ---------------------------------- | ---------------------------------------------------------------------------- |
-| `media.device`                     | this browser's device code, `dv_<id>.<secret>`                               |
-| `media.active`                     | the slot every client on the origin acts as                                  |
-| `media.person.<userId>`            | the slot that holds that person's session                                    |
-| `media.session.<slotId>`           | the slot's session: its id, its person, and that person's sign-in generation |
-| `media.session.<slotId>:<session>` | that session's tokens                                                        |
-| `media.revoked:<session>`          | a sign-out, and the core's confirmation once it comes                        |
-| `media.signOut:<session>`          | a sign-out the core has not confirmed, for any client                        |
-| `media.generation:<userId>`        | the person's sign-in counter, raised by each sign-in                         |
-| `media.joined.<userId>`            | the last device join promoted for the person: device, number, and session    |
+| Key                                | Holds                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------- |
+| `media.device`                     | this browser's device code, `dv_<id>.<secret>`                            |
+| `media.active`                     | the slot every client on the origin acts as                               |
+| `media.person.<userId>`            | the slot that holds that person's session                                 |
+| `media.session.<slotId>`           | the slot's session: its id and its person                                 |
+| `media.session.<slotId>:<session>` | that session's tokens                                                     |
+| `media.revoked:<session>`          | a sign-out, and the core's confirmation once it comes                     |
+| `media.signOut:<session>`          | a sign-out the core has not confirmed, for any client                     |
+| `media.joined.<userId>`            | the last device join promoted for the person: device, number, and session |
 
 - **A slot** is a random local name for one sign-in's tokens. A password, setup, invite, or reset
   sign-in starts before the client knows whose session it is, so the key cannot carry the
@@ -126,9 +125,8 @@ every tab of the origin, and which works outside secure contexts.
     sign-in goes to a fresh slot, an empty one, one whose session is over (signed out here, or its
     tokens gone), or the one already holding that same session. A tile on a shared device signs in
     on a fresh slot through a short-lived client, and the slot of the tile it replaced is then
-    forgotten by that session's name. Otherwise the sign-in raises the person's sign-in
-    generation and writes the tokens and the slot's session, person, and generation, and it
-    answers the session it stored. However late an answer lands, it is judged by these records
+    forgotten by that session's name. Otherwise the sign-in writes the tokens and the slot's
+    session and person, and it answers the session it stored. However late an answer lands, it is judged by these records
     alone.
   - A renewal writes new tokens only while the stored tokens are still the ones the refresh
     started from and no revocation exists.
@@ -138,13 +136,15 @@ every tab of the origin, and which works outside secure contexts.
     writing the records again.
   - Every change names what it expects and does nothing if the store no longer matches. A promote
     goes ahead only while the slot holds that person, and only for the sign-in whose session the
-    core kept. The core decides that, not the tabs: each enrollment answers its join's number on
-    the device (`joinSequence`, counted on the device row), and a join ends the person's earlier
-    session there (ADR 0006). So a promote goes ahead only with a higher number than the person's
-    last promoted join on that device, whichever tab saved or promotes first. A join on another
-    device counts as newer, since a cleared device code is never used again. A tile, which
-    enrolls nothing, goes by the person's newest sign-in generation instead. A slot that lost is
-    forgotten. The person's older slot goes too, but only while it still holds the session last
+    core kept. The core decides that, not the tabs. Every session the core binds to a device
+    takes the next number on the device's count, kept on the device row: a personal device's
+    join, which ends the person's earlier session there (ADR 0006), and a shared device's tile,
+    which ends the tile session the device held. Enrollment answers the number
+    (`joinSequence`), and `core.auth.sessions.current` names the device and number of any bound
+    session, as a tile's. A promote needs that number and goes ahead only when it is higher than
+    the person's last promoted one on that device, whichever tab saved or promotes first. A
+    number on another device counts as newer, since a cleared device code is never used again.
+    There is no local counter or clock to fall back on. A slot that lost is forgotten. The person's older slot goes too, but only while it still holds the session last
     promoted, so another person's sign-in, or a newer one of this person, saved there since stays.
     The last join outlives a sign-out, so an ended session that answers late is never promoted. A forget
     names the slot and the session it signed out, and goes ahead only while the slot still holds

@@ -13,6 +13,7 @@ const me = (scopes: Me["scopes"], kind: Me["kind"]): Me => ({
   sessionId: Brand.nominal<Me["sessionId"]>()("s1"),
   kind,
   scopes,
+  device: null,
 });
 
 describe("NeedsAccountScreen", () => {

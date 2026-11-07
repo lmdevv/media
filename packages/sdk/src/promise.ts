@@ -58,7 +58,7 @@ export { createPlatform } from "./platform/promise";
 
 export { openIndexedDb } from "./shared-store";
 
-export { latestGeneration, slotHolding } from "./token-storage";
+export { slotHolding } from "./token-storage";
 
 export type { SlotHolding } from "./token-storage";
 

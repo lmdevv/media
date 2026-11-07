@@ -31,6 +31,7 @@ const person = (kind: Me["kind"], scopes: Me["scopes"]): Me => ({
   sessionId: Brand.nominal<Me["sessionId"]>()("s1"),
   kind,
   scopes,
+  device: null,
 });
 
 const hrefs = (html: string): ReadonlyArray<string> =>

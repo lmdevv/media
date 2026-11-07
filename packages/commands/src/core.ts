@@ -176,7 +176,7 @@ export const core = [
   }),
 
   query("core.auth.sessions.current", {
-    summary: "Show who is signed in, how, and with which scopes",
+    summary: "Show who is signed in, how, with which scopes, and on which device in what order",
     scope: "signed-in",
     args: {},
     result: v.object({
@@ -192,6 +192,7 @@ export const core = [
         v.literal("guest"),
       ),
       scopes: v.array(credentialScope),
+      device: v.union(v.null(), v.object({ deviceId: v.id("devices"), joinSequence: v.number() })),
     }),
   }),
   mutation("core.auth.sessions.end", {

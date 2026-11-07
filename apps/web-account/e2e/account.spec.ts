@@ -168,6 +168,28 @@ test("two tabs signing one person in keep the session the core kept, whichever p
   await expect(page.getByRole("link", { name: `${person.username}, switch person` })).toBeVisible();
 });
 
+/**
+ * Sets whether a person is on every shared device's picker. The listing is the server's, so tests
+ * in other workers change it at once and the core may give up on a conflict; it is tried again.
+ */
+const setListed = async (
+  platform: PlatformSdk,
+  userId: Parameters<PlatformSdk["core"]["devices"]["tiles"]["setListed"]>[0]["userId"],
+  listed: boolean,
+  attempts = 5,
+): Promise<void> => {
+  try {
+    await platform.core.devices.tiles.setListed({ userId, listed });
+  } catch (cause) {
+    if (attempts <= 1 || !String(cause).includes("OptimisticConcurrencyControlFailure")) {
+      throw cause;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100 * Math.random()));
+    await setListed(platform, userId, listed, attempts - 1);
+  }
+};
+
 /** Puts `person` on every shared device's picker; the returned step takes them off again. */
 const listOnSharedDevices = async (core: Stack, person: Person) => {
   const platform = openPlatform(core);
@@ -175,10 +197,10 @@ const listOnSharedDevices = async (core: Stack, person: Person) => {
   await platform.session.signInWithPassword(person);
   const { userId } = await platform.core.auth.sessions.current();
 
-  await platform.core.devices.tiles.setListed({ userId, listed: true });
+  await setListed(platform, userId, true);
 
   return async () => {
-    await platform.core.devices.tiles.setListed({ userId, listed: false });
+    await setListed(platform, userId, false);
     await platform.dispose();
   };
 };
@@ -251,6 +273,61 @@ test("a shared device opens each tile on a slot of its own, and drops the tile i
 
     expect(tokens).toHaveLength(1);
   } finally {
+    await Promise.all(unlist.map((step) => step()));
+    await host.dispose();
+  }
+});
+
+test("two tabs opening tiles at once keep the tile the core opened last", async ({
+  page,
+  context,
+}) => {
+  if (stack === null) return;
+
+  const admin = await createPerson(stack, "admin", "admin");
+  const ada = await createPerson(stack, "ada");
+  const bo = await createPerson(stack, "bo");
+  const unlist = await Promise.all([ada, bo].map((person) => listOnSharedDevices(stack, person)));
+  const host = openPlatform(stack);
+  const other = await context.newPage();
+  const { promise: released, resolve: release } = Promise.withResolvers<void>();
+  const { promise: reachedCore, resolve: opened } = Promise.withResolvers<void>();
+
+  // Tab A's tile opening reaches the core first, but its answer waits until tab B is done.
+  await page.route("**/api/action", async (route) => {
+    if (!(route.request().postData() ?? "").includes('"tile"')) return route.fallback();
+
+    const response = await route.fetch();
+
+    opened();
+    await released;
+    await route.fulfill({ response });
+  });
+
+  try {
+    await signIn(page, admin);
+    await expect(page.getByRole("button", { name: admin.username, exact: true })).toBeVisible();
+    await host.session.signInWithPassword(admin);
+    await host.core.devices.registry.setMode({
+      deviceId: Brand.nominal<DeviceRowId>()((await readStore(page)).deviceId),
+      mode: "shared",
+    });
+
+    await page.reload();
+    await other.goto("/");
+    await page.getByRole("button", { name: ada.username, exact: true }).click();
+    await reachedCore;
+
+    await other.getByRole("button", { name: bo.username, exact: true }).click();
+    await expect(other.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+
+    release();
+    await expect(page.getByRole("button", { name: ada.username, exact: true })).toBeVisible();
+
+    await other.reload();
+    await expect(other.getByRole("link", { name: `${bo.username}, switch person` })).toBeVisible();
+  } finally {
+    release();
     await Promise.all(unlist.map((step) => step()));
     await host.dispose();
   }

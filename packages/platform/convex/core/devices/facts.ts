@@ -151,17 +151,28 @@ export const requireTile = async (
   return decision.allowed ? user : tileRefusal(decision);
 };
 
-/** Puts a new tile session in the device's slot and ends the session the slot held. */
+/**
+ * Puts a new tile session in the device's slot and ends the session the slot held. Answers the
+ * session's number on the device, the same count personal joins take, which it also stores on the
+ * session: of two tiles opened at once, the higher number is the one still open.
+ */
 export const occupyTile = async (
   ctx: Pick<MutationCtx, "db">,
   device: SharedDevice,
   tile: { readonly userId: Id<"users">; readonly sessionId: Id<"authSessions"> },
-): Promise<void> => {
-  await ctx.db.patch(device._id, { tile });
+): Promise<number> => {
+  const joined = (device.joins ?? 0) + 1;
+
+  await ctx.db.patch(device._id, { tile, joins: joined });
+  await ctx.db.patch(tile.sessionId, {
+    device: { id: device._id, generation: device.generation, joined },
+  });
 
   if (device.tile !== null && device.tile.sessionId !== tile.sessionId) {
     await endSession(ctx, device.tile.sessionId);
   }
+
+  return joined;
 };
 
 /** Empties the device's slot, which ends its tile session and any kid's hold. */

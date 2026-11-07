@@ -6,14 +6,22 @@ import { endSession, endUserSessions } from "../sessions";
 const REFRESH_TOKEN_DIVIDER = "|";
 
 export const { current, end, endAll, revoke } = register({
-  current: (_ctx, _args, caller) => ({
-    userId: caller.userId,
-    username: caller.username,
-    role: caller.role,
-    sessionId: caller.sessionId,
-    kind: caller.sessionKind,
-    scopes: caller.scopes,
-  }),
+  current: async (ctx, _args, caller) => {
+    const session = await ctx.db.get(caller.sessionId);
+    const bound = session !== null && "device" in session ? session.device : undefined;
+
+    return {
+      userId: caller.userId,
+      username: caller.username,
+      role: caller.role,
+      sessionId: caller.sessionId,
+      kind: caller.sessionKind,
+      scopes: caller.scopes,
+      // Where the session took a device, and its number there: a later one ends it.
+      device:
+        bound?.joined === undefined ? null : { deviceId: bound.id, joinSequence: bound.joined },
+    };
+  },
   end: async (ctx, { sessionId }, caller) => {
     const session = await ctx.db.get(sessionId);
 
