@@ -34,6 +34,13 @@ export const credentialScopes = ["account", "admin", ...domainScopes] as const;
 export type CredentialScope = (typeof credentialScopes)[number];
 
 /**
+ * The scopes only a service principal's API key holds. No role allows one and no command requires
+ * one, so no person can hold them. `media-service` reaches the functions the media server calls
+ * (ADR 0010).
+ */
+export const serviceScopes = ["media-service"] as const;
+
+/**
  * Who may call a command. The generated Convex function checks it on every call: `public` needs no
  * session, `signed-in` needs any live session, and a credential scope needs a live session that
  * holds it.

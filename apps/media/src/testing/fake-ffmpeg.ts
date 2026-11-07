@@ -28,6 +28,11 @@ export interface FakeFfmpegBehavior {
    */
   readonly hlsStallsAfterFragments?: number;
   /**
+   * HLS runs that stall exit with status 1 once a file named `cue` exists beside the stand-in, as
+   * an encoder that fails while a request waits on it would.
+   */
+  readonly hlsStallsUntilCue?: true;
+  /**
    * Quick Sync runs that start before this many seconds write their init segment and first
    * fragment, then exit with status 1, as a device lost right after its first fragment would;
    * later Quick Sync runs encode in software.
@@ -49,7 +54,7 @@ const QSV_ONLY = [
 
 const script = (realFfmpeg: string, behavior: FakeFfmpegBehavior): string => `#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -152,7 +157,11 @@ if (stalls || failsAfterFirst) {
 
   if (status !== 0) process.exit(status);
   if (failsAfterFirst) process.exit(1);
-  setInterval(() => {}, 60_000);
+  const cue = join(dirname(process.argv[1] ?? ""), "cue");
+
+  setInterval(() => {
+    if (behavior.hlsStallsUntilCue === true && existsSync(cue)) process.exit(1);
+  }, behavior.hlsStallsUntilCue === true ? 50 : 60_000);
 } else {
   const result = spawnSync(${JSON.stringify(realFfmpeg)}, args, { stdio: "inherit" });
 

@@ -21,6 +21,11 @@ describe("the name a guest gives", () => {
     ["a control character", "Sam\u0000"],
     ["a right-to-left override that reorders what others see", "Sam‮nimda"],
     ["a directional isolate", "Sam⁦admin"],
+    ["only zero-width spaces", "\u200B\u200B"],
+    ["only a zero-width joiner", "\u200D"],
+    ["only a Hangul filler", "\u3164"],
+    ["only a soft hyphen and a combining mark", "\u00AD\u0301"],
+    ["only blank Braille patterns", "\u2800\u2800"],
   ])("refuses %s", (_name, typed) => {
     expect(() => requireGuestName(typed)).toThrow(/printable/u);
   });

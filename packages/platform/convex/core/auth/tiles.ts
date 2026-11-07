@@ -143,6 +143,11 @@ const checkCode = async (
     );
   }
 
+  await ctx.runMutation(internal.core.devices.unlockCodes.refundRightCode, {
+    deviceId: attempt.deviceId,
+    by,
+  });
+
   return { kind: "code", by, codeId: attempt.codeId };
 };
 

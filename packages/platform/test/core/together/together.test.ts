@@ -1,21 +1,17 @@
 import { makeFunctionReference } from "convex/server";
 import type { FunctionArgs } from "convex/server";
-import { ConvexError } from "convex/values";
-import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { ContentDomain } from "../../../commands/scopes";
 import { api } from "../../../convex/_generated/api";
-import type { Id } from "../../../convex/_generated/dataModel";
 import { inOrder } from "../../../convex/core/lib/inOrder";
 import { BLOCKED_MAX } from "../../../convex/core/together/model";
 import { member } from "../../devices";
 import type { Member } from "../../devices";
-import { importRows, newestRows } from "../../rows";
-import { refusal, unique } from "../../sign-in";
+import { failureOf, refusal } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
-import { catalog, guestOf, joinedView, kidOf, watch } from "../../together";
+import { catalog, guestOf, joinedView, kidOf, plantedStrangers, watch } from "../../together";
 import type { Catalog } from "../../together";
 
 const stack = coreStackFromEnvFile();
@@ -52,54 +48,6 @@ const memberNames = async (who: Member): Promise<ReadonlyArray<string>> =>
 
 const configureAs = (who: Member, settings: Required<Settings>) =>
   who.signedIn.client.mutation(api.core.together.configure, { domain: "movies", ...settings });
-
-const ServiceRow = Schema.fromJsonString(
-  Schema.Struct({ _id: Schema.String, name: Schema.optional(Schema.String) }),
-);
-
-// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
-// stack's export wrote this one as a `users` id; the backend checks it again when a call names it.
-const isUserId = (value: string): value is Id<"users"> => value.length > 0;
-
-const plantedStrangers = (count: number): ReadonlyArray<Id<"users">> => {
-  const prefix = `stranger-${unique()}-`;
-
-  importRows(
-    "users",
-    Array.from({ length: count }, (_, index) => ({
-      kind: "service" as const,
-      name: `${prefix}${index}`,
-      sessionGeneration: 0,
-      keyGeneration: 0,
-    })),
-  );
-
-  const ids = newestRows("users", count + 100)
-    .map((line) => Schema.decodeSync(ServiceRow)(line))
-    .flatMap((row) =>
-      row.name?.startsWith(prefix) === true && isUserId(row._id) ? [row._id] : [],
-    );
-
-  if (ids.length !== count) throw new Error(`planted ${ids.length} of ${count} strangers`);
-
-  return ids;
-};
-
-const ErrorData = Schema.Struct({ code: Schema.String, message: Schema.String });
-
-const failureOf = async (
-  call: Promise<unknown>,
-): Promise<{ readonly code: string; readonly message: string }> => {
-  try {
-    await call;
-  } catch (cause) {
-    if (cause instanceof ConvexError) return Schema.decodeUnknownSync(ErrorData)(cause.data);
-
-    throw cause;
-  }
-
-  throw new Error("the call was not refused");
-};
 
 /** `core.together.add` as a client that does not use the generated types sends it. */
 const untypedAdd = makeFunctionReference<

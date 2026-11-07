@@ -256,7 +256,7 @@ Report what this device plays, where it plays it, and the newest request it has 
 - CLI: `media auth player report`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ output: { kind: "local" } | { kind: "cast"; receiver: string } | { kind: "airplay"; receiver: string | null }; playback: { domain: "movies" | "music"; playing: boolean; positionMs: number } | null; applied: number }`
+- Arguments: `{ output: { kind: "local" } | { kind: "cast"; receiver: string | null } | { kind: "airplay"; receiver: string | null }; playback: { domain: "movies" | "music"; playing: boolean; positionMs: number } | null; applied: number }`
 - Result: `{ reportedAt: number }`
 
 ## `core.connect.player.requested`
@@ -287,7 +287,7 @@ List the online devices you can control with Connect, newest report first, with 
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `Array<{ deviceId: Id<"devices">; name: string; mode: "personal" | "shared"; output: { kind: "local" } | { kind: "cast"; receiver: string } | { kind: "airplay"; receiver: string | null }; playback: null | { domain: "movies" | "music"; playing: boolean; positionMs: number; at: number; pending: boolean }; reportedAt: number }>`
+- Result: `Array<{ deviceId: Id<"devices">; name: string; mode: "personal" | "shared"; output: { kind: "local" } | { kind: "cast"; receiver: string | null } | { kind: "airplay"; receiver: string | null }; playback: null | { domain: "movies" | "music"; playing: boolean; positionMs: number; at: number; pending: boolean }; reportedAt: number }>`
 
 ## `core.devices.approvals.approve`
 

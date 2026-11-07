@@ -24,7 +24,7 @@ import {
   tilePerson,
 } from "./facts";
 import type { SharedDevice } from "./facts";
-import { clearStrikes, codeOf, unlockLimit } from "./unlockCodes";
+import { clearStrikes, codeOf } from "./unlockCodes";
 
 /** A proof the provider checked, which `open` checks again against the rows it reads. */
 export const checkedProof = v.union(
@@ -93,8 +93,6 @@ export const open = internalMutation({
     if (prover !== null) await clearStrikes(ctx, device._id, prover.userId);
 
     if (proof.kind === "password") await refundAttempt(ctx, signInLimit(proof.usernameKey), now);
-
-    if (proof.kind === "code") await refundAttempt(ctx, unlockLimit(proof.by), now);
 
     if (proof.kind === "approval") await markRedeemed(ctx, proof.approvalId, sessionId);
 

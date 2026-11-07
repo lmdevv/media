@@ -55,6 +55,18 @@ export const credentialScope = v.union(
   v.literal("music:edit"),
 );
 
+/** The scopes only a service principal's API key holds. No role allows one. */
+export const serviceScopes = ["media-service"] as const;
+
+/** A scope only a service principal's API key holds. */
+export type ServiceScope = (typeof serviceScopes)[number];
+
+/** `ServiceScope` as a Convex validator. */
+export const serviceScope = v.union(v.literal("media-service"));
+
+/** A scope an API key can hold, a credential scope or a service scope, as a Convex validator. */
+export const keyScope = v.union(credentialScope, serviceScope);
+
 /** The content domains' scopes, the only scopes a session on a shared device holds. */
 export const domainScopes = [
   "movies:read",

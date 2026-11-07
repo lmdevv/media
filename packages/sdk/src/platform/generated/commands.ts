@@ -328,7 +328,10 @@ const core_connect_player_report = mutation({
   args: Schema.Struct({
     output: Schema.Union([
       Schema.Struct({ kind: Schema.Literal("local") }),
-      Schema.Struct({ kind: Schema.Literal("cast"), receiver: Schema.String }),
+      Schema.Struct({
+        kind: Schema.Literal("cast"),
+        receiver: Schema.Union([Schema.String, Schema.Null]),
+      }),
       Schema.Struct({
         kind: Schema.Literal("airplay"),
         receiver: Schema.Union([Schema.String, Schema.Null]),
@@ -384,7 +387,10 @@ const core_connect_targets_list = query({
       mode: Schema.Union([Schema.Literal("personal"), Schema.Literal("shared")]),
       output: Schema.Union([
         Schema.Struct({ kind: Schema.Literal("local") }),
-        Schema.Struct({ kind: Schema.Literal("cast"), receiver: Schema.String }),
+        Schema.Struct({
+          kind: Schema.Literal("cast"),
+          receiver: Schema.Union([Schema.String, Schema.Null]),
+        }),
         Schema.Struct({
           kind: Schema.Literal("airplay"),
           receiver: Schema.Union([Schema.String, Schema.Null]),

@@ -8,6 +8,9 @@ import type { GuestAccess, LinkDoc } from "./model";
 /** A guest's row: a person a share link let in. */
 export type GuestDoc = Extract<Doc<"users">, { readonly role: "guest" }>;
 
+export const isGuest = (user: Doc<"users"> | null): user is GuestDoc =>
+  user?.kind === "person" && user.role === "guest";
+
 /** Everything `can` reads about a link but what an action is about. */
 export type ShareStanding = Omit<ShareResource, "about">;
 

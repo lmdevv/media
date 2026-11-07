@@ -1,8 +1,10 @@
+import { ConvexClient } from "convex/browser";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { roleScopes } from "../../../commands/scopes";
 import { api, internal } from "../../../convex/_generated/api";
+import { NO_TILE } from "../../../convex/core/devices/facts";
 import { inOrder } from "../../../convex/core/lib/inOrder";
 import { PASSWORD_MAX } from "../../../convex/core/lib/passwords";
 import { runFunction } from "../../admin";
@@ -18,8 +20,10 @@ import {
   sharedTiles,
   tileIn,
 } from "../../devices";
-import type { Member } from "../../devices";
-import { refusal, signIn, signInAs } from "../../sign-in";
+import type { Member, Picker } from "../../devices";
+import { importRows } from "../../rows";
+import { failureOf, refusal, signIn, signInAs } from "../../sign-in";
+import type { SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
 
@@ -614,5 +618,137 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     });
 
     expect(await refusal(picker(stack, tv))).toBe("not_found");
+  });
+
+  it("refuses a person the shared devices do not list as having no tile, not as locked", async () => {
+    if (stack === undefined) return;
+    const admin = await sharedAdmin(stack);
+    const stranger = await member(stack, "stranger");
+    const tv = await sharedDevice(stack, admin);
+
+    expect(await failureOf(openTile(stack, tv, stranger.userId))).toEqual({
+      code: "not_found",
+      message: NO_TILE,
+    });
+  });
+
+  it("asks again once whoever approved has signed out everywhere", async () => {
+    if (stack === undefined) return;
+    const admin = await sharedAdmin(stack);
+    const dad = await member(stack, "dad");
+    await listed.kid(admin, await member(stack, "lily"));
+    const tv = await sharedDevice(stack, admin);
+    const phone = await signInAs(stack, dad.person);
+
+    const setListed = async (who: SignedIn, listing: boolean) => {
+      await who.client.mutation(api.core.devices.tiles.setListed, {
+        userId: dad.userId,
+        listed: listing,
+      });
+    };
+
+    const ask = () =>
+      anonymous(stack).mutation(api.core.devices.approvals.request, {
+        device: tv.device,
+        ask: { intent: "open", userId: dad.userId },
+      });
+
+    await setListed(dad.signedIn, true);
+
+    try {
+      const asked = await ask();
+
+      await phone.client.mutation(api.core.devices.approvals.approve, {
+        approvalId: asked.approvalId,
+      });
+      await phone.client.mutation(api.core.auth.sessions.endAll, { keepCurrent: false });
+
+      const proof = { kind: "approval", approvalId: asked.approvalId } as const;
+
+      expect(await refusal(openTile(stack, tv, dad.userId, proof))).toBe("expired");
+
+      const again = await ask();
+
+      expect(again.approvalId).not.toBe(asked.approvalId);
+      expect(await picker(stack, tv)).toMatchObject({
+        approval: { approvalId: again.approvalId, intent: "open", state: "pending" },
+      });
+    } finally {
+      await setListed(await signInAs(stack, dad.person), false);
+    }
+  });
+
+  it("shows every waiting prompt however many answered ones a person has", async () => {
+    if (stack === undefined) return;
+    const admin = await sharedAdmin(stack);
+    const dad = await listed.adult(await member(stack, "dad"));
+    await listed.kid(admin, await member(stack, "lily"));
+    const tv = await sharedDevice(stack, admin);
+    const den = await sharedDevice(stack, admin, "Den TV");
+
+    const asked = await anonymous(stack).mutation(api.core.devices.approvals.request, {
+      device: tv.device,
+      ask: { intent: "open", userId: dad.userId },
+    });
+
+    importRows(
+      "tileApprovals",
+      Array.from({ length: 60 }, () => ({
+        deviceId: den.deviceId,
+        intent: "open" as const,
+        userId: dad.userId,
+        expiresAt: asked.expiresAt - 1000,
+        state: "denied" as const,
+        answeredBy: dad.userId,
+      })),
+    );
+
+    expect(
+      (await dad.signedIn.client.query(api.core.devices.approvals.pending, {})).map(
+        (prompt) => prompt.approvalId,
+      ),
+    ).toContain(asked.approvalId);
+  });
+
+  it("gives a right unlock code its try back when the tile cannot open after all", async () => {
+    if (stack === undefined) return;
+    const admin = await sharedAdmin(stack);
+    const lily = await listed.kid(admin, await member(stack, "lily"));
+    const max = await listed.kid(admin, await member(stack, "max"));
+    const tv = await sharedDevice(stack, admin);
+    const code = "5307";
+
+    await lily.signedIn.client.action(api.core.devices.unlockCodes.set, { code });
+
+    const tryCode = (typed: string) =>
+      refusal(openTile(stack, tv, lily.userId, { kind: "code", by: lily.userId, code: typed }));
+
+    expect(await inOrder(["1111", "2222", "3333", "4444"], tryCode)).toEqual(
+      Array.from({ length: 4 }, () => "unauthenticated"),
+    );
+
+    const watcher = new ConvexClient(stack.url, { logger: false });
+    const maxOpens: Array<Promise<string>> = [];
+
+    const stop = watcher.onUpdate(
+      api.core.devices.picker.show,
+      { device: tv.device },
+      (shown: Picker) => {
+        if (maxOpens.length === 0 && tileIn(shown, lily.userId).code === "off") {
+          maxOpens.push(refusal(openTile(stack, tv, max.userId)));
+        }
+      },
+    );
+
+    try {
+      expect(await tryCode(code)).toBe("forbidden");
+      expect(await Promise.all(maxOpens)).toEqual(["accepted"]);
+    } finally {
+      stop();
+      await watcher.close();
+    }
+
+    expect(await picker(stack, tv)).toMatchObject({ holder: max.userId });
+    expect(tileIn(await picker(stack, tv), lily.userId).code).toBe("ready");
   });
 });

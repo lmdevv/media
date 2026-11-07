@@ -58,6 +58,32 @@ export const findMediaStack = (): MediaStack | undefined => {
   return { convexUrl, mediaUrl, mediaServiceKey, mediaEnv: Object.fromEntries(media) };
 };
 
+export interface CoreStack {
+  readonly url: string;
+  readonly adminKey: string;
+}
+
+/**
+ * The core stack to test, or undefined unless `MEDIA_STACK_TESTS=1`.
+ *
+ * @throws When `MEDIA_STACK_TESTS=1` but no core stack is configured, a setup mistake.
+ */
+export const findCoreStack = (): CoreStack | undefined => {
+  if (process.env["MEDIA_STACK_TESTS"] !== "1") return undefined;
+
+  const platform = readEnvFile(join(repoRoot, "packages", "platform", ".env.local"));
+  const url = platform.get("CONVEX_SELF_HOSTED_URL");
+  const adminKey = platform.get("CONVEX_SELF_HOSTED_ADMIN_KEY");
+
+  if (url === undefined || adminKey === undefined) {
+    throw new Error(
+      "MEDIA_STACK_TESTS=1 but no core stack is configured; run scripts/dev-stack.sh up",
+    );
+  }
+
+  return { url, adminKey };
+};
+
 /** Bundles the media service so a test runs the file that ships. */
 export const buildService = (): void => {
   execFileSync(process.execPath, [join(mediaRoot, "scripts", "build.ts")]);

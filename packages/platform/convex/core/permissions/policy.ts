@@ -6,8 +6,14 @@ import type {
   Restrictions,
   resourceTypes,
 } from "../../../commands/access";
-import { domainScopes, roleScopes } from "../../../commands/scopes";
-import type { ContentDomain, ContentVerb, CredentialScope, Role } from "../../../commands/scopes";
+import { domainScopes, roleScopes, serviceScopes } from "../../../commands/scopes";
+import type {
+  ContentDomain,
+  ContentVerb,
+  CredentialScope,
+  Role,
+  ServiceScope,
+} from "../../../commands/scopes";
 import type { Doc, Id } from "../../_generated/dataModel";
 import type { JoinSetting, Settings } from "../together/model";
 
@@ -1308,9 +1314,9 @@ const allowedScopes = (user: Doc<"users">): ReadonlyArray<CredentialScope> =>
   user.kind === "service" ? NO_SCOPES : roleScopes[user.role];
 
 /**
- * The scopes a session holds now: a password or guest session holds its role's, a tile on a shared
- * device only its role's content scopes, and an API key or a device sign-in the ones it was given
- * that its role still allows. A service holds none yet.
+ * The credential scopes a session holds now: a password or guest session holds its role's, a
+ * tile on a shared device only its role's content scopes, and an API key or a device sign-in the
+ * ones it was given that its role still allows. A service holds none.
  */
 export const heldScopes = (
   session: Doc<"authSessions">,
@@ -1324,8 +1330,21 @@ export const heldScopes = (
 
   if (session.kind === "guest") return [...allowed];
 
-  return session.scopes.filter((scope) => allowed.includes(scope));
+  return session.scopes.flatMap((scope) => allowed.filter((held) => held === scope));
 };
+
+/**
+ * The service scopes a session holds now: the ones its API key was issued with when the session is
+ * a service's, and none for anyone else. No role allows a service scope, so a person never holds
+ * one.
+ */
+export const heldServiceScopes = (
+  session: Doc<"authSessions">,
+  user: Doc<"users">,
+): Array<ServiceScope> =>
+  user.kind === "service" && session.kind === "apiKey"
+    ? session.scopes.flatMap((scope) => serviceScopes.filter((held) => held === scope))
+    : [];
 
 /** A person's restrictions; only a member carries them. */
 export const restrictionsOf = (person: PersonDoc): Restrictions | null =>

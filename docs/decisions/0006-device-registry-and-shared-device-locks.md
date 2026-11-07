@@ -1,6 +1,7 @@
 # 0006. Register every device and lock adult tiles on shared devices
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the registry and locks as built.
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the registry and locks as built, and
+  2026-11-07 with the phase 3 review fixes.
 - Decisions: D18, D19, D35, D47
 
 ## Context
@@ -144,8 +145,10 @@ never stored. `lockOf` derives it from three reasons:
   - the person types their password there,
   - an approval from another device where the person is signed in opens the tile there,
   - an admin resets it with `core.devices.unlockCodes.reset`.
-- A right code also clears the count, so the count is of wrong tries in a row. A new code starts
-  at zero on every device.
+- A right code also clears the count, so the count is of wrong tries in a row. It clears it, and
+  gives back its hourly try, in its own transaction before the tile opens, so a right code costs
+  nothing even when the tile cannot open after all, as when a kid takes the device meanwhile. A
+  new code starts at zero on every device.
 
 ### Approvals
 
@@ -154,7 +157,8 @@ never stored. `lockOf` derives it from three reasons:
   live approval, for 2 minutes.
 - `core.devices.approvals.pending` is the prompt list an open app shows. Answering needs the
   `account` scope, which a tile session never holds, so every approval comes from another device.
-  API keys cannot approve.
+  API keys cannot approve. The list reads only waiting approvals, by index, so answered ones never
+  crowd a prompt out.
 - An approved `open` lets the device sign in with that approval. A retry gets the same session
   while it fills the slot, so a lost answer costs only a retry. An approved `leave` empties the
   slot at once.
@@ -183,7 +187,10 @@ ADR 0018 records how it is built.
 
 - A device code from a device that became shared registers nothing: `enroll` fails `conflict`,
   and the app opens tiles from the picker instead.
-- An approval made before its approver signed out everywhere no longer opens anything.
+- An approval made before its approver signed out everywhere no longer opens anything, and the
+  device's next `request` makes a new one instead of handing it back.
+- A person the shared devices do not list has no tile there: opening one fails `not_found` with
+  "No such tile on this device", not the lock screen's message.
 - Listing a person again brings back their tile session if it still fills a slot and has not
   expired. The session was theirs before they unlisted.
 - A device's approval and strikes go when it stops being shared or is removed.
