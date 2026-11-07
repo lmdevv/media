@@ -2,11 +2,19 @@ import { useEffect, useState } from "react";
 
 import type { Approval } from "@/session/platform-types";
 
-/** What this screen did about asking: nothing yet, sending the ask, sent it, or failed to. */
+/**
+ * What this screen did about asking: nothing yet, sending the ask, sent it, or failed to. A sent
+ * ask keeps the expiry its request answered, since the picker stops showing an approval once it
+ * has expired.
+ */
 export type Ask =
   | { readonly kind: "idle" }
   | { readonly kind: "asking" }
-  | { readonly kind: "sent"; readonly approvalId: Approval["approvalId"] }
+  | {
+      readonly kind: "sent";
+      readonly approvalId: Approval["approvalId"];
+      readonly expiresAt: number;
+    }
   | { readonly kind: "failed"; readonly message: string };
 
 /** An ask's progress as the lock screen and the picker show it. */
@@ -30,7 +38,9 @@ export const approvalPhase = (ask: Ask, approval: Approval | null, now: number):
   if (ask.kind === "failed") return { kind: "failed", message: ask.message };
 
   if (approval === null || (ask.kind === "sent" && approval.approvalId !== ask.approvalId)) {
-    return ask.kind === "sent" ? { kind: "waiting" } : { kind: "idle" };
+    if (ask.kind !== "sent") return { kind: "idle" };
+
+    return ask.expiresAt <= now ? { kind: "expired" } : { kind: "waiting" };
   }
 
   if (approval.state === "denied") return { kind: "denied" };
@@ -41,6 +51,13 @@ export const approvalPhase = (ask: Ask, approval: Approval | null, now: number):
     ? { kind: "waiting" }
     : { kind: "approved", approvalId: approval.approvalId };
 };
+
+/**
+ * When the ask on screen expires: this screen's sent ask by its request's answer, else the
+ * approval the picker shows, as after a reload.
+ */
+export const expiryOf = (ask: Ask, approval: Approval | null): number | null =>
+  ask.kind === "sent" ? ask.expiresAt : (approval?.expiresAt ?? null);
 
 /** Timers can fire a few milliseconds early; reading the clock this much later is past expiry. */
 const TIMER_SLACK_MS = 50;

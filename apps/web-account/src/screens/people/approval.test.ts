@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { approvalPhase } from "./approval";
+import { approvalPhase, expiryOf } from "./approval";
 import { anApprovalId, approval, userId } from "./fixtures";
 
 const ada = userId("ada");
@@ -25,7 +25,7 @@ describe("approvalPhase", () => {
   });
 
   it("waits after sending until the picker shows the approval", () => {
-    const sent = { kind: "sent", approvalId: anApprovalId("a2") } as const;
+    const sent = { kind: "sent", approvalId: anApprovalId("a2"), expiresAt: NOW + 60_000 } as const;
 
     expect(approvalPhase(sent, null, NOW)).toEqual({ kind: "waiting" });
     expect(approvalPhase(sent, approval(ada, "approved", live), NOW)).toEqual({ kind: "waiting" });
@@ -63,5 +63,26 @@ describe("approvalPhase", () => {
     expect(approvalPhase({ kind: "idle" }, approval(ada, "approved", gone), NOW)).toEqual({
       kind: "expired",
     });
+  });
+
+  it("expires a sent ask by the expiry its request answered, once the picker no longer shows it", () => {
+    const sent = { kind: "sent", approvalId: anApprovalId("a2"), expiresAt: NOW } as const;
+
+    expect(approvalPhase(sent, null, NOW)).toEqual({ kind: "expired" });
+    expect(approvalPhase(sent, approval(ada, "pending", live), NOW)).toEqual({ kind: "expired" });
+  });
+});
+
+describe("expiryOf", () => {
+  it("times a sent ask by its request's answer, though the picker no longer shows the approval", () => {
+    const sent = { kind: "sent", approvalId: anApprovalId("a2"), expiresAt: NOW + 5_000 } as const;
+
+    expect(expiryOf(sent, null)).toBe(NOW + 5_000);
+    expect(expiryOf(sent, approval(ada, "pending", live))).toBe(NOW + 5_000);
+  });
+
+  it("times an approval the picker shows when this screen sent none, as after a reload", () => {
+    expect(expiryOf({ kind: "idle" }, approval(ada, "pending", live))).toBe(live.expiresAt);
+    expect(expiryOf({ kind: "idle" }, null)).toBeNull();
   });
 });

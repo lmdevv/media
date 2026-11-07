@@ -12,7 +12,7 @@ import type { SharedPicker, SharedTile } from "@/session/platform-types";
 
 import { useAction } from "./people/action";
 import type { ActionStatus } from "./people/action";
-import { approvalPhase, useClock } from "./people/approval";
+import { approvalPhase, expiryOf, useClock } from "./people/approval";
 import type { ApprovalPhase, Ask } from "./people/approval";
 import { AskStatus } from "./people/ask-status";
 import { PICKER_GRID, PickerPage } from "./people/picker-page";
@@ -105,7 +105,7 @@ export function SharedPickerScreen({ picker }: { readonly picker: SharedPicker }
   const [ask, setAsk] = useState<Ask>({ kind: "idle" });
   const kid = kidHolder(picker);
   const approval = picker.approval?.intent === "leave" ? picker.approval : null;
-  const now = useClock(approval?.expiresAt ?? null);
+  const now = useClock(expiryOf(ask, approval));
 
   const askLeave = async (): Promise<void> => {
     setAsk({ kind: "asking" });
@@ -113,12 +113,12 @@ export function SharedPickerScreen({ picker }: { readonly picker: SharedPicker }
     try {
       if (device === null) throw new Error("This browser isn't registered as a device.");
 
-      const { approvalId } = await platform.core.devices.approvals.request({
+      const { approvalId, expiresAt } = await platform.core.devices.approvals.request({
         device,
         ask: { intent: "leave" },
       });
 
-      setAsk({ kind: "sent", approvalId });
+      setAsk({ kind: "sent", approvalId, expiresAt });
     } catch (cause) {
       setAsk({ kind: "failed", message: describeFailure(cause) });
     }

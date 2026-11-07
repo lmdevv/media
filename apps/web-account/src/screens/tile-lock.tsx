@@ -13,7 +13,7 @@ import type { Approval, SharedPicker, SharedTile, TileProof } from "@/session/pl
 
 import { useAction } from "./people/action";
 import type { ActionStatus } from "./people/action";
-import { approvalPhase, useClock } from "./people/approval";
+import { approvalPhase, expiryOf, useClock } from "./people/approval";
 import type { ApprovalPhase, Ask } from "./people/approval";
 import { AskStatus } from "./people/ask-status";
 import { UNLOCK_CODE, codeDigits, isUnlockCode } from "./people/unlock-code";
@@ -248,7 +248,7 @@ function TileLock({
   const [chosen, setChosen] = useState<UserId | null>(null);
   const [method, setMethod] = useState<Method | null>(null);
   const [ask, setAsk] = useState<Ask>({ kind: "idle" });
-  const now = useClock(approval?.expiresAt ?? null);
+  const now = useClock(expiryOf(ask, approval));
   const redeemed = useRef<string | null>(null);
 
   const provers = proversOf(picker, tile, lock);
@@ -275,12 +275,12 @@ function TileLock({
     try {
       if (device === null) throw new Error("This browser isn't registered as a device.");
 
-      const { approvalId } = await platform.core.devices.approvals.request({
+      const { approvalId, expiresAt } = await platform.core.devices.approvals.request({
         device,
         ask: { intent: "open", userId: tile.userId },
       });
 
-      setAsk({ kind: "sent", approvalId });
+      setAsk({ kind: "sent", approvalId, expiresAt });
     } catch (cause) {
       setAsk({ kind: "failed", message: describeFailure(cause) });
     }
