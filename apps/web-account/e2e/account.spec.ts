@@ -40,6 +40,31 @@ test("a second person signed in on this browser joins the picker", async ({ page
   await expect(page.getByRole("link", { name: `${first.username}, switch person` })).toBeVisible();
 });
 
+test("two tabs share one sign-in, and a sign-out in one signs the other out", async ({
+  page,
+  context,
+}) => {
+  if (stack === null) return;
+
+  const person = await createPerson(stack, "lucia");
+  const other = await context.newPage();
+
+  await signIn(page, person);
+  await page.getByRole("button", { name: person.username, exact: true }).click();
+  await expect(page).toHaveURL(/\/home$/u);
+
+  await other.goto("/home");
+  await expect(other.getByRole("button", { name: "Sign out" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByLabel("Username")).toBeVisible();
+  await expect(other.getByRole("button", { name: "Sign out" })).toBeHidden();
+
+  await other.reload();
+  await expect(other.getByLabel("Username")).toBeVisible();
+  expect(await other.evaluate(() => Object.keys(localStorage))).toStrictEqual([]);
+});
+
 test("a CLI link signs in, then approves its code on the same page", async ({ page }) => {
   if (stack === null) return;
 

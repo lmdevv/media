@@ -110,8 +110,8 @@ export interface AccountActions {
   readonly switchTo: (userId: UserId) => void;
   /** Opens a person's tile on this shared device, with a proof for a locked tile. */
   readonly openTile: (userId: UserId, proof?: TileProof) => Promise<void>;
-  /** Signs the active person out here; others on this browser stay. */
-  readonly signOut: (userId: UserId) => Promise<void>;
+  /** Signs this client's person out here; others on this browser stay. */
+  readonly signOut: () => Promise<void>;
 }
 
 /** The actions on this browser's people, for the current client. */
@@ -133,7 +133,7 @@ export const useAccountActions = (): AccountActions => {
           device === null ? { name: deviceName() } : { name: deviceName(), device },
         );
 
-        store.setDevice(enrolled.device);
+        await store.setDevice(enrolled.device);
       }
 
       return me.userId;
@@ -149,7 +149,7 @@ export const useAccountActions = (): AccountActions => {
   const establish = async (): Promise<void> => {
     const userId = await register();
 
-    store.promote(slot, userId);
+    await store.promote(slot, userId);
 
     // A page that asked for a sign-in, such as /device from a CLI's link, shows once it is done;
     // the picker, Add someone, an invite, and a reset link go on to the picker.
@@ -188,8 +188,7 @@ export const useAccountActions = (): AccountActions => {
         return;
       }
 
-      store.activate(held);
-      void navigate({ to: "/home" });
+      void store.activate(held).then(() => navigate({ to: "/home" }));
     },
     openTile: async (userId, proof) => {
       const device = store.read().device;
@@ -199,19 +198,20 @@ export const useAccountActions = (): AccountActions => {
       await platform.session.openTile(
         proof === undefined ? { device, userId } : { device, userId, proof },
       );
-      store.promote(slot, userId);
+      await store.promote(slot, userId);
       await navigate({ to: "/home" });
     },
-    signOut: async (userId) => {
-      // The slot is fixed now: another tab may sign this person in on a new slot meanwhile, and
-      // that one must stay. Signing out returns once this browser holds the revocation, and the
-      // server is told in the background, so nothing here waits on the server.
-      const signingOut = store.read().people.get(userId);
+    signOut: async () => {
+      // This client's slot holds the session being signed out. Another tab may sign the person in
+      // on a new slot meanwhile, and `forget` decides inside its transaction, so that one stays.
+      // Signing out returns once the store holds the revocation; the server is told in the
+      // background, so nothing here waits on the server.
+      const signingOut = slot;
 
       try {
         await platform.session.signOut();
       } finally {
-        if (signingOut !== undefined) store.forget(signingOut);
+        await store.forget(signingOut);
         await navigate({ to: "/" });
       }
     },

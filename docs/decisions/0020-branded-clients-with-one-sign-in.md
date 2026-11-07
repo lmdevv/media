@@ -56,16 +56,19 @@ platform SDK. Its session layer is `apps/web-account/src/session/`.
 
 ### What a browser holds
 
-One origin's `localStorage` holds every client's sign-in state. `session/origin.ts` names every key
-and is their only writer, except the session keys, which only the SDK writes.
+One origin's IndexedDB database `media` holds every client's sign-in state, in one object store
+`kv` of string keys. `session/origin.ts` names the origin's keys, and the SDK's `layerShared`
+names the session keys. `localStorage` holds nothing credential-bearing.
 
-| Key                                 | Holds                                          |
-| ----------------------------------- | ---------------------------------------------- |
-| `media.device`                      | this browser's device code, `dv_<id>.<secret>` |
-| `media.active`                      | the slot every client on the origin acts as    |
-| `media.person.<userId>`             | the slot that holds that person's session      |
-| `media.session.<slotId>`            | the SDK's session for one sign-in              |
-| `media.session.<slotId>:<session>…` | that session's tokens and revocation (below)   |
+| Key                                | Holds                                                 |
+| ---------------------------------- | ----------------------------------------------------- |
+| `media.device`                     | this browser's device code, `dv_<id>.<secret>`        |
+| `media.active`                     | the slot every client on the origin acts as           |
+| `media.person.<userId>`            | the slot that holds that person's session             |
+| `media.session.<slotId>`           | the session id the slot holds now                     |
+| `media.session.<slotId>:<session>` | that session's tokens                                 |
+| `media.revoked:<session>`          | a sign-out, and the core's confirmation once it comes |
+| `media.signOut:<session>`          | a sign-out the core has not confirmed, for any client |
 
 - **A slot** is a random local name for one sign-in's tokens. A password, setup, invite, or reset
   sign-in starts before the client knows whose session it is, so the key cannot carry the
@@ -91,12 +94,11 @@ and is their only writer, except the session keys, which only the SDK writes.
 
 ### Clients on one origin (D52)
 
-- Every tab and every client on the origin reads the same keys. A switch, a sign-in, or a sign-out
-  in one tab reaches the others through `storage` events. A session store can now announce changes
-  (`KeyValueStore.subscribe` in the SDK), and the SDK's session follows what another tab wrote:
-  renewed tokens of the same session, another person's sign-in, or a sign-out. So a background
-  tab never spends a refresh token another tab already rotated, which Convex Auth would treat as
-  reuse.
+- Every tab and every client on the origin reads the same store. After a write commits, a
+  `BroadcastChannel` tells the other tabs to read again; the message carries nothing, so it never
+  carries authority. The SDK's session follows what another tab wrote: renewed tokens of the same
+  session, another person's sign-in, or a sign-out. So a background tab never spends a refresh
+  token another tab already rotated, which Convex Auth would treat as reuse.
 - D52 asks each client to mint its own session. The core cannot do that today, and doing it would
   break ADR 0006. The core keeps one session per person per device and one slot per shared device,
   so a second session minted for `/movies` would end the account client's session on the same
@@ -108,81 +110,61 @@ and is their only writer, except the session keys, which only the SDK writes.
 
 ### A sign-out holds across tabs
 
-`localStorage` has no atomic compare-and-set. Another tab's `storage` event arrives later, as its
-own task, and tabs in separate processes read their own copy of the store, which catches up only
-with that event. So no shared value that several tabs rewrite can be race-free. The core is the
-authority instead: a sign-out ends the session on the server, the server then refuses its
-refresh token and its calls, and the browser only has to make every tab stop using it.
+The core is the authority: a sign-out ends the session on the server, and the server then refuses
+its refresh token and its calls. The browser has to make every tab stop using it, and never bring
+it back. `localStorage` cannot do that: it has no atomic compare-and-write, Web Locks are missing
+over plain HTTP, and every round of review found another interleaving. The shared state is
+therefore in IndexedDB, whose readwrite transactions on one object store run one at a time across
+every tab of the origin, and which works outside secure contexts.
 
-- **One writer per key.** A store that can announce other clients' writes (`subscribe`) gets this
-  layout under its key `K`. A store without `subscribe`, such as old movies' and the iOS app's,
-  keeps the session under `K` alone, as before.
-  - `K` names the current session (the token's `sub`). Only a sign-in writes it.
-  - `K:<session>` holds that session's tokens. A sign-in creates it. A renewal of that session
-    replaces it, only while it still holds the tokens the renewal started from.
-  - `K:<session>:revoked` is written once when the session signs out, and never changes.
-  - `K:<session>:confirmed` is written once when the server confirms the sign-out, which also
-    removes `K:<session>`.
-- **Reads change nothing.** A session with a revocation loads as none. No read deletes or rewrites
-  a key, so a later sign-in is never lost to what an earlier read found.
-- **Signing out** writes the revocation first and shows signed out at once, even if the server
-  call fails. Once the pending sign-out is stored, `signOut` returns, and the client asks the core
-  to end the session in the background. On failure it retries, backing off from a second to every
-  30 seconds, until the core confirms. A store that keeps no pending sign-outs, such as the CLI's,
-  waits for one attempt instead.
-- **The account client forgets the slot it signed out of.** It fixes that slot when sign-out
-  starts and forgets only that slot afterwards. Another tab may sign the same person in on a new
-  slot meanwhile, and that slot stays.
+- **Every change is one transaction** that reads what it decides on and writes in the same
+  transaction, so no other tab's write lands between the check and the write.
+  - A sign-in writes the session's tokens and the slot's session id.
+  - A renewal writes new tokens only while the stored tokens are still the ones the refresh
+    started from and no revocation exists.
+  - A sign-out writes the revocation and the pending sign-out and deletes the tokens. If that
+    transaction fails, as when storage is full, nothing of it lands. A second transaction then
+    deletes the tokens alone, which frees space. The client stays signed out, and its retry keeps
+    writing the records again.
+  - The origin's promote, forget, and switch decide from what they read inside their own
+    transaction. Forgetting a slot deletes only the mappings and the active slot that still point
+    at it.
+  - The sweep deletes a revocation 31 days after the sign-out, past the core's 30-day limit on a
+    session and an unused refresh token. It also drops the oldest confirmed revocations past 64.
+- **Every token passes a transactional check.** Before a client hands out any token, the
+  in-memory one included, it reads the session's state in a transaction. The token goes out only
+  while the store holds that session's tokens and no revocation. A client that finds the session
+  revoked or gone drops it at once. A read that fails counts as revoked.
+- **Signing out** writes the revocation and shows signed out at once, even if the server call
+  fails. Once the pending sign-out is stored, `signOut` returns and the client asks the core to end
+  the session in the background. On failure it retries, backing off from a second to every 30
+  seconds, until the core confirms. Any client that starts, or hears of a write, takes over every
+  pending sign-out, even one whose slot was forgotten and whose client is gone. Confirming
+  deletes the record. A store that keeps no pending sign-outs, such as the CLI's, waits for one
+  attempt instead.
 - **Only the core's revoke confirms.** `core.auth.sessions.revoke` takes any refresh token the
-  session ever had, deletes the session and all its refresh tokens, and answers `confirmed` whether
-  or not it had already ended. Convex Auth keeps a rotated or invalidated token's row until the
-  session ends, so an old token still proves the session. A refresh that comes back empty proves
-  nothing: Convex Auth refuses a token spent outside its reuse window but keeps the session alive.
-  So a refused refresh is treated as a sign-out, and the session is revoked like any other. The
-  command needs no session, because the refresh token is the proof. It cannot end a session whose
-  token it was not given. ADR 0006's refusal of API keys concerns a caller acting with a key, and
-  this command has no caller.
-- **Storage that fails, fails closed.** When the revocation or the pending record cannot be
-  written, as in a full `localStorage`, the session's tokens are removed first, which frees space,
-  and the records are tried again. The retry stays alive in memory and writes the records again on
-  every attempt. A revocation check that cannot read the store counts as revoked, and no token
-  leaves the client unchecked, the in-memory fallback included.
-- **A pending sign-out belongs to the browser, not to a slot.** Signing out also writes
-  `media.signOut:<session>` with the session's tokens and the key it was signed in under. It sits
-  outside every session key, so forgetting a slot or disposing that slot's client keeps it.
-  - Every client takes over every pending sign-out when it starts and whenever another tab writes
-    one, and retries it until the server confirms. Confirming deletes the record.
-  - The record serves only to end the session on the server. No read that loads a session looks
-    there, so nothing signs in or calls with it, and the session's own revocation keeps it out of
-    every slot.
-- **Every token passes a check.** A client checks its session before it hands any token to a
-  caller, the in-memory one included, and again after it writes a renewal. The token goes out only
-  while the store still holds that session's credentials and no revocation. A sign-out that could
-  only delete the credentials, as with storage full, therefore stops every tab too. A client that
-  finds the session revoked or gone drops it at once. If a sign-out is pending, it ends the session
-  on the server the same way, after a second's wait, so the client that signed out usually
-  confirms it first and the others send nothing.
-- **What this guarantees.** Once the server confirms a sign-out, no credential of that session
-  works anywhere. Before that, every tab stops using it as soon as it reads storage, which it does
-  before every token it uses. The window left is a tab that has not yet read storage. While the
-  server cannot be reached, nothing reaches it either.
+  session ever had, deletes the session and all its refresh tokens, and answers `confirmed`
+  whether or not it had already ended. Convex Auth keeps a rotated or invalidated token's row
+  until the session ends, so an old token still proves the session. A refresh that comes back
+  empty proves nothing, so a refused refresh is treated as a sign-out and revoked like any other.
+  The command needs no session, because the refresh token is the proof. It cannot end a session
+  whose token it was not given. ADR 0006's refusal of API keys concerns a caller acting with a
+  key, and this command has no caller.
+- **The account client forgets the slot it signed out of**, which is its own client's slot. The
+  forget transaction leaves a slot another tab signed the person in on meanwhile.
+- **Without IndexedDB**, as in some private modes, the browser keeps no sign-in and shows signed
+  out. It never falls back to `localStorage`. The CLI's and old movies' stores are unchanged: a
+  store one client owns keeps the session under one key.
+- **What this guarantees.** Once the core confirms a sign-out, no credential of that session works
+  anywhere. Before that, every tab stops using it at its next token, which first reads the store
+  in a transaction. No renewal can bring it back, because a renewal commits only over the exact
+  tokens it started from. The window left is a request already sent with a token checked before
+  the sign-out committed.
 - A refresh the server refuses becomes a revocation, unless the store shows that another tab
-  renewed the session first. A tab reading a stale copy can still revoke a session another tab
-  just renewed. That tab then signs out and the person signs in again. This never keeps a session
-  alive.
-- **Sweeping.** Each client sweeps the store's revocation records when it starts. It deletes a
-  record, with that session's leftover tokens and pending sign-out, 31 days after the sign-out:
-  the core's 30-day limit on a session and on an unused refresh token, plus a day. Past 64
-  confirmed revocations it also drops the oldest confirmed ones, whose sessions the core already
-  ended. It never deletes a key that names the current session, or a session revoked less than 31
-  days ago that the core has not confirmed. A session id revoked in a
-  store does not load there again until its record is swept. Every sign-in in the account client starts a new session, so
-  this only matters for an API key, which reuses its session. When the account client forgets a
-  slot or a person moves to a new one, it removes that slot's token keys and keeps its
-  revocations.
-- None of this needs a secure context. Over plain HTTP on a LAN or tailnet address, which installs
-  support, `navigator.locks`, `crypto.randomUUID`, `crypto.subtle`, and `navigator.clipboard` are
-  missing. The client uses none of them unguarded. Slot ids come from `randomUuid` and copying from
+  renewed the session first. That can sign out a tab whose own renewal was still in flight. The
+  person signs in again, and it never keeps a session alive.
+- None of this needs a secure context. IndexedDB and `BroadcastChannel` work over plain HTTP on a
+  LAN or tailnet address, which installs support. Slot ids come from `randomUuid` and copying from
   `copyText` in `@media/ui/lib/secure-context`, which `apps/web` shares. The Playwright suite runs
   a second time against the host's non-loopback address over plain HTTP.
 
@@ -215,11 +197,13 @@ An invite is `/invite#mi_<id>.<secret>`, and a reset link is `/reset#mr_<id>.<se
   the SDK would carry a web-only policy and its own storage format.
 - One shared session key with the other people's tokens stashed elsewhere and swapped in. The
   stash goes stale at the first refresh, and Convex Auth then ends the session as reused.
-- A BroadcastChannel beside `storage` events. The events already reach every other tab for exactly
-  the keys that change.
+- `storage` events as the notification. They fire only for `localStorage` writes, and the store
+  makes none; a `BroadcastChannel` tells the other tabs instead.
 - Web Locks around each write. They exist only in secure contexts, and a lock does not make
   another process's copy of `localStorage` current.
 - A shared list of ended sessions. Two tabs that sign out at once each rewrite the list without
   the other's entry, and a read that cleans up after it can delete a newer sign-in.
+- Any session state in `localStorage`. Four rounds of review each found a new interleaving, because
+  nothing there checks and writes as one step. IndexedDB transactions do.
 - Secrets in the path or the query. Both reach the server's request log and any proxy in the
   first request, and stay in history until the link expires.

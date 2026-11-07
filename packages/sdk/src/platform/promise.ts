@@ -4,6 +4,7 @@ import type { AuthStatus } from "../auth";
 import type { FunctionKind } from "../convex-transport";
 import * as QueryWatch from "../query-watch";
 import * as TokenStorage from "../token-storage";
+import type { SharedStore } from "../shared-store";
 import type { KeyValueStore } from "../token-storage";
 import * as Client from "./client";
 import type { Command, Id, Params, PromiseBuilder } from "./command";
@@ -15,8 +16,11 @@ export interface PlatformOptions {
   readonly url: string;
   /** `websocket` (default) for apps; `http` for short-lived scripts. */
   readonly connection?: "websocket" | "http";
-  /** Where the session's tokens live; memory when omitted. */
-  readonly storage?: KeyValueStore;
+  /**
+   * Where the session's tokens live: a store this client owns, or a `SharedStore` the origin's
+   * clients share, such as the browser's IndexedDB (`openIndexedDb`); memory when omitted.
+   */
+  readonly storage?: KeyValueStore | SharedStore;
   /**
    * The key the session is stored under; `media.session` when omitted. Clients on one origin that
    * use the same key share one sign-in (ADR 0020).
@@ -125,16 +129,21 @@ const tileProof = Match.type<PlatformTileProof>().pipe(
   }),
 );
 
+const storageLayer = (storage: KeyValueStore | SharedStore | undefined, key: string) => {
+  if (storage === undefined) return TokenStorage.layerMemory;
+
+  return "write" in storage
+    ? TokenStorage.layerShared(storage, key)
+    : TokenStorage.layerKeyValue(storage, key);
+};
+
 /** Opens the platform client. The connection opens on the first call. */
 export const createPlatform = (options: PlatformOptions): PlatformSdk => {
   const runtime = ManagedRuntime.make(
     Client.layer({
       url: options.url,
       connection: options.connection ?? "websocket",
-      storage:
-        options.storage === undefined
-          ? TokenStorage.layerMemory
-          : TokenStorage.layerKeyValue(options.storage, options.storageKey ?? DEFAULT_STORAGE_KEY),
+      storage: storageLayer(options.storage, options.storageKey ?? DEFAULT_STORAGE_KEY),
     }),
   );
 

@@ -13,6 +13,8 @@ import {
 } from "effect";
 import * as Base64Url from "effect/encoding/Base64Url";
 
+import type { SharedStore, SharedTransaction } from "./shared-store";
+
 /** A Convex Auth session: the short-lived JWT and the refresh token that renews it. */
 export interface StoredSession {
   readonly token: Redacted.Redacted;
@@ -156,22 +158,14 @@ export const layerMemory: Layer.Layer<TokenStorage> = Layer.effect(
 );
 
 /**
- * A synchronous or asynchronous string store, such as `window.localStorage` or AsyncStorage.
- * Methods may throw or reject; the adapter turns that into `TokenStorageError`.
+ * A synchronous or asynchronous string store that one client owns, such as AsyncStorage or a file.
+ * Methods may throw or reject; the adapter turns that into `TokenStorageError`. Clients that share
+ * a store, such as browser tabs, use a `SharedStore` instead (`layerShared`).
  */
 export interface KeyValueStore {
   readonly getItem: (key: string) => string | null | Promise<string | null>;
   readonly setItem: (key: string, value: string) => void | Promise<void>;
   readonly removeItem: (key: string) => void | Promise<void>;
-  /**
-   * Calls `onChange` when `key`, or a key that starts with `key:`, may have changed underneath
-   * this client, such as another tab writing `localStorage`, and returns the unsubscribe. A store
-   * with it is shared between clients; a store without it is read only at start, so it suits a
-   * store that one client owns.
-   */
-  readonly subscribe?: (key: string, onChange: () => void) => () => void;
-  /** Every key the store holds, so a shared store can find sign-outs other clients left pending. */
-  readonly keys?: () => ReadonlyArray<string> | Promise<ReadonlyArray<string>>;
 }
 
 const SerializedSession = Schema.fromJsonString(
@@ -196,51 +190,33 @@ export const serializeSession = (session: StoredSession): string =>
     refreshToken: Redacted.value(session.refreshToken),
   });
 
-const changesOf = (store: KeyValueStore, key: string): Stream.Stream<void> => {
-  const { subscribe } = store;
-
-  if (subscribe === undefined) return Stream.never;
-
-  return Stream.callback<void>(
-    (queue) =>
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          const unsubscribe = subscribe(key, () => {
-            Queue.offerUnsafe(queue, undefined);
-          });
-
-          Queue.offerUnsafe(queue, undefined);
-
-          return unsubscribe;
-        }),
-        (unsubscribe) => Effect.sync(unsubscribe),
-      ),
-    { bufferSize: 1, strategy: "sliding" },
-  );
-};
-
 const failure =
   (operation: TokenStorageError["operation"], message: string) =>
   (cause: unknown): TokenStorageError =>
     new TokenStorageError({ operation, message, cause });
 
-/** One key holding the session, for a store only this client uses. */
-const singleKey = (store: KeyValueStore, key: string): Interface =>
-  owned({
-    load: Effect.tryPromise({
-      try: async () => store.getItem(key),
-      catch: failure("load", "Token storage failed to load the session"),
-    }).pipe(Effect.map((text) => (text === null ? Option.none() : parseStoredSession(text)))),
-    save: (session) =>
-      Effect.tryPromise({
-        try: async () => store.setItem(key, serializeSession(session)),
-        catch: failure("save", "Token storage failed to save the session"),
+/** Stores the session under `key` in a string key-value store that one client owns. */
+export const layerKeyValue = (store: KeyValueStore, key: string): Layer.Layer<TokenStorage> =>
+  Layer.succeed(
+    TokenStorage,
+    TokenStorage.of(
+      owned({
+        load: Effect.tryPromise({
+          try: async () => store.getItem(key),
+          catch: failure("load", "Token storage failed to load the session"),
+        }).pipe(Effect.map((text) => (text === null ? Option.none() : parseStoredSession(text)))),
+        save: (session) =>
+          Effect.tryPromise({
+            try: async () => store.setItem(key, serializeSession(session)),
+            catch: failure("save", "Token storage failed to save the session"),
+          }),
+        clear: Effect.tryPromise({
+          try: async () => store.removeItem(key),
+          catch: failure("clear", "Token storage failed to clear the session"),
+        }),
       }),
-    clear: Effect.tryPromise({
-      try: async () => store.removeItem(key),
-      catch: failure("clear", "Token storage failed to clear the session"),
-    }),
-  });
+    ),
+  );
 
 const idOf = (session: StoredSession, operation: TokenStorageError["operation"]) =>
   Effect.fromOption(sessionOf(session)).pipe(
@@ -254,23 +230,25 @@ const idOf = (session: StoredSession, operation: TokenStorageError["operation"])
     ),
   );
 
-const attempt = <A>(operation: TokenStorageError["operation"], run: () => Promise<A>) =>
-  Effect.tryPromise({
-    try: run,
-    catch: failure(operation, `Token storage failed to ${operation} the session`),
-  });
-
 const Revoked = Schema.fromJsonString(
-  Schema.Struct({ revokedAt: Schema.Finite, key: Schema.String, id: Schema.String }),
+  Schema.Struct({
+    revokedAt: Schema.Finite,
+    slot: Schema.String,
+    confirmedAt: Schema.optionalKey(Schema.Finite),
+  }),
 );
 
 const decodeRevoked = Schema.decodeUnknownOption(Revoked);
 
-const Confirmed = Schema.fromJsonString(Schema.Struct({ confirmedAt: Schema.Finite }));
+const encodeRevoked = Schema.encodeSync(Revoked);
 
-const decodeConfirmed = Schema.decodeUnknownOption(Confirmed);
+const PendingSignOut = Schema.fromJsonString(
+  Schema.Struct({ slot: Schema.String, token: Schema.String, refreshToken: Schema.String }),
+);
 
-const encodeConfirmed = Schema.encodeSync(Confirmed);
+const decodePending = Schema.decodeUnknownOption(PendingSignOut);
+
+const encodePending = Schema.encodeSync(PendingSignOut);
 
 /**
  * How long after a sign-out its session can surely no longer work: the core's 30-day limit on a
@@ -281,215 +259,209 @@ const REVOCATION_KEPT_MS = 31 * 24 * 60 * 60 * 1000;
 /** How many confirmed revocations a store keeps before it drops the oldest. */
 const CONFIRMED_KEPT = 64;
 
-/**
- * The store-wide prefix of pending sign-outs. It sits outside every session key, so forgetting a
- * slot keeps them, and no read that loads a session looks there.
- */
-const PENDING = "media.signOut";
+/** Revocations, one per session id, whichever slot it was signed in under. */
+const REVOKED = "media.revoked:";
 
-const PendingSignOut = Schema.fromJsonString(
-  Schema.Struct({ key: Schema.String, token: Schema.String, refreshToken: Schema.String }),
-);
+/** Sign-outs the core has not confirmed, one per session id, for any client to finish. */
+const PENDING = "media.signOut:";
 
-const decodePending = Schema.decodeUnknownOption(PendingSignOut);
+const tokensIn = async (tx: SharedTransaction, key: string) =>
+  Option.flatMap(Option.fromNullishOr(await tx.get(key)), parseStoredSession);
 
-const encodePending = Schema.encodeSync(PendingSignOut);
-
-const encodeRevoked = Schema.encodeSync(Revoked);
+const revokedIn = async (tx: SharedTransaction, id: string) =>
+  Option.flatMap(Option.fromNullishOr(await tx.get(`${REVOKED}${id}`)), decodeRevoked);
 
 /**
- * The session under `key` in a store several clients share, such as `localStorage` across tabs,
- * which has no atomic compare-and-set. Each key has one kind of writer, and nothing deletes a key
- * because of what a read found:
+ * The session of slot `slot` in a store the origin's clients share (ADR 0020). Every operation is
+ * one transaction, so a check and the write it guards never interleave with another client's:
  *
- * - `key` names the current session. Only a sign-in writes it.
- * - `key:<session>` holds that session's tokens. A sign-in creates it, a renewal of that session
- *   replaces it, and the server confirming its sign-out removes it.
- * - `key:<session>:revoked` is written once, when the session signs out, and never changes.
- * - `key:<session>:confirmed` is written once, when the server confirms the sign-out.
+ * - `slot` names the slot's current session. Only a sign-in writes it.
+ * - `slot:<session>` holds that session's tokens. A renewal replaces them only while they are
+ *   still the ones it started from and no revocation exists; a sign-out deletes them.
+ * - `media.revoked:<session>` records a sign-out, and the core's confirmation once it comes.
+ * - `media.signOut:<session>` holds a sign-out the core has not confirmed, for any client to
+ *   finish, wherever its slot went. Nothing that loads a session reads it.
+ *
+ * A store that cannot be read loads no session, and a token check that cannot read it counts the
+ * session as revoked.
  */
-const sharedKeys = (store: KeyValueStore, key: string): Interface => {
-  const tokensKey = (id: string) => `${key}:${id}`;
-  const revokedKey = (id: string) => `${key}:${id}:revoked`;
-  const confirmedKey = (id: string) => `${key}:${id}:confirmed`;
+export const layerShared = (store: SharedStore, slot: string): Layer.Layer<TokenStorage> => {
+  const tokensKey = (id: string) => `${slot}:${id}`;
 
-  const tokensOf = async (id: string) => {
-    const text = await store.getItem(tokensKey(id));
+  const attempt = <A>(
+    operation: TokenStorageError["operation"],
+    mode: "read" | "write",
+    run: (tx: SharedTransaction) => Promise<A>,
+  ) =>
+    Effect.tryPromise({
+      try: () => (mode === "read" ? store.read(run) : store.write(run)),
+      catch: failure(operation, `Token storage failed to ${operation} the session`),
+    });
 
-    return text === null ? Option.none() : parseStoredSession(text);
-  };
+  const revocationIn = async (tx: SharedTransaction, id: string): Promise<Revocation> =>
+    Option.match(await revokedIn(tx, id), {
+      onSome: (record) => (record.confirmedAt === undefined ? "pending" : "confirmed"),
+      onNone: async () => (Option.isSome(await tokensIn(tx, tokensKey(id))) ? "none" : "missing"),
+    });
 
-  const pendingKey = (id: string) => `${PENDING}:${id}`;
-
-  const pendingOf = async (id: string) => {
-    const text = await store.getItem(pendingKey(id));
-
-    return text === null ? Option.none() : decodePending(text);
-  };
-
-  const revocationOf = async (id: string): Promise<Revocation> => {
-    if ((await store.getItem(confirmedKey(id))) !== null) return "confirmed";
-
-    if ((await store.getItem(revokedKey(id))) !== null) return "pending";
-
-    return (await store.getItem(tokensKey(id))) === null ? "missing" : "none";
-  };
-
-  return {
-    load: attempt("load", async () => {
-      const id = await store.getItem(key);
-
-      if (id === null || (await revocationOf(id)) !== "none") return Option.none();
-
-      return tokensOf(id);
-    }),
-    save: (session) =>
-      Effect.flatMap(idOf(session, "save"), (id) =>
-        attempt("save", async () => {
-          await store.setItem(tokensKey(id), serializeSession(session));
-          await store.setItem(key, id);
-        }),
-      ),
-    renew: (expected, renewed) =>
-      Effect.flatMap(idOf(renewed, "save"), (id) =>
-        attempt("save", async () => {
-          if (!sameStored(await tokensOf(id), Option.some(expected))) return false;
-          await store.setItem(tokensKey(id), serializeSession(renewed));
-
-          return true;
-        }),
-      ),
-    revoke: (session) =>
-      Effect.flatMap(idOf(session, "clear"), (id) =>
-        Effect.flatMap(Clock.currentTimeMillis, (revokedAt) => {
-          const record = async () => {
-            if ((await store.getItem(revokedKey(id))) === null) {
-              await store.setItem(revokedKey(id), encodeRevoked({ revokedAt, key, id }));
-            }
-
-            if ((await store.getItem(pendingKey(id))) === null) {
-              await store.setItem(
-                pendingKey(id),
-                encodePending({
-                  key,
-                  token: Redacted.value(session.token),
-                  refreshToken: Redacted.value(session.refreshToken),
-                }),
-              );
-            }
-          };
-
-          // A full store refuses the records, so the session's tokens go first: removing frees
-          // space, and with them gone nothing loads the session even if the records never land.
-          return attempt("clear", async () => {
-            try {
-              await record();
-            } catch {
-              await store.removeItem(tokensKey(id));
-              await record();
-            }
-          });
-        }),
-      ),
-    confirmRevoked: (session) =>
-      Effect.flatMap(idOf(session, "clear"), (id) =>
-        attempt("clear", async () => {
-          const signedInAt = Option.match(await pendingOf(id), {
-            onNone: () => key,
-            onSome: (pending) => pending.key,
+  const changed = Stream.callback<void>(
+    (queue) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const stop = store.subscribe(() => {
+            Queue.offerUnsafe(queue, undefined);
           });
 
-          await store.setItem(
-            `${signedInAt}:${id}:confirmed`,
-            encodeConfirmed({ confirmedAt: Date.now() }),
-          );
-          await store.removeItem(`${signedInAt}:${id}`);
-          await store.removeItem(pendingKey(id));
+          Queue.offerUnsafe(queue, undefined);
+
+          return stop;
         }),
+        (stop) => Effect.sync(stop),
       ),
-    revocation: (session) =>
-      Effect.flatMap(idOf(session, "load"), (id) => attempt("load", () => revocationOf(id))),
-    signOutPending: (session) =>
-      Effect.flatMap(idOf(session, "load"), (id) =>
-        attempt("load", async () => Option.isSome(await pendingOf(id))),
-      ),
-    pendingSignOuts: attempt("load", async () => {
-      const all = store.keys === undefined ? [] : await store.keys();
+    { bufferSize: 1, strategy: "sliding" },
+  );
 
-      const found = await Promise.all(
-        all
-          .filter((each) => each.startsWith(`${PENDING}:`))
-          .map(async (each) => {
-            const text = await store.getItem(each);
+  return Layer.succeed(
+    TokenStorage,
+    TokenStorage.of({
+      load: attempt("load", "read", async (tx) => {
+        const id = await tx.get(slot);
 
-            return text === null ? Option.none() : decodePending(text);
+        if (id === undefined || Option.isSome(await revokedIn(tx, id))) return Option.none();
+
+        return tokensIn(tx, tokensKey(id));
+      }).pipe(Effect.orElseSucceed(() => Option.none<StoredSession>())),
+      save: (session) =>
+        Effect.flatMap(idOf(session, "save"), (id) =>
+          attempt("save", "write", async (tx) => {
+            await tx.set(tokensKey(id), serializeSession(session));
+            await tx.set(slot, id);
           }),
-      );
-
-      return found.flatMap((pending) =>
-        Option.toArray(
-          Option.map(pending, ({ token, refreshToken }) => ({
-            token: Redacted.make(token),
-            refreshToken: Redacted.make(refreshToken),
-          })),
         ),
-      );
-    }),
-    sweep: Effect.flatMap(Clock.currentTimeMillis, (now) =>
-      attempt("clear", async () => {
-        const all = store.keys === undefined ? [] : await store.keys();
+      renew: (expected, renewed) =>
+        Effect.flatMap(idOf(renewed, "save"), (id) =>
+          attempt("save", "write", async (tx) => {
+            if (Option.isSome(await revokedIn(tx, id))) return false;
 
-        const revoked = await Promise.all(
-          all
-            .filter((each) => each.endsWith(":revoked"))
-            .map(async (each) => decodeRevoked((await store.getItem(each)) ?? "")),
-        );
+            if (!sameStored(await tokensIn(tx, tokensKey(id)), Option.some(expected))) return false;
+            await tx.set(tokensKey(id), serializeSession(renewed));
 
-        const records = revoked.flatMap((each) => Option.toArray(each));
+            return true;
+          }),
+        ),
+      revoke: (session) =>
+        Effect.flatMap(idOf(session, "clear"), (id) =>
+          Effect.flatMap(Clock.currentTimeMillis, (revokedAt) =>
+            attempt("clear", "write", async (tx) => {
+              if (Option.isNone(await revokedIn(tx, id))) {
+                await tx.set(`${REVOKED}${id}`, encodeRevoked({ revokedAt, slot }));
+              }
 
-        const forget = async (record: { readonly key: string; readonly id: string }) => {
-          await store.removeItem(`${record.key}:${record.id}`);
-          await store.removeItem(pendingKey(record.id));
-          await store.removeItem(`${record.key}:${record.id}:confirmed`);
-          await store.removeItem(`${record.key}:${record.id}:revoked`);
-        };
+              if ((await tx.get(`${PENDING}${id}`)) === undefined) {
+                await tx.set(
+                  `${PENDING}${id}`,
+                  encodePending({
+                    slot,
+                    token: Redacted.value(session.token),
+                    refreshToken: Redacted.value(session.refreshToken),
+                  }),
+                );
+              }
 
-        const confirmed = await Promise.all(
-          records.map(async (record) => ({
-            record,
-            confirmedAt: Option.map(
-              decodeConfirmed((await store.getItem(`${record.key}:${record.id}:confirmed`)) ?? ""),
-              (each) => each.confirmedAt,
+              await tx.remove(tokensKey(id));
+            }).pipe(
+              // A full store refuses the records, so deleting the tokens alone frees space and
+              // leaves nothing to load; the caller keeps retrying the records.
+              Effect.tapError(() =>
+                Effect.ignore(attempt("clear", "write", (tx) => tx.remove(tokensKey(id)))),
+              ),
             ),
-          })),
-        );
+          ),
+        ),
+      confirmRevoked: (session) =>
+        Effect.flatMap(idOf(session, "clear"), (id) =>
+          Effect.flatMap(Clock.currentTimeMillis, (confirmedAt) =>
+            attempt("clear", "write", async (tx) => {
+              const pending = Option.flatMap(
+                Option.fromNullishOr(await tx.get(`${PENDING}${id}`)),
+                decodePending,
+              );
 
-        const overCap = confirmed
-          .flatMap(({ record, confirmedAt }) =>
-            Option.toArray(Option.map(confirmedAt, (at) => ({ record, at }))),
-          )
-          .toSorted((a, b) => b.at - a.at)
-          .slice(CONFIRMED_KEPT)
-          .map(({ record }) => record);
+              const signedInAt = Option.match(pending, {
+                onNone: () => slot,
+                onSome: (each) => each.slot,
+              });
 
-        await Promise.all(
-          [...records.filter((each) => now - each.revokedAt > REVOCATION_KEPT_MS), ...overCap].map(
-            forget,
+              const revokedAt = Option.match(await revokedIn(tx, id), {
+                onNone: () => confirmedAt,
+                onSome: (record) => record.revokedAt,
+              });
+
+              await tx.set(
+                `${REVOKED}${id}`,
+                encodeRevoked({ revokedAt, slot: signedInAt, confirmedAt }),
+              );
+              await tx.remove(`${signedInAt}:${id}`);
+              await tx.remove(`${PENDING}${id}`);
+            }),
+          ),
+        ),
+      revocation: (session) =>
+        Effect.flatMap(idOf(session, "load"), (id) =>
+          attempt("load", "read", (tx) => revocationIn(tx, id)),
+        ),
+      signOutPending: (session) =>
+        Effect.flatMap(idOf(session, "load"), (id) =>
+          attempt("load", "read", async (tx) => (await tx.get(`${PENDING}${id}`)) !== undefined),
+        ),
+      pendingSignOuts: attempt("load", "read", async (tx) => {
+        const keys = (await tx.keys()).filter((key) => key.startsWith(PENDING));
+        const found = await Promise.all(keys.map((key) => tx.get(key)));
+
+        return found.flatMap((text) =>
+          Option.toArray(
+            Option.map(
+              Option.flatMap(Option.fromNullishOr(text), decodePending),
+              ({ token, refreshToken }) => ({
+                token: Redacted.make(token),
+                refreshToken: Redacted.make(refreshToken),
+              }),
+            ),
           ),
         );
       }),
-    ),
-    changed: Stream.merge(changesOf(store, key), changesOf(store, PENDING)),
-  };
-};
+      sweep: Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        attempt("clear", "write", async (tx) => {
+          const keys = (await tx.keys()).filter((key) => key.startsWith(REVOKED));
 
-/**
- * Stores the session under `key` in a string key-value store. A store that can announce other
- * clients' writes (`subscribe`) is shared, so it gets the layout of `sharedKeys`; any other store
- * keeps the session under `key` alone.
- */
-export const layerKeyValue = (store: KeyValueStore, key: string): Layer.Layer<TokenStorage> =>
-  Layer.succeed(
-    TokenStorage,
-    TokenStorage.of(store.subscribe === undefined ? singleKey(store, key) : sharedKeys(store, key)),
+          const records = (
+            await Promise.all(
+              keys.map(async (key) => ({
+                id: key.slice(REVOKED.length),
+                record: Option.flatMap(Option.fromNullishOr(await tx.get(key)), decodeRevoked),
+              })),
+            )
+          ).flatMap(({ id, record }) =>
+            Option.toArray(Option.map(record, (each) => ({ id, ...each }))),
+          );
+
+          const expired = records.filter((each) => now - each.revokedAt > REVOCATION_KEPT_MS);
+
+          const overCap = records
+            .filter((each) => each.confirmedAt !== undefined)
+            .toSorted((a, b) => (b.confirmedAt ?? 0) - (a.confirmedAt ?? 0))
+            .slice(CONFIRMED_KEPT);
+
+          await Promise.all(
+            [...expired, ...overCap].flatMap((each) => [
+              tx.remove(`${REVOKED}${each.id}`),
+              tx.remove(`${PENDING}${each.id}`),
+              tx.remove(`${each.slot}:${each.id}`),
+            ]),
+          );
+        }),
+      ),
+      changed,
+    }),
   );
+};

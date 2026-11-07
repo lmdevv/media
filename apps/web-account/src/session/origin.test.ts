@@ -1,54 +1,80 @@
+import { openIndexedDb } from "@media/sdk/promise";
+import type { SharedStore } from "@media/sdk/promise";
 import { Brand } from "effect";
+import { IDBFactory } from "fake-indexeddb";
 import { describe, expect, it } from "vitest";
 
-import { makeOriginStore, newSlot } from "./origin";
+import { newSlot, openOriginStore } from "./origin";
+import type { OriginStore } from "./origin";
 import type { UserId } from "./platform-types";
 
 const userId = Brand.nominal<UserId>();
-
-/** `localStorage` as one origin holds it: every tab shares the same items. */
-class MemoryStorage implements Storage {
-  private readonly items = new Map<string, string>();
-
-  get length(): number {
-    return this.items.size;
-  }
-
-  clear(): void {
-    this.items.clear();
-  }
-
-  getItem(key: string): string | null {
-    return this.items.get(key) ?? null;
-  }
-
-  key(index: number): string | null {
-    return [...this.items.keys()][index] ?? null;
-  }
-
-  removeItem(key: string): void {
-    this.items.delete(key);
-  }
-
-  setItem(key: string, value: string): void {
-    this.items.set(key, value);
-  }
-}
-
-/** Another tab's write, as the browser reports it to this one. */
-const storageEvent = (storage: Storage, key: string | null): Event =>
-  Object.assign(new Event("storage"), { key, storageArea: storage });
 
 const ada = userId("user-ada");
 
 const bo = userId("user-bo");
 
+/**
+ * Tabs of one origin over one fake IndexedDB. A tab hears another tab's commit only when
+ * `deliver` runs, as a `BroadcastChannel` message arrives later.
+ */
+const tabs = async (count: number) => {
+  const indexedDB = new IDBFactory();
+  const listeners: Array<() => void> = [];
+  const queued: Array<Array<() => void>> = Array.from({ length: count }, () => []);
+
+  const shared = await Promise.all(
+    Array.from({ length: count }, (_, index) =>
+      openIndexedDb({
+        indexedDB,
+        name: "media",
+        channel: (_name, onMessage) => {
+          listeners[index] = onMessage;
+
+          return {
+            post: () => {
+              for (const [other, waiting] of queued.entries()) {
+                if (other !== index) waiting.push(() => listeners[other]?.());
+              }
+            },
+            close: () => undefined,
+          };
+        },
+      }),
+    ),
+  );
+
+  const stores = await Promise.all(shared.map((store) => openOriginStore(store)));
+
+  return {
+    stores,
+    shared,
+    deliver: async () => {
+      for (const waiting of queued) for (const notify of waiting.splice(0)) notify();
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    },
+  };
+};
+
+const one = async (): Promise<{ store: OriginStore; shared: SharedStore }> => {
+  const { stores, shared } = await tabs(1);
+  const [store] = stores;
+  const [first] = shared;
+
+  if (store === undefined || first === undefined) throw new Error("No tab");
+
+  return { store, shared: first };
+};
+
+const keysOf = (shared: SharedStore) => shared.read((tx) => tx.keys());
+
 describe("the origin store", () => {
-  it("makes a signed-in slot its person's and the active one", () => {
-    const store = makeOriginStore(new MemoryStorage(), new EventTarget());
+  it("makes a signed-in slot its person's and the active one", async () => {
+    const { store } = await one();
     const slot = newSlot();
 
-    store.promote(slot, ada);
+    await store.promote(slot, ada);
 
     expect(store.read()).toStrictEqual({
       device: null,
@@ -57,145 +83,133 @@ describe("the origin store", () => {
     });
   });
 
-  it("keeps the same snapshot until a key changes", () => {
-    const store = makeOriginStore(new MemoryStorage(), new EventTarget());
+  it("keeps the same snapshot until something changes", async () => {
+    const { store } = await one();
     const before = store.read();
 
     expect(store.read()).toBe(before);
 
-    store.setDevice("dv_1.secret");
+    await store.setDevice("dv_1.secret");
 
     expect(store.read()).not.toBe(before);
     expect(store.read().device).toBe("dv_1.secret");
   });
 
-  it("drops a person's older session when they sign in on another slot", () => {
-    const storage = new MemoryStorage();
-    const store = makeOriginStore(storage, new EventTarget());
+  it("drops a person's older session when they sign in on another slot", async () => {
+    const { store, shared } = await one();
     const first = newSlot();
     const second = newSlot();
 
-    storage.setItem(store.sessionKey(first), "first tokens");
-    store.promote(first, ada);
-    store.promote(second, ada);
+    await shared.write((tx) => tx.set(store.sessionKey(first), "ada|s1"));
+    await store.promote(first, ada);
+    await store.promote(second, ada);
 
-    expect(storage.getItem(store.sessionKey(first))).toBeNull();
+    expect(await keysOf(shared)).not.toContain(store.sessionKey(first));
     expect(store.read().people).toStrictEqual(new Map([[ada, second]]));
   });
 
-  it("gives a shared device's one slot to the tile opened last", () => {
-    const store = makeOriginStore(new MemoryStorage(), new EventTarget());
+  it("gives a shared device's one slot to the tile opened last", async () => {
+    const { store } = await one();
     const slot = newSlot();
 
-    store.promote(slot, ada);
-    store.promote(slot, bo);
+    await store.promote(slot, ada);
+    await store.promote(slot, bo);
 
     expect(store.read().people).toStrictEqual(new Map([[bo, slot]]));
   });
 
-  it("drops a forgotten slot's tokens but keeps its sessions' revocations", () => {
-    const storage = new MemoryStorage();
-    const store = makeOriginStore(storage, new EventTarget());
+  it("drops a forgotten slot's tokens but keeps the sessions' revocations", async () => {
+    const { store, shared } = await one();
     const slot = newSlot();
     const key = store.sessionKey(slot);
 
-    store.promote(slot, userId("ada"));
-    storage.setItem(key, "ada|s1");
-    storage.setItem(`${key}:ada|s1`, "tokens");
-    storage.setItem(`${key}:ada|s0`, "older tokens");
-    storage.setItem(`${key}:ada|s0:revoked`, "revoked");
-    storage.setItem(`${key}:ada|s0:confirmed`, "1");
-    store.forget(slot);
+    await store.promote(slot, ada);
+    await shared.write(async (tx) => {
+      await tx.set(key, "ada|s1");
+      await tx.set(`${key}:ada|s1`, "tokens");
+      await tx.set("media.revoked:ada|s0", "revoked");
+      await tx.set("media.signOut:ada|s0", "pending");
+    });
+    await store.forget(slot);
 
-    expect(
-      Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
-        (each) => each?.startsWith(key) === true,
-      ),
-    ).toStrictEqual([`${key}:ada|s0:revoked`, `${key}:ada|s0:confirmed`]);
+    expect((await keysOf(shared)).toSorted()).toStrictEqual([
+      "media.revoked:ada|s0",
+      "media.signOut:ada|s0",
+    ]);
   });
 
-  it("forgets the slot a person signed out of, not the one they signed in on since", () => {
-    const storage = new MemoryStorage();
-    const store = makeOriginStore(storage, new EventTarget());
-    const signingOut = newSlot();
-    const signedInAgain = newSlot();
-
-    store.promote(signingOut, ada);
-    store.promote(signedInAgain, ada);
-    storage.setItem(store.sessionKey(signedInAgain), "ada|s2");
-    store.forget(signingOut);
-
-    expect({
-      person: store.read().people.get(ada),
-      active: store.read().active,
-      session: storage.getItem(store.sessionKey(signedInAgain)),
-    }).toStrictEqual({ person: signedInAgain, active: signedInAgain, session: "ada|s2" });
-  });
-
-  it("forgets one person and leaves the others signed in here", () => {
-    const storage = new MemoryStorage();
-    const store = makeOriginStore(storage, new EventTarget());
+  it("forgets one person and leaves the others signed in here", async () => {
+    const { store, shared } = await one();
     const adaSlot = newSlot();
     const boSlot = newSlot();
 
-    storage.setItem(store.sessionKey(adaSlot), "ada tokens");
-    store.promote(adaSlot, ada);
-    store.promote(boSlot, bo);
-    store.forget(boSlot);
+    await shared.write((tx) => tx.set(store.sessionKey(adaSlot), "ada|s1"));
+    await store.promote(adaSlot, ada);
+    await store.promote(boSlot, bo);
+    await store.forget(boSlot);
 
     expect(store.read()).toStrictEqual({
       device: null,
       active: null,
       people: new Map([[ada, adaSlot]]),
     });
-    expect(storage.getItem(store.sessionKey(adaSlot))).toBe("ada tokens");
+    expect(await keysOf(shared)).toContain(store.sessionKey(adaSlot));
   });
 
-  it("tells this tab of another tab's switch", () => {
-    const storage = new MemoryStorage();
-    const events = new EventTarget();
-    const store = makeOriginStore(storage, events);
+  it("forgets only what still points at the slot, though this tab has not heard of a newer one", async () => {
+    const {
+      stores: [signingOut, signingIn],
+      shared: [store],
+      deliver,
+    } = await tabs(2);
+
+    if (signingOut === undefined || signingIn === undefined || store === undefined) {
+      throw new Error("No tab");
+    }
+
+    const old = newSlot();
+    const fresh = newSlot();
+
+    await signingOut.promote(old, ada);
+    await deliver();
+    await store.write((tx) => tx.set(signingOut.sessionKey(fresh), "ada|s2"));
+    await signingIn.promote(fresh, ada);
+
+    expect(signingOut.read().active).toBe(old);
+
+    await signingOut.forget(old);
+    await deliver();
+
+    expect({ here: signingOut.read(), there: signingIn.read() }).toStrictEqual({
+      here: { device: null, active: fresh, people: new Map([[ada, fresh]]) },
+      there: { device: null, active: fresh, people: new Map([[ada, fresh]]) },
+    });
+    expect(await keysOf(store)).toContain(signingOut.sessionKey(fresh));
+  });
+
+  it("tells this tab of another tab's switch once its notification arrives", async () => {
+    const {
+      stores: [here, there],
+      deliver,
+    } = await tabs(2);
+
+    if (here === undefined || there === undefined) throw new Error("No tab");
+
     const seen: Array<string | null> = [];
     const slot = newSlot();
 
-    store.subscribe(() => seen.push(store.read().active));
-    storage.setItem("media.active", slot);
-    events.dispatchEvent(storageEvent(storage, "media.active"));
+    here.subscribe(() => seen.push(here.read().active));
+    await there.activate(slot);
+    await deliver();
 
     expect(seen).toStrictEqual([slot]);
   });
 
-  it("tells a session's engine when another tab writes or removes that session or its keys", () => {
-    const storage = new MemoryStorage();
-    const events = new EventTarget();
-    const store = makeOriginStore(storage, events);
-    const slot = newSlot();
-    const other = newSlot();
-    let changes = 0;
+  it("holds nothing and refuses every change without IndexedDB", async () => {
+    const store = await openOriginStore(null);
 
-    store.sessions.subscribe?.(store.sessionKey(slot), () => {
-      changes += 1;
-    });
-    events.dispatchEvent(storageEvent(storage, store.sessionKey(other)));
-    events.dispatchEvent(storageEvent(storage, `${store.sessionKey(other)}:ada|s1:revoked`));
-    events.dispatchEvent(storageEvent(storage, store.sessionKey(slot)));
-    events.dispatchEvent(storageEvent(storage, `${store.sessionKey(slot)}:ada|s1:revoked`));
-    store.promote(slot, ada);
-    store.forget(slot);
-
-    expect(changes).toBe(3);
-  });
-
-  it("ignores another storage area's events", () => {
-    const events = new EventTarget();
-    const store = makeOriginStore(new MemoryStorage(), events);
-    let changes = 0;
-
-    store.subscribe(() => {
-      changes += 1;
-    });
-    events.dispatchEvent(storageEvent(new MemoryStorage(), "media.active"));
-
-    expect(changes).toBe(0);
+    expect(store.read()).toStrictEqual({ device: null, active: null, people: new Map() });
+    await expect(store.promote(newSlot(), ada)).rejects.toThrow("IndexedDB is unavailable");
+    await expect(store.sessions.read((tx) => tx.keys())).rejects.toThrow();
   });
 });

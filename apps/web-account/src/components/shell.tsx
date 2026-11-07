@@ -100,7 +100,7 @@ export function Shell({ children }: { readonly children: ReactNode }) {
     setLeaving(true);
 
     try {
-      await signOut(me.userId);
+      await signOut();
     } catch (cause) {
       toast.error(describeFailure(cause));
       setLeaving(false);

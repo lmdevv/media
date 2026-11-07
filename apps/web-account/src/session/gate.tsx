@@ -59,7 +59,7 @@ const useForgetUnknownDevice = (inputs: ScreenInputs): void => {
   const unknown = deviceUnknown(inputs);
 
   useEffect(() => {
-    if (unknown) store.clearDevice();
+    if (unknown) void store.clearDevice();
   }, [unknown, store]);
 };
 

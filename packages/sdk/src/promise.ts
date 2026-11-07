@@ -56,6 +56,10 @@ export type { PasswordSignIn } from "./auth";
 
 export { createPlatform } from "./platform/promise";
 
+export { openIndexedDb } from "./shared-store";
+
+export type { Channel, IdbFactory, SharedStore, SharedTransaction } from "./shared-store";
+
 export type {
   PendingDeviceSignIn,
   PlatformInvite,
