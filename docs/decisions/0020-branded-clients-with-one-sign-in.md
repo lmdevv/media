@@ -156,6 +156,11 @@ every tab of the origin, and which works outside secure contexts.
   The command needs no session, because the refresh token is the proof. It cannot end a session
   whose token it was not given. ADR 0006's refusal of API keys concerns a caller acting with a
   key, and this command has no caller.
+- **One device code per browser.** The first sign-in enrolls the browser and keeps its device code
+  only if none is kept yet, in one transaction. A tab that enrolled at the same moment and lost
+  enrolls again with the kept code, so its session joins that device and the picker lists both
+  people. The device it enrolled first is left for an admin to remove. While a sign-in finishes,
+  its tab stays on its slot, so another tab's sign-in cannot switch it away.
 - **The account client forgets the slot it signed out of**, which is its own client's slot. The
   forget transaction leaves a slot another tab signed the person in on meanwhile.
 - **Without IndexedDB**, as in some private modes, or when it has not opened within five seconds,

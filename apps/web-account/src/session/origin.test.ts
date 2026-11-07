@@ -122,7 +122,7 @@ describe("the origin store", () => {
 
     expect(store.read()).toBe(before);
 
-    await store.setDevice("dv_1.secret");
+    await store.claimDevice("dv_1.secret");
 
     expect(store.read()).not.toBe(before);
     expect(store.read().device).toBe("dv_1.secret");
@@ -224,6 +224,24 @@ describe("the origin store", () => {
       there: { device: null, active: fresh, people: new Map([[ada, fresh]]) },
     });
     expect(await keysOf(store)).toContain(signingOut.sessionKey(fresh));
+  });
+
+  it("keeps the first device two tabs enroll at once, and tells both which one it is", async () => {
+    const {
+      stores: [here, there],
+    } = await tabs(2);
+
+    if (here === undefined || there === undefined) throw new Error("No tab");
+
+    const kept = await Promise.all([
+      here.claimDevice("dv_1.first"),
+      there.claimDevice("dv_2.second"),
+    ]);
+
+    expect({ kept, stored: here.read().device }).toStrictEqual({
+      kept: [kept[0], kept[0]],
+      stored: kept[0],
+    });
   });
 
   it("tells this tab of another tab's switch once its notification arrives", async () => {

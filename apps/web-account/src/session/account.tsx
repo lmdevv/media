@@ -14,6 +14,11 @@ interface AccountContext {
   readonly origin: Origin;
   /** The slot this tab's client runs on. */
   readonly slot: SlotId;
+  /**
+   * Keeps this tab's client on `slot` while a sign-in finishes there, or lets it follow the active
+   * slot again with null, so another tab's sign-in cannot switch it away mid-sign-in.
+   */
+  readonly pin: (slot: SlotId | null) => void;
 }
 
 const Context = createContext<AccountContext | null>(null);
@@ -54,6 +59,7 @@ export function AccountProvider({
 }) {
   const origin = useSyncExternalStore(store.subscribe, store.read, store.read);
   const [staging, setStaging] = useState(() => ({ fresh: freshSlot, slot: newSlot() }));
+  const [pinned, pin] = useState<SlotId | null>(null);
 
   const taken = [...origin.people.values()].includes(staging.slot);
 
@@ -66,9 +72,9 @@ export function AccountProvider({
     setStaging({ fresh: freshSlot, slot: needsNew ? newSlot() : staging.slot });
   }
 
-  const slot = freshSlot || origin.active === null ? staging.slot : origin.active;
+  const slot = pinned ?? (freshSlot || origin.active === null ? staging.slot : origin.active);
 
-  const context = useMemo(() => ({ store, origin, slot }), [store, origin, slot]);
+  const context = useMemo(() => ({ store, origin, slot, pin }), [store, origin, slot]);
 
   return (
     <Context value={context}>
@@ -116,7 +122,7 @@ export interface AccountActions {
 
 /** The actions on this browser's people, for the current client. */
 export const useAccountActions = (): AccountActions => {
-  const { store, origin, slot } = useAccountContext();
+  const { store, origin, slot, pin } = useAccountContext();
   const platform = usePlatform();
   const navigate = useNavigate();
   const router = useRouter();
@@ -127,13 +133,19 @@ export const useAccountActions = (): AccountActions => {
       const me = await platform.core.auth.sessions.current();
 
       if (me.kind !== "tile") {
+        const { enroll } = platform.core.devices.registry;
         const device = store.read().device;
 
-        const enrolled = await platform.core.devices.registry.enroll(
+        const enrolled = await enroll(
           device === null ? { name: deviceName() } : { name: deviceName(), device },
         );
 
-        await store.setDevice(enrolled.device);
+        // Another tab may have enrolled this browser at the same moment. The first device kept
+        // wins, and this session moves onto it, so the picker lists everyone signed in here. The
+        // device this tab enrolled is left for an admin to remove.
+        const kept = await store.claimDevice(enrolled.device);
+
+        if (kept !== enrolled.device) await enroll({ name: deviceName(), device: kept });
       }
 
       return me.userId;
@@ -164,22 +176,28 @@ export const useAccountActions = (): AccountActions => {
     signIn: async (signIn) => {
       const { session } = platform;
 
-      switch (signIn.kind) {
-        case "password":
-          await session.signInWithPassword(signIn);
-          break;
-        case "setUpOwner":
-          await session.setUpOwner(signIn);
-          break;
-        case "invite":
-          await session.acceptInvite(signIn);
-          break;
-        case "reset":
-          await session.resetPassword(signIn);
-          break;
-      }
+      pin(slot);
 
-      await establish();
+      try {
+        switch (signIn.kind) {
+          case "password":
+            await session.signInWithPassword(signIn);
+            break;
+          case "setUpOwner":
+            await session.setUpOwner(signIn);
+            break;
+          case "invite":
+            await session.acceptInvite(signIn);
+            break;
+          case "reset":
+            await session.resetPassword(signIn);
+            break;
+        }
+
+        await establish();
+      } finally {
+        pin(null);
+      }
     },
     switchTo: (userId) => {
       const held = origin.people.get(userId);

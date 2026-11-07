@@ -62,7 +62,11 @@ export interface OriginStore {
    * moment. A slot that took another session since, or a person's newer slot, is left alone.
    */
   readonly forget: (slot: SlotId, session: string | null) => Promise<void>;
-  readonly setDevice: (code: string) => Promise<void>;
+  /**
+   * Keeps `code` as this browser's device code unless one is already kept, and answers the code
+   * kept. Two tabs that enroll at once both end up with the first one.
+   */
+  readonly claimDevice: (code: string) => Promise<string>;
   readonly clearDevice: () => Promise<void>;
 }
 
@@ -231,7 +235,15 @@ export const openOriginStore = async (shared: SharedStore | null): Promise<Origi
 
         if (active === slot) await tx.remove(ACTIVE);
       }),
-    setDevice: (code) => change((tx) => tx.set(DEVICE, code)),
+    claimDevice: (code) =>
+      change(async (tx) => {
+        const kept = await tx.get(DEVICE);
+
+        if (kept !== undefined) return kept;
+        await tx.set(DEVICE, code);
+
+        return code;
+      }),
     clearDevice: () => change((tx) => tx.remove(DEVICE)),
   };
 };

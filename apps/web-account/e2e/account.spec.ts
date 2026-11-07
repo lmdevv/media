@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 import { createPerson, openPlatform, signIn } from "./people";
+import type { Person } from "./people";
 import { stackEnv } from "./stack";
 
 const stack = stackEnv();
@@ -38,6 +40,40 @@ test("a second person signed in on this browser joins the picker", async ({ page
   await page.getByRole("button", { name: first.username, exact: true }).click();
   await expect(page).toHaveURL(/\/home$/u);
   await expect(page.getByRole("link", { name: `${first.username}, switch person` })).toBeVisible();
+});
+
+const fillIn = async (tab: Page, person: Person): Promise<void> => {
+  await tab.goto("/");
+  await tab.getByLabel("Username").fill(person.username);
+  await tab.getByLabel("Password", { exact: true }).fill(person.password);
+};
+
+test("two people signing in at once on a new browser both join its picker", async ({
+  page,
+  context,
+}) => {
+  if (stack === null) return;
+
+  const first = await createPerson(stack, "mateo");
+  const second = await createPerson(stack, "aiko");
+  const other = await context.newPage();
+
+  await Promise.all([fillIn(page, first), fillIn(other, second)]);
+  await Promise.all([
+    page.getByRole("button", { name: "Sign in" }).click(),
+    other.getByRole("button", { name: "Sign in" }).click(),
+  ]);
+  await Promise.all(
+    [page, other].flatMap((tab) =>
+      [first, second].map((person) =>
+        expect(tab.getByRole("button", { name: person.username, exact: true })).toBeVisible(),
+      ),
+    ),
+  );
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: first.username, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: second.username, exact: true })).toBeVisible();
 });
 
 test("two tabs share one sign-in, and a sign-out in one signs the other out", async ({
