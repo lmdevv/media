@@ -354,6 +354,28 @@ const beginStop = (stream: Lifecycle, run: RunScope) =>
         ),
   ).pipe(Effect.uninterruptible);
 
+const whileOpen = <A, E, R>(scope: Scope.Scope, effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const running = MutableRef.make(false);
+    const done = yield* Deferred.make<void>();
+
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.suspend(() => (MutableRef.get(running) ? Deferred.await(done) : Effect.void)),
+    );
+
+    const open = yield* Effect.sync(() => {
+      if (isClosed(scope)) return false;
+      MutableRef.set(running, true);
+
+      return true;
+    });
+
+    if (!open) return Option.none<A>();
+
+    return Option.some(yield* effect.pipe(Effect.ensuring(Deferred.succeed(done, undefined))));
+  });
+
 const stopWaitingAfter =
   <L>(wait: Duration.Duration, late: () => L) =>
   <A, E, R>(request: Effect.Effect<A, E, R>) =>
@@ -479,10 +501,11 @@ const make = Effect.gen(function* () {
       Effect.flatMap((first) =>
         first
           ? Effect.gen(function* () {
-              yield* Scope.close(stream.scope, Exit.void);
+              const fibers = yield* Scope.close(stream.scope, Exit.void).pipe(Effect.forkDetach);
               const live = [...(yield* Ref.get(stream.runs)).live.values()];
 
               yield* Effect.forEach(live, (run) => beginStop(stream, run), { discard: true });
+              yield* Fiber.await(fibers);
               yield* Effect.forEach(live, (run) => Deferred.await(run.stopped), { discard: true });
               yield* fs.remove(stream.directory, { recursive: true }).pipe(Effect.ignore);
             }).pipe(
@@ -806,10 +829,21 @@ const make = Effect.gen(function* () {
       return Option.none<Generation>();
     }
 
-    const running = yield* tools.startFfmpeg(args).pipe(
-      Scope.provide(scope),
-      Effect.catch((error) => Deferred.fail(exit, error).pipe(Effect.as(undefined))),
+    const spawned = yield* whileOpen(
+      scope,
+      tools.startFfmpeg(args).pipe(
+        Scope.provide(scope),
+        Effect.catch((error) => Deferred.fail(exit, error).pipe(Effect.as(undefined))),
+      ),
     );
+
+    if (Option.isNone(spawned)) {
+      yield* awaitPrevious;
+
+      return Option.none<Generation>();
+    }
+
+    const running = spawned.value;
 
     yield* Scope.addFinalizer(scope, Effect.sync(wakeWaits));
 
