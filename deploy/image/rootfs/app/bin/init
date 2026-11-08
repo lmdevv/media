@@ -1,7 +1,4 @@
 #!/command/with-contenv bash
-# Runs once at every start, as root, after both Convex backends answer: for the core and for old
-# movies it backs up before an upgrade and deploys the bundled functions, then configures both
-# deployments and both web clients, and writes the media service's private environment file.
 set -euo pipefail
 umask 077
 # Outside CI the Convex CLI reports to Sentry, and where that host is slow or blocked each command
@@ -47,8 +44,7 @@ install -d -m 700 -o movies -g movies /data/movies/media /data/movies/backups /t
 find /data/movies/media /data/movies/backups /transcode \( \! -user movies -o \! -group movies \) \
   -exec chown -h movies:movies {} +
 
-# Deploys one Convex project and leaves its admin key in $admin_key:
-#   deploy <domain> <port> <project dir> <backup owner>
+# Shell functions return one status, so these leave $admin_key and $deployed_version behind.
 deploy() {
   local domain="$1" port="$2" dir="$3" owner="$4"
   local url="http://127.0.0.1:$port" data="/data/$domain" version stamp backup

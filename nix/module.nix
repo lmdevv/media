@@ -48,7 +48,6 @@ let
   moviesDataDir = "${cfg.dataDir}/movies";
   mediaDataDir = "${moviesDataDir}/media";
 
-  # Both backends get the settings of the image's (deploy/image/rootfs/app/bin/convex-backend).
   # Their HTTP actions stay inside their containers (docs/decisions/0025).
   convexContainer = name: port: origin: dataDir: {
     image = cfg.convexImage;
@@ -91,8 +90,7 @@ let
         ]}
       install -d -m 700 ${lib.escapeShellArg "${coreDataDir}/backups"}
 
-      # Deploys one Convex project and leaves its admin key in $admin_key:
-      #   deploy <domain> <url> <container> <convex command> <functions hash> <data dir> <backup dir> <backup owner>
+      # Shell functions return one status, so these leave $admin_key and $deployed_version behind.
       deploy() {
         local domain="$1" url="$2" container="$3" convex="$4" hash_file="$5" data="$6" backups="$7"
         local backup_owner="$8" version name
@@ -147,7 +145,7 @@ let
       unset media_env
 
       umask 022
-      movies-configure-account --to /run/movies/account --convex-url "$public_url/convex"
+      movies-configure-account --to /run/media-account --convex-url "$public_url/convex"
       movies-configure-web --to /run/movies/web --convex-url "$public_url/movies/convex"
       finish ${lib.escapeShellArg mediaDataDir}
       chown "$owner" ${lib.escapeShellArg "${mediaDataDir}/version"}
@@ -582,7 +580,6 @@ in
           "${moviesDataDir}/convex";
     };
 
-    # Caddy with the image's routes on the one address.
     systemd.services.media-proxy = {
       description = "[media] on one address";
       wantedBy = [ "multi-user.target" ];
@@ -593,7 +590,7 @@ in
         MEDIA_CORE_CONVEX = "127.0.0.1:${toString ports.coreConvex}";
         MEDIA_MOVIES_CONVEX = "127.0.0.1:${toString ports.moviesConvex}";
         MEDIA_SERVICE = "127.0.0.1:${toString ports.media}";
-        MEDIA_ACCOUNT_DIR = "/run/movies/account";
+        MEDIA_ACCOUNT_DIR = "/run/media-account";
         HOME = "/run/media-proxy";
         XDG_CONFIG_HOME = "/run/media-proxy/config";
         XDG_DATA_HOME = "/run/media-proxy/data";
@@ -708,8 +705,6 @@ in
         TimeoutStartSec = "10min";
         RuntimeDirectory = "movies";
         RuntimeDirectoryMode = "0755";
-        # Caddy keeps serving the account client from it while the service restarts.
-        RuntimeDirectoryPreserve = true;
 
         ReadWritePaths = [
           mediaDataDir

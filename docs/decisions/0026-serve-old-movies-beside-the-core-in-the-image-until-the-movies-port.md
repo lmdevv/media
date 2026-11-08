@@ -61,8 +61,9 @@ second port.
 - Behind Caddy every request reaches the media service from 127.0.0.1, so its per-address rate
   limits on `/artwork` and `/api/health` count all clients together. The server's adoption of the
   core in phase 4 should trust Caddy's `X-Forwarded-For`.
-- A share link the movies iOS app builds from the server URL, `/title/<id>`, lands on the account
-  client, not the movies client, until the movies port settles the web URLs.
+- Links the movies iOS app builds from the server URL, a title's share link `/title/<id>` and a
+  watch room's invite `/r/<id>`, land on the account client, not the movies client, until the
+  movies port settles the web URLs. The web client builds them under `/movies`.
 
 ## Alternatives rejected
 

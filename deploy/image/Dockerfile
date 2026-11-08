@@ -1,14 +1,8 @@
 # syntax=docker/dockerfile:1.7
-# [media] all-in-one image: Caddy on one port in front of the core's Convex backend, old movies'
-# Convex backend, and the media service, under s6 (docs/decisions/0015 and 0025). It serves the
-# account client at /, the movies client at /movies, and holds the `media` CLI and ffmpeg with
-# Intel Quick Sync. Build from the repo root:
-#   docker build -f deploy/image/Dockerfile -t media .
 
 ARG NODE_IMAGE=node:24.21.0-trixie-slim@sha256:173f125896c3b47ddf056734c7ea789d04595a6a08769a8f78e0df642781fb66
 # `generate_key` derives the admin key from the backend's instance secret and must match its version.
 ARG CONVEX_IMAGE=ghcr.io/convex/convex-backend:5c7cb5bc7db457290f1769f95f1d1340912f7fd7@sha256:d715e9ec088784407ca4ba2d3db592702cd328d02c76cdca3852c0018f2a76b4
-# caddy:2.11
 ARG CADDY_IMAGE=caddy:2.11@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
 
 FROM ${CONVEX_IMAGE} AS convex
@@ -42,7 +36,6 @@ RUN corepack enable
 WORKDIR /src
 COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts --os=linux --cpu=x64 --cpu=arm64 --libc=glibc
-# Both web clients are built once with a placeholder Convex URL that init replaces at startup.
 RUN VITE_CONVEX_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter web build --base=/movies/ \
  && VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter @media/web-account build \
  && pnpm --config.verify-deps-before-run=false --filter @media/server build \
@@ -72,7 +65,6 @@ RUN for project in backend platform; do \
 FROM ${NODE_IMAGE}
 ARG TARGETARCH
 ARG S6_OVERLAY_VERSION=3.2.1.0
-# SHA-256 of the s6-overlay release tarballs, from the release's .sha256 files.
 ARG S6_OVERLAY_NOARCH_SHA256=42e038a9a00fc0fef70bf0bc42f625a9c14f8ecdfe77d4ad93281edf717e10c5
 ARG S6_OVERLAY_X86_64_SHA256=8bcbc2cada58426f976b159dcc4e06cbb1454d5f39252b3bb0c778ccf71c9435
 ARG S6_OVERLAY_AARCH64_SHA256=c8fd6b1f0380d399422fc986a1e6799f6a287e2cfa24813ad0b6a4fb4fa755cc
@@ -103,9 +95,7 @@ RUN set -eux; \
     tar -C / -Jxpf s6-overlay-noarch.tar.xz; \
     tar -C / -Jxpf "s6-overlay-${s6arch}.tar.xz"; \
     rm s6-overlay-*.tar.xz
-# Every service runs as its own unprivileged user. The media service runs as `movies`, which init
-# moves to PUID/PGID at boot; the base image's `node` user held uid 1000. Both Convex backends and
-# Caddy get fixed system ids that PUID/PGID may not take.
+# The base image's `node` user holds uid 1000.
 RUN userdel --remove node \
  && groupadd --gid 1000 movies \
  && useradd --uid 1000 --gid movies --no-create-home --home-dir /nonexistent \
@@ -148,8 +138,7 @@ ENV NODE_ENV=production \
 
 VOLUME ["/data", "/transcode"]
 EXPOSE 8080
-# Healthy while Caddy, the media service with its Convex backend, and the core's Convex answer. The
-# media service starts only after init, which backs up before an upgrade and deploys both
+# The media service starts only after init, which backs up before an upgrade and deploys both
 # projects, so the start period is long; it ends at the first passing check.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --start-interval=2s \
   CMD curl -fsS http://127.0.0.1:8080/api/health | grep -q '"backend":"connected"' \

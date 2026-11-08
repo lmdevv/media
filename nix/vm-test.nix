@@ -1,8 +1,3 @@
-# NixOS VM test of the module: boots a machine with `services.media` enabled, starts both pinned
-# Convex backends (from a fixed-output image, since the test has no network), the media service,
-# and Caddy, and checks that one address serves every path, the service signs in to Convex, both
-# web clients are configured, secrets stay private, and the service survives a restart.
-#
 #   nix build .#checks.x86_64-linux.vm -L
 #
 # After a change to deploy/convex-backend.image, update `imageHashes` with
@@ -103,8 +98,8 @@ testers.runNixOSTest {
 
     with subtest("both web clients are served with their deployment's Convex URL"):
         machine.succeed("grep -rqF http://localhost:8080/movies/convex /run/movies/web")
-        machine.succeed("grep -rqF http://localhost:8080/convex /run/movies/account")
-        machine.fail("grep -rqF __MEDIA_CONVEX_URL__ /run/movies/web /run/movies/account")
+        machine.succeed("grep -rqF http://localhost:8080/convex /run/media-account")
+        machine.fail("grep -rqF __MEDIA_CONVEX_URL__ /run/movies/web /run/media-account")
 
     with subtest("options reach the service"):
         environ = machine.succeed(

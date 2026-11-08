@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# Keeps the installs in step with each other and with the media service. Fails when:
-#   - the image's Dockerfile pins another Convex backend than deploy/convex-backend.image, or the
-#     NixOS module or scripts/dev-stack.sh stops reading that file;
-#   - a setting the media service reads (apps/media/src/media-config.ts) is neither set by the
-#     image's init nor passed on by it, or is missing from the NixOS module or apps/media/README.md;
-#   - a setting init passes on is missing from compose.yaml, deploy/compose/.env.example, the root
-#     .env.example, or the README's configuration table;
-#   - the Jellyfin test image is referenced in code or CI without a digest, or with different ones;
-#   - a workspace package carries another version than the release (scripts/check-version.sh);
-#   - compose.demo.yaml mounts another demo library than deploy/demo-library/image.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"

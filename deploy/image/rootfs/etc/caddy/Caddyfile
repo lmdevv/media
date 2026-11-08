@@ -9,7 +9,7 @@
 	}
 	# Caddy aborts a response whose write stalls for `write_idle` (1m by default). Players stop
 	# reading a stream once they have buffered far enough ahead, and while paused, so that default
-	# would cut streams off. Off, as when the media service served them itself.
+	# would cut streams off.
 	servers {
 		timeouts {
 			write_idle -1s
@@ -20,13 +20,8 @@
 	grace_period 3s
 }
 
-# One address for the whole product (docs/decisions/0015 and 0025). The image runs it as is; the
-# NixOS module sets the variables. Upstreams, all on loopback: the core's Convex backend
-# (MEDIA_CORE_CONVEX), old movies' Convex backend (MEDIA_MOVIES_CONVEX), each with its HTTP actions
-# on the next port, which stay unpublished, and the media service (MEDIA_SERVICE), which serves the
-# movies client itself. MEDIA_ACCOUNT_DIR holds the configured account client.
 :{$MEDIA_PORT:8080} {
-	bind {$MEDIA_BIND:::}
+	bind {$MEDIA_BIND:0.0.0.0}
 	header -Server
 
 	handle_path /convex/* {
@@ -71,7 +66,8 @@
 		}
 		@assets path /assets/*
 		header @assets Cache-Control "public, max-age=31536000, immutable"
-		header /index.html Cache-Control "no-cache"
+		@pages not path /assets/*
+		header @pages Cache-Control "no-cache"
 		try_files {path} /index.html
 		file_server
 	}

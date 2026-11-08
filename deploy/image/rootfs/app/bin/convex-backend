@@ -1,12 +1,6 @@
 #!/command/with-contenv sh
-# One self-hosted Convex backend, as the unprivileged `convex` user:
-#
-#   convex-backend <domain> <port> <public path>
-#
-# Its database lives in /data/<domain>/convex. The instance secret is generated on first boot into
-# /data/<domain>/secrets (root only); this script, still root, hands the backend a copy only it
-# can read. HTTP actions stay inside the container on <port> + 1 (docs/decisions/0025): Convex
-# Auth signs tokens with that origin as issuer and the backend fetches its own JWKS from it.
+# HTTP actions stay inside the container on <port> + 1 (docs/decisions/0025): Convex Auth signs
+# tokens with that origin as issuer and the backend fetches its own JWKS from it.
 set -e
 umask 077
 domain="$1"

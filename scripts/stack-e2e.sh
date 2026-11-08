@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# Packaged-stack smoke test: builds the all-in-one image, starts deploy/compose/compose.yaml on a
-# fresh project with a generated fixture library mounted read-only, checks that one port serves
-# every path, the install's privilege and secret boundaries, its data root, and that s6 restarts
-# the media service, then runs apps/media/src/stack/packaged-stack.test.ts against it (sign-up,
-# library, scan, direct and HLS playback, a media restart, CLI backup and restore) and the image's
-# own `media` CLI.
-#
 #   scripts/stack-e2e.sh
 #   IMAGE=ghcr.io/lmdevv/media:main scripts/stack-e2e.sh   # skip the build
 #   QSV=1 scripts/stack-e2e.sh   # with compose.qsv.yaml: Quick Sync on the host's Intel GPU
@@ -82,7 +75,6 @@ media_pid() {
 media_pid="$(media_pid)"
 media_uid="$(in_movies awk '/^Uid:/ { print $2 }' "/proc/${media_pid}/status")"
 answers() { curl -fsS "${MEDIA_BASE_URL}$1" 2>/dev/null | grep -qF "$2"; }
-# The users running the processes whose command line starts with $1.
 owners() {
   in_movies sh -c 'for p in /proc/[0-9]*; do
     tr "\0" " " <"$p/cmdline" 2>/dev/null | grep -q "^$0" && stat -c %U "$p"

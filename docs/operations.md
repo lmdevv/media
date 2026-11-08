@@ -119,6 +119,12 @@ npm and standalone binaries on the tag's GitHub Release. Upgrade a CLI installed
 ad hoc signed binary until `xattr -d com.apple.quarantine`); the image and the Nix modules carry
 their own.
 
+The all-in-one image (ADR 0026) is a fresh install, not an upgrade of a v0.2 install. Its Compose
+project, volumes, and data layout are new (`media`, `media-data`, `/data/core` and `/data/movies`),
+and the NixOS module's `dataDir` moved to `/var/lib/media`. Nothing moves the old data over (ADR
+0002). Stop the old install before starting the new one, since both take port 8080, and keep its
+volumes or `/var/lib/movies` until you no longer need them.
+
 | Track     | Compose `MEDIA_IMAGE`                              | NixOS flake input            |
 | --------- | -------------------------------------------------- | ---------------------------- |
 | A release | `ghcr.io/lmdevv/media:latest`, `:0.2`, or `:0.2.1` | `github:lmdevv/media/v0.2.1` |

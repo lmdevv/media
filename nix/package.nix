@@ -1,8 +1,3 @@
-# [media] built from this repository: the media service bundle, the movies client (served at
-# /movies) and the account client, each built once with a placeholder Convex URL that
-# `movies-configure-web` replaces at startup, and both Convex projects (old movies and the core)
-# with production dependencies and the pinned Convex CLI.
-#
 #   nix build .#movies
 #
 # After a change to pnpm-lock.yaml, set `pnpmDeps.hash` to "" and build once; Nix prints the

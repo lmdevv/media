@@ -1,5 +1,4 @@
 #!/command/with-contenv sh
-# The media service, unprivileged and with only what init wrote to its private environment file.
 cd /app/media
 exec setpriv --reuid=movies --regid=movies --init-groups --inh-caps=-all \
   env -i PATH=/usr/local/bin:/usr/bin:/bin NODE_ENV=production TZ="${TZ:-UTC}" \

@@ -50,7 +50,6 @@ const serveApp = (name) =>
         response.writeHead(200, { "content-type": "audio/wav" }).end(toneWav());
         return;
       }
-      // The one port serves the account client at / and movies at /movies, as the image does.
       const app = name === "media" ? (request.url.startsWith("/movies/") ? "movies" : "account") : name;
       response.writeHead(200, { "content-type": "text/html" });
       response.end(`<!doctype html><title>${app}</title><main><h1>${app}</h1>

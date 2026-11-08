@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# NixOS module smoke test on a NixOS host, without a VM: evaluates nix/module.nix with the Docker
-# backend, runs both Convex containers the way the module's oci-containers units do, installs the
-# module's own generated movies.service and media-proxy.service (hardening included) as runtime
-# units under /run/systemd/system, checks that one address serves every path, and runs
-# apps/media/src/stack/packaged-stack.test.ts against it (sign-up, library, scan, direct and HLS
-# playback, a service restart, CLI backup and restore). Then it checks the unit's sandbox and
-# removes everything. It refuses to run beside a real install: it needs the containers'
-# names and /run/movies.
-#
 #   scripts/nixos-module-e2e.sh                              # software transcoding
 #   HARDWARE_ACCELERATION=auto scripts/nixos-module-e2e.sh   # probe and use the host's Quick Sync
 #
