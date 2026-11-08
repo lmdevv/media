@@ -114,6 +114,13 @@ answers it as `joinSequence`, and a tile's comes from `core.auth.sessions.curren
   stay live. A sign-in that fails on the way is signed out on the core by its own client.
 - Two tabs of a new browser that sign in at once each enroll a device. The first kept wins, the
   other loses as above, and its device is left for an admin to remove.
+- **One window is accepted.** Two tabs sign in at once on one device. The core binds S2, then S3,
+  and ends S2. If S2's answer reaches the browser first, the record holds S2 until S3's answer
+  lands, and calls with S2 fail meanwhile, because the core refuses it. A tab whose token or
+  refresh is refused reads the record again before it shows signed out. It takes S3 if the record
+  holds it, and otherwise signs S2 out only by compare-and-set, while the record still holds S2.
+  S3's number is higher, so it is kept either way. **The guarantee:** once both answers land, the
+  record holds S3 and every tab uses it. No tab is left signed out, and the core never serves S2.
 
 ### A sign-out holds across tabs
 
@@ -134,15 +141,20 @@ writes in the same transaction.
   pending record.
 - **Every token passes a transactional check.** Before a client hands out any token, the
   in-memory one included, it reads the session's state in a transaction. The token goes out only
-  while the record holds that session and no revocation exists. A read that fails counts as
-  revoked.
+  while the record holds that session and no revocation exists. A read that fails gives no
+  token, so nothing leaves unchecked, but it proves nothing about the session: the client keeps
+  it, ends nothing, and hands its token out again once the store reads.
+- **Only three things ask the core to end a session:** an explicit sign-out, a revocation and
+  pending sign-out read from the store, and a session losing a keep (or being replaced by one). A
+  store that cannot be read never does.
 - **Only the core's revoke confirms.** `core.auth.sessions.revoke` takes any refresh token the
   session ever had, deletes the session and all its refresh tokens, and answers `confirmed`
   whether or not it had already ended. Convex Auth keeps a rotated token's row until the session
-  ends, so an old token still proves the session. A refresh that comes back empty proves nothing,
-  so a refused refresh is treated as a sign-out and revoked like any other, unless the record
-  shows that another tab renewed the session first. The command needs no session, because the
-  refresh token is the proof.
+  ends, so an old token still proves the session. A refresh that comes back empty proves nothing.
+  So a refused refresh reads the record first: it takes another tab's renewal of the session, or
+  another session the record holds, and otherwise signs the session out by compare-and-set while
+  the record still holds it, which also ends it on the core. The command needs no session,
+  because the refresh token is the proof.
 - **The `BroadcastChannel` only tells other tabs to read again.** Its message carries nothing, so
   it never carries authority, and a tab never spends a refresh token another tab already rotated.
 - **No client clock decides anything.** No record expires, and no answer is refused for its age.

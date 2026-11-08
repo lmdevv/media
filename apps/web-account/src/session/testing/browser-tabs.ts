@@ -3,7 +3,8 @@
  * Every tab opens its own connection to one fake-indexeddb database, so transactions serialize
  * across tabs as they do in a browser. A tab hears of another tab's commit only when `deliver`
  * runs, the way a `BroadcastChannel` message arrives as a later task, unless delivery is `at once`.
- * `fill` makes writes fail as a full store does, rolling their transaction back.
+ * `fill` makes writes fail as a full store does, rolling their transaction back, and `break` makes
+ * every transaction fail, as when the browser loses its connection to IndexedDB.
  */
 import { openIndexedDb } from "@media/sdk/promise";
 import type { Channel, SharedStore } from "@media/sdk/promise";
@@ -18,6 +19,8 @@ export interface BrowserTabs {
   readonly deliver: (index?: number) => void;
   /** While on, every write that sets a value fails and rolls back; removing still works. */
   readonly fill: (full: boolean) => void;
+  /** While on, every read and write fails. */
+  readonly break: (broken: boolean) => void;
 }
 
 const NAME = "media";
@@ -32,6 +35,10 @@ export const makeBrowserTabs = async (options: {
   const queued = indices.map((): Array<() => void> => []);
   const listeners: Array<() => void> = [];
   let full = false;
+  let broken = false;
+
+  const unlessBroken = () =>
+    broken ? Promise.reject(new Error("UnknownError: the connection to IndexedDB was lost")) : null;
 
   const deliverTo = (index: number) => {
     for (const notify of queued[index]?.splice(0) ?? []) notify();
@@ -68,9 +75,10 @@ export const makeBrowserTabs = async (options: {
     if (store === undefined) throw new Error(`No tab ${index}`);
 
     return {
-      read: store.read,
+      read: (run) => unlessBroken() ?? store.read(run),
       subscribe: store.subscribe,
       write: (run) =>
+        unlessBroken() ??
         store.write((tx) =>
           run({
             ...tx,
@@ -100,6 +108,9 @@ export const makeBrowserTabs = async (options: {
     deliver,
     fill: (next) => {
       full = next;
+    },
+    break: (next) => {
+      broken = next;
     },
   };
 };

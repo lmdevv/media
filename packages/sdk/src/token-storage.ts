@@ -83,6 +83,11 @@ export interface Interface {
    */
   readonly revoke: (session: StoredSession) => Effect.Effect<void, TokenStorageError>;
   /**
+   * Signs `session` out as `revoke` does, but only while the store still holds it as its current
+   * session; whether it did. A store another client replaced the session in keeps its newer one.
+   */
+  readonly revokeHeld: (session: StoredSession) => Effect.Effect<boolean, TokenStorageError>;
+  /**
    * Records that the server ended a revoked `session`, and forgets its tokens and its pending
    * sign-out.
    */
@@ -124,6 +129,7 @@ export const owned = (store: {
   save: store.save,
   renew: (_expected, renewed) => Effect.as(store.save(renewed), true),
   revoke: () => store.clear,
+  revokeHeld: () => Effect.as(store.clear, true),
   confirmRevoked: () => Effect.void,
   revocation: () => Effect.succeed("none"),
   signOutPending: () => Effect.succeed(false),
@@ -455,6 +461,15 @@ export const layerShared = (store: SharedStore): Layer.Layer<TokenStorage> => {
               ),
             ),
           ),
+        ),
+      revokeHeld: (session) =>
+        Effect.flatMap(idOf(session, "clear"), (id) =>
+          attempt("clear", "write", async (tx) => {
+            if (!(await holds(tx, id))) return false;
+            await signOutIn(tx, id, session);
+
+            return true;
+          }),
         ),
       confirmRevoked: (session) =>
         Effect.flatMap(idOf(session, "clear"), (id) =>
