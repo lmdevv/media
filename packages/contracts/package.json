@@ -4,6 +4,7 @@
   "private": true,
   "description": "Effect Schema DTOs, errors, the media HttpApi, and typed plugin interfaces.",
   "type": "module",
+  "sideEffects": false,
   "exports": {
     "./ids": "./src/ids.ts",
     "./units": "./src/units.ts",

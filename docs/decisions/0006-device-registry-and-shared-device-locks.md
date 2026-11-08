@@ -1,8 +1,8 @@
 # 0006. Register every device and lock adult tiles on shared devices
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the registry and locks as built, and
-  2026-11-07 with the phase 3 review fixes.
-- Decisions: D18, D19, D35, D47
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the registry and locks as built,
+  2026-11-07 with the phase 3 review fixes, and 2026-11-07 with one session per device (D52).
+- Decisions: D18, D19, D35, D47, D52
 
 ## Context
 
@@ -13,7 +13,9 @@ users, and a family TV or a shared iPad needs a way to keep a kid from opening a
 ## Decision
 
 - **One device registry**, music's model. A device is personal or shared.
-- **The picker on a personal device** shows only the users signed in on that device.
+- **One session per device.** A device holds one session at a time, whoever's. Switching person
+  on a device signs the first person out there (D52).
+- **The picker on a personal device** shows only the user signed in on that device.
 - **A shared device** is one an admin marks shared. Its picker lists every household user who opted
   in to shared devices.
 - **Locks.**
@@ -70,13 +72,19 @@ The registry, the picker, tiles, unlock codes, and approvals are in
   every session a user.
 - An app registers after it signs in, with `core.devices.registry.enroll`. When it passes its
   stored code, the new session joins the same device. A lost or unknown code registers a new
-  device. Each person keeps one session per device, and a personal device holds at most 16 people.
+  device.
+- A device holds one session. Binding a session to it, by enrolling on a personal device or by
+  opening a tile on a shared one, ends the session it held, whoever's. Each bind takes the next
+  number on the device's count, `devices.joins`, which goes on across mode changes. `enroll`
+  answers it as `joinSequence`, and `core.auth.sessions.current` names the device and number of a
+  bound session, as a tile's. Of two sign-ins that raced, the higher number is the one still live,
+  and a client keeps that one (ADR 0020).
 - `authSessions.device` records the device and its `generation` when the session joined it.
   `liveSession` treats a session as ended once its device is gone or has another generation. So
   an admin's mode change (`core.devices.registry.setMode`) or removal
   (`core.devices.registry.remove`) signs everyone on the device out with one write, and a
   scheduled job deletes the dead rows afterwards.
-- A personal device's picker lists the people with a live session on it. A shared device's picker
+- A personal device's picker lists the person with the live session on it. A shared device's picker
   lists everyone who opted in (`users.sharedDevices`), by username, at most 50 people.
   `core.devices.picker.show` takes the device code, because a shared device at its picker has no
   session. On an idle dev stack with 20 people listed, it answered in 8 to 10 ms at the median

@@ -1,5 +1,6 @@
 import type { PaginationOptions, PaginationResult } from "convex/server";
 import { v } from "convex/values";
+import type { Infer } from "convex/values";
 
 import { register } from "../../../commands/core/devices/registry";
 import { internal } from "../../_generated/api";
@@ -27,8 +28,6 @@ import { dropApprovals } from "./approvals";
 import { DEVICE_PREFIX, NO_DEVICE } from "./facts";
 
 const NAME_MAX = 64;
-
-const PEOPLE_PER_DEVICE_MAX = 16;
 
 const DEVICE_SESSIONS_READ = 200;
 
@@ -83,41 +82,39 @@ export const signedInOn = async (
 };
 
 /**
- * Binds the caller's session to a personal device, and ends the caller's other sessions there, so
- * each person has one session per device.
+ * Binds the caller's session to a personal device and ends every other session there, whoever's,
+ * so a device holds one session (ADR 0006). Answers the join's number on the device: a later join
+ * ends this session, so of two sign-ins the higher number is the one still live.
  */
 const joinDevice = async (
   ctx: Pick<MutationCtx, "db">,
   caller: Caller,
   device: Doc<"devices">,
-): Promise<void> => {
+): Promise<number> => {
   const here = await signedInOn(ctx.db, device, Date.now());
 
-  const others = new Set(
-    here.flatMap(({ person }) => (person._id === caller.userId ? [] : [person._id])),
-  );
-
-  if (others.size >= PEOPLE_PER_DEVICE_MAX) {
-    fail("conflict", `${PEOPLE_PER_DEVICE_MAX} people are already signed in on this device`);
-  }
-
   await Promise.all(
-    here.flatMap(({ sessionId, person }) =>
-      person._id === caller.userId && sessionId !== caller.sessionId
-        ? [endSession(ctx, sessionId)]
-        : [],
+    here.flatMap(({ sessionId }) =>
+      sessionId === caller.sessionId ? [] : [endSession(ctx, sessionId)],
     ),
   );
 
+  const joined = (device.joins ?? 0) + 1;
+
+  await ctx.db.patch(device._id, { joins: joined });
   await ctx.db.patch(caller.sessionId, {
-    device: { id: device._id, generation: device.generation },
+    device: { id: device._id, generation: device.generation, joined },
   });
+
+  return joined;
 };
+
+const joinedDevice = v.object({ deviceId: v.id("devices"), joinSequence: v.number() });
 
 /** Binds the caller's session to the personal device a code names; null when it names none. */
 export const attach = internalMutation({
   args: { deviceId: v.string(), secretHash: v.string(), name: v.string() },
-  returns: v.union(v.id("devices"), v.null()),
+  returns: v.union(joinedDevice, v.null()),
   handler: async (ctx, { deviceId, secretHash, name }) => {
     const caller = refuseKeys(await requireCaller(ctx, "account"));
     const id = ctx.db.normalizeId("devices", deviceId);
@@ -133,16 +130,14 @@ export const attach = internalMutation({
 
     if (named !== device.name) await ctx.db.patch(device._id, { name: named });
 
-    await joinDevice(ctx, caller, device);
-
-    return device._id;
+    return { deviceId: device._id, joinSequence: await joinDevice(ctx, caller, device) };
   },
 });
 
 /** Registers a new personal device and binds the caller's session to it. */
 export const insert = internalMutation({
   args: { secretHash: v.string(), name: v.string() },
-  returns: v.id("devices"),
+  returns: joinedDevice,
   handler: async (ctx, { secretHash, name }) => {
     const caller = refuseKeys(await requireCaller(ctx, "account"));
     const limit = { identifier: `devices:${caller.userId}`, perHour: ENROLLS_PER_HOUR };
@@ -152,17 +147,21 @@ export const insert = internalMutation({
     }
 
     const generation = 0;
+    const joinSequence = 1;
 
     const deviceId = await ctx.db.insert("devices", {
       name: parseName(name),
       secretHash,
       generation,
+      joins: joinSequence,
       mode: "personal",
     });
 
-    await ctx.db.patch(caller.sessionId, { device: { id: deviceId, generation } });
+    await ctx.db.patch(caller.sessionId, {
+      device: { id: deviceId, generation, joined: joinSequence },
+    });
 
-    return deviceId;
+    return { deviceId, joinSequence };
   },
 });
 
@@ -308,22 +307,22 @@ export const { enroll, list, setMode, remove } = register({
     const parsed = stored === undefined ? null : parseSecret(DEVICE_PREFIX, stored);
 
     if (stored !== undefined && parsed !== null) {
-      const found: Id<"devices"> | null = await ctx.runMutation(
+      const found: Infer<typeof joinedDevice> | null = await ctx.runMutation(
         internal.core.devices.registry.attach,
         { deviceId: parsed.rowId, secretHash: await sha256Hex(parsed.secret), name },
       );
 
-      if (found !== null) return { deviceId: found, device: stored };
+      if (found !== null) return { ...found, device: stored };
     }
 
     const secret = randomSecret(32);
 
-    const deviceId: Id<"devices"> = await ctx.runMutation(internal.core.devices.registry.insert, {
-      secretHash: await sha256Hex(secret),
-      name,
-    });
+    const created: Infer<typeof joinedDevice> = await ctx.runMutation(
+      internal.core.devices.registry.insert,
+      { secretHash: await sha256Hex(secret), name },
+    );
 
-    return { deviceId, device: formatSecret(DEVICE_PREFIX, deviceId, secret) };
+    return { ...created, device: formatSecret(DEVICE_PREFIX, created.deviceId, secret) };
   },
   list: async (ctx, { paginationOpts }, caller) => {
     requireServer(caller, "manageDevices");
@@ -350,11 +349,14 @@ export const { enroll, list, setMode, remove } = register({
 
     if (device.mode === mode) return null;
 
-    const fields = {
+    const common = {
       name: device.name,
       secretHash: device.secretHash,
       generation: device.generation + 1,
     };
+
+    // The join count goes on across modes, so a client's last join stays lower than the next.
+    const fields = device.joins === undefined ? common : { ...common, joins: device.joins };
 
     await ctx.db.replace(
       device._id,

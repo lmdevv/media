@@ -12,7 +12,11 @@ import type { Caller } from "../../../convex/core/auth/caller";
 
 const enrollArgs = v.object({ name: v.string(), device: v.optional(v.string()) });
 
-const enrollResult = v.object({ deviceId: v.id("devices"), device: v.string() });
+const enrollResult = v.object({
+  deviceId: v.id("devices"),
+  device: v.string(),
+  joinSequence: v.number(),
+});
 
 const listArgs = v.object({
   paginationOpts: v.object({

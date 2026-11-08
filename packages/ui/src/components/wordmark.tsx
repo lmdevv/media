@@ -1,8 +1,15 @@
 import { cn } from "@media/ui/lib/utils";
 import type { ComponentProps } from "react";
 
-/** The `[movies]` wordmark in heavy Netflix red. */
-export function Wordmark({ className, ...props }: ComponentProps<"span">) {
+/**
+ * A product's wordmark in heavy accent type: `[movies]` unless `product` names another, such as
+ * `media` for the account client.
+ */
+export function Wordmark({
+  product = "movies",
+  className,
+  ...props
+}: Omit<ComponentProps<"span">, "children"> & { readonly product?: "movies" | "media" }) {
   return (
     <span
       data-slot="wordmark"
@@ -12,7 +19,7 @@ export function Wordmark({ className, ...props }: ComponentProps<"span">) {
       )}
       {...props}
     >
-      [movies]
+      [{product}]
     </span>
   );
 }

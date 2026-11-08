@@ -70,12 +70,14 @@ const CONTENT_SCOPES = roleScopes.member.filter((scope) => scope !== "account");
 
 const LOCKED_BY_KID = { state: "locked", because: ["kid-listed"], opensWith: "self" };
 
+const currentOf = (tile: SignedIn) => tile.client.query(api.core.auth.sessions.current, {});
+
 describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
   afterEach(async () => {
     await listed.clear();
   });
 
-  it("registers personal devices whose picker lists only the people signed in on them", async () => {
+  it("registers personal devices that hold one session each: a join ends whoever was signed in", async () => {
     if (stack === undefined) return;
     const ada = await member(stack, "ada");
     const bo = await member(stack, "bo");
@@ -85,23 +87,82 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     const again = await enroll(bo.signedIn, "Shared laptop", laptop.device);
     await enroll(cy.signedIn, "Cy's phone");
 
-    expect(again).toEqual(laptop);
+    expect(again).toEqual({ ...laptop, joinSequence: 2 });
 
     const shown = await picker(stack, laptop);
-    const names = shown.tiles.map((tile) => tile.username);
 
     expect(shown).toMatchObject({ mode: "personal", name: "Shared laptop" });
-    expect(names).toEqual([ada.person.username, bo.person.username].toSorted());
+    expect(shown.tiles.map((tile) => tile.username)).toEqual([bo.person.username]);
+    expect(await refusal(ada.signedIn.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
 
-    await ada.signedIn.client.mutation(api.core.auth.sessions.end, { sessionId: ada.sessionId });
+    await bo.signedIn.client.mutation(api.core.auth.sessions.end, { sessionId: bo.sessionId });
 
-    expect((await picker(stack, laptop)).tiles.map((tile) => tile.username)).toEqual([
-      bo.person.username,
-    ]);
+    expect((await picker(stack, laptop)).tiles).toEqual([]);
     expect(await refusal(enroll(cy.signedIn, "x", `${laptop.device}x`))).toBe("accepted");
     expect(await refusal(picker(stack, { ...laptop, device: `${laptop.device}x` }))).toBe(
       "not_found",
     );
+  });
+
+  it("numbers each join of a device, and keeps live only its last join", async () => {
+    if (stack === undefined) return;
+    const admin = await sharedAdmin(stack);
+    const ada = await member(stack, "ada");
+    const savedFirst = await signInAs(stack, ada.person);
+    const savedSecond = await signInAs(stack, ada.person);
+    const laptop = await enroll(ada.signedIn, "Ada's laptop");
+
+    // Two tabs' sign-ins: the one saved second joins first, then the one saved first joins.
+    const joinedFirst = await enroll(savedSecond, "Ada's laptop", laptop.device);
+    const joinedLast = await enroll(savedFirst, "Ada's laptop", laptop.device);
+
+    expect([laptop, joinedFirst, joinedLast].map((join) => join.joinSequence)).toStrictEqual([
+      1, 2, 3,
+    ]);
+    expect(await refusal(savedSecond.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
+    expect(await savedFirst.client.query(api.core.auth.sessions.current, {})).toMatchObject({
+      userId: ada.userId,
+      device: { deviceId: laptop.deviceId, joinSequence: 3 },
+    });
+
+    const setMode = (mode: "personal" | "shared") =>
+      admin.signedIn.client.mutation(api.core.devices.registry.setMode, {
+        deviceId: laptop.deviceId,
+        mode,
+      });
+
+    await setMode("shared");
+    await setMode("personal");
+
+    const afterModes = await enroll(await signInAs(stack, ada.person), "Laptop", laptop.device);
+
+    expect(afterModes.joinSequence).toBe(4);
+  });
+
+  it("numbers each tile a shared device opens after its joins, and keeps open only the highest", async () => {
+    if (stack === undefined) return;
+    const admin = await sharedAdmin(stack);
+    const ada = await listed.adult(await member(stack, "ada"));
+    const bo = await listed.adult(await member(stack, "bo"));
+    const tv = await sharedDevice(stack, admin);
+
+    const adaTile = await openTile(stack, tv, ada.userId);
+    const adaOpened = (await currentOf(adaTile)).device;
+    const boTile = await openTile(stack, tv, bo.userId);
+
+    expect({
+      ada: adaOpened,
+      bo: (await currentOf(boTile)).device,
+      adaAfter: await refusal(currentOf(adaTile)),
+    }).toStrictEqual({
+      ada: { deviceId: tv.deviceId, joinSequence: 2 },
+      bo: { deviceId: tv.deviceId, joinSequence: 3 },
+      adaAfter: "unauthenticated",
+    });
   });
 
   it("lists on a shared device only the people who opted in", async () => {

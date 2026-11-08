@@ -18,6 +18,7 @@
 #   base + 3  web dev server
 #   base + 4  core Convex API
 #   base + 5  core Convex HTTP actions
+#   base + 6  account client dev server (apps/web-account)
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -39,6 +40,7 @@ media_port=$((base + 2))
 web_port=$((base + 3))
 core_port=$((base + 4))
 core_site_port=$((base + 5))
+account_port=$((base + 6))
 container="movies-convex-${name}"
 core_container="media-platform-convex-${name}"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/movies-dev/${name}"
@@ -58,6 +60,7 @@ web_url=http://localhost:${web_port}
 core_container=${core_container}
 core_convex_url=http://127.0.0.1:${core_port}
 core_convex_site_url=http://127.0.0.1:${core_site_port}
+account_url=http://localhost:${account_port}
 data_dir=${data_dir}
 transcode_dir=${transcode_dir}
 backup_dir=${backup_dir}
@@ -167,6 +170,11 @@ core_admin_key="$(docker exec "$core_container" ./generate_admin_key.sh | tail -
 cat >"${root}/packages/platform/.env.local" <<ENV
 CONVEX_SELF_HOSTED_URL=http://127.0.0.1:${core_port}
 CONVEX_SELF_HOSTED_ADMIN_KEY=${core_admin_key}
+ENV
+
+cat >"${root}/apps/web-account/.env.local" <<ENV
+VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
+ACCOUNT_PORT=${account_port}
 ENV
 
 cd "${root}/packages/platform"

@@ -1,12 +1,13 @@
-import { Effect, Fiber, ManagedRuntime, Redacted, Stream } from "effect";
+import { Effect, Fiber, ManagedRuntime, Match, Option, Redacted, Stream } from "effect";
 
 import type { AuthStatus } from "../auth";
 import type { FunctionKind } from "../convex-transport";
 import * as QueryWatch from "../query-watch";
 import * as TokenStorage from "../token-storage";
+import type { SharedStore } from "../shared-store";
 import type { KeyValueStore } from "../token-storage";
 import * as Client from "./client";
-import type { Command, Params, PromiseBuilder } from "./command";
+import type { Command, Id, Params, PromiseBuilder } from "./command";
 import { promiseMethods } from "./generated/commands";
 
 /** Where the platform client connects and where it keeps its session. */
@@ -15,8 +16,11 @@ export interface PlatformOptions {
   readonly url: string;
   /** `websocket` (default) for apps; `http` for short-lived scripts. */
   readonly connection?: "websocket" | "http";
-  /** Where the session's tokens live; memory when omitted. */
-  readonly storage?: KeyValueStore;
+  /**
+   * Where the session's tokens live: a store this client owns, or a `SharedStore` the origin's
+   * clients share, such as the browser's IndexedDB (`openIndexedDb`); memory when omitted.
+   */
+  readonly storage?: KeyValueStore | SharedStore;
   /**
    * The key the session is stored under; `media.session` when omitted. Clients on one origin that
    * use the same key share one sign-in (ADR 0020).
@@ -41,6 +45,20 @@ export interface PlatformReset {
   /** The code `core.accounts.resetLinks.create` showed once. */
   readonly code: string;
   readonly password: string;
+}
+
+/** What lets a person past their tile's lock, as `Credentials.Tile` describes it. */
+export type PlatformTileProof =
+  | { readonly kind: "password"; readonly by: Id<"users">; readonly password: string }
+  | { readonly kind: "code"; readonly by: Id<"users">; readonly code: string }
+  | { readonly kind: "approval"; readonly approvalId: Id<"tileApprovals"> };
+
+/** A person's tile on a shared device, and the proof for a locked one. */
+export interface PlatformTile {
+  /** The shared device's code, `dv_` and its secret. */
+  readonly device: string;
+  readonly userId: Id<"users">;
+  readonly proof?: PlatformTileProof;
 }
 
 /** A device sign-in waiting for approval. */
@@ -82,6 +100,11 @@ export interface PlatformSession {
   readonly resetPassword: (reset: PlatformReset) => Promise<void>;
   /** Starts a device sign-in named `clientName`, as the person approving it will see it. */
   readonly startDeviceSignIn: (clientName: string) => Promise<PendingDeviceSignIn>;
+  /**
+   * Opens a tile on a shared device and signs in as its person, ending the session that held the
+   * device. Rejects with `Forbidden` for a locked tile without a proof that lifts the lock.
+   */
+  readonly openTile: (tile: PlatformTile) => Promise<void>;
   /** Ends the session on the server when reachable, then forgets it locally. */
   readonly signOut: () => Promise<void>;
 }
@@ -97,16 +120,30 @@ export interface PlatformSdk extends PromiseMethods {
 
 const DEFAULT_STORAGE_KEY = "media.session";
 
+const tileProof = Match.type<PlatformTileProof>().pipe(
+  Match.discriminatorsExhaustive("kind")({
+    password: ({ by, password }) =>
+      Client.TileProof.Password({ by, password: Redacted.make(password) }),
+    code: ({ by, code }) => Client.TileProof.Code({ by, code: Redacted.make(code) }),
+    approval: ({ approvalId }) => Client.TileProof.Approval({ approvalId }),
+  }),
+);
+
+const storageLayer = (storage: KeyValueStore | SharedStore | undefined, key: string) => {
+  if (storage === undefined) return TokenStorage.layerMemory;
+
+  return "write" in storage
+    ? TokenStorage.layerShared(storage)
+    : TokenStorage.layerKeyValue(storage, key);
+};
+
 /** Opens the platform client. The connection opens on the first call. */
 export const createPlatform = (options: PlatformOptions): PlatformSdk => {
   const runtime = ManagedRuntime.make(
     Client.layer({
       url: options.url,
       connection: options.connection ?? "websocket",
-      storage:
-        options.storage === undefined
-          ? TokenStorage.layerMemory
-          : TokenStorage.layerKeyValue(options.storage, options.storageKey ?? DEFAULT_STORAGE_KEY),
+      storage: storageLayer(options.storage, options.storageKey ?? DEFAULT_STORAGE_KEY),
     }),
   );
 
@@ -192,6 +229,16 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
           complete: () => runtime.runPromise(pending.complete),
         };
       },
+      openTile: ({ device, userId, proof }) =>
+        withClient((client) =>
+          client.session.signIn(
+            Client.Credentials.Tile({
+              device: Redacted.make(device),
+              userId,
+              proof: Option.map(Option.fromUndefinedOr(proof), tileProof),
+            }),
+          ),
+        ),
       signOut: () => withClient((client) => client.session.signOut),
     },
     dispose: () => runtime.dispose(),

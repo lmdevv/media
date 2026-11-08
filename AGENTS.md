@@ -165,7 +165,8 @@ The example identities must be replaced with the model and tool that actually co
 ## Verify and review
 
 - Ports come from the worktree's stack: Convex API at base, auth at base + 1, media at base + 2, web
-  at base + 3, the core's Convex API at base + 4 and its HTTP actions at base + 5.
+  at base + 3, the core's Convex API at base + 4, its HTTP actions at base + 5, and the account
+  client at base + 6.
   `scripts/dev-stack.sh env` prints them. Playwright uses `E2E_PORT`, else the stack's
   web port, else 3011.
 - Stack suites need Docker and `scripts/dev-stack.sh up`: `pnpm --filter <pkg> test:stack` for

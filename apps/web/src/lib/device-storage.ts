@@ -3,7 +3,7 @@ import { LogLevel, Option, Schema } from "effect";
 
 import { QualityChoice } from "@/playback/quality";
 
-import { randomUuid } from "./secure-context";
+import { randomUuid } from "@media/ui/lib/secure-context";
 
 const PROFILE_KEY = "movies.profile";
 

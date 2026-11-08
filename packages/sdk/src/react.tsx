@@ -59,6 +59,7 @@ import type { RoomSyncTunables } from "./room-sync/sync-policy";
 import { DEFAULT_TUNABLES } from "./room-sync/sync-policy";
 import type { CallError } from "./sdk-errors";
 import * as TokenStorage from "./token-storage";
+import type { SharedStore } from "./shared-store";
 import type { KeyValueStore } from "./token-storage";
 
 type Runtime = ManagedRuntime.ManagedRuntime<Movies.Services, Movies.OpenError>;
@@ -433,10 +434,11 @@ export interface PlatformProviderProps {
   /** The platform deployment's URL. */
   readonly url: string;
   /**
-   * Where the session lives, such as `window.localStorage`. Pass the same object on every render:
-   * a new one opens a new client and remounts the tree.
+   * Where the session lives: a `SharedStore` the origin's clients share, such as IndexedDB from
+   * `openIndexedDb`, or a store this client owns. Pass the same object on every render: a new one
+   * opens a new client and remounts the tree.
    */
-  readonly storage: KeyValueStore;
+  readonly storage: KeyValueStore | SharedStore;
   /**
    * The key the session is stored under; `media.session` when omitted, which every client on the
    * origin shares, so one sign-in serves them all (ADR 0020).

@@ -47,7 +47,7 @@ import {
   saveQualityChoice,
 } from "@/lib/device-storage";
 import { toastFailure } from "@/lib/failure";
-import { copyText } from "@/lib/secure-context";
+import { copyText } from "@media/ui/lib/secure-context";
 import { episodeCode } from "@/lib/format";
 import { playerKeymap } from "@/lib/keymap";
 import { audioTrackLabel, subtitleTrackLabels } from "@/lib/media-facts";

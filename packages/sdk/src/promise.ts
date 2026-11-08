@@ -56,6 +56,14 @@ export type { PasswordSignIn } from "./auth";
 
 export { createPlatform } from "./platform/promise";
 
+export { openIndexedDb } from "./shared-store";
+
+export { holdSignIn, readDevice } from "./token-storage";
+
+export type { BrowserDevice, DeviceOrder, HeldSignIn } from "./token-storage";
+
+export type { Channel, IdbFactory, SharedStore, SharedTransaction } from "./shared-store";
+
 export type {
   PendingDeviceSignIn,
   PlatformInvite,
@@ -64,6 +72,8 @@ export type {
   PlatformReset,
   PlatformSdk,
   PlatformSession,
+  PlatformTile,
+  PlatformTileProof,
 } from "./platform/promise";
 
 export type { PendingDeviceLogin } from "./device-login";
