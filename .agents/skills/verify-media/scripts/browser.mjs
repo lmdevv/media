@@ -5,7 +5,7 @@
 // --app when the page is created. verify-media.sh calls this; agents call it through
 // `verify-media.sh browser`.
 //
-//   node browser.mjs serve --state <dir> --base <movies url> [--account <url>] [--music <url>]
+//   node browser.mjs serve --state <dir> --base <movies url> [--account <url>] [--convex <url>] [--music <url>]
 //   node browser.mjs <command> --state <dir> [--app movies|music] [flags]
 //
 // Where the host allows it, the browser runs in a private network namespace (see `isolate`),
@@ -25,7 +25,7 @@ const APPS = ["movies", "music", "account"];
 
 // Every socket lives in the side's state folder and is named relative to it: a socket address
 // holds at most 107 bytes, which a long TMPDIR and run name can pass.
-const SOCKETS = { control: "browser.sock", web: "web.sock", music: "music.sock", proxy: "proxy.sock" };
+const SOCKETS = { control: "browser.sock", web: "web.sock", convex: "convex.sock", music: "music.sock", proxy: "proxy.sock" };
 const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
 const PRIVATE_NETWORK = fileURLToPath(new URL("../../../../scripts/private-network.sh", import.meta.url));
 const NETWORKS = ["auto", "isolated", "host"];
@@ -48,6 +48,7 @@ const FLAGS = {
   state: { type: "string" },
   base: { type: "string" },
   account: { type: "string" },
+  convex: { type: "string" },
   music: { type: "string" },
   app: { type: "string" },
   page: { type: "string" },
@@ -206,7 +207,7 @@ async function serve(options) {
 // clients, Convex, and streams) and music keep their port numbers inside, so every origin stays
 // `http://localhost:<port>`. The proxy carries HTTPS to the internet for the Cast SDK, TMDB
 // images, and trailers.
-async function isolate({ base, account, music }) {
+async function isolate({ base, account, convex, music }) {
   const toHost = (port) =>
     createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, port, host: "127.0.0.1" })));
   const proxy = createServer((request, response) => {
@@ -227,6 +228,7 @@ async function isolate({ base, account, music }) {
   });
   const relays = await Promise.all([
     listen(toHost(portOf(base, "base")), SOCKETS.web),
+    ...(convex ? [listen(toHost(portOf(convex, "convex")), SOCKETS.convex)] : []),
     ...(music ? [listen(toHost(portOf(music, "music")), SOCKETS.music)] : []),
     listen(proxy, SOCKETS.proxy),
   ]);
@@ -237,7 +239,8 @@ async function isolate({ base, account, music }) {
     PRIVATE_NETWORK,
     [
       process.execPath, fileURLToPath(import.meta.url), "serve-inside", "--state", ".", "--base", base,
-      ...(account ? ["--account", account] : []), ...(music ? ["--music", music] : []),
+      ...(account ? ["--account", account] : []), ...(convex ? ["--convex", convex] : []),
+      ...(music ? ["--music", music] : []),
     ],
     { stdio: ["pipe", "inherit", "inherit"] },
   );
@@ -246,7 +249,7 @@ async function isolate({ base, account, music }) {
   process.on("SIGINT", stop);
   const finish = (code) => {
     for (const relay of relays) relay.close();
-    for (const socket of [SOCKETS.web, SOCKETS.music, SOCKETS.proxy]) rmSync(socket, { force: true });
+    for (const socket of [SOCKETS.web, SOCKETS.convex, SOCKETS.music, SOCKETS.proxy]) rmSync(socket, { force: true });
     if (code !== 0 && !existsSync(SOCKETS.control)) {
       console.error("the browser host stopped before it was ready (see above)");
     }
@@ -263,6 +266,7 @@ async function serveInside(options) {
   process.chdir(options.state);
   const toSocket = (socket) => createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, path: socket })));
   await listen(toSocket(SOCKETS.web), portOf(options.base, "base"), "127.0.0.1");
+  if (options.convex) await listen(toSocket(SOCKETS.convex), portOf(options.convex, "convex"), "127.0.0.1");
   if (options.music) await listen(toSocket(SOCKETS.music), portOf(options.music, "music"), "127.0.0.1");
   const proxy = await listen(toSocket(SOCKETS.proxy), 0, "127.0.0.1");
   // Chromium never proxies loopback, so the apps' ports still reach the relays above.

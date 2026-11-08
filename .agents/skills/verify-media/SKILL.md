@@ -21,6 +21,13 @@ A run has two sides, each its own Compose project that holds both apps:
 - `before` is main: movies is `ghcr.io/lmdevv/media:main`, the last image published from main,
   and music is built from `origin/main:legacy/music`.
 
+Each side runs its own revision's `deploy/compose`, copied into its state folder: the checkout's
+for `after`, `origin/main`'s for `before`. `up` reads the layout from it and records it: `one-port`
+(the all-in-one image, movies pages under `/movies`) or `two-port` (a `convex` service beside a
+`movies` service, movies at `/`). URLs, the CLI's server, the browser's relays, doctor, and the
+iOS forwards follow each side's layout, so a change to the deploy shape still compares before and
+after.
+
 You drive a side through three surfaces: a Chromium that stays open between commands and opens
 pages in either app, the built `media` and `music` CLIs signed in as each seeded person, and the
 movies iOS app on a simulator on the Mac `darwin`. Run every command from the repo root. `S` is
