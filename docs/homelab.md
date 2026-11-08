@@ -1,17 +1,19 @@
 # Homelab install
 
-[movies] on one box at home, with Docker Compose or NixOS, in about ten minutes. It runs two
-things: the self-hosted Convex backend (port 3210) and the media service, which also serves the
-web app (port 8080). Browsers and the CLI talk to both. `docs/operations.md` explains what happens
-at startup, backups and restores, and telemetry in more depth.
+[movies] on one box at home, with Docker Compose or NixOS, in about ten minutes. It runs the
+core's and old movies' self-hosted Convex backends and the media service, which also serves the
+movies client, behind Caddy on one port (8080). The account client is at `/`, movies at `/movies`,
+and each Convex backend under its own path (ADR 0026). Browsers and the CLI talk only to that port.
+`docs/operations.md` explains what happens at startup, backups and restores, and telemetry in more
+depth.
 
 ## Before you start
 
 - A Linux host with your library on a local disk or a NAS mount. The library is mounted
   read-only; [movies] never writes to it.
-- 2 GB of RAM for the two services, plus a few GB of fast disk for transcoding.
+- 2 GB of RAM for the services, plus a few GB of fast disk for transcoding.
 - Decide how people reach it: only this machine (the default), your tailnet (recommended, below),
-  or a reverse proxy with TLS on your LAN. Never put either port on the internet.
+  or a reverse proxy with TLS on your LAN. Never put the port on the internet.
 
 ## Docker Compose
 
@@ -27,7 +29,6 @@ Edit `.env`:
 ```sh
 MEDIA_LIBRARY=/srv/media                 # host folder with your movies and shows
 MEDIA_BASE_URL=http://nas.tailnet.ts.net:8080
-CONVEX_PUBLIC_URL=http://nas.tailnet.ts.net:3210
 MEDIA_BIND=100.64.0.1                    # the host's Tailscale address (`tailscale ip -4`)
 PUID=1000                                 # a user that can read MEDIA_LIBRARY (`id -u you`)
 PGID=1000
@@ -39,23 +40,25 @@ minute):
 
 ```sh
 docker compose up -d
-docker compose ps          # movies turns (healthy)
-docker compose logs -f movies
+docker compose ps          # media turns (healthy)
+docker compose logs -f media
 ```
 
-Open `MEDIA_BASE_URL`, create the owner account (the first account is the owner), and add
-`/media/library` as a library. More folders: add one read-only line per folder under the `movies`
+Open `MEDIA_BASE_URL/movies`, create the owner account (the first account is the owner), and add
+`/media/library` as a library. More folders: add one read-only line per folder under the `media`
 service's `volumes:` (`- /mnt/nas/shows:/media/shows:ro`) and add `/media/shows` as a library.
+`MEDIA_BASE_URL` opens the account client, which keeps its own accounts until the movies port, so
+people sign in to each client separately.
 
 - **Image.** `MEDIA_IMAGE` defaults to `ghcr.io/lmdevv/media:latest`, the newest release. Best
   is the release your checkout is at (`git checkout vX.Y.Z` with `:X.Y.Z`), or `main` with
-  `:main` to follow development, since `compose.yaml` pins the Convex backend for its release.
+  `:main` to follow development, since `compose.yaml` passes the settings of its release.
   `docker compose build` builds the image from your checkout instead. Images exist for amd64 and
   arm64; Quick Sync drivers are amd64 only.
 - **Settings.** Every name in `.env.example`, explained in the README's configuration table. The
   install sets the rest (paths, ports, Convex credentials) itself.
-- **Privileges.** The entrypoint runs as root only to set up, then runs the media service as
-  `PUID:PGID` with no capabilities. `init: true` reaps ffmpeg processes.
+- **Privileges.** s6 runs init as root only to set up. It runs the media service as `PUID:PGID`
+  with no capabilities, and both Convex backends and Caddy as their own unprivileged users.
 
 ## NixOS
 
@@ -71,17 +74,18 @@ inputs.movies.nixosModules.default
     libraryDirs = [ "/srv/media/movies" "/srv/media/shows" ];
     listenAddress = "100.64.0.1";                     # the host's Tailscale address
     publicUrl = "http://nas.tailnet.ts.net:8080";
-    convexPublicUrl = "http://nas.tailnet.ts.net:3210";
     hardwareAcceleration = "qsv";                     # see GPU below; "auto" by default
     environmentFile = "/run/secrets/movies.env";      # TMDB_API_KEY=..., from agenix or sops-nix
   };
 }
 ```
 
-`nixos-rebuild switch`, then `systemctl status movies` and `journalctl -u movies -f`. The Convex
-backend runs as the `movies-convex` OCI container (Podman unless
-`virtualisation.oci-containers.backend` says otherwise); the media service runs natively as a
-sandboxed systemd unit with read-only access to `libraryDirs`. The service user must be able to
+`nixos-rebuild switch`, then `systemctl status movies` and `journalctl -u movies -f`. The core's
+and old movies' Convex backends run as the `media-core-convex` and `movies-convex` OCI containers
+(Podman unless `virtualisation.oci-containers.backend` says otherwise); the media service runs
+natively as a sandboxed systemd unit with read-only access to `libraryDirs`. The `media-proxy`
+unit runs Caddy with the image's routes on `listenAddress:port`. The backends and the media service
+listen on loopback only, on the ports in `internalPorts`. The service user must be able to
 read them; add a group with `users.users.movies.extraGroups` if your files are not
 world-readable.
 
@@ -94,8 +98,8 @@ anything else, and `environmentFile` keeps secrets out of the Nix store. The fla
 
 ### Tailscale (recommended)
 
-Put the host on your tailnet and bind both ports to its Tailscale address (`MEDIA_BIND` or
-`listenAddress`). Use the MagicDNS name in both public URLs. Every device on the tailnet can
+Put the host on your tailnet and bind the port to its Tailscale address (`MEDIA_BIND` or
+`listenAddress`). Use the MagicDNS name in the public URL. Every device on the tailnet can
 reach it, and nothing else can. Traffic is encrypted by WireGuard; [movies] itself speaks plain
 HTTP.
 
@@ -104,35 +108,42 @@ For HTTPS on the tailnet (needed by some browsers for features like casting), ke
 
 ```sh
 tailscale serve --bg --https=443 http://127.0.0.1:8080
-tailscale serve --bg --https=8443 http://127.0.0.1:3210
 ```
 
-and set `MEDIA_BASE_URL=https://nas.tailnet.ts.net` and
-`CONVEX_PUBLIC_URL=https://nas.tailnet.ts.net:8443` (`publicUrl` and `convexPublicUrl`).
+and set `MEDIA_BASE_URL=https://nas.tailnet.ts.net` (`publicUrl`). Trust that proxy too, as in
+[Trusting a proxy in front](#trusting-a-proxy-in-front).
 
 ### Caddy on your LAN
 
-A reverse proxy with TLS for a LAN name, with [movies] bound to `127.0.0.1`. The Convex port
-carries a WebSocket, which Caddy proxies as is.
+A reverse proxy with TLS for a LAN name, with [movies] bound to `127.0.0.1`. The proxy forwards
+the one port, and Convex's WebSocket under `/convex` and `/movies/convex` passes through as is.
 
 ```caddyfile
 movies.home.arpa {
 	tls internal
 	reverse_proxy 127.0.0.1:8080
 }
-
-convex.movies.home.arpa {
-	tls internal
-	reverse_proxy 127.0.0.1:3210
-}
 ```
 
-Set `MEDIA_BASE_URL=https://movies.home.arpa` and
-`CONVEX_PUBLIC_URL=https://convex.movies.home.arpa`. Every browser and phone must trust
+Set `MEDIA_BASE_URL=https://movies.home.arpa`. Every browser and phone must trust
 Caddy's local root CA: copy `pki/authorities/local/root.crt` from Caddy's data folder (such as
 `/var/lib/caddy/.local/share/caddy` on NixOS) to each device and install it as a trusted root.
 `caddy trust` only installs it on the machine Caddy runs on. On NixOS,
 `services.caddy.virtualHosts` takes the same blocks. Keep the proxy on the LAN or tailnet; do not port-forward it.
+
+### Trusting a proxy in front
+
+The media service limits unauthenticated routes (artwork, `/api/health`, `/api/client-config`)
+per client, by the client address [media]'s own Caddy resolves. A proxy in front, such as the TLS
+proxies above, connects from one address for everyone, so name it as trusted and [media] takes the
+client from the `X-Forwarded-For` it sends:
+
+- **NixOS:** `trustedProxies = [ "127.0.0.1/32" ];` for a proxy on the same host.
+- **Compose:** `MEDIA_TRUSTED_PROXIES=172.16.0.0/12` in `.env`. Docker's port publishing makes a
+  proxy on the host connect from the Docker bridge, not from `127.0.0.1`.
+
+The value is space-separated CIDRs, empty by default, which trusts no proxy. Trust only proxies
+you run: a trusted address can name any client.
 
 ## GPU transcoding
 
@@ -152,7 +163,7 @@ service uses today.
   touching the host's graphics configuration; `"none"` keeps it away from the GPU.
 
 **Render group.** The service must open `/dev/dri/renderD128`, which is owned by the host's
-`render` group (`stat -c '%G %g' /dev/dri/renderD128`). The image's entrypoint adds the media
+`render` group (`stat -c '%G %g' /dev/dri/renderD128`). Init in the image adds the media
 user to whichever group owns each passed-through render node, so the GID need not match inside
 the container. On NixOS the module adds the `movies` user to `render` and `video` and allows the
 DRM devices in the unit's sandbox whenever `hardwareAcceleration` is not `none`. With rootless
@@ -178,32 +189,33 @@ the driver libva detects.
 Check the GPU from inside the container:
 
 ```sh
-docker compose exec -u movies movies vainfo --display drm --device /dev/dri/renderD128
+docker compose exec -u movies media vainfo --display drm --device /dev/dri/renderD128
 ```
 
 ## Where data lives
 
-| What                                   | Compose                               | NixOS                          |
-| -------------------------------------- | ------------------------------------- | ------------------------------ |
-| Database, file storage, Convex secrets | `convex-data` volume                  | `/var/lib/movies/convex`       |
-| Service state and caches               | `movies-data` volume, `/data/media`   | `/var/lib/movies/media`        |
-| Nightly backups                        | `movies-data` volume, `/data/backups` | `/var/lib/movies/backups`      |
-| `media` CLI logins                     | `movies-data` volume, `/data/config`  | each user's `~/.config/movies` |
-| Transcode segments (disposable)        | `movies-transcode` volume             | `/var/cache/movies/transcode`  |
-| Your library                           | read-only bind mounts under `/media`  | `libraryDirs`, read-only       |
+| What                                        | Compose                                     | NixOS                           |
+| ------------------------------------------- | ------------------------------------------- | ------------------------------- |
+| The core's database, secrets, and backups   | `media-data` volume, `/data/core`           | `/var/lib/media/core`           |
+| Movies' database, file storage, and secrets | `media-data` volume, `/data/movies`         | `/var/lib/media/movies/convex`  |
+| Service state and caches                    | `media-data` volume, `/data/movies/media`   | `/var/lib/media/movies/media`   |
+| Nightly backups                             | `media-data` volume, `/data/movies/backups` | `/var/lib/media/movies/backups` |
+| `media` CLI logins                          | `media-data` volume, `/data/movies/config`  | each user's `~/.config/movies`  |
+| Transcode segments (disposable)             | `media-transcode` volume                    | `/var/cache/movies/transcode`   |
+| Your library                                | read-only bind mounts under `/media`        | `libraryDirs`, read-only        |
 
-Volumes are named `movies_<name>` (`docker volume inspect movies_convex-data`). To keep backups on
-another disk, bind a host folder over them: `- /srv/backups/movies:/data/backups` under the
-`movies` service's `volumes:` (or `backupDir` on NixOS). Transcode segments can live in memory:
-replace the `movies-transcode` line with
+Volumes are named `media_<name>` (`docker volume inspect media_media-data`). To keep backups on
+another disk, bind a host folder over them: `- /srv/backups/movies:/data/movies/backups` under the
+`media` service's `volumes:` (or `backupDir` on NixOS). Transcode segments can live in memory:
+replace the `media-transcode` line with
 `- { type: tmpfs, target: /transcode, tmpfs: { size: 8g } }`, sized above `MIN_FREE_TRANSCODE_MB`
 plus a few GB per stream.
 
 ## Backups
 
-Every night at 03:00 UTC the media service exports the whole database, file storage included,
-into the backup folder and keeps `BACKUP_RETENTION_DAYS` (14) days. Each upgrade backs up first.
-Back up now with Admin → Backups or `media backup --wait`.
+Every night at 03:00 UTC the media service exports the whole movies database, file storage
+included, into the backup folder and keeps `BACKUP_RETENTION_DAYS` (14) days. Each upgrade backs
+up first. Back up now with Admin → Backups or `media backup --wait`.
 
 Copy the archives off the box with your usual tool (restic, borg, rsync) from the backup folder.
 They hold password hashes, so store them as carefully as the server. Restoring, including onto a
@@ -211,8 +223,8 @@ new machine: `docs/operations.md`.
 
 ## Upgrading
 
-Compose: keep the checkout and the image on the same release, since `compose.yaml` pins the
-Convex backend that release's image was built for (the image logs a warning when they differ).
+Compose: keep the checkout and the image on the same release, since `compose.yaml` passes the
+settings that release's image reads.
 
 ```sh
 cd media && git fetch --tags && git checkout v0.2.0

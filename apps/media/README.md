@@ -52,11 +52,12 @@ Registry `media` commands answer `{ code, message }` like Convex.
 
 ## Configuration
 
-Required: `MEDIA_BASE_URL`, `DATA_DIR`, `TRANSCODE_DIR`, `PLAYBACK_TOKEN_SECRET` (base64url,
-≥ 32 bytes). Optional with defaults: `LIBRARY_ROOTS` (comma list of approved mounts; none
-approves nothing, so every scan is refused), `PORT` (4300), `HOST` (all interfaces),
-`BACKUP_DIR` (`/data/backups`), `TMDB_API_KEY` (v3 key or v4 read token), `OMDB_API_KEY`
-(IMDb, Rotten Tomatoes, and Metacritic scores; without it titles keep TMDB's), `WEB_DIST_DIR`,
+Required: `MEDIA_BASE_URL`, `DATA_DIR` (`/data/movies/media` in the image), `TRANSCODE_DIR`,
+`PLAYBACK_TOKEN_SECRET` (base64url, ≥ 32 bytes). Optional with defaults: `LIBRARY_ROOTS` (comma
+list of approved mounts; none approves nothing, so every scan is refused), `PORT` (4300), `HOST`
+(all interfaces), `BACKUP_DIR` (`/data/backups`; `/data/movies/backups` in the image),
+`TMDB_API_KEY` (v3 key or v4 read token), `OMDB_API_KEY` (IMDb, Rotten Tomatoes, and Metacritic
+scores; without it titles keep TMDB's), `WEB_DIST_DIR`,
 `MAX_CONCURRENT_TRANSCODES` (3), `MAX_CONCURRENT_REMUXES` (10: HLS streams that copy the video),
 `HARDWARE_ACCELERATION` (`auto` tries Quick Sync, then VA-API, then software; `qsv`, `vaapi`,
 `none`), `QSV_DEVICE` and `VAAPI_DEVICE` (`/dev/dri/renderD128`), `STREAM_IDLE_SECONDS` (60: a
@@ -91,6 +92,11 @@ Every response carries a content security policy (scripts from this origin only)
 `Referrer-Policy: no-referrer` (media URLs carry tokens), and `frame-ancestors 'none'`. Request
 bodies must declare a `Content-Length` of at most 128 KiB. ffmpeg and ffprobe run with a minimal
 environment, so a crafted file that exploits them finds no credentials.
+
+`/artwork`, `/api/health`, and `/api/client-config` are rate limited per client. The client is the
+direct peer, or, from a loopback peer, the last `X-Forwarded-For` entry, which the installs' Caddy
+sets to the client it resolved through `MEDIA_TRUSTED_PROXIES`. A loopback caller without the
+header, such as the container's health check, is not limited.
 
 ## Convex integration
 

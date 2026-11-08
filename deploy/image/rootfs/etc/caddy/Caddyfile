@@ -1,0 +1,86 @@
+{
+	admin off
+	auto_https off
+	log {
+		format console {
+			level_format upper
+			time_local
+		}
+	}
+	# Caddy aborts a response whose write stalls for `write_idle` (1m by default). Players stop
+	# reading a stream once they have buffered far enough ahead, and while paused, so that default
+	# would cut streams off.
+	servers {
+		timeouts {
+			write_idle -1s
+		}
+		# Upstream proxies whose X-Forwarded-For names the client, such as a TLS proxy on the host:
+		# space-separated CIDRs, none by default. The rightmost untrusted address is the client.
+		trusted_proxies static {$MEDIA_TRUSTED_PROXIES}
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
+	}
+	# On a stop, close open connections (Convex's WebSockets, streams) after 3 s instead of waiting
+	# for them to end, which held one stop for 17 s.
+	grace_period 3s
+}
+
+# The media service limits unauthenticated routes per client, trusting X-Forwarded-For only from a
+# loopback peer and only its last entry, so set it to the client this server resolved.
+(media-service) {
+	reverse_proxy {$MEDIA_SERVICE:127.0.0.1:4300} {
+		header_up X-Forwarded-For {client_ip}
+		flush_interval -1
+	}
+}
+
+:{$MEDIA_PORT:8080} {
+	bind {$MEDIA_BIND:0.0.0.0}
+	header -Server
+
+	handle_path /convex/* {
+		reverse_proxy {$MEDIA_CORE_CONVEX:127.0.0.1:3210}
+	}
+
+	handle_path /movies/convex/* {
+		reverse_proxy {$MEDIA_MOVIES_CONVEX:127.0.0.1:3220}
+	}
+
+	handle /media/* {
+		import media-service
+	}
+
+	handle /api/* {
+		import media-service
+	}
+
+	handle /artwork/* {
+		import media-service
+	}
+
+	redir /movies /movies/ 308
+
+	handle_path /movies/* {
+		encode zstd gzip
+		import media-service
+	}
+
+	handle {
+		encode zstd gzip
+		root * {$MEDIA_ACCOUNT_DIR:/run/media/account}
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://{hostport} wss://{hostport}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+			X-Content-Type-Options nosniff
+			Referrer-Policy no-referrer
+			X-Frame-Options DENY
+			Cross-Origin-Opener-Policy same-origin
+			Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		}
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@pages not path /assets/*
+		header @pages Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

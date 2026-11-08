@@ -5,7 +5,7 @@ const known: ReadonlySet<string> = new Set(AVATAR_KEYS);
 
 /** The art for an avatar key, or undefined for keys this app does not know. */
 export const avatarImage = (key: string): string | undefined =>
-  known.has(key) ? `/avatars/${key}.svg` : undefined;
+  known.has(key) ? `${import.meta.env.BASE_URL}avatars/${key}.svg` : undefined;
 
 /** Avatars whose art already carries a label (the `kids` lettering) skip the name's first letter. */
 export const avatarHasLettering = (key: string): boolean => key === "kids";

@@ -1,10 +1,11 @@
 # VA-API for the media service, for Intel and AMD GPUs whose ffmpeg cannot use Quick Sync: passes
-# the host's render nodes through. The entrypoint adds the media user to the group that owns them.
+# the host's render nodes through. Init in the image adds the media user to the group that owns
+# them.
 # Set VAAPI_DEVICE for another node than /dev/dri/renderD128, and LIBVA_DRIVER_NAME (iHD for
 # Intel, radeonsi for AMD) when libva picks the wrong driver.
 #   docker compose -f compose.yaml -f compose.vaapi.yaml up -d
 services:
-  movies:
+  media:
     devices:
       - /dev/dri:/dev/dri
     environment:

@@ -50,8 +50,9 @@ const serveApp = (name) =>
         response.writeHead(200, { "content-type": "audio/wav" }).end(toneWav());
         return;
       }
+      const app = name === "media" ? (request.url.startsWith("/movies/") ? "movies" : "account") : name;
       response.writeHead(200, { "content-type": "text/html" });
-      response.end(`<!doctype html><title>${name}</title><main><h1>${name}</h1>
+      response.end(`<!doctype html><title>${app}</title><main><h1>${app}</h1>
         <button onclick="new Audio('/tone.wav').play()">Play</button></main>`);
     });
     server.listen(0, "127.0.0.1", () => resolve(server));
@@ -76,13 +77,13 @@ for (const network of ["isolated", "host"]) {
 
     before(async () => {
       mkdirSync(state, { recursive: true });
-      for (const name of ["movies", "convex", "music"]) servers[name] = await serveApp(name);
+      for (const name of ["media", "music"]) servers[name] = await serveApp(name);
       host = spawn(
         "node",
         [
           browserJs, "serve", "--state", state,
-          "--base", `http://localhost:${portOf(servers.movies)}`,
-          "--convex", `http://localhost:${portOf(servers.convex)}`,
+          "--base", `http://localhost:${portOf(servers.media)}/movies/`,
+          "--account", `http://localhost:${portOf(servers.media)}`,
           "--music", `http://localhost:${portOf(servers.music)}`,
         ],
         { env: { ...process.env, CHROMIUM_PATH: chromium() ?? "", MEDIA_VERIFY_BROWSER_NETWORK: network }, stdio: "inherit" },
@@ -109,10 +110,15 @@ for (const network of ["isolated", "host"]) {
       assert.match(result.stdout, new RegExp(`^${network} \\d+`));
     });
 
-    test("opens a movies page on movies and a music page on music", async () => {
-      const movies = await browser("open", "/");
+    test("opens a movies page under /movies, an account page at /, and a music page on music", async () => {
+      const movies = await browser("open", "/title/1");
       assert.equal(movies.status, 0, movies.stderr);
-      assert.equal(movies.stdout.trim(), `http://localhost:${portOf(servers.movies)}/`);
+      assert.equal(movies.stdout.trim(), `http://localhost:${portOf(servers.media)}/movies/title/1`);
+      const heading = await browser("text", "--role", "heading");
+      assert.equal(heading.stdout.trim(), "movies");
+      const account = await browser("--app", "account", "--page", "account", "open", "/");
+      assert.equal(account.status, 0, account.stderr);
+      assert.equal(account.stdout.trim(), `http://localhost:${portOf(servers.media)}/`);
       const music = await browser("--app", "music", "open", "/");
       assert.equal(music.status, 0, music.stderr);
       assert.equal(music.stdout.trim(), `http://localhost:${portOf(servers.music)}/`);

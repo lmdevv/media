@@ -1,15 +1,4 @@
 #!/usr/bin/env bash
-# Keeps the installs in step with each other and with the media service. Fails when:
-#   - compose.yaml or the Dockerfile pins another Convex backend than deploy/convex-backend.image,
-#     or the NixOS module or scripts/dev-stack.sh stops reading that file;
-#   - a setting the media service reads (apps/media/src/media-config.ts) is neither set by the
-#     container entrypoint nor passed on by it, or is missing from the NixOS module or
-#     apps/media/README.md;
-#   - a setting the entrypoint passes on is missing from compose.yaml, deploy/compose/.env.example,
-#     the root .env.example, or the README's configuration table;
-#   - the Jellyfin test image is referenced in code or CI without a digest, or with different ones;
-#   - a workspace package carries another version than the release (scripts/check-version.sh);
-#   - compose.demo.yaml mounts another demo library than deploy/demo-library/image.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,13 +15,9 @@ if ! [[ "$pinned" =~ ^ghcr\.io/convex/convex-backend:[^@[:space:]]+@sha256:[0-9a
   fail "deploy/convex-backend.image must hold one image reference with a digest; got '$pinned'"
 fi
 
-compose_image="$(sed -n 's/^x-convex-image: &convex-image \(.*\)$/\1/p' deploy/compose/compose.yaml)"
-[[ "$compose_image" == "$pinned" ]] ||
-  fail "compose.yaml runs '$compose_image', not deploy/convex-backend.image ('$pinned')"
-
-dockerfile_image="$(sed -n 's/^ARG CONVEX_IMAGE=//p' deploy/compose/Dockerfile)"
+dockerfile_image="$(sed -n 's/^ARG CONVEX_IMAGE=//p' deploy/image/Dockerfile)"
 [[ "$dockerfile_image" == "$pinned" ]] ||
-  fail "the Dockerfile copies generate_key from '$dockerfile_image', not '$pinned'"
+  fail "deploy/image/Dockerfile copies the Convex backend from '$dockerfile_image', not '$pinned'"
 
 grep -qF 'deploy/convex-backend.image' scripts/dev-stack.sh ||
   fail "scripts/dev-stack.sh no longer reads deploy/convex-backend.image"
@@ -48,13 +33,14 @@ config_reads="$(grep -oE 'yield\* Config\.' <<<"$config_source" | wc -l)"
 ((${#config_names[@]} == config_reads)) ||
   fail "parsed ${#config_names[@]} setting names but media-config.ts has $config_reads Config reads"
 
-mapfile -t entrypoint_set < <(sed -n 's/^setting \([A-Z][A-Z0-9_]*\) .*/\1/p' deploy/compose/entrypoint.sh | sort -u)
+init=deploy/image/rootfs/app/bin/init
+mapfile -t entrypoint_set < <(sed -n 's/^setting \([A-Z][A-Z0-9_]*\) .*/\1/p' "$init" | sort -u)
 mapfile -t entrypoint_forwarded < <(
-  sed -n '/^optional_settings=(/,/^)/p' deploy/compose/entrypoint.sh | grep -oE '^ +[A-Z][A-Z0-9_]+' |
+  sed -n '/^optional_settings=(/,/^)/p' "$init" | grep -oE '^ +[A-Z][A-Z0-9_]+' |
     tr -d ' ' | sort -u
 )
-((${#entrypoint_forwarded[@]} > 0)) || fail "found no optional_settings in entrypoint.sh"
-image_fixed=(HOST FFMPEG_PATH FFPROBE_PATH)
+((${#entrypoint_forwarded[@]} > 0)) || fail "found no optional_settings in $init"
+image_fixed=(FFMPEG_PATH FFPROBE_PATH)
 
 contains() {
   local needle="$1"
@@ -66,16 +52,22 @@ contains() {
 
 for name in "${config_names[@]}"; do
   if ! contains "$name" "${entrypoint_set[@]}" "${entrypoint_forwarded[@]}" "${image_fixed[@]}"; then
-    fail "$name (media-config.ts) is neither set nor passed on by deploy/compose/entrypoint.sh"
+    fail "$name (media-config.ts) is neither set nor passed on by $init"
   fi
   grep -qE "^ +${name} = |'${name}=%s" nix/module.nix || fail "$name (media-config.ts) is not set by nix/module.nix"
   grep -qF "\`${name}\`" apps/media/README.md || fail "$name (media-config.ts) is not in apps/media/README.md"
 done
 
-user_facing=(LIBRARY_ROOTS "${entrypoint_forwarded[@]}")
+# Settings the image reads outside the media service, such as Caddy's.
+image_settings=(MEDIA_TRUSTED_PROXIES)
+for name in "${image_settings[@]}"; do
+  grep -qE "^ +${name} = " nix/module.nix || fail "$name (the image's Caddy) is not set by nix/module.nix"
+  grep -qF "{\$${name}}" deploy/image/rootfs/etc/caddy/Caddyfile || fail "$name is not read by the Caddyfile"
+done
+user_facing=(LIBRARY_ROOTS "${entrypoint_forwarded[@]}" "${image_settings[@]}")
 for name in "${user_facing[@]}"; do
   grep -qE "^      ${name}: \\$\\{${name}:-\\}$" deploy/compose/compose.yaml ||
-    fail "$name is passed on by the entrypoint but compose.yaml lacks '${name}: \${${name}:-}'"
+    fail "$name is passed on by init but compose.yaml lacks '${name}: \${${name}:-}'"
   grep -qE "^${name}=" deploy/compose/.env.example || fail "$name is not in deploy/compose/.env.example"
   grep -qE "^${name}=" .env.example || fail "$name is not in .env.example"
   grep -qF "\`${name}\`" README.md || fail "$name is not in README.md's configuration table"

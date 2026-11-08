@@ -1,0 +1,46 @@
+#!/command/with-contenv sh
+# HTTP actions stay inside the container on <port> + 1 (docs/decisions/0025): Convex Auth signs
+# tokens with that origin as issuer and the backend fetches its own JWKS from it.
+set -e
+umask 077
+domain="$1"
+port="$2"
+path="$3"
+data="/data/$domain"
+mkdir -p "$data/convex/storage" "$data/convex/tmp" "$data/secrets"
+chmod 711 /data "$data"
+chmod 700 "$data/secrets" "$data/convex"
+if [ ! -s "$data/secrets/instance_secret" ]; then
+  node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' \
+    >"$data/secrets/instance_secret"
+fi
+find "$data/convex" \( \! -user convex -o \! -group convex \) -exec chown -h convex:convex {} +
+install -d -m 700 -o convex -g convex "/run/convex-$domain"
+install -m 400 -o convex -g convex "$data/secrets/instance_secret" "/run/convex-$domain/instance_secret"
+public="${MEDIA_BASE_URL%/}"
+export TMPDIR="$data/convex/tmp"
+# Plain text logs: `docker logs` is not a terminal. The backend stops on SIGINT, which drains
+# requests and shuts the database down cleanly (SIGTERM kills it at once); `down-signal` makes s6
+# stop it that way.
+export NO_COLOR=1
+# Convex refuses to start with TZ set ("Convex requires UTC"); TZ only localizes the other logs.
+unset TZ
+# The backend takes its secret only as an argument, and every process can read every other's
+# arguments in /proc/<pid>/cmdline. The argv-secret shim swaps the placeholder for the file's
+# contents inside the process, so the command line only ever shows the placeholder.
+exec s6-setuidgid convex env \
+  LD_PRELOAD=/app/convex/argv-secret.so ARGV_SECRET_FILE="/run/convex-$domain/instance_secret" \
+  /app/convex/convex-local-backend \
+  --instance-name "$domain" \
+  --instance-secret @ARGV_SECRET_FILE \
+  --port "$port" \
+  --site-proxy-port "$((port + 1))" \
+  --interface 127.0.0.1 \
+  --convex-origin "$public$path" \
+  --convex-site "http://127.0.0.1:$((port + 1))" \
+  --beacon-tag media-self-hosted \
+  --disable-beacon \
+  --redact-logs-to-client \
+  --do-not-require-ssl \
+  --local-storage "$data/convex/storage" \
+  "$data/convex/db.sqlite3"

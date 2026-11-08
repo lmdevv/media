@@ -5,7 +5,7 @@
 // --app when the page is created. verify-media.sh calls this; agents call it through
 // `verify-media.sh browser`.
 //
-//   node browser.mjs serve --state <dir> --base <url> --convex <url> [--music <url>]
+//   node browser.mjs serve --state <dir> --base <movies url> [--account <url>] [--convex <url>] [--music <url>]
 //   node browser.mjs <command> --state <dir> [--app movies|music] [flags]
 //
 // Where the host allows it, the browser runs in a private network namespace (see `isolate`),
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const OWNER = { name: "Lucía", email: "admin@movies.local", password: "password123" };
-const APPS = ["movies", "music"];
+const APPS = ["movies", "music", "account"];
 
 // Every socket lives in the side's state folder and is named relative to it: a socket address
 // holds at most 107 bytes, which a long TMPDIR and run name can pass.
@@ -47,6 +47,7 @@ const TRACK_MEDIA = `(() => {
 const FLAGS = {
   state: { type: "string" },
   base: { type: "string" },
+  account: { type: "string" },
   convex: { type: "string" },
   music: { type: "string" },
   app: { type: "string" },
@@ -102,7 +103,7 @@ if (flags.app !== undefined && !APPS.includes(flags.app)) {
   console.error(`--app must be ${APPS.join(" or ")}, not "${flags.app}"`);
   process.exit(2);
 }
-flags.page ??= flags.app === "music" ? "music" : "main";
+flags.page ??= flags.app === "music" || flags.app === "account" ? flags.app : "main";
 
 if (command === "serve") {
   await serve(flags);
@@ -184,7 +185,7 @@ function namespaceUnavailable() {
 }
 
 async function serve(options) {
-  if (!options.base || !options.convex) throw new Error("serve needs --base and --convex");
+  if (!options.base) throw new Error("serve needs --base");
   const requested = process.env.MEDIA_VERIFY_BROWSER_NETWORK || "auto";
   if (!NETWORKS.includes(requested)) {
     throw new Error(`MEDIA_VERIFY_BROWSER_NETWORK must be ${NETWORKS.join(", ")}, not "${requested}"`);
@@ -202,10 +203,11 @@ async function serve(options) {
   return drive(options, "host", []);
 }
 
-// Pathname Unix sockets cross network namespaces, so the relays use them. Web, Convex, and music
-// keep their port numbers inside, so every origin stays `http://localhost:<port>`. The proxy
-// carries HTTPS to the internet for the Cast SDK, TMDB images, and trailers.
-async function isolate({ base, convex, music }) {
+// Pathname Unix sockets cross network namespaces, so the relays use them. The one port (both web
+// clients, Convex, and streams) and music keep their port numbers inside, so every origin stays
+// `http://localhost:<port>`. The proxy carries HTTPS to the internet for the Cast SDK, TMDB
+// images, and trailers.
+async function isolate({ base, account, convex, music }) {
   const toHost = (port) =>
     createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, port, host: "127.0.0.1" })));
   const proxy = createServer((request, response) => {
@@ -226,7 +228,7 @@ async function isolate({ base, convex, music }) {
   });
   const relays = await Promise.all([
     listen(toHost(portOf(base, "base")), SOCKETS.web),
-    listen(toHost(portOf(convex, "convex")), SOCKETS.convex),
+    ...(convex ? [listen(toHost(portOf(convex, "convex")), SOCKETS.convex)] : []),
     ...(music ? [listen(toHost(portOf(music, "music")), SOCKETS.music)] : []),
     listen(proxy, SOCKETS.proxy),
   ]);
@@ -237,7 +239,8 @@ async function isolate({ base, convex, music }) {
     PRIVATE_NETWORK,
     [
       process.execPath, fileURLToPath(import.meta.url), "serve-inside", "--state", ".", "--base", base,
-      "--convex", convex, ...(music ? ["--music", music] : []),
+      ...(account ? ["--account", account] : []), ...(convex ? ["--convex", convex] : []),
+      ...(music ? ["--music", music] : []),
     ],
     { stdio: ["pipe", "inherit", "inherit"] },
   );
@@ -263,7 +266,7 @@ async function serveInside(options) {
   process.chdir(options.state);
   const toSocket = (socket) => createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, path: socket })));
   await listen(toSocket(SOCKETS.web), portOf(options.base, "base"), "127.0.0.1");
-  await listen(toSocket(SOCKETS.convex), portOf(options.convex, "convex"), "127.0.0.1");
+  if (options.convex) await listen(toSocket(SOCKETS.convex), portOf(options.convex, "convex"), "127.0.0.1");
   if (options.music) await listen(toSocket(SOCKETS.music), portOf(options.music, "music"), "127.0.0.1");
   const proxy = await listen(toSocket(SOCKETS.proxy), 0, "127.0.0.1");
   // Chromium never proxies loopback, so the apps' ports still reach the relays above.
@@ -272,7 +275,7 @@ async function serveInside(options) {
   process.stdin.resume();
 }
 
-async function drive({ base, music }, network, launchArgs) {
+async function drive({ base, account, music }, network, launchArgs) {
   const { chromium, devices } = await import("@playwright/test");
   const executablePath = process.env.CHROMIUM_PATH || undefined;
   const browser = await chromium.launch({
@@ -281,12 +284,16 @@ async function drive({ base, music }, network, launchArgs) {
   });
   /** @type {Map<string, {app: string, context: any, page: any, viewport: any, recording: any, streams: any, networkChanged: string[]}>} */
   const pages = new Map();
-  const bases = { movies: base, music };
+  // A base with a path, movies at /movies/, prefixes the app paths that commands open.
+  const bases = { movies: base, music, account };
+  const prefixes = new WeakMap();
+  const openAppPath = (page, path) => page.goto(path.startsWith("/") ? (prefixes.get(page) ?? "") + path : path);
+  const appPathOf = (page, url) => url.pathname.slice((prefixes.get(page) ?? "").length) || "/";
 
   const pageFor = async (options, app) => {
     const existing = pages.get(options.page);
     if (existing) return existing;
-    if (!bases[app]) throw new Error("this side has no music; up ran with --no-music");
+    if (!bases[app]) throw new Error(`this side has no ${app} app`);
     const device = options.device ? devices[options.device] : undefined;
     if (options.device && !device) throw new Error(`unknown Playwright device "${options.device}"`);
     const viewport =
@@ -302,6 +309,7 @@ async function drive({ base, music }, network, launchArgs) {
     });
     await context.addInitScript({ content: TRACK_MEDIA });
     const page = await context.newPage();
+    prefixes.set(page, new URL(bases[app]).pathname.replace(/\/$/, ""));
     // What the player fetched, so `video` can say whether it played the file or an HLS stream.
     // Counted per page address, so a title opened after another starts from zero.
     const streams = { direct: 0, hls: 0 };
@@ -537,7 +545,7 @@ async function drive({ base, music }, network, launchArgs) {
     // The label names both the digits' group and the first digit, so ask for the textbox. The
     // page doesn't focus it, so click it first, as a person does.
     const pin = page.getByRole("textbox", { name: `${options.profile}'s PIN`, exact: true });
-    const left = page.waitForURL((url) => !url.pathname.startsWith("/profiles"), { timeout: timeout(options) });
+    const left = page.waitForURL((url) => !appPathOf(page, url).startsWith("/profiles"), { timeout: timeout(options) });
     if (await Promise.race([left.then(() => false), pin.waitFor({ timeout: timeout(options) }).then(() => true, () => false)])) {
       if (!options.pin) throw new Error(`${options.profile} has a PIN; pass --pin`);
       await pin.click();
@@ -550,7 +558,7 @@ async function drive({ base, music }, network, launchArgs) {
   // Opens a path the way a person would, getting past the profile picker that a page load can
   // land on: the app forgets nothing, but a fresh tab asks who's watching until one is chosen.
   const visit = async (page, path, options) => {
-    await page.goto(path);
+    await openAppPath(page, path);
     const picker = page.getByRole("heading", { name: "Who's watching?" });
     await picker.or(page.getByRole("main")).first().waitFor({ timeout: timeout(options) });
     if (await picker.isVisible()) {
@@ -569,7 +577,7 @@ async function drive({ base, music }, network, launchArgs) {
     async open({ page, networkChanged }, options) {
       // A new page load replaces whatever the cancelled requests left out.
       networkChanged.length = 0;
-      await page.goto(options.args[0] ?? "/");
+      await openAppPath(page, options.args[0] ?? "/");
       return page.url();
     },
     async click({ page }, options) {
@@ -657,25 +665,25 @@ async function drive({ base, music }, network, launchArgs) {
 
   const moviesCommands = {
     async "sign-in"({ page }, options) {
-      await page.goto("/sign-in");
+      await openAppPath(page, "/sign-in");
       await page.getByLabel("Email").fill(options.email ?? OWNER.email);
       await page.getByLabel("Password", { exact: true }).fill(options.password ?? OWNER.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
-      await page.waitForURL((url) => url.pathname !== "/sign-in", { timeout: timeout(options) });
+      await page.waitForURL((url) => appPathOf(page, url) !== "/sign-in", { timeout: timeout(options) });
       await signedIn(page).first().waitFor({ timeout: timeout(options) });
       if (options.profile) return chooseProfile(page, options);
       return page.url();
     },
     async profile({ page }, options) {
       if (!options.profile) throw new Error("profile needs --profile NAME");
-      if (!new URL(page.url()).pathname.startsWith("/profiles")) await page.goto("/profiles");
+      if (!appPathOf(page, new URL(page.url())).startsWith("/profiles")) await openAppPath(page, "/profiles");
       return chooseProfile(page, options);
     },
     // First-run setup, as an owner does it on a fresh server: the owner account, the Movies
     // library and its first scan, then the Shows library from Admin, Libraries.
     async setup({ page }, options) {
       const long = Number(options.timeout ?? 900_000);
-      await page.goto("/");
+      await openAppPath(page, "/");
       await page.waitForURL(/\/welcome/, { timeout: timeout(options) });
       await page.getByLabel("Your name").fill(OWNER.name);
       await page.getByLabel("Email").fill(OWNER.email);
@@ -705,7 +713,7 @@ async function drive({ base, music }, network, launchArgs) {
     // PG limit, and --pin sets a four-digit PIN.
     async "add-profile"({ page }, options) {
       if (!options.profile) throw new Error("add-profile needs --profile NAME");
-      await page.goto("/profiles/new");
+      await openAppPath(page, "/profiles/new");
       await page.getByRole("heading", { name: "Add profile" }).waitFor({ timeout: timeout(options) });
       await page.getByLabel("Name", { exact: true }).fill(options.profile);
       if (options.kids) await page.getByRole("switch", { name: "Kids profile" }).click();
@@ -739,7 +747,7 @@ async function drive({ base, music }, network, launchArgs) {
     // Accepts an invite at /invite/<code> and makes the account, as the invited person does.
     async join({ page }, options) {
       if (!options.code || !options.name || !options.email) throw new Error("join needs --code, --name, and --email");
-      await page.goto(`/invite/${options.code}`);
+      await openAppPath(page, `/invite/${options.code}`);
       await page.getByRole("heading", { name: "You're invited." }).waitFor({ timeout: timeout(options) });
       await page.getByLabel("Your name").fill(options.name);
       const email = page.getByLabel("Email");
@@ -756,7 +764,7 @@ async function drive({ base, music }, network, launchArgs) {
 
   const musicCommands = {
     async "sign-in"({ page }, options) {
-      await page.goto("/sign-in");
+      await openAppPath(page, "/sign-in");
       await page.getByLabel("Email").fill(options.email ?? OWNER.email);
       await page.getByLabel("Password").fill(options.password ?? OWNER.password);
       await page.getByRole("button", { name: "Sign in" }).click();
@@ -764,7 +772,7 @@ async function drive({ base, music }, network, launchArgs) {
       return page.url();
     },
     async setup({ page }, options) {
-      await page.goto("/");
+      await openAppPath(page, "/");
       await page.waitForURL(/\/setup/, { timeout: timeout(options) });
       await page.getByLabel("Name").fill(OWNER.name);
       await page.getByLabel("Email").fill(OWNER.email);
@@ -780,7 +788,7 @@ async function drive({ base, music }, network, launchArgs) {
     },
     async join({ page }, options) {
       if (!options.code || !options.name || !options.email) throw new Error("join needs --code, --name, and --email");
-      await page.goto(`/invite/${options.code}`);
+      await openAppPath(page, `/invite/${options.code}`);
       const email = page.getByLabel("Email");
       await email.waitFor({ timeout: timeout(options) });
       if (await email.isEditable()) await email.fill(options.email);
@@ -791,7 +799,7 @@ async function drive({ base, music }, network, launchArgs) {
       return `joined music as ${options.email}`;
     },
     async "create-key"({ page }, options) {
-      await page.goto("/settings/keys");
+      await openAppPath(page, "/settings/keys");
       await page.getByRole("button", { name: "New key" }).click();
       await page.getByLabel("Name").fill("verify-media");
       await page.getByRole("button", { name: "Create key" }).click();
@@ -801,7 +809,7 @@ async function drive({ base, music }, network, launchArgs) {
       return key;
     },
   };
-  const appCommands = { movies: moviesCommands, music: musicCommands };
+  const appCommands = { movies: moviesCommands, music: musicCommands, account: {} };
 
   const handle = async (options) => {
     if (options.command === "network") return `${network} ${chromiumPid()}`;

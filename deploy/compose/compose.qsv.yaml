@@ -1,8 +1,8 @@
-# Intel Quick Sync for the media service: passes the host's render nodes through. The entrypoint
+# Intel Quick Sync for the media service: passes the host's render nodes through. Init in the image
 # adds the media user to the group that owns them.
 #   docker compose -f compose.yaml -f compose.qsv.yaml up -d
 services:
-  movies:
+  media:
     devices:
       - /dev/dri:/dev/dri
     environment:

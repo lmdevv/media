@@ -853,22 +853,34 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
       }),
     );
 
-    it.effect("limits how fast one address may call the unauthenticated routes", () =>
-      Effect.gen(function* () {
-        const server = yield* MediaTestServer.Service;
+    it.effect(
+      "limits how fast one client behind the proxy may call the unauthenticated routes",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const client = { "x-forwarded-for": "192.168.1.40" };
 
-        const statuses = yield* Effect.forEach(
-          Array.from({ length: 150 }, (_, index) => index),
-          () => get(`${server.baseUrl}/api/health`),
-          { concurrency: 16 },
-        );
+          const statuses = yield* Effect.forEach(
+            Array.from({ length: 150 }, (_, index) => index),
+            () => get(`${server.baseUrl}/api/health`, client),
+            { concurrency: 16 },
+          );
 
-        const refused = statuses.filter((response) => response.status === 429);
+          const refused = statuses.filter((response) => response.status === 429);
 
-        assert.isAbove(refused.length, 0);
-        assert.isAtLeast(statuses.filter((response) => response.status === 200).length, 60);
-        assert.match(refused[0]?.headers["retry-after"] ?? "", /^\d+$/);
-      }),
+          assert.isAbove(refused.length, 0);
+          assert.isAtLeast(statuses.filter((response) => response.status === 200).length, 60);
+          assert.match(refused[0]?.headers["retry-after"] ?? "", /^\d+$/);
+
+          const other = yield* get(`${server.baseUrl}/api/health`, {
+            "x-forwarded-for": "192.168.1.41",
+          });
+
+          const fromInside = yield* get(`${server.baseUrl}/api/health`);
+
+          assert.strictEqual(other.status, 200);
+          assert.strictEqual(fromInside.status, 200);
+        }),
     );
 
     it.effect("answers unknown streams with a recoverable error", () =>

@@ -1,64 +1,33 @@
-# [movies] with Docker Compose: the self-hosted Convex backend and the media service, which also
-# serves the web app. From this folder:
+# [media] with Docker Compose: the all-in-one image (the core's and old movies' Convex backends,
+# the media service, and the web clients behind one port), plus optional sidecars. From this folder:
 #
-#   cp .env.example .env        # then set MEDIA_LIBRARY and the URLs; see docs/homelab.md
+#   cp .env.example .env        # then set MEDIA_LIBRARY and MEDIA_BASE_URL; see docs/homelab.md
 #   docker compose up -d
 #
-# Open MEDIA_BASE_URL, create the owner account, and add /media/library as a library.
-# Optional: Intel Quick Sync with `-f compose.yaml -f compose.qsv.yaml`; an OpenTelemetry
-# collector with `--profile telemetry`. Upgrades: docs/operations.md.
-name: movies
-
-x-convex-image: &convex-image ghcr.io/convex/convex-backend:5c7cb5bc7db457290f1769f95f1d1340912f7fd7@sha256:d715e9ec088784407ca4ba2d3db592702cd328d02c76cdca3852c0018f2a76b4
+# Open MEDIA_BASE_URL for the account client and MEDIA_BASE_URL/movies for movies, create each
+# owner account, and add /media/library as a movies library. Optional: Intel Quick Sync with
+# `-f compose.yaml -f compose.qsv.yaml`; an OpenTelemetry collector with `--profile telemetry`.
+# Upgrades: docs/operations.md.
+name: media
 
 services:
-  convex:
-    image: *convex-image
-    restart: unless-stopped
-    environment:
-      # Where browsers and the CLI reach Convex; it appears in URLs the backend hands out.
-      CONVEX_CLOUD_ORIGIN: ${CONVEX_PUBLIC_URL:-http://localhost:3210}
-      # HTTP actions (Convex Auth's JWKS) stay inside the container; the backend fetches its own.
-      CONVEX_SITE_ORIGIN: http://127.0.0.1:3211
-      DISABLE_BEACON: "1"
-      REDACT_LOGS_TO_CLIENT: "1"
-      # Plain HTTP over the tailnet or localhost; put a TLS proxy in front for anything else.
-      DO_NOT_REQUIRE_SSL: "1"
-    ports:
-      - "${MEDIA_BIND:-127.0.0.1}:${CONVEX_PORT:-3210}:3210"
-    volumes:
-      - convex-data:/convex/data
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3210/version"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 30s
-
-  movies:
+  media:
     # `latest` is the newest release; pin a version (`:0.1`, `:0.1.2`) or follow `main` for the edge.
     image: ${MEDIA_IMAGE:-ghcr.io/lmdevv/media:latest}
     build:
       context: ../..
-      dockerfile: deploy/compose/Dockerfile
+      dockerfile: deploy/image/Dockerfile
     restart: unless-stopped
-    # Reaps ffmpeg processes and forwards signals to the service.
-    init: true
-    # The service ends open responses 3 s into a stop, then closes its streams and writes its last
-    # log lines; Docker's default of 10 s could cut that short on a busy server.
+    # s6 in the image stops the media service, which ends open responses 3 s into a stop and then
+    # closes its streams, before both Convex backends; it allows them 27 s in all.
     stop_grace_period: 30s
-    depends_on:
-      convex:
-        condition: service_healthy
     environment:
       MEDIA_BASE_URL: ${MEDIA_BASE_URL:-http://localhost:8080}
-      CONVEX_PUBLIC_URL: ${CONVEX_PUBLIC_URL:-http://localhost:3210}
-      CONVEX_URL: http://convex:3210
-      CONVEX_BACKEND_IMAGE: *convex-image
       # User and group the media service runs as; they must be able to read the library.
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-UTC}
+      MEDIA_TRUSTED_PROXIES: ${MEDIA_TRUSTED_PROXIES:-}
       # Media service settings, set in .env. Empty means the service's default (README.md,
       # Configuration).
       LIBRARY_ROOTS: ${LIBRARY_ROOTS:-}
@@ -90,20 +59,14 @@ services:
     ports:
       - "${MEDIA_BIND:-127.0.0.1}:${MEDIA_PORT:-8080}:8080"
     volumes:
-      # Service state and nightly backups (/data/backups). Bind a host folder to keep backups
-      # elsewhere, such as `- /srv/backups/movies:/data/backups`.
-      - movies-data:/data
+      # Everything to keep, one folder per domain: /data/core (the core's Convex database) and
+      # /data/movies (old movies' Convex database, the media service's state, and nightly backups
+      # in /data/movies/backups).
+      - media-data:/data
       # Disposable HLS segments. To keep them in memory instead, replace this line with
       #   - { type: tmpfs, target: /transcode, tmpfs: { size: 8g } }
       # sized above MIN_FREE_TRANSCODE_MB (2 GiB) plus a few GB per stream.
-      - movies-transcode:/transcode
-      # The backend's instance secret, from which the admin key is derived at startup.
-      - type: volume
-        source: convex-data
-        target: /run/convex-credentials
-        read_only: true
-        volume:
-          subpath: credentials
+      - media-transcode:/transcode
       # Libraries, read-only. Add one line per folder and add /media/<name> as a library.
       - ${MEDIA_LIBRARY:-./library}:/media/library:ro
 
@@ -117,6 +80,5 @@ services:
       - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
 
 volumes:
-  convex-data:
-  movies-data:
-  movies-transcode:
+  media-data:
+  media-transcode:

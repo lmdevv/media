@@ -1,0 +1,5 @@
+#!/command/with-contenv sh
+set -e
+install -d -m 700 -o caddy -g caddy /run/caddy
+export HOME=/run/caddy XDG_CONFIG_HOME=/run/caddy/config XDG_DATA_HOME=/run/caddy/data
+exec s6-setuidgid caddy caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

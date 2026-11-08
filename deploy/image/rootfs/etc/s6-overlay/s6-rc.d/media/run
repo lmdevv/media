@@ -1,0 +1,5 @@
+#!/command/with-contenv sh
+cd /app/media
+exec setpriv --reuid=movies --regid=movies --init-groups --inh-caps=-all \
+  env -i PATH=/usr/local/bin:/usr/bin:/bin NODE_ENV=production TZ="${TZ:-UTC}" \
+  node --env-file=/run/movies/media.env --enable-source-maps dist/main.js
