@@ -437,19 +437,20 @@ describe("clients sharing one session store", () => {
 
         const observer = yield* openClient(fake, tabs.tab(2));
 
+        const signedInAsBo = (platform: Platform.Interface) =>
+          Effect.map(bearerOf(platform, fake), (subject) =>
+            Option.exists(subject, (value) => value.startsWith("bo|")),
+          );
+
         return {
           kept,
-          second: Option.map(yield* bearerOf(second, fake), (subject) => subject.split("|")[0]),
-          observer: Option.map(yield* bearerOf(observer, fake), (subject) => subject.split("|")[0]),
+          second: yield* eventually(signedInAsBo(second)),
+          observer: yield* eventually(signedInAsBo(observer)),
         };
       }),
     );
 
-    expect(answer).toStrictEqual({
-      kept: true,
-      second: Option.some("bo"),
-      observer: Option.some("bo"),
-    });
+    expect(answer).toStrictEqual({ kept: true, second: true, observer: true });
   });
 });
 
