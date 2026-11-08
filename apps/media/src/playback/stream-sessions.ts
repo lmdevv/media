@@ -263,6 +263,8 @@ interface Lifecycle {
   readonly streamId: StreamId;
   readonly scope: Scope.Closeable;
   readonly runs: Ref.Ref<Runs>;
+  /** Runs of every stream, closed ones included, whose stop has not finished. */
+  readonly awaitingExit: Ref.Ref<number>;
   readonly directory: string;
   readonly torndown: Deferred.Deferred<void>;
 }
@@ -285,6 +287,9 @@ const InitSource = Data.taggedEnum<InitSource>();
 interface Admission extends StreamLiveness.Use {
   readonly admitting: boolean;
 }
+
+/** A lifecycle step of a stream; `callerGone` completes once its caller stops waiting for it. */
+type Step<A, E> = (callerGone: Effect.Effect<void>) => Effect.Effect<A, E>;
 
 /** Reads a stream's state now and judges its use against it, for a close that must still hold. */
 type Condition = Effect.Effect<(use: StreamLiveness.Use) => boolean>;
@@ -354,7 +359,10 @@ const beginStop = (stream: Lifecycle, run: RunScope) =>
             Ref.update(stream.runs, (runs) => ({
               ...runs,
               live: without(runs.live, run.scope),
-            })).pipe(Effect.andThen(Deferred.succeed(run.stopped, undefined))),
+            })).pipe(
+              Effect.andThen(Ref.update(stream.awaitingExit, (count) => count - 1)),
+              Effect.andThen(Deferred.succeed(run.stopped, undefined)),
+            ),
           ),
           Effect.forkDetach,
           Effect.asVoid,
@@ -399,6 +407,13 @@ const stopWaitingAfter =
   <A, E, R>(request: Effect.Effect<A, E, R>) =>
     request.pipe(Effect.timeoutOrElse({ duration: wait, orElse: () => Effect.fail(late()) }));
 
+const endOfStart = (cause: Cause.Cause<StartError>): PlaybackReporter.StreamEndReason =>
+  Cause.hasInterrupts(cause)
+    ? "abandoned"
+    : Option.exists(Cause.findErrorOption(cause), Predicate.isTagged("TranscodeCapacityReached"))
+      ? "capacity-reached"
+      : "failed";
+
 const awaitStopped = (run: RunScope) =>
   Effect.interruptible(
     Deferred.await(run.stopped).pipe(Effect.timeoutOption(STOP_WAIT), Effect.asVoid),
@@ -417,6 +432,7 @@ const make = Effect.gen(function* () {
   const owners = yield* StreamOwners.Service;
   const reports = yield* SessionReports.Service;
   const sessions = yield* Ref.make<ReadonlyMap<StreamId, Session>>(new Map());
+  const awaitingExit = yield* Ref.make(0);
   const transcodes = yield* EncoderSlots.make(config.maxConcurrentTranscodes);
   const copies = yield* EncoderSlots.make(config.maxConcurrentRemuxes);
   const registry = yield* Semaphore.make(1);
@@ -507,6 +523,11 @@ const make = Effect.gen(function* () {
       runs.sealed
         ? ([false, runs] as const)
         : ([true, { ...runs, live: new Map(runs.live).set(run.scope, run) }] as const),
+    ).pipe(
+      Effect.tap((added) =>
+        added ? Ref.update(stream.awaitingExit, (count) => count + 1) : Effect.void,
+      ),
+      Effect.uninterruptible,
     );
 
     if (!opened) return yield* new StreamNotFound({ streamId: stream.streamId });
@@ -542,22 +563,28 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const onStreamFiber = <A, E>(session: Session, locked: Effect.Effect<A, E>) =>
-    locked.pipe(
-      Effect.forkIn(session.scope),
-      Effect.flatMap(Fiber.await),
-      Effect.flatMap((exit): Effect.Effect<A, E | StreamNotFound> =>
-        Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
-          ? Effect.fail(new StreamNotFound({ streamId: session.streamId }))
-          : exit,
-      ),
+  /** Runs `step` on a fiber of the stream, so it finishes even when its caller stops waiting. */
+  const onStreamFiber = <A, E>(session: Session, step: Step<A, E>) =>
+    Effect.gen(function* () {
+      const gone = yield* Deferred.make<void>();
+      const fiber = yield* step(Deferred.await(gone)).pipe(Effect.forkIn(session.scope));
+
+      const exit = yield* Fiber.await(fiber).pipe(
+        Effect.onInterrupt(() => Deferred.succeed(gone, undefined)),
+      );
+
+      return yield* Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+        ? Effect.fail(new StreamNotFound({ streamId: session.streamId }))
+        : exit;
+    });
+
+  const transition = <A, E>(session: Session, step: Step<A, E>) =>
+    onStreamFiber(session, (callerGone) => session.lane.withPermits(1)(step(callerGone)));
+
+  const transitionIfIdle = <A, E>(session: Session, step: Step<A, E>) =>
+    onStreamFiber(session, (callerGone) =>
+      session.lane.withPermitsIfAvailable(1)(step(callerGone)),
     );
-
-  const transition = <A, E>(session: Session, step: Effect.Effect<A, E>) =>
-    onStreamFiber(session, session.lane.withPermits(1)(step));
-
-  const transitionIfIdle = <A, E>(session: Session, step: Effect.Effect<A, E>) =>
-    onStreamFiber(session, session.lane.withPermitsIfAvailable(1)(step));
 
   /**
    * Closes `session` unless `condition` fails on its use when the close begins, so a request
@@ -932,8 +959,7 @@ const make = Effect.gen(function* () {
     index: number,
     detail: string,
   ) {
-    const restarted = yield* transition(
-      session,
+    const restarted = yield* transition(session, () =>
       Effect.gen(function* () {
         const current = yield* Ref.get(session.generation);
 
@@ -1201,23 +1227,29 @@ const make = Effect.gen(function* () {
     return generation;
   });
 
+  /** Claims a run's slot; a guest waits in line up to `wait`, and no longer once `until` ends. */
   const claimRun = (
     stream: Lifecycle,
     transcoding: boolean,
     audience: EncoderSlots.Audience,
     claimant: EncoderSlots.Claimant,
     wait: Duration.Duration,
+    until: Effect.Effect<void>,
   ): Effect.Effect<Run, TranscodeCapacityReached | StreamNotFound> => {
     const pool = transcoding ? transcodes : copies;
+    const full = () => new TranscodeCapacityReached({ limit: pool.limit });
 
     return openRun(stream).pipe(
       Effect.flatMap((opened) =>
         (audience === "household"
           ? pool.household(opened.scope, claimant)
-          : pool.guest(opened.scope, claimant).pipe(
-              stopWaitingAfter(wait, () => new TranscodeCapacityReached({ limit: pool.limit })),
-              Effect.interruptible,
-            )
+          : pool
+              .guest(opened.scope, claimant)
+              .pipe(
+                stopWaitingAfter(wait, full),
+                Effect.raceFirst(until.pipe(Effect.andThen(Effect.fail(full())))),
+                Effect.interruptible,
+              )
         ).pipe(
           Effect.map((held): Run => ({ ...opened, held })),
           Effect.onError(() => beginStop(stream, opened)),
@@ -1268,6 +1300,7 @@ const make = Effect.gen(function* () {
     session: Session,
     released: Encoder & { readonly _tag: "Released" },
     index: number,
+    callerGone: Effect.Effect<void>,
   ) {
     const current = yield* Ref.get(session.generation);
     const transcoding = isEncode(yield* Ref.get(session.video));
@@ -1299,6 +1332,7 @@ const make = Effect.gen(function* () {
           session.audience,
           { sessionId: session.sessionId, ticket: session.ticket },
           SEGMENT_WAIT,
+          callerGone,
         ),
       ),
       Effect.catchTags({
@@ -1357,12 +1391,14 @@ const make = Effect.gen(function* () {
     session: Session,
     index: number,
   ) {
-    return yield* transition(
-      session,
+    return yield* transition(session, (callerGone) =>
       Effect.gen(function* () {
         const encoder = yield* Ref.get(session.encoder);
 
-        if (Encoder.$is("Released")(encoder)) return yield* revive(session, encoder, index);
+        if (Encoder.$is("Released")(encoder)) {
+          return yield* revive(session, encoder, index, callerGone);
+        }
+
         const current = yield* Ref.get(session.generation);
         yield* readerOf(current, refreshFragments(current));
         const produced = producedRange(session, current, yield* Ref.get(current.fragments));
@@ -1422,8 +1458,7 @@ const make = Effect.gen(function* () {
     session: Session,
     run: Run,
   ) {
-    yield* transition(
-      session,
+    yield* transition(session, () =>
       Effect.gen(function* () {
         const encoder = yield* Ref.get(session.encoder);
 
@@ -1457,8 +1492,7 @@ const make = Effect.gen(function* () {
       : Effect.void;
 
   const release = Effect.fn("StreamSessions.release")(function* (session: Session) {
-    yield* transitionIfIdle(
-      session,
+    yield* transitionIfIdle(session, () =>
       Effect.gen(function* () {
         const encoder = yield* Ref.get(session.encoder);
 
@@ -1553,6 +1587,7 @@ const make = Effect.gen(function* () {
       streamId,
       scope: yield* Scope.make("sequential"),
       runs: yield* Ref.make<Runs>({ live: new Map(), sealed: false }),
+      awaitingExit,
       directory: path.join(config.transcodeDir, streamId),
       torndown: yield* Deferred.make<void>(),
     };
@@ -1570,7 +1605,7 @@ const make = Effect.gen(function* () {
               onSome: (session) =>
                 Exit.isSuccess(exit)
                   ? leave(session)
-                  : closeSession(session, Exit.hasInterrupts(exit) ? "abandoned" : "failed"),
+                  : closeSession(session, endOfStart(exit.cause)),
             }),
           ),
         ),
@@ -1609,6 +1644,7 @@ const make = Effect.gen(function* () {
       grant.audience,
       { sessionId: grant.sessionId, ticket },
       START_WAIT,
+      Effect.never,
     );
 
     const placeholder: Generation = {
@@ -1701,8 +1737,7 @@ const make = Effect.gen(function* () {
     const refused = () =>
       new TranscodeCapacityReached({ limit: (transcoding ? transcodes : copies).limit });
 
-    const first = yield* transition(
-      session,
+    const first = yield* transition(session, () =>
       startGeneration(session, run, Option.none(), 1, segmentIndex),
     );
 
@@ -1744,8 +1779,7 @@ const make = Effect.gen(function* () {
     session: Session,
     generation: number,
   ) {
-    return yield* transition(
-      session,
+    return yield* transition(session, (callerGone) =>
       Effect.gen(function* () {
         const current = yield* currentGeneration(session, generation);
         const encoder = yield* Ref.get(session.encoder);
@@ -1756,7 +1790,7 @@ const make = Effect.gen(function* () {
           return InitSource.Kept({ file: encoder.keptInit.value });
         }
 
-        yield* revive(session, encoder, yield* Ref.get(session.requested));
+        yield* revive(session, encoder, yield* Ref.get(session.requested), callerGone);
 
         return InitSource.Run({ run: yield* currentGeneration(session, generation) });
       }),
@@ -1927,10 +1961,14 @@ const make = Effect.gen(function* () {
   );
 
   yield* Effect.addFinalizer(() =>
-    Effect.gen(function* () {
-      for (const session of (yield* Ref.get(sessions)).values())
-        yield* closeSession(session, "shutdown");
-    }),
+    Ref.get(sessions).pipe(
+      Effect.flatMap((current) =>
+        Effect.forEach(current.values(), (session) => closeSession(session, "shutdown"), {
+          concurrency: "unbounded",
+          discard: true,
+        }),
+      ),
+    ),
   );
 
   return Service.of({
@@ -1948,14 +1986,7 @@ const make = Effect.gen(function* () {
       ),
       Effect.map((running) => running.length),
     ),
-    runsAwaitingExit: Ref.get(sessions).pipe(
-      Effect.flatMap((current) =>
-        Effect.forEach(current.values(), (session) =>
-          Ref.get(session.runs).pipe(Effect.map(({ live }) => live.size)),
-        ),
-      ),
-      Effect.map((counts) => counts.reduce((total, count) => total + count, 0)),
-    ),
+    runsAwaitingExit: Ref.get(awaitingExit),
   });
 });
 

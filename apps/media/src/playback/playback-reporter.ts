@@ -13,6 +13,7 @@ const StreamEndReason = Schema.Literals([
   "expired",
   "unattended",
   "resume-refused",
+  "capacity-reached",
   "replaced",
   "failed",
   "shutdown",
