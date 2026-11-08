@@ -5,7 +5,7 @@
 #   verify-media.sh doctor [--side S]
 #   verify-media.sh browser [--side S] [--app movies|music] <command> [flags]
 #   verify-media.sh cli [--side S] [--app movies|music] [--as PERSON] -- <media or music args>
-#   verify-media.sh logs [--side S] [--service movies|convex|music] [lines]
+#   verify-media.sh logs [--side S] [--service media|music] [lines]
 #   verify-media.sh ios <up|doctor|describe|find|tap|type|swipe|wait|shot|record|appearance|orientation|open|matrix|sign-in|down> [--side S] ...
 #   verify-media.sh evidence <add|list|clear|publish> ...
 #   verify-media.sh status
@@ -13,8 +13,8 @@
 #
 # MEDIA_VERIFY_RUN names the run (default: the checkout's directory name). A run has two sides:
 # `after` is built from this checkout, `before` from main. Each side is its own Compose project,
-# media-verify-<run>-<side>: deploy/compose/compose.yaml for movies, plus old music from
-# legacy/music as one more service.
+# media-verify-<run>-<side>: deploy/compose/compose.yaml for the all-in-one image (the account
+# client at /, movies at /movies), plus old music from legacy/music as one more service.
 set -euo pipefail
 
 skill="$(cd "$(dirname "$0")/.." && pwd)"
@@ -94,7 +94,8 @@ chromium_path() {
 }
 
 url() { echo "http://localhost:$(read_state port)"; }
-convex_url() { echo "http://localhost:$(read_state convex_port)"; }
+movies_url() { echo "$(url)/movies"; }
+convex_url() { echo "$(url)/movies/convex"; }
 music_url() { echo "http://localhost:$(read_state music_port)"; }
 has_music() { [[ -n "$(read_state music_port)" ]]; }
 container() { echo "$project-$1-1"; }
@@ -115,11 +116,11 @@ healthy() { curl -fsS "$(url)/api/health" 2>/dev/null | grep -q '"backend":"conn
 music_healthy() { curl -fsS "$(music_url)/healthz" 2>/dev/null | grep -q '"ok":true'; }
 
 wait_healthy() {
-  local services=(movies convex) status service
+  local services=(media) status service
   has_music && services+=(music)
   for _ in $(seq 1 180); do
     healthy && { ! has_music || music_healthy; } && return 0
-    for service in movies music; do
+    for service in media music; do
       [[ "$service" == music ]] && ! has_music && continue
       status="$(docker inspect -f '{{.State.Status}}' "$(container "$service")" 2>/dev/null || echo missing)"
       if [[ "$status" == exited || "$status" == dead ]]; then
@@ -142,7 +143,7 @@ start_browser() {
   local music=()
   has_music && music=(--music "$(music_url)")
   CHROMIUM_PATH="$(chromium_path)" nohup node "$scripts/browser.mjs" serve --state "$state" \
-    --base "$(url)" --convex "$(convex_url)" "${music[@]}" > "$state/browser.log" 2>&1 &
+    --base "$(movies_url)/" --account "$(url)" "${music[@]}" > "$state/browser.log" 2>&1 &
   write_state browser.pid "$!"
   for _ in $(seq 1 100); do
     if [[ -S "$state/browser.sock" ]]; then
@@ -230,7 +231,7 @@ cmd_up() {
   elif [[ -z "$image" ]]; then
     image="media:verify-$run"
     say "building $image from $root"
-    docker build -q -f "$root/deploy/compose/Dockerfile" --label "media.verify.run=$run" \
+    docker build -q -f "$root/deploy/image/Dockerfile" --label "media.verify.run=$run" \
       --label "media.verify.side=$side" --label "media.verify.rev=$(checkout_rev)" -t "$image" "$root" >/dev/null
     built=1
   fi
@@ -302,11 +303,9 @@ cmd_up() {
   fi
   write_state library "$library"
 
-  local port convex_port music_port music_service=""
+  local port music_port music_service=""
   port="$(free_port)"
-  convex_port="$(free_port)"
   write_state port "$port"
-  write_state convex_port "$convex_port"
   if ((music)); then
     music_port="$(free_port)"
     write_state music_port "$music_port"
@@ -327,9 +326,7 @@ volumes:
 MEDIA_IMAGE=$image
 MEDIA_BIND=127.0.0.1
 MEDIA_PORT=$port
-CONVEX_PORT=$convex_port
 MEDIA_BASE_URL=http://localhost:$port
-CONVEX_PUBLIC_URL=http://localhost:$convex_port
 MEDIA_LIBRARY=/nonexistent
 PUID=$(id -u)
 PGID=$(id -g)
@@ -339,16 +336,14 @@ ENV
   # compose.yaml's MEDIA_LIBRARY line.
   cat > "$state/compose.verify.yaml" <<YAML
 services:
-  convex:
-    labels: { media.verify.run: "$run", media.verify.side: "$side" }
-  movies:
+  media:
     labels: { media.verify.run: "$run", media.verify.side: "$side" }
 $mount
 $music_service
 YAML
   compose up -d --pull missing --no-build --quiet-pull > "$state/compose.log" 2>&1 ||
     { cat "$state/compose.log" >&2; die "docker compose up failed"; }
-  say "waiting for $project on ports $port (web) and $convex_port (Convex)${music_port:+, and $music_port (music)}"
+  say "waiting for $project on port $port${music_port:+, and $music_port (music)}"
   wait_healthy
   timing "starting the stack"
 
@@ -403,23 +398,23 @@ seed() {
 
 cmd_doctor() {
   take_side "$@"
-  local failed=0 port convex_port image_id
+  local failed=0 port image_id
   check() { if eval "$2" >/dev/null 2>&1; then echo "ok    $1"; else echo "FAIL  $1"; failed=1; fi; }
   port="$(read_state port)"
-  convex_port="$(read_state convex_port)"
   image_id="$(read_state image_id)"
   [[ -n "$port" ]] || die "no $side side in run $run; run \`up --side $side\`"
-  local m c
-  m="$(container movies)"
-  c="$(container convex)"
-  check "containers $m and $c run" "[[ \$(docker inspect -f '{{.State.Running}}' $m $c | sort -u) == true ]]"
-  check "both belong to run $run" "[[ \$(docker inspect -f '{{index .Config.Labels \"media.verify.run\"}}' $m $c | sort -u) == $run ]]"
+  local m
+  m="$(container media)"
+  check "container $m runs" "[[ \$(docker inspect -f '{{.State.Running}}' $m) == true ]]"
+  check "it belongs to run $run" "[[ \$(docker inspect -f '{{index .Config.Labels \"media.verify.run\"}}' $m) == $run ]]"
   check "port $port maps to $m" "docker port $m 8080/tcp | grep -q ':$port\$'"
-  check "port $convex_port maps to $c" "docker port $c 3210/tcp | grep -q ':$convex_port\$'"
   check "/api/health reports the backend connected" "healthy"
   check "the media service runs the image from up" "[[ \$(docker inspect -f '{{.Image}}' $m) == $image_id ]]"
-  check "the entrypoint deployed this image's functions" \
-    "[[ \$(docker exec $m cat /data/version) == \$(docker exec $m sh -c 'echo \$(node -p \"require(\\\"/app/backend/package.json\\\").version\")+\$(cat /app/backend/.functions-hash)') ]]"
+  local project_dir
+  for project_dir in movies:backend core:platform; do
+    check "init deployed this image's ${project_dir%%:*} functions" \
+      "[[ \$(docker exec $m cat /data/${project_dir%%:*}/version) == \$(docker exec $m sh -c 'echo \$(node -p \"require(\\\"/app/${project_dir#*:}/package.json\\\").version\")+\$(cat /app/${project_dir#*:}/.functions-hash)') ]]"
+  done
   check "browser host answers" "browser url"
   local network browser_pid browser_ns host_ns
   read -r network browser_pid <<<"$(browser network 2>/dev/null || true)"
@@ -440,7 +435,7 @@ cmd_doctor() {
     if [[ "$(read_state rev)" == "$(checkout_rev)" ]]; then echo "ok    image matches the checkout"
     else echo "FAIL  the checkout changed since up; run \`down --side $side\` and \`up --side $side\` to test it"; failed=1; fi
   fi
-  echo "info  version $(docker exec "$m" cat /data/version 2>/dev/null), image $(read_state image), library $(read_state library)"
+  echo "info  version $(docker exec "$m" cat /data/movies/version 2>/dev/null), image $(read_state image), library $(read_state library)"
   if ! has_music; then
     echo "info  no music (up ran with --no-music)"
     return "$failed"
@@ -527,7 +522,7 @@ cmd_cli() {
 
 cmd_logs() {
   take_side "$@"
-  local service=movies lines=80
+  local service=media lines=80
   set -- "${args[@]}"
   while (($#)); do
     case "$1" in
@@ -549,7 +544,7 @@ cmd_status() {
   for s in after before; do
     take_side --side "$s"
     [[ -n "$(read_state port)" ]] || continue
-    echo "$s: $(side_phase) movies $(url) (Convex $(convex_url)) project $project ($(docker inspect -f '{{.State.Status}}' "$(container movies)" 2>/dev/null || echo gone)) image $(read_state image)"
+    echo "$s: $(side_phase) account $(url), movies $(movies_url) (Convex $(convex_url)) project $project ($(docker inspect -f '{{.State.Status}}' "$(container media)" 2>/dev/null || echo gone)) image $(read_state image)"
     has_music && echo "$s: $(side_phase) music $(music_url) container $(container music) ($(docker inspect -f '{{.State.Status}}' "$(container music)" 2>/dev/null || echo gone)) image $(read_state music/image)"
     [[ -n "$(read_state ios_udid)" ]] && echo "$s ios: simulator $(read_state ios_udid), metro $(read_state metro_port)"
   done
@@ -717,15 +712,14 @@ cmd_ios_up() {
   free="$(on_mac "df -g \$HOME | awk 'NR == 2 { print \$4 }'")"
   ((free >= need)) || die "$mac has ${free} GB free and ios up needs ${need} GB; free space there (\`down --purge\` removes this run's checkout there and the dev client for its native inputs, which other runs with the same inputs share)"
 
-  local port convex_port metro src
+  local port metro src
   port="$(read_state port)"
-  convex_port="$(read_state convex_port)"
   metro="$(free_port)"
   write_state metro_port "$metro"
   # The simulator shares the Mac's network, so localhost:<port> on the Mac reaches this machine:
-  # the web app and streams, Convex, and Metro.
+  # the one port (the web clients, Convex, and streams), and Metro.
   nohup ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
-    -R "$port:127.0.0.1:$port" -R "$convex_port:127.0.0.1:$convex_port" -R "$metro:127.0.0.1:$metro" \
+    -R "$port:127.0.0.1:$port" -R "$metro:127.0.0.1:$metro" \
     "$mac" > "$state/forward.log" 2>&1 &
   write_state forward_pid "$!"
   sleep 2

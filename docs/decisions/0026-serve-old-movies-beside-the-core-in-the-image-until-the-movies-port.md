@@ -36,8 +36,9 @@ second port.
   | `/api`, `/media` | the media service                                                     |
   | `/artwork`       | the media service's artwork route, which the movies client calls      |
 
-- **`/music` is not served in phase 3.** A request for it reaches the account client, which shows
-  its own not-found page. The music port builds `apps/web-music` and adds the route. Old music
+- **`/music` is not served in phase 3.** A request for it reaches the account client, whose
+  router answers with its default `Not Found` page. The account client's Movies and Music links
+  stay as #121 built them. The music port builds `apps/web-music` and adds the route. Old music
   keeps running from `legacy/music`, outside the image.
 - **One data root with a folder per domain.** `/data/core` holds the core's Convex database and
   its upgrade backups. `/data/movies` holds old movies' Convex database, the media service's state

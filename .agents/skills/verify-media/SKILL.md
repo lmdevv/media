@@ -1,14 +1,16 @@
 ---
 name: verify-media
-description: Run disposable [media] stacks built from this checkout and from main, with [movies] (the real Compose install, with the Convex backend, the media service, the scanner, ffmpeg, and real video) and old [music] from legacy/music side by side on one demo library, then drive both web apps in one Chromium, the `media` and `music` CLIs as each seeded person, and the movies iOS app on a Mac simulator to prove a change works the way a user sees it. Captures before/after screenshots and H.264 videos and publishes them to the PR description. Use to verify a web, CLI, backend, media, music, or iOS change end to end, to reproduce a user-facing bug, or to put visual evidence on a PR.
+description: Run disposable [media] stacks built from this checkout and from main, with [media]'s all-in-one image (the real Compose install: the account client, movies with its Convex backend, the media service, the scanner, ffmpeg, and real video, on one port) and old [music] from legacy/music side by side on one demo library, then drive both web apps in one Chromium, the `media` and `music` CLIs as each seeded person, and the movies iOS app on a Mac simulator to prove a change works the way a user sees it. Captures before/after screenshots and H.264 videos and publishes them to the PR description. Use to verify a web, CLI, backend, media, music, or iOS change end to end, to reproduce a user-facing bug, or to put visual evidence on a PR.
 ---
 
 # Verify [media]
 
 This skill runs the real products on one demo library, mounted read-only:
 
-- **Movies.** `deploy/compose/compose.yaml`, with its `convex` backend and its `movies` media
-  service (which also serves the web app), with the library at `/media/library`.
+- **[media].** `deploy/compose/compose.yaml`, which runs the all-in-one image as one `media`
+  container on one port: the account client at `/` with the core's Convex at `/convex`, and the
+  movies client at `/movies` with old movies' Convex at `/movies/convex` and its media service,
+  with the library at `/media/library` (ADR 0026).
 - **Old music.** The all-in-one image from `legacy/music/deploy/docker/Dockerfile`, with its own
   Convex, media service, and web app, with the library's `Music` folder at `/music`. It runs
   until the music port deletes `legacy/music`.
@@ -38,10 +40,10 @@ two runs on their own. Each side of a run owns these resources and nothing else:
 
 | Resource   | Name                                                                                    |
 | ---------- | --------------------------------------------------------------------------------------- |
-| Project    | `media-verify-<run>-<side>`: containers `…-convex-1`, `…-movies-1`, and `…-music-1`, labeled `media.verify.run=<run>` |
-| Volumes    | `media-verify-<run>-<side>_convex-data`, `_movies-data`, `_movies-transcode`, `_music-data`, and its network |
+| Project    | `media-verify-<run>-<side>`: containers `…-media-1` and `…-music-1`, labeled `media.verify.run=<run>` |
+| Volumes    | `media-verify-<run>-<side>_media-data`, `_media-transcode`, `_music-data`, and its network |
 | Images     | `media:verify-<run>`, built by `up` for the after side, and `media:verify-<run>-music-<side>` for each side |
-| Ports      | Three free loopback ports chosen at `up`: the movies web app, its Convex, and music, each at `http://localhost:<port>` (`MEDIA_BASE_URL`, `CONVEX_PUBLIC_URL`, and music's `PUBLIC_URL`) |
+| Ports      | Two free loopback ports chosen at `up`: [media]'s one port and music, each at `http://localhost:<port>` (`MEDIA_BASE_URL` and music's `PUBLIC_URL`) |
 | Network    | The browser host's own network namespace where the host allows it, reached through Unix sockets in the state folder (see [Network view](#network-view)) |
 | State      | `${TMPDIR:-/tmp}/media-verify/<run>/<side>/`: ports, pids, logs, sockets, and each person's CLI config, with music's under `music/` |
 | Simulator  | `media-verify-<run>-<side>` on `darwin`, made by `ios up`                               |
@@ -68,7 +70,7 @@ Where the host allows it, the browser host therefore runs in a private user and 
 (`scripts/private-network.sh` at the repo root), with the same Chromium, Node, fonts, ffmpeg, and
 files. Its loopback has only these, relayed over Unix sockets in the state folder:
 
-- The side's movies web, Convex, and music ports, at the same numbers, so every URL and origin
+- The side's [media] and music ports, at the same numbers, so every URL and origin
   stays `http://localhost:<port>` for the browser and the CLIs alike, and for movies through the
   iOS forwards.
 - An HTTPS proxy to the internet on the host, for the Cast SDK, TMDB images, and trailers.
@@ -108,7 +110,7 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/media:main, build 
 
 `up` does these steps in order and prints how long each took:
 
-1. It builds `media:verify-<run>` from `deploy/compose/Dockerfile`, or pulls the main image for
+1. It builds `media:verify-<run>` from `deploy/image/Dockerfile`, or pulls the main image for
    `before`. A warm Docker cache builds in seconds; a cold one takes several minutes.
 2. It builds old music's `media:verify-<run>-music-<side>` from `legacy/music`, or from
    `origin/main:legacy/music` for `before`. An unchanged tree builds from the cache in seconds;
@@ -225,8 +227,8 @@ one line per check, and exits non-zero on any `FAIL`:
 - Both containers run, belong to this run, and own their ports.
 - `/api/health` reports the backend connected.
 - The media service runs the image that `up` recorded.
-- The entrypoint deployed this image's functions: `/data/version` matches the image's version and
-  functions hash.
+- Init deployed this image's functions for both projects: `/data/movies/version` and
+  `/data/core/version` match the image's versions and functions hashes.
 - The browser host answers.
 - The browser has its own network namespace: its Chromium's `/proc/<pid>/ns/net` differs from
   the helper's. When the browser shares the host network instead, an `info` line says why.
@@ -239,7 +241,7 @@ one line per check, and exits non-zero on any `FAIL`:
 The `info` lines name the version, the images, the library, and music's address and build. The
 `before` side often shows the same version as the checkout even when the code differs, because
 the `:main` tag moves only when the Image workflow publishes. `$S logs [--side S] [--service
-movies|convex|music] [N]` shows a container's last lines; the media service logs one JSON record
+media|music] [N]` shows a container's last lines; the media service logs one JSON record
 per line, such as `"message":"Stream.started"` with the stream's `mode`, and music's container
 holds its init, Convex, media service, and Caddy logs. `$S status` lists each side's apps, whether
 the side is `ready`, still `starting`, or `failed` (its `up` stopped before ready; run `down`),
@@ -252,12 +254,13 @@ again.
 
 ### Browser
 
-`$S browser [--side S] [--app movies|music] <command> [flags]` sends one action to the open
-Chromium and prints the result. A failed action exits 1 with Playwright's message. URLs are paths
-on the page's app's server.
+`$S browser [--side S] [--app movies|music|account] <command> [flags]` sends one action to the
+open Chromium and prints the result. A failed action exits 1 with Playwright's message. URLs are
+paths inside the page's app: a movies page opens `/title/<id>` at `/movies/title/<id>`.
 
-Each page belongs to one app, which `--app` picks when the page is created: `movies` (the default)
-or `music`. A later command on the page needs no `--app`. With `--app music`, `--page` defaults to
+Each page belongs to one app, which `--app` picks when the page is created: `movies` (the default),
+`music`, or `account`, the account client at `/`, which has only the generic commands. A later
+command on the page needs no `--app`. With `--app music`, `--page` defaults to
 `music` instead of `main`; `up` signs `music` in as Lucía. A command that names a page with the
 other app fails, so give each app's pages their own names.
 
@@ -348,7 +351,7 @@ The movies iOS app runs on a simulator on `darwin` (set `MAC_HOST` for another M
 iOS app is not driven here; the `ios` commands sign in to movies only. Its JavaScript comes
 from a Metro on this machine. For the before side, Metro serves a main checkout that `ios up`
 makes with `git worktree` under the side's state. The simulator reaches the side as
-`localhost:<port>` through ssh forwards for the web app, Convex, and Metro, so every address
+`localhost:<port>` through ssh forwards for [media]'s one port and Metro, so every address
 matches the side's public URLs.
 
 ```sh
@@ -361,7 +364,7 @@ this side's server, so one stack verifies several app branches with this checkou
 `ios up` needs the side to be up with setup, and it stops before anything else when the Mac has
 less than 3 GB free, or 10 GB when it must build the dev client. It does these steps in order:
 
-1. It forwards the web app, Convex, and Metro ports to the Mac.
+1. It forwards [media]'s port and Metro's to the Mac.
 2. It starts Metro.
 3. It creates and boots the simulator `media-verify-<run>-<side>`, in dark mode unless `--light`.
 4. It installs the dev client. The build is named for the app's native inputs (`app.json`, its

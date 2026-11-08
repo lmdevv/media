@@ -15,6 +15,9 @@
 			write_idle -1s
 		}
 	}
+	# On a stop, close open connections (Convex's WebSockets, streams) after 3 s instead of waiting
+	# for them to end, which held one stop for 17 s.
+	grace_period 3s
 }
 
 # One address for the whole product (docs/decisions/0015 and 0025). The image runs it as is; the
