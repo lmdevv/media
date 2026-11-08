@@ -77,6 +77,9 @@ let
       # Outside CI the Convex CLI reports to Sentry, and where that host is slow or blocked each
       # command waits minutes for it on exit. A self-hosted install sends nothing anyway.
       export CI=1
+      # `convex deploy` also asks version.convex.dev for news, with no timeout. A refused loopback
+      # port fails that fetch at once, so a start never waits on the internet.
+      export CONVEX_VERSION_API_ORIGIN=http://127.0.0.1:9
 
       public_url=${lib.escapeShellArg publicUrl}
       owner=${lib.escapeShellArg "${cfg.user}:${cfg.group}"}
