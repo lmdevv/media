@@ -64,13 +64,8 @@ export function ProfileTile({
   );
 }
 
-/** The dashed tile at the end of the picker, labelled "Add profile" unless `label` says otherwise. */
-export function AddProfileTile({
-  label = "Add profile",
-  className,
-  type = "button",
-  ...props
-}: Omit<ComponentProps<"button">, "children"> & { readonly label?: string }) {
+/** The dashed "Add profile" tile at the end of the picker. */
+export function AddProfileTile({ className, type = "button", ...props }: ComponentProps<"button">) {
   return (
     <button
       type={type}
@@ -87,7 +82,7 @@ export function AddProfileTile({
       >
         <PlusIcon className="size-9 md:size-11" strokeWidth={1.5} aria-hidden />
       </span>
-      <span className={cn(nameClassName, "text-text-muted")}>{label}</span>
+      <span className={cn(nameClassName, "text-text-muted")}>Add profile</span>
       <span className="h-4" />
     </button>
   );
