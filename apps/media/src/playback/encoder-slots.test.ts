@@ -359,6 +359,55 @@ describe("encoder slots", () => {
     }),
   );
 
+  it.effect("a stream whose place a newer stream of its session took starts no encoder", () =>
+    Effect.gen(function* () {
+      const pool = yield* EncoderSlots.make(1);
+
+      const older = yield* pool.household(
+        yield* Scope.make(),
+        claimant("older", 1, { session: "session" }),
+      );
+
+      const newer = yield* pool.household(
+        yield* Scope.make(),
+        claimant("newer", 2, { session: "session" }),
+      );
+
+      yield* older.ready;
+
+      assert.isTrue(yield* older.isLost, "the older stream's holder gives up");
+      assert.isFalse(yield* newer.isLost);
+    }),
+  );
+
+  it.effect(
+    "an older stream's claim takes nothing once a newer stream of its session holds a slot",
+    () =>
+      Effect.gen(function* () {
+        const pool = yield* EncoderSlots.make(2);
+        yield* pool.household(yield* Scope.make(), claimant("newer", 2, { session: "session" }));
+
+        const guest = yield* pool.guest(
+          yield* Scope.make(),
+          claimant("older guest", 1, { session: "session" }),
+        );
+
+        const household = yield* pool.household(
+          yield* Scope.make(),
+          claimant("older household", 1, { session: "session" }),
+        );
+
+        assert.isTrue(yield* guest.isLost, "the older guest's holder gives up");
+        assert.isTrue(yield* household.isLost, "the older household's holder gives up");
+
+        const other = yield* pool
+          .household(yield* Scope.make(), claimant("other", 3))
+          .pipe(Effect.result);
+
+        assert.isTrue(Result.isSuccess(other), "the older claims left the other place free");
+      }),
+  );
+
   it.effect(
     "a stream that replaces a household stream before its taken guest stops waits for the guest",
     () =>
@@ -476,7 +525,12 @@ describe("encoder slots", () => {
             assert.isAtMost(
               run.processStop,
               STALLED_STOP_MS,
-              `${label}: a run's process stops without waiting for its readers`,
+              `${label}: a run's process stop begins without waiting for its readers`,
+            );
+            assert.strictEqual(
+              run.superseded,
+              0,
+              `${label}: encoders started after a newer stream of their session took their place`,
             );
           }
         }
@@ -515,6 +569,7 @@ interface Stream {
   status: Status;
   run: Scope.Closeable | undefined;
   held: EncoderSlots.Held | undefined;
+  claimedOn: Scope.Closeable | undefined;
   readonly runs: Set<Scope.Closeable>;
   readonly transitions: Set<Fiber.Fiber<void>>;
   readonly stopping: Set<Scope.Closeable>;
@@ -529,9 +584,11 @@ const simulate = (limit: number) =>
     const latest = new Map<string, number>();
     const actors: Array<Fiber.Fiber<void>> = [];
     const cut = { transitions: 0 };
+    const superseded = { starts: 0 };
     let tickets = 0;
 
     const readers = new Map<Scope.Closeable, Scope.Closeable>();
+    const stopsRequested = new Map<Scope.Scope, number>();
 
     const open = (stream: Stream) =>
       Effect.gen(function* () {
@@ -565,15 +622,11 @@ const simulate = (limit: number) =>
         stream.stopping.add(run);
 
         const reading = readers.get(run);
-        const began = yield* Clock.currentTimeMillis;
 
-        const stopsProcess = Effect.gen(function* () {
-          yield* close(run);
-          waits.processStop = Math.max(waits.processStop, (yield* Clock.currentTimeMillis) - began);
-        });
+        stopsRequested.set(run, yield* Clock.currentTimeMillis);
 
         yield* Effect.forkDetach(
-          Effect.all([stopsProcess, reading === undefined ? Effect.void : close(reading)], {
+          Effect.all([close(run), reading === undefined ? Effect.void : close(reading)], {
             concurrency: "unbounded",
             discard: true,
           }),
@@ -621,7 +674,17 @@ const simulate = (limit: number) =>
           run,
           Effect.suspend(() =>
             started.value
-              ? Effect.sleep(stopsAfter).pipe(
+              ? Clock.currentTimeMillis.pipe(
+                  Effect.tap((now) =>
+                    Effect.sync(() => {
+                      const requested = stopsRequested.get(run);
+
+                      if (requested !== undefined) {
+                        waits.processStop = Math.max(waits.processStop, now - requested);
+                      }
+                    }),
+                  ),
+                  Effect.andThen(Effect.sleep(stopsAfter)),
                   Effect.andThen(
                     Effect.sync(() => {
                       encoders.live -= 1;
@@ -646,10 +709,20 @@ const simulate = (limit: number) =>
           waits.household = Math.max(waits.household, (yield* Clock.currentTimeMillis) - since);
         }
 
+        const newerClaimed = streams.some(
+          (other) =>
+            other.claimant.sessionId === stream.claimant.sessionId &&
+            other.claimant.ticket > stream.claimant.ticket &&
+            other.claimedOn !== undefined &&
+            !isClosed(other.claimedOn),
+        );
+
         const displaced = yield* held.isLost;
 
         const running = yield* Effect.sync(() => {
           if (displaced || isClosed(run)) return false;
+
+          if (newerClaimed) superseded.starts += 1;
           started.value = true;
           encoders.live += 1;
           encoders.peak = Math.max(encoders.peak, encoders.live);
@@ -692,8 +765,13 @@ const simulate = (limit: number) =>
         }
 
         stream.held = claimed.success;
+        stream.claimedOn = run;
 
         if (!resume) {
+          const registering = yield* Random.nextIntBetween(0, 12, { halfOpen: true });
+
+          for (let turn = 0; turn < registering; turn += 1) yield* Effect.yieldNow;
+
           if (stream.status === "ended" || latest.get(sessionId) !== ticket) {
             yield* end(stream);
 
@@ -741,6 +819,7 @@ const simulate = (limit: number) =>
         if (yield* begin(stream, run, renewed)) {
           stream.run = run;
           stream.held = renewed;
+          stream.claimedOn = run;
 
           return;
         }
@@ -762,6 +841,7 @@ const simulate = (limit: number) =>
           status: "starting",
           run: undefined,
           held: undefined,
+          claimedOn: undefined,
           runs: new Set(),
           transitions: new Set(),
           stopping: new Set(),
@@ -860,5 +940,6 @@ const simulate = (limit: number) =>
       stuck,
       freed: waiting.every((still) => !still),
       cut: cut.transitions,
+      superseded: superseded.starts,
     };
   });

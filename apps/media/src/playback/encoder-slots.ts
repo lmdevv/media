@@ -45,8 +45,9 @@ interface Pool {
   /**
    * Takes a slot until `scope` closes, without waiting. When the limit is reached, takes the slots
    * of the newest guests, running guests' before starting ones', until it fits. Fails, taking
-   * none, when guests' slots are not enough. On a scope that already closed it takes nothing, and
-   * the slot it returns is displaced, so its holder starts no encoder.
+   * none, when guests' slots are not enough. On a scope that already closed, or for a claimant a
+   * newer stream of its session superseded, it takes nothing, and the slot it returns is
+   * displaced, so its holder starts no encoder.
    */
   readonly household: (
     scope: Scope.Scope,
@@ -57,7 +58,8 @@ interface Pool {
    * limit is reached or an older guest waits. A waiter whose session already holds a slot fits
    * sooner and is seated ahead of older waiters that do not fit. The wait can be interrupted, and
    * the caller bounds it. Closing `scope` leaves the line, ending the wait, or frees the slot. On a
-   * scope that already closed it takes nothing, and the slot it returns is displaced.
+   * scope that already closed, or once a newer stream of its session holds a slot, it takes
+   * nothing, and the slot it returns is displaced.
    */
   readonly guest: (scope: Scope.Scope, claimant: Claimant) => Effect.Effect<Held>;
 }
@@ -92,7 +94,7 @@ const Turn = Data.taggedEnum<Turn>();
 type HouseholdDecision = Data.TaggedEnum<{
   Take: { readonly victims: ReadonlyArray<Slot> };
   Full: {};
-  Closed: {};
+  Lost: {};
 }>;
 
 const HouseholdDecision = Data.taggedEnum<HouseholdDecision>();
@@ -104,6 +106,14 @@ const takesOver = (claimant: Claimant, slot: Slot): boolean =>
 
 const placesAgainst = (slots: ReadonlyMap<number, Slot>, claimant: Claimant) =>
   [...slots.values()].filter((slot) => slot.takenOverBy === null && !takesOver(claimant, slot));
+
+const supersedes = (slots: ReadonlyMap<number, Slot>, claimant: Claimant): boolean =>
+  [...slots.values()].some(
+    (slot) =>
+      slot.takenOverBy === null &&
+      slot.claimant.sessionId === claimant.sessionId &&
+      slot.claimant.ticket > claimant.ticket,
+  );
 
 const newest = (slots: ReadonlyArray<Slot>): Slot | undefined =>
   slots.reduce<Slot | undefined>(
@@ -147,13 +157,22 @@ const seat = (
   return seated.set(slot.id, slot);
 };
 
-const fillLine = (state: State, limit: number): readonly [ReadonlyArray<Waiter>, State] => {
+interface Filled {
+  readonly seated: ReadonlyArray<Waiter>;
+  /** Waiters a newer stream of their session took over while they waited; they take nothing. */
+  readonly superseded: ReadonlyArray<Waiter>;
+}
+
+const fillLine = (state: State, limit: number): readonly [Filled, State] => {
   let slots = state.slots;
   const seated: Array<Waiter> = [];
+  const superseded: Array<Waiter> = [];
   const line: Array<Waiter> = [];
 
   for (const waiter of state.line) {
-    if (placesAgainst(slots, waiter.slot.claimant).length < limit) {
+    if (supersedes(slots, waiter.slot.claimant)) {
+      superseded.push(waiter);
+    } else if (placesAgainst(slots, waiter.slot.claimant).length < limit) {
       slots = seat(slots, waiter.slot, []);
       seated.push(waiter);
     } else {
@@ -161,7 +180,10 @@ const fillLine = (state: State, limit: number): readonly [ReadonlyArray<Waiter>,
     }
   }
 
-  return [seated, { slots, line }];
+  return [
+    { seated, superseded },
+    { slots, line },
+  ];
 };
 
 const joinLine = (state: State, waiter: Waiter): State => {
@@ -216,6 +238,11 @@ const settle = (waiters: ReadonlyArray<Waiter>) =>
 const displace = (slots: ReadonlyArray<Slot>) =>
   Effect.forEach(slots, (slot) => Deferred.succeed(slot.displaced, undefined), { discard: true });
 
+const settleFilled = ({ seated, superseded }: Filled) =>
+  displace(superseded.map((waiter) => waiter.slot)).pipe(
+    Effect.andThen(settle([...superseded, ...seated])),
+  );
+
 /** Builds a limit of `limit` running encoders, a whole number of at least 1. */
 export const make = Effect.fnUntraced(function* (limit: number) {
   const state = yield* Ref.make<State>({ slots: new Map(), line: [] });
@@ -241,12 +268,12 @@ export const make = Effect.fnUntraced(function* (limit: number) {
   const leave = (slot: Slot) =>
     Ref.modify(state, (current) => {
       const [displaced, left] = remove(current, slot.id);
-      const [seated, next] = fillLine(left, limit);
+      const [filled, next] = fillLine(left, limit);
 
-      return [{ displaced, seated }, next] as const;
+      return [{ displaced, filled }, next] as const;
     }).pipe(
-      Effect.flatMap(({ displaced, seated }) =>
-        Effect.andThen(displace(displaced), settle(seated)),
+      Effect.flatMap(({ displaced, filled }) =>
+        Effect.andThen(displace(displaced), settleFilled(filled)),
       ),
       Effect.andThen(Deferred.succeed(slot.freed, undefined)),
     );
@@ -272,10 +299,15 @@ export const make = Effect.fnUntraced(function* (limit: number) {
   const heldBy = (slot: Slot): Held => ({
     ready: ready(slot),
     displaced: slot.audience === "guest" ? Deferred.await(slot.displaced) : Effect.never,
-    isLost: Effect.zipWith(
+    isLost: Effect.all([
       Deferred.isDone(slot.displaced),
       Deferred.isDone(slot.freed),
-      (displaced, freed) => displaced || freed,
+      Ref.get(state).pipe(Effect.map((current) => current.slots.get(slot.id)?.takenOverBy)),
+    ]).pipe(
+      Effect.map(
+        ([displaced, freed, takenOverBy]) =>
+          displaced || freed || (takenOverBy !== undefined && takenOverBy !== null),
+      ),
     ),
     renew: (scope) => renew(slot, scope),
   });
@@ -317,8 +349,8 @@ export const make = Effect.fnUntraced(function* (limit: number) {
       const slot = yield* slotFor(claimant, "household");
 
       const decision = yield* Ref.modify(state, (current) => {
-        if (Predicate.isTagged(scope.state, "Closed")) {
-          return [HouseholdDecision.Closed(), current] as const;
+        if (Predicate.isTagged(scope.state, "Closed") || supersedes(current.slots, claimant)) {
+          return [HouseholdDecision.Lost(), current] as const;
         }
 
         const decided = decideHousehold(current, claimant, limit);
@@ -327,7 +359,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
           Take: ({ victims }) =>
             [decided, { ...current, slots: seat(current.slots, slot, victims) }] as const,
           Full: () => [decided, current] as const,
-          Closed: () => [decided, current] as const,
+          Lost: () => [decided, current] as const,
         });
       });
 
@@ -338,7 +370,7 @@ export const make = Effect.fnUntraced(function* (limit: number) {
             Effect.as(heldBy(slot)),
           ),
         Full: () => Effect.fail(new TranscodeCapacityReached({ limit })),
-        Closed: () => Deferred.succeed(slot.displaced, undefined).pipe(Effect.as(heldBy(slot))),
+        Lost: () => Deferred.succeed(slot.displaced, undefined).pipe(Effect.as(heldBy(slot))),
       });
     }).pipe(Effect.uninterruptible);
 
@@ -355,11 +387,11 @@ export const make = Effect.fnUntraced(function* (limit: number) {
 
         const waiter: Waiter = { slot, settled: yield* Deferred.make<void>() };
 
-        const seated = yield* Ref.modify(state, (current) =>
+        const filled = yield* Ref.modify(state, (current) =>
           fillLine(joinLine(current, waiter), limit),
         );
 
-        yield* settle(seated);
+        yield* settleFilled(filled);
 
         const finalize = leave(slot).pipe(
           Effect.andThen(Deferred.succeed(waiter.settled, undefined)),
