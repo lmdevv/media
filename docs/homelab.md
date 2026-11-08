@@ -110,7 +110,8 @@ For HTTPS on the tailnet (needed by some browsers for features like casting), ke
 tailscale serve --bg --https=443 http://127.0.0.1:8080
 ```
 
-and set `MEDIA_BASE_URL=https://nas.tailnet.ts.net` (`publicUrl`).
+and set `MEDIA_BASE_URL=https://nas.tailnet.ts.net` (`publicUrl`). Trust that proxy too, as in
+[Trusting a proxy in front](#trusting-a-proxy-in-front).
 
 ### Caddy on your LAN
 
@@ -129,6 +130,20 @@ Caddy's local root CA: copy `pki/authorities/local/root.crt` from Caddy's data f
 `/var/lib/caddy/.local/share/caddy` on NixOS) to each device and install it as a trusted root.
 `caddy trust` only installs it on the machine Caddy runs on. On NixOS,
 `services.caddy.virtualHosts` takes the same blocks. Keep the proxy on the LAN or tailnet; do not port-forward it.
+
+### Trusting a proxy in front
+
+The media service limits unauthenticated routes (artwork, `/api/health`, `/api/client-config`)
+per client, by the client address [media]'s own Caddy resolves. A proxy in front, such as the TLS
+proxies above, connects from one address for everyone, so name it as trusted and [media] takes the
+client from the `X-Forwarded-For` it sends:
+
+- **NixOS:** `trustedProxies = [ "127.0.0.1/32" ];` for a proxy on the same host.
+- **Compose:** `MEDIA_TRUSTED_PROXIES=172.16.0.0/12` in `.env`. Docker's port publishing makes a
+  proxy on the host connect from the Docker bridge, not from `127.0.0.1`.
+
+The value is space-separated CIDRs, empty by default, which trusts no proxy. Trust only proxies
+you run: a trusted address can name any client.
 
 ## GPU transcoding
 

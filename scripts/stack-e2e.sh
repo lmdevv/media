@@ -126,7 +126,7 @@ check "s6 restarts the media service when it dies" '[[ -n "$restarted" && "$rest
 statuses="$(for _ in $(seq 1 80); do curl -s -o /dev/null -w "%{http_code}\n" "${MEDIA_BASE_URL}/api/health"; done)"
 check "a client past its limit through Caddy gets 429" 'grep -qx 429 <<<"$statuses"'
 check "the container's health check is never limited" \
-  '[[ "$(in_movies curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/health)" == 200 ]] &&
+  '[[ "$(in_movies curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4300/api/health)" == 200 ]] &&
     [[ "$(docker inspect -f "{{.State.Health.Status}}" "$(compose ps -q media)")" == healthy ]]'
 sleep 7
 spoofed="$(for _ in $(seq 1 80); do
@@ -195,6 +195,27 @@ for _ in $(seq 1 60); do
 done
 check "the service is healthy after the retried upgrade" 'healthy'
 check "a retried upgrade does not back up again" '[[ "$(archives movies)" -eq "$after" ]]'
+
+# An outer proxy on the container's loopback, as a TLS proxy beside the NixOS module connects:
+# 80 requests for one client, then one for another, in one shell so no refill falls between.
+through_outer_proxy() {
+  in_movies sh -c 'health() { curl -s -o /dev/null -w "%{http_code}\n" -H "X-Forwarded-For: $1" \
+    http://127.0.0.1:8080/api/health; }
+  for _ in $(seq 1 80); do health 203.0.113.1; done; health 203.0.113.2'
+}
+outer="$(through_outer_proxy)"
+check "an untrusted outer proxy's clients count as one client" \
+  'grep -qx 429 <<<"$outer" && [[ "$(tail -n 1 <<<"$outer")" == 429 ]]'
+sleep 7
+export MEDIA_TRUSTED_PROXIES=127.0.0.1/32
+compose up -d --no-build >/dev/null 2>&1
+for _ in $(seq 1 60); do
+  healthy && break
+  sleep 2
+done
+outer="$(through_outer_proxy)"
+check "a trusted outer proxy's clients each get their own limit" \
+  'grep -qx 429 <<<"$outer" && [[ "$(tail -n 1 <<<"$outer")" == 200 ]]'
 
 if [[ "${QSV:-0}" == 1 ]]; then
   check "the media user encodes with Quick Sync in the container" \

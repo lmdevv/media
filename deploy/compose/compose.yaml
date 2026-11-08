@@ -27,6 +27,7 @@ services:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-UTC}
+      MEDIA_TRUSTED_PROXIES: ${MEDIA_TRUSTED_PROXIES:-}
       # Media service settings, set in .env. Empty means the service's default (README.md,
       # Configuration).
       LIBRARY_ROOTS: ${LIBRARY_ROOTS:-}

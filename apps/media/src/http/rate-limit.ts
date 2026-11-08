@@ -73,21 +73,6 @@ export const retryAfter = (
 const isLoopback = (address: string): boolean =>
   address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
 
-/**
- * The client a request came from. The installs put Caddy in front on loopback, and Caddy replaces
- * `X-Forwarded-For` with the address it accepted the connection from, so the header is trusted
- * only from a loopback peer, and only its last entry, the one the proxy wrote. A client that
- * reaches the service directly is its own peer, whatever header it sends.
- */
-const clientAddress = (peer: Option.Option<string>, forwardedFor: string | undefined): string => {
-  const direct = Option.getOrElse(peer, () => "unknown");
-
-  if (!isLoopback(direct) || forwardedFor === undefined) return direct;
-  const appended = forwardedFor.split(",").at(-1)?.trim() ?? "";
-
-  return appended === "" ? direct : appended;
-};
-
 interface LimitedRequest {
   readonly pathname: string;
   readonly peer: Option.Option<string>;
@@ -95,8 +80,12 @@ interface LimitedRequest {
 }
 
 /**
- * The seconds `request` must wait, or none. Requests from inside the install, such as the
- * container's health check, are never limited: no remote client can appear as loopback.
+ * The seconds `request` must wait, or none. The installs put Caddy in front on loopback, and Caddy
+ * always sets `X-Forwarded-For` to the client it resolved (through MEDIA_TRUSTED_PROXIES), so the
+ * header counts only from a loopback peer, and only its last entry. A client that reaches the
+ * service directly is its own peer, whatever header it sends. The one caller never limited is a
+ * loopback peer without the header: the container's health check, which bypasses Caddy, since
+ * every request through Caddy carries it.
  */
 export const limitRequest = (
   take: ReturnType<typeof makeLimiter>,
@@ -106,9 +95,11 @@ export const limitRequest = (
   const limited = BUDGETS.find(([prefix]) => request.pathname.startsWith(prefix));
 
   if (limited === undefined) return Option.none();
-  const address = clientAddress(request.peer, request.forwardedFor);
+  const peer = Option.getOrElse(request.peer, () => "unknown");
 
-  if (isLoopback(address)) return Option.none();
+  if (isLoopback(peer) && request.forwardedFor === undefined) return Option.none();
+  const forwarded = isLoopback(peer) ? request.forwardedFor?.split(",").at(-1)?.trim() : undefined;
+  const address = forwarded === undefined || forwarded === "" ? peer : forwarded;
   const [prefix, budget] = limited;
 
   return take([[`${prefix}\u0000${address}`, budget]], now);

@@ -241,6 +241,17 @@ in
       description = "The one port of the whole product: both web clients, Convex, the API, and streams.";
     };
 
+    trustedProxies = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "127.0.0.1/32" ];
+      description = ''
+        CIDRs of proxies in front of [media] whose `X-Forwarded-For` names the client, such as a TLS
+        proxy on this host (`127.0.0.1/32`). The media service limits unauthenticated routes per
+        client, so without this every request through such a proxy counts as one client.
+      '';
+    };
+
     internalPorts = {
       coreConvex = lib.mkOption {
         type = lib.types.port;
@@ -594,6 +605,7 @@ in
         MEDIA_MOVIES_CONVEX = "127.0.0.1:${toString ports.moviesConvex}";
         MEDIA_SERVICE = "127.0.0.1:${toString ports.media}";
         MEDIA_ACCOUNT_DIR = "/run/media-account";
+        MEDIA_TRUSTED_PROXIES = lib.concatStringsSep " " cfg.trustedProxies;
         HOME = "/run/media-proxy";
         XDG_CONFIG_HOME = "/run/media-proxy/config";
         XDG_DATA_HOME = "/run/media-proxy/data";

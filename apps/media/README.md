@@ -93,6 +93,11 @@ Every response carries a content security policy (scripts from this origin only)
 bodies must declare a `Content-Length` of at most 128 KiB. ffmpeg and ffprobe run with a minimal
 environment, so a crafted file that exploits them finds no credentials.
 
+`/artwork`, `/api/health`, and `/api/client-config` are rate limited per client. The client is the
+direct peer, or, from a loopback peer, the last `X-Forwarded-For` entry, which the installs' Caddy
+sets to the client it resolved through `MEDIA_TRUSTED_PROXIES`. A loopback caller without the
+header, such as the container's health check, is not limited.
+
 ## Convex integration
 
 `src/convex/` holds the Convex side; `src/main.ts` composes it.

@@ -139,8 +139,9 @@ ENV NODE_ENV=production \
 VOLUME ["/data", "/transcode"]
 EXPOSE 8080
 # The media service starts only after init, which backs up before an upgrade and deploys both
-# projects, so the start period is long; it ends at the first passing check.
+# projects, so the start period is long; it ends at the first passing check. The media service is
+# checked directly, past Caddy, which its per-client rate limits never count; Caddy through /convex.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --start-interval=2s \
-  CMD curl -fsS http://127.0.0.1:8080/api/health | grep -q '"backend":"connected"' \
+  CMD curl -fsS http://127.0.0.1:4300/api/health | grep -q '"backend":"connected"' \
    && curl -fsS -o /dev/null http://127.0.0.1:8080/convex/version
 ENTRYPOINT ["/init"]

@@ -78,40 +78,41 @@ service, and `openFirewall` is off by default.
 Compose reads these names from `deploy/compose/.env` (see `.env.example`); empty means the
 default. The NixOS options are in brackets.
 
-| Name                          | Meaning                                                                   |
-| ----------------------------- | ------------------------------------------------------------------------- |
-| `MEDIA_LIBRARY`               | Host folder mounted read-only at `/media/library` (`libraryDirs`)         |
-| `MEDIA_BASE_URL`              | The one public URL of the web clients, Convex, and streams (`publicUrl`)  |
-| `MEDIA_BIND`                  | Address the port listens on, `127.0.0.1` by default (`listenAddress`)     |
-| `MEDIA_PORT`                  | Port of the whole product, 8080 (`port`)                                  |
-| `PUID`, `PGID`                | User and group of the media service, 1000 (`user`, `group`)               |
-| `MEDIA_IMAGE`, `TZ`           | Image to run, `ghcr.io/lmdevv/media:latest`; time zone, UTC               |
-| `TMDB_API_KEY`                | TMDB key or read token for metadata and artwork (`tmdbApiKeyFile`)        |
-| `OMDB_API_KEY`                | OMDb key for IMDb, RT, and Metacritic scores (`omdbApiKeyFile`)           |
-| `LIBRARY_ROOTS`               | Approved library folders in the container, `/media` (from `libraryDirs`)  |
-| `HARDWARE_ACCELERATION`       | `auto`, `qsv`, `vaapi`, or `none`, `auto` (`hardwareAcceleration`)        |
-| `QSV_DEVICE`                  | Render node for Quick Sync, `/dev/dri/renderD128` (`qsvDevice`)           |
-| `VAAPI_DEVICE`                | Render node for VA-API, `/dev/dri/renderD128` (`vaapiDevice`)             |
-| `LIBVA_DRIVER_NAME`           | VA-API driver, such as `iHD`; detected when empty (`extraEnvironment`)    |
-| `MAX_CONCURRENT_TRANSCODES`   | Simultaneous transcodes, 3 (`maxConcurrentTranscodes`)                    |
-| `MAX_CONCURRENT_REMUXES`      | Simultaneous remux and audio-only streams, 10 (`maxConcurrentRemuxes`)    |
-| `STREAM_IDLE_SECONDS`         | A quiet stream's encoder stops after this, 60 (`streamIdleSeconds`)       |
-| `STREAM_BUFFER_AHEAD_SECONDS` | How far ffmpeg runs ahead of the player, 120 (`streamBufferAheadSeconds`) |
-| `MIN_FREE_TRANSCODE_MB`       | Free space the transcode folder keeps, 2048 MiB (`minFreeTranscodeMb`)    |
-| `LIBRARY_RECONCILE_MINUTES`   | Full library reconciliation interval, 360 (`libraryReconcileMinutes`)     |
-| `TRICKPLAY`                   | Scrub thumbnails, `on` or `off`, `on` (`trickplay.enable`)                |
-| `TRICKPLAY_INTERVAL_SECONDS`  | Seconds between scrub thumbnails, 10 (`trickplay.intervalSeconds`)        |
-| `TRICKPLAY_CONCURRENCY`       | Files given thumbnails at once, 1 (`trickplay.concurrency`)               |
-| `LIBRARY_WATCH`               | `auto`, `events`, or `poll`; `auto` polls network shares (`libraryWatch`) |
-| `LIBRARY_POLL_SECONDS`        | Seconds between polls of a share, 60 (`libraryPollSeconds`)               |
-| `PROBE_TIMEOUT_SECONDS`       | Longest probe or artwork resize, 60 (`probeTimeoutSeconds`)               |
-| `FILE_SCAN_TIMEOUT_SECONDS`   | Longest whole-file scan, 900 (`fileScanTimeoutSeconds`)                   |
-| `CACHE_MAX_MB`                | Size the caches are pruned to, 2048 MiB (`cacheMaxMb`)                    |
-| `BACKUP_RETENTION_DAYS`       | Days of nightly backups kept, 14 (`backupRetentionDays`)                  |
-| `LOG_LEVEL`                   | Least severe level logged and retained, `info` (`logLevel`)               |
-| `LOG_RETENTION_DAYS`          | Days the retained logs are kept, 14 (`logRetentionDays`)                  |
-| `LOG_MAX_MB`                  | Size the retained logs never pass, 512 MiB, at least 8 (`logMaxMb`)       |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional OTLP/HTTP collector for traces and logs (`otlpEndpoint`)         |
+| Name                          | Meaning                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `MEDIA_LIBRARY`               | Host folder mounted read-only at `/media/library` (`libraryDirs`)                                      |
+| `MEDIA_BASE_URL`              | The one public URL of the web clients, Convex, and streams (`publicUrl`)                               |
+| `MEDIA_BIND`                  | Address the port listens on, `127.0.0.1` by default (`listenAddress`)                                  |
+| `MEDIA_PORT`                  | Port of the whole product, 8080 (`port`)                                                               |
+| `MEDIA_TRUSTED_PROXIES`       | CIDRs of proxies in front whose `X-Forwarded-For` names the client, none by default (`trustedProxies`) |
+| `PUID`, `PGID`                | User and group of the media service, 1000 (`user`, `group`)                                            |
+| `MEDIA_IMAGE`, `TZ`           | Image to run, `ghcr.io/lmdevv/media:latest`; time zone, UTC                                            |
+| `TMDB_API_KEY`                | TMDB key or read token for metadata and artwork (`tmdbApiKeyFile`)                                     |
+| `OMDB_API_KEY`                | OMDb key for IMDb, RT, and Metacritic scores (`omdbApiKeyFile`)                                        |
+| `LIBRARY_ROOTS`               | Approved library folders in the container, `/media` (from `libraryDirs`)                               |
+| `HARDWARE_ACCELERATION`       | `auto`, `qsv`, `vaapi`, or `none`, `auto` (`hardwareAcceleration`)                                     |
+| `QSV_DEVICE`                  | Render node for Quick Sync, `/dev/dri/renderD128` (`qsvDevice`)                                        |
+| `VAAPI_DEVICE`                | Render node for VA-API, `/dev/dri/renderD128` (`vaapiDevice`)                                          |
+| `LIBVA_DRIVER_NAME`           | VA-API driver, such as `iHD`; detected when empty (`extraEnvironment`)                                 |
+| `MAX_CONCURRENT_TRANSCODES`   | Simultaneous transcodes, 3 (`maxConcurrentTranscodes`)                                                 |
+| `MAX_CONCURRENT_REMUXES`      | Simultaneous remux and audio-only streams, 10 (`maxConcurrentRemuxes`)                                 |
+| `STREAM_IDLE_SECONDS`         | A quiet stream's encoder stops after this, 60 (`streamIdleSeconds`)                                    |
+| `STREAM_BUFFER_AHEAD_SECONDS` | How far ffmpeg runs ahead of the player, 120 (`streamBufferAheadSeconds`)                              |
+| `MIN_FREE_TRANSCODE_MB`       | Free space the transcode folder keeps, 2048 MiB (`minFreeTranscodeMb`)                                 |
+| `LIBRARY_RECONCILE_MINUTES`   | Full library reconciliation interval, 360 (`libraryReconcileMinutes`)                                  |
+| `TRICKPLAY`                   | Scrub thumbnails, `on` or `off`, `on` (`trickplay.enable`)                                             |
+| `TRICKPLAY_INTERVAL_SECONDS`  | Seconds between scrub thumbnails, 10 (`trickplay.intervalSeconds`)                                     |
+| `TRICKPLAY_CONCURRENCY`       | Files given thumbnails at once, 1 (`trickplay.concurrency`)                                            |
+| `LIBRARY_WATCH`               | `auto`, `events`, or `poll`; `auto` polls network shares (`libraryWatch`)                              |
+| `LIBRARY_POLL_SECONDS`        | Seconds between polls of a share, 60 (`libraryPollSeconds`)                                            |
+| `PROBE_TIMEOUT_SECONDS`       | Longest probe or artwork resize, 60 (`probeTimeoutSeconds`)                                            |
+| `FILE_SCAN_TIMEOUT_SECONDS`   | Longest whole-file scan, 900 (`fileScanTimeoutSeconds`)                                                |
+| `CACHE_MAX_MB`                | Size the caches are pruned to, 2048 MiB (`cacheMaxMb`)                                                 |
+| `BACKUP_RETENTION_DAYS`       | Days of nightly backups kept, 14 (`backupRetentionDays`)                                               |
+| `LOG_LEVEL`                   | Least severe level logged and retained, `info` (`logLevel`)                                            |
+| `LOG_RETENTION_DAYS`          | Days the retained logs are kept, 14 (`logRetentionDays`)                                               |
+| `LOG_MAX_MB`                  | Size the retained logs never pass, 512 MiB, at least 8 (`logMaxMb`)                                    |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional OTLP/HTTP collector for traces and logs (`otlpEndpoint`)                                      |
 
 On NixOS, `environmentFile` adds secrets (such as `TMDB_API_KEY`) from a root-only file and
 `extraEnvironment` sets anything else. The media service's own settings are listed in

@@ -112,22 +112,31 @@ describe("rate limit", () => {
       assert.isTrue(Option.isSome(limitRequest(take, artwork(remote, "127.0.0.1"), 0)));
     });
 
-    it("never refuses a health check from inside the install", () => {
+    it("limits an outer proxy on loopback, which Caddy names as 127.0.0.1", () => {
+      const take = makeLimiter();
+
+      const throughOuterProxy = Array.from({ length: 700 }, () =>
+        limitRequest(take, artwork(proxy, "127.0.0.1"), 0),
+      );
+
+      assert.strictEqual(refusedOf(throughOuterProxy), 100);
+    });
+
+    it("never refuses the health check, which calls the service directly", () => {
       const take = makeLimiter();
 
       for (let index = 0; index < 100; index += 1) {
-        limitRequest(take, health(proxy, "192.168.1.20"), 0);
+        limitRequest(take, health(proxy, "127.0.0.1"), 0);
       }
 
       const checks = [
-        limitRequest(take, health(proxy, "127.0.0.1"), 0),
         limitRequest(take, health(Option.some("::ffff:127.0.0.1")), 0),
         limitRequest(take, health(Option.some("::1")), 0),
         ...Array.from({ length: 200 }, () => limitRequest(take, health(proxy), 0)),
       ];
 
       assert.strictEqual(refusedOf(checks), 0);
-      assert.isTrue(Option.isSome(limitRequest(take, health(proxy, "192.168.1.20"), 0)));
+      assert.isTrue(Option.isSome(limitRequest(take, health(proxy, "127.0.0.1"), 0)));
     });
   });
 });

@@ -58,7 +58,13 @@ for name in "${config_names[@]}"; do
   grep -qF "\`${name}\`" apps/media/README.md || fail "$name (media-config.ts) is not in apps/media/README.md"
 done
 
-user_facing=(LIBRARY_ROOTS "${entrypoint_forwarded[@]}")
+# Settings the image reads outside the media service, such as Caddy's.
+image_settings=(MEDIA_TRUSTED_PROXIES)
+for name in "${image_settings[@]}"; do
+  grep -qE "^ +${name} = " nix/module.nix || fail "$name (the image's Caddy) is not set by nix/module.nix"
+  grep -qF "{\$${name}}" deploy/image/rootfs/etc/caddy/Caddyfile || fail "$name is not read by the Caddyfile"
+done
+user_facing=(LIBRARY_ROOTS "${entrypoint_forwarded[@]}" "${image_settings[@]}")
 for name in "${user_facing[@]}"; do
   grep -qE "^      ${name}: \\$\\{${name}:-\\}$" deploy/compose/compose.yaml ||
     fail "$name is passed on by init but compose.yaml lacks '${name}: \${${name}:-}'"
