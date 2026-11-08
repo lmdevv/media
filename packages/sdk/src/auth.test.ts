@@ -773,6 +773,22 @@ describe("Auth", () => {
       }),
     ));
 
+  it("retries a sign-out the server could not confirm, with a store only this client owns", () =>
+    withAuth(signedInWith(FRESH), ({ fake, auth }) =>
+      Effect.gen(function* () {
+        yield* fake.reply("auth:signOut", Reply.Failure({ code: "internal", message: "Down" }));
+        yield* auth.signOut;
+        yield* fake.reply("auth:signOut", Reply.Success({ value: null }));
+        yield* TestClock.adjust(2_000);
+
+        expect(yield* serverSignOuts(fake, 2)).toStrictEqual([
+          `Bearer ${FRESH}`,
+          `Bearer ${FRESH}`,
+        ]);
+        expect(yield* auth.currentStatus).toBe("signedOut");
+      }),
+    ));
+
   it("renews for a caller whose token was rejected even after another refresh kept it", () =>
     withAuth(signedInWith(EXPIRING), ({ fake, auth }) =>
       Effect.gen(function* () {

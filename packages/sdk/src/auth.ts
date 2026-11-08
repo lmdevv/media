@@ -566,7 +566,8 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
         if (
           signedOut &&
           (yield* Ref.get(stored)) &&
-          !(yield* storage.signOutPending(ended).pipe(Effect.orElseSucceed(() => true)))
+          (yield* storage.revocation(ended).pipe(Effect.orElseSucceed(() => "pending"))) ===
+            "confirmed"
         ) {
           return true;
         }
@@ -599,7 +600,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     Effect.asVoid(
       FiberMap.run(
         ending,
-        Option.getOrElse(sessionOf(ended), () => Redacted.value(ended.refreshToken)),
+        `${signedOut ? "signOut" : "letGo"}:${Option.getOrElse(sessionOf(ended), () => Redacted.value(ended.refreshToken))}`,
         Effect.delay(endUntilConfirmed(ended, signedOut, recorded), wait),
         { onlyIfMissing: true },
       ),
@@ -742,18 +743,24 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     yield* adoptStored(yield* storage.load);
   }, committing.withPermits(1));
 
-  const endUnlessStored = (renewed: StoredSession, stored: Option.Option<StoredSession>) =>
-    Option.exists(stored, (held) => isSameSession(held, renewed))
-      ? Effect.void
-      : endInBackground(renewed, false);
+  /**
+   * Ends a renewal the store refused only when the store holds neither it nor its sign-out. A
+   * session that left the store was signed out there, which any client finishes, and a read that
+   * fails ends nothing.
+   */
+  const endUnlessKnown = (renewed: StoredSession) =>
+    storage.revocation(renewed).pipe(
+      Effect.flatMap((state) =>
+        state === "missing" ? endInBackground(renewed, false) : Effect.void,
+      ),
+      Effect.catchTag("TokenStorageError", logStorageFailure),
+    );
 
   const giveWayToStore = Effect.fn("Auth.giveWayToStore")(function* (
     renewed: Option.Option<StoredSession>,
   ) {
-    const stored = yield* storage.load;
-
-    if (Option.isSome(renewed)) yield* endUnlessStored(renewed.value, stored);
-    yield* adoptStored(stored);
+    if (Option.isSome(renewed)) yield* endUnlessKnown(renewed.value);
+    yield* adoptStored(yield* storage.load);
 
     return yield* currentToken;
   });

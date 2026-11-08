@@ -120,6 +120,7 @@ test("two tabs signing in at once leave only the session the core bound last, an
   await signIn(page, enrolled);
   await home(page, enrolled);
   await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByLabel("Username")).toBeVisible();
 
   const { held, release } = await holdEnrollments(page);
 
