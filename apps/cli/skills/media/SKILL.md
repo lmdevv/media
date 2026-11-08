@@ -27,7 +27,7 @@ in with `media auth login`. `media --help` lists both.
 
 Skip this when `media --version` already works.
 
-- **On the server:** a Compose install has it in the image (`docker compose exec movies media ...`).
+- **On the server:** a Compose install has it in the image (`docker compose exec media media ...`).
   A NixOS install puts it on every user's `PATH`.
 - **Node 22 or newer:** `npm install -g @lmdevv/movies`, or once with `npx @lmdevv/movies --help`.
 - **No Node:** download the release binary, check it, and install it (`media-linux-arm64` or
@@ -70,7 +70,7 @@ No install holds a credential; sign in as each reference says.
   `MEDIA_CORE_ADMIN_KEY`. The new password comes from stdin or `MEDIA_ARG_PASSWORD`.
 
 ```sh
-printf '%s' "$PASSWORD" | media auth login --server http://nas.tailnet.ts.net:3214 --username ana
+printf '%s' "$PASSWORD" | media auth login --server http://nas.tailnet.ts.net:8080/convex --username ana
 media admin users list --human
 printf '%s' "$NEW" | media admin users create bob --role member
 media auth api-keys create --name ci --scopes account

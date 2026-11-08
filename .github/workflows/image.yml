@@ -34,16 +34,16 @@ jobs:
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
-          file: deploy/compose/Dockerfile
+          file: deploy/image/Dockerfile
           platforms: linux/amd64
           load: true
-          tags: movies:ci
+          tags: media:ci
           cache-from: type=gha
           cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max' || '' }}
       - name: Image size
         run: |
-          size="$(docker image inspect movies:ci --format '{{.Size}}')"
-          echo "movies:ci is $((size / 1024 / 1024)) MiB" | tee -a "$GITHUB_STEP_SUMMARY"
+          size="$(docker image inspect media:ci --format '{{.Size}}')"
+          echo "media:ci is $((size / 1024 / 1024)) MiB" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -55,7 +55,7 @@ jobs:
       - name: Packaged-stack smoke test
         run: scripts/stack-e2e.sh
         env:
-          IMAGE: movies:ci
+          IMAGE: media:ci
 
   publish:
     name: publish to GHCR
@@ -103,7 +103,7 @@ jobs:
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
-          file: deploy/compose/Dockerfile
+          file: deploy/image/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

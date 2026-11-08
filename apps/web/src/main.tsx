@@ -20,6 +20,7 @@ const logLevel = loadLogLevel();
 
 const router = createRouter({
   routeTree,
+  basepath: import.meta.env.BASE_URL,
   defaultPreload: "intent",
   scrollRestoration: true,
   parseSearch,

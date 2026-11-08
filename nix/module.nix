@@ -1,6 +1,7 @@
-# NixOS module for [movies]: the self-hosted Convex backend as a pinned OCI container, and the
-# media service (which also serves the web app) as a native, hardened systemd service built from
-# this repository (nix/package.nix).
+# NixOS module for [media]: the core's and old movies' self-hosted Convex backends as pinned OCI
+# containers, the media service (which also serves the movies client) as a native, hardened
+# systemd service built from this repository (nix/package.nix), and Caddy in front of them on one
+# address, with the image's routes (deploy/image/rootfs/etc/caddy/Caddyfile, docs/decisions/0015).
 #
 #   services.media = {
 #     enable = true;
@@ -8,16 +9,16 @@
 #     # Reached over Tailscale; see README.md.
 #     listenAddress = "100.64.0.1";
 #     publicUrl = "http://nas.tailnet.ts.net:8080";
-#     convexPublicUrl = "http://nas.tailnet.ts.net:3210";
 #     hardwareAcceleration = "qsv";
 #     tmdbApiKeyFile = "/run/secrets/tmdb-api-key";
 #     omdbApiKeyFile = "/run/secrets/omdb-api-key";
 #   };
 #
-# Every startup derives the Convex admin key from the backend's instance secret, backs up before
-# an upgrade, deploys the bundled functions, configures the deployment (keys and secrets are
-# generated inside Convex and kept there), and writes the service's environment to
-# /run/movies/media.env, readable by the service user only. No secret enters the Nix store.
+# Every startup derives each Convex admin key from its backend's instance secret, backs up before
+# an upgrade, deploys both projects' functions, configures both deployments (keys and secrets are
+# generated inside Convex and kept there) and both web clients, and writes the service's
+# environment to /run/movies/media.env, readable by the service user only. No secret enters the
+# Nix store.
 #
 # The host also gets the `media` CLI, pointed at this server (programs.media, in cli-module.nix).
 {
@@ -33,13 +34,35 @@ let
 
   backend = config.virtualisation.oci-containers.backend;
   containerRuntime = lib.getExe pkgs.${backend};
-  containerUnit = "${backend}-movies-convex.service";
+  containerUnits = [
+    "${backend}-media-core-convex.service"
+    "${backend}-movies-convex.service"
+  ];
 
   hardware = cfg.hardwareAcceleration != "none";
-  localAddress = if cfg.listenAddress == "0.0.0.0" then "127.0.0.1" else cfg.listenAddress;
-  convexUrl = "http://${localAddress}:${toString cfg.convexPort}";
-  convexDataDir = "${cfg.dataDir}/convex";
-  mediaDataDir = "${cfg.dataDir}/media";
+  ports = cfg.internalPorts;
+  publicUrl = lib.removeSuffix "/" cfg.publicUrl;
+  coreConvexUrl = "http://127.0.0.1:${toString ports.coreConvex}";
+  moviesConvexUrl = "http://127.0.0.1:${toString ports.moviesConvex}";
+  coreDataDir = "${cfg.dataDir}/core";
+  moviesDataDir = "${cfg.dataDir}/movies";
+  mediaDataDir = "${moviesDataDir}/media";
+
+  # Both backends get the settings of the image's (deploy/image/rootfs/app/bin/convex-backend).
+  # Their HTTP actions stay inside their containers (docs/decisions/0025).
+  convexContainer = name: port: origin: dataDir: {
+    image = cfg.convexImage;
+    ports = [ "127.0.0.1:${toString port}:3210" ];
+    environment = {
+      INSTANCE_NAME = name;
+      CONVEX_CLOUD_ORIGIN = origin;
+      CONVEX_SITE_ORIGIN = "http://127.0.0.1:3211";
+      DISABLE_BEACON = "1";
+      REDACT_LOGS_TO_CLIENT = "1";
+      DO_NOT_REQUIRE_SSL = "1";
+    };
+    volumes = [ "${dataDir}:/convex/data" ];
+  };
 
   setup = pkgs.writeShellApplication {
     name = "movies-setup";
@@ -52,19 +75,12 @@ let
     text = ''
       umask 077
       log() { echo "movies-setup: $*" >&2; }
+      # Outside CI the Convex CLI reports to Sentry, and where that host is slow or blocked each
+      # command waits minutes for it on exit. A self-hosted install sends nothing anyway.
+      export CI=1
 
-      convex_url=${lib.escapeShellArg convexUrl}
-      public_url=${lib.escapeShellArg cfg.publicUrl}
-      convex_public_url=${lib.escapeShellArg cfg.convexPublicUrl}
-      backup_dir=${lib.escapeShellArg cfg.backupDir}
+      public_url=${lib.escapeShellArg publicUrl}
       owner=${lib.escapeShellArg "${cfg.user}:${cfg.group}"}
-      version=${lib.escapeShellArg cfg.package.version}
-      functions_hash=${lib.escapeShellArg "${cfg.package}/lib/movies/backend/.functions-hash"}
-      if [ -s "$functions_hash" ]; then
-        version="$version+$(cat "$functions_hash")"
-      fi
-      version_file=${lib.escapeShellArg "${mediaDataDir}/version"}
-      upgrade_backup_file=${lib.escapeShellArg "${mediaDataDir}/upgrade-backup"}
 
       # The service's folders, in case they were removed since boot (tmpfiles creates them).
       install -d -m 700 -o ${lib.escapeShellArg cfg.user} -g ${lib.escapeShellArg cfg.group} \
@@ -73,42 +89,68 @@ let
           cfg.backupDir
           cfg.transcodeDir
         ]}
+      install -d -m 700 ${lib.escapeShellArg "${coreDataDir}/backups"}
 
-      log "waiting for Convex at $convex_url"
-      for _ in $(seq 1 120); do
-        curl -fsS "$convex_url/version" >/dev/null 2>&1 && break
-        sleep 1
-      done
-      curl -fsS "$convex_url/version" >/dev/null
+      # Deploys one Convex project and leaves its admin key in $admin_key:
+      #   deploy <domain> <url> <container> <convex command> <functions hash> <data dir> <backup dir> <backup owner>
+      deploy() {
+        local domain="$1" url="$2" container="$3" convex="$4" hash_file="$5" data="$6" backups="$7"
+        local backup_owner="$8" version name
+        version=${lib.escapeShellArg cfg.package.version}
+        [ -s "$hash_file" ] && version="$version+$(cat "$hash_file")"
 
-      admin_key="$(${containerRuntime} exec movies-convex ./generate_admin_key.sh | tail -n 1)"
-      export CONVEX_SELF_HOSTED_URL="$convex_url"
-      export CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
+        log "waiting for the $domain Convex backend at $url"
+        for _ in $(seq 1 120); do
+          curl -fsS "$url/version" >/dev/null 2>&1 && break
+          sleep 1
+        done
+        curl -fsS "$url/version" >/dev/null
 
-      if [ -s "$version_file" ] && [ "$(cat "$version_file")" != "$version" ] &&
-        [ "$(cat "$upgrade_backup_file" 2>/dev/null)" != "$version" ]; then
-        name="movies-manual-$(date -u +%Y-%m-%dT%H-%M-%S-000Z).zip"
-        log "upgrading from $(cat "$version_file") to $version; backing up to $name first"
-        movies-convex export --include-file-storage --path "$backup_dir/.partial-$name"
-        mv "$backup_dir/.partial-$name" "$backup_dir/$name"
-        chown "$owner" "$backup_dir/$name"
-        printf '%s\n' "$version" >"$upgrade_backup_file"
-      fi
+        admin_key="$(${containerRuntime} exec "$container" ./generate_admin_key.sh | tail -n 1)"
+        export CONVEX_SELF_HOSTED_URL="$url" CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
 
-      log "deploying the Convex functions ($version)"
-      movies-convex deploy --yes --codegen disable --typecheck disable
+        if [ -s "$data/version" ] && [ "$(cat "$data/version")" != "$version" ] &&
+          [ "$(cat "$data/upgrade-backup" 2>/dev/null)" != "$version" ]; then
+          name="$domain-manual-$(date -u +%Y-%m-%dT%H-%M-%S-000Z).zip"
+          log "upgrading $domain from $(cat "$data/version") to $version; backing up to $name first"
+          "$convex" export --include-file-storage --path "$backups/.partial-$name"
+          mv "$backups/.partial-$name" "$backups/$name"
+          chown "$backup_owner" "$backups/$name"
+          printf '%s\n' "$version" >"$data/upgrade-backup"
+        fi
 
-      log "configuring the deployment"
-      media_env="$(movies-configure --site-url="$public_url" --media-url="$public_url")"
+        log "deploying the $domain functions ($version)"
+        "$convex" deploy --yes --codegen disable --typecheck disable
+        deployed_version="$version"
+      }
+
+      finish() {
+        printf '%s\n' "$deployed_version" >"$1/version"
+        rm -f "$1/upgrade-backup"
+      }
+
+      deploy core ${lib.escapeShellArg coreConvexUrl} media-core-convex media-core-convex \
+        ${lib.escapeShellArg "${cfg.package}/lib/movies/platform/.functions-hash"} \
+        ${lib.escapeShellArg coreDataDir} ${lib.escapeShellArg "${coreDataDir}/backups"} root:root
+      log "configuring the core deployment"
+      media-core-configure
+      media-core-convex run core/schemaMigrations:run >/dev/null
+      finish ${lib.escapeShellArg coreDataDir}
+
+      deploy movies ${lib.escapeShellArg moviesConvexUrl} movies-convex movies-convex \
+        ${lib.escapeShellArg "${cfg.package}/lib/movies/backend/.functions-hash"} \
+        ${lib.escapeShellArg mediaDataDir} ${lib.escapeShellArg cfg.backupDir} "$owner"
+      log "configuring the movies deployment"
+      media_env="$(movies-configure --site-url="$public_url/movies" --media-url="$public_url")"
       media_service_api_key="$(sed -n 's/^MEDIA_SERVICE_API_KEY=//p' <<<"$media_env")"
       playback_token_secret="$(sed -n 's/^PLAYBACK_TOKEN_SECRET=//p' <<<"$media_env")"
       unset media_env
 
       umask 022
-      movies-configure-web --to /run/movies/web --convex-url "$convex_public_url"
-      printf '%s\n' "$version" >"$version_file"
-      chown "$owner" "$version_file"
-      rm -f "$upgrade_backup_file"
+      movies-configure-account --to /run/movies/account --convex-url "$public_url/convex"
+      movies-configure-web --to /run/movies/web --convex-url "$public_url/movies/convex"
+      finish ${lib.escapeShellArg mediaDataDir}
+      chown "$owner" ${lib.escapeShellArg "${mediaDataDir}/version"}
 
       umask 077
       env_file=/run/movies/media.env
@@ -131,14 +173,14 @@ in
   imports = [ ./cli-module.nix ];
 
   options.services.media = {
-    enable = lib.mkEnableOption "[movies], self-hosted movies and TV for people and agents";
+    enable = lib.mkEnableOption "[media], self-hosted media for people and agents";
 
     package = lib.mkOption {
       type = lib.types.package;
       default = pkgs.callPackage ./package.nix { };
       defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
       description = ''
-        The [movies] package: media service, web app, and Convex functions. Set it to `pkgs.movies`
+        The [media] package: media service, web clients, and both Convex projects. Set it to `pkgs.movies`
         to use the flake's overlay (or your override of it).
       '';
     };
@@ -166,16 +208,17 @@ in
 
     dataDir = lib.mkOption {
       type = lib.types.path;
-      default = "/var/lib/movies";
+      default = "/var/lib/media";
       description = ''
-        State: the Convex database and file storage (`convex/`) and the media service's caches
-        (`media/`).
+        State, one folder per domain: the core's Convex database (`core/convex/`), and old movies'
+        Convex database (`movies/convex/`) and the media service's caches (`movies/media/`).
       '';
     };
 
     backupDir = lib.mkOption {
       type = lib.types.path;
-      default = "/var/lib/movies/backups";
+      default = "${cfg.dataDir}/movies/backups";
+      defaultText = lib.literalExpression ''"''${config.services.media.dataDir}/movies/backups"'';
       description = "Nightly database backups (Convex exports with file storage).";
     };
 
@@ -194,19 +237,33 @@ in
     port = lib.mkOption {
       type = lib.types.port;
       default = 8080;
-      description = "Port of the web app, API, and streams.";
+      description = "The one port of the whole product: both web clients, Convex, the API, and streams.";
     };
 
-    convexPort = lib.mkOption {
-      type = lib.types.port;
-      default = 3210;
-      description = "Port of the Convex backend, which browsers and the CLI use directly.";
+    internalPorts = {
+      coreConvex = lib.mkOption {
+        type = lib.types.port;
+        default = 3210;
+        description = "Loopback port of the core's Convex backend, which Caddy serves at /convex.";
+      };
+
+      moviesConvex = lib.mkOption {
+        type = lib.types.port;
+        default = 3220;
+        description = "Loopback port of old movies' Convex backend, which Caddy serves at /movies/convex.";
+      };
+
+      media = lib.mkOption {
+        type = lib.types.port;
+        default = 4300;
+        description = "Loopback port of the media service, behind Caddy.";
+      };
     };
 
     openFirewall = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Listen on all interfaces and open both ports in the firewall.";
+      description = "Listen on all interfaces and open the port in the firewall.";
     };
 
     listenAddress = lib.mkOption {
@@ -215,9 +272,9 @@ in
       defaultText = lib.literalExpression ''if config.services.media.openFirewall then "0.0.0.0" else "127.0.0.1"'';
       example = "100.64.0.1";
       description = ''
-        Address both ports listen on. Container port publishing bypasses the NixOS firewall, so this,
-        not the firewall, decides who can reach Convex. The default keeps [movies] local; set the
-        host's Tailscale address to reach it over the tailnet only.
+        Address the port listens on. The default keeps [media] local; set the host's Tailscale
+        address to reach it over the tailnet only. Both Convex backends and the media service listen
+        on loopback only.
       '';
     };
 
@@ -225,14 +282,10 @@ in
       type = lib.types.str;
       default = "http://localhost:${toString cfg.port}";
       defaultText = lib.literalExpression ''"http://localhost:''${toString config.services.media.port}"'';
-      description = "URL people use for the web app and streams.";
-    };
-
-    convexPublicUrl = lib.mkOption {
-      type = lib.types.str;
-      default = "http://localhost:${toString cfg.convexPort}";
-      defaultText = lib.literalExpression ''"http://localhost:''${toString config.services.media.convexPort}"'';
-      description = "URL browsers and the CLI use for Convex.";
+      description = ''
+        URL people use for [media]: the account client at its root, movies at `/movies`, and the
+        Convex backends and streams under it.
+      '';
     };
 
     hardwareAcceleration = lib.mkOption {
@@ -485,7 +538,7 @@ in
   config = lib.mkIf cfg.enable {
     programs.media = {
       enable = lib.mkDefault true;
-      convexUrl = lib.mkDefault cfg.convexPublicUrl;
+      convexUrl = lib.mkDefault "${publicUrl}/movies/convex";
       mediaUrl = lib.mkDefault cfg.publicUrl;
     };
 
@@ -513,43 +566,91 @@ in
 
     systemd.tmpfiles.rules = [
       "d ${cfg.dataDir} 0711 root root -"
-      "d ${convexDataDir} 0700 root root -"
+      "d ${coreDataDir} 0711 root root -"
+      "d ${coreDataDir}/convex 0700 root root -"
+      "d ${moviesDataDir} 0711 root root -"
+      "d ${moviesDataDir}/convex 0700 root root -"
       "d ${mediaDataDir} 0700 ${cfg.user} ${cfg.group} -"
       "d ${cfg.backupDir} 0700 ${cfg.user} ${cfg.group} -"
       "d ${cfg.transcodeDir} 0700 ${cfg.user} ${cfg.group} -"
     ];
 
-    virtualisation.oci-containers.containers.movies-convex = {
-      image = cfg.convexImage;
-      ports = [ "${cfg.listenAddress}:${toString cfg.convexPort}:3210" ];
+    virtualisation.oci-containers.containers = {
+      media-core-convex = convexContainer "core" ports.coreConvex "${publicUrl}/convex" "${coreDataDir}/convex";
+      movies-convex =
+        convexContainer "movies" ports.moviesConvex "${publicUrl}/movies/convex"
+          "${moviesDataDir}/convex";
+    };
+
+    # Caddy with the image's routes on the one address.
+    systemd.services.media-proxy = {
+      description = "[media] on one address";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network.target" ];
       environment = {
-        CONVEX_CLOUD_ORIGIN = cfg.convexPublicUrl;
-        # HTTP actions (Convex Auth's JWKS) stay inside the container.
-        CONVEX_SITE_ORIGIN = "http://127.0.0.1:3211";
-        DISABLE_BEACON = "1";
-        REDACT_LOGS_TO_CLIENT = "1";
-        DO_NOT_REQUIRE_SSL = "1";
+        MEDIA_BIND = cfg.listenAddress;
+        MEDIA_PORT = toString cfg.port;
+        MEDIA_CORE_CONVEX = "127.0.0.1:${toString ports.coreConvex}";
+        MEDIA_MOVIES_CONVEX = "127.0.0.1:${toString ports.moviesConvex}";
+        MEDIA_SERVICE = "127.0.0.1:${toString ports.media}";
+        MEDIA_ACCOUNT_DIR = "/run/movies/account";
+        HOME = "/run/media-proxy";
+        XDG_CONFIG_HOME = "/run/media-proxy/config";
+        XDG_DATA_HOME = "/run/media-proxy/data";
       };
-      volumes = [ "${convexDataDir}:/convex/data" ];
+      serviceConfig = {
+        ExecStart = "${lib.getExe pkgs.caddy} run --config ${cfg.package}/lib/movies/Caddyfile --adapter caddyfile";
+        Restart = "on-failure";
+        RestartSec = 5;
+        DynamicUser = true;
+        RuntimeDirectory = "media-proxy";
+        AmbientCapabilities = lib.optionals (cfg.port < 1024) [ "CAP_NET_BIND_SERVICE" ];
+        CapabilityBoundingSet = lib.optionals (cfg.port < 1024) [ "CAP_NET_BIND_SERVICE" ];
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectKernelLogs = true;
+        ProtectControlGroups = true;
+        ProtectClock = true;
+        ProtectHostname = true;
+        ProtectProc = "invisible";
+        RestrictAddressFamilies = [
+          "AF_UNIX"
+          "AF_INET"
+          "AF_INET6"
+        ];
+        RestrictNamespaces = true;
+        RestrictRealtime = true;
+        RestrictSUIDSGID = true;
+        LockPersonality = true;
+        MemoryDenyWriteExecute = true;
+        SystemCallArchitectures = "native";
+        SystemCallFilter = [
+          "@system-service"
+          "~@privileged"
+        ];
+        UMask = "0077";
+      };
     };
 
     systemd.services.movies = {
-      description = "[movies] media service";
+      description = "[media] media service";
       wantedBy = [ "multi-user.target" ];
-      requires = [ containerUnit ];
-      after = [
-        containerUnit
-        "network-online.target"
-      ];
+      requires = containerUnits;
+      after = containerUnits ++ [ "network-online.target" ];
       wants = [ "network-online.target" ];
 
       environment = {
         NODE_ENV = "production";
-        HOST = cfg.listenAddress;
-        PORT = toString cfg.port;
-        MEDIA_BASE_URL = cfg.publicUrl;
-        CONVEX_URL = convexUrl;
-        CONVEX_PUBLIC_URL = cfg.convexPublicUrl;
+        HOST = "127.0.0.1";
+        PORT = toString ports.media;
+        MEDIA_BASE_URL = publicUrl;
+        CONVEX_URL = moviesConvexUrl;
+        CONVEX_PUBLIC_URL = "${publicUrl}/movies/convex";
         CONVEX_BACKEND_DIR = "${cfg.package}/lib/movies/backend";
         DATA_DIR = mediaDataDir;
         BACKUP_DIR = cfg.backupDir;
@@ -607,6 +708,8 @@ in
         TimeoutStartSec = "10min";
         RuntimeDirectory = "movies";
         RuntimeDirectoryMode = "0755";
+        # Caddy keeps serving the account client from it while the service restarts.
+        RuntimeDirectoryPreserve = true;
 
         ReadWritePaths = [
           mediaDataDir
@@ -659,9 +762,6 @@ in
       };
     };
 
-    networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [
-      cfg.port
-      cfg.convexPort
-    ];
+    networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
   };
 }

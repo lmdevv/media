@@ -1,0 +1,2 @@
+#!/command/with-contenv sh
+exec /app/bin/convex-backend core 3210 /convex

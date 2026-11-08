@@ -1,7 +1,7 @@
-# NixOS VM test of the module: boots a machine with `services.media` enabled, starts the pinned
-# Convex backend (from a fixed-output image, since the test has no network) and the media service,
-# and checks that the service signs in to Convex, serves the web app, keeps its secrets private,
-# and survives a restart.
+# NixOS VM test of the module: boots a machine with `services.media` enabled, starts both pinned
+# Convex backends (from a fixed-output image, since the test has no network), the media service,
+# and Caddy, and checks that one address serves every path, the service signs in to Convex, both
+# web clients are configured, secrets stay private, and the service survives a restart.
 #
 #   nix build .#checks.x86_64-linux.vm -L
 #
@@ -44,10 +44,16 @@ testers.runNixOSTest {
       memorySize = 4096;
       cores = 4;
       diskSize = 8192;
-      # The loaded image has no registry digest, so the container runs it by name and tag.
-      oci-containers.containers.movies-convex = {
-        imageFile = convexImage;
-        pull = "never";
+      # The loaded image has no registry digest, so the containers run it by name and tag.
+      oci-containers.containers = {
+        movies-convex = {
+          imageFile = convexImage;
+          pull = "never";
+        };
+        media-core-convex = {
+          imageFile = convexImage;
+          pull = "never";
+        };
       };
     };
 
@@ -75,19 +81,30 @@ testers.runNixOSTest {
         )
 
     machine.wait_for_unit("podman-movies-convex.service")
+    machine.wait_for_unit("podman-media-core-convex.service")
     machine.wait_until_succeeds("curl -fsS http://127.0.0.1:3210/version", timeout=300)
+    machine.wait_until_succeeds("curl -fsS http://127.0.0.1:3220/version", timeout=300)
+    machine.wait_for_unit("media-proxy.service")
     machine.wait_for_unit("movies.service", timeout=900)
 
     with subtest("the media service signs in to Convex"):
         wait_connected()
         print(health())
 
-    with subtest("the web app is served with the deployment's Convex URL"):
-        page = machine.succeed("curl -fsS http://127.0.0.1:8080/")
-        assert "<div id=\"app\"" in page, page
-        machine.succeed("grep -rqF http://localhost:3210 /run/movies/web")
-        machine.fail("grep -rqF __MEDIA_CONVEX_URL__ /run/movies/web")
-        machine.succeed("curl -fsS http://127.0.0.1:8080/some/client/route | grep -qF '<div id=\"app\"'")
+    with subtest("one address serves every path"):
+        assert machine.succeed("curl -fsS http://127.0.0.1:8080/convex/instance_name").strip() == "core"
+        assert machine.succeed("curl -fsS http://127.0.0.1:8080/movies/convex/instance_name").strip() == "movies"
+        machine.succeed("curl -fsS http://127.0.0.1:8080/api/health")
+        machine.succeed("curl -fsS http://127.0.0.1:8080/ | grep -qF '<title>[media]</title>'")
+        machine.succeed("curl -fsS http://127.0.0.1:8080/people | grep -qF '<title>[media]</title>'")
+        machine.succeed("curl -fsS http://127.0.0.1:8080/movies/ | grep -qF '<title>[movies]</title>'")
+        machine.succeed("curl -fsS http://127.0.0.1:8080/movies/some/client/route | grep -qF '/movies/assets/'")
+        machine.fail("curl -fsS http://127.0.0.1:8080/convex/.well-known/jwks.json | grep -qF keys")
+
+    with subtest("both web clients are served with their deployment's Convex URL"):
+        machine.succeed("grep -rqF http://localhost:8080/movies/convex /run/movies/web")
+        machine.succeed("grep -rqF http://localhost:8080/convex /run/movies/account")
+        machine.fail("grep -rqF __MEDIA_CONVEX_URL__ /run/movies/web /run/movies/account")
 
     with subtest("options reach the service"):
         environ = machine.succeed(
@@ -99,7 +116,7 @@ testers.runNixOSTest {
 
     with subtest("secrets stay private"):
         machine.succeed("[ \"$(stat -c '%U %a' /run/movies/media.env)\" = 'movies 600' ]")
-        machine.succeed("[ \"$(stat -c '%a' /var/lib/movies/backups)\" = 700 ]")
+        machine.succeed("[ \"$(stat -c '%a' /var/lib/media/movies/backups)\" = 700 ]")
         machine.succeed("[ \"$(stat -c '%U' /proc/$(systemctl show -p MainPID --value movies))\" = movies ]")
         machine.fail(
             "tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value movies)/cmdline | grep -q 'KEY\\|SECRET'"
@@ -116,25 +133,25 @@ testers.runNixOSTest {
         wait_connected()
 
     with subtest("an upgrade backs up first"):
-        machine.succeed("echo 0.0.0-previous > /var/lib/movies/media/version")
+        machine.succeed("echo 0.0.0-previous > /var/lib/media/movies/media/version")
         machine.succeed("systemctl restart movies.service")
         machine.wait_for_unit("movies.service")
         wait_connected()
-        machine.succeed("ls /var/lib/movies/backups | grep -q '^movies-manual-.*\\.zip$'")
+        machine.succeed("ls /var/lib/media/movies/backups | grep -q '^movies-manual-.*\\.zip$'")
 
     with subtest("a deployed upgrade clears its backup marker"):
-        machine.fail("test -e /var/lib/movies/media/upgrade-backup")
-        version = machine.succeed("cat /var/lib/movies/media/version").strip()
+        machine.fail("test -e /var/lib/media/movies/media/upgrade-backup")
+        version = machine.succeed("cat /var/lib/media/movies/media/version").strip()
         assert "+" in version, version
 
     with subtest("a retried upgrade does not back up again"):
         machine.succeed(
-            "cd /var/lib/movies/media && cp version upgrade-backup && echo 0.0.0-previous > version"
+            "cd /var/lib/media/movies/media && cp version upgrade-backup && echo 0.0.0-previous > version"
         )
         machine.succeed("systemctl restart movies.service")
         machine.wait_for_unit("movies.service")
         wait_connected()
-        count = machine.succeed("ls /var/lib/movies/backups | grep -c '^movies-manual-.*\\.zip$'").strip()
+        count = machine.succeed("ls /var/lib/media/movies/backups | grep -c '^movies-manual-.*\\.zip$'").strip()
         assert count == "1", count
   '';
 }

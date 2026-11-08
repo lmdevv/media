@@ -1,0 +1,161 @@
+#!/command/with-contenv bash
+# Runs once at every start, as root, after both Convex backends answer: for the core and for old
+# movies it backs up before an upgrade and deploys the bundled functions, then configures both
+# deployments and both web clients, and writes the media service's private environment file.
+set -euo pipefail
+umask 077
+# Outside CI the Convex CLI reports to Sentry, and where that host is slow or blocked each command
+# waits minutes for it on exit. A self-hosted install sends nothing anyway.
+export CI=1
+
+log() { echo "[init] $*" >&2; }
+
+public_url="${MEDIA_BASE_URL%/}"
+puid="${PUID:-1000}"
+pgid="${PGID:-1000}"
+
+if ! [[ "$puid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ ]] || [ "$puid" = 0 ] || [ "$pgid" = 0 ]; then
+  log "PUID and PGID must be numeric and not 0 (root); got PUID=$puid PGID=$pgid"
+  exit 1
+fi
+for reserved in convex caddy; do
+  if [ "$puid" = "$(id -u "$reserved")" ] || [ "$pgid" = "$(id -g "$reserved")" ]; then
+    log "PUID and PGID may not be $(id -u "$reserved"), which the $reserved service uses; got PUID=$puid PGID=$pgid"
+    exit 1
+  fi
+done
+
+# At most seven significant digits, so the arithmetic below never wraps a huge number into range.
+if [ -n "${LOG_MAX_MB:-}" ] &&
+  ! [[ "$LOG_MAX_MB" =~ ^0*[0-9]{1,7}$ && "$((10#$LOG_MAX_MB))" -ge 8 && "$((10#$LOG_MAX_MB))" -le 1048576 ]]; then
+  log "LOG_MAX_MB must be a whole number of MiB from 8 to 1048576; got LOG_MAX_MB=$LOG_MAX_MB"
+  exit 1
+fi
+
+[ "$(id -g movies)" = "$pgid" ] || groupmod --non-unique --gid "$pgid" movies
+[ "$(id -u movies)" = "$puid" ] || usermod --non-unique --uid "$puid" --gid "$pgid" movies
+
+for node in /dev/dri/renderD*; do
+  [ -e "$node" ] || continue
+  gid="$(stat -c %g "$node")"
+  getent group "$gid" >/dev/null || groupadd --gid "$gid" "render$gid"
+  usermod -a -G "$(getent group "$gid" | cut -d: -f1)" movies
+done
+
+install -d -m 700 /data/core/backups /data/movies/config
+install -d -m 700 -o movies -g movies /data/movies/media /data/movies/backups /transcode
+find /data/movies/media /data/movies/backups /transcode \( \! -user movies -o \! -group movies \) \
+  -exec chown -h movies:movies {} +
+
+# Deploys one Convex project and leaves its admin key in $admin_key:
+#   deploy <domain> <port> <project dir> <backup owner>
+deploy() {
+  local domain="$1" port="$2" dir="$3" owner="$4"
+  local url="http://127.0.0.1:$port" data="/data/$domain" version stamp backup
+
+  log "waiting for the $domain Convex backend"
+  for _ in $(seq 1 120); do
+    curl -fsS "$url/version" >/dev/null 2>&1 && break
+    sleep 1
+  done
+  curl -fsS "$url/version" >/dev/null || { log "the $domain Convex backend did not answer"; exit 1; }
+
+  admin_key="$(LD_PRELOAD=/app/convex/argv-secret.so ARGV_SECRET_FILE="$data/secrets/instance_secret" \
+    /app/convex/generate_key "$domain" @ARGV_SECRET_FILE | tail -n 1)"
+  export CONVEX_SELF_HOSTED_URL="$url" CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
+
+  version="$(node -p "require('$dir/package.json').version")+$(cat "$dir/.functions-hash")"
+  if [ -s "$data/version" ] && [ "$(cat "$data/version")" != "$version" ] &&
+    [ "$(cat "$data/upgrade-backup" 2>/dev/null)" != "$version" ]; then
+    stamp="$(date -u +%Y-%m-%dT%H-%M-%S-000Z)"
+    backup="$data/backups/$domain-manual-$stamp.zip"
+    log "upgrading $domain from $(cat "$data/version") to $version; backing up to $backup first"
+    (cd "$dir" && node node_modules/convex/bin/main.js export --include-file-storage \
+      --path "$data/backups/.partial-$domain-manual-$stamp.zip")
+    mv "$data/backups/.partial-$domain-manual-$stamp.zip" "$backup"
+    chown "$owner" "$backup"
+    printf '%s\n' "$version" >"$data/upgrade-backup"
+  fi
+
+  log "deploying the $domain functions ($version)"
+  (cd "$dir" && node node_modules/convex/bin/main.js deploy --yes --codegen disable --typecheck disable)
+  deployed_version="$version"
+}
+
+finish() {
+  local data="/data/$1"
+  printf '%s\n' "$deployed_version" >"$data/version"
+  rm -f "$data/upgrade-backup"
+}
+
+deploy core 3210 /app/platform root:root
+log "configuring the core deployment"
+(cd /app/platform && node scripts/configure.mjs && node node_modules/convex/bin/main.js run core/schemaMigrations:run >/dev/null)
+finish core
+
+deploy movies 3220 /app/backend movies:movies
+log "configuring the movies deployment"
+media_env="$(cd /app/backend && node scripts/configure.ts "--site-url=$public_url/movies" "--media-url=$public_url")"
+media_service_api_key="$(sed -n 's/^MEDIA_SERVICE_API_KEY=//p' <<<"$media_env")"
+playback_token_secret="$(sed -n 's/^PLAYBACK_TOKEN_SECRET=//p' <<<"$media_env")"
+unset media_env
+finish movies
+
+umask 022
+install -d -m 755 /run/media
+node /app/media/scripts/configure-web.ts --from /app/account --to /run/media/account \
+  --convex-url "$public_url/convex"
+node /app/media/scripts/configure-web.ts --from /app/web --to /run/media/web \
+  --convex-url "$public_url/movies/convex"
+
+umask 077
+install -d -m 755 /run/movies
+env_file=/run/movies/media.env
+install -m 600 -o movies -g movies /dev/null "$env_file"
+setting() { [ -z "$2" ] || printf '%s=%s\n' "$1" "$2" >>"$env_file"; }
+setting HOST 127.0.0.1
+setting PORT 4300
+setting MEDIA_BASE_URL "$public_url"
+setting CONVEX_URL http://127.0.0.1:3220
+setting CONVEX_PUBLIC_URL "$public_url/movies/convex"
+setting MEDIA_SERVICE_API_KEY "$media_service_api_key"
+setting PLAYBACK_TOKEN_SECRET "$playback_token_secret"
+setting CONVEX_SELF_HOSTED_ADMIN_KEY "$admin_key"
+setting CONVEX_BACKEND_DIR /app/backend
+setting DATA_DIR /data/movies/media
+setting BACKUP_DIR /data/movies/backups
+setting TRANSCODE_DIR /transcode
+setting WEB_DIST_DIR /run/media/web
+setting LIBRARY_ROOTS "${LIBRARY_ROOTS:-/media}"
+optional_settings=(
+  BACKUP_RETENTION_DAYS
+  TMDB_API_KEY
+  OMDB_API_KEY
+  OTEL_EXPORTER_OTLP_ENDPOINT
+  HARDWARE_ACCELERATION
+  QSV_DEVICE
+  VAAPI_DEVICE
+  LIBVA_DRIVER_NAME
+  MAX_CONCURRENT_TRANSCODES
+  MAX_CONCURRENT_REMUXES
+  STREAM_IDLE_SECONDS
+  STREAM_BUFFER_AHEAD_SECONDS
+  MIN_FREE_TRANSCODE_MB
+  LIBRARY_RECONCILE_MINUTES
+  TRICKPLAY
+  TRICKPLAY_INTERVAL_SECONDS
+  TRICKPLAY_CONCURRENCY
+  LIBRARY_WATCH
+  LIBRARY_POLL_SECONDS
+  PROBE_TIMEOUT_SECONDS
+  FILE_SCAN_TIMEOUT_SECONDS
+  CACHE_MAX_MB
+  LOG_LEVEL
+  LOG_RETENTION_DAYS
+  LOG_MAX_MB
+)
+for name in "${optional_settings[@]}"; do
+  setting "$name" "${!name:-}"
+done
+
+log "ready at $public_url"

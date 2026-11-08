@@ -67,7 +67,7 @@ const login = coreShortcut("auth", "login", {
       if (Option.isNone(url) || !isServerUrl(url.value)) {
         return yield* usage(
           invocation,
-          "auth login needs --server with the core's Convex URL, such as http://nas.tailnet.ts.net:3214",
+          "auth login needs --server with the core's Convex URL, such as http://nas.tailnet.ts.net:8080/convex",
         );
       }
 

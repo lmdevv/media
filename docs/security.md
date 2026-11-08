@@ -7,9 +7,9 @@ Each finding says what was wrong, how it was fixed or why it stays, and where th
 
 ## Threat model
 
-- One household, self-hosted on a LAN or a tailnet. The Compose install publishes both ports on
+- One household, self-hosted on a LAN or a tailnet. The Compose install publishes its one port on
   `127.0.0.1` unless `MEDIA_BIND` says otherwise, and the NixOS module listens on `listenAddress`;
-  a media service started directly without `HOST` listens on every interface. Neither port may face
+  a media service started directly without `HOST` listens on every interface. No port may face
   the internet (`docs/operations.md`).
 - Attackers considered: a stranger who can reach the ports, a signed-in member probing for more
   than their account allows, a child on a shared browser or TV trying to leave a kids profile, a

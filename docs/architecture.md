@@ -112,18 +112,22 @@ only (ADR 0017).
 
 The image serves every path from one port.
 
-| Path      | Served by                                                           |
-| --------- | ------------------------------------------------------------------- |
-| `/`       | `apps/web-account`                                                  |
-| `/invite` | `apps/web-account`, accepting an invite, its code in the fragment   |
-| `/device` | `apps/web-account`, approving a device code                         |
-| `/reset`  | `apps/web-account`, a one-time reset link, its code in the fragment |
-| `/guest`  | `apps/web-account`, a guest link, its code in the fragment          |
-| `/movies` | `apps/web-movies`                                                   |
-| `/music`  | `apps/web-music`                                                    |
-| `/convex` | the Convex backend                                                  |
-| `/api`    | `@media/server`, its HttpApi routes                                 |
-| `/media`  | `@media/server`, byte-serving routes that take a ticket             |
+| Path             | Served by                                                           |
+| ---------------- | ------------------------------------------------------------------- |
+| `/`              | `apps/web-account`                                                  |
+| `/invite`        | `apps/web-account`, accepting an invite, its code in the fragment   |
+| `/device`        | `apps/web-account`, approving a device code                         |
+| `/reset`         | `apps/web-account`, a one-time reset link, its code in the fragment |
+| `/guest`         | `apps/web-account`, a guest link, its code in the fragment          |
+| `/movies`        | `apps/web-movies`                                                   |
+| `/music`         | `apps/web-music`                                                    |
+| `/convex`        | the Convex backend                                                  |
+| `/movies/convex` | old movies' Convex backend, until the movies port (ADR 0026)        |
+| `/api`           | `@media/server`, its HttpApi routes                                 |
+| `/media`         | `@media/server`, byte-serving routes that take a ticket             |
+| `/artwork`       | `@media/server`, artwork by sealed key                              |
+
+`/music` arrives with the music port; until then the image does not serve it (ADR 0026).
 
 Guest links use a configurable guest address. v1 runs on the home network or Tailscale, and
 Tailscale Funnel can open guest links (ADR 0007).
@@ -159,31 +163,34 @@ casting, is missing only from the repo in between.
 
 Each row is the ADR's own title.
 
-| ADR                                                                                | Decision                                                                      | D-numbers     |
-| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------- |
-| [0001](decisions/0001-one-repo-named-media.md)                                     | Merge both products into one repo named [media]                               | D08, D09, D10 |
-| [0002](decisions/0002-build-a-new-core-and-start-fresh.md)                         | Build a new platform core and start from a fresh install                      | D01 to D07    |
-| [0003](decisions/0003-users-sign-in-with-username-and-password.md)                 | Make every account a user who signs in with a username and password           | D12, D13, D15 |
-| [0004](decisions/0004-convex-auth-v1-behind-an-interface.md)                       | Use Convex Auth v1 behind a thin interface and check every session live       | D14           |
-| [0005](decisions/0005-four-permission-layers-and-kids.md)                          | Check access in four layers and make kids restricted users                    | D16, D17      |
-| [0006](decisions/0006-device-registry-and-shared-device-locks.md)                  | Register every device and lock adult tiles on shared devices                  | D18, D19      |
-| [0007](decisions/0007-guest-links-on-the-home-network.md)                          | Build guests into identity and keep v1 on the home network or Tailscale       | D20, D21      |
-| [0008](decisions/0008-domains-are-folders-in-one-schema.md)                        | Keep each domain as a folder in one Convex schema                             | D22           |
-| [0009](decisions/0009-command-list-generates-every-entry-point.md)                 | Declare each action once and generate its Convex function and clients         | D23           |
-| [0010](decisions/0010-effect-httpapi-server-with-a-service-principal.md)           | Serve HTTP with Effect HttpApi and sign the server in as a service principal  | D24, D25      |
-| [0011](decisions/0011-one-ticket-format-for-every-byte.md)                         | Use one signed ticket format for every route that serves bytes                | D26, D46      |
-| [0012](decisions/0012-one-job-framework.md)                                        | Run all background work through one job framework in the core                 | D27           |
-| [0013](decisions/0013-stay-inside-convex-per-call-limits.md)                       | Keep SQLite and build every list to stay inside Convex's per-call limits      | D28           |
-| [0014](decisions/0014-one-server-process-with-per-domain-budgets.md)               | Run one server process with per-domain worker caps and one transcode limit    | D29           |
-| [0015](decisions/0015-all-in-one-image-on-one-address.md)                          | Ship one all-in-one image on one address, with the account client at the root | D30, D31      |
-| [0016](decisions/0016-one-config-shape-and-aligned-versions.md)                    | Use one config shape and align dependency versions                            | D32, D33      |
-| [0017](decisions/0017-one-group-session-feature.md)                                | Build group sessions once in the core and let each domain supply its state    | D34           |
-| [0018](decisions/0018-connect-remote-control-and-casting.md)                       | Put remote control and casting in the core and keep third-party support small | D35, D44      |
-| [0019](decisions/0019-synced-settings-and-core-downloads.md)                       | Mark which settings sync per user and run downloads as a core service         | D36, D37      |
-| [0020](decisions/0020-branded-clients-with-one-sign-in.md)                         | Ship a branded client per product on a shared base, with one sign-in          | D38, D39, D40 |
-| [0021](decisions/0021-one-cli-and-one-agent-skill.md)                              | Ship one `media` CLI and one agent skill with a reference per domain          | D41           |
-| [0022](decisions/0022-agent-workflow-tracking-and-copyleft.md)                     | Keep movies' agent workflow, one Linear team, and a merged copyleft list      | D11, D42, D43 |
-| [0023](decisions/0023-run-the-core-in-its-own-deployment-until-the-movies-port.md) | Run the core in its own Convex deployment until the movies port               | D04, D14, D22 |
+| ADR                                                                                           | Decision                                                                       | D-numbers                         |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------------- |
+| [0001](decisions/0001-one-repo-named-media.md)                                                | Merge both products into one repo named [media]                                | D08, D09, D10                     |
+| [0002](decisions/0002-build-a-new-core-and-start-fresh.md)                                    | Build a new platform core and start from a fresh install                       | D01 to D07                        |
+| [0003](decisions/0003-users-sign-in-with-username-and-password.md)                            | Make every account a user who signs in with a username and password            | D12, D13, D15                     |
+| [0004](decisions/0004-convex-auth-v1-behind-an-interface.md)                                  | Use Convex Auth v1 behind a thin interface and check every session live        | D14                               |
+| [0005](decisions/0005-four-permission-layers-and-kids.md)                                     | Check access in four layers and make kids restricted users                     | D16, D17                          |
+| [0006](decisions/0006-device-registry-and-shared-device-locks.md)                             | Register every device and lock adult tiles on shared devices                   | D18, D19                          |
+| [0007](decisions/0007-guest-links-on-the-home-network.md)                                     | Build guests into identity and keep v1 on the home network or Tailscale        | D20, D21                          |
+| [0008](decisions/0008-domains-are-folders-in-one-schema.md)                                   | Keep each domain as a folder in one Convex schema                              | D22                               |
+| [0009](decisions/0009-command-list-generates-every-entry-point.md)                            | Declare each action once and generate its Convex function and clients          | D23                               |
+| [0010](decisions/0010-effect-httpapi-server-with-a-service-principal.md)                      | Serve HTTP with Effect HttpApi and sign the server in as a service principal   | D24, D25                          |
+| [0011](decisions/0011-one-ticket-format-for-every-byte.md)                                    | Use one signed ticket format for every route that serves bytes                 | D26, D46                          |
+| [0012](decisions/0012-one-job-framework.md)                                                   | Run all background work through one job framework in the core                  | D27                               |
+| [0013](decisions/0013-stay-inside-convex-per-call-limits.md)                                  | Keep SQLite and build every list to stay inside Convex's per-call limits       | D28                               |
+| [0014](decisions/0014-one-server-process-with-per-domain-budgets.md)                          | Run one server process with per-domain worker caps and one transcode limit     | D29                               |
+| [0015](decisions/0015-all-in-one-image-on-one-address.md)                                     | Ship one all-in-one image on one address, with the account client at the root  | D30, D31                          |
+| [0016](decisions/0016-one-config-shape-and-aligned-versions.md)                               | Use one config shape and align dependency versions                             | D32, D33                          |
+| [0017](decisions/0017-one-group-session-feature.md)                                           | Build group sessions once in the core and let each domain supply its state     | D34                               |
+| [0018](decisions/0018-connect-remote-control-and-casting.md)                                  | Put remote control and casting in the core and keep third-party support small  | D35, D44                          |
+| [0019](decisions/0019-synced-settings-and-core-downloads.md)                                  | Mark which settings sync per user and run downloads as a core service          | D36, D37                          |
+| [0020](decisions/0020-branded-clients-with-one-sign-in.md)                                    | Ship a branded client per product on a shared base, with one sign-in           | D38, D39, D40                     |
+| [0021](decisions/0021-one-cli-and-one-agent-skill.md)                                         | Ship one `media` CLI and one agent skill with a reference per domain           | D41                               |
+| [0022](decisions/0022-agent-workflow-tracking-and-copyleft.md)                                | Keep movies' agent workflow, one Linear team, and a merged copyleft list       | D11, D42, D43                     |
+| [0023](decisions/0023-run-the-core-in-its-own-deployment-until-the-movies-port.md)            | Run the core in its own Convex deployment until the movies port                | D04, D14, D22                     |
+| [0024](decisions/0024-libraries-folders-and-scans.md)                                         | Libraries have a kind, their own folders, grants, and one scan kind per domain | D01, D02, D16, D17, D28, D29, D50 |
+| [0025](decisions/0025-convex-http-actions-stay-inside-the-install.md)                         | Keep Convex's HTTP actions inside the install, off the public address          | D30, D45                          |
+| [0026](decisions/0026-serve-old-movies-beside-the-core-in-the-image-until-the-movies-port.md) | Serve old movies beside the core in the image until the movies port            | D30, D31, D32, D49, D50           |
 
 ## Open
 
@@ -195,10 +202,6 @@ an ADR.
 - **The exact shared UI split.** Each product has its own look on a shared shadcn base and type
   scale. Which components are shared and which belong to one product is decided in Paper during
   the ports (ADR 0020).
-- **Where Convex's HTTP actions live on the one address.** Convex Auth serves its sign-in routes
-  and its JWKS from Convex's HTTP actions origin, a separate port in today's dev stack. The
-  register names `/convex` for Convex and `/api` for the server and does not place that origin.
-  The deploy image PR in phase 3 settles it.
 - **What the shared iOS keychain stores.** Each app mints its own session from the shared
   keychain (ADR 0020). The register does not say which credential the keychain holds or what
   signing out of one app does to the other. The movies port settles it with `@media/mobile-core`.

@@ -1,5 +1,5 @@
 {
-  description = "[movies]: self-hosted movies and TV for people and agents";
+  description = "[media]: self-hosted media for people and agents";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -110,14 +110,15 @@
             in
             pkgs.writeText "movies-module-check" (
               builtins.toJSON {
-                container = {
-                  inherit (config.virtualisation.oci-containers.containers.movies-convex)
+                containers = builtins.mapAttrs (_: container: {
+                  inherit (container)
                     image
                     ports
                     volumes
                     environment
                     ;
-                };
+                }) config.virtualisation.oci-containers.containers;
+                proxy = config.systemd.services.media-proxy.environment;
                 inherit (service) environment serviceConfig;
                 firewall = config.networking.firewall.allowedTCPPorts;
                 groups = config.users.users.movies.extraGroups;
@@ -166,7 +167,6 @@
               serverSettings.services.media = {
                 enable = true;
                 publicUrl = "http://nas:8080";
-                convexPublicUrl = "http://nas:3210";
               };
               actual = {
                 server = summary (system [ self.nixosModules.default ] serverSettings);
@@ -195,7 +195,7 @@
               expected = {
                 server = {
                   cli = true;
-                  convexUrl = "http://nas:3210";
+                  convexUrl = "http://nas:8080/movies/convex";
                   mediaUrl = "http://nas:8080";
                   server = true;
                 };

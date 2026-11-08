@@ -163,7 +163,8 @@ const watchSearch = (episodeId: EpisodeId | undefined, room: RoomId | undefined)
   return room === undefined ? { episodeId, start: "resume" } : { episodeId, room, start: "resume" };
 };
 
-const roomLink = (id: RoomId): string => `${window.location.origin}/r/${id}`;
+const roomLink = (id: RoomId): string =>
+  `${window.location.origin}${import.meta.env.BASE_URL}r/${id}`;
 
 const useSettled = (value: boolean, ms: number): boolean => {
   const [settled, setSettled] = useState(false);

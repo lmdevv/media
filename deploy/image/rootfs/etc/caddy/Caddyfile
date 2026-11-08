@@ -1,0 +1,75 @@
+{
+	admin off
+	auto_https off
+	log {
+		format console {
+			level_format upper
+			time_local
+		}
+	}
+	# Caddy aborts a response whose write stalls for `write_idle` (1m by default). Players stop
+	# reading a stream once they have buffered far enough ahead, and while paused, so that default
+	# would cut streams off. Off, as when the media service served them itself.
+	servers {
+		timeouts {
+			write_idle -1s
+		}
+	}
+}
+
+# One address for the whole product (docs/decisions/0015 and 0025). The image runs it as is; the
+# NixOS module sets the variables. Upstreams, all on loopback: the core's Convex backend
+# (MEDIA_CORE_CONVEX), old movies' Convex backend (MEDIA_MOVIES_CONVEX), each with its HTTP actions
+# on the next port, which stay unpublished, and the media service (MEDIA_SERVICE), which serves the
+# movies client itself. MEDIA_ACCOUNT_DIR holds the configured account client.
+:{$MEDIA_PORT:8080} {
+	bind {$MEDIA_BIND:::}
+	header -Server
+
+	handle_path /convex/* {
+		reverse_proxy {$MEDIA_CORE_CONVEX:127.0.0.1:3210}
+	}
+
+	handle_path /movies/convex/* {
+		reverse_proxy {$MEDIA_MOVIES_CONVEX:127.0.0.1:3220}
+	}
+
+	handle /media/* {
+		reverse_proxy {$MEDIA_SERVICE:127.0.0.1:4300} {
+			flush_interval -1
+		}
+	}
+
+	handle /api/* {
+		reverse_proxy {$MEDIA_SERVICE:127.0.0.1:4300}
+	}
+
+	handle /artwork/* {
+		reverse_proxy {$MEDIA_SERVICE:127.0.0.1:4300}
+	}
+
+	redir /movies /movies/ 308
+
+	handle_path /movies/* {
+		encode zstd gzip
+		reverse_proxy {$MEDIA_SERVICE:127.0.0.1:4300}
+	}
+
+	handle {
+		encode zstd gzip
+		root * {$MEDIA_ACCOUNT_DIR:/run/media/account}
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://{hostport} wss://{hostport}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+			X-Content-Type-Options nosniff
+			Referrer-Policy no-referrer
+			X-Frame-Options DENY
+			Cross-Origin-Opener-Policy same-origin
+			Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		}
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		header /index.html Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -47,7 +47,8 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 | `packages/sdk`       | Effect core with `/effect`, `/react`, `/promise` entry points       |
 | `packages/ui`        | shadcn components restyled through Paper tokens                     |
 | `packages/config`    | Shared strict `tsconfig`                                            |
-| `deploy/compose`     | Docker Compose: Convex backend plus media/web                       |
+| `deploy/image`       | All-in-one image: both Convex backends, media, and Caddy under s6   |
+| `deploy/compose`     | Docker Compose: the image plus optional sidecars                    |
 | `nix/`               | NixOS module                                                        |
 | `legacy/music`       | Old [music] code, runnable until the music port deletes it          |
 
@@ -79,9 +80,9 @@ scripts/check-deploy.sh  # installs pin one Convex backend and expose every medi
 pre-commit hook and in CI. All must pass before every commit. The hook and pull request CI run
 typecheck, lint, and test only over the packages a diff affects and their dependents, and run
 everything when a root config file changes; `scripts/changed-packages.sh` prints that set. CI on
-`main` runs everything. A new media service setting goes in
-`deploy/compose` (entrypoint, `compose.yaml`, `.env.example`), the root `.env.example`,
-`nix/module.nix`, and both READMEs; `check-deploy.sh` names what is missing.
+`main` runs everything. A new media service setting goes in `deploy/image/rootfs/app/bin/init`,
+`deploy/compose` (`compose.yaml`, `.env.example`), the root `.env.example`, `nix/module.nix`, and
+both READMEs; `check-deploy.sh` names what is missing.
 
 Each worktree gets its own stack: `scripts/dev-stack.sh up` starts two self-hosted Convex backends
 in Docker, one for old movies and one for the core, deploys both, configures both backends' auth keys,

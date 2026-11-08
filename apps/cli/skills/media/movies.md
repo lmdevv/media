@@ -11,15 +11,15 @@ is JSON by default. `SKILL.md` covers installing `media`, output, and exit codes
 different one stays unused, even with `--profile`. Run `MEDIA_CONVEX_URL= MEDIA_SERVER_URL= media
 ...` to use that profile.
 
-The server URL is the install's Convex URL (`CONVEX_PUBLIC_URL`; port 3210 on the Compose and
-NixOS installs, such as `http://nas.tailnet.ts.net:3210`); the media service URL is the web
-address (`MEDIA_BASE_URL`, port 8080).
+The server URL is the install's movies Convex URL, `MEDIA_BASE_URL` plus `/movies/convex` on the
+Compose and NixOS installs, such as `http://nas.tailnet.ts.net:8080/movies/convex`; the media
+service URL is the install's address (`MEDIA_BASE_URL`, port 8080).
 
 - **API key (agents, CI):** create one in the web app (Settings → API keys) or with
   `media keys create agent --scopes read,play` from a signed-in machine. The secret is shown once.
 
   ```sh
-  media login --server http://nas.tailnet.ts.net:3210 --media-url http://nas.tailnet.ts.net:8080 --api-key mk_...
+  media login --server http://nas.tailnet.ts.net:8080/movies/convex --media-url http://nas.tailnet.ts.net:8080 --api-key mk_...
   media whoami
   ```
 

@@ -163,12 +163,12 @@ describe.skipIf(!enabled)("the packaged install", { timeout: 180_000 }, () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
-  it("serves the web app pointed at the deployment", async () => {
-    const index = await fetch(`${mediaUrl}/`);
+  it("serves the movies client pointed at the deployment", async () => {
+    const index = await fetch(`${mediaUrl}/movies/`);
     const html = await index.text();
 
     expect(index.status).toBe(200);
-    const script = /src="(\/assets\/index-[^"]+\.js)"/u.exec(html)?.[1] ?? "";
+    const script = /src="(\/movies\/assets\/index-[^"]+\.js)"/u.exec(html)?.[1] ?? "";
     const bundle = await (await fetch(`${mediaUrl}${script}`)).text();
 
     expect(bundle).toContain(convexUrl);
