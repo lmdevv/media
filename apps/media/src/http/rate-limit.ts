@@ -70,6 +70,50 @@ export const retryAfter = (
 ): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.setHeader(response, "retry-after", String(seconds));
 
+const isLoopback = (address: string): boolean =>
+  address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
+
+/**
+ * The client a request came from. The installs put Caddy in front on loopback, and Caddy replaces
+ * `X-Forwarded-For` with the address it accepted the connection from, so the header is trusted
+ * only from a loopback peer, and only its last entry, the one the proxy wrote. A client that
+ * reaches the service directly is its own peer, whatever header it sends.
+ */
+const clientAddress = (peer: Option.Option<string>, forwardedFor: string | undefined): string => {
+  const direct = Option.getOrElse(peer, () => "unknown");
+
+  if (!isLoopback(direct) || forwardedFor === undefined) return direct;
+  const appended = forwardedFor.split(",").at(-1)?.trim() ?? "";
+
+  return appended === "" ? direct : appended;
+};
+
+interface LimitedRequest {
+  readonly pathname: string;
+  readonly peer: Option.Option<string>;
+  readonly forwardedFor: string | undefined;
+}
+
+/**
+ * The seconds `request` must wait, or none. Requests from inside the install, such as the
+ * container's health check, are never limited: no remote client can appear as loopback.
+ */
+export const limitRequest = (
+  take: ReturnType<typeof makeLimiter>,
+  request: LimitedRequest,
+  now: number,
+): Option.Option<number> => {
+  const limited = BUDGETS.find(([prefix]) => request.pathname.startsWith(prefix));
+
+  if (limited === undefined) return Option.none();
+  const address = clientAddress(request.peer, request.forwardedFor);
+
+  if (isLoopback(address)) return Option.none();
+  const [prefix, budget] = limited;
+
+  return take([[`${prefix}\u0000${address}`, budget]], now);
+};
+
 /** Limits the unauthenticated routes by client address. */
 export const layer: Layer.Layer<never, never, HttpRouter.HttpRouter> = Layer.unwrap(
   Effect.sync(() => {
@@ -79,15 +123,14 @@ export const layer: Layer.Layer<never, never, HttpRouter.HttpRouter> = Layer.unw
       (httpEffect) =>
         Effect.gen(function* () {
           const request = yield* HttpServerRequest.HttpServerRequest;
-          const pathname = new URL(request.url, "http://media.invalid").pathname;
-          const limited = BUDGETS.find(([prefix]) => pathname.startsWith(prefix));
 
-          if (limited === undefined) return yield* httpEffect;
-          const [prefix, budget] = limited;
-          const address = Option.getOrElse(request.remoteAddress, () => "unknown");
-
-          const wait = take(
-            [[`${prefix}\u0000${address}`, budget]],
+          const wait = limitRequest(
+            take,
+            {
+              pathname: new URL(request.url, "http://media.invalid").pathname,
+              peer: request.remoteAddress,
+              forwardedFor: request.headers["x-forwarded-for"],
+            },
             yield* Clock.currentTimeMillis,
           );
 

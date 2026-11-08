@@ -58,9 +58,11 @@ second port.
   account system, `/movies/convex`, and the second backend.
 - The image runs one more Convex backend and Caddy than the old media service image. It replaces
   the separate Convex image.
-- Behind Caddy every request reaches the media service from 127.0.0.1, so its per-address rate
-  limits on `/artwork` and `/api/health` count all clients together. The server's adoption of the
-  core in phase 4 should trust Caddy's `X-Forwarded-For`.
+- Behind Caddy every request reaches the media service from 127.0.0.1. Caddy sets
+  `X-Forwarded-For` to the address it accepted the connection from, and the media service's
+  per-client limits on `/artwork`, `/api/health`, and `/api/client-config` trust that header only
+  from a loopback peer and only its last entry. Requests from inside the install, such as the
+  container's health check, are never limited.
 - Links the movies iOS app builds from the server URL, a title's share link `/title/<id>` and a
   watch room's invite `/r/<id>`, land on the account client, not the movies client, until the
   movies port settles the web URLs. The web client builds them under `/movies`.

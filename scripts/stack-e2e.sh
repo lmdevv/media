@@ -123,6 +123,18 @@ for _ in $(seq 1 60); do
 done
 check "s6 restarts the media service when it dies" '[[ -n "$restarted" && "$restarted" != "$media_pid" ]] && healthy'
 
+statuses="$(for _ in $(seq 1 80); do curl -s -o /dev/null -w "%{http_code}\n" "${MEDIA_BASE_URL}/api/health"; done)"
+check "a client past its limit through Caddy gets 429" 'grep -qx 429 <<<"$statuses"'
+check "the container's health check is never limited" \
+  '[[ "$(in_movies curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/health)" == 200 ]] &&
+    [[ "$(docker inspect -f "{{.State.Health.Status}}" "$(compose ps -q media)")" == healthy ]]'
+sleep 7
+spoofed="$(for _ in $(seq 1 80); do
+  curl -s -o /dev/null -w "%{http_code}\n" -H "X-Forwarded-For: 127.0.0.1" "${MEDIA_BASE_URL}/api/health"
+done)"
+check "a client cannot pass as the install by sending X-Forwarded-For" 'grep -qx 429 <<<"$spoofed"'
+sleep 7
+
 pnpm --dir "$root" --filter @lmdevv/movies build >/dev/null
 
 MEDIA_PACKAGED_STACK=1 \

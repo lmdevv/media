@@ -20,6 +20,15 @@
 	grace_period 3s
 }
 
+# The media service limits unauthenticated routes per client, trusting X-Forwarded-For only from a
+# loopback peer and only its last entry, so set it to the connection's own address.
+(media-service) {
+	reverse_proxy {$MEDIA_SERVICE:127.0.0.1:4300} {
+		header_up X-Forwarded-For {remote_host}
+		flush_interval -1
+	}
+}
+
 :{$MEDIA_PORT:8080} {
 	bind {$MEDIA_BIND:0.0.0.0}
 	header -Server
@@ -33,24 +42,22 @@
 	}
 
 	handle /media/* {
-		reverse_proxy {$MEDIA_SERVICE:127.0.0.1:4300} {
-			flush_interval -1
-		}
+		import media-service
 	}
 
 	handle /api/* {
-		reverse_proxy {$MEDIA_SERVICE:127.0.0.1:4300}
+		import media-service
 	}
 
 	handle /artwork/* {
-		reverse_proxy {$MEDIA_SERVICE:127.0.0.1:4300}
+		import media-service
 	}
 
 	redir /movies /movies/ 308
 
 	handle_path /movies/* {
 		encode zstd gzip
-		reverse_proxy {$MEDIA_SERVICE:127.0.0.1:4300}
+		import media-service
 	}
 
 	handle {
