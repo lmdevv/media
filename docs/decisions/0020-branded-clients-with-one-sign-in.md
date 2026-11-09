@@ -1,8 +1,9 @@
 # 0020. Ship a branded client per product on a shared base, with one sign-in
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-06 with the account client as built, and
-  2026-11-07 with one sign-in session per browser (D52).
-- Decisions: D38, D39, D40, D52
+- Status: Accepted, 2026-11-03. Amended 2026-11-06 with the account client as built,
+  2026-11-07 with one sign-in session per browser (D52), and 2026-11-09 with what the iOS keychain
+  holds (D48, D59).
+- Decisions: D38, D39, D40, D48, D52, D59
 
 ## Context
 
@@ -45,8 +46,11 @@ With one account system (ADR 0003), a user who signs in once expects every produ
 ## Edge cases settled
 
 - Every iOS app must ship under the same Team ID to share the keychain access group.
-- Which credential the shared keychain holds, and what signing out of one app does to the other,
-  is open until the movies port (`docs/architecture.md`, "Open").
+- The shared keychain holds the server origin, the user id, and one device grant for the phone
+  (D48). Each app exchanges the grant for a session of its own and keeps that session in its own
+  keychain. Revoking the grant signs every app on the phone out. Ending one app's session signs
+  out only that app, which then asks for the password and does not exchange the grant again (D59).
+  ADR 0006, "Device grants as built", records how the core builds it.
 - The exact split between shared and per-product UI is open until the port, and Paper decides it
   (`docs/architecture.md`, "Open").
 
@@ -185,8 +189,8 @@ never has the `account` scope, so account pages tell it to use the person's own 
 D40 asks each client to mint its own session and show as its own device. On the web that would
 break the core's one session per device, and the core has no command that mints a session from
 another. So clients on one origin share the browser's one session, each running its own SDK client
-over the same record, and `/movies` and `/music` never sign in themselves. If each must show as its
-own device, the core needs a grant exchange like D48's.
+over the same record, and `/movies` and `/music` never sign in themselves. The core now has D48's
+grant exchange for iOS (ADR 0006). The web keeps one session per browser (D52) and does not use it.
 
 ### Links carry their secret in the fragment
 

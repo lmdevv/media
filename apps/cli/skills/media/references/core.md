@@ -216,7 +216,7 @@ Show who is signed in, how, with which scopes, and on which device in what order
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "guest"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; device: null | { deviceId: Id<"devices">; joinSequence: number } }`
+- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "guest" | "grant"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; device: null | { deviceId: Id<"devices">; joinSequence: number } }`
 
 ## `core.auth.sessions.end`
 
@@ -331,6 +331,39 @@ From a shared device, ask someone signed in elsewhere to open their locked tile,
 - Arguments: `{ device: string; ask: { intent: "open"; userId: Id<"users"> } | { intent: "leave" } }`
 - Secret: `device` from `MEDIA_ARG_DEVICE` or stdin, never a flag
 - Result: `{ approvalId: Id<"tileApprovals">; expiresAt: number }`
+
+## `core.devices.deviceGrants.issue`
+
+Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it.
+
+- CLI: `media auth device-grants issue`
+- Kind: action
+- Scope: account
+- API keys: refused
+- Arguments: `{ name: string; grant?: string }`
+- Secret: `grant` from `MEDIA_ARG_GRANT`, never a flag; leave it unset to omit it
+- Result: `{ grantId: Id<"deviceGrants">; grant: string }`
+
+## `core.devices.deviceGrants.list`
+
+List your device grants, newest first, with whether each still signs apps in and the apps signed in with it.
+
+- CLI: `media auth device-grants list`
+- Kind: query
+- Scope: account
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ grantId: Id<"deviceGrants">; name: string; issuedAt: number; signsIn: boolean; devices: Array<{ deviceId: Id<"devices">; name: string }> }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.devices.deviceGrants.revoke`
+
+Revoke one of your device grants and sign out every app it signed in.
+
+- CLI: `media auth device-grants revoke`
+- Kind: mutation
+- Scope: account
+- Arguments: `{ grantId: Id<"deviceGrants"> }`
+- Result: `null`
 
 ## `core.devices.picker.show`
 

@@ -61,6 +61,13 @@ export interface PlatformTile {
   readonly proof?: PlatformTileProof;
 }
 
+/** A device grant and the person it signs in, as a phone's shared keychain keeps them. */
+export interface PlatformGrant {
+  readonly userId: Id<"users">;
+  /** The grant `core.devices.deviceGrants.issue` showed, `dg_` and its secret. */
+  readonly grant: string;
+}
+
 /** A device sign-in waiting for approval. */
 export interface PendingDeviceSignIn {
   /** The short code the person approving types or confirms. */
@@ -105,6 +112,12 @@ export interface PlatformSession {
    * device. Rejects with `Forbidden` for a locked tile without a proof that lifts the lock.
    */
   readonly openTile: (tile: PlatformTile) => Promise<void>;
+  /**
+   * Exchanges the device's grant for a session of this app's own; enroll the app's device next.
+   * Rejects with `Unauthenticated` for a revoked, stale, or someone else's grant: ask for the
+   * password then (D59).
+   */
+  readonly exchangeGrant: (grant: PlatformGrant) => Promise<void>;
   /** Ends the session on the server when reachable, then forgets it locally. */
   readonly signOut: () => Promise<void>;
 }
@@ -238,6 +251,10 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
               proof: Option.map(Option.fromUndefinedOr(proof), tileProof),
             }),
           ),
+        ),
+      exchangeGrant: ({ userId, grant }) =>
+        withClient((client) =>
+          client.session.signIn(Client.Credentials.Grant({ userId, grant: Redacted.make(grant) })),
         ),
       signOut: () => withClient((client) => client.session.signOut),
     },

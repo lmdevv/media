@@ -62,6 +62,14 @@ export type Credentials = Data.TaggedEnum<{
     readonly userId: Id<"users">;
     readonly proof: Option.Option<TileProof>;
   };
+  /**
+   * Exchanges the grant a phone or tablet keeps for `userId`, as
+   * `core.devices.deviceGrants.issue` shows it, for a session of this app's own (ADR 0006). Enroll
+   * the app's device afterwards, so it shows as its own device. A grant that was revoked, belongs
+   * to someone else, or stopped when its person signed out everywhere fails with
+   * `Unauthenticated`: ask for the password then.
+   */
+  Grant: { readonly userId: Id<"users">; readonly grant: Redacted.Redacted };
 }>;
 
 /** Constructors and matchers for `Credentials`. */
@@ -281,6 +289,10 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
         Reset: ({ code, password }) => ({
           provider: "reset",
           params: { code: Redacted.value(code), password: Redacted.value(password) },
+        }),
+        Grant: ({ userId, grant }) => ({
+          provider: "grant",
+          params: { userId, grant: Redacted.value(grant) },
         }),
         Tile: ({ device, userId, proof }) => ({
           provider: "tile",

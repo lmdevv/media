@@ -170,7 +170,7 @@ Each row is the ADR's own title.
 | [0003](decisions/0003-users-sign-in-with-username-and-password.md)                            | Make every account a user who signs in with a username and password            | D12, D13, D15                     |
 | [0004](decisions/0004-convex-auth-v1-behind-an-interface.md)                                  | Use Convex Auth v1 behind a thin interface and check every session live        | D14                               |
 | [0005](decisions/0005-four-permission-layers-and-kids.md)                                     | Check access in four layers and make kids restricted users                     | D16, D17                          |
-| [0006](decisions/0006-device-registry-and-shared-device-locks.md)                             | Register every device and lock adult tiles on shared devices                   | D18, D19                          |
+| [0006](decisions/0006-device-registry-and-shared-device-locks.md)                             | Register every device and lock adult tiles on shared devices                   | D18, D19, D48                     |
 | [0007](decisions/0007-guest-links-on-the-home-network.md)                                     | Build guests into identity and keep v1 on the home network or Tailscale        | D20, D21                          |
 | [0008](decisions/0008-domains-are-folders-in-one-schema.md)                                   | Keep each domain as a folder in one Convex schema                              | D22                               |
 | [0009](decisions/0009-command-list-generates-every-entry-point.md)                            | Declare each action once and generate its Convex function and clients          | D23                               |
@@ -184,7 +184,7 @@ Each row is the ADR's own title.
 | [0017](decisions/0017-one-group-session-feature.md)                                           | Build group sessions once in the core and let each domain supply its state     | D34                               |
 | [0018](decisions/0018-connect-remote-control-and-casting.md)                                  | Put remote control and casting in the core and keep third-party support small  | D35, D44                          |
 | [0019](decisions/0019-synced-settings-and-core-downloads.md)                                  | Mark which settings sync per user and run downloads as a core service          | D36, D37                          |
-| [0020](decisions/0020-branded-clients-with-one-sign-in.md)                                    | Ship a branded client per product on a shared base, with one sign-in           | D38, D39, D40                     |
+| [0020](decisions/0020-branded-clients-with-one-sign-in.md)                                    | Ship a branded client per product on a shared base, with one sign-in           | D38, D39, D40, D48                |
 | [0021](decisions/0021-one-cli-and-one-agent-skill.md)                                         | Ship one `media` CLI and one agent skill with a reference per domain           | D41                               |
 | [0022](decisions/0022-agent-workflow-tracking-and-copyleft.md)                                | Keep movies' agent workflow, one Linear team, and a merged copyleft list       | D11, D42, D43                     |
 | [0023](decisions/0023-run-the-core-in-its-own-deployment-until-the-movies-port.md)            | Run the core in its own Convex deployment until the movies port                | D04, D14, D22                     |
@@ -202,9 +202,6 @@ an ADR.
 - **The exact shared UI split.** Each product has its own look on a shared shadcn base and type
   scale. Which components are shared and which belong to one product is decided in Paper during
   the ports (ADR 0020).
-- **What the shared iOS keychain stores.** Each app mints its own session from the shared
-  keychain (ADR 0020). The register does not say which credential the keychain holds or what
-  signing out of one app does to the other. The movies port settles it with `@media/mobile-core`.
 
 ## Appendix A. Where the core runs until the movies port
 

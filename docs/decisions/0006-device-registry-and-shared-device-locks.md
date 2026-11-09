@@ -1,8 +1,9 @@
 # 0006. Register every device and lock adult tiles on shared devices
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the registry and locks as built,
-  2026-11-07 with the phase 3 review fixes, and 2026-11-07 with one session per device (D52).
-- Decisions: D18, D19, D35, D47, D52
+  2026-11-07 with the phase 3 review fixes, 2026-11-07 with one session per device (D52), and
+  2026-11-09 with device grants (D48, D59).
+- Decisions: D18, D19, D35, D40, D47, D48, D52, D59
 
 ## Context
 
@@ -223,3 +224,108 @@ Rejected in this build:
   look-alike digits passed as 14 units and then signed in with the 7-digit code they hash as.
 - Refusing a typed password over 256 NFKC characters at sign-in. A password set under the 256-unit
   rule can normalize longer, such as 100 `ﬃ` ligatures, and its person could no longer sign in.
+
+## Device grants as built (amended 2026-11-09)
+
+A phone or tablet runs several of the person's apps, and each app is its own device here (ADR 0020).
+D48 gives the phone one grant for the person. Its shared keychain keeps the grant, and each app
+exchanges it for a session of the app's own. The code is in
+`packages/platform/convex/core/devices/deviceGrants.ts`. The plan named the module `grants.ts`, but
+the command generator refuses that name, because `media auth grants` is already the CLI path of
+`core.permissions.grants`. The CLI commands are `media auth device-grants issue`, `list`, and
+`revoke`.
+
+### The grant
+
+- A grant is a `deviceGrants` row and a code, `dg_<grantId>.<secret>`, that the phone keeps. The
+  row holds the person, a name such as "Aiko's iPhone", the SHA-256 of the secret, and a
+  generation. The core never stores the code and never logs it.
+- The generation is the person's `sessionGeneration` when the grant was issued or last confirmed.
+  A grant mints sessions only while the two are equal.
+- A grant has no expiry. Like a device code, it lasts until it is revoked or its person signs out
+  everywhere.
+
+### Issuing
+
+- `core.devices.deviceGrants.issue` takes the device's name and, when the keychain holds one, the
+  stored grant. Only a session that a password opened may issue, so an exchanged session, an API
+  key, a device sign-in, and a tile cannot. Otherwise a credential could mint a grant that outlives
+  its own revocation, and sessions from that grant would outlive it too.
+- If the stored grant is the caller's own, issuing confirms it. The answer is the same grant, and
+  its generation becomes the person's current one, so a password typed on the phone brings back a
+  grant that signing out everywhere had stopped. Any other value, or none, gets a new grant. That
+  keeps one grant per person per phone. A person may issue 20 grants an hour.
+- Issuing puts the caller's session in the grant's family (`authSessions.grant`), moving it out of
+  any family it was in. Revoking the grant then signs out the app that issued it too. A session
+  that issues from a laptop joins that grant's family the same way, so issue only on the phone.
+
+### The exchange
+
+- The `grant` sign-in provider takes the user id from the keychain and the grant. It opens a
+  session of kind `grant`. That session holds the person's role scopes, as a password session does,
+  and carries the person's `sessionGeneration`.
+- The app then enrolls with its own device code through `core.devices.registry.enroll`. So each app
+  shows as its own device, and an app that exchanges again replaces its earlier session on its
+  device, because a device holds one session. The provider cannot hand back a new device code,
+  so enrolling stays the one place that registers a device.
+- Every refused exchange gets the same `unauthenticated` message, "This device grant does not work;
+  sign in with your password". That covers a malformed grant, an unknown one, a tampered one,
+  another person's, a revoked one, and a stopped one.
+- An exchange is a hash, an index read, and an insert, with no Scrypt. On an idle dev stack, two
+  runs of 100 sign-in round trips each, interleaved in blocks of 10, had medians of 39 and 42 ms
+  for the exchange, against 165 and 175 ms for trunk's password sign-in.
+
+### Ending sessions
+
+| Event                                                              | Ends                                     | The grant                    |
+| ------------------------------------------------------------------ | ---------------------------------------- | ---------------------------- |
+| `core.devices.deviceGrants.revoke`                                 | every session in the grant's family      | deleted                      |
+| `core.auth.sessions.end`, or a later join on the app's device      | that one app's session                   | stays and still mints        |
+| `endAll`, a password change or reset, a role change taking a scope | every session of the person's generation | stays, stopped until confirm |
+| A device mode change or removal                                    | the sessions on that device              | stays and still mints        |
+
+- Revoking deletes the grant and its family in one transaction. A grant keeps at most 16 sessions
+  (`GRANT_SESSIONS_MAX`), so the delete always fits one call. A session past that ends the oldest
+  session on no device first, which an app that exchanged and never enrolled left behind, so an
+  app that keeps exchanging signs no other app out. As with an API key, the refresh tokens are left
+  to expire and be swept.
+- A session in the family can still make an API key or approve a device sign-in, as a password
+  session can. Those credentials are their own, and revoking the grant leaves them, just as ending
+  a password session leaves the keys it made. Signing out everywhere (`core.auth.sessions.endAll`)
+  ends the device sign-ins, since they carry the person's `sessionGeneration`, but leaves API keys
+  and their sessions, which follow `keyGeneration`. `core.auth.apiKeys.endAll`, a password reset,
+  and a role change that takes a scope away end the keys.
+- D59: an app whose session the core refuses while the keychain still holds a grant asks for the
+  password. It does not exchange again. The password sign-in then confirms the stored grant. An
+  app exchanges silently only when it has no session of its own yet, as on first launch. The core
+  cannot tell a refused app from a new one, so this rule lives in the app
+  (`@media/mobile-core`, p4-mobile-movies). The core's own guarantees are that a revoked grant
+  never mints again, and that a stopped one mints only after a password sign-in on the phone.
+
+### Listing
+
+`core.devices.deviceGrants.list` shows the person's grants, newest first. Each row says whether
+the grant still signs apps in and lists the devices that hold a live session from it. A grant costs
+at most 33 reads, its row and each session with its device, so a page holds at most 29 grants.
+
+### Actions added to `can`
+
+| Action   | On          | Needs                                                              |
+| -------- | ----------- | ------------------------------------------------------------------ |
+| `issue`  | deviceGrant | the grant's own person, `account`, and a session a password opened |
+| `list`   | deviceGrant | the grant's own person and `account`                               |
+| `revoke` | deviceGrant | the grant's own person and `account`                               |
+
+Another person's grant is `hidden`, admins included, as an API key is. An admin who must cut a
+person off resets their password, which stops every grant they hold. Restricting a member into a
+kid stops no grant, as it ends no session (ADR 0005); the restrictions apply on every call.
+
+### Rejected
+
+- One session shared by every app on the phone. Each app shows as its own device (ADR 0020).
+- Letting any session with `account` issue. A grant issued from an exchanged session would let
+  the phone's apps sign in again after their own grant was revoked.
+- Reading the grant on every call to decide whether a session is live. Revoking deletes the family
+  at once instead, as revoking an API key does, so a live call reads nothing more.
+- Binding the device inside the exchange. The provider can return only tokens, so a new app could
+  never learn its device code.

@@ -410,6 +410,7 @@ export const generatedCommands = [
         Schema.Literal("deviceCode"),
         Schema.Literal("tile"),
         Schema.Literal("guest"),
+        Schema.Literal("grant"),
       ]),
       scopes: Schema.Array(
         Schema.Union([
@@ -662,6 +663,84 @@ export const generatedCommands = [
       expiresAt: Schema.Finite,
     }),
     method: (platform) => platform.core.devices.approvals.request,
+  }),
+  coreCommand({
+    name: "core.devices.deviceGrants.issue",
+    path: ["auth", "device-grants", "issue"],
+    kind: "action",
+    scope: "account",
+    refusesKeys: true,
+    summary:
+      "Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it",
+    secrets: [{ field: "grant", variable: "MEDIA_ARG_GRANT", optional: true }],
+    paginated: false,
+    args: Schema.Struct({ name: Schema.String, grant: Schema.optionalKey(Schema.String) }),
+    result: Schema.Struct({
+      grantId: Schema.String.pipe(Schema.brand("Id<deviceGrants>")),
+      grant: Schema.String,
+    }),
+    method: (platform) => platform.core.devices.deviceGrants.issue,
+  }),
+  coreCommand({
+    name: "core.devices.deviceGrants.list",
+    path: ["auth", "device-grants", "list"],
+    kind: "query",
+    scope: "account",
+    refusesKeys: false,
+    summary:
+      "List your device grants, newest first, with whether each still signs apps in and the apps signed in with it",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          grantId: Schema.String.pipe(Schema.brand("Id<deviceGrants>")),
+          name: Schema.String,
+          issuedAt: Schema.Finite,
+          signsIn: Schema.Boolean,
+          devices: Schema.Array(
+            Schema.Struct({
+              deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+              name: Schema.String,
+            }),
+          ),
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.core.devices.deviceGrants.list,
+  }),
+  coreCommand({
+    name: "core.devices.deviceGrants.revoke",
+    path: ["auth", "device-grants", "revoke"],
+    kind: "mutation",
+    scope: "account",
+    refusesKeys: false,
+    summary: "Revoke one of your device grants and sign out every app it signed in",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({ grantId: Schema.String.pipe(Schema.brand("Id<deviceGrants>")) }),
+    result: Schema.Null,
+    method: (platform) => platform.core.devices.deviceGrants.revoke,
   }),
   coreCommand({
     name: "core.devices.picker.show",

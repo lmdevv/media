@@ -182,7 +182,8 @@ export type Because =
   | "revoked"
   | "expired"
   | "not-shared"
-  | "api-key";
+  | "api-key"
+  | "needs-password";
 
 /**
  * An access decision. `hidden` answers as if the thing did not exist, so a private thing stays
@@ -1160,6 +1161,53 @@ const decideShareRecord = (
     : hidden("not-yours");
 };
 
+/**
+ * What can be done with a device grant (D48, ADR 0006). `issue` makes or confirms the grant of
+ * the device the caller signs in on, `list` shows the caller's grants, and `revoke` ends one.
+ */
+export const grantActions = ["issue", "list", "revoke"] as const;
+
+export type GrantAction = (typeof grantActions)[number];
+
+/** A device grant as `can` sees it: whose it is, or whose it will be while it is being issued. */
+export interface GrantResource {
+  readonly on: "deviceGrant";
+  readonly owner: Id<"users">;
+}
+
+interface GrantRule {
+  /**
+   * `password`: only a session a password opened, so no grant, key, or device sign-in mints a
+   * grant that outlives it. `any`: any session with `account`.
+   */
+  readonly session: "password" | "any";
+}
+
+type GrantRules = { readonly [A in GrantAction]: GrantRule };
+
+const grantRules: GrantRules = {
+  issue: { session: "password" },
+  list: { session: "any" },
+  revoke: { session: "any" },
+};
+
+/** A grant is its person's own: nobody else lists or revokes it, admins included. */
+const decideGrant = (principal: Principal, rule: GrantRule, grant: GrantResource): Decision => {
+  if (principal.kind === "service") return hidden("service");
+
+  if (principal.userId !== grant.owner) return hidden("not-yours");
+
+  if (principal.role === "guest") return forbidden("guest");
+
+  if (!principal.scopes.includes("account")) return forbidden("scope");
+
+  if (rule.session === "password" && principal.sessionKind !== "password") {
+    return forbidden(principal.sessionKind === "apiKey" ? "api-key" : "needs-password");
+  }
+
+  return ALLOWED;
+};
+
 const isContentAction = (action: string): action is ContentAction =>
   contentActions.some((known) => known === action);
 
@@ -1192,6 +1240,9 @@ const isShareAction = (action: string): action is ShareAction =>
 
 const isShareRecordAction = (action: string): action is ShareRecordAction =>
   shareRecordActions.some((known) => known === action);
+
+const isGrantAction = (action: string): action is GrantAction =>
+  grantActions.some((known) => known === action);
 
 /**
  * The one access decision (ADR 0005): role, credential scopes, grants, and restrictions, from
@@ -1237,6 +1288,7 @@ export function can(
   action: ShareRecordAction,
   resource: ShareRecordResource,
 ): Decision;
+export function can(principal: Principal, action: GrantAction, resource: GrantResource): Decision;
 export function can(
   principal: Principal,
   action:
@@ -1250,7 +1302,8 @@ export function can(
     | DownloadAction
     | TogetherAction
     | ShareAction
-    | ShareRecordAction,
+    | ShareRecordAction
+    | GrantAction,
   resource:
     | ContentResource
     | AccountResource
@@ -1262,7 +1315,8 @@ export function can(
     | DownloadResource
     | TogetherResource
     | ShareResource
-    | ShareRecordResource,
+    | ShareRecordResource
+    | GrantResource,
 ): Decision {
   if (resource.on === "content" && isContentAction(action)) {
     return decideContent(principal, action, resource);
@@ -1308,6 +1362,10 @@ export function can(
     return decideShareRecord(principal, shareRecordRules[action], resource);
   }
 
+  if (resource.on === "deviceGrant" && isGrantAction(action)) {
+    return decideGrant(principal, grantRules[action], resource);
+  }
+
   throw new Error(`${action} is not an action on ${resource.on}`);
 }
 
@@ -1319,9 +1377,9 @@ const allowedScopes = (user: Doc<"users">): ReadonlyArray<CredentialScope> =>
   user.kind === "service" ? NO_SCOPES : roleScopes[user.role];
 
 /**
- * The credential scopes a session holds now: a password or guest session holds its role's, a
- * tile on a shared device only its role's content scopes, and an API key or a device sign-in the
- * ones it was given that its role still allows. A service holds none.
+ * The credential scopes a session holds now: a password, device grant, or guest session holds its
+ * role's, a tile on a shared device only its role's content scopes, and an API key or a device
+ * sign-in the ones it was given that its role still allows. A service holds none.
  */
 export const heldScopes = (
   session: Doc<"authSessions">,
@@ -1329,7 +1387,7 @@ export const heldScopes = (
 ): Array<CredentialScope> => {
   const allowed = allowedScopes(user);
 
-  if (session.kind === "password") return [...allowed];
+  if (session.kind === "password" || session.kind === "grant") return [...allowed];
 
   if (session.kind === "tile") return allowed.filter((scope) => DOMAIN_SCOPES.includes(scope));
 

@@ -23,6 +23,7 @@ const currentResult = v.object({
     v.literal("deviceCode"),
     v.literal("tile"),
     v.literal("guest"),
+    v.literal("grant"),
   ),
   scopes: v.array(
     v.union(

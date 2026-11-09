@@ -13,6 +13,7 @@ import type { Refs as core_auth_sessions } from "./core/auth/sessions";
 import type { Refs as core_connect_player } from "./core/connect/player";
 import type { Refs as core_connect_targets } from "./core/connect/targets";
 import type { Refs as core_devices_approvals } from "./core/devices/approvals";
+import type { Refs as core_devices_deviceGrants } from "./core/devices/deviceGrants";
 import type { Refs as core_devices_picker } from "./core/devices/picker";
 import type { Refs as core_devices_registry } from "./core/devices/registry";
 import type { Refs as core_devices_tiles } from "./core/devices/tiles";
@@ -87,6 +88,12 @@ export const commandRefs = {
     .pending satisfies core_devices_approvals["pending"],
   "core.devices.approvals.request": api.core.devices.approvals
     .request satisfies core_devices_approvals["request"],
+  "core.devices.deviceGrants.issue": api.core.devices.deviceGrants
+    .issue satisfies core_devices_deviceGrants["issue"],
+  "core.devices.deviceGrants.list": api.core.devices.deviceGrants
+    .list satisfies core_devices_deviceGrants["list"],
+  "core.devices.deviceGrants.revoke": api.core.devices.deviceGrants
+    .revoke satisfies core_devices_deviceGrants["revoke"],
   "core.devices.picker.show": api.core.devices.picker.show satisfies core_devices_picker["show"],
   "core.devices.registry.enroll": api.core.devices.registry
     .enroll satisfies core_devices_registry["enroll"],
