@@ -4,6 +4,7 @@ import type { DatabaseReader } from "../../_generated/server";
 import { callerUser } from "../auth/caller";
 import type { Caller } from "../auth/caller";
 import { fail } from "../lib/errors";
+import { printableName } from "../lib/names";
 import { can } from "../permissions/policy";
 import { boundDevice } from "../sessions";
 import { deviceFor, playerOf, requestOf } from "./facts";
@@ -26,9 +27,11 @@ const deviceOfCaller = async (db: DatabaseReader, caller: Caller): Promise<Doc<"
 };
 
 const receiverName = (name: string | null): string | null => {
-  const trimmed = name?.trim() ?? "";
+  const printable = name === null ? null : printableName(name);
 
-  return trimmed === "" ? null : Array.from(trimmed).slice(0, RECEIVER_MAX).join("").trimEnd();
+  return printable === null
+    ? null
+    : Array.from(printable).slice(0, RECEIVER_MAX).join("").trimEnd();
 };
 
 const parseOutput = (output: Output): Output =>

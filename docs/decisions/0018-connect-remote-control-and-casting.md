@@ -184,8 +184,10 @@ as a device that does not exist. `list` shows only the devices `control` would a
 
 A Cast or AirPlay receiver is the output of the device that drives it: `{ kind: "cast",
 receiver }` or `{ kind: "airplay", receiver }`. The name is display text the sender reads off
-the receiver, so it never refuses a report: the core trims it, cuts it to 64 code points, and keeps
-a blank one as null, as Safari leaves some AirPlay receivers. The receiver cannot sign in or run our code, so it is not a device. It shows in `list`
+the receiver, so it never refuses a report. Every controller sees it, so it follows the rule guest
+names follow (ADR 0007): NFKC form, trimmed, cut to 64 code points, and null when it is blank, as
+Safari leaves some AirPlay receivers, or when it holds a control or bidirectional character or no
+visible one. The receiver cannot sign in or run our code, so it is not a device. It shows in `list`
 under the driving device's name and is controlled under that device's rule. The driving device
 applies requests through the Cast or AirPlay sender, as it applies them to its own player.
 

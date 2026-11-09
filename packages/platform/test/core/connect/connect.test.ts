@@ -410,6 +410,30 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     });
   });
 
+  it("names a receiver by the rule guest names follow, and drops a name that breaks it", async () => {
+    if (stack === undefined) return;
+    const lucia = await member(stack, "lucia");
+    const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
+
+    const shown = async (receiver: string) => {
+      await report(laptop.signedIn, { ...playing(0), output: { kind: "cast", receiver } });
+
+      return targetIn(await targets(lucia.signedIn), laptop.deviceId)?.output;
+    };
+
+    expect(await shown("Den \u202Evt\u202C")).toEqual({ kind: "cast", receiver: null });
+    expect(await shown("Den\u0007")).toEqual({ kind: "cast", receiver: null });
+    expect(await shown("\u200B\u200B")).toEqual({ kind: "cast", receiver: null });
+    expect(await shown("\uFF2C\uFF49\uFF56\uFF49\uFF4E\uFF47 Room")).toEqual({
+      kind: "cast",
+      receiver: "Living Room",
+    });
+    expect(await shown("\u{1F468}\u200D\u{1F469}\u200D\u{1F467} TV")).toEqual({
+      kind: "cast",
+      receiver: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467} TV",
+    });
+  });
+
   it("lists a live device however many ended sessions a person has elsewhere", async () => {
     if (stack === undefined) return;
     const lucia = await member(stack, "lucia");
