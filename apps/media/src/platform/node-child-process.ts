@@ -1,29 +1,44 @@
+/**
+ * Starts a child process that is signalled only through Node's `ChildProcess` handle. Node drops
+ * the handle when it reaps the process, on the same thread, so a signal after that goes nowhere:
+ * the server never signals a process id or a process group id that may already belong to someone
+ * else. Effect's child process spawner does: it signals the numeric process group id when a run
+ * fails or its scope closes, even after the process was reaped. The child stays in the server's
+ * process group. This Effect-free leaf reports through callbacks and promises; `scoped-process.ts`
+ * wraps it for Effect callers.
+ */
 import { spawn } from "node:child_process";
 import { setPriority } from "node:os";
 
-/** How a tool's process ended: its exit code, or the signal that ended it. */
-interface ToolExit {
+/** How a process ended: its exit code, or the signal that ended it. */
+interface ChildExit {
   readonly code: number | null;
   readonly signal: NodeJS.Signals | null;
 }
 
-/** A started tool's process. */
-export interface ToolProcess {
+/** A signal the server sends its own children. */
+type ChildSignal = "SIGTERM" | "SIGKILL" | "SIGSTOP" | "SIGCONT";
+
+/** A started child process. */
+export interface RunningChild {
   /** Resolves when Node reaps the process. */
-  readonly exited: Promise<ToolExit>;
+  readonly exited: Promise<ChildExit>;
   /** Resolves once the process has exited and its output pipes have closed. */
   readonly closed: Promise<void>;
   readonly stdout: () => string;
   /** The last `stderrTail` characters of standard error. */
   readonly stderrTail: () => string;
   /** Signals the process until Node reaps it; afterwards it sends nothing. */
-  readonly signal: (signal: "SIGKILL" | "SIGSTOP" | "SIGCONT") => void;
+  readonly signal: (signal: ChildSignal) => void;
 }
 
-interface StartOptions {
+/** How to start a child process. */
+export interface ChildOptions {
+  /** The child's whole environment; nothing is inherited. */
   readonly env: Readonly<Record<string, string>>;
+  readonly cwd?: string;
   /** Run at the lowest CPU priority. */
-  readonly background: boolean;
+  readonly background?: boolean;
   /** How many trailing characters of standard error to keep. */
   readonly stderrTail: number;
 }
@@ -32,33 +47,32 @@ interface StartOptions {
 const LOWEST_PRIORITY = 19;
 
 /**
- * Starts a tool's process and calls `onStarted` or `onFailed` once. Returns a function that kills
- * a process whose start is no longer wanted.
- *
- * Effect's child process spawner signals the numeric process group id when a run fails or its
- * scope closes, even after Node has reaped the process and an unrelated group may have taken the
- * id. Here the tool stays in the server's process group and is signalled only through Node's
- * `ChildProcess`, which drops its process handle when it reaps the process, on the same thread,
- * so a signal after that goes nowhere.
+ * Starts `command` with standard input closed and calls `onStarted` or `onFailed` once. Returns a
+ * function that kills a process whose start is no longer wanted.
  */
-export const startToolProcess = (
+export const startChild = (
   command: string,
   args: ReadonlyArray<string>,
-  options: StartOptions,
-  onStarted: (process: ToolProcess) => void,
+  options: ChildOptions,
+  onStarted: (child: RunningChild) => void,
   onFailed: (error: Error) => void,
 ): (() => void) => {
-  const child = spawn(command, args, { env: options.env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(command, args, {
+    env: options.env,
+    cwd: options.cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
   let stdout = "";
   let stderr = "";
 
   // Node reaps children only from the event loop, which has not run since the spawn, so the pid
-  // is still the tool's. Lowering a child's priority needs no privileges.
-  if (options.background && child.pid !== undefined) {
+  // is still the child's. Lowering a child's priority needs no privileges.
+  if (options.background === true && child.pid !== undefined) {
     try {
       setPriority(child.pid, LOWEST_PRIORITY);
     } catch {
-      // A platform that refuses runs the tool at normal priority.
+      // A platform that refuses runs the child at normal priority.
     }
   }
 
@@ -71,7 +85,7 @@ export const startToolProcess = (
     stderr = (stderr + chunk).slice(-options.stderrTail);
   });
 
-  const exited = new Promise<ToolExit>((resolve) => {
+  const exited = new Promise<ChildExit>((resolve) => {
     child.on("exit", (code, signal) => {
       resolve({ code, signal });
     });

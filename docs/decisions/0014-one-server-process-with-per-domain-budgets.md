@@ -105,13 +105,15 @@ mount media read-only.
   then are they deleted. A replaced stream ends the same way. The server counts runs whose ffmpeg
   has not exited, closed streams' runs included, for an operator to see a stuck one.
   Shutting down closes every stream at once, so it waits at most 3 seconds in all.
-- The server signals a tool only through Node's handle for the process it spawned, to stop it
-  or to pause and resume it. Node drops that handle when it reaps the process, on the same thread,
-  so a tool that has exited is never signalled, and the server never signals a process id or a
-  process group id. Tools stay in the server's process group: ffmpeg and ffprobe do not fork, so
-  there is no group to clean up. Effect's child process spawner is not used for tools, because it
-  signals the tool's numeric process group id when a run fails or its scope closes, even after the
-  tool was reaped and an unrelated group may have taken the id.
+- The server signals its child processes, the tools and the backups' Convex CLI, only through
+  Node's handle for the process it spawned, to stop them or to pause and resume a tool. Node drops
+  that handle when it reaps the process, on the same thread, so a child that has exited is never
+  signalled, and no server path signals a process id or a process group id. Children stay in the
+  server's process group, and a stop reaches only the child itself. That is enough: ffmpeg and
+  ffprobe start no processes, and the CLI runs its commands in its own process. The server does
+  not use Effect's child process spawner, because it signals the child's numeric process group id
+  when a run fails or its scope closes, even after the child was reaped and an unrelated group may
+  have taken the id.
 - On Linux the server starts every tool through util-linux `setpriv --pdeathsig KILL` and then a
   `/bin/sh` check that its parent is still the server, after which the shell becomes the tool
   under the same pid. The kernel sends no death signal for a parent that died before the signal

@@ -183,6 +183,8 @@ file at a time because each starts the service on the stack's media port.
 Effect 4.0.3 marks its HTTP, platform, process, observability, and some core modules
 `@stability unstable`, and the lint preset rejects unstable APIs. `tsconfig.json` allows exactly
 the modules this service depends on (`allowedUnstableApis`): the architecture chose Effect
-HttpApi and the lint rules require Effect's `FileSystem` and `ChildProcessSpawner`.
+HttpApi and the lint rules require Effect's `FileSystem`. Tests drive processes through
+`ChildProcessSpawner`; the service starts its own children through `platform/scoped-process.ts`,
+which never signals a process id (ADR 0014).
 `@media/contracts` allows only `effect/http-api`, for the HttpApi definition in `media-api.ts`;
 the SDK uses none and decodes the same schemas from `media-playback.ts` over `fetch`.

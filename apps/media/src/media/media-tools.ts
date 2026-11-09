@@ -1,7 +1,7 @@
 import { Context, Duration, Effect, Layer, type Scope, Schema } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
-import { startToolProcess, type ToolProcess } from "./tool-process.ts";
+import * as ScopedProcess from "../platform/scoped-process.ts";
 
 /** A media tool could not start, or exited unsuccessfully. */
 export class MediaToolFailed extends Schema.TaggedError<MediaToolFailed>()("MediaToolFailed", {
@@ -117,37 +117,6 @@ export const toolEnvironment = (
     }),
   );
 
-/** Starts a tool's process in Effect; see `startToolProcess`. */
-const startProcess = (
-  command: string,
-  args: ReadonlyArray<string>,
-  env: Record<string, string>,
-  background: boolean,
-) =>
-  Effect.callback<ToolProcess, Error>((resume) => {
-    const abandon = startToolProcess(
-      command,
-      args,
-      { env, background, stderrTail: STDERR_TAIL },
-      (started) => {
-        resume(Effect.succeed(started));
-      },
-      (error) => {
-        resume(Effect.fail(error));
-      },
-    );
-
-    return Effect.sync(abandon);
-  });
-
-/** Kills a tool that is still running, then waits until Node has reaped it. */
-const stopProcess = (tool: ToolProcess) =>
-  Effect.suspend(() => {
-    tool.signal("SIGKILL");
-
-    return Effect.promise(() => tool.exited);
-  });
-
 const make = Effect.gen(function* () {
   const config = yield* MediaConfig.Service;
   const env = toolEnvironment(process.env);
@@ -162,13 +131,19 @@ const make = Effect.gen(function* () {
 
     const program = tool === "ffmpeg" ? config.ffmpegPath : config.ffprobePath;
 
-    const running = yield* Effect.acquireRelease(
-      (process.platform === "linux"
-        ? startProcess("setpriv", dyingWithServer(program, args), env, background)
-        : startProcess(program, args, env, background)
-      ).pipe(Effect.mapError((cause) => failed(null, "", cause))),
-      stopProcess,
-    );
+    const options = {
+      env,
+      background,
+      stderrTail: STDERR_TAIL,
+      stopSignal: "SIGKILL",
+      forceKillAfter: "2 seconds",
+    } as const;
+
+    const running = yield* (
+      process.platform === "linux"
+        ? ScopedProcess.start("setpriv", dyingWithServer(program, args), options)
+        : ScopedProcess.start(program, args, options)
+    ).pipe(Effect.mapError((cause) => failed(null, "", cause)));
 
     const exit = Effect.gen(function* () {
       const { code, signal } = yield* Effect.promise(() => running.exited);
