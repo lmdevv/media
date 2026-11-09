@@ -35,6 +35,12 @@ export interface StreamSeeker {
 /** `HAVE_CURRENT_DATA`: the element has the frame at its position. */
 const HAVE_CURRENT_DATA = 2;
 
+/**
+ * How far from its target a finished seek may sit and count as landed: playback may move on, or
+ * the browser round the time, before `seeked` dispatches. A lost start seek lands at 0.
+ */
+const LANDED_TOLERANCE_SECONDS = 0.5;
+
 /** `HAVE_FUTURE_DATA`: enough data to play forward from the current position. */
 const HAVE_FUTURE_DATA = 3;
 
@@ -148,7 +154,7 @@ export class MediaElementPlayer implements PlayerPort {
 
     const atRisk = element.seeking
       ? element.readyState < HAVE_CURRENT_DATA
-      : element.currentTime !== target;
+      : Math.abs(element.currentTime - target) > LANDED_TOLERANCE_SECONDS;
 
     if (atRisk) element.currentTime = target;
   }

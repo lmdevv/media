@@ -312,9 +312,10 @@ const EDGE_WINDOW_SECONDS = 0.05;
 
 /**
  * How long the page stays busy once the held segment is buffered, before it pauses. Chrome
- * finishes the seek about 15 ms after the append, so it lands before the pause event dispatches.
+ * finishes the seek about 15 ms after the append unloaded, so it lands before the pause event
+ * dispatches, with room for a loaded runner.
  */
-const BUSY_MAIN_THREAD_MS = 60;
+const BUSY_MAIN_THREAD_MS = 250;
 
 interface PlannedSegment {
   readonly index: number;

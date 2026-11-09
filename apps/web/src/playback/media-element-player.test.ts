@@ -183,7 +183,7 @@ describe("MediaElementPlayer", () => {
     ]);
   });
 
-  it("leaves a seek alone when the pause comes once a frame shows, or after the seek", async () => {
+  it("leaves a seek alone when the pause comes once a frame shows, after it, or once it landed", async () => {
     const element = new FakeMediaElement();
     const player = new MediaElementPlayer(element);
 
@@ -197,7 +197,15 @@ describe("MediaElementPlayer", () => {
     element.readyState = 1;
     player.pause();
 
-    expect(element.seeks).toStrictEqual([{ seconds: 11.9, paused: false }]);
+    await player.play();
+    element.startSeek(30);
+    element.land(30.04);
+    player.pause();
+
+    expect(element.seeks).toStrictEqual([
+      { seconds: 11.9, paused: false },
+      { seconds: 30, paused: false },
+    ]);
   });
 
   it("forgets a seek its stream dropped, so a pause on the next stream stays put", async () => {
