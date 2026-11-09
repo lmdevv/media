@@ -442,12 +442,11 @@ const stopWaitingAfter =
   <A, E, R>(request: Effect.Effect<A, E, R>) =>
     request.pipe(Effect.timeoutOrElse({ duration: wait, orElse: () => Effect.fail(late()) }));
 
-const endOfStart = (cause: Cause.Cause<StartError>): PlaybackReporter.StreamEndReason =>
-  Cause.hasInterrupts(cause)
-    ? "abandoned"
-    : Option.exists(Cause.findErrorOption(cause), Predicate.isTagged("TranscodeCapacityReached"))
-      ? "capacity-reached"
-      : "failed";
+const endOfStart = (
+  cause: Cause.Cause<StartError>,
+  lostSlot: boolean,
+): PlaybackReporter.StreamEndReason =>
+  Cause.hasInterrupts(cause) ? "abandoned" : lostSlot ? "capacity-reached" : "failed";
 
 const awaitExited = (run: RunScope) =>
   Effect.interruptible(
@@ -1650,9 +1649,10 @@ const make = Effect.gen(function* () {
     };
 
     const registered = yield* Ref.make(Option.none<Session>());
+    const lostSlot = yield* Ref.make(false);
     const limit = (isEncode(request.plan.video) ? transcodes : copies).limit;
 
-    return yield* startIn(stream, registered, grant, ticket, request).pipe(
+    return yield* startIn(stream, registered, lostSlot, grant, ticket, request).pipe(
       stopWaitingAfter(startWait, () => new TranscodeCapacityReached({ limit })),
       Effect.onExit((exit) =>
         Ref.get(registered).pipe(
@@ -1662,7 +1662,9 @@ const make = Effect.gen(function* () {
               onSome: (session) =>
                 Exit.isSuccess(exit)
                   ? leave(session)
-                  : closeSession(session, endOfStart(exit.cause)),
+                  : Ref.get(lostSlot).pipe(
+                      Effect.flatMap((lost) => closeSession(session, endOfStart(exit.cause, lost))),
+                    ),
             }),
           ),
         ),
@@ -1673,6 +1675,7 @@ const make = Effect.gen(function* () {
   const startIn = Effect.fnUntraced(function* (
     stream: Lifecycle,
     registered: Ref.Ref<Option.Option<Session>>,
+    lostSlot: Ref.Ref<boolean>,
     grant: PlaybackGrant,
     ticket: number,
     request: StartRequest,
@@ -1800,7 +1803,11 @@ const make = Effect.gen(function* () {
       startGeneration(session, run, Option.none(), 1, segmentIndex),
     );
 
-    if (Option.isNone(first)) return yield* refused();
+    if (Option.isNone(first)) {
+      yield* Ref.set(lostSlot, true);
+
+      return yield* refused();
+    }
 
     const generation =
       hardwareOf(plan.mode) !== undefined
