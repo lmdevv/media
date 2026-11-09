@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 
+import { register } from "../../commands/movies/metadata";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import { leaseAnswer, withJobLease } from "../core/jobs/held";
@@ -11,8 +12,17 @@ import { fail } from "../core/lib/errors";
 import { paginate } from "../core/lib/paginate";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
 import { budgetFor, whileBudget, work } from "./budget";
-import { EPISODE_COST, rescannedTitle, rewriteCost, rewriteTitle, upsertEpisode } from "./catalog";
+import { requireTitle } from "./access";
+import {
+  EPISODE_COST,
+  rescannedTitle,
+  rewriteCost,
+  rewriteTitle,
+  upsertEpisode,
+  writeOverrides,
+} from "./catalog";
 import { CREDIT_LIMIT, creditsOf, replaceCredits } from "./credits";
+import { askForMatch, askForRefresh } from "./matching";
 import { moveTotals, sumMoved } from "./totals";
 import {
   artwork,
@@ -378,4 +388,71 @@ export const applyCollection = serverMutation({
 
       return null;
     }),
+});
+
+/** The oldest minimum viewer age a rating may ask for (ADR 0005). */
+const AGE_RATING_MAX = 21;
+
+type Overrides = NonNullable<Doc<"titles">["overrides"]>;
+
+const OVERRIDE_BOUNDS: ReadonlyArray<{
+  readonly broken: (overrides: Overrides) => boolean;
+  readonly message: string;
+}> = [
+  {
+    broken: ({ name }) => name !== undefined && name.trim() === "",
+    message: "Names are not blank",
+  },
+  {
+    broken: ({ sortName }) => sortName !== undefined && sortName.trim() === "",
+    message: "Sort names are not blank",
+  },
+  {
+    broken: ({ year }) => year !== undefined && !Number.isInteger(year),
+    message: "Years are whole numbers",
+  },
+  {
+    broken: ({ ageRating }) =>
+      ageRating !== undefined &&
+      (!Number.isInteger(ageRating) || ageRating < 0 || ageRating > AGE_RATING_MAX),
+    message: `Age ratings run from 0 to ${AGE_RATING_MAX}`,
+  },
+];
+
+/** Edits an admin sets, or `invalid_args` for a blank name, a fractional year, or a bad rating. */
+const checkedOverrides = (overrides: Overrides): Overrides => {
+  const broken = OVERRIDE_BOUNDS.find((bound) => bound.broken(overrides));
+
+  return broken === undefined ? overrides : fail("invalid_args", broken.message);
+};
+
+/**
+ * The metadata commands. Each needs `movies:edit` and an `edit` grant on the title's library,
+ * which `requireTitle` decides through `can()`. A match or a refresh goes through
+ * `askForMatch` and `askForRefresh`, so the match generation fences every metadata job.
+ */
+export const { match, refresh, edit } = register({
+  match: async (ctx, { titleId, provider, providerId }, caller) => {
+    const { title } = await requireTitle(ctx.db, caller, "edit", titleId);
+    const chosen = providerId.trim();
+
+    if (chosen.length === 0) return fail("invalid_args", "Choose a match");
+
+    return { jobId: await askForMatch(ctx, title, { provider, providerId: chosen }) };
+  },
+  refresh: async (ctx, { titleId }, caller) => {
+    const { title } = await requireTitle(ctx.db, caller, "edit", titleId);
+
+    return { jobId: await askForRefresh(ctx, title) };
+  },
+  edit: async (ctx, { titleId, set, clear }, caller) => {
+    const { title } = await requireTitle(ctx.db, caller, "edit", titleId);
+    const merged: Overrides = { ...title.overrides, ...checkedOverrides(set) };
+
+    for (const field of clear ?? []) delete merged[field];
+
+    await writeOverrides(ctx.db, title, merged);
+
+    return null;
+  },
 });

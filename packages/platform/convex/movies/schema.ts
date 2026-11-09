@@ -19,10 +19,10 @@ import {
 } from "./validators";
 
 /**
- * The movies catalog, ported from old movies' tables (ADR 0024). Everything a person keeps, such as
- * progress and their list, is keyed by the person in the movies commands; profiles, rooms,
- * playback sessions, and old movies' identity tables do not come over (D12). A library's title
- * total is its core item count, and its episode and file totals are counters in `totals.ts`.
+ * The movies catalog, ported from old movies' tables (ADR 0024), and what each person keeps of it:
+ * progress and their list, keyed by the person (D12, D36). Profiles, rooms, playback sessions, and
+ * old movies' identity tables do not come over. A library's title total is its core item count,
+ * and its episode and file totals are counters in `totals.ts`.
  */
 export const moviesTables = {
   titles: defineTable({
@@ -159,6 +159,8 @@ export const moviesTables = {
     knownFor: nullable(v.string()),
     /** When a person or metadata job last wrote their details; null until then. */
     detailsFetchedAt: nullable(v.number()),
+    /** When someone last asked for their details, so a page opened again queues no new job. */
+    detailsRequestedAt: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_key", ["personKey"])
@@ -231,4 +233,39 @@ export const moviesTables = {
   })
     .index("by_collection_position", ["collectionId", "position"])
     .index("by_title", ["titleId"]),
+
+  /**
+   * One person's progress through a movie (`episodeId` null) or an episode, and so their watch
+   * history. A row stays when its title is purged; reads skip it, as old movies did.
+   */
+  watchProgress: defineTable({
+    userId: v.id("users"),
+    titleId: v.id("titles"),
+    episodeId: nullable(v.id("episodes")),
+    /** The version last played, which the next start prefers while it is on disk. */
+    fileId: nullable(v.id("mediaFiles")),
+    positionMs: v.number(),
+    durationMs: v.number(),
+    /** Stays set until the person marks the item unwatched, so a rewatch keeps it. */
+    watched: v.boolean(),
+    updatedAt: v.number(),
+    lastPlayedAt: v.number(),
+    /**
+     * The auth session and start time of the playback that last reported, so a report from an
+     * older start on another session cannot drag a newer one's position back.
+     */
+    playSessionId: v.optional(v.id("authSessions")),
+    playStartedAt: v.optional(v.number()),
+  })
+    .index("by_user_item", ["userId", "titleId", "episodeId"])
+    .index("by_user_played", ["userId", "lastPlayedAt"]),
+
+  /** The titles one person keeps on their list. */
+  myList: defineTable({
+    userId: v.id("users"),
+    titleId: v.id("titles"),
+    addedAt: v.number(),
+  })
+    .index("by_user_title", ["userId", "titleId"])
+    .index("by_user_added", ["userId", "addedAt"]),
 };

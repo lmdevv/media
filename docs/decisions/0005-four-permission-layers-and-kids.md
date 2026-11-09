@@ -2,7 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the first role and the `admin` scope,
   and again the same day with the permissions as built. Amended 2026-11-06 with the service
-  principal's scope and key, and 2026-11-09 with the guarded server functions and movies' facts.
+  principal's scope and key, and 2026-11-09 with the guarded server functions, movies' facts,
+  and the movies commands' access.
 - Decisions: D16, D17
 
 ## Context
@@ -323,8 +324,70 @@ Rejected in this build:
 
 - Access declared on each command and checked by the generated wrapper before the handler runs.
   Lists and commands whose action depends on an argument, such as `setRole` (`promote` or
-  `demote`), fit no single declared target. It is worth another look in the movies port, when
-  many commands each open one title.
+  `demote`), fit no single declared target. The movies port looked again and kept loaders; see
+  Movies commands below.
 - A table of each person's effective level per resource. A household grant would write a row per
   person, and a group change a row per resource shared with the group.
 - Admins who see all content, and a `play` or `edit` scope that needs `read`.
+
+## Movies commands (amended 2026-11-09)
+
+The movies commands (ADR 0009) port old movies' actions onto the core. A person's progress,
+history, and list are theirs (D12, D36), in `watchProgress` and `myList` keyed by user.
+
+### Title commands do not declare their target
+
+This build left open whether a command that opens one title should declare it, so the generated
+wrapper checks access before the handler runs. The port keeps loaders, and the generator stays
+as it is.
+
+- Of the 27 movies commands, 10 open one title by its id and decide it. The rest decide many
+  titles (home rows, lists, search, genres, history, the list, collections, people), open a
+  title through another row (an episode, a file, a person, a collection), decide by what a
+  guest's link covers (`movies.play.start` and the play reports), or need no decision
+  (`movies.myList.remove` takes a title off the caller's own list). A declared target fits only
+  the 10.
+- The 10 call one loader, `requireTitle` in `convex/movies/access.ts`, as their first line. It
+  reads the title, its library, the caller's reach, and the library's grants, and asks
+  `can(principal, action, item)` with the title's facts. A title being purged, one in no movies
+  library, and one the caller may not see all fail `not_found` with one message; one they see
+  but may not act on fails `forbidden`. The declaration would save that one line and add a
+  second way to check access.
+- Metadata match, refresh, and edits ask `edit`, so they need `movies:edit` and an `edit` grant
+  on the title's library. The list and marking watched ask `play`, as old movies asked the `play`
+  scope.
+
+### Lists across libraries
+
+- A list across libraries starts from the libraries shared with the caller, through
+  `visiblePage` over the caller's grants, never from every library on the server. It reads the
+  first 64 of them, music ones included, and decides each movies library once through `can()`;
+  each title then goes through that library's gate with its facts. A library past the 64th still
+  lists by name.
+- `movies.titles.list` pages one library's index with `paginate`, a library at a time in id
+  order. Convex runs one paginated query per call, so a page never crosses libraries: its cursor
+  names the library and Convex's cursor inside it, and a library that ends hands the next
+  library's start to the next page. A page reloaded to its end cursor reads the same range again.
+  With a library named, the list pages only that library after `requireItems` decides it.
+- Restrictions and filters drop titles after the page is read, so a page can come back short or
+  empty while its cursor goes on. A kind filter has no index of its own and reads the library's
+  rows.
+- Rows a person keeps (history, the list, continue watching) decide their titles with a
+  per-call `titleViewer`, which reads each library and its grants at most once. A row whose
+  title is gone or being purged is skipped, as old movies skipped it; the purge leaves those
+  rows behind.
+
+### Playback
+
+- `movies.play.start` decides one file. A person in the household needs `play` on the title
+  through their grants, decided before any file is chosen. A guest's link decides instead,
+  through `playableBy` in `permissions/items.ts`: a link to the title covers each of its files,
+  one to an episode that episode's files, and one to a file that file (ADR 0007). It issues a
+  personal `play` ticket for the file, which names the caller's session and lasts at most 6 h
+  (ADR 0011).
+- Old movies' playback sessions do not come over. A start answers `startedAt`, each report
+  carries it, and the progress row keeps the session and start of the playback that last
+  reported. A report from an older start on another session is stale and changes nothing, as old
+  movies' reports from an older playback session were.
+- Marking a whole show watched or unwatched writes a page of up to 500 episodes in its call and
+  schedules the rest, a page a call, inside the call budget of ADR 0013.

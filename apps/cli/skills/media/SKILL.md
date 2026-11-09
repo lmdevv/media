@@ -12,16 +12,17 @@ by default.
 
 Read the one file that covers the task, and no other.
 
-| Task                                                                                                                                                                                                      | Read                 |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| Movies and shows: search, play, progress, watch rooms, libraries, scans, metadata, imports, backups, playback diagnostics, and the movies server's own sign-in, profiles, and keys                        | `movies.md`          |
-| The core: sign-in, sessions, API keys, device sign-ins, your username and password, users, roles, invites, reset links, groups, restrictions, downloads kept on a device, group sessions, and guest links | `references/core.md` |
-| Music                                                                                                                                                                                                     | No commands yet      |
+| Task                                                                                                                                                                                                      | Read                   |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| Movies and shows on the core (`media movies`): home rows, titles, search, people, collections, continue watching, history, your list, starting playback, and metadata edits                               | `references/movies.md` |
+| The old movies server (top-level words such as `media search` and `media play`): watch rooms, libraries, scans, imports, backups, playback diagnostics, and its own sign-in, profiles, and keys           | `movies.md`            |
+| The core: sign-in, sessions, API keys, device sign-ins, your username and password, users, roles, invites, reset links, groups, restrictions, downloads kept on a device, group sessions, and guest links | `references/core.md`   |
+| Music                                                                                                                                                                                                     | No commands yet        |
 
 [media] is moving onto one core server. Until the movies port lands there are two servers. The
-movies commands run at the top level (`media search`, `media play`) against the movies server
-and sign in with `media login`. The core's commands sit in the `auth` and `admin` groups and sign
-in with `media auth login`. `media --help` lists both.
+core's movies commands sit in the `movies` group and sign in with `media auth login`, like the
+`auth` and `admin` groups. The old movies server's commands run at the top level (`media search`,
+`media play`) and sign in with `media login`. `media --help` lists both.
 
 ## Install
 
@@ -55,9 +56,11 @@ No install holds a credential; sign in as each reference says.
   (mode 0600). `media auth logout` signs out.
 - **Agents and CI.** Set `MEDIA_CORE_URL` and `MEDIA_CORE_API_KEY` instead of signing in, so the
   key never touches the disk.
-- **Names to words.** `references/core.md` lists each command with its `media` line. Admin
-  commands are in `media admin`, the rest in `media auth`: `core.accounts.users.list` is
-  `media admin users list`. `media call <name> --json '{...}'` runs any command by its name.
+- **Names to words.** Each reference lists its commands with their `media` lines. Admin
+  commands are in `media admin`, the rest of the core's in `media auth`, and movies in
+  `media movies`: `core.accounts.users.list` is `media admin users list`, and
+  `movies.history.continueWatching` is `media movies history continue-watching`.
+  `media call <name> --json '{...}'` runs any command by its name.
 - **Passwords never go on the command line.** An argument named like `password` comes from
   `MEDIA_ARG_<FIELD>` (`newPassword` is `MEDIA_ARG_NEW_PASSWORD`), or from stdin when it is the
   command's only one. A flag or `--json` that carries one is refused.

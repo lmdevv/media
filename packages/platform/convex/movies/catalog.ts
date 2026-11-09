@@ -280,6 +280,28 @@ export const rewriteTitle = async (
   return updated;
 };
 
+/** What an admin set on a title, over what scans wrote. */
+type Overrides = NonNullable<Doc<"titles">["overrides"]>;
+
+/**
+ * Stores an admin's edits on a title and sorts, searches, and lists its genre rows under them.
+ * Edits that change nothing write nothing. A title has at most 256 genre rows, so this stays a
+ * small, bounded write.
+ */
+export const writeOverrides = async (
+  db: Db,
+  title: Doc<"titles">,
+  overrides: Overrides,
+): Promise<Doc<"titles">> => {
+  const named = { ...title, overrides };
+
+  return rewriteTitle(db, title, {
+    overrides,
+    sortKey: sortKeyOf(named),
+    searchText: searchTextOf(named),
+  });
+};
+
 interface Landed<Row> {
   readonly row: Row;
   readonly moved: Moved;

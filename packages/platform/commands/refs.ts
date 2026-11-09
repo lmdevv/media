@@ -28,6 +28,13 @@ import type { Refs as core_restrictions } from "./core/restrictions";
 import type { Refs as core_server } from "./core/server";
 import type { Refs as core_settings } from "./core/settings";
 import type { Refs as core_together } from "./core/together";
+import type { Refs as movies_collections } from "./movies/collections";
+import type { Refs as movies_history } from "./movies/history";
+import type { Refs as movies_metadata } from "./movies/metadata";
+import type { Refs as movies_myList } from "./movies/myList";
+import type { Refs as movies_people } from "./movies/people";
+import type { Refs as movies_play } from "./movies/play";
+import type { Refs as movies_titles } from "./movies/titles";
 
 /**
  * Every command's `api` reference by name. It fails to compile when a command's Convex module is
@@ -170,4 +177,35 @@ export const commandRefs = {
   "core.together.leave": api.core.together.leave satisfies core_together["leave"],
   "core.together.queue": api.core.together.queue satisfies core_together["queue"],
   "core.together.remove": api.core.together.remove satisfies core_together["remove"],
+  "movies.collections.get": api.movies.collections.get satisfies movies_collections["get"],
+  "movies.collections.list": api.movies.collections.list satisfies movies_collections["list"],
+  "movies.history.continueWatching": api.movies.history
+    .continueWatching satisfies movies_history["continueWatching"],
+  "movies.history.list": api.movies.history.list satisfies movies_history["list"],
+  "movies.history.markUnwatched": api.movies.history
+    .markUnwatched satisfies movies_history["markUnwatched"],
+  "movies.history.markWatched": api.movies.history
+    .markWatched satisfies movies_history["markWatched"],
+  "movies.metadata.edit": api.movies.metadata.edit satisfies movies_metadata["edit"],
+  "movies.metadata.match": api.movies.metadata.match satisfies movies_metadata["match"],
+  "movies.metadata.refresh": api.movies.metadata.refresh satisfies movies_metadata["refresh"],
+  "movies.myList.add": api.movies.myList.add satisfies movies_myList["add"],
+  "movies.myList.list": api.movies.myList.list satisfies movies_myList["list"],
+  "movies.myList.remove": api.movies.myList.remove satisfies movies_myList["remove"],
+  "movies.people.get": api.movies.people.get satisfies movies_people["get"],
+  "movies.people.requestDetails": api.movies.people
+    .requestDetails satisfies movies_people["requestDetails"],
+  "movies.people.search": api.movies.people.search satisfies movies_people["search"],
+  "movies.play.report": api.movies.play.report satisfies movies_play["report"],
+  "movies.play.reportOffline": api.movies.play.reportOffline satisfies movies_play["reportOffline"],
+  "movies.play.start": api.movies.play.start satisfies movies_play["start"],
+  "movies.titles.episodes": api.movies.titles.episodes satisfies movies_titles["episodes"],
+  "movies.titles.genres": api.movies.titles.genres satisfies movies_titles["genres"],
+  "movies.titles.get": api.movies.titles.get satisfies movies_titles["get"],
+  "movies.titles.home": api.movies.titles.home satisfies movies_titles["home"],
+  "movies.titles.list": api.movies.titles.list satisfies movies_titles["list"],
+  "movies.titles.nextEpisode": api.movies.titles.nextEpisode satisfies movies_titles["nextEpisode"],
+  "movies.titles.search": api.movies.titles.search satisfies movies_titles["search"],
+  "movies.titles.similar": api.movies.titles.similar satisfies movies_titles["similar"],
+  "movies.titles.versions": api.movies.titles.versions satisfies movies_titles["versions"],
 } as const;

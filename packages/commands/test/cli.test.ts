@@ -26,7 +26,7 @@ const refusalsOf = (declarations: ReadonlyArray<Declaration>): ReadonlyArray<str
 };
 
 describe("CLI placement", () => {
-  it("puts admin-scoped core commands under admin and the rest under auth", () => {
+  it("puts admin-scoped core commands under admin, the rest under auth, and movies under movies", () => {
     expect(
       Object.fromEntries(placed.map((command) => [command.name, cliPath(command).join(" ")])),
     ).toEqual({
@@ -121,6 +121,33 @@ describe("CLI placement", () => {
       "core.together.leave": "auth together leave",
       "core.together.queue": "auth together queue",
       "core.together.remove": "auth together remove",
+      "movies.collections.get": "movies collections get",
+      "movies.collections.list": "movies collections list",
+      "movies.history.continueWatching": "movies history continue-watching",
+      "movies.history.list": "movies history list",
+      "movies.history.markUnwatched": "movies history mark-unwatched",
+      "movies.history.markWatched": "movies history mark-watched",
+      "movies.metadata.edit": "movies metadata edit",
+      "movies.metadata.match": "movies metadata match",
+      "movies.metadata.refresh": "movies metadata refresh",
+      "movies.myList.add": "movies my-list add",
+      "movies.myList.list": "movies my-list list",
+      "movies.myList.remove": "movies my-list remove",
+      "movies.people.get": "movies people get",
+      "movies.people.requestDetails": "movies people request-details",
+      "movies.people.search": "movies people search",
+      "movies.play.report": "movies play report",
+      "movies.play.reportOffline": "movies play report-offline",
+      "movies.play.start": "movies play start",
+      "movies.titles.episodes": "movies titles episodes",
+      "movies.titles.genres": "movies titles genres",
+      "movies.titles.get": "movies titles get",
+      "movies.titles.home": "movies titles home",
+      "movies.titles.list": "movies titles list",
+      "movies.titles.nextEpisode": "movies titles next-episode",
+      "movies.titles.search": "movies titles search",
+      "movies.titles.similar": "movies titles similar",
+      "movies.titles.versions": "movies titles versions",
     });
   });
 
@@ -212,6 +239,10 @@ describe("CLI placement", () => {
       "core.permissions.groups.list",
       "core.permissions.groups.members",
       "core.together.queue",
+      "movies.collections.list",
+      "movies.history.list",
+      "movies.myList.list",
+      "movies.titles.list",
     ]);
   });
 });

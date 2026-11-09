@@ -91,20 +91,29 @@ import type * as core_together_queue from "../core/together/queue.js";
 import type * as core_together_sessions from "../core/together/sessions.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
+import type * as movies_access from "../movies/access.js";
+import type * as movies_browse from "../movies/browse.js";
 import type * as movies_budget from "../movies/budget.js";
 import type * as movies_catalog from "../movies/catalog.js";
+import type * as movies_collections from "../movies/collections.js";
 import type * as movies_credits from "../movies/credits.js";
+import type * as movies_history from "../movies/history.js";
 import type * as movies_items from "../movies/items.js";
 import type * as movies_matching from "../movies/matching.js";
 import type * as movies_metadata from "../movies/metadata.js";
+import type * as movies_myList from "../movies/myList.js";
 import type * as movies_people from "../movies/people.js";
+import type * as movies_play from "../movies/play.js";
+import type * as movies_present from "../movies/present.js";
 import type * as movies_probe from "../movies/probe.js";
 import type * as movies_purge from "../movies/purge.js";
 import type * as movies_scanner from "../movies/scanner.js";
+import type * as movies_titles from "../movies/titles.js";
 import type * as movies_totals from "../movies/totals.js";
 import type * as movies_trickplay from "../movies/trickplay.js";
 import type * as movies_trickplayState from "../movies/trickplayState.js";
 import type * as movies_validators from "../movies/validators.js";
+import type * as movies_viewing from "../movies/viewing.js";
 
 import type {
   ApiFromModules,
@@ -196,20 +205,29 @@ declare const fullApi: ApiFromModules<{
   "core/together/sessions": typeof core_together_sessions;
   crons: typeof crons;
   http: typeof http;
+  "movies/access": typeof movies_access;
+  "movies/browse": typeof movies_browse;
   "movies/budget": typeof movies_budget;
   "movies/catalog": typeof movies_catalog;
+  "movies/collections": typeof movies_collections;
   "movies/credits": typeof movies_credits;
+  "movies/history": typeof movies_history;
   "movies/items": typeof movies_items;
   "movies/matching": typeof movies_matching;
   "movies/metadata": typeof movies_metadata;
+  "movies/myList": typeof movies_myList;
   "movies/people": typeof movies_people;
+  "movies/play": typeof movies_play;
+  "movies/present": typeof movies_present;
   "movies/probe": typeof movies_probe;
   "movies/purge": typeof movies_purge;
   "movies/scanner": typeof movies_scanner;
+  "movies/titles": typeof movies_titles;
   "movies/totals": typeof movies_totals;
   "movies/trickplay": typeof movies_trickplay;
   "movies/trickplayState": typeof movies_trickplayState;
   "movies/validators": typeof movies_validators;
+  "movies/viewing": typeof movies_viewing;
 }>;
 
 /**

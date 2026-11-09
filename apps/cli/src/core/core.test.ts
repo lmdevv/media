@@ -88,12 +88,11 @@ describe("media's groups", () => {
     expect(admin.stdout).toContain("media admin reset-password");
     expect(admin.stdout).toContain("media admin users list");
 
-    const empty = await Promise.all([media(["movies"]), media(["music"])]);
+    const [movies, music] = await Promise.all([media(["movies"]), media(["music"])]);
 
-    expect(empty.map((run) => [run.code, run.stdout.includes("None yet")])).toEqual([
-      [ExitCode.ok, true],
-      [ExitCode.ok, true],
-    ]);
+    expect([movies.code, movies.stdout.includes("None yet")]).toEqual([ExitCode.ok, false]);
+    expect(movies.stdout).toContain("media movies titles list");
+    expect([music.code, music.stdout.includes("None yet")]).toEqual([ExitCode.ok, true]);
 
     expect((await media(["admin", "users"])).stdout).not.toContain("media admin invites");
   });
