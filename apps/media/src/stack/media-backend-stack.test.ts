@@ -1,5 +1,5 @@
 import { assert, describe, layer } from "@effect/vitest";
-import { Duration, Effect, Fiber, Layer, Redacted, Schedule, Stream } from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer, Redacted, Schedule, Stream } from "effect";
 
 import { TransportError } from "@media/sdk/effect";
 
@@ -12,6 +12,13 @@ const stack = findMediaStack();
 const proxy = stack === undefined ? undefined : await startTcpProxy(new URL(stack.convexUrl));
 
 proxy?.setMode("refuse");
+
+/**
+ * After the first test's outage of about 17 seconds, the Convex client's WebSocket waits up to
+ * 16 seconds plus half again between reconnects, and the service's own sign-in retries reach 16
+ * seconds plus a fifth. Either can take about 24 seconds once Convex is back.
+ */
+const RECONNECTS_WITHIN = Duration.seconds(40);
 
 const backendLayer = Layer.unwrap(
   Effect.sync(() =>
@@ -52,7 +59,7 @@ describe.skipIf(stack === undefined)("media service Convex connection", () => {
           assert.instanceOf(early, TransportError);
 
           proxy?.setMode("open");
-          yield* awaitStatus("connected", Duration.seconds(20));
+          yield* awaitStatus("connected", RECONNECTS_WITHIN);
 
           // The WebSocket keeps its own reconnect backoff from the outage; calls wait for it, each
           // within its timeout, and callers retry as the job worker and watchers do.
@@ -70,12 +77,16 @@ describe.skipIf(stack === undefined)("media service Convex connection", () => {
       () =>
         Effect.gen(function* () {
           const backend = yield* MediaBackend.Service;
+          const first = yield* Deferred.make<void>();
 
-          const updates = yield* backend
-            .subscribe("mediaService.libraries", {})
-            .pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped);
+          const updates = yield* backend.subscribe("mediaService.libraries", {}).pipe(
+            Stream.tap(() => Deferred.succeed(first, undefined)),
+            Stream.take(2),
+            Stream.runCollect,
+            Effect.forkScoped,
+          );
 
-          yield* Effect.sleep(Duration.seconds(1));
+          yield* Deferred.await(first).pipe(Effect.timeout(RECONNECTS_WITHIN));
           proxy?.drop();
 
           // The WebSocket reconnects on its own; the call waits for it, within its timeout.
