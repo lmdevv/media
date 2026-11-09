@@ -419,7 +419,6 @@ const OVERRIDE_BOUNDS: ReadonlyArray<{
   },
 ];
 
-/** Edits an admin sets, or `invalid_args` for a blank name, a fractional year, or a bad rating. */
 const checkedOverrides = (overrides: Overrides): Overrides => {
   const broken = OVERRIDE_BOUNDS.find((bound) => bound.broken(overrides));
 

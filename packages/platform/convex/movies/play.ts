@@ -26,7 +26,6 @@ const fileItem = (file: Doc<"mediaFiles">): DomainItem => ({
   ref: { type: "file", id: file._id },
 });
 
-/** A whole number of milliseconds, 0 or more, or `invalid_args` naming `what`. */
 const milliseconds = (value: number, what: string): number =>
   Number.isSafeInteger(value) && value >= 0
     ? value
@@ -106,6 +105,7 @@ export const { start, report, reportOffline } = register({
   },
   report: async (ctx, { fileId, positionMs, durationMs, event, startedAt }, caller) => {
     milliseconds(positionMs, "Positions");
+    milliseconds(startedAt, "Start times");
 
     if (durationMs !== undefined) milliseconds(durationMs, "Durations");
 

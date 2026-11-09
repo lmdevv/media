@@ -280,7 +280,6 @@ export const rewriteTitle = async (
   return updated;
 };
 
-/** What an admin set on a title, over what scans wrote. */
 type Overrides = NonNullable<Doc<"titles">["overrides"]>;
 
 /**

@@ -260,7 +260,6 @@ export const moviesTables = {
     .index("by_user_item", ["userId", "titleId", "episodeId"])
     .index("by_user_played", ["userId", "lastPlayedAt"]),
 
-  /** The titles one person keeps on their list. */
   myList: defineTable({
     userId: v.id("users"),
     titleId: v.id("titles"),

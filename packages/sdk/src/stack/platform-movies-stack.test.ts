@@ -26,10 +26,6 @@ const Seeded = Schema.fromJsonString(
   }),
 );
 
-/**
- * Seeds a movies library that `managerId` manages through the core's test seam, with the admin
- * key as the server host holds it, and answers its title ids in order.
- */
 const seedMovies = async (
   core: PlatformStack,
   managerId: string,
@@ -77,6 +73,11 @@ const signedInAs = (person: PlatformPerson) =>
     return platform;
   });
 
+interface Listed {
+  readonly id: Platform.Id<"titles">;
+  readonly name: string;
+}
+
 const scoped = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>): Promise<A> =>
   Effect.runPromise(Effect.scoped(effect));
 
@@ -104,11 +105,24 @@ describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 
         if (first === undefined || second === undefined)
           return yield* Effect.die("no titles seeded");
 
-        const listed = yield* platform.movies.titles.list({
-          paginationOpts: { numItems: 50, cursor: null },
-        });
+        const listAll = (
+          cursor: string | null,
+          titles: ReadonlyArray<Listed>,
+        ): Effect.Effect<ReadonlyArray<Listed>, Platform.PlatformError> =>
+          Effect.flatMap(
+            platform.movies.titles.list({ paginationOpts: { numItems: 50, cursor } }),
+            (page) => {
+              const next = [...titles, ...page.page];
 
-        const titleId = listed.page.find((title) => title.name === "Elephants Dream")?.id;
+              return page.isDone ? Effect.succeed(next) : listAll(page.continueCursor, next);
+            },
+          );
+
+        const listed = (yield* listAll(null, [])).filter(
+          (title) => title.id === first || title.id === second,
+        );
+
+        const titleId = listed.find((title) => title.name === "Elephants Dream")?.id;
 
         if (titleId === undefined) return yield* Effect.die("the seeded title was not listed");
 
@@ -140,7 +154,7 @@ describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 
         );
 
         return {
-          names: listed.page.map((title) => title.name).toSorted(),
+          names: listed.map((title) => title.name).toSorted(),
           detail: detail.name,
           myList: myList.page.map((title) => title.id),
           ticket: started.ticket.length > 0,

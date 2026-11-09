@@ -17,7 +17,6 @@ import { CREDIT_LIMIT, creditsOf } from "./credits";
 import { titleFacts } from "./items";
 import {
   filesOnDisk,
-  onDiskBestFirst,
   presentCreditGroups,
   presentEpisode,
   presentMediaFile,
@@ -50,33 +49,24 @@ const SIMILAR_SCAN = 300;
 
 const SEARCH_SCAN = 200;
 
-/** Most episodes one season lists, far above any real season. */
 const SEASON_EPISODES_MAX = 500;
 
-/** Most seasons one show lists. */
 const SEASONS_MAX = 200;
 
 const CREW_ORDER = ["creator", "director", "writer", "producer", "composer"] as const;
 
 const NO_RATINGS = { tmdb: null, imdb: null, rottenTomatoes: null, metacritic: null };
 
-/** A wanted count within 1 and `max`, `fallback` when none was asked for. */
 const resultLimit = (wanted: number | undefined, fallback: number, max: number): number =>
   wanted === undefined || !Number.isFinite(wanted)
     ? fallback
     : Math.min(Math.max(Math.floor(wanted), 1), max);
 
-/** How many titles to return, and how many items to read at most to find them. */
 interface VisibleBudget {
   readonly limit: number;
   readonly scanLimit: number;
 }
 
-/**
- * The first titles of `items` that `keeps` allows, read in batches with their titles found in
- * parallel: a caller who sees everything reads no more than it returns, and one who sees little
- * stops after `scanLimit` items. `titleOf` finds an item's title, or null when it is gone.
- */
 const firstKept = async <Item>(
   items: AsyncIterable<Item>,
   titleOf: (item: Item) => Promise<Doc<"titles"> | null>,
@@ -135,7 +125,6 @@ const admittedBy =
 
 const itself = async (title: Doc<"titles">): Promise<Doc<"titles">> => title;
 
-/** The newest titles of `kind` across `gates`, up to a row of them. */
 const newest = async (
   db: DatabaseReader,
   gates: ReadonlyArray<ItemGate>,
@@ -164,7 +153,6 @@ const newest = async (
 const identityOf = (title: Doc<"titles">): ReadonlyArray<string> =>
   title.externalIds.tmdb === null ? [title._id] : [title._id, `tmdb:${title.externalIds.tmdb}`];
 
-/** The gate of the one library a list names, which must be a movies library the caller sees. */
 const namedLibrary = async (
   db: DatabaseReader,
   caller: Parameters<typeof requireItems>[1],
@@ -214,13 +202,7 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
 
       const page =
         libraryId === undefined
-          ? await libraryByLibrary(
-              ctx.db,
-              await browsableLibraries(ctx.db, caller),
-              order,
-              filter,
-              paginationOpts,
-            )
+          ? await libraryByLibrary(ctx.db, caller, order, filter, paginationOpts)
           : await libraryPage(
               ctx.db,
               await namedLibrary(ctx.db, caller, libraryId),
@@ -372,9 +354,7 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
           externalIds: season.externalIds,
         })),
         files: files.map(presentMediaFile),
-        versions: onDiskBestFirst(files, null).map((file) =>
-          presentVersion(file, progress?.fileId ?? null),
-        ),
+        versions: files.map((file) => presentVersion(file, progress?.fileId ?? null)),
         progress: progress === null ? null : presentProgress(progress),
         nextEpisode: upNext,
         inMyList: listed !== null,

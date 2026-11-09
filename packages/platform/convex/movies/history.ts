@@ -8,12 +8,12 @@ import type { MutationCtx } from "../_generated/server";
 import { fail } from "../core/lib/errors";
 import { paginate, paginateAtMost } from "../core/lib/paginate";
 import { reachOf } from "../core/permissions/grants";
-import { requireTitle, titleViewer } from "./access";
+import { principalOf } from "../core/permissions/policy";
+import { mayActOnTitle, requireTitle, titleViewer } from "./access";
 import { CALL_BUDGET, work } from "./budget";
 import { presentEpisode, presentProgress, presentTitleCard } from "./present";
 import { continueWatching as continueWatchingOf, findProgress, writeProgress } from "./viewing";
 
-/** Most rows one history page holds; each reads its title and episode too. */
 const HISTORY_PAGE_MAX = 200;
 
 /** Marking one episode: its progress row read (1 range), then written or deleted (1, 1). */
@@ -65,7 +65,6 @@ const markOne = async (ctx: Ctx, mark: Mark, episode: Doc<"episodes"> | null): P
   });
 };
 
-/** Marks one page of a show's episodes, and schedules the next page while any remain. */
 const markShowPage = async (ctx: Ctx, mark: Mark, cursor: string | null): Promise<void> => {
   const page = await paginate(
     ctx.db,
@@ -104,7 +103,8 @@ const markTarget = async (
 
 /**
  * Marks the next page of a show that `movies.history.markWatched` or `markUnwatched` started, as
- * the person who asked. It stops once the title is gone or being purged.
+ * the person who asked. It stops once the title is gone or being purged, or the person may no
+ * longer play it.
  */
 export const markRest = internalMutation({
   args: {
@@ -116,11 +116,14 @@ export const markRest = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, { userId, titleId, watched, at, cursor }) => {
-    const title = await ctx.db.get(titleId);
+    const [title, user] = await Promise.all([ctx.db.get(titleId), ctx.db.get(userId)]);
 
-    if (title !== null && title.purging !== true) {
-      await markShowPage(ctx, { userId, title, watched, at }, cursor);
-    }
+    const allowed =
+      title !== null &&
+      user !== null &&
+      (await mayActOnTitle(ctx.db, principalOf(user), "play", titleId));
+
+    if (allowed) await markShowPage(ctx, { userId, title, watched, at }, cursor);
 
     return null;
   },

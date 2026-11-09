@@ -26,7 +26,6 @@ const SessionStatus = Schema.Union([
   Schema.Struct({ state: Schema.Literal("ended") }),
 ]);
 
-/** What a play ticket names once the server admits it for `fileId`. */
 const admittedFor = async (
   core: CoreStack,
   ring: TicketKeyRing,
@@ -56,7 +55,6 @@ const admittedFor = async (
   return answer.value.claims;
 };
 
-/** The titles on `who`'s list, newest first. */
 const listOf = async (who: Member): Promise<ReadonlyArray<Id<"titles">>> =>
   (
     await who.signedIn.client.query(api.movies.myList.list, {
@@ -238,6 +236,16 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
     expect(
       (await first.query(api.movies.history.continueWatching, {})).map((item) => item.title.id),
     ).not.toContain(tears);
+    expect(
+      await refusal(
+        first.mutation(api.movies.play.report, {
+          fileId,
+          positionMs: 1,
+          event: "tick",
+          startedAt: -1,
+        }),
+      ),
+    ).toBe("invalid_args");
     expect(
       await refusal(
         shelf.sam.signedIn.client.mutation(api.movies.play.report, {

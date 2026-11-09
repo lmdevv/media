@@ -248,7 +248,6 @@ const scanUnwatched = async (
   return step(episode, 0, 0);
 };
 
-/** Most of one person's progress rows on one show read to find where they are in it. */
 const SHOW_PROGRESS_MAX = 1000;
 
 const latestShowProgress = async (

@@ -31,7 +31,6 @@ const Credits = answer(
   }),
 );
 
-/** A movie the shelf scans, with its rating and genres. */
 interface Film {
   readonly name: string;
   readonly age: number | null;
@@ -46,7 +45,6 @@ const FILMS: ReadonlyArray<Film> = [
   { name: "Unrated Short", age: null, genres: ["Documentary"], year: 2015 },
 ];
 
-/** The shows the shelf scans: a name, a rating, and how many episodes of season 1. */
 const SHOWS = [
   { name: "Pioneer One", age: 7, episodes: 3 },
   { name: "Caminandes", age: 0, episodes: 2 },
@@ -254,6 +252,6 @@ export const titleIn = (shelf: Shelf, name: string): Id<"titles"> => {
   return id;
 };
 
-/** The first file of a title of `shelf` by name. */
+/** A file of a title of `shelf` by name: the first, or the one at `index`. */
 export const fileIn = (shelf: Shelf, name: string, index = 0): Id<"mediaFiles"> =>
   at(shelf.files.get(name) ?? [], index, `file of ${name}`);

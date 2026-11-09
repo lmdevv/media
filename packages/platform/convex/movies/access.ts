@@ -8,12 +8,7 @@ import { can, contentNeeds, itemOf, resourceOf } from "../core/permissions/polic
 import type { ContentAction, Principal } from "../core/permissions/policy";
 import { titleFacts } from "./items";
 
-/**
- * Most libraries shared with a caller that a list across libraries reads, music ones included:
- * home rows, search, genres, and the title list with no library named. Each one past it still
- * lists by name.
- */
-export const BROWSABLE_LIBRARIES_MAX = 64;
+const BROWSABLE_LIBRARIES_MAX = 64;
 
 const NO_TITLE = "No such title";
 
@@ -24,6 +19,45 @@ export interface TitleAccess {
   readonly level: Level;
   readonly reach: Reach;
 }
+
+type Decided =
+  | { readonly kind: "missing" }
+  | {
+      readonly kind: "refused";
+      readonly refusal: "hidden" | "forbidden";
+      readonly scope: boolean;
+      readonly level: Level | null;
+    }
+  | { readonly kind: "allowed"; readonly access: TitleAccess };
+
+const decideTitle = async (
+  db: DatabaseReader,
+  caller: Principal,
+  action: ContentAction,
+  titleId: Id<"titles">,
+): Promise<Decided> => {
+  const [found, reach] = await Promise.all([db.get(titleId), reachOf(db, caller)]);
+  const title = found?.purging === true ? null : found;
+  const library = title === null ? null : await db.get(title.libraryId);
+
+  if (title === null || library === null || library.kind !== "movies") return { kind: "missing" };
+
+  const level = await levelOn(db, reach, { type: "library", id: library._id });
+  const decision = can(caller, action, itemOf(library, level, titleFacts(title)));
+
+  if (!decision.allowed) {
+    return {
+      kind: "refused",
+      refusal: decision.refusal,
+      scope: decision.because === "scope",
+      level,
+    };
+  }
+
+  return level === null
+    ? { kind: "missing" }
+    : { kind: "allowed", access: { title, library, level, reach } };
+};
 
 /**
  * Loads `titleId` and decides `action` on it for `caller` through `can()`, at the level their
@@ -37,32 +71,31 @@ export const requireTitle = async (
   action: ContentAction,
   titleId: Id<"titles">,
 ): Promise<TitleAccess> => {
-  const [found, reach] = await Promise.all([db.get(titleId), reachOf(db, caller)]);
-  const title = found?.purging === true ? null : found;
-  const library = title === null ? null : await db.get(title.libraryId);
+  const decided = await decideTitle(db, caller, action, titleId);
 
-  if (title === null || library === null || library.kind !== "movies") {
+  if (decided.kind === "allowed") return decided.access;
+
+  if (decided.kind === "missing" || decided.refusal === "hidden") {
     return fail("not_found", NO_TITLE);
   }
 
-  const level = await levelOn(db, reach, { type: "library", id: library._id });
-  const decision = can(caller, action, itemOf(library, level, titleFacts(title)));
+  const needs = contentNeeds(action, "movies");
 
-  if (!decision.allowed) {
-    const needs = contentNeeds(action, "movies");
-
-    if (decision.refusal === "hidden") return fail("not_found", NO_TITLE);
-
-    return fail(
-      "forbidden",
-      decision.because === "scope"
-        ? `This session lacks the ${needs.scope} scope`
-        : `This needs ${needs.level} access, and you have ${level ?? "none"}`,
-    );
-  }
-
-  return level === null ? fail("not_found", NO_TITLE) : { title, library, level, reach };
+  return fail(
+    "forbidden",
+    decided.scope
+      ? `This session lacks the ${needs.scope} scope`
+      : `This needs ${needs.level} access, and you have ${decided.level ?? "none"}`,
+  );
 };
+
+/** Whether `caller` may do `action` to `titleId`, decided as `requireTitle` decides it. */
+export const mayActOnTitle = async (
+  db: DatabaseReader,
+  caller: Principal,
+  action: ContentAction,
+  titleId: Id<"titles">,
+): Promise<boolean> => (await decideTitle(db, caller, action, titleId)).kind === "allowed";
 
 const libraryRef = (library: Doc<"libraries">) => ({ type: "library", id: library._id }) as const;
 
@@ -81,6 +114,20 @@ const gateFor = (
         admits: (facts) => can(caller, "view", itemOf(library, level, facts)).allowed,
       };
 
+/** The gate of one library for `caller`, or null when it is not a movies library they see. */
+export const libraryGate = async (
+  db: DatabaseReader,
+  caller: Principal,
+  reach: Reach,
+  libraryId: Id<"libraries">,
+): Promise<ItemGate | null> => {
+  const library = await db.get(libraryId);
+
+  return library === null
+    ? null
+    : gateFor(caller, library, await levelOn(db, reach, libraryRef(library)));
+};
+
 /**
  * Whether `caller` may see titles, deciding each library once per call through `can()`. A title
  * being purged or in a library of another domain is not seen.
@@ -91,18 +138,10 @@ export type TitleViewer = (title: Doc<"titles">) => Promise<boolean>;
 export const titleViewer = (db: DatabaseReader, caller: Principal, reach: Reach): TitleViewer => {
   const gates = new Map<Id<"libraries">, Promise<ItemGate | null>>();
 
-  const gateOf = async (libraryId: Id<"libraries">): Promise<ItemGate | null> => {
-    const library = await db.get(libraryId);
-
-    return library === null
-      ? null
-      : gateFor(caller, library, await levelOn(db, reach, libraryRef(library)));
-  };
-
   return async (title) => {
     if (title.purging === true) return false;
 
-    const gate = gates.get(title.libraryId) ?? gateOf(title.libraryId);
+    const gate = gates.get(title.libraryId) ?? libraryGate(db, caller, reach, title.libraryId);
 
     gates.set(title.libraryId, gate);
 
@@ -129,4 +168,52 @@ export const browsableLibraries = async (
 
     return gate === null ? [] : [gate];
   });
+};
+
+/** Shared libraries one step of a library walk reads, music ones included. */
+const WALK_STEP = 16;
+
+/** Pages of shared libraries one call reads while looking for the next movies library. */
+const WALK_PAGES_MAX = 4;
+
+/**
+ * Where a walk through the libraries shared with a caller goes next: a movies library's gate,
+ * the last library read when the call's reads ran out first, or the end.
+ */
+export type NextLibrary =
+  | { readonly kind: "library"; readonly gate: ItemGate }
+  | { readonly kind: "resume"; readonly after: Id<"libraries"> }
+  | { readonly kind: "end" };
+
+/**
+ * The first movies library shared with `caller` whose id comes after `after`, or the first one
+ * at all for null, read through `visiblePage` over the caller's grants. One call reads a few
+ * pages at most and then answers where to resume, so it stays bounded however many libraries the
+ * caller sees and never ends a walk early.
+ */
+export const nextBrowsableLibrary = async (
+  db: DatabaseReader,
+  caller: Principal,
+  after: Id<"libraries"> | null,
+  pages = WALK_PAGES_MAX,
+): Promise<NextLibrary> => {
+  const visible = await visiblePage({ db }, caller, "library", {
+    numItems: WALK_STEP,
+    cursor: after,
+  });
+
+  const gate = visible.page
+    .map(({ doc, level }) => gateFor(caller, doc, level))
+    .find((found) => found !== null);
+
+  if (gate !== undefined) return { kind: "library", gate };
+
+  const last =
+    visible.continueCursor === "" ? null : db.normalizeId("libraries", visible.continueCursor);
+
+  if (visible.isDone || last === null) return { kind: "end" };
+
+  return pages <= 1
+    ? { kind: "resume", after: last }
+    : nextBrowsableLibrary(db, caller, last, pages - 1);
 };

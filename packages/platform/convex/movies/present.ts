@@ -172,13 +172,12 @@ const byQuality = (left: Doc<"mediaFiles">, right: Doc<"mediaFiles">): number =>
   left._creationTime - right._creationTime;
 
 /** The files of `files` on disk that play `episodeId` (null for a movie), best quality first. */
-export const onDiskBestFirst = (
+const onDiskBestFirst = (
   files: ReadonlyArray<Doc<"mediaFiles">>,
   episodeId: Id<"episodes"> | null,
 ): ReadonlyArray<Doc<"mediaFiles">> =>
   files.filter((file) => !file.missing && file.episodeId === episodeId).toSorted(byQuality);
 
-/** Most files one movie or episode is read with: far above any real set of versions. */
 const FILES_PER_ITEM_MAX = 100;
 
 /** A movie's (`episode` null) or an episode's files on disk, best quality first. */
@@ -219,7 +218,6 @@ export const resolveEpisode = async (
   return episode?.titleId === title._id ? episode : fail("not_found", "No such episode");
 };
 
-/** A stored file as direct play reads it: its primary video and default audio track. */
 const directPlayFile = (file: Doc<"mediaFiles">): DirectPlayFile => {
   const video = primaryVideo(file);
   const audio = defaultAudio(file);

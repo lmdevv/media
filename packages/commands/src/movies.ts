@@ -218,7 +218,6 @@ const clientCapabilities = v.object({
   mse: v.boolean(),
 });
 
-/** How far you got through a movie or an episode. */
 const progress = v.object({
   positionMs: v.number(),
   durationMs: v.number(),
@@ -262,7 +261,6 @@ const episodeFields = {
   progress: nullable(progress),
 };
 
-/** An episode with your progress through it. */
 const episode = v.object(episodeFields);
 
 const season = v.object({
@@ -386,10 +384,8 @@ const progressEvent = v.union(
   v.literal("ended"),
 );
 
-/** Whether a progress report was saved, and whether the item now counts as watched. */
 const progressReceipt = v.object({ applied: v.boolean(), watched: v.boolean() });
 
-/** A movie or a show, and for a show one of its episodes. */
 const watchTarget = {
   titleId: v.id("titles"),
   /** An episode of the show; omit to mean a movie, or every episode of a show. */

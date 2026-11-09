@@ -9,10 +9,8 @@ import type { TitleViewer } from "./access";
 import { presentTitleCard } from "./present";
 import type { TitleCard } from "./present";
 
-/** Most members of one collection read. */
 const TITLE_LIMIT = 200;
 
-/** Most collections one page holds. */
 const COLLECTIONS_PAGE_MAX = 20;
 
 /** Most members read across one page, so the call stays inside Convex's read limits. */

@@ -4,7 +4,11 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import { fail } from "../core/lib/errors";
 import { paginate } from "../core/lib/paginate";
+import { reachOf } from "../core/permissions/grants";
 import type { ItemGate } from "../core/permissions/grants";
+import type { Principal } from "../core/permissions/policy";
+import { libraryGate, nextBrowsableLibrary } from "./access";
+import type { NextLibrary } from "./access";
 import { titleFacts } from "./items";
 
 /** The orders a title list offers: by name, newest added, or newest year. */
@@ -176,73 +180,120 @@ export const libraryPage = async (
 
 const SEPARATOR = "|";
 
+/** Where a cursor sits: inside a library's index, or past the end of a library. */
+type Position = "paging" | "done";
+
+const FLAGS = { paging: "p", done: "d" } as const satisfies Readonly<Record<Position, string>>;
+
 interface Spot {
   readonly libraryId: Id<"libraries">;
+  readonly position: Position;
   readonly inner: string | null;
 }
+
+const badCursor = (): never => fail("invalid_args", "This page cursor did not come from this list");
 
 const spotOf = (db: DatabaseReader, cursor: string | null | undefined): Spot | null => {
   if (cursor === undefined || cursor === null || cursor === "") return null;
 
-  const at = cursor.indexOf(SEPARATOR);
-  const libraryId = at < 0 ? null : db.normalizeId("libraries", cursor.slice(0, at));
+  const [id = "", flag = "", ...rest] = cursor.split(SEPARATOR);
+  const libraryId = db.normalizeId("libraries", id);
+  const inner = rest.join(SEPARATOR);
 
-  if (libraryId === null)
-    return fail("invalid_args", "This page cursor did not come from this list");
+  if (libraryId === null || (flag !== FLAGS.paging && flag !== FLAGS.done)) return badCursor();
 
-  const inner = cursor.slice(at + 1);
-
-  return { libraryId, inner: inner === "" ? null : inner };
+  return {
+    libraryId,
+    position: flag === FLAGS.done ? "done" : "paging",
+    inner: inner === "" ? null : inner,
+  };
 };
 
-const cursorAt = (libraryId: Id<"libraries">, inner: string): string =>
-  `${libraryId}${SEPARATOR}${inner}`;
+const cursorAt = (libraryId: Id<"libraries">, position: Position, inner: string): string =>
+  [libraryId, FLAGS[position], inner].join(SEPARATOR);
+
+type Start =
+  | { readonly kind: "page"; readonly gate: ItemGate; readonly inner: string | null }
+  | NextLibrary;
+
+/** The library a page reads and where in it, or where the walk resumes, or its end. */
+const startOf = async (
+  db: DatabaseReader,
+  caller: Principal,
+  from: Spot | null,
+): Promise<Start> => {
+  if (from === null) return nextBrowsableLibrary(db, caller, null);
+
+  if (from.position === "paging") {
+    const gate = await libraryGate(db, caller, await reachOf(db, caller), from.libraryId);
+
+    if (gate !== null) return { kind: "page", gate, inner: from.inner };
+  }
+
+  return nextBrowsableLibrary(db, caller, from.libraryId);
+};
 
 /**
- * One page of the titles in every library of `gates`, a library at a time in their order. Each
- * call pages one library's index once, since Convex runs one paginated query per call. The cursor
- * names the library and Convex's cursor inside it; when a library ends, the cursor names the next
- * library's start, so the next page begins there. A page reloaded to its end cursor reads the same
- * range of the same library again.
+ * One page of the titles in every movies library shared with `caller`, a library at a time in
+ * id order. Each call pages one library's index once, since Convex runs one paginated query per
+ * call. The cursor names the library and either Convex's cursor inside it or that the library is
+ * done; the next call after a done library finds the next one through the caller's grants. A
+ * library the caller lost meanwhile counts as done. A page reloaded to its end cursor reads the
+ * same range of the same library again.
  */
 export const libraryByLibrary = async (
   db: DatabaseReader,
-  gates: ReadonlyArray<ItemGate>,
+  caller: Principal,
   sort: TitleSort,
   filter: TitleFilter,
   options: PaginationOptions,
 ): Promise<PaginationResult<Doc<"titles">>> => {
-  const from = spotOf(db, options.cursor);
   const through = spotOf(db, options.endCursor);
-  const index = from === null ? 0 : gates.findIndex((gate) => gate.library._id === from.libraryId);
-  const gate = gates[index];
+  const start = await startOf(db, caller, spotOf(db, options.cursor));
+  const reloaded = through === null ? null : (options.endCursor ?? null);
 
-  if (gate === undefined) return { page: [], isDone: true, continueCursor: options.cursor ?? "" };
+  if (start.kind === "end") {
+    return {
+      page: [],
+      isDone: reloaded === null,
+      continueCursor: reloaded ?? options.cursor ?? "",
+    };
+  }
 
+  if (start.kind === "resume") {
+    return {
+      page: [],
+      isDone: false,
+      continueCursor: reloaded ?? cursorAt(start.after, "done", ""),
+    };
+  }
+
+  const { gate } = start;
   const libraryId = gate.library._id;
-  const ending = through?.libraryId === libraryId ? through.inner : null;
 
   const page = await libraryPage(db, gate, sort, filter, {
     ...options,
-    cursor: from?.inner ?? null,
-    endCursor: ending,
+    cursor: start.kind === "page" ? start.inner : null,
+    endCursor: through?.libraryId === libraryId ? through.inner : null,
   });
 
-  const next = gates[index + 1];
+  const last =
+    reloaded === null &&
+    page.isDone &&
+    (await nextBrowsableLibrary(db, caller, libraryId)).kind === "end";
+
+  const answer = {
+    ...page,
+    isDone: last,
+    continueCursor:
+      reloaded ?? cursorAt(libraryId, page.isDone ? "done" : "paging", page.continueCursor),
+  };
+
   const split = page.splitCursor;
-
-  const continueCursor =
-    options.endCursor !== undefined && options.endCursor !== null && options.endCursor !== ""
-      ? options.endCursor
-      : page.isDone && next !== undefined
-        ? cursorAt(next.library._id, "")
-        : cursorAt(libraryId, page.continueCursor);
-
-  const answer = { ...page, isDone: page.isDone && next === undefined, continueCursor };
 
   return split === undefined || split === null
     ? answer
-    : { ...answer, splitCursor: cursorAt(libraryId, split) };
+    : { ...answer, splitCursor: cursorAt(libraryId, "paging", split) };
 };
 
 /**

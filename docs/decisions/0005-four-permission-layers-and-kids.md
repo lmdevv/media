@@ -360,15 +360,18 @@ as it is.
 ### Lists across libraries
 
 - A list across libraries starts from the libraries shared with the caller, through
-  `visiblePage` over the caller's grants, never from every library on the server. It reads the
-  first 64 of them, music ones included, and decides each movies library once through `can()`;
-  each title then goes through that library's gate with its facts. A library past the 64th still
-  lists by name.
+  `visiblePage` over the caller's grants, never from every library on the server, and decides
+  each movies library once through `can()`; each title then goes through that library's gate
+  with its facts. Home rows, genres, and similar titles read the newest titles of the first 64
+  libraries shared with the caller, music ones included. Search reads the search index and
+  decides each hit's library the same way.
 - `movies.titles.list` pages one library's index with `paginate`, a library at a time in id
-  order. Convex runs one paginated query per call, so a page never crosses libraries: its cursor
-  names the library and Convex's cursor inside it, and a library that ends hands the next
-  library's start to the next page. A page reloaded to its end cursor reads the same range again.
-  With a library named, the list pages only that library after `requireItems` decides it.
+  order, and walks every movies library shared with the caller. Convex runs one paginated query
+  per call, so a page never crosses libraries: its cursor names the library and Convex's cursor
+  inside it, and a library that ends hands the next library's start, found through
+  `visiblePage` from its id, to the next page. A page reloaded to its end cursor reads the same
+  range again. With a library named, the list pages only that library after `requireItems`
+  decides it.
 - Restrictions and filters drop titles after the page is read, so a page can come back short or
   empty while its cursor goes on. A kind filter has no index of its own and reads the library's
   rows.

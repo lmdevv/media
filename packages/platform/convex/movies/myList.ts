@@ -6,7 +6,6 @@ import { reachOf } from "../core/permissions/grants";
 import { requireTitle, titleViewer } from "./access";
 import { presentTitleCard } from "./present";
 
-/** Most entries one page of a person's list holds; each reads its title too. */
 const LIST_PAGE_MAX = 200;
 
 const entryOf = (db: DatabaseReader, userId: Id<"users">, titleId: Id<"titles">) =>

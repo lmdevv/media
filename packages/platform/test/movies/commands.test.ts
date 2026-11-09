@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { Member } from "../devices";
-import { movie, seedLibrary } from "../probe";
+import { movie, seedLibrary, share, unshare } from "../probe";
 import { failureOf, refusal } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
 import { NONE, shelfOf, titleIn } from "./shelf";
@@ -13,7 +13,14 @@ const stack = coreStackFromEnvFile();
 
 type Sort = "name" | "added" | "year";
 
-/** Every title name `who` lists across their libraries, a page of `numItems` at a time. */
+interface Listed {
+  readonly id: Id<"titles">;
+  readonly name: string;
+}
+
+/** The shelf's titles, by id: other suites' libraries may share names and the household. */
+let shelfIds: ReadonlySet<string> = new Set();
+
 const listedNames = async (
   who: Member,
   options: {
@@ -23,9 +30,13 @@ const listedNames = async (
     readonly genre?: string;
   } = {},
   cursor: string | null = null,
-  names: ReadonlyArray<string> = [],
+  titles: ReadonlyArray<Listed> = [],
   calls = 0,
-): Promise<{ readonly names: ReadonlyArray<string>; readonly calls: number }> => {
+): Promise<{
+  readonly names: ReadonlyArray<string>;
+  readonly titles: ReadonlyArray<Listed>;
+  readonly calls: number;
+}> => {
   const { numItems = 100, ...filter } = options;
 
   const page = await who.signedIn.client.query(api.movies.titles.list, {
@@ -33,14 +44,12 @@ const listedNames = async (
     ...filter,
   });
 
-  const next = [...names, ...page.page.map((title) => title.name)];
+  const next = [...titles, ...page.page.map(({ id, name }) => ({ id, name }))];
 
   return page.isDone
-    ? { names: next, calls: calls + 1 }
+    ? { names: next.map((title) => title.name), titles: next, calls: calls + 1 }
     : listedNames(who, options, page.continueCursor, next, calls + 1);
 };
-
-const sorted = (names: ReadonlyArray<string>): ReadonlyArray<string> => names.toSorted();
 
 const ALL = [
   "Big Buck Bunny",
@@ -51,6 +60,11 @@ const ALL = [
   "Unrated Short",
 ];
 
+const sorted = (names: ReadonlyArray<string>): ReadonlyArray<string> => names.toSorted();
+
+const shelfTitlesIn = (listed: { readonly titles: ReadonlyArray<Listed> }): ReadonlyArray<string> =>
+  sorted(listed.titles.flatMap((title) => (shelfIds.has(title.id) ? [title.name] : [])));
+
 describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_000 }, () => {
   let shelf: Shelf;
 
@@ -58,13 +72,14 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     if (stack === undefined) return;
 
     shelf = await shelfOf(stack, `browse-${Math.random().toString(36).slice(2, 8)}`);
+    shelfIds = new Set(shelf.titles.values());
   }, 180_000);
 
   it("list each person's titles a library at a time, each once, through can()", async () => {
-    expect(sorted((await listedNames(shelf.aiko)).names)).toEqual(ALL);
-    expect(sorted((await listedNames(shelf.sam)).names)).toEqual(["Caminandes", "Pioneer One"]);
-    expect((await listedNames(shelf.outsider)).names).toEqual([]);
-    expect(sorted((await listedNames(shelf.kid)).names)).toEqual([
+    expect(shelfTitlesIn(await listedNames(shelf.aiko))).toEqual(ALL);
+    expect(shelfTitlesIn(await listedNames(shelf.sam))).toEqual(["Caminandes", "Pioneer One"]);
+    expect(shelfTitlesIn(await listedNames(shelf.outsider))).toEqual([]);
+    expect(shelfTitlesIn(await listedNames(shelf.kid))).toEqual([
       "Big Buck Bunny",
       "Caminandes",
       "Pioneer One",
@@ -73,7 +88,7 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
 
     const paged = await listedNames(shelf.aiko, { numItems: 1 });
 
-    expect(sorted(paged.names)).toEqual(ALL);
+    expect(shelfTitlesIn(paged)).toEqual(ALL);
     expect(paged.calls).toBeGreaterThanOrEqual(ALL.length);
 
     expect((await listedNames(shelf.aiko, { libraryId: shelf.films, sort: "name" })).names).toEqual(
@@ -95,6 +110,31 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     ).toBe("not_found");
   });
 
+  it("keep walking the libraries when one is taken away mid-list", async () => {
+    const client = shelf.mateo.signedIn.client;
+
+    const first = await client.query(api.movies.titles.list, {
+      paginationOpts: { numItems: 1, cursor: null },
+    });
+
+    const series = ["Caminandes", "Pioneer One"];
+    const inSeries = series.includes(first.page[0]?.name ?? "");
+    const taken = inSeries ? shelf.series : shelf.films;
+    const principal = { kind: "user", userId: shelf.mateo.userId } as const;
+
+    await unshare(shelf.owner, taken, principal);
+
+    try {
+      const rest = await listedNames(shelf.mateo, { numItems: 1 }, first.continueCursor);
+
+      expect(shelfTitlesIn(rest)).toEqual(
+        inSeries ? ["Big Buck Bunny", "Sintel", "Tears of Steel", "Unrated Short"] : series,
+      );
+    } finally {
+      await share(shelf.owner, taken, principal, inSeries ? "view" : "edit");
+    }
+  });
+
   it("hide unrated titles from a kid only when an admin turns that on", async () => {
     await shelf.owner.signedIn.client.mutation(api.core.restrictions.set, {
       userId: shelf.kid.userId,
@@ -102,7 +142,7 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     });
 
     try {
-      expect(sorted((await listedNames(shelf.kid)).names)).toEqual([
+      expect(shelfTitlesIn(await listedNames(shelf.kid))).toEqual([
         "Big Buck Bunny",
         "Caminandes",
         "Pioneer One",

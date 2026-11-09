@@ -74,16 +74,12 @@ export const applyPerson = serverMutation({
     }),
 });
 
-/** Most of a person's credits a person page reads. */
 const CREDIT_SCAN = 500;
 
-/** Most people a name search reads. */
 const SEARCH_SCAN = 50;
 
-/** Most credits a name search reads in all to find which people the caller sees. */
 const SEARCH_CREDIT_BUDGET = 1000;
 
-/** How often one person's missing details may be asked for. */
 const REQUEST_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 const NO_PERSON = "No such person";
@@ -98,10 +94,6 @@ const KIND_RANK: Readonly<Record<Doc<"credits">["kind"], number>> = {
   composer: 6,
 };
 
-/**
- * Whether the caller sees at least one title each person is credited on, reading each person's
- * credits only until one shows and at most `creditBudget` credits in all.
- */
 const seenBy = async (
   db: DatabaseReader,
   sees: TitleViewer,
