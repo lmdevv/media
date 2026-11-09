@@ -285,6 +285,12 @@ export const HealthResponse = Schema.Struct({
   status: Schema.Literal("ok"),
   /** Streams whose encoder runs; a paused stream whose encoder stopped is not counted. */
   activeStreams: Schema.Int,
+  /**
+   * Encoder runs whose ffmpeg has not exited yet, closed streams' runs included. A run that stays
+   * here after its stream stopped is stuck, for example on a disk that stopped answering. Servers
+   * from before it leave it out, so clients that check an older server still read its health.
+   */
+  runsAwaitingExit: Schema.optionalKey(Schema.Int),
   hardwareAcceleration: Schema.Literals(["qsv", "vaapi", "none"]),
   /**
    * `connected` while the service is signed in to Convex and Convex answered it within about a

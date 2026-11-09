@@ -234,4 +234,272 @@ describe("verify-media.sh", () => {
     const result = helperCommand("down");
     assert.equal(result.status, 0, result.stderr);
   });
+
+  test("refuses a health deadline that is not whole seconds only where up reads it", () => {
+    const badDeadline = { ...env, MEDIA_VERIFY_HEALTH_SECONDS: "5m" };
+    const up = spawnSync(helper, ["up"], { encoding: "utf8", env: badDeadline });
+    assert.equal(up.status, 1);
+    assert.match(up.stderr, /MEDIA_VERIFY_HEALTH_SECONDS must be a whole number of seconds/);
+    const down = spawnSync(helper, ["down"], { encoding: "utf8", env: badDeadline });
+    assert.equal(down.status, 0, down.stderr);
+  });
+});
+
+// A server that accepts connections and never answers, as a container behind a missing route
+// does. It logs when it listens, each connection it accepts with its request's first line, and how
+// long it held each one, so a test can tell a held request from a refused one.
+const silentServer = String.raw`
+import { appendFileSync } from "node:fs";
+import { createServer } from "node:net";
+const [log, address] = process.argv.slice(2);
+const held = [];
+createServer((socket) => {
+  const opened = Date.now();
+  held.push(socket);
+  appendFileSync(log, "accepted\n");
+  socket.once("data", (chunk) => appendFileSync(log, "request " + chunk.toString().split("\r\n")[0] + "\n"));
+  socket.on("close", () => appendFileSync(log, "held " + (Date.now() - opened) + "\n"));
+}).listen(...(/^\d+$/.test(address) ? [Number(address), "127.0.0.1"] : [address]), () => appendFileSync(log, "ready\n"));
+`;
+
+const silentLog = (file) => {
+  const lines = existsSync(file) ? execFileSync("cat", [file], { encoding: "utf8" }).split("\n") : [];
+  return {
+    ready: lines.includes("ready"),
+    requests: lines.filter((line) => line.startsWith("request ")).map((line) => line.slice("request ".length)),
+    held: lines.filter((line) => line.startsWith("held ")).map((line) => Number(line.slice("held ".length))),
+  };
+};
+
+const waitFor = async (check, what) => {
+  for (let tries = 0; !check(); tries += 1) {
+    assert.ok(tries < 200, what);
+    await sleep(50);
+  }
+};
+
+// A stand-in for Docker whose stack never answers: `compose up` starts the silent server on the
+// side's port.
+const fakeDocker = `#!/usr/bin/env bash
+set -euo pipefail
+log="$FAKE_DOCKER_DIR/calls"
+echo "$*" >> "$log"
+case "$1 \${2:-}" in
+  "image inspect") echo sha256:fake ;;
+  "inspect -f")
+    case "$3" in
+      *State.Status*) echo running ;;
+      *Networks*) echo "172.31.255.2 " ;;
+    esac ;;
+  compose*)
+    for arg in "$@"; do
+      if [[ "$arg" == up ]]; then
+        env_file="$(sed -n 's/.*--env-file \\([^ ]*\\).*/\\1/p' <<<"$*")"
+        port="$(sed -n 's/^MEDIA_PORT=//p' "$env_file")"
+        nohup node "$FAKE_DOCKER_DIR/silent-server.mjs" "$FAKE_DOCKER_DIR/silent.log" "$port" >/dev/null 2>&1 &
+        echo "$!" > "$FAKE_DOCKER_DIR/silent.pid"
+        # Up returns once the stack listens, as Compose's own containers start before it returns, so
+        # the first health check finds the server however slowly Node starts.
+        for _ in $(seq 1 200); do
+          grep -qx ready "$FAKE_DOCKER_DIR/silent.log" 2>/dev/null && break
+          sleep 0.05
+        done
+        grep -qx ready "$FAKE_DOCKER_DIR/silent.log" 2>/dev/null || { echo "the silent server did not listen in 10s" >&2; exit 1; }
+      elif [[ "$arg" == down ]]; then
+        kill "$(cat "$FAKE_DOCKER_DIR/silent.pid")" 2>/dev/null || true
+      elif [[ "$arg" == logs ]]; then
+        # A daemon that stalls, when the test asks for one, answers nothing until it is killed.
+        [[ "\${FAKE_DOCKER_STALL:-}" == logs ]] && exec sleep 3600
+        echo "media-1  | starting"
+      fi
+    done ;;
+esac
+`;
+
+// Runs `up` against the fake Docker in its own folder and returns what it printed, how long it took,
+// and what the silent server saw.
+const upAgainstSilentStack = (name, extra = {}) => {
+  const dir = join(scratch, name);
+  const library = join(scratch, "silent-library");
+  const run = `${name}-${process.pid}`;
+  const env = {
+    ...process.env,
+    PATH: `${dir}:${process.env.PATH}`,
+    TMPDIR: join(scratch, `${name}-tmp`),
+    MEDIA_VERIFY_RUN: run,
+    MEDIA_VERIFY_HEALTH_SECONDS: "3",
+    FAKE_DOCKER_DIR: dir,
+    ...extra,
+  };
+
+  before(() => {
+    mkdirSync(join(library, "Movies"), { recursive: true });
+    mkdirSync(env.TMPDIR, { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "docker"), fakeDocker, { mode: 0o755 });
+    writeFileSync(join(dir, "silent-server.mjs"), silentServer);
+  });
+
+  after(() => {
+    const pid = join(dir, "silent.pid");
+    if (existsSync(pid)) spawnSync("sh", ["-c", `kill "$(cat '${pid}')" 2>/dev/null || true`]);
+    rmSync(here(`../../../../captures/verify/${run}`), { recursive: true, force: true });
+  });
+
+  return async () => {
+    const began = Date.now();
+    const result = await new Promise((resolve) => {
+      execFile(
+        helper,
+        ["up", "--image", "media:silent", "--library", library, "--no-music", "--no-setup"],
+        { encoding: "utf8", env, timeout: 90_000 },
+        (error, stdout, stderr) => resolve({ status: error ? error.code : 0, stdout, stderr }),
+      );
+    });
+    return {
+      ...result,
+      seconds: (Date.now() - began) / 1000,
+      silent: silentLog(join(dir, "silent.log")),
+      calls: existsSync(join(dir, "calls")) ? execFileSync("cat", [join(dir, "calls")], { encoding: "utf8" }) : "",
+      stateLeft: existsSync(join(env.TMPDIR, "media-verify", run, "after")),
+    };
+  };
+};
+
+describe("verify-media.sh up against a stack that never answers", () => {
+  const up = upAgainstSilentStack("silent");
+
+  test("gives up at its deadline, names the silent URL and the route to check, and removes the side", async () => {
+    const result = await up();
+
+    // The stack was there and silent: a refused connection would meet every check below.
+    assert.ok(result.silent.ready, "the silent server listened");
+    assert.ok(result.silent.requests.includes("GET /api/health HTTP/1.1"), `requests: ${result.silent.requests}`);
+    assert.ok(result.silent.held.some((ms) => ms >= 9_000), `a health check held its connection: ${result.silent.held}`);
+    assert.equal(result.status, 1, result.stderr);
+    assert.ok(result.seconds < 45, `up returned after ${result.seconds}s`);
+    assert.match(result.stderr, /http:\/\/localhost:\d+\/api\/health never answered/);
+    assert.match(result.stderr, /`ip route get 172\.31\.255\.2`/);
+    assert.match(result.stderr, /media-1 {2}\| starting/);
+    assert.match(result.stderr, /did not become healthy in 3s/);
+    assert.match(result.calls, /compose .* down --volumes/);
+    assert.equal(result.stateLeft, false, "the side's state is gone");
+  });
+});
+
+describe("verify-media.sh up when Docker stalls on the logs", () => {
+  const up = upAgainstSilentStack("stalled", { FAKE_DOCKER_STALL: "logs" });
+
+  test("stops waiting for the logs, still removes the side, and fails with its own reason", async () => {
+    const result = await up();
+
+    assert.ok(result.silent.ready, "the silent server listened");
+    assert.match(result.calls, /compose .* logs/);
+    assert.equal(result.status, 1, result.stderr);
+    assert.ok(result.seconds < 60, `up returned after ${result.seconds}s`);
+    assert.match(result.stderr, /could not read the containers' logs/);
+    assert.match(result.stderr, /did not become healthy in 3s/);
+    assert.match(result.calls, /compose .* down --volumes/);
+    assert.equal(result.stateLeft, false, "the side's state is gone");
+  });
+});
+
+describe("a browser host that never answers", () => {
+  const state = join(scratch, "silent-browser");
+  const log = join(state, "silent.log");
+  let server;
+
+  before(async () => {
+    mkdirSync(state, { recursive: true });
+    writeFileSync(join(scratch, "silent-server.mjs"), silentServer);
+    server = spawn("node", [join(scratch, "silent-server.mjs"), log, join(state, "browser.sock")], { stdio: "inherit" });
+    await waitFor(() => silentLog(log).ready, "the silent browser host listened");
+  });
+
+  after(() => server?.kill());
+
+  test("gives up on a command a second after its --timeout and exits as timeout(1) does", async () => {
+    const began = Date.now();
+    const result = await new Promise((resolve) => {
+      execFile("node", [browserJs, "url", "--state", state, "--timeout", "100"], { encoding: "utf8", timeout: 20_000 },
+        (error, stdout, stderr) => resolve({ status: error ? error.code : 0, stderr }));
+    });
+    const elapsed = Date.now() - began;
+    const silent = silentLog(log);
+
+    assert.ok(silent.requests.includes("POST / HTTP/1.1"), `requests: ${silent.requests}`);
+    assert.equal(result.status, 124, result.stderr);
+    assert.ok(elapsed >= 1_000 && elapsed < 10_000, `the command returned after ${elapsed} ms`);
+    assert.match(result.stderr, /did not answer `url` within 1100 ms/);
+    await waitFor(() => silentLog(log).held.length > 0, "the client closed its request");
+    assert.ok(silentLog(log).held[0] >= 1_000, `the request was held: ${silentLog(log).held}`);
+  });
+});
+
+describe("a step of up that runs out of time", () => {
+  const env = { ...process.env, TMPDIR: join(scratch, "within-tmp"), MEDIA_VERIFY_RUN: `within-${process.pid}` };
+  const hanging = join(scratch, "hanging-cli.mjs");
+  const stubborn = join(scratch, "stubborn-cli.mjs");
+  const stubbornPid = join(scratch, "stubborn-cli.pid");
+
+  before(() => {
+    mkdirSync(env.TMPDIR, { recursive: true });
+    writeFileSync(hanging, "setInterval(() => {}, 1_000);\n");
+    writeFileSync(
+      stubborn,
+      `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(stubbornPid)}, String(process.pid));
+process.on("SIGTERM", () => console.error("ignoring SIGTERM"));
+setInterval(() => {}, 1_000);
+`,
+    );
+  });
+
+  // The script's own functions, with the side's removal recorded instead of run.
+  const step = (cli) =>
+    spawnSync(
+      "bash",
+      [
+        "-c",
+        `source "$1"; take_side --side after; mkdir -p "$state"; side_down() { echo "removed the $1 side" >&2; }
+         cli_js="$2"; within 1 "asking the owner's CLI who it is" cli_raw whoami`,
+        "within-test",
+        helper,
+        cli,
+      ],
+      { encoding: "utf8", env, timeout: 20_000 },
+    );
+
+  test("fails up the way a silent stack does: names the step, removes the side, and exits 1", () => {
+    const began = Date.now();
+    const result = step(hanging);
+
+    assert.equal(result.status, 1, result.stderr);
+    assert.ok(Date.now() - began < 10_000, "the step stopped at its deadline");
+    assert.match(result.stderr, /removed the after side/);
+    assert.match(result.stderr, /asking the owner's CLI who it is did not finish in 1s/);
+  });
+
+  test("kills a step that ignores the stop, then fails up the same way", async () => {
+    const began = Date.now();
+    const result = step(stubborn);
+    const pid = Number(execFileSync("cat", [stubbornPid], { encoding: "utf8" }));
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    // Its parent reaps it a moment after the kill.
+    for (let tries = 0; alive() && tries < 40; tries += 1) await sleep(50);
+
+    assert.match(result.stderr, /ignoring SIGTERM/);
+    assert.equal(result.status, 1, result.stderr);
+    assert.ok(Date.now() - began < 15_000, "the step was killed after its grace");
+    assert.match(result.stderr, /removed the after side/);
+    assert.match(result.stderr, /asking the owner's CLI who it is did not finish in 1s/);
+    assert.equal(alive(), false, `the stubborn CLI ${pid} is gone`);
+  });
 });

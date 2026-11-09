@@ -11,6 +11,7 @@
 #   verify-media.sh status
 #   verify-media.sh down [--side S] [--purge]
 #
+# MEDIA_VERIFY_HEALTH_SECONDS bounds how long `up` waits for the stack to answer (default 360).
 # MEDIA_VERIFY_RUN names the run (default: the checkout's directory name). A run has two sides:
 # `after` is built from this checkout, `before` from main. Each side is its own Compose project,
 # media-verify-<run>-<side>: that side's own revision of deploy/compose (the all-in-one image,
@@ -18,7 +19,7 @@
 # ports), plus old music from legacy/music as one more service.
 set -euo pipefail
 
-skill="$(cd "$(dirname "$0")/.." && pwd)"
+skill="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 root="$(cd "$skill/../../.." && pwd)"
 scripts="$skill/scripts"
 
@@ -36,6 +37,7 @@ cli_js="$root/apps/cli/dist/media.js"
 music_root="$root/legacy/music"
 music_cli_js="$music_root/apps/cli/dist/music.js"
 password="password123"
+health_seconds="${MEDIA_VERIFY_HEALTH_SECONDS:-360}"
 
 die() { echo "verify-media: $*" >&2; exit 1; }
 say() { echo "verify-media: $*" >&2; }
@@ -108,7 +110,8 @@ container() { echo "$project-$1-1"; }
 # Compose for this side only: its own project, the settings `up` wrote, the demo library's own
 # override (deploy/compose/compose.demo.yaml, as self-hosters use it) or a bind mount of another
 # library, and an override that labels the containers. Settings in the caller's shell or in a
-# deploy/compose/.env file would change what runs, so neither reaches Compose.
+# deploy/compose/.env file would change what runs, so neither reaches Compose. A `docker_limit` of
+# some seconds stops a call that takes longer, as when the Docker daemon stalls.
 compose() {
   local unset=() name dir files
   dir="$state/deploy/compose"
@@ -116,34 +119,83 @@ compose() {
   while read -r name; do unset+=(-u "$name"); done < <(sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$dir/.env.example")
   [[ "$(read_state library)" == "$demo_image" ]] && files+=(-f "$dir/compose.demo.yaml")
   env "${unset[@]}" -u COMPOSE_PROFILES -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME -u COMPOSE_ENV_FILES \
-    docker compose -p "$project" --env-file "$state/compose.env" "${files[@]}" -f "$state/compose.verify.yaml" "$@"
+    ${docker_limit:+timeout --kill-after=5 "$docker_limit"} docker compose -p "$project" --env-file "$state/compose.env" "${files[@]}" -f "$state/compose.verify.yaml" "$@"
 }
 
-healthy() { curl -fsS "$(url)/api/health" 2>/dev/null | grep -q '"backend":"connected"'; }
-music_healthy() { curl -fsS "$(music_url)/healthz" 2>/dev/null | grep -q '"ok":true'; }
+# Docker for a check or a cleanup on the way out, which a stalled daemon must not hold up: each call
+# gets 15 seconds.
+docker_brief() { timeout --kill-after=5 15 docker "$@"; }
 
-wait_healthy() {
-  local services=("$(movies_service)") status service
+# Health URLs that sent any HTTP response, so a wait that runs out can name the ones that never did.
+declare -A answered=()
+
+# Checks a health URL: succeeds when its body holds $2. Every request gives up within 10 seconds, so
+# a stack the host cannot route to fails its wait instead of hanging it.
+probe() {
+  local body code=0
+  body="$(curl -fsS --connect-timeout 5 --max-time 10 "$1" 2>/dev/null)" || code=$?
+  # 22 is curl's code for an HTTP error status: the URL answered, but not with a success.
+  ((code == 0 || code == 22)) && answered["$1"]=1
+  ((code == 0)) && grep -qF -- "$2" <<<"$body"
+}
+
+health_url() { echo "$(url)/api/health"; }
+music_health_url() { echo "$(music_url)/healthz"; }
+healthy() { probe "$(health_url)" '"backend":"connected"'; }
+music_healthy() { probe "$(music_health_url)" '"ok":true'; }
+
+stack_logs() {
+  local services=("$(movies_service)")
   one_port || services+=(convex)
   has_music && services+=(music)
-  for _ in $(seq 1 180); do
-    healthy && { ! has_music || music_healthy; } && return 0
+  docker_limit=15 compose logs --no-color --tail 40 "${services[@]}" >&2 ||
+    say "could not read the containers' logs (status $?)"
+}
+
+# Removes a side that did not start, so a failed `up` leaves nothing running. The removal runs
+# whatever its own steps do, and `up` still fails with the reason it stopped.
+start_failed() {
+  side_down "$side" >&2 || say "could not finish removing the $side side (status $?)"
+  die "$1"
+}
+
+wait_healthy() {
+  local service status urls=("$(health_url)") target ip ready deadline=$((SECONDS + health_seconds))
+  has_music && urls+=("$(music_health_url)")
+  while ((SECONDS < deadline)); do
+    # Both every time, so a report names only the URLs that really never answered.
+    ready=1
+    healthy || ready=0
+    if has_music && ! music_healthy; then ready=0; fi
+    ((ready)) && return 0
     for service in "$(movies_service)" music; do
       [[ "$service" == music ]] && ! has_music && continue
-      status="$(docker inspect -f '{{.State.Status}}' "$(container "$service")" 2>/dev/null || echo missing)"
+      status="$(docker_brief inspect -f '{{.State.Status}}' "$(container "$service")" 2>/dev/null || echo missing)"
       if [[ "$status" == exited || "$status" == dead ]]; then
-        compose logs --no-color --tail 40 "${services[@]}" >&2 || true
-        die "$(container "$service") stopped while starting"
+        stack_logs
+        start_failed "$(container "$service") stopped while starting"
       fi
     done
     sleep 2
   done
-  compose logs --no-color --tail 40 "${services[@]}" >&2 || true
-  die "$project did not become healthy in 6 minutes"
+  stack_logs
+  for target in "${urls[@]}"; do
+    if [[ -n "${answered[$target]:-}" ]]; then say "$target answered but never reported ready"
+    else say "$target never answered"; fi
+  done
+  # Published ports reach a container through its address on a Docker network. A VPN route, such as
+  # a Tailscale exit node's, can take that address away from the host.
+  for service in "$(movies_service)" music; do
+    [[ "$service" == music ]] && ! has_music && continue
+    for ip in $(docker_brief inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$(container "$service")" 2>/dev/null || true); do
+      say "check the host's route to $(container "$service") with \`ip route get $ip\`: $(ip route get "$ip" 2>/dev/null | head -1 || true)"
+    done
+  done
+  start_failed "$project did not become healthy in ${health_seconds}s"
 }
 
 browser() {
-  CHROMIUM_PATH="$(chromium_path)" node "$scripts/browser.mjs" --state "$state" "$@"
+  CHROMIUM_PATH="$(chromium_path)" ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$scripts/browser.mjs" --state "$state" "$@"
 }
 
 start_browser() {
@@ -160,22 +212,36 @@ start_browser() {
       sed -n 's/^browser: /verify-media: /p' "$state/browser.log" >&2
       return 0
     fi
-    kill -0 "$(read_state browser.pid)" 2>/dev/null || { cat "$state/browser.log" >&2; die "the browser host exited"; }
+    kill -0 "$(read_state browser.pid)" 2>/dev/null || { cat "$state/browser.log" >&2; start_failed "the browser host exited"; }
     sleep 0.2
   done
-  die "the browser host did not start; see $state/browser.log"
+  cat "$state/browser.log" >&2
+  start_failed "the browser host did not start in 20s"
+}
+
+# Runs one step of `up`, such as signing in or seeding, within some seconds: `browser`, the CLIs,
+# and the seeds read `cli_timeout` and run under timeout(1), which exits 124 when time runs out, as
+# browser.mjs does when its host stays silent, or 137 when the step ignored the stop and was killed
+# 5 seconds later. A step that runs out fails `up` the way a stack that never answered does.
+within() {
+  local seconds="$1" step="$2" code=0
+  shift 2
+  cli_timeout="$seconds" "$@" || code=$?
+  ((code == 124 || code == 137)) && start_failed "$step did not finish in ${seconds}s"
+  return "$code"
 }
 
 # The CLI for one person, with their own config folder, so sessions never mix. Lucía is the owner.
 as="lucia"
 cli_raw() {
   env -u MEDIA_CONVEX_URL -u MEDIA_SERVER_URL -u MEDIA_API_KEY -u MEDIA_PROFILE -u MEDIA_PASSWORD \
-    XDG_CONFIG_HOME="$state/cli/$as" node "$cli_js" "$@"
+    XDG_CONFIG_HOME="$state/cli/$as" ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$cli_js" "$@"
 }
 
 music_cli_raw() {
   env -u MUSIC_INSECURE MUSIC_SERVER="$(music_url)/convex" \
-    MUSIC_API_KEY="$(read_state "music/key.$as")" XDG_CONFIG_HOME="$state/music/cli/$as" node "$music_cli_js" "$@"
+    MUSIC_API_KEY="$(read_state "music/key.$as")" XDG_CONFIG_HOME="$state/music/cli/$as" \
+    ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$music_cli_js" "$@"
 }
 
 # Signs a person's CLI in with their password, the way `media login` documents it.
@@ -190,9 +256,9 @@ cli_login() {
 # scan starts. The quiet must hold for three checks in a row, since a scan's follow-up jobs appear
 # just as it finishes.
 wait_libraries() {
-  local want="$1" quiet=0 state_now
-  for _ in $(seq 1 450); do
-    state_now="$( { cli_raw libraries list; echo; cli_raw jobs list --limit 100; } 2>/dev/null | node -e '
+  local want="$1" quiet=0 state_now deadline=$((SECONDS + 900))
+  while ((SECONDS < deadline)); do
+    state_now="$( { cli_timeout=60 cli_raw libraries list; echo; cli_timeout=60 cli_raw jobs list --limit 100; } 2>/dev/null | node -e '
       const [libraries, jobs] = require("node:fs").readFileSync(0, "utf8").split(/\n(?=\[)/).map((part) => JSON.parse(part));
       const failed = jobs.find((job) => job.kind === "scan" && job.status === "failed");
       if (failed) { console.log(`failed ${JSON.stringify(failed.error)}`); process.exit(0); }
@@ -208,7 +274,7 @@ wait_libraries() {
     fi
     sleep 2
   done
-  die "the libraries were still busy after 15 minutes ($state_now)"
+  start_failed "the libraries were still busy after 15 minutes ($state_now)"
 }
 
 # ---------------------------------------------------------------------------------------------- up
@@ -216,6 +282,7 @@ wait_libraries() {
 cmd_up() {
   take_side "$@"
   local image="" library="" setup=1 seed=1 music=1 started=$SECONDS step=$SECONDS
+  [[ "$health_seconds" =~ ^[1-9][0-9]*$ ]] || die "MEDIA_VERIFY_HEALTH_SECONDS must be a whole number of seconds"
   set -- "${args[@]}"
   while (($#)); do
     case "$1" in
@@ -391,15 +458,18 @@ YAML
     local shows=()
     [[ "$library" == "$demo_image" || -d "$library/$shows_dir" ]] && shows=(--shows "/media/library/$shows_dir")
     say "running first-run setup through the web app and scanning the libraries"
-    browser setup --movies "/media/library/$movies_dir" "${shows[@]}" >/dev/null
-    as=lucia cli_login admin@movies.local
-    cli_raw whoami | grep -q admin@movies.local || die "the CLI does not sign in as the owner"
+    within 1260 "first-run setup in the movies web app" \
+      browser setup --movies "/media/library/$movies_dir" "${shows[@]}" >/dev/null
+    as=lucia within 60 "signing the owner's CLI in" cli_login admin@movies.local
+    as=lucia within 60 "asking the owner's CLI who it is" cli_raw whoami > "$state/whoami.json"
+    grep -q admin@movies.local "$state/whoami.json" || die "the CLI does not sign in as the owner"
     if ((music)); then
       say "running old music's first-run setup through its web app and scanning /music"
-      browser setup --app music >/dev/null
+      within 1260 "first-run setup in the music web app" browser setup --app music >/dev/null
       mkdir -p "$state/music/cli/lucia"
-      write_state music/key.lucia "$(browser create-key --app music)"
-      as=lucia music_cli_raw whoami --json | grep -q admin@movies.local || die "the API key does not sign music's CLI in as the owner"
+      within 360 "making the owner's music API key" browser create-key --app music > "$state/music/key.lucia"
+      as=lucia within 60 "asking the owner's music CLI who it is" music_cli_raw whoami --json > "$state/music/whoami.json"
+      grep -q admin@movies.local "$state/music/whoami.json" || die "the API key does not sign music's CLI in as the owner"
       write_state music/people lucia
     fi
     wait_libraries "$(( ${#shows[@]} > 0 ? 2 : 1 ))"
@@ -409,11 +479,10 @@ YAML
   if ((seed)); then
     [[ "$library" == "$demo_image" ]] || say "the seed expects the demo library's titles and albums"
     say "seeding the demo people, profiles, access, and watching"
-    seed
+    within 900 "seeding movies" seed
     if ((music)); then
       say "seeding the same people in music, with playlists and likes"
-      node "$scripts/music-seed.mjs" --state "$state" --server "$(music_url)/convex" --cli "$music_cli_js" \
-        --browser "$scripts/browser.mjs" >&2
+      within 900 "seeding music" music_seed
     fi
     timing "the seed"
   fi
@@ -422,8 +491,13 @@ YAML
 }
 
 seed() {
-  node "$scripts/seed.mjs" --state "$state" --server "$(convex_url)" --media-url "$(url)" \
-    --cli "$cli_js" --browser "$scripts/browser.mjs" >&2
+  ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$scripts/seed.mjs" --state "$state" --server "$(convex_url)" \
+    --media-url "$(url)" --cli "$cli_js" --browser "$scripts/browser.mjs" >&2
+}
+
+music_seed() {
+  ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$scripts/music-seed.mjs" --state "$state" \
+    --server "$(music_url)/convex" --cli "$music_cli_js" --browser "$scripts/browser.mjs" >&2
 }
 
 # ------------------------------------------------------------------------------------------ doctor
@@ -589,7 +663,7 @@ cmd_status() {
 
 # --------------------------------------------------------------------------------------------- ios
 
-on_mac() { ssh "$mac" "export PATH=/opt/homebrew/bin:\$PATH LANG=en_US.UTF-8; set -euo pipefail; $1"; }
+on_mac() { ssh -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 "$mac" "export PATH=/opt/homebrew/bin:\$PATH LANG=en_US.UTF-8; set -euo pipefail; $1"; }
 
 udid() {
   local id
@@ -612,8 +686,9 @@ ios_tree() {
 }
 
 ios_wait() {
-  local label="$1" seconds="${2:-60}"
-  for _ in $(seq 1 "$seconds"); do
+  local label="$1" seconds="${2:-60}" deadline
+  deadline=$((SECONDS + seconds))
+  while ((SECONDS < deadline)); do
     # Not `ios_tree | grep -q`: grep stops at the first match, and with pipefail the tree's
     # writer failing on the closed pipe would fail the match.
     grep -qF -- "$label" <<<"$(ios_tree 2>/dev/null || true)" && return 0
@@ -779,10 +854,10 @@ cmd_ios_up() {
     expo start --dev-client --port "$2"' metro "$src" "$metro" < /dev/null > "$state/metro.log" 2>&1 &
   write_state metro_pid "$!"
   for _ in $(seq 1 120); do
-    curl -fsS "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running && break
+    curl -fsS --max-time 5 "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running && break
     sleep 1
   done
-  curl -fsS "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running || { tail -20 "$state/metro.log" >&2; die "Metro did not start"; }
+  curl -fsS --max-time 5 "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running || { tail -20 "$state/metro.log" >&2; die "Metro did not start"; }
 
   local id
   id="$(on_mac "xcrun simctl create media-verify-$run-$side $(printf %q "$sim_type")")"
@@ -807,8 +882,8 @@ cmd_ios_up() {
   metro_url="$(node -p 'encodeURIComponent(process.argv[1])' "http://127.0.0.1:$metro")"
   on_mac "xcrun simctl openurl $id 'exp+movies://expo-development-client/?url=$metro_url'"
   # iOS asks once whether to open the link in the app. Tap only that prompt's button.
-  local tree
-  for _ in $(seq 1 120); do
+  local tree deadline=$((SECONDS + 240))
+  while ((SECONDS < deadline)); do
     tree="$(ios_tree 2>/dev/null || true)"
     grep -qE 'Connect to Server|Sign In' <<<"$tree" && break
     grep -q 'Open in' <<<"$tree" && ios_tap_label "Open" >/dev/null 2>&1
@@ -884,10 +959,10 @@ cmd_ios() {
       local failed=0 id
       id="$(udid)"
       kill -0 "$(read_state forward_pid)" 2>/dev/null && echo "ok    ssh forwards to $mac" || { echo "FAIL  ssh forwards to $mac"; failed=1; }
-      curl -fsS "http://127.0.0.1:$(read_state metro_port)/status" 2>/dev/null | grep -q running && echo "ok    Metro on $(read_state metro_port)" || { echo "FAIL  Metro"; failed=1; }
+      curl -fsS --max-time 5 "http://127.0.0.1:$(read_state metro_port)/status" 2>/dev/null | grep -q running && echo "ok    Metro on $(read_state metro_port)" || { echo "FAIL  Metro"; failed=1; }
       on_mac "xcrun simctl list devices | grep -F '$id) (Booted)' >/dev/null" && echo "ok    simulator $id booted" || { echo "FAIL  simulator $id"; failed=1; }
-      on_mac "curl -fsS $(url)/api/health | grep -q connected" && echo "ok    the Mac reaches $(url)" || { echo "FAIL  the Mac reaches $(url)"; failed=1; }
-      on_mac "curl -fsS $(convex_url)/version >/dev/null" && echo "ok    the Mac reaches Convex at $(convex_url)" || { echo "FAIL  the Mac reaches $(convex_url)"; failed=1; }
+      on_mac "curl -fsS --max-time 10 $(url)/api/health | grep -q connected" && echo "ok    the Mac reaches $(url)" || { echo "FAIL  the Mac reaches $(url)"; failed=1; }
+      on_mac "curl -fsS --max-time 10 $(convex_url)/version >/dev/null" && echo "ok    the Mac reaches Convex at $(convex_url)" || { echo "FAIL  the Mac reaches $(convex_url)"; failed=1; }
       return "$failed" ;;
     describe) ios_tree ;;
     sign-in) ios_sign_in && echo "signed in on $(udid)" ;;
@@ -1106,19 +1181,22 @@ cmd_evidence() {
 side_down() {
   take_side --side "$1"
   local label="label=com.docker.compose.project=$project" pid
-  [[ -d "$state" || -n "$(docker ps -aq --filter "$label")$(docker volume ls -q --filter "$label")" ]] || return 0
+  [[ -d "$state" || -n "$(docker_brief ps -aq --filter "$label")$(docker_brief volume ls -q --filter "$label")" ]] || return 0
   mkdir -p "$state"
   ios_down
   pid="$(read_state browser.pid)"
   [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
   # The project's containers, network, and named volumes, and nothing else. Compose labels each
   # with the project's name, which also finds them when the state folder is gone.
-  [[ -f "$state/compose.env" ]] && compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
-  docker ps -aq --filter "$label" | xargs -r docker rm -f >/dev/null 2>&1 || true
-  docker volume ls -q --filter "$label" | xargs -r docker volume rm >/dev/null 2>&1 || true
-  docker network ls -q --filter "$label" | xargs -r docker network rm >/dev/null 2>&1 || true
-  docker images -q --filter "label=media.verify.run=$run" --filter "label=media.verify.side=$side" | sort -u |
-    xargs -r docker image rm -f >/dev/null 2>&1 || true
+  # Each step is bounded, and one that fails or runs out leaves the rest to run.
+  if [[ -f "$state/compose.env" ]] && ! docker_limit=60 compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1; then
+    say "compose down did not finish for $project; check \`docker ps -a --filter $label\`"
+  fi
+  docker_brief ps -aq --filter "$label" | xargs -r timeout --kill-after=5 15 docker rm -f >/dev/null 2>&1 || true
+  docker_brief volume ls -q --filter "$label" | xargs -r timeout --kill-after=5 15 docker volume rm >/dev/null 2>&1 || true
+  docker_brief network ls -q --filter "$label" | xargs -r timeout --kill-after=5 15 docker network rm >/dev/null 2>&1 || true
+  docker_brief images -q --filter "label=media.verify.run=$run" --filter "label=media.verify.side=$side" | sort -u |
+    xargs -r timeout --kill-after=5 15 docker image rm -f >/dev/null 2>&1 || true
   [[ -d "$state/src" ]] && git -C "$root" worktree remove --force "$state/src" 2>/dev/null || true
   rm -rf "$state"
   say "removed the $side side (evidence kept in $evidence)"
@@ -1159,4 +1237,5 @@ main() {
     *) sed -n '2,17p' "$0" >&2; exit 2 ;;
   esac
 }
-main "$@"; exit
+# Tests source the script to call its functions; run as a command, it runs main.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; exit; fi

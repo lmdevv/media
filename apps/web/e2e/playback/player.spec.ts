@@ -1001,7 +1001,17 @@ test("pausing while a stream moves to where it resumes keeps the position", asyn
         : null,
     );
 
-  await expect.poll(pausedAfterLanding).toStrictEqual({ seeking: "false", at: "0" });
+  // Chrome may lose the seek at 0 before the pause dispatches, which the player must undo, or
+  // finish it at the target first. Which one happens depends on the runner's load, so the test
+  // asserts the outcome either way and records which it saw.
+  await expect.poll(async () => (await pausedAfterLanding())?.seeking).toBeDefined();
+
+  const landed = await pausedAfterLanding();
+
+  test.info().annotations.push({
+    type: "pause after landing",
+    description: `seeking ${String(landed?.seeking)} at ${String(landed?.at)}s`,
+  });
   await expect
     .poll(async () => {
       const state = await videoState(page);
@@ -1012,6 +1022,23 @@ test("pausing while a stream moves to where it resumes keeps the position", asyn
   await expectPositionNear(page, start, 0.1);
   await page.waitForTimeout(1_000);
   expect(Math.abs((await videoState(page)).currentTime - start)).toBeLessThan(0.1);
+
+  await video.evaluate((element) => {
+    if (!(element instanceof HTMLVideoElement)) return;
+
+    element.dataset["lowest"] = String(element.currentTime);
+    element.addEventListener("timeupdate", () => {
+      element.dataset["lowest"] = String(
+        Math.min(Number(element.dataset["lowest"]), element.currentTime),
+      );
+    });
+  });
+  await page.getByTestId("player").press("k");
+  await expectPlayingPast(page, start + 1);
+  expect(
+    await video.evaluate((element) => Number(element.dataset["lowest"])),
+    "playback goes on from where it resumed",
+  ).toBeGreaterThan(start - 0.1);
 
   before = streams.length;
   await chooseQuality(/^Auto/u);

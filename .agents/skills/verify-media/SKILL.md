@@ -128,7 +128,11 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/media:main, build 
    `deploy/compose/compose.demo.yaml` for movies; `up` pulls it once per machine.
 4. It starts the Compose project and waits until movies' `/api/health` reports
    `"backend":"connected"`, which needs Convex, the deployed functions, and the media service, and
-   music's `/healthz` reports `"ok":true`.
+   music's `/healthz` reports `"ok":true`. Each check gives up after 10 seconds, and the wait
+   after 6 minutes (`MEDIA_VERIFY_HEALTH_SECONDS`). When it runs out, or a container stops while
+   starting, `up` prints the containers' last log lines, which URL never answered, and each
+   container's `ip route get` line, removes the side, and exits 1. A route through `tailscale0`
+   or another VPN means the host can't reach that Docker network.
 5. It starts the browser host, in its own network namespace where it can, and runs first-run setup
    through each web app, as an owner does. The owner is Lucía, `admin@movies.local` with password
    `password123`, in both apps:
@@ -142,6 +146,13 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/media:main, build 
 7. It seeds the demo people in both apps: in movies, Lucía's Kids profile, library access, and
    watching (`seed.mjs`); in music, playlists, likes, and sharing (`music-seed.mjs`). Each seed
    checks that each person sees what the demo data says.
+
+Each later step has its own limit too: 21 minutes for each app's first-run setup, a minute for
+each CLI sign-in and check, 6 minutes for music's API key, 15 minutes for the library wait, and
+15 minutes for each seed. A step that runs out fails `up` the same way, naming the step, and so
+does a browser host that doesn't start in 20 seconds. A step that ignores the stop is killed 5
+seconds later. On the way out, each Docker call gets 15 seconds and `compose down` 60, so a
+stalled Docker daemon can't hold up the removal; a removal that can't finish says so.
 
 The side is ready only after a line like this prints, and `$S status` then says `ready` for it:
 
@@ -262,7 +273,9 @@ again.
 ### Browser
 
 `$S browser [--side S] [--app movies|music|account] <command> [flags]` sends one action to the
-open Chromium and prints the result. A failed action exits 1 with Playwright's message. URLs are
+open Chromium and prints the result. A failed action exits 1 with Playwright's message. A host
+that doesn't answer makes it exit 124 a second after its `--timeout`, or after 5 minutes without
+one (20 for `setup`). URLs are
 paths inside the page's app: a movies page opens `/title/<id>` at `/movies/title/<id>`.
 
 Each page belongs to one app, which `--app` picks when the page is created: `movies` (the default),

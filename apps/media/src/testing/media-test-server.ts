@@ -13,7 +13,8 @@ import * as LibraryScanner from "../library/library-scanner.ts";
 import { decodeRecord } from "../logging/log-query.ts";
 import * as MemoryLibrary from "../library/memory-library.ts";
 import * as MediaConfig from "../media-config.ts";
-import { servicesLayer } from "../media-service.ts";
+import * as MediaTools from "../media/media-tools.ts";
+import { servicesLayerWith } from "../media-service.ts";
 import { redactedLine } from "../observability.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
 import * as PlaybackReporter from "../playback/playback-reporter.ts";
@@ -49,6 +50,8 @@ interface Options {
    * ended, when absent; the scripted Convex is then present but nothing follows it.
    */
   readonly convex?: true;
+  /** Wraps the real ffmpeg and ffprobe the server's own services run, such as to hold an exit. */
+  readonly mediaTools?: (real: MediaTools.Interface) => MediaTools.Interface;
 }
 
 /**
@@ -98,7 +101,12 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
         Effect.map(FileSystem.FileSystem, options.fileSystem ?? ((real) => real)),
       );
 
-      const services = servicesLayer.pipe(
+      const tools = Layer.effect(
+        MediaTools.Service,
+        Effect.map(MediaTools.Service, options.mediaTools ?? ((real) => real)),
+      ).pipe(Layer.provide(MediaTools.layer));
+
+      const services = servicesLayerWith(tools).pipe(
         Layer.provideMerge(
           Layer.mergeAll(
             MemoryLibrary.layer,
