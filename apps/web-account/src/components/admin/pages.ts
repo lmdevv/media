@@ -114,8 +114,8 @@ interface Loaded<Row> {
 /**
  * One store over a list's pages. Loading the next page pins the page above to end where the next
  * one starts, so a row that moves into or out of the pages above never shows twice or goes
- * missing. The open-ended subscription keeps serving the page until the pinned one answers. Its
- * snapshot stays the same object until a page changes, as `useSyncExternalStore` needs.
+ * missing. The open-ended subscription keeps serving the page until the pinned one answers, then
+ * stops. Its snapshot stays the same object until a page changes, as `useSyncExternalStore` needs.
  *
  * @param pageAt - Follows the page that starts at a cursor, ended at `endCursor` when given.
  */
@@ -124,12 +124,33 @@ export const pagedStore = <Row>(
 ): PagedStore<Row> => {
   const pages: Array<Loaded<Row>> = [{ watch: pageAt({ cursor: null }), before: null }];
   const starts: Array<string | null> = [null];
-  const listening = new Map<() => void, Array<() => void>>();
+  const listening = new Map<() => void, Map<Watch<PageOf<Row>>, () => void>>();
   let inputs: ReadonlyArray<QueryState<PageOf<Row>>> = [];
   let output: Paged<Row> = { status: "loading" };
 
+  const stopReplacedWatches = (): void => {
+    for (const [index, loaded] of pages.entries()) {
+      const { before } = loaded;
+
+      if (before !== null && loaded.watch.getSnapshot().status !== "loading") {
+        pages[index] = { watch: loaded.watch, before: null };
+
+        for (const stops of listening.values()) {
+          stops.get(before)?.();
+          stops.delete(before);
+        }
+      }
+    }
+  };
+
+  const follow = (watch: Watch<PageOf<Row>>, onChange: () => void): (() => void) =>
+    watch.subscribe(() => {
+      stopReplacedWatches();
+      onChange();
+    });
+
   const listen = (watch: Watch<PageOf<Row>>): void => {
-    for (const [onChange, stops] of listening) stops.push(watch.subscribe(onChange));
+    for (const [onChange, stops] of listening) stops.set(watch, follow(watch, onChange));
   };
 
   const stateOf = (loaded: Loaded<Row>): QueryState<PageOf<Row>> => {
@@ -170,13 +191,11 @@ export const pagedStore = <Row>(
 
   return {
     subscribe: (onChange) => {
-      listening.set(
-        onChange,
-        watches().map((watch) => watch.subscribe(onChange)),
-      );
+      stopReplacedWatches();
+      listening.set(onChange, new Map(watches().map((watch) => [watch, follow(watch, onChange)])));
 
       return () => {
-        for (const stop of listening.get(onChange) ?? []) stop();
+        for (const stop of listening.get(onChange)?.values() ?? []) stop();
 
         listening.delete(onChange);
       };
