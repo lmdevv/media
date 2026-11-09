@@ -312,13 +312,18 @@ const deleteRefreshTokens = async (
   }
 };
 
-/** Ends one session at once, and deletes its refresh tokens a batch per call. */
+/**
+ * Ends one session at once, and deletes its refresh tokens a batch per call. A session already
+ * gone is left alone: whatever deleted it deletes its tokens, or leaves them to the sweep, so a
+ * repeated end never starts a second chain of deletions.
+ */
 export const endSession = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   sessionId: Id<"authSessions">,
 ): Promise<void> => {
-  if ((await ctx.db.get(sessionId)) !== null) await ctx.db.delete(sessionId);
+  if ((await ctx.db.get(sessionId)) === null) return;
 
+  await ctx.db.delete(sessionId);
   await deleteRefreshTokens(ctx, sessionId);
 };
 

@@ -207,22 +207,34 @@ token past the window left its session unrevoked.
 - **Refresh.** Before the library sees one, the store answers the cases that read every token:
   - an expired token, or one whose session is gone or expired, ends its session through
     `endSession` and refreshes nothing;
-  - a used token past the reuse window, unless it is the parent of the newest token, ends its
-    session the same way. The library left such a session unable to refresh but its JWT live for
-    up to 10 minutes; ending it signs the person out at once instead, which is where both lead;
+  - a used token past the reuse window, unless it is the parent of the active token, refreshes
+    nothing, and every token descended from it is marked used, as the library marks them. The
+    session and its other branches go on, so a client whose late network retry came back keeps the
+    branch it holds. The store marks 256 tokens a call, depth first over the parent index, and
+    schedules the rest (`core/auth/store:invalidateTokens`). Until the last call, a deep token of
+    that branch can still refresh once; what it mints is a child in the branch, which a later call
+    marks;
   - a token that is gone, or whose stored session differs from the one it names, refreshes
     nothing and ends nothing. It proves no hold on the session it names, where the library ended
     that session, so knowing a session id and holding any refresh token signed its owner out.
 
-  The rest go to the library's store through `ctx.runMutation`, in the same transaction, and none
-  of them reads more than the token, its session, and the newest token.
+  The rest go to the library's store through `ctx.runMutation`, in the same transaction.
+  Marked tokens stay until their session ends, so `core.auth.sessions.revoke` still takes any
+  token of a session, an invalidated one included.
 
-- **The newest token is the active one.** Every refresh the library answers adds a token or hands
-  back the newest, so the store reads one row where the library scans for the newest unused one.
+- **The active token, read within a bound.** The library calls the newest unused token active and
+  scans back for it. The store reads the newest 64 tokens. When none is unused, a used token
+  inside the window refreshes nothing instead of going to a scan that may read thousands, and one
+  past the window is treated as having no active token. A session reaches that only when a reused
+  token's branch held its 64 newest tokens.
+- **One chain of deletions per session.** `endSession` leaves a session that is already gone
+  alone. Whatever deleted it deletes its tokens or leaves them to the sweep, so an expired token
+  sent again while its session's tokens are being deleted, or a second revoke, starts no second
+  chain.
 - **Rejected: patching or forking the library.** The pinned package stays as published, and the
   store depends only on its store's call shapes and two constants it does not export (the reuse
   window and the token divider), which `test/core/auth/store.test.ts` checks against the
   installed package.
 - This narrows the rejection above of intercepting Convex Auth's refresh. Since every client has
-  its own session, the store does not skip a delete; it only ends sessions in batches the library
-  would end, or leave unable to refresh, in one call.
+  its own session, the store does not skip a delete; it does in batches what the library does in
+  one call, apart from the two refusals above.

@@ -40,3 +40,18 @@ export const newestRows = (table: TableNames, limit = 200): ReadonlyArray<string
   convex(["data", table, "--format", "jsonl", "--order", "desc", "--limit", String(limit)])
     .split("\n")
     .filter((line) => line.trim().startsWith("{"));
+
+/** The newest scheduled function runs, as `convex data` lists the `_scheduled_functions` table. */
+export const newestScheduledRuns = (limit = 200): ReadonlyArray<string> =>
+  convex([
+    "data",
+    "_scheduled_functions",
+    "--format",
+    "jsonl",
+    "--order",
+    "desc",
+    "--limit",
+    String(limit),
+  ])
+    .split("\n")
+    .filter((line) => line.trim().startsWith("{"));

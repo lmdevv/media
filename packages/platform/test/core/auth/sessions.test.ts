@@ -1,10 +1,10 @@
 import { ConvexHttpClient } from "convex/browser";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { importRows, newestRows } from "../../rows";
+import { importRows, newestRows, newestScheduledRuns } from "../../rows";
 import { createPerson, refusal, signInAs, unique } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
@@ -25,8 +25,35 @@ const TokenRow = Schema.fromJsonString(
     _id: Schema.declare(isTokenId),
     sessionId: Schema.String,
     expirationTime: Schema.Finite,
+    firstUsedTime: Schema.optionalKey(Schema.Finite),
+    parentRefreshTokenId: Schema.optionalKey(Schema.String),
   }),
 );
+
+/** How long after its first use a refresh token still refreshes, in Convex Auth. */
+const REUSE_WINDOW_MS = 10_000;
+
+const ScheduledRun = Schema.fromJsonString(
+  Schema.Struct({
+    name: Schema.String,
+    args: Schema.Tuple([Schema.Struct({ sessionId: Schema.optionalKey(Schema.String) })]),
+    state: Schema.Struct({ kind: Schema.String }),
+  }),
+);
+
+/** The token deletions queued or running for `sessionId`. */
+const queuedDeletions = (sessionId: string): number =>
+  newestScheduledRuns(500)
+    .map((line) => Schema.decodeOption(ScheduledRun)(line))
+    .filter(
+      (run) =>
+        Option.isSome(run) &&
+        run.value.name.endsWith(":endRefreshTokens") &&
+        run.value.args[0].sessionId === sessionId &&
+        (run.value.state.kind === "pending" || run.value.state.kind === "inProgress"),
+    ).length;
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const tokenRowsOf = (sessionId: string, newest = PILED_UP + 1000) =>
   newestRows("authRefreshTokens", newest)
@@ -66,7 +93,7 @@ const pileUp = async (
   }>,
 ): Promise<void> => {
   importRows("authRefreshTokens", rows);
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await pause(1500);
 };
 
 const refreshWith = (core: CoreStack, refreshToken: string) =>
@@ -107,7 +134,7 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     expect(refreshed.tokens).toBeNull();
   });
 
-  it("ends a session whose rotated refresh token comes back late, and revoke confirms it", async () => {
+  it("revokes a session from a refresh token that was rotated and invalidated since", async () => {
     if (stack === undefined) return;
     const signedIn = await signInAs(stack, await createPerson(stack));
     const anonymous = () => new ConvexHttpClient(stack.url, { logger: false });
@@ -122,12 +149,13 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     const issued = new ConvexHttpClient(stack.url, { logger: false });
 
     issued.setAuth(second.tokens?.token ?? "");
+    const stillLive = await issued.query(api.core.auth.sessions.current, {});
 
     expect({
       rotated: first.tokens !== null && second.tokens !== null,
       late: late.tokens,
-      issued: await refusal(issued.query(api.core.auth.sessions.current, {})),
-    }).toStrictEqual({ rotated: true, late: null, issued: "unauthenticated" });
+      stillLive: stillLive.sessionId.length > 0,
+    }).toStrictEqual({ rotated: true, late: null, stillLive: true });
 
     expect(
       await anonymous().mutation(api.core.auth.sessions.revoke, {
@@ -266,30 +294,104 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     await expect.poll(() => tokensOf(sessionId), { timeout: 30_000, interval: 1_000 }).toBe(0);
   });
 
-  it("ends a session whose old refresh token comes back, however many tokens followed it", async () => {
+  it("marks every token after a reused one used, however many, and keeps the session", async () => {
     if (stack === undefined) return;
     const signedIn = await signInAs(stack, await createPerson(stack));
     const { sessionId } = await signedIn.client.query(api.core.auth.sessions.current, {});
-    const usedAt = Date.now() - 60_000;
     const expirationTime = Date.now() + DAY_MS;
-    const reused = addToken(sessionId, { expirationTime, firstUsedTime: usedAt });
+
+    const reused = addToken(sessionId, {
+      expirationTime,
+      firstUsedTime: Date.now() - 6 * REUSE_WINDOW_MS,
+    });
 
     await pileUp(
       Array.from({ length: PILED_UP }, () => ({
         sessionId,
         expirationTime,
-        firstUsedTime: usedAt,
         parentRefreshTokenId: reused,
       })),
     );
 
+    const active = addToken(sessionId, { expirationTime });
+
+    const stillRefreshing = (): number =>
+      tokenRowsOf(sessionId).filter(
+        (row) =>
+          row.parentRefreshTokenId === reused &&
+          (row.firstUsedTime === undefined || row.firstUsedTime > Date.now() - REUSE_WINDOW_MS),
+      ).length;
+
+    expect(stillRefreshing()).toBe(PILED_UP);
     expect(await refreshWith(stack, `${reused}|${sessionId}`)).toEqual({ tokens: null });
+    await expect.poll(stillRefreshing, { timeout: 60_000, interval: 1_000 }).toBe(0);
     expect(await refusal(signedIn.client.query(api.core.auth.sessions.current, {}))).toBe(
-      "unauthenticated",
+      "accepted",
     );
-    expect((await refreshWith(stack, signedIn.refreshToken)).tokens).toBeNull();
-    await expect.poll(() => tokensOf(sessionId), { timeout: 30_000, interval: 1_000 }).toBe(0);
+    expect((await refreshWith(stack, `${active}|${sessionId}`)).tokens).not.toBeNull();
   });
+
+  it("invalidates only a late retry's branch, so a client on another branch stays signed in", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const r0 = signedIn.refreshToken;
+
+    const tokensFrom = async (refreshToken: string) =>
+      (await refreshWith(stack, refreshToken)).tokens;
+
+    const r1 = (await tokensFrom(r0))?.refreshToken ?? "";
+    const r2 = (await tokensFrom(r1))?.refreshToken ?? "";
+    const r3 = await tokensFrom(r0);
+
+    expect([r1, r2, r3?.refreshToken].every((token) => token !== undefined && token !== "")).toBe(
+      true,
+    );
+
+    await pause(REUSE_WINDOW_MS + 1000);
+
+    expect(await tokensFrom(r1)).toBeNull();
+    expect(await tokensFrom(r3?.refreshToken ?? "")).not.toBeNull();
+    expect(await tokensFrom(r2)).toBeNull();
+
+    const onBranch = new ConvexHttpClient(stack.url, { logger: false });
+
+    onBranch.setAuth(r3?.token ?? "");
+
+    expect(await refusal(onBranch.query(api.core.auth.sessions.current, {}))).toBe("accepted");
+  }, 60_000);
+
+  it("deletes an ended session's tokens in one chain, however often its expired token returns", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const { sessionId } = await signedIn.client.query(api.core.auth.sessions.current, {});
+    const many = 12_000;
+
+    await pileUp(
+      Array.from({ length: many }, () => ({ sessionId, expirationTime: Date.now() + DAY_MS })),
+    );
+
+    const expired = addToken(sessionId, { expirationTime: Date.now() - 1000 });
+
+    expect(await refreshWith(stack, `${expired}|${sessionId}`)).toEqual({ tokens: null });
+    expect(await refreshWith(stack, `${expired}|${sessionId}`)).toEqual({ tokens: null });
+
+    const seen: Array<number> = [];
+
+    await expect
+      .poll(
+        () => {
+          const queued = queuedDeletions(sessionId);
+
+          seen.push(queued);
+
+          return queued;
+        },
+        { timeout: 60_000, interval: 200 },
+      )
+      .toBe(0);
+
+    expect(Math.max(...seen)).toBe(1);
+  }, 120_000);
 
   it("refreshes nothing and ends nothing for a token that names another session", async () => {
     if (stack === undefined) return;

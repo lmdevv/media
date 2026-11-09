@@ -1,7 +1,10 @@
 import { getAuthSessionId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import type { Infer } from "convex/values";
 
-import type { Id } from "../../_generated/dataModel";
+import { internal } from "../../_generated/api";
+import type { Doc, Id } from "../../_generated/dataModel";
+import { internalMutation } from "../../_generated/server";
 import type { MutationCtx } from "../../_generated/server";
 import { endSession } from "../sessions";
 
@@ -58,20 +61,143 @@ const idsOf = (
   return tokenId === null || sessionId === null ? null : { tokenId, sessionId };
 };
 
+/** Newest tokens of a session read to find its active one. */
+const ACTIVE_READ = 64;
+
+/** Reads and marks one call of an invalidation makes, inside Convex's 4,096 reads a call. */
+const MARKS_PER_CALL = 256;
+
+type Token = Doc<"authRefreshTokens">;
+
+const frame = v.object({
+  parent: v.id("authRefreshTokens"),
+  after: v.union(v.number(), v.null()),
+  skip: v.union(v.id("authRefreshTokens"), v.null()),
+});
+
+/** Children of `parent` still to mark: those created at or after `after`, past `skip`. */
+type Frame = Infer<typeof frame>;
+
+const tokens = (db: MutationCtx["db"]) => db.query("authRefreshTokens");
+
+/**
+ * The token Convex Auth calls active, the newest unused one, when it is among the session's
+ * newest `ACTIVE_READ`; null when the session has no unused token; "unread" when the newest
+ * `ACTIVE_READ` are all used and an older one might not be.
+ */
+const activeToken = async (
+  db: MutationCtx["db"],
+  sessionId: Id<"authSessions">,
+): Promise<Token | null | "unread"> => {
+  const newest = await tokens(db)
+    .withIndex("sessionId", (q) => q.eq("sessionId", sessionId))
+    .order("desc")
+    .take(ACTIVE_READ);
+
+  const active = newest.find((token) => token.firstUsedTime === undefined);
+
+  if (active !== undefined) return active;
+
+  return newest.length < ACTIVE_READ ? null : "unread";
+};
+
+/**
+ * Marks the tokens under the top frame used, as of `marked`, depth first, until `budget` reads and
+ * marks are spent, and answers the frames left. A token used since `marked` is marked too.
+ */
+const markFrom = async (
+  ctx: Pick<MutationCtx, "db">,
+  sessionId: Id<"authSessions">,
+  frames: ReadonlyArray<Frame>,
+  budget: number,
+  marked: number,
+): Promise<ReadonlyArray<Frame>> => {
+  const top = frames.at(-1);
+  const limit = budget - 1;
+
+  if (top === undefined || limit < 1) return frames;
+
+  const rows = (
+    await tokens(ctx.db)
+      .withIndex("sessionIdAndParentRefreshTokenId", (q) =>
+        q
+          .eq("sessionId", sessionId)
+          .eq("parentRefreshTokenId", top.parent)
+          .gte("_creationTime", top.after ?? 0),
+      )
+      .take(limit + 2)
+  ).filter((row) => row._id !== top.skip);
+
+  const taken = rows.slice(0, limit);
+
+  await Promise.all(
+    taken
+      .filter((row) => row.firstUsedTime === undefined || row.firstUsedTime > marked)
+      .map((row) => ctx.db.patch(row._id, { firstUsedTime: marked })),
+  );
+
+  const last = taken.at(-1);
+
+  const resumed =
+    rows.length > limit && last !== undefined
+      ? [{ parent: top.parent, after: last._creationTime, skip: last._id }]
+      : [];
+
+  const children = taken.map((row) => ({ parent: row._id, after: null, skip: null }));
+
+  return markFrom(
+    ctx,
+    sessionId,
+    [...frames.slice(0, -1), ...resumed, ...children],
+    limit - taken.length,
+    marked,
+  );
+};
+
+const invalidate = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  sessionId: Id<"authSessions">,
+  frames: ReadonlyArray<Frame>,
+  marked: number,
+): Promise<void> => {
+  const left = await markFrom(ctx, sessionId, frames, MARKS_PER_CALL, marked);
+
+  if (left.length > 0) {
+    await ctx.scheduler.runAfter(0, internal.core.auth.store.invalidateTokens, {
+      sessionId,
+      frames: [...left],
+      marked,
+    });
+  }
+};
+
+/** The tokens under a reused one still to mark, past the batch the refresh marked. */
+export const invalidateTokens = internalMutation({
+  args: { sessionId: v.id("authSessions"), frames: v.array(frame), marked: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { sessionId, frames, marked }) => {
+    if ((await ctx.db.get(sessionId)) !== null) await invalidate(ctx, sessionId, frames, marked);
+
+    return null;
+  },
+});
+
 /**
  * Answers a refresh that Convex Auth would answer by reading every token of a session, and says
  * whether it did; the rest go on to the library.
  *
  * - A token that is gone or names another session refreshes nothing and ends nothing: it proves
  *   no hold on the session it names. The library would end that session.
- * - An expired token, or one whose session is gone or expired, ends its session the way
- *   `endSession` does. The library deletes every token in one call.
- * - A token used again past the reuse window, other than as the parent of the newest token, ends
- *   its session: it may have been stolen. The library walks and marks every token descended from
- *   it in one call, and the session it leaves can no longer refresh.
- *
- * Every refresh the library answers adds a token or hands back the newest one, so the newest token
- * is the one it calls active.
+ * - An expired token, or one whose session is gone or expired, ends its session through
+ *   `endSession`, which does nothing once the session is gone. The library deletes every token in
+ *   one call.
+ * - A token used again past the reuse window, other than as the parent of the active token,
+ *   refreshes nothing, and every token descended from it is marked used, as the library marks
+ *   them, `MARKS_PER_CALL` a call. The session and its other branches go on. The library marks
+ *   them all in one call.
+ * - A used token inside the window goes on to the library only when the active token is among the
+ *   newest `ACTIVE_READ`, so the library's search for it stays as short; otherwise it refreshes
+ *   nothing.
  */
 export const answeredBeforeLibrary = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
@@ -94,21 +220,20 @@ export const answeredBeforeLibrary = async (
     return true;
   }
 
-  if (token.firstUsedTime === undefined || token.firstUsedTime + REUSE_WINDOW_MS > now) {
-    return false;
-  }
+  if (token.firstUsedTime === undefined) return false;
 
-  const newest = await ctx.db
-    .query("authRefreshTokens")
-    .withIndex("sessionId", (q) => q.eq("sessionId", token.sessionId))
-    .order("desc")
-    .first();
+  const active = await activeToken(ctx.db, token.sessionId);
 
-  if (newest?.firstUsedTime === undefined && newest?.parentRefreshTokenId === token._id) {
-    return false;
-  }
+  if (active !== "unread" && active?.parentRefreshTokenId === token._id) return false;
 
-  await endSession(ctx, token.sessionId);
+  if (token.firstUsedTime + REUSE_WINDOW_MS > now) return active === "unread";
+
+  await invalidate(
+    ctx,
+    token.sessionId,
+    [{ parent: token._id, after: null, skip: null }],
+    now - REUSE_WINDOW_MS,
+  );
 
   return true;
 };

@@ -21,7 +21,8 @@ pre-commit:
       run: pnpm --filter @media/commands check
     - name: verify-media
       glob: [".agents/skills/verify-media/**", "scripts/private-network.sh"]
-      run: node --test .agents/skills/verify-media/scripts/*.test.mjs
+      # The evidence tests need ffmpeg, which the dev shell pins and a bare host may lack.
+      run: nix develop --command node --test .agents/skills/verify-media/scripts/*.test.mjs
     - name: legacy
       glob: "legacy/**"
       root: legacy/music/
