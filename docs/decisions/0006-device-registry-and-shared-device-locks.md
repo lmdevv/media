@@ -291,8 +291,10 @@ the command generator refuses that name, because `media auth grants` is already 
   to expire and be swept.
 - A session in the family can still make an API key or approve a device sign-in, as a password
   session can. Those credentials are their own, and revoking the grant leaves them, just as ending
-  a password session leaves the keys it made. `core.auth.apiKeys.endAll` and signing out
-  everywhere end them.
+  a password session leaves the keys it made. Signing out everywhere (`core.auth.sessions.endAll`)
+  ends the device sign-ins, since they carry the person's `sessionGeneration`, but leaves API keys
+  and their sessions, which follow `keyGeneration`. `core.auth.apiKeys.endAll`, a password reset,
+  and a role change that takes a scope away end the keys.
 - D59: an app whose session the core refuses while the keychain still holds a grant asks for the
   password. It does not exchange again. The password sign-in then confirms the stored grant. An
   app exchanges silently only when it has no session of its own yet, as on first launch. The core
