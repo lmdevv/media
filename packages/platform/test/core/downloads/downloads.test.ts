@@ -6,12 +6,13 @@ import { Schema } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
 import type { DownloadItem } from "../../../commands/access";
-import { api } from "../../../convex/_generated/api";
+import { api, internal } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { inOrder } from "../../../convex/core/lib/inOrder";
+import { runFunction } from "../../admin";
 import { enroll, listings, member, openTile, sharedAdmin } from "../../devices";
 import type { Device, Member } from "../../devices";
-import { movie, openItem, seedLibrary, share, unshare, visibleItems } from "../../probe";
+import { movie, seedLibrary, share, unshare } from "../../probe";
 import type { Session } from "../../probe";
 import { guestOf } from "../../guests";
 import { newestRows } from "../../rows";
@@ -39,15 +40,15 @@ afterAll(async () => {
   await Promise.all(roots.map(removeTree));
 });
 
-const itemOf = (id: Id<"probeItems">): DownloadItem => ({ kind: "probe", id });
+const itemOf = (id: Id<"mediaFiles">): DownloadItem => ({ kind: "file", id });
 
-const add = (who: SignedIn, id: Id<"probeItems">): Promise<null> =>
+const add = (who: SignedIn, id: Id<"mediaFiles">): Promise<null> =>
   who.client.mutation(api.core.downloads.add, { item: itemOf(id) });
 
-const fetchOf = (who: SignedIn, id: Id<"probeItems">) =>
+const fetchOf = (who: SignedIn, id: Id<"mediaFiles">) =>
   who.client.mutation(api.core.downloads.fetch, { item: itemOf(id) });
 
-const removeOf = (who: SignedIn, id: Id<"probeItems">): Promise<null> =>
+const removeOf = (who: SignedIn, id: Id<"mediaFiles">): Promise<null> =>
   who.client.mutation(api.core.downloads.remove, { item: itemOf(id) });
 
 const Refusal = Schema.Struct({ code: Schema.String, message: Schema.String });
@@ -103,6 +104,14 @@ const sharedLibrary = async (core: CoreStack, manager: Session, reader: Session,
   return seeded;
 };
 
+// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
+// stack answered this one through `v.id("mediaFiles")`, which checks it again when a test sends it.
+const isFileId = (value: unknown): value is Id<"mediaFiles"> => Schema.is(Schema.String)(value);
+
+const ScannedFiles = Schema.Array(
+  Schema.Struct({ fileId: Schema.declare(isFileId), path: Schema.String }),
+);
+
 const libraryOnDisk = async (
   core: CoreStack,
   manager: Member,
@@ -121,11 +130,10 @@ const libraryOnDisk = async (
 
   await scanLibrary(core, "movies", libraryId);
 
-  const ids = await visibleItems(core, manager, libraryId);
-  const opened = await Promise.all(ids.map(async (id) => openItem(core, manager, id)));
-  const byName = new Map(opened.map((item) => [item.path.slice(root.length + 1), item.itemId]));
+  const scanned = await runFunction(core, internal.movies.probe.files, { libraryId }, ScannedFiles);
+  const byName = new Map(scanned.map((file) => [file.path.slice(root.length + 1), file.fileId]));
 
-  const idOf = (name: string): Id<"probeItems"> => {
+  const idOf = (name: string): Id<"mediaFiles"> => {
     const id = byName.get(name);
 
     if (id === undefined) throw new Error(`the scan found no ${name}`);
@@ -159,7 +167,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     const aiko = await onDevice(stack, "aiko");
     const films = await sharedLibrary(stack, admin, aiko);
 
-    await inOrder(films.itemIds, async (id) => add(aiko.signedIn, id));
+    await inOrder(films.fileIds, async (id) => add(aiko.signedIn, id));
 
     expect(Object.values(await statesOf(aiko.signedIn))).toEqual([
       "available",
@@ -175,7 +183,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
       "expired:access",
     ]);
 
-    const [first] = films.itemIds;
+    const [first] = films.fileIds;
 
     if (first === undefined) throw new Error("no item seeded");
 
@@ -197,7 +205,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     const admin = await sharedAdmin(stack);
     const aiko = await onDevice(stack, "aiko-live");
     const films = await sharedLibrary(stack, admin, aiko, 1);
-    const [film] = films.itemIds;
+    const [film] = films.fileIds;
 
     if (film === undefined) throw new Error("no item seeded");
 
@@ -247,7 +255,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
       items: [movie("cartoon.mkv", 0), movie("thriller.mkv", 17)],
     });
 
-    const [cartoon, thriller] = films.itemIds;
+    const [cartoon, thriller] = films.fileIds;
 
     if (cartoon === undefined || thriller === undefined) throw new Error("no items seeded");
 
@@ -411,12 +419,13 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
       items: [movie("trailer.mkv", 0)],
     });
 
-    const [trailer] = films.itemIds;
+    const [trailer] = films.fileIds;
+    const [trailerTitle] = films.itemIds;
 
-    if (trailer === undefined) throw new Error("no item seeded");
+    if (trailer === undefined || trailerTitle === undefined) throw new Error("no item seeded");
 
     const visitor = (
-      await guestOf(stack, sharer, { domain: "movies", ref: { type: "probeMovie", id: trailer } })
+      await guestOf(stack, sharer, { domain: "movies", ref: { type: "title", id: trailerTitle } })
     ).signedIn;
 
     await expect(add(visitor, trailer)).rejects.toThrow(/Guests cannot download/u);
@@ -474,7 +483,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     const phone = await enroll(aiko.signedIn, "Phone");
     const laptop = await enroll(laptopSession, "Laptop");
     const films = await sharedLibrary(stack, admin, aiko);
-    const [one, two, three] = films.itemIds;
+    const [one, two, three] = films.fileIds;
 
     if (one === undefined || two === undefined || three === undefined) {
       throw new Error("no items seeded");
@@ -511,7 +520,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     const admin = await sharedAdmin(stack);
     const aiko = await onDevice(stack, "aiko-ticket");
     const films = await sharedLibrary(stack, admin, aiko, 1);
-    const [film] = films.itemIds;
+    const [film] = films.fileIds;
 
     if (film === undefined) throw new Error("no item seeded");
 
@@ -560,9 +569,9 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     const films = await sharedLibrary(stack, admin, aiko, 120);
 
     await share(admin, films.libraryId, { kind: "user", userId: bob.userId }, "view");
-    await Promise.all(films.itemIds.slice(0, 110).map(async (id) => add(aiko.signedIn, id)));
+    await Promise.all(films.fileIds.slice(0, 110).map(async (id) => add(aiko.signedIn, id)));
     await enroll(bob.signedIn, "Old phone", aiko.device.device);
-    await Promise.all(films.itemIds.slice(100).map(async (id) => add(bob.signedIn, id)));
+    await Promise.all(films.fileIds.slice(100).map(async (id) => add(bob.signedIn, id)));
     await admin.signedIn.client.mutation(api.core.downloads.setCap, {
       deviceId: aiko.device.deviceId,
       bytes: 10_000,
@@ -596,7 +605,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     const admin = await sharedAdmin(stack);
     const aiko = await onDevice(stack, "aiko-shared", "Den TV");
     const films = await sharedLibrary(stack, admin, aiko, 2);
-    const [one, two] = films.itemIds;
+    const [one, two] = films.fileIds;
 
     if (one === undefined || two === undefined) throw new Error("no items seeded");
 
@@ -633,7 +642,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     const admin = await sharedAdmin(stack);
     const aiko = await onDevice(stack, "aiko-gone");
     const films = await sharedLibrary(stack, admin, aiko, 2);
-    const [one, two] = films.itemIds;
+    const [one, two] = films.fileIds;
 
     if (one === undefined || two === undefined) throw new Error("no items seeded");
 
@@ -649,7 +658,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
     expect(await usageOf(aiko.signedIn)).toMatchObject({ bytes: 0, items: 0 });
 
     const kept = await sharedLibrary(stack, admin, aiko, 1);
-    const [film] = kept.itemIds;
+    const [film] = kept.fileIds;
 
     if (film === undefined) throw new Error("no item seeded");
 
@@ -669,14 +678,14 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
 
     const seedOne = async (
       name: string,
-    ): Promise<{ libraryId: Id<"libraries">; id: Id<"probeItems"> }> => {
+    ): Promise<{ libraryId: Id<"libraries">; id: Id<"mediaFiles"> }> => {
       const seeded = await seedLibrary(stack, admin, {
         name: `${name}-${unique()}`,
         kind: "movies",
         items: [movie(`${name}.mkv`, 0)],
       });
 
-      const [id] = seeded.itemIds;
+      const [id] = seeded.fileIds;
 
       if (id === undefined) throw new Error("no item seeded");
 
@@ -698,12 +707,13 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
       items: [movie("shared.mkv", 0)],
     });
 
-    const [shared] = shelf.itemIds;
+    const [shared] = shelf.fileIds;
+    const [sharedTitle] = shelf.itemIds;
 
-    if (shared === undefined) throw new Error("no item seeded");
+    if (shared === undefined || sharedTitle === undefined) throw new Error("no item seeded");
 
     const guest = (
-      await guestOf(stack, sharer, { domain: "movies", ref: { type: "probeMovie", id: shared } })
+      await guestOf(stack, sharer, { domain: "movies", ref: { type: "title", id: sharedTitle } })
     ).signedIn;
 
     const kai = await onDevice(stack, "kai-tile", "Den TV");
@@ -725,7 +735,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
 
     const deviceless = await signIn(stack, "apiKey", { key });
 
-    const answersFor = async (id: Id<"probeItems">) => ({
+    const answersFor = async (id: Id<"mediaFiles">) => ({
       guest: await answerOf(add(guest, id)),
       tile: await answerOf(add(tile, id)),
       deviceless: await answerOf(add(deviceless, id)),

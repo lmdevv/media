@@ -2,7 +2,7 @@ import { paginationOptsValidator, paginationResultValidator } from "convex/serve
 import { v } from "convex/values";
 
 import { level } from "../../commands/access";
-import { callerScope, contentDomain } from "../../commands/scopes";
+import { callerScope } from "../../commands/scopes";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { internalMutation, internalQuery } from "../_generated/server";
@@ -16,9 +16,10 @@ import { inOrder } from "./lib/inOrder";
 import { paginate } from "./lib/paginate";
 import { serverMutation } from "./lib/serverFacing";
 import { grantCreator, requireItems } from "./permissions/grants";
-import { contentActions, ratingOf } from "./permissions/policy";
+import { contentActions } from "./permissions/policy";
 import type { ContentFacts } from "./permissions/policy";
-import { purgeStep, scanAnswer, withLibraryItems, withScanLease } from "./scans";
+import { leaseAnswer } from "./jobs/held";
+import { purgeStep, withLibraryItems, withScanLease } from "./scans";
 
 const SEED_MAX = 200;
 
@@ -28,22 +29,22 @@ const KNOWN_PAGE = 1000;
 
 const scannedFile = v.object({ path: v.string(), size: v.number(), mtime: v.number() });
 
-/** The facts restrictions read about a probe item, in its library's domain. */
-export const probeFacts = (library: Doc<"libraries">, item: Doc<"probeItems">): ContentFacts =>
-  library.kind === "movies"
-    ? { domain: "movies", rating: ratingOf(item.age) }
-    : { domain: "music", explicit: item.explicit };
+/** The facts restrictions read about a probe item, a stand-in for a track. */
+export const probeFacts = (item: Doc<"probeItems">): ContentFacts => ({
+  domain: "music",
+  explicit: item.explicit,
+});
 
-/** The probe seam's download source, until the movies port gives movies' items their own. */
+/** The probe seam's download source, a track until the music port gives tracks their own. */
 export const probeSource: SourceLoader<"probe"> = async (db, id, libraryOf) => {
   const item = await db.get(id);
   const library = item === null ? null : await libraryOf(item.libraryId);
 
-  if (item === null || library === null) return null;
+  if (item === null || library?.kind !== "music") return null;
 
   return {
     library: library._id,
-    facts: probeFacts(library, item),
+    facts: probeFacts(item),
     resource: { kind: "file", id: item._id },
     revision: `${item.size}:${item.mtime}`,
     bytes: () => item.size,
@@ -66,8 +67,8 @@ const checkBatch = (count: number): void => {
 };
 
 /**
- * Makes libraries managed by `managerId`, each with a folder of its own and rated items in it,
- * and queues no scan.
+ * Makes music libraries managed by `managerId`, each with a folder of its own and tracks in it,
+ * explicit or not, and queues no scan.
  *
  * @throws Error when asked for none or more than 200 libraries.
  */
@@ -77,14 +78,7 @@ export const seed = internalMutation({
     libraries: v.array(
       v.object({
         name: v.string(),
-        kind: contentDomain,
-        items: v.array(
-          v.object({
-            name: v.string(),
-            age: v.union(v.number(), v.null()),
-            explicit: v.boolean(),
-          }),
-        ),
+        items: v.array(v.object({ name: v.string(), explicit: v.boolean() })),
       }),
     ),
   },
@@ -96,8 +90,8 @@ export const seed = internalMutation({
       throw new Error(`seed makes 1 to ${SEED_MAX} libraries; got ${libraries.length}`);
     }
 
-    const seeded = await inOrder(libraries, async ({ name, kind, items }) => {
-      const libraryId = await ctx.db.insert("libraries", { name, kind, lastScan: null });
+    const seeded = await inOrder(libraries, async ({ name, items }) => {
+      const libraryId = await ctx.db.insert("libraries", { name, kind: "music", lastScan: null });
       const folder = `/probe/${libraryId}`;
 
       await claimFolders(ctx, libraryId, [folder]);
@@ -111,7 +105,6 @@ export const seed = internalMutation({
               path: `${folder}/${item.name}`,
               size: 0,
               mtime: 0,
-              age: item.age,
               explicit: item.explicit,
             }),
           ),
@@ -143,7 +136,7 @@ export const open = internalQuery({
     const item = (await ctx.db.get(itemId)) ?? fail("not_found", "No such item");
     const gate = await requireItems(ctx, caller, action, item.libraryId);
 
-    if (!gate.admits(probeFacts(gate.library, item))) fail("not_found", "No such item");
+    if (!gate.admits(probeFacts(item))) fail("not_found", "No such item");
 
     return { itemId: item._id, path: item.path, level: gate.level };
   },
@@ -175,7 +168,7 @@ export const page = internalQuery({
     return {
       ...found,
       page: found.page
-        .filter((item) => gate.admits(probeFacts(gate.library, item)))
+        .filter((item) => gate.admits(probeFacts(item)))
         .map((item) => ({ itemId: item._id, path: item.path, level: gate.level })),
     };
   },
@@ -186,16 +179,16 @@ export const page = internalQuery({
  * unchanged files and find missing ones. Rows of a removed folder are the purge's to delete.
  */
 export const known = serverMutation({
-  args: { lease, kind: contentDomain, cursor: v.union(v.string(), v.null()) },
-  returns: scanAnswer(
+  args: { lease, cursor: v.union(v.string(), v.null()) },
+  returns: leaseAnswer(
     v.object({
       files: v.array(scannedFile),
       continueCursor: v.string(),
       isDone: v.boolean(),
     }),
   ),
-  handler: (ctx, { lease: held, kind, cursor }) =>
-    withScanLease(ctx, kind, held, async (scan) => {
+  handler: (ctx, { lease: held, cursor }) =>
+    withScanLease(ctx, "music", held, async (scan) => {
       const found = await paginate(
         ctx.db,
         {
@@ -225,10 +218,10 @@ export const known = serverMutation({
  * sent twice in one batch is written once, with its last size and change time.
  */
 export const upsert = serverMutation({
-  args: { lease, kind: contentDomain, files: v.array(scannedFile) },
-  returns: scanAnswer(v.object({ inserted: v.number() })),
-  handler: (ctx, { lease: held, kind, files }) =>
-    withScanLease(ctx, kind, held, async (scan) => {
+  args: { lease, files: v.array(scannedFile) },
+  returns: leaseAnswer(v.object({ inserted: v.number() })),
+  handler: (ctx, { lease: held, files }) =>
+    withScanLease(ctx, "music", held, async (scan) => {
       checkBatch(files.length);
       scan.admit(files.map((file) => file.path));
 
@@ -242,7 +235,6 @@ export const upsert = serverMutation({
             await ctx.db.insert("probeItems", {
               libraryId: scan.library._id,
               ...file,
-              age: null,
               explicit: false,
             });
 
@@ -265,10 +257,10 @@ export const upsert = serverMutation({
 
 /** Deletes up to 500 files a scan did not find; a path the library does not list is no change. */
 export const missing = serverMutation({
-  args: { lease, kind: contentDomain, paths: v.array(v.string()) },
-  returns: scanAnswer(v.object({ removed: v.number() })),
-  handler: (ctx, { lease: held, kind, paths }) =>
-    withScanLease(ctx, kind, held, async (scan) => {
+  args: { lease, paths: v.array(v.string()) },
+  returns: leaseAnswer(v.object({ removed: v.number() })),
+  handler: (ctx, { lease: held, paths }) =>
+    withScanLease(ctx, "music", held, async (scan) => {
       checkBatch(paths.length);
 
       const rows = await Promise.all(
@@ -283,7 +275,7 @@ export const missing = serverMutation({
     }),
 });
 
-/** Both domains' purge until the movies port: deletes 500 rows a page that no folder keeps. */
+/** Music's purge until the music port: deletes 500 rows a page that no folder keeps. */
 export const purge = internalMutation({
   args: { libraryId: v.id("libraries"), cursor: v.union(v.string(), v.null()) },
   returns: v.null(),

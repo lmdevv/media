@@ -28,7 +28,7 @@ type Entry = FunctionReturnType<typeof api.core.downloads.list>["page"][number];
 const median = (values: ReadonlyArray<number>): number =>
   values.toSorted((left, right) => left - right)[Math.floor(values.length / 2)] ?? Number.NaN;
 
-const itemOf = (id: Id<"probeItems">): DownloadItem => ({ kind: "probe", id });
+const itemOf = (id: Id<"mediaFiles">): DownloadItem => ({ kind: "file", id });
 
 const timed = async <A>(call: () => Promise<A>): Promise<number> => {
   const started = performance.now();
@@ -58,7 +58,7 @@ describe.skipIf(stack === undefined)("downloads at scale", { timeout: 900_000 },
     );
 
     const [kept, spare] = [0, 1].map((slot) =>
-      libraries.flatMap((library) => library.itemIds.slice(slot, slot + 1)),
+      libraries.flatMap((library) => library.fileIds.slice(slot, slot + 1)),
     );
 
     if (kept === undefined || spare === undefined) throw new Error("no items seeded");
@@ -143,7 +143,7 @@ describe.skipIf(stack === undefined)("downloads at scale", { timeout: 900_000 },
     );
 
     const [kept, ahead] = [0, 1].map((slot) =>
-      libraries.flatMap((library) => library.itemIds.slice(slot, slot + 1).map(itemOf)),
+      libraries.flatMap((library) => library.fileIds.slice(slot, slot + 1).map(itemOf)),
     );
 
     if (kept === undefined || ahead === undefined) throw new Error("no items seeded");

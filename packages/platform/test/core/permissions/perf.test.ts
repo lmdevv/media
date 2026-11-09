@@ -28,17 +28,21 @@ describe.skipIf(stack === undefined)("the library list", { timeout: 600_000 }, (
     const manager = await sessionOf(await signInAs(stack, await createPerson(stack, "manager")));
     const viewer = await sessionOf(await signInAs(stack, await createPerson(stack, "viewer")));
 
-    const libraries = (
-      await seedLibraries(
-        stack,
-        manager,
-        Array.from({ length: GRANTS }, (_, n) => ({
-          name: `perf-${n}`,
-          kind: n % 2 === 0 ? "movies" : "music",
-          items: [],
-        })),
-      )
-    ).map((seeded) => seeded.libraryId);
+    const half = Array.from({ length: GRANTS / 2 }, (_, n) => n);
+
+    const films = await seedLibraries(
+      stack,
+      manager,
+      half.map((n) => ({ name: `perf-${2 * n}`, kind: "movies", items: [] })),
+    );
+
+    const songs = await seedLibraries(
+      stack,
+      manager,
+      half.map((n) => ({ name: `perf-${2 * n + 1}`, kind: "music", items: [] })),
+    );
+
+    const libraries = [...films, ...songs].map((seeded) => seeded.libraryId);
 
     const { groupId } = await admin.client.mutation(api.core.permissions.groups.create, {
       name: `perf-${unique()}`,

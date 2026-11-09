@@ -44,7 +44,7 @@ describe.skipIf(stack === undefined)("a group session's queue", { timeout: 600_0
     const items = libraries.map(({ itemIds: [itemId] }): DomainItem => {
       if (itemId === undefined) throw new Error("seeded a library with no item");
 
-      return { domain: "movies", ref: { type: "probeMovie", id: itemId } };
+      return { domain: "movies", ref: { type: "title", id: itemId } };
     });
 
     const [first] = items;

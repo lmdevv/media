@@ -29,14 +29,12 @@ export interface Catalog {
   /** A movie for 7 and up. */
   readonly pg: DomainItem;
   readonly track: DomainItem;
-  /** A music library's row named as a movie. */
-  readonly misfiled: DomainItem;
   readonly share: (who: Member) => Promise<void>;
 }
 
-const probeMovie = (id: Id<"probeItems">): DomainItem => ({
+const title = (id: Id<"titles">): DomainItem => ({
   domain: "movies",
-  ref: { type: "probeMovie", id },
+  ref: { type: "title", id },
 });
 
 const probeTrack = (id: Id<"probeItems">): DomainItem => ({
@@ -72,11 +70,10 @@ export const catalog = async (stack: CoreStack): Promise<Catalog> => {
 
   return {
     host,
-    g: probeMovie(only(films.itemIds, 0)),
-    r: probeMovie(only(films.itemIds, 1)),
-    pg: probeMovie(only(films.itemIds, 2)),
+    g: title(only(films.itemIds, 0)),
+    r: title(only(films.itemIds, 1)),
+    pg: title(only(films.itemIds, 2)),
     track: probeTrack(track),
-    misfiled: probeMovie(track),
     share: async (who) => {
       await Promise.all(
         [films.libraryId, songs.libraryId].map(async (libraryId) =>

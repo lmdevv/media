@@ -2,7 +2,7 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the first role and the `admin` scope,
   and again the same day with the permissions as built. Amended 2026-11-06 with the service
-  principal's scope and key.
+  principal's scope and key, and 2026-11-09 with the guarded server functions and movies' facts.
 - Decisions: D16, D17
 
 ## Context
@@ -178,8 +178,25 @@ admin can give it a role, a reset link, restrictions, or ownership.
   of a service's key session.
 - `serviceOfSession` in `core/auth/caller.ts` is `callerOfSession`'s mirror: `unauthenticated`
   when the session is not live, `forbidden` for a person, or for a service whose key lacks the
-  scope. Server functions stay internal until the server moves onto the core in phase 4 (D50);
-  until then `core/serviceProbe:whoami` runs `serviceOfSession` for a stack test's real session.
+  scope.
+- Server functions are public, and `requireService` guards each one (amended 2026-11-09, phase 4).
+  `serverQuery` and `serverMutation` in `core/lib/serverFacing.ts` build them. Each runs
+  `requireService(ctx, "media-service")` before its handler, and that guard reads the caller's
+  token and calls `serviceOfSession`. A person's session gets `forbidden`, and so does an API key,
+  admin scope included, because a key a person makes cannot hold a service scope. A call with no
+  session gets `unauthenticated`. The handler gets the `ServiceCaller` and a context without
+  `auth`, as a command handler gets its `Caller`.
+- Server functions are not commands (D23). They have no declaration, no SDK method, and no CLI
+  word, and `commandRefs` never lists them. Lint allows a public function in `convex/` only
+  through these two builders or the generated command list: `no-restricted-imports` bans the
+  public `query`, `mutation`, and `action` builders everywhere in `packages/platform/convex/`
+  except `core/lib/serverFacing.ts`, and the generated `register` functions live in
+  `packages/platform/commands/`.
+- The builders are generic over the argument and result validators with no cast. The handler's
+  arguments arrive as a typed rest tuple, and the result validator reaches `query` widened to its
+  constraint, so Convex checks the result at run time and the `api` reference keeps the
+  handler's own result type. ADR 0024 had rejected a generic scanner-callback builder because the
+  same typing seemed to need casts.
 
 ### Grants and groups
 
@@ -250,31 +267,41 @@ admin can give it a role, a reset link, restrictions, or ownership.
   page holds fewer rows the more groups the person is in. A page that a reactive client reloads up
   to its end cursor holds every row up to it, because Convex then ignores `maximumRowsRead`. Past
   that size it decides none of them and asks the client to split it (`paginateAtMost`). The
-  library list below works this way. So do the group session queue (ADR 0017), 44 entries a page
-  for a person in 16 groups, and the downloads list (ADR 0019), 46 rows a page for that person and
-  196 for one in no group.
+  library list below works this way. So do the group session queue (ADR 0017), 42 entries a page
+  for a person in 16 groups and 140 for one in none, and the downloads list (ADR 0019), 44 rows a
+  page for that person and 164 for one in no group. A movies item reads its row, its title, and its
+  library, one more than the probe items these were first measured on (44, 164, 46, and 196).
 - A list page merges the index ranges of the person's own, household, and group grants after the
   cursor, so it reads at most 1,000 documents however many grants the table holds. On the dev stack
   with more than 1,000 grants in the table, a 50-row page read 168 documents.
 - A page reloaded up to its end cursor returns every row up to it, or asks the client to split it.
   Restrictions can make a page short.
 
+### Movies facts
+
+- A title's facts are `ratingOf(overrides.ageRating ?? ageRating)`: the minimum viewer age an
+  admin set wins over the scanned one, and a title with neither is `unrated`. An episode and a
+  file carry their title's facts. `movies/items.ts` derives them, and the item and download
+  loaders hand them to `can()`, which stays the only decision (amended 2026-11-09).
+
 ### Test seam
 
-`convex/core/libraryProbe.ts` holds `probeItems`, items in real libraries with a movie age and an
-explicit flag, in place of titles and tracks until they exist (ADR 0024). Its internal `open` and
-`page` take a real session's id and run `callerOfSession`, which is everything `requireCaller` does
-after it reads the token. A stack test signs in for real, with a password or a key with chosen
-scopes, and calls them with the deployment admin key. Libraries themselves are shared and read
-through the real commands. The admin key acting as a user identity reaches only public functions,
-and the core allows no public function outside the command list.
+`convex/movies/probe.ts` seeds rated titles in real movies libraries, and
+`convex/core/libraryProbe.ts` seeds `probeItems` tracks with an explicit flag in music libraries
+until music's own rows exist (ADR 0024). Each seam's internal `open` and `page` take a real
+session's id and run `callerOfSession`, which is everything `requireCaller` does after it reads
+the token. A stack test signs in for real, with a password or a key with chosen scopes, and calls
+them with the deployment admin key. Libraries themselves are shared and read through the real
+commands. A stack test calls a server function as a service principal it signs in with a key
+from `issueServiceKey`, through Convex's `/api/run` route with the session's token, since the
+admin key reaches the functions with no identity and the guard refuses that.
 
 ### Left to later units
 
 - Guest principals and links: built, see ADR 0007. A guest holds no grant (`keyOf` refuses one),
   so their reach has no keys and what they may play comes only from their link.
 - Public server functions guarded by `media-service`, and the guard that reads their token:
-  phase 4.
+  built in phase 4, see Service principals.
 - Locking shared-device tiles for kids, from `isKid`: built, see ADR 0006.
 
 ### Edge cases settled

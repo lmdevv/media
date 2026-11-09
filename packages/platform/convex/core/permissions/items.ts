@@ -1,7 +1,7 @@
-import { itemTypes } from "../../../commands/access";
 import type { DomainItem, ItemType, Level } from "../../../commands/access";
 import type { Doc, Id } from "../../_generated/dataModel";
 import type { DatabaseReader } from "../../_generated/server";
+import { placeEpisode, placeFile, placeTitle } from "../../movies/items";
 import { probeFacts } from "../libraryProbe";
 import { fail } from "../lib/errors";
 import { levelOn, reachOf } from "./grants";
@@ -31,24 +31,21 @@ interface Loader<T extends ItemType> {
  */
 type Loaders = { readonly [T in ItemType]: Loader<T> };
 
-type ProbeType = "probeMovie" | "probeTrack";
-
-/** A probe item, when its library holds the content of `type`'s domain. */
-const probeOf = (type: ProbeType): Loader<ProbeType> => ({
-  reads: 2,
-  load: async (db, id) => {
-    const row = await db.get(id);
-    const library = row === null ? null : await db.get(row.libraryId);
-
-    return row !== null && library?.kind === itemTypes[type].domain
-      ? { library, facts: probeFacts(library, row) }
-      : null;
-  },
-});
+const libraryReader = (db: DatabaseReader) => (libraryId: Id<"libraries">) => db.get(libraryId);
 
 const loaders: Loaders = {
-  probeMovie: probeOf("probeMovie"),
-  probeTrack: probeOf("probeTrack"),
+  title: { reads: 2, load: (db, id) => placeTitle(db, id, libraryReader(db)) },
+  episode: { reads: 3, load: (db, id) => placeEpisode(db, id, libraryReader(db)) },
+  file: { reads: 3, load: (db, id) => placeFile(db, id, libraryReader(db)) },
+  probeTrack: {
+    reads: 2,
+    load: async (db, id) => {
+      const row = await db.get(id);
+      const library = row === null ? null : await db.get(row.libraryId);
+
+      return row !== null && library?.kind === "music" ? { library, facts: probeFacts(row) } : null;
+    },
+  },
 };
 
 /** The most documents placing one item reads, besides its library's grants. */

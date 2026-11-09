@@ -14,6 +14,7 @@ import { SESSION_MS } from "../../convex/core/sessions";
 import { runFunction } from "../admin";
 import { createPerson, signIn, signInAs } from "../sign-in";
 import type { SignedIn } from "../sign-in";
+import { runServer } from "../service";
 import { coreStackFromEnvFile } from "../stack-env";
 import { deploymentTicketKeys } from "../ticket-keys";
 import type { CoreStack } from "../stack-env";
@@ -32,7 +33,7 @@ const SessionStatus = Schema.Union([
 const ErrorCode = /"code":"(?<code>\w+)"/u;
 
 const sessionStatus = (core: CoreStack, userId: string, sessionId: string) =>
-  runFunction(core, internal.core.tickets.sessionStatus, { userId, sessionId }, SessionStatus);
+  runServer(core, api.core.tickets.sessionStatus, { userId, sessionId }, SessionStatus);
 
 const coreSessions =
   (core: CoreStack): SessionReader =>

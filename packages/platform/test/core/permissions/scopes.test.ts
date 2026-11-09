@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
-import { movie, openItem, seedLibraries, sessionOf, song } from "../../probe";
+import { movie, openItem, openTitle, seedLibrary, sessionOf, song } from "../../probe";
 import { createPerson, refusal, signIn, signInAs } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 
@@ -13,13 +13,20 @@ describe.skipIf(stack === undefined)("domain scopes", { timeout: 120_000 }, () =
     const person = await signInAs(stack, await createPerson(stack, "listener"));
     const owner = await sessionOf(person);
 
-    const [films, songs] = await seedLibraries(stack, owner, [
-      { name: "films", kind: "movies", items: [movie("film", 0)] },
-      { name: "songs", kind: "music", items: [song("track", false)] },
-    ]);
+    const films = await seedLibrary(stack, owner, {
+      name: "films",
+      kind: "movies",
+      items: [movie("film", 0)],
+    });
 
-    const film = films?.itemIds[0];
-    const track = songs?.itemIds[0];
+    const songs = await seedLibrary(stack, owner, {
+      name: "songs",
+      kind: "music",
+      items: [song("track", false)],
+    });
+
+    const film = films.itemIds[0];
+    const track = songs.itemIds[0];
 
     if (film === undefined || track === undefined) throw new Error("seed made no items");
 
@@ -34,16 +41,16 @@ describe.skipIf(stack === undefined)("domain scopes", { timeout: 120_000 }, () =
       kind: "apiKey",
       scopes: ["music:play"],
     });
-    expect(await refusal(openItem(stack, speaker, film, "play", "movies:play"))).toBe("forbidden");
-    expect(await refusal(openItem(stack, speaker, film, "play"))).toBe("forbidden");
+    expect(await refusal(openTitle(stack, speaker, film, "play", "movies:play"))).toBe("forbidden");
+    expect(await refusal(openTitle(stack, speaker, film, "play"))).toBe("forbidden");
     expect(await openItem(stack, speaker, track, "play", "music:play")).toMatchObject({
       itemId: track,
       level: "manage",
     });
     expect(await refusal(openItem(stack, speaker, track, "view", "music:read"))).toBe("forbidden");
     expect(await refusal(openItem(stack, speaker, track, "view"))).toBe("forbidden");
-    expect(await openItem(stack, owner, film, "view", "movies:read")).toMatchObject({
-      itemId: film,
+    expect(await openTitle(stack, owner, film, "view", "movies:read")).toMatchObject({
+      titleId: film,
     });
   });
 

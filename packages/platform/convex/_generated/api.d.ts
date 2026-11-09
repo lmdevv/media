@@ -44,6 +44,7 @@ import type * as core_guests_model from "../core/guests/model.js";
 import type * as core_guests_standing from "../core/guests/standing.js";
 import type * as core_imports from "../core/imports.js";
 import type * as core_jobs_admin from "../core/jobs/admin.js";
+import type * as core_jobs_held from "../core/jobs/held.js";
 import type * as core_jobs_kinds from "../core/jobs/kinds.js";
 import type * as core_jobs_leases from "../core/jobs/leases.js";
 import type * as core_jobs_machine from "../core/jobs/machine.js";
@@ -89,6 +90,20 @@ import type * as core_together_queue from "../core/together/queue.js";
 import type * as core_together_sessions from "../core/together/sessions.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
+import type * as movies_budget from "../movies/budget.js";
+import type * as movies_catalog from "../movies/catalog.js";
+import type * as movies_credits from "../movies/credits.js";
+import type * as movies_items from "../movies/items.js";
+import type * as movies_matching from "../movies/matching.js";
+import type * as movies_metadata from "../movies/metadata.js";
+import type * as movies_people from "../movies/people.js";
+import type * as movies_probe from "../movies/probe.js";
+import type * as movies_purge from "../movies/purge.js";
+import type * as movies_scanner from "../movies/scanner.js";
+import type * as movies_totals from "../movies/totals.js";
+import type * as movies_trickplay from "../movies/trickplay.js";
+import type * as movies_trickplayState from "../movies/trickplayState.js";
+import type * as movies_validators from "../movies/validators.js";
 
 import type {
   ApiFromModules,
@@ -133,6 +148,7 @@ declare const fullApi: ApiFromModules<{
   "core/guests/standing": typeof core_guests_standing;
   "core/imports": typeof core_imports;
   "core/jobs/admin": typeof core_jobs_admin;
+  "core/jobs/held": typeof core_jobs_held;
   "core/jobs/kinds": typeof core_jobs_kinds;
   "core/jobs/leases": typeof core_jobs_leases;
   "core/jobs/machine": typeof core_jobs_machine;
@@ -178,6 +194,20 @@ declare const fullApi: ApiFromModules<{
   "core/together/sessions": typeof core_together_sessions;
   crons: typeof crons;
   http: typeof http;
+  "movies/budget": typeof movies_budget;
+  "movies/catalog": typeof movies_catalog;
+  "movies/credits": typeof movies_credits;
+  "movies/items": typeof movies_items;
+  "movies/matching": typeof movies_matching;
+  "movies/metadata": typeof movies_metadata;
+  "movies/people": typeof movies_people;
+  "movies/probe": typeof movies_probe;
+  "movies/purge": typeof movies_purge;
+  "movies/scanner": typeof movies_scanner;
+  "movies/totals": typeof movies_totals;
+  "movies/trickplay": typeof movies_trickplay;
+  "movies/trickplayState": typeof movies_trickplayState;
+  "movies/validators": typeof movies_validators;
 }>;
 
 /**

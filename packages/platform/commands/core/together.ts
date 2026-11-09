@@ -14,7 +14,11 @@ const addArgs = v.object({
   item: v.union(
     v.object({
       domain: v.literal("movies"),
-      ref: v.union(v.object({ type: v.literal("probeMovie"), id: v.id("probeItems") })),
+      ref: v.union(
+        v.object({ type: v.literal("title"), id: v.id("titles") }),
+        v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+        v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+      ),
     }),
     v.object({
       domain: v.literal("music"),
@@ -72,7 +76,11 @@ const createArgs = v.object({
   item: v.union(
     v.object({
       domain: v.literal("movies"),
-      ref: v.union(v.object({ type: v.literal("probeMovie"), id: v.id("probeItems") })),
+      ref: v.union(
+        v.object({ type: v.literal("title"), id: v.id("titles") }),
+        v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+        v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+      ),
     }),
     v.object({
       domain: v.literal("music"),
@@ -119,7 +127,11 @@ const getResult = v.union(
       v.union(
         v.object({
           domain: v.literal("movies"),
-          ref: v.union(v.object({ type: v.literal("probeMovie"), id: v.id("probeItems") })),
+          ref: v.union(
+            v.object({ type: v.literal("title"), id: v.id("titles") }),
+            v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+            v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+          ),
         }),
         v.object({
           domain: v.literal("music"),
@@ -179,7 +191,11 @@ const queueResult = v.object({
         v.union(
           v.object({
             domain: v.literal("movies"),
-            ref: v.union(v.object({ type: v.literal("probeMovie"), id: v.id("probeItems") })),
+            ref: v.union(
+              v.object({ type: v.literal("title"), id: v.id("titles") }),
+              v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+              v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+            ),
           }),
           v.object({
             domain: v.literal("music"),

@@ -42,10 +42,11 @@ interface DownloadKindEntry {
 
 /**
  * Every kind of domain item a device can keep for offline play, the table that holds its rows, and
- * what its download serves (ADR 0019). `probe` is the core's stand-in for a domain's item, such as
- * a movie file or a track, until the movies port replaces it with movies' own kinds.
+ * what its download serves (ADR 0019). `file` is a movies media file. `probe` is the core's
+ * stand-in for a track until the music port replaces it with music's own kind.
  */
 export const downloadKinds = {
+  file: { table: "mediaFiles", serves: "file" },
   probe: { table: "probeItems", serves: "file" },
 } as const satisfies Readonly<Record<string, DownloadKindEntry>>;
 
@@ -78,10 +79,14 @@ interface ItemTypeEntry {
 /**
  * Every type of item a group session can hold, the domain it belongs to, and the table of its
  * rows: the one list of item types (ADR 0017). The item validators derive from it, and the core's
- * item loaders fail to compile until a new type has one.
+ * item loaders fail to compile until a new type has one. A movies `title` is a movie or a show,
+ * an `episode` one episode of a show, and a `file` one version of either. `probeTrack` is the
+ * core's stand-in for a track until the music port.
  */
 export const itemTypes = {
-  probeMovie: { domain: "movies", table: "probeItems" },
+  title: { domain: "movies", table: "titles" },
+  episode: { domain: "movies", table: "episodes" },
+  file: { domain: "movies", table: "mediaFiles" },
   probeTrack: { domain: "music", table: "probeItems" },
 } as const satisfies Readonly<Record<string, ItemTypeEntry>>;
 

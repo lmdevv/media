@@ -2,6 +2,7 @@ import type { DownloadKind, downloadKinds } from "../../commands/access";
 import type { DownloadQuality } from "../../commands/settings";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
+import { fileSource } from "../movies/items";
 import { probeSource } from "./libraryProbe";
 import type { ContentFacts } from "./permissions/policy";
 
@@ -55,6 +56,7 @@ interface Source<K extends DownloadKind> {
 type SourceLoaders = { readonly [K in DownloadKind]: Source<K> };
 
 const loaders: SourceLoaders = {
+  file: { reads: 3, load: fileSource },
   probe: { reads: 2, load: probeSource },
 };
 

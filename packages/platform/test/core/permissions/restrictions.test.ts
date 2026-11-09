@@ -2,16 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import type { Restrictions } from "../../../commands/access";
 import { api } from "../../../convex/_generated/api";
-import type { Id } from "../../../convex/_generated/dataModel";
 import {
   movie,
   openItem,
-  seedLibraries,
+  openTitle,
+  seedLibrary,
   sessionOf,
   share,
   song,
   visibleItems,
   visibleLibraries,
+  visibleTitles,
 } from "../../probe";
 import type { Session } from "../../probe";
 import { createPerson, refusal, signInAs } from "../../sign-in";
@@ -40,22 +41,23 @@ describe.skipIf(stack === undefined)("restrictions", { timeout: 120_000 }, () =>
     const manager = await signInSession(stack, "manager");
     const kid = await signInSession(stack, "kid");
 
-    const [films, songs] = await seedLibraries(stack, manager, [
-      {
-        name: "films",
-        kind: "movies",
-        items: [
-          movie("G", 0),
-          movie("PG", 7),
-          movie("PG-13", 13),
-          movie("R", 17),
-          movie("unrated", null),
-        ],
-      },
-      { name: "songs", kind: "music", items: [song("explicit", true), song("clean", false)] },
-    ]);
+    const films = await seedLibrary(stack, manager, {
+      name: "films",
+      kind: "movies",
+      items: [
+        movie("G", 0),
+        movie("PG", 7),
+        movie("PG-13", 13),
+        movie("R", 17),
+        movie("unrated", null),
+      ],
+    });
 
-    if (films === undefined || songs === undefined) throw new Error("seed made too few libraries");
+    const songs = await seedLibrary(stack, manager, {
+      name: "songs",
+      kind: "music",
+      items: [song("explicit", true), song("clean", false)],
+    });
 
     const libraries = [films, songs];
 
@@ -65,20 +67,23 @@ describe.skipIf(stack === undefined)("restrictions", { timeout: 120_000 }, () =>
       ),
     );
 
-    const seeded = libraries.flatMap((library) => library.itemIds);
+    const seeded: ReadonlyArray<string> = [...films.itemIds, ...songs.itemIds];
     const [g, pg, pg13, r, unrated] = films.itemIds;
     const [explicit, clean] = songs.itemIds;
 
-    const seen = async (): Promise<ReadonlyArray<Id<"probeItems">>> => {
+    const seen = async (): Promise<ReadonlyArray<string>> => {
       const listed = await visibleLibraries(kid);
 
-      const visible = await Promise.all(
-        libraries.map(async ({ libraryId }) =>
-          listed.includes(libraryId) ? visibleItems(stack, kid, libraryId) : [],
-        ),
-      );
+      const visible = new Set<string>([
+        ...(listed.includes(films.libraryId)
+          ? await visibleTitles(stack, kid, films.libraryId)
+          : []),
+        ...(listed.includes(songs.libraryId)
+          ? await visibleItems(stack, kid, songs.libraryId)
+          : []),
+      ]);
 
-      return seeded.filter((itemId) => visible.flat().includes(itemId));
+      return seeded.filter((itemId) => visible.has(itemId));
     };
 
     expect(await seen()).toEqual(seeded);
@@ -91,8 +96,8 @@ describe.skipIf(stack === undefined)("restrictions", { timeout: 120_000 }, () =>
       throw new Error("seed made too few items");
     }
 
-    expect(await refusal(openItem(stack, kid, pg13))).toBe("not_found");
-    expect(await refusal(openItem(stack, kid, r, "play"))).toBe("not_found");
+    expect(await refusal(openTitle(stack, kid, pg13))).toBe("not_found");
+    expect(await refusal(openTitle(stack, kid, r, "play"))).toBe("not_found");
 
     await restrict(admin, kid, { ...NONE, maxMovieAge: 7, hideUnrated: true });
 
