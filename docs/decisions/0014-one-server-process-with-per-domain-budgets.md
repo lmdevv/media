@@ -110,7 +110,9 @@ mount media read-only.
   a crash leaves nothing to clean up, and the server never kills by process id. The signal
   follows the thread that spawned the tool, which is Node's main thread and lives as long as the
   server. The image ships `setpriv`, and the NixOS module puts util-linux on the service's path.
-  The module also keeps systemd's default control-group kill. Checking a recorded process id and
+  Its system call filter allows `capset`, which `setpriv` calls to re-apply the process's
+  capabilities; the unit has none, so this grants nothing. The module also keeps systemd's
+  default control-group kill. Checking a recorded process id and
   then signalling it was rejected: the id can be reused between the check and the signal.
 - A yield or a release spends at most 2 seconds keeping the run's init segment, then stops
   without it. The player's next request then starts a new run.
