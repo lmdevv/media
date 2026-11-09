@@ -8,6 +8,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { runFunction } from "../../admin";
 import { createPerson, signInAs } from "../../sign-in";
 import type { SignedIn } from "../../sign-in";
+import { runServer } from "../../service";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
 import { eventually } from "../jobs/driver";
@@ -69,7 +70,7 @@ describe.skipIf(stack === undefined)("library scans", { timeout: 180_000 }, () =
       removed: 5,
     });
     expect(await itemsOf(owner, libraryId)).toBe(1196);
-    expect(await runFunction(stack, internal.core.scans.domains, {}, Domains)).toContainEqual({
+    expect(await runServer(stack, api.core.scans.domains, {}, Domains)).toContainEqual({
       kind: "music",
       hasLibraries: true,
     });

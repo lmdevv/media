@@ -1,6 +1,7 @@
 # 0012. Run all background work through one job framework in the core
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the framework's shape.
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the framework's shape, and 2026-11-09
+  with movies' kinds, pools, and the general lease check.
 - Decisions: D27
 
 ## Context
@@ -104,9 +105,8 @@ The first framework, in `packages/platform/convex/core/jobs/`, settled how these
 - Every lease call answers `canceled`, `lost`, `outOfOrder`, or `unfinished` as a value. It
   throws only on a defect, such as a lease length out of range.
 - The server-facing functions use `serverQuery` and `serverMutation` from
-  `convex/core/lib/serverFacing.ts`. They build internal functions until the server signs in to
-  the core. That unit replaces the two builders with public ones that require the
-  `media-service` scope (ADR 0009, ADR 0010).
+  `convex/core/lib/serverFacing.ts`. Since the movies port they build public functions that
+  require the `media-service` scope (ADR 0005, ADR 0009, ADR 0010).
 - `schemaMigrations.ts` is music's runner with one list, `MIGRATIONS`. `run` starts each
   unfinished migration from its saved cursor, and a step runs only from the saved cursor, so two
   chains never both advance. A changed migration needs a new name, because a deployment that
@@ -136,6 +136,31 @@ Left for the first unit that needs each one:
   the count.
 - Totals of jobs by status, when a screen shows them. `store.applyEvent` is the one place that
   moves a job between statuses, so the counters go there.
+
+Settled by the movies catalog (2026-11-09):
+
+- Each kind names its server pool (ADR 0014) in `KINDS`: `movies.scan`, `movies.metadata`, and
+  `movies.person` run in `movies`, `movies.trickplay` in `movies.background`, `music.scan` in
+  `music`, and `server.backup` in `server`. The `probe.*` kinds name `probe`, which no server pool
+  claims. A kind's cap bounds it across every worker; the pool's cap bounds its kinds on one
+  server.
+- `movies.metadata` (`{ titleId, match }`), `movies.person` (`{ personId }`), and
+  `movies.trickplay` (`{ fileId }`) dedupe on their row, and `server.backup` (`{ trigger }`) on
+  the server, so one backup runs at a time. Metadata and person cap at the `movies` pool's 2.
+  Trickplay caps at 8 across workers, above the server's `TRICKPLAY_CONCURRENCY`, 1 by default.
+  Old movies' `migration` kind stays `probe.import` until the importer port.
+- `withJobLease(ctx, kinds, lease, write)` in `jobs/held.ts` is the lease check of every server
+  function that writes for a job. It applies the `check` event as `items` does, narrows the
+  payload to the kinds it accepts, and throws on a lease of another kind, a server defect.
+  `withScanLease` is its scan form. A movies writer accepts exactly the kinds that may write its
+  rows: credits and a collection under the title's metadata job or a scan of its library, a
+  person's details under their person job or a metadata job of a title that credits them, and
+  thumbnails under the file's trickplay job.
+- Scrub thumbnails need no reaction to a finished job. A file's `trickplay` state names its job,
+  and a scan that finds the job failed for the file's current contents counts it as their
+  failure, as old movies' `settleTrickplay` recorded it, so it does not queue them again.
+- Finished trickplay jobs are not yet deleted after a retention period. A first scan of a large
+  library now queues a job per video file, so that unit is due before cutover.
 
 Settled by the libraries build (ADR 0024):
 

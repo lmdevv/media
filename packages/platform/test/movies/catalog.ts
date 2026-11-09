@@ -1,0 +1,246 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
+import { Schema } from "effect";
+
+import { api, internal } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
+import { runFunction } from "../admin";
+import { retrying } from "../core/jobs/driver";
+import { makeTree } from "../core/libraries/files";
+import type { Member } from "../devices";
+import { runServer } from "../service";
+import type { CoreStack } from "../stack-env";
+import type { ScannedItem } from "./scanned";
+
+// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
+// stack answered this one through a `v.id(...)` validator, which checks it again whenever a test
+// sends it back.
+const isId =
+  <Table extends "jobs" | "titles" | "episodes" | "mediaFiles" | "people">(_table: Table) =>
+  (value: unknown): value is Id<Table> =>
+    Schema.is(Schema.String)(value);
+
+export const JobId = Schema.declare(isId("jobs"));
+
+const TitleId = Schema.declare(isId("titles"));
+
+const EpisodeId = Schema.declare(isId("episodes"));
+
+const FileId = Schema.declare(isId("mediaFiles"));
+
+export const PersonId = Schema.declare(isId("people"));
+
+export const Lease = Schema.Struct({ jobId: JobId, attempt: Schema.Finite });
+
+export type Lease = typeof Lease.Type;
+
+export const answer = <Value extends Schema.Top>(value: Value) =>
+  Schema.Union([
+    Schema.Struct({ outcome: Schema.Literal("held"), value }),
+    Schema.Struct({ outcome: Schema.Literals(["canceled", "lost"]) }),
+  ]);
+
+const Claim = Schema.Union([
+  Schema.Struct({
+    outcome: Schema.Literal("claimed"),
+    lease: Lease,
+    payload: Schema.Struct({ kind: Schema.String }),
+  }),
+  Schema.Struct({ outcome: Schema.Literal("idle") }),
+]);
+
+export const Landed = answer(
+  Schema.Struct({
+    files: Schema.Array(
+      Schema.Struct({
+        path: Schema.String,
+        fileId: FileId,
+        titleId: TitleId,
+        episodeId: Schema.NullOr(EpisodeId),
+      }),
+    ),
+  }),
+);
+
+const Known = answer(
+  Schema.Struct({
+    files: Schema.Array(
+      Schema.Struct({
+        path: Schema.String,
+        sizeBytes: Schema.Finite,
+        mtimeMs: Schema.Finite,
+        missing: Schema.Boolean,
+        sidecarDigest: Schema.NullOr(Schema.String),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+  }),
+);
+
+const Marked = answer(Schema.Struct({ marked: Schema.Finite }));
+
+export const Totals = Schema.Struct({
+  titles: Schema.Finite,
+  episodes: Schema.Finite,
+  files: Schema.Finite,
+});
+
+export type Totals = typeof Totals.Type;
+
+const RowsPage = Schema.Struct({
+  counted: Totals,
+  continueCursor: Schema.String,
+  isDone: Schema.Boolean,
+});
+
+type MoviesKind = "movies.scan" | "movies.metadata" | "movies.person" | "movies.trickplay";
+
+/** A movies library on a new empty folder, made by `admin`, and the scan its creation queued. */
+export const moviesLibrary = async (
+  admin: Member,
+  name: string,
+  folders = 1,
+): Promise<{
+  readonly libraryId: Id<"libraries">;
+  readonly scanJobId: Id<"jobs">;
+  readonly roots: ReadonlyArray<string>;
+}> => {
+  const roots = await Promise.all(Array.from({ length: folders }, async () => makeTree([])));
+
+  const { libraryId, scanJobId } = await admin.signedIn.client.mutation(api.core.libraries.create, {
+    name,
+    kind: "movies",
+    folders: [...roots],
+  });
+
+  return { libraryId, scanJobId, roots };
+};
+
+/**
+ * Claims job `jobId` of `kind` as the stack's media server, with a lease of `leaseMs`. Another
+ * job of the kind it claims first it fails for good at once, which frees its slot, so a leftover
+ * of an earlier test never blocks it.
+ */
+export const claimJob = async (
+  stack: CoreStack,
+  kind: MoviesKind,
+  jobId: Id<"jobs">,
+  leaseMs = 60_000,
+  deadline = Date.now() + 120_000,
+): Promise<Lease> => {
+  const claim = await retrying(() =>
+    runServer(
+      stack,
+      api.core.jobs.worker.claim,
+      { kinds: [kind], workerId: `movies-${jobId}`, leaseMs },
+      Claim,
+    ),
+  );
+
+  if (claim.outcome === "claimed" && claim.lease.jobId === jobId) return claim.lease;
+
+  if (Date.now() > deadline) throw new Error(`Timed out waiting for a claim of ${jobId}`);
+
+  if (claim.outcome === "claimed") {
+    await retrying(() =>
+      runServer(
+        stack,
+        api.core.jobs.worker.finish,
+        {
+          lease: claim.lease,
+          end: { outcome: "failed", error: "left by another test", retry: false },
+        },
+        Schema.Struct({ outcome: Schema.String }),
+      ),
+    );
+  } else {
+    await sleep(250);
+  }
+
+  return claimJob(stack, kind, jobId, leaseMs, deadline);
+};
+
+/** Cancels every queued job of `kind`, such as the thumbnails a large scan queued. */
+export const cancelQueued = async (stack: CoreStack, kind: MoviesKind): Promise<void> => {
+  const { more } = await runFunction(
+    stack,
+    internal.movies.probe.cancelQueued,
+    { kind },
+    Schema.Struct({ more: Schema.Boolean }),
+  );
+
+  if (more) await cancelQueued(stack, kind);
+};
+
+/** Writes `items` under the scan lease. */
+export const upsert = (stack: CoreStack, lease: Lease, items: ReadonlyArray<ScannedItem>) =>
+  retrying(() => runServer(stack, api.movies.scanner.upsert, { lease, items: [...items] }, Landed));
+
+/** Marks `paths` missing under the scan lease. */
+export const markMissing = (stack: CoreStack, lease: Lease, paths: ReadonlyArray<string>) =>
+  retrying(() =>
+    runServer(stack, api.movies.scanner.missing, { lease, paths: [...paths] }, Marked),
+  );
+
+/** Every file the library knows inside its folders, page by page. */
+export const knownFiles = async (
+  stack: CoreStack,
+  lease: Lease,
+  cursor: string | null = null,
+  seen: ReadonlyArray<(typeof Known.Type & { outcome: "held" })["value"]["files"][number]> = [],
+): Promise<typeof seen> => {
+  const page = await runServer(stack, api.movies.scanner.known, { lease, cursor }, Known);
+
+  if (page.outcome !== "held") throw new Error(`known answered ${page.outcome}`);
+
+  const next = [...seen, ...page.value.files];
+
+  return page.value.isDone ? next : knownFiles(stack, lease, page.value.continueCursor, next);
+};
+
+/** A library's totals as its counters hold them. */
+export const totalsOf = (stack: CoreStack, libraryId: Id<"libraries">): Promise<Totals> =>
+  runFunction(stack, internal.movies.probe.totals, { libraryId }, Totals);
+
+/** A library's rows counted one by one, for comparing with its counters. */
+export const rowsOf = async (
+  stack: CoreStack,
+  libraryId: Id<"libraries">,
+  cursor: string | null = null,
+  sum: Totals = { titles: 0, episodes: 0, files: 0 },
+): Promise<Totals> => {
+  const page = await runFunction(
+    stack,
+    internal.movies.probe.rows,
+    { libraryId, cursor },
+    RowsPage,
+  );
+
+  const next = {
+    titles: sum.titles + page.counted.titles,
+    episodes: sum.episodes + page.counted.episodes,
+    files: sum.files + page.counted.files,
+  };
+
+  return page.isDone ? next : rowsOf(stack, libraryId, page.continueCursor, next);
+};
+
+/** Whether any title or file of the library is left. */
+export const hasRows = (stack: CoreStack, libraryId: Id<"libraries">): Promise<boolean> =>
+  runFunction(stack, internal.movies.probe.hasRows, { libraryId }, Schema.Boolean);
+
+/** Whether any shard of the library's episode or file totals is left. */
+export const hasTotals = (stack: CoreStack, libraryId: Id<"libraries">): Promise<boolean> =>
+  runFunction(stack, internal.movies.probe.hasTotals, { libraryId }, Schema.Boolean);
+
+/** Ends a held job as succeeded, which frees its slot for the next test's claim. */
+export const finishJob = (stack: CoreStack, lease: Lease) =>
+  retrying(() =>
+    runServer(
+      stack,
+      api.core.jobs.worker.finish,
+      { lease, end: { outcome: "succeeded" } },
+      Schema.Struct({ outcome: Schema.String }),
+    ),
+  );

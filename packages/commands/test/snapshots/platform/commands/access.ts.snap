@@ -26,13 +26,19 @@ export const resourceType = v.union(v.literal("library"));
 export const resourceId = v.union(v.id("libraries"));
 
 /** Every kind of domain item a device can keep for offline play, the table that holds it, and what its download serves. */
-export const downloadKinds = { probe: { table: "probeItems", serves: "file" } } as const;
+export const downloadKinds = {
+  file: { table: "mediaFiles", serves: "file" },
+  probe: { table: "probeItems", serves: "file" },
+} as const;
 
 /** A kind of domain item a device can keep. */
 export type DownloadKind = keyof typeof downloadKinds;
 
 /** One item a device can keep: its kind, and the id of its row in that kind's table. */
-export const downloadItem = v.union(v.object({ kind: v.literal("probe"), id: v.id("probeItems") }));
+export const downloadItem = v.union(
+  v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
+  v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+);
 
 /** One item a device can keep. */
 export type DownloadItem = Infer<typeof downloadItem>;
@@ -45,7 +51,9 @@ export type LibraryId = Infer<typeof libraryId>;
 
 /** Every type of item a group session can hold, its domain, and the table of its rows. */
 export const itemTypes = {
-  probeMovie: { domain: "movies", table: "probeItems" },
+  title: { domain: "movies", table: "titles" },
+  episode: { domain: "movies", table: "episodes" },
+  file: { domain: "movies", table: "mediaFiles" },
   probeTrack: { domain: "music", table: "probeItems" },
 } as const;
 
@@ -56,7 +64,11 @@ export type ItemType = keyof typeof itemTypes;
 export const domainItem = v.union(
   v.object({
     domain: v.literal("movies"),
-    ref: v.union(v.object({ type: v.literal("probeMovie"), id: v.id("probeItems") })),
+    ref: v.union(
+      v.object({ type: v.literal("title"), id: v.id("titles") }),
+      v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+      v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+    ),
   }),
   v.object({
     domain: v.literal("music"),

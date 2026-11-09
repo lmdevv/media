@@ -701,6 +701,10 @@ const core_downloads_add = mutation({
   args: Schema.Struct({
     item: Schema.Union([
       Schema.Struct({
+        kind: Schema.Literal("file"),
+        id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+      }),
+      Schema.Struct({
         kind: Schema.Literal("probe"),
         id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
       }),
@@ -714,6 +718,10 @@ const core_downloads_fetch = mutation({
   path: "core/downloads:fetch",
   args: Schema.Struct({
     item: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("file"),
+        id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+      }),
       Schema.Struct({
         kind: Schema.Literal("probe"),
         id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
@@ -761,6 +769,10 @@ const core_downloads_list = query({
         Schema.Struct({
           item: Schema.Union([
             Schema.Struct({
+              kind: Schema.Literal("file"),
+              id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+            }),
+            Schema.Struct({
               kind: Schema.Literal("probe"),
               id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
             }),
@@ -773,6 +785,10 @@ const core_downloads_list = query({
         }),
         Schema.Struct({
           item: Schema.Union([
+            Schema.Struct({
+              kind: Schema.Literal("file"),
+              id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+            }),
             Schema.Struct({
               kind: Schema.Literal("probe"),
               id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
@@ -787,6 +803,10 @@ const core_downloads_list = query({
         }),
         Schema.Struct({
           item: Schema.Union([
+            Schema.Struct({
+              kind: Schema.Literal("file"),
+              id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+            }),
             Schema.Struct({
               kind: Schema.Literal("probe"),
               id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
@@ -814,6 +834,10 @@ const core_downloads_remove = mutation({
   path: "core/downloads:remove",
   args: Schema.Struct({
     item: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("file"),
+        id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+      }),
       Schema.Struct({
         kind: Schema.Literal("probe"),
         id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
@@ -882,8 +906,16 @@ const core_guests_current = query({
               domain: Schema.Literal("movies"),
               ref: Schema.Union([
                 Schema.Struct({
-                  type: Schema.Literal("probeMovie"),
-                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  type: Schema.Literal("title"),
+                  id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("episode"),
+                  id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("file"),
+                  id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
                 }),
               ]),
             }),
@@ -955,8 +987,16 @@ const core_guests_links_create = action({
             domain: Schema.Literal("movies"),
             ref: Schema.Union([
               Schema.Struct({
-                type: Schema.Literal("probeMovie"),
-                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                type: Schema.Literal("title"),
+                id: Schema.String.pipe(Schema.brand("Id<titles>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("episode"),
+                id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("file"),
+                id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
               }),
             ]),
           }),
@@ -1015,8 +1055,16 @@ const core_guests_links_list = query({
                   domain: Schema.Literal("movies"),
                   ref: Schema.Union([
                     Schema.Struct({
-                      type: Schema.Literal("probeMovie"),
-                      id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                      type: Schema.Literal("title"),
+                      id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                    }),
+                    Schema.Struct({
+                      type: Schema.Literal("episode"),
+                      id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                    }),
+                    Schema.Struct({
+                      type: Schema.Literal("file"),
+                      id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
                     }),
                   ]),
                 }),
@@ -1595,8 +1643,16 @@ const core_together_add = mutation({
         domain: Schema.Literal("movies"),
         ref: Schema.Union([
           Schema.Struct({
-            type: Schema.Literal("probeMovie"),
-            id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            type: Schema.Literal("title"),
+            id: Schema.String.pipe(Schema.brand("Id<titles>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("episode"),
+            id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("file"),
+            id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
           }),
         ]),
       }),
@@ -1686,8 +1742,16 @@ const core_together_create = action({
         domain: Schema.Literal("movies"),
         ref: Schema.Union([
           Schema.Struct({
-            type: Schema.Literal("probeMovie"),
-            id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            type: Schema.Literal("title"),
+            id: Schema.String.pipe(Schema.brand("Id<titles>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("episode"),
+            id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("file"),
+            id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
           }),
         ]),
       }),
@@ -1760,8 +1824,16 @@ const core_together_get = query({
             domain: Schema.Literal("movies"),
             ref: Schema.Union([
               Schema.Struct({
-                type: Schema.Literal("probeMovie"),
-                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                type: Schema.Literal("title"),
+                id: Schema.String.pipe(Schema.brand("Id<titles>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("episode"),
+                id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("file"),
+                id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
               }),
             ]),
           }),
@@ -1854,8 +1926,16 @@ const core_together_queue = query({
               domain: Schema.Literal("movies"),
               ref: Schema.Union([
                 Schema.Struct({
-                  type: Schema.Literal("probeMovie"),
-                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  type: Schema.Literal("title"),
+                  id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("episode"),
+                  id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("file"),
+                  id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
                 }),
               ]),
             }),

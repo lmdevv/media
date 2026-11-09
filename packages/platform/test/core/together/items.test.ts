@@ -8,7 +8,15 @@ describe("typed item references", () => {
   it("pair each domain only with its own item types", () => {
     expectTypeOf<{
       domain: "movies";
-      ref: { type: "probeMovie"; id: Id<"probeItems"> };
+      ref: { type: "title"; id: Id<"titles"> };
+    }>().toExtend<DomainItem>();
+    expectTypeOf<{
+      domain: "movies";
+      ref: { type: "episode"; id: Id<"episodes"> };
+    }>().toExtend<DomainItem>();
+    expectTypeOf<{
+      domain: "movies";
+      ref: { type: "file"; id: Id<"mediaFiles"> };
     }>().toExtend<DomainItem>();
     expectTypeOf<{
       domain: "movies";
@@ -16,7 +24,11 @@ describe("typed item references", () => {
     }>().not.toExtend<DomainItem>();
     expectTypeOf<{
       domain: "music";
-      ref: { type: "probeMovie"; id: Id<"probeItems"> };
+      ref: { type: "title"; id: Id<"titles"> };
+    }>().not.toExtend<DomainItem>();
+    expectTypeOf<{
+      domain: "movies";
+      ref: { type: "title"; id: Id<"probeItems"> };
     }>().not.toExtend<DomainItem>();
   });
 

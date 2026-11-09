@@ -43,7 +43,7 @@ describe.skipIf(stack === undefined)("opening guest links", { timeout: 600_000 }
 
     const target = {
       kind: "item",
-      item: { domain: "movies", ref: { type: "probeMovie", id } },
+      item: { domain: "movies", ref: { type: "title", id } },
     } as const;
 
     const links = await inOrder(

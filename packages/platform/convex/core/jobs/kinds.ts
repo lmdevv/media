@@ -14,9 +14,18 @@ type Tagged<Kind extends string, Fields extends PropertyValidators> = ReturnType
   typeof tagged<Kind, Fields>
 >;
 
+/**
+ * The server's worker pools (ADR 0014). Each kind runs in exactly one, and a pool's cap bounds its
+ * kinds together on one server, under each kind's own cap across every worker. `probe` runs only
+ * in the stack suite; the server never claims it.
+ */
+type JobPool = "movies" | "movies.background" | "music" | "server" | "probe";
+
 interface KindPolicy<Payload extends PropertyValidators> {
   /** What enqueue stores, at most a few KiB. A large plan belongs in the domain's own table. */
   readonly payload: Payload;
+  /** The server pool whose workers claim this kind. */
+  readonly pool: JobPool;
   /** Most jobs of this kind running at once, across every worker. */
   readonly cap: number;
   /**
@@ -37,6 +46,7 @@ export interface JobKindDef<Kind extends string, Payload, Item> {
   readonly payload: Payload;
   /** The validator of one batched item, or null for a kind whose worker reports done/total. */
   readonly item: Item;
+  readonly pool: JobPool;
   readonly cap: number;
   readonly maxStrikes: number;
   /** The dedupe key of a stored payload of this kind, or null when the kind does not dedupe. */
@@ -93,6 +103,7 @@ export function defineKind<
     kind,
     payload: tagged(kind, policy.payload),
     item: policy.item === null ? null : tagged(kind, policy.item),
+    pool: policy.pool,
     cap: policy.cap,
     maxStrikes: policy.maxStrikes,
     dedupeKey: (payload) => {
@@ -109,9 +120,19 @@ const probeRun = { run: v.string(), n: v.number() };
 
 const LIBRARIES_SCANNING_PER_DOMAIN = 2;
 
+/** The `movies` pool's cap in ADR 0014, which no one of its kinds exceeds on its own. */
+const MOVIES_POOL_CAP = 2;
+
+/**
+ * The most scrub-thumbnail jobs running across every worker. The server's `movies.background`
+ * pool runs `TRICKPLAY_CONCURRENCY` of them, 1 unless set, under this.
+ */
+const TRICKPLAY_RUNNING_MAX = 8;
+
 const scanKind = <const Kind extends ContentDomain>(kind: Kind) =>
   defineKind(`${kind}.scan`, {
     payload: { libraryId: v.id("libraries") },
+    pool: kind,
     item: null,
     cap: LIBRARIES_SCANNING_PER_DOMAIN,
     maxStrikes: 3,
@@ -121,14 +142,23 @@ const scanKind = <const Kind extends ContentDomain>(kind: Kind) =>
 export const KINDS = [
   defineKind("probe.capped", {
     payload: probeRun,
+    pool: "probe",
     item: null,
     cap: 2,
     maxStrikes: 3,
     dedupe: null,
   }),
-  defineKind("probe.wide", { payload: probeRun, item: null, cap: 4, maxStrikes: 3, dedupe: null }),
+  defineKind("probe.wide", {
+    payload: probeRun,
+    pool: "probe",
+    item: null,
+    cap: 4,
+    maxStrikes: 3,
+    dedupe: null,
+  }),
   defineKind("probe.items", {
     payload: probeRun,
+    pool: "probe",
     item: { n: v.number() },
     cap: 2,
     maxStrikes: 3,
@@ -136,6 +166,7 @@ export const KINDS = [
   }),
   defineKind("probe.import", {
     payload: { source: importSource, serverId: v.string() },
+    pool: "probe",
     item: null,
     cap: 1,
     maxStrikes: 3,
@@ -143,6 +174,42 @@ export const KINDS = [
   }),
   scanKind("movies"),
   scanKind("music"),
+  defineKind("movies.metadata", {
+    payload: {
+      titleId: v.id("titles"),
+      /** A match an admin chose, which marks the title manual; null refreshes the current one. */
+      match: v.union(v.object({ provider: v.literal("tmdb"), providerId: v.string() }), v.null()),
+    },
+    pool: "movies",
+    item: null,
+    cap: MOVIES_POOL_CAP,
+    maxStrikes: 3,
+    dedupe: (payload) => payload.titleId,
+  }),
+  defineKind("movies.person", {
+    payload: { personId: v.id("people") },
+    pool: "movies",
+    item: null,
+    cap: MOVIES_POOL_CAP,
+    maxStrikes: 3,
+    dedupe: (payload) => payload.personId,
+  }),
+  defineKind("movies.trickplay", {
+    payload: { fileId: v.id("mediaFiles") },
+    pool: "movies.background",
+    item: null,
+    cap: TRICKPLAY_RUNNING_MAX,
+    maxStrikes: 3,
+    dedupe: (payload) => payload.fileId,
+  }),
+  defineKind("server.backup", {
+    payload: { trigger: v.union(v.literal("nightly"), v.literal("manual")) },
+    pool: "server",
+    item: null,
+    cap: 1,
+    maxStrikes: 3,
+    dedupe: () => "server",
+  }),
 ] as const;
 
 type KindDef = (typeof KINDS)[number];

@@ -1,6 +1,5 @@
 import type { FunctionReference } from "convex/server";
 import { v } from "convex/values";
-import type { Validator } from "convex/values";
 
 import { contentDomain } from "../../commands/scopes";
 import type { ContentDomain } from "../../commands/scopes";
@@ -9,6 +8,8 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { foldersOf, isInside, isPlainPath } from "./folders";
 import { scanKindOf } from "./jobs/kinds";
+import { withJobLease, leaseAnswer } from "./jobs/held";
+import type { LeaseAnswer } from "./jobs/held";
 import { cancel } from "./jobs/queue";
 import { lease } from "./jobs/model";
 import type { Lease } from "./jobs/model";
@@ -88,20 +89,6 @@ export interface HeldScan {
   readonly admit: (paths: ReadonlyArray<string>) => ReadonlyArray<string>;
 }
 
-/** What a scanner callback answers: its value while the lease holds, or why the worker stops. */
-export type ScanAnswer<Value> =
-  | { readonly outcome: "held"; readonly value: Value }
-  | { readonly outcome: "canceled" }
-  | { readonly outcome: "lost" };
-
-/** `ScanAnswer` as a Convex validator, for a callback's `returns`. */
-export const scanAnswer = <Value extends Validator<unknown, "required", string>>(value: Value) =>
-  v.union(
-    v.object({ outcome: v.literal("held"), value }),
-    v.object({ outcome: v.literal("canceled") }),
-    v.object({ outcome: v.literal("lost") }),
-  );
-
 const keepsIn =
   (folders: ReadonlyArray<string>) =>
   (path: string): boolean =>
@@ -133,65 +120,45 @@ const heldScan = (
 
 /**
  * The lease check every scanner callback runs first, in its own mutation, and the only way to
- * write a library's items under a scan. It applies the `check` event through `applyEvent`, so a
- * canceled job ends on this call and frees its slot, and a call from an older attempt answers
- * `lost`. It then reads the library and its folders, runs `write`, and moves the library's count
- * by what `write` reports, in this same mutation. A canceled attempt therefore writes nothing
- * after its cancel commits, which is what lets a library's new scan start while the old one's
- * worker has not yet stopped.
+ * write a library's items under a scan. It runs `withJobLease`, so a canceled job ends on this
+ * call and frees its slot, and a call from an older attempt answers `lost`. It then reads the
+ * library and its folders, runs `write`, and moves the library's count by what `write` reports, in
+ * this same mutation. A canceled attempt therefore writes nothing after its cancel commits, which
+ * is what lets a library's new scan start while the old one's worker has not yet stopped.
  *
  * @throws Error when the lease is a scan of another domain's library, which only a defect gives.
  */
-export const withScanLease = async <Value>(
+export const withScanLease = <Value>(
   ctx: JobCtx,
   kind: ContentDomain,
   held: Lease,
   write: (scan: HeldScan) => Promise<Counted<Value>>,
-): Promise<ScanAnswer<Value>> => {
-  const job = await ctx.db.get(held.jobId);
+): Promise<LeaseAnswer<Value>> =>
+  withJobLease(ctx, [scanKindOf(kind)], held, async (job) => {
+    const library = await ctx.db.get(job.payload.libraryId);
 
-  if (job === null) return { outcome: "lost" };
+    if (library === null) {
+      await cancel(ctx, job.jobId);
 
-  const { payload } = job;
+      const canceling = await ctx.db.get(job.jobId);
 
-  if (payload.kind !== scanKindOf(kind)) {
-    throw new Error(`A ${kind} scan callback got the lease of a ${payload.kind} job`);
-  }
+      if (canceling !== null) await applyEvent(ctx, canceling, { type: "check", lease: held });
 
-  const checked = await applyEvent(ctx, job, { type: "check", lease: held });
-
-  if (!checked.ok) {
-    if (checked.refused === "canceled" || checked.refused === "lost") {
-      return { outcome: checked.refused };
+      return { outcome: "canceled" };
     }
 
-    throw new Error(`A lease check was refused as ${checked.refused}`);
-  }
+    const folders = await foldersOf(ctx.db, library._id);
+    const counted = await write(heldScan(job.jobId, library, folders));
+    const value = await moveCount(ctx.db, library._id, counted);
 
-  if (checked.next.status === "canceled") return { outcome: "canceled" };
-
-  const library = await ctx.db.get(payload.libraryId);
-
-  if (library === null) {
-    await cancel(ctx, job._id);
-
-    const canceling = await ctx.db.get(job._id);
-
-    if (canceling !== null) await applyEvent(ctx, canceling, { type: "check", lease: held });
-
-    return { outcome: "canceled" };
-  }
-
-  const folders = await foldersOf(ctx.db, library._id);
-  const counted = await write(heldScan(job._id, library, folders));
-  const value = await moveCount(ctx.db, library._id, counted);
-
-  return { outcome: "held", value };
-};
+    return { outcome: "held", value };
+  });
 
 /** What a purge may delete: the library's rows that no folder of it holds now. */
 export interface PurgeScope {
   readonly libraryId: Id<"libraries">;
+  /** Whether the library itself is gone; its counts went with it, so nothing moves them. */
+  readonly gone: boolean;
   /** Whether a row at `path` stays: inside a current folder. Never, once the library is gone. */
   readonly keeps: (path: string) => boolean;
 }
@@ -209,7 +176,7 @@ export const purgeStep = async <Value>(
 ): Promise<Value> => {
   const library = await ctx.db.get(libraryId);
   const keeps = library === null ? () => false : keepsIn(await foldersOf(ctx.db, libraryId));
-  const counted = await deletePage({ libraryId, keeps });
+  const counted = await deletePage({ libraryId, gone: library === null, keeps });
 
   return library === null ? counted.value : moveCount(ctx.db, libraryId, counted);
 };
@@ -222,7 +189,7 @@ type PurgeHook = FunctionReference<
 >;
 
 const purgeHooks = {
-  movies: internal.core.libraryProbe.purge,
+  movies: internal.movies.purge.files,
   music: internal.core.libraryProbe.purge,
 } satisfies { readonly [Kind in ContentDomain]: PurgeHook };
 
@@ -270,7 +237,7 @@ export const domains = serverQuery({
  */
 export const target = serverMutation({
   args: { lease, kind: contentDomain },
-  returns: scanAnswer(v.object({ libraryId: v.id("libraries"), folders: v.array(v.string()) })),
+  returns: leaseAnswer(v.object({ libraryId: v.id("libraries"), folders: v.array(v.string()) })),
   handler: (ctx, { lease: held, kind }) =>
     withScanLease(ctx, kind, held, async (scan) => ({
       value: { libraryId: scan.library._id, folders: [...scan.folders] },

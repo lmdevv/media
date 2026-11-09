@@ -36,25 +36,37 @@ export class FunctionRefused extends Error {
 }
 
 /**
- * Runs a function with the deployment's admin key and decodes its result. A refusal the function
- * failed with comes back as the `ConvexError` a client gets, so `refusal` reads its code.
+ * Sends one function call over HTTP with `authorization` and decodes its result: the admin key
+ * (`Convex <key>`) through `/api/function`, which reaches internal functions too, or a session's
+ * `Bearer <token>` (or none) through `/api/run`, as a client reaches public ones. A refusal the
+ * function failed with comes back as the `ConvexError` a client gets, so `refusal` reads its code;
+ * a refusal before or instead of committing comes back as `FunctionRefused`.
  */
-export const runFunction = async <
+export const callFunction = async <
   Callable extends AdminCallable,
   Result extends Schema.ConstraintDecoder<unknown>,
 >(
-  stack: CoreStack,
+  url: string,
+  authorization: string,
   callable: Callable,
   args: FunctionArgs<Callable>,
   result: Result,
 ): Promise<Result["Type"]> => {
   const path = getFunctionName(callable);
+  const admin = authorization.startsWith("Convex ");
 
-  const response = await fetch(`${stack.url}/api/function`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Convex ${stack.adminKey}` },
-    body: JSON.stringify({ path, args, format: "json" }),
-  });
+  const response = await fetch(
+    admin ? `${url}/api/function` : `${url}/api/run/${path.replace(":", "/")}`,
+    {
+      method: "POST",
+      headers: new Headers(
+        authorization === ""
+          ? { "Content-Type": "application/json" }
+          : { "Content-Type": "application/json", Authorization: authorization },
+      ),
+      body: JSON.stringify(admin ? { path, args, format: "json" } : { args, format: "json" }),
+    },
+  );
 
   const body = await response.text();
 
@@ -72,6 +84,18 @@ export const runFunction = async <
 
   return Schema.decodeUnknownSync(result)(decoded.value);
 };
+
+/** Runs a function with the deployment's admin key and decodes its result, as `callFunction`. */
+export const runFunction = <
+  Callable extends AdminCallable,
+  Result extends Schema.ConstraintDecoder<unknown>,
+>(
+  stack: CoreStack,
+  callable: Callable,
+  args: FunctionArgs<Callable>,
+  result: Result,
+): Promise<Result["Type"]> =>
+  callFunction(stack.url, `Convex ${stack.adminKey}`, callable, args, result);
 
 const FunctionLog = Schema.Struct({
   newCursor: Schema.Finite,

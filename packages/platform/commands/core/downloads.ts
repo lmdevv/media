@@ -11,13 +11,19 @@ import { requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
 
 const addArgs = v.object({
-  item: v.union(v.object({ kind: v.literal("probe"), id: v.id("probeItems") })),
+  item: v.union(
+    v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
+    v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+  ),
 });
 
 const addResult = v.null();
 
 const fetchArgs = v.object({
-  item: v.union(v.object({ kind: v.literal("probe"), id: v.id("probeItems") })),
+  item: v.union(
+    v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
+    v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+  ),
 });
 
 const fetchResult = v.union(
@@ -52,7 +58,10 @@ const listResult = v.object({
   page: v.array(
     v.union(
       v.object({
-        item: v.union(v.object({ kind: v.literal("probe"), id: v.id("probeItems") })),
+        item: v.union(
+          v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
+          v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+        ),
         state: v.literal("available"),
         revision: v.string(),
         quality: v.union(v.literal("standard"), v.literal("high")),
@@ -60,12 +69,18 @@ const listResult = v.object({
         label: v.string(),
       }),
       v.object({
-        item: v.union(v.object({ kind: v.literal("probe"), id: v.id("probeItems") })),
+        item: v.union(
+          v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
+          v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+        ),
         state: v.literal("expired"),
         because: v.union(v.literal("access"), v.literal("restricted"), v.literal("device")),
       }),
       v.object({
-        item: v.union(v.object({ kind: v.literal("probe"), id: v.id("probeItems") })),
+        item: v.union(
+          v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
+          v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+        ),
         state: v.literal("gone"),
       }),
     ),
@@ -79,7 +94,10 @@ const listResult = v.object({
 });
 
 const removeArgs = v.object({
-  item: v.union(v.object({ kind: v.literal("probe"), id: v.id("probeItems") })),
+  item: v.union(
+    v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
+    v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+  ),
 });
 
 const removeResult = v.null();

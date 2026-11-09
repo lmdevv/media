@@ -13,10 +13,11 @@ import { runFunction } from "../../admin";
 import { member } from "../../devices";
 import type { Member } from "../../devices";
 import { GUEST_ADDRESS, guestsOn, makeLink, openLink } from "../../guests";
-import { movie, openItem, seedLibrary, share, visibleItems, visibleLibraries } from "../../probe";
+import { movie, openTitle, seedLibrary, share, visibleLibraries, visibleTitles } from "../../probe";
 import type { Session } from "../../probe";
 import { importRows, newestRows } from "../../rows";
 import { failureOf, refusal, signIn, unique } from "../../sign-in";
+import { runServer } from "../../service";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
 import { plantedStrangers } from "../../together";
@@ -37,11 +38,16 @@ interface Shelf {
   readonly libraryId: Id<"libraries">;
   readonly shared: DomainItem;
   readonly other: DomainItem;
+  readonly ids: {
+    readonly shared: Id<"titles">;
+    readonly other: Id<"titles">;
+    readonly sharedFile: Id<"mediaFiles">;
+  };
 }
 
-const movieRef = (id: Id<"probeItems">): DomainItem => ({
+const movieRef = (id: Id<"titles">): DomainItem => ({
   domain: "movies",
-  ref: { type: "probeMovie", id },
+  ref: { type: "title", id },
 });
 
 const shelf = async (core: CoreStack): Promise<Shelf> => {
@@ -56,19 +62,28 @@ const shelf = async (core: CoreStack): Promise<Shelf> => {
   });
 
   const [shared, other] = films.itemIds;
+  const [sharedFile] = films.fileIds;
 
   if (shared === undefined || other === undefined) throw new Error("seeded too few items");
 
-  return { admin, libraryId: films.libraryId, shared: movieRef(shared), other: movieRef(other) };
+  if (sharedFile === undefined) throw new Error("seeded no file");
+
+  return {
+    admin,
+    libraryId: films.libraryId,
+    shared: movieRef(shared),
+    other: movieRef(other),
+    ids: { shared, other, sharedFile },
+  };
 };
 
 const play = (core: CoreStack, who: Session, item: DomainItem) =>
   runFunction(core, internal.core.ticketsProbe.play, { sessionId: who.sessionId, item }, Issued);
 
 const statusOf = (core: CoreStack, who: Session) =>
-  runFunction(
+  runServer(
     core,
-    internal.core.tickets.sessionStatus,
+    api.core.tickets.sessionStatus,
     { userId: who.userId, sessionId: who.sessionId },
     Status,
   );
@@ -94,7 +109,7 @@ const LinkRow = Schema.fromJsonString(
 describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => {
   it("lets a guest in under a display name to only what the link names, at the guest address", async () => {
     if (stack === undefined) return;
-    const { admin, libraryId, shared, other } = await shelf(stack);
+    const { admin, libraryId, shared, other, ids } = await shelf(stack);
     const made = await makeLink(admin, { kind: "item", item: shared });
 
     expect(made.url.startsWith(`${GUEST_ADDRESS}/guest#mg_${made.linkId}.`)).toBe(true);
@@ -122,11 +137,11 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
     expect(await statusOf(stack, admin)).toMatchObject({ state: "live", guest: false });
 
     expect(await visibleLibraries(guest)).toEqual([]);
-    expect(await refusal(openItem(stack, guest, other.ref.id, "play"))).toBe("not_found");
-    expect(await refusal(openItem(stack, guest, shared.ref.id, "view", "movies:read"))).toBe(
+    expect(await refusal(openTitle(stack, guest, ids.other, "play"))).toBe("not_found");
+    expect(await refusal(openTitle(stack, guest, ids.shared, "view", "movies:read"))).toBe(
       "forbidden",
     );
-    expect(await refusal(visibleItems(stack, guest, libraryId))).toBe("not_found");
+    expect(await refusal(visibleTitles(stack, guest, libraryId))).toBe("not_found");
     expect(await refusal(guest.signedIn.client.query(api.core.libraries.get, { libraryId }))).toBe(
       "not_found",
     );
@@ -143,7 +158,7 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
 
   it("refuses a guest a download", async () => {
     if (stack === undefined) return;
-    const { admin, shared } = await shelf(stack);
+    const { admin, shared, ids } = await shelf(stack);
 
     const guest = await openLink(
       stack,
@@ -152,7 +167,7 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
     );
 
     const adding = guest.signedIn.client.mutation(api.core.downloads.add, {
-      item: { kind: "probe", id: shared.ref.id },
+      item: { kind: "file", id: ids.sharedFile },
     });
 
     await expect(adding).rejects.toThrow(/Guests cannot download/u);

@@ -250,7 +250,7 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
     );
   });
 
-  it("refuses an item from another domain, by its type and by its row", async () => {
+  it("refuses an item from another domain, by its type and by its row's table", async () => {
     if (stack === undefined) return;
     const { shelf, link } = await started(stack, { add: true });
 
@@ -266,11 +266,11 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
     expect(
       await refusal(shelf.host.signedIn.client.mutation(untypedAdd, { item: crossed })),
     ).toMatch(/ArgumentValidationError/u);
+    const misfiled = { domain: "movies", ref: { type: "title", id: shelf.track.ref.id } };
+
     expect(
-      await refusal(
-        shelf.host.signedIn.client.mutation(api.core.together.add, { item: shelf.misfiled }),
-      ),
-    ).toBe("not_found");
+      await refusal(shelf.host.signedIn.client.mutation(untypedAdd, { item: misfiled })),
+    ).toMatch(/ArgumentValidationError/u);
     expect(await refusal(joinBy(shelf.host, music.link, "movies"))).toBe("invalid_args");
     expect(await refusal(joinBy(shelf.host, link, "music"))).toBe("invalid_args");
     expect((await joinedView(shelf.host, "music")).item).toEqual(shelf.track);

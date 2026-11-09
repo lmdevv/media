@@ -1,6 +1,6 @@
 # 0024. Libraries have a kind, their own folders, grants, and one scan kind per domain
 
-- Status: Accepted, 2026-11-04
+- Status: Accepted, 2026-11-04. Amended 2026-11-09 with the movies catalog.
 - Decisions: D01, D02, D16, D17, D28, D29, D50
 
 ## Context
@@ -122,8 +122,8 @@ never both write.
   most 1,000), deletes the row, and schedules the purge, all in one mutation of about 1,050 reads
   and writes. Its items vanish with its grants, because an item's level is its library's. A kid's
   allowed-libraries list may keep the removed id, which matches nothing.
-- The per-domain purge hooks live in one table in `scans.ts`. Until the movies port, both domains'
-  hooks are the test seam's.
+- The per-domain purge hooks live in one table in `scans.ts`. Movies' hook is `movies/purge:files`;
+  music's is the test seam's until the music port.
 
 ### No libraries, no workers
 
@@ -134,18 +134,51 @@ cancels its scan, so no scan of a domain without libraries stays queued.
 
 ### Test seam
 
-`core/libraryProbe.ts` holds `probeItems`, a stand-in for a domain's rows: the scanner callbacks
-`known`, `upsert`, and `missing`, the purge hook, a seed of rated items written through
-`withLibraryItems`, and `open` and `page`, which decide items through `requireItems` as a title
-list will. `packages/platform/test/core/libraries/scanner.ts` drives a scan as the server will:
-claim, `target`, a walk with `opendir` and `lstat` only, pages of `known`, batches of 500, finish.
-The movies port replaces the seam with movies' rows and deletes it.
+`core/libraryProbe.ts` holds `probeItems`, a stand-in for music's tracks until the music port: the
+scanner callbacks `known`, `upsert`, and `missing`, the purge hook, a seed of tracks written
+through `withLibraryItems`, and `open` and `page`, which decide items through `requireItems` as a
+track list will. It takes music libraries only; movies keep their own rows (below).
+`packages/platform/test/core/libraries/scanner.ts` drives a scan as the server will: claim,
+`target`, a walk with `opendir` and `lstat` only, pages of `known`, batches of 500, finish. For a
+movies library it sends each file as a movie titled by its path.
+
+### Movies (amended 2026-11-09)
+
+The movies port replaced the movies half of the seam with movies' own rows in
+`convex/movies/` (`titles`, `titleGenres`, `seasons`, `episodes`, `people`, `credits`,
+`mediaFiles`, `collections`, `collectionItems`).
+
+- The scanner callbacks are `movies/scanner:known`, `upsert`, and `missing`, server functions
+  under `withScanLease`. `upsert` takes up to 500 files, each with its title and episode, writes
+  them in order, and answers where each landed. `missing` marks up to 500 files missing and keeps
+  their rows, so a title, its episodes, and everyone's history stay until the file returns or its
+  folder leaves; `known` lists missing files too, so the scanner writes a returning one again.
+- A movies library's item count is its title count: `upsert` reports the titles it inserted as
+  `added`, and the purge the titles it deleted as `removed`. Its episode and file totals are two
+  more counters, `movies.episodes:<id>` and `movies.files:<id>`, which every write of those rows
+  moves in its own mutation (`movies/totals.ts`).
+- A full batch stays inside one call's limits. On the dev stack, 500 new video files, half of
+  them episodes of one show in five seasons, each queuing a `movies.trickplay` job, committed in
+  one call, and so did the unchanged rescan of them.
+- The purge runs in two stages. `files` deletes 500 files a page that no current folder keeps
+  (every file once the library is gone) and cancels their thumbnail jobs. `titles` then pages the
+  library's titles 10 at a time and deletes each one no file plays any more, with its episodes,
+  seasons, credits, genre rows, and collection memberships, 200 of each a call, rereading the
+  same page until a title's rows are gone. Once the library is gone and its last title went, its
+  episode and file totals go too. `PurgeScope.gone` tells a hook that the library's counts are
+  already gone, so it moves none.
+- A title, an episode, and a file are item types, and a file is a download kind
+  (`packages/commands/src/access.ts`). Each loader reads the row, its title, and the library once,
+  and gives the title's facts (ADR 0005).
+- `movies/probe.ts` seeds rated titles, shows with episodes, and their files without a scan, and
+  opens and pages titles through `requireItems`, as the libraryProbe seam does for music.
 
 ## Consequences
 
 - A domain author writes scanner callbacks as `serverMutation`s that call `withScanLease`, a purge
   hook that calls `purgeStep`, and lists that call `requireItems`. The core keeps no file index:
-  the domain owns its rows (D01).
+  the domain owns its rows (D01). Server functions are public and guarded by `media-service`
+  (ADR 0005).
 - A folder overlap is found however many libraries exist. Old movies read every library for it.
 - A canceled scan frees its slot and stops writing on its worker's next call, so a folder change
   never leaves two scans writing one library.
@@ -157,8 +190,9 @@ The movies port replaces the seam with movies' rows and deletes it.
 - A visibility field on the library. It would be a second record of what the grants already say.
 - Library-specific share commands (`core.libraries.share`). They would pass through to the generic
   grant functions, and each later container would add three more commands.
-- A generic Convex function builder for scanner callbacks. Typing a builder over arbitrary argument
-  validators needs casts; a closure inside a plain `serverMutation` needs none.
+- A generic Convex function builder for scanner callbacks. A closure inside a plain
+  `serverMutation` needs none. (`serverMutation` itself became generic without casts in the
+  movies port, ADR 0005; a scanner callback still calls `withScanLease` inside it.)
 - Scan paths as job items. A 40,000-file scan would write 40,000 items and delete them again, and
   finding missing files still needs every known row of the library.
 - Cap 1 per scan kind, or keeping the dedupe key until the cancel ends. Cap 1 makes a small
@@ -185,5 +219,5 @@ The movies port replaces the seam with movies' rows and deletes it.
 - A purge after a folder removal pages the whole library. A domain whose libraries hold many
   items can page only the removed folders' path ranges instead.
 - A recount of a library's items from the domain's rows, for a count a defect moved wrong.
-- Totals of a library's items by kind of item (titles, episodes, tracks, albums) belong to each
-  domain's port.
+- Totals of a library's items by kind of item belong to each domain's port. Movies counts titles,
+  episodes, and files (above); music's tracks and albums come with its port.

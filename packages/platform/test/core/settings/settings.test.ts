@@ -301,7 +301,7 @@ describe.skipIf(stack === undefined)("settings", { timeout: 120_000 }, () => {
 
     const guest = await guestOf(stack, maker, {
       domain: "movies",
-      ref: { type: "probeMovie", id: itemId },
+      ref: { type: "title", id: itemId },
     });
 
     expect(await refusal(get(guest.signedIn.client))).toBe("forbidden");

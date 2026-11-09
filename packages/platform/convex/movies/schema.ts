@@ -1,0 +1,216 @@
+import { defineTable } from "convex/server";
+import { v } from "convex/values";
+
+import {
+  artwork,
+  communityRating,
+  creditKind,
+  externalIds,
+  externalSubtitle,
+  matchStatus,
+  metadataOverrides,
+  nullable,
+  probe,
+  ratings,
+  showStatus,
+  titleKind,
+  trailer,
+  trickplayState,
+} from "./validators";
+
+/**
+ * The movies catalog, ported from old movies' tables (ADR 0024). Everything a person keeps, such as
+ * progress and their list, is keyed by the person in the movies commands; profiles, rooms,
+ * playback sessions, and old movies' identity tables do not come over (D12). A library's title
+ * total is its core item count, and its episode and file totals are counters in `totals.ts`.
+ */
+export const moviesTables = {
+  titles: defineTable({
+    libraryId: v.id("libraries"),
+    kind: titleKind,
+    /** Identifies the title within its library across scans, such as `tmdb:603`. */
+    matchKey: v.string(),
+    name: v.string(),
+    sortName: v.string(),
+    /** Lowercased sort name for ordering; an admin's sort name wins over the scanned one. */
+    sortKey: v.string(),
+    year: nullable(v.number()),
+    overview: nullable(v.string()),
+    tagline: nullable(v.string()),
+    genres: v.array(v.string()),
+    certification: nullable(v.string()),
+    /** The minimum viewer age the title asks for; null is unrated, which `hideUnrated` hides. */
+    ageRating: nullable(v.number()),
+    runtimeMs: nullable(v.number()),
+    artwork,
+    externalIds,
+    matchStatus,
+    /** Admin edits; presentation prefers them and scans never overwrite them. */
+    overrides: v.optional(metadataOverrides),
+    /** Files of this title (or its episodes) present on disk. Zero means unavailable. */
+    presentFileCount: v.number(),
+    addedAt: v.number(),
+    updatedAt: v.number(),
+    searchText: v.string(),
+    originalName: v.optional(nullable(v.string())),
+    releaseDate: v.optional(nullable(v.string())),
+    status: v.optional(nullable(showStatus)),
+    originalLanguage: v.optional(nullable(v.string())),
+    studios: v.optional(v.array(v.string())),
+    countries: v.optional(v.array(v.string())),
+    tags: v.optional(v.array(v.string())),
+    ratings: v.optional(ratings),
+    trailer: v.optional(nullable(trailer)),
+    /** TMDB ids the provider recommends, best first. */
+    recommendations: v.optional(v.array(v.string())),
+    /** Digest of the title's own credits, so unchanged rescans skip rewriting them. */
+    creditsHash: v.optional(v.string()),
+    /** Digest of the collection the title's metadata names, likewise. */
+    collectionHash: v.optional(v.string()),
+  })
+    .index("by_library_match", ["libraryId", "matchKey"])
+    .index("by_kind_tmdb", ["kind", "externalIds.tmdb"])
+    .index("by_library_status", ["libraryId", "matchStatus"])
+    .index("by_library_sort", ["libraryId", "sortKey"])
+    .index("by_library_added", ["libraryId", "addedAt"])
+    .index("by_library_year", ["libraryId", "year"])
+    .searchIndex("search_text", { searchField: "searchText", filterFields: ["libraryId", "kind"] }),
+
+  /**
+   * One row per title and genre, so browsing a genre reads only its titles: Convex cannot index
+   * array members. Rows copy the title's sort fields; `catalog.ts` keeps them in step with every
+   * write of a title's genres or sort fields.
+   */
+  titleGenres: defineTable({
+    titleId: v.id("titles"),
+    libraryId: v.id("libraries"),
+    /** The genre, trimmed and lowercased. */
+    genre: v.string(),
+    kind: titleKind,
+    sortKey: v.string(),
+    addedAt: v.number(),
+    year: nullable(v.number()),
+  })
+    .index("by_title", ["titleId"])
+    .index("by_library_genre_sort", ["libraryId", "genre", "sortKey"])
+    .index("by_library_genre_added", ["libraryId", "genre", "addedAt"])
+    .index("by_library_genre_year", ["libraryId", "genre", "year"]),
+
+  seasons: defineTable({
+    titleId: v.id("titles"),
+    seasonNumber: v.number(),
+    name: v.string(),
+    poster: nullable(v.string()),
+    episodeCount: v.number(),
+    externalIds,
+  }).index("by_title_number", ["titleId", "seasonNumber"]),
+
+  episodes: defineTable({
+    titleId: v.id("titles"),
+    seasonId: v.id("seasons"),
+    seasonNumber: v.number(),
+    episodeNumber: v.number(),
+    name: v.string(),
+    overview: nullable(v.string()),
+    airDate: nullable(v.string()),
+    runtimeMs: nullable(v.number()),
+    still: nullable(v.string()),
+    presentFileCount: v.number(),
+    rating: nullable(communityRating),
+    externalIds,
+    /** Digest of the episode's guest stars and crew, so unchanged rescans skip rewriting them. */
+    creditsHash: v.optional(v.string()),
+  }).index("by_title_order", ["titleId", "seasonNumber", "episodeNumber"]),
+
+  /**
+   * Cast and crew, shared by every library. A person is identified by `personKey`: `tmdb:<id>`
+   * when TMDB knows them, else `imdb:<id>`, else `name:<normalized name>`. A name-keyed person is
+   * upgraded in place once a TMDB id turns up, so their credits keep pointing at one row.
+   */
+  people: defineTable({
+    personKey: v.string(),
+    name: v.string(),
+    sortKey: v.string(),
+    externalIds,
+    /** Photo artwork key. */
+    profile: nullable(v.string()),
+    biography: nullable(v.string()),
+    birthDate: nullable(v.string()),
+    deathDate: nullable(v.string()),
+    birthPlace: nullable(v.string()),
+    knownFor: nullable(v.string()),
+    /** When a person or metadata job last wrote their details; null until then. */
+    detailsFetchedAt: nullable(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_key", ["personKey"])
+    .index("by_name", ["name"])
+    .index("by_tmdb", ["externalIds.tmdb"])
+    .searchIndex("search_name", { searchField: "name" }),
+
+  /** One person's credit on a title (`episodeId` null) or on one episode of a show. */
+  credits: defineTable({
+    titleId: v.id("titles"),
+    episodeId: nullable(v.id("episodes")),
+    personId: v.id("people"),
+    kind: creditKind,
+    role: nullable(v.string()),
+    order: v.number(),
+  })
+    .index("by_title_episode", ["titleId", "episodeId", "order"])
+    .index("by_person", ["personId"]),
+
+  /** A file a scan found, the title and episode it plays, and what ffprobe saw in it. */
+  mediaFiles: defineTable({
+    libraryId: v.id("libraries"),
+    titleId: v.id("titles"),
+    episodeId: nullable(v.id("episodes")),
+    path: v.string(),
+    sizeBytes: v.number(),
+    mtimeMs: v.number(),
+    probe,
+    externalSubtitles: v.array(externalSubtitle),
+    versionName: nullable(v.string()),
+    hdr: v.boolean(),
+    /** A scan did not find it; its title, episode, and history stay until it returns. */
+    missing: v.boolean(),
+    missingSince: v.optional(v.number()),
+    addedAt: v.number(),
+    /** Scrub thumbnails; absent until a trickplay job is queued for this file. */
+    trickplay: v.optional(trickplayState),
+    /** Digest of the companions the scan read (NFO, artwork, subtitles), to notice their edits. */
+    sidecarDigest: nullable(v.string()),
+  })
+    .index("by_library_path", ["libraryId", "path"])
+    .index("by_library_missing", ["libraryId", "missing"])
+    .index("by_title", ["titleId"])
+    .index("by_episode", ["episodeId"]),
+
+  /** Named sets of titles: TMDB collections, NFO sets, and box sets imported from elsewhere. */
+  collections: defineTable({
+    name: v.string(),
+    sortKey: v.string(),
+    /**
+     * Identifies a collection across runs: `jellyfin:<server>:<id>` or `plex:…` when imported,
+     * `tmdb:<id>` for a TMDB collection, `set:<name>` for an NFO set.
+     */
+    sourceKey: nullable(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    overview: nullable(v.string()),
+    poster: nullable(v.string()),
+    backdrop: nullable(v.string()),
+  })
+    .index("by_source_key", ["sourceKey"])
+    .index("by_sort", ["sortKey"]),
+
+  collectionItems: defineTable({
+    collectionId: v.id("collections"),
+    titleId: v.id("titles"),
+    position: v.number(),
+    /** `metadata` members come from a title's metadata; imports leave them alone. */
+    source: v.union(v.literal("metadata"), v.literal("import")),
+  })
+    .index("by_collection_position", ["collectionId", "position"])
+    .index("by_title", ["titleId"]),
+};

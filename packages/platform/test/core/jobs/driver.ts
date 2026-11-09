@@ -3,13 +3,14 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { FunctionArgs } from "convex/server";
 import { Schema } from "effect";
 
-import { internal } from "../../../convex/_generated/api";
+import { api, internal } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { kindDef } from "../../../convex/core/jobs/kinds";
 import { FunctionRefused, runFunction } from "../../admin";
+import { runServer } from "../../service";
 import type { CoreStack } from "../../stack-env";
 
-export const server = internal.core.jobs.worker;
+export const server = api.core.jobs.worker;
 
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
 // stack answered this one as a `jobs` id; the backend's `v.id("jobs")` validators check it again
@@ -100,7 +101,7 @@ export const freshRun = (label: string): string =>
   `${label}-${Math.random().toString(36).slice(2, 8)}`;
 
 export const waiting = (stack: CoreStack, kinds: ReadonlyArray<ProbeKind>) =>
-  runFunction(stack, server.waiting, { kinds: [...kinds] }, Waiting);
+  runServer(stack, server.waiting, { kinds: [...kinds] }, Waiting);
 
 export const jobOf = async (stack: CoreStack, jobId: Id<"jobs">): Promise<JobView> => {
   const job = await runFunction(
@@ -244,15 +245,13 @@ export const retrying = async <Value>(send: () => Promise<Value>, attempt = 1): 
 
 export const worker = (stack: CoreStack, workerId: string) => ({
   claim: (kinds: ReadonlyArray<ProbeKind>, leaseMs = LEASE_MS) =>
-    retrying(() =>
-      runFunction(stack, server.claim, { kinds: [...kinds], workerId, leaseMs }, Claim),
-    ),
+    retrying(() => runServer(stack, server.claim, { kinds: [...kinds], workerId, leaseMs }, Claim)),
   report: (lease: Lease, fields: ReportFields = {}) =>
     retrying(() =>
-      runFunction(stack, server.report, { leaseMs: LEASE_MS, ...fields, lease }, Reported),
+      runServer(stack, server.report, { leaseMs: LEASE_MS, ...fields, lease }, Reported),
     ),
   items: (lease: Lease, from: number, limit: number) =>
-    retrying(() => runFunction(stack, server.items, { lease, from, limit }, Items)),
+    retrying(() => runServer(stack, server.items, { lease, from, limit }, Items)),
   finish: (lease: Lease, end: End) =>
-    retrying(() => runFunction(stack, server.finish, { lease, end }, Finished)),
+    retrying(() => runServer(stack, server.finish, { lease, end }, Finished)),
 });

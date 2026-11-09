@@ -2,9 +2,9 @@ import { strict as effectStrict } from "@effect/tsgo/oxlint-presets";
 import { defineConfig } from "oxlint";
 
 const commandOnly =
-  "Declare a public function as a command in packages/commands and pass its handler to register from packages/platform/commands.";
+  "Declare a public function as a command in packages/commands and pass its handler to register from packages/platform/commands, or build a server function with serverQuery or serverMutation from convex/core/lib/serverFacing.ts.";
 
-const builderBans = {
+const genericBans = {
   paths: [
     {
       name: "convex/server",
@@ -12,6 +12,10 @@ const builderBans = {
       message: commandOnly,
     },
   ],
+};
+
+const builderBans = {
+  ...genericBans,
   patterns: [
     {
       regex: "_generated/server$",
@@ -131,6 +135,13 @@ export default defineConfig({
     {
       files: ["packages/platform/convex/auth.ts", "packages/platform/convex/core/auth/**"],
       rules: { "no-restricted-imports": ["error", builderBans] },
+    },
+    {
+      // The media-service guard: the only module in convex/ that builds public functions itself.
+      files: ["packages/platform/convex/core/lib/serverFacing.ts"],
+      rules: {
+        "no-restricted-imports": ["error", { ...genericBans, patterns: [convexAuthBan] }],
+      },
     },
   ],
 });

@@ -7,6 +7,7 @@ import { deviceSettingFields, downloadQuality, userSettingFields } from "../comm
 import { guestAccessDocument, linkDocument } from "./core/guests/model";
 import { importSource } from "./core/jobs/kinds";
 import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
+import { moviesTables } from "./movies/schema";
 import {
   beatDocument,
   entryDocument,
@@ -95,6 +96,8 @@ const connectOutput = v.union(
  * and `authRefreshTokens`, so its other tables are left out.
  */
 export default defineSchema({
+  ...moviesTables,
+
   /**
    * The principals. A person has a role, and exactly one person is the owner once the server is
    * set up; only a member carries restrictions, which make them a kid. A service, such as the
@@ -454,17 +457,14 @@ export default defineSchema({
     .index("by_library_path", ["libraryId", "path"]),
 
   /**
-   * The test seam for what a domain keeps per library item, such as a movie file or a track, until
-   * the movies port: a path a scan found, its size and change time, and the facts restrictions
-   * read. Its domain is its library's kind.
+   * The test seam for a track in a music library until the music port: a path a scan found, its
+   * size and change time, and whether it is explicit. Movies keep their own rows (`movies/`).
    */
   probeItems: defineTable({
     libraryId: v.id("libraries"),
     path: v.string(),
     size: v.number(),
     mtime: v.number(),
-    /** Movies: the minimum viewer age, or null when unrated. */
-    age: v.union(v.number(), v.null()),
     explicit: v.boolean(),
   }).index("by_library_path", ["libraryId", "path"]),
 

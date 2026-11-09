@@ -984,6 +984,10 @@ export const generatedCommands = [
     args: Schema.Struct({
       item: Schema.Union([
         Schema.Struct({
+          kind: Schema.Literal("file"),
+          id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+        }),
+        Schema.Struct({
           kind: Schema.Literal("probe"),
           id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
         }),
@@ -1004,6 +1008,10 @@ export const generatedCommands = [
     paginated: false,
     args: Schema.Struct({
       item: Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal("file"),
+          id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+        }),
         Schema.Struct({
           kind: Schema.Literal("probe"),
           id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
@@ -1061,6 +1069,10 @@ export const generatedCommands = [
           Schema.Struct({
             item: Schema.Union([
               Schema.Struct({
+                kind: Schema.Literal("file"),
+                id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+              }),
+              Schema.Struct({
                 kind: Schema.Literal("probe"),
                 id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
               }),
@@ -1073,6 +1085,10 @@ export const generatedCommands = [
           }),
           Schema.Struct({
             item: Schema.Union([
+              Schema.Struct({
+                kind: Schema.Literal("file"),
+                id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+              }),
               Schema.Struct({
                 kind: Schema.Literal("probe"),
                 id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
@@ -1087,6 +1103,10 @@ export const generatedCommands = [
           }),
           Schema.Struct({
             item: Schema.Union([
+              Schema.Struct({
+                kind: Schema.Literal("file"),
+                id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+              }),
               Schema.Struct({
                 kind: Schema.Literal("probe"),
                 id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
@@ -1120,6 +1140,10 @@ export const generatedCommands = [
     paginated: false,
     args: Schema.Struct({
       item: Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal("file"),
+          id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+        }),
         Schema.Struct({
           kind: Schema.Literal("probe"),
           id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
@@ -1221,8 +1245,16 @@ export const generatedCommands = [
                 domain: Schema.Literal("movies"),
                 ref: Schema.Union([
                   Schema.Struct({
-                    type: Schema.Literal("probeMovie"),
-                    id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                    type: Schema.Literal("title"),
+                    id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("episode"),
+                    id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("file"),
+                    id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
                   }),
                 ]),
               }),
@@ -1307,8 +1339,16 @@ export const generatedCommands = [
               domain: Schema.Literal("movies"),
               ref: Schema.Union([
                 Schema.Struct({
-                  type: Schema.Literal("probeMovie"),
-                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  type: Schema.Literal("title"),
+                  id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("episode"),
+                  id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("file"),
+                  id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
                 }),
               ]),
             }),
@@ -1373,8 +1413,16 @@ export const generatedCommands = [
                     domain: Schema.Literal("movies"),
                     ref: Schema.Union([
                       Schema.Struct({
-                        type: Schema.Literal("probeMovie"),
-                        id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                        type: Schema.Literal("title"),
+                        id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                      }),
+                      Schema.Struct({
+                        type: Schema.Literal("episode"),
+                        id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                      }),
+                      Schema.Struct({
+                        type: Schema.Literal("file"),
+                        id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
                       }),
                     ]),
                   }),
@@ -2121,8 +2169,16 @@ export const generatedCommands = [
           domain: Schema.Literal("movies"),
           ref: Schema.Union([
             Schema.Struct({
-              type: Schema.Literal("probeMovie"),
-              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              type: Schema.Literal("title"),
+              id: Schema.String.pipe(Schema.brand("Id<titles>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("episode"),
+              id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("file"),
+              id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
             }),
           ]),
         }),
@@ -2246,8 +2302,16 @@ export const generatedCommands = [
           domain: Schema.Literal("movies"),
           ref: Schema.Union([
             Schema.Struct({
-              type: Schema.Literal("probeMovie"),
-              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              type: Schema.Literal("title"),
+              id: Schema.String.pipe(Schema.brand("Id<titles>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("episode"),
+              id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("file"),
+              id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
             }),
           ]),
         }),
@@ -2335,8 +2399,16 @@ export const generatedCommands = [
               domain: Schema.Literal("movies"),
               ref: Schema.Union([
                 Schema.Struct({
-                  type: Schema.Literal("probeMovie"),
-                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  type: Schema.Literal("title"),
+                  id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("episode"),
+                  id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("file"),
+                  id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
                 }),
               ]),
             }),
@@ -2454,8 +2526,16 @@ export const generatedCommands = [
                 domain: Schema.Literal("movies"),
                 ref: Schema.Union([
                   Schema.Struct({
-                    type: Schema.Literal("probeMovie"),
-                    id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                    type: Schema.Literal("title"),
+                    id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("episode"),
+                    id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("file"),
+                    id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
                   }),
                 ]),
               }),

@@ -1,10 +1,11 @@
 import { Schema } from "effect";
 
 import type { ContentDomain } from "../../../commands/scopes";
-import { internal } from "../../../convex/_generated/api";
+import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { scanKindOf } from "../../../convex/core/jobs/kinds";
-import { runFunction } from "../../admin";
+import { movieFile } from "../../movies/scanned";
+import { runServer } from "../../service";
 import type { CoreStack } from "../../stack-env";
 import { eventually, retrying } from "../jobs/driver";
 import { walk } from "./files";
@@ -43,21 +44,35 @@ const answer = <Value extends Schema.Top>(value: Value) =>
 
 const File = Schema.Struct({ path: Schema.String, size: Schema.Finite, mtime: Schema.Finite });
 
+const MovieFile = Schema.Struct({
+  path: Schema.String,
+  sizeBytes: Schema.Finite,
+  mtimeMs: Schema.Finite,
+  missing: Schema.Boolean,
+});
+
 const Target = answer(
   Schema.Struct({ libraryId: LibraryId, folders: Schema.Array(Schema.String) }),
 );
 
-const Known = answer(
-  Schema.Struct({
-    files: Schema.Array(File),
-    continueCursor: Schema.String,
-    isDone: Schema.Boolean,
-  }),
-);
+const pageOf = <Row extends Schema.Top>(row: Row) =>
+  answer(
+    Schema.Struct({
+      files: Schema.Array(row),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+    }),
+  );
 
 const Upserted = answer(Schema.Struct({ inserted: Schema.Finite }));
 
+const Landed = answer(
+  Schema.Struct({ files: Schema.Array(Schema.Struct({ path: Schema.String })) }),
+);
+
 const Missing = answer(Schema.Struct({ removed: Schema.Finite }));
+
+const Marked = answer(Schema.Struct({ marked: Schema.Finite }));
 
 const Finished = Schema.Struct({ outcome: Schema.String });
 
@@ -65,32 +80,106 @@ const LEASE_MS = 30_000;
 
 const BATCH = 500;
 
-const probe = internal.core.libraryProbe;
+const probe = api.core.libraryProbe;
 
-/** The scanner's calls, each retried on a refusal that committed nothing, as the server's pool will. */
+const movies = api.movies.scanner;
+
+/** A file the library knows; `missing` only for movies, which keep a missing file's row. */
+export interface KnownFile extends ScannedFile {
+  readonly missing: boolean;
+}
+
+type Held<Value> =
+  | { readonly outcome: "held"; readonly value: Value }
+  | { readonly outcome: "canceled" | "lost" };
+
+const mapHeld = <From, To>(held: Held<From>, map: (value: From) => To): Held<To> =>
+  held.outcome === "held" ? { outcome: "held", value: map(held.value) } : held;
+
+/**
+ * The scanner's calls, each retried on a refusal that committed nothing, as the server's pool will.
+ * Music writes the probe's rows; movies writes each file as a movie titled by its path. Movies'
+ * `upsert` counts every file it wrote as inserted, and its `missing` counts the files it newly
+ * marked missing as removed, since movies keeps their rows.
+ */
 export const scanCalls = (stack: CoreStack, workerId: string) => ({
   claim: (kind: ContentDomain) =>
     retrying(() =>
-      runFunction(
+      runServer(
         stack,
-        internal.core.jobs.worker.claim,
+        api.core.jobs.worker.claim,
         { kinds: [scanKindOf(kind)], workerId, leaseMs: LEASE_MS },
         Claim,
       ),
     ),
   target: (lease: ScanLease, kind: ContentDomain) =>
-    retrying(() => runFunction(stack, internal.core.scans.target, { lease, kind }, Target)),
-  known: (lease: ScanLease, kind: ContentDomain, cursor: string | null) =>
-    retrying(() => runFunction(stack, probe.known, { lease, kind, cursor }, Known)),
-  upsert: (lease: ScanLease, kind: ContentDomain, files: ReadonlyArray<ScannedFile>) =>
-    retrying(() => runFunction(stack, probe.upsert, { lease, kind, files: [...files] }, Upserted)),
-  missing: (lease: ScanLease, kind: ContentDomain, paths: ReadonlyArray<string>) =>
-    retrying(() => runFunction(stack, probe.missing, { lease, kind, paths: [...paths] }, Missing)),
+    retrying(() => runServer(stack, api.core.scans.target, { lease, kind }, Target)),
+  known: async (
+    lease: ScanLease,
+    kind: ContentDomain,
+    cursor: string | null,
+  ): Promise<
+    Held<{
+      readonly files: ReadonlyArray<KnownFile>;
+      readonly continueCursor: string;
+      readonly isDone: boolean;
+    }>
+  > =>
+    kind === "music"
+      ? mapHeld(
+          await retrying(() => runServer(stack, probe.known, { lease, cursor }, pageOf(File))),
+          (page) => ({ ...page, files: page.files.map((file) => ({ ...file, missing: false })) }),
+        )
+      : mapHeld(
+          await retrying(() =>
+            runServer(stack, movies.known, { lease, cursor }, pageOf(MovieFile)),
+          ),
+          (page) => ({
+            ...page,
+            files: page.files.map((file) => ({
+              path: file.path,
+              size: file.sizeBytes,
+              mtime: file.mtimeMs,
+              missing: file.missing,
+            })),
+          }),
+        ),
+  upsert: async (
+    lease: ScanLease,
+    kind: ContentDomain,
+    files: ReadonlyArray<ScannedFile>,
+  ): Promise<Held<{ readonly inserted: number }>> =>
+    kind === "music"
+      ? retrying(() => runServer(stack, probe.upsert, { lease, files: [...files] }, Upserted))
+      : mapHeld(
+          await retrying(() =>
+            runServer(
+              stack,
+              movies.upsert,
+              { lease, items: files.map((file) => movieFile(file.path, file.size, file.mtime)) },
+              Landed,
+            ),
+          ),
+          (value) => ({ inserted: value.files.length }),
+        ),
+  missing: async (
+    lease: ScanLease,
+    kind: ContentDomain,
+    paths: ReadonlyArray<string>,
+  ): Promise<Held<{ readonly removed: number }>> =>
+    kind === "music"
+      ? retrying(() => runServer(stack, probe.missing, { lease, paths: [...paths] }, Missing))
+      : mapHeld(
+          await retrying(() =>
+            runServer(stack, movies.missing, { lease, paths: [...paths] }, Marked),
+          ),
+          (value) => ({ removed: value.marked }),
+        ),
   finish: (lease: ScanLease) =>
     retrying(() =>
-      runFunction(
+      runServer(
         stack,
-        internal.core.jobs.worker.finish,
+        api.core.jobs.worker.finish,
         { lease, end: { outcome: "succeeded" } },
         Finished,
       ),
@@ -119,8 +208,8 @@ const knownFiles = async (
   lease: ScanLease,
   kind: ContentDomain,
   cursor: string | null = null,
-  seen: ReadonlyArray<ScannedFile> = [],
-): Promise<ReadonlyArray<ScannedFile> | null> => {
+  seen: ReadonlyArray<KnownFile> = [],
+): Promise<ReadonlyArray<KnownFile> | null> => {
   const page = await calls.known(lease, kind, cursor);
 
   if (page.outcome !== "held") return null;
@@ -171,10 +260,12 @@ const scanClaimed = async (
   const changed = walked.filter((file) => {
     const old = before.get(file.path);
 
-    return old === undefined || old.size !== file.size || old.mtime !== file.mtime;
+    return old === undefined || old.missing || old.size !== file.size || old.mtime !== file.mtime;
   });
 
-  const gone = known.filter((file) => !onDisk.has(file.path)).map((file) => file.path);
+  const gone = known
+    .filter((file) => !file.missing && !onDisk.has(file.path))
+    .map((file) => file.path);
 
   const inserted = await sendAll(batches(changed), async (batch) => {
     const written = await calls.upsert(lease, kind, batch);

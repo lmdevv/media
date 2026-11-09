@@ -116,6 +116,22 @@ export const serviceOfSession = async (
 };
 
 /**
+ * The service principal of a server function, or a refusal: `unauthenticated` without a live
+ * session, `forbidden` for a person's session or a service's that lacks `scope`. The guard every
+ * server function in `core/lib/serverFacing.ts` runs first.
+ */
+export const requireService = async (
+  ctx: Pick<QueryCtx, "auth" | "db">,
+  scope: ServiceScope,
+): Promise<ServiceCaller> => {
+  const sessionId = ctx.db.normalizeId("authSessions", (await getAuthSessionId(ctx)) ?? "");
+
+  if (sessionId === null) return fail("unauthenticated", "Sign in first");
+
+  return serviceOfSession(ctx.db, sessionId, scope);
+};
+
+/**
  * The caller of a query or mutation, or a refusal: `unauthenticated` without a live session,
  * `forbidden` for a service or when the session lacks `scope`.
  */
