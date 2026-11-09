@@ -77,8 +77,9 @@ mount media read-only.
   and the stream's next request finds it done.
 - A segment, init, or seek request answers within 30 seconds, counting its wait for a step already
   in progress, such as one stuck on a hung disk, and the opening of the files it serves. Past that
-  it fails as not ready, and the step goes on. A direct play or download request waits for the
-  library's disk at most 30 seconds, then fails as unreadable. A start answers within one bound
+  it fails as not ready, and the step goes on. A direct play or download request waits at most 30
+  seconds for the library's disk before its response starts, then fails as unreadable. Reading the
+  body after that has no bound of its own yet. A start answers within one bound
   from its arrival, then fails with capacity reached: the guest line (20 seconds), the keyframe
   scan's timeout, a replaced stream's stop (3 seconds), and its first run (63 seconds, enough for a
   hardware run to fail and its software fallback to start).
@@ -89,7 +90,8 @@ mount media read-only.
   returns. A segment request's files are opened by the stream for that request, and the run keeps
   its folder until the response is sent. An init segment is a few kilobytes, so it is read whole and
   sent as bytes. A run's folder goes once its process exited, its reads ended, and its responses
-  were sent. The stream's folder goes after every run's.
+  were sent. The stream's folder goes after every run's. A seek, yield, or release waits for the
+  previous run's process to exit, not for its folder.
 - Requests waiting for the same run share one read of its folder at a time, rather than one each
   per poll.
 - A start claims its slot only after its disk space check and keyframe scan. A start stuck in
@@ -97,8 +99,8 @@ mount media read-only.
 - A stop waits at most 3 seconds. ffmpeg gets `SIGKILL` at once. When its exit is still unknown
   after that, the stop returns and the encoder keeps its slot until it exits. The stream's files
   stay until every run it started has exited, including a run a seek was still stopping, and only
-  then are they deleted. A replaced stream ends the same way. The server counts runs whose stop
-  has not finished, closed streams' runs included, for an operator to see a stuck ffmpeg.
+  then are they deleted. A replaced stream ends the same way. The server counts runs whose ffmpeg
+  has not exited, closed streams' runs included, for an operator to see a stuck one.
   Shutting down closes every stream at once, so it waits at most 3 seconds in all.
 - ffmpeg runs in its own process group, which outlives a crashed server. At startup the server
   kills each process group whose leader runs the configured ffmpeg and writes into the server's
