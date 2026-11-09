@@ -191,7 +191,7 @@ describe.skipIf(!hasFfmpeg)("stream request bounds", () => {
           const requested = yield* Effect.forkChild(
             sessions
               .segment(started.streamId, started.generation, started.segmentIndex, who.grant)
-              .pipe(Effect.exit),
+              .pipe(Effect.scoped, Effect.exit),
           );
 
           yield* Effect.promise(() => opens.reached.promise);
@@ -206,7 +206,7 @@ describe.skipIf(!hasFfmpeg)("stream request bounds", () => {
           yield* releaseStalls;
           yield* sessions
             .segment(started.streamId, started.generation, started.segmentIndex, who.grant)
-            .pipe(Effect.timeout("15 seconds"));
+            .pipe(Effect.scoped, Effect.timeout("15 seconds"));
           yield* sessions.stop(started.streamId, who.grant);
 
           const gone = yield* fs.exists(`${server.transcodeDir}/${started.streamId}`).pipe(
@@ -240,12 +240,9 @@ describe.skipIf(!hasFfmpeg)("stream request bounds", () => {
 
           const playing = yield* start(other).pipe(Effect.timeout("15 seconds"));
 
-          yield* sessions.segment(
-            playing.streamId,
-            playing.generation,
-            playing.segmentIndex,
-            other.grant,
-          );
+          yield* sessions
+            .segment(playing.streamId, playing.generation, playing.segmentIndex, other.grant)
+            .pipe(Effect.scoped);
           yield* sessions.stop(playing.streamId, other.grant);
           yield* releaseStalls;
 

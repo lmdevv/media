@@ -464,30 +464,30 @@ export const layer: Layer.Layer<
         const segmentIndex = segmentMatch === null ? -1 : Number(segmentMatch[1]);
         const started = yield* Clock.currentTimeMillis;
 
-        const parts =
-          segmentMatch === null
-            ? yield* sessions.init(streamId, generation, grant)
-            : yield* sessions.segment(streamId, generation, segmentIndex, grant);
-
-        const produced = yield* Clock.currentTimeMillis;
         const readMs = yield* Ref.make(0);
 
-        // Open every part before answering: a seek may delete this generation's folder at any
-        // moment, and a body cut short under its promised length breaks the player's parser. An
-        // open file stays readable after it is deleted; the request's scope closes the handles
-        // once the body is sent.
-        const opened = yield* Effect.forEach(parts.paths, (part) =>
-          fs
-            .open(part)
-            .pipe(
-              Effect.flatMap((handle) =>
-                handle.stat.pipe(Effect.map((info) => ({ handle, size: Number(info.size) }))),
-              ),
-            ),
-        ).pipe(Effect.mapError(() => new SegmentNotReady({ index: segmentIndex })));
+        // The stream opens a segment's parts for this request's scope and keeps their folder until
+        // the body is sent, as a body cut short under its promised length breaks the player's
+        // parser. An init segment is a few kilobytes and comes as bytes.
+        const answer =
+          segmentMatch === null
+            ? yield* sessions.init(streamId, generation, grant).pipe(
+                Effect.map((bytes) => ({
+                  body: Stream.make(bytes),
+                  contentLength: bytes.byteLength,
+                })),
+              )
+            : yield* sessions.segment(streamId, generation, segmentIndex, grant).pipe(
+                Effect.map((served) => ({
+                  body: Stream.fromIterable(served.parts).pipe(
+                    Stream.flatMap((part) => readWhole(part.file, part.sizeBytes, readMs)),
+                  ),
+                  contentLength: served.sizeBytes,
+                })),
+              );
 
         const answered = yield* Clock.currentTimeMillis;
-        const contentLength = opened.reduce((total, part) => total + part.size, 0);
+        const { body, contentLength } = answer;
 
         yield* Effect.addFinalizer((exit) =>
           Effect.gen(function* () {
@@ -501,8 +501,8 @@ export const layer: Layer.Layer<
               generation,
               segment: segmentMatch === null ? "init" : segmentIndex,
               elapsedMs,
-              encoderWaitMs: produced - started,
-              diskReadMs: answered - produced + bodyReadMs,
+              encoderWaitMs: answered - started,
+              diskReadMs: bodyReadMs,
               networkWriteMs: Math.max(0, finished - answered - bodyReadMs),
               bytes: contentLength,
               completed: Exit.isSuccess(exit),
@@ -515,10 +515,6 @@ export const layer: Layer.Layer<
                 : Effect.logDebug(LogEvent.segmentServed)
             ).pipe(Effect.annotateLogs(timing));
           }),
-        );
-
-        const body = Stream.fromIterable(opened).pipe(
-          Stream.flatMap(({ handle, size }) => readWhole(handle, size, readMs)),
         );
 
         return HttpEffect.scopeTransferToStream(

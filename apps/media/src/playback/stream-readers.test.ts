@@ -37,6 +37,26 @@ const releaseOpens = Effect.sync(() => {
   opens.release.resolve();
 });
 
+const FIRST_RUN_INIT = /\/1\/init\.mp4$/u;
+
+// Node's `readFile` stops waiting when interrupted, and keeps its handle until its read returns.
+const reads = {
+  armed: false,
+  reached: Promise.withResolvers<void>(),
+  release: Promise.withResolvers<void>(),
+};
+
+const stallNextFirstRunInitRead = () => {
+  reads.armed = true;
+  reads.reached = Promise.withResolvers<void>();
+  reads.release = Promise.withResolvers<void>();
+};
+
+const releaseReads = Effect.sync(() => {
+  reads.armed = false;
+  reads.release.resolve();
+});
+
 const encoders = { live: 0, stopsBegun: 0 };
 
 const stalledOpens = Layer.effect(
@@ -44,6 +64,15 @@ const stalledOpens = Layer.effect(
   Effect.map(FileSystem.FileSystem, (real) =>
     FileSystem.FileSystem.of({
       ...real,
+      readFile: (file) =>
+        reads.armed && FIRST_RUN_INIT.test(file)
+          ? Effect.suspend(() => {
+              reads.armed = false;
+              reads.reached.resolve();
+
+              return Effect.promise(() => reads.release.promise);
+            }).pipe(Effect.andThen(real.readFile(file)))
+          : real.readFile(file),
       open: (file, options) =>
         opens.armed && FIRST_RUN_FRAGMENT.test(file)
           ? Effect.uninterruptible(
@@ -267,6 +296,55 @@ describe.skipIf(!hasFfmpeg)("stream readers", () => {
 
           yield* sessions.stop(started.streamId, who.grant);
         }).pipe(Effect.ensuring(releaseOpens)),
+      60_000,
+    );
+
+    it.effect(
+      "a stopped run keeps its folder until an interrupted read of its files returns",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const server = yield* MediaTestServer.Service;
+          const who = yield* viewer;
+          const started = yield* start(who);
+          const runFolder = `${server.transcodeDir}/${started.streamId}/1`;
+
+          yield* sessions
+            .segment(started.streamId, started.generation, started.segmentIndex, who.grant)
+            .pipe(Effect.scoped);
+
+          stallNextFirstRunInitRead();
+          yield* Effect.promise(() => reads.reached.promise);
+
+          assert.strictEqual(
+            yield* until(
+              Effect.sync(() => encoders.live),
+              (live) => live === 0,
+            ),
+            0,
+            "the idle release stopped the encoder while its init copy reads",
+          );
+
+          const removedEarly = yield* exists(runFolder).pipe(
+            Effect.repeat({
+              until: (present) => !present,
+              schedule: Schedule.spaced("100 millis"),
+              times: 20,
+            }),
+            Effect.map((present) => !present),
+          );
+
+          assert.isFalse(removedEarly, "the run's folder outlives the read");
+
+          yield* releaseReads;
+
+          assert.isFalse(
+            yield* until(exists(runFolder), (present) => !present),
+            "the run's folder goes once the read returns",
+          );
+
+          yield* sessions.stop(started.streamId, who.grant);
+        }).pipe(Effect.ensuring(releaseReads)),
       60_000,
     );
   });

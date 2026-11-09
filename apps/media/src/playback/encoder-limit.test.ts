@@ -262,7 +262,9 @@ const playing = (who: Viewer) =>
     const sessions = yield* StreamSessions.Service;
     const started = yield* start(who);
 
-    yield* sessions.segment(started.streamId, started.generation, started.segmentIndex, who.grant);
+    yield* sessions
+      .segment(started.streamId, started.generation, started.segmentIndex, who.grant)
+      .pipe(Effect.scoped);
 
     return started;
   });
@@ -415,7 +417,7 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
 
             yield* sessions
               .segment(started.streamId, moved.generation, index, who.grant)
-              .pipe(Effect.timeout("15 seconds"));
+              .pipe(Effect.scoped, Effect.timeout("15 seconds"));
 
             assert.strictEqual(encoders.started - before, 1, "encoders started for both seeks");
 
@@ -463,7 +465,7 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
 
           yield* sessions
             .segment(started.streamId, moved.generation, index, who.grant)
-            .pipe(Effect.timeout("15 seconds"));
+            .pipe(Effect.scoped, Effect.timeout("15 seconds"));
 
           assert.isAtMost(encoders.peak, 1, "encoders running at once");
           yield* sessions.stop(started.streamId, who.grant);
@@ -570,7 +572,7 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
           const queued = yield* Effect.forkChild(
             sessions
               .segment(started.streamId, started.generation + 1, index, who.grant)
-              .pipe(Effect.exit),
+              .pipe(Effect.scoped, Effect.exit),
           );
 
           const answered = yield* Fiber.join(queued).pipe(Effect.timeout("35 seconds"));
@@ -593,7 +595,7 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
 
           yield* sessions
             .segment(started.streamId, moved.generation, index, who.grant)
-            .pipe(Effect.timeout("15 seconds"));
+            .pipe(Effect.scoped, Effect.timeout("15 seconds"));
           yield* sessions.stop(started.streamId, who.grant);
         }).pipe(Effect.ensuring(releaseStalledRemovals)),
       120_000,

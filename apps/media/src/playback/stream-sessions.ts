@@ -95,8 +95,14 @@ interface StreamView {
   readonly plan: SegmentPlan;
 }
 
-interface SegmentFiles {
-  readonly paths: ReadonlyArray<string>;
+interface ServedPart {
+  readonly file: FileSystem.File;
+  readonly sizeBytes: number;
+}
+
+/** A segment's files, open until the scope they were served for closes. */
+interface ServedSegment {
+  readonly parts: ReadonlyArray<ServedPart>;
   readonly sizeBytes: number;
 }
 
@@ -144,17 +150,22 @@ export interface Interface {
     generation: number,
     grant: PlaybackGrant,
   ) => Effect.Effect<StreamView, StreamRequestError>;
+  /** The bytes of a generation's init segment. */
   readonly init: (
     streamId: StreamId,
     generation: number,
     grant: PlaybackGrant,
-  ) => Effect.Effect<SegmentFiles, StreamRequestError>;
+  ) => Effect.Effect<Uint8Array, StreamRequestError>;
+  /**
+   * Opens the files of segment `index` for the scope; the stream keeps their folder until the
+   * scope closes.
+   */
   readonly segment: (
     streamId: StreamId,
     generation: number,
     index: number,
     grant: PlaybackGrant,
-  ) => Effect.Effect<SegmentFiles, StreamRequestError>;
+  ) => Effect.Effect<ServedSegment, StreamRequestError, Scope.Scope>;
   /** Moves playback to `seconds`, starting a new generation unless that point is already produced. */
   readonly seek: (
     streamId: StreamId,
@@ -231,6 +242,7 @@ interface Generation {
   readonly directory: string;
   readonly scope: Scope.Closeable;
   readonly readers: Scope.Closeable;
+  readonly files: Scope.Closeable;
   readonly exit: Deferred.Deferred<void, MediaTools.MediaToolFailed>;
   readonly fragments: Ref.Ref<ReadonlyArray<Fragment>>;
   readonly refreshLock: Semaphore.Semaphore;
@@ -391,8 +403,15 @@ const whileOpen = <A, E, R>(scope: Scope.Scope, effect: Effect.Effect<A, E, R>) 
     return Option.some(yield* effect.pipe(Effect.ensuring(Deferred.succeed(done, undefined))));
   });
 
+/**
+ * Runs `read` to its end once it started, as a file it opens or reads must be closed before its
+ * folder goes. Interrupted before it starts, it does not start.
+ */
+const wholly = <A, E>(read: Effect.Effect<A, E>) =>
+  Effect.uninterruptibleMask((restore) => restore(Effect.void).pipe(Effect.andThen(read)));
+
 const readerOf = <A, E>(generation: Generation, read: Effect.Effect<A, E>) =>
-  read.pipe(
+  wholly(read).pipe(
     Effect.forkIn(generation.readers),
     Effect.flatMap(Fiber.await),
     Effect.flatMap((exit): Effect.Effect<Option.Option<A>, E> =>
@@ -828,6 +847,7 @@ const make = Effect.gen(function* () {
       directory,
       scope,
       readers: run.readers,
+      files: run.files,
       exit,
       fragments: yield* Ref.make<ReadonlyArray<Fragment>>([]),
       refreshLock: yield* Semaphore.make(1),
@@ -1075,10 +1095,7 @@ const make = Effect.gen(function* () {
 
         yield* Ref.set(session.served, true);
 
-        return {
-          paths: covering.map((fragment) => fragment.path),
-          sizeBytes: covering.reduce((total, fragment) => total + fragment.sizeBytes, 0),
-        } satisfies SegmentFiles;
+        return covering.map((fragment) => fragment.path);
       }
 
       const stopped = isClosed(generation.scope);
@@ -1165,11 +1182,11 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const using = <A, E>(
+  const using = <A, E, R>(
     streamId: StreamId,
     grant: PlaybackGrant,
     notReady: (session: Session) => number,
-    f: (session: Session) => Effect.Effect<A, E>,
+    f: (session: Session) => Effect.Effect<A, E, R>,
   ) =>
     lookup(streamId, grant).pipe(
       Effect.flatMap((session) =>
@@ -1656,6 +1673,7 @@ const make = Effect.gen(function* () {
       directory: "",
       scope: run.scope,
       readers: run.readers,
+      files: run.files,
       exit: yield* Deferred.make<void, MediaTools.MediaToolFailed>(),
       fragments: yield* Ref.make<ReadonlyArray<Fragment>>([]),
       refreshLock: yield* Semaphore.make(1),
@@ -1804,27 +1822,68 @@ const make = Effect.gen(function* () {
   ) {
     return yield* using(streamId, grant, noSegment, (session) =>
       Effect.gen(function* () {
-        const initPath = yield* InitSource.$match(yield* initSource(session, generation), {
-          Kept: ({ file }) => Effect.succeed(file),
+        const bytes = yield* InitSource.$match(yield* initSource(session, generation), {
+          Kept: ({ file }) =>
+            onStreamFiber(session, () => wholly(Effect.option(fs.readFile(file)))),
           Run: ({ run }) =>
             awaitSegment(session, run, run.startSegment, SEGMENT_WAIT).pipe(
-              Effect.as(path.join(run.directory, "init.mp4")),
+              Effect.andThen(
+                readerOf(run, Effect.option(fs.readFile(path.join(run.directory, "init.mp4")))),
+              ),
+              Effect.map(Option.flatten),
             ),
         });
 
-        const info = yield* fs
-          .stat(initPath)
-          .pipe(
-            Effect.catch(() =>
-              currentGeneration(session, generation).pipe(
-                Effect.andThen(Effect.fail(new SegmentNotReady({ index: -1 }))),
-              ),
-            ),
-          );
+        if (Option.isSome(bytes)) return bytes.value;
+        yield* currentGeneration(session, generation);
 
-        return { paths: [initPath], sizeBytes: Number(info.size) } satisfies SegmentFiles;
+        return yield* new SegmentNotReady({ index: -1 });
       }),
     );
+  });
+
+  /** Opens `paths` of `generation` for the caller's scope; the run keeps its folder until it closes. */
+  const serve = Effect.fnUntraced(function* (
+    generation: Generation,
+    index: number,
+    paths: ReadonlyArray<string>,
+  ) {
+    const caller = yield* Effect.scope;
+
+    const opened = yield* readerOf(
+      generation,
+      Effect.gen(function* () {
+        const released = yield* Deferred.make<void>();
+        const serving = yield* Scope.fork(generation.files);
+
+        yield* Scope.addFinalizer(serving, Deferred.await(released));
+        yield* Scope.addFinalizer(
+          caller,
+          Deferred.succeed(released, undefined).pipe(
+            Effect.andThen(Scope.close(serving, Exit.void)),
+          ),
+        );
+
+        return yield* Effect.forEach(paths, (part) =>
+          fs
+            .open(part)
+            .pipe(
+              Effect.flatMap((file) =>
+                file.stat.pipe(
+                  Effect.map((info): ServedPart => ({ file, sizeBytes: Number(info.size) })),
+                ),
+              ),
+            ),
+        ).pipe(Scope.provide(caller), Effect.option);
+      }),
+    ).pipe(Effect.map(Option.flatten));
+
+    if (Option.isNone(opened)) return yield* new SegmentNotReady({ index });
+
+    return {
+      parts: opened.value,
+      sizeBytes: opened.value.reduce((total, part) => total + part.sizeBytes, 0),
+    } satisfies ServedSegment;
   });
 
   const segment = Effect.fn("StreamSessions.segment")(function* (
@@ -1855,7 +1914,11 @@ const make = Effect.gen(function* () {
             });
           }
 
-          return yield* awaitSegment(session, covering, index, SEGMENT_WAIT);
+          return yield* serve(
+            covering,
+            index,
+            yield* awaitSegment(session, covering, index, SEGMENT_WAIT),
+          );
         }),
     );
   });

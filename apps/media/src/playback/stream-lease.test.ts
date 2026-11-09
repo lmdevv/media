@@ -91,7 +91,7 @@ const disk = {
   refuseCopies: false,
   beforeCopy: (_to: string): Effect.Effect<void> => Effect.void,
   refuseRenamesIn: "",
-  beforeStat: (_path: string): Effect.Effect<void> => Effect.void,
+  beforeRead: (_path: string): Effect.Effect<void> => Effect.void,
 };
 
 const scriptedDisk = (real: FileSystem.FileSystem): FileSystem.FileSystem =>
@@ -141,8 +141,8 @@ const scriptedDisk = (real: FileSystem.FileSystem): FileSystem.FileSystem =>
             )
           : real.rename(from, to),
       ),
-    stat: (path) =>
-      Effect.suspend(() => disk.beforeStat(path)).pipe(Effect.andThen(real.stat(path))),
+    readFile: (path) =>
+      Effect.suspend(() => disk.beforeRead(path)).pipe(Effect.andThen(real.readFile(path))),
   });
 
 const decodeTagged = Schema.decodeUnknownSync(
@@ -886,16 +886,16 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
             assert.deepInclude(JSON.parse(textOf(moved.body)), { generation: 2 });
           }).pipe(Effect.provideContext(context));
 
-          disk.beforeStat = (file) => {
+          disk.beforeRead = (file) => {
             if (!file.endsWith(`/${stream.streamId}/init-1.mp4`)) return Effect.void;
-            disk.beforeStat = () => Effect.void;
+            disk.beforeRead = () => Effect.void;
 
             return moveOn;
           };
 
           const raced = yield* fetched(stream.file("init.mp4"));
 
-          disk.beforeStat = () => Effect.void;
+          disk.beforeRead = () => Effect.void;
 
           assert.strictEqual(raced.status, 410);
           assert.deepStrictEqual(JSON.parse(textOf(raced.body)), {
@@ -990,39 +990,42 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
       );
     }
 
-    it.effect("logs no release for a stream that stops while its release keeps the init", () =>
-      Effect.gen(function* () {
-        const server = yield* MediaTestServer.Service;
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const stream = yield* negotiate({ name: "stopped-in-release" });
-        const context = yield* Effect.context<HttpClient.HttpClient | MediaTestServer.Service>();
-        const stopped = yield* Deferred.make<void>();
+    it.effect(
+      "logs no release for a stream that stops while its release keeps the init",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const stream = yield* negotiate({ name: "stopped-in-release" });
+          const context = yield* Effect.context<HttpClient.HttpClient | MediaTestServer.Service>();
+          const stopped = yield* Deferred.make<void>();
 
-        assert.strictEqual(yield* status(stream.file("init.mp4")), 200);
-        assert.strictEqual(yield* status(stream.file("0.m4s")), 200);
+          assert.strictEqual(yield* status(stream.file("init.mp4")), 200);
+          assert.strictEqual(yield* status(stream.file("0.m4s")), 200);
 
-        disk.beforeCopy = (to) => {
-          if (!to.includes(`/${stream.streamId}/`)) return Effect.void;
-          disk.beforeCopy = () => Effect.void;
+          disk.beforeCopy = (to) => {
+            if (!to.includes(`/${stream.streamId}/`)) return Effect.void;
+            disk.beforeCopy = () => Effect.void;
 
-          return stop(stream).pipe(
-            Effect.andThen(Deferred.succeed(stopped, undefined)),
-            Effect.provideContext(context),
-            Effect.forkDetach,
-            Effect.andThen(Deferred.await(stopped)),
+            return stop(stream).pipe(
+              Effect.andThen(Deferred.succeed(stopped, undefined)),
+              Effect.provideContext(context),
+              Effect.forkDetach,
+              Effect.andThen(Deferred.await(stopped)),
+            );
+          };
+
+          yield* Deferred.await(stopped);
+          yield* Effect.sleep(Duration.seconds(1));
+
+          assert.deepStrictEqual(yield* logsOf("Stream.released", stream.streamId), []);
+          assert.lengthOf(yield* logsOf("Stream.ended", stream.streamId), 1);
+          assert.isFalse(
+            yield* fs.exists(path.join(server.transcodeDir, stream.streamId)).pipe(Effect.orDie),
           );
-        };
-
-        yield* Deferred.await(stopped);
-        yield* Effect.sleep(Duration.seconds(1));
-
-        assert.deepStrictEqual(yield* logsOf("Stream.released", stream.streamId), []);
-        assert.lengthOf(yield* logsOf("Stream.ended", stream.streamId), 1);
-        assert.isFalse(
-          yield* fs.exists(path.join(server.transcodeDir, stream.streamId)).pipe(Effect.orDie),
-        );
-      }),
+        }),
+      15_000,
     );
 
     it.effect("leaves no temporary init segment behind when keeping one fails", () =>

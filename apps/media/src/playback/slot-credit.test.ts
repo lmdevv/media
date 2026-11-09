@@ -385,7 +385,7 @@ describe.skipIf(!hasFfmpeg)("slot credit", () => {
             .init(streamId, generation, guest)
             .pipe(Effect.timeout("5 seconds"));
 
-          assert.strictEqual(init.paths.length, 1, "the stream answers from its kept init");
+          assert.isAbove(init.byteLength, 0, "the stream answers from its kept init");
 
           yield* sessions.stop(household.streamId, grant);
           yield* sessions.stop(streamId, guest);
@@ -456,7 +456,7 @@ describe.skipIf(!hasFfmpeg)("slot credit", () => {
           yield* sessions.stop(household.streamId, grant);
           const served = yield* Fiber.join(next);
 
-          assert.isAbove(served.paths.length, 0);
+          assert.isAbove(served.parts.length, 0);
           assert.strictEqual(yield* sessions.activeCount, 1);
 
           yield* sessions.stop(streamId, guest);

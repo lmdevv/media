@@ -196,12 +196,9 @@ describe.skipIf(!hasFfmpeg)("stream displacement", () => {
           const household = yield* viewer("household");
           const playing = yield* start(guest);
 
-          yield* sessions.segment(
-            playing.streamId,
-            playing.generation,
-            playing.segmentIndex,
-            guest.grant,
-          );
+          yield* sessions
+            .segment(playing.streamId, playing.generation, playing.segmentIndex, guest.grant)
+            .pipe(Effect.scoped);
 
           holdNextInitCopy();
           yield* Effect.promise(() => copies.reached.promise);
@@ -271,10 +268,14 @@ describe.skipIf(!hasFfmpeg)("stream displacement", () => {
             "the stream has a next segment",
           );
 
-          yield* sessions.segment(streamId, generation, segmentIndex, guest.grant);
+          yield* sessions
+            .segment(streamId, generation, segmentIndex, guest.grant)
+            .pipe(Effect.scoped);
 
           const waiting = yield* Effect.forkChild(
-            sessions.segment(streamId, generation, segmentIndex + 1, guest.grant).pipe(Effect.exit),
+            sessions
+              .segment(streamId, generation, segmentIndex + 1, guest.grant)
+              .pipe(Effect.scoped, Effect.exit),
           );
 
           holdNextInitCopy();
@@ -321,12 +322,14 @@ describe.skipIf(!hasFfmpeg)("stream displacement", () => {
           const household = yield* viewer("household");
           const { streamId, generation, segmentIndex } = yield* start(household);
 
-          yield* sessions.segment(streamId, generation, segmentIndex, household.grant);
+          yield* sessions
+            .segment(streamId, generation, segmentIndex, household.grant)
+            .pipe(Effect.scoped);
 
           const waiting = yield* Effect.forkChild(
             sessions
               .segment(streamId, generation, segmentIndex + 1, household.grant)
-              .pipe(Effect.exit),
+              .pipe(Effect.scoped, Effect.exit),
           );
 
           yield* Effect.sleep("300 millis");
