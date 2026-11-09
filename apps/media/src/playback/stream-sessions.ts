@@ -62,7 +62,6 @@ import {
 } from "./hls-plan.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
 import * as EncoderSlots from "./encoder-slots.ts";
-import * as LeftoverEncoders from "./leftover-encoders.ts";
 import { AudioPlan, decidePlayback, PlaybackPlan, VideoPlan } from "./playback-decision.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
 import type { PlaybackGrant } from "./playback-token.ts";
@@ -483,10 +482,6 @@ const make = Effect.gen(function* () {
   const services = yield* Effect.context();
   const pollInterval = yield* PollInterval;
 
-  yield* LeftoverEncoders.kill({
-    ffmpegPath: config.ffmpegPath,
-    transcodeDir: config.transcodeDir,
-  });
   yield* fs.makeDirectory(config.transcodeDir, { recursive: true }).pipe(Effect.orDie);
 
   for (const name of yield* fs
