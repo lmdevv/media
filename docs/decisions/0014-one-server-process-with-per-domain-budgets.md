@@ -102,8 +102,9 @@ mount media read-only.
 - A stop waits at most 3 seconds. ffmpeg gets `SIGKILL` at once. When its exit is still unknown
   after that, the stop returns and the encoder keeps its slot until it exits. The stream's files
   stay until every run it started has exited, including a run a seek was still stopping, and only
-  then are they deleted. A replaced stream ends the same way. The server counts runs whose ffmpeg
-  has not exited, closed streams' runs included, for an operator to see a stuck one.
+  then are they deleted. A replaced stream ends the same way. The health response reports runs
+  whose ffmpeg has not exited, closed streams' runs included, as `runsAwaitingExit`, so an operator
+  can see a stuck one.
   Shutting down closes every stream at once, so it waits at most 3 seconds in all.
 - The server signals its child processes, the tools and the backups' Convex CLI, only through
   Node's handle for the process it spawned, to stop them or to pause and resume a tool. Node drops

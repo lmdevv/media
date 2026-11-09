@@ -40,6 +40,7 @@ const baseUrl = (server: Server): string => {
 const health = JSON.stringify({
   status: "ok",
   activeStreams: 0,
+  runsAwaitingExit: 0,
   hardwareAcceleration: "none",
   backend: "connected",
 });

@@ -340,6 +340,7 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         assert.deepStrictEqual(yield* json(response), {
           status: "ok",
           activeStreams: 0,
+          runsAwaitingExit: 0,
           hardwareAcceleration: "none",
           backend: "standalone",
         });

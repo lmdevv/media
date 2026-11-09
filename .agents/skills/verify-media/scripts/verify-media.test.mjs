@@ -235,3 +235,82 @@ describe("verify-media.sh", () => {
     assert.equal(result.status, 0, result.stderr);
   });
 });
+
+// A stand-in for Docker whose stack never answers: `compose up` starts a server on the side's port
+// that accepts connections and never replies, as a container behind a missing route does.
+const fakeDocker = `#!/usr/bin/env bash
+set -euo pipefail
+log="$FAKE_DOCKER_DIR/calls"
+echo "$*" >> "$log"
+case "$1 \${2:-}" in
+  "image inspect") echo sha256:fake ;;
+  "inspect -f")
+    case "$3" in
+      *State.Status*) echo running ;;
+      *Networks*) echo "172.31.255.2 " ;;
+    esac ;;
+  compose*)
+    for arg in "$@"; do
+      if [[ "$arg" == up ]]; then
+        env_file="$(sed -n 's/.*--env-file \\([^ ]*\\).*/\\1/p' <<<"$*")"
+        port="$(sed -n 's/^MEDIA_PORT=//p' "$env_file")"
+        nohup node -e 'const held = []; require("node:net").createServer((socket) => held.push(socket)).listen(Number(process.argv[1]), "127.0.0.1")' "$port" >/dev/null 2>&1 &
+        echo "$!" > "$FAKE_DOCKER_DIR/silent.pid"
+      elif [[ "$arg" == down ]]; then
+        kill "$(cat "$FAKE_DOCKER_DIR/silent.pid")" 2>/dev/null || true
+      elif [[ "$arg" == logs ]]; then
+        echo "media-1  | starting"
+      fi
+    done ;;
+esac
+`;
+
+describe("verify-media.sh up against a stack that never answers", () => {
+  const dir = join(scratch, "fake-docker");
+  const library = join(scratch, "silent-library");
+  const run = `silent-${process.pid}`;
+  const env = {
+    ...process.env,
+    PATH: `${dir}:${process.env.PATH}`,
+    TMPDIR: join(scratch, "silent-tmp"),
+    MEDIA_VERIFY_RUN: run,
+    MEDIA_VERIFY_HEALTH_SECONDS: "3",
+    FAKE_DOCKER_DIR: dir,
+  };
+
+  before(() => {
+    mkdirSync(join(library, "Movies"), { recursive: true });
+    mkdirSync(env.TMPDIR, { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "docker"), fakeDocker, { mode: 0o755 });
+  });
+
+  after(() => {
+    const pid = join(dir, "silent.pid");
+    if (existsSync(pid)) spawnSync("sh", ["-c", `kill "$(cat '${pid}')" 2>/dev/null || true`]);
+    rmSync(here(`../../../../captures/verify/${run}`), { recursive: true, force: true });
+  });
+
+  test("gives up at its deadline, names the silent URL and the route to check, and removes the side", async () => {
+    const began = Date.now();
+    const result = await new Promise((resolve) => {
+      execFile(
+        helper,
+        ["up", "--image", "media:silent", "--library", library, "--no-music", "--no-setup"],
+        { encoding: "utf8", env, timeout: 60_000 },
+        (error, stdout, stderr) => resolve({ status: error ? error.code : 0, stdout, stderr }),
+      );
+    });
+    const seconds = (Date.now() - began) / 1000;
+
+    assert.equal(result.status, 1, result.stderr);
+    assert.ok(seconds < 30, `up returned after ${seconds}s`);
+    assert.match(result.stderr, /http:\/\/localhost:\d+\/api\/health never answered/);
+    assert.match(result.stderr, /`ip route get 172\.31\.255\.2`/);
+    assert.match(result.stderr, /media-1 {2}\| starting/);
+    assert.match(result.stderr, /did not become healthy in 3s/);
+    const calls = execFileSync("cat", [join(dir, "calls")], { encoding: "utf8" });
+    assert.match(calls, /compose .* down --volumes/);
+    assert.equal(existsSync(join(env.TMPDIR, "media-verify", run, "after")), false, "the side's state is gone");
+  });
+});

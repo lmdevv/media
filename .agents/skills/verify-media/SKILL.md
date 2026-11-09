@@ -128,7 +128,11 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/media:main, build 
    `deploy/compose/compose.demo.yaml` for movies; `up` pulls it once per machine.
 4. It starts the Compose project and waits until movies' `/api/health` reports
    `"backend":"connected"`, which needs Convex, the deployed functions, and the media service, and
-   music's `/healthz` reports `"ok":true`.
+   music's `/healthz` reports `"ok":true`. Each check gives up after 10 seconds, and the wait
+   after 6 minutes (`MEDIA_VERIFY_HEALTH_SECONDS`). When it runs out, or a container stops while
+   starting, `up` prints the containers' last log lines, which URL never answered, and each
+   container's `ip route get` line, removes the side, and exits 1. A route through `tailscale0`
+   or another VPN means the host can't reach that Docker network.
 5. It starts the browser host, in its own network namespace where it can, and runs first-run setup
    through each web app, as an owner does. The owner is Lucía, `admin@movies.local` with password
    `password123`, in both apps:

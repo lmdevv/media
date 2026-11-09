@@ -10,11 +10,12 @@ import {
   Option,
   Redacted,
   Schedule,
+  Schema,
   Scope,
 } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
-import type { ClientCapabilities } from "@media/contracts/media-playback";
+import { type ClientCapabilities, HealthResponse } from "@media/contracts/media-playback";
 
 import * as MediaTools from "../media/media-tools.ts";
 import { writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
@@ -48,44 +49,39 @@ const releaseExits = Effect.sync(() => {
   exits.release.resolve();
 });
 
-const tools = Layer.effect(
-  MediaTools.Service,
-  Effect.map(MediaTools.Service, (real) =>
-    MediaTools.Service.of({
-      ...real,
-      startFfmpeg: (args) =>
-        Effect.gen(function* () {
-          const gate = { held: Option.none<Promise<void>>() };
+const holdingExits = (real: MediaTools.Interface): MediaTools.Interface =>
+  MediaTools.Service.of({
+    ...real,
+    startFfmpeg: (args) =>
+      Effect.gen(function* () {
+        const gate = { held: Option.none<Promise<void>>() };
 
-          // Finalizers run last in, first out: this one runs after the process is killed.
-          yield* Effect.addFinalizer(() =>
-            Option.match(gate.held, {
-              onNone: () => Effect.void,
-              onSome: (held) => Effect.promise(() => held),
-            }),
-          );
+        // Finalizers run last in, first out: this one runs after the process is killed.
+        yield* Effect.addFinalizer(() =>
+          Option.match(gate.held, {
+            onNone: () => Effect.void,
+            onSome: (held) => Effect.promise(() => held),
+          }),
+        );
 
-          const running = yield* real.startFfmpeg(args);
+        const running = yield* real.startFfmpeg(args);
 
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              if (exits.held) gate.held = Option.some(exits.release.promise);
-            }),
-          );
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            if (exits.held) gate.held = Option.some(exits.release.promise);
+          }),
+        );
 
-          return running;
-        }),
-    }),
-  ),
-);
+        return running;
+      }),
+  });
 
-const subject = tools.pipe(
-  Layer.provideMerge(
-    MediaTestServer.layer({
-      FFMPEG_PATH: stallsAfterFirstFragment,
-      MAX_CONCURRENT_TRANSCODES: String(STREAMS),
-    }),
-  ),
+const subject = MediaTestServer.layer(
+  {
+    FFMPEG_PATH: stallsAfterFirstFragment,
+    MAX_CONCURRENT_TRANSCODES: String(STREAMS),
+  },
+  { mediaTools: holdingExits },
 );
 
 const smallScreen: ClientCapabilities = {
@@ -150,6 +146,15 @@ const playing = (sessions: StreamSessions.Interface, { grant, request }: Viewer)
     ),
   );
 
+const decodeHealth = Schema.decodeUnknownEffect(Schema.toCodecJson(HealthResponse));
+
+const runsAwaitingExit = Effect.gen(function* () {
+  const server = yield* MediaTestServer.Service;
+  const response = yield* HttpClient.get(`${server.baseUrl}/api/health`).pipe(Effect.orDie);
+
+  return (yield* response.json.pipe(Effect.flatMap(decodeHealth), Effect.orDie)).runsAwaitingExit;
+});
+
 const freshSessions = (scope: Scope.Scope) =>
   Layer.buildWithScope(Layer.fresh(StreamSessions.layer), scope).pipe(
     Effect.map((built) => Context.get(built, StreamSessions.Service)),
@@ -187,6 +192,41 @@ describe.skipIf(!hasFfmpeg)("stream shutdown", () => {
 
           assert.strictEqual(left, 0, "runs awaiting exit once the encoder exited");
           yield* Scope.close(scope, Exit.void);
+        }).pipe(Effect.ensuring(releaseExits)),
+      60_000,
+    );
+
+    it.effect(
+      "health shows a stuck run while its encoder has not exited and drops it once it exits",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const who = yield* viewer;
+
+          assert.strictEqual(yield* runsAwaitingExit, 0, "no run before any stream");
+
+          const started = yield* playing(sessions, who);
+
+          yield* holdExits;
+          yield* sessions.stop(started.streamId, who.grant).pipe(Effect.timeout("10 seconds"));
+
+          assert.strictEqual(
+            yield* runsAwaitingExit,
+            1,
+            "the stopped stream's run while its exit is unconfirmed",
+          );
+
+          yield* releaseExits;
+
+          const left = yield* runsAwaitingExit.pipe(
+            Effect.repeat({
+              until: (count) => count === 0,
+              schedule: Schedule.spaced("100 millis"),
+              times: 50,
+            }),
+          );
+
+          assert.strictEqual(left, 0, "health once the encoder exited");
         }).pipe(Effect.ensuring(releaseExits)),
       60_000,
     );

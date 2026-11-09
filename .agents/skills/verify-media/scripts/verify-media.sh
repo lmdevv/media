@@ -11,6 +11,7 @@
 #   verify-media.sh status
 #   verify-media.sh down [--side S] [--purge]
 #
+# MEDIA_VERIFY_HEALTH_SECONDS bounds how long `up` waits for the stack to answer (default 360).
 # MEDIA_VERIFY_RUN names the run (default: the checkout's directory name). A run has two sides:
 # `after` is built from this checkout, `before` from main. Each side is its own Compose project,
 # media-verify-<run>-<side>: that side's own revision of deploy/compose (the all-in-one image,
@@ -36,6 +37,8 @@ cli_js="$root/apps/cli/dist/media.js"
 music_root="$root/legacy/music"
 music_cli_js="$music_root/apps/cli/dist/music.js"
 password="password123"
+health_seconds="${MEDIA_VERIFY_HEALTH_SECONDS:-360}"
+[[ "$health_seconds" =~ ^[1-9][0-9]*$ ]] || { echo "MEDIA_VERIFY_HEALTH_SECONDS must be a whole number of seconds" >&2; exit 2; }
 
 die() { echo "verify-media: $*" >&2; exit 1; }
 say() { echo "verify-media: $*" >&2; }
@@ -119,27 +122,64 @@ compose() {
     docker compose -p "$project" --env-file "$state/compose.env" "${files[@]}" -f "$state/compose.verify.yaml" "$@"
 }
 
-healthy() { curl -fsS "$(url)/api/health" 2>/dev/null | grep -q '"backend":"connected"'; }
-music_healthy() { curl -fsS "$(music_url)/healthz" 2>/dev/null | grep -q '"ok":true'; }
+# Health URLs that sent any HTTP response, so a wait that runs out can name the ones that never did.
+declare -A answered=()
 
-wait_healthy() {
-  local services=("$(movies_service)") status service
+# Checks a health URL: succeeds when its body holds $2. Every request gives up within 10 seconds, so
+# a stack the host cannot route to fails its wait instead of hanging it.
+probe() {
+  local body code=0
+  body="$(curl -fsS --connect-timeout 5 --max-time 10 "$1" 2>/dev/null)" || code=$?
+  # 22 is curl's code for an HTTP error status: the URL answered, but not with a success.
+  ((code == 0 || code == 22)) && answered["$1"]=1
+  ((code == 0)) && grep -qF -- "$2" <<<"$body"
+}
+
+healthy() { probe "$(url)/api/health" '"backend":"connected"'; }
+music_healthy() { probe "$(music_url)/healthz" '"ok":true'; }
+
+stack_logs() {
+  local services=("$(movies_service)")
   one_port || services+=(convex)
   has_music && services+=(music)
-  for _ in $(seq 1 180); do
+  compose logs --no-color --tail 40 "${services[@]}" >&2 || true
+}
+
+# Removes a side that did not start, so a failed `up` leaves nothing running.
+start_failed() {
+  side_down "$side" >&2
+  die "$1"
+}
+
+wait_healthy() {
+  local service status urls=("$(url)/api/health") target ip deadline=$((SECONDS + health_seconds))
+  has_music && urls+=("$(music_url)/healthz")
+  while ((SECONDS < deadline)); do
     healthy && { ! has_music || music_healthy; } && return 0
     for service in "$(movies_service)" music; do
       [[ "$service" == music ]] && ! has_music && continue
       status="$(docker inspect -f '{{.State.Status}}' "$(container "$service")" 2>/dev/null || echo missing)"
       if [[ "$status" == exited || "$status" == dead ]]; then
-        compose logs --no-color --tail 40 "${services[@]}" >&2 || true
-        die "$(container "$service") stopped while starting"
+        stack_logs
+        start_failed "$(container "$service") stopped while starting"
       fi
     done
     sleep 2
   done
-  compose logs --no-color --tail 40 "${services[@]}" >&2 || true
-  die "$project did not become healthy in 6 minutes"
+  stack_logs
+  for target in "${urls[@]}"; do
+    if [[ -n "${answered[$target]:-}" ]]; then say "$target answered but never reported ready"
+    else say "$target never answered"; fi
+  done
+  # Published ports reach a container through its address on a Docker network. A VPN route, such as
+  # a Tailscale exit node's, can take that address away from the host.
+  for service in "$(movies_service)" music; do
+    [[ "$service" == music ]] && ! has_music && continue
+    for ip in $(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$(container "$service")" 2>/dev/null); do
+      say "check the host's route to $(container "$service") with \`ip route get $ip\`: $(ip route get "$ip" 2>/dev/null | head -1 || true)"
+    done
+  done
+  start_failed "$project did not become healthy in ${health_seconds}s"
 }
 
 browser() {
@@ -168,9 +208,10 @@ start_browser() {
 
 # The CLI for one person, with their own config folder, so sessions never mix. Lucía is the owner.
 as="lucia"
+# A `cli_timeout` of some seconds stops a call that takes longer.
 cli_raw() {
   env -u MEDIA_CONVEX_URL -u MEDIA_SERVER_URL -u MEDIA_API_KEY -u MEDIA_PROFILE -u MEDIA_PASSWORD \
-    XDG_CONFIG_HOME="$state/cli/$as" node "$cli_js" "$@"
+    XDG_CONFIG_HOME="$state/cli/$as" ${cli_timeout:+timeout "$cli_timeout"} node "$cli_js" "$@"
 }
 
 music_cli_raw() {
@@ -190,9 +231,9 @@ cli_login() {
 # scan starts. The quiet must hold for three checks in a row, since a scan's follow-up jobs appear
 # just as it finishes.
 wait_libraries() {
-  local want="$1" quiet=0 state_now
-  for _ in $(seq 1 450); do
-    state_now="$( { cli_raw libraries list; echo; cli_raw jobs list --limit 100; } 2>/dev/null | node -e '
+  local want="$1" quiet=0 state_now deadline=$((SECONDS + 900))
+  while ((SECONDS < deadline)); do
+    state_now="$( { cli_timeout=60 cli_raw libraries list; echo; cli_timeout=60 cli_raw jobs list --limit 100; } 2>/dev/null | node -e '
       const [libraries, jobs] = require("node:fs").readFileSync(0, "utf8").split(/\n(?=\[)/).map((part) => JSON.parse(part));
       const failed = jobs.find((job) => job.kind === "scan" && job.status === "failed");
       if (failed) { console.log(`failed ${JSON.stringify(failed.error)}`); process.exit(0); }
@@ -589,7 +630,7 @@ cmd_status() {
 
 # --------------------------------------------------------------------------------------------- ios
 
-on_mac() { ssh "$mac" "export PATH=/opt/homebrew/bin:\$PATH LANG=en_US.UTF-8; set -euo pipefail; $1"; }
+on_mac() { ssh -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 "$mac" "export PATH=/opt/homebrew/bin:\$PATH LANG=en_US.UTF-8; set -euo pipefail; $1"; }
 
 udid() {
   local id
@@ -612,8 +653,9 @@ ios_tree() {
 }
 
 ios_wait() {
-  local label="$1" seconds="${2:-60}"
-  for _ in $(seq 1 "$seconds"); do
+  local label="$1" seconds="${2:-60}" deadline
+  deadline=$((SECONDS + seconds))
+  while ((SECONDS < deadline)); do
     # Not `ios_tree | grep -q`: grep stops at the first match, and with pipefail the tree's
     # writer failing on the closed pipe would fail the match.
     grep -qF -- "$label" <<<"$(ios_tree 2>/dev/null || true)" && return 0
@@ -779,10 +821,10 @@ cmd_ios_up() {
     expo start --dev-client --port "$2"' metro "$src" "$metro" < /dev/null > "$state/metro.log" 2>&1 &
   write_state metro_pid "$!"
   for _ in $(seq 1 120); do
-    curl -fsS "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running && break
+    curl -fsS --max-time 5 "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running && break
     sleep 1
   done
-  curl -fsS "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running || { tail -20 "$state/metro.log" >&2; die "Metro did not start"; }
+  curl -fsS --max-time 5 "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running || { tail -20 "$state/metro.log" >&2; die "Metro did not start"; }
 
   local id
   id="$(on_mac "xcrun simctl create media-verify-$run-$side $(printf %q "$sim_type")")"
@@ -807,8 +849,8 @@ cmd_ios_up() {
   metro_url="$(node -p 'encodeURIComponent(process.argv[1])' "http://127.0.0.1:$metro")"
   on_mac "xcrun simctl openurl $id 'exp+movies://expo-development-client/?url=$metro_url'"
   # iOS asks once whether to open the link in the app. Tap only that prompt's button.
-  local tree
-  for _ in $(seq 1 120); do
+  local tree deadline=$((SECONDS + 240))
+  while ((SECONDS < deadline)); do
     tree="$(ios_tree 2>/dev/null || true)"
     grep -qE 'Connect to Server|Sign In' <<<"$tree" && break
     grep -q 'Open in' <<<"$tree" && ios_tap_label "Open" >/dev/null 2>&1
@@ -884,10 +926,10 @@ cmd_ios() {
       local failed=0 id
       id="$(udid)"
       kill -0 "$(read_state forward_pid)" 2>/dev/null && echo "ok    ssh forwards to $mac" || { echo "FAIL  ssh forwards to $mac"; failed=1; }
-      curl -fsS "http://127.0.0.1:$(read_state metro_port)/status" 2>/dev/null | grep -q running && echo "ok    Metro on $(read_state metro_port)" || { echo "FAIL  Metro"; failed=1; }
+      curl -fsS --max-time 5 "http://127.0.0.1:$(read_state metro_port)/status" 2>/dev/null | grep -q running && echo "ok    Metro on $(read_state metro_port)" || { echo "FAIL  Metro"; failed=1; }
       on_mac "xcrun simctl list devices | grep -F '$id) (Booted)' >/dev/null" && echo "ok    simulator $id booted" || { echo "FAIL  simulator $id"; failed=1; }
-      on_mac "curl -fsS $(url)/api/health | grep -q connected" && echo "ok    the Mac reaches $(url)" || { echo "FAIL  the Mac reaches $(url)"; failed=1; }
-      on_mac "curl -fsS $(convex_url)/version >/dev/null" && echo "ok    the Mac reaches Convex at $(convex_url)" || { echo "FAIL  the Mac reaches $(convex_url)"; failed=1; }
+      on_mac "curl -fsS --max-time 10 $(url)/api/health | grep -q connected" && echo "ok    the Mac reaches $(url)" || { echo "FAIL  the Mac reaches $(url)"; failed=1; }
+      on_mac "curl -fsS --max-time 10 $(convex_url)/version >/dev/null" && echo "ok    the Mac reaches Convex at $(convex_url)" || { echo "FAIL  the Mac reaches $(convex_url)"; failed=1; }
       return "$failed" ;;
     describe) ios_tree ;;
     sign-in) ios_sign_in && echo "signed in on $(udid)" ;;

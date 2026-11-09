@@ -186,4 +186,36 @@ describe("pagedStore", () => {
 
     expect(pinned.listening() + second.listening()).toBe(0);
   });
+
+  it("stops following the open-ended page at once when the pinned page is ready as it starts", () => {
+    const first = watchOf(page(["a"], false, "after-a"));
+    const pinned = watchOf(page(["a"], false, "after-a"));
+    const second = watchOf(page(["b"], true));
+
+    const store = pagedStore((span) => {
+      if (span.cursor !== null) return second.watch;
+
+      return span.endCursor === undefined ? first.watch : pinned.watch;
+    });
+
+    const stop = store.subscribe(() => undefined);
+    const list = store.getSnapshot();
+
+    expect(first.listening()).toBe(1);
+
+    if (list.status === "ready" && list.next.kind === "more") list.next.load();
+
+    expect(first.listening()).toBe(0);
+    expect(pinned.listening()).toBe(1);
+    expect(store.getSnapshot()).toMatchObject({ rows: ["a", "b"], next: { kind: "done" } });
+
+    const late = store.subscribe(() => undefined);
+
+    expect(first.listening()).toBe(0);
+
+    late();
+    stop();
+
+    expect(pinned.listening() + second.listening()).toBe(0);
+  });
 });
