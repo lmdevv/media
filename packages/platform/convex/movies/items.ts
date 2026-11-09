@@ -25,7 +25,8 @@ const placedTitle = async (
   titleId: Id<"titles">,
   libraryOf: LibraryReader,
 ): Promise<{ readonly title: Doc<"titles">; readonly placed: PlacedItem } | null> => {
-  const title = await db.get(titleId);
+  const found = await db.get(titleId);
+  const title = found?.purging === true ? null : found;
   const library = title === null ? null : await libraryOf(title.libraryId);
 
   return title === null || library?.kind !== "movies"
@@ -65,11 +66,13 @@ export const placeFile = async (
 /**
  * A movies file as a download describes it: the file the server serves as it is on disk, at every
  * quality, as old movies kept downloads. Its revision changes with the file's size or change time.
- * Reads 3.
+ * A file a scan marked missing is not on disk, so it is gone until a scan finds it again. Reads 3.
  */
 export const fileSource: SourceLoader<"file"> = async (db, fileId, libraryOf) => {
   const file = await db.get(fileId);
-  const found = file === null ? null : await placedTitle(db, file.titleId, libraryOf);
+
+  const found =
+    file === null || file.missing ? null : await placedTitle(db, file.titleId, libraryOf);
 
   if (file === null || found === null) return null;
 

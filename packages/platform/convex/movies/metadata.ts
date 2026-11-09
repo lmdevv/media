@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 
 import type { Doc, Id } from "../_generated/dataModel";
+import type { DatabaseReader } from "../_generated/server";
 import { leaseAnswer, withJobLease } from "../core/jobs/held";
 import type { HeldJob } from "../core/jobs/held";
 import { lease } from "../core/jobs/model";
@@ -8,8 +9,9 @@ import type { Lease } from "../core/jobs/model";
 import type { JobCtx } from "../core/jobs/store";
 import { fail } from "../core/lib/errors";
 import { inOrder } from "../core/lib/inOrder";
+import { paginate } from "../core/lib/paginate";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
-import { rescannedTitle, rewriteTitle, upsertEpisode } from "./catalog";
+import { checkTitle, rescannedTitle, rewriteTitle, upsertEpisode } from "./catalog";
 import { CREDIT_LIMIT, creditsOf, replaceCredits } from "./credits";
 import { moveTotals, sumMoved } from "./totals";
 import {
@@ -26,20 +28,26 @@ import {
 /** The most episodes one metadata call writes, and one target lists. */
 const EPISODES_MAX = 500;
 
-/** The most episodes a target lists: more than any show the scanner has met. */
-const TARGET_EPISODES_MAX = 4000;
+/** Episodes one target page lists; the worker follows `continueCursor` to the end. */
+const TARGET_PAGE = 1000;
 
 const UNDATED_COLLECTION_POSITION = 9999;
 
-const titleOf = async (ctx: JobCtx, titleId: Id<"titles">): Promise<Doc<"titles">> =>
-  (await ctx.db.get(titleId)) ?? fail("not_found", "No such title");
+/** A title, or `not_found` when it is gone or the purge is deleting it. */
+const titleOf = async (db: DatabaseReader, titleId: Id<"titles">): Promise<Doc<"titles">> => {
+  const title = await db.get(titleId);
+
+  return title === null || title.purging === true ? fail("not_found", "No such title") : title;
+};
 
 /**
  * What a metadata job needs to look a title up: its name and year with overrides applied, its
- * external ids, artwork, and episode numbers.
+ * external ids, artwork, and a page of up to 1,000 of its episodes' numbers from `cursor`, in
+ * season and episode order. The worker asks again with `continueCursor` until `isDone`, so a show
+ * of any length is listed whole.
  */
 export const metadataTarget = serverQuery({
-  args: { titleId: v.id("titles") },
+  args: { titleId: v.id("titles"), cursor: v.union(v.string(), v.null()) },
   returns: v.object({
     titleId: v.id("titles"),
     libraryId: v.id("libraries"),
@@ -55,14 +63,21 @@ export const metadataTarget = serverQuery({
         episodeNumber: v.number(),
       }),
     ),
+    continueCursor: v.string(),
+    isDone: v.boolean(),
   }),
-  handler: async (ctx, { titleId }) => {
-    const title = (await ctx.db.get(titleId)) ?? fail("not_found", "No such title");
+  handler: async (ctx, { titleId, cursor }) => {
+    const title = await titleOf(ctx.db, titleId);
 
-    const episodes = await ctx.db
-      .query("episodes")
-      .withIndex("by_title_order", (q) => q.eq("titleId", titleId))
-      .take(TARGET_EPISODES_MAX);
+    const episodes = await paginate(
+      ctx.db,
+      {
+        table: "episodes",
+        index: "by_title_order",
+        range: (q) => q.eq("titleId", titleId),
+      },
+      { numItems: TARGET_PAGE, cursor },
+    );
 
     return {
       titleId,
@@ -72,11 +87,13 @@ export const metadataTarget = serverQuery({
       year: title.overrides?.year ?? title.year,
       externalIds: title.externalIds,
       artwork: title.artwork,
-      episodes: episodes.map((episode) => ({
+      episodes: episodes.page.map((episode) => ({
         episodeId: episode._id,
         seasonNumber: episode.seasonNumber,
         episodeNumber: episode.episodeNumber,
       })),
+      continueCursor: episodes.continueCursor,
+      isDone: episodes.isDone,
     };
   },
 });
@@ -101,7 +118,9 @@ export const applyMetadata = serverMutation({
         fail("invalid_args", `Send at most ${EPISODES_MAX} episodes per call`);
       }
 
-      const current = await titleOf(ctx, titleId);
+      checkTitle(title);
+
+      const current = await titleOf(ctx.db, titleId);
       const fields = rescannedTitle(title, current);
 
       await rewriteTitle(ctx.db, current, {
@@ -194,7 +213,7 @@ export const applyCredits = serverMutation({
         fail("invalid_args", `Send at most ${CREDIT_LIMIT} credits per call`);
       }
 
-      const title = await titleOf(ctx, titleId);
+      const title = await titleOf(ctx.db, titleId);
       const episode = episodeId === null ? null : await ctx.db.get(episodeId);
 
       if (episodeId !== null && episode?.titleId !== titleId) {
@@ -268,7 +287,7 @@ export const applyCollection = serverMutation({
   returns: leaseAnswer(v.null()),
   handler: (ctx, { lease: held, titleId, collection, hash }) =>
     withMetadataLease(ctx, held, async (job) => {
-      const title = await titleOf(ctx, titleId);
+      const title = await titleOf(ctx.db, titleId);
 
       if (title.collectionHash === hash || !mayWrite(job, title)) return null;
 

@@ -78,7 +78,11 @@ const Finished = Schema.Struct({ outcome: Schema.String });
 
 const LEASE_MS = 30_000;
 
+/** Paths one `missing` call takes, and files one music `upsert` takes. */
 const BATCH = 500;
+
+/** Files one movies `upsert` takes: each carries its title and episode. */
+const MOVIES_UPSERT_BATCH = 80;
 
 const probe = api.core.libraryProbe;
 
@@ -186,9 +190,12 @@ export const scanCalls = (stack: CoreStack, workerId: string) => ({
     ),
 });
 
-const batches = <Item>(items: ReadonlyArray<Item>): ReadonlyArray<ReadonlyArray<Item>> =>
-  Array.from({ length: Math.ceil(items.length / BATCH) }, (_, n) =>
-    items.slice(n * BATCH, (n + 1) * BATCH),
+const batches = <Item>(
+  items: ReadonlyArray<Item>,
+  size = BATCH,
+): ReadonlyArray<ReadonlyArray<Item>> =>
+  Array.from({ length: Math.ceil(items.length / size) }, (_, n) =>
+    items.slice(n * size, (n + 1) * size),
   );
 
 /** What one scan attempt did. */
@@ -267,11 +274,14 @@ const scanClaimed = async (
     .filter((file) => !file.missing && !onDisk.has(file.path))
     .map((file) => file.path);
 
-  const inserted = await sendAll(batches(changed), async (batch) => {
-    const written = await calls.upsert(lease, kind, batch);
+  const inserted = await sendAll(
+    batches(changed, kind === "movies" ? MOVIES_UPSERT_BATCH : BATCH),
+    async (batch) => {
+      const written = await calls.upsert(lease, kind, batch);
 
-    return written.outcome === "held" ? written.value.inserted : null;
-  });
+      return written.outcome === "held" ? written.value.inserted : null;
+    },
+  );
 
   const removed =
     inserted === null

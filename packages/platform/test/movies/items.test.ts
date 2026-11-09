@@ -13,6 +13,8 @@ import type { SeededMoviesLibrary } from "../probe";
 import { refusal, unique } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
 import type { CoreStack } from "../stack-env";
+import { claimJob, finishJob, markMissing, upsert } from "./catalog";
+import { movieFile, scannedTitle } from "./scanned";
 
 const stack = coreStackFromEnvFile();
 
@@ -214,5 +216,66 @@ describe.skipIf(stack === undefined)("movies items", { timeout: 120_000 }, () =>
     await unshare(manager, films.libraryId, { kind: "user", userId: aiko.userId });
 
     expect(await stateOf()).toEqual(["expired:access"]);
+  });
+
+  it("show a kept file gone while a scan finds it missing, and available once it returns", async () => {
+    if (stack === undefined) return;
+    const manager = await member(stack, "missing-manager");
+    const aiko = await member(stack, "aiko-missing");
+
+    const films = await seedLibrary(stack, manager, {
+      name: `missing-${unique()}`,
+      kind: "movies",
+      items: [movie("Sintel", 0)],
+    });
+
+    await share(manager, films.libraryId, { kind: "user", userId: aiko.userId }, "view");
+    await enroll(aiko.signedIn, "Phone");
+
+    const kept = at(films.fileIds, 0);
+
+    await aiko.signedIn.client.mutation(api.core.downloads.add, {
+      item: { kind: "file", id: kept },
+    });
+
+    const stateOf = async () =>
+      (
+        await aiko.signedIn.client.query(api.core.downloads.list, {
+          paginationOpts: { numItems: 10, cursor: null },
+        })
+      ).page.map((entry) => entry.state);
+
+    const Files = Schema.Array(Schema.Struct({ fileId: Schema.String, path: Schema.String }));
+
+    const [onDisk] = await runFunction(
+      stack,
+      internal.movies.probe.files,
+      { libraryId: films.libraryId },
+      Files,
+    );
+
+    if (onDisk === undefined) throw new Error("seeded no file");
+
+    const { jobId } = await manager.signedIn.client.mutation(api.core.libraries.scan, {
+      libraryId: films.libraryId,
+    });
+
+    const lease = await claimJob(stack, "movies.scan", jobId);
+
+    await markMissing(stack, lease, [onDisk.path]);
+
+    expect(await stateOf()).toEqual(["gone"]);
+    expect(
+      await aiko.signedIn.client.mutation(api.core.downloads.fetch, {
+        item: { kind: "file", id: kept },
+      }),
+    ).toEqual({ state: "gone" });
+
+    await upsert(stack, lease, [
+      movieFile(onDisk.path, 1_000_000, 0, scannedTitle("movie", "seed:Sintel", "Sintel", 0)),
+    ]);
+    await finishJob(stack, lease);
+
+    expect(await stateOf()).toEqual(["available"]);
   });
 });

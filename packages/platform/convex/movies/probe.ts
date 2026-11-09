@@ -18,6 +18,7 @@ import { contentActions } from "../core/permissions/policy";
 import { withLibraryItems } from "../core/scans";
 import { NO_EXTERNAL_IDS } from "./catalog";
 import { titleFacts } from "./items";
+import { filesPage, titlesPage } from "./purge";
 import { moveTotals, nothingMoved, totalsOf } from "./totals";
 import { trickplayState } from "./validators";
 
@@ -392,5 +393,89 @@ export const cancelQueued = internalMutation({
     await inOrder(queued, (job) => cancel(ctx, job._id));
 
     return { more: queued.length === CANCEL_BATCH };
+  },
+});
+
+/**
+ * Makes `folders` the library's folders without scheduling its purge, so a test can run the
+ * purge one page at a time with `purgePage` and act between pages.
+ */
+export const setFolders = internalMutation({
+  args: { libraryId: v.id("libraries"), folders: v.array(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, { libraryId, folders }) => {
+    await claimFolders(ctx, libraryId, folders);
+
+    return null;
+  },
+});
+
+/** Runs one page of the movies purge's `files` or `titles` stage, and schedules nothing. */
+export const purgePage = internalMutation({
+  args: {
+    libraryId: v.id("libraries"),
+    stage: v.union(v.literal("files"), v.literal("titles")),
+    cursor: v.union(v.string(), v.null()),
+  },
+  returns: v.object({ cursor: v.union(v.string(), v.null()), more: v.boolean() }),
+  handler: async (ctx, { libraryId, stage, cursor }) => {
+    if (stage === "titles") return titlesPage(ctx, libraryId, cursor);
+
+    const next = await filesPage(ctx, libraryId, cursor);
+
+    return { cursor: next, more: next !== null };
+  },
+});
+
+const TITLE_ROWS_MAX = 1000;
+
+/**
+ * A title as a test checks it after a purge, or null once it is gone: whether the purge is
+ * deleting it, its rows, and whether every episode's season exists and counts it.
+ */
+export const titleState = internalQuery({
+  args: { titleId: v.id("titles") },
+  returns: v.union(
+    v.null(),
+    v.object({
+      purging: v.boolean(),
+      episodes: v.number(),
+      seasons: v.number(),
+      genres: v.number(),
+      seasonsHoldEpisodes: v.boolean(),
+    }),
+  ),
+  handler: async (ctx, { titleId }) => {
+    const title = await ctx.db.get(titleId);
+
+    if (title === null) return null;
+
+    const [episodes, seasons, genres] = await Promise.all([
+      ctx.db
+        .query("episodes")
+        .withIndex("by_title_order", (q) => q.eq("titleId", titleId))
+        .take(TITLE_ROWS_MAX),
+      ctx.db
+        .query("seasons")
+        .withIndex("by_title_number", (q) => q.eq("titleId", titleId))
+        .take(TITLE_ROWS_MAX),
+      ctx.db
+        .query("titleGenres")
+        .withIndex("by_title", (q) => q.eq("titleId", titleId))
+        .take(TITLE_ROWS_MAX),
+    ]);
+
+    const seasonIds = new Set(seasons.map((season) => season._id));
+    const seasonCounts = seasons.reduce((sum, season) => sum + season.episodeCount, 0);
+
+    return {
+      purging: title.purging === true,
+      episodes: episodes.length,
+      seasons: seasons.length,
+      genres: genres.length,
+      seasonsHoldEpisodes:
+        episodes.every((episode) => seasonIds.has(episode.seasonId)) &&
+        seasonCounts === episodes.length,
+    };
   },
 });

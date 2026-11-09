@@ -7,7 +7,7 @@ import type { MutationCtx } from "../_generated/server";
 import { inOrder } from "../core/lib/inOrder";
 import { paginate } from "../core/lib/paginate";
 import { purgeStep } from "../core/scans";
-import { adjustPresent } from "./catalog";
+import { adjustPresent, purgingKey } from "./catalog";
 import { forgetTotals, moveTotals, nothingMoved } from "./totals";
 import { forgetTrickplay } from "./trickplayState";
 
@@ -25,42 +25,54 @@ type TitleRow = "credits" | "episodes" | "seasons" | "titleGenres" | "collection
 const cursorArgs = { libraryId: v.id("libraries"), cursor: v.union(v.string(), v.null()) };
 
 /**
- * The movies purge hook (ADR 0024), first stage: deletes 500 files a page that no current folder
- * of the library keeps, or every file once the library is gone, then hands over to `titles`.
+ * One page of the purge's first stage: deletes up to 500 files that no current folder of the
+ * library keeps, or every file once the library is gone. Answers the cursor of the next page, or
+ * null once the files are done.
+ */
+export const filesPage = (
+  ctx: MutationCtx,
+  libraryId: Id<"libraries">,
+  cursor: string | null,
+): Promise<string | null> =>
+  purgeStep(ctx, libraryId, async (scope) => {
+    const found = await paginate(
+      ctx.db,
+      {
+        table: "mediaFiles",
+        index: "by_library_path",
+        range: (q) => q.eq("libraryId", libraryId),
+      },
+      { numItems: FILES_PAGE, cursor },
+    );
+
+    const leaving = found.page.filter((file) => !scope.keeps(file.path));
+
+    await inOrder(leaving, async (file) => {
+      await forgetTrickplay(ctx, file);
+
+      if (!scope.gone && !file.missing) {
+        await adjustPresent(ctx.db, file.titleId, file.episodeId, -1);
+      }
+
+      await ctx.db.delete(file._id);
+    });
+
+    if (!scope.gone) {
+      await moveTotals(ctx.db, libraryId, { ...nothingMoved, files: -leaving.length });
+    }
+
+    return { value: found.isDone ? null : found.continueCursor, added: 0, removed: 0 };
+  });
+
+/**
+ * The movies purge hook (ADR 0024), first stage: `filesPage` until the files are done, then the
+ * `titles` stage.
  */
 export const files = internalMutation({
   args: cursorArgs,
   returns: v.null(),
   handler: async (ctx, { libraryId, cursor }) => {
-    const next = await purgeStep(ctx, libraryId, async (scope) => {
-      const found = await paginate(
-        ctx.db,
-        {
-          table: "mediaFiles",
-          index: "by_library_path",
-          range: (q) => q.eq("libraryId", libraryId),
-        },
-        { numItems: FILES_PAGE, cursor },
-      );
-
-      const leaving = found.page.filter((file) => !scope.keeps(file.path));
-
-      await inOrder(leaving, async (file) => {
-        await forgetTrickplay(ctx, file);
-
-        if (!scope.gone && !file.missing) {
-          await adjustPresent(ctx.db, file.titleId, file.episodeId, -1);
-        }
-
-        await ctx.db.delete(file._id);
-      });
-
-      if (!scope.gone) {
-        await moveTotals(ctx.db, libraryId, { ...nothingMoved, files: -leaving.length });
-      }
-
-      return { value: found.isDone ? null : found.continueCursor, added: 0, removed: 0 };
-    });
+    const next = await filesPage(ctx, libraryId, cursor);
 
     await ctx.scheduler.runAfter(
       0,
@@ -113,64 +125,87 @@ const deleteTitle = async (db: MutationCtx["db"], title: Doc<"titles">): Promise
     ...memberships,
   ];
 
-  await Promise.all(rows.map((row) => db.delete(row._id)));
-
   const done = rows.length === 0;
+
+  // Out of every scan's and writer's reach from its first deletion on, so a file that returns
+  // meanwhile builds a new title instead of joining one that is half gone.
+  if (!done && title.purging !== true) {
+    await db.patch(titleId, { purging: true, matchKey: purgingKey(titleId) });
+  }
+
+  await Promise.all(rows.map((row) => db.delete(row._id)));
 
   if (done) await db.delete(titleId);
 
   return { done, episodes: episodes.length };
 };
 
+/** Where the title stage goes next: the same page again while a title's rows remain. */
+export interface TitlesNext {
+  readonly cursor: string | null;
+  readonly more: boolean;
+}
+
 /**
- * The movies purge hook, second stage: deletes a page of the library's titles that no file plays
- * any more, with their episodes, seasons, credits, genre rows, and collection memberships, 200 of
- * each a call. Once the library is gone and its last title went, its totals go too.
+ * One page of the purge's second stage: deletes 10 of the library's titles a page that no file
+ * plays any more, or that an earlier page started deleting, with their episodes, seasons,
+ * credits, genre rows, and collection memberships, 200 of each a call. It pages by when each
+ * title was added, which the purge never changes. Once the library is gone and its last title
+ * went, its totals go too.
  */
+export const titlesPage = async (
+  ctx: MutationCtx,
+  libraryId: Id<"libraries">,
+  cursor: string | null,
+): Promise<TitlesNext> =>
+  purgeStep(ctx, libraryId, async (scope) => {
+    const found = await paginate(
+      ctx.db,
+      {
+        table: "titles",
+        index: "by_library_added",
+        range: (q) => q.eq("libraryId", libraryId),
+      },
+      { numItems: TITLES_PAGE, cursor },
+    );
+
+    const orphans = await inOrder(found.page, async (title) =>
+      scope.gone ||
+      title.purging === true ||
+      (await ctx.db
+        .query("mediaFiles")
+        .withIndex("by_title", (q) => q.eq("titleId", title._id))
+        .first()) === null
+        ? [title]
+        : [],
+    );
+
+    const deleted = await inOrder(orphans.flat(), (title) => deleteTitle(ctx.db, title));
+    const finished = deleted.every((one) => one.done);
+    const removed = deleted.filter((one) => one.done).length;
+
+    if (!scope.gone) {
+      await moveTotals(ctx.db, libraryId, {
+        ...nothingMoved,
+        episodes: -deleted.reduce((sum, one) => sum + one.episodes, 0),
+      });
+    }
+
+    const value: TitlesNext = !finished
+      ? { cursor, more: true }
+      : { cursor: found.continueCursor, more: !found.isDone };
+
+    if (!value.more && scope.gone) await forgetTotals(ctx.db, libraryId);
+
+    return { value, added: 0, removed };
+  });
+
+/** The movies purge hook, second stage: `titlesPage` until no title is left to delete. */
 export const titles = internalMutation({
   args: cursorArgs,
   returns: v.null(),
   handler: async (ctx, { libraryId, cursor }) => {
-    const next = await purgeStep(ctx, libraryId, async (scope) => {
-      const found = await paginate(
-        ctx.db,
-        {
-          table: "titles",
-          index: "by_library_match",
-          range: (q) => q.eq("libraryId", libraryId),
-        },
-        { numItems: TITLES_PAGE, cursor },
-      );
-
-      const orphans = await inOrder(found.page, async (title) =>
-        scope.gone ||
-        (await ctx.db
-          .query("mediaFiles")
-          .withIndex("by_title", (q) => q.eq("titleId", title._id))
-          .first()) === null
-          ? [title]
-          : [],
-      );
-
-      const deleted = await inOrder(orphans.flat(), (title) => deleteTitle(ctx.db, title));
-      const finished = deleted.every((one) => one.done);
-      const removed = deleted.filter((one) => one.done).length;
-
-      if (!scope.gone) {
-        await moveTotals(ctx.db, libraryId, {
-          ...nothingMoved,
-          episodes: -deleted.reduce((sum, one) => sum + one.episodes, 0),
-        });
-      }
-
-      const value = !finished
-        ? { cursor, more: true }
-        : { cursor: found.continueCursor, more: !found.isDone };
-
-      if (!value.more && scope.gone) await forgetTotals(ctx.db, libraryId);
-
-      return { value, added: 0, removed };
-    });
+    const next = await titlesPage(ctx, libraryId, cursor);
 
     if (next.more) {
       await ctx.scheduler.runAfter(0, internal.movies.purge.titles, {

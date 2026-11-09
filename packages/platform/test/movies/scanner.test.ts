@@ -82,7 +82,7 @@ describe.skipIf(stack === undefined)("movies scanner callbacks", { timeout: 180_
     await finishJob(stack, lease);
   });
 
-  it("refuse a batch over 500 and a path outside the library's folders", async () => {
+  it("refuse an upsert over 80 files, a missing batch over 500 paths, and a path outside the folders", async () => {
     if (stack === undefined) return;
     const admin = await member(stack, "scanner-bounds", "admin");
     const { libraryId, scanJobId, roots } = await moviesLibrary(admin, "Bounded");
@@ -91,7 +91,7 @@ describe.skipIf(stack === undefined)("movies scanner callbacks", { timeout: 180_
 
     const many = Array.from({ length: 501 }, (_, n) => movieFile(join(root, `${n}.mkv`)));
 
-    await expect(upsert(stack, lease, many)).rejects.toThrow(/at most 500/u);
+    await expect(upsert(stack, lease, many.slice(0, 81))).rejects.toThrow(/at most 80/u);
     await expect(upsert(stack, lease, [movieFile("/elsewhere/a.mkv")])).rejects.toThrow(
       /not a path inside/u,
     );

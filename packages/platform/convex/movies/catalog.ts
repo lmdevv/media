@@ -4,6 +4,7 @@ import type { Infer, Value } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import type { JobCtx } from "../core/jobs/store";
+import { fail } from "../core/lib/errors";
 import { nothingMoved } from "./totals";
 import type { Moved } from "./totals";
 import { forgetTrickplay, queueTrickplay } from "./trickplayState";
@@ -19,6 +20,13 @@ export const NO_EXTERNAL_IDS: ExternalIds = { tmdb: null, imdb: null, tvdb: null
 
 /** Most studios, countries, or recommendations a title keeps. */
 const TITLE_LIST_LIMIT = 20;
+
+/**
+ * Most genres a title may carry, the same bound as its other lists. Each genre is a `titleGenres`
+ * row, so this bounds the rows one title write reads and writes: a scan refuses a title with more
+ * (`checkTitle`) before it writes anything.
+ */
+export const GENRES_MAX = TITLE_LIST_LIMIT;
 
 /** Most keywords a title keeps. */
 const TITLE_TAG_LIMIT = 40;
@@ -75,10 +83,11 @@ const genreKey = (genre: string): string => genre.trim().toLowerCase();
 
 /** Makes the title's genre rows match its current genres and sort fields. */
 const syncTitleGenres = async (db: Db, title: Doc<"titles">): Promise<void> => {
+  // Every write of a title's genres goes through here and keeps at most GENRES_MAX rows.
   const rows = await db
     .query("titleGenres")
     .withIndex("by_title", (q) => q.eq("titleId", title._id))
-    .collect();
+    .take(GENRES_MAX);
 
   const wanted = new Set(title.genres.map(genreKey).filter((genre) => genre !== ""));
 
@@ -108,6 +117,29 @@ const syncTitleGenres = async (db: Db, title: Doc<"titles">): Promise<void> => {
     ),
   );
 };
+
+/**
+ * Refuses a scanned title whose genres would write more than `GENRES_MAX` rows, before any write,
+ * so every scanner and metadata call stays inside one mutation's limits (ADR 0013).
+ *
+ * @throws ConvexError `invalid_args` for a title with more distinct genres than that.
+ */
+export const checkTitle = (title: ScannedTitle): void => {
+  const genres = new Set(title.genres.map(genreKey).filter((genre) => genre !== ""));
+
+  if (genres.size > GENRES_MAX) {
+    fail(
+      "invalid_args",
+      `A title carries at most ${GENRES_MAX} genres; ${title.name} has ${genres.size}`,
+    );
+  }
+};
+
+/**
+ * The key a title takes once the purge starts deleting it: its own id, which no scanned key can
+ * be, so no scan or metadata job finds it by its old key again (ADR 0024).
+ */
+export const purgingKey = (titleId: Id<"titles">): string => `purging:${titleId}`;
 
 const checkedTrailer = (value: ScannedTitle["trailer"]) =>
   value === undefined || value === null || YOUTUBE_KEY.test(value.key) ? value : null;
@@ -257,12 +289,13 @@ const upsertTitle = async (
   previous: Doc<"titles"> | null,
 ): Promise<Landed<Doc<"titles">>> => {
   const unchanged = { moved: nothingMoved };
+  const kept = previous?.purging === true ? null : previous;
 
-  if (previous?.matchStatus === "manual") return { row: previous, ...unchanged };
+  if (kept?.matchStatus === "manual") return { row: kept, ...unchanged };
 
   const existing =
-    previous?.libraryId === libraryId && previous.matchKey === scanned.matchKey
-      ? previous
+    kept?.libraryId === libraryId && kept.matchKey === scanned.matchKey
+      ? kept
       : await db
           .query("titles")
           .withIndex("by_library_match", (q) =>

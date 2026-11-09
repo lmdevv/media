@@ -13,8 +13,13 @@ import {
   hasTotals,
   moviesLibrary,
   rowsOf,
+  purgePage,
+  purgeStage,
+  setFoldersQuietly,
+  titleStateOf,
   totalsOf,
   upsert,
+  upsertAll,
 } from "./catalog";
 import { episodeFile, movieFile, scannedTitle } from "./scanned";
 
@@ -32,21 +37,14 @@ describe.skipIf(stack === undefined)("the movies purge", { timeout: 180_000 }, (
     const lease = await claimJob(stack, "movies.scan", scanJobId);
     const show = scannedTitle("show", "tmdb:7", "Split show");
 
-    await upsert(
-      stack,
-      lease,
-      [
-        ...Array.from({ length: 600 }, (_, n) => movieFile(join(kept, `kept-${n}.mkv`))),
-        episodeFile(join(kept, "show", "e1.mkv"), show, 1, 1),
-        episodeFile(join(dropped, "show", "e2.mkv"), show, 1, 2),
-      ].slice(0, 500),
-    );
-    await upsert(stack, lease, [
-      ...Array.from({ length: 100 }, (_, n) => movieFile(join(kept, `kept-${n + 500}.mkv`))),
+    const items = [
+      ...Array.from({ length: 600 }, (_, n) => movieFile(join(kept, `kept-${n}.mkv`))),
       episodeFile(join(kept, "show", "e1.mkv"), show, 1, 1),
       episodeFile(join(dropped, "show", "e2.mkv"), show, 1, 2),
       ...Array.from({ length: 30 }, (_, n) => movieFile(join(dropped, `dropped-${n}.mkv`))),
-    ]);
+    ];
+
+    await upsertAll(stack, lease, items);
 
     const before = { titles: 631, episodes: 2, files: 632 };
 
@@ -87,5 +85,81 @@ describe.skipIf(stack === undefined)("the movies purge", { timeout: 180_000 }, (
         120_000,
       ),
     ).toBe(true);
+  });
+
+  it("build a new title for a show that returns while the purge is deleting its old one", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "purge-return", "admin");
+    const { libraryId, scanJobId, roots } = await moviesLibrary(admin, "Returning", 3);
+    const [kept, dropped, moved] = roots;
+
+    if (kept === undefined || dropped === undefined || moved === undefined) {
+      throw new Error("made too few folders");
+    }
+
+    const show = { ...scannedTitle("show", "tmdb:11", "Long show"), genres: ["Drama"] };
+    const first = await claimJob(stack, "movies.scan", scanJobId);
+
+    await upsertAll(
+      stack,
+      first,
+      Array.from({ length: 200 }, (_, n) =>
+        episodeFile(join(dropped, `${n + 1}.mkv`), show, 1, n + 1),
+      ),
+    );
+
+    const landed = await upsert(stack, first, [
+      episodeFile(join(dropped, "201.mkv"), show, 1, 201),
+    ]);
+
+    if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
+
+    await finishJob(stack, first);
+
+    const oldTitle = landed.value.files[0]?.titleId;
+
+    if (oldTitle === undefined) throw new Error("no title landed");
+
+    await setFoldersQuietly(stack, libraryId, [kept]);
+    await purgeStage(stack, libraryId, "files");
+
+    expect(await purgePage(stack, libraryId, "titles", null)).toMatchObject({ more: true });
+    expect(await titleStateOf(stack, oldTitle)).toMatchObject({ purging: true, episodes: 1 });
+
+    await setFoldersQuietly(stack, libraryId, [kept, dropped, moved]);
+
+    const { jobId } = await admin.signedIn.client.mutation(api.core.libraries.scan, { libraryId });
+    const second = await claimJob(stack, "movies.scan", jobId);
+
+    const returned = await upsert(stack, second, [
+      episodeFile(join(dropped, "201.mkv"), show, 1, 201),
+      episodeFile(join(moved, "202.mkv"), show, 1, 202),
+    ]);
+
+    await finishJob(stack, second);
+
+    if (returned.outcome !== "held") throw new Error(`upsert answered ${returned.outcome}`);
+
+    const newTitles = new Set(returned.value.files.map((file) => file.titleId));
+    const [newTitle] = newTitles;
+
+    expect(newTitles.size).toBe(1);
+    expect(newTitle).not.toBe(oldTitle);
+
+    await purgeStage(stack, libraryId, "titles");
+
+    expect(await titleStateOf(stack, oldTitle)).toBeNull();
+
+    if (newTitle === undefined) throw new Error("no new title");
+
+    expect(await titleStateOf(stack, newTitle)).toEqual({
+      purging: false,
+      episodes: 2,
+      seasons: 1,
+      genres: 1,
+      seasonsHoldEpisodes: true,
+    });
+    expect(await totalsOf(stack, libraryId)).toEqual(await rowsOf(stack, libraryId));
+    expect(await totalsOf(stack, libraryId)).toEqual({ titles: 1, episodes: 2, files: 2 });
   });
 });

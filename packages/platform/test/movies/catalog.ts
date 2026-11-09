@@ -244,3 +244,74 @@ export const finishJob = (stack: CoreStack, lease: Lease) =>
       Schema.Struct({ outcome: Schema.String }),
     ),
   );
+
+/** The most files one `movies/scanner:upsert` takes. */
+export const UPSERT_BATCH = 80;
+
+/** Writes `items` under the scan lease in batches of `UPSERT_BATCH`, one after another. */
+export const upsertAll = async (
+  stack: CoreStack,
+  lease: Lease,
+  items: ReadonlyArray<ScannedItem>,
+): Promise<void> => {
+  const batches = Array.from({ length: Math.ceil(items.length / UPSERT_BATCH) }, (_, n) =>
+    items.slice(n * UPSERT_BATCH, (n + 1) * UPSERT_BATCH),
+  );
+
+  await batches.reduce<Promise<void>>(async (previous, batch) => {
+    await previous;
+
+    const landed = await upsert(stack, lease, batch);
+
+    if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
+  }, Promise.resolve());
+};
+
+const TitleState = Schema.NullOr(
+  Schema.Struct({
+    purging: Schema.Boolean,
+    episodes: Schema.Finite,
+    seasons: Schema.Finite,
+    genres: Schema.Finite,
+    seasonsHoldEpisodes: Schema.Boolean,
+  }),
+);
+
+/** A title's state after a purge, or null once it is gone. */
+export const titleStateOf = (stack: CoreStack, titleId: Id<"titles">) =>
+  runFunction(stack, internal.movies.probe.titleState, { titleId }, TitleState);
+
+/** Makes `folders` the library's folders without scheduling its purge. */
+export const setFoldersQuietly = (
+  stack: CoreStack,
+  libraryId: Id<"libraries">,
+  folders: ReadonlyArray<string>,
+) =>
+  runFunction(
+    stack,
+    internal.movies.probe.setFolders,
+    { libraryId, folders: [...folders] },
+    Schema.Null,
+  );
+
+const PurgeNext = Schema.Struct({ cursor: Schema.NullOr(Schema.String), more: Schema.Boolean });
+
+/** Runs one page of a purge stage, scheduling nothing, and answers where the stage goes next. */
+export const purgePage = (
+  stack: CoreStack,
+  libraryId: Id<"libraries">,
+  stage: "files" | "titles",
+  cursor: string | null,
+) => runFunction(stack, internal.movies.probe.purgePage, { libraryId, stage, cursor }, PurgeNext);
+
+/** Runs a purge stage page by page to its end. */
+export const purgeStage = async (
+  stack: CoreStack,
+  libraryId: Id<"libraries">,
+  stage: "files" | "titles",
+  cursor: string | null = null,
+): Promise<void> => {
+  const next = await purgePage(stack, libraryId, stage, cursor);
+
+  if (next.more) await purgeStage(stack, libraryId, stage, next.cursor);
+};

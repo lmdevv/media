@@ -7,6 +7,7 @@ import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { runFunction } from "../admin";
 import { member } from "../devices";
+import { seedLibrary, sessionOf, show } from "../probe";
 import { runServer, runServerAs } from "../service";
 import { refusal } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
@@ -105,12 +106,18 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
 
     expect(
       await refusal(
-        runServerAs(stack, admin.signedIn, api.movies.metadata.metadataTarget, { titleId }, Target),
+        runServerAs(
+          stack,
+          admin.signedIn,
+          api.movies.metadata.metadataTarget,
+          { titleId, cursor: null },
+          Target,
+        ),
       ),
     ).toBe("forbidden");
-    expect(await runServer(stack, api.movies.metadata.metadataTarget, { titleId }, Target)).toEqual(
-      { name: "Sintel", year: null },
-    );
+    expect(
+      await runServer(stack, api.movies.metadata.metadataTarget, { titleId, cursor: null }, Target),
+    ).toEqual({ name: "Sintel", year: null });
     expect(
       await runServer(
         stack,
@@ -124,9 +131,9 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
         Done,
       ),
     ).toEqual({ outcome: "held", value: null });
-    expect(await runServer(stack, api.movies.metadata.metadataTarget, { titleId }, Target)).toEqual(
-      { name: "Sintel", year: 2010 },
-    );
+    expect(
+      await runServer(stack, api.movies.metadata.metadataTarget, { titleId, cursor: null }, Target),
+    ).toEqual({ name: "Sintel", year: 2010 });
 
     const refreshed = await runServer(
       stack,
@@ -269,5 +276,50 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
       { fileId: "not-an-id", version: null },
     ]);
     await finishJob(stack, lease);
+  });
+
+  it("list a show's episodes for a metadata job page by page, past any one page", async () => {
+    if (stack === undefined) return;
+    const owner = await sessionOf((await member(stack, "target-owner")).signedIn);
+
+    const long = await seedLibrary(stack, owner, {
+      name: "Long running",
+      kind: "movies",
+      items: [show("Daily show", null, 1001)],
+    });
+
+    const titleId = long.itemIds[0];
+
+    if (titleId === undefined) throw new Error("seeded no show");
+
+    const Page = Schema.Struct({
+      episodes: Schema.Array(Schema.Struct({ episodeId: Schema.String })),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+    });
+
+    const pages = async (
+      cursor: string | null = null,
+      seen: ReadonlyArray<number> = [],
+      ids: ReadonlyArray<string> = [],
+    ): Promise<{ readonly sizes: ReadonlyArray<number>; readonly ids: ReadonlyArray<string> }> => {
+      const page = await runServer(
+        stack,
+        api.movies.metadata.metadataTarget,
+        { titleId, cursor },
+        Page,
+      );
+
+      const sizes = [...seen, page.episodes.length];
+      const all = [...ids, ...page.episodes.map((one) => one.episodeId)];
+
+      return page.isDone ? { sizes, ids: all } : pages(page.continueCursor, sizes, all);
+    };
+
+    const listed = await pages();
+
+    expect(listed.sizes[0]).toBe(1000);
+    expect(new Set(listed.ids).size).toBe(1001);
+    expect(listed.ids).toHaveLength(1001);
   });
 });

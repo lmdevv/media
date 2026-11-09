@@ -88,8 +88,9 @@ export const episodeFile = (
   seasonNumber: number,
   episodeNumber: number,
   video = false,
+  size = 1,
 ): ScannedItem => ({
-  file: scannedFile(path, 1, 1, video),
+  file: scannedFile(path, size, size, video),
   title: show,
   episode: {
     seasonNumber,

@@ -67,6 +67,12 @@ export const moviesTables = {
     creditsHash: v.optional(v.string()),
     /** Digest of the collection the title's metadata names, likewise. */
     collectionHash: v.optional(v.string()),
+    /**
+     * Set when the purge starts deleting the title, in the mutation that deletes its first rows,
+     * with `matchKey` moved aside to `purgingKey`. Scans and writers never reuse it, so a file
+     * that returns builds a new title while the purge finishes this one (ADR 0024).
+     */
+    purging: v.optional(v.literal(true)),
   })
     .index("by_library_match", ["libraryId", "matchKey"])
     .index("by_kind_tmdb", ["kind", "externalIds.tmdb"])
