@@ -11,6 +11,7 @@ import { signTestToken } from "../testing/test-config.ts";
 import { resolveInsideRoots } from "./file-resolver.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
 import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
+import * as PlaybackReporter from "./playback-reporter.ts";
 import * as PlaybackToken from "./playback-token.ts";
 import * as StreamOwners from "./stream-owners.ts";
 import * as StreamSessions from "./stream-sessions.ts";
@@ -309,6 +310,90 @@ describe.skipIf(!hasFfmpeg)("slot credit", () => {
     );
 
     it.effect(
+      "a guest a household stream displaces before its encoder starts ends for want of a slot",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const { grant, request } = yield* setup;
+          const guest = { ...(yield* setup).grant, audience: "guest" as const };
+
+          const start = (as: PlaybackToken.PlaybackGrant) =>
+            Effect.gen(function* () {
+              const negotiation = yield* sessions.negotiate(as);
+
+              return yield* negotiation.start(request);
+            }).pipe(Effect.scoped);
+
+          holdNextStart();
+          const starting = yield* Effect.forkChild(start(guest).pipe(Effect.result));
+          yield* Effect.promise(() => pending.holding.promise);
+
+          const household = yield* start(grant);
+
+          pending.held.resolve();
+          const displaced = yield* Fiber.join(starting);
+
+          assert.isTrue(
+            Result.isFailure(displaced) &&
+              Predicate.isTagged(displaced.failure, "TranscodeCapacityReached"),
+            "the guest's start finds no slot",
+          );
+
+          const ended = (yield* (yield* PlaybackReporter.Recording).events)
+            .filter(PlaybackReporter.PlaybackEvent.guards.StreamEnded)
+            .filter((event) => event.sessionId === guest.sessionId);
+
+          assert.deepStrictEqual(
+            ended.map((event) => event.reason),
+            ["capacity-reached"],
+          );
+
+          yield* sessions.stop(household.streamId, grant);
+        }).pipe(Effect.ensuring(Effect.sync(() => pending.held.resolve()))),
+      60_000,
+    );
+
+    it.effect(
+      "a guest's resume stops waiting for a slot once its request is gone, so the stream answers again",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* StreamSessions.Service;
+          const { grant, request } = yield* setup;
+          const guest = { ...(yield* setup).grant, audience: "guest" as const };
+
+          const start = (as: PlaybackToken.PlaybackGrant) =>
+            Effect.gen(function* () {
+              const negotiation = yield* sessions.negotiate(as);
+
+              return yield* negotiation.start(request);
+            }).pipe(Effect.scoped);
+
+          const { streamId, generation, segmentIndex } = yield* start(guest);
+          yield* sessions.segment(streamId, generation, segmentIndex, guest).pipe(Effect.scoped);
+
+          const household = yield* start(grant);
+
+          const resuming = yield* Effect.forkChild(
+            sessions.segment(streamId, generation, segmentIndex, guest).pipe(Effect.scoped),
+          );
+
+          assert.isTrue(yield* stillWaiting(resuming), "the guest's resume waits for a slot");
+
+          yield* Fiber.interrupt(resuming);
+
+          const init = yield* sessions
+            .init(streamId, generation, guest)
+            .pipe(Effect.timeout("5 seconds"));
+
+          assert.isAbove(init.byteLength, 0, "the stream answers from its kept init");
+
+          yield* sessions.stop(household.streamId, grant);
+          yield* sessions.stop(streamId, guest);
+        }),
+      60_000,
+    );
+
+    it.effect(
       "a guest stream waits behind a household one and starts once it stops",
       () =>
         Effect.gen(function* () {
@@ -355,7 +440,7 @@ describe.skipIf(!hasFfmpeg)("slot credit", () => {
 
           const playing = yield* start(guest);
           const { streamId, generation, segmentIndex } = playing;
-          yield* sessions.segment(streamId, generation, segmentIndex, guest);
+          yield* sessions.segment(streamId, generation, segmentIndex, guest).pipe(Effect.scoped);
 
           const household = yield* start(grant);
 
@@ -363,7 +448,7 @@ describe.skipIf(!hasFfmpeg)("slot credit", () => {
           yield* sessions.playlist(streamId, generation, guest);
 
           const next = yield* Effect.forkChild(
-            sessions.segment(streamId, generation, segmentIndex, guest),
+            sessions.segment(streamId, generation, segmentIndex, guest).pipe(Effect.scoped),
           );
 
           assert.isTrue(yield* stillWaiting(next), "the guest waits for the slot");
@@ -371,7 +456,7 @@ describe.skipIf(!hasFfmpeg)("slot credit", () => {
           yield* sessions.stop(household.streamId, grant);
           const served = yield* Fiber.join(next);
 
-          assert.isAbove(served.paths.length, 0);
+          assert.isAbove(served.parts.length, 0);
           assert.strictEqual(yield* sessions.activeCount, 1);
 
           yield* sessions.stop(streamId, guest);

@@ -93,6 +93,11 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
           ? EndedSessions.layer.pipe(Layer.provideMerge(ConvexSessionReports.layer))
           : Layer.merge(SessionReports.layerNone, EndedSessions.layerNone);
 
+      const fileSystem = Layer.effect(
+        FileSystem.FileSystem,
+        Effect.map(FileSystem.FileSystem, options.fileSystem ?? ((real) => real)),
+      );
+
       const services = servicesLayer.pipe(
         Layer.provideMerge(
           Layer.mergeAll(
@@ -104,15 +109,10 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
         ),
         Layer.provideMerge(TestConvex.layer),
         Layer.provideMerge(config),
-        Layer.provide(
-          Layer.effect(
-            FileSystem.FileSystem,
-            Effect.map(FileSystem.FileSystem, options.fileSystem ?? ((real) => real)),
-          ),
-        ),
+        Layer.provide(fileSystem),
       );
 
-      const server = serve(routesLayer).pipe(
+      const server = serve(routesLayer.pipe(Layer.provide(fileSystem))).pipe(
         Layer.provideMerge(NodeHttpServer.layer(createServer, { port: 0, host: "127.0.0.1" })),
       );
 

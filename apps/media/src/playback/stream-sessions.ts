@@ -95,8 +95,13 @@ interface StreamView {
   readonly plan: SegmentPlan;
 }
 
-interface SegmentFiles {
-  readonly paths: ReadonlyArray<string>;
+interface ServedPart {
+  readonly file: FileSystem.File;
+  readonly sizeBytes: number;
+}
+
+interface ServedSegment {
+  readonly parts: ReadonlyArray<ServedPart>;
   readonly sizeBytes: number;
 }
 
@@ -148,13 +153,17 @@ export interface Interface {
     streamId: StreamId,
     generation: number,
     grant: PlaybackGrant,
-  ) => Effect.Effect<SegmentFiles, StreamRequestError>;
+  ) => Effect.Effect<Uint8Array, StreamRequestError>;
+  /**
+   * Opens the files of segment `index` for the scope; the stream keeps their folder until the
+   * scope closes.
+   */
   readonly segment: (
     streamId: StreamId,
     generation: number,
     index: number,
     grant: PlaybackGrant,
-  ) => Effect.Effect<SegmentFiles, StreamRequestError>;
+  ) => Effect.Effect<ServedSegment, StreamRequestError, Scope.Scope>;
   /** Moves playback to `seconds`, starting a new generation unless that point is already produced. */
   readonly seek: (
     streamId: StreamId,
@@ -167,6 +176,7 @@ export interface Interface {
   ) => Effect.Effect<void, StreamNotFound | StreamAccessDenied>;
   /** Number of streams whose encoder runs; a released stream waiting for its player is not one. */
   readonly activeCount: Effect.Effect<number>;
+  /** Runs whose ffmpeg has not exited yet, closed streams' included, such as a stuck one's. */
   readonly runsAwaitingExit: Effect.Effect<number>;
 }
 
@@ -231,10 +241,13 @@ interface Generation {
   readonly directory: string;
   readonly scope: Scope.Closeable;
   readonly readers: Scope.Closeable;
+  readonly files: Scope.Closeable;
   readonly exit: Deferred.Deferred<void, MediaTools.MediaToolFailed>;
   readonly fragments: Ref.Ref<ReadonlyArray<Fragment>>;
   readonly refreshLock: Semaphore.Semaphore;
   readonly wake: MutableRef.MutableRef<Deferred.Deferred<void>>;
+  /** The read of the run's new fragments in progress, with the fragment wake it began under. */
+  readonly refreshing: MutableRef.MutableRef<Option.Option<Refresh>>;
   readonly endUnknownLogged: MutableRef.MutableRef<boolean>;
   /** The video timing read from the run's `init.mp4`, once its first fragment is written. */
   readonly videoTiming: MutableRef.MutableRef<Option.Option<VideoTiming>>;
@@ -242,11 +255,19 @@ interface Generation {
   readonly paused: Ref.Ref<boolean>;
 }
 
+interface Refresh {
+  readonly seen: Deferred.Deferred<void>;
+  readonly reading: Fiber.Fiber<boolean>;
+}
+
 interface RunScope {
   readonly scope: Scope.Closeable;
   readonly readers: Scope.Closeable;
   readonly files: Scope.Closeable;
   readonly stopping: MutableRef.MutableRef<boolean>;
+  /** Once its process exited, which frees its slot. */
+  readonly exited: Deferred.Deferred<void>;
+  /** Once its folder is gone too, after its reads and the responses that hold its files. */
   readonly stopped: Deferred.Deferred<void>;
 }
 
@@ -259,23 +280,36 @@ interface Runs {
   readonly sealed: boolean;
 }
 
+/** A generation's init segment kept while its stream is released, and the reads of it. */
+interface KeptInit {
+  readonly generation: number;
+  readonly file: string;
+  readonly readers: Scope.Closeable;
+  readonly draining: MutableRef.MutableRef<boolean>;
+  /** Once no read of the file is open and none can start. */
+  readonly drained: Deferred.Deferred<void>;
+}
+
 interface Lifecycle {
   readonly streamId: StreamId;
   readonly scope: Scope.Closeable;
   readonly runs: Ref.Ref<Runs>;
+  readonly keptInits: Ref.Ref<ReadonlyMap<number, KeptInit>>;
+  /** Runs of every stream, closed ones included, whose process has not exited. */
+  readonly serverRunsAwaitingExit: Ref.Ref<number>;
   readonly directory: string;
   readonly torndown: Deferred.Deferred<void>;
 }
 
 type Encoder = Data.TaggedEnum<{
   Running: { readonly run: Run };
-  Released: { readonly since: number; readonly keptInit: Option.Option<string> };
+  Released: { readonly since: number; readonly keptInit: Option.Option<KeptInit> };
 }>;
 
 const Encoder = Data.taggedEnum<Encoder>();
 
 type InitSource = Data.TaggedEnum<{
-  Kept: { readonly file: string };
+  Kept: { readonly kept: KeptInit };
   Run: { readonly run: Generation };
 }>;
 
@@ -285,6 +319,9 @@ const InitSource = Data.taggedEnum<InitSource>();
 interface Admission extends StreamLiveness.Use {
   readonly admitting: boolean;
 }
+
+/** A lifecycle step of a stream; `callerGone` completes once its caller stops waiting for it. */
+type Step<A, E> = (callerGone: Effect.Effect<void>) => Effect.Effect<A, E>;
 
 /** Reads a stream's state now and judges its use against it, for a close that must still hold. */
 type Condition = Effect.Effect<(use: StreamLiveness.Use) => boolean>;
@@ -345,10 +382,19 @@ const beginStop = (stream: Lifecycle, run: RunScope) =>
   Effect.suspend(() =>
     MutableRef.getAndSet(run.stopping, true)
       ? Effect.void
-      : Effect.all([Scope.close(run.scope, Exit.void), Scope.close(run.readers, Exit.void)], {
-          concurrency: "unbounded",
-          discard: true,
-        }).pipe(
+      : Effect.all(
+          [
+            Scope.close(run.scope, Exit.void).pipe(
+              Effect.ensuring(
+                Ref.update(stream.serverRunsAwaitingExit, (count) => count - 1).pipe(
+                  Effect.andThen(Deferred.succeed(run.exited, undefined)),
+                ),
+              ),
+            ),
+            Scope.close(run.readers, Exit.void),
+          ],
+          { concurrency: "unbounded", discard: true },
+        ).pipe(
           Effect.andThen(Scope.close(run.files, Exit.void)),
           Effect.ensuring(
             Ref.update(stream.runs, (runs) => ({
@@ -383,10 +429,14 @@ const whileOpen = <A, E, R>(scope: Scope.Scope, effect: Effect.Effect<A, E, R>) 
     return Option.some(yield* effect.pipe(Effect.ensuring(Deferred.succeed(done, undefined))));
   });
 
-const readerOf = <A, E>(generation: Generation, read: Effect.Effect<A, E>) =>
-  read.pipe(
-    Effect.forkIn(generation.readers),
-    Effect.flatMap(Fiber.await),
+const finishOnceStarted = <A, E>(read: Effect.Effect<A, E>) =>
+  Effect.uninterruptibleMask((restore) => restore(Effect.void).pipe(Effect.andThen(read)));
+
+const forkReader = <A, E>(generation: Generation, read: Effect.Effect<A, E>) =>
+  finishOnceStarted(read).pipe(Effect.forkIn(generation.readers));
+
+const awaitReader = <A, E>(reading: Fiber.Fiber<A, E>) =>
+  Fiber.await(reading).pipe(
     Effect.flatMap((exit): Effect.Effect<Option.Option<A>, E> =>
       Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
         ? Effect.succeedNone
@@ -394,14 +444,32 @@ const readerOf = <A, E>(generation: Generation, read: Effect.Effect<A, E>) =>
     ),
   );
 
+const readerOf = <A, E>(generation: Generation, read: Effect.Effect<A, E>) =>
+  forkReader(generation, read).pipe(Effect.flatMap(awaitReader));
+
 const stopWaitingAfter =
   <L>(wait: Duration.Duration, late: () => L) =>
   <A, E, R>(request: Effect.Effect<A, E, R>) =>
     request.pipe(Effect.timeoutOrElse({ duration: wait, orElse: () => Effect.fail(late()) }));
 
-const awaitStopped = (run: RunScope) =>
+const endOfStart = (
+  cause: Cause.Cause<StartError>,
+  lostSlot: boolean,
+): PlaybackReporter.StreamEndReason =>
+  Cause.hasInterrupts(cause) ? "abandoned" : lostSlot ? "capacity-reached" : "failed";
+
+const drain = (kept: KeptInit) =>
+  Effect.suspend(() =>
+    MutableRef.getAndSet(kept.draining, true)
+      ? Deferred.await(kept.drained)
+      : Scope.close(kept.readers, Exit.void).pipe(
+          Effect.ensuring(Deferred.succeed(kept.drained, undefined)),
+        ),
+  );
+
+const awaitExited = (run: RunScope) =>
   Effect.interruptible(
-    Deferred.await(run.stopped).pipe(Effect.timeoutOption(STOP_WAIT), Effect.asVoid),
+    Deferred.await(run.exited).pipe(Effect.timeoutOption(STOP_WAIT), Effect.asVoid),
   );
 
 const make = Effect.gen(function* () {
@@ -417,6 +485,7 @@ const make = Effect.gen(function* () {
   const owners = yield* StreamOwners.Service;
   const reports = yield* SessionReports.Service;
   const sessions = yield* Ref.make<ReadonlyMap<StreamId, Session>>(new Map());
+  const awaitingExit = yield* Ref.make(0);
   const transcodes = yield* EncoderSlots.make(config.maxConcurrentTranscodes);
   const copies = yield* EncoderSlots.make(config.maxConcurrentRemuxes);
   const registry = yield* Semaphore.make(1);
@@ -500,6 +569,7 @@ const make = Effect.gen(function* () {
       readers: yield* Scope.make(),
       files: yield* Scope.make(),
       stopping: MutableRef.make(false),
+      exited: yield* Deferred.make<void>(),
       stopped: yield* Deferred.make<void>(),
     };
 
@@ -507,6 +577,11 @@ const make = Effect.gen(function* () {
       runs.sealed
         ? ([false, runs] as const)
         : ([true, { ...runs, live: new Map(runs.live).set(run.scope, run) }] as const),
+    ).pipe(
+      Effect.tap((added) =>
+        added ? Ref.update(stream.serverRunsAwaitingExit, (count) => count + 1) : Effect.void,
+      ),
+      Effect.uninterruptible,
     );
 
     if (!opened) return yield* new StreamNotFound({ streamId: stream.streamId });
@@ -527,6 +602,10 @@ const make = Effect.gen(function* () {
               yield* Effect.forEach(live, (run) => beginStop(stream, run), { discard: true });
               yield* Fiber.await(fibers);
               yield* Effect.forEach(live, (run) => Deferred.await(run.stopped), { discard: true });
+              yield* Effect.forEach((yield* Ref.get(stream.keptInits)).values(), drain, {
+                concurrency: "unbounded",
+                discard: true,
+              });
               yield* fs.remove(stream.directory, { recursive: true }).pipe(Effect.ignore);
             }).pipe(
               Effect.ensuring(Deferred.succeed(stream.torndown, undefined)),
@@ -542,22 +621,27 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const onStreamFiber = <A, E>(session: Session, locked: Effect.Effect<A, E>) =>
-    locked.pipe(
-      Effect.forkIn(session.scope),
-      Effect.flatMap(Fiber.await),
-      Effect.flatMap((exit): Effect.Effect<A, E | StreamNotFound> =>
-        Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
-          ? Effect.fail(new StreamNotFound({ streamId: session.streamId }))
-          : exit,
-      ),
+  const onStreamFiber = <A, E>(session: Session, step: Step<A, E>) =>
+    Effect.gen(function* () {
+      const gone = yield* Deferred.make<void>();
+      const fiber = yield* step(Deferred.await(gone)).pipe(Effect.forkIn(session.scope));
+
+      const exit = yield* Fiber.await(fiber).pipe(
+        Effect.onInterrupt(() => Deferred.succeed(gone, undefined)),
+      );
+
+      return yield* Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+        ? Effect.fail(new StreamNotFound({ streamId: session.streamId }))
+        : exit;
+    });
+
+  const transition = <A, E>(session: Session, step: Step<A, E>) =>
+    onStreamFiber(session, (callerGone) => session.lane.withPermits(1)(step(callerGone)));
+
+  const transitionIfIdle = <A, E>(session: Session, step: Step<A, E>) =>
+    onStreamFiber(session, (callerGone) =>
+      session.lane.withPermitsIfAvailable(1)(step(callerGone)),
     );
-
-  const transition = <A, E>(session: Session, step: Effect.Effect<A, E>) =>
-    onStreamFiber(session, session.lane.withPermits(1)(step));
-
-  const transitionIfIdle = <A, E>(session: Session, step: Effect.Effect<A, E>) =>
-    onStreamFiber(session, session.lane.withPermitsIfAvailable(1)(step));
 
   /**
    * Closes `session` unless `condition` fails on its use when the close begins, so a request
@@ -694,6 +778,27 @@ const make = Effect.gen(function* () {
     (refresh, generation) => generation.refreshLock.withPermits(1)(refresh),
   );
 
+  const parsedNewFragments = (generation: Generation) =>
+    Effect.suspend(() => {
+      const seen = MutableRef.get(generation.wake);
+      const current = MutableRef.get(generation.refreshing);
+
+      if (
+        Option.isSome(current) &&
+        current.value.seen === seen &&
+        current.value.reading.pollUnsafe() === undefined
+      ) {
+        return awaitReader(current.value.reading);
+      }
+
+      return forkReader(generation, refreshFragments(generation)).pipe(
+        Effect.tap((reading) =>
+          Effect.sync(() => MutableRef.set(generation.refreshing, Option.some({ seen, reading }))),
+        ),
+        Effect.flatMap(awaitReader),
+      );
+    }).pipe(Effect.map((parsed) => Option.getOrElse(parsed, () => false)));
+
   const producedRange = (
     session: Session,
     generation: Generation,
@@ -801,10 +906,12 @@ const make = Effect.gen(function* () {
       directory,
       scope,
       readers: run.readers,
+      files: run.files,
       exit,
       fragments: yield* Ref.make<ReadonlyArray<Fragment>>([]),
       refreshLock: yield* Semaphore.make(1),
       wake,
+      refreshing: MutableRef.make(Option.none<Refresh>()),
       endUnknownLogged: MutableRef.make(false),
       videoTiming: MutableRef.make(Option.none<VideoTiming>()),
       suspend: (paused) => Effect.suspend(() => MutableRef.get(suspender)(paused)),
@@ -815,7 +922,7 @@ const make = Effect.gen(function* () {
     const replaced = yield* Ref.getAndSet(session.generation, generation);
 
     if (number > 1 && replaced.number !== number) {
-      yield* fs.remove(keptInitOf(session, replaced.number)).pipe(Effect.ignore);
+      yield* retireKeptInit(session, replaced.number);
       yield* Effect.logInfo(LogEvent.streamMoved).pipe(
         Effect.annotateLogs({
           sessionId: session.sessionId,
@@ -832,7 +939,7 @@ const make = Effect.gen(function* () {
 
     const awaitPrevious = Option.match(previous, {
       onNone: () => Effect.void,
-      onSome: awaitStopped,
+      onSome: awaitExited,
     });
 
     const ready = yield* run.held.ready.pipe(Effect.timeoutOption(READY_WAIT));
@@ -932,8 +1039,7 @@ const make = Effect.gen(function* () {
     index: number,
     detail: string,
   ) {
-    const restarted = yield* transition(
-      session,
+    const restarted = yield* transition(session, () =>
       Effect.gen(function* () {
         const current = yield* Ref.get(session.generation);
 
@@ -1002,8 +1108,7 @@ const make = Effect.gen(function* () {
 
       const wake = MutableRef.get(generation.wake);
       const finished = yield* Deferred.isDone(generation.exit);
-      const refreshed = yield* readerOf(generation, refreshFragments(generation));
-      const parsed = Option.getOrElse(refreshed, () => false);
+      const parsed = yield* parsedNewFragments(generation);
       const fragments = yield* Ref.get(generation.fragments);
       const produced = producedRange(session, generation, fragments);
       const next = session.plan.starts[index + 1];
@@ -1049,10 +1154,7 @@ const make = Effect.gen(function* () {
 
         yield* Ref.set(session.served, true);
 
-        return {
-          paths: covering.map((fragment) => fragment.path),
-          sizeBytes: covering.reduce((total, fragment) => total + fragment.sizeBytes, 0),
-        } satisfies SegmentFiles;
+        return covering.map((fragment) => fragment.path);
       }
 
       const stopped = isClosed(generation.scope);
@@ -1072,7 +1174,7 @@ const make = Effect.gen(function* () {
     const generation = yield* Ref.get(session.generation);
 
     if (generation.number === 0 || (yield* Deferred.isDone(generation.exit))) return;
-    yield* readerOf(generation, refreshFragments(generation));
+    yield* parsedNewFragments(generation);
     const produced = producedRange(session, generation, yield* Ref.get(generation.fragments));
     const requested = yield* Ref.get(session.requested);
     const startOf = (index: number) => session.plan.starts[index] ?? session.plan.end;
@@ -1139,11 +1241,11 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const using = <A, E>(
+  const using = <A, E, R>(
     streamId: StreamId,
     grant: PlaybackGrant,
     notReady: (session: Session) => number,
-    f: (session: Session) => Effect.Effect<A, E>,
+    f: (session: Session) => Effect.Effect<A, E, R>,
   ) =>
     lookup(streamId, grant).pipe(
       Effect.flatMap((session) =>
@@ -1207,17 +1309,22 @@ const make = Effect.gen(function* () {
     audience: EncoderSlots.Audience,
     claimant: EncoderSlots.Claimant,
     wait: Duration.Duration,
+    callerGone: Effect.Effect<void>,
   ): Effect.Effect<Run, TranscodeCapacityReached | StreamNotFound> => {
     const pool = transcoding ? transcodes : copies;
+    const full = () => new TranscodeCapacityReached({ limit: pool.limit });
 
     return openRun(stream).pipe(
       Effect.flatMap((opened) =>
         (audience === "household"
           ? pool.household(opened.scope, claimant)
-          : pool.guest(opened.scope, claimant).pipe(
-              stopWaitingAfter(wait, () => new TranscodeCapacityReached({ limit: pool.limit })),
-              Effect.interruptible,
-            )
+          : pool
+              .guest(opened.scope, claimant)
+              .pipe(
+                stopWaitingAfter(wait, full),
+                Effect.raceFirst(callerGone.pipe(Effect.andThen(Effect.fail(full())))),
+                Effect.interruptible,
+              )
         ).pipe(
           Effect.map((held): Run => ({ ...opened, held })),
           Effect.onError(() => beginStop(stream, opened)),
@@ -1268,6 +1375,7 @@ const make = Effect.gen(function* () {
     session: Session,
     released: Encoder & { readonly _tag: "Released" },
     index: number,
+    callerGone: Effect.Effect<void>,
   ) {
     const current = yield* Ref.get(session.generation);
     const transcoding = isEncode(yield* Ref.get(session.video));
@@ -1299,6 +1407,7 @@ const make = Effect.gen(function* () {
           session.audience,
           { sessionId: session.sessionId, ticket: session.ticket },
           SEGMENT_WAIT,
+          callerGone,
         ),
       ),
       Effect.catchTags({
@@ -1357,14 +1466,16 @@ const make = Effect.gen(function* () {
     session: Session,
     index: number,
   ) {
-    return yield* transition(
-      session,
+    return yield* transition(session, (callerGone) =>
       Effect.gen(function* () {
         const encoder = yield* Ref.get(session.encoder);
 
-        if (Encoder.$is("Released")(encoder)) return yield* revive(session, encoder, index);
+        if (Encoder.$is("Released")(encoder)) {
+          return yield* revive(session, encoder, index, callerGone);
+        }
+
         const current = yield* Ref.get(session.generation);
-        yield* readerOf(current, refreshFragments(current));
+        yield* parsedNewFragments(current);
         const produced = producedRange(session, current, yield* Ref.get(current.fragments));
 
         if (index >= current.startSegment && index <= produced.head + LOOKAHEAD_SEGMENTS)
@@ -1376,12 +1487,13 @@ const make = Effect.gen(function* () {
   });
 
   const keepInit = Effect.fnUntraced(function* (session: Session, run: Generation) {
-    const kept = keptInitOf(session, run.number);
+    const known = (yield* Ref.get(session.keptInits)).get(run.number);
 
-    if (yield* fs.exists(kept).pipe(Effect.orElseSucceed(() => false))) return Option.some(kept);
+    if (known !== undefined) return Option.some(known);
     yield* refreshFragments(run);
 
-    const temporary = `${kept}.tmp`;
+    const file = keptInitOf(session, run.number);
+    const temporary = `${file}.tmp`;
 
     // ffmpeg's HLS muxer finishes `init.mp4` only when it writes the first fragment. The bytes are
     // written here rather than with `copyFile`, whose libuv implementation calls `fchown`: the
@@ -1390,13 +1502,55 @@ const make = Effect.gen(function* () {
       (yield* Ref.get(run.fragments)).length > 0 &&
       (yield* fs.readFile(path.join(run.directory, "init.mp4")).pipe(
         Effect.andThen((bytes) => fs.writeFile(temporary, bytes)),
-        Effect.andThen(fs.rename(temporary, kept)),
+        Effect.andThen(fs.rename(temporary, file)),
         Effect.as(true),
         Effect.catch(() => fs.remove(temporary).pipe(Effect.ignore, Effect.as(false))),
       ));
 
-    return copied ? Option.some(kept) : Option.none();
+    if (!copied) return Option.none<KeptInit>();
+
+    const made: KeptInit = {
+      generation: run.number,
+      file,
+      readers: yield* Scope.make(),
+      draining: MutableRef.make(false),
+      drained: yield* Deferred.make<void>(),
+    };
+
+    return Option.some(
+      yield* Ref.modify(session.keptInits, (current) => {
+        const existing = current.get(run.number);
+
+        return existing === undefined
+          ? ([made, new Map(current).set(run.number, made)] as const)
+          : ([existing, current] as const);
+      }),
+    );
   });
+
+  /** Reads a kept init on a reader its deletion waits for; none once its deletion began. */
+  const readKept = (kept: KeptInit) =>
+    finishOnceStarted(Effect.option(fs.readFile(kept.file))).pipe(
+      Effect.forkIn(kept.readers),
+      Effect.flatMap(awaitReader),
+      Effect.map(Option.flatten),
+    );
+
+  /** Deletes the init kept for `generation` once its reads end, without the caller waiting. */
+  const retireKeptInit = (stream: Lifecycle, generation: number) =>
+    Ref.get(stream.keptInits).pipe(
+      Effect.flatMap((current) => {
+        const kept = current.get(generation);
+
+        return kept === undefined
+          ? Effect.void
+          : drain(kept).pipe(
+              Effect.andThen(fs.remove(kept.file).pipe(Effect.ignore)),
+              Effect.forkDetach,
+              Effect.asVoid,
+            );
+      }),
+    );
 
   const keepInitWithin = (session: Session, run: Generation) =>
     readerOf(run, keepInit(session, run)).pipe(
@@ -1408,22 +1562,21 @@ const make = Effect.gen(function* () {
   const stopEncoder = Effect.fnUntraced(function* (
     session: Session,
     run: Run,
-    keptInit: Option.Option<string>,
+    keptInit: Option.Option<KeptInit>,
   ) {
     yield* Ref.set(
       session.encoder,
       Encoder.Released({ since: yield* Clock.currentTimeMillis, keptInit }),
     );
     yield* beginStop(session, run);
-    yield* awaitStopped(run);
+    yield* awaitExited(run);
   });
 
   const yieldEncoder = Effect.fn("StreamSessions.yieldEncoder")(function* (
     session: Session,
     run: Run,
   ) {
-    yield* transition(
-      session,
+    yield* transition(session, () =>
       Effect.gen(function* () {
         const encoder = yield* Ref.get(session.encoder);
 
@@ -1457,8 +1610,7 @@ const make = Effect.gen(function* () {
       : Effect.void;
 
   const release = Effect.fn("StreamSessions.release")(function* (session: Session) {
-    yield* transitionIfIdle(
-      session,
+    yield* transitionIfIdle(session, () =>
       Effect.gen(function* () {
         const encoder = yield* Ref.get(session.encoder);
 
@@ -1553,14 +1705,17 @@ const make = Effect.gen(function* () {
       streamId,
       scope: yield* Scope.make("sequential"),
       runs: yield* Ref.make<Runs>({ live: new Map(), sealed: false }),
+      keptInits: yield* Ref.make<ReadonlyMap<number, KeptInit>>(new Map()),
+      serverRunsAwaitingExit: awaitingExit,
       directory: path.join(config.transcodeDir, streamId),
       torndown: yield* Deferred.make<void>(),
     };
 
     const registered = yield* Ref.make(Option.none<Session>());
+    const lostSlot = yield* Ref.make(false);
     const limit = (isEncode(request.plan.video) ? transcodes : copies).limit;
 
-    return yield* startIn(stream, registered, grant, ticket, request).pipe(
+    return yield* startIn(stream, registered, lostSlot, grant, ticket, request).pipe(
       stopWaitingAfter(startWait, () => new TranscodeCapacityReached({ limit })),
       Effect.onExit((exit) =>
         Ref.get(registered).pipe(
@@ -1570,7 +1725,9 @@ const make = Effect.gen(function* () {
               onSome: (session) =>
                 Exit.isSuccess(exit)
                   ? leave(session)
-                  : closeSession(session, Exit.hasInterrupts(exit) ? "abandoned" : "failed"),
+                  : Ref.get(lostSlot).pipe(
+                      Effect.flatMap((lost) => closeSession(session, endOfStart(exit.cause, lost))),
+                    ),
             }),
           ),
         ),
@@ -1581,6 +1738,7 @@ const make = Effect.gen(function* () {
   const startIn = Effect.fnUntraced(function* (
     stream: Lifecycle,
     registered: Ref.Ref<Option.Option<Session>>,
+    lostSlot: Ref.Ref<boolean>,
     grant: PlaybackGrant,
     ticket: number,
     request: StartRequest,
@@ -1609,6 +1767,7 @@ const make = Effect.gen(function* () {
       grant.audience,
       { sessionId: grant.sessionId, ticket },
       START_WAIT,
+      Effect.never,
     );
 
     const placeholder: Generation = {
@@ -1620,10 +1779,12 @@ const make = Effect.gen(function* () {
       directory: "",
       scope: run.scope,
       readers: run.readers,
+      files: run.files,
       exit: yield* Deferred.make<void, MediaTools.MediaToolFailed>(),
       fragments: yield* Ref.make<ReadonlyArray<Fragment>>([]),
       refreshLock: yield* Semaphore.make(1),
       wake: MutableRef.make(Deferred.makeUnsafe<void>()),
+      refreshing: MutableRef.make(Option.none<Refresh>()),
       endUnknownLogged: MutableRef.make(false),
       videoTiming: MutableRef.make(Option.none<VideoTiming>()),
       suspend: () => Effect.void,
@@ -1701,12 +1862,15 @@ const make = Effect.gen(function* () {
     const refused = () =>
       new TranscodeCapacityReached({ limit: (transcoding ? transcodes : copies).limit });
 
-    const first = yield* transition(
-      session,
+    const first = yield* transition(session, () =>
       startGeneration(session, run, Option.none(), 1, segmentIndex),
     );
 
-    if (Option.isNone(first)) return yield* refused();
+    if (Option.isNone(first)) {
+      yield* Ref.set(lostSlot, true);
+
+      return yield* refused();
+    }
 
     const generation =
       hardwareOf(plan.mode) !== undefined
@@ -1744,8 +1908,7 @@ const make = Effect.gen(function* () {
     session: Session,
     generation: number,
   ) {
-    return yield* transition(
-      session,
+    return yield* transition(session, (callerGone) =>
       Effect.gen(function* () {
         const current = yield* currentGeneration(session, generation);
         const encoder = yield* Ref.get(session.encoder);
@@ -1753,10 +1916,10 @@ const make = Effect.gen(function* () {
         if (Encoder.$is("Running")(encoder)) return InitSource.Run({ run: current });
 
         if (Option.isSome(encoder.keptInit)) {
-          return InitSource.Kept({ file: encoder.keptInit.value });
+          return InitSource.Kept({ kept: encoder.keptInit.value });
         }
 
-        yield* revive(session, encoder, yield* Ref.get(session.requested));
+        yield* revive(session, encoder, yield* Ref.get(session.requested), callerGone);
 
         return InitSource.Run({ run: yield* currentGeneration(session, generation) });
       }),
@@ -1770,27 +1933,66 @@ const make = Effect.gen(function* () {
   ) {
     return yield* using(streamId, grant, noSegment, (session) =>
       Effect.gen(function* () {
-        const initPath = yield* InitSource.$match(yield* initSource(session, generation), {
-          Kept: ({ file }) => Effect.succeed(file),
+        const bytes = yield* InitSource.$match(yield* initSource(session, generation), {
+          Kept: ({ kept }) => readKept(kept),
           Run: ({ run }) =>
             awaitSegment(session, run, run.startSegment, SEGMENT_WAIT).pipe(
-              Effect.as(path.join(run.directory, "init.mp4")),
+              Effect.andThen(
+                readerOf(run, Effect.option(fs.readFile(path.join(run.directory, "init.mp4")))),
+              ),
+              Effect.map(Option.flatten),
             ),
         });
 
-        const info = yield* fs
-          .stat(initPath)
-          .pipe(
-            Effect.catch(() =>
-              currentGeneration(session, generation).pipe(
-                Effect.andThen(Effect.fail(new SegmentNotReady({ index: -1 }))),
-              ),
-            ),
-          );
+        if (Option.isSome(bytes)) return bytes.value;
+        yield* currentGeneration(session, generation);
 
-        return { paths: [initPath], sizeBytes: Number(info.size) } satisfies SegmentFiles;
+        return yield* new SegmentNotReady({ index: -1 });
       }),
     );
+  });
+
+  const serve = Effect.fnUntraced(function* (
+    generation: Generation,
+    index: number,
+    paths: ReadonlyArray<string>,
+  ) {
+    const caller = yield* Effect.scope;
+
+    const opened = yield* readerOf(
+      generation,
+      Effect.gen(function* () {
+        const released = yield* Deferred.make<void>();
+        const serving = yield* Scope.fork(generation.files);
+
+        yield* Scope.addFinalizer(serving, Deferred.await(released));
+        yield* Scope.addFinalizer(
+          caller,
+          Deferred.succeed(released, undefined).pipe(
+            Effect.andThen(Scope.close(serving, Exit.void)),
+          ),
+        );
+
+        return yield* Effect.forEach(paths, (part) =>
+          fs
+            .open(part)
+            .pipe(
+              Effect.flatMap((file) =>
+                file.stat.pipe(
+                  Effect.map((info): ServedPart => ({ file, sizeBytes: Number(info.size) })),
+                ),
+              ),
+            ),
+        ).pipe(Scope.provide(caller), Effect.option);
+      }),
+    ).pipe(Effect.map(Option.flatten));
+
+    if (Option.isNone(opened)) return yield* new SegmentNotReady({ index });
+
+    return {
+      parts: opened.value,
+      sizeBytes: opened.value.reduce((total, part) => total + part.sizeBytes, 0),
+    } satisfies ServedSegment;
   });
 
   const segment = Effect.fn("StreamSessions.segment")(function* (
@@ -1821,7 +2023,11 @@ const make = Effect.gen(function* () {
             });
           }
 
-          return yield* awaitSegment(session, covering, index, SEGMENT_WAIT);
+          return yield* serve(
+            covering,
+            index,
+            yield* awaitSegment(session, covering, index, SEGMENT_WAIT),
+          );
         }),
     );
   });
@@ -1927,10 +2133,14 @@ const make = Effect.gen(function* () {
   );
 
   yield* Effect.addFinalizer(() =>
-    Effect.gen(function* () {
-      for (const session of (yield* Ref.get(sessions)).values())
-        yield* closeSession(session, "shutdown");
-    }),
+    Ref.get(sessions).pipe(
+      Effect.flatMap((current) =>
+        Effect.forEach(current.values(), (session) => closeSession(session, "shutdown"), {
+          concurrency: "unbounded",
+          discard: true,
+        }),
+      ),
+    ),
   );
 
   return Service.of({
@@ -1948,14 +2158,7 @@ const make = Effect.gen(function* () {
       ),
       Effect.map((running) => running.length),
     ),
-    runsAwaitingExit: Ref.get(sessions).pipe(
-      Effect.flatMap((current) =>
-        Effect.forEach(current.values(), (session) =>
-          Ref.get(session.runs).pipe(Effect.map(({ live }) => live.size)),
-        ),
-      ),
-      Effect.map((counts) => counts.reduce((total, count) => total + count, 0)),
-    ),
+    runsAwaitingExit: Ref.get(awaitingExit),
   });
 });
 

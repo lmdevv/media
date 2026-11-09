@@ -144,6 +144,17 @@ const CONTENT_TYPES: Readonly<Record<Container, string>> = {
 
 const SEGMENT_CACHE = "private, max-age=3600";
 
+/** How long a request waits for the library's disk, which a hung network share never answers. */
+const FILE_WAIT = Duration.seconds(30);
+
+const withinFileWait = <A, E, R>(waiting: Effect.Effect<A, E, R>) =>
+  waiting.pipe(
+    Effect.timeoutOrElse({
+      duration: FILE_WAIT,
+      orElse: () => Effect.fail(new MediaFileUnreadable()),
+    }),
+  );
+
 const READ_CHUNK = 256 * 1024;
 
 const readWhole = (handle: FileSystem.File, size: number, readMs: Ref.Ref<number>) =>
@@ -387,9 +398,14 @@ export const layer: Layer.Layer<
         const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.PLAY_OR_DOWNLOAD);
 
         if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
-        const file = yield* resolve(grant.fileId, { sidecars: false });
 
-        return yield* fileResponse(request, file.path, CONTENT_TYPES[file.probe.container]);
+        return yield* withinFileWait(
+          Effect.gen(function* () {
+            const file = yield* resolve(grant.fileId, { sidecars: false });
+
+            return yield* fileResponse(request, file.path, CONTENT_TYPES[file.probe.container]);
+          }),
+        );
       }),
     ).pipe(Effect.withSpan("MediaRoutes.direct"));
 
@@ -405,11 +421,17 @@ export const layer: Layer.Layer<
         const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.DOWNLOAD);
 
         if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
-        const output = yield* downloads.output(grant.fileId, name);
 
-        if (Option.isNone(output)) return yield* new MediaFileNotFound({ fileId: grant.fileId });
+        return yield* withinFileWait(
+          Effect.gen(function* () {
+            const output = yield* downloads.output(grant.fileId, name);
 
-        return yield* fileResponse(request, output.value, CONTENT_TYPES.mp4);
+            if (Option.isNone(output))
+              return yield* new MediaFileNotFound({ fileId: grant.fileId });
+
+            return yield* fileResponse(request, output.value, CONTENT_TYPES.mp4);
+          }),
+        );
       }),
     ).pipe(Effect.withSpan("MediaRoutes.download"));
 
@@ -464,30 +486,27 @@ export const layer: Layer.Layer<
         const segmentIndex = segmentMatch === null ? -1 : Number(segmentMatch[1]);
         const started = yield* Clock.currentTimeMillis;
 
-        const parts =
-          segmentMatch === null
-            ? yield* sessions.init(streamId, generation, grant)
-            : yield* sessions.segment(streamId, generation, segmentIndex, grant);
-
-        const produced = yield* Clock.currentTimeMillis;
         const readMs = yield* Ref.make(0);
 
-        // Open every part before answering: a seek may delete this generation's folder at any
-        // moment, and a body cut short under its promised length breaks the player's parser. An
-        // open file stays readable after it is deleted; the request's scope closes the handles
-        // once the body is sent.
-        const opened = yield* Effect.forEach(parts.paths, (part) =>
-          fs
-            .open(part)
-            .pipe(
-              Effect.flatMap((handle) =>
-                handle.stat.pipe(Effect.map((info) => ({ handle, size: Number(info.size) }))),
-              ),
-            ),
-        ).pipe(Effect.mapError(() => new SegmentNotReady({ index: segmentIndex })));
+        const answer =
+          segmentMatch === null
+            ? yield* sessions.init(streamId, generation, grant).pipe(
+                Effect.map((bytes) => ({
+                  body: Stream.make(bytes),
+                  contentLength: bytes.byteLength,
+                })),
+              )
+            : yield* sessions.segment(streamId, generation, segmentIndex, grant).pipe(
+                Effect.map((served) => ({
+                  body: Stream.fromIterable(served.parts).pipe(
+                    Stream.flatMap((part) => readWhole(part.file, part.sizeBytes, readMs)),
+                  ),
+                  contentLength: served.sizeBytes,
+                })),
+              );
 
         const answered = yield* Clock.currentTimeMillis;
-        const contentLength = opened.reduce((total, part) => total + part.size, 0);
+        const { body, contentLength } = answer;
 
         yield* Effect.addFinalizer((exit) =>
           Effect.gen(function* () {
@@ -501,8 +520,8 @@ export const layer: Layer.Layer<
               generation,
               segment: segmentMatch === null ? "init" : segmentIndex,
               elapsedMs,
-              encoderWaitMs: produced - started,
-              diskReadMs: answered - produced + bodyReadMs,
+              encoderWaitMs: answered - started,
+              diskReadMs: bodyReadMs,
               networkWriteMs: Math.max(0, finished - answered - bodyReadMs),
               bytes: contentLength,
               completed: Exit.isSuccess(exit),
@@ -515,10 +534,6 @@ export const layer: Layer.Layer<
                 : Effect.logDebug(LogEvent.segmentServed)
             ).pipe(Effect.annotateLogs(timing));
           }),
-        );
-
-        const body = Stream.fromIterable(opened).pipe(
-          Stream.flatMap(({ handle, size }) => readWhole(handle, size, readMs)),
         );
 
         return HttpEffect.scopeTransferToStream(

@@ -91,7 +91,7 @@ const disk = {
   refuseCopies: false,
   beforeCopy: (_to: string): Effect.Effect<void> => Effect.void,
   refuseRenamesIn: "",
-  beforeStat: (_path: string): Effect.Effect<void> => Effect.void,
+  beforeRead: (_path: string): Effect.Effect<void> => Effect.void,
 };
 
 const scriptedDisk = (real: FileSystem.FileSystem): FileSystem.FileSystem =>
@@ -141,8 +141,8 @@ const scriptedDisk = (real: FileSystem.FileSystem): FileSystem.FileSystem =>
             )
           : real.rename(from, to),
       ),
-    stat: (path) =>
-      Effect.suspend(() => disk.beforeStat(path)).pipe(Effect.andThen(real.stat(path))),
+    readFile: (path) =>
+      Effect.suspend(() => disk.beforeRead(path)).pipe(Effect.andThen(real.readFile(path))),
   });
 
 const decodeTagged = Schema.decodeUnknownSync(
@@ -272,6 +272,17 @@ const runFolder = Effect.fn(function* (streamId: string, run: number) {
   return yield* fs.exists(path.join(server.transcodeDir, streamId, String(run))).pipe(Effect.orDie);
 });
 
+/** Whether a stopped run's folder went; it goes once the run's reads and responses end. */
+const runFolderGone = (streamId: string, run: number) =>
+  runFolder(streamId, run).pipe(
+    Effect.repeat({
+      until: (exists) => !exists,
+      schedule: Schedule.spaced("50 millis"),
+      times: 100,
+    }),
+    Effect.map((exists) => !exists),
+  );
+
 const playing = Effect.fn(function* (sid: string) {
   const convex = yield* TestConvex.Service;
   const position = yield* Ref.make(0);
@@ -374,7 +385,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
           assert.deepInclude(released[0]?.annotations, { liveness: "paused", generation: 1 });
           assert.isAtLeast(Number(released[0]?.annotations["lastRequestAgeMs"]), 1000);
           assertExplained(released);
-          assert.isFalse(yield* runFolder(stream.streamId, 1), "the run folder is gone");
+          assert.isTrue(yield* runFolderGone(stream.streamId, 1), "the run folder is gone");
           assert.strictEqual(yield* activeStreams(), 0, "not active while released");
 
           const whileReleased = yield* fetched(stream.file("init.mp4"));
@@ -823,9 +834,18 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
           assert.strictEqual(moved.status, 200);
           assert.deepInclude(JSON.parse(textOf(moved.body)), { generation: 2 });
 
+          const kept = new Set(["3", "init-2.mp4"]);
+
           const names = yield* fs
             .readDirectory(path.join(server.transcodeDir, stream.streamId))
-            .pipe(Effect.orDie);
+            .pipe(
+              Effect.orDie,
+              Effect.repeat({
+                until: (found) => found.every((name) => kept.has(name)),
+                schedule: Schedule.spaced("50 millis"),
+                times: 100,
+              }),
+            );
 
           assert.includeMembers(
             ["3", "init-2.mp4"],
@@ -862,51 +882,78 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
     );
 
     it.effect(
-      "answers a moved generation when the kept init segment it chose goes before it is read",
+      "keeps a kept init segment while a read of it is open after the stream moves on, then deletes it",
       () =>
         Effect.gen(function* () {
-          const stream = yield* negotiate({ name: "init-moves" });
+          const server = yield* MediaTestServer.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const stream = yield* negotiate({ name: "init-held" });
+          const kept = path.join(server.transcodeDir, stream.streamId, "init-1.mp4");
+          const reading = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
 
           assert.strictEqual(yield* status(stream.file("init.mp4")), 200);
           assert.strictEqual(yield* status(stream.file("0.m4s")), 200);
 
           yield* awaitLogged("Stream.released", stream.streamId);
 
-          const context = yield* Effect.context<HttpClient.HttpClient | MediaTestServer.Service>();
-
-          const moveOn = Effect.gen(function* () {
-            assert.strictEqual(yield* status(stream.file("4.m4s")), 200, "the resumed segment");
-
-            const moved = yield* posted("/api/playback/seek", {
-              token: stream.token,
-              streamId: stream.streamId,
-              positionSeconds: 0,
-            });
-
-            assert.deepInclude(JSON.parse(textOf(moved.body)), { generation: 2 });
-          }).pipe(Effect.provideContext(context));
-
-          disk.beforeStat = (file) => {
+          disk.beforeRead = (file) => {
             if (!file.endsWith(`/${stream.streamId}/init-1.mp4`)) return Effect.void;
-            disk.beforeStat = () => Effect.void;
+            disk.beforeRead = () => Effect.void;
 
-            return moveOn;
+            return fs
+              .open(file)
+              .pipe(
+                Effect.andThen(Deferred.succeed(reading, undefined)),
+                Effect.andThen(Deferred.await(release)),
+                Effect.scoped,
+                Effect.orDie,
+              );
           };
 
-          const raced = yield* fetched(stream.file("init.mp4"));
+          const raced = yield* Effect.forkChild(fetched(stream.file("init.mp4")));
 
-          disk.beforeStat = () => Effect.void;
+          yield* Deferred.await(reading);
+          assert.strictEqual(yield* status(stream.file("4.m4s")), 200, "the resumed segment");
 
-          assert.strictEqual(raced.status, 410);
-          assert.deepStrictEqual(JSON.parse(textOf(raced.body)), {
+          const moved = yield* posted("/api/playback/seek", {
+            token: stream.token,
+            streamId: stream.streamId,
+            positionSeconds: 0,
+          });
+
+          assert.deepInclude(JSON.parse(textOf(moved.body)), { generation: 2 });
+          assert.isTrue(
+            yield* fs.exists(kept).pipe(Effect.orDie),
+            "the kept init outlives the read",
+          );
+
+          yield* Deferred.succeed(release, undefined);
+
+          const answered = yield* Fiber.join(raced);
+
+          assert.strictEqual(answered.status, 410, "the read answers that its generation moved");
+          assert.deepStrictEqual(JSON.parse(textOf(answered.body)), {
             _tag: "StreamGenerationGone",
             streamId: stream.streamId,
             generation: 1,
             currentGeneration: 2,
           });
+          assert.isFalse(
+            yield* fs.exists(kept).pipe(
+              Effect.orDie,
+              Effect.repeat({
+                until: (exists) => !exists,
+                schedule: Schedule.spaced("50 millis"),
+                times: 100,
+              }),
+            ),
+            "the kept init goes once the read ended",
+          );
 
           yield* stop(stream);
-        }),
+        }).pipe(Effect.ensuring(Effect.sync(() => (disk.beforeRead = () => Effect.void)))),
       60_000,
     );
 
@@ -990,39 +1037,50 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
       );
     }
 
-    it.effect("logs no release for a stream that stops while its release keeps the init", () =>
-      Effect.gen(function* () {
-        const server = yield* MediaTestServer.Service;
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const stream = yield* negotiate({ name: "stopped-in-release" });
-        const context = yield* Effect.context<HttpClient.HttpClient | MediaTestServer.Service>();
-        const stopped = yield* Deferred.make<void>();
+    it.effect(
+      "logs no release for a stream that stops while its release keeps the init",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const stream = yield* negotiate({ name: "stopped-in-release" });
+          const context = yield* Effect.context<HttpClient.HttpClient | MediaTestServer.Service>();
+          const stopped = yield* Deferred.make<void>();
 
-        assert.strictEqual(yield* status(stream.file("init.mp4")), 200);
-        assert.strictEqual(yield* status(stream.file("0.m4s")), 200);
+          assert.strictEqual(yield* status(stream.file("init.mp4")), 200);
+          assert.strictEqual(yield* status(stream.file("0.m4s")), 200);
 
-        disk.beforeCopy = (to) => {
-          if (!to.includes(`/${stream.streamId}/`)) return Effect.void;
-          disk.beforeCopy = () => Effect.void;
+          disk.beforeCopy = (to) => {
+            if (!to.includes(`/${stream.streamId}/`)) return Effect.void;
+            disk.beforeCopy = () => Effect.void;
 
-          return stop(stream).pipe(
-            Effect.andThen(Deferred.succeed(stopped, undefined)),
-            Effect.provideContext(context),
-            Effect.forkDetach,
-            Effect.andThen(Deferred.await(stopped)),
+            return stop(stream).pipe(
+              Effect.andThen(Deferred.succeed(stopped, undefined)),
+              Effect.provideContext(context),
+              Effect.forkDetach,
+              Effect.andThen(Deferred.await(stopped)),
+            );
+          };
+
+          yield* Deferred.await(stopped);
+          yield* Effect.sleep(Duration.seconds(1));
+
+          assert.deepStrictEqual(yield* logsOf("Stream.released", stream.streamId), []);
+          assert.lengthOf(yield* logsOf("Stream.ended", stream.streamId), 1);
+          assert.isFalse(
+            yield* fs.exists(path.join(server.transcodeDir, stream.streamId)).pipe(
+              Effect.orDie,
+              Effect.repeat({
+                until: (exists) => !exists,
+                schedule: Schedule.spaced("50 millis"),
+                times: 100,
+              }),
+            ),
+            "the stream's folder goes once the init copy the stop could not cut ends",
           );
-        };
-
-        yield* Deferred.await(stopped);
-        yield* Effect.sleep(Duration.seconds(1));
-
-        assert.deepStrictEqual(yield* logsOf("Stream.released", stream.streamId), []);
-        assert.lengthOf(yield* logsOf("Stream.ended", stream.streamId), 1);
-        assert.isFalse(
-          yield* fs.exists(path.join(server.transcodeDir, stream.streamId)).pipe(Effect.orDie),
-        );
-      }),
+        }),
+      15_000,
     );
 
     it.effect("leaves no temporary init segment behind when keeping one fails", () =>
@@ -1040,9 +1098,14 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
         disk.refuseRenamesIn = "";
 
         assert.deepStrictEqual(
-          yield* fs
-            .readDirectory(path.join(server.transcodeDir, stream.streamId))
-            .pipe(Effect.orDie),
+          yield* fs.readDirectory(path.join(server.transcodeDir, stream.streamId)).pipe(
+            Effect.orDie,
+            Effect.repeat({
+              until: (names) => names.length === 0,
+              schedule: Schedule.spaced("50 millis"),
+              times: 100,
+            }),
+          ),
           [],
           "neither a run folder nor a kept or temporary init segment",
         );

@@ -1,9 +1,9 @@
 import { join } from "node:path";
 
-import { Context, Effect, Fiber, Layer, Option, Redacted, Ref, Schema, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
+import * as ScopedProcess from "../platform/scoped-process.ts";
 
 type Operation = "export" | "import" | "run";
 
@@ -56,7 +56,6 @@ const scrub = (text: string, secrets: ReadonlyArray<string>): string =>
 
 const make = Effect.gen(function* () {
   const config = yield* MediaConfig.Service;
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
   const missing = [
     ...(Option.isNone(config.convexAdminKey) ? ["CONVEX_SELF_HOSTED_ADMIN_KEY"] : []),
@@ -81,7 +80,8 @@ const make = Effect.gen(function* () {
       const failed = (exitCode: number | null, output: string, cause: unknown) =>
         new ConvexCliFailed({ operation, exitCode, output: scrub(output, secrets), cause });
 
-      const command = ChildProcess.make(
+      // Closing the scope, as a cancelled backup does, stops the CLI: SIGTERM, then SIGKILL.
+      const child = yield* ScopedProcess.start(
         process.execPath,
         [join(backendDir, "node_modules", "convex", "bin", "main.js"), ...args],
         {
@@ -90,41 +90,24 @@ const make = Effect.gen(function* () {
             CONVEX_SELF_HOSTED_URL: config.convexUrl.value,
             CONVEX_SELF_HOSTED_ADMIN_KEY: adminKey,
           },
-          stdin: "ignore",
-          killSignal: "SIGTERM",
+          stderrTail: OUTPUT_TAIL,
+          stopSignal: "SIGTERM",
           forceKillAfter: "5 seconds",
         },
-      );
+      ).pipe(Effect.mapError((cause) => failed(null, "", cause)));
 
-      const handle = yield* spawner
-        .spawn(command)
-        .pipe(Effect.mapError((cause) => failed(null, "", cause)));
+      const { code, signal } = yield* Effect.promise(() => child.exited);
 
-      const output = yield* Ref.make("");
+      if (code === null) {
+        return yield* failed(null, "", new Error(`the CLI was ended by ${String(signal)}`));
+      }
 
-      const stdout = yield* handle.stdout.pipe(
-        Stream.decodeText(),
-        Stream.mkString,
-        Effect.mapError((cause) => failed(null, "", cause)),
-        Effect.forkScoped,
-      );
+      yield* Effect.promise(() => child.closed);
 
-      const stderr = yield* handle.stderr.pipe(
-        Stream.decodeText(),
-        Stream.runForEach((chunk) =>
-          Ref.update(output, (tail) => (tail + chunk).slice(-OUTPUT_TAIL)),
-        ),
-        Effect.ignore,
-        Effect.forkScoped,
-      );
+      const printed = child.stdout();
 
-      const code = yield* handle.exitCode.pipe(Effect.mapError((cause) => failed(null, "", cause)));
-      const printed = yield* Fiber.join(stdout);
-
-      yield* Fiber.join(stderr);
-
-      if (code !== ChildProcessSpawner.ExitCode(0)) {
-        return yield* failed(code, `${yield* Ref.get(output)}${printed}`.slice(-OUTPUT_TAIL), null);
+      if (code !== 0) {
+        return yield* failed(code, `${child.stderrTail()}${printed}`.slice(-OUTPUT_TAIL), null);
       }
 
       return printed.trim();
@@ -144,9 +127,5 @@ const make = Effect.gen(function* () {
   });
 });
 
-/** The CLI over the platform's child process spawner. */
-export const layer: Layer.Layer<
-  Service,
-  never,
-  MediaConfig.Service | ChildProcessSpawner.ChildProcessSpawner
-> = Layer.effect(Service, make);
+/** The CLI as a Node child process of the server. */
+export const layer: Layer.Layer<Service, never, MediaConfig.Service> = Layer.effect(Service, make);

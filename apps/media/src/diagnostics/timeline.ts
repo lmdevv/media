@@ -98,6 +98,7 @@ const STREAM_END_REASONS: Record<StreamEndReason, string> = {
   unattended:
     "no playback session reports reached the service and nothing used the stream for ten idle periods",
   "resume-refused": "its player came back while no slot or transcode space was free",
+  "capacity-reached": "no transcode slot stayed free for it to start",
   replaced: "a newer negotiation on the same device replaced it",
   stopped: "the player stopped it",
   abandoned: "the player went away before the first segment",

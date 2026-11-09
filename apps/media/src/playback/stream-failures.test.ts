@@ -180,7 +180,15 @@ describe.skipIf(!hasFfmpeg)("stream failures", () => {
 
           const folder = join(server.transcodeDir, negotiated.streamId ?? "");
 
-          assert.deepStrictEqual(yield* fs.readDirectory(folder), ["2"]);
+          const left = yield* fs.readDirectory(folder).pipe(
+            Effect.repeat({
+              until: (names) => names.length === 1 && names[0] === "2",
+              schedule: Schedule.spaced("50 millis"),
+              times: 100,
+            }),
+          );
+
+          assert.deepStrictEqual(left, ["2"]);
         }),
       30_000,
     );

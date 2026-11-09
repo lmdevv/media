@@ -63,8 +63,10 @@ sandbox="$(nix eval --json --impure --expr "$(module '
 ')")"
 node_dir="$(built config.services.media.package.nodejs)/bin"
 ffmpeg_dir="$(built 'lib.getBin config.services.media.ffmpegPackage')/bin"
+setpriv_dir="$(built 'lib.getBin (lib.findFirst (p: lib.getName p == "util-linux") null config.systemd.services.movies.path)')/bin"
 [[ -x "$node_dir/node" ]] || fail "no node in $node_dir"
 [[ -x "$ffmpeg_dir/ffmpeg" && -x "$ffmpeg_dir/ffprobe" ]] || fail "no ffmpeg in $ffmpeg_dir"
+[[ -x "$setpriv_dir/setpriv" ]] || fail "no setpriv in $setpriv_dir"
 
 properties=()
 while IFS= read -r property; do
@@ -89,7 +91,7 @@ done < <(
 # The service finds ffmpeg and ffprobe on PATH unless FFMPEG_PATH and FFPROBE_PATH say otherwise,
 # and tests start it with their own settings, so the module's ffmpeg goes first on PATH too.
 environment=(
-  -E "PATH=$node_dir:$ffmpeg_dir:$PATH"
+  -E "PATH=$node_dir:$ffmpeg_dir:$setpriv_dir:$PATH"
   -E "HOME=$HOME"
   -E CI=1
   -E "FFMPEG_PATH=$ffmpeg_dir/ffmpeg"
@@ -119,14 +121,16 @@ status="$(sandboxed "$(command -v bash)" "$canary/chown.sh")"
 # The ffmpeg suites skip without a working ffmpeg, and a service under test that finds none fails
 # every stream; either must fail the check here. Tools run by name, as the service runs them.
 cat >"$canary/tools.sh" <<'EOF'
-command -v node ffmpeg ffprobe
-ffmpeg -hide_banner -version >/dev/null && ffprobe -hide_banner -version >/dev/null
+command -v node ffmpeg ffprobe setpriv
+# As the service starts each tool: the death signal, then a check that the parent is still here.
+launch() { setpriv --pdeathsig KILL -- /bin/sh -c '[ "$PPID" = "$1" ] || exit 1; shift; exec "$@"' sh "$$" "$@"; }
+launch ffmpeg -hide_banner -version >/dev/null && launch ffprobe -hide_banner -version >/dev/null
 EOF
 tools="$(sandboxed "$(command -v bash)" "$canary/tools.sh")" ||
-  fail "ffmpeg or ffprobe does not run under the filter"
-expected="$(printf '%s\n' "$node_dir/node" "$ffmpeg_dir/ffmpeg" "$ffmpeg_dir/ffprobe")"
+  fail "ffmpeg or ffprobe does not run under the filter behind setpriv"
+expected="$(printf '%s\n' "$node_dir/node" "$ffmpeg_dir/ffmpeg" "$ffmpeg_dir/ffprobe" "$setpriv_dir/setpriv")"
 [[ "$tools" == "$expected" ]] ||
-  fail "the unit finds ${tools//$'\n'/ } on PATH, not the module's node and ffmpeg"
+  fail "the unit finds ${tools//$'\n'/ } on PATH, not the module's node, ffmpeg and setpriv"
 
 if [[ $# -eq 0 ]]; then
   set -- apps/media/src

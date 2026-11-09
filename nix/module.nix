@@ -655,6 +655,9 @@ in
       requires = containerUnits;
       after = containerUnits ++ [ "network-online.target" ];
       wants = [ "network-online.target" ];
+      # setpriv starts every ffmpeg with a parent-death signal, so none outlives the service. The
+      # default KillMode (control-group) also stops anything left when the service exits.
+      path = [ pkgs.util-linux ];
 
       environment = {
         NODE_ENV = "production";
@@ -765,6 +768,9 @@ in
         SystemCallFilter = [
           "@system-service"
           "~@privileged"
+          # setpriv, which gives each ffmpeg its parent-death signal, also re-applies the process's
+          # capabilities. With no capabilities to keep, that grants nothing.
+          "capset"
         ];
         # A denied call fails that call rather than killing the service and every stream with it.
         # scripts/check-sandbox.sh still kills on one, so the service is kept from needing any.
