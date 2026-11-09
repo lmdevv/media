@@ -24,9 +24,6 @@ const TITLES_PAGE = 10;
 /** The rows of one kind one query of a title's children takes. */
 const ROWS_PER_QUERY = 200;
 
-/** The most seasons whose episode counts a title's marking sums. */
-const SEASONS_MAX = 1000;
-
 /** A page's own work: the page read, the library and its folders, and the counters. */
 const PAGE_COST = work(20, 8);
 
@@ -39,11 +36,8 @@ const FILE_COST = work(13, 7);
 /** Whether a title still has a file: one index range. */
 const CHECK_COST = work(1, 0);
 
-/**
- * Marking a title: its seasons read for their episode counts, the title patched, and the
- * library's episode total moved (6 ranges, 4 writes).
- */
-const MARK_COST = work(6, 4);
+/** Marking a title: the title patched and the library's episode total moved. */
+const MARK_COST = work(4, 3);
 
 /** Listing one kind of a title's children: one index range. */
 const LIST_COST = work(1, 0);
@@ -134,22 +128,15 @@ export const files = internalMutation({
 /**
  * Takes a title out of every read, list, and total, in one mutation: marks it `purging`, moves
  * its key aside so no scan or writer finds it again, and moves the library's episode total by the
- * episodes its seasons count. The core's title count moves by the `removed` the page reports.
- * Its files are already gone, since only a title no file plays is purged.
+ * title's own episode count, however many seasons hold them. The core's title count moves by the
+ * `removed` the page reports. Its files are already gone, since only a title no file plays is
+ * purged.
  */
 const markPurging = async (db: Db, scope: PurgeScope, title: Doc<"titles">): Promise<void> => {
-  const seasons = await db
-    .query("seasons")
-    .withIndex("by_title_number", (q) => q.eq("titleId", title._id))
-    .take(SEASONS_MAX);
-
   await db.patch(title._id, { purging: true, matchKey: purgingKey(title._id) });
 
   if (!scope.gone) {
-    await moveTotals(db, title.libraryId, {
-      ...nothingMoved,
-      episodes: -seasons.reduce((sum, season) => sum + season.episodeCount, 0),
-    });
+    await moveTotals(db, title.libraryId, { ...nothingMoved, episodes: -title.episodeCount });
   }
 };
 

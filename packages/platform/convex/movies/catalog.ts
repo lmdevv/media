@@ -324,6 +324,7 @@ const upsertTitle = async (
     ...metadata,
     matchStatus: scanned.matchStatus,
     presentFileCount: 0,
+    episodeCount: 0,
     addedAt: now,
     updatedAt: now,
     searchText: searchTextOf(metadata),
@@ -412,10 +413,13 @@ export const upsertEpisode = async (
 
   const episodeId = await db.insert("episodes", row);
   const seasonDoc = season ?? (await db.get(seasonId));
+  const title = await db.get(titleId);
 
   if (seasonDoc !== null) {
     await db.patch(seasonId, { episodeCount: seasonDoc.episodeCount + 1 });
   }
+
+  if (title !== null) await db.patch(titleId, { episodeCount: title.episodeCount + 1 });
 
   return {
     row: { ...row, _id: episodeId, _creationTime: Date.now() },
@@ -459,15 +463,15 @@ export const fileAt = (
 /**
  * Every database operation, a `get`, query, insert, patch, or delete, is charged one index range
  * and every insert, patch, or delete one write: an upper bound, since Convex counts at most that.
- * Besides the genre rows, a file costs at most 40 operations and 20 writes: the file, the title it
+ * Besides the genre rows, a file costs at most 42 operations and 21 writes: the file, the title it
  * plays now, and the title its key names, read to price it (3); the same read again to write it
- * (3); the title written (1); a season and an episode looked up, written, and the season's count
- * moved (6); the file written (1); the present-file counts of an old and a new title and episode
+ * (3); the title written (1); a season and an episode looked up, written, and the season's and
+ * the title's episode counts moved (8); the file written (1); the present-file counts of an old and a new title and episode
  * (8); and its thumbnail job read, canceled, queued again, and recorded (16, with 2 to spare).
  * Each genre row the title has is deleted or patched, and each it gains inserted: one operation
  * and one write each, plus the one query that lists them.
  */
-const UPSERT_COST = work(40, 20);
+const UPSERT_COST = work(42, 21);
 
 /** The worst case of `upsertScannedItem` for `item`, after reading what prices it (counted). */
 export const upsertCost = async (
@@ -505,10 +509,10 @@ export const rewriteCost = (current: Doc<"titles">, scanned: ScannedTitle): Work
 };
 
 /**
- * The worst case of `upsertEpisode`: a season and an episode looked up and written, and the
- * season read again and its count moved.
+ * The worst case of `upsertEpisode`: a season and an episode looked up and written, the season
+ * read again and its count moved, and the title read and its episode count moved.
  */
-export const EPISODE_COST = work(8, 4);
+export const EPISODE_COST = work(10, 5);
 
 /**
  * Inserts or updates one scanned file with its title and episode, and queues scrub thumbnails

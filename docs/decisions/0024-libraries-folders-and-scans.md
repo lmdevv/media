@@ -195,8 +195,13 @@ The movies port replaced the movies half of the seam with movies' own rows in
 - A title the purge has started deleting is out of every scan's and writer's reach, and out of
   every read, list, and total. Before deleting any of its rows, the purge marks it `purging` and
   moves its `matchKey` to `purging:<id>`, which no scanned key can be. In that same mutation it
-  takes the title out of the core's title count and its episodes, summed from its seasons'
-  counts, out of the library's episode total; its files are already gone. The pages that delete
+  takes the title out of the core's title count, and its episodes out of the library's episode
+  total by the title's own `episodeCount`; its files are already gone. A title row keeps that
+  count in every mutation that inserts one of its episodes. Episodes never move between titles,
+  and only the purge deletes them, after the marking. So the marking is one exact subtraction
+  however many seasons the show has. Summing seasons' counts at marking time would need a read
+  bounded by a season cap, and a show with more seasons than the cap would leave episodes in the
+  total. The pages that delete
   its rows later move no counter. Lists and lookups skip a purging title, so the counters always
   equal the live rows. Because the title is marked, so a file that returns, at its old path or at a new folder, builds a new
   title instead of joining one that is half gone. Writers and the item loaders treat it as gone,

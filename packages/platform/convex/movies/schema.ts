@@ -49,6 +49,12 @@ export const moviesTables = {
     overrides: v.optional(metadataOverrides),
     /** Files of this title (or its episodes) present on disk. Zero means unavailable. */
     presentFileCount: v.number(),
+    /**
+     * How many episode rows the title has, kept by every mutation that inserts one. Episodes never
+     * move between titles and only the purge deletes them, after it has marked the title, so the
+     * purge takes the title's episodes out of the library's total with this one number.
+     */
+    episodeCount: v.number(),
     addedAt: v.number(),
     updatedAt: v.number(),
     searchText: v.string(),

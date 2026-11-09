@@ -175,4 +175,49 @@ describe.skipIf(stack === undefined)("the movies purge", { timeout: 180_000 }, (
     expect(await totalsOf(stack, libraryId)).toEqual(await rowsOf(stack, libraryId));
     expect(await totalsOf(stack, libraryId)).toEqual({ titles: 1, episodes: 2, files: 2 });
   });
+
+  it("take every episode of a show of more than 1,000 seasons out of the totals", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "purge-seasons", "admin");
+    const { libraryId, scanJobId, roots } = await moviesLibrary(admin, "Many seasons", 2);
+    const [kept, dropped] = roots;
+
+    if (kept === undefined || dropped === undefined) throw new Error("made too few folders");
+
+    const lease = await claimJob(stack, "movies.scan", scanJobId, 600_000);
+    const show = scannedTitle("show", "tmdb:12", "Long running");
+
+    await upsertAll(
+      stack,
+      lease,
+      Array.from({ length: 1001 }, (_, n) =>
+        episodeFile(join(dropped, `${n + 1}.mkv`), show, n + 1, 1),
+      ),
+    );
+    await finishJob(stack, lease);
+
+    expect(await totalsOf(stack, libraryId)).toEqual({ titles: 1, episodes: 1001, files: 1001 });
+
+    await setFoldersQuietly(stack, libraryId, [kept]);
+
+    const pages = async (
+      stage: "files" | "titles",
+      cursor: string | null = null,
+      count = 0,
+    ): Promise<number> => {
+      const next = await purgePage(stack, libraryId, stage, cursor);
+
+      expect(await totalsOf(stack, libraryId)).toEqual(await rowsOf(stack, libraryId));
+
+      if (count > 100) throw new Error("the purge made no progress");
+
+      return next.more ? pages(stage, next.cursor, count + 1) : count + 1;
+    };
+
+    await pages("files");
+    await pages("titles");
+
+    expect(await totalsOf(stack, libraryId)).toEqual({ titles: 0, episodes: 0, files: 0 });
+    expect(await hasRows(stack, libraryId)).toBe(false);
+  });
 });

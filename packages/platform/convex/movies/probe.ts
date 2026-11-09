@@ -82,6 +82,7 @@ const insertTitle = async (
     externalIds: NO_EXTERNAL_IDS,
     matchStatus: "unmatched",
     presentFileCount: Math.max(title.episodes, 1),
+    episodeCount: title.episodes,
     addedAt: now,
     updatedAt: now,
     searchText: title.name,
