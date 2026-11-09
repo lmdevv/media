@@ -107,6 +107,51 @@ describe("the media binary", () => {
     }
   });
 
+  it(
+    "runs a command whose only secret is optional without waiting on an open stdin",
+    { timeout: 20_000 },
+    async () => {
+      const signedIn = join(home, "open-stdin");
+      const enrolled = { deviceId: "devices:1", device: "dv_1.secret", joinSequence: 1 };
+
+      mkdirSync(join(signedIn, "media", "sessions"), { recursive: true });
+
+      const run = await withMediaService(
+        (request, response) => {
+          request.resume().on("end", () => {
+            convexAnswer(response, enrolled);
+          });
+        },
+        async (url) => {
+          writeFileSync(
+            join(signedIn, "media", "sessions", "default.json"),
+            JSON.stringify({
+              url,
+              session: { token: RENEWED, refreshToken: "refresh-1" },
+            }),
+          );
+
+          const running = startMovies(
+            ["auth", "registry", "enroll", "--name", "Laptop"],
+            { XDG_CONFIG_HOME: signedIn, HOME: signedIn, MEDIA_CORE_URL: url },
+            null,
+          );
+
+          const timedOut = setTimeout(() => running.child.kill(), 10_000);
+
+          try {
+            return await running.done;
+          } finally {
+            clearTimeout(timedOut);
+          }
+        },
+      );
+
+      expect(run.code, run.stderr).toBe(ExitCode.ok);
+      expect(JSON.parse(run.stdout)).toStrictEqual(enrolled);
+    },
+  );
+
   it("rejects a secret variable that is set but empty, without reading stdin", async () => {
     const env = { XDG_CONFIG_HOME: home, HOME: home };
 

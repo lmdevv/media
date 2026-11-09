@@ -45,7 +45,7 @@ export interface Secret {
   readonly variable: string;
   /** The field also takes null, which reveals nothing, so `--json` may clear it. */
   readonly clearable?: true;
-  /** The command runs without it: when neither the variable nor stdin gives it, it is left out. */
+  /** The command runs without it: when the variable does not give it, it is left out. */
   readonly optional?: true;
 }
 

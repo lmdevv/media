@@ -29,11 +29,14 @@ export interface Running {
   readonly done: Promise<Run>;
 }
 
-/** Starts the built CLI with only PATH plus `env` in its environment, feeding `stdin` if given. */
+/**
+ * Starts the built CLI with only PATH plus `env` in its environment, feeding `stdin` if given.
+ * `null` leaves stdin a pipe that never closes, as an agent's or a CI step's often is.
+ */
 export const startMovies = (
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
-  stdin = "",
+  stdin: string | null = "",
 ): Running => {
   const child = spawn(process.execPath, [binary, ...args], {
     env: { PATH: process.env["PATH"] ?? "", ...env },
@@ -56,7 +59,7 @@ export const startMovies = (
     else waiter(line);
   });
 
-  child.stdin.end(stdin);
+  if (stdin !== null) child.stdin.end(stdin);
 
   const done = new Promise<Run>((resolve, reject) => {
     child.on("error", reject);
