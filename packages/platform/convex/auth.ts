@@ -9,7 +9,7 @@ import { deviceCodeProvider } from "./core/auth/deviceCodes";
 import { grantProvider } from "./core/auth/deviceGrants";
 import { guestProvider, inviteProvider, resetProvider, setupProvider } from "./core/auth/flows";
 import { passwordProvider } from "./core/auth/password";
-import { answeredBeforeLibrary, signOutCaller, storeCall } from "./core/auth/store";
+import { decideRefresh, signOutCaller, storeCall } from "./core/auth/store";
 import { tileProvider } from "./core/auth/tiles";
 import { JWT_MS, SESSION_MS } from "./core/sessions";
 
@@ -62,8 +62,14 @@ export const store = internalMutation({
   handler: async (ctx, { args }): Promise<StoreAnswer> => {
     if (args.type === "signOut") return signOutCaller(ctx);
 
-    if (args.type === "refreshSession" && (await answeredBeforeLibrary(ctx, args.refreshToken))) {
-      return null;
+    if (args.type === "refreshSession") {
+      const refresh = await decideRefresh(ctx, args.refreshToken);
+
+      if (refresh.kind === "answered") return null;
+
+      return ctx.runMutation(internal.auth.libraryStore, {
+        args: { type: "refreshSession", refreshToken: refresh.refreshToken },
+      });
     }
 
     return ctx.runMutation(internal.auth.libraryStore, { args });

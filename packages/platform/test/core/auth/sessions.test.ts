@@ -360,6 +360,109 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     expect(await refusal(onBranch.query(api.core.auth.sessions.current, {}))).toBe("accepted");
   }, 60_000);
 
+  it("hands a late retry the child it lost, however many newer tokens a reuse invalidated", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const r0 = signedIn.refreshToken;
+
+    const tokensFrom = async (refreshToken: string) =>
+      (await refreshWith(stack, refreshToken)).tokens;
+
+    const rotate = async (refreshToken: string, times: number): Promise<string> =>
+      times === 0
+        ? refreshToken
+        : rotate((await tokensFrom(refreshToken))?.refreshToken ?? "", times - 1);
+
+    const r1 = (await tokensFrom(r0))?.refreshToken ?? "";
+    const r2 = (await tokensFrom(r1))?.refreshToken ?? "";
+    const r3 = (await tokensFrom(r0))?.refreshToken ?? "";
+    const head = await rotate(r3, 64);
+
+    expect([r1, r2, r3, head].every((token) => token !== "")).toBe(true);
+
+    await pause(REUSE_WINDOW_MS + 1000);
+
+    expect(await tokensFrom(r3)).toBeNull();
+    expect((await tokensFrom(r1))?.refreshToken).toBe(r2);
+  }, 90_000);
+
+  it("hands an in-window retry its active child, however many newer tokens a reuse invalidated", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const r0 = signedIn.refreshToken;
+
+    const tokensFrom = async (refreshToken: string) =>
+      (await refreshWith(stack, refreshToken)).tokens;
+
+    const rotate = async (refreshToken: string, times: number): Promise<string> =>
+      times === 0
+        ? refreshToken
+        : rotate((await tokensFrom(refreshToken))?.refreshToken ?? "", times - 1);
+
+    const r1 = (await tokensFrom(r0))?.refreshToken ?? "";
+    const r2 = (await tokensFrom(r1))?.refreshToken ?? "";
+    const branch = (await tokensFrom(r0))?.refreshToken ?? "";
+    const head = (await tokensFrom(branch))?.refreshToken ?? "";
+
+    await pause(REUSE_WINDOW_MS + 1000);
+
+    const r2UsedAt = Date.now();
+    const sibling = (await tokensFrom(r2))?.refreshToken ?? "";
+
+    expect(await rotate(head, 64)).not.toBe("");
+    expect(await tokensFrom(branch)).toBeNull();
+    expect(Date.now() - r2UsedAt).toBeLessThan(REUSE_WINDOW_MS - 1000);
+    expect((await tokensFrom(r2))?.refreshToken).toBe(sibling);
+  }, 90_000);
+
+  it("answers every retry within its reads, with 5,000 used tokens above the active one", async () => {
+    if (stack === undefined) return;
+    const late = await signInAs(stack, await createPerson(stack));
+    const inWindow = await signInAs(stack, await createPerson(stack));
+    const { sessionId: lateSession } = await late.client.query(api.core.auth.sessions.current, {});
+
+    const { sessionId: windowSession } = await inWindow.client.query(
+      api.core.auth.sessions.current,
+      {},
+    );
+
+    const expirationTime = Date.now() + DAY_MS;
+    const longAgo = Date.now() - 6 * REUSE_WINDOW_MS;
+    const lostChildOf = addToken(lateSession, { expirationTime, firstUsedTime: longAgo });
+    const childless = addToken(lateSession, { expirationTime, firstUsedTime: longAgo });
+
+    importRows("authRefreshTokens", [
+      { sessionId: lateSession, expirationTime, parentRefreshTokenId: lostChildOf },
+    ]);
+
+    const usedAbove = (sessionId: Id<"authSessions">) =>
+      pileUp(
+        Array.from({ length: PILED_UP }, () => ({
+          sessionId,
+          expirationTime,
+          firstUsedTime: longAgo,
+        })),
+      );
+
+    await usedAbove(lateSession);
+    await usedAbove(windowSession);
+
+    expect(await refreshWith(stack, `${childless}|${lateSession}`)).toEqual({ tokens: null });
+    expect((await refreshWith(stack, `${lostChildOf}|${lateSession}`)).tokens).not.toBeNull();
+
+    const justUsed = addToken(windowSession, { expirationTime, firstUsedTime: Date.now() });
+
+    expect((await refreshWith(stack, `${justUsed}|${windowSession}`)).tokens).not.toBeNull();
+
+    expect(
+      await Promise.all(
+        [late, inWindow].map((signedIn) =>
+          refusal(signedIn.client.query(api.core.auth.sessions.current, {})),
+        ),
+      ),
+    ).toEqual(["accepted", "accepted"]);
+  }, 120_000);
+
   it("deletes an ended session's tokens in one chain, however often its expired token returns", async () => {
     if (stack === undefined) return;
     const signedIn = await signInAs(stack, await createPerson(stack));

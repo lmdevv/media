@@ -222,11 +222,23 @@ token past the window left its session unrevoked.
   Marked tokens stay until their session ends, so `core.auth.sessions.revoke` still takes any
   token of a session, an invalidated one included.
 
-- **The active token, read within a bound.** The library calls the newest unused token active and
-  scans back for it. The store reads the newest 64 tokens. When none is unused, a used token
-  inside the window refreshes nothing instead of going to a scan that may read thousands, and one
-  past the window is treated as having no active token. A session reaches that only when a reused
-  token's branch held its 64 newest tokens.
+- **A used token is answered as the library answers it.** Convex Auth calls the session's newest
+  unused token active. It hands that token back when the reused token is its parent; otherwise,
+  inside the window, it mints a child of the reused token, and past it, it refreshes nothing and
+  marks the branch. The store reaches the same answer within a bound:
+  - it reads the reused token's children through `sessionIdAndParentRefreshTokenId`, at most 64.
+    A late retry with no unused child cannot be handed the active token, so it marks the branch
+    without searching further;
+  - otherwise it searches for the active token as the library does, from the newest token down to
+    the first unused one, at most 1,500 deep. Used tokens lie above the active one only where a
+    branch was marked, so the search usually reads one row. When the store then hands the refresh
+    to the library, the library's own search reads no more than the store's did;
+  - when the active token lies deeper, the library's search could pass the read limit. Wherever
+    the library could return a token (inside the window, or past it when the reused token has an
+    unused child), the store adds a fresh child of the reused token and hands the library that
+    one. On a first use the library reads only the token and its session, so the client gets
+    tokens where the library would give them, and they stay in the reused token's branch, which a
+    later late retry of it marks.
 - **One chain of deletions per session.** `endSession` leaves a session that is already gone
   alone. Whatever deleted it deletes its tokens or leaves them to the sweep, so an expired token
   sent again while its session's tokens are being deleted, or a second revoke, starts no second
