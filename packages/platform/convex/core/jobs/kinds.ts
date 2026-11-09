@@ -184,7 +184,9 @@ export const KINDS = [
     item: null,
     cap: MOVIES_POOL_CAP,
     maxStrikes: 3,
-    dedupe: (payload) => payload.titleId,
+    /** A refresh joins a queued refresh; an admin's match never folds into one. */
+    dedupe: (payload) =>
+      `${payload.titleId}:${payload.match === null ? "refresh" : `${payload.match.provider}:${payload.match.providerId}`}`,
   }),
   defineKind("movies.person", {
     payload: { personId: v.id("people") },

@@ -144,9 +144,10 @@ Settled by the movies catalog (2026-11-09):
   `music`, and `server.backup` in `server`. The `probe.*` kinds name `probe`, which no server pool
   claims. A kind's cap bounds it across every worker; the pool's cap bounds its kinds on one
   server.
-- `movies.metadata` (`{ titleId, match }`), `movies.person` (`{ personId }`), and
-  `movies.trickplay` (`{ fileId }`) dedupe on their row, and `server.backup` (`{ trigger }`) on
-  the server, so one backup runs at a time. Metadata and person cap at the `movies` pool's 2.
+- `movies.metadata` (`{ titleId, match }`) dedupes on its title and match, so a refresh joins a
+  queued refresh but an admin's match is never folded into one. `movies.person` (`{ personId }`)
+  and `movies.trickplay` (`{ fileId }`) dedupe on their row, and `server.backup`
+  (`{ trigger }`) on the server, so one backup runs at a time. Metadata and person cap at the `movies` pool's 2.
   Trickplay caps at 8 across workers, above the server's `TRICKPLAY_CONCURRENCY`, 1 by default.
   Old movies' `migration` kind stays `probe.import` until the importer port.
 - `withJobLease(ctx, kinds, lease, write)` in `jobs/held.ts` is the lease check of every server
