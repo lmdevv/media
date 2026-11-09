@@ -163,41 +163,7 @@ const freshSessions = (scope: Scope.Scope) =>
 describe.skipIf(!hasFfmpeg)("stream shutdown", () => {
   layer(subject, { excludeTestServices: true, timeout: "120 seconds" })((it) => {
     it.effect(
-      "a stopped stream's run counts as awaiting exit until its encoder exits",
-      () =>
-        Effect.gen(function* () {
-          const scope = yield* Scope.make();
-          const sessions = yield* freshSessions(scope);
-          const who = yield* viewer;
-          const started = yield* playing(sessions, who);
-
-          yield* holdExits;
-          yield* sessions.stop(started.streamId, who.grant).pipe(Effect.timeout("10 seconds"));
-
-          assert.strictEqual(
-            yield* sessions.runsAwaitingExit,
-            1,
-            "the stopped stream's run while its exit is unconfirmed",
-          );
-
-          yield* releaseExits;
-
-          const left = yield* sessions.runsAwaitingExit.pipe(
-            Effect.repeat({
-              until: (count) => count === 0,
-              schedule: Schedule.spaced("100 millis"),
-              times: 50,
-            }),
-          );
-
-          assert.strictEqual(left, 0, "runs awaiting exit once the encoder exited");
-          yield* Scope.close(scope, Exit.void);
-        }).pipe(Effect.ensuring(releaseExits)),
-      60_000,
-    );
-
-    it.effect(
-      "health shows a stuck run while its encoder has not exited and drops it once it exits",
+      "a stopped stream's run counts as awaiting exit, in health too, until its encoder exits",
       () =>
         Effect.gen(function* () {
           const sessions = yield* StreamSessions.Service;
@@ -211,10 +177,11 @@ describe.skipIf(!hasFfmpeg)("stream shutdown", () => {
           yield* sessions.stop(started.streamId, who.grant).pipe(Effect.timeout("10 seconds"));
 
           assert.strictEqual(
-            yield* runsAwaitingExit,
+            yield* sessions.runsAwaitingExit,
             1,
             "the stopped stream's run while its exit is unconfirmed",
           );
+          assert.strictEqual(yield* runsAwaitingExit, 1, "health reports the same run");
 
           yield* releaseExits;
 

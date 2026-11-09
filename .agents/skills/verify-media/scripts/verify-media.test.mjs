@@ -234,6 +234,15 @@ describe("verify-media.sh", () => {
     const result = helperCommand("down");
     assert.equal(result.status, 0, result.stderr);
   });
+
+  test("refuses a health deadline that is not whole seconds only where up reads it", () => {
+    const badDeadline = { ...env, MEDIA_VERIFY_HEALTH_SECONDS: "5m" };
+    const up = spawnSync(helper, ["up"], { encoding: "utf8", env: badDeadline });
+    assert.equal(up.status, 1);
+    assert.match(up.stderr, /MEDIA_VERIFY_HEALTH_SECONDS must be a whole number of seconds/);
+    const down = spawnSync(helper, ["down"], { encoding: "utf8", env: badDeadline });
+    assert.equal(down.status, 0, down.stderr);
+  });
 });
 
 // A stand-in for Docker whose stack never answers: `compose up` starts a server on the side's port

@@ -38,7 +38,6 @@ music_root="$root/legacy/music"
 music_cli_js="$music_root/apps/cli/dist/music.js"
 password="password123"
 health_seconds="${MEDIA_VERIFY_HEALTH_SECONDS:-360}"
-[[ "$health_seconds" =~ ^[1-9][0-9]*$ ]] || { echo "MEDIA_VERIFY_HEALTH_SECONDS must be a whole number of seconds" >&2; exit 2; }
 
 die() { echo "verify-media: $*" >&2; exit 1; }
 say() { echo "verify-media: $*" >&2; }
@@ -135,8 +134,10 @@ probe() {
   ((code == 0)) && grep -qF -- "$2" <<<"$body"
 }
 
-healthy() { probe "$(url)/api/health" '"backend":"connected"'; }
-music_healthy() { probe "$(music_url)/healthz" '"ok":true'; }
+health_url() { echo "$(url)/api/health"; }
+music_health_url() { echo "$(music_url)/healthz"; }
+healthy() { probe "$(health_url)" '"backend":"connected"'; }
+music_healthy() { probe "$(music_health_url)" '"ok":true'; }
 
 stack_logs() {
   local services=("$(movies_service)")
@@ -152,10 +153,14 @@ start_failed() {
 }
 
 wait_healthy() {
-  local service status urls=("$(url)/api/health") target ip deadline=$((SECONDS + health_seconds))
-  has_music && urls+=("$(music_url)/healthz")
+  local service status urls=("$(health_url)") target ip ready deadline=$((SECONDS + health_seconds))
+  has_music && urls+=("$(music_health_url)")
   while ((SECONDS < deadline)); do
-    healthy && { ! has_music || music_healthy; } && return 0
+    # Both every time, so a report names only the URLs that really never answered.
+    ready=1
+    healthy || ready=0
+    if has_music && ! music_healthy; then ready=0; fi
+    ((ready)) && return 0
     for service in "$(movies_service)" music; do
       [[ "$service" == music ]] && ! has_music && continue
       status="$(docker inspect -f '{{.State.Status}}' "$(container "$service")" 2>/dev/null || echo missing)"
@@ -257,6 +262,7 @@ wait_libraries() {
 cmd_up() {
   take_side "$@"
   local image="" library="" setup=1 seed=1 music=1 started=$SECONDS step=$SECONDS
+  [[ "$health_seconds" =~ ^[1-9][0-9]*$ ]] || die "MEDIA_VERIFY_HEALTH_SECONDS must be a whole number of seconds"
   set -- "${args[@]}"
   while (($#)); do
     case "$1" in
