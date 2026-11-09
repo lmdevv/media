@@ -19,7 +19,7 @@
 # ports), plus old music from legacy/music as one more service.
 set -euo pipefail
 
-skill="$(cd "$(dirname "$0")/.." && pwd)"
+skill="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 root="$(cd "$skill/../../.." && pwd)"
 scripts="$skill/scripts"
 
@@ -188,7 +188,7 @@ wait_healthy() {
 }
 
 browser() {
-  CHROMIUM_PATH="$(chromium_path)" node "$scripts/browser.mjs" --state "$state" "$@"
+  CHROMIUM_PATH="$(chromium_path)" ${cli_timeout:+timeout "$cli_timeout"} node "$scripts/browser.mjs" --state "$state" "$@"
 }
 
 start_browser() {
@@ -205,15 +205,27 @@ start_browser() {
       sed -n 's/^browser: /verify-media: /p' "$state/browser.log" >&2
       return 0
     fi
-    kill -0 "$(read_state browser.pid)" 2>/dev/null || { cat "$state/browser.log" >&2; die "the browser host exited"; }
+    kill -0 "$(read_state browser.pid)" 2>/dev/null || { cat "$state/browser.log" >&2; start_failed "the browser host exited"; }
     sleep 0.2
   done
-  die "the browser host did not start; see $state/browser.log"
+  cat "$state/browser.log" >&2
+  start_failed "the browser host did not start in 20s"
+}
+
+# Runs one step of `up`, such as signing in or seeding, within some seconds: `browser`, the CLIs,
+# and the seeds read `cli_timeout` and run under timeout(1), which exits 124 when time runs out, as
+# browser.mjs does when its host stays silent. A step that runs out fails `up` the way a stack that
+# never answered does.
+within() {
+  local seconds="$1" step="$2" code=0
+  shift 2
+  cli_timeout="$seconds" "$@" || code=$?
+  ((code == 124)) && start_failed "$step did not finish in ${seconds}s"
+  return "$code"
 }
 
 # The CLI for one person, with their own config folder, so sessions never mix. Lucía is the owner.
 as="lucia"
-# A `cli_timeout` of some seconds stops a call that takes longer.
 cli_raw() {
   env -u MEDIA_CONVEX_URL -u MEDIA_SERVER_URL -u MEDIA_API_KEY -u MEDIA_PROFILE -u MEDIA_PASSWORD \
     XDG_CONFIG_HOME="$state/cli/$as" ${cli_timeout:+timeout "$cli_timeout"} node "$cli_js" "$@"
@@ -221,7 +233,8 @@ cli_raw() {
 
 music_cli_raw() {
   env -u MUSIC_INSECURE MUSIC_SERVER="$(music_url)/convex" \
-    MUSIC_API_KEY="$(read_state "music/key.$as")" XDG_CONFIG_HOME="$state/music/cli/$as" node "$music_cli_js" "$@"
+    MUSIC_API_KEY="$(read_state "music/key.$as")" XDG_CONFIG_HOME="$state/music/cli/$as" \
+    ${cli_timeout:+timeout "$cli_timeout"} node "$music_cli_js" "$@"
 }
 
 # Signs a person's CLI in with their password, the way `media login` documents it.
@@ -254,7 +267,7 @@ wait_libraries() {
     fi
     sleep 2
   done
-  die "the libraries were still busy after 15 minutes ($state_now)"
+  start_failed "the libraries were still busy after 15 minutes ($state_now)"
 }
 
 # ---------------------------------------------------------------------------------------------- up
@@ -438,15 +451,18 @@ YAML
     local shows=()
     [[ "$library" == "$demo_image" || -d "$library/$shows_dir" ]] && shows=(--shows "/media/library/$shows_dir")
     say "running first-run setup through the web app and scanning the libraries"
-    browser setup --movies "/media/library/$movies_dir" "${shows[@]}" >/dev/null
-    as=lucia cli_login admin@movies.local
-    cli_raw whoami | grep -q admin@movies.local || die "the CLI does not sign in as the owner"
+    within 1260 "first-run setup in the movies web app" \
+      browser setup --movies "/media/library/$movies_dir" "${shows[@]}" >/dev/null
+    as=lucia within 60 "signing the owner's CLI in" cli_login admin@movies.local
+    as=lucia within 60 "asking the owner's CLI who it is" cli_raw whoami > "$state/whoami.json"
+    grep -q admin@movies.local "$state/whoami.json" || die "the CLI does not sign in as the owner"
     if ((music)); then
       say "running old music's first-run setup through its web app and scanning /music"
-      browser setup --app music >/dev/null
+      within 1260 "first-run setup in the music web app" browser setup --app music >/dev/null
       mkdir -p "$state/music/cli/lucia"
-      write_state music/key.lucia "$(browser create-key --app music)"
-      as=lucia music_cli_raw whoami --json | grep -q admin@movies.local || die "the API key does not sign music's CLI in as the owner"
+      within 360 "making the owner's music API key" browser create-key --app music > "$state/music/key.lucia"
+      as=lucia within 60 "asking the owner's music CLI who it is" music_cli_raw whoami --json > "$state/music/whoami.json"
+      grep -q admin@movies.local "$state/music/whoami.json" || die "the API key does not sign music's CLI in as the owner"
       write_state music/people lucia
     fi
     wait_libraries "$(( ${#shows[@]} > 0 ? 2 : 1 ))"
@@ -456,11 +472,10 @@ YAML
   if ((seed)); then
     [[ "$library" == "$demo_image" ]] || say "the seed expects the demo library's titles and albums"
     say "seeding the demo people, profiles, access, and watching"
-    seed
+    within 900 "seeding movies" seed
     if ((music)); then
       say "seeding the same people in music, with playlists and likes"
-      node "$scripts/music-seed.mjs" --state "$state" --server "$(music_url)/convex" --cli "$music_cli_js" \
-        --browser "$scripts/browser.mjs" >&2
+      within 900 "seeding music" music_seed
     fi
     timing "the seed"
   fi
@@ -469,8 +484,13 @@ YAML
 }
 
 seed() {
-  node "$scripts/seed.mjs" --state "$state" --server "$(convex_url)" --media-url "$(url)" \
-    --cli "$cli_js" --browser "$scripts/browser.mjs" >&2
+  ${cli_timeout:+timeout "$cli_timeout"} node "$scripts/seed.mjs" --state "$state" --server "$(convex_url)" \
+    --media-url "$(url)" --cli "$cli_js" --browser "$scripts/browser.mjs" >&2
+}
+
+music_seed() {
+  ${cli_timeout:+timeout "$cli_timeout"} node "$scripts/music-seed.mjs" --state "$state" \
+    --server "$(music_url)/convex" --cli "$music_cli_js" --browser "$scripts/browser.mjs" >&2
 }
 
 # ------------------------------------------------------------------------------------------ doctor
@@ -1207,4 +1227,5 @@ main() {
     *) sed -n '2,17p' "$0" >&2; exit 2 ;;
   esac
 }
-main "$@"; exit
+# Tests source the script to call its functions; run as a command, it runs main.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; exit; fi

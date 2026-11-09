@@ -147,6 +147,11 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/media:main, build 
    watching (`seed.mjs`); in music, playlists, likes, and sharing (`music-seed.mjs`). Each seed
    checks that each person sees what the demo data says.
 
+Each later step has its own limit too: 21 minutes for each app's first-run setup, a minute for
+each CLI sign-in and check, 6 minutes for music's API key, 15 minutes for the library wait, and
+15 minutes for each seed. A step that runs out fails `up` the same way, naming the step, and so
+does a browser host that doesn't start in 20 seconds.
+
 The side is ready only after a line like this prints, and `$S status` then says `ready` for it:
 
 ```text
@@ -266,7 +271,9 @@ again.
 ### Browser
 
 `$S browser [--side S] [--app movies|music|account] <command> [flags]` sends one action to the
-open Chromium and prints the result. A failed action exits 1 with Playwright's message. URLs are
+open Chromium and prints the result. A failed action exits 1 with Playwright's message. A host
+that doesn't answer makes it exit 124 a second after its `--timeout`, or after 5 minutes without
+one (20 for `setup`). URLs are
 paths inside the page's app: a movies page opens `/title/<id>` at `/movies/title/<id>`.
 
 Each page belongs to one app, which `--app` picks when the page is created: `movies` (the default),

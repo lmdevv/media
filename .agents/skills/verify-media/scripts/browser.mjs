@@ -27,6 +27,13 @@ const APPS = ["movies", "music", "account"];
 // holds at most 107 bytes, which a long TMPDIR and run name can pass.
 const SOCKETS = { control: "browser.sock", web: "web.sock", convex: "convex.sock", music: "music.sock", proxy: "proxy.sock" };
 const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
+// How long a command may take on the host. With --timeout, each of its waits stops then and the
+// host answers right after; without it, setup waits for whole first scans.
+const REPLY_GRACE_MS = 1_000;
+const COMMAND_MS = 300_000;
+const SETUP_MS = 1_200_000;
+// The status timeout(1) exits with, so verify-media.sh treats a silent host as a step out of time.
+const TIMED_OUT = 124;
 const PRIVATE_NETWORK = fileURLToPath(new URL("../../../../scripts/private-network.sh", import.meta.url));
 const NETWORKS = ["auto", "isolated", "host"];
 // A relay must carry each direction's end on its own: a client may finish its request and still
@@ -99,6 +106,10 @@ if (!command || !flags.state) {
   console.error("usage: browser.mjs <command> --state <dir> [flags]");
   process.exit(2);
 }
+if (flags.timeout !== undefined && !(Number(flags.timeout) >= 0)) {
+  console.error(`--timeout must be milliseconds, not "${flags.timeout}"`);
+  process.exit(2);
+}
 if (flags.app !== undefined && !APPS.includes(flags.app)) {
   console.error(`--app must be ${APPS.join(" or ")}, not "${flags.app}"`);
   process.exit(2);
@@ -120,7 +131,10 @@ async function send(state, name, args, options) {
     process.exit(1);
   }
   process.chdir(state);
+  const limit =
+    options.timeout !== undefined ? Number(options.timeout) + REPLY_GRACE_MS : name === "setup" ? SETUP_MS : COMMAND_MS;
   let result;
+  let timer;
   try {
     result = await new Promise((resolveResult, rejectResult) => {
       const request = httpRequest({ socketPath: SOCKETS.control, method: "POST", path: "/" }, (response) => {
@@ -128,13 +142,22 @@ async function send(state, name, args, options) {
         response.setEncoding("utf8");
         response.on("data", (chunk) => (text += chunk));
         response.on("end", () => resolveResult(JSON.parse(text)));
+        response.on("error", rejectResult);
       });
+      timer = setTimeout(() => {
+        const error = new Error(`it did not answer \`${name}\` within ${limit} ms`);
+        error.timedOut = true;
+        rejectResult(error);
+        request.destroy();
+      }, limit);
       request.on("error", rejectResult);
       request.end(body);
     });
   } catch (error) {
     console.error(`the browser host does not answer on ${join(state, SOCKETS.control)}: ${error.message}`);
-    process.exit(1);
+    process.exit(error.timedOut === true ? TIMED_OUT : 1);
+  } finally {
+    clearTimeout(timer);
   }
   if (result.output !== undefined && result.output !== "") console.log(result.output);
   if (!result.ok) {
