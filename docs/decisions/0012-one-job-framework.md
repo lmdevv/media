@@ -152,15 +152,20 @@ Settled by the movies catalog (2026-11-09):
   that changed since a job read it gets a job of its own, even while the old one runs, and an
   admin's match never folds into a refresh. `recordTrickplay` records only for the job the file
   waits on and the contents it has; a late result for older contents changes nothing.
-- A title's `matchGeneration` moves in the patch that applies an admin's match, and a
-  `movies.metadata` job carries the generation it was asked for (`generation`, also in its
-  dedupe key). `applyMetadata`, `applyCredits`, and `applyCollection` drop a result from an older
-  generation (`applied: false`), so a refresh that read the title before a manual match can never
-  overwrite or downgrade it. Scans and other changes to the title do not move the generation, so
-  refreshes go on working; scans never touch a manual title anyway.
-  `server.backup` (`{ trigger }`) dedupes on the server, so one backup runs at a time. Metadata and person cap at the `movies` pool's 2.
-  Trickplay caps at 8 across workers, above the server's `TRICKPLAY_CONCURRENCY`, 1 by default.
-  Old movies' `migration` kind stays `probe.import` until the importer port.
+- A title's `matchGeneration` moves when an admin's match is asked for, never when one applies
+  (amended twice on 2026-11-09). `askForMatch` in `movies/matching.ts` moves it and queues the
+  manual job carrying the new generation; `askForRefresh` queues a refresh at the current one.
+  A `movies.metadata` job carries its generation in its payload and dedupe key. Every write of
+  the newest job is therefore current: its continuation calls, its credits, and its collection.
+  A refresh or an earlier match asked for before it is stale: `applyMetadata` answers
+  `applied: false` with `done: 0`, and the worker stops that job instead of sending the rest
+  again. `applyCredits` and `applyCollection` write nothing for a stale job.
+  `applyMetadata` only marks the title manual for a manual job and never moves the generation.
+  The first cut moved the generation when the match applied, which dropped the manual job's own
+  continuation calls and its later credits as stale.
+- Scans are not fenced on the generation. Scans skip a manual title (D62), so once a match
+  applies none writes it again. Before it applies, the manual job rewrites the title's metadata,
+  credits, and collection after whatever a scan wrote.
 - `withJobLease(ctx, kinds, lease, write)` in `jobs/held.ts` is the lease check of every server
   function that writes for a job. It applies the `check` event as `items` does, narrows the
   payload to the kinds it accepts, and throws on a lease of another kind, a server defect.

@@ -5,17 +5,17 @@ import { describe, expect, it } from "vitest";
 
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { logMark, runFunction, usageSince } from "../admin";
+import { logMark, usageSince } from "../admin";
 import type { CallUsage } from "../admin";
 import { member } from "../devices";
 import { openTitle, visibleTitles } from "../probe";
 import { runServer } from "../service";
 import { refusal } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
-import type { CoreStack } from "../stack-env";
 import {
-  JobId,
   answer,
+  applyMetadataAll,
+  askRefresh,
   cancelQueued,
   claimJob,
   finishJob,
@@ -31,7 +31,6 @@ import {
   upsert,
   upsertAll,
 } from "./catalog";
-import type { Lease } from "./catalog";
 import { episodeFile, movieFile, scannedTitle } from "./scanned";
 import type { ScannedItem } from "./scanned";
 
@@ -64,35 +63,6 @@ const episodeAt = (season: number, number: number): Episode => {
   if (episode === null) throw new Error("an episode file has an episode");
 
   return episode;
-};
-
-const Applied = answer(Schema.Struct({ done: Schema.Finite }));
-
-/** Writes a show's metadata and every episode, sending again what a call's budget left. */
-const applyAll = async (
-  core: CoreStack,
-  lease: Lease,
-  titleId: Id<"titles">,
-  title: ScannedItem["title"],
-  episodes: ReadonlyArray<Episode>,
-  written: ReadonlyArray<number> = [],
-): Promise<ReadonlyArray<number>> => {
-  const applied = await runServer(
-    core,
-    api.movies.metadata.applyMetadata,
-    { lease, titleId, title, episodes: [...episodes] },
-    Applied,
-  );
-
-  if (applied.outcome !== "held") throw new Error(`applyMetadata answered ${applied.outcome}`);
-
-  const next = [...written, applied.value.done];
-
-  if (applied.value.done >= episodes.length) return next;
-
-  if (applied.value.done < 1) throw new Error("applyMetadata wrote no episode");
-
-  return applyAll(core, lease, titleId, title, episodes.slice(applied.value.done), next);
 };
 
 const Credited = answer(
@@ -191,18 +161,13 @@ describe.skipIf(stack === undefined)("movies call budgets", { timeout: 900_000 }
 
     if (titleId === undefined) throw new Error("no title landed");
 
-    const jobId = await runFunction(
-      stack,
-      internal.movies.probe.enqueueJob,
-      { payload: { kind: "movies.metadata", titleId, match: null, revision: 1, generation: 0 } },
-      JobId,
-    );
+    const jobId = await askRefresh(stack, titleId);
 
     const lease = await claimJob(stack, "movies.metadata", jobId);
     const episodes = Array.from({ length: 500 }, (_, n) => episodeAt(1 + (n % 10), n + 2));
     const mark = await logMark(stack);
 
-    const written = await applyAll(
+    const { written } = await applyMetadataAll(
       stack,
       lease,
       titleId,

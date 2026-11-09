@@ -352,3 +352,53 @@ export const purgeStage = async (
 
   if (next.more) await purgeStage(stack, libraryId, stage, next.cursor);
 };
+
+const Applied = answer(Schema.Struct({ done: Schema.Finite, applied: Schema.Boolean }));
+
+/** What a metadata job's writes came to: episodes written per call, and whether it still applied. */
+export interface MetadataRun {
+  readonly written: ReadonlyArray<number>;
+  readonly applied: boolean;
+}
+
+/**
+ * Writes a title's metadata and every episode as the server does: sends again what a call's
+ * budget left, and stops the job at the first call that answers it is no longer current.
+ */
+export const applyMetadataAll = async (
+  stack: CoreStack,
+  lease: Lease,
+  titleId: Id<"titles">,
+  title: ScannedItem["title"],
+  episodes: ReadonlyArray<NonNullable<ScannedItem["episode"]>>,
+  written: ReadonlyArray<number> = [],
+): Promise<MetadataRun> => {
+  const answered = await runServer(
+    stack,
+    api.movies.metadata.applyMetadata,
+    { lease, titleId, title, episodes: [...episodes] },
+    Applied,
+  );
+
+  if (answered.outcome !== "held") throw new Error(`applyMetadata answered ${answered.outcome}`);
+
+  const { done, applied } = answered.value;
+
+  if (!applied) return { written, applied: false };
+
+  const next = [...written, done];
+
+  if (done >= episodes.length) return { written: next, applied: true };
+
+  if (done < 1) throw new Error("applyMetadata wrote no episode");
+
+  return applyMetadataAll(stack, lease, titleId, title, episodes.slice(done), next);
+};
+
+/** Asks for an admin's match of a title, as the movies command will. */
+export const askMatch = (stack: CoreStack, titleId: Id<"titles">, providerId: string) =>
+  runFunction(stack, internal.movies.probe.askMatch, { titleId, providerId }, JobId);
+
+/** Asks for a refresh of a title's metadata, as the movies command will. */
+export const askRefresh = (stack: CoreStack, titleId: Id<"titles">) =>
+  runFunction(stack, internal.movies.probe.askRefresh, { titleId }, JobId);

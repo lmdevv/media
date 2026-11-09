@@ -19,6 +19,7 @@ import { withLibraryItems } from "../core/scans";
 import { NO_EXTERNAL_IDS } from "./catalog";
 import { titleFacts } from "./items";
 import { CALL_BUDGET, work } from "./budget";
+import { askForMatch, askForRefresh } from "./matching";
 import { filesPage, titlesPage } from "./purge";
 import { moveTotals, nothingMoved, totalsOf } from "./totals";
 import { trickplayState } from "./validators";
@@ -340,6 +341,25 @@ export const files = internalQuery({
 
     return found.map((file) => ({ fileId: file._id, path: file.path }));
   },
+});
+
+/** Asks for an admin's match of a title, as the movies command will (`askForMatch`). */
+export const askMatch = internalMutation({
+  args: { titleId: v.id("titles"), providerId: v.string() },
+  returns: v.id("jobs"),
+  handler: async (ctx, { titleId, providerId }) => {
+    const title = (await ctx.db.get(titleId)) ?? fail("not_found", "No such title");
+
+    return askForMatch(ctx, title, { provider: "tmdb", providerId });
+  },
+});
+
+/** Asks for a refresh of a title's metadata, as the movies command will (`askForRefresh`). */
+export const askRefresh = internalMutation({
+  args: { titleId: v.id("titles") },
+  returns: v.id("jobs"),
+  handler: async (ctx, { titleId }) =>
+    askForRefresh(ctx, (await ctx.db.get(titleId)) ?? fail("not_found", "No such title")),
 });
 
 /** Queues a job as a movies command will, such as an admin's metadata refresh. */

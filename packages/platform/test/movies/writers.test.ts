@@ -12,9 +12,21 @@ import { runServer, runServerAs } from "../service";
 import { refusal } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
 import type { CoreStack } from "../stack-env";
-import { JobId, PersonId, answer, claimJob, finishJob, moviesLibrary, upsert } from "./catalog";
+import {
+  JobId,
+  PersonId,
+  answer,
+  applyMetadataAll,
+  askMatch,
+  askRefresh,
+  claimJob,
+  finishJob,
+  moviesLibrary,
+  titleStateOf,
+  upsert,
+} from "./catalog";
 import type { Lease } from "./catalog";
-import { movieFile, scannedTitle } from "./scanned";
+import { episodeFile, movieFile, scannedTitle } from "./scanned";
 
 const stack = coreStackFromEnvFile();
 
@@ -75,6 +87,53 @@ const credit = (name: string, tmdb: string, order: number) => ({
   role: null,
   order,
 });
+
+const stale = { outcome: "held", value: { done: 0, applied: false } } as const;
+
+const scannedTitleOf = async (label: string, kind: "movie" | "show") => {
+  if (stack === undefined) throw new Error("no stack");
+
+  const admin = await member(stack, label, "admin");
+  const { scanJobId, roots } = await moviesLibrary(admin, label);
+  const scan = await claimJob(stack, "movies.scan", scanJobId);
+  const name = kind === "show" ? "Pioneer Won" : "Sintle";
+
+  const item =
+    kind === "show"
+      ? episodeFile(join(roots[0] ?? "", "1.mkv"), scannedTitle("show", "nfo:s", name), 1, 1)
+      : movieFile(join(roots[0] ?? "", "a.mkv"), 1, 1, scannedTitle("movie", "nfo:m", name));
+
+  const landed = await upsert(stack, scan, [item]);
+
+  await finishJob(stack, scan);
+
+  if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
+
+  const titleId = landed.value.files[0]?.titleId;
+
+  if (titleId === undefined) throw new Error("no title landed");
+
+  return titleId;
+};
+
+const nameOf = async (titleId: Id<"titles">) => {
+  if (stack === undefined) throw new Error("no stack");
+
+  return (
+    await runServer(stack, api.movies.metadata.metadataTarget, { titleId, cursor: null }, Target)
+  ).name;
+};
+
+const creditAs = (lease: Lease, titleId: Id<"titles">, hash: string) => {
+  if (stack === undefined) throw new Error("no stack");
+
+  return runServer(
+    stack,
+    api.movies.metadata.applyCredits,
+    { lease, titleId, episodeId: null, credits: [credit(`Cast ${hash}`, hash, 0)], hash },
+    Credits,
+  );
+};
 
 describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () => {
   it("write metadata, credits, people, and a collection under their jobs' leases", async () => {
@@ -426,106 +485,161 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
     ).toEqual([{ fileId, version: "v2" }]);
   });
 
-  it("drop a refresh asked for before an admin's match, so it never overwrites that match", async () => {
-    if (stack === undefined) return;
-    const admin = await member(stack, "match-race", "admin");
-    const { scanJobId, roots } = await moviesLibrary(admin, "Matched");
-    const scan = await claimJob(stack, "movies.scan", scanJobId);
+  describe("a title's match generation", () => {
+    it("write every episode of a manual match on a show, across continuation calls", async () => {
+      if (stack === undefined) return;
+      const titleId = await scannedTitleOf("match-big", "show");
+      const lease = await claimJob(stack, "movies.metadata", await askMatch(stack, titleId, "1"));
 
-    const landed = await upsert(stack, scan, [
-      movieFile(join(roots[0] ?? "", "Sintel.mkv"), 1, 1, scannedTitle("movie", "nfo:1", "Sintle")),
-    ]);
+      const episodes = Array.from({ length: 500 }, (_, n) => {
+        const { episode } = episodeFile("/unused", scannedTitle("show", "x", "x"), 1, n + 2);
 
-    await finishJob(stack, scan);
+        if (episode === null) throw new Error("an episode file has an episode");
 
-    if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
+        return episode;
+      });
 
-    const titleId = landed.value.files[0]?.titleId;
-
-    if (titleId === undefined) throw new Error("no title landed");
-
-    const nameOf = async () =>
-      (
-        await runServer(
-          stack,
-          api.movies.metadata.metadataTarget,
-          { titleId, cursor: null },
-          Target,
-        )
-      ).name;
-
-    const apply = (lease: Lease, name: string) =>
-      runServer(
+      const run = await applyMetadataAll(
         stack,
-        api.movies.metadata.applyMetadata,
-        { lease, titleId, title: scannedTitle("movie", "nfo:1", name), episodes: [] },
-        Applied,
+        lease,
+        titleId,
+        {
+          ...scannedTitle("show", "tmdb:1", "Pioneer One"),
+          genres: Array.from({ length: 256 }, (_, n) => `Genre ${n}`),
+        },
+        episodes,
       );
 
-    // A refresh is asked for and reads the title...
-    const refreshJob = await enqueue(
-      stack,
-      enqueueArgs({ kind: "movies.metadata", titleId, match: null, revision: 1, generation: 0 }),
-    );
-
-    const refresh = await claimJob(stack, "movies.metadata", refreshJob);
-
-    expect(await nameOf()).toBe("Sintle");
-
-    // ...then an admin's match is applied...
-    const matchJob = await enqueue(
-      stack,
-      enqueueArgs({
-        kind: "movies.metadata",
-        titleId,
-        match: { provider: "tmdb", providerId: "45745" },
-        revision: 1,
-        generation: 0,
-      }),
-    );
-
-    const match = await claimJob(stack, "movies.metadata", matchJob);
-
-    expect(await apply(match, "Sintel")).toEqual({
-      outcome: "held",
-      value: { done: 0, applied: true },
+      expect(run.applied).toBe(true);
+      expect(run.written.length).toBeGreaterThan(1);
+      expect(await titleStateOf(stack, titleId)).toMatchObject({ episodes: 501 });
+      expect(await creditAs(lease, titleId, "after")).toMatchObject({
+        value: { written: true },
+      });
+      await finishJob(stack, lease);
+      expect(await nameOf(titleId)).toBe("Pioneer One");
     });
-    await finishJob(stack, match);
 
-    // ...and the refresh's older result writes nothing, credits included.
-    expect(await apply(refresh, "Wrong film")).toEqual({
-      outcome: "held",
-      value: { done: 0, applied: false },
+    it("land a manual match's credits and collection written after its metadata", async () => {
+      if (stack === undefined) return;
+      const titleId = await scannedTitleOf("match-credits", "movie");
+      const lease = await claimJob(stack, "movies.metadata", await askMatch(stack, titleId, "2"));
+
+      expect(
+        await applyMetadataAll(
+          stack,
+          lease,
+          titleId,
+          scannedTitle("movie", "tmdb:2", "Sintel"),
+          [],
+        ),
+      ).toEqual({ written: [0], applied: true });
+      expect(await creditAs(lease, titleId, "manual")).toMatchObject({
+        outcome: "held",
+        value: { written: true },
+      });
+      expect(
+        await runServer(
+          stack,
+          api.movies.metadata.applyCollection,
+          {
+            lease,
+            titleId,
+            collection: {
+              sourceKey: "tmdb:c2",
+              name: "Blender",
+              overview: null,
+              poster: null,
+              backdrop: null,
+            },
+            hash: "c",
+          },
+          Done,
+        ),
+      ).toEqual({ outcome: "held", value: null });
+      await finishJob(stack, lease);
     });
-    expect(
-      await runServer(
+
+    it("drop a refresh asked for before an admin's match, so it never overwrites that match", async () => {
+      if (stack === undefined) return;
+      const titleId = await scannedTitleOf("match-race", "movie");
+      const refresh = await claimJob(stack, "movies.metadata", await askRefresh(stack, titleId));
+
+      expect(await nameOf(titleId)).toBe("Sintle");
+
+      const match = await claimJob(stack, "movies.metadata", await askMatch(stack, titleId, "3"));
+
+      expect(
+        await applyMetadataAll(
+          stack,
+          match,
+          titleId,
+          scannedTitle("movie", "tmdb:3", "Sintel"),
+          [],
+        ),
+      ).toMatchObject({ applied: true });
+      await finishJob(stack, match);
+
+      const late = await runServer(
         stack,
-        api.movies.metadata.applyCredits,
+        api.movies.metadata.applyMetadata,
         {
           lease: refresh,
           titleId,
-          episodeId: null,
-          credits: [credit("Wrong person", "9", 0)],
-          hash: "stale",
+          title: scannedTitle("movie", "nfo:m", "Wrong film"),
+          episodes: [],
         },
-        Credits,
-      ),
-    ).toEqual({ outcome: "held", value: { written: false, people: [] } });
-    await finishJob(stack, refresh);
+        Applied,
+      );
 
-    expect(await nameOf()).toBe("Sintel");
+      expect(late).toEqual(stale);
+      expect(await creditAs(refresh, titleId, "stale")).toEqual({
+        outcome: "held",
+        value: { written: false, people: [] },
+      });
+      await finishJob(stack, refresh);
+      expect(await nameOf(titleId)).toBe("Sintel");
 
-    // A refresh asked for after the match still refreshes it, and keeps it manual.
-    const laterJob = await enqueue(
-      stack,
-      enqueueArgs({ kind: "movies.metadata", titleId, match: null, revision: 2, generation: 1 }),
-    );
+      const later = await claimJob(stack, "movies.metadata", await askRefresh(stack, titleId));
 
-    const later = await claimJob(stack, "movies.metadata", laterJob);
+      expect(
+        await applyMetadataAll(
+          stack,
+          later,
+          titleId,
+          scannedTitle("movie", "tmdb:3", "Sintel 2010"),
+          [],
+        ),
+      ).toMatchObject({ applied: true });
+      await finishJob(stack, later);
+      expect(await nameOf(titleId)).toBe("Sintel 2010");
+    });
 
-    expect(await apply(later, "Sintel (2010)")).toMatchObject({ value: { applied: true } });
-    await finishJob(stack, later);
+    it("let a second manual match supersede the first, whose late writes are dropped", async () => {
+      if (stack === undefined) return;
+      const titleId = await scannedTitleOf("match-twice", "movie");
+      const first = await claimJob(stack, "movies.metadata", await askMatch(stack, titleId, "4"));
+      const second = await claimJob(stack, "movies.metadata", await askMatch(stack, titleId, "5"));
 
-    expect(await nameOf()).toBe("Sintel (2010)");
+      const apply = (lease: Lease, name: string) =>
+        runServer(
+          stack,
+          api.movies.metadata.applyMetadata,
+          { lease, titleId, title: scannedTitle("movie", "tmdb:x", name), episodes: [] },
+          Applied,
+        );
+
+      expect(await apply(first, "First match")).toEqual(stale);
+      expect(await apply(second, "Second match")).toEqual({
+        outcome: "held",
+        value: { done: 0, applied: true },
+      });
+      expect(await apply(first, "First match, late")).toEqual(stale);
+      expect(await creditAs(first, titleId, "first")).toMatchObject({ value: { written: false } });
+      expect(await creditAs(second, titleId, "second")).toMatchObject({ value: { written: true } });
+      await finishJob(stack, first);
+      await finishJob(stack, second);
+      expect(await nameOf(titleId)).toBe("Second match");
+    });
   });
 });

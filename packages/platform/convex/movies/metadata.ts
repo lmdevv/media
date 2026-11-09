@@ -102,8 +102,9 @@ export const metadataTarget = serverQuery({
 });
 
 /**
- * Whether a metadata job's result still describes the title: no admin's match was applied since
- * the job was asked for. A result from an older generation is dropped whole (ADR 0012).
+ * Whether a metadata job is still the title's current one: no admin's match was asked for since
+ * it was (`askForMatch` moves the generation when a match is asked for, never when one applies).
+ * A stale job's writes are dropped whole (ADR 0012).
  */
 const current = (asked: { readonly generation: number }, title: Doc<"titles">): boolean =>
   asked.generation === title.matchGeneration;
@@ -112,8 +113,9 @@ const current = (asked: { readonly generation: number }, title: Doc<"titles">): 
  * Writes fetched metadata during the title's metadata job, and the leading episodes of up to 500
  * of a show's as the call's budget admits, answering how many it wrote (`done`); the worker sends
  * the rest again, and the title, already written, costs nothing more. A job carrying an admin's
- * match marks the title manual and moves its match generation, so later scans keep its metadata
- * and a refresh asked for before it writes nothing (`applied` false).
+ * match marks the title manual, so later scans keep its metadata. A job asked for before a newer
+ * match writes nothing and answers `applied: false` with `done: 0`: the worker stops that job
+ * rather than sending the rest again.
  */
 export const applyMetadata = serverMutation({
   args: {
@@ -134,7 +136,7 @@ export const applyMetadata = serverMutation({
       const stored = await titleOf(ctx.db, titleId);
 
       if (!current(job.payload, stored)) {
-        return { outcome: "held", value: { done: episodes.length, applied: false } };
+        return { outcome: "held", value: { done: 0, applied: false } };
       }
 
       const fields = rescannedTitle(title, stored);
@@ -147,7 +149,6 @@ export const applyMetadata = serverMutation({
         ...fields,
         kind: stored.kind,
         matchStatus: manual || stored.matchStatus === "manual" ? "manual" : fields.matchStatus,
-        matchGeneration: manual ? stored.matchGeneration + 1 : stored.matchGeneration,
       });
 
       const landed =
