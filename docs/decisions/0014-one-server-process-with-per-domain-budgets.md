@@ -105,11 +105,13 @@ mount media read-only.
   then are they deleted. A replaced stream ends the same way. The server counts runs whose ffmpeg
   has not exited, closed streams' runs included, for an operator to see a stuck one.
   Shutting down closes every stream at once, so it waits at most 3 seconds in all.
-- ffmpeg runs in its own process group, which outlives a crashed server. The server records each
-  encoder it starts under its data folder: the process group, and its leader's start time and
-  executable. It drops the record once the exit is confirmed. At startup it kills only recorded
-  groups whose leader still has that start time and executable, so a process that reused the id
-  is left alone, and it never reads command lines.
+- ffmpeg runs in its own process group, so on Linux the server starts every tool through util-linux
+  `setpriv --pdeathsig KILL`. The kernel kills the tool when the server dies, even by SIGKILL, so
+  a crash leaves nothing to clean up, and the server never kills by process id. The signal
+  follows the thread that spawned the tool, which is Node's main thread and lives as long as the
+  server. The image ships `setpriv`, and the NixOS module puts util-linux on the service's path.
+  The module also keeps systemd's default control-group kill. Checking a recorded process id and
+  then signalling it was rejected: the id can be reused between the check and the signal.
 - A yield or a release spends at most 2 seconds keeping the run's init segment, then stops
   without it. The player's next request then starts a new run.
 - A new encoder waits at most 10 seconds for the encoders whose places it took. Past that, a
