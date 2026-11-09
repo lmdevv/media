@@ -150,7 +150,9 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/media:main, build 
 Each later step has its own limit too: 21 minutes for each app's first-run setup, a minute for
 each CLI sign-in and check, 6 minutes for music's API key, 15 minutes for the library wait, and
 15 minutes for each seed. A step that runs out fails `up` the same way, naming the step, and so
-does a browser host that doesn't start in 20 seconds.
+does a browser host that doesn't start in 20 seconds. A step that ignores the stop is killed 5
+seconds later. On the way out, each Docker call gets 15 seconds and `compose down` 60, so a
+stalled Docker daemon can't hold up the removal; a removal that can't finish says so.
 
 The side is ready only after a line like this prints, and `$S status` then says `ready` for it:
 

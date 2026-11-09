@@ -110,7 +110,8 @@ container() { echo "$project-$1-1"; }
 # Compose for this side only: its own project, the settings `up` wrote, the demo library's own
 # override (deploy/compose/compose.demo.yaml, as self-hosters use it) or a bind mount of another
 # library, and an override that labels the containers. Settings in the caller's shell or in a
-# deploy/compose/.env file would change what runs, so neither reaches Compose.
+# deploy/compose/.env file would change what runs, so neither reaches Compose. A `docker_limit` of
+# some seconds stops a call that takes longer, as when the Docker daemon stalls.
 compose() {
   local unset=() name dir files
   dir="$state/deploy/compose"
@@ -118,8 +119,12 @@ compose() {
   while read -r name; do unset+=(-u "$name"); done < <(sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$dir/.env.example")
   [[ "$(read_state library)" == "$demo_image" ]] && files+=(-f "$dir/compose.demo.yaml")
   env "${unset[@]}" -u COMPOSE_PROFILES -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME -u COMPOSE_ENV_FILES \
-    docker compose -p "$project" --env-file "$state/compose.env" "${files[@]}" -f "$state/compose.verify.yaml" "$@"
+    ${docker_limit:+timeout --kill-after=5 "$docker_limit"} docker compose -p "$project" --env-file "$state/compose.env" "${files[@]}" -f "$state/compose.verify.yaml" "$@"
 }
+
+# Docker for a check or a cleanup on the way out, which a stalled daemon must not hold up: each call
+# gets 15 seconds.
+docker_brief() { timeout --kill-after=5 15 docker "$@"; }
 
 # Health URLs that sent any HTTP response, so a wait that runs out can name the ones that never did.
 declare -A answered=()
@@ -143,12 +148,14 @@ stack_logs() {
   local services=("$(movies_service)")
   one_port || services+=(convex)
   has_music && services+=(music)
-  compose logs --no-color --tail 40 "${services[@]}" >&2 || true
+  docker_limit=15 compose logs --no-color --tail 40 "${services[@]}" >&2 ||
+    say "could not read the containers' logs (status $?)"
 }
 
-# Removes a side that did not start, so a failed `up` leaves nothing running.
+# Removes a side that did not start, so a failed `up` leaves nothing running. The removal runs
+# whatever its own steps do, and `up` still fails with the reason it stopped.
 start_failed() {
-  side_down "$side" >&2
+  side_down "$side" >&2 || say "could not finish removing the $side side (status $?)"
   die "$1"
 }
 
@@ -163,7 +170,7 @@ wait_healthy() {
     ((ready)) && return 0
     for service in "$(movies_service)" music; do
       [[ "$service" == music ]] && ! has_music && continue
-      status="$(docker inspect -f '{{.State.Status}}' "$(container "$service")" 2>/dev/null || echo missing)"
+      status="$(docker_brief inspect -f '{{.State.Status}}' "$(container "$service")" 2>/dev/null || echo missing)"
       if [[ "$status" == exited || "$status" == dead ]]; then
         stack_logs
         start_failed "$(container "$service") stopped while starting"
@@ -180,7 +187,7 @@ wait_healthy() {
   # a Tailscale exit node's, can take that address away from the host.
   for service in "$(movies_service)" music; do
     [[ "$service" == music ]] && ! has_music && continue
-    for ip in $(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$(container "$service")" 2>/dev/null); do
+    for ip in $(docker_brief inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$(container "$service")" 2>/dev/null || true); do
       say "check the host's route to $(container "$service") with \`ip route get $ip\`: $(ip route get "$ip" 2>/dev/null | head -1 || true)"
     done
   done
@@ -188,7 +195,7 @@ wait_healthy() {
 }
 
 browser() {
-  CHROMIUM_PATH="$(chromium_path)" ${cli_timeout:+timeout "$cli_timeout"} node "$scripts/browser.mjs" --state "$state" "$@"
+  CHROMIUM_PATH="$(chromium_path)" ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$scripts/browser.mjs" --state "$state" "$@"
 }
 
 start_browser() {
@@ -214,13 +221,13 @@ start_browser() {
 
 # Runs one step of `up`, such as signing in or seeding, within some seconds: `browser`, the CLIs,
 # and the seeds read `cli_timeout` and run under timeout(1), which exits 124 when time runs out, as
-# browser.mjs does when its host stays silent. A step that runs out fails `up` the way a stack that
-# never answered does.
+# browser.mjs does when its host stays silent, or 137 when the step ignored the stop and was killed
+# 5 seconds later. A step that runs out fails `up` the way a stack that never answered does.
 within() {
   local seconds="$1" step="$2" code=0
   shift 2
   cli_timeout="$seconds" "$@" || code=$?
-  ((code == 124)) && start_failed "$step did not finish in ${seconds}s"
+  ((code == 124 || code == 137)) && start_failed "$step did not finish in ${seconds}s"
   return "$code"
 }
 
@@ -228,13 +235,13 @@ within() {
 as="lucia"
 cli_raw() {
   env -u MEDIA_CONVEX_URL -u MEDIA_SERVER_URL -u MEDIA_API_KEY -u MEDIA_PROFILE -u MEDIA_PASSWORD \
-    XDG_CONFIG_HOME="$state/cli/$as" ${cli_timeout:+timeout "$cli_timeout"} node "$cli_js" "$@"
+    XDG_CONFIG_HOME="$state/cli/$as" ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$cli_js" "$@"
 }
 
 music_cli_raw() {
   env -u MUSIC_INSECURE MUSIC_SERVER="$(music_url)/convex" \
     MUSIC_API_KEY="$(read_state "music/key.$as")" XDG_CONFIG_HOME="$state/music/cli/$as" \
-    ${cli_timeout:+timeout "$cli_timeout"} node "$music_cli_js" "$@"
+    ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$music_cli_js" "$@"
 }
 
 # Signs a person's CLI in with their password, the way `media login` documents it.
@@ -484,12 +491,12 @@ YAML
 }
 
 seed() {
-  ${cli_timeout:+timeout "$cli_timeout"} node "$scripts/seed.mjs" --state "$state" --server "$(convex_url)" \
+  ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$scripts/seed.mjs" --state "$state" --server "$(convex_url)" \
     --media-url "$(url)" --cli "$cli_js" --browser "$scripts/browser.mjs" >&2
 }
 
 music_seed() {
-  ${cli_timeout:+timeout "$cli_timeout"} node "$scripts/music-seed.mjs" --state "$state" \
+  ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$scripts/music-seed.mjs" --state "$state" \
     --server "$(music_url)/convex" --cli "$music_cli_js" --browser "$scripts/browser.mjs" >&2
 }
 
@@ -1174,19 +1181,22 @@ cmd_evidence() {
 side_down() {
   take_side --side "$1"
   local label="label=com.docker.compose.project=$project" pid
-  [[ -d "$state" || -n "$(docker ps -aq --filter "$label")$(docker volume ls -q --filter "$label")" ]] || return 0
+  [[ -d "$state" || -n "$(docker_brief ps -aq --filter "$label")$(docker_brief volume ls -q --filter "$label")" ]] || return 0
   mkdir -p "$state"
   ios_down
   pid="$(read_state browser.pid)"
   [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
   # The project's containers, network, and named volumes, and nothing else. Compose labels each
   # with the project's name, which also finds them when the state folder is gone.
-  [[ -f "$state/compose.env" ]] && compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
-  docker ps -aq --filter "$label" | xargs -r docker rm -f >/dev/null 2>&1 || true
-  docker volume ls -q --filter "$label" | xargs -r docker volume rm >/dev/null 2>&1 || true
-  docker network ls -q --filter "$label" | xargs -r docker network rm >/dev/null 2>&1 || true
-  docker images -q --filter "label=media.verify.run=$run" --filter "label=media.verify.side=$side" | sort -u |
-    xargs -r docker image rm -f >/dev/null 2>&1 || true
+  # Each step is bounded, and one that fails or runs out leaves the rest to run.
+  if [[ -f "$state/compose.env" ]] && ! docker_limit=60 compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1; then
+    say "compose down did not finish for $project; check \`docker ps -a --filter $label\`"
+  fi
+  docker_brief ps -aq --filter "$label" | xargs -r timeout --kill-after=5 15 docker rm -f >/dev/null 2>&1 || true
+  docker_brief volume ls -q --filter "$label" | xargs -r timeout --kill-after=5 15 docker volume rm >/dev/null 2>&1 || true
+  docker_brief network ls -q --filter "$label" | xargs -r timeout --kill-after=5 15 docker network rm >/dev/null 2>&1 || true
+  docker_brief images -q --filter "label=media.verify.run=$run" --filter "label=media.verify.side=$side" | sort -u |
+    xargs -r timeout --kill-after=5 15 docker image rm -f >/dev/null 2>&1 || true
   [[ -d "$state/src" ]] && git -C "$root" worktree remove --force "$state/src" 2>/dev/null || true
   rm -rf "$state"
   say "removed the $side side (evidence kept in $evidence)"
