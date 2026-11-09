@@ -22,7 +22,14 @@ const userId = (name: string): Id<"users"> => {
 const AIKO = userId("aiko");
 
 const aiko = (scopes: ReadonlyArray<CredentialScope>, role: "member" | "guest" = "member") =>
-  ({ kind: "person", userId: AIKO, role, scopes, restrictions: null }) satisfies Principal;
+  ({
+    kind: "person",
+    userId: AIKO,
+    role,
+    scopes,
+    restrictions: null,
+    sessionKind: "password",
+  }) satisfies Principal;
 
 const decide = (principal: Principal, name: SettingName, owner = AIKO) =>
   can(principal, "change", { on: "setting", owner, domains: settingTable[name].domains });
@@ -38,6 +45,7 @@ describe("the settings rule in can", () => {
       role: "admin",
       scopes: ["account", "admin", "movies:play", "music:play"],
       restrictions: null,
+      sessionKind: "password",
     };
 
     expect(decide(admin, "subtitleLanguage")).toEqual({

@@ -21,8 +21,8 @@ import type { JoinSetting, Settings } from "../together/model";
 export type PersonDoc = Extract<Doc<"users">, { readonly kind: "person" }>;
 
 /**
- * Who acts. A person has a role, the scopes their credential holds now, and their restrictions. A
- * service, such as the media server, has no role and no restrictions.
+ * Who acts. A person has a role, the scopes their credential holds now, their restrictions, and
+ * how they signed in. A service, such as the media server, has no role and no restrictions.
  */
 export type Principal =
   | {
@@ -31,6 +31,8 @@ export type Principal =
       readonly role: Role;
       readonly scopes: ReadonlyArray<CredentialScope>;
       readonly restrictions: Restrictions | null;
+      /** How this call signed in; null with no session in the call, as for a link's maker. */
+      readonly sessionKind: Doc<"authSessions">["kind"] | null;
     }
   | {
       readonly kind: "service";
@@ -179,7 +181,8 @@ export type Because =
   | "unbacked"
   | "revoked"
   | "expired"
-  | "not-shared";
+  | "not-shared"
+  | "api-key";
 
 /**
  * An access decision. `hidden` answers as if the thing did not exist, so a private thing stays
@@ -1013,8 +1016,8 @@ export interface ShareResource {
 
 /**
  * What can be done through a share link. `offer` asks whether the caller may make links at all,
- * and `make` makes one. `open` lets a new guest in, `hold` keeps a guest's session live on every
- * call, and `play` plays one item.
+ * and `make` makes one; neither is open to an API key. `open` lets a new guest in, `hold` keeps a
+ * guest's session live on every call, and `play` plays one item.
  */
 export const shareActions = ["offer", "make", "open", "hold", "play"] as const;
 
@@ -1100,6 +1103,8 @@ const decideShare = (principal: Principal, rule: ShareRule, share: ShareResource
     }
 
     if (!principal.scopes.includes("account")) return forbidden("scope");
+
+    if (principal.sessionKind === "apiKey") return forbidden("api-key");
   } else if (principal.role !== "guest" || link === "new" || !link.mine) {
     return hidden("not-yours");
   }
@@ -1366,6 +1371,7 @@ export const principalOf = (
         role: user.role,
         scopes,
         restrictions: restrictionsOf(user),
+        sessionKind: null,
       };
 
 export const accountTarget = (user: Doc<"users">): AccountResource => ({

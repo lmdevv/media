@@ -20,7 +20,7 @@ export const { status, configure, allow, current } = register({
     return {
       enabled: access.enabled,
       address: access.address,
-      mayShare: offer.allowed && caller.sessionKind !== "apiKey",
+      mayShare: offer.allowed,
     };
   },
   configure: async (ctx, { enabled, address }, caller) => {

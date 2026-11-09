@@ -128,8 +128,10 @@ owner included. `forbidden` refuses something the principal can see but may not 
 
 Handlers never pass rows to `can` themselves. Loaders read the facts and decide:
 `requireContent`, `visiblePage`, and `requireItems` in `permissions/grants.ts`, and `requireAccount` and
-`requireServer` in `permissions/authorize.ts`. A link check has no session, so it asks `can` about
-`principalOf(maker)`, the principal the maker's row alone allows.
+`requireServer` in `permissions/authorize.ts`. A person principal carries how its session signed
+in, so a rule such as "no API key makes a guest link" lives in `can` too. A link check has no
+session, so it asks `can` about `principalOf(maker)`, the principal the maker's row alone allows,
+with no session kind.
 
 ### Roles and scopes
 

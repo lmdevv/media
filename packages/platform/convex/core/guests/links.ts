@@ -6,7 +6,7 @@ import type { Doc, Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { asPerson } from "../accounts/users";
-import { callerUser, refuseKeys, requireCaller } from "../auth/caller";
+import { callerUser, requireCaller } from "../auth/caller";
 import type { Caller } from "../auth/caller";
 import { fail } from "../lib/errors";
 import { PAGE_ROWS_MAX, paginate, paginateAtMost } from "../lib/paginate";
@@ -69,6 +69,10 @@ const refuseMake = (
 ): never => {
   const { because, refusal } = decision;
 
+  if (because === "api-key") {
+    return fail("forbidden", "API keys cannot do this; sign in with a password or a device");
+  }
+
   if (because === "switched-off") {
     return fail("forbidden", "Guest links are off; an admin can turn them on");
   }
@@ -94,15 +98,15 @@ const refuseMake = (
 };
 
 /**
- * `create`'s write, once its action made the secret. Checks the caller again with API keys
- * refused, decides `make` on what they ask to share, and stores the link with the stamps that
- * keep it dead once guest links go off or the caller loses the right to make it.
+ * `create`'s write, once its action made the secret. Checks the caller again, decides `make` on
+ * what they ask to share, and stores the link with the stamps that keep it dead once guest links
+ * go off or the caller loses the right to make it.
  */
 export const insert = internalMutation({
   args: { secretHash: v.string(), target: shareTarget, expiresInDays: v.number() },
   returns: v.object({ linkId: v.id("shareLinks"), expiresAt: v.number(), address: v.string() }),
   handler: async (ctx, { secretHash, target, expiresInDays }) => {
-    const caller = refuseKeys(await requireCaller(ctx, "account"));
+    const caller = await requireCaller(ctx, "account");
     const now = Date.now();
 
     if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > DAYS_MAX) {
