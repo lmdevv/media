@@ -144,10 +144,15 @@ Settled by the movies catalog (2026-11-09):
   `music`, and `server.backup` in `server`. The `probe.*` kinds name `probe`, which no server pool
   claims. A kind's cap bounds it across every worker; the pool's cap bounds its kinds on one
   server.
-- `movies.metadata` (`{ titleId, match }`) dedupes on its title and match, so a refresh joins a
-  queued refresh but an admin's match is never folded into one. `movies.person` (`{ personId }`)
-  and `movies.trickplay` (`{ fileId }`) dedupe on their row, and `server.backup`
-  (`{ trigger }`) on the server, so one backup runs at a time. Metadata and person cap at the `movies` pool's 2.
+- A movies job's dedupe key names the revision of what it works from, not just the row
+  (amended 2026-11-09, Codex review of #126). `movies.metadata` (`{ titleId, match, revision }`)
+  dedupes on the title, the title's `updatedAt` when asked, and the match. `movies.person`
+  (`{ personId, revision }`) dedupes on the person and their `updatedAt`. `movies.trickplay`
+  (`{ fileId, revision }`) dedupes on the file and its contents, `size:mtime`. A request for a row
+  that changed since a job read it gets a job of its own, even while the old one runs, and an
+  admin's match never folds into a refresh. `recordTrickplay` records only for the job the file
+  waits on and the contents it has; a late result for older contents changes nothing.
+  `server.backup` (`{ trigger }`) dedupes on the server, so one backup runs at a time. Metadata and person cap at the `movies` pool's 2.
   Trickplay caps at 8 across workers, above the server's `TRICKPLAY_CONCURRENCY`, 1 by default.
   Old movies' `migration` kind stays `probe.import` until the importer port.
 - `withJobLease(ctx, kinds, lease, write)` in `jobs/held.ts` is the lease check of every server

@@ -5,6 +5,10 @@ import type { JobCtx } from "../core/jobs/store";
 const hasFrames = (file: Doc<"mediaFiles">): boolean =>
   !file.missing && file.probe.video.length > 0 && file.probe.durationMs > 0;
 
+/** The contents of a file thumbnails are made from: its size and change time. */
+export const contentRevision = (file: Doc<"mediaFiles">): string =>
+  `${file.sizeBytes}:${file.mtimeMs}`;
+
 const forCurrent = (file: Doc<"mediaFiles">): boolean =>
   file.trickplay !== undefined &&
   file.trickplay.sizeBytes === file.sizeBytes &&
@@ -35,8 +39,10 @@ const jobState = async (
 /**
  * Queues a `movies.trickplay` job for `file` unless it has no frames, already has one queued or
  * running for its current contents, or has thumbnails of them. A job for older contents is
- * canceled and replaced. A job that failed for the current contents counts as their failure, so
- * a scan does not queue it again; `retryFailed` queues it anyway, as an admin's request does.
+ * canceled and replaced, and the new job's dedupe key carries the new contents' revision, so it
+ * never folds into a job for the old contents that is still running, whatever the file's state
+ * recorded. A job that failed for the current contents counts as their failure, so a scan does
+ * not queue it again; `retryFailed` queues it anyway, as an admin's request does.
  */
 export const queueTrickplay = async (
   ctx: JobCtx,
@@ -59,7 +65,11 @@ export const queueTrickplay = async (
     await cancel(ctx, file.trickplay.jobId);
   }
 
-  const { jobId } = await enqueue(ctx, { kind: "movies.trickplay", fileId: file._id });
+  const { jobId } = await enqueue(ctx, {
+    kind: "movies.trickplay",
+    fileId: file._id,
+    revision: contentRevision(file),
+  });
 
   await ctx.db.patch(file._id, {
     trickplay: { status: "pending", jobId, sizeBytes: file.sizeBytes, mtimeMs: file.mtimeMs },

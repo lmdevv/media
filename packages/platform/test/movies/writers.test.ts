@@ -13,6 +13,7 @@ import { refusal } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
 import type { CoreStack } from "../stack-env";
 import { JobId, PersonId, answer, claimJob, finishJob, moviesLibrary, upsert } from "./catalog";
+import type { Lease } from "./catalog";
 import { movieFile, scannedTitle } from "./scanned";
 
 const stack = coreStackFromEnvFile();
@@ -38,6 +39,17 @@ const Target = Schema.Struct({ name: Schema.String, year: Schema.NullOr(Schema.F
 
 const PersonTarget = Schema.Struct({ name: Schema.String });
 
+const manifestOf = (version: string) => ({
+  version,
+  intervalMs: 10_000,
+  tileWidth: 320,
+  tileHeight: 180,
+  columns: 10,
+  rows: 10,
+  thumbnailCount: 6,
+  sheetCount: 1,
+});
+
 const Versions = Schema.Array(
   Schema.Struct({ fileId: Schema.String, version: Schema.NullOr(Schema.String) }),
 );
@@ -51,8 +63,9 @@ const enqueueArgs = (
         kind: "movies.metadata";
         titleId: Id<"titles">;
         match: { provider: "tmdb"; providerId: string } | null;
+        revision: number;
       }
-    | { kind: "movies.person"; personId: Id<"people"> },
+    | { kind: "movies.person"; personId: Id<"people">; revision: number },
 ) => payload;
 
 const credit = (name: string, tmdb: string, order: number) => ({
@@ -101,7 +114,7 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
 
     const jobId = await enqueue(
       stack,
-      enqueueArgs({ kind: "movies.metadata", titleId, match: null }),
+      enqueueArgs({ kind: "movies.metadata", titleId, match: null, revision: 1 }),
     );
 
     const lease = await claimJob(stack, "movies.metadata", jobId);
@@ -189,7 +202,11 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
 
     await finishJob(stack, lease);
 
-    const personJob = await enqueue(stack, enqueueArgs({ kind: "movies.person", personId }));
+    const personJob = await enqueue(
+      stack,
+      enqueueArgs({ kind: "movies.person", personId, revision: 1 }),
+    );
+
     const personLease = await claimJob(stack, "movies.person", personJob);
 
     expect(
@@ -323,5 +340,88 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
     expect(listed.sizes[0]).toBe(1000);
     expect(new Set(listed.ids).size).toBe(1001);
     expect(listed.ids).toHaveLength(1001);
+  });
+
+  it("queue thumbnails for a file's new contents while the job for its old ones still runs", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "trickplay-change", "admin");
+    const { scanJobId, roots } = await moviesLibrary(admin, "Changed file");
+    const scan = await claimJob(stack, "movies.scan", scanJobId, 600_000);
+    const path = join(roots[0] ?? "", "Sintel.mkv");
+    const title = scannedTitle("movie", "tmdb:45745", "Sintel");
+
+    const landed = await upsert(stack, scan, [movieFile(path, 5, 5, title, true)]);
+
+    if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
+
+    const fileId = landed.value.files[0]?.fileId;
+
+    if (fileId === undefined) throw new Error("no file landed");
+
+    const State = Schema.Struct({
+      trickplay: Schema.NullOr(
+        Schema.Struct({ status: Schema.String, jobId: Schema.optionalKey(JobId) }),
+      ),
+    });
+
+    const stateOf = async () =>
+      (await runFunction(stack, internal.movies.probe.fileState, { fileId }, State)).trickplay;
+
+    const JobStatus = Schema.NullOr(Schema.Struct({ status: Schema.String }));
+
+    const statusOf = async (jobId: Id<"jobs">) =>
+      (await runFunction(stack, internal.core.jobs.admin.get, { jobId }, JobStatus))?.status;
+
+    const firstJob = (await stateOf())?.jobId;
+
+    if (firstJob === undefined) throw new Error("the scan queued no thumbnails");
+
+    const first = await claimJob(stack, "movies.trickplay", firstJob, 600_000);
+
+    const record = (lease: Lease, size: number, version: string) =>
+      runServer(
+        stack,
+        api.movies.trickplay.recordTrickplay,
+        { lease, fileId, sizeBytes: size, mtimeMs: size, manifest: manifestOf(version) },
+        Done,
+      );
+
+    // The old job records, then the file changes before that job finishes.
+    await record(first, 5, "v1");
+
+    expect(await stateOf()).toMatchObject({ status: "ready" });
+
+    await upsert(stack, scan, [movieFile(path, 6, 6, title, true)]);
+
+    const pending = await stateOf();
+    const secondJob = pending?.jobId;
+
+    expect(pending?.status).toBe("pending");
+    expect(secondJob).toBeDefined();
+    expect(secondJob).not.toBe(firstJob);
+
+    if (secondJob === undefined) throw new Error("no job for the new contents");
+
+    // The old job's late result, for contents the file no longer has, changes nothing.
+    await record(first, 5, "v1-late");
+    await finishJob(stack, first);
+    await finishJob(stack, scan);
+
+    expect(await stateOf()).toMatchObject({ status: "pending", jobId: secondJob });
+    expect(await statusOf(secondJob)).toBe("queued");
+
+    const second = await claimJob(stack, "movies.trickplay", secondJob, 600_000);
+
+    await record(second, 6, "v2");
+    await finishJob(stack, second);
+
+    expect(
+      await runServer(
+        stack,
+        api.movies.trickplay.trickplayVersions,
+        { fileIds: [fileId] },
+        Versions,
+      ),
+    ).toEqual([{ fileId, version: "v2" }]);
   });
 });

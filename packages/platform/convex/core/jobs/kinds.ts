@@ -179,30 +179,47 @@ export const KINDS = [
       titleId: v.id("titles"),
       /** A match an admin chose, which marks the title manual; null refreshes the current one. */
       match: v.union(v.object({ provider: v.literal("tmdb"), providerId: v.string() }), v.null()),
+      /** The title's `updatedAt` when the job was asked for: the target it looks up. */
+      revision: v.number(),
     },
     pool: "movies",
     item: null,
     cap: MOVIES_POOL_CAP,
     maxStrikes: 3,
-    /** A refresh joins a queued refresh; an admin's match never folds into one. */
+    /**
+     * A refresh joins a queued or running refresh of the same title as it is now; an admin's
+     * match never folds into one, and a title that changed since gets a job of its own.
+     */
     dedupe: (payload) =>
-      `${payload.titleId}:${payload.match === null ? "refresh" : `${payload.match.provider}:${payload.match.providerId}`}`,
+      `${payload.titleId}:${payload.revision}:${payload.match === null ? "refresh" : `${payload.match.provider}:${payload.match.providerId}`}`,
   }),
   defineKind("movies.person", {
-    payload: { personId: v.id("people") },
+    payload: {
+      personId: v.id("people"),
+      /** The person's `updatedAt` when the job was asked for: the name and ids it looks up. */
+      revision: v.number(),
+    },
     pool: "movies",
     item: null,
     cap: MOVIES_POOL_CAP,
     maxStrikes: 3,
-    dedupe: (payload) => payload.personId,
+    dedupe: (payload) => `${payload.personId}:${payload.revision}`,
   }),
   defineKind("movies.trickplay", {
-    payload: { fileId: v.id("mediaFiles") },
+    payload: {
+      fileId: v.id("mediaFiles"),
+      /** The contents the thumbnails are for: the file's size and change time, `size:mtime`. */
+      revision: v.string(),
+    },
     pool: "movies.background",
     item: null,
     cap: TRICKPLAY_RUNNING_MAX,
     maxStrikes: 3,
-    dedupe: (payload) => payload.fileId,
+    /**
+     * A job joins one queued or running for the same contents; a file that changed gets a job for
+     * its new contents even while the old one still runs.
+     */
+    dedupe: (payload) => `${payload.fileId}:${payload.revision}`,
   }),
   defineKind("server.backup", {
     payload: { trigger: v.union(v.literal("nightly"), v.literal("manual")) },

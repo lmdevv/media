@@ -4,17 +4,17 @@ import { leaseAnswer, withJobLease } from "../core/jobs/held";
 import { lease } from "../core/jobs/model";
 import { fail } from "../core/lib/errors";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
-import { currentManifest } from "./trickplayState";
+import { contentRevision, currentManifest } from "./trickplayState";
 import { nullable, trickplayManifest } from "./validators";
 
 /** The most file ids one sweep call asks about. */
 const SWEEP_MAX = 500;
 
 /**
- * Records a file's finished scrub thumbnails during its trickplay job. A file whose state moved
- * on meanwhile (marked missing, or queued again after a change) keeps its state, and thumbnails
- * made from other contents than the catalog has are dropped; the server's sweep deletes thumbnails
- * nobody records.
+ * Records a file's finished scrub thumbnails during its trickplay job. Only the job the file now
+ * waits on records, and only for the contents it was queued for: a result for contents the file
+ * no longer has, or from a job a newer one replaced, changes nothing, since a job for the current
+ * contents is queued. The server's sweep deletes thumbnails nobody records.
  */
 export const recordTrickplay = serverMutation({
   args: {
@@ -31,16 +31,18 @@ export const recordTrickplay = serverMutation({
 
       const file = await ctx.db.get(fileId);
 
-      if (file?.trickplay?.status !== "pending" || file.trickplay.jobId !== job.jobId) {
-        return { outcome: "held", value: null };
-      }
+      const current =
+        file?.trickplay?.status === "pending" &&
+        file.trickplay.jobId === job.jobId &&
+        job.payload.revision === contentRevision(file) &&
+        sizeBytes === file.sizeBytes &&
+        mtimeMs === file.mtimeMs;
 
-      await ctx.db.patch(
-        fileId,
-        sizeBytes === file.sizeBytes && mtimeMs === file.mtimeMs
-          ? { trickplay: { status: "ready", sizeBytes, mtimeMs, manifest } }
-          : { trickplay: undefined },
-      );
+      if (current) {
+        await ctx.db.patch(fileId, {
+          trickplay: { status: "ready", sizeBytes, mtimeMs, manifest },
+        });
+      }
 
       return { outcome: "held", value: null };
     }),

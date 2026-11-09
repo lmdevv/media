@@ -194,7 +194,7 @@ describe.skipIf(stack === undefined)("movies call budgets", { timeout: 900_000 }
     const jobId = await runFunction(
       stack,
       internal.movies.probe.enqueueJob,
-      { payload: { kind: "movies.metadata", titleId, match: null } },
+      { payload: { kind: "movies.metadata", titleId, match: null, revision: 1 } },
       JobId,
     );
 

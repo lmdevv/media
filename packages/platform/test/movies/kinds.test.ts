@@ -18,20 +18,31 @@ describe("movies job kinds", () => {
     });
   });
 
-  it("collapse a second job for the same title and match, person, file, or server backup", () => {
+  it("collapse a second job only for the same title and match, person, or file as it is now", () => {
     const payloads = [
-      { kind: "movies.metadata", titleId: "t", match: null },
-      { kind: "movies.metadata", titleId: "t", match: { provider: "tmdb", providerId: "603" } },
-      { kind: "movies.person", personId: "p" },
-      { kind: "movies.trickplay", fileId: "f" },
+      { kind: "movies.metadata", titleId: "t", match: null, revision: 1 },
+      { kind: "movies.metadata", titleId: "t", match: null, revision: 2 },
+      {
+        kind: "movies.metadata",
+        titleId: "t",
+        match: { provider: "tmdb", providerId: "603" },
+        revision: 1,
+      },
+      { kind: "movies.person", personId: "p", revision: 1 },
+      { kind: "movies.person", personId: "p", revision: 2 },
+      { kind: "movies.trickplay", fileId: "f", revision: "10:1" },
+      { kind: "movies.trickplay", fileId: "f", revision: "20:2" },
       { kind: "server.backup", trigger: "manual" },
     ] as const;
 
     expect(payloads.map((payload) => kindDef(payload.kind).dedupeKey(payload))).toEqual([
-      "movies.metadata:t:refresh",
-      "movies.metadata:t:tmdb:603",
-      "movies.person:p",
-      "movies.trickplay:f",
+      "movies.metadata:t:1:refresh",
+      "movies.metadata:t:2:refresh",
+      "movies.metadata:t:1:tmdb:603",
+      "movies.person:p:1",
+      "movies.person:p:2",
+      "movies.trickplay:f:10:1",
+      "movies.trickplay:f:20:2",
       "server.backup:server",
     ]);
   });
