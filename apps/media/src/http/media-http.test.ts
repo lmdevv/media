@@ -768,7 +768,16 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         });
 
         assert.strictEqual((yield* get(firstPlaylist)).status, 410);
-        assert.isFalse(yield* fs.exists(path.join(server.transcodeDir, streamId, "1")));
+
+        const firstRunLeft = yield* fs.exists(path.join(server.transcodeDir, streamId, "1")).pipe(
+          Effect.repeat({
+            until: (exists) => !exists,
+            schedule: Schedule.spaced("50 millis"),
+            times: 100,
+          }),
+        );
+
+        assert.isFalse(firstRunLeft, "the first run's folder goes once it stopped");
 
         const secondPlaylist = firstPlaylist.replace("/1/index.m3u8", "/2/index.m3u8");
         const rewound = yield* fetchSegment(secondPlaylist, 0);

@@ -823,9 +823,18 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
           assert.strictEqual(moved.status, 200);
           assert.deepInclude(JSON.parse(textOf(moved.body)), { generation: 2 });
 
+          const kept = new Set(["3", "init-2.mp4"]);
+
           const names = yield* fs
             .readDirectory(path.join(server.transcodeDir, stream.streamId))
-            .pipe(Effect.orDie);
+            .pipe(
+              Effect.orDie,
+              Effect.repeat({
+                until: (found) => found.every((name) => kept.has(name)),
+                schedule: Schedule.spaced("50 millis"),
+                times: 100,
+              }),
+            );
 
           assert.includeMembers(
             ["3", "init-2.mp4"],

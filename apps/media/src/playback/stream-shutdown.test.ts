@@ -192,6 +192,44 @@ describe.skipIf(!hasFfmpeg)("stream shutdown", () => {
     );
 
     it.effect(
+      "a seek does not wait for a response its previous run is still sending",
+      () =>
+        Effect.gen(function* () {
+          const scope = yield* Scope.make();
+          const sessions = yield* freshSessions(scope);
+          const who = yield* viewer;
+          const started = yield* playing(sessions, who);
+          const response = yield* Scope.make();
+
+          yield* sessions
+            .segment(started.streamId, started.generation, started.segmentIndex, who.grant)
+            .pipe(Scope.provide(response));
+
+          const began = yield* Clock.currentTimeMillis;
+          const moved = yield* sessions.seek(started.streamId, 8, who.grant);
+          const elapsed = (yield* Clock.currentTimeMillis) - began;
+
+          assert.isAbove(moved.generation, started.generation, "the seek started a new run");
+          assert.isBelow(elapsed, STOP_WAIT_MS, `the seek took ${String(elapsed)} ms`);
+          assert.strictEqual(
+            yield* sessions.runsAwaitingExit.pipe(
+              Effect.repeat({
+                until: (count) => count === 1,
+                schedule: Schedule.spaced("100 millis"),
+                times: 50,
+              }),
+            ),
+            1,
+            "runs awaiting exit once the previous encoder exited, its response still open",
+          );
+
+          yield* Scope.close(response, Exit.void);
+          yield* Scope.close(scope, Exit.void);
+        }),
+      60_000,
+    );
+
+    it.effect(
       "shutting down closes every stream within one stop's bound while their encoders' exits are unconfirmed",
       () =>
         Effect.gen(function* () {

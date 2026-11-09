@@ -177,6 +177,7 @@ export interface Interface {
   ) => Effect.Effect<void, StreamNotFound | StreamAccessDenied>;
   /** Number of streams whose encoder runs; a released stream waiting for its player is not one. */
   readonly activeCount: Effect.Effect<number>;
+  /** Runs whose ffmpeg has not exited yet, closed streams' included, such as a stuck one's. */
   readonly runsAwaitingExit: Effect.Effect<number>;
 }
 
@@ -265,6 +266,9 @@ interface RunScope {
   readonly readers: Scope.Closeable;
   readonly files: Scope.Closeable;
   readonly stopping: MutableRef.MutableRef<boolean>;
+  /** Once its process exited, which frees its slot. */
+  readonly exited: Deferred.Deferred<void>;
+  /** Once its folder is gone too, after its reads and the responses that hold its files. */
   readonly stopped: Deferred.Deferred<void>;
 }
 
@@ -281,7 +285,7 @@ interface Lifecycle {
   readonly streamId: StreamId;
   readonly scope: Scope.Closeable;
   readonly runs: Ref.Ref<Runs>;
-  /** Runs of every stream, closed ones included, whose stop has not finished. */
+  /** Runs of every stream, closed ones included, whose process has not exited. */
   readonly serverRunsAwaitingExit: Ref.Ref<number>;
   readonly directory: string;
   readonly torndown: Deferred.Deferred<void>;
@@ -368,19 +372,25 @@ const beginStop = (stream: Lifecycle, run: RunScope) =>
   Effect.suspend(() =>
     MutableRef.getAndSet(run.stopping, true)
       ? Effect.void
-      : Effect.all([Scope.close(run.scope, Exit.void), Scope.close(run.readers, Exit.void)], {
-          concurrency: "unbounded",
-          discard: true,
-        }).pipe(
+      : Effect.all(
+          [
+            Scope.close(run.scope, Exit.void).pipe(
+              Effect.ensuring(
+                Ref.update(stream.serverRunsAwaitingExit, (count) => count - 1).pipe(
+                  Effect.andThen(Deferred.succeed(run.exited, undefined)),
+                ),
+              ),
+            ),
+            Scope.close(run.readers, Exit.void),
+          ],
+          { concurrency: "unbounded", discard: true },
+        ).pipe(
           Effect.andThen(Scope.close(run.files, Exit.void)),
           Effect.ensuring(
             Ref.update(stream.runs, (runs) => ({
               ...runs,
               live: without(runs.live, run.scope),
-            })).pipe(
-              Effect.andThen(Ref.update(stream.serverRunsAwaitingExit, (count) => count - 1)),
-              Effect.andThen(Deferred.succeed(run.stopped, undefined)),
-            ),
+            })).pipe(Effect.andThen(Deferred.succeed(run.stopped, undefined))),
           ),
           Effect.forkDetach,
           Effect.asVoid,
@@ -439,9 +449,9 @@ const endOfStart = (cause: Cause.Cause<StartError>): PlaybackReporter.StreamEndR
       ? "capacity-reached"
       : "failed";
 
-const awaitStopped = (run: RunScope) =>
+const awaitExited = (run: RunScope) =>
   Effect.interruptible(
-    Deferred.await(run.stopped).pipe(Effect.timeoutOption(STOP_WAIT), Effect.asVoid),
+    Deferred.await(run.exited).pipe(Effect.timeoutOption(STOP_WAIT), Effect.asVoid),
   );
 
 const make = Effect.gen(function* () {
@@ -545,6 +555,7 @@ const make = Effect.gen(function* () {
       readers: yield* Scope.make(),
       files: yield* Scope.make(),
       stopping: MutableRef.make(false),
+      exited: yield* Deferred.make<void>(),
       stopped: yield* Deferred.make<void>(),
     };
 
@@ -910,7 +921,7 @@ const make = Effect.gen(function* () {
 
     const awaitPrevious = Option.match(previous, {
       onNone: () => Effect.void,
-      onSome: awaitStopped,
+      onSome: awaitExited,
     });
 
     const ready = yield* run.held.ready.pipe(Effect.timeoutOption(READY_WAIT));
@@ -1497,7 +1508,7 @@ const make = Effect.gen(function* () {
       Encoder.Released({ since: yield* Clock.currentTimeMillis, keptInit }),
     );
     yield* beginStop(session, run);
-    yield* awaitStopped(run);
+    yield* awaitExited(run);
   });
 
   const yieldEncoder = Effect.fn("StreamSessions.yieldEncoder")(function* (
