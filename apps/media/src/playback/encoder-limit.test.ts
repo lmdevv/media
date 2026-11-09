@@ -115,7 +115,7 @@ const RUN_FOLDER = /\/transcode\/[^/]+\/\d+$/u;
 
 const folders = { failNext: false };
 
-const KEPT_INIT_OF_MOVE = /\/init-\d+\.mp4$/u;
+const MOVED_RUN_FOLDER = /\/transcode\/[^/]+\/(?:[2-9]|\d{2,})$/u;
 
 const moves = { armed: false, reached: Promise.withResolvers<void>() };
 
@@ -123,21 +123,21 @@ const smallTurns = Effect.provideService(Scheduler.MaxOpsBeforeYield, 3);
 
 const MOVE_TURNS = Array.from({ length: 40 }, (_, turn) => turn);
 
-const stalledRemovals = {
+const stalledMoves = {
   armed: false,
   reached: Promise.withResolvers<void>(),
   release: Promise.withResolvers<void>(),
 };
 
-const stallNextMoveRemoval = () => {
-  stalledRemovals.armed = true;
-  stalledRemovals.reached = Promise.withResolvers<void>();
-  stalledRemovals.release = Promise.withResolvers<void>();
+const stallNextMoveFolder = () => {
+  stalledMoves.armed = true;
+  stalledMoves.reached = Promise.withResolvers<void>();
+  stalledMoves.release = Promise.withResolvers<void>();
 };
 
-const releaseStalledRemovals = Effect.sync(() => {
-  stalledRemovals.armed = false;
-  stalledRemovals.release.resolve();
+const releaseStalledMoves = Effect.sync(() => {
+  stalledMoves.armed = false;
+  stalledMoves.release.resolve();
 });
 
 const holdNextMove = () => {
@@ -150,28 +150,29 @@ const heldInitCopies = Layer.effect(
   Effect.map(FileSystem.FileSystem, (real) =>
     FileSystem.FileSystem.of({
       ...real,
-      remove: (target, options) =>
-        stalledRemovals.armed && KEPT_INIT_OF_MOVE.test(target)
+      makeDirectory: (target, options) =>
+        stalledMoves.armed && MOVED_RUN_FOLDER.test(target)
           ? Effect.suspend(() => {
-              stalledRemovals.armed = false;
-              stalledRemovals.reached.resolve();
+              stalledMoves.armed = false;
+              stalledMoves.reached.resolve();
 
-              return Effect.promise(() => stalledRemovals.release.promise);
-            }).pipe(Effect.andThen(real.remove(target, options)))
-          : moves.armed && KEPT_INIT_OF_MOVE.test(target)
+              return Effect.promise(() => stalledMoves.release.promise);
+            }).pipe(Effect.andThen(real.makeDirectory(target, options)))
+          : moves.armed && MOVED_RUN_FOLDER.test(target)
             ? Effect.sync(() => {
                 moves.armed = false;
                 moves.reached.resolve();
-              }).pipe(Effect.andThen(Effect.forEach(MOVE_TURNS, () => Effect.yieldNow)))
-            : real.remove(target, options),
-      makeDirectory: (target, options) =>
-        folders.failNext && RUN_FOLDER.test(target)
-          ? Effect.suspend(() => {
-              folders.failNext = false;
+              }).pipe(
+                Effect.andThen(Effect.forEach(MOVE_TURNS, () => Effect.yieldNow)),
+                Effect.andThen(real.makeDirectory(target, options)),
+              )
+            : folders.failNext && RUN_FOLDER.test(target)
+              ? Effect.suspend(() => {
+                  folders.failNext = false;
 
-              return Effect.die(new Error("no space left on the transcode disk"));
-            })
-          : real.makeDirectory(target, options),
+                  return Effect.die(new Error("no space left on the transcode disk"));
+                })
+              : real.makeDirectory(target, options),
       writeFile: (to, bytes, options) =>
         copies.armed && KEPT_INIT.test(to)
           ? Effect.suspend(() => {
@@ -561,17 +562,17 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
           const view = yield* sessions.playlist(started.streamId, started.generation, who.grant);
           const index = segmentAt(view.plan, who.request.file.probe.startSeconds + 6);
 
-          stallNextMoveRemoval();
+          stallNextMoveFolder();
 
           const seeking = yield* Effect.forkChild(
             sessions.seek(started.streamId, 6, who.grant).pipe(Effect.exit),
           );
 
-          yield* Effect.promise(() => stalledRemovals.reached.promise);
+          yield* Effect.promise(() => stalledMoves.reached.promise);
 
           const queued = yield* Effect.forkChild(
             sessions
-              .segment(started.streamId, started.generation + 1, index, who.grant)
+              .segment(started.streamId, started.generation, index, who.grant)
               .pipe(Effect.scoped, Effect.exit),
           );
 
@@ -587,7 +588,7 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
             `the seek answers not ready: ${String(sought)}`,
           );
 
-          yield* releaseStalledRemovals;
+          yield* releaseStalledMoves;
 
           const moved = yield* sessions.seek(started.streamId, 6, who.grant);
 
@@ -597,7 +598,7 @@ describe.skipIf(!hasFfmpeg)("transcode limit", () => {
             .segment(started.streamId, moved.generation, index, who.grant)
             .pipe(Effect.scoped, Effect.timeout("15 seconds"));
           yield* sessions.stop(started.streamId, who.grant);
-        }).pipe(Effect.ensuring(releaseStalledRemovals)),
+        }).pipe(Effect.ensuring(releaseStalledMoves)),
       120_000,
     );
   });

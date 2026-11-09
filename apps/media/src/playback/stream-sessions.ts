@@ -280,10 +280,21 @@ interface Runs {
   readonly sealed: boolean;
 }
 
+/** A generation's init segment kept while its stream is released, and the reads of it. */
+interface KeptInit {
+  readonly generation: number;
+  readonly file: string;
+  readonly readers: Scope.Closeable;
+  readonly draining: MutableRef.MutableRef<boolean>;
+  /** Once no read of the file is open and none can start. */
+  readonly drained: Deferred.Deferred<void>;
+}
+
 interface Lifecycle {
   readonly streamId: StreamId;
   readonly scope: Scope.Closeable;
   readonly runs: Ref.Ref<Runs>;
+  readonly keptInits: Ref.Ref<ReadonlyMap<number, KeptInit>>;
   /** Runs of every stream, closed ones included, whose process has not exited. */
   readonly serverRunsAwaitingExit: Ref.Ref<number>;
   readonly directory: string;
@@ -292,13 +303,13 @@ interface Lifecycle {
 
 type Encoder = Data.TaggedEnum<{
   Running: { readonly run: Run };
-  Released: { readonly since: number; readonly keptInit: Option.Option<string> };
+  Released: { readonly since: number; readonly keptInit: Option.Option<KeptInit> };
 }>;
 
 const Encoder = Data.taggedEnum<Encoder>();
 
 type InitSource = Data.TaggedEnum<{
-  Kept: { readonly file: string };
+  Kept: { readonly kept: KeptInit };
   Run: { readonly run: Generation };
 }>;
 
@@ -447,6 +458,15 @@ const endOfStart = (
 ): PlaybackReporter.StreamEndReason =>
   Cause.hasInterrupts(cause) ? "abandoned" : lostSlot ? "capacity-reached" : "failed";
 
+const drain = (kept: KeptInit) =>
+  Effect.suspend(() =>
+    MutableRef.getAndSet(kept.draining, true)
+      ? Deferred.await(kept.drained)
+      : Scope.close(kept.readers, Exit.void).pipe(
+          Effect.ensuring(Deferred.succeed(kept.drained, undefined)),
+        ),
+  );
+
 const awaitExited = (run: RunScope) =>
   Effect.interruptible(
     Deferred.await(run.exited).pipe(Effect.timeoutOption(STOP_WAIT), Effect.asVoid),
@@ -582,6 +602,10 @@ const make = Effect.gen(function* () {
               yield* Effect.forEach(live, (run) => beginStop(stream, run), { discard: true });
               yield* Fiber.await(fibers);
               yield* Effect.forEach(live, (run) => Deferred.await(run.stopped), { discard: true });
+              yield* Effect.forEach((yield* Ref.get(stream.keptInits)).values(), drain, {
+                concurrency: "unbounded",
+                discard: true,
+              });
               yield* fs.remove(stream.directory, { recursive: true }).pipe(Effect.ignore);
             }).pipe(
               Effect.ensuring(Deferred.succeed(stream.torndown, undefined)),
@@ -898,7 +922,7 @@ const make = Effect.gen(function* () {
     const replaced = yield* Ref.getAndSet(session.generation, generation);
 
     if (number > 1 && replaced.number !== number) {
-      yield* fs.remove(keptInitOf(session, replaced.number)).pipe(Effect.ignore);
+      yield* retireKeptInit(session, replaced.number);
       yield* Effect.logInfo(LogEvent.streamMoved).pipe(
         Effect.annotateLogs({
           sessionId: session.sessionId,
@@ -1463,12 +1487,13 @@ const make = Effect.gen(function* () {
   });
 
   const keepInit = Effect.fnUntraced(function* (session: Session, run: Generation) {
-    const kept = keptInitOf(session, run.number);
+    const known = (yield* Ref.get(session.keptInits)).get(run.number);
 
-    if (yield* fs.exists(kept).pipe(Effect.orElseSucceed(() => false))) return Option.some(kept);
+    if (known !== undefined) return Option.some(known);
     yield* refreshFragments(run);
 
-    const temporary = `${kept}.tmp`;
+    const file = keptInitOf(session, run.number);
+    const temporary = `${file}.tmp`;
 
     // ffmpeg's HLS muxer finishes `init.mp4` only when it writes the first fragment. The bytes are
     // written here rather than with `copyFile`, whose libuv implementation calls `fchown`: the
@@ -1477,13 +1502,55 @@ const make = Effect.gen(function* () {
       (yield* Ref.get(run.fragments)).length > 0 &&
       (yield* fs.readFile(path.join(run.directory, "init.mp4")).pipe(
         Effect.andThen((bytes) => fs.writeFile(temporary, bytes)),
-        Effect.andThen(fs.rename(temporary, kept)),
+        Effect.andThen(fs.rename(temporary, file)),
         Effect.as(true),
         Effect.catch(() => fs.remove(temporary).pipe(Effect.ignore, Effect.as(false))),
       ));
 
-    return copied ? Option.some(kept) : Option.none();
+    if (!copied) return Option.none<KeptInit>();
+
+    const made: KeptInit = {
+      generation: run.number,
+      file,
+      readers: yield* Scope.make(),
+      draining: MutableRef.make(false),
+      drained: yield* Deferred.make<void>(),
+    };
+
+    return Option.some(
+      yield* Ref.modify(session.keptInits, (current) => {
+        const existing = current.get(run.number);
+
+        return existing === undefined
+          ? ([made, new Map(current).set(run.number, made)] as const)
+          : ([existing, current] as const);
+      }),
+    );
   });
+
+  /** Reads a kept init on a reader its deletion waits for; none once its deletion began. */
+  const readKept = (kept: KeptInit) =>
+    finishOnceStarted(Effect.option(fs.readFile(kept.file))).pipe(
+      Effect.forkIn(kept.readers),
+      Effect.flatMap(awaitReader),
+      Effect.map(Option.flatten),
+    );
+
+  /** Deletes the init kept for `generation` once its reads end, without the caller waiting. */
+  const retireKeptInit = (stream: Lifecycle, generation: number) =>
+    Ref.get(stream.keptInits).pipe(
+      Effect.flatMap((current) => {
+        const kept = current.get(generation);
+
+        return kept === undefined
+          ? Effect.void
+          : drain(kept).pipe(
+              Effect.andThen(fs.remove(kept.file).pipe(Effect.ignore)),
+              Effect.forkDetach,
+              Effect.asVoid,
+            );
+      }),
+    );
 
   const keepInitWithin = (session: Session, run: Generation) =>
     readerOf(run, keepInit(session, run)).pipe(
@@ -1495,7 +1562,7 @@ const make = Effect.gen(function* () {
   const stopEncoder = Effect.fnUntraced(function* (
     session: Session,
     run: Run,
-    keptInit: Option.Option<string>,
+    keptInit: Option.Option<KeptInit>,
   ) {
     yield* Ref.set(
       session.encoder,
@@ -1638,6 +1705,7 @@ const make = Effect.gen(function* () {
       streamId,
       scope: yield* Scope.make("sequential"),
       runs: yield* Ref.make<Runs>({ live: new Map(), sealed: false }),
+      keptInits: yield* Ref.make<ReadonlyMap<number, KeptInit>>(new Map()),
       serverRunsAwaitingExit: awaitingExit,
       directory: path.join(config.transcodeDir, streamId),
       torndown: yield* Deferred.make<void>(),
@@ -1848,7 +1916,7 @@ const make = Effect.gen(function* () {
         if (Encoder.$is("Running")(encoder)) return InitSource.Run({ run: current });
 
         if (Option.isSome(encoder.keptInit)) {
-          return InitSource.Kept({ file: encoder.keptInit.value });
+          return InitSource.Kept({ kept: encoder.keptInit.value });
         }
 
         yield* revive(session, encoder, yield* Ref.get(session.requested), callerGone);
@@ -1866,8 +1934,7 @@ const make = Effect.gen(function* () {
     return yield* using(streamId, grant, noSegment, (session) =>
       Effect.gen(function* () {
         const bytes = yield* InitSource.$match(yield* initSource(session, generation), {
-          Kept: ({ file }) =>
-            onStreamFiber(session, () => finishOnceStarted(Effect.option(fs.readFile(file)))),
+          Kept: ({ kept }) => readKept(kept),
           Run: ({ run }) =>
             awaitSegment(session, run, run.startSegment, SEGMENT_WAIT).pipe(
               Effect.andThen(
