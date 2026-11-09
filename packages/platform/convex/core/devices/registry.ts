@@ -87,7 +87,7 @@ export const signedInOn = async (
  * ends this session, so of two sign-ins the higher number is the one still live.
  */
 const joinDevice = async (
-  ctx: Pick<MutationCtx, "db">,
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
   caller: Caller,
   device: Doc<"devices">,
 ): Promise<number> => {

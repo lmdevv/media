@@ -84,8 +84,8 @@ links in phase 7.
   a password change, and a demotion end a maker's links the same way. A promotion clears the
   member's allowance.
 - Making a link needs the `account` scope and refuses API keys, so no key, shared-device tile, or
-  guest makes one. `core.guests.status` answers `mayShare: false` to an API key for the same
-  reason.
+  guest makes one. Both are rules of `can`'s `offer` and `make` share actions, so
+  `core.guests.status` answers `mayShare: false` to an API key from the same decision.
 - Only the host shares a group session. Someone still waiting to be let in is told so, as anyone
   else in the session is.
 

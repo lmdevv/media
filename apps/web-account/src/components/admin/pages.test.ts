@@ -158,4 +158,32 @@ describe("pagedStore", () => {
 
     expect(first.listening() + pinned.listening() + second.listening()).toBe(0);
   });
+
+  it("stops following the open-ended page once the page pinned in its place answers", () => {
+    const first = watchOf(page(["a"], false, "after-a"));
+    const pinned = watchOf({ status: "loading" });
+    const second = watchOf(page(["b"], true));
+
+    const store = pagedStore((span) => {
+      if (span.cursor !== null) return second.watch;
+
+      return span.endCursor === undefined ? first.watch : pinned.watch;
+    });
+
+    const stop = store.subscribe(() => undefined);
+    const list = store.getSnapshot();
+
+    if (list.status === "ready" && list.next.kind === "more") list.next.load();
+
+    expect(first.listening()).toBe(1);
+
+    pinned.publish(page(["a"], false, "after-a"));
+
+    expect(first.listening()).toBe(0);
+    expect(store.getSnapshot()).toMatchObject({ rows: ["a", "b"], next: { kind: "done" } });
+
+    stop();
+
+    expect(pinned.listening() + second.listening()).toBe(0);
+  });
 });

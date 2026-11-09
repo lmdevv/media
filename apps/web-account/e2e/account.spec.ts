@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { Brand } from "effect";
 
-import { createPerson, openPlatform, signIn } from "./people";
+import { createPerson, newSecret, openPlatform, signIn } from "./people";
 import type { Person } from "./people";
 import { stackEnv } from "./stack";
 import type { Stack } from "./stack";
@@ -385,4 +385,34 @@ test("a CLI link signs in, then approves its code on the same page", async ({ pa
   } finally {
     await device.dispose();
   }
+});
+
+test("a second password change keeps what was typed while it runs and once it fails", async ({
+  page,
+}) => {
+  if (stack === null) return;
+
+  const person = await createPerson(stack, "aiko");
+  const current = page.getByLabel("Current password", { exact: true });
+  const next = page.getByLabel(/^New password/u);
+  const change = page.getByRole("button", { name: "Change password" });
+
+  await signIn(page, person);
+  await home(page, person);
+  await page.goto("/settings");
+
+  await current.fill(person.password);
+  await next.fill(newSecret());
+  await change.click();
+  await expect(page.getByRole("status")).toHaveText("Password changed.");
+  await expect(current).toHaveValue("");
+
+  const typed = newSecret();
+
+  await current.fill("not-the-password");
+  await next.fill(typed);
+  await change.click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(current).toHaveValue("not-the-password");
+  await expect(next).toHaveValue(typed);
 });

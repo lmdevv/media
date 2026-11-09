@@ -62,6 +62,23 @@ function Outcome({ status, done }: { readonly status: ActionStatus; readonly don
 
 const FORM = "flex max-w-120 flex-col gap-4";
 
+/**
+ * A form's key, which changes each time `status` turns done: the form starts empty after each
+ * success, and keeps what was typed while a later submit runs or once it fails.
+ */
+const useSuccessCount = (status: ActionStatus): number => {
+  const done = status.kind === "done";
+  const [seen, setSeen] = useState({ done, count: 0 });
+
+  if (done === seen.done) return seen.count;
+
+  const next = { done, count: done ? seen.count + 1 : seen.count };
+
+  setSeen(next);
+
+  return next.count;
+};
+
 /** The person's username. */
 export function NameSection({
   username,
@@ -118,13 +135,11 @@ export function PasswordSection({
     readonly newPassword: string;
   }) => void;
 }) {
+  const successes = useSuccessCount(status);
+
   return (
     <Section title="Password">
-      <PasswordForm
-        key={status.kind === "done" ? "done" : "form"}
-        status={status}
-        onChange={onChange}
-      />
+      <PasswordForm key={successes} status={status} onChange={onChange} />
     </Section>
   );
 }
@@ -196,6 +211,7 @@ export function UnlockCodeSection({
   readonly onSet: (code: string | null) => void;
 }) {
   const [last, setLast] = useState<"set" | "off">("set");
+  const successes = useSuccessCount(status);
 
   const send = (code: string | null): void => {
     setLast(code === null ? "off" : "set");
@@ -207,7 +223,7 @@ export function UnlockCodeSection({
       <Muted>
         {`${UNLOCK_CODE.min} to ${UNLOCK_CODE.max} digits that open your tile on a shared device's lock screen. It never signs you in.`}
       </Muted>
-      <CodeForm key={status.kind === "done" ? "done" : "form"} status={status} onSet={send} />
+      <CodeForm key={successes} status={status} onSet={send} />
       <Outcome status={status} done={last === "set" ? "Unlock code saved." : "Unlock code off."} />
     </Section>
   );

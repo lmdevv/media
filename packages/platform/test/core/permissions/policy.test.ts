@@ -874,6 +874,7 @@ const asRole = (role: Role): Principal => ({
   role,
   scopes: roleScopes[role],
   restrictions: null,
+  sessionKind: "password",
 });
 
 describe("endsCredentials", () => {

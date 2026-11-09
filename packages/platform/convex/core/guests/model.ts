@@ -6,6 +6,7 @@ import { contentDomain } from "../../../commands/scopes";
 import type { Doc, Id } from "../../_generated/dataModel";
 import type { DatabaseReader } from "../../_generated/server";
 import { fail } from "../lib/errors";
+import { printableName } from "../lib/names";
 
 /** A share link is `mg_<linkId>.<secret>`; the secret is stored as SHA-256 and shown once. */
 export const LINK_PREFIX = "mg";
@@ -127,21 +128,10 @@ export const guestKeyOf = (linkId: Id<"shareLinks">, guestNumber: number): strin
 /** Below every guest's usernameKey and above every household one. */
 export const GUEST_KEYS_FROM = "~";
 
-/**
- * Control, private-use, unassigned, and surrogate code points, line and paragraph separators, and
- * the bidirectional controls that reorder what others see. Zero-width joiners stay: emoji
- * sequences and several scripts need them.
- */
-const UNPRINTABLE =
-  /[\p{Cc}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
-
-const VISIBLE = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{M}\u2800]/u;
-
 export const requireGuestName = (typed: string): string => {
-  const name = typed.normalize("NFKC").trim();
-  const length = Array.from(name).length;
+  const name = printableName(typed);
 
-  return length >= 1 && length <= NAME_MAX && !UNPRINTABLE.test(name) && VISIBLE.test(name)
+  return name !== null && Array.from(name).length <= NAME_MAX
     ? name
     : fail("invalid_args", `Give a name of 1 to ${NAME_MAX} printable characters`);
 };

@@ -28,7 +28,10 @@ interface Secret {
   readonly variable: string;
   /** Null clears the field and reveals nothing, so it may come in `--json`. */
   readonly clearable?: true;
-  /** Left out when neither its variable nor stdin gives it. */
+  /**
+   * Left out when its variable does not give it. It never reads stdin, which could wait forever
+   * on an inherited pipe that never closes.
+   */
   readonly optional?: true;
 }
 
@@ -184,14 +187,16 @@ const required = (
     ? Effect.succeed(given)
     : Effect.fail(usage(invocation, missing));
 
-/**
- * A secret from its variable or, for a command's only secret, stdin. Absent, an optional secret is
- * none and any other is a usage error.
- */
+const stdinSecret = (command: CoreCommand): Secret | undefined => {
+  const [only, ...others] = command.secrets;
+
+  return others.length === 0 && only?.optional !== true ? only : undefined;
+};
+
 const secretOf = (
   invocation: Invocation,
   secret: Secret,
-  fromStdin: "allowed" | "shared with another secret",
+  fromStdin: "allowed" | "never",
 ): Effect.Effect<Option.Option<Redacted.Redacted>, UsageError | ConfigFileError> =>
   fromStdin === "allowed"
     ? Effect.flatMap(secretGiven(invocation, secret.variable, secret.field), (given) =>
@@ -236,7 +241,7 @@ export const wireArgsOf = Effect.fn("Core.wireArgs")(function* (
   if (leaked !== undefined) {
     return yield* usage(
       invocation,
-      `Pass ${leaked.field} in ${leaked.variable}${command.secrets.length === 1 ? " or on stdin" : ""}, never on the command line`,
+      `Pass ${leaked.field} in ${leaked.variable}${stdinSecret(command) === undefined ? "" : " or on stdin"}, never on the command line`,
     );
   }
 
@@ -248,11 +253,7 @@ export const wireArgsOf = Effect.fn("Core.wireArgs")(function* (
     command.secrets.filter((secret) => !clears(secret)),
     (secret) =>
       Effect.map(
-        secretOf(
-          invocation,
-          secret,
-          command.secrets.length === 1 ? "allowed" : "shared with another secret",
-        ),
+        secretOf(invocation, secret, stdinSecret(command) === secret ? "allowed" : "never"),
         (value) =>
           Option.toArray(
             Option.map(value, (each) => [secret.field, Redacted.value(each)] as const),
@@ -293,7 +294,7 @@ const secretLine = (command: CoreCommand): ReadonlyArray<string> =>
     : [
         `${command.secrets
           .map((secret) => `The ${secret.field} comes from ${secret.variable}`)
-          .join("; ")}${command.secrets.length === 1 ? ", or stdin when piped" : ""}.`,
+          .join("; ")}${stdinSecret(command) === undefined ? "" : ", or stdin when piped"}.`,
       ];
 
 /** `media admin users create --help`. */

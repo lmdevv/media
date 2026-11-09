@@ -47,7 +47,14 @@ const personOf = (
   role: Role,
   scopes: ReadonlyArray<CredentialScope> = roleScopes[role],
   restrictions: Restrictions | null = null,
-): PersonPrincipal => ({ kind: "person", userId: idOf("users", name), role, scopes, restrictions });
+): PersonPrincipal => ({
+  kind: "person",
+  userId: idOf("users", name),
+  role,
+  scopes,
+  restrictions,
+  sessionKind: "password",
+});
 
 const OWNER = personOf("owner", "owner");
 
@@ -274,6 +281,14 @@ describe("who may make a guest link", () => {
 
   it("refuses a service as if links did not exist", () => {
     expect(share(SERVICE, "make", newLink(OWNER, itemTarget(G_AT_VIEW)))).toBe("hidden service");
+  });
+
+  it("refuses an API key, whatever its scopes, both making a link and offering to", () => {
+    const viaKey: PersonPrincipal = { ...OWNER, sessionKind: "apiKey" };
+
+    expect(share(viaKey, "make", newLink(viaKey, itemTarget(G_AT_VIEW)))).toBe("forbidden api-key");
+    expect(share(viaKey, "offer", newLink(viaKey, STANDING))).toBe("forbidden api-key");
+    expect(share(OWNER, "offer", newLink(OWNER, STANDING))).toBe("allowed");
   });
 
   it("decides a new link only for its own maker", () => {

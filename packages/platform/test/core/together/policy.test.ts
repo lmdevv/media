@@ -34,7 +34,14 @@ const personOf = (
   role: Role,
   scopes: ReadonlyArray<CredentialScope> = roleScopes[role],
   restrictions: typeof KID | null = null,
-): Principal => ({ kind: "person", userId: idOf("users", name), role, scopes, restrictions });
+): Principal => ({
+  kind: "person",
+  userId: idOf("users", name),
+  role,
+  scopes,
+  restrictions,
+  sessionKind: "password",
+});
 
 const PEOPLE = {
   member: personOf("member", "member"),

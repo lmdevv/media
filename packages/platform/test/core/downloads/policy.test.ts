@@ -51,6 +51,7 @@ const person = (role: Role): fc.Arbitrary<Principal> =>
     role: fc.constant(role),
     scopes: scopes(role),
     restrictions: role === "member" ? fc.option(restrictions, { nil: null }) : fc.constant(null),
+    sessionKind: fc.constant("password" as const),
   });
 
 const people = (allowed: ReadonlyArray<Role>): fc.Arbitrary<Principal> =>
@@ -142,6 +143,7 @@ describe("the download rule in can", () => {
       role: "guest",
       scopes: roleScopes.guest,
       restrictions: null,
+      sessionKind: "guest",
     };
 
     const shared: ContentResource = {
