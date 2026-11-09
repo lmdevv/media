@@ -272,6 +272,17 @@ const runFolder = Effect.fn(function* (streamId: string, run: number) {
   return yield* fs.exists(path.join(server.transcodeDir, streamId, String(run))).pipe(Effect.orDie);
 });
 
+/** Whether a stopped run's folder went; it goes once the run's reads and responses end. */
+const runFolderGone = (streamId: string, run: number) =>
+  runFolder(streamId, run).pipe(
+    Effect.repeat({
+      until: (exists) => !exists,
+      schedule: Schedule.spaced("50 millis"),
+      times: 100,
+    }),
+    Effect.map((exists) => !exists),
+  );
+
 const playing = Effect.fn(function* (sid: string) {
   const convex = yield* TestConvex.Service;
   const position = yield* Ref.make(0);
@@ -374,7 +385,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
           assert.deepInclude(released[0]?.annotations, { liveness: "paused", generation: 1 });
           assert.isAtLeast(Number(released[0]?.annotations["lastRequestAgeMs"]), 1000);
           assertExplained(released);
-          assert.isFalse(yield* runFolder(stream.streamId, 1), "the run folder is gone");
+          assert.isTrue(yield* runFolderGone(stream.streamId, 1), "the run folder is gone");
           assert.strictEqual(yield* activeStreams(), 0, "not active while released");
 
           const whileReleased = yield* fetched(stream.file("init.mp4"));
@@ -1052,9 +1063,14 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
         disk.refuseRenamesIn = "";
 
         assert.deepStrictEqual(
-          yield* fs
-            .readDirectory(path.join(server.transcodeDir, stream.streamId))
-            .pipe(Effect.orDie),
+          yield* fs.readDirectory(path.join(server.transcodeDir, stream.streamId)).pipe(
+            Effect.orDie,
+            Effect.repeat({
+              until: (names) => names.length === 0,
+              schedule: Schedule.spaced("50 millis"),
+              times: 100,
+            }),
+          ),
           [],
           "neither a run folder nor a kept or temporary init segment",
         );

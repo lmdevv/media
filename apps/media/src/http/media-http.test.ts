@@ -945,7 +945,15 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
 
           yield* Effect.sleep("2500 millis");
 
-          assert.isFalse(yield* fs.exists(run));
+          const runLeft = yield* fs.exists(run).pipe(
+            Effect.repeat({
+              until: (exists) => !exists,
+              schedule: Schedule.spaced("50 millis"),
+              times: 100,
+            }),
+          );
+
+          assert.isFalse(runLeft, "the released run's folder goes");
           assert.strictEqual((yield* get(local(server.baseUrl, first.url))).status, 200);
 
           const events = yield* (yield* PlaybackReporter.Recording).events;
