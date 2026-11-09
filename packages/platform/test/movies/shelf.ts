@@ -1,5 +1,7 @@
 import { basename, dirname, join } from "node:path";
 
+import type { ConvexHttpClient } from "convex/browser";
+import type { FunctionReturnType } from "convex/server";
 import { Schema } from "effect";
 
 import type { Restrictions } from "../../commands/access";
@@ -21,6 +23,9 @@ export const NONE: Restrictions = {
   hideExplicitMusic: false,
   libraries: null,
 };
+
+/** One episode of a season as `movies.titles.episodes` answers it. */
+export type SeasonEpisode = FunctionReturnType<typeof api.movies.titles.episodes>["page"][number];
 
 const Done = answer(Schema.Null);
 
@@ -255,3 +260,22 @@ export const titleIn = (shelf: Shelf, name: string): Id<"titles"> => {
 /** A file of a title of `shelf` by name: the first, or the one at `index`. */
 export const fileIn = (shelf: Shelf, name: string, index = 0): Id<"mediaFiles"> =>
   at(shelf.files.get(name) ?? [], index, `file of ${name}`);
+
+/** Every episode of a season, read a page at a time through `movies.titles.episodes`. */
+export const seasonOf = async (
+  client: ConvexHttpClient,
+  titleId: Id<"titles">,
+  seasonNumber: number,
+  cursor: string | null = null,
+  episodes: ReadonlyArray<SeasonEpisode> = [],
+): Promise<ReadonlyArray<SeasonEpisode>> => {
+  const page = await client.query(api.movies.titles.episodes, {
+    titleId,
+    seasonNumber,
+    paginationOpts: { numItems: 100, cursor },
+  });
+
+  const next = [...episodes, ...page.page];
+
+  return page.isDone ? next : seasonOf(client, titleId, seasonNumber, page.continueCursor, next);
+};

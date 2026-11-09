@@ -2,17 +2,12 @@ import { register } from "../../commands/movies/titles";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import { fail } from "../core/lib/errors";
-import { reachOf, requireItems } from "../core/permissions/grants";
+import { paginateAtMost } from "../core/lib/paginate";
+import { decidableRows, reachOf, requireItems } from "../core/permissions/grants";
 import type { ItemGate } from "../core/permissions/grants";
-import { browsableLibraries, requireTitle, titleViewer } from "./access";
+import { movieLibraries, requireTitle, titleViewer } from "./access";
 import type { TitleViewer } from "./access";
-import {
-  countGenres,
-  libraryByLibrary,
-  libraryPage,
-  rankBySimilarity,
-  recentTitles,
-} from "./browse";
+import { countGenres, rankBySimilarity, titlePage } from "./browse";
 import { CREDIT_LIMIT, creditsOf } from "./credits";
 import { titleFacts } from "./items";
 import {
@@ -49,7 +44,11 @@ const SIMILAR_SCAN = 300;
 
 const SEARCH_SCAN = 200;
 
-const SEASON_EPISODES_MAX = 500;
+/**
+ * Most episodes one season page holds: each reads its progress, up to 12 credits, and their
+ * people, so a page stays far inside one call's reads.
+ */
+const SEASON_PAGE_MAX = 32;
 
 const SEASONS_MAX = 200;
 
@@ -118,18 +117,32 @@ const firstKept = async <Item>(
   }
 };
 
-const admittedBy =
-  (gate: ItemGate, kind: Doc<"titles">["kind"]): TitleViewer =>
-  async (title) =>
-    title.purging !== true && title.kind === kind && gate.admits(titleFacts(title));
-
 const itself = async (title: Doc<"titles">): Promise<Doc<"titles">> => title;
 
-const newest = async (
+const admittedBy =
+  (gate: ItemGate, kind: Doc<"titles">["kind"] | undefined): TitleViewer =>
+  async (title) =>
+    title.purging !== true &&
+    (kind === undefined || title.kind === kind) &&
+    gate.admits(titleFacts(title));
+
+/** Titles read across a caller's libraries for one row or count, shared among the libraries. */
+const NEWEST_READ_BUDGET = 2000;
+
+/**
+ * The `count` most recently added titles, of one kind or all, across `gates`: each library's own
+ * newest that its gate admits, merged by when they were added. Each library reads its share of
+ * the budget, at least `count`, so a library of titles the caller may not see cannot hide the
+ * others.
+ */
+const newestAcross = async (
   db: DatabaseReader,
   gates: ReadonlyArray<ItemGate>,
-  kind: Doc<"titles">["kind"],
+  kind: Doc<"titles">["kind"] | undefined,
+  count: number,
 ): Promise<ReadonlyArray<Doc<"titles">>> => {
+  const scanLimit = Math.max(count, Math.floor(NEWEST_READ_BUDGET / Math.max(1, gates.length)));
+
   const perLibrary = await Promise.all(
     gates.map(async (gate) =>
       firstKept(
@@ -139,7 +152,7 @@ const newest = async (
           .order("desc"),
         itself,
         admittedBy(gate, kind),
-        { limit: ROW_LIMIT, scanLimit: ROW_SCAN },
+        { limit: count, scanLimit },
       ),
     ),
   );
@@ -147,8 +160,14 @@ const newest = async (
   return perLibrary
     .flat()
     .toSorted((left, right) => right.addedAt - left.addedAt)
-    .slice(0, ROW_LIMIT);
+    .slice(0, count);
 };
+
+/** What one row of the title list reads besides its title: its library. */
+const TITLE_ROW_READS = 2;
+
+/** What one row reads when the list pages a genre: the genre row, its title, and its library. */
+const GENRE_ROW_READS = 3;
 
 const identityOf = (title: Doc<"titles">): ReadonlyArray<string> =>
   title.externalIds.tmdb === null ? [title._id] : [title._id, `tmdb:${title.externalIds.tmdb}`];
@@ -157,10 +176,10 @@ const namedLibrary = async (
   db: DatabaseReader,
   caller: Parameters<typeof requireItems>[1],
   libraryId: Id<"libraries">,
-): Promise<ItemGate> => {
+): Promise<void> => {
   const gate = await requireItems({ db }, caller, "view", libraryId);
 
-  return gate.library.kind === "movies" ? gate : fail("not_found", "No such library");
+  if (gate.library.kind !== "movies") fail("not_found", "No such library");
 };
 
 export const { home, list, genres, search, similar, get, versions, episodes, nextEpisode } =
@@ -168,11 +187,11 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
     home: async (ctx, _args, caller) => {
       const reach = await reachOf(ctx.db, caller);
       const sees = titleViewer(ctx.db, caller, reach);
-      const gates = await browsableLibraries(ctx.db, caller);
+      const gates = await movieLibraries(ctx.db, caller);
 
       const [movies, shows, myList, resume] = await Promise.all([
-        newest(ctx.db, gates, "movie"),
-        newest(ctx.db, gates, "show"),
+        newestAcross(ctx.db, gates, "movie", ROW_LIMIT),
+        newestAcross(ctx.db, gates, "show", ROW_LIMIT),
         firstKept(
           ctx.db
             .query("myList")
@@ -198,25 +217,26 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
       };
     },
     list: async (ctx, { paginationOpts, libraryId, sort, ...filter }, caller) => {
-      const order = sort ?? "name";
+      const reach = await reachOf(ctx.db, caller);
 
-      const page =
-        libraryId === undefined
-          ? await libraryByLibrary(ctx.db, caller, order, filter, paginationOpts)
-          : await libraryPage(
-              ctx.db,
-              await namedLibrary(ctx.db, caller, libraryId),
-              order,
-              filter,
-              paginationOpts,
-            );
+      if (libraryId !== undefined) await namedLibrary(ctx.db, caller, libraryId);
+
+      const page = await titlePage(
+        ctx.db,
+        { libraryId, kind: filter.kind },
+        sort ?? "name",
+        filter,
+        titleViewer(ctx.db, caller, reach),
+        paginationOpts,
+        decidableRows(reach, filter.genre === undefined ? TITLE_ROW_READS : GENRE_ROW_READS),
+      );
 
       return { ...page, page: page.page.map(presentTitleCard) };
     },
     genres: async (ctx, { kind }, caller) => {
-      const gates = await browsableLibraries(ctx.db, caller);
+      const gates = await movieLibraries(ctx.db, caller);
 
-      return [...countGenres(await recentTitles(ctx.db, gates, kind, GENRE_SCAN))];
+      return [...countGenres(await newestAcross(ctx.db, gates, kind, GENRE_SCAN))];
     },
     search: async (ctx, { query: typed, limit }, caller) => {
       const text = typed.trim();
@@ -275,9 +295,9 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
           ? []
           : rankBySimilarity(
               title,
-              await recentTitles(
+              await newestAcross(
                 ctx.db,
-                await browsableLibraries(ctx.db, caller),
+                await movieLibraries(ctx.db, caller),
                 title.kind,
                 SIMILAR_SCAN,
               ),
@@ -371,30 +391,39 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
 
       return files.map((file) => presentVersion(file, progress?.fileId ?? null));
     },
-    episodes: async (ctx, { titleId, seasonNumber }, caller) => {
+    episodes: async (ctx, { titleId, seasonNumber, paginationOpts }, caller) => {
       await requireTitle(ctx.db, caller, "view", titleId);
 
-      const docs = await ctx.db
-        .query("episodes")
-        .withIndex("by_title_order", (q) =>
-          q.eq("titleId", titleId).eq("seasonNumber", seasonNumber),
-        )
-        .take(SEASON_EPISODES_MAX);
+      const page = await paginateAtMost(
+        ctx.db,
+        {
+          table: "episodes",
+          index: "by_title_order",
+          range: (q) => q.eq("titleId", titleId).eq("seasonNumber", seasonNumber),
+        },
+        paginationOpts,
+        SEASON_PAGE_MAX,
+      );
 
       const [watches, rows] = await Promise.all([
-        Promise.all(docs.map(async (doc) => findProgress(ctx.db, caller.userId, titleId, doc._id))),
         Promise.all(
-          docs.map(async (doc) => creditsOf(ctx.db, titleId, doc._id, EPISODE_CREDIT_LIMIT)),
+          page.page.map(async (doc) => findProgress(ctx.db, caller.userId, titleId, doc._id)),
+        ),
+        Promise.all(
+          page.page.map(async (doc) => creditsOf(ctx.db, titleId, doc._id, EPISODE_CREDIT_LIMIT)),
         ),
       ]);
 
       const credits = await presentCreditGroups(ctx.db, rows);
 
-      return docs.map((doc, index) =>
-        Object.assign(presentEpisode(doc, watches[index] ?? null), {
-          credits: [...(credits[index] ?? [])],
-        }),
-      );
+      return {
+        ...page,
+        page: page.page.map((doc, index) =>
+          Object.assign(presentEpisode(doc, watches[index] ?? null), {
+            credits: [...(credits[index] ?? [])],
+          }),
+        ),
+      };
     },
     nextEpisode: async (ctx, { episodeId }, caller) => {
       const current = await ctx.db.get(episodeId);

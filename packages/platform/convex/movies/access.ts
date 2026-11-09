@@ -8,8 +8,6 @@ import { can, contentNeeds, itemOf, resourceOf } from "../core/permissions/polic
 import type { ContentAction, Principal } from "../core/permissions/policy";
 import { titleFacts } from "./items";
 
-const BROWSABLE_LIBRARIES_MAX = 64;
-
 const NO_TITLE = "No such title";
 
 /** A title the caller may act on, its library, and the level their grants give them there. */
@@ -115,7 +113,7 @@ const gateFor = (
       };
 
 /** The gate of one library for `caller`, or null when it is not a movies library they see. */
-export const libraryGate = async (
+const libraryGate = async (
   db: DatabaseReader,
   caller: Principal,
   reach: Reach,
@@ -149,71 +147,37 @@ export const titleViewer = (db: DatabaseReader, caller: Principal, reach: Reach)
   };
 };
 
+/** Libraries one step of the walk through a caller's shared libraries reads, music ones included. */
+const WALK_PAGE = 64;
+
+/** Steps of that walk one call takes at most: 1,024 shared libraries of any kind. */
+const WALK_PAGES_MAX = 16;
+
 /**
- * The movies libraries shared with `caller`, in id order, each with the gate `can()` decides its
- * titles through. It reads the caller's grants, not every library, so it reaches the first
- * `BROWSABLE_LIBRARIES_MAX` libraries they may see however many the server holds.
+ * Every movies library shared with `caller`, in id order, each with the gate `can()` decides its
+ * titles through. It walks the caller's grants with `visiblePage`, keeping each step's
+ * continuation, so music libraries and libraries the caller cannot browse never push a movies
+ * library out. It stops after 1,024 shared libraries of any kind.
  */
-export const browsableLibraries = async (
+export const movieLibraries = async (
   db: DatabaseReader,
   caller: Principal,
+  cursor: string | null = null,
+  steps = WALK_PAGES_MAX,
+  found: ReadonlyArray<ItemGate> = [],
 ): Promise<ReadonlyArray<ItemGate>> => {
-  const visible = await visiblePage({ db }, caller, "library", {
-    numItems: BROWSABLE_LIBRARIES_MAX,
-    cursor: null,
-  });
+  const page = await visiblePage({ db }, caller, "library", { numItems: WALK_PAGE, cursor });
 
-  return visible.page.flatMap(({ doc, level }) => {
-    const gate = gateFor(caller, doc, level);
+  const gates = [
+    ...found,
+    ...page.page.flatMap(({ doc, level }) => {
+      const gate = gateFor(caller, doc, level);
 
-    return gate === null ? [] : [gate];
-  });
-};
+      return gate === null ? [] : [gate];
+    }),
+  ];
 
-/** Shared libraries one step of a library walk reads, music ones included. */
-const WALK_STEP = 16;
-
-/** Pages of shared libraries one call reads while looking for the next movies library. */
-const WALK_PAGES_MAX = 4;
-
-/**
- * Where a walk through the libraries shared with a caller goes next: a movies library's gate,
- * the last library read when the call's reads ran out first, or the end.
- */
-export type NextLibrary =
-  | { readonly kind: "library"; readonly gate: ItemGate }
-  | { readonly kind: "resume"; readonly after: Id<"libraries"> }
-  | { readonly kind: "end" };
-
-/**
- * The first movies library shared with `caller` whose id comes after `after`, or the first one
- * at all for null, read through `visiblePage` over the caller's grants. One call reads a few
- * pages at most and then answers where to resume, so it stays bounded however many libraries the
- * caller sees and never ends a walk early.
- */
-export const nextBrowsableLibrary = async (
-  db: DatabaseReader,
-  caller: Principal,
-  after: Id<"libraries"> | null,
-  pages = WALK_PAGES_MAX,
-): Promise<NextLibrary> => {
-  const visible = await visiblePage({ db }, caller, "library", {
-    numItems: WALK_STEP,
-    cursor: after,
-  });
-
-  const gate = visible.page
-    .map(({ doc, level }) => gateFor(caller, doc, level))
-    .find((found) => found !== null);
-
-  if (gate !== undefined) return { kind: "library", gate };
-
-  const last =
-    visible.continueCursor === "" ? null : db.normalizeId("libraries", visible.continueCursor);
-
-  if (visible.isDone || last === null) return { kind: "end" };
-
-  return pages <= 1
-    ? { kind: "resume", after: last }
-    : nextBrowsableLibrary(db, caller, last, pages - 1);
+  return page.isDone || steps <= 1
+    ? gates
+    : movieLibraries(db, caller, page.continueCursor, steps - 1, gates);
 };

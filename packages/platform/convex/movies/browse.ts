@@ -2,14 +2,8 @@ import type { PaginationOptions, PaginationResult } from "convex/server";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
-import { fail } from "../core/lib/errors";
-import { paginate } from "../core/lib/paginate";
-import { reachOf } from "../core/permissions/grants";
-import type { ItemGate } from "../core/permissions/grants";
-import type { Principal } from "../core/permissions/policy";
-import { libraryGate, nextBrowsableLibrary } from "./access";
-import type { NextLibrary } from "./access";
-import { titleFacts } from "./items";
+import { paginateAtMost } from "../core/lib/paginate";
+import type { TitleViewer } from "./access";
 
 /** The orders a title list offers: by name, newest added, or newest year. */
 export type TitleSort = "name" | "added" | "year";
@@ -51,24 +45,34 @@ export const matchesFilter = (filter: TitleFilter, title: Doc<"titles">): boolea
   );
 };
 
-type Paged = PaginationResult<Doc<"titles"> | null>;
+type Kind = Doc<"titles">["kind"];
 
-const byTitle = async (
+/** Where a title list reads: one library, one kind, or every title on the server. */
+interface Scope {
+  readonly libraryId?: Id<"libraries"> | undefined;
+  readonly kind?: Kind | undefined;
+}
+
+type Page<Row> = Promise<PaginationResult<Row>>;
+
+const ofLibrary = (
   db: DatabaseReader,
   libraryId: Id<"libraries">,
   sort: TitleSort,
   options: PaginationOptions,
-): Promise<Paged> => {
+  rows: number,
+): Page<Doc<"titles">> => {
   if (sort === "name") {
-    return paginate(
+    return paginateAtMost(
       db,
       { table: "titles", index: "by_library_sort", range: (q) => q.eq("libraryId", libraryId) },
       options,
+      rows,
     );
   }
 
   return sort === "added"
-    ? paginate(
+    ? paginateAtMost(
         db,
         {
           table: "titles",
@@ -77,8 +81,9 @@ const byTitle = async (
           order: "desc",
         },
         options,
+        rows,
       )
-    : paginate(
+    : paginateAtMost(
         db,
         {
           table: "titles",
@@ -87,18 +92,71 @@ const byTitle = async (
           order: "desc",
         },
         options,
+        rows,
       );
 };
 
-const genreRows = (
+const ofKind = (
+  db: DatabaseReader,
+  kind: Kind,
+  sort: TitleSort,
+  options: PaginationOptions,
+  rows: number,
+): Page<Doc<"titles">> => {
+  if (sort === "name") {
+    return paginateAtMost(
+      db,
+      { table: "titles", index: "by_kind_sort", range: (q) => q.eq("kind", kind) },
+      options,
+      rows,
+    );
+  }
+
+  return sort === "added"
+    ? paginateAtMost(
+        db,
+        {
+          table: "titles",
+          index: "by_kind_added",
+          range: (q) => q.eq("kind", kind),
+          order: "desc",
+        },
+        options,
+        rows,
+      )
+    : paginateAtMost(
+        db,
+        { table: "titles", index: "by_kind_year", range: (q) => q.eq("kind", kind), order: "desc" },
+        options,
+        rows,
+      );
+};
+
+const ofEvery = (
+  db: DatabaseReader,
+  sort: TitleSort,
+  options: PaginationOptions,
+  rows: number,
+): Page<Doc<"titles">> => {
+  if (sort === "name") {
+    return paginateAtMost(db, { table: "titles", index: "by_sort" }, options, rows);
+  }
+
+  return sort === "added"
+    ? paginateAtMost(db, { table: "titles", index: "by_added", order: "desc" }, options, rows)
+    : paginateAtMost(db, { table: "titles", index: "by_year", order: "desc" }, options, rows);
+};
+
+const genreOfLibrary = (
   db: DatabaseReader,
   libraryId: Id<"libraries">,
   genre: string,
   sort: TitleSort,
   options: PaginationOptions,
-): Promise<PaginationResult<Doc<"titleGenres">>> => {
+  rows: number,
+): Page<Doc<"titleGenres">> => {
   if (sort === "name") {
-    return paginate(
+    return paginateAtMost(
       db,
       {
         table: "titleGenres",
@@ -106,11 +164,12 @@ const genreRows = (
         range: (q) => q.eq("libraryId", libraryId).eq("genre", genre),
       },
       options,
+      rows,
     );
   }
 
   return sort === "added"
-    ? paginate(
+    ? paginateAtMost(
         db,
         {
           table: "titleGenres",
@@ -119,8 +178,9 @@ const genreRows = (
           order: "desc",
         },
         options,
+        rows,
       )
-    : paginate(
+    : paginateAtMost(
         db,
         {
           table: "titleGenres",
@@ -129,204 +189,165 @@ const genreRows = (
           order: "desc",
         },
         options,
+        rows,
       );
 };
 
-const byGenre = async (
+const genreOfKind = (
   db: DatabaseReader,
-  libraryId: Id<"libraries">,
+  kind: Kind,
   genre: string,
   sort: TitleSort,
   options: PaginationOptions,
-): Promise<Paged> => {
-  const rows = await genreRows(db, libraryId, folded(genre), sort, options);
+  rows: number,
+): Page<Doc<"titleGenres">> => {
+  if (sort === "name") {
+    return paginateAtMost(
+      db,
+      {
+        table: "titleGenres",
+        index: "by_kind_genre_sort",
+        range: (q) => q.eq("kind", kind).eq("genre", genre),
+      },
+      options,
+      rows,
+    );
+  }
 
-  return { ...rows, page: await Promise.all(rows.page.map(async (row) => db.get(row.titleId))) };
+  return sort === "added"
+    ? paginateAtMost(
+        db,
+        {
+          table: "titleGenres",
+          index: "by_kind_genre_added",
+          range: (q) => q.eq("kind", kind).eq("genre", genre),
+          order: "desc",
+        },
+        options,
+        rows,
+      )
+    : paginateAtMost(
+        db,
+        {
+          table: "titleGenres",
+          index: "by_kind_genre_year",
+          range: (q) => q.eq("kind", kind).eq("genre", genre),
+          order: "desc",
+        },
+        options,
+        rows,
+      );
+};
+
+const genreOfEvery = (
+  db: DatabaseReader,
+  genre: string,
+  sort: TitleSort,
+  options: PaginationOptions,
+  rows: number,
+): Page<Doc<"titleGenres">> => {
+  if (sort === "name") {
+    return paginateAtMost(
+      db,
+      { table: "titleGenres", index: "by_genre_sort", range: (q) => q.eq("genre", genre) },
+      options,
+      rows,
+    );
+  }
+
+  return sort === "added"
+    ? paginateAtMost(
+        db,
+        {
+          table: "titleGenres",
+          index: "by_genre_added",
+          range: (q) => q.eq("genre", genre),
+          order: "desc",
+        },
+        options,
+        rows,
+      )
+    : paginateAtMost(
+        db,
+        {
+          table: "titleGenres",
+          index: "by_genre_year",
+          range: (q) => q.eq("genre", genre),
+          order: "desc",
+        },
+        options,
+        rows,
+      );
+};
+
+const titleRows = async (
+  db: DatabaseReader,
+  scope: Scope,
+  sort: TitleSort,
+  options: PaginationOptions,
+  rows: number,
+): Page<Doc<"titles">> => {
+  const { libraryId, kind } = scope;
+
+  if (libraryId !== undefined) return ofLibrary(db, libraryId, sort, options, rows);
+
+  return kind === undefined
+    ? ofEvery(db, sort, options, rows)
+    : ofKind(db, kind, sort, options, rows);
+};
+
+const genreRows = async (
+  db: DatabaseReader,
+  scope: Scope,
+  genre: string,
+  sort: TitleSort,
+  options: PaginationOptions,
+  rows: number,
+): Page<Doc<"titles"> | null> => {
+  const { libraryId, kind } = scope;
+  const key = folded(genre);
+
+  const found =
+    libraryId !== undefined
+      ? await genreOfLibrary(db, libraryId, key, sort, options, rows)
+      : kind === undefined
+        ? await genreOfEvery(db, key, sort, options, rows)
+        : await genreOfKind(db, kind, key, sort, options, rows);
+
+  return { ...found, page: await Promise.all(found.page.map(async (row) => db.get(row.titleId))) };
 };
 
 /**
- * One page of one library's titles by index, in `sort` order, keeping the ones `gate` admits and
- * `filter` passes. A genre pages its own `titleGenres` rows, which carry the title's sort fields,
- * so a rare genre reads only its titles. Restrictions and filters can make a page short, and its
- * cursor still continues after the last row read.
+ * One page of titles in `sort` order across every library, or within one library, through the
+ * index that matches the library, kind, and genre asked for. It reads at most `rows` rows, so a
+ * caller's page stays within the reads `decidableRows` allows, and keeps the titles `sees`
+ * allows through `can()` and `filter` passes. Titles the caller may not see, restrictions, and
+ * filters can make a page short or empty while its cursor goes on.
  */
-export const libraryPage = async (
+export const titlePage = async (
   db: DatabaseReader,
-  gate: ItemGate,
+  scope: Scope,
   sort: TitleSort,
   filter: TitleFilter,
+  sees: TitleViewer,
   options: PaginationOptions,
+  rows: number,
 ): Promise<PaginationResult<Doc<"titles">>> => {
-  const bounded = { ...options, numItems: Math.min(options.numItems, TITLE_PAGE_MAX) };
-  const libraryId = gate.library._id;
+  const bounded = Math.min(rows, TITLE_PAGE_MAX);
+  const scoped = { libraryId: scope.libraryId, kind: scope.kind ?? filter.kind };
 
   const found =
     filter.genre === undefined
-      ? await byTitle(db, libraryId, sort, bounded)
-      : await byGenre(db, libraryId, filter.genre, sort, bounded);
+      ? await titleRows(db, scoped, sort, options, bounded)
+      : await genreRows(db, scoped, filter.genre, sort, options, bounded);
 
-  return {
-    ...found,
-    page: found.page.flatMap((title) =>
-      title === null ||
-      title.purging === true ||
-      !gate.admits(titleFacts(title)) ||
-      !matchesFilter(filter, title)
-        ? []
-        : [title],
+  const kept = await Promise.all(
+    found.page.map(async (title) =>
+      title !== null && matchesFilter(filter, title) && (await sees(title)) ? title : null,
     ),
-  };
-};
-
-const SEPARATOR = "|";
-
-/** Where a cursor sits: inside a library's index, or past the end of a library. */
-type Position = "paging" | "done";
-
-const FLAGS = { paging: "p", done: "d" } as const satisfies Readonly<Record<Position, string>>;
-
-interface Spot {
-  readonly libraryId: Id<"libraries">;
-  readonly position: Position;
-  readonly inner: string | null;
-}
-
-const badCursor = (): never => fail("invalid_args", "This page cursor did not come from this list");
-
-const spotOf = (db: DatabaseReader, cursor: string | null | undefined): Spot | null => {
-  if (cursor === undefined || cursor === null || cursor === "") return null;
-
-  const [id = "", flag = "", ...rest] = cursor.split(SEPARATOR);
-  const libraryId = db.normalizeId("libraries", id);
-  const inner = rest.join(SEPARATOR);
-
-  if (libraryId === null || (flag !== FLAGS.paging && flag !== FLAGS.done)) return badCursor();
-
-  return {
-    libraryId,
-    position: flag === FLAGS.done ? "done" : "paging",
-    inner: inner === "" ? null : inner,
-  };
-};
-
-const cursorAt = (libraryId: Id<"libraries">, position: Position, inner: string): string =>
-  [libraryId, FLAGS[position], inner].join(SEPARATOR);
-
-type Start =
-  | { readonly kind: "page"; readonly gate: ItemGate; readonly inner: string | null }
-  | NextLibrary;
-
-/** The library a page reads and where in it, or where the walk resumes, or its end. */
-const startOf = async (
-  db: DatabaseReader,
-  caller: Principal,
-  from: Spot | null,
-): Promise<Start> => {
-  if (from === null) return nextBrowsableLibrary(db, caller, null);
-
-  if (from.position === "paging") {
-    const gate = await libraryGate(db, caller, await reachOf(db, caller), from.libraryId);
-
-    if (gate !== null) return { kind: "page", gate, inner: from.inner };
-  }
-
-  return nextBrowsableLibrary(db, caller, from.libraryId);
-};
-
-/**
- * One page of the titles in every movies library shared with `caller`, a library at a time in
- * id order. Each call pages one library's index once, since Convex runs one paginated query per
- * call. The cursor names the library and either Convex's cursor inside it or that the library is
- * done; the next call after a done library finds the next one through the caller's grants. A
- * library the caller lost meanwhile counts as done. A page reloaded to its end cursor reads the
- * same range of the same library again.
- */
-export const libraryByLibrary = async (
-  db: DatabaseReader,
-  caller: Principal,
-  sort: TitleSort,
-  filter: TitleFilter,
-  options: PaginationOptions,
-): Promise<PaginationResult<Doc<"titles">>> => {
-  const through = spotOf(db, options.endCursor);
-  const start = await startOf(db, caller, spotOf(db, options.cursor));
-  const reloaded = through === null ? null : (options.endCursor ?? null);
-
-  if (start.kind === "end") {
-    return {
-      page: [],
-      isDone: reloaded === null,
-      continueCursor: reloaded ?? options.cursor ?? "",
-    };
-  }
-
-  if (start.kind === "resume") {
-    return {
-      page: [],
-      isDone: false,
-      continueCursor: reloaded ?? cursorAt(start.after, "done", ""),
-    };
-  }
-
-  const { gate } = start;
-  const libraryId = gate.library._id;
-
-  const page = await libraryPage(db, gate, sort, filter, {
-    ...options,
-    cursor: start.kind === "page" ? start.inner : null,
-    endCursor: through?.libraryId === libraryId ? through.inner : null,
-  });
-
-  const last =
-    reloaded === null &&
-    page.isDone &&
-    (await nextBrowsableLibrary(db, caller, libraryId)).kind === "end";
-
-  const answer = {
-    ...page,
-    isDone: last,
-    continueCursor:
-      reloaded ?? cursorAt(libraryId, page.isDone ? "done" : "paging", page.continueCursor),
-  };
-
-  const split = page.splitCursor;
-
-  return split === undefined || split === null
-    ? answer
-    : { ...answer, splitCursor: cursorAt(libraryId, "paging", split) };
-};
-
-/**
- * Up to `count` of the most recently added titles across `gates` that each library's gate admits,
- * reading each library's newest titles, about the same share from each. Genres and "more like
- * this" count among these, so a vast library counts its newer part.
- */
-export const recentTitles = async (
-  db: DatabaseReader,
-  gates: ReadonlyArray<ItemGate>,
-  kind: Doc<"titles">["kind"] | undefined,
-  count: number,
-): Promise<ReadonlyArray<Doc<"titles">>> => {
-  const share = Math.max(10, Math.ceil(count / Math.max(1, gates.length)));
-
-  const read = await Promise.all(
-    gates.map(async (gate) => {
-      const titles = await db
-        .query("titles")
-        .withIndex("by_library_added", (q) => q.eq("libraryId", gate.library._id))
-        .order("desc")
-        .take(share);
-
-      return titles.filter(
-        (title) =>
-          title.purging !== true &&
-          (kind === undefined || title.kind === kind) &&
-          gate.admits(titleFacts(title)),
-      );
-    }),
   );
 
-  return read.flat();
+  return { ...found, page: kept.flatMap((title) => (title === null ? [] : [title])) };
 };
 
 /** Genres across `titles` with their counts, most common first, then by name. */

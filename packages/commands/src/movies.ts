@@ -459,10 +459,14 @@ export const movies = [
     result: v.array(mediaVersion),
   }),
   query("movies.titles.episodes", {
-    summary: "List a season's episodes with your progress and their credits",
+    summary: "List a season's episodes in order with your progress and their credits",
     scope: "movies:read",
-    args: { titleId: v.id("titles"), seasonNumber: v.number() },
-    result: v.array(v.object({ ...episodeFields, credits: v.array(credit) })),
+    args: {
+      titleId: v.id("titles"),
+      seasonNumber: v.number(),
+      paginationOpts: paginationOptsValidator,
+    },
+    result: paginationResultValidator(v.object({ ...episodeFields, credits: v.array(credit) })),
   }),
   query("movies.titles.nextEpisode", {
     summary: "Show the episode after this one, specials last, or null after the last",

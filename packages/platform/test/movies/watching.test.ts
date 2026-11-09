@@ -14,7 +14,7 @@ import { coreStackFromEnvFile } from "../stack-env";
 import type { CoreStack } from "../stack-env";
 import { deploymentTicketKeys } from "../ticket-keys";
 import { Schema } from "effect";
-import { fileIn, shelfOf, titleIn } from "./shelf";
+import { fileIn, seasonOf, shelfOf, titleIn } from "./shelf";
 import type { Shelf } from "./shelf";
 
 const stack = coreStackFromEnvFile();
@@ -101,10 +101,7 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
 
     const pioneer = titleIn(shelf, "Pioneer One");
 
-    const [, secondEpisode] = await shelf.aiko.signedIn.client.query(api.movies.titles.episodes, {
-      titleId: pioneer,
-      seasonNumber: 1,
-    });
+    const [, secondEpisode] = await seasonOf(shelf.aiko.signedIn.client, pioneer, 1);
 
     if (secondEpisode === undefined) throw new Error("Pioneer One has no second episode");
 
@@ -283,9 +280,7 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
     const client = shelf.mateo.signedIn.client;
 
     const watchedFlags = async () =>
-      (await client.query(api.movies.titles.episodes, { titleId: pioneer, seasonNumber: 1 })).map(
-        (episode) => episode.progress?.watched ?? false,
-      );
+      (await seasonOf(client, pioneer, 1)).map((episode) => episode.progress?.watched ?? false);
 
     await client.mutation(api.movies.history.markWatched, { titleId: pioneer });
 
@@ -312,12 +307,9 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
 
     expect(await watchedFlags()).toEqual([false, false, false]);
     expect(
-      (
-        await shelf.aiko.signedIn.client.query(api.movies.titles.episodes, {
-          titleId: pioneer,
-          seasonNumber: 1,
-        })
-      ).every((episode) => episode.progress === null),
+      (await seasonOf(shelf.aiko.signedIn.client, pioneer, 1)).every(
+        (episode) => episode.progress === null,
+      ),
     ).toBe(true);
   });
 });

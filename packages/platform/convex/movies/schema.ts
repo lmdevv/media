@@ -92,6 +92,12 @@ export const moviesTables = {
     .index("by_library_sort", ["libraryId", "sortKey"])
     .index("by_library_added", ["libraryId", "addedAt"])
     .index("by_library_year", ["libraryId", "year"])
+    .index("by_sort", ["sortKey"])
+    .index("by_added", ["addedAt"])
+    .index("by_year", ["year"])
+    .index("by_kind_sort", ["kind", "sortKey"])
+    .index("by_kind_added", ["kind", "addedAt"])
+    .index("by_kind_year", ["kind", "year"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["libraryId", "kind"] }),
 
   /**
@@ -112,7 +118,13 @@ export const moviesTables = {
     .index("by_title", ["titleId"])
     .index("by_library_genre_sort", ["libraryId", "genre", "sortKey"])
     .index("by_library_genre_added", ["libraryId", "genre", "addedAt"])
-    .index("by_library_genre_year", ["libraryId", "genre", "year"]),
+    .index("by_library_genre_year", ["libraryId", "genre", "year"])
+    .index("by_genre_sort", ["genre", "sortKey"])
+    .index("by_genre_added", ["genre", "addedAt"])
+    .index("by_genre_year", ["genre", "year"])
+    .index("by_kind_genre_sort", ["kind", "genre", "sortKey"])
+    .index("by_kind_genre_added", ["kind", "genre", "addedAt"])
+    .index("by_kind_genre_year", ["kind", "genre", "year"]),
 
   seasons: defineTable({
     titleId: v.id("titles"),
@@ -258,6 +270,7 @@ export const moviesTables = {
     playStartedAt: v.optional(v.number()),
   })
     .index("by_user_item", ["userId", "titleId", "episodeId"])
+    .index("by_user_title_played", ["userId", "titleId", "lastPlayedAt"])
     .index("by_user_played", ["userId", "lastPlayedAt"]),
 
   myList: defineTable({

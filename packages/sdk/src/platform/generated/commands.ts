@@ -2648,55 +2648,75 @@ const movies_titles_episodes = query({
   args: Schema.Struct({
     titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
     seasonNumber: Schema.Finite,
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
   }),
-  result: Schema.Array(
-    Schema.Struct({
-      id: Schema.String.pipe(Schema.brand("Id<episodes>")),
-      titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
-      seasonId: Schema.String.pipe(Schema.brand("Id<seasons>")),
-      seasonNumber: Schema.Finite,
-      episodeNumber: Schema.Finite,
-      name: Schema.String,
-      overview: Schema.Union([Schema.String, Schema.Null]),
-      airDate: Schema.Union([Schema.String, Schema.Null]),
-      runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
-      still: Schema.Union([Schema.String, Schema.Null]),
-      rating: Schema.Union([Schema.Finite, Schema.Null]),
-      externalIds: Schema.Struct({
-        tmdb: Schema.Union([Schema.String, Schema.Null]),
-        imdb: Schema.Union([Schema.String, Schema.Null]),
-        tvdb: Schema.Union([Schema.String, Schema.Null]),
-      }),
-      available: Schema.Boolean,
-      progress: Schema.Union([
-        Schema.Struct({
-          positionMs: Schema.Finite,
-          durationMs: Schema.Finite,
-          watched: Schema.Boolean,
-          updatedAt: Schema.Finite,
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+        titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
+        seasonId: Schema.String.pipe(Schema.brand("Id<seasons>")),
+        seasonNumber: Schema.Finite,
+        episodeNumber: Schema.Finite,
+        name: Schema.String,
+        overview: Schema.Union([Schema.String, Schema.Null]),
+        airDate: Schema.Union([Schema.String, Schema.Null]),
+        runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+        still: Schema.Union([Schema.String, Schema.Null]),
+        rating: Schema.Union([Schema.Finite, Schema.Null]),
+        externalIds: Schema.Struct({
+          tmdb: Schema.Union([Schema.String, Schema.Null]),
+          imdb: Schema.Union([Schema.String, Schema.Null]),
+          tvdb: Schema.Union([Schema.String, Schema.Null]),
         }),
+        available: Schema.Boolean,
+        progress: Schema.Union([
+          Schema.Struct({
+            positionMs: Schema.Finite,
+            durationMs: Schema.Finite,
+            watched: Schema.Boolean,
+            updatedAt: Schema.Finite,
+          }),
+          Schema.Null,
+        ]),
+        credits: Schema.Array(
+          Schema.Struct({
+            personId: Schema.String.pipe(Schema.brand("Id<people>")),
+            name: Schema.String,
+            kind: Schema.Union([
+              Schema.Literal("actor"),
+              Schema.Literal("guest-star"),
+              Schema.Literal("director"),
+              Schema.Literal("writer"),
+              Schema.Literal("creator"),
+              Schema.Literal("producer"),
+              Schema.Literal("composer"),
+            ]),
+            role: Schema.Union([Schema.String, Schema.Null]),
+            profile: Schema.Union([Schema.String, Schema.Null]),
+            order: Schema.Finite,
+          }),
+        ),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
         Schema.Null,
       ]),
-      credits: Schema.Array(
-        Schema.Struct({
-          personId: Schema.String.pipe(Schema.brand("Id<people>")),
-          name: Schema.String,
-          kind: Schema.Union([
-            Schema.Literal("actor"),
-            Schema.Literal("guest-star"),
-            Schema.Literal("director"),
-            Schema.Literal("writer"),
-            Schema.Literal("creator"),
-            Schema.Literal("producer"),
-            Schema.Literal("composer"),
-          ]),
-          role: Schema.Union([Schema.String, Schema.Null]),
-          profile: Schema.Union([Schema.String, Schema.Null]),
-          order: Schema.Finite,
-        }),
-      ),
-    }),
-  ),
+    ),
+  }),
 });
 
 const movies_titles_genres = query({
@@ -3630,7 +3650,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       start: method.mutation(movies_play_start),
     },
     titles: {
-      /** `movies.titles.episodes` (query, movies:read): List a season's episodes with your progress and their credits. */
+      /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
       episodes: method.query(movies_titles_episodes),
       /** `movies.titles.genres` (query, movies:read): List the genres of the titles you may see, most common first. */
       genres: method.query(movies_titles_genres),
@@ -3948,7 +3968,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       start: method.mutation(movies_play_start),
     },
     titles: {
-      /** `movies.titles.episodes` (query, movies:read): List a season's episodes with your progress and their credits. */
+      /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
       episodes: method.query(movies_titles_episodes),
       /** `movies.titles.genres` (query, movies:read): List the genres of the titles you may see, most common first. */
       genres: method.query(movies_titles_genres),

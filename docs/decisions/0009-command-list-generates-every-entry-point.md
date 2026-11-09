@@ -198,5 +198,6 @@ the same generator run writes every entry point.
   words stay at the top level of `media` (`media search`, `media play`) until the CLI folds onto
   the core, and the skill names a reference for each.
 - **One paginated query per call.** Convex runs one paginated query in each function, so a list
-  that crosses rows of several index ranges, such as the title list across libraries, pages one
-  range per call and carries which range it is in inside its cursor (ADR 0005).
+  that must keep one order across many containers, such as the title list across libraries,
+  pages one household-wide index and decides each row's access, rather than merging one range
+  per container (ADR 0005).

@@ -248,25 +248,18 @@ const scanUnwatched = async (
   return step(episode, 0, 0);
 };
 
-const SHOW_PROGRESS_MAX = 1000;
-
 const latestShowProgress = async (
   db: DatabaseReader,
   userId: Id<"users">,
   titleId: Id<"titles">,
 ): Promise<Doc<"watchProgress"> | null> => {
-  const rows = await db
+  const latest = await db
     .query("watchProgress")
-    .withIndex("by_user_item", (q) => q.eq("userId", userId).eq("titleId", titleId))
-    .take(SHOW_PROGRESS_MAX);
+    .withIndex("by_user_title_played", (q) => q.eq("userId", userId).eq("titleId", titleId))
+    .order("desc")
+    .first();
 
-  return rows.reduce<Doc<"watchProgress"> | null>(
-    (latest, row) =>
-      row.episodeId !== null && (latest === null || row.lastPlayedAt > latest.lastPlayedAt)
-        ? row
-        : latest,
-    null,
-  );
+  return latest?.episodeId === null ? null : latest;
 };
 
 /**

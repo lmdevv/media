@@ -242,6 +242,7 @@ describe("CLI placement", () => {
       "movies.collections.list",
       "movies.history.list",
       "movies.myList.list",
+      "movies.titles.episodes",
       "movies.titles.list",
     ]);
   });

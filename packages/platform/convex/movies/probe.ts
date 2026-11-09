@@ -329,6 +329,25 @@ export const hasRows = internalQuery({
   },
 });
 
+/**
+ * How many progress rows a person has on a show, and the episode whose row comes last in
+ * `(user, title, episode)` order: the row a read of the first 1,000 in that order would miss.
+ */
+export const progressOrder = internalQuery({
+  args: { userId: v.id("users"), titleId: v.id("titles") },
+  returns: v.object({ rows: v.number(), lastEpisodeId: v.union(v.id("episodes"), v.null()) }),
+  handler: async (ctx, { userId, titleId }) => {
+    const range = () =>
+      ctx.db
+        .query("watchProgress")
+        .withIndex("by_user_item", (q) => q.eq("userId", userId).eq("titleId", titleId));
+
+    const [found, last] = await Promise.all([range().take(5000), range().order("desc").first()]);
+
+    return { rows: found.length, lastEpisodeId: last?.episodeId ?? null };
+  },
+});
+
 /** Up to 1,000 of a library's files with their paths, for a test to name files it scanned. */
 export const files = internalQuery({
   args: { libraryId: v.id("libraries") },

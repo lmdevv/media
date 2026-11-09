@@ -10,56 +10,75 @@ import type { QueryCtx } from "../../convex/_generated/server";
 import { requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
 
-const episodesArgs = v.object({ titleId: v.id("titles"), seasonNumber: v.number() });
-
-const episodesResult = v.array(
-  v.object({
-    id: v.id("episodes"),
-    titleId: v.id("titles"),
-    seasonId: v.id("seasons"),
-    seasonNumber: v.number(),
-    episodeNumber: v.number(),
-    name: v.string(),
-    overview: v.union(v.string(), v.null()),
-    airDate: v.union(v.string(), v.null()),
-    runtimeMs: v.union(v.number(), v.null()),
-    still: v.union(v.string(), v.null()),
-    rating: v.union(v.number(), v.null()),
-    externalIds: v.object({
-      tmdb: v.union(v.string(), v.null()),
-      imdb: v.union(v.string(), v.null()),
-      tvdb: v.union(v.string(), v.null()),
-    }),
-    available: v.boolean(),
-    progress: v.union(
-      v.object({
-        positionMs: v.number(),
-        durationMs: v.number(),
-        watched: v.boolean(),
-        updatedAt: v.number(),
-      }),
-      v.null(),
-    ),
-    credits: v.array(
-      v.object({
-        personId: v.id("people"),
-        name: v.string(),
-        kind: v.union(
-          v.literal("actor"),
-          v.literal("guest-star"),
-          v.literal("director"),
-          v.literal("writer"),
-          v.literal("creator"),
-          v.literal("producer"),
-          v.literal("composer"),
-        ),
-        role: v.union(v.string(), v.null()),
-        profile: v.union(v.string(), v.null()),
-        order: v.number(),
-      }),
-    ),
+const episodesArgs = v.object({
+  titleId: v.id("titles"),
+  seasonNumber: v.number(),
+  paginationOpts: v.object({
+    numItems: v.number(),
+    cursor: v.union(v.string(), v.null()),
+    endCursor: v.optional(v.union(v.string(), v.null())),
+    id: v.optional(v.number()),
+    maximumRowsRead: v.optional(v.number()),
+    maximumBytesRead: v.optional(v.number()),
   }),
-);
+});
+
+const episodesResult = v.object({
+  page: v.array(
+    v.object({
+      id: v.id("episodes"),
+      titleId: v.id("titles"),
+      seasonId: v.id("seasons"),
+      seasonNumber: v.number(),
+      episodeNumber: v.number(),
+      name: v.string(),
+      overview: v.union(v.string(), v.null()),
+      airDate: v.union(v.string(), v.null()),
+      runtimeMs: v.union(v.number(), v.null()),
+      still: v.union(v.string(), v.null()),
+      rating: v.union(v.number(), v.null()),
+      externalIds: v.object({
+        tmdb: v.union(v.string(), v.null()),
+        imdb: v.union(v.string(), v.null()),
+        tvdb: v.union(v.string(), v.null()),
+      }),
+      available: v.boolean(),
+      progress: v.union(
+        v.object({
+          positionMs: v.number(),
+          durationMs: v.number(),
+          watched: v.boolean(),
+          updatedAt: v.number(),
+        }),
+        v.null(),
+      ),
+      credits: v.array(
+        v.object({
+          personId: v.id("people"),
+          name: v.string(),
+          kind: v.union(
+            v.literal("actor"),
+            v.literal("guest-star"),
+            v.literal("director"),
+            v.literal("writer"),
+            v.literal("creator"),
+            v.literal("producer"),
+            v.literal("composer"),
+          ),
+          role: v.union(v.string(), v.null()),
+          profile: v.union(v.string(), v.null()),
+          order: v.number(),
+        }),
+      ),
+    }),
+  ),
+  continueCursor: v.string(),
+  isDone: v.boolean(),
+  splitCursor: v.optional(v.union(v.string(), v.null())),
+  pageStatus: v.optional(
+    v.union(v.literal("SplitRecommended"), v.literal("SplitRequired"), v.null()),
+  ),
+});
 
 const genresArgs = v.object({ kind: v.optional(v.union(v.literal("movie"), v.literal("show"))) });
 
@@ -637,7 +656,7 @@ const versionsResult = v.array(
 
 /** The handlers `convex/movies/titles.ts` passes to `register`, one per `movies.titles` command. */
 export interface Handlers {
-  /** `movies.titles.episodes` (query, movies:read): List a season's episodes with your progress and their credits. */
+  /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
   readonly episodes: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof episodesArgs>,

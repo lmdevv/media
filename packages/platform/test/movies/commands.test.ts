@@ -6,7 +6,7 @@ import type { Member } from "../devices";
 import { movie, seedLibrary, share, unshare } from "../probe";
 import { failureOf, refusal } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
-import { NONE, shelfOf, titleIn } from "./shelf";
+import { NONE, seasonOf, shelfOf, titleIn } from "./shelf";
 import type { Shelf } from "./shelf";
 
 const stack = coreStackFromEnvFile();
@@ -186,7 +186,13 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
       refusal(client.query(api.movies.titles.get, { titleId: sintel })),
       refusal(client.query(api.movies.titles.versions, { titleId: sintel })),
       refusal(client.query(api.movies.titles.similar, { titleId: sintel })),
-      refusal(client.query(api.movies.titles.episodes, { titleId: sintel, seasonNumber: 1 })),
+      refusal(
+        client.query(api.movies.titles.episodes, {
+          titleId: sintel,
+          seasonNumber: 1,
+          paginationOpts: { numItems: 10, cursor: null },
+        }),
+      ),
       refusal(client.mutation(api.movies.play.start, { titleId: sintel })),
       refusal(client.mutation(api.movies.myList.add, { titleId: sintel })),
       refusal(client.mutation(api.movies.history.markWatched, { titleId: sintel })),
@@ -227,10 +233,7 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     expect(pioneer.seasons.map((season) => season.seasonNumber)).toEqual([1]);
     expect(pioneer.nextEpisode?.episodeNumber).toBe(1);
 
-    const episodes = await client.query(api.movies.titles.episodes, {
-      titleId: pioneerId,
-      seasonNumber: 1,
-    });
+    const episodes = await seasonOf(client, pioneerId, 1);
 
     expect(episodes.map((episode) => episode.episodeNumber)).toEqual([1, 2, 3]);
 

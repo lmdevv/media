@@ -359,22 +359,27 @@ as it is.
 
 ### Lists across libraries
 
-- A list across libraries starts from the libraries shared with the caller, through
-  `visiblePage` over the caller's grants, never from every library on the server, and decides
-  each movies library once through `can()`; each title then goes through that library's gate
-  with its facts. Home rows, genres, and similar titles read the newest titles of the first 64
-  libraries shared with the caller, music ones included. Search reads the search index and
-  decides each hit's library the same way.
-- `movies.titles.list` pages one library's index with `paginate`, a library at a time in id
-  order, and walks every movies library shared with the caller. Convex runs one paginated query
-  per call, so a page never crosses libraries: its cursor names the library and Convex's cursor
-  inside it, and a library that ends hands the next library's start, found through
-  `visiblePage` from its id, to the next page. A page reloaded to its end cursor reads the same
-  range again. With a library named, the list pages only that library after `requireItems`
-  decides it.
-- Restrictions and filters drop titles after the page is read, so a page can come back short or
-  empty while its cursor goes on. A kind filter has no index of its own and reads the library's
-  rows.
+- `movies.titles.list` keeps one order across every library, as old movies' list did: by name,
+  newest added, or newest year. It pages one household-wide index with `paginate`, the titles
+  table's own (`by_sort`, `by_added`, `by_year`, and the same by kind) or the genre rows'
+  (`by_genre_*`, `by_kind_genre_*`), and decides each row through `can()` at its library's level,
+  each library read once per call. A page reads at most what `decidableRows` allows for the
+  caller (100 rows at most), so it stays bounded however many titles or libraries the server
+  holds. Titles the caller may not see, restrictions, and filters make a page short or empty
+  while its cursor goes on. With a library named, the list pages that library's own index after
+  `requireItems` decides it.
+- Home rows, genres, and similar titles start from every movies library shared with the caller.
+  `movieLibraries` walks the caller's grants with `visiblePage`, keeping each step's
+  continuation, so music libraries and libraries the caller cannot browse never push a movies
+  library out; it stops after 1,024 shared libraries of any kind. Each library reads its newest
+  titles that its gate admits, its share of 2,000 reads and at least what the row needs, and the
+  results merge by when titles were added. A library full of titles the caller may not see
+  therefore cannot hide another library's. Search reads the search index and decides each hit's
+  library the same way, among the first 200 hits as old movies did.
+- A season's episodes come a page at a time (32 at most, each with its progress and credits), so a
+  season of any length lists whole.
+- Where a show resumes comes from the person's newest progress row on it, read from the
+  `(user, title, played at)` index, however many episodes they watched.
 - Rows a person keeps (history, the list, continue watching) decide their titles with a
   per-call `titleViewer`, which reads each library and its grants at most once. A row whose
   title is gone or being purged is skipped, as old movies skipped it; the purge leaves those

@@ -187,13 +187,14 @@ Start a movie or an episode: choose its file, resume your position, and get a st
 
 ## `movies.titles.episodes`
 
-List a season's episodes with your progress and their credits.
+List a season's episodes in order with your progress and their credits.
 
 - CLI: `media movies titles episodes`
 - Kind: query
 - Scope: movies:read
-- Arguments: `{ titleId: Id<"titles">; seasonNumber: number }`
-- Result: `Array<{ id: Id<"episodes">; titleId: Id<"titles">; seasonId: Id<"seasons">; seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; runtimeMs: number | null; still: string | null; rating: number | null; externalIds: { tmdb: string | null; imdb: string | null; tvdb: string | null }; available: boolean; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null; credits: Array<{ personId: Id<"people">; name: string; kind: "actor" | "guest-star" | "director" | "writer" | "creator" | "producer" | "composer"; role: string | null; profile: string | null; order: number }> }>`
+- Arguments: `{ titleId: Id<"titles">; seasonNumber: number; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ id: Id<"episodes">; titleId: Id<"titles">; seasonId: Id<"seasons">; seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; runtimeMs: number | null; still: string | null; rating: number | null; externalIds: { tmdb: string | null; imdb: string | null; tvdb: string | null }; available: boolean; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null; credits: Array<{ personId: Id<"people">; name: string; kind: "actor" | "guest-star" | "director" | "writer" | "creator" | "producer" | "composer"; role: string | null; profile: string | null; order: number }> }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `movies.titles.genres`
 
