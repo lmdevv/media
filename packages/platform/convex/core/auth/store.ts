@@ -9,10 +9,10 @@ import { endSession } from "../sessions";
  * How long after its first use a refresh token still refreshes, as Convex Auth's
  * `REFRESH_TOKEN_REUSE_WINDOW_MS`, which the package does not export.
  */
-const REUSE_WINDOW_MS = 10 * 1000;
+export const REUSE_WINDOW_MS = 10 * 1000;
 
 /** Divides a refresh token's id from its session's, as Convex Auth's `REFRESH_TOKEN_DIVIDER`. */
-const DIVIDER = "|";
+export const DIVIDER = "|";
 
 /**
  * The `auth:store` calls the core's sign-in flows make. Every provider is a credentials provider

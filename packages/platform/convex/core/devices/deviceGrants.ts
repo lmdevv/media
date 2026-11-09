@@ -8,7 +8,7 @@ import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { callerUser, requireCaller } from "../auth/caller";
 import type { Caller } from "../auth/caller";
 import { fail } from "../lib/errors";
-import { GIVEN_NAME_MAX, requireGivenName } from "../lib/names";
+import { requireDeviceName } from "../lib/names";
 import { PAGE_ROWS_MAX, paginateAtMost } from "../lib/paginate";
 import { takeAttempt } from "../lib/rateLimit";
 import {
@@ -46,9 +46,6 @@ const NO_GRANT = "No such device grant";
 const LIST_ROW_READS = 1 + 2 * GRANT_SESSIONS_MAX;
 
 const LIST_ROWS = Math.floor((PAGE_ROWS_MAX - LIST_CALL_READS) / LIST_ROW_READS);
-
-const parseName = (name: string): string =>
-  requireGivenName(name, `Name the device with 1 to ${GIVEN_NAME_MAX} printable characters`);
 
 const refusal = (action: GrantAction, because: Because): string => {
   if (because === "scope") return "Only your own account session can do this";
@@ -153,7 +150,10 @@ export const confirm = internalMutation({
       return null;
     }
 
-    await ctx.db.patch(grant._id, { name: parseName(name), generation: person.sessionGeneration });
+    await ctx.db.patch(grant._id, {
+      name: requireDeviceName(name),
+      generation: person.sessionGeneration,
+    });
     await joinGrant(ctx, caller, grant._id);
 
     return grant._id;
@@ -174,7 +174,7 @@ export const insert = internalMutation({
 
     const grantId = await ctx.db.insert("deviceGrants", {
       userId: person._id,
-      name: parseName(name),
+      name: requireDeviceName(name),
       secretHash,
       generation: person.sessionGeneration,
     });
@@ -209,7 +209,7 @@ const devicesOf = async (
 
 export const { issue, list, revoke } = register({
   issue: async (ctx, { name, grant }) => {
-    parseName(name);
+    requireDeviceName(name);
 
     const stored = grant?.trim();
     const parsed = stored === undefined ? null : parseSecret(GRANT_PREFIX, stored);

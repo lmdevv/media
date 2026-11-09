@@ -221,7 +221,8 @@ token past the window left its session unrevoked.
   back the newest, so the store reads one row where the library scans for the newest unused one.
 - **Rejected: patching or forking the library.** The pinned package stays as published, and the
   store depends only on its store's call shapes and two constants it does not export (the reuse
-  window and the token divider), which a version bump must check.
+  window and the token divider), which `test/core/auth/store.test.ts` checks against the
+  installed package.
 - This narrows the rejection above of intercepting Convex Auth's refresh. Since every client has
   its own session, the store does not skip a delete; it only ends sessions in batches the library
   would end, or leave unable to refresh, in one call.

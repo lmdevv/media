@@ -9,7 +9,7 @@ import type { DataModel, Doc } from "../../_generated/dataModel";
 import { internalMutation, internalQuery } from "../../_generated/server";
 import type { QueryCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
-import { GIVEN_NAME_MAX, requireGivenName } from "../lib/names";
+import { requireDeviceName } from "../lib/names";
 import {
   constantTimeEqual,
   formatSecret,
@@ -180,10 +180,7 @@ export const insert = internalMutation({
   handler: async (ctx, { secretHash, userCode, clientName }) => {
     const now = Date.now();
 
-    const name = requireGivenName(
-      clientName,
-      `Name the device with 1 to ${GIVEN_NAME_MAX} printable characters`,
-    );
+    const name = requireDeviceName(clientName);
 
     const waiting = await ctx.db
       .query("deviceCodes")

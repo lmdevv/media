@@ -36,3 +36,7 @@ export const GIVEN_NAME_MAX = 64;
  */
 export const requireGivenName = (typed: string, refusal: string): string =>
   printableWithin(typed, GIVEN_NAME_MAX) ?? fail("invalid_args", refusal);
+
+/** A device's name, which an app sends at enrollment: `requireGivenName` with the device refusal. */
+export const requireDeviceName = (typed: string): string =>
+  requireGivenName(typed, `Name the device with 1 to ${GIVEN_NAME_MAX} printable characters`);
