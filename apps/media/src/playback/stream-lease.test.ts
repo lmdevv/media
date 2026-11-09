@@ -1042,7 +1042,15 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
           assert.deepStrictEqual(yield* logsOf("Stream.released", stream.streamId), []);
           assert.lengthOf(yield* logsOf("Stream.ended", stream.streamId), 1);
           assert.isFalse(
-            yield* fs.exists(path.join(server.transcodeDir, stream.streamId)).pipe(Effect.orDie),
+            yield* fs.exists(path.join(server.transcodeDir, stream.streamId)).pipe(
+              Effect.orDie,
+              Effect.repeat({
+                until: (exists) => !exists,
+                schedule: Schedule.spaced("50 millis"),
+                times: 100,
+              }),
+            ),
+            "the stream's folder goes once the init copy the stop could not cut ends",
           );
         }),
       15_000,

@@ -297,9 +297,14 @@ describe.skipIf(!hasFfmpeg)("stream throttling", () => {
 
           assert.deepInclude(released[0]?.annotations, { liveness: "paused", generation: 1 });
           assert.isFalse(
-            yield* fs
-              .exists(path.join(server.transcodeDir, stream.streamId, "1"))
-              .pipe(Effect.orDie),
+            yield* fs.exists(path.join(server.transcodeDir, stream.streamId, "1")).pipe(
+              Effect.orDie,
+              Effect.repeat({
+                until: (exists) => !exists,
+                schedule: Schedule.spaced("50 millis"),
+                times: 100,
+              }),
+            ),
             "the stopped ffmpeg's run folder is gone",
           );
 
