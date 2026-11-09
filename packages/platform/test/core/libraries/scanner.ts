@@ -67,12 +67,15 @@ const pageOf = <Row extends Schema.Top>(row: Row) =>
 const Upserted = answer(Schema.Struct({ inserted: Schema.Finite }));
 
 const Landed = answer(
-  Schema.Struct({ files: Schema.Array(Schema.Struct({ path: Schema.String })) }),
+  Schema.Struct({
+    files: Schema.Array(Schema.Struct({ path: Schema.String })),
+    done: Schema.Finite,
+  }),
 );
 
 const Missing = answer(Schema.Struct({ removed: Schema.Finite }));
 
-const Marked = answer(Schema.Struct({ marked: Schema.Finite }));
+const Marked = answer(Schema.Struct({ marked: Schema.Finite, done: Schema.Finite }));
 
 const Finished = Schema.Struct({ outcome: Schema.String });
 
@@ -80,9 +83,6 @@ const LEASE_MS = 30_000;
 
 /** Paths one `missing` call takes, and files one music `upsert` takes. */
 const BATCH = 500;
-
-/** Files one movies `upsert` takes: each carries its title and episode. */
-const MOVIES_UPSERT_BATCH = 80;
 
 const probe = api.core.libraryProbe;
 
@@ -99,6 +99,50 @@ type Held<Value> =
 
 const mapHeld = <From, To>(held: Held<From>, map: (value: From) => To): Held<To> =>
   held.outcome === "held" ? { outcome: "held", value: map(held.value) } : held;
+
+/**
+ * Writes `files` as movies, sending again what a call's budget left unwritten, and counts every
+ * file it wrote as inserted.
+ */
+const moviesUpsert = async (
+  stack: CoreStack,
+  lease: ScanLease,
+  files: ReadonlyArray<ScannedFile>,
+  inserted = 0,
+): Promise<Held<{ readonly inserted: number }>> => {
+  if (files.length === 0) return { outcome: "held", value: { inserted } };
+
+  const landed = await retrying(() =>
+    runServer(
+      stack,
+      movies.upsert,
+      { lease, items: files.map((file) => movieFile(file.path, file.size, file.mtime)) },
+      Landed,
+    ),
+  );
+
+  if (landed.outcome !== "held") return landed;
+
+  return moviesUpsert(stack, lease, files.slice(landed.value.done), inserted + landed.value.done);
+};
+
+/** Marks `paths` missing, sending again what a call's budget left, and counts the newly marked. */
+const moviesMissing = async (
+  stack: CoreStack,
+  lease: ScanLease,
+  paths: ReadonlyArray<string>,
+  removed = 0,
+): Promise<Held<{ readonly removed: number }>> => {
+  if (paths.length === 0) return { outcome: "held", value: { removed } };
+
+  const marked = await retrying(() =>
+    runServer(stack, movies.missing, { lease, paths: [...paths] }, Marked),
+  );
+
+  if (marked.outcome !== "held") return marked;
+
+  return moviesMissing(stack, lease, paths.slice(marked.value.done), removed + marked.value.marked);
+};
 
 /**
  * The scanner's calls, each retried on a refusal that committed nothing, as the server's pool will.
@@ -155,17 +199,7 @@ export const scanCalls = (stack: CoreStack, workerId: string) => ({
   ): Promise<Held<{ readonly inserted: number }>> =>
     kind === "music"
       ? retrying(() => runServer(stack, probe.upsert, { lease, files: [...files] }, Upserted))
-      : mapHeld(
-          await retrying(() =>
-            runServer(
-              stack,
-              movies.upsert,
-              { lease, items: files.map((file) => movieFile(file.path, file.size, file.mtime)) },
-              Landed,
-            ),
-          ),
-          (value) => ({ inserted: value.files.length }),
-        ),
+      : moviesUpsert(stack, lease, files),
   missing: async (
     lease: ScanLease,
     kind: ContentDomain,
@@ -173,12 +207,7 @@ export const scanCalls = (stack: CoreStack, workerId: string) => ({
   ): Promise<Held<{ readonly removed: number }>> =>
     kind === "music"
       ? retrying(() => runServer(stack, probe.missing, { lease, paths: [...paths] }, Missing))
-      : mapHeld(
-          await retrying(() =>
-            runServer(stack, movies.missing, { lease, paths: [...paths] }, Marked),
-          ),
-          (value) => ({ removed: value.marked }),
-        ),
+      : moviesMissing(stack, lease, paths),
   finish: (lease: ScanLease) =>
     retrying(() =>
       runServer(
@@ -274,14 +303,11 @@ const scanClaimed = async (
     .filter((file) => !file.missing && !onDisk.has(file.path))
     .map((file) => file.path);
 
-  const inserted = await sendAll(
-    batches(changed, kind === "movies" ? MOVIES_UPSERT_BATCH : BATCH),
-    async (batch) => {
-      const written = await calls.upsert(lease, kind, batch);
+  const inserted = await sendAll(batches(changed), async (batch) => {
+    const written = await calls.upsert(lease, kind, batch);
 
-      return written.outcome === "held" ? written.value.inserted : null;
-    },
-  );
+    return written.outcome === "held" ? written.value.inserted : null;
+  });
 
   const removed =
     inserted === null

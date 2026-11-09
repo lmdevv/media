@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { api } from "../../convex/_generated/api";
 import { eventually } from "../core/jobs/driver";
 import { member } from "../devices";
+import { openTitle, visibleTitles } from "../probe";
+import { refusal } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
 import {
   claimJob,
@@ -123,8 +125,15 @@ describe.skipIf(stack === undefined)("the movies purge", { timeout: 180_000 }, (
     await setFoldersQuietly(stack, libraryId, [kept]);
     await purgeStage(stack, libraryId, "files");
 
-    expect(await purgePage(stack, libraryId, "titles", null)).toMatchObject({ more: true });
-    expect(await titleStateOf(stack, oldTitle)).toMatchObject({ purging: true, episodes: 1 });
+    // A page that stops partway through the show's episodes.
+    expect(await purgePage(stack, libraryId, "titles", null, 150)).toMatchObject({ more: true });
+    expect(await titleStateOf(stack, oldTitle)).toMatchObject({ purging: true });
+
+    // Out of every read, list, and total from the page that marked it.
+    expect(await refusal(openTitle(stack, admin, oldTitle))).toBe("not_found");
+    expect(await visibleTitles(stack, admin, libraryId)).not.toContain(oldTitle);
+    expect(await totalsOf(stack, libraryId)).toEqual(await rowsOf(stack, libraryId));
+    expect(await totalsOf(stack, libraryId)).toEqual({ titles: 0, episodes: 0, files: 0 });
 
     await setFoldersQuietly(stack, libraryId, [kept, dropped, moved]);
 
@@ -145,6 +154,10 @@ describe.skipIf(stack === undefined)("the movies purge", { timeout: 180_000 }, (
 
     expect(newTitles.size).toBe(1);
     expect(newTitle).not.toBe(oldTitle);
+    expect((await admin.signedIn.client.query(api.core.libraries.get, { libraryId })).items).toBe(
+      1,
+    );
+    expect(await totalsOf(stack, libraryId)).toEqual(await rowsOf(stack, libraryId));
 
     await purgeStage(stack, libraryId, "titles");
 

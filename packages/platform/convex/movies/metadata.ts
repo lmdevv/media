@@ -8,10 +8,10 @@ import { lease } from "../core/jobs/model";
 import type { Lease } from "../core/jobs/model";
 import type { JobCtx } from "../core/jobs/store";
 import { fail } from "../core/lib/errors";
-import { inOrder } from "../core/lib/inOrder";
 import { paginate } from "../core/lib/paginate";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
-import { checkTitle, rescannedTitle, rewriteTitle, upsertEpisode } from "./catalog";
+import { budgetFor, whileBudget, work } from "./budget";
+import { EPISODE_COST, rescannedTitle, rewriteCost, rewriteTitle, upsertEpisode } from "./catalog";
 import { CREDIT_LIMIT, creditsOf, replaceCredits } from "./credits";
 import { moveTotals, sumMoved } from "./totals";
 import {
@@ -27,6 +27,9 @@ import {
 
 /** The most episodes one metadata call writes, and one target lists. */
 const EPISODES_MAX = 500;
+
+/** A metadata call's own work: the lease check, the title, and the episode total. */
+const CALL_COST = work(12, 4);
 
 /** Episodes one target page lists; the worker follows `continueCursor` to the end. */
 const TARGET_PAGE = 1000;
@@ -99,8 +102,10 @@ export const metadataTarget = serverQuery({
 });
 
 /**
- * Writes fetched metadata during the title's metadata job, and up to 500 of a show's episodes. A
- * job carrying an admin's match marks the title manual, so later scans keep its metadata.
+ * Writes fetched metadata during the title's metadata job, and the leading episodes of up to 500
+ * of a show's as the call's budget admits, answering how many it wrote (`done`); the worker sends
+ * the rest again, and the title, already written, costs nothing more. A job carrying an admin's
+ * match marks the title manual, so later scans keep its metadata.
  */
 export const applyMetadata = serverMutation({
   args: {
@@ -109,7 +114,7 @@ export const applyMetadata = serverMutation({
     title: scannedTitle,
     episodes: v.array(scannedEpisode),
   },
-  returns: leaseAnswer(v.null()),
+  returns: leaseAnswer(v.object({ done: v.number() })),
   handler: (ctx, { lease: held, titleId, title, episodes }) =>
     withJobLease(ctx, ["movies.metadata"], held, async (job) => {
       if (job.payload.titleId !== titleId) fail("invalid_args", "This job is for another title");
@@ -118,10 +123,11 @@ export const applyMetadata = serverMutation({
         fail("invalid_args", `Send at most ${EPISODES_MAX} episodes per call`);
       }
 
-      checkTitle(title);
-
       const current = await titleOf(ctx.db, titleId);
       const fields = rescannedTitle(title, current);
+      const budget = budgetFor(CALL_COST);
+
+      budget.spend(rewriteCost(current, title));
 
       await rewriteTitle(ctx.db, current, {
         ...fields,
@@ -134,12 +140,20 @@ export const applyMetadata = serverMutation({
 
       const landed =
         current.kind === "show"
-          ? await inOrder(episodes, (episode) => upsertEpisode(ctx.db, titleId, episode))
+          ? await whileBudget(
+              budget,
+              episodes,
+              () => EPISODE_COST,
+              (episode) => upsertEpisode(ctx.db, titleId, episode),
+            )
           : [];
 
       await moveTotals(ctx.db, current.libraryId, sumMoved(landed.map((one) => one.moved)));
 
-      return { outcome: "held", value: null };
+      return {
+        outcome: "held",
+        value: { done: current.kind === "show" ? landed.length : episodes.length },
+      };
     }),
 });
 

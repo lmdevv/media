@@ -139,8 +139,8 @@ scanner callbacks `known`, `upsert`, and `missing`, the purge hook, a seed of tr
 through `withLibraryItems`, and `open` and `page`, which decide items through `requireItems` as a
 track list will. It takes music libraries only; movies keep their own rows (below).
 `packages/platform/test/core/libraries/scanner.ts` drives a scan as the server will: claim,
-`target`, a walk with `opendir` and `lstat` only, pages of `known`, batches (500 paths, or 80
-files for a movies `upsert`), finish. For a movies library it sends each file as a movie titled by
+`target`, a walk with `opendir` and `lstat` only, pages of `known`, batches of 500 (movies sends
+again what a call's budget left), finish. For a movies library it sends each file as a movie titled by
 its path.
 
 ### Movies (amended 2026-11-09)
@@ -150,37 +150,55 @@ The movies port replaced the movies half of the seam with movies' own rows in
 `mediaFiles`, `collections`, `collectionItems`).
 
 - The scanner callbacks are `movies/scanner:known`, `upsert`, and `missing`, server functions
-  under `withScanLease`. `upsert` takes up to 80 files, each with its title and episode, writes
-  them in order, and answers where each landed. `missing` marks up to 500 files missing and keeps
+  under `withScanLease`. `upsert` takes up to 500 files, each with its title and episode, writes
+  the leading ones its budget admits in order, and answers where each landed and how many it
+  wrote (`done`). `missing` marks the leading ones of up to 500 paths missing, answering how many it got
+  through, and keeps
   their rows, so a title, its episodes, and everyone's history stay until the file returns or its
   folder leaves; `known` lists missing files too, so the scanner writes a returning one again.
 - A movies library's item count is its title count: `upsert` reports the titles it inserted as
   `added`, and the purge the titles it deleted as `removed`. Its episode and file totals are two
   more counters, `movies.episodes:<id>` and `movies.files:<id>`, which every write of those rows
   moves in its own mutation (`movies/totals.ts`).
-- Every scanner call is bounded by its worst case, not its average (amended 2026-11-09, review of
-  #126). A title carries at most 20 genres, each a `titleGenres` row, and `upsert` and
-  `applyMetadata` refuse a title with more with `invalid_args` before they write anything; Convex
-  validators cannot bound an array's length. The genre rows are read with `take(20)`, never
-  collected. Credits are at most 100 a call, and episodes at most 500. The tighter of Convex's
-  limits for `upsert` is the 4,096 index ranges a call may read, since every `get`, query, patch,
-  and delete reads one. The worst file is a show rewritten with every genre replaced, whose
-  episode moves and whose thumbnails are queued again. On the dev stack 100 such files committed
-  and 110 failed, so `upsert` takes 80 and keeps a fifth in reserve; 80 files write at most 4,400
-  documents. The first cut took 500 and failed at 125 on that case. Old movies wrote 100 a call
-  with genres unbounded.
+- Every scanner, metadata, and purge mutation spends a per-call work budget (amended 2026-11-09,
+  round 2 of #126's review; `movies/budget.ts`). Each step, such as one file, one path, one
+  episode, one title's marking, or one child row, is charged its worst case before it runs. The
+  charge is index-range operations and writes, with every `get`, query, insert, patch, and delete
+  counted as one range, which bounds what Convex counts from above. A step that would pass 3,200
+  ranges or 12,000 writes does not start. That leaves headroom under Convex's 4,096 and 16,000
+  for the call's fixed work and for an estimate that runs short. The call commits what it did
+  and says how far it got: `upsert`, `missing`, and `applyMetadata` answer `done`, the leading
+  items they wrote, and the server sends the rest again. A purge page answers the same cursor
+  when it stopped partway, even inside one title's children, and goes on from there. The first
+  step of a call always runs, and no single step comes near the budget, so every call makes
+  progress. A file's worst case is priced from the file and the two titles it may touch, which
+  `upsertCost` reads first. Batches stay at 500 files or paths a call as arguments; the budget,
+  not the batch, bounds the work.
+  - The first cuts sized batches by a fixed per-file worst case: 500, then 80. Both failed on the
+    dev stack, at large genre lists and at purge pages of big shows, and a fixed batch had to
+    assume the worst file. The budget charges each file what it can cost.
+- Genres are kept as old movies kept them (D62): every distinct genre an NFO or a match names,
+  in order, with no refusal. The only bound is 256 distinct genres a title, far above any real
+  file, and a title with more keeps its first 256 and the batch goes on. It exists so one title's
+  worst case, every one of 256 rows replaced, fits one call. Genre rows are read with
+  `take(256)`, never collected. Credits stay at 100 a call and episodes at 500.
 - `metadataTarget` lists a show's episodes in pages of 1,000 with a cursor the worker follows, so
   a show of any length is listed whole.
-- The purge runs in two stages. `files` deletes 500 files a page that no current folder keeps
-  (every file once the library is gone) and cancels their thumbnail jobs. `titles` then pages the
-  library's titles 10 at a time, by when each was added, and deletes each one no file plays any
-  more, with its episodes, seasons, credits, genre rows, and collection memberships, 200 of each a
-  call, rereading the same page until a title's rows are gone. Once the library is gone and its
+- The purge runs in two stages. `files` reads 500 files a page and deletes those no current
+  folder keeps (every file once the library is gone), cancelling their thumbnail jobs, as many as
+  its budget admits. `titles` then pages the library's titles 10 at a time, by when each was
+  added, and deletes each one no file plays any more, with its episodes, seasons, credits, genre
+  rows, and collection memberships, as many rows as its budget admits, rereading the same page
+  until a title's rows are gone. Once the library is gone and its
   last title went, its episode and file totals go too. `PurgeScope.gone` tells a hook that the
   library's counts are already gone, so it moves none.
-- A title the purge has started deleting is out of every scan's and writer's reach. The mutation
-  that deletes its first rows marks it `purging` and moves its `matchKey` to `purging:<id>`, which
-  no scanned key can be, so a file that returns, at its old path or at a new folder, builds a new
+- A title the purge has started deleting is out of every scan's and writer's reach, and out of
+  every read, list, and total. Before deleting any of its rows, the purge marks it `purging` and
+  moves its `matchKey` to `purging:<id>`, which no scanned key can be. In that same mutation it
+  takes the title out of the core's title count and its episodes, summed from its seasons'
+  counts, out of the library's episode total; its files are already gone. The pages that delete
+  its rows later move no counter. Lists and lookups skip a purging title, so the counters always
+  equal the live rows. Because the title is marked, so a file that returns, at its old path or at a new folder, builds a new
   title instead of joining one that is half gone. Writers and the item loaders treat it as gone,
   and later pages delete it whether or not a file appeared. A scan and the purge write the same
   index entries, so Convex runs them one after the other: a scan that lands first keeps the title,

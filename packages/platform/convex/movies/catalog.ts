@@ -2,9 +2,10 @@ import { compareValues } from "convex/values";
 import type { Infer, Value } from "convex/values";
 
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { JobCtx } from "../core/jobs/store";
-import { fail } from "../core/lib/errors";
+import { addWork, work } from "./budget";
+import type { Work } from "./budget";
 import { nothingMoved } from "./totals";
 import type { Moved } from "./totals";
 import { forgetTrickplay, queueTrickplay } from "./trickplayState";
@@ -22,11 +23,12 @@ export const NO_EXTERNAL_IDS: ExternalIds = { tmdb: null, imdb: null, tvdb: null
 const TITLE_LIST_LIMIT = 20;
 
 /**
- * Most genres a title may carry, the same bound as its other lists. Each genre is a `titleGenres`
- * row, so this bounds the rows one title write reads and writes: a scan refuses a title with more
- * (`checkTitle`) before it writes anything.
+ * Most distinct genres a title keeps, far above any real file: old movies kept every NFO
+ * `<genre>`, and so does this, up to here (ADR 0024). It exists only so one title's worst case
+ * always fits one call's budget, since each genre is a `titleGenres` row; a title with more keeps
+ * its first 256 and the batch goes on.
  */
-export const GENRES_MAX = TITLE_LIST_LIMIT;
+const GENRES_HARD_MAX = 256;
 
 /** Most keywords a title keeps. */
 const TITLE_TAG_LIMIT = 40;
@@ -81,15 +83,33 @@ const sortKeyOf = (title: Named): string => {
 /** A genre as rows store it and filters compare it. */
 const genreKey = (genre: string): string => genre.trim().toLowerCase();
 
+/** A title's genres as it keeps them: the first `GENRES_HARD_MAX` distinct ones, in order. */
+const keptGenres = (genres: ReadonlyArray<string>): Array<string> => {
+  const seen = new Set<string>();
+
+  return genres.filter((genre) => {
+    const key = genreKey(genre);
+
+    if (key === "" || seen.has(key) || seen.size >= GENRES_HARD_MAX) return false;
+
+    seen.add(key);
+
+    return true;
+  });
+};
+
+/** How many genre rows a title keeps for `genres`. */
+const genreRows = (genres: ReadonlyArray<string>): number => keptGenres(genres).length;
+
 /** Makes the title's genre rows match its current genres and sort fields. */
 const syncTitleGenres = async (db: Db, title: Doc<"titles">): Promise<void> => {
-  // Every write of a title's genres goes through here and keeps at most GENRES_MAX rows.
+  // Every write of a title's genres goes through here and keeps at most GENRES_HARD_MAX rows.
   const rows = await db
     .query("titleGenres")
     .withIndex("by_title", (q) => q.eq("titleId", title._id))
-    .take(GENRES_MAX);
+    .take(GENRES_HARD_MAX);
 
-  const wanted = new Set(title.genres.map(genreKey).filter((genre) => genre !== ""));
+  const wanted = new Set(keptGenres(title.genres).map(genreKey));
 
   const fields = {
     libraryId: title.libraryId,
@@ -116,23 +136,6 @@ const syncTitleGenres = async (db: Db, title: Doc<"titles">): Promise<void> => {
       kept.has(genre) ? [] : [db.insert("titleGenres", { titleId: title._id, genre, ...fields })],
     ),
   );
-};
-
-/**
- * Refuses a scanned title whose genres would write more than `GENRES_MAX` rows, before any write,
- * so every scanner and metadata call stays inside one mutation's limits (ADR 0013).
- *
- * @throws ConvexError `invalid_args` for a title with more distinct genres than that.
- */
-export const checkTitle = (title: ScannedTitle): void => {
-  const genres = new Set(title.genres.map(genreKey).filter((genre) => genre !== ""));
-
-  if (genres.size > GENRES_MAX) {
-    fail(
-      "invalid_args",
-      `A title carries at most ${GENRES_MAX} genres; ${title.name} has ${genres.size}`,
-    );
-  }
 };
 
 /**
@@ -203,7 +206,7 @@ const titleMetadata = (scanned: ScannedTitle) => {
     year: scanned.year,
     overview: scanned.overview,
     tagline: scanned.tagline,
-    genres: scanned.genres,
+    genres: keptGenres(scanned.genres),
     certification: scanned.certification,
     ageRating: scanned.ageRating,
     runtimeMs: scanned.runtimeMs,
@@ -444,7 +447,7 @@ export const adjustPresent = async (
 
 /** A file of a library by path. */
 export const fileAt = (
-  db: MutationCtx["db"],
+  db: DatabaseReader,
   libraryId: Id<"libraries">,
   path: string,
 ): Promise<Doc<"mediaFiles"> | null> =>
@@ -452,6 +455,60 @@ export const fileAt = (
     .query("mediaFiles")
     .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId).eq("path", path))
     .unique();
+
+/**
+ * Every database operation, a `get`, query, insert, patch, or delete, is charged one index range
+ * and every insert, patch, or delete one write: an upper bound, since Convex counts at most that.
+ * Besides the genre rows, a file costs at most 40 operations and 20 writes: the file, the title it
+ * plays now, and the title its key names, read to price it (3); the same read again to write it
+ * (3); the title written (1); a season and an episode looked up, written, and the season's count
+ * moved (6); the file written (1); the present-file counts of an old and a new title and episode
+ * (8); and its thumbnail job read, canceled, queued again, and recorded (16, with 2 to spare).
+ * Each genre row the title has is deleted or patched, and each it gains inserted: one operation
+ * and one write each, plus the one query that lists them.
+ */
+const UPSERT_COST = work(40, 20);
+
+/** The worst case of `upsertScannedItem` for `item`, after reading what prices it (counted). */
+export const upsertCost = async (
+  db: DatabaseReader,
+  libraryId: Id<"libraries">,
+  item: Infer<typeof scannedItem>,
+): Promise<Work> => {
+  const existingFile = await fileAt(db, libraryId, item.file.path);
+  const previous = existingFile === null ? null : await db.get(existingFile.titleId);
+
+  const named = await db
+    .query("titles")
+    .withIndex("by_library_match", (q) =>
+      q.eq("libraryId", libraryId).eq("matchKey", item.title.matchKey),
+    )
+    .first();
+
+  const stored = Math.max(genreRows(previous?.genres ?? []), genreRows(named?.genres ?? []));
+  const rows = 1 + stored + genreRows(item.title.genres);
+
+  return addWork(UPSERT_COST, work(rows, rows));
+};
+
+/**
+ * The worst case of `markFileMissing`: the file looked up, its thumbnail job read and canceled,
+ * its state cleared, the file marked, and its title's and episode's present counts moved.
+ */
+export const MISSING_COST = work(16, 8);
+
+/** The worst case of rewriting `current` from `scanned`: its row, and each genre row. */
+export const rewriteCost = (current: Doc<"titles">, scanned: ScannedTitle): Work => {
+  const rows = 2 + genreRows(current.genres) + genreRows(scanned.genres);
+
+  return work(rows, rows);
+};
+
+/**
+ * The worst case of `upsertEpisode`: a season and an episode looked up and written, and the
+ * season read again and its count moved.
+ */
+export const EPISODE_COST = work(8, 4);
 
 /**
  * Inserts or updates one scanned file with its title and episode, and queues scrub thumbnails

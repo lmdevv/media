@@ -59,6 +59,7 @@ export const Landed = answer(
         episodeId: Schema.NullOr(EpisodeId),
       }),
     ),
+    done: Schema.Finite,
   }),
 );
 
@@ -78,7 +79,7 @@ const Known = answer(
   }),
 );
 
-const Marked = answer(Schema.Struct({ marked: Schema.Finite }));
+const Marked = answer(Schema.Struct({ marked: Schema.Finite, done: Schema.Finite }));
 
 export const Totals = Schema.Struct({
   titles: Schema.Finite,
@@ -245,26 +246,55 @@ export const finishJob = (stack: CoreStack, lease: Lease) =>
     ),
   );
 
-/** The most files one `movies/scanner:upsert` takes. */
-export const UPSERT_BATCH = 80;
+/** The most files or paths one scanner call takes as arguments. */
+const SCANNER_BATCH = 500;
 
-/** Writes `items` under the scan lease in batches of `UPSERT_BATCH`, one after another. */
+const chunks = <Item>(items: ReadonlyArray<Item>): ReadonlyArray<ReadonlyArray<Item>> =>
+  Array.from({ length: Math.ceil(items.length / SCANNER_BATCH) }, (_, n) =>
+    items.slice(n * SCANNER_BATCH, (n + 1) * SCANNER_BATCH),
+  );
+
+/**
+ * Sends `items` as the server does: up to 500 a call, and what a call's budget left unwritten
+ * again, until every item is written. Answers how many items each call wrote.
+ */
 export const upsertAll = async (
   stack: CoreStack,
   lease: Lease,
   items: ReadonlyArray<ScannedItem>,
-): Promise<void> => {
-  const batches = Array.from({ length: Math.ceil(items.length / UPSERT_BATCH) }, (_, n) =>
-    items.slice(n * UPSERT_BATCH, (n + 1) * UPSERT_BATCH),
-  );
+  written: ReadonlyArray<number> = [],
+): Promise<ReadonlyArray<number>> => {
+  const [batch] = chunks(items);
 
-  await batches.reduce<Promise<void>>(async (previous, batch) => {
-    await previous;
+  if (batch === undefined) return written;
 
-    const landed = await upsert(stack, lease, batch);
+  const landed = await upsert(stack, lease, batch);
 
-    if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
-  }, Promise.resolve());
+  if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
+
+  if (landed.value.done < 1) throw new Error("an upsert wrote nothing");
+
+  return upsertAll(stack, lease, items.slice(landed.value.done), [...written, landed.value.done]);
+};
+
+/** `upsertAll` for paths a scan did not find. Answers how many paths each call got through. */
+export const markMissingAll = async (
+  stack: CoreStack,
+  lease: Lease,
+  paths: ReadonlyArray<string>,
+  done: ReadonlyArray<number> = [],
+): Promise<ReadonlyArray<number>> => {
+  const [batch] = chunks(paths);
+
+  if (batch === undefined) return done;
+
+  const marked = await markMissing(stack, lease, batch);
+
+  if (marked.outcome !== "held") throw new Error(`missing answered ${marked.outcome}`);
+
+  if (marked.value.done < 1) throw new Error("a missing call got through nothing");
+
+  return markMissingAll(stack, lease, paths.slice(marked.value.done), [...done, marked.value.done]);
 };
 
 const TitleState = Schema.NullOr(
@@ -302,7 +332,14 @@ export const purgePage = (
   libraryId: Id<"libraries">,
   stage: "files" | "titles",
   cursor: string | null,
-) => runFunction(stack, internal.movies.probe.purgePage, { libraryId, stage, cursor }, PurgeNext);
+  ranges?: number,
+) =>
+  runFunction(
+    stack,
+    internal.movies.probe.purgePage,
+    ranges === undefined ? { libraryId, stage, cursor } : { libraryId, stage, cursor, ranges },
+    PurgeNext,
+  );
 
 /** Runs a purge stage page by page to its end. */
 export const purgeStage = async (

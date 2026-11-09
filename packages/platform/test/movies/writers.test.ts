@@ -19,6 +19,8 @@ const stack = coreStackFromEnvFile();
 
 const Done = answer(Schema.Null);
 
+const Applied = answer(Schema.Struct({ done: Schema.Finite }));
+
 const Credits = answer(
   Schema.Struct({
     written: Schema.Boolean,
@@ -128,9 +130,9 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
           title: { ...scannedTitle("movie", "tmdb:45745", "Sintel", 13), year: 2010 },
           episodes: [],
         },
-        Done,
+        Applied,
       ),
-    ).toEqual({ outcome: "held", value: null });
+    ).toEqual({ outcome: "held", value: { done: 0 } });
     expect(
       await runServer(stack, api.movies.metadata.metadataTarget, { titleId, cursor: null }, Target),
     ).toEqual({ name: "Sintel", year: 2010 });
@@ -198,7 +200,7 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
         stack,
         api.movies.metadata.applyMetadata,
         { lease: personLease, titleId, title: scannedTitle("movie", "x", "x"), episodes: [] },
-        Done,
+        Applied,
       ),
     ).rejects.toThrow(/movies\.person/u);
     await finishJob(stack, personLease);

@@ -18,6 +18,7 @@ import { contentActions } from "../core/permissions/policy";
 import { withLibraryItems } from "../core/scans";
 import { NO_EXTERNAL_IDS } from "./catalog";
 import { titleFacts } from "./items";
+import { CALL_BUDGET, work } from "./budget";
 import { filesPage, titlesPage } from "./purge";
 import { moveTotals, nothingMoved, totalsOf } from "./totals";
 import { trickplayState } from "./validators";
@@ -199,7 +200,11 @@ export const open = internalQuery({
   returns: opened,
   handler: async (ctx, { sessionId, scope, action, titleId }) => {
     const caller = await callerOfSession(ctx.db, sessionId, scope);
-    const title = (await ctx.db.get(titleId)) ?? fail("not_found", "No such title");
+    const found = await ctx.db.get(titleId);
+
+    const title =
+      found === null || found.purging === true ? fail("not_found", "No such title") : found;
+
     const gate = await requireItems(ctx, caller, action, title.libraryId);
 
     if (!gate.admits(titleFacts(title))) fail("not_found", "No such title");
@@ -234,7 +239,7 @@ export const page = internalQuery({
     return {
       ...found,
       page: found.page
-        .filter((title) => gate.admits(titleFacts(title)))
+        .filter((title) => title.purging !== true && gate.admits(titleFacts(title)))
         .map((title) => ({ titleId: title._id, name: title.name, level: gate.level })),
     };
   },
@@ -252,8 +257,9 @@ export const totals = internalQuery({
 const ROWS_PAGE = 100;
 
 /**
- * One page of a library's rows counted the slow way, from `cursor` over its titles: the titles,
- * their episodes, and the library's files under those titles, for a test to compare with `totals`.
+ * One page of a library's live rows counted the slow way, from `cursor` over its titles: the
+ * titles the purge is not deleting, their episodes, and the library's files under them, for a
+ * test to compare with `totals`.
  */
 export const rows = internalQuery({
   args: { libraryId: v.id("libraries"), cursor: v.union(v.string(), v.null()) },
@@ -269,8 +275,10 @@ export const rows = internalQuery({
       { numItems: ROWS_PAGE, cursor },
     );
 
+    const live = found.page.filter((title) => title.purging !== true);
+
     const perTitle = await Promise.all(
-      found.page.map(async (title) => {
+      live.map(async (title) => {
         const [episodes, files] = await Promise.all([
           ctx.db
             .query("episodes")
@@ -288,7 +296,7 @@ export const rows = internalQuery({
 
     return {
       counted: {
-        titles: found.page.length,
+        titles: live.length,
         episodes: perTitle.reduce((sum, one) => sum + one.episodes, 0),
         files: perTitle.reduce((sum, one) => sum + one.files, 0),
       },
@@ -416,14 +424,16 @@ export const purgePage = internalMutation({
     libraryId: v.id("libraries"),
     stage: v.union(v.literal("files"), v.literal("titles")),
     cursor: v.union(v.string(), v.null()),
+    /** A smaller budget of index ranges than a call's, so a test can stop a page partway. */
+    ranges: v.optional(v.number()),
   },
   returns: v.object({ cursor: v.union(v.string(), v.null()), more: v.boolean() }),
-  handler: async (ctx, { libraryId, stage, cursor }) => {
-    if (stage === "titles") return titlesPage(ctx, libraryId, cursor);
+  handler: async (ctx, { libraryId, stage, cursor, ranges }) => {
+    const limit = ranges === undefined ? CALL_BUDGET : work(ranges, CALL_BUDGET.writes);
 
-    const next = await filesPage(ctx, libraryId, cursor);
-
-    return { cursor: next, more: next !== null };
+    return stage === "titles"
+      ? titlesPage(ctx, libraryId, cursor, limit)
+      : filesPage(ctx, libraryId, cursor, limit);
   },
 });
 

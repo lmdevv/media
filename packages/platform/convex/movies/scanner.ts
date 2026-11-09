@@ -2,36 +2,28 @@ import { v } from "convex/values";
 
 import { leaseAnswer } from "../core/jobs/held";
 import { lease } from "../core/jobs/model";
-import { inOrder } from "../core/lib/inOrder";
 import { paginate } from "../core/lib/paginate";
 import { serverMutation } from "../core/lib/serverFacing";
 import { withScanLease } from "../core/scans";
-import { checkTitle, markFileMissing, upsertScannedItem } from "./catalog";
+import { budgetFor, whileBudget, work } from "./budget";
+import { MISSING_COST, markFileMissing, upsertCost, upsertScannedItem } from "./catalog";
 import { moveTotals, sumMoved } from "./totals";
 import { knownFile, scannedItem, upsertedFile } from "./validators";
 
 /**
- * The most files one `upsert` takes, sized from the worst case, not the average (ADR 0013).
- *
- * - Writes: one file writes at most 55 documents. That is a title rewritten with all 20 of its
- *   genre rows replaced (1 + 2 × 20), a season, an episode, and the season's count (3), the file
- *   (1), the present-file counts of its old and new title and episode (4), and a scrub-thumbnail
- *   job canceled and queued with the file's state (6). So 80 files write at most 4,400 of 16,000.
- * - Index ranges read, the tighter bound: every `get`, query, patch, and delete reads one, and
- *   Convex fails a call past 4,096. The worst file is one whose show is rewritten with every
- *   genre replaced, whose episode moves, and whose thumbnails are queued again. On the dev stack
- *   100 such files committed and 110 failed with "Too many reads", so 80 keeps a fifth in
- *   reserve. Old movies wrote 100 a call, with genres unbounded.
+ * The most files or paths one call takes as arguments. How many of them it writes is the call's
+ * work budget's to decide (`budget.ts`): it writes the leading ones whose worst case fits and
+ * answers how many, and the server sends the rest again (ADR 0024).
  */
-const UPSERT_MAX = 80;
+const BATCH_MAX = 500;
 
-/** The most paths one `missing` takes: each writes at most 7 documents (ADR 0024). */
-const PATHS_MAX = 500;
+/** A scanner call's own work: the lease check, the library, its folders, and the counters. */
+const CALL_COST = work(20, 8);
 
 const KNOWN_PAGE = 1000;
 
-const checkBatch = (count: number, most: number): void => {
-  if (count > most) throw new Error(`A batch holds at most ${most} files; got ${count}`);
+const checkBatch = (count: number): void => {
+  if (count > BATCH_MAX) throw new Error(`A batch holds at most ${BATCH_MAX} files; got ${count}`);
 };
 
 /**
@@ -77,27 +69,33 @@ export const known = serverMutation({
 });
 
 /**
- * Writes up to 80 files a scan found with their titles and episodes, in order, and queues scrub
+ * Writes the leading files of up to 500 a scan found with their titles and episodes, in order, and queues scrub
  * thumbnails for new or changed files. A path sent twice in one batch is written twice, the last
  * one winning. Answers where each file landed, so the scanner can write credits for new titles.
  */
 export const upsert = serverMutation({
   args: { lease, items: v.array(scannedItem) },
-  returns: leaseAnswer(v.object({ files: v.array(upsertedFile) })),
+  returns: leaseAnswer(v.object({ files: v.array(upsertedFile), done: v.number() })),
   handler: (ctx, { lease: held, items }) =>
     withScanLease(ctx, "movies", held, async (scan) => {
-      checkBatch(items.length, UPSERT_MAX);
+      checkBatch(items.length);
       scan.admit(items.map((item) => item.file.path));
-      items.forEach((item) => checkTitle(item.title));
 
-      const landed = await inOrder(items, (item) => upsertScannedItem(ctx, scan.library._id, item));
+      const libraryId = scan.library._id;
+
+      const landed = await whileBudget(
+        budgetFor(CALL_COST),
+        items,
+        (item) => upsertCost(ctx.db, libraryId, item),
+        (item) => upsertScannedItem(ctx, libraryId, item),
+      );
 
       const moved = sumMoved(landed.map((one) => one.moved));
 
-      await moveTotals(ctx.db, scan.library._id, moved);
+      await moveTotals(ctx.db, libraryId, moved);
 
       return {
-        value: { files: landed.map((one) => one.row) },
+        value: { files: landed.map((one) => one.row), done: landed.length },
         added: moved.titles,
         removed: 0,
       };
@@ -105,22 +103,26 @@ export const upsert = serverMutation({
 });
 
 /**
- * Marks up to 500 of the library's files missing by path; their titles, episodes, and history
- * stay. Answers how many were newly marked, so repeating a path is harmless.
+ * Marks the leading paths of up to 500 missing, as many as the call's budget admits, and answers
+ * how many it got through (`done`) and how many were newly marked. Their titles, episodes, and
+ * history stay. Repeating a path is harmless.
  */
 export const missing = serverMutation({
   args: { lease, paths: v.array(v.string()) },
-  returns: leaseAnswer(v.object({ marked: v.number() })),
+  returns: leaseAnswer(v.object({ marked: v.number(), done: v.number() })),
   handler: (ctx, { lease: held, paths }) =>
     withScanLease(ctx, "movies", held, async (scan) => {
-      checkBatch(paths.length, PATHS_MAX);
+      checkBatch(paths.length);
 
-      const marked = await inOrder([...new Set(scan.admit(paths))], (path) =>
-        markFileMissing(ctx, scan.library._id, path),
+      const marked = await whileBudget(
+        budgetFor(CALL_COST),
+        scan.admit(paths),
+        () => MISSING_COST,
+        (path) => markFileMissing(ctx, scan.library._id, path),
       );
 
       return {
-        value: { marked: marked.filter(Boolean).length },
+        value: { marked: marked.filter(Boolean).length, done: marked.length },
         added: 0,
         removed: 0,
       };

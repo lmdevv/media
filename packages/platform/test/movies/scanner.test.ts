@@ -17,6 +17,7 @@ import {
   markMissing,
   moviesLibrary,
   rowsOf,
+  titleStateOf,
   totalsOf,
   upsert,
 } from "./catalog";
@@ -63,11 +64,11 @@ describe.skipIf(stack === undefined)("movies scanner callbacks", { timeout: 180_
 
     expect(await markMissing(stack, lease, [gone, gone])).toEqual({
       outcome: "held",
-      value: { marked: 1 },
+      value: { marked: 1, done: 2 },
     });
     expect(await markMissing(stack, lease, [gone])).toEqual({
       outcome: "held",
-      value: { marked: 0 },
+      value: { marked: 0, done: 1 },
     });
 
     const known = await knownFiles(stack, lease);
@@ -82,7 +83,7 @@ describe.skipIf(stack === undefined)("movies scanner callbacks", { timeout: 180_
     await finishJob(stack, lease);
   });
 
-  it("refuse an upsert over 80 files, a missing batch over 500 paths, and a path outside the folders", async () => {
+  it("refuse a batch over 500 files or paths, and a path outside the folders", async () => {
     if (stack === undefined) return;
     const admin = await member(stack, "scanner-bounds", "admin");
     const { libraryId, scanJobId, roots } = await moviesLibrary(admin, "Bounded");
@@ -91,7 +92,7 @@ describe.skipIf(stack === undefined)("movies scanner callbacks", { timeout: 180_
 
     const many = Array.from({ length: 501 }, (_, n) => movieFile(join(root, `${n}.mkv`)));
 
-    await expect(upsert(stack, lease, many.slice(0, 81))).rejects.toThrow(/at most 80/u);
+    await expect(upsert(stack, lease, many)).rejects.toThrow(/at most 500/u);
     await expect(upsert(stack, lease, [movieFile("/elsewhere/a.mkv")])).rejects.toThrow(
       /not a path inside/u,
     );
@@ -148,5 +149,37 @@ describe.skipIf(stack === undefined)("movies scanner callbacks", { timeout: 180_
       ),
     ).toEqual({ outcome: "lost" });
     expect(await totalsOf(stack, second.libraryId)).toEqual({ titles: 0, episodes: 0, files: 0 });
+  });
+
+  it("keep every genre an NFO names, and write a batch whatever one file's genre count", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "scanner-genres", "admin");
+    const { scanJobId, roots } = await moviesLibrary(admin, "Genres");
+    const root = roots[0] ?? "";
+    const lease = await claimJob(stack, "movies.scan", scanJobId);
+
+    const titled = (name: string, count: number) =>
+      movieFile(join(root, `${name}.mkv`), 1, 1, {
+        ...scannedTitle("movie", `nfo:${name}`, name),
+        genres: Array.from({ length: count }, (_, n) => `Genre ${n}`),
+      });
+
+    const landed = await upsert(stack, lease, [
+      titled("Plain", 2),
+      titled("Twenty-one", 21),
+      titled("Hundred", 100),
+      titled("Too many", 300),
+    ]);
+
+    await finishJob(stack, lease);
+
+    if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
+
+    expect(landed.value.done).toBe(4);
+    expect(
+      await Promise.all(
+        landed.value.files.map(async (file) => (await titleStateOf(stack, file.titleId))?.genres),
+      ),
+    ).toEqual([2, 21, 100, 256]);
   });
 });

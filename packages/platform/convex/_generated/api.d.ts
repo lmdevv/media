@@ -90,6 +90,7 @@ import type * as core_together_queue from "../core/together/queue.js";
 import type * as core_together_sessions from "../core/together/sessions.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
+import type * as movies_budget from "../movies/budget.js";
 import type * as movies_catalog from "../movies/catalog.js";
 import type * as movies_credits from "../movies/credits.js";
 import type * as movies_items from "../movies/items.js";
@@ -192,6 +193,7 @@ declare const fullApi: ApiFromModules<{
   "core/together/sessions": typeof core_together_sessions;
   crons: typeof crons;
   http: typeof http;
+  "movies/budget": typeof movies_budget;
   "movies/catalog": typeof movies_catalog;
   "movies/credits": typeof movies_credits;
   "movies/items": typeof movies_items;
