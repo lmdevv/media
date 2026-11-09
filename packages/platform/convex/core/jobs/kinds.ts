@@ -181,6 +181,8 @@ export const KINDS = [
       match: v.union(v.object({ provider: v.literal("tmdb"), providerId: v.string() }), v.null()),
       /** The title's `updatedAt` when the job was asked for: the target it looks up. */
       revision: v.number(),
+      /** The title's `matchGeneration` when the job was asked for; a later one drops its result. */
+      generation: v.number(),
     },
     pool: "movies",
     item: null,
@@ -191,7 +193,7 @@ export const KINDS = [
      * match never folds into one, and a title that changed since gets a job of its own.
      */
     dedupe: (payload) =>
-      `${payload.titleId}:${payload.revision}:${payload.match === null ? "refresh" : `${payload.match.provider}:${payload.match.providerId}`}`,
+      `${payload.titleId}:${payload.revision}:${payload.generation}:${payload.match === null ? "refresh" : `${payload.match.provider}:${payload.match.providerId}`}`,
   }),
   defineKind("movies.person", {
     payload: {

@@ -20,13 +20,14 @@ describe("movies job kinds", () => {
 
   it("collapse a second job only for the same title and match, person, or file as it is now", () => {
     const payloads = [
-      { kind: "movies.metadata", titleId: "t", match: null, revision: 1 },
-      { kind: "movies.metadata", titleId: "t", match: null, revision: 2 },
+      { kind: "movies.metadata", titleId: "t", match: null, revision: 1, generation: 0 },
+      { kind: "movies.metadata", titleId: "t", match: null, revision: 2, generation: 0 },
       {
         kind: "movies.metadata",
         titleId: "t",
         match: { provider: "tmdb", providerId: "603" },
         revision: 1,
+        generation: 0,
       },
       { kind: "movies.person", personId: "p", revision: 1 },
       { kind: "movies.person", personId: "p", revision: 2 },
@@ -36,9 +37,9 @@ describe("movies job kinds", () => {
     ] as const;
 
     expect(payloads.map((payload) => kindDef(payload.kind).dedupeKey(payload))).toEqual([
-      "movies.metadata:t:1:refresh",
-      "movies.metadata:t:2:refresh",
-      "movies.metadata:t:1:tmdb:603",
+      "movies.metadata:t:1:0:refresh",
+      "movies.metadata:t:2:0:refresh",
+      "movies.metadata:t:1:0:tmdb:603",
       "movies.person:p:1",
       "movies.person:p:2",
       "movies.trickplay:f:10:1",

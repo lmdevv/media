@@ -55,6 +55,12 @@ export const moviesTables = {
      * purge takes the title's episodes out of the library's total with this one number.
      */
     episodeCount: v.number(),
+    /**
+     * Moves each time an admin's match is applied. A metadata job carries the generation it was
+     * asked for, and its result is dropped once the generation moved on, so a refresh that read
+     * the title before a manual match can never overwrite it (ADR 0012).
+     */
+    matchGeneration: v.number(),
     addedAt: v.number(),
     updatedAt: v.number(),
     searchText: v.string(),

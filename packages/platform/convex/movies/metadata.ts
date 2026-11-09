@@ -102,10 +102,18 @@ export const metadataTarget = serverQuery({
 });
 
 /**
+ * Whether a metadata job's result still describes the title: no admin's match was applied since
+ * the job was asked for. A result from an older generation is dropped whole (ADR 0012).
+ */
+const current = (asked: { readonly generation: number }, title: Doc<"titles">): boolean =>
+  asked.generation === title.matchGeneration;
+
+/**
  * Writes fetched metadata during the title's metadata job, and the leading episodes of up to 500
  * of a show's as the call's budget admits, answering how many it wrote (`done`); the worker sends
  * the rest again, and the title, already written, costs nothing more. A job carrying an admin's
- * match marks the title manual, so later scans keep its metadata.
+ * match marks the title manual and moves its match generation, so later scans keep its metadata
+ * and a refresh asked for before it writes nothing (`applied` false).
  */
 export const applyMetadata = serverMutation({
   args: {
@@ -114,7 +122,7 @@ export const applyMetadata = serverMutation({
     title: scannedTitle,
     episodes: v.array(scannedEpisode),
   },
-  returns: leaseAnswer(v.object({ done: v.number() })),
+  returns: leaseAnswer(v.object({ done: v.number(), applied: v.boolean() })),
   handler: (ctx, { lease: held, titleId, title, episodes }) =>
     withJobLease(ctx, ["movies.metadata"], held, async (job) => {
       if (job.payload.titleId !== titleId) fail("invalid_args", "This job is for another title");
@@ -123,23 +131,27 @@ export const applyMetadata = serverMutation({
         fail("invalid_args", `Send at most ${EPISODES_MAX} episodes per call`);
       }
 
-      const current = await titleOf(ctx.db, titleId);
-      const fields = rescannedTitle(title, current);
+      const stored = await titleOf(ctx.db, titleId);
+
+      if (!current(job.payload, stored)) {
+        return { outcome: "held", value: { done: episodes.length, applied: false } };
+      }
+
+      const fields = rescannedTitle(title, stored);
+      const manual = job.payload.match !== null;
       const budget = budgetFor(CALL_COST);
 
-      budget.spend(rewriteCost(current, title));
+      budget.spend(rewriteCost(stored, title));
 
-      await rewriteTitle(ctx.db, current, {
+      await rewriteTitle(ctx.db, stored, {
         ...fields,
-        kind: current.kind,
-        matchStatus:
-          job.payload.match !== null || current.matchStatus === "manual"
-            ? "manual"
-            : fields.matchStatus,
+        kind: stored.kind,
+        matchStatus: manual || stored.matchStatus === "manual" ? "manual" : fields.matchStatus,
+        matchGeneration: manual ? stored.matchGeneration + 1 : stored.matchGeneration,
       });
 
       const landed =
-        current.kind === "show"
+        stored.kind === "show"
           ? await whileBudget(
               budget,
               episodes,
@@ -148,11 +160,11 @@ export const applyMetadata = serverMutation({
             )
           : [];
 
-      await moveTotals(ctx.db, current.libraryId, sumMoved(landed.map((one) => one.moved)));
+      await moveTotals(ctx.db, stored.libraryId, sumMoved(landed.map((one) => one.moved)));
 
       return {
         outcome: "held",
-        value: { done: current.kind === "show" ? landed.length : episodes.length },
+        value: { done: stored.kind === "show" ? landed.length : episodes.length, applied: true },
       };
     }),
 });
@@ -161,15 +173,16 @@ type MetadataLease = HeldJob<"movies.metadata" | "movies.scan">;
 
 /**
  * Whether the held job may write the title's credits or collection: a metadata job for exactly
- * this title, or a scan of its library while no admin matched it by hand.
+ * this title whose match generation is still the title's, or a scan of its library while no admin
+ * matched it by hand.
  *
  * @throws ConvexError `invalid_args` for a job of another title or library.
  */
 const mayWrite = (job: MetadataLease, title: Doc<"titles">): boolean => {
   if (job.payload.kind === "movies.metadata") {
-    return (
-      job.payload.titleId === title._id || fail("invalid_args", "This job is for another title")
-    );
+    if (job.payload.titleId !== title._id) fail("invalid_args", "This job is for another title");
+
+    return current(job.payload, title);
   }
 
   if (job.payload.libraryId !== title.libraryId) {

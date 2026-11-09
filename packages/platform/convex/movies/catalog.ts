@@ -325,6 +325,7 @@ const upsertTitle = async (
     matchStatus: scanned.matchStatus,
     presentFileCount: 0,
     episodeCount: 0,
+    matchGeneration: 0,
     addedAt: now,
     updatedAt: now,
     searchText: searchTextOf(metadata),

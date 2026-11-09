@@ -20,7 +20,7 @@ const stack = coreStackFromEnvFile();
 
 const Done = answer(Schema.Null);
 
-const Applied = answer(Schema.Struct({ done: Schema.Finite }));
+const Applied = answer(Schema.Struct({ done: Schema.Finite, applied: Schema.Boolean }));
 
 const Credits = answer(
   Schema.Struct({
@@ -64,6 +64,7 @@ const enqueueArgs = (
         titleId: Id<"titles">;
         match: { provider: "tmdb"; providerId: string } | null;
         revision: number;
+        generation: number;
       }
     | { kind: "movies.person"; personId: Id<"people">; revision: number },
 ) => payload;
@@ -114,7 +115,7 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
 
     const jobId = await enqueue(
       stack,
-      enqueueArgs({ kind: "movies.metadata", titleId, match: null, revision: 1 }),
+      enqueueArgs({ kind: "movies.metadata", titleId, match: null, revision: 1, generation: 0 }),
     );
 
     const lease = await claimJob(stack, "movies.metadata", jobId);
@@ -145,7 +146,7 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
         },
         Applied,
       ),
-    ).toEqual({ outcome: "held", value: { done: 0 } });
+    ).toEqual({ outcome: "held", value: { done: 0, applied: true } });
     expect(
       await runServer(stack, api.movies.metadata.metadataTarget, { titleId, cursor: null }, Target),
     ).toEqual({ name: "Sintel", year: 2010 });
@@ -423,5 +424,108 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
         Versions,
       ),
     ).toEqual([{ fileId, version: "v2" }]);
+  });
+
+  it("drop a refresh asked for before an admin's match, so it never overwrites that match", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "match-race", "admin");
+    const { scanJobId, roots } = await moviesLibrary(admin, "Matched");
+    const scan = await claimJob(stack, "movies.scan", scanJobId);
+
+    const landed = await upsert(stack, scan, [
+      movieFile(join(roots[0] ?? "", "Sintel.mkv"), 1, 1, scannedTitle("movie", "nfo:1", "Sintle")),
+    ]);
+
+    await finishJob(stack, scan);
+
+    if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
+
+    const titleId = landed.value.files[0]?.titleId;
+
+    if (titleId === undefined) throw new Error("no title landed");
+
+    const nameOf = async () =>
+      (
+        await runServer(
+          stack,
+          api.movies.metadata.metadataTarget,
+          { titleId, cursor: null },
+          Target,
+        )
+      ).name;
+
+    const apply = (lease: Lease, name: string) =>
+      runServer(
+        stack,
+        api.movies.metadata.applyMetadata,
+        { lease, titleId, title: scannedTitle("movie", "nfo:1", name), episodes: [] },
+        Applied,
+      );
+
+    // A refresh is asked for and reads the title...
+    const refreshJob = await enqueue(
+      stack,
+      enqueueArgs({ kind: "movies.metadata", titleId, match: null, revision: 1, generation: 0 }),
+    );
+
+    const refresh = await claimJob(stack, "movies.metadata", refreshJob);
+
+    expect(await nameOf()).toBe("Sintle");
+
+    // ...then an admin's match is applied...
+    const matchJob = await enqueue(
+      stack,
+      enqueueArgs({
+        kind: "movies.metadata",
+        titleId,
+        match: { provider: "tmdb", providerId: "45745" },
+        revision: 1,
+        generation: 0,
+      }),
+    );
+
+    const match = await claimJob(stack, "movies.metadata", matchJob);
+
+    expect(await apply(match, "Sintel")).toEqual({
+      outcome: "held",
+      value: { done: 0, applied: true },
+    });
+    await finishJob(stack, match);
+
+    // ...and the refresh's older result writes nothing, credits included.
+    expect(await apply(refresh, "Wrong film")).toEqual({
+      outcome: "held",
+      value: { done: 0, applied: false },
+    });
+    expect(
+      await runServer(
+        stack,
+        api.movies.metadata.applyCredits,
+        {
+          lease: refresh,
+          titleId,
+          episodeId: null,
+          credits: [credit("Wrong person", "9", 0)],
+          hash: "stale",
+        },
+        Credits,
+      ),
+    ).toEqual({ outcome: "held", value: { written: false, people: [] } });
+    await finishJob(stack, refresh);
+
+    expect(await nameOf()).toBe("Sintel");
+
+    // A refresh asked for after the match still refreshes it, and keeps it manual.
+    const laterJob = await enqueue(
+      stack,
+      enqueueArgs({ kind: "movies.metadata", titleId, match: null, revision: 2, generation: 1 }),
+    );
+
+    const later = await claimJob(stack, "movies.metadata", laterJob);
+
+    expect(await apply(later, "Sintel (2010)")).toMatchObject({ value: { applied: true } });
+    await finishJob(stack, later);
+
+    expect(await nameOf()).toBe("Sintel (2010)");
   });
 });
