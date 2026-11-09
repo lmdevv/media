@@ -3,9 +3,10 @@
  * the bidirectional controls that reorder what others see. Zero-width joiners stay: emoji
  * sequences and several scripts need them.
  */
-const UNPRINTABLE = /[\p{Cc}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}؜‎‏‪-‮⁦-⁩]/u;
+const UNPRINTABLE =
+  /[\p{Cc}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
-const VISIBLE = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{M}⠀]/u;
+const VISIBLE = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{M}\u2800]/u;
 
 /**
  * A name other people see, such as a guest's or a Cast receiver's: `typed` in NFKC form and

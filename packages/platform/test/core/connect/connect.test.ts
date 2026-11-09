@@ -424,6 +424,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     expect(await shown("Den \u202Evt\u202C")).toEqual({ kind: "cast", receiver: null });
     expect(await shown("Den\u0007")).toEqual({ kind: "cast", receiver: null });
     expect(await shown("\u200B\u200B")).toEqual({ kind: "cast", receiver: null });
+    expect(await shown(`${"\u0301".repeat(64)}TV`)).toEqual({ kind: "cast", receiver: null });
     expect(await shown("\uFF2C\uFF49\uFF56\uFF49\uFF4E\uFF47 Room")).toEqual({
       kind: "cast",
       receiver: "Living Room",

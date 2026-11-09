@@ -31,7 +31,7 @@ const receiverName = (name: string | null): string | null => {
 
   return printable === null
     ? null
-    : Array.from(printable).slice(0, RECEIVER_MAX).join("").trimEnd();
+    : printableName(Array.from(printable).slice(0, RECEIVER_MAX).join(""));
 };
 
 const parseOutput = (output: Output): Output =>
