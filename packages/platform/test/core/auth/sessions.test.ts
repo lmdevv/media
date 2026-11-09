@@ -14,6 +14,9 @@ const stack = coreStackFromEnvFile();
 /** More refresh tokens than a session gathers in its 30 days at one per 10-minute JWT. */
 const PILED_UP = 5000;
 
+/** Used tokens enough to put the active one past the store's 1,500-deep search for it. */
+const DEEPER_THAN_SEARCH = 1600;
+
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and these
 // are the `_id`s the stack's authRefreshTokens rows hold; the backend's `v.id(...)` validators check
 // each again whenever a test sends it back.
@@ -67,7 +70,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Adds one refresh token to `sessionId` and answers its id. */
 const addToken = (
   sessionId: Id<"authSessions">,
-  fields: { readonly expirationTime: number; readonly firstUsedTime?: number },
+  fields: {
+    readonly expirationTime: number;
+    readonly firstUsedTime?: number;
+    readonly parentRefreshTokenId?: Id<"authRefreshTokens">;
+  },
 ): Id<"authRefreshTokens"> => {
   const before = new Set(tokenRowsOf(sessionId, 10).map((row) => row._id));
 
@@ -431,9 +438,7 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     const lostChildOf = addToken(lateSession, { expirationTime, firstUsedTime: longAgo });
     const childless = addToken(lateSession, { expirationTime, firstUsedTime: longAgo });
 
-    importRows("authRefreshTokens", [
-      { sessionId: lateSession, expirationTime, parentRefreshTokenId: lostChildOf },
-    ]);
+    const lostChild = addToken(lateSession, { expirationTime, parentRefreshTokenId: lostChildOf });
 
     const usedAbove = (sessionId: Id<"authSessions">) =>
       pileUp(
@@ -448,7 +453,8 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     await usedAbove(windowSession);
 
     expect(await refreshWith(stack, `${childless}|${lateSession}`)).toEqual({ tokens: null });
-    expect((await refreshWith(stack, `${lostChildOf}|${lateSession}`)).tokens).not.toBeNull();
+    expect(await refreshWith(stack, `${lostChildOf}|${lateSession}`)).toEqual({ tokens: null });
+    expect(await refreshWith(stack, `${lostChild}|${lateSession}`)).toEqual({ tokens: null });
 
     const justUsed = addToken(windowSession, { expirationTime, firstUsedTime: Date.now() });
 
@@ -462,6 +468,61 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
       ),
     ).toEqual(["accepted", "accepted"]);
   }, 120_000);
+
+  it("refuses a late retry whose unused child is not the active token, however deep it lies", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const { sessionId } = await signedIn.client.query(api.core.auth.sessions.current, {});
+    const expirationTime = Date.now() + DAY_MS;
+    const longAgo = Date.now() - 6 * REUSE_WINDOW_MS;
+    const replayed = addToken(sessionId, { expirationTime, firstUsedTime: longAgo });
+    const olderChild = addToken(sessionId, { expirationTime, parentRefreshTokenId: replayed });
+    const otherBranch = addToken(sessionId, { expirationTime, firstUsedTime: longAgo });
+    const active = addToken(sessionId, { expirationTime, parentRefreshTokenId: otherBranch });
+
+    await pileUp(
+      Array.from({ length: DEEPER_THAN_SEARCH }, () => ({
+        sessionId,
+        expirationTime,
+        firstUsedTime: longAgo,
+      })),
+    );
+
+    expect(await refreshWith(stack, `${replayed}|${sessionId}`)).toEqual({ tokens: null });
+    expect(await refreshWith(stack, `${olderChild}|${sessionId}`)).toEqual({ tokens: null });
+    expect((await refreshWith(stack, `${active}|${sessionId}`)).tokens).not.toBeNull();
+  });
+
+  it("refuses a late retry whose children are all used, however many it had", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const { sessionId } = await signedIn.client.query(api.core.auth.sessions.current, {});
+    const expirationTime = Date.now() + DAY_MS;
+    const longAgo = Date.now() - 6 * REUSE_WINDOW_MS;
+    const replayed = addToken(sessionId, { expirationTime, firstUsedTime: longAgo });
+
+    await pileUp(
+      Array.from({ length: 66 }, () => ({
+        sessionId,
+        expirationTime,
+        firstUsedTime: longAgo,
+        parentRefreshTokenId: replayed,
+      })),
+    );
+
+    await pileUp(
+      Array.from({ length: DEEPER_THAN_SEARCH }, () => ({
+        sessionId,
+        expirationTime,
+        firstUsedTime: longAgo,
+      })),
+    );
+
+    expect(await refreshWith(stack, `${replayed}|${sessionId}`)).toEqual({ tokens: null });
+    expect(await refusal(signedIn.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "accepted",
+    );
+  });
 
   it("deletes an ended session's tokens in one chain, however often its expired token returns", async () => {
     if (stack === undefined) return;

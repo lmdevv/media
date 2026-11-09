@@ -233,12 +233,16 @@ token past the window left its session unrevoked.
     the first unused one, at most 1,500 deep. Used tokens lie above the active one only where a
     branch was marked, so the search usually reads one row. When the store then hands the refresh
     to the library, the library's own search reads no more than the store's did;
-  - when the active token lies deeper, the library's search could pass the read limit. Wherever
-    the library could return a token (inside the window, or past it when the reused token has an
-    unused child), the store adds a fresh child of the reused token and hands the library that
-    one. On a first use the library reads only the token and its session, so the client gets
-    tokens where the library would give them, and they stay in the reused token's branch, which a
-    later late retry of it marks.
+  - a late retry is handed the active token only when the store found it and the reused token
+    is its parent, which is the library's rule. When the search runs out at 1,500, or the children
+    read is full of used ones, nothing proves that, so the retry refreshes nothing and its branch
+    is marked, as the library answers a late retry that is not the active token's parent. The
+    store refuses where it cannot prove the library would accept; at that depth the library's own
+    search would pass the read limit anyway;
+  - inside the window the library always returns a token. When the active token lies deeper than
+    the search, the store adds a fresh child of the reused token and hands the library that one.
+    On a first use the library reads only the token and its session, so the client gets tokens,
+    and they stay in the reused token's branch, which a later late retry of it marks.
 - **One chain of deletions per session.** `endSession` leaves a session that is already gone
   alone. Whatever deleted it deletes its tokens or leaves them to the sweep, so an expired token
   sent again while its session's tokens are being deleted, or a second revoke, starts no second

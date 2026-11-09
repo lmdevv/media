@@ -121,7 +121,7 @@ const activeToken = async (
 
 /**
  * Whether `token` has an unused child, read newest first through the parent index; "deep" when
- * its newest `CHILDREN_READ` children are all used.
+ * its newest `CHILDREN_READ` children are all used, which proves nothing either way.
  */
 const hasUnusedChild = async (db: MutationCtx["db"], token: Token): Promise<boolean | "deep"> => {
   const children = await tokens(db)
@@ -239,11 +239,13 @@ const ANSWERED: Refresh = { kind: "answered" };
  *   refreshes nothing. The store marks them `MARKS_PER_CALL` a call, and the session and its other
  *   branches go on. A late retry of a token with no unused child is answered that way without the
  *   search for the active token, since no child can be it.
- * - When the active token lies below `ACTIVE_DEPTH` used ones, the library's own search would read
- *   them all. Wherever the library could return a token (inside the window, or past it when the
- *   reused token has an unused child), the store adds a fresh child of the reused token and hands
- *   the library that instead: on first use the library reads only the token and its session, and
- *   what it mints stays in the reused token's branch. Otherwise it marks the branch.
+ * - A late retry is handed the active token only when the store found it and the reused token is
+ *   its parent. When the search runs out at `ACTIVE_DEPTH`, it is answered as one that is not, so
+ *   the store refuses where it cannot prove what the library would accept.
+ * - Inside the window the library always returns a token. When the active token lies below
+ *   `ACTIVE_DEPTH` used ones, where the library's own search would read them all, the store adds a
+ *   fresh child of the reused token and hands the library that instead: on first use the library
+ *   reads only the token and its session, and what it mints stays in the reused token's branch.
  */
 export const decideRefresh = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
@@ -288,9 +290,11 @@ export const decideRefresh = async (
 
   const active = await activeToken(ctx.db, token.sessionId);
 
-  if (active === "deep") {
-    if (!inWindow && child === false) return invalidated();
+  if (active !== "deep" && active?.parentRefreshTokenId === token._id) return library;
 
+  if (!inWindow) return invalidated();
+
+  if (active === "deep") {
     const fresh = await ctx.db.insert("authRefreshTokens", {
       sessionId: token.sessionId,
       expirationTime: now + SESSION_MS,
@@ -300,7 +304,5 @@ export const decideRefresh = async (
     return { kind: "library", refreshToken: `${fresh}${DIVIDER}${token.sessionId}` };
   }
 
-  if (active?.parentRefreshTokenId === token._id || inWindow) return library;
-
-  return invalidated();
+  return library;
 };
