@@ -105,20 +105,26 @@ mount media read-only.
   then are they deleted. A replaced stream ends the same way. The server counts runs whose ffmpeg
   has not exited, closed streams' runs included, for an operator to see a stuck one.
   Shutting down closes every stream at once, so it waits at most 3 seconds in all.
-- ffmpeg runs in its own process group, so on Linux the server starts every tool through util-linux
-  `setpriv --pdeathsig KILL` and then a `/bin/sh` check that its parent is still the server, after
-  which the shell becomes the tool under the same pid. The kernel sends no death signal for a
-  parent that died before the signal was set, so a server that dies that early fails the check,
-  and its tool never starts. A server that dies at any later point has the kernel kill the tool,
-  even by SIGKILL. So no tool the server started outlives it, and the server never kills by
-  process id. This holds on Linux, where `setpriv` and `/bin/sh` exist; elsewhere, as on a
-  developer's Mac, tools start directly. The signal follows the thread that spawned the tool,
-  which is Node's main thread and lives as long as the server. The image ships `setpriv`, and the
-  NixOS module puts util-linux on the service's path. Its system call filter allows `capset`,
-  which `setpriv` calls to re-apply the process's capabilities; the unit has none, so this grants
-  nothing. The module also keeps systemd's default control-group kill. Checking a recorded
-  process id and then signalling it was rejected: the id can be reused between the check and the
-  signal.
+- The server signals a tool only through Node's handle for the process it spawned, to stop it
+  or to pause and resume it. Node drops that handle when it reaps the process, on the same thread,
+  so a tool that has exited is never signalled, and the server never signals a process id or a
+  process group id. Tools stay in the server's process group: ffmpeg and ffprobe do not fork, so
+  there is no group to clean up. Effect's child process spawner is not used for tools, because it
+  signals the tool's numeric process group id when a run fails or its scope closes, even after the
+  tool was reaped and an unrelated group may have taken the id.
+- On Linux the server starts every tool through util-linux `setpriv --pdeathsig KILL` and then a
+  `/bin/sh` check that its parent is still the server, after which the shell becomes the tool
+  under the same pid. The kernel sends no death signal for a parent that died before the signal
+  was set, so a server that dies that early fails the check, and its tool never starts. A server
+  that dies at any later point has the kernel kill the tool, even by SIGKILL. So no tool the
+  server started outlives it. This holds on Linux, where `setpriv` and `/bin/sh` exist; elsewhere,
+  as on a developer's Mac, tools start directly. The signal follows the thread that spawned the
+  tool, which is Node's main thread and lives as long as the server. The image ships `setpriv`,
+  and the NixOS module puts util-linux on the service's path. Its system call filter allows
+  `capset`, which `setpriv` calls to re-apply the process's capabilities; the unit has none, so
+  this grants nothing. The module also keeps systemd's default control-group kill. Checking a
+  recorded process id and then signalling it was rejected: the id can be reused between the check
+  and the signal.
 - A yield or a release spends at most 2 seconds keeping the run's init segment, then stops
   without it. The player's next request then starts a new run.
 - A new encoder waits at most 10 seconds for the encoders whose places it took. Past that, a

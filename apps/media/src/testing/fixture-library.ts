@@ -288,6 +288,20 @@ export const ffmpegAvailable = async (): Promise<boolean> => {
   }
 };
 
+/** `unshare` flags for a new user and pid namespace, where this user may choose the next pid. */
+export const ISOLATED_PIDS = ["--user", "--map-root-user", "--pid", "--fork", "--mount-proc"];
+
+/** Whether this host lets an unprivileged user make that namespace, as Linux usually does. */
+export const pidNamespacesAvailable = async (): Promise<boolean> => {
+  try {
+    await run("unshare", [...ISOLATED_PIDS, "true"]);
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /** Whether this ffmpeg can tone-map HDR in software (`zscale` and `tonemap`). */
 export const softwareToneMappingAvailable = async (): Promise<boolean> => {
   try {

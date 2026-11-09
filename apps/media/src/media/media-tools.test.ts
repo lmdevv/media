@@ -1,50 +1,23 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it, layer } from "@effect/vitest";
-import { Context, Duration, Effect, Exit, FileSystem, Layer, Schedule } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { Duration, Effect, Exit, FileSystem, Layer, Scope } from "effect";
 
 import { testConfigLayer } from "../testing/test-config.ts";
 import * as MediaTools from "./media-tools.ts";
 
 const toolsLayer = MediaTools.layer.pipe(
   Layer.provide(testConfigLayer({ FFPROBE_PATH: "/usr/bin/env" })),
-  Layer.provide(NodeServices.layer),
 );
 
 // Node stands in for ffmpeg: `-e` runs a script with the arguments after `--`.
 const nodeLayer = MediaTools.layer.pipe(
   Layer.provide(testConfigLayer({ FFMPEG_PATH: process.execPath })),
-  Layer.provide(NodeServices.layer),
 );
 
 const hangingLayer = MediaTools.layer.pipe(
   Layer.provide(testConfigLayer({ FFMPEG_PATH: "sleep", PROBE_TIMEOUT_SECONDS: "1" })),
   Layer.provideMerge(NodeServices.layer),
 );
-
-const reusingPid = (pid: ChildProcessSpawner.ProcessId) =>
-  Layer.fresh(MediaTools.layer).pipe(
-    Layer.provide(testConfigLayer({ FFMPEG_PATH: "sleep" })),
-    Layer.provide(
-      Layer.effect(
-        ChildProcessSpawner.ChildProcessSpawner,
-        Effect.map(ChildProcessSpawner.ChildProcessSpawner, (real) =>
-          ChildProcessSpawner.make((command) =>
-            real
-              .spawn(command)
-              .pipe(Effect.map((handle) => ChildProcessSpawner.makeHandle({ ...handle, pid }))),
-          ),
-        ),
-      ),
-    ),
-  );
-
-const stopped = Effect.fnUntraced(function* (pid: ChildProcessSpawner.ProcessId) {
-  const fs = yield* FileSystem.FileSystem;
-  const stat = yield* fs.readFileString(`/proc/${String(pid)}/stat`);
-
-  return stat.slice(stat.lastIndexOf(")") + 2).startsWith("T");
-});
 
 const running = Effect.fnUntraced(function* (args: ReadonlyArray<string>) {
   const fs = yield* FileSystem.FileSystem;
@@ -146,34 +119,17 @@ describe("media tools", () => {
       }),
     );
 
-    tools.effect("never signals the process that took over a finished run's PID", () =>
+    tools.effect("closing a run's scope kills its tool and returns once it has exited", () =>
       Effect.gen(function* () {
-        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const service = yield* MediaTools.Service;
+        const marker = ["86398.75"];
+        const scope = yield* Scope.make();
 
-        const bystander = yield* spawner.spawn(
-          ChildProcess.make("sleep", ["30"], { stdin: "ignore", killSignal: "SIGKILL" }),
-        );
+        yield* service.startFfmpeg(marker).pipe(Scope.provide(scope));
+        assert.isTrue(yield* running(marker), "the run's tool is running");
 
-        const signalled = stopped(bystander.pid).pipe(
-          Effect.repeat({
-            until: (state) => state,
-            schedule: Schedule.spaced("20 millis"),
-            times: 50,
-          }),
-        );
-
-        const reused = yield* Layer.build(reusingPid(bystander.pid));
-        const run = yield* Context.get(reused, MediaTools.Service).startFfmpeg(["0.3"]);
-
-        yield* run.suspend(true);
-        assert.isTrue(yield* signalled, "a running run's suspend reaches its PID");
-        yield* run.suspend(false);
-
-        yield* run.exit;
-        yield* run.suspend(true);
-        yield* Effect.sleep(Duration.millis(300));
-
-        assert.isFalse(yield* stopped(bystander.pid), "a finished run sends nothing");
+        yield* Scope.close(scope, Exit.void);
+        assert.isFalse(yield* running(marker), "the tool is gone when the close returns");
       }),
     );
 
