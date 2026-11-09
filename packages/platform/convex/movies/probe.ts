@@ -511,3 +511,50 @@ export const titleState = internalQuery({
     };
   },
 });
+
+/**
+ * What a title's metadata writers stored for it, for a test to read back: the names of the people
+ * credited on the title itself, in billing order, and each collection it is in.
+ */
+export const titleLinks = internalQuery({
+  args: { titleId: v.id("titles") },
+  returns: v.object({
+    credited: v.array(v.string()),
+    collections: v.array(
+      v.object({
+        sourceKey: v.union(v.string(), v.null()),
+        name: v.string(),
+        source: v.union(v.literal("metadata"), v.literal("import")),
+      }),
+    ),
+  }),
+  handler: async (ctx, { titleId }) => {
+    const [credits, memberships] = await Promise.all([
+      ctx.db
+        .query("credits")
+        .withIndex("by_title_episode", (q) => q.eq("titleId", titleId).eq("episodeId", null))
+        .take(TITLE_ROWS_MAX),
+      ctx.db
+        .query("collectionItems")
+        .withIndex("by_title", (q) => q.eq("titleId", titleId))
+        .take(TITLE_ROWS_MAX),
+    ]);
+
+    const people = await Promise.all(credits.map(async (credit) => ctx.db.get(credit.personId)));
+
+    const collections = await Promise.all(
+      memberships.map(async (row) => ctx.db.get(row.collectionId)),
+    );
+
+    return {
+      credited: people.flatMap((person) => (person === null ? [] : [person.name])),
+      collections: memberships.flatMap((row, n) => {
+        const collection = collections[n];
+
+        return collection === null || collection === undefined
+          ? []
+          : [{ sourceKey: collection.sourceKey, name: collection.name, source: row.source }];
+      }),
+    };
+  },
+});

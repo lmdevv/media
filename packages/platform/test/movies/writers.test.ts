@@ -124,6 +124,41 @@ const nameOf = async (titleId: Id<"titles">) => {
   ).name;
 };
 
+const Links = Schema.Struct({
+  credited: Schema.Array(Schema.String),
+  collections: Schema.Array(
+    Schema.Struct({
+      sourceKey: Schema.NullOr(Schema.String),
+      name: Schema.String,
+      source: Schema.String,
+    }),
+  ),
+});
+
+/** What the writers stored for a title: its credited people and its collections, read back. */
+const linksOf = async (titleId: Id<"titles">) => {
+  if (stack === undefined) throw new Error("no stack");
+
+  return runFunction(stack, internal.movies.probe.titleLinks, { titleId }, Links);
+};
+
+/** Puts the title in the collection `key` named `name` under `lease`. */
+const collectAs = (lease: Lease, titleId: Id<"titles">, key: string, name: string) => {
+  if (stack === undefined) throw new Error("no stack");
+
+  return runServer(
+    stack,
+    api.movies.metadata.applyCollection,
+    {
+      lease,
+      titleId,
+      collection: { sourceKey: key, name, overview: null, poster: null, backdrop: null },
+      hash: key,
+    },
+    Done,
+  );
+};
+
 const creditAs = (lease: Lease, titleId: Id<"titles">, hash: string) => {
   if (stack === undefined) throw new Error("no stack");
 
@@ -518,6 +553,7 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
       });
       await finishJob(stack, lease);
       expect(await nameOf(titleId)).toBe("Pioneer One");
+      expect((await linksOf(titleId)).credited).toEqual(["Cast after"]);
     });
 
     it("land a manual match's credits and collection written after its metadata", async () => {
@@ -538,26 +574,17 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
         outcome: "held",
         value: { written: true },
       });
-      expect(
-        await runServer(
-          stack,
-          api.movies.metadata.applyCollection,
-          {
-            lease,
-            titleId,
-            collection: {
-              sourceKey: "tmdb:c2",
-              name: "Blender",
-              overview: null,
-              poster: null,
-              backdrop: null,
-            },
-            hash: "c",
-          },
-          Done,
-        ),
-      ).toEqual({ outcome: "held", value: null });
+      expect(await collectAs(lease, titleId, "tmdb:c2", "Blender")).toEqual({
+        outcome: "held",
+        value: null,
+      });
       await finishJob(stack, lease);
+
+      // The answer alone is the same for a dropped write, so read back what was stored.
+      expect(await linksOf(titleId)).toEqual({
+        credited: ["Cast manual"],
+        collections: [{ sourceKey: "tmdb:c2", name: "Blender", source: "metadata" }],
+      });
     });
 
     it("drop a refresh asked for before an admin's match, so it never overwrites that match", async () => {
@@ -578,7 +605,16 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
           [],
         ),
       ).toMatchObject({ applied: true });
+      await creditAs(match, titleId, "match");
+      await collectAs(match, titleId, "tmdb:c3", "Right set");
       await finishJob(stack, match);
+
+      const matched = {
+        credited: ["Cast match"],
+        collections: [{ sourceKey: "tmdb:c3", name: "Right set", source: "metadata" }],
+      };
+
+      expect(await linksOf(titleId)).toEqual(matched);
 
       const late = await runServer(
         stack,
@@ -597,8 +633,10 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
         outcome: "held",
         value: { written: false, people: [] },
       });
+      await collectAs(refresh, titleId, "tmdb:wrong", "Wrong set");
       await finishJob(stack, refresh);
       expect(await nameOf(titleId)).toBe("Sintel");
+      expect(await linksOf(titleId)).toEqual(matched);
 
       const later = await claimJob(stack, "movies.metadata", await askRefresh(stack, titleId));
 
@@ -635,11 +673,17 @@ describe.skipIf(stack === undefined)("movies writers", { timeout: 180_000 }, () 
         value: { done: 0, applied: true },
       });
       expect(await apply(first, "First match, late")).toEqual(stale);
-      expect(await creditAs(first, titleId, "first")).toMatchObject({ value: { written: false } });
       expect(await creditAs(second, titleId, "second")).toMatchObject({ value: { written: true } });
+      await collectAs(second, titleId, "tmdb:c5", "Second set");
+      expect(await creditAs(first, titleId, "first")).toMatchObject({ value: { written: false } });
+      await collectAs(first, titleId, "tmdb:c4", "First set");
       await finishJob(stack, first);
       await finishJob(stack, second);
       expect(await nameOf(titleId)).toBe("Second match");
+      expect(await linksOf(titleId)).toEqual({
+        credited: ["Cast second"],
+        collections: [{ sourceKey: "tmdb:c5", name: "Second set", source: "metadata" }],
+      });
     });
   });
 });
