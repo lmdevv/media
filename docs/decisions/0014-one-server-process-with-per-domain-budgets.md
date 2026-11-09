@@ -55,11 +55,15 @@ mount media read-only.
   slots until it fits, preferring guests whose encoders already run over ones still starting. Each
   such guest's encoder stops, even mid-start or under a waiting request, and its session stays.
   Its next segment request waits in the line. A guest whose encoder has not started gives up its
-  start instead. Household streams leave the limit as it is when guests' slots are not enough.
+  start instead, and its stream ends as `capacity-reached`, not as `failed`. Household streams
+  leave the limit as it is when guests' slots are not enough.
 - A taken slot counts as part of the stream that took it, and so does the slot of a stream that a
   newer one in its session replaces. If the taker leaves before that slot is free, the slot passes
   to whoever took the taker's own slot, and a guest's slot that passes to a household stream
   yields as a taken one does. Failing that, it counts on its own.
+- A stream that a newer one in its session replaced starts no encoder. That holds when the newer
+  stream took its slot before its encoder started. It also holds when the older stream claims a
+  slot after the newer one holds one, as a resume can, and that claim takes nothing.
 - An encoder starts only while fewer encoders than the limit run, counting every one not yet
   stopped. Taken and replaced encoders that are still stopping hold back the streams that took
   their slots, so the limit is never exceeded.
@@ -72,16 +76,33 @@ mount media read-only.
   waits for the step it asked for. When the player disconnects mid-seek, the step still finishes,
   and the stream's next request finds it done.
 - A segment, init, or seek request answers within 30 seconds, counting its wait for a step already
-  in progress, such as one stuck on a hung disk. Past that it fails as not ready, and the step goes
-  on. A start answers within one bound from its arrival, then fails with capacity reached: the
-  guest line (20 seconds), the keyframe scan's timeout, a replaced stream's stop (3 seconds), and
-  its first run (63 seconds, enough for a hardware run to fail and its software fallback to start).
+  in progress, such as one stuck on a hung disk, and the opening of the files it serves. Past that
+  it fails as not ready, and the step goes on. A direct play or download request waits for the
+  library's disk at most 30 seconds, then fails as unreadable. A start answers within one bound
+  from its arrival, then fails with capacity reached: the guest line (20 seconds), the keyframe
+  scan's timeout, a replaced stream's stop (3 seconds), and its first run (63 seconds, enough for a
+  hardware run to fail and its software fallback to start).
+- A step that only waits, as a guest's resume does in the line, stops waiting once its request is
+  gone, so the stream's next request does not queue behind it.
+- No folder is deleted while the server has a file in it open. Every read of a run's files runs to
+  its end once it started, since an interrupted read keeps its handle until the system call
+  returns. A segment request's files are opened by the stream for that request, and the run keeps
+  its folder until the response is sent. An init segment is a few kilobytes, so it is read whole and
+  sent as bytes. A run's folder goes once its process exited, its reads ended, and its responses
+  were sent. The stream's folder goes after every run's.
+- Requests waiting for the same run share one read of its folder at a time, rather than one each
+  per poll.
 - A start claims its slot only after its disk space check and keyframe scan. A start stuck in
   either holds no slot and takes no guest's place.
 - A stop waits at most 3 seconds. ffmpeg gets `SIGKILL` at once. When its exit is still unknown
   after that, the stop returns and the encoder keeps its slot until it exits. The stream's files
   stay until every run it started has exited, including a run a seek was still stopping, and only
-  then are they deleted. A replaced stream ends the same way.
+  then are they deleted. A replaced stream ends the same way. The server counts runs whose stop
+  has not finished, closed streams' runs included, for an operator to see a stuck ffmpeg.
+  Shutting down closes every stream at once, so it waits at most 3 seconds in all.
+- ffmpeg runs in its own process group, which outlives a crashed server. At startup the server
+  kills each process group whose leader runs the configured ffmpeg and writes into the server's
+  transcode folder. No other process matches, since each server has its own transcode folder.
 - A yield or a release spends at most 2 seconds keeping the run's init segment, then stops
   without it. The player's next request then starts a new run.
 - A new encoder waits at most 10 seconds for the encoders whose places it took. Past that, a
@@ -90,8 +111,8 @@ mount media read-only.
 - A guest whose own session already holds a slot fits sooner, so it is seated ahead of older
   waiters that do not fit yet.
 - A guest waits up to 20 seconds to start a stream, then fails with capacity reached. A guest
-  resuming a stream waits up to 30 seconds, then its segment request fails as not ready and the
-  session stays for the player's retry.
+  resuming a stream waits up to 30 seconds, and no longer than its request does. Then its segment
+  request fails as not ready, and the session stays for the player's retry.
 - When household streams fill the limit, another household stream is refused at once, a household
   resume ends its session, and guests wait.
 - Until the server checks core tickets (phase 4), every stream it serves is a household stream.
