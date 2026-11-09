@@ -422,4 +422,54 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
 
     expect(answer).toMatchObject({ username: person.username, kind: "tile" });
   });
+
+  it("exchanges a phone's grant for each app's own session until the grant is revoked", async () => {
+    const person = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-grant");
+
+    const answer = await scoped(
+      Effect.gen(function* () {
+        const movies = yield* signedInAs(person);
+        const { userId } = yield* movies.core.auth.sessions.current();
+        const first = yield* movies.core.devices.registry.enroll({ name: "Movies on iPhone" });
+        const issued = yield* movies.core.devices.deviceGrants.issue({ name: "iPhone" });
+
+        const music = yield* open();
+
+        yield* music.session.signIn(
+          Platform.Credentials.Grant({ userId, grant: Redacted.make(issued.grant) }),
+        );
+
+        const second = yield* music.core.devices.registry.enroll({ name: "Music on iPhone" });
+        const exchanged = yield* music.core.auth.sessions.current();
+
+        yield* movies.core.devices.deviceGrants.revoke({ grantId: issued.grantId });
+
+        return {
+          userId,
+          grant: issued.grant,
+          devices: [first.deviceId, second.deviceId],
+          exchanged,
+          afterRevoke: yield* Effect.flip(music.core.auth.sessions.current()),
+          issuerAfterRevoke: yield* Effect.flip(movies.core.auth.sessions.current()),
+        };
+      }),
+    );
+
+    expect(answer.exchanged).toMatchObject({ username: person.username, kind: "grant" });
+    expect(answer.exchanged.device?.deviceId).toBe(answer.devices[1]);
+    expect(new Set(answer.devices).size).toBe(2);
+    expect(answer.afterRevoke).toMatchObject({ _tag: "Unauthenticated" });
+    expect(answer.issuerAfterRevoke).toMatchObject({ _tag: "Unauthenticated" });
+
+    const platform = createPlatform({ url, connection: "http" });
+
+    try {
+      await expect(
+        platform.session.exchangeGrant({ userId: answer.userId, grant: answer.grant }),
+      ).rejects.toMatchObject({ _tag: "Unauthenticated" });
+      expect(await platform.session.status()).toBe("signedOut");
+    } finally {
+      await platform.dispose();
+    }
+  });
 });

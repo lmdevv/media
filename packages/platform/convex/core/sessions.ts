@@ -30,6 +30,13 @@ const REFRESH_TOKENS_PER_CALL = 256;
 
 const KEY_SESSIONS_MAX = 100;
 
+/**
+ * Sessions one device grant keeps: the one that issued it and each app's own. An app's later
+ * exchange replaces its earlier one on its device, so a phone stays far below this, and revoking
+ * the grant ends them all in one call. `trimGrantSessions` holds the family to it.
+ */
+export const GRANT_SESSIONS_MAX = 16;
+
 type Session = Doc<"authSessions">;
 
 /** How a session signed in. */
@@ -52,7 +59,8 @@ export type Opening =
       readonly code: Extract<Doc<"deviceCodes">, { readonly state: "approved" }>;
     }
   | { readonly kind: "tile"; readonly device: Doc<"devices"> }
-  | { readonly kind: "guest"; readonly link: LinkDoc };
+  | { readonly kind: "guest"; readonly link: LinkDoc }
+  | { readonly kind: "grant"; readonly grant: Doc<"deviceGrants"> };
 
 const currentGeneration = (kind: SessionKind, user: Doc<"users">): number =>
   kind === "apiKey" ? user.keyGeneration : user.sessionGeneration;
@@ -159,6 +167,52 @@ const endKeySessionsBeyondNewest = async (
   await Promise.all(newest.slice(KEY_SESSIONS_MAX).map((oldest) => endSession(ctx, oldest._id)));
 };
 
+/** The sessions a device grant issued or minted, newest first. */
+export const grantSessions = (db: DatabaseReader, grantId: Id<"deviceGrants">) =>
+  db
+    .query("authSessions")
+    .withIndex("by_grant", (q) => q.eq("grant", grantId))
+    .order("desc");
+
+/**
+ * Keeps a grant's family at `GRANT_SESSIONS_MAX` sessions, sparing `keep`, the session just added.
+ * It ends sessions on no device first, oldest first: an app that exchanged and never enrolled, as
+ * after a crash or a reinstall, left them. So an app that keeps exchanging signs no other app on the
+ * phone out, and only a family of enrolled apps loses its oldest one.
+ */
+export const trimGrantSessions = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  grantId: Id<"deviceGrants">,
+  keep: Id<"authSessions">,
+): Promise<void> => {
+  const family = await grantSessions(ctx.db, grantId).take(GRANT_SESSIONS_MAX + 1);
+  const extra = family.length - GRANT_SESSIONS_MAX;
+
+  if (extra <= 0) return;
+
+  const oldestFirst = family.filter((session) => session._id !== keep).toReversed();
+
+  const ended = [
+    ...oldestFirst.filter((session) => boundDevice(session) === null),
+    ...oldestFirst.filter((session) => boundDevice(session) !== null),
+  ].slice(0, extra);
+
+  await Promise.all(ended.map((session) => endSession(ctx, session._id)));
+};
+
+/**
+ * Ends every session a grant issued or minted, at once. They are at most `GRANT_SESSIONS_MAX`
+ * rows, and their refresh tokens are left to expire and be swept, as a key's are.
+ */
+export const endGrantSessions = async (
+  ctx: Pick<MutationCtx, "db">,
+  grantId: Id<"deviceGrants">,
+): Promise<void> => {
+  const sessions = await grantSessions(ctx.db, grantId).collect();
+
+  await Promise.all(sessions.map((session) => ctx.db.delete(session._id)));
+};
+
 /** Opens a session for `user`, stamped with the generation of what opened it. */
 export const openSession = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
@@ -198,6 +252,19 @@ export const openSession = async (
       expirationTime: Math.min(fields.expirationTime, opening.link.expiresAt),
       generation: user.sessionGeneration,
     });
+  }
+
+  if (opening.kind === "grant") {
+    const sessionId = await ctx.db.insert("authSessions", {
+      ...fields,
+      kind: "grant",
+      generation: user.sessionGeneration,
+      grant: opening.grant._id,
+    });
+
+    await trimGrantSessions(ctx, opening.grant._id, sessionId);
+
+    return sessionId;
   }
 
   if (opening.kind === "tile") {

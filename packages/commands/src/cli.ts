@@ -60,10 +60,11 @@ const CREDENTIAL = /(?:password|token|secret)$/iu;
 
 /**
  * Arguments named for what they carry rather than for being secret: an invite, reset, or unlock
- * code, a shared device's code (`dv_`), and a group-session link (`mt_`). A user code is the short
- * code a person reads off a device, which redeems nothing, so it is not one of them.
+ * code, a shared device's code (`dv_`), a group-session link (`mt_`), and a device grant (`dg_`). A
+ * user code is the short code a person reads off a device, which redeems nothing, so it is not one
+ * of them.
  */
-const SECRET_NAMES: ReadonlySet<string> = new Set(["code", "device", "link"]);
+const SECRET_NAMES: ReadonlySet<string> = new Set(["code", "device", "grant", "link"]);
 
 /**
  * The arguments a flag would leak into shell history and the process list: every string field

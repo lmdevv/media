@@ -285,6 +285,7 @@ const core_auth_sessions_current = query({
       Schema.Literal("deviceCode"),
       Schema.Literal("tile"),
       Schema.Literal("guest"),
+      Schema.Literal("grant"),
     ]),
     scopes: Schema.Array(
       Schema.Union([
@@ -465,6 +466,64 @@ const core_devices_approvals_request = mutation({
     approvalId: Schema.String.pipe(Schema.brand("Id<tileApprovals>")),
     expiresAt: Schema.Finite,
   }),
+});
+
+const core_devices_deviceGrants_issue = action({
+  name: "core.devices.deviceGrants.issue",
+  path: "core/devices/deviceGrants:issue",
+  args: Schema.Struct({ name: Schema.String, grant: Schema.optionalKey(Schema.String) }),
+  result: Schema.Struct({
+    grantId: Schema.String.pipe(Schema.brand("Id<deviceGrants>")),
+    grant: Schema.String,
+  }),
+});
+
+const core_devices_deviceGrants_list = query({
+  name: "core.devices.deviceGrants.list",
+  path: "core/devices/deviceGrants:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        grantId: Schema.String.pipe(Schema.brand("Id<deviceGrants>")),
+        name: Schema.String,
+        issuedAt: Schema.Finite,
+        signsIn: Schema.Boolean,
+        devices: Schema.Array(
+          Schema.Struct({
+            deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+            name: Schema.String,
+          }),
+        ),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const core_devices_deviceGrants_revoke = mutation({
+  name: "core.devices.deviceGrants.revoke",
+  path: "core/devices/deviceGrants:revoke",
+  args: Schema.Struct({ grantId: Schema.String.pipe(Schema.brand("Id<deviceGrants>")) }),
+  result: Schema.Null,
 });
 
 const core_devices_picker_show = query({
@@ -1934,6 +1993,14 @@ export const effectMethods = (method: EffectBuilder) => ({
         /** `core.devices.approvals.request` (mutation, public): From a shared device, ask someone signed in elsewhere to open their locked tile, or an adult to let a kid leave. */
         request: method.mutation(core_devices_approvals_request),
       },
+      deviceGrants: {
+        /** `core.devices.deviceGrants.issue` (action, account, API keys refused): Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it. */
+        issue: method.action(core_devices_deviceGrants_issue),
+        /** `core.devices.deviceGrants.list` (query, account): List your device grants, newest first, with whether each still signs apps in and the apps signed in with it. */
+        list: method.query(core_devices_deviceGrants_list),
+        /** `core.devices.deviceGrants.revoke` (mutation, account): Revoke one of your device grants and sign out every app it signed in. */
+        revoke: method.mutation(core_devices_deviceGrants_revoke),
+      },
       picker: {
         /** `core.devices.picker.show` (query, public): Show a device's picker: who is signed in on it, or on a shared device who opted in, which tiles are locked, and its approval. */
         show: method.query(core_devices_picker_show),
@@ -2173,6 +2240,14 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         pending: method.query(core_devices_approvals_pending),
         /** `core.devices.approvals.request` (mutation, public): From a shared device, ask someone signed in elsewhere to open their locked tile, or an adult to let a kid leave. */
         request: method.mutation(core_devices_approvals_request),
+      },
+      deviceGrants: {
+        /** `core.devices.deviceGrants.issue` (action, account, API keys refused): Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it. */
+        issue: method.action(core_devices_deviceGrants_issue),
+        /** `core.devices.deviceGrants.list` (query, account): List your device grants, newest first, with whether each still signs apps in and the apps signed in with it. */
+        list: method.query(core_devices_deviceGrants_list),
+        /** `core.devices.deviceGrants.revoke` (mutation, account): Revoke one of your device grants and sign out every app it signed in. */
+        revoke: method.mutation(core_devices_deviceGrants_revoke),
       },
       picker: {
         /** `core.devices.picker.show` (query, public): Show a device's picker: who is signed in on it, or on a shared device who opted in, which tiles are locked, and its approval. */

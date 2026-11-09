@@ -190,6 +190,7 @@ export const core = [
         v.literal("deviceCode"),
         v.literal("tile"),
         v.literal("guest"),
+        v.literal("grant"),
       ),
       scopes: v.array(credentialScope),
       device: v.union(v.null(), v.object({ deviceId: v.id("devices"), joinSequence: v.number() })),
@@ -651,6 +652,35 @@ export const core = [
     scope: "account",
     refusesKeys: true,
     args: { approvalId: v.id("tileApprovals") },
+    result: v.null(),
+  }),
+  action("core.devices.deviceGrants.issue", {
+    summary:
+      "Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it",
+    scope: "account",
+    refusesKeys: true,
+    args: { name: v.string(), grant: v.optional(v.string()) },
+    result: v.object({ grantId: v.id("deviceGrants"), grant: v.string() }),
+  }),
+  query("core.devices.deviceGrants.list", {
+    summary:
+      "List your device grants, newest first, with whether each still signs apps in and the apps signed in with it",
+    scope: "account",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({
+        grantId: v.id("deviceGrants"),
+        name: v.string(),
+        issuedAt: v.number(),
+        signsIn: v.boolean(),
+        devices: v.array(v.object({ deviceId: v.id("devices"), name: v.string() })),
+      }),
+    ),
+  }),
+  mutation("core.devices.deviceGrants.revoke", {
+    summary: "Revoke one of your device grants and sign out every app it signed in",
+    scope: "account",
+    args: { grantId: v.id("deviceGrants") },
     result: v.null(),
   }),
 

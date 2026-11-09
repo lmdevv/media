@@ -129,7 +129,13 @@ export default defineSchema({
 
   authSessions: defineTable(
     v.union(
-      v.object({ ...sessionFields, kind: v.literal("password"), device: v.optional(boundDevice) }),
+      v.object({
+        ...sessionFields,
+        kind: v.literal("password"),
+        device: v.optional(boundDevice),
+        /** The device grant this session issued or took up; revoking the grant ends it. */
+        grant: v.optional(v.id("deviceGrants")),
+      }),
       v.object({
         ...sessionFields,
         kind: v.literal("apiKey"),
@@ -147,13 +153,24 @@ export default defineSchema({
       v.object({ ...sessionFields, kind: v.literal("tile"), device: boundDevice }),
       /** A guest's, opened by a share link; it ends no later than the link and only while it holds. */
       v.object({ ...sessionFields, kind: v.literal("guest") }),
+      /**
+       * An app's own session, exchanged for its device's grant (D48). It holds its person's role
+       * scopes, as a password session does, and ends with the grant.
+       */
+      v.object({
+        ...sessionFields,
+        kind: v.literal("grant"),
+        grant: v.id("deviceGrants"),
+        device: v.optional(boundDevice),
+      }),
     ),
   )
     .index("userId", ["userId"])
     .index("by_key", ["keyId"])
     .index("by_expiration", ["expirationTime"])
     .index("by_device_user", ["device.id", "userId"])
-    .index("by_user_device", ["userId", "device.id"]),
+    .index("by_user_device", ["userId", "device.id"])
+    .index("by_grant", ["grant"]),
 
   /** Convex Auth's refresh tokens, in its own shape. */
   authRefreshTokens: defineTable({
@@ -250,6 +267,24 @@ export default defineSchema({
   groupMembers: defineTable({ groupId: v.id("groups"), userId: v.id("users") })
     .index("by_group_user", ["groupId", "userId"])
     .index("by_user_group", ["userId", "groupId"]),
+
+  /**
+   * A person's grant on one phone or tablet (D48, ADR 0006). The device's shared keychain holds
+   * `dg_<grantId>.<secret>`, and each app there exchanges it for a session of its own. Revoking it
+   * ends every session it issued or minted.
+   */
+  deviceGrants: defineTable({
+    userId: v.id("users"),
+    name: v.string(),
+    /** SHA-256 of the secret half of the grant, hex. The grant itself is never stored. */
+    secretHash: v.string(),
+    /**
+     * The person's `sessionGeneration` when the grant was issued or last confirmed with a password.
+     * Once they sign out everywhere it differs, and the grant mints nothing until a password
+     * sign-in on the device confirms it again.
+     */
+    generation: v.number(),
+  }).index("by_user", ["userId"]),
 
   /**
    * One row per app instance (ADR 0006). A shared device's `tile` is the last tile opened on it and
