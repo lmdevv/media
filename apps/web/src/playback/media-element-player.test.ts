@@ -35,6 +35,20 @@ class FakeMediaElement extends EventTarget implements MediaElementLike {
     this.dispatchEvent(new Event(type));
   }
 
+  /** Starts a seek to `seconds` as the browser reports one: seeking, with its target as the time. */
+  startSeek(seconds: number): void {
+    this.currentTime = seconds;
+    this.seeking = true;
+    this.fire("seeking");
+  }
+
+  /** Ends the seek at `seconds`, where the browser put it, before its `seeked` event dispatches. */
+  land(seconds: number): void {
+    this.#time = seconds;
+    this.seeking = false;
+    this.readyState = 4;
+  }
+
   play(): Promise<void> {
     if (this.refuse !== "allowed") {
       return Promise.reject(new DOMException("play() refused", this.refuse));
@@ -142,8 +156,7 @@ describe("MediaElementPlayer", () => {
 
     await player.play();
     element.readyState = 1;
-    element.currentTime = 11.9;
-    element.seeking = true;
+    element.startSeek(11.9);
     element.pause();
 
     expect(element.seeks).toStrictEqual([
@@ -153,19 +166,50 @@ describe("MediaElementPlayer", () => {
     expect(player.isPaused()).toBe(true);
   });
 
+  it("starts a seek again when it landed at 0 before the pause that interrupted it arrived", async () => {
+    const element = new FakeMediaElement();
+    const player = new MediaElementPlayer(element);
+
+    await player.play();
+    element.readyState = 1;
+    element.startSeek(11.9);
+    element.land(0);
+    element.pause();
+    element.fire("seeked");
+
+    expect(element.seeks).toStrictEqual([
+      { seconds: 11.9, paused: false },
+      { seconds: 11.9, paused: true },
+    ]);
+  });
+
   it("leaves a seek alone when the pause comes once a frame shows, or after the seek", async () => {
     const element = new FakeMediaElement();
     const player = new MediaElementPlayer(element);
 
     await player.play();
-    element.currentTime = 11.9;
-    element.seeking = true;
+    element.startSeek(11.9);
     player.pause();
 
     await player.play();
+    element.land(11.9);
+    element.fire("seeked");
     element.readyState = 1;
-    element.seeking = false;
     player.pause();
+
+    expect(element.seeks).toStrictEqual([{ seconds: 11.9, paused: false }]);
+  });
+
+  it("forgets a seek its stream dropped, so a pause on the next stream stays put", async () => {
+    const element = new FakeMediaElement();
+    const player = new MediaElementPlayer(element);
+
+    await player.play();
+    element.readyState = 1;
+    element.startSeek(11.9);
+    element.fire("emptied");
+    element.land(0);
+    element.pause();
 
     expect(element.seeks).toStrictEqual([{ seconds: 11.9, paused: false }]);
   });

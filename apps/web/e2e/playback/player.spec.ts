@@ -310,6 +310,12 @@ const STALLED_SHORT_OF_EDGE_SECONDS = 0.2;
 
 const EDGE_WINDOW_SECONDS = 0.05;
 
+/**
+ * How long the page stays busy once the held segment is buffered, before it pauses. Chrome
+ * finishes the seek about 15 ms after the append, so it lands before the pause event dispatches.
+ */
+const BUSY_MAIN_THREAD_MS = 60;
+
 interface PlannedSegment {
   readonly index: number;
   readonly start: number;
@@ -930,6 +936,71 @@ test("pausing while a stream moves to where it resumes keeps the position", asyn
   await expect.poll(async () => (await pausedWith())?.seeking).toBe("true");
   expect((await pausedWith())?.readyState).toBeLessThan(HAVE_CURRENT_DATA);
   await resumed.release();
+  await expect
+    .poll(async () => {
+      const state = await videoState(page);
+
+      return state.paused && state.readyState >= HAVE_CURRENT_DATA;
+    })
+    .toBe(true);
+  await expectPositionNear(page, start, 0.1);
+  await page.waitForTimeout(1_000);
+  expect(Math.abs((await videoState(page)).currentTime - start)).toBeLessThan(0.1);
+
+  await leavePlayer();
+
+  const busy = await resumeHeld(target);
+
+  expect(busy.segment, "the stream resumes into the probed segment").toEqual(probe.segment);
+  await expect.poll(() => bufferedEnd(page, start)).not.toBeNull();
+  expect(
+    await video.evaluate((element) => element instanceof HTMLVideoElement && element.seeking),
+  ).toBe(true);
+
+  const heldAgain = await bufferedEnd(page, start);
+
+  if (heldAgain === null) throw new Error(`The buffer dropped ${start}s`);
+
+  await video.evaluate(
+    (element, { heldEnd, busyMs }) => {
+      if (!(element instanceof HTMLVideoElement)) return;
+
+      const ends = () =>
+        Array.from({ length: element.buffered.length }, (_, index) => element.buffered.end(index));
+
+      const watch = window.setInterval(() => {
+        if (!ends().some((end) => end > heldEnd)) return;
+
+        window.clearInterval(watch);
+
+        const until = performance.now() + busyMs;
+
+        while (performance.now() < until);
+        element.pause();
+      }, 0);
+
+      // Capture on the document runs before the player's own listener on the element.
+      document.addEventListener(
+        "pause",
+        () => {
+          element.dataset["pausedSeeking"] = String(element.seeking);
+          element.dataset["pausedAt"] = String(element.currentTime);
+        },
+        { capture: true, once: true },
+      );
+    },
+    { heldEnd: heldAgain, busyMs: BUSY_MAIN_THREAD_MS },
+  );
+  await busy.release();
+
+  const pausedAfterLanding = () =>
+    video.evaluate((element) =>
+      element instanceof HTMLVideoElement
+        ? { seeking: element.dataset["pausedSeeking"], at: element.dataset["pausedAt"] }
+        : null,
+    );
+
+  await expect.poll(pausedAfterLanding).toStrictEqual({ seeking: "false", at: "0" });
   await expect
     .poll(async () => {
       const state = await videoState(page);

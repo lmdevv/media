@@ -47,6 +47,8 @@ const EVENTS: ReadonlyArray<readonly [string, PlayerEvent]> = [
   ["ended", "ended"],
 ];
 
+const SEEK_EVENTS = ["seeking", "seeked", "emptied"] as const;
+
 /** Plays anywhere the element itself reaches, as direct files do. */
 export const ELEMENT_SEEKER: StreamSeeker = {
   reaches: () => true,
@@ -73,6 +75,7 @@ export class MediaElementPlayer implements PlayerPort {
   #move: AbortController | null = null;
   #wantsPlay = false;
   #final: number | null = null;
+  #seekTarget: number | null = null;
   readonly #listeners = new Set<(event: PlayerEvent) => void>();
 
   /** Wraps `element`; call `dispose` when the element goes away. */
@@ -80,6 +83,8 @@ export class MediaElementPlayer implements PlayerPort {
     this.#element = element;
 
     for (const [type] of EVENTS) element.addEventListener(type, this.#onElementEvent);
+
+    for (const type of SEEK_EVENTS) element.addEventListener(type, this.#onSeekEvent);
   }
 
   /**
@@ -105,8 +110,15 @@ export class MediaElementPlayer implements PlayerPort {
     this.#move?.abort();
 
     for (const [type] of EVENTS) this.#element.removeEventListener(type, this.#onElementEvent);
+
+    for (const type of SEEK_EVENTS) this.#element.removeEventListener(type, this.#onSeekEvent);
     this.#listeners.clear();
   }
+
+  /** A seeking element reports its target as its time; `seeked` and `emptied` end the seek. */
+  readonly #onSeekEvent = (event: Event): void => {
+    this.#seekTarget = event.type === "seeking" ? this.#element.currentTime : null;
+  };
 
   readonly #onElementEvent = (event: Event): void => {
     const mapped = EVENTS.find(([type]) => type === event.type)?.[1];
@@ -123,19 +135,22 @@ export class MediaElementPlayer implements PlayerPort {
   };
 
   /**
-   * Starts a seek still under way again once the element pauses, from any source. Chrome lands
-   * a seek that a pause interrupts before the element has shown a frame at 0, as with a new
-   * stream's move to its start position.
+   * Starts a seek again once the element pauses, from any source, when the pause put it at risk.
+   * Chrome lands a seek that a pause interrupts before the element has shown a frame at 0, as with
+   * a new stream's move to its start position. On a busy main thread the seek can land there
+   * before the pause event dispatches, with no `seeked` yet, so the target is the one remembered.
    */
   #keepSeekTarget(): void {
     const element = this.#element;
+    const target = this.#seekTarget;
 
-    if (!element.seeking || element.readyState >= HAVE_CURRENT_DATA) return;
+    if (target === null) return;
 
-    // A seeking element reports its target; setting the same position starts the seek again.
-    const target = element.currentTime;
+    const atRisk = element.seeking
+      ? element.readyState < HAVE_CURRENT_DATA
+      : element.currentTime !== target;
 
-    element.currentTime = target;
+    if (atRisk) element.currentTime = target;
   }
 
   #emit(event: PlayerEvent): void {
