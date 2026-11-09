@@ -30,8 +30,8 @@ const entry = (command: CheckedCommand): string =>
       ...(command.refusesKeys ? ["- API keys: refused"] : []),
       `- Arguments: ${command.args.length === 0 ? "none" : codeSpan(fieldsType(command.args))}`,
       ...secretsOf(command.args).map(
-        (secret, _, secrets) =>
-          `- Secret: ${codeSpan(secret.field)} from ${codeSpan(secret.variable)}${secrets.length === 1 && secret.optional !== true ? " or stdin" : ""}, never a flag${secret.optional === true ? "; leave it unset to omit it" : ""}${secret.clearable === true ? `; \`--json '{"${secret.field}":null}'\` clears it` : ""}`,
+        (secret) =>
+          `- Secret: ${codeSpan(secret.field)} from ${codeSpan(secret.variable)}${secret.stdin === true ? " or stdin" : ""}, never a flag${secret.optional === true ? "; leave it unset to omit it" : ""}${secret.clearable === true ? `; \`--json '{"${secret.field}":null}'\` clears it` : ""}`,
       ),
       ...(isPaginated(command.args)
         ? ["- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`"]

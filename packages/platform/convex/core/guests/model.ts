@@ -6,7 +6,7 @@ import { contentDomain } from "../../../commands/scopes";
 import type { Doc, Id } from "../../_generated/dataModel";
 import type { DatabaseReader } from "../../_generated/server";
 import { fail } from "../lib/errors";
-import { printableName } from "../lib/names";
+import { printableWithin } from "../lib/names";
 
 /** A share link is `mg_<linkId>.<secret>`; the secret is stored as SHA-256 and shown once. */
 export const LINK_PREFIX = "mg";
@@ -128,13 +128,9 @@ export const guestKeyOf = (linkId: Id<"shareLinks">, guestNumber: number): strin
 /** Below every guest's usernameKey and above every household one. */
 export const GUEST_KEYS_FROM = "~";
 
-export const requireGuestName = (typed: string): string => {
-  const name = printableName(typed);
-
-  return name !== null && Array.from(name).length <= NAME_MAX
-    ? name
-    : fail("invalid_args", `Give a name of 1 to ${NAME_MAX} printable characters`);
-};
+export const requireGuestName = (typed: string): string =>
+  printableWithin(typed, NAME_MAX) ??
+  fail("invalid_args", `Give a name of 1 to ${NAME_MAX} printable characters`);
 
 const urlOf = (text: string): URL | null => {
   try {

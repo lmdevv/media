@@ -28,11 +28,10 @@ interface Secret {
   readonly variable: string;
   /** Null clears the field and reveals nothing, so it may come in `--json`. */
   readonly clearable?: true;
-  /**
-   * Left out when its variable does not give it. It never reads stdin, which could wait forever
-   * on an inherited pipe that never closes.
-   */
+  /** Left out when its variable does not give it. */
   readonly optional?: true;
+  /** It may also come piped on stdin, by the rule `@media/commands` writes into each command. */
+  readonly stdin?: true;
 }
 
 type Kind = "query" | "mutation" | "action";
@@ -187,11 +186,8 @@ const required = (
     ? Effect.succeed(given)
     : Effect.fail(usage(invocation, missing));
 
-const stdinSecret = (command: CoreCommand): Secret | undefined => {
-  const [only, ...others] = command.secrets;
-
-  return others.length === 0 && only?.optional !== true ? only : undefined;
-};
+const stdinSecret = (command: CoreCommand): Secret | undefined =>
+  command.secrets.find((secret) => secret.stdin === true);
 
 const secretOf = (
   invocation: Invocation,

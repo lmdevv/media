@@ -10,10 +10,14 @@ import type { Doc, TableNames } from "../convex/_generated/dataModel";
 
 const platformDir = fileURLToPath(new URL("..", import.meta.url));
 
+/** Room for thousands of rows of `convex data`; Node's 1 MB default cuts it off. */
+const ROWS_OUTPUT_MAX = 64 * 1024 * 1024;
+
 const convex = (args: ReadonlyArray<string>): string =>
   execFileSync(join(platformDir, "node_modules/.bin/convex"), args, {
     cwd: platformDir,
     encoding: "utf8",
+    maxBuffer: ROWS_OUTPUT_MAX,
     stdio: ["ignore", "pipe", "ignore"],
   });
 

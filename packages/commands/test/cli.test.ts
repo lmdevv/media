@@ -166,11 +166,32 @@ describe("CLI placement", () => {
     });
   });
 
+  it("lets stdin give only a command's one required secret", () => {
+    expect(
+      Object.fromEntries(
+        placed.flatMap((command) => {
+          const piped = secretsOf(command.args).filter((secret) => secret.stdin === true);
+
+          return piped.length === 0 ? [] : [[command.name, piped.map((secret) => secret.field)]];
+        }),
+      ),
+    ).toEqual({
+      "core.accounts.invites.lookup": ["code"],
+      "core.accounts.resetLinks.lookup": ["code"],
+      "core.accounts.users.create": ["password"],
+      "core.auth.sessions.revoke": ["refreshToken"],
+      "core.devices.approvals.request": ["device"],
+      "core.devices.picker.show": ["device"],
+      "core.devices.unlockCodes.set": ["code"],
+      "core.together.join": ["link"],
+    });
+  });
+
   it("keeps password arguments off the command line and pages lists", () => {
     const named = (name: string) => placed.find((command) => command.name === name)?.args ?? [];
 
     expect(secretsOf(named("core.accounts.users.create"))).toEqual([
-      { field: "password", variable: "MEDIA_ARG_PASSWORD" },
+      { field: "password", variable: "MEDIA_ARG_PASSWORD", stdin: true },
     ]);
     expect(secretsOf(named("core.accounts.me.changePassword"))).toEqual([
       { field: "currentPassword", variable: "MEDIA_ARG_CURRENT_PASSWORD" },

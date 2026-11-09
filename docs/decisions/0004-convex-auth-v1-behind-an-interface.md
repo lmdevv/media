@@ -1,8 +1,8 @@
 # 0004. Use Convex Auth v1 behind a thin interface and check every session live
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with how sign-in was built, again on
-  2026-11-04 to give each API key sign-in its own session, and again on 2026-11-04 with the
-  account sign-ins.
+  2026-11-04 to give each API key sign-in its own session, again on 2026-11-04 with the
+  account sign-ins, and on 2026-11-09 with the core's store in front of Convex Auth's.
 - Decisions: D14
 
 ## Context
@@ -94,14 +94,17 @@ The first sign-in in the core settled the interface, the session record, and the
     Each sign-in with a key opens its own session, and a key keeps its newest 100 (see "One
     session per API key sign-in" below). A key cannot create a key or approve a device, even with
     the `account` scope, so a leaked key cannot mint a credential that outlives its own revocation.
+    A key's name, and a device code's client name, follow the device-name rule (ADR 0006): a
+    name that breaks it is refused with `invalid_args`.
   - A device code lasts 10 minutes, at most 50 wait at once, and the device polls `auth:signIn`,
     which answers `pending`, `denied`, or `expired` until approval. After approval the code signs
     the device into the same session until it expires, so a lost answer costs only a retry.
 - **Cleanup.** Ending a session deletes it at once, then its refresh tokens 256 a call, scheduling
   the next call until none is left: a session gathers one per JWT, thousands over 30 days, more
-  than one call may delete. Revoking a key deletes its sessions at
+  than one call may delete. `auth:signOut` and the refreshes below end sessions the same way.
+  Revoking a key deletes its sessions at
   once and leaves their refresh tokens to the sweep. Ending every session or key deletes the ended
-  rows in scheduled batches. An hourly sweep deletes expired refresh tokens, old device codes, and
+  rows in scheduled batches, and schedules each ended session's refresh tokens the same way. An hourly sweep deletes expired refresh tokens, old device codes, and
   idle rate-limit buckets.
 - **Scopes.** `account` is the first credential scope (ADR 0005). It manages the caller's own
   credentials. A password session holds every scope its user may use. A key or device session
@@ -185,3 +188,40 @@ Rejected:
   two Scrypt runs, about twice the measured p50.
 - One `password` provider with a `flow` param. Its params would be a union, and the sign-in
   bucket's rules would sit beside flows that must not take from it.
+
+## The core's store in front of Convex Auth's (amended 2026-11-09)
+
+Convex Auth 0.0.96 reads every refresh token of a session in one call in four places:
+`auth:signOut`, a refresh with a token that is expired or whose session is gone or expired, a
+refresh with a used token past its 10-second reuse window (it walks every token descended from it),
+and a sign-in that replaces the caller's session. A session gathers thousands of tokens over 30
+days, and one call may read 4,096 rows, so each failed for a long-lived session, and a reused
+token past the window left its session unrevoked.
+
+- **Decision.** The library calls its store by name, `auth:store`. The core exports its own
+  `store` there (`convex/auth.ts`, logic in `core/auth/store.ts`) and the library's at
+  `auth:libraryStore`. The core's store takes only the calls the core's flows make: a sign-in that
+  names its session (every provider opens its own, so the fourth path is unreachable), a sign-out,
+  and a refresh. It refuses email, OAuth, and account calls as arguments.
+- **Sign-out** ends the caller's session through `endSession`.
+- **Refresh.** Before the library sees one, the store answers the cases that read every token:
+  - an expired token, or one whose session is gone or expired, ends its session through
+    `endSession` and refreshes nothing;
+  - a used token past the reuse window, unless it is the parent of the newest token, ends its
+    session the same way. The library left such a session unable to refresh but its JWT live for
+    up to 10 minutes; ending it signs the person out at once instead, which is where both lead;
+  - a token that is gone, or whose stored session differs from the one it names, refreshes
+    nothing and ends nothing. It proves no hold on the session it names, where the library ended
+    that session, so knowing a session id and holding any refresh token signed its owner out.
+
+  The rest go to the library's store through `ctx.runMutation`, in the same transaction, and none
+  of them reads more than the token, its session, and the newest token.
+
+- **The newest token is the active one.** Every refresh the library answers adds a token or hands
+  back the newest, so the store reads one row where the library scans for the newest unused one.
+- **Rejected: patching or forking the library.** The pinned package stays as published, and the
+  store depends only on its store's call shapes and two constants it does not export (the reuse
+  window and the token divider), which a version bump must check.
+- This narrows the rejection above of intercepting Convex Auth's refresh. Since every client has
+  its own session, the store does not skip a delete; it only ends sessions in batches the library
+  would end, or leave unable to refresh, in one call.

@@ -6,20 +6,13 @@ import { scanKindOf } from "./jobs/kinds";
 import { progressOf } from "./jobs/machine";
 import { cancel, enqueue } from "./jobs/queue";
 import type { Enqueued, JobCtx } from "./jobs/store";
-import { fail } from "./lib/errors";
+import { GIVEN_NAME_MAX, requireGivenName } from "./lib/names";
 import { requireServer } from "./permissions/authorize";
 import { deleteGrantsOn, grantCreator, requireContent, visiblePage } from "./permissions/grants";
 import { forgetItemCount, itemCount, schedulePurge } from "./scans";
 
-const NAME_MAX = 64;
-
-const parseName = (typed: string): string => {
-  const name = typed.trim();
-
-  return name.length === 0 || name.length > NAME_MAX
-    ? fail("invalid_args", `Name a library with 1 to ${NAME_MAX} characters`)
-    : name;
-};
+const parseName = (typed: string): string =>
+  requireGivenName(typed, `Name a library with 1 to ${GIVEN_NAME_MAX} printable characters`);
 
 const libraryRef = (id: Id<"libraries">) => ({ type: "library", id }) as const;
 

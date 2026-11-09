@@ -74,6 +74,13 @@ The registry, the picker, tiles, unlock codes, and approvals are in
 - An app registers after it signs in, with `core.devices.registry.enroll`. When it passes its
   stored code, the new session joins the same device. A lost or unknown code registers a new
   device.
+- A device's name is shown to other people: in the picker, approvals, and Connect. The name
+  `enroll` and `core.devices.deviceGrants.issue` take, and a device code's client name, follow the
+  rule guest names follow (ADR 0007, `printableName` in `core/lib/names.ts`): NFKC form, trimmed,
+  no control, bidirectional, private-use, or unassigned character, at least one visible one, and
+  at most 64 code points. The app builds the name and sends it once, at enrollment, so one that
+  breaks the rule is refused with `invalid_args`. A Cast receiver's name comes in every report
+  instead, so it is kept as null (ADR 0018).
 - A device holds one session. Binding a session to it, by enrolling on a personal device or by
   opening a tile on a shared one, ends the session it held, whoever's. Each bind takes the next
   number on the device's count, `devices.joins`, which goes on across mode changes. `enroll`

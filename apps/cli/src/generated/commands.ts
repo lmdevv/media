@@ -76,7 +76,7 @@ export const generatedCommands = [
     scope: "public",
     refusesKeys: false,
     summary: "Show what an invite code offers, or refuse it when it no longer works",
-    secrets: [{ field: "code", variable: "MEDIA_ARG_CODE" }],
+    secrets: [{ field: "code", variable: "MEDIA_ARG_CODE", stdin: true }],
     paginated: false,
     args: Schema.Struct({ code: Schema.String }),
     result: Schema.Struct({
@@ -148,7 +148,7 @@ export const generatedCommands = [
     scope: "public",
     refusesKeys: false,
     summary: "Show whose password a reset code sets, or refuse it when it no longer works",
-    secrets: [{ field: "code", variable: "MEDIA_ARG_CODE" }],
+    secrets: [{ field: "code", variable: "MEDIA_ARG_CODE", stdin: true }],
     paginated: false,
     args: Schema.Struct({ code: Schema.String }),
     result: Schema.Struct({ username: Schema.String, expiresAt: Schema.Finite }),
@@ -161,7 +161,7 @@ export const generatedCommands = [
     scope: "admin",
     refusesKeys: true,
     summary: "Create a user with a username and password you choose for them",
-    secrets: [{ field: "password", variable: "MEDIA_ARG_PASSWORD" }],
+    secrets: [{ field: "password", variable: "MEDIA_ARG_PASSWORD", stdin: true }],
     paginated: false,
     args: Schema.Struct({
       username: Schema.String,
@@ -468,7 +468,7 @@ export const generatedCommands = [
     refusesKeys: false,
     summary:
       "End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended",
-    secrets: [{ field: "refreshToken", variable: "MEDIA_ARG_REFRESH_TOKEN" }],
+    secrets: [{ field: "refreshToken", variable: "MEDIA_ARG_REFRESH_TOKEN", stdin: true }],
     paginated: false,
     args: Schema.Struct({ refreshToken: Schema.String }),
     result: Schema.Struct({ confirmed: Schema.Literal(true) }),
@@ -646,7 +646,7 @@ export const generatedCommands = [
     refusesKeys: false,
     summary:
       "From a shared device, ask someone signed in elsewhere to open their locked tile, or an adult to let a kid leave",
-    secrets: [{ field: "device", variable: "MEDIA_ARG_DEVICE" }],
+    secrets: [{ field: "device", variable: "MEDIA_ARG_DEVICE", stdin: true }],
     paginated: false,
     args: Schema.Struct({
       device: Schema.String,
@@ -750,7 +750,7 @@ export const generatedCommands = [
     refusesKeys: false,
     summary:
       "Show a device's picker: who is signed in on it, or on a shared device who opted in, which tiles are locked, and its approval",
-    secrets: [{ field: "device", variable: "MEDIA_ARG_DEVICE" }],
+    secrets: [{ field: "device", variable: "MEDIA_ARG_DEVICE", stdin: true }],
     paginated: false,
     args: Schema.Struct({ device: Schema.String }),
     result: Schema.Union([
@@ -965,7 +965,7 @@ export const generatedCommands = [
     refusesKeys: true,
     summary:
       "Set or clear your short unlock code, which opens your tile on shared-device lock screens and never signs in",
-    secrets: [{ field: "code", variable: "MEDIA_ARG_CODE", clearable: true }],
+    secrets: [{ field: "code", variable: "MEDIA_ARG_CODE", clearable: true, stdin: true }],
     paginated: false,
     args: Schema.Struct({ code: Schema.Union([Schema.String, Schema.Null]) }),
     result: Schema.Null,
@@ -2470,7 +2470,7 @@ export const generatedCommands = [
     refusesKeys: false,
     summary:
       "Join the group session a link opens, or wait for its host to let you in; leaves your other session in this domain",
-    secrets: [{ field: "link", variable: "MEDIA_ARG_LINK" }],
+    secrets: [{ field: "link", variable: "MEDIA_ARG_LINK", stdin: true }],
     paginated: false,
     args: Schema.Struct({
       domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),

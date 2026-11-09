@@ -1,3 +1,5 @@
+import { fail } from "./errors";
+
 /**
  * Control, private-use, unassigned, and surrogate code points, line and paragraph separators, and
  * the bidirectional controls that reorder what others see. Zero-width joiners stay: emoji
@@ -17,3 +19,20 @@ export const printableName = (typed: string): string | null => {
 
   return !UNPRINTABLE.test(name) && VISIBLE.test(name) ? name : null;
 };
+
+/** `typed` as a printable name of at most `max` code points, or null. */
+export const printableWithin = (typed: string, max: number): string | null => {
+  const name = printableName(typed);
+
+  return name !== null && Array.from(name).length <= max ? name : null;
+};
+
+/** Most code points in a name a person gives a device, group, library, or key. */
+export const GIVEN_NAME_MAX = 64;
+
+/**
+ * A device, group, library, or key name, which other people see: printable and at most
+ * `GIVEN_NAME_MAX` code points, or `invalid_args` with `refusal`.
+ */
+export const requireGivenName = (typed: string, refusal: string): string =>
+  printableWithin(typed, GIVEN_NAME_MAX) ?? fail("invalid_args", refusal);

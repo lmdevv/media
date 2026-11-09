@@ -10,6 +10,7 @@ import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { refuseKeys, requireCaller } from "../auth/caller";
 import type { Caller } from "../auth/caller";
 import { fail } from "../lib/errors";
+import { GIVEN_NAME_MAX, requireGivenName } from "../lib/names";
 import { paginate } from "../lib/paginate";
 import { takeAttempt } from "../lib/rateLimit";
 import {
@@ -27,21 +28,14 @@ import { endSession, liveOnDevice } from "../sessions";
 import { dropApprovals } from "./approvals";
 import { DEVICE_PREFIX, NO_DEVICE } from "./facts";
 
-const NAME_MAX = 64;
-
 const DEVICE_SESSIONS_READ = 200;
 
 const ENROLLS_PER_HOUR = 20;
 
 const PURGE_BATCH = 100;
 
-const parseName = (name: string): string => {
-  const trimmed = name.trim();
-
-  return trimmed.length === 0 || trimmed.length > NAME_MAX
-    ? fail("invalid_args", `Name the device with 1 to ${NAME_MAX} characters`)
-    : trimmed;
-};
+const parseName = (name: string): string =>
+  requireGivenName(name, `Name the device with 1 to ${GIVEN_NAME_MAX} printable characters`);
 
 interface SignedInHere {
   readonly sessionId: Id<"authSessions">;

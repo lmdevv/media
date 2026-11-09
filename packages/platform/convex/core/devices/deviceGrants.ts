@@ -8,6 +8,7 @@ import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { callerUser, requireCaller } from "../auth/caller";
 import type { Caller } from "../auth/caller";
 import { fail } from "../lib/errors";
+import { GIVEN_NAME_MAX, requireGivenName } from "../lib/names";
 import { PAGE_ROWS_MAX, paginateAtMost } from "../lib/paginate";
 import { takeAttempt } from "../lib/rateLimit";
 import {
@@ -34,8 +35,6 @@ import {
 /** A device grant reads `dg_<grantId>.<secret>`. */
 export const GRANT_PREFIX = "dg";
 
-const NAME_MAX = 64;
-
 const ISSUES_PER_HOUR = 20;
 
 /** One answer for every grant that does not sign in, so a refusal tells nothing about the grant. */
@@ -48,13 +47,8 @@ const LIST_ROW_READS = 1 + 2 * GRANT_SESSIONS_MAX;
 
 const LIST_ROWS = Math.floor((PAGE_ROWS_MAX - LIST_CALL_READS) / LIST_ROW_READS);
 
-const parseName = (name: string): string => {
-  const trimmed = name.trim();
-
-  return trimmed.length === 0 || trimmed.length > NAME_MAX
-    ? fail("invalid_args", `Name the device with 1 to ${NAME_MAX} characters`)
-    : trimmed;
-};
+const parseName = (name: string): string =>
+  requireGivenName(name, `Name the device with 1 to ${GIVEN_NAME_MAX} printable characters`);
 
 const refusal = (action: GrantAction, because: Because): string => {
   if (because === "scope") return "Only your own account session can do this";

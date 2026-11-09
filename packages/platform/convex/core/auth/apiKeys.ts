@@ -10,6 +10,7 @@ import type { DataModel, Doc, Id } from "../../_generated/dataModel";
 import { internalAction, internalMutation, internalQuery } from "../../_generated/server";
 import type { MutationCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
+import { GIVEN_NAME_MAX, requireGivenName } from "../lib/names";
 import {
   constantTimeEqual,
   formatSecret,
@@ -24,8 +25,6 @@ import { callerUser, refuseKeys, requireCaller } from "./caller";
 const PREFIX = "mk";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-const NAME_MAX = 64;
 
 const EXPIRY_DAYS_MAX = 365;
 
@@ -187,12 +186,13 @@ export const insert = internalMutation({
   handler: async (ctx, { name, scopes, expiresInDays, secretHash }) => {
     const caller = refuseKeys(await requireCaller(ctx, "account"));
     const user = await callerUser(ctx, caller);
-    const trimmed = name.trim();
-    const granted = [...new Set(scopes)];
 
-    if (trimmed.length === 0 || trimmed.length > NAME_MAX) {
-      return fail("invalid_args", `Name the key with 1 to ${NAME_MAX} characters`);
-    }
+    const named = requireGivenName(
+      name,
+      `Name the key with 1 to ${GIVEN_NAME_MAX} printable characters`,
+    );
+
+    const granted = [...new Set(scopes)];
 
     if (granted.some((scope) => !caller.scopes.includes(scope))) {
       return fail("forbidden", "A key can hold only scopes this session holds");
@@ -209,7 +209,7 @@ export const insert = internalMutation({
 
     const fields = {
       userId: user._id,
-      name: trimmed,
+      name: named,
       secretHash,
       scopes: granted,
       generation: user.keyGeneration,

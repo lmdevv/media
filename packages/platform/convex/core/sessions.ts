@@ -405,13 +405,25 @@ export const endUserKeys = async (
 };
 
 const deleteEnded = async <Row extends Doc<"authSessions"> | Doc<"apiKeys">>(
-  ctx: Pick<MutationCtx, "db">,
   page: PaginationResult<Row>,
   ended: (row: Row) => boolean,
+  drop: (row: Row) => Promise<void>,
 ): Promise<PaginationResult<Row>> => {
-  await Promise.all(page.page.flatMap((row) => (ended(row) ? [ctx.db.delete(row._id)] : [])));
+  await Promise.all(page.page.flatMap((row) => (ended(row) ? [drop(row)] : [])));
 
   return page;
+};
+
+/**
+ * Deletes an ended session and schedules its refresh tokens' deletion, a batch per call, so a page
+ * of sessions stays inside one call's reads however many tokens each gathered.
+ */
+const dropSession = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  sessionId: Id<"authSessions">,
+): Promise<void> => {
+  await ctx.db.delete(sessionId);
+  await ctx.scheduler.runAfter(0, internal.core.sessions.endRefreshTokens, { sessionId });
 };
 
 const purgeArgs = {
@@ -434,22 +446,22 @@ export const purge = internalMutation({
     const page =
       table === "authSessions"
         ? await deleteEnded(
-            ctx,
             await paginate(
               ctx.db,
               { table, index: "userId", range: (q) => q.eq("userId", userId) },
               options,
             ),
             (session) => !isLive(session, user, now),
+            (session) => dropSession(ctx, session._id),
           )
         : await deleteEnded(
-            ctx,
             await paginate(
               ctx.db,
               { table, index: "by_user", range: (q) => q.eq("userId", userId) },
               options,
             ),
             (key) => !keyWorks(key, user, now),
+            (key) => ctx.db.delete(key._id),
           );
 
     if (!page.isDone) {
