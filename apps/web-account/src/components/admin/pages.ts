@@ -180,6 +180,7 @@ export const pagedStore = <Row>(
     pages.push({ watch: next, before: null });
     starts.push(cursor);
     listen(next);
+    stopReplacedWatches();
 
     for (const onChange of listening.keys()) onChange();
   };
