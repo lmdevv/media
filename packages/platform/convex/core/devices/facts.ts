@@ -157,7 +157,7 @@ export const requireTile = async (
  * session: of two tiles opened at once, the higher number is the one still open.
  */
 export const occupyTile = async (
-  ctx: Pick<MutationCtx, "db">,
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
   device: SharedDevice,
   tile: { readonly userId: Id<"users">; readonly sessionId: Id<"authSessions"> },
 ): Promise<number> => {
@@ -177,7 +177,7 @@ export const occupyTile = async (
 
 /** Empties the device's slot, which ends its tile session and any kid's hold. */
 export const releaseTile = async (
-  ctx: Pick<MutationCtx, "db">,
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
   device: SharedDevice,
 ): Promise<void> => {
   if (device.tile === null) return;

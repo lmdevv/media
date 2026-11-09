@@ -21,8 +21,12 @@ const TILE_SESSION_MS = 12 * 60 * 60 * 1000;
 
 const PURGE_BATCH = 100;
 
-/** More refresh tokens than a session can gather: one per JWT lifetime for its whole life. */
-const SESSION_REFRESH_TOKENS_MAX = Math.ceil(SESSION_MS / JWT_MS) + 500;
+/**
+ * Refresh tokens one call deletes. A session gathers one per JWT lifetime, thousands over its life,
+ * and each delete counts toward the 4,096 reads a call may make (a call deleting 4,820 failed at
+ * the 4,077th), so the rest go a call at a time.
+ */
+const REFRESH_TOKENS_PER_CALL = 256;
 
 const KEY_SESSIONS_MAX = 100;
 
@@ -145,7 +149,7 @@ const keySessions = (db: DatabaseReader, keyId: Id<"apiKeys">) =>
   db.query("authSessions").withIndex("by_key", (q) => q.eq("keyId", keyId));
 
 const endKeySessionsBeyondNewest = async (
-  ctx: Pick<MutationCtx, "db">,
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
   keyId: Id<"apiKeys">,
 ): Promise<void> => {
   const newest = await keySessions(ctx.db, keyId)
@@ -157,7 +161,7 @@ const endKeySessionsBeyondNewest = async (
 
 /** Opens a session for `user`, stamped with the generation of what opened it. */
 export const openSession = async (
-  ctx: Pick<MutationCtx, "db">,
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
   user: Doc<"users">,
   opening: Opening,
   now: number,
@@ -223,20 +227,44 @@ const schedulePurge = async (
   await ctx.scheduler.runAfter(0, internal.core.sessions.purge, { userId, table, cursor: null });
 };
 
-/** Ends one session and its refresh tokens. */
-export const endSession = async (
-  ctx: Pick<MutationCtx, "db">,
+const deleteRefreshTokens = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
   sessionId: Id<"authSessions">,
 ): Promise<void> => {
-  const refreshTokens = await ctx.db
+  const batch = await ctx.db
     .query("authRefreshTokens")
     .withIndex("sessionId", (q) => q.eq("sessionId", sessionId))
-    .take(SESSION_REFRESH_TOKENS_MAX);
+    .take(REFRESH_TOKENS_PER_CALL + 1);
 
-  await Promise.all(refreshTokens.map((token) => ctx.db.delete(token._id)));
+  await Promise.all(
+    batch.slice(0, REFRESH_TOKENS_PER_CALL).map((token) => ctx.db.delete(token._id)),
+  );
 
-  if ((await ctx.db.get(sessionId)) !== null) await ctx.db.delete(sessionId);
+  if (batch.length > REFRESH_TOKENS_PER_CALL) {
+    await ctx.scheduler.runAfter(0, internal.core.sessions.endRefreshTokens, { sessionId });
+  }
 };
+
+/** Ends one session at once, and deletes its refresh tokens a batch per call. */
+export const endSession = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  sessionId: Id<"authSessions">,
+): Promise<void> => {
+  if ((await ctx.db.get(sessionId)) !== null) await ctx.db.delete(sessionId);
+
+  await deleteRefreshTokens(ctx, sessionId);
+};
+
+/** The refresh tokens an ended session still has, past the batch `endSession` deleted. */
+export const endRefreshTokens = internalMutation({
+  args: { sessionId: v.id("authSessions") },
+  returns: v.null(),
+  handler: async (ctx, { sessionId }) => {
+    await deleteRefreshTokens(ctx, sessionId);
+
+    return null;
+  },
+});
 
 /**
  * Ends every session a key opened, at once. They are at most `KEY_SESSIONS_MAX` rows, and their

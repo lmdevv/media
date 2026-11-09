@@ -97,7 +97,9 @@ The first sign-in in the core settled the interface, the session record, and the
   - A device code lasts 10 minutes, at most 50 wait at once, and the device polls `auth:signIn`,
     which answers `pending`, `denied`, or `expired` until approval. After approval the code signs
     the device into the same session until it expires, so a lost answer costs only a retry.
-- **Cleanup.** Ending a session deletes its refresh tokens. Revoking a key deletes its sessions at
+- **Cleanup.** Ending a session deletes it at once, then its refresh tokens 256 a call, scheduling
+  the next call until none is left: a session gathers one per JWT, thousands over 30 days, more
+  than one call may delete. Revoking a key deletes its sessions at
   once and leaves their refresh tokens to the sweep. Ending every session or key deletes the ended
   rows in scheduled batches. An hourly sweep deletes expired refresh tokens, old device codes, and
   idle rate-limit buckets.

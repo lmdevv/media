@@ -1,11 +1,23 @@
 import { ConvexHttpClient } from "convex/browser";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
+import { importRows, newestRows } from "../../rows";
 import { createPerson, refusal, signInAs } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 
 const stack = coreStackFromEnvFile();
+
+/** More refresh tokens than a session gathers in its 30 days at one per 10-minute JWT. */
+const PILED_UP = 5000;
+
+const TokenRow = Schema.fromJsonString(Schema.Struct({ sessionId: Schema.String }));
+
+const tokensOf = (sessionId: string): number =>
+  newestRows("authRefreshTokens", PILED_UP + 1000).filter(
+    (line) => Schema.decodeSync(TokenRow)(line).sessionId === sessionId,
+  ).length;
 
 describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_000 }, () => {
   it("refuses a call with no session", async () => {
@@ -147,6 +159,26 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
       "unauthenticated",
     );
     expect(await signInAs(stack, person)).toBeDefined();
+  });
+
+  it("deletes every refresh token of an ended session, however many it gathered", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const { sessionId } = await signedIn.client.query(api.core.auth.sessions.current, {});
+    const expirationTime = Date.now() + 24 * 60 * 60 * 1000;
+
+    importRows(
+      "authRefreshTokens",
+      Array.from({ length: PILED_UP }, () => ({ sessionId, expirationTime })),
+    );
+
+    expect(tokensOf(sessionId)).toBe(PILED_UP + 1);
+
+    await signedIn.client.mutation(api.core.auth.sessions.revoke, {
+      refreshToken: signedIn.refreshToken,
+    });
+
+    await expect.poll(() => tokensOf(sessionId), { timeout: 30_000, interval: 1_000 }).toBe(0);
   });
 
   it("refuses to end another user's session", async () => {
