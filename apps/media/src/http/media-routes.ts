@@ -144,6 +144,17 @@ const CONTENT_TYPES: Readonly<Record<Container, string>> = {
 
 const SEGMENT_CACHE = "private, max-age=3600";
 
+/** How long a request waits for the library's disk, which a hung network share never answers. */
+const FILE_WAIT = Duration.seconds(30);
+
+const withinFileWait = <A, E, R>(waiting: Effect.Effect<A, E, R>) =>
+  waiting.pipe(
+    Effect.timeoutOrElse({
+      duration: FILE_WAIT,
+      orElse: () => Effect.fail(new MediaFileUnreadable()),
+    }),
+  );
+
 const READ_CHUNK = 256 * 1024;
 
 const readWhole = (handle: FileSystem.File, size: number, readMs: Ref.Ref<number>) =>
@@ -387,9 +398,14 @@ export const layer: Layer.Layer<
         const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.PLAY_OR_DOWNLOAD);
 
         if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
-        const file = yield* resolve(grant.fileId, { sidecars: false });
 
-        return yield* fileResponse(request, file.path, CONTENT_TYPES[file.probe.container]);
+        return yield* withinFileWait(
+          Effect.gen(function* () {
+            const file = yield* resolve(grant.fileId, { sidecars: false });
+
+            return yield* fileResponse(request, file.path, CONTENT_TYPES[file.probe.container]);
+          }),
+        );
       }),
     ).pipe(Effect.withSpan("MediaRoutes.direct"));
 
@@ -405,11 +421,17 @@ export const layer: Layer.Layer<
         const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.DOWNLOAD);
 
         if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
-        const output = yield* downloads.output(grant.fileId, name);
 
-        if (Option.isNone(output)) return yield* new MediaFileNotFound({ fileId: grant.fileId });
+        return yield* withinFileWait(
+          Effect.gen(function* () {
+            const output = yield* downloads.output(grant.fileId, name);
 
-        return yield* fileResponse(request, output.value, CONTENT_TYPES.mp4);
+            if (Option.isNone(output))
+              return yield* new MediaFileNotFound({ fileId: grant.fileId });
+
+            return yield* fileResponse(request, output.value, CONTENT_TYPES.mp4);
+          }),
+        );
       }),
     ).pipe(Effect.withSpan("MediaRoutes.download"));
 
