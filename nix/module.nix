@@ -655,6 +655,9 @@ in
       requires = containerUnits;
       after = containerUnits ++ [ "network-online.target" ];
       wants = [ "network-online.target" ];
+      # setpriv starts every ffmpeg with a parent-death signal, so none outlives the service. The
+      # default KillMode (control-group) also stops anything left when the service exits.
+      path = [ pkgs.util-linux ];
 
       environment = {
         NODE_ENV = "production";

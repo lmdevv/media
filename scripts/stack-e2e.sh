@@ -19,6 +19,11 @@ fi
 
 library="$(mktemp -d)"
 node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
+# Ten minutes of video, so its transcode still runs when the crash check kills the media service.
+mkdir -p "$library/movies/Long Fixture (2020)"
+"${FFMPEG_PATH:-ffmpeg}" -hide_banner -nostdin -v error -y -f lavfi \
+  -i testsrc2=size=320x180:rate=24:duration=600 -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+  -g 48 "$library/movies/Long Fixture (2020)/Long Fixture (2020).mp4"
 # mktemp makes the folder private to this user; the media user (PUID) must read it, as it must
 # read any real library.
 chmod -R a+rX "$library"
@@ -170,6 +175,28 @@ check "the image's CLI reads the retained log as the owner" \
 check "the retained log is private to the media user" \
   '[[ "$(in_movies stat -c "%u %a" /data/movies/media/logs)" == "$PUID 700" ]] &&
     ! in_movies find /data/movies/media/logs -type f ! -perm 600 | grep -q .'
+
+running_ffmpeg() {
+  in_movies sh -c 'for p in /proc/[0-9]*; do
+    [ "$(cat "$p/comm" 2>/dev/null)" = ffmpeg ] && [ "$(cut -d" " -f3 "$p/stat" 2>/dev/null)" != Z ] &&
+      echo "${p#/proc/}"
+  done' || true
+}
+in_movies media play "Long Fixture" --max-height 144 >/dev/null ||
+  { echo "check failed: the image's CLI transcodes the long fixture" >&2; exit 1; }
+check "the media service runs ffmpeg before it crashes" '[[ -n "$(running_ffmpeg)" ]]'
+crashed="$(media_pid)"
+in_movies sh -c "kill -KILL $crashed"
+sleep 1
+check "a media service killed with SIGKILL leaves no ffmpeg running a second later" \
+  '[[ -z "$(running_ffmpeg)" ]]'
+for _ in $(seq 1 60); do
+  restarted="$(media_pid)"
+  [[ -n "$restarted" && "$restarted" != "$crashed" ]] && healthy && break
+  sleep 1
+done
+check "s6 restarts the media service after it crashes" \
+  '[[ -n "$restarted" && "$restarted" != "$crashed" ]] && healthy'
 
 archives() { in_movies sh -c "ls /data/$1/backups | grep -c '^$1-.*\.zip$'" || true; }
 before="$(archives movies)"

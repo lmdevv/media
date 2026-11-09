@@ -52,11 +52,20 @@ const QSV_ONLY = [
   "-forced_idr",
 ];
 
+/** Runs the real tool as the service runs tools: on Linux it dies with the stand-in that ran it. */
+const dyingWithParent = (realTool: string): string => `const run = (args, options) =>
+  process.platform === "linux"
+    ? spawnSync("setpriv", ["--pdeathsig", "KILL", "--", ${JSON.stringify(realTool)}, ...args], options)
+    : spawnSync(${JSON.stringify(realTool)}, args, options);
+`;
+
 const script = (realFfmpeg: string, behavior: FakeFfmpegBehavior): string => `#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+
+${dyingWithParent(realFfmpeg)}
 
 const behavior = ${JSON.stringify(behavior)};
 const qsvOnly = new Set(${JSON.stringify(QSV_ONLY)});
@@ -70,7 +79,7 @@ const qsv =
 const failsLater = qsv && behavior.qsvFailsAfterSeconds !== undefined;
 
 if (behavior.withoutSoftwareToneMapping === true && args.includes("-filters")) {
-  const listed = spawnSync(${JSON.stringify(realFfmpeg)}, args, { encoding: "utf8" });
+  const listed = run(args, { encoding: "utf8" });
 
   process.stdout.write(
     listed.stdout
@@ -141,7 +150,7 @@ if (stalls || failsAfterFirst) {
   let status = 0;
 
   try {
-    status = spawnSync(${JSON.stringify(realFfmpeg)}, redirected, { stdio: "inherit" }).status ?? 1;
+    status = run(redirected, { stdio: "inherit" }).status ?? 1;
 
     const kept = stalls ? behavior.hlsStallsAfterFragments : 1;
     const names = ["init.mp4", ...Array.from({ length: kept }, (_, index) => \`f\${index}.m4s\`)];
@@ -158,14 +167,12 @@ if (stalls || failsAfterFirst) {
   if (status !== 0) process.exit(status);
   if (failsAfterFirst) process.exit(1);
   const cue = join(dirname(process.argv[1] ?? ""), "cue");
-  const parent = process.ppid;
 
   setInterval(() => {
-    if (process.ppid !== parent) process.exit(1);
     if (behavior.hlsStallsUntilCue === true && existsSync(cue)) process.exit(1);
-  }, behavior.hlsStallsUntilCue === true ? 50 : 1000);
+  }, behavior.hlsStallsUntilCue === true ? 50 : 60_000);
 } else {
-  const result = spawnSync(${JSON.stringify(realFfmpeg)}, args, { stdio: "inherit" });
+  const result = run(args, { stdio: "inherit" });
 
   process.exit(failsLater ? 1 : (result.status ?? 1));
 }
@@ -187,13 +194,14 @@ const ffprobeScript = (
 ): string => `#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
+${dyingWithParent(realFfprobe)}
 const args = process.argv.slice(2);
 
 if (args.includes("packet=pts_time,flags")) {
   await new Promise((resolve) => setTimeout(resolve, ${String(packetScanDelayMs)}));
 }
 
-const result = spawnSync(${JSON.stringify(realFfprobe)}, args, { stdio: "inherit" });
+const result = run(args, { stdio: "inherit" });
 
 process.exit(result.status ?? 1);
 `;

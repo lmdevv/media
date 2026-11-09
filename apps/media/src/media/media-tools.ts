@@ -1,23 +1,9 @@
 import { setPriority } from "node:os";
 
-import {
-  Context,
-  Duration,
-  Effect,
-  Fiber,
-  type FileSystem,
-  Layer,
-  Option,
-  type Path,
-  Ref,
-  type Scope,
-  Schema,
-  Stream,
-} from "effect";
+import { Context, Duration, Effect, Fiber, Layer, Ref, type Scope, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as MediaConfig from "../media-config.ts";
-import * as EncoderRecords from "./encoder-records.ts";
 
 /** A media tool could not start, or exited unsuccessfully. */
 export class MediaToolFailed extends Schema.TaggedError<MediaToolFailed>()("MediaToolFailed", {
@@ -66,8 +52,7 @@ export interface Interface {
   ) => Effect.Effect<string, MediaToolFailed>;
   /**
    * Starts ffmpeg in the current scope. Closing the scope kills the whole process group with
-   * `SIGKILL`; its output is disposable. The run is recorded until its exit is confirmed, so a
-   * crashed server's next start kills it.
+   * `SIGKILL`; its output is disposable. On Linux it also dies with the server.
    */
   readonly startFfmpeg: (
     args: ReadonlyArray<string>,
@@ -81,6 +66,14 @@ const STDERR_TAIL = 4096;
 
 /** The nicest CPU priority on Unix systems. */
 const LOWEST_PRIORITY = 19;
+
+/**
+ * util-linux `setpriv` sets the tool's parent-death signal, then becomes the tool under the same
+ * pid. The kernel then kills the tool when the server dies, even by SIGKILL, so a crash leaves no
+ * ffmpeg behind. The signal follows the thread that spawned the tool, and Node spawns from its
+ * main thread, which lives as long as the server.
+ */
+const DIE_WITH_PARENT = ["--pdeathsig", "KILL", "--"] as const;
 
 const scrubPaths = (text: string, args: ReadonlyArray<string>): string =>
   args
@@ -120,7 +113,6 @@ export const toolEnvironment = (
 const make = Effect.gen(function* () {
   const config = yield* MediaConfig.Service;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const records = yield* EncoderRecords.Service;
   const env = toolEnvironment(process.env);
 
   const spawn = Effect.fnUntraced(function* (
@@ -132,16 +124,13 @@ const make = Effect.gen(function* () {
     const failed = (exitCode: number | null, stderr: string, cause: unknown) =>
       new MediaToolFailed({ tool, exitCode, stderr: scrubPaths(stderr, args), cause });
 
-    const command = ChildProcess.make(
-      tool === "ffmpeg" ? config.ffmpegPath : config.ffprobePath,
-      args,
-      {
-        env,
-        stdin: "ignore",
-        killSignal,
-        forceKillAfter: "2 seconds",
-      },
-    );
+    const program = tool === "ffmpeg" ? config.ffmpegPath : config.ffprobePath;
+    const options = { env, stdin: "ignore", killSignal, forceKillAfter: "2 seconds" } as const;
+
+    const command =
+      process.platform === "linux"
+        ? ChildProcess.make("setpriv", [...DIE_WITH_PARENT, program, ...args], options)
+        : ChildProcess.make(program, args, options);
 
     const handle = yield* spawner
       .spawn(command)
@@ -191,7 +180,6 @@ const make = Effect.gen(function* () {
       );
 
     return {
-      pid: handle.pid,
       exit,
       stderrTail: Ref.get(stderr).pipe(Effect.map((text) => scrubPaths(text, args))),
       suspend,
@@ -226,19 +214,7 @@ const make = Effect.gen(function* () {
     }, Effect.scoped);
 
   const startFfmpeg = Effect.fn("MediaTools.startFfmpeg")(function* (args: ReadonlyArray<string>) {
-    const recorded = yield* Ref.make(Option.none<number>());
-
-    // Finalizers run last in, first out: this one runs once the process group's exit is confirmed.
-    yield* Effect.addFinalizer(() =>
-      Ref.get(recorded).pipe(
-        Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: records.forget })),
-      ),
-    );
-
     const running = yield* spawn("ffmpeg", args, "SIGKILL");
-
-    yield* records.record(running.pid);
-    yield* Ref.set(recorded, Option.some(running.pid));
 
     return {
       exit: Effect.asVoid(running.exit),
@@ -255,12 +231,9 @@ const make = Effect.gen(function* () {
   });
 });
 
-/**
- * Media tools over the platform's child process spawner. Building them kills the encoders an
- * earlier run of the server recorded and never saw exit.
- */
+/** Media tools over the platform's child process spawner. */
 export const layer: Layer.Layer<
   Service,
   never,
-  MediaConfig.Service | ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
-> = Layer.effect(Service, make).pipe(Layer.provide(EncoderRecords.layer));
+  MediaConfig.Service | ChildProcessSpawner.ChildProcessSpawner
+> = Layer.effect(Service, make);
