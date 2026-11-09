@@ -1,6 +1,6 @@
 import type { PlaybackSessionId } from "@media/contracts/ids";
 import { TranscodeCapacityReached } from "@media/contracts/media-playback";
-import { Data, Deferred, Effect, Predicate, Ref, Scope } from "effect";
+import { Data, Deferred, Effect, Option, Predicate, Ref, Scope } from "effect";
 
 /** Who a stream plays for, which sets its priority under a limit (ADR 0007, ADR 0014). */
 export type Audience = "household" | "guest";
@@ -238,6 +238,8 @@ const settle = (waiters: ReadonlyArray<Waiter>) =>
 const displace = (slots: ReadonlyArray<Slot>) =>
   Effect.forEach(slots, (slot) => Deferred.succeed(slot.displaced, undefined), { discard: true });
 
+const NOTHING_FILLED: Filled = { seated: [], superseded: [] };
+
 const settleFilled = ({ seated, superseded }: Filled) =>
   displace(superseded.map((waiter) => waiter.slot)).pipe(
     Effect.andThen(settle([...superseded, ...seated])),
@@ -325,18 +327,21 @@ export const make = Effect.fnUntraced(function* (limit: number) {
           place.takenOverBy !== null ||
           Deferred.isDoneUnsafe(place.displaced)
         ) {
-          return [false, current] as const;
+          return [Option.none<Filled>(), current] as const;
         }
 
         const slots = new Map(current.slots)
           .set(place.id, { ...place, takenOverBy: slot.id })
           .set(slot.id, slot);
 
-        return [true, { ...current, slots }] as const;
+        const [filled, next] = fillLine({ ...current, slots }, limit);
+
+        return [Option.some(filled), next] as const;
       });
 
-      if (renewed) {
+      if (Option.isSome(renewed)) {
         yield* Scope.addFinalizer(scope, leave(slot));
+        yield* settleFilled(renewed.value);
       } else {
         yield* Deferred.succeed(slot.displaced, undefined);
       }
@@ -348,25 +353,31 @@ export const make = Effect.fnUntraced(function* (limit: number) {
     Effect.gen(function* () {
       const slot = yield* slotFor(claimant, "household");
 
-      const decision = yield* Ref.modify(state, (current) => {
-        if (Predicate.isTagged(scope.state, "Closed") || supersedes(current.slots, claimant)) {
-          return [HouseholdDecision.Lost(), current] as const;
-        }
+      const [decision, filled] = yield* Ref.modify(
+        state,
+        (current): readonly [readonly [HouseholdDecision, Filled], State] => {
+          if (Predicate.isTagged(scope.state, "Closed") || supersedes(current.slots, claimant)) {
+            return [[HouseholdDecision.Lost(), NOTHING_FILLED], current];
+          }
 
-        const decided = decideHousehold(current, claimant, limit);
+          const decided = decideHousehold(current, claimant, limit);
 
-        return HouseholdDecision.$match(decided, {
-          Take: ({ victims }) =>
-            [decided, { ...current, slots: seat(current.slots, slot, victims) }] as const,
-          Full: () => [decided, current] as const,
-          Lost: () => [decided, current] as const,
-        });
-      });
+          if (!HouseholdDecision.$is("Take")(decided)) return [[decided, NOTHING_FILLED], current];
+
+          const [taken, next] = fillLine(
+            { ...current, slots: seat(current.slots, slot, decided.victims) },
+            limit,
+          );
+
+          return [[decided, taken], next];
+        },
+      );
 
       return yield* HouseholdDecision.$match(decision, {
         Take: ({ victims }) =>
           Scope.addFinalizer(scope, leave(slot)).pipe(
             Effect.andThen(displace(victims)),
+            Effect.andThen(settleFilled(filled)),
             Effect.as(heldBy(slot)),
           ),
         Full: () => Effect.fail(new TranscodeCapacityReached({ limit })),

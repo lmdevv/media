@@ -409,6 +409,27 @@ describe("encoder slots", () => {
   );
 
   it.effect(
+    "an older stream waiting in line gives up once a newer household stream of its session is seated",
+    () =>
+      Effect.gen(function* () {
+        const pool = yield* EncoderSlots.make(1);
+        const other = yield* pool.guest(yield* Scope.make(), claimant("other", 1));
+        yield* other.ready;
+
+        const waiting = yield* Effect.forkChild(
+          pool.guest(yield* Scope.make(), claimant("older", 2, { session: "session" })),
+        );
+
+        assert.isTrue(yield* stillRunning(waiting), "the older stream waits for the slot");
+
+        yield* pool.household(yield* Scope.make(), claimant("newer", 3, { session: "session" }));
+
+        assert.isFalse(yield* stillRunning(waiting), "the older stream stops waiting");
+        assert.isTrue(yield* (yield* Fiber.join(waiting)).isLost, "and takes nothing");
+      }),
+  );
+
+  it.effect(
     "a stream that replaces a household stream before its taken guest stops waits for the guest",
     () =>
       Effect.gen(function* () {
