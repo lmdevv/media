@@ -247,11 +247,18 @@ interface Generation {
   readonly fragments: Ref.Ref<ReadonlyArray<Fragment>>;
   readonly refreshLock: Semaphore.Semaphore;
   readonly wake: MutableRef.MutableRef<Deferred.Deferred<void>>;
+  /** The read of the run's new fragments in progress, with the fragment wake it began under. */
+  readonly refreshing: MutableRef.MutableRef<Option.Option<Refresh>>;
   readonly endUnknownLogged: MutableRef.MutableRef<boolean>;
   /** The video timing read from the run's `init.mp4`, once its first fragment is written. */
   readonly videoTiming: MutableRef.MutableRef<Option.Option<VideoTiming>>;
   readonly suspend: (paused: boolean) => Effect.Effect<void>;
   readonly paused: Ref.Ref<boolean>;
+}
+
+interface Refresh {
+  readonly seen: Deferred.Deferred<void>;
+  readonly reading: Fiber.Fiber<boolean>;
 }
 
 interface RunScope {
@@ -410,16 +417,21 @@ const whileOpen = <A, E, R>(scope: Scope.Scope, effect: Effect.Effect<A, E, R>) 
 const wholly = <A, E>(read: Effect.Effect<A, E>) =>
   Effect.uninterruptibleMask((restore) => restore(Effect.void).pipe(Effect.andThen(read)));
 
-const readerOf = <A, E>(generation: Generation, read: Effect.Effect<A, E>) =>
-  wholly(read).pipe(
-    Effect.forkIn(generation.readers),
-    Effect.flatMap(Fiber.await),
+const forkReader = <A, E>(generation: Generation, read: Effect.Effect<A, E>) =>
+  wholly(read).pipe(Effect.forkIn(generation.readers));
+
+/** A reader's result; none when its run stopped before the read began. */
+const awaitReader = <A, E>(reading: Fiber.Fiber<A, E>) =>
+  Fiber.await(reading).pipe(
     Effect.flatMap((exit): Effect.Effect<Option.Option<A>, E> =>
       Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
         ? Effect.succeedNone
         : Effect.asSome(exit),
     ),
   );
+
+const readerOf = <A, E>(generation: Generation, read: Effect.Effect<A, E>) =>
+  forkReader(generation, read).pipe(Effect.flatMap(awaitReader));
 
 const stopWaitingAfter =
   <L>(wait: Duration.Duration, late: () => L) =>
@@ -740,6 +752,31 @@ const make = Effect.gen(function* () {
     (refresh, generation) => generation.refreshLock.withPermits(1)(refresh),
   );
 
+  /**
+   * Reads `generation`'s new fragments, joining the read in progress unless a fragment was written
+   * since it began; whether every new fragment parsed, none once the run stopped.
+   */
+  const refreshed = (generation: Generation) =>
+    Effect.suspend(() => {
+      const seen = MutableRef.get(generation.wake);
+      const current = MutableRef.get(generation.refreshing);
+
+      if (
+        Option.isSome(current) &&
+        current.value.seen === seen &&
+        current.value.reading.pollUnsafe() === undefined
+      ) {
+        return awaitReader(current.value.reading);
+      }
+
+      return forkReader(generation, refreshFragments(generation)).pipe(
+        Effect.tap((reading) =>
+          Effect.sync(() => MutableRef.set(generation.refreshing, Option.some({ seen, reading }))),
+        ),
+        Effect.flatMap(awaitReader),
+      );
+    });
+
   const producedRange = (
     session: Session,
     generation: Generation,
@@ -852,6 +889,7 @@ const make = Effect.gen(function* () {
       fragments: yield* Ref.make<ReadonlyArray<Fragment>>([]),
       refreshLock: yield* Semaphore.make(1),
       wake,
+      refreshing: MutableRef.make(Option.none<Refresh>()),
       endUnknownLogged: MutableRef.make(false),
       videoTiming: MutableRef.make(Option.none<VideoTiming>()),
       suspend: (paused) => Effect.suspend(() => MutableRef.get(suspender)(paused)),
@@ -1048,8 +1086,7 @@ const make = Effect.gen(function* () {
 
       const wake = MutableRef.get(generation.wake);
       const finished = yield* Deferred.isDone(generation.exit);
-      const refreshed = yield* readerOf(generation, refreshFragments(generation));
-      const parsed = Option.getOrElse(refreshed, () => false);
+      const parsed = Option.getOrElse(yield* refreshed(generation), () => false);
       const fragments = yield* Ref.get(generation.fragments);
       const produced = producedRange(session, generation, fragments);
       const next = session.plan.starts[index + 1];
@@ -1115,7 +1152,7 @@ const make = Effect.gen(function* () {
     const generation = yield* Ref.get(session.generation);
 
     if (generation.number === 0 || (yield* Deferred.isDone(generation.exit))) return;
-    yield* readerOf(generation, refreshFragments(generation));
+    yield* refreshed(generation);
     const produced = producedRange(session, generation, yield* Ref.get(generation.fragments));
     const requested = yield* Ref.get(session.requested);
     const startOf = (index: number) => session.plan.starts[index] ?? session.plan.end;
@@ -1417,7 +1454,7 @@ const make = Effect.gen(function* () {
         }
 
         const current = yield* Ref.get(session.generation);
-        yield* readerOf(current, refreshFragments(current));
+        yield* refreshed(current);
         const produced = producedRange(session, current, yield* Ref.get(current.fragments));
 
         if (index >= current.startSegment && index <= produced.head + LOOKAHEAD_SEGMENTS)
@@ -1678,6 +1715,7 @@ const make = Effect.gen(function* () {
       fragments: yield* Ref.make<ReadonlyArray<Fragment>>([]),
       refreshLock: yield* Semaphore.make(1),
       wake: MutableRef.make(Deferred.makeUnsafe<void>()),
+      refreshing: MutableRef.make(Option.none<Refresh>()),
       endUnknownLogged: MutableRef.make(false),
       videoTiming: MutableRef.make(Option.none<VideoTiming>()),
       suspend: () => Effect.void,
