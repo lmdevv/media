@@ -44,6 +44,62 @@ const alive = (pid: number) =>
     Effect.orElseSucceed(() => false),
   );
 
+// Holds the launcher until the server that spawned it is gone, then runs the real setpriv, as a
+// server that dies before its tool's death signal is set leaves it. That is the only way the
+// launcher can reach the parent check with the server gone: had the server died after the signal
+// was set, the kernel would have killed the launcher first.
+const heldSetprivScript = (realSetpriv: string) => `#!/bin/sh
+parent=$PPID
+echo $$ > "$(dirname "$0")/launcher.pid.tmp"
+mv "$(dirname "$0")/launcher.pid.tmp" "$(dirname "$0")/launcher.pid"
+while [ "$(cut -d" " -f4 /proc/$$/stat)" = "$parent" ]; do sleep 0.05; done
+exec ${JSON.stringify(realSetpriv)} "$@"
+`;
+
+const onPath = (command: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+
+    for (const directory of (process.env["PATH"] ?? "").split(":")) {
+      const candidate = path.join(directory, command);
+
+      if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) return candidate;
+    }
+
+    return yield* Effect.die(`no ${command} on PATH`);
+  });
+
+/** Starts the miniature server, whose encoder writes its pid to `pidFile`. */
+const startServer = (
+  folder: string,
+  pidFile: string,
+  searchPath: string = process.env["PATH"] ?? "",
+) =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const sleeper = yield* writeExecutable(path.join(folder, "ffmpeg.mjs"), sleeperScript);
+    const harness = yield* writeExecutable(path.join(folder, "server.mjs"), harnessScript);
+
+    return yield* spawner
+      .spawn(
+        ChildProcess.make(
+          process.execPath,
+          [
+            harness,
+            path.join(import.meta.dirname, "..", "..", "package.json"),
+            path.join(import.meta.dirname, "media-tools.ts"),
+            path.join(import.meta.dirname, "..", "testing", "test-config.ts"),
+            sleeper,
+            pidFile,
+          ],
+          { stdin: "ignore", env: { PATH: searchPath }, extendEnv: true },
+        ),
+      )
+      .pipe(Effect.orDie);
+  });
+
 const writeExecutable = (file: string, content: string) =>
   FileSystem.FileSystem.use((fs) =>
     fs.writeFileString(file, content).pipe(Effect.andThen(fs.chmod(file, 0o755)), Effect.as(file)),
@@ -57,28 +113,9 @@ describe.skipIf(!hasFfmpeg || process.platform !== "linux")("tool lifetime", () 
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
-          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
           const folder = yield* fs.makeTempDirectoryScoped({ prefix: "movies-tool-lifetime-" });
-          const sleeper = yield* writeExecutable(path.join(folder, "ffmpeg.mjs"), sleeperScript);
-          const harness = yield* writeExecutable(path.join(folder, "server.mjs"), harnessScript);
           const pidFile = path.join(folder, "ffmpeg.pid");
-
-          const server = yield* spawner
-            .spawn(
-              ChildProcess.make(
-                process.execPath,
-                [
-                  harness,
-                  path.join(import.meta.dirname, "..", "..", "package.json"),
-                  path.join(import.meta.dirname, "media-tools.ts"),
-                  path.join(import.meta.dirname, "..", "testing", "test-config.ts"),
-                  sleeper,
-                  pidFile,
-                ],
-                { stdin: "ignore" },
-              ),
-            )
-            .pipe(Effect.orDie);
+          const server = yield* startServer(folder, pidFile);
 
           const pid = yield* fs
             .readFileString(pidFile)
@@ -108,6 +145,48 @@ describe.skipIf(!hasFfmpeg || process.platform !== "linux")("tool lifetime", () 
 
           assert.isFalse(left, "the ffmpeg of a killed server exits");
           assert.isBelow(elapsed, SERVER_DEATH_MS, `the ffmpeg exited ${String(elapsed)} ms after`);
+        }),
+      60_000,
+    );
+
+    it.effect(
+      "a server that dies before its tool's death signal is set starts no tool",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const folder = yield* fs.makeTempDirectoryScoped({ prefix: "movies-tool-lifetime-" });
+          const pidFile = path.join(folder, "ffmpeg.pid");
+          const bin = path.join(folder, "bin");
+
+          yield* fs.makeDirectory(bin).pipe(Effect.orDie);
+          yield* writeExecutable(
+            path.join(bin, "setpriv"),
+            heldSetprivScript(yield* onPath("setpriv")),
+          );
+
+          const server = yield* startServer(folder, pidFile, `${bin}:${process.env["PATH"] ?? ""}`);
+
+          const launcher = yield* fs.readFileString(path.join(bin, "launcher.pid")).pipe(
+            Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 100 }),
+            Effect.map((text) => Number(text.trim())),
+            Effect.orDie,
+          );
+
+          yield* Effect.sync(() => process.kill(server.pid, "SIGKILL"));
+
+          const left = yield* alive(launcher).pipe(
+            Effect.repeat({
+              until: (running) => !running,
+              schedule: Schedule.spaced("50 millis"),
+              times: 100,
+            }),
+          );
+
+          if (left) yield* Effect.sync(() => process.kill(-launcher, "SIGKILL"));
+
+          assert.isFalse(left, "the launcher of a dead server exits instead of starting its tool");
+          assert.isFalse(yield* fs.exists(pidFile).pipe(Effect.orDie), "the tool never started");
         }),
       60_000,
     );

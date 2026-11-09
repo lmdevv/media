@@ -68,12 +68,24 @@ const STDERR_TAIL = 4096;
 const LOWEST_PRIORITY = 19;
 
 /**
- * util-linux `setpriv` sets the tool's parent-death signal, then becomes the tool under the same
- * pid. The kernel then kills the tool when the server dies, even by SIGKILL, so a crash leaves no
- * ffmpeg behind. The signal follows the thread that spawned the tool, and Node spawns from its
- * main thread, which lives as long as the server.
+ * Starts a tool so it dies with the server, even by SIGKILL. util-linux `setpriv` sets the
+ * parent-death signal, then a shell checks its parent is still the server, since a server that
+ * died before the signal was set sends none, and becomes the tool. Each step keeps the pid. The
+ * signal follows the thread that spawned the tool: Node spawns from its main thread, which lives
+ * as long as the server.
  */
-const DIE_WITH_PARENT = ["--pdeathsig", "KILL", "--"] as const;
+const dyingWithServer = (program: string, args: ReadonlyArray<string>) => [
+  "--pdeathsig",
+  "KILL",
+  "--",
+  "/bin/sh",
+  "-c",
+  '[ "$PPID" = "$1" ] || exit 1; shift; exec "$@"',
+  "sh",
+  String(process.pid),
+  program,
+  ...args,
+];
 
 const scrubPaths = (text: string, args: ReadonlyArray<string>): string =>
   args
@@ -129,7 +141,7 @@ const make = Effect.gen(function* () {
 
     const command =
       process.platform === "linux"
-        ? ChildProcess.make("setpriv", [...DIE_WITH_PARENT, program, ...args], options)
+        ? ChildProcess.make("setpriv", dyingWithServer(program, args), options)
         : ChildProcess.make(program, args, options);
 
     const handle = yield* spawner

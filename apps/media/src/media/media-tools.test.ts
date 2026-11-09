@@ -11,6 +11,12 @@ const toolsLayer = MediaTools.layer.pipe(
   Layer.provide(NodeServices.layer),
 );
 
+// Node stands in for ffmpeg: `-e` runs a script with the arguments after `--`.
+const nodeLayer = MediaTools.layer.pipe(
+  Layer.provide(testConfigLayer({ FFMPEG_PATH: process.execPath })),
+  Layer.provide(NodeServices.layer),
+);
+
 const hangingLayer = MediaTools.layer.pipe(
   Layer.provide(testConfigLayer({ FFMPEG_PATH: "sleep", PROBE_TIMEOUT_SECONDS: "1" })),
   Layer.provideMerge(NodeServices.layer),
@@ -81,6 +87,42 @@ describe("media tools", () => {
         assert.include(names, "PATH");
         assert.notInclude(names, "MEDIA_SERVICE_API_KEY");
         assert.isTrue(names.every((name) => !name.includes("KEY") && !name.includes("SECRET")));
+      }),
+    );
+  });
+
+  layer(nodeLayer)((tools) => {
+    tools.effect("hands a tool its arguments exactly as given", () =>
+      Effect.gen(function* () {
+        const service = yield* MediaTools.Service;
+        const args = ["-x", "a b", `it's "quoted"`, "--", "$HOME", "*", "", "-c"];
+
+        const echoed = yield* service.ffmpeg([
+          "-e",
+          "process.stdout.write(JSON.stringify(process.argv.slice(1)))",
+          "--",
+          ...args,
+        ]);
+
+        assert.strictEqual(echoed, JSON.stringify(args));
+      }),
+    );
+
+    tools.effect("reports a failed tool's exit code and standard error", () =>
+      Effect.gen(function* () {
+        const service = yield* MediaTools.Service;
+
+        const failure = yield* service
+          .ffmpeg([
+            "-e",
+            "process.stderr.write(`no decoder for ${process.argv[1]}`); process.exit(3)",
+            "--",
+            "/media/films/a b.mkv",
+          ])
+          .pipe(Effect.flip);
+
+        assert.strictEqual(failure.exitCode, 3);
+        assert.strictEqual(failure.stderr, "no decoder for <path>");
       }),
     );
   });

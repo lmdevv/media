@@ -55,7 +55,22 @@ const QSV_ONLY = [
 /** Runs the real tool as the service runs tools: on Linux it dies with the stand-in that ran it. */
 const dyingWithParent = (realTool: string): string => `const run = (args, options) =>
   process.platform === "linux"
-    ? spawnSync("setpriv", ["--pdeathsig", "KILL", "--", ${JSON.stringify(realTool)}, ...args], options)
+    ? spawnSync(
+        "setpriv",
+        [
+          "--pdeathsig",
+          "KILL",
+          "--",
+          "/bin/sh",
+          "-c",
+          '[ "$PPID" = "$1" ] || exit 1; shift; exec "$@"',
+          "sh",
+          String(process.pid),
+          ${JSON.stringify(realTool)},
+          ...args,
+        ],
+        options,
+      )
     : spawnSync(${JSON.stringify(realTool)}, args, options);
 `;
 

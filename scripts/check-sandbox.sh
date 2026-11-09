@@ -122,8 +122,9 @@ status="$(sandboxed "$(command -v bash)" "$canary/chown.sh")"
 # every stream; either must fail the check here. Tools run by name, as the service runs them.
 cat >"$canary/tools.sh" <<'EOF'
 command -v node ffmpeg ffprobe setpriv
-setpriv --pdeathsig KILL -- ffmpeg -hide_banner -version >/dev/null &&
-  setpriv --pdeathsig KILL -- ffprobe -hide_banner -version >/dev/null
+# As the service starts each tool: the death signal, then a check that the parent is still here.
+launch() { setpriv --pdeathsig KILL -- /bin/sh -c '[ "$PPID" = "$1" ] || exit 1; shift; exec "$@"' sh "$$" "$@"; }
+launch ffmpeg -hide_banner -version >/dev/null && launch ffprobe -hide_banner -version >/dev/null
 EOF
 tools="$(sandboxed "$(command -v bash)" "$canary/tools.sh")" ||
   fail "ffmpeg or ffprobe does not run under the filter behind setpriv"
