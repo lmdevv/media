@@ -101,7 +101,6 @@ interface ServedPart {
   readonly sizeBytes: number;
 }
 
-/** A segment's files, open until the scope they were served for closes. */
 interface ServedSegment {
   readonly parts: ReadonlyArray<ServedPart>;
   readonly sizeBytes: number;
@@ -151,7 +150,6 @@ export interface Interface {
     generation: number,
     grant: PlaybackGrant,
   ) => Effect.Effect<StreamView, StreamRequestError>;
-  /** The bytes of a generation's init segment. */
   readonly init: (
     streamId: StreamId,
     generation: number,
@@ -284,7 +282,7 @@ interface Lifecycle {
   readonly scope: Scope.Closeable;
   readonly runs: Ref.Ref<Runs>;
   /** Runs of every stream, closed ones included, whose stop has not finished. */
-  readonly awaitingExit: Ref.Ref<number>;
+  readonly serverRunsAwaitingExit: Ref.Ref<number>;
   readonly directory: string;
   readonly torndown: Deferred.Deferred<void>;
 }
@@ -380,7 +378,7 @@ const beginStop = (stream: Lifecycle, run: RunScope) =>
               ...runs,
               live: without(runs.live, run.scope),
             })).pipe(
-              Effect.andThen(Ref.update(stream.awaitingExit, (count) => count - 1)),
+              Effect.andThen(Ref.update(stream.serverRunsAwaitingExit, (count) => count - 1)),
               Effect.andThen(Deferred.succeed(run.stopped, undefined)),
             ),
           ),
@@ -411,17 +409,12 @@ const whileOpen = <A, E, R>(scope: Scope.Scope, effect: Effect.Effect<A, E, R>) 
     return Option.some(yield* effect.pipe(Effect.ensuring(Deferred.succeed(done, undefined))));
   });
 
-/**
- * Runs `read` to its end once it started, as a file it opens or reads must be closed before its
- * folder goes. Interrupted before it starts, it does not start.
- */
-const wholly = <A, E>(read: Effect.Effect<A, E>) =>
+const finishOnceStarted = <A, E>(read: Effect.Effect<A, E>) =>
   Effect.uninterruptibleMask((restore) => restore(Effect.void).pipe(Effect.andThen(read)));
 
 const forkReader = <A, E>(generation: Generation, read: Effect.Effect<A, E>) =>
-  wholly(read).pipe(Effect.forkIn(generation.readers));
+  finishOnceStarted(read).pipe(Effect.forkIn(generation.readers));
 
-/** A reader's result; none when its run stopped before the read began. */
 const awaitReader = <A, E>(reading: Fiber.Fiber<A, E>) =>
   Fiber.await(reading).pipe(
     Effect.flatMap((exit): Effect.Effect<Option.Option<A>, E> =>
@@ -561,7 +554,7 @@ const make = Effect.gen(function* () {
         : ([true, { ...runs, live: new Map(runs.live).set(run.scope, run) }] as const),
     ).pipe(
       Effect.tap((added) =>
-        added ? Ref.update(stream.awaitingExit, (count) => count + 1) : Effect.void,
+        added ? Ref.update(stream.serverRunsAwaitingExit, (count) => count + 1) : Effect.void,
       ),
       Effect.uninterruptible,
     );
@@ -599,7 +592,6 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  /** Runs `step` on a fiber of the stream, so it finishes even when its caller stops waiting. */
   const onStreamFiber = <A, E>(session: Session, step: Step<A, E>) =>
     Effect.gen(function* () {
       const gone = yield* Deferred.make<void>();
@@ -757,11 +749,7 @@ const make = Effect.gen(function* () {
     (refresh, generation) => generation.refreshLock.withPermits(1)(refresh),
   );
 
-  /**
-   * Reads `generation`'s new fragments, joining the read in progress unless a fragment was written
-   * since it began; whether every new fragment parsed, none once the run stopped.
-   */
-  const refreshed = (generation: Generation) =>
+  const parsedNewFragments = (generation: Generation) =>
     Effect.suspend(() => {
       const seen = MutableRef.get(generation.wake);
       const current = MutableRef.get(generation.refreshing);
@@ -780,7 +768,7 @@ const make = Effect.gen(function* () {
         ),
         Effect.flatMap(awaitReader),
       );
-    });
+    }).pipe(Effect.map((parsed) => Option.getOrElse(parsed, () => false)));
 
   const producedRange = (
     session: Session,
@@ -1091,7 +1079,7 @@ const make = Effect.gen(function* () {
 
       const wake = MutableRef.get(generation.wake);
       const finished = yield* Deferred.isDone(generation.exit);
-      const parsed = Option.getOrElse(yield* refreshed(generation), () => false);
+      const parsed = yield* parsedNewFragments(generation);
       const fragments = yield* Ref.get(generation.fragments);
       const produced = producedRange(session, generation, fragments);
       const next = session.plan.starts[index + 1];
@@ -1157,7 +1145,7 @@ const make = Effect.gen(function* () {
     const generation = yield* Ref.get(session.generation);
 
     if (generation.number === 0 || (yield* Deferred.isDone(generation.exit))) return;
-    yield* refreshed(generation);
+    yield* parsedNewFragments(generation);
     const produced = producedRange(session, generation, yield* Ref.get(generation.fragments));
     const requested = yield* Ref.get(session.requested);
     const startOf = (index: number) => session.plan.starts[index] ?? session.plan.end;
@@ -1286,14 +1274,13 @@ const make = Effect.gen(function* () {
     return generation;
   });
 
-  /** Claims a run's slot; a guest waits in line up to `wait`, and no longer once `until` ends. */
   const claimRun = (
     stream: Lifecycle,
     transcoding: boolean,
     audience: EncoderSlots.Audience,
     claimant: EncoderSlots.Claimant,
     wait: Duration.Duration,
-    until: Effect.Effect<void>,
+    callerGone: Effect.Effect<void>,
   ): Effect.Effect<Run, TranscodeCapacityReached | StreamNotFound> => {
     const pool = transcoding ? transcodes : copies;
     const full = () => new TranscodeCapacityReached({ limit: pool.limit });
@@ -1306,7 +1293,7 @@ const make = Effect.gen(function* () {
               .guest(opened.scope, claimant)
               .pipe(
                 stopWaitingAfter(wait, full),
-                Effect.raceFirst(until.pipe(Effect.andThen(Effect.fail(full())))),
+                Effect.raceFirst(callerGone.pipe(Effect.andThen(Effect.fail(full())))),
                 Effect.interruptible,
               )
         ).pipe(
@@ -1459,7 +1446,7 @@ const make = Effect.gen(function* () {
         }
 
         const current = yield* Ref.get(session.generation);
-        yield* refreshed(current);
+        yield* parsedNewFragments(current);
         const produced = producedRange(session, current, yield* Ref.get(current.fragments));
 
         if (index >= current.startSegment && index <= produced.head + LOOKAHEAD_SEGMENTS)
@@ -1646,7 +1633,7 @@ const make = Effect.gen(function* () {
       streamId,
       scope: yield* Scope.make("sequential"),
       runs: yield* Ref.make<Runs>({ live: new Map(), sealed: false }),
-      awaitingExit,
+      serverRunsAwaitingExit: awaitingExit,
       directory: path.join(config.transcodeDir, streamId),
       torndown: yield* Deferred.make<void>(),
     };
@@ -1867,7 +1854,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const bytes = yield* InitSource.$match(yield* initSource(session, generation), {
           Kept: ({ file }) =>
-            onStreamFiber(session, () => wholly(Effect.option(fs.readFile(file)))),
+            onStreamFiber(session, () => finishOnceStarted(Effect.option(fs.readFile(file)))),
           Run: ({ run }) =>
             awaitSegment(session, run, run.startSegment, SEGMENT_WAIT).pipe(
               Effect.andThen(
@@ -1885,7 +1872,6 @@ const make = Effect.gen(function* () {
     );
   });
 
-  /** Opens `paths` of `generation` for the caller's scope; the run keeps its folder until it closes. */
   const serve = Effect.fnUntraced(function* (
     generation: Generation,
     index: number,

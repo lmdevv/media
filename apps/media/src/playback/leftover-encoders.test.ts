@@ -18,7 +18,6 @@ const writeSleeper = (file: string) =>
 const until = <A, E, R>(check: Effect.Effect<A, E, R>, done: (value: A) => boolean) =>
   check.pipe(Effect.repeat({ until: done, schedule: Schedule.spaced("50 millis"), times: 100 }));
 
-/** A process the server did not stop, in its own process group as the server starts ffmpeg. */
 const leftOver = (command: string, output: string) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;

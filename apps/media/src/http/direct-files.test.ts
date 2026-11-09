@@ -29,7 +29,6 @@ const releaseLookups = Effect.sync(() => {
   library.release.resolve();
 });
 
-// A network share that stops answering leaves path lookups waiting, as here until released.
 const hungShare = (real: FileSystem.FileSystem) =>
   FileSystem.FileSystem.of({
     ...real,

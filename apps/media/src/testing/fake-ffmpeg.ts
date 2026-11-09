@@ -160,7 +160,6 @@ if (stalls || failsAfterFirst) {
   const cue = join(dirname(process.argv[1] ?? ""), "cue");
   const parent = process.ppid;
 
-  // A test worker that dies leaves its stalled runs to the init process; they end with it.
   setInterval(() => {
     if (process.ppid !== parent) process.exit(1);
     if (behavior.hlsStallsUntilCue === true && existsSync(cue)) process.exit(1);

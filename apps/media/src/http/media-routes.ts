@@ -488,9 +488,6 @@ export const layer: Layer.Layer<
 
         const readMs = yield* Ref.make(0);
 
-        // The stream opens a segment's parts for this request's scope and keeps their folder until
-        // the body is sent, as a body cut short under its promised length breaks the player's
-        // parser. An init segment is a few kilobytes and comes as bytes.
         const answer =
           segmentMatch === null
             ? yield* sessions.init(streamId, generation, grant).pipe(
