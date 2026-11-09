@@ -158,10 +158,13 @@ if (stalls || failsAfterFirst) {
   if (status !== 0) process.exit(status);
   if (failsAfterFirst) process.exit(1);
   const cue = join(dirname(process.argv[1] ?? ""), "cue");
+  const parent = process.ppid;
 
+  // A test worker that dies leaves its stalled runs to the init process; they end with it.
   setInterval(() => {
+    if (process.ppid !== parent) process.exit(1);
     if (behavior.hlsStallsUntilCue === true && existsSync(cue)) process.exit(1);
-  }, behavior.hlsStallsUntilCue === true ? 50 : 60_000);
+  }, behavior.hlsStallsUntilCue === true ? 50 : 1000);
 } else {
   const result = spawnSync(${JSON.stringify(realFfmpeg)}, args, { stdio: "inherit" });
 
