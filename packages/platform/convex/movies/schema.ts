@@ -91,6 +91,7 @@ export const moviesTables = {
     .index("by_library_status", ["libraryId", "matchStatus"])
     .index("by_library_sort", ["libraryId", "sortKey"])
     .index("by_library_added", ["libraryId", "addedAt"])
+    .index("by_library_kind_added", ["libraryId", "kind", "addedAt"])
     .index("by_library_year", ["libraryId", "year"])
     .index("by_sort", ["sortKey"])
     .index("by_added", ["addedAt"])

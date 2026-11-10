@@ -47,6 +47,8 @@ const seededTitle = v.object({
   age: v.union(v.number(), v.null()),
   /** A show's episode count, each with a file; a movie has none and one file. */
   episodes: v.number(),
+  /** Its genres, each with the genre row lists read; none when absent. */
+  genres: v.optional(v.array(v.string())),
 });
 
 const seededRows = v.object({
@@ -59,7 +61,12 @@ const insertTitle = async (
   db: MutationCtx["db"],
   libraryId: Id<"libraries">,
   folder: string,
-  title: { readonly name: string; readonly age: number | null; readonly episodes: number },
+  title: {
+    readonly name: string;
+    readonly age: number | null;
+    readonly episodes: number;
+    readonly genres?: ReadonlyArray<string> | undefined;
+  },
 ) => {
   const now = Date.now();
   const kind = title.episodes > 0 ? "show" : "movie";
@@ -75,7 +82,7 @@ const insertTitle = async (
     year: null,
     overview: null,
     tagline: null,
-    genres: [],
+    genres: [...(title.genres ?? [])],
     certification: null,
     ageRating: title.age,
     runtimeMs: null,
@@ -89,6 +96,18 @@ const insertTitle = async (
     updatedAt: now,
     searchText: title.name,
   });
+
+  await inOrder(title.genres ?? [], async (genre) =>
+    db.insert("titleGenres", {
+      titleId,
+      libraryId,
+      genre: genre.toLowerCase(),
+      kind,
+      sortKey,
+      addedAt: now,
+      year: null,
+    }),
+  );
 
   const seasonId =
     title.episodes > 0
@@ -155,9 +174,11 @@ export const seed = internalMutation({
   args: {
     managerId: v.id("users"),
     libraries: v.array(v.object({ name: v.string(), titles: v.array(seededTitle) })),
+    /** People given `view` on every library made, as a share would. */
+    viewers: v.optional(v.array(v.id("users"))),
   },
   returns: v.array(v.object({ libraryId: v.id("libraries"), titles: v.array(seededRows) })),
-  handler: async (ctx, { managerId, libraries }) => {
+  handler: async (ctx, { managerId, libraries, viewers }) => {
     if (libraries.length === 0 || libraries.length > SEED_MAX) {
       throw new Error(`seed makes 1 to ${SEED_MAX} libraries; got ${libraries.length}`);
     }
@@ -168,6 +189,14 @@ export const seed = internalMutation({
 
       await claimFolders(ctx, libraryId, [folder]);
       await grantCreator(ctx, { type: "library", id: libraryId }, managerId);
+      await inOrder(viewers ?? [], async (viewerId) =>
+        ctx.db.insert("grants", {
+          resourceType: "library",
+          resourceId: libraryId,
+          principal: viewerId,
+          level: "view",
+        }),
+      );
 
       const rows = await withLibraryItems(ctx, libraryId, async () => {
         const inserted = await inOrder(titles, (title) =>
@@ -345,6 +374,71 @@ export const progressOrder = internalQuery({
     const [found, last] = await Promise.all([range().take(5000), range().order("desc").first()]);
 
     return { rows: found.length, lastEpisodeId: last?.episodeId ?? null };
+  },
+});
+
+/** A collection holding `titleIds` in order, written without a metadata job. */
+export const seedCollection = internalMutation({
+  args: { name: v.string(), titleIds: v.array(v.id("titles")) },
+  returns: v.id("collections"),
+  handler: async (ctx, { name, titleIds }) => {
+    const now = Date.now();
+
+    const collectionId = await ctx.db.insert("collections", {
+      name,
+      sortKey: name.toLowerCase(),
+      sourceKey: null,
+      createdAt: now,
+      updatedAt: now,
+      overview: null,
+      poster: null,
+      backdrop: null,
+    });
+
+    await inOrder(
+      titleIds.map((titleId, position) => ({ titleId, position })),
+      async ({ titleId, position }) =>
+        ctx.db.insert("collectionItems", { collectionId, titleId, position, source: "import" }),
+    );
+
+    return collectionId;
+  },
+});
+
+/** A person credited as an actor on each of `titleIds`, written without a metadata job. */
+export const seedCredits = internalMutation({
+  args: { name: v.string(), titleIds: v.array(v.id("titles")) },
+  returns: v.id("people"),
+  handler: async (ctx, { name, titleIds }) => {
+    const personId = await ctx.db.insert("people", {
+      personKey: `name:${name.toLowerCase()}`,
+      name,
+      sortKey: name.toLowerCase(),
+      externalIds: NO_EXTERNAL_IDS,
+      profile: null,
+      biography: null,
+      birthDate: null,
+      deathDate: null,
+      birthPlace: null,
+      knownFor: null,
+      detailsFetchedAt: null,
+      updatedAt: Date.now(),
+    });
+
+    await inOrder(
+      titleIds.map((titleId, order) => ({ titleId, order })),
+      async ({ titleId, order }) =>
+        ctx.db.insert("credits", {
+          titleId,
+          episodeId: null,
+          personId,
+          kind: "actor",
+          role: null,
+          order,
+        }),
+    );
+
+    return personId;
   },
 });
 

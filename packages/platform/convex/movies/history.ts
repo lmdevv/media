@@ -7,14 +7,18 @@ import { internalMutation } from "../_generated/server";
 import type { MutationCtx } from "../_generated/server";
 import { fail } from "../core/lib/errors";
 import { paginate, paginateAtMost } from "../core/lib/paginate";
-import { reachOf } from "../core/permissions/grants";
+import { decidableRows, reachOf } from "../core/permissions/grants";
 import { principalOf } from "../core/permissions/policy";
-import { mayActOnTitle, requireTitle, titleViewer } from "./access";
+import { budgetedViewer, mayActOnTitle, requireTitle, titleViewer } from "./access";
 import { CALL_BUDGET, work } from "./budget";
 import { presentEpisode, presentProgress, presentTitleCard } from "./present";
+import { callBudget } from "./reads";
 import { continueWatching as continueWatchingOf, findProgress, writeProgress } from "./viewing";
 
 const HISTORY_PAGE_MAX = 200;
+
+/** What one history row reads besides its grant checks: the row, its title, episode, and library. */
+const HISTORY_ROW_READS = 4;
 
 /** Marking one episode: its progress row read (1 range), then written or deleted (1, 1). */
 const MARK_COST = work(2, 1);
@@ -131,12 +135,15 @@ export const markRest = internalMutation({
 
 export const { continueWatching, list, markWatched, markUnwatched } = register({
   continueWatching: async (ctx, _args, caller) => {
-    const sees = titleViewer(ctx.db, caller, await reachOf(ctx.db, caller));
+    const reach = await reachOf(ctx.db, caller);
+    const budget = callBudget(reach);
+    const seen = budgetedViewer(ctx.db, caller, reach, budget);
 
-    return [...(await continueWatchingOf(ctx.db, caller.userId, sees))];
+    return [...(await continueWatchingOf(ctx.db, caller.userId, seen, budget))];
   },
   list: async (ctx, { paginationOpts }, caller) => {
-    const sees = titleViewer(ctx.db, caller, await reachOf(ctx.db, caller));
+    const reach = await reachOf(ctx.db, caller);
+    const sees = titleViewer(ctx.db, caller, reach);
 
     const page = await paginateAtMost(
       ctx.db,
@@ -147,7 +154,7 @@ export const { continueWatching, list, markWatched, markUnwatched } = register({
         order: "desc",
       },
       paginationOpts,
-      HISTORY_PAGE_MAX,
+      Math.min(HISTORY_PAGE_MAX, decidableRows(reach, HISTORY_ROW_READS)),
     );
 
     const entries = await Promise.all(

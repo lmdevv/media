@@ -30,6 +30,7 @@ const seedMovies = async (
   core: PlatformStack,
   managerId: string,
   titles: ReadonlyArray<{ readonly name: string; readonly age: number | null }>,
+  genre = "sdk",
 ): Promise<ReadonlyArray<string>> => {
   const response = await fetch(`${core.url}/api/function`, {
     method: "POST",
@@ -41,7 +42,7 @@ const seedMovies = async (
         libraries: [
           {
             name: `sdk-movies-${Math.random().toString(36).slice(2, 8)}`,
-            titles: titles.map((title) => ({ ...title, episodes: 0 })),
+            titles: titles.map((title) => ({ ...title, episodes: 0, genres: [genre] })),
           },
         ],
       },
@@ -95,11 +96,18 @@ describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 
         const platform = yield* signedInAs(owner);
         const { userId } = yield* platform.core.auth.sessions.current();
 
+        const genre = `sdk ${userId}`;
+
         const [first, second] = yield* Effect.promise(async () =>
-          seedMovies(stack, userId, [
-            { name: "Elephants Dream", age: 0 },
-            { name: "Cosmos Laundromat", age: 13 },
-          ]),
+          seedMovies(
+            stack,
+            userId,
+            [
+              { name: "Elephants Dream", age: 0 },
+              { name: "Cosmos Laundromat", age: 13 },
+            ],
+            genre,
+          ),
         );
 
         if (first === undefined || second === undefined)
@@ -110,7 +118,7 @@ describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 
           titles: ReadonlyArray<Listed>,
         ): Effect.Effect<ReadonlyArray<Listed>, Platform.PlatformError> =>
           Effect.flatMap(
-            platform.movies.titles.list({ paginationOpts: { numItems: 50, cursor } }),
+            platform.movies.titles.list({ paginationOpts: { numItems: 50, cursor }, genre }),
             (page) => {
               const next = [...titles, ...page.page];
 

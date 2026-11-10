@@ -29,17 +29,19 @@ const byCodeUnits = (left: string, right: string): number =>
 const listAll = async (
   who: Member,
   sort: "name" | "added" | "year",
+  genre: string,
   cursor: string | null = null,
   titles: ReadonlyArray<{ readonly id: string; readonly name: string }> = [],
 ): Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>> => {
   const page = await who.signedIn.client.query(api.movies.titles.list, {
     paginationOpts: { numItems: 100, cursor },
     sort,
+    genre,
   });
 
   const next = [...titles, ...page.page.map(({ id, name }) => ({ id, name }))];
 
-  return page.isDone ? next : listAll(who, sort, page.continueCursor, next);
+  return page.isDone ? next : listAll(who, sort, genre, page.continueCursor, next);
 };
 
 const progressOrder = (core: CoreStack, userId: Id<"users">, titleId: Id<"titles">) =>
@@ -119,16 +121,23 @@ describe.skipIf(stack === undefined)("movies lists across libraries", { timeout:
     const viewer = await member(stack, "sorted-viewer");
 
     const [first, second] = await seedLibraries(stack, viewer, [
-      { name: `sorted ${label} a`, kind: "movies", items: [movie(`Mike ${label}`, 0)] },
+      {
+        name: `sorted ${label} a`,
+        kind: "movies",
+        items: [{ ...movie(`Mike ${label}`, 0), genres: [label] }],
+      },
       {
         name: `sorted ${label} b`,
         kind: "movies",
-        items: [movie(`Alpha ${label}`, 0), movie(`Zulu ${label}`, 0)],
+        items: [
+          { ...movie(`Alpha ${label}`, 0), genres: [label] },
+          { ...movie(`Zulu ${label}`, 0), genres: [label] },
+        ],
       },
     ]);
 
     const ours = new Set<string>([...(first?.itemIds ?? []), ...(second?.itemIds ?? [])]);
-    const listed = await listAll(viewer, "name");
+    const listed = await listAll(viewer, "name", label);
 
     expect(listed.filter((title) => ours.has(title.id)).map((title) => title.name)).toEqual([
       `Alpha ${label}`,

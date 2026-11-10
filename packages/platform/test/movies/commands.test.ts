@@ -76,17 +76,20 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
   }, 180_000);
 
   it("list each person's titles a library at a time, each once, through can()", async () => {
-    expect(shelfTitlesIn(await listedNames(shelf.aiko))).toEqual(ALL);
-    expect(shelfTitlesIn(await listedNames(shelf.sam))).toEqual(["Caminandes", "Pioneer One"]);
-    expect(shelfTitlesIn(await listedNames(shelf.outsider))).toEqual([]);
-    expect(shelfTitlesIn(await listedNames(shelf.kid))).toEqual([
+    expect(shelfTitlesIn(await listedNames(shelf.aiko, { genre: shelf.genre }))).toEqual(ALL);
+    expect(shelfTitlesIn(await listedNames(shelf.sam, { genre: shelf.genre }))).toEqual([
+      "Caminandes",
+      "Pioneer One",
+    ]);
+    expect(shelfTitlesIn(await listedNames(shelf.outsider, { genre: shelf.genre }))).toEqual([]);
+    expect(shelfTitlesIn(await listedNames(shelf.kid, { genre: shelf.genre }))).toEqual([
       "Big Buck Bunny",
       "Caminandes",
       "Pioneer One",
       "Unrated Short",
     ]);
 
-    const paged = await listedNames(shelf.aiko, { numItems: 1 });
+    const paged = await listedNames(shelf.aiko, { numItems: 1, genre: shelf.genre });
 
     expect(shelfTitlesIn(paged)).toEqual(ALL);
     expect(paged.calls).toBeGreaterThanOrEqual(ALL.length);
@@ -110,11 +113,12 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     ).toBe("not_found");
   });
 
-  it("keep walking the libraries when one is taken away mid-list", async () => {
+  it("keep listing when a library is taken away mid-list", async () => {
     const client = shelf.mateo.signedIn.client;
 
     const first = await client.query(api.movies.titles.list, {
       paginationOpts: { numItems: 1, cursor: null },
+      genre: shelf.genre,
     });
 
     const series = ["Caminandes", "Pioneer One"];
@@ -125,7 +129,11 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     await unshare(shelf.owner, taken, principal);
 
     try {
-      const rest = await listedNames(shelf.mateo, { numItems: 1 }, first.continueCursor);
+      const rest = await listedNames(
+        shelf.mateo,
+        { numItems: 1, genre: shelf.genre },
+        first.continueCursor,
+      );
 
       expect(shelfTitlesIn(rest)).toEqual(
         inSeries ? ["Big Buck Bunny", "Sintel", "Tears of Steel", "Unrated Short"] : series,
@@ -142,7 +150,7 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     });
 
     try {
-      expect(shelfTitlesIn(await listedNames(shelf.kid))).toEqual([
+      expect(shelfTitlesIn(await listedNames(shelf.kid, { genre: shelf.genre }))).toEqual([
         "Big Buck Bunny",
         "Caminandes",
         "Pioneer One",

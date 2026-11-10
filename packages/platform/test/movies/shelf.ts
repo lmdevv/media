@@ -66,6 +66,11 @@ export interface Shelf {
   /** The person credited on Sintel. */
   readonly castId: Id<"people">;
   readonly collectionName: string;
+  /**
+   * A genre only the shelf's titles carry, so a list across libraries can read just them through
+   * the genre index however many titles other suites left on the stack.
+   */
+  readonly genre: string;
   /** Made both libraries, so manages them. */
   readonly owner: Member;
   /** Sees both libraries. */
@@ -79,6 +84,8 @@ export interface Shelf {
   /** An admin with no grant at all, who sees nothing. */
   readonly outsider: Member;
 }
+
+const genreOf = (label: string): string => `shelf ${label}`;
 
 const at = <T>(values: ReadonlyArray<T>, index: number, what: string): T => {
   const value = values[index];
@@ -114,7 +121,7 @@ export const shelfOf = async (core: CoreStack, label: string): Promise<Shelf> =>
     FILMS.map((film) =>
       movieFile(join(root, `${film.name}.mkv`), 1, 1, {
         ...scannedTitle("movie", `nfo:${label}:${film.name}`, film.name, film.age),
-        genres: [...film.genres],
+        genres: [...film.genres, genreOf(label)],
         year: film.year,
       }),
     ),
@@ -125,7 +132,10 @@ export const shelfOf = async (core: CoreStack, label: string): Promise<Shelf> =>
       Array.from({ length: show.episodes }, (_, n) =>
         episodeFile(
           join(root, show.name, `${n + 1}.mkv`),
-          scannedTitle("show", `nfo:${label}:${show.name}`, show.name, show.age),
+          {
+            ...scannedTitle("show", `nfo:${label}:${show.name}`, show.name, show.age),
+            genres: [genreOf(label)],
+          },
           1,
           n + 1,
         ),
@@ -239,6 +249,7 @@ export const shelfOf = async (core: CoreStack, label: string): Promise<Shelf> =>
     files,
     castId,
     collectionName,
+    genre: genreOf(label),
     owner,
     aiko,
     mateo,

@@ -2,11 +2,14 @@ import { register } from "../../commands/movies/myList";
 import type { Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import { paginateAtMost } from "../core/lib/paginate";
-import { reachOf } from "../core/permissions/grants";
+import { decidableRows, reachOf } from "../core/permissions/grants";
 import { requireTitle, titleViewer } from "./access";
 import { presentTitleCard } from "./present";
 
 const LIST_PAGE_MAX = 200;
+
+/** What one entry reads besides its grant checks: the entry, its title, and its library. */
+const LIST_ROW_READS = 3;
 
 const entryOf = (db: DatabaseReader, userId: Id<"users">, titleId: Id<"titles">) =>
   db
@@ -16,7 +19,8 @@ const entryOf = (db: DatabaseReader, userId: Id<"users">, titleId: Id<"titles">)
 
 export const { list, add, remove } = register({
   list: async (ctx, { paginationOpts }, caller) => {
-    const sees = titleViewer(ctx.db, caller, await reachOf(ctx.db, caller));
+    const reach = await reachOf(ctx.db, caller);
+    const sees = titleViewer(ctx.db, caller, reach);
 
     const page = await paginateAtMost(
       ctx.db,
@@ -27,7 +31,7 @@ export const { list, add, remove } = register({
         order: "desc",
       },
       paginationOpts,
-      LIST_PAGE_MAX,
+      Math.min(LIST_PAGE_MAX, decidableRows(reach, LIST_ROW_READS)),
     );
 
     const titles = await Promise.all(

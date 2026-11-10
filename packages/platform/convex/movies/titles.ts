@@ -4,12 +4,13 @@ import type { DatabaseReader } from "../_generated/server";
 import { fail } from "../core/lib/errors";
 import { paginateAtMost } from "../core/lib/paginate";
 import { decidableRows, reachOf, requireItems } from "../core/permissions/grants";
-import type { ItemGate } from "../core/permissions/grants";
-import { movieLibraries, requireTitle, titleViewer } from "./access";
-import type { TitleViewer } from "./access";
+import { budgetedViewer, requireTitle, titleViewer, walkMovieLibraries } from "./access";
+import type { BudgetedViewer } from "./access";
 import { countGenres, rankBySimilarity, titlePage } from "./browse";
 import { CREDIT_LIMIT, creditsOf } from "./credits";
-import { titleFacts } from "./items";
+import { newestAcross } from "./newest";
+import { TITLE_GET, callBudget, libraryCheck, plus, queryOf, readsOf, titlesOf } from "./reads";
+import type { ReadBudget, Reads } from "./reads";
 import {
   filesOnDisk,
   presentCreditGroups,
@@ -44,6 +45,24 @@ const SIMILAR_SCAN = 300;
 
 const SEARCH_SCAN = 200;
 
+/** Titles one recommendation's TMDB id may match: one per library at most, in practice. */
+const MATCHES_PER_RECOMMENDATION = 5;
+
+/**
+ * How an aggregate shares its call's reads: home rows give continue watching and the list their
+ * parts first; the walk through the caller's libraries then takes most of what is left, since it
+ * charges each grant key's range at its worst; the merges of each library's newest titles spend
+ * the rest.
+ */
+const RESUME_SHARE = 0.2;
+
+const LIST_SHARE = 0.1;
+
+const WALK_SHARE = 0.8;
+
+/** What one entry of a person's list reads: the entry, and its title. */
+const LIST_ENTRY_READS = plus(readsOf(0, 1), TITLE_GET);
+
 /**
  * Most episodes one season page holds: each reads its progress, up to 12 credits, and their
  * people, so a page stays far inside one call's reads.
@@ -66,12 +85,22 @@ interface VisibleBudget {
   readonly scanLimit: number;
 }
 
-const firstKept = async <Item>(
+/**
+ * The first titles of `items` that `seen` allows, read in batches with their titles found in
+ * parallel. Every item read is charged to `budget` at `itemCost`, and each library `seen`
+ * decides at its own cost; the read stops at `limit` titles, at `scanLimit` items, at the end of
+ * `items`, or when the budget cannot pay for more, answering what it found by then.
+ */
+const firstSeen = async <Item>(
   items: AsyncIterable<Item>,
   titleOf: (item: Item) => Promise<Doc<"titles"> | null>,
-  keeps: TitleViewer,
+  seen: BudgetedViewer,
+  budget: ReadBudget,
+  itemCost: Reads,
   { limit, scanLimit }: VisibleBudget,
 ): Promise<ReadonlyArray<Doc<"titles">>> => {
+  if (!budget.take(queryOf(0))) return [];
+
   const iterator = items[Symbol.asyncIterator]();
 
   const fill = async (
@@ -80,6 +109,8 @@ const firstKept = async <Item>(
   ): Promise<{ readonly batch: ReadonlyArray<Item>; readonly ended: boolean }> => {
     if (batch.length >= count) return { batch, ended: false };
 
+    if (!budget.take(itemCost)) return { batch, ended: true };
+
     const step = await iterator.next();
 
     return step.done === true ? { batch, ended: true } : fill([...batch, step.value], count);
@@ -87,27 +118,31 @@ const firstKept = async <Item>(
 
   const take = async (
     found: ReadonlyArray<Doc<"titles">>,
-    budget: number,
+    scan: number,
     size: number,
   ): Promise<ReadonlyArray<Doc<"titles">>> => {
-    if (found.length >= limit || budget <= 0) return found;
+    if (found.length >= limit || scan <= 0) return found;
 
-    const { batch, ended } = await fill([], Math.min(size, budget));
+    const { batch, ended } = await fill([], Math.min(size, scan));
 
-    const titles = await Promise.all(
+    const decided = await Promise.all(
       batch.map(async (item) => {
         const title = await titleOf(item);
 
-        return title !== null && (await keeps(title)) ? title : null;
+        return title === null
+          ? { title, seen: "hidden" as const }
+          : { title, seen: await seen(title) };
       }),
     );
 
-    const kept = [...found, ...titles.flatMap((title) => (title === null ? [] : [title]))].slice(
-      0,
-      limit,
-    );
+    const kept = [
+      ...found,
+      ...decided.flatMap((one) => (one.seen === "seen" ? [one.title] : [])),
+    ].slice(0, limit);
 
-    return ended ? kept : take(kept, budget - batch.length, Math.max(limit * 2, 50));
+    const stop = ended || decided.some((one) => one.seen === "spent");
+
+    return stop ? kept : take(kept, scan - batch.length, Math.max(limit * 2, 50));
   };
 
   try {
@@ -118,50 +153,6 @@ const firstKept = async <Item>(
 };
 
 const itself = async (title: Doc<"titles">): Promise<Doc<"titles">> => title;
-
-const admittedBy =
-  (gate: ItemGate, kind: Doc<"titles">["kind"] | undefined): TitleViewer =>
-  async (title) =>
-    title.purging !== true &&
-    (kind === undefined || title.kind === kind) &&
-    gate.admits(titleFacts(title));
-
-/** Titles read across a caller's libraries for one row or count, shared among the libraries. */
-const NEWEST_READ_BUDGET = 2000;
-
-/**
- * The `count` most recently added titles, of one kind or all, across `gates`: each library's own
- * newest that its gate admits, merged by when they were added. Each library reads its share of
- * the budget, at least `count`, so a library of titles the caller may not see cannot hide the
- * others.
- */
-const newestAcross = async (
-  db: DatabaseReader,
-  gates: ReadonlyArray<ItemGate>,
-  kind: Doc<"titles">["kind"] | undefined,
-  count: number,
-): Promise<ReadonlyArray<Doc<"titles">>> => {
-  const scanLimit = Math.max(count, Math.floor(NEWEST_READ_BUDGET / Math.max(1, gates.length)));
-
-  const perLibrary = await Promise.all(
-    gates.map(async (gate) =>
-      firstKept(
-        db
-          .query("titles")
-          .withIndex("by_library_added", (q) => q.eq("libraryId", gate.library._id))
-          .order("desc"),
-        itself,
-        admittedBy(gate, kind),
-        { limit: count, scanLimit },
-      ),
-    ),
-  );
-
-  return perLibrary
-    .flat()
-    .toSorted((left, right) => right.addedAt - left.addedAt)
-    .slice(0, count);
-};
 
 /** What one row of the title list reads besides its title: its library. */
 const TITLE_ROW_READS = 2;
@@ -186,23 +177,37 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
   register({
     home: async (ctx, _args, caller) => {
       const reach = await reachOf(ctx.db, caller);
-      const sees = titleViewer(ctx.db, caller, reach);
-      const gates = await movieLibraries(ctx.db, caller);
+      const budget = callBudget(reach);
+      const viewer = (part: ReadBudget) => budgetedViewer(ctx.db, caller, reach, part);
+      const resumeBudget = budget.part(RESUME_SHARE);
 
-      const [movies, shows, myList, resume] = await Promise.all([
-        newestAcross(ctx.db, gates, "movie", ROW_LIMIT),
-        newestAcross(ctx.db, gates, "show", ROW_LIMIT),
-        firstKept(
-          ctx.db
-            .query("myList")
-            .withIndex("by_user_added", (q) => q.eq("userId", caller.userId))
-            .order("desc"),
-          async (entry) => ctx.db.get(entry.titleId),
-          sees,
-          { limit: ROW_LIMIT, scanLimit: ROW_SCAN },
-        ),
-        continueWatching(ctx.db, caller.userId, sees),
-      ]);
+      const resume = await continueWatching(
+        ctx.db,
+        caller.userId,
+        viewer(resumeBudget),
+        resumeBudget,
+      );
+
+      const listBudget = budget.part(LIST_SHARE);
+
+      const myList = await firstSeen(
+        ctx.db
+          .query("myList")
+          .withIndex("by_user_added", (q) => q.eq("userId", caller.userId))
+          .order("desc"),
+        async (entry) => ctx.db.get(entry.titleId),
+        viewer(listBudget),
+        listBudget,
+        LIST_ENTRY_READS,
+        { limit: ROW_LIMIT, scanLimit: ROW_SCAN },
+      );
+
+      const { gates } = await walkMovieLibraries(ctx.db, caller, reach, budget.part(WALK_SHARE));
+
+      const movies = (await newestAcross(ctx.db, gates, "movie", ROW_LIMIT, budget.part(0.5)))
+        .titles;
+
+      const shows = (await newestAcross(ctx.db, gates, "show", ROW_LIMIT, budget)).titles;
 
       const featured = [...movies, ...shows]
         .filter((title) => title.artwork.backdrop !== null && title.presentFileCount > 0)
@@ -234,21 +239,26 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
       return { ...page, page: page.page.map(presentTitleCard) };
     },
     genres: async (ctx, { kind }, caller) => {
-      const gates = await movieLibraries(ctx.db, caller);
+      const reach = await reachOf(ctx.db, caller);
+      const budget = callBudget(reach);
+      const { gates } = await walkMovieLibraries(ctx.db, caller, reach, budget.part(WALK_SHARE));
 
-      return [...countGenres(await newestAcross(ctx.db, gates, kind, GENRE_SCAN))];
+      return [...countGenres((await newestAcross(ctx.db, gates, kind, GENRE_SCAN, budget)).titles)];
     },
     search: async (ctx, { query: typed, limit }, caller) => {
       const text = typed.trim();
 
       if (text.length === 0) return [];
 
-      const sees = titleViewer(ctx.db, caller, await reachOf(ctx.db, caller));
+      const reach = await reachOf(ctx.db, caller);
+      const budget = callBudget(reach);
 
-      const matches = await firstKept(
+      const matches = await firstSeen(
         ctx.db.query("titles").withSearchIndex("search_text", (q) => q.search("searchText", text)),
         itself,
-        sees,
+        budgetedViewer(ctx.db, caller, reach, budget),
+        budget,
+        titlesOf(1, 0),
         { limit: resultLimit(limit, 20, 50), scanLimit: SEARCH_SCAN },
       );
 
@@ -256,18 +266,26 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
     },
     similar: async (ctx, { titleId, limit }, caller) => {
       const { title, reach } = await requireTitle(ctx.db, caller, "view", titleId);
-      const sees = titleViewer(ctx.db, caller, reach);
+      const budget = callBudget(reach);
+      const seesWithin = budgetedViewer(ctx.db, caller, reach, budget);
       const wanted = resultLimit(limit, ROW_LIMIT, 50);
+
+      budget.take(TITLE_GET);
+      budget.take(libraryCheck(reach));
 
       const recommended = await Promise.all(
         (title.recommendations ?? []).map(async (tmdb) => {
+          if (!budget.take(titlesOf(MATCHES_PER_RECOMMENDATION))) return undefined;
+
           const matches = await ctx.db
             .query("titles")
             .withIndex("by_kind_tmdb", (q) => q.eq("kind", title.kind).eq("externalIds.tmdb", tmdb))
-            .take(5);
+            .take(MATCHES_PER_RECOMMENDATION);
 
           const visible = await Promise.all(
-            matches.map(async (match) => match._id !== title._id && (await sees(match))),
+            matches.map(
+              async (match) => match._id !== title._id && (await seesWithin(match)) === "seen",
+            ),
           );
 
           return matches.find((_, index) => visible[index] === true);
@@ -295,12 +313,15 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
           ? []
           : rankBySimilarity(
               title,
-              await newestAcross(
-                ctx.db,
-                await movieLibraries(ctx.db, caller),
-                title.kind,
-                SIMILAR_SCAN,
-              ),
+              (
+                await newestAcross(
+                  ctx.db,
+                  (await walkMovieLibraries(ctx.db, caller, reach, budget.part(WALK_SHARE))).gates,
+                  title.kind,
+                  SIMILAR_SCAN,
+                  budget,
+                )
+              ).titles,
             ).filter(fresh);
 
       return [...chosen, ...topUp].slice(0, wanted).map(presentTitleCard);

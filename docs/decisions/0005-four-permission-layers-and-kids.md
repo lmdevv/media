@@ -362,28 +362,53 @@ as it is.
 - `movies.titles.list` keeps one order across every library, as old movies' list did: by name,
   newest added, or newest year. It pages one household-wide index with `paginate`, the titles
   table's own (`by_sort`, `by_added`, `by_year`, and the same by kind) or the genre rows'
-  (`by_genre_*`, `by_kind_genre_*`), and decides each row through `can()` at its library's level,
-  each library read once per call. A page reads at most what `decidableRows` allows for the
-  caller (100 rows at most), so it stays bounded however many titles or libraries the server
-  holds. Titles the caller may not see, restrictions, and filters make a page short or empty
+  (`by_genre_*`, `by_kind_genre_*`), and decides each row through `can()` at its library's
+  level. Titles the caller may not see, restrictions, and filters make a page short or empty
   while its cursor goes on. With a library named, the list pages that library's own index after
   `requireItems` decides it.
-- Home rows, genres, and similar titles start from every movies library shared with the caller.
-  `movieLibraries` walks the caller's grants with `visiblePage`, keeping each step's
-  continuation, so music libraries and libraries the caller cannot browse never push a movies
-  library out; it stops after 1,024 shared libraries of any kind. Each library reads its newest
-  titles that its gate admits, its share of 2,000 reads and at least what the row needs, and the
-  results merge by when titles were added. A library full of titles the caller may not see
-  therefore cannot hide another library's. Search reads the search index and decides each hit's
-  library the same way, among the first 200 hits as old movies did.
-- A season's episodes come a page at a time (32 at most, each with its progress and credits), so a
-  season of any length lists whole.
-- Where a show resumes comes from the person's newest progress row on it, read from the
-  `(user, title, played at)` index, however many episodes they watched.
-- Rows a person keeps (history, the list, continue watching) decide their titles with a
-  per-call `titleViewer`, which reads each library and its grants at most once. A row whose
-  title is gone or being purged is skipped, as old movies skipped it; the purge leaves those
-  rows behind.
+- A season's episodes come a page at a time, so a season of any length lists whole. Where a show
+  resumes comes from the person's newest progress row on it, through the
+  `(user, title, played at)` index.
+- A row whose title is gone or being purged is skipped, as old movies skipped it; the purge
+  leaves the person's rows behind.
+
+### One read budget per call
+
+Convex fails a call past 4,096 index ranges, 32,000 documents, or 16 MiB read (ADR 0013). Every
+access-checked movies read stays under all three by one rule, in `movies/reads.ts`.
+
+- **Real costs.** A `get` is one range and one document; a query is one range and the rows it
+  returns; a document counts at a size estimate for its table (512 bytes for a grant, a library,
+  or a list or progress row; 6 KiB for a title; 2 KiB for an episode, a person, or a
+  collection). Deciding a library is charged once per call, at what `reachOf` and `levelOn` read:
+  the library and one grant query per grant key (the person's own, the household's, and each of
+  up to 16 groups). The caller, the session, and the reach are charged first, as
+  `decidableRows` charges them. Lookups that find nothing, such as next-episode scans, are
+  charged too.
+- **One total.** A call spends at most 3,000 ranges, 30,000 documents, and 12 MiB from one
+  shared total, which leaves headroom for estimates that undercount. Parts of a call take shares
+  of what is left (home rows: continue watching first, then the list, then the library walk, then
+  each row's merge), never a minimum per library.
+- **Pages are sized, never cut.** A paginated list sizes its page before it reads, so its rows
+  can never run out of budget: history and the list by `decidableRows` from each row's own
+  reads, the title list the same way, and collections by what each collection needs to decide
+  all 200 of its members at the worst cost, each in a library of its own, with each collection
+  on a page given an equal share of the page's budget. So a page's continuation is always exactly
+  after its last row, and no row is skipped. Only a collection that alone costs more than a
+  call can pay (a person in many groups, with members in more libraries than a call can check)
+  runs out of its share; it stays listed with the titles it decided.
+- **Aggregates answer the best for their budget.** Home rows, genres, and similar titles walk
+  every movies library shared with the caller with `visiblePage`, as many rows a step as both
+  `visiblePage`'s sizing and the budget allow, keeping each step's continuation, with no fixed
+  number of steps; music libraries and libraries the caller cannot browse cost a step but never
+  push a movies library out. They then merge the libraries' own newest titles from the
+  `(library, kind, added)` index, a batch at a time, reading a library further only while its
+  titles are still among the newest, so a library of newer titles of another kind or of titles
+  the caller may not see hides nothing. When the walk cannot finish within its share, the
+  aggregate uses the libraries it covered; when a merge runs out, it answers the newest it found
+  among what it read. Search, a person's credits, people search, and a collection's titles decide
+  rows until the budget runs out and answer what they decided; continue watching keeps the most
+  recent items it could decide.
 
 ### Playback
 

@@ -2,11 +2,14 @@ import type { Level } from "../../commands/access";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import { fail } from "../core/lib/errors";
+import { PAGE_ROWS_MAX } from "../core/lib/paginate";
 import { levelOn, reachOf, visiblePage } from "../core/permissions/grants";
 import type { ItemGate, Reach } from "../core/permissions/grants";
 import { can, contentNeeds, itemOf, resourceOf } from "../core/permissions/policy";
 import type { ContentAction, Principal } from "../core/permissions/policy";
 import { titleFacts } from "./items";
+import { libraryCheck, readsOf } from "./reads";
+import type { ReadBudget } from "./reads";
 
 const NO_TITLE = "No such title";
 
@@ -147,26 +150,114 @@ export const titleViewer = (db: DatabaseReader, caller: Principal, reach: Reach)
   };
 };
 
-/** Libraries one step of the walk through a caller's shared libraries reads, music ones included. */
-const WALK_PAGE = 64;
+/** Whether a title is seen, hidden, or could not be decided within the call's read budget. */
+export type Seen = "seen" | "hidden" | "spent";
 
-/** Steps of that walk one call takes at most: 1,024 shared libraries of any kind. */
-const WALK_PAGES_MAX = 16;
+/** Decides titles for one call, charging each library's first check to the call's budget. */
+export type BudgetedViewer = (title: Doc<"titles">) => Promise<Seen>;
+
+/**
+ * A `TitleViewer` that charges `budget` for each library it decides, once per library, and
+ * answers `spent` instead of reading a library the budget cannot pay for.
+ */
+export const budgetedViewer = (
+  db: DatabaseReader,
+  caller: Principal,
+  reach: Reach,
+  budget: ReadBudget,
+): BudgetedViewer => {
+  const gates = new Map<Id<"libraries">, Promise<ItemGate | null>>();
+  const cost = libraryCheck(reach);
+
+  return async (title) => {
+    if (title.purging === true) return "hidden";
+
+    const known = gates.get(title.libraryId);
+
+    if (known === undefined && !budget.take(cost)) return "spent";
+
+    const gate = known ?? libraryGate(db, caller, reach, title.libraryId);
+
+    gates.set(title.libraryId, gate);
+
+    return (await gate)?.admits(titleFacts(title)) === true ? "seen" : "hidden";
+  };
+};
+
+/** The movies libraries a walk found, and whether it reached the last library shared. */
+export interface Walked {
+  readonly gates: ReadonlyArray<ItemGate>;
+  readonly complete: boolean;
+}
+
+/** How many of `reach`'s grant keys hold any library grant: one small query per key. */
+const grantingKeys = async (db: DatabaseReader, reach: Reach): Promise<number> => {
+  const found = await Promise.all(
+    [...reach.direct, ...reach.groups].map(async (key) =>
+      db
+        .query("grants")
+        .withIndex("by_principal_resource", (q) =>
+          q.eq("principal", key).eq("resourceType", "library"),
+        )
+        .first(),
+    ),
+  );
+
+  return found.filter((grant) => grant !== null).length;
+};
 
 /**
  * Every movies library shared with `caller`, in id order, each with the gate `can()` decides its
- * titles through. It walks the caller's grants with `visiblePage`, keeping each step's
- * continuation, so music libraries and libraries the caller cannot browse never push a movies
- * library out. It stops after 1,024 shared libraries of any kind.
+ * titles through. It pages the caller's grants with `visiblePage`, as many rows a step as both
+ * `visiblePage`'s own sizing and `budget` allow, keeping each step's continuation, so music
+ * libraries and libraries the caller cannot browse never push a movies library out. A step is
+ * charged a range per grant key, rows only for the keys that hold library grants, and a read per
+ * library considered. It stops only at the last library or when `budget` cannot pay for another
+ * step, and says which.
  */
-export const movieLibraries = async (
+export const walkMovieLibraries = async (
   db: DatabaseReader,
   caller: Principal,
-  cursor: string | null = null,
-  steps = WALK_PAGES_MAX,
-  found: ReadonlyArray<ItemGate> = [],
-): Promise<ReadonlyArray<ItemGate>> => {
-  const page = await visiblePage({ db }, caller, "library", { numItems: WALK_PAGE, cursor });
+  reach: Reach,
+  budget: ReadBudget,
+): Promise<Walked> => {
+  const keys = reach.direct.length + reach.groups.length;
+
+  if (!budget.take(readsOf(keys, keys))) {
+    return { gates: [], complete: false };
+  }
+
+  const granting = await grantingKeys(db, reach);
+
+  return walkFrom(db, caller, reach, budget, granting, null, []);
+};
+
+const walkFrom = async (
+  db: DatabaseReader,
+  caller: Principal,
+  reach: Reach,
+  budget: ReadBudget,
+  granting: number,
+  cursor: string | null,
+  found: ReadonlyArray<ItemGate>,
+): Promise<Walked> => {
+  const groups = reach.groups.length;
+  const keys = reach.direct.length + groups;
+  const room = budget.left();
+  const fits = Math.floor((PAGE_ROWS_MAX - groups - keys) / (keys + 1));
+  const documents = Math.min(room.documents, Math.floor(room.bytes / readsOf(0, 1).bytes));
+
+  const rows = Math.min(
+    fits,
+    room.ranges - 1 - keys,
+    Math.floor((documents - groups - granting) / (granting + 1)),
+  );
+
+  const step = readsOf(1 + keys + rows, groups + granting * (rows + 1) + rows);
+
+  if (rows < 1 || !budget.take(step)) return { gates: found, complete: false };
+
+  const page = await visiblePage({ db }, caller, "library", { numItems: rows, cursor });
 
   const gates = [
     ...found,
@@ -177,7 +268,7 @@ export const movieLibraries = async (
     }),
   ];
 
-  return page.isDone || steps <= 1
-    ? gates
-    : movieLibraries(db, caller, page.continueCursor, steps - 1, gates);
+  return page.isDone
+    ? { gates, complete: true }
+    : walkFrom(db, caller, reach, budget, granting, page.continueCursor, gates);
 };

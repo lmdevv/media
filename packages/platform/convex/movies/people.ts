@@ -7,12 +7,15 @@ import { leaseAnswer, withJobLease } from "../core/jobs/held";
 import { lease } from "../core/jobs/model";
 import { enqueue } from "../core/jobs/queue";
 import { fail } from "../core/lib/errors";
+import { inOrder } from "../core/lib/inOrder";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
 import { reachOf } from "../core/permissions/grants";
-import { titleViewer } from "./access";
-import type { TitleViewer } from "./access";
+import { budgetedViewer } from "./access";
+import type { BudgetedViewer, Seen } from "./access";
 import { CREDIT_LIMIT, mergeIds, personKeyOf } from "./credits";
 import { presentTitleCard } from "./present";
+import { TITLE_GET, callBudget, peopleOf, queryOf } from "./reads";
+import type { ReadBudget } from "./reads";
 import { externalIds, scannedPersonDetails } from "./validators";
 
 /** A person's name and external ids, for a person job to look up their details. */
@@ -78,8 +81,6 @@ const CREDIT_SCAN = 500;
 
 const SEARCH_SCAN = 50;
 
-const SEARCH_CREDIT_BUDGET = 1000;
-
 const REQUEST_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 const NO_PERSON = "No such person";
@@ -94,55 +95,69 @@ const KIND_RANK: Readonly<Record<Doc<"credits">["kind"], number>> = {
   composer: 6,
 };
 
+/** Credits one look into a person's credits reads at a time. */
+const CREDIT_BATCH = 10;
+
+const creditsAfter = (
+  db: DatabaseReader,
+  person: Doc<"people">,
+  after: Doc<"credits"> | null,
+): Promise<ReadonlyArray<Doc<"credits">>> =>
+  db
+    .query("credits")
+    .withIndex("by_person", (q) =>
+      after === null
+        ? q.eq("personId", person._id)
+        : q.eq("personId", person._id).gt("_creationTime", after._creationTime),
+    )
+    .take(CREDIT_BATCH);
+
+/**
+ * Whether the caller sees at least one title each person is credited on, reading each person's
+ * credits a batch at a time only until one shows. Every read is charged to `budget`; a person the
+ * budget cannot finish counts as not seen.
+ */
 const seenBy = async (
   db: DatabaseReader,
-  sees: TitleViewer,
+  seen: BudgetedViewer,
+  budget: ReadBudget,
   people: ReadonlyArray<Doc<"people">>,
-  creditBudget: number,
 ): Promise<ReadonlyArray<boolean>> => {
-  const titles = new Map<Id<"titles">, Promise<boolean>>();
-  let budget = creditBudget;
+  const titles = new Map<Id<"titles">, Promise<Seen>>();
 
-  const shows = (titleId: Id<"titles">): Promise<boolean> => {
+  const shows = (titleId: Id<"titles">): Promise<Seen> => {
     const known = titles.get(titleId);
 
     if (known !== undefined) return known;
 
-    const visible = db.get(titleId).then(async (title) => title !== null && sees(title));
+    const decided = budget.take(TITLE_GET)
+      ? db.get(titleId).then(async (title) => (title === null ? "hidden" : seen(title)))
+      : Promise.resolve<Seen>("spent");
 
-    titles.set(titleId, visible);
+    titles.set(titleId, decided);
 
-    return visible;
+    return decided;
   };
 
-  const anyVisible = async (credits: AsyncIterator<Doc<"credits">>): Promise<boolean> => {
-    if (budget <= 0) {
-      await credits.return?.();
+  const anyVisible = async (
+    person: Doc<"people">,
+    after: Doc<"credits"> | null,
+  ): Promise<boolean> => {
+    if (!budget.take(queryOf(CREDIT_BATCH))) return false;
 
-      return false;
-    }
+    const batch = await creditsAfter(db, person, after);
+    const decided = await Promise.all(batch.map(async (credit) => shows(credit.titleId)));
 
-    budget -= 1;
+    if (decided.includes("seen")) return true;
 
-    const step = await credits.next();
+    const last = batch.at(-1);
 
-    if (step.done === true) return false;
-
-    if (await shows(step.value.titleId)) {
-      await credits.return?.();
-
-      return true;
-    }
-
-    return anyVisible(credits);
+    return batch.length < CREDIT_BATCH || decided.includes("spent") || last === undefined
+      ? false
+      : anyVisible(person, last);
   };
 
-  const creditsOf = (person: Doc<"people">) =>
-    db.query("credits").withIndex("by_person", (q) => q.eq("personId", person._id));
-
-  return Promise.all(
-    people.map(async (person) => anyVisible(creditsOf(person)[Symbol.asyncIterator]())),
-  );
+  return inOrder(people, async (person) => anyVisible(person, null));
 };
 
 interface CreditOnTitle {
@@ -152,11 +167,18 @@ interface CreditOnTitle {
   readonly episodes: number;
 }
 
+/**
+ * A person's credits on titles the caller may see, from their first 500 credits. Each title is
+ * read and decided once, charged to `budget`; titles the budget cannot pay for are left out.
+ */
 const visibleCredits = async (
   db: DatabaseReader,
-  sees: TitleViewer,
+  seen: BudgetedViewer,
+  budget: ReadBudget,
   personId: Id<"people">,
 ): Promise<ReadonlyArray<CreditOnTitle>> => {
+  if (!budget.take(queryOf(CREDIT_SCAN))) return [];
+
   const rows = await db
     .query("credits")
     .withIndex("by_person", (q) => q.eq("personId", personId))
@@ -166,9 +188,11 @@ const visibleCredits = async (
 
   const titles = await Promise.all(
     titleIds.map(async (titleId) => {
+      if (!budget.take(TITLE_GET)) return null;
+
       const title = await db.get(titleId);
 
-      return title !== null && (await sees(title)) ? title : null;
+      return title !== null && (await seen(title)) === "seen" ? title : null;
     }),
   );
 
@@ -204,8 +228,10 @@ export const { get, search, requestDetails } = register({
 
     if (person === null) return fail("not_found", NO_PERSON);
 
-    const sees = titleViewer(ctx.db, caller, await reachOf(ctx.db, caller));
-    const credits = await visibleCredits(ctx.db, sees, personId);
+    const reach = await reachOf(ctx.db, caller);
+    const budget = callBudget(reach);
+    const seen = budgetedViewer(ctx.db, caller, reach, budget);
+    const credits = await visibleCredits(ctx.db, seen, budget, personId);
 
     if (credits.length === 0) return fail("not_found", NO_PERSON);
 
@@ -244,14 +270,22 @@ export const { get, search, requestDetails } = register({
         ? 10
         : Math.min(Math.max(Math.floor(limit), 1), 50);
 
-    const sees = titleViewer(ctx.db, caller, await reachOf(ctx.db, caller));
+    const reach = await reachOf(ctx.db, caller);
+    const budget = callBudget(reach);
 
     const matches = await ctx.db
       .query("people")
       .withSearchIndex("search_name", (q) => q.search("name", text))
       .take(SEARCH_SCAN);
 
-    const visible = await seenBy(ctx.db, sees, matches, SEARCH_CREDIT_BUDGET);
+    budget.take(peopleOf(SEARCH_SCAN));
+
+    const visible = await seenBy(
+      ctx.db,
+      budgetedViewer(ctx.db, caller, reach, budget),
+      budget,
+      matches,
+    );
 
     return matches
       .filter((_, index) => visible[index] === true)
@@ -268,8 +302,12 @@ export const { get, search, requestDetails } = register({
 
     if (person === null) return fail("not_found", NO_PERSON);
 
-    const sees = titleViewer(ctx.db, caller, await reachOf(ctx.db, caller));
-    const [seen] = await seenBy(ctx.db, sees, [person], CREDIT_SCAN);
+    const reach = await reachOf(ctx.db, caller);
+    const budget = callBudget(reach);
+
+    const [seen] = await seenBy(ctx.db, budgetedViewer(ctx.db, caller, reach, budget), budget, [
+      person,
+    ]);
 
     if (seen !== true) return fail("not_found", NO_PERSON);
 
