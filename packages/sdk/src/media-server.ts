@@ -1,5 +1,3 @@
-import type { ArgsSchema, MediaCommand, WireSchema } from "@media/contracts/command";
-import { commands } from "@media/contracts/commands";
 import type { CommandArgs, CommandResult } from "@media/contracts/commands";
 import {
   ClientDiagnosticsRequest,
@@ -8,9 +6,8 @@ import {
 } from "@media/contracts/diagnostics";
 import { Clock, Effect, Option, Redacted, Schema } from "effect";
 
-import { encodeArgs } from "./calls";
-import { reportGate, reportOf } from "./client-errors";
-import type { ErrorContext } from "./client-errors";
+import { reportGate, reportOf } from "./client-error-report";
+import type { ErrorContext } from "./client-error-report";
 import { baseUrl, encodeJson, requestJson } from "./media-http";
 import type { MediaName } from "./movies-client";
 
@@ -50,32 +47,10 @@ export interface MediaServer {
   readonly reportClientEvents: (request: ClientDiagnosticsRequest) => Promise<void>;
 }
 
-const bearerOf = (options: MediaServerOptions) =>
+/** The session's token as a bearer, none while signed out. */
+export const bearerOf = (options: MediaServerOptions) =>
   Effect.promise(() => options.accessToken()).pipe(
     Effect.map((token) => Option.map(Option.fromNullishOr(token), Redacted.make)),
-  );
-
-const callMedia = <Command extends MediaCommand<ArgsSchema, WireSchema>>(
-  options: MediaServerOptions,
-  name: string,
-  command: Command,
-  args: Command["args"]["Type"],
-): Promise<Command["result"]["Type"]> =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const wire = yield* encodeArgs(name, command.args, args);
-
-      return yield* requestJson(
-        {
-          operation: name,
-          url: `${baseUrl(options.url)}${command.route.path}`,
-          method: command.route.method,
-          body: Option.some(wire),
-          bearer: yield* bearerOf(options),
-        },
-        command.result,
-      );
-    }),
   );
 
 const postSignedIn = (
@@ -114,7 +89,12 @@ export const createMediaServer = (options: MediaServerOptions): MediaServer => {
     );
 
   return {
-    run: (name, args) => callMedia(options, name, commands[name], args),
+    // The command list loads with the first command, so a client that only reports errors, such
+    // as every page of the movies client, does not carry it.
+    run: (name, args) =>
+      import("./media-commands").then(({ runMediaCommand }) =>
+        runMediaCommand(options, name, args),
+      ),
     reportError: (report) => Effect.runPromise(sendReport(report)),
     reportCaught: (cause, context) =>
       Effect.runPromise(
