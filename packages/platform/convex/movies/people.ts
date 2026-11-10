@@ -103,62 +103,22 @@ const KIND_RANK: Readonly<Record<Doc<"credits">["kind"], number>> = {
 const CREDIT_BATCH = 10;
 
 /**
- * Where a look into a person's credits stopped: its last credit, and how many credits of that
- * credit's creation time it read, the last among them. Credits of one creation time, which an
- * import can make, order only by id, which no range can name.
+ * The next `CREDIT_BATCH` of a person's credits in index order after `after`. A credit's tie is
+ * unique, so this goes on from the exact credit it stopped at, whatever was added or removed.
  */
-interface CreditsRead {
-  readonly last: Doc<"credits">;
-  readonly tied: number;
-}
-
-/** What reading a batch of a person's credits after `after` costs: the tied ones it passes too. */
-const batchCost = (after: CreditsRead | null) =>
-  after === null ? creditRowsOf(CREDIT_BATCH) : creditRowsOf(CREDIT_BATCH + after.tied);
-
-/** The next `CREDIT_BATCH` of a person's credits in index order after `after`. */
-const creditsAfter = async (
+const creditsAfter = (
   db: DatabaseReader,
   person: Doc<"people">,
-  after: CreditsRead | null,
-): Promise<ReadonlyArray<Doc<"credits">>> => {
-  if (after === null) {
-    return db
-      .query("credits")
-      .withIndex("by_person", (q) => q.eq("personId", person._id))
-      .take(CREDIT_BATCH);
-  }
-
-  // From the last credit's creation time on: the `tied` read already come first, in order.
-  const time = after.last._creationTime;
-
-  return (
-    await db
-      .query("credits")
-      .withIndex("by_person", (q) => q.eq("personId", person._id).gte("_creationTime", time))
-      .take(after.tied + CREDIT_BATCH)
-  ).slice(after.tied);
-};
-
-/** Where a look stopped after reading `batch` past `after`. */
-const readThrough = (
-  after: CreditsRead | null,
-  batch: ReadonlyArray<Doc<"credits">>,
-): CreditsRead | null => {
-  const last = batch.at(-1);
-
-  if (last === undefined) return after;
-
-  const run =
-    batch.length - 1 - batch.findLastIndex((credit) => credit._creationTime !== last._creationTime);
-
-  const tied =
-    run === batch.length && after !== null && after.last._creationTime === last._creationTime
-      ? after.tied + run
-      : run;
-
-  return { last, tied };
-};
+  after: Doc<"credits"> | null,
+): Promise<ReadonlyArray<Doc<"credits">>> =>
+  db
+    .query("credits")
+    .withIndex("by_person", (q) =>
+      after === null
+        ? q.eq("personId", person._id)
+        : q.eq("personId", person._id).gt("tie", after.tie),
+    )
+    .take(CREDIT_BATCH);
 
 /**
  * Whether the caller sees at least one title each person is credited on, reading each person's
@@ -191,19 +151,22 @@ const seenBy = async (
     return decided;
   };
 
-  const anyVisible = async (person: Doc<"people">, after: CreditsRead | null): Promise<boolean> => {
-    if (!budget.take(batchCost(after))) return false;
+  const anyVisible = async (
+    person: Doc<"people">,
+    after: Doc<"credits"> | null,
+  ): Promise<boolean> => {
+    if (!budget.take(creditRowsOf(CREDIT_BATCH))) return false;
 
     const batch = await creditsAfter(db, person, after);
     const decided = await Promise.all(batch.map(async (credit) => shows(credit.titleId)));
 
     if (decided.includes("seen")) return true;
 
-    const through = readThrough(after, batch);
+    const last = batch.at(-1);
 
-    return batch.length < CREDIT_BATCH || decided.includes("spent") || through === null
+    return batch.length < CREDIT_BATCH || decided.includes("spent") || last === undefined
       ? false
-      : anyVisible(person, through);
+      : anyVisible(person, last);
   };
 
   return inOrder(people, async (person) => anyVisible(person, null));

@@ -125,7 +125,7 @@ const titleIdentity = <Fields extends TitleFields>(fields: Fields): Fields =>
     creditsHashWithin(trailerWithin(recommendationsWithin(idsWithin(matchKeyWithin(fields))))),
   );
 
-type TitleFields = WithoutSystemFields<Doc<"titles">>;
+type TitleFields = Omit<WithoutSystemFields<Doc<"titles">>, "tie">;
 
 const titleTexts = <Fields extends TitleFields>(): ReadonlyArray<Shrinker<Fields>> => [
   {
@@ -349,7 +349,7 @@ export const fitPerson = <Fields extends PersonFields>(fields: Fields): Fields =
     [],
   );
 
-type CreditFields = WithoutSystemFields<Doc<"credits">>;
+type CreditFields = Omit<WithoutSystemFields<Doc<"credits">>, "tie">;
 
 /** A credit's fields kept within `DOCUMENT_BYTES.credits`: its role. */
 export const fitCredit = <Fields extends CreditFields>(fields: Fields): Fields =>
@@ -365,7 +365,7 @@ export const fitCredit = <Fields extends CreditFields>(fields: Fields): Fields =
     [],
   );
 
-type CollectionFields = WithoutSystemFields<Doc<"collections">>;
+type CollectionFields = Omit<WithoutSystemFields<Doc<"collections">>, "tie">;
 
 /** A collection's fields kept within `DOCUMENT_BYTES.collections`: its overview first. */
 export const fitCollection = <Fields extends CollectionFields>(fields: Fields): Fields =>

@@ -113,6 +113,7 @@ import type * as movies_present from "../movies/present.js";
 import type * as movies_probe from "../movies/probe.js";
 import type * as movies_purge from "../movies/purge.js";
 import type * as movies_reads from "../movies/reads.js";
+import type * as movies_rowsProbe from "../movies/rowsProbe.js";
 import type * as movies_scanner from "../movies/scanner.js";
 import type * as movies_titles from "../movies/titles.js";
 import type * as movies_totals from "../movies/totals.js";
@@ -234,6 +235,7 @@ declare const fullApi: ApiFromModules<{
   "movies/probe": typeof movies_probe;
   "movies/purge": typeof movies_purge;
   "movies/reads": typeof movies_reads;
+  "movies/rowsProbe": typeof movies_rowsProbe;
   "movies/scanner": typeof movies_scanner;
   "movies/titles": typeof movies_titles;
   "movies/totals": typeof movies_totals;

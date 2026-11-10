@@ -407,13 +407,16 @@ access-checked movies read stays under all three by one rule, in `movies/reads.t
   there, unlisted: the page's cursor names it and the first member it did not decide, so the
   next page decides it from that member on, and it is listed once a member is visible, or left
   out once every member is decided and none is. A collection with a visible member whose budget
-  then runs out stays listed with the titles it decided. Collections page by their own cursor, a
-  position in the index's `(sort key, creation time, id)` order, which a reloaded page's
-  `endCursor` also uses. No range can name an id, so the cursor also counts the rows of its sort
-  key and creation time already passed, and the next page reads on from there within them;
-  collections an import gave one name and one creation time are each listed once. The newest
-  merge and people search's walk through a person's credits continue the same way past rows of
-  one time.
+  then runs out stays listed with the titles it decided. Collections page by their own cursor, which names one exact row: a collection's
+  sort key and its tie. Each collection, title, and credit gets a tie when the movies writer
+  inserts it, a UUID unique to the row and never changed, and it is the last field of the
+  indexes the paging walks use (collections by `(sort key, tie)`, titles by `(library, kind,
+  added, tie)`, credits by `(person, tie)`). A page goes on strictly after the tie its cursor
+  names within an equal prefix, so it reads only forward, deleting or adding rows between pages
+  never skips or repeats one, and a page's reads stay within the budget however many rows share
+  a sort key, an added time, or a creation time. A reloaded page's `endCursor` uses the same
+  position. The newest merge and people search's walk through a person's credits continue the
+  same way inside a call.
 - **Aggregates answer the best for their budget.** Home rows, genres, and similar titles walk
   every movies library shared with the caller with `visiblePage`, as many rows a step as both
   `visiblePage`'s sizing and the budget allow, keeping each step's continuation, with no fixed

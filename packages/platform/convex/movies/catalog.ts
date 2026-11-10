@@ -371,8 +371,7 @@ const upsertTitle = async (
     searchText: searchTextOf(metadata),
   });
 
-  const titleId = await insertTitle(db, fields);
-  const created = { ...fields, _id: titleId, _creationTime: now };
+  const created = { ...(await insertTitle(db, fields)), _creationTime: now };
 
   await syncTitleGenres(db, created);
 

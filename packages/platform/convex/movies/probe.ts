@@ -86,7 +86,7 @@ const seedTitle = async (
   const kind = title.episodes > 0 ? "show" : "movie";
   const sortKey = title.name.toLowerCase();
 
-  const titleId = await insertTitle(db, {
+  const { _id: titleId } = await insertTitle(db, {
     libraryId,
     kind,
     matchKey: `seed:${title.name}`,

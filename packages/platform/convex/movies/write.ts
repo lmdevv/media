@@ -27,6 +27,12 @@ type Db = MutationCtx["db"];
 
 type Fields<T extends keyof Rows> = WithoutSystemFields<Rows[T]>;
 
+/** A row's fields as its writer's callers give them: the writer sets its tie. */
+type Untied<T extends "titles" | "credits" | "collections"> = Omit<Fields<T>, "tie">;
+
+/** A tie for a new row: unique, and never changed after its insert (ADR 0005). */
+const newTie = (): string => crypto.randomUUID();
+
 /** Fields to write over a row, as Convex patches them: an undefined optional field is removed. */
 type Patch<Row extends GenericDocument> = {
   readonly [K in keyof WithoutSystemFields<Row>]?: undefined extends WithoutSystemFields<Row>[K]
@@ -44,14 +50,21 @@ interface Rows {
   readonly collections: Doc<"collections">;
 }
 
-export const insertTitle = async (db: Db, fields: Fields<"titles">): Promise<Id<"titles">> =>
-  db.insert("titles", fitTitle(fields));
+/** Inserts a title with a new tie and answers it as stored, but for its creation time. */
+export const insertTitle = async (
+  db: Db,
+  fields: Untied<"titles">,
+): Promise<Fields<"titles"> & { readonly _id: Id<"titles"> }> => {
+  const stored = fitTitle({ ...fields, tie: newTie() });
+
+  return { ...stored, _id: await db.insert("titles", stored) };
+};
 
 /** Writes `fields` over a title, fitting the merged document; answers the title as stored. */
 export const patchTitle = async (
   db: Db,
   existing: Doc<"titles">,
-  fields: Partial<Fields<"titles">>,
+  fields: Partial<Untied<"titles">>,
 ): Promise<Doc<"titles">> => {
   const merged: Doc<"titles"> = { ...existing, ...fields };
   const fitted = fitTitle(merged);
@@ -98,19 +111,20 @@ export const patchPerson = async (
   return fitted;
 };
 
-export const insertCredit = async (db: Db, fields: Fields<"credits">): Promise<Id<"credits">> =>
-  db.insert("credits", fitCredit(fields));
+export const insertCredit = async (db: Db, fields: Untied<"credits">): Promise<Id<"credits">> =>
+  db.insert("credits", fitCredit({ ...fields, tie: newTie() }));
 
 export const insertCollection = async (
   db: Db,
-  fields: Fields<"collections">,
-): Promise<Id<"collections">> => db.insert("collections", fitCollection(fields));
+  fields: Untied<"collections">,
+): Promise<Id<"collections">> =>
+  db.insert("collections", fitCollection({ ...fields, tie: newTie() }));
 
 /** Writes `fields` over a collection, fitting the merged document; answers it as stored. */
 export const patchCollection = async (
   db: Db,
   existing: Doc<"collections">,
-  fields: Partial<Fields<"collections">>,
+  fields: Partial<Untied<"collections">>,
 ): Promise<Doc<"collections">> => {
   const merged: Doc<"collections"> = { ...existing, ...fields };
   const fitted = fitCollection(merged);

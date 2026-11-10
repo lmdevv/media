@@ -64,6 +64,11 @@ export const moviesTables = {
     addedAt: v.number(),
     updatedAt: v.number(),
     searchText: v.string(),
+    /**
+     * Unique per row, set once by the movies writer: the last field of the indexes a list walks,
+     * so its cursor names one exact row however many share the fields before it (ADR 0005).
+     */
+    tie: v.string(),
     originalName: v.optional(nullable(v.string())),
     releaseDate: v.optional(nullable(v.string())),
     status: v.optional(nullable(showStatus)),
@@ -90,8 +95,8 @@ export const moviesTables = {
     .index("by_kind_tmdb", ["kind", "externalIds.tmdb"])
     .index("by_library_status", ["libraryId", "matchStatus"])
     .index("by_library_sort", ["libraryId", "sortKey"])
-    .index("by_library_added", ["libraryId", "addedAt"])
-    .index("by_library_kind_added", ["libraryId", "kind", "addedAt"])
+    .index("by_library_added", ["libraryId", "addedAt", "tie"])
+    .index("by_library_kind_added", ["libraryId", "kind", "addedAt", "tie"])
     .index("by_library_year", ["libraryId", "year"])
     .index("by_sort", ["sortKey"])
     .index("by_added", ["addedAt"])
@@ -195,9 +200,14 @@ export const moviesTables = {
     kind: creditKind,
     role: nullable(v.string()),
     order: v.number(),
+    /**
+     * Unique per row, set once by the movies writer: the last field of the indexes a list walks,
+     * so its cursor names one exact row however many share the fields before it (ADR 0005).
+     */
+    tie: v.string(),
   })
     .index("by_title_episode", ["titleId", "episodeId", "order"])
-    .index("by_person", ["personId"]),
+    .index("by_person", ["personId", "tie"]),
 
   /** A file a scan found, the title and episode it plays, and what ffprobe saw in it. */
   mediaFiles: defineTable({
@@ -239,9 +249,14 @@ export const moviesTables = {
     overview: nullable(v.string()),
     poster: nullable(v.string()),
     backdrop: nullable(v.string()),
+    /**
+     * Unique per row, set once by the movies writer: the last field of the indexes a list walks,
+     * so its cursor names one exact row however many share the fields before it (ADR 0005).
+     */
+    tie: v.string(),
   })
     .index("by_source_key", ["sourceKey"])
-    .index("by_sort", ["sortKey"]),
+    .index("by_sort", ["sortKey", "tie"]),
 
   collectionItems: defineTable({
     collectionId: v.id("collections"),

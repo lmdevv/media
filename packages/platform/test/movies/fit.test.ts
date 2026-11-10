@@ -73,6 +73,7 @@ const title = (
   addedAt: 1,
   updatedAt: 1,
   searchText: "A Title 2010",
+  tie: "6f1c2a3e-0b4d-4e5f-8a9b-0c1d2e3f4a5b",
 });
 
 describe("movies document bounds", () => {
@@ -192,6 +193,9 @@ const ids = {
   userId: idOf("users", "k57useridforaboundtestxxxxxxxxxx"),
 };
 
+/** A tie as the writer makes it: a UUID. */
+const TIE = "6f1c2a3e-0b4d-4e5f-8a9b-0c1d2e3f4a5b";
+
 const widestIds = { tmdb: wide(BOUNDS.id), imdb: wide(BOUNDS.id), tvdb: wide(BOUNDS.id) };
 
 /**
@@ -300,6 +304,7 @@ const floor = (text: number): Floor => {
       kind: "guest-star",
       role: free,
       order: 1_000_000,
+      tie: TIE,
     },
     collections: {
       name: free,
@@ -310,6 +315,7 @@ const floor = (text: number): Floor => {
       overview: free,
       poster: free,
       backdrop: free,
+      tie: TIE,
     },
     seasons: {
       titleId: ids.titleId,
