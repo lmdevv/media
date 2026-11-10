@@ -9,6 +9,7 @@ import type { DataModel, Doc } from "../../_generated/dataModel";
 import { internalMutation, internalQuery } from "../../_generated/server";
 import type { QueryCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
+import { requireDeviceName } from "../lib/names";
 import {
   constantTimeEqual,
   formatSecret,
@@ -27,8 +28,6 @@ const CODE_MS = 10 * 60 * 1000;
 const POLL_SECONDS = 5;
 
 const WAITING_MAX = 50;
-
-const NAME_MAX = 64;
 
 const USER_CODE_LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
 
@@ -180,11 +179,8 @@ export const insert = internalMutation({
   returns: v.object({ codeId: v.id("deviceCodes"), expiresAt: v.number() }),
   handler: async (ctx, { secretHash, userCode, clientName }) => {
     const now = Date.now();
-    const name = clientName.trim();
 
-    if (name.length === 0 || name.length > NAME_MAX) {
-      return fail("invalid_args", `Name the device with 1 to ${NAME_MAX} characters`);
-    }
+    const name = requireDeviceName(clientName);
 
     const waiting = await ctx.db
       .query("deviceCodes")

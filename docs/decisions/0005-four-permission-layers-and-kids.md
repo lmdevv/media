@@ -223,7 +223,8 @@ admin can give it a role, a reset link, restrictions, or ownership.
   keys, because a leaked admin key could otherwise add its own person to every group. Group membership is read on every
   content check, so a person added to or removed from a group gains or loses its grants on their
   next call. Removing a group deletes its memberships at once and deletes its grants in scheduled
-  pages.
+  pages. A group's name follows the device-name rule (ADR 0006): an admin types it, so one that
+  breaks the rule is refused with `invalid_args`.
 - Limits: 1,000 grants per resource, 16 groups per person, and 500 people per group.
 
 ### Restrictions

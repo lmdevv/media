@@ -10,6 +10,7 @@ import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { refuseKeys, requireCaller } from "../auth/caller";
 import type { Caller } from "../auth/caller";
 import { fail } from "../lib/errors";
+import { requireDeviceName } from "../lib/names";
 import { paginate } from "../lib/paginate";
 import { takeAttempt } from "../lib/rateLimit";
 import {
@@ -27,21 +28,11 @@ import { endSession, liveOnDevice } from "../sessions";
 import { dropApprovals } from "./approvals";
 import { DEVICE_PREFIX, NO_DEVICE } from "./facts";
 
-const NAME_MAX = 64;
-
 const DEVICE_SESSIONS_READ = 200;
 
 const ENROLLS_PER_HOUR = 20;
 
 const PURGE_BATCH = 100;
-
-const parseName = (name: string): string => {
-  const trimmed = name.trim();
-
-  return trimmed.length === 0 || trimmed.length > NAME_MAX
-    ? fail("invalid_args", `Name the device with 1 to ${NAME_MAX} characters`)
-    : trimmed;
-};
 
 interface SignedInHere {
   readonly sessionId: Id<"authSessions">;
@@ -126,7 +117,7 @@ export const attach = internalMutation({
       return fail("conflict", "This device is shared; open a tile from its picker instead");
     }
 
-    const named = parseName(name);
+    const named = requireDeviceName(name);
 
     if (named !== device.name) await ctx.db.patch(device._id, { name: named });
 
@@ -150,7 +141,7 @@ export const insert = internalMutation({
     const joinSequence = 1;
 
     const deviceId = await ctx.db.insert("devices", {
-      name: parseName(name),
+      name: requireDeviceName(name),
       secretHash,
       generation,
       joins: joinSequence,
@@ -301,7 +292,7 @@ const purgeLeftovers = async (
 
 export const { enroll, list, setMode, remove } = register({
   enroll: async (ctx, { name, device }) => {
-    parseName(name);
+    requireDeviceName(name);
 
     const stored = device?.trim();
     const parsed = stored === undefined ? null : parseSecret(DEVICE_PREFIX, stored);

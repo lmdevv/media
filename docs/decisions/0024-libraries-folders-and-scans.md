@@ -21,7 +21,9 @@ the server keeps its file access until phase 4 (D50).
 
 - A `libraries` row holds a name, a `kind`, and `lastScan`. The kind is the content domain (`movies`
   or `music`), so a later product adds a domain and with it a kind. Names are not unique, because
-  refusing a taken name would tell its creator that a private library exists.
+  refusing a taken name would tell its creator that a private library exists. A name follows the
+  device-name rule (ADR 0006): a manager types it, so one that breaks the rule is refused with
+  `invalid_args`.
 - A library's folders live in `libraryFolders`, one row per folder, and nowhere else. A library has
   1 to 16 folders. A folder is absolute, written down by `normalizeFolder` from
   `@media/contracts/library-folder` as the web app writes it, without `.` or `..` parts or control

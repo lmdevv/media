@@ -2,21 +2,21 @@ import { register } from "../../../commands/core/permissions/groups";
 import type { Doc, Id } from "../../_generated/dataModel";
 import type { DatabaseReader } from "../../_generated/server";
 import { fail } from "../lib/errors";
+import { GIVEN_NAME_MAX, requireGivenName } from "../lib/names";
 import { paginate } from "../lib/paginate";
 import { requireAccount, requireServer } from "./authorize";
 import { GROUPS_PER_USER_MAX, groupsOf, purgeGrantsOf } from "./grants";
-
-const NAME_MAX = 64;
 
 /** Most people in one group, so removing a group deletes its memberships in one call. */
 const GROUP_MEMBERS_MAX = 500;
 
 const parseName = (typed: string): Pick<Doc<"groups">, "name" | "nameKey"> => {
-  const name = typed.trim();
+  const name = requireGivenName(
+    typed,
+    `Name a group with 1 to ${GIVEN_NAME_MAX} printable characters`,
+  );
 
-  return name.length === 0 || name.length > NAME_MAX
-    ? fail("invalid_args", `Name a group with 1 to ${NAME_MAX} characters`)
-    : { name, nameKey: name.toLowerCase() };
+  return { name, nameKey: name.toLowerCase() };
 };
 
 const refuseTakenName = async (

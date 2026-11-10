@@ -47,6 +47,11 @@ export interface Secret {
   readonly clearable?: true;
   /** The command runs without it: when the variable does not give it, it is left out. */
   readonly optional?: true;
+  /**
+   * It may also come piped on stdin: it is the command's only secret, and required. An optional
+   * secret never reads stdin, which could wait forever on an inherited pipe that never closes.
+   */
+  readonly stdin?: true;
 }
 
 const isNullableString = (wire: WireField["wire"]): boolean =>
@@ -66,11 +71,7 @@ const CREDENTIAL = /(?:password|token|secret)$/iu;
  */
 const SECRET_NAMES: ReadonlySet<string> = new Set(["code", "device", "grant", "link"]);
 
-/**
- * The arguments a flag would leak into shell history and the process list: every string field
- * named like a credential, and the codes and links in `SECRET_NAMES`.
- */
-export const secretsOf = (args: ReadonlyArray<WireField>): ReadonlyArray<Secret> =>
+const fieldSecrets = (args: ReadonlyArray<WireField>): ReadonlyArray<Secret> =>
   args.flatMap((field) => {
     if (!CREDENTIAL.test(field.name) && !SECRET_NAMES.has(field.name)) return [];
 
@@ -85,6 +86,20 @@ export const secretsOf = (args: ReadonlyArray<WireField>): ReadonlyArray<Secret>
 
     return [Object.assign({ field: field.name, variable }, optional, clears) satisfies Secret];
   });
+
+/**
+ * The arguments a flag would leak into shell history and the process list: every string field
+ * named like a credential, and the codes and links in `SECRET_NAMES`. The one rule for which of
+ * them stdin may give is here, and the CLI and the skill reference both read it as `stdin`.
+ */
+export const secretsOf = (args: ReadonlyArray<WireField>): ReadonlyArray<Secret> => {
+  const secrets = fieldSecrets(args);
+  const [only] = secrets;
+
+  return secrets.length === 1 && only !== undefined && only.optional !== true
+    ? [{ ...only, stdin: true }]
+    : secrets;
+};
 
 /** A Convex paginated query takes `paginationOpts`; the CLI gives it `--limit` and `--cursor`. */
 export const isPaginated = (args: ReadonlyArray<WireField>): boolean =>

@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       workspaces: ${{ steps.scope.outputs.workspaces }}
+      verify-media: ${{ steps.skill.outputs.changed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,6 +34,14 @@ jobs:
         run: |
           workspaces="$(scripts/changed-packages.sh $CHANGED)"
           echo "workspaces=$(jq -Rsc 'split("\n") | map(select(. != ""))' <<<"$workspaces")" >> "$GITHUB_OUTPUT"
+      # The verify-media skill lives outside the workspaces, so its tests key off its own paths.
+      - id: skill
+        run: |
+          if [ "$CHANGED" = "--all" ] || git diff --name-only HEAD^1 HEAD | grep -qE '^(\.agents/skills/verify-media/|scripts/private-network\.sh$|\.github/workflows/ci\.yml$)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
   check:
     runs-on: ubuntu-latest
@@ -56,6 +65,10 @@ jobs:
       - run: scripts/changed-packages.sh $CHANGED lint
       - run: pnpm fmt:check
       - run: pnpm --filter @media/commands check
+      # Ubuntu's AppArmor refuses unprivileged user namespaces by default; allowing them lets the
+      # media service's pid-namespace regression in tool-lifetime.test.ts run instead of skip.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: unshare --user --map-root-user --pid --fork --mount-proc true
       - run: scripts/changed-packages.sh $CHANGED test
       - run: pnpm knip
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/mobile')
@@ -65,6 +78,28 @@ jobs:
         run: pnpm --filter @lmdevv/movies build:sea
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/cli')
         run: test "$(apps/cli/dist/sea/media-linux-x64 --version)" = "$(scripts/check-version.sh)"
+
+  verify-media-skill:
+    name: verify-media skill tests
+    needs: changes
+    if: needs.changes.outputs.verify-media == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: pnpm install --frozen-lockfile --filter=. --ignore-scripts
+      - run: pnpm exec playwright install --with-deps chromium
+      # The isolated browser host runs in an unprivileged user and network namespace.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: scripts/private-network.sh true
+      - run: node --test .agents/skills/verify-media/scripts/*.test.mjs
 
   legacy-music:
     name: legacy/music checks

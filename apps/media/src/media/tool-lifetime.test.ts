@@ -12,6 +12,8 @@ import * as MediaTestServer from "../testing/media-test-server.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
+// Needs unprivileged user namespaces. Ubuntu's AppArmor refuses them by default, so CI's check job
+// allows them before it runs this suite; the NixOS module's sandbox refuses them too.
 const canIsolate = process.platform === "linux" && (await pidNamespacesAvailable());
 
 const SERVER_DEATH_MS = 1000;

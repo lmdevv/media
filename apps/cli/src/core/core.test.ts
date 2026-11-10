@@ -137,7 +137,13 @@ describe("media's groups", () => {
             name: Schema.String,
             command: Schema.String,
             secrets: Schema.optionalKey(
-              Schema.Array(Schema.Struct({ field: Schema.String, variable: Schema.String })),
+              Schema.Array(
+                Schema.Struct({
+                  field: Schema.String,
+                  variable: Schema.String,
+                  stdin: Schema.optionalKey(Schema.Literal(true)),
+                }),
+              ),
             ),
           }),
         ),
@@ -147,7 +153,7 @@ describe("media's groups", () => {
     expect(listed.find((entry) => entry.name === "core.accounts.users.create")).toEqual({
       name: "core.accounts.users.create",
       command: "media admin users create",
-      secrets: [{ field: "password", variable: "MEDIA_ARG_PASSWORD" }],
+      secrets: [{ field: "password", variable: "MEDIA_ARG_PASSWORD", stdin: true }],
     });
   });
 });

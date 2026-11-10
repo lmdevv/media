@@ -10,10 +10,14 @@ import type { Doc, TableNames } from "../convex/_generated/dataModel";
 
 const platformDir = fileURLToPath(new URL("..", import.meta.url));
 
+/** Room for thousands of rows of `convex data`; Node's 1 MB default cuts it off. */
+const ROWS_OUTPUT_MAX = 64 * 1024 * 1024;
+
 const convex = (args: ReadonlyArray<string>): string =>
   execFileSync(join(platformDir, "node_modules/.bin/convex"), args, {
     cwd: platformDir,
     encoding: "utf8",
+    maxBuffer: ROWS_OUTPUT_MAX,
     stdio: ["ignore", "pipe", "ignore"],
   });
 
@@ -34,5 +38,20 @@ export const importRows = <Table extends TableNames>(
 
 export const newestRows = (table: TableNames, limit = 200): ReadonlyArray<string> =>
   convex(["data", table, "--format", "jsonl", "--order", "desc", "--limit", String(limit)])
+    .split("\n")
+    .filter((line) => line.trim().startsWith("{"));
+
+/** The newest scheduled function runs, as `convex data` lists the `_scheduled_functions` table. */
+export const newestScheduledRuns = (limit = 200): ReadonlyArray<string> =>
+  convex([
+    "data",
+    "_scheduled_functions",
+    "--format",
+    "jsonl",
+    "--order",
+    "desc",
+    "--limit",
+    String(limit),
+  ])
     .split("\n")
     .filter((line) => line.trim().startsWith("{"));

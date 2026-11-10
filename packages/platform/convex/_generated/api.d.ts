@@ -21,6 +21,7 @@ import type * as core_auth_deviceGrants from "../core/auth/deviceGrants.js";
 import type * as core_auth_flows from "../core/auth/flows.js";
 import type * as core_auth_password from "../core/auth/password.js";
 import type * as core_auth_sessions from "../core/auth/sessions.js";
+import type * as core_auth_store from "../core/auth/store.js";
 import type * as core_auth_sweep from "../core/auth/sweep.js";
 import type * as core_auth_tiles from "../core/auth/tiles.js";
 import type * as core_connect_facts from "../core/connect/facts.js";
@@ -125,6 +126,7 @@ declare const fullApi: ApiFromModules<{
   "core/auth/flows": typeof core_auth_flows;
   "core/auth/password": typeof core_auth_password;
   "core/auth/sessions": typeof core_auth_sessions;
+  "core/auth/store": typeof core_auth_store;
   "core/auth/sweep": typeof core_auth_sweep;
   "core/auth/tiles": typeof core_auth_tiles;
   "core/connect/facts": typeof core_connect_facts;
