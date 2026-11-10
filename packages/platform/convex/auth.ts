@@ -62,14 +62,11 @@ export const store = internalMutation({
   handler: async (ctx, { args }): Promise<StoreAnswer> => {
     if (args.type === "signOut") return signOutCaller(ctx);
 
-    if (args.type === "refreshSession") {
-      const refresh = await decideRefresh(ctx, args.refreshToken);
-
-      if (refresh.kind === "answered") return null;
-
-      return ctx.runMutation(internal.auth.libraryStore, {
-        args: { type: "refreshSession", refreshToken: refresh.refreshToken },
-      });
+    if (
+      args.type === "refreshSession" &&
+      (await decideRefresh(ctx, args.refreshToken)) === "answered"
+    ) {
+      return null;
     }
 
     return ctx.runMutation(internal.auth.libraryStore, { args });

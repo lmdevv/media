@@ -222,27 +222,20 @@ token past the window left its session unrevoked.
   Marked tokens stay until their session ends, so `core.auth.sessions.revoke` still takes any
   token of a session, an invalidated one included.
 
-- **A used token is answered as the library answers it.** Convex Auth calls the session's newest
-  unused token active. It hands that token back when the reused token is its parent; otherwise,
-  inside the window, it mints a child of the reused token, and past it, it refreshes nothing and
-  marks the branch. The store reaches the same answer within a bound:
-  - it reads the reused token's children through `sessionIdAndParentRefreshTokenId`, at most 64.
-    A late retry with no unused child cannot be handed the active token, so it marks the branch
-    without searching further;
-  - otherwise it searches for the active token as the library does, from the newest token down to
-    the first unused one, at most 1,500 deep. Used tokens lie above the active one only where a
-    branch was marked, so the search usually reads one row. When the store then hands the refresh
-    to the library, the library's own search reads no more than the store's did;
-  - a late retry is handed the active token only when the store found it and the reused token
-    is its parent, which is the library's rule. When the search runs out at 1,500, or the children
-    read is full of used ones, nothing proves that, so the retry refreshes nothing and its branch
-    is marked, as the library answers a late retry that is not the active token's parent. The
-    store refuses where it cannot prove the library would accept; at that depth the library's own
-    search would pass the read limit anyway;
-  - inside the window the library always returns a token. When the active token lies deeper than
-    the search, the store adds a fresh child of the reused token and hands the library that one.
-    On a first use the library reads only the token and its session, so the client gets tokens,
-    and they stay in the reused token's branch, which a later late retry of it marks.
+- **A used token is answered by the library's rule, from one read.** Convex Auth calls the
+  session's newest unused token active and finds it by scanning the session's tokens from the
+  newest down. It hands that token back when the reused token is its parent; otherwise, inside the
+  window, it mints a child of the reused token, and past it, it refreshes nothing and marks the
+  branch. The core's schema defines `authRefreshTokens` and adds `by_session_use`
+  (`["sessionId", "firstUsedTime"]`), so the store reads the active token at once: the newest row
+  with `firstUsedTime` undefined. A late retry goes to the library exactly when the reused token is
+  that token's parent, and inside the window every retry goes to the library. The index follows
+  every insert and mark, the library's and the store's, and nothing depends on scan order.
+- **What the library still reads.** When the store hands a refresh on, the library repeats its
+  own scan for the active token, reading each used token above it, as it does without the store.
+  Used tokens lie above the active one only where a late retry marked a branch, so the scan
+  usually reads one row; with more than about 4,000 above, the library's call fails at the read
+  limit as it would alone.
 - **One chain of deletions per session.** `endSession` leaves a session that is already gone
   alone. Whatever deleted it deletes its tokens or leaves them to the sweep, so an expired token
   sent again while its session's tokens are being deleted, or a second revoke, starts no second

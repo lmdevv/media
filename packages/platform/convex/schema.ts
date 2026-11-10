@@ -175,7 +175,10 @@ export default defineSchema({
     .index("by_user_device", ["userId", "device.id"])
     .index("by_grant", ["grant"]),
 
-  /** Convex Auth's refresh tokens, in its own shape. */
+  /**
+   * Convex Auth's refresh tokens, in its own shape. `by_session_use` finds a session's active token,
+   * its newest unused one, in one read (`core/auth/store.ts`).
+   */
   authRefreshTokens: defineTable({
     sessionId: v.id("authSessions"),
     expirationTime: v.number(),
@@ -184,6 +187,7 @@ export default defineSchema({
   })
     .index("sessionId", ["sessionId"])
     .index("sessionIdAndParentRefreshTokenId", ["sessionId", "parentRefreshTokenId"])
+    .index("by_session_use", ["sessionId", "firstUsedTime"])
     .index("by_expiration", ["expirationTime"]),
 
   /** A user's password, as a Scrypt hash. */

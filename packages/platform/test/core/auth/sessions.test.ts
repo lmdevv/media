@@ -14,8 +14,15 @@ const stack = coreStackFromEnvFile();
 /** More refresh tokens than a session gathers in its 30 days at one per 10-minute JWT. */
 const PILED_UP = 5000;
 
-/** Used tokens enough to put the active one past the store's 1,500-deep search for it. */
-const DEEPER_THAN_SEARCH = 1600;
+/** Used tokens a long branch leaves above the active token once a late retry marks it. */
+const MARKED_BRANCH = 1600;
+
+/**
+ * Used tokens above the active one in the 5,000-token session. Convex Auth's own search for the
+ * active token, which it repeats when the store hands it a refresh, reads each of them, and one
+ * call may read 4,096.
+ */
+const USED_ABOVE = 3500;
 
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and these
 // are the `_id`s the stack's authRefreshTokens rows hold; the backend's `v.id(...)` validators check
@@ -422,7 +429,7 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     expect((await tokensFrom(r2))?.refreshToken).toBe(sibling);
   }, 90_000);
 
-  it("answers every retry within its reads, with 5,000 used tokens above the active one", async () => {
+  it("answers every retry as the library does in a session of 5,000 tokens", async () => {
     if (stack === undefined) return;
     const late = await signInAs(stack, await createPerson(stack));
     const inWindow = await signInAs(stack, await createPerson(stack));
@@ -435,26 +442,31 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
 
     const expirationTime = Date.now() + DAY_MS;
     const longAgo = Date.now() - 6 * REUSE_WINDOW_MS;
-    const lostChildOf = addToken(lateSession, { expirationTime, firstUsedTime: longAgo });
-    const childless = addToken(lateSession, { expirationTime, firstUsedTime: longAgo });
 
-    const lostChild = addToken(lateSession, { expirationTime, parentRefreshTokenId: lostChildOf });
-
-    const usedAbove = (sessionId: Id<"authSessions">) =>
+    const used = (sessionId: Id<"authSessions">, count: number) =>
       pileUp(
-        Array.from({ length: PILED_UP }, () => ({
+        Array.from({ length: count }, () => ({
           sessionId,
           expirationTime,
           firstUsedTime: longAgo,
         })),
       );
 
-    await usedAbove(lateSession);
-    await usedAbove(windowSession);
+    await used(lateSession, PILED_UP - USED_ABOVE);
+
+    const lostChildOf = addToken(lateSession, { expirationTime, firstUsedTime: longAgo });
+    const childless = addToken(lateSession, { expirationTime, firstUsedTime: longAgo });
+
+    const lostChild = addToken(lateSession, { expirationTime, parentRefreshTokenId: lostChildOf });
+
+    await used(lateSession, USED_ABOVE);
+    await used(windowSession, USED_ABOVE);
 
     expect(await refreshWith(stack, `${childless}|${lateSession}`)).toEqual({ tokens: null });
-    expect(await refreshWith(stack, `${lostChildOf}|${lateSession}`)).toEqual({ tokens: null });
-    expect(await refreshWith(stack, `${lostChild}|${lateSession}`)).toEqual({ tokens: null });
+
+    expect((await refreshWith(stack, `${lostChildOf}|${lateSession}`)).tokens?.refreshToken).toBe(
+      `${lostChild}|${lateSession}`,
+    );
 
     const justUsed = addToken(windowSession, { expirationTime, firstUsedTime: Date.now() });
 
@@ -469,6 +481,30 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     ).toEqual(["accepted", "accepted"]);
   }, 120_000);
 
+  it("hands a late retry its active child under a long invalidated branch", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const { sessionId } = await signedIn.client.query(api.core.auth.sessions.current, {});
+    const expirationTime = Date.now() + DAY_MS;
+    const longAgo = Date.now() - 6 * REUSE_WINDOW_MS;
+    const replayed = addToken(sessionId, { expirationTime, firstUsedTime: longAgo });
+    const active = addToken(sessionId, { expirationTime, parentRefreshTokenId: replayed });
+    const invalidatedRoot = addToken(sessionId, { expirationTime, firstUsedTime: longAgo });
+
+    await pileUp(
+      Array.from({ length: MARKED_BRANCH }, () => ({
+        sessionId,
+        expirationTime,
+        firstUsedTime: longAgo,
+        parentRefreshTokenId: invalidatedRoot,
+      })),
+    );
+
+    expect((await refreshWith(stack, `${replayed}|${sessionId}`)).tokens?.refreshToken).toBe(
+      `${active}|${sessionId}`,
+    );
+  });
+
   it("refuses a late retry whose unused child is not the active token, however deep it lies", async () => {
     if (stack === undefined) return;
     const signedIn = await signInAs(stack, await createPerson(stack));
@@ -481,7 +517,7 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     const active = addToken(sessionId, { expirationTime, parentRefreshTokenId: otherBranch });
 
     await pileUp(
-      Array.from({ length: DEEPER_THAN_SEARCH }, () => ({
+      Array.from({ length: MARKED_BRANCH }, () => ({
         sessionId,
         expirationTime,
         firstUsedTime: longAgo,
@@ -511,7 +547,7 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     );
 
     await pileUp(
-      Array.from({ length: DEEPER_THAN_SEARCH }, () => ({
+      Array.from({ length: MARKED_BRANCH }, () => ({
         sessionId,
         expirationTime,
         firstUsedTime: longAgo,

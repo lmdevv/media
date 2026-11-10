@@ -6,7 +6,7 @@ import { internal } from "../../_generated/api";
 import type { Doc, Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { MutationCtx } from "../../_generated/server";
-import { endSession, SESSION_MS } from "../sessions";
+import { endSession } from "../sessions";
 
 /**
  * How long after its first use a refresh token still refreshes, as Convex Auth's
@@ -61,19 +61,6 @@ const idsOf = (
   return tokenId === null || sessionId === null ? null : { tokenId, sessionId };
 };
 
-/**
- * How deep the store follows Convex Auth's search for the active token, from the newest token down
- * to the first unused one. The library repeats that search when the store hands it a refresh, so
- * the two together stay inside one call's 4,096 reads.
- */
-const ACTIVE_DEPTH = 1500;
-
-/** Newest tokens read before the deeper search; the active token is the newest one but after an invalidation. */
-const ACTIVE_NEAR = 8;
-
-/** Children of a reused token read to find its newest unused one. */
-const CHILDREN_READ = 64;
-
 /** Reads and marks one call of an invalidation makes, inside Convex's 4,096 reads a call. */
 const MARKS_PER_CALL = 256;
 
@@ -90,51 +77,16 @@ type Frame = Infer<typeof frame>;
 
 const tokens = (db: MutationCtx["db"]) => db.query("authRefreshTokens");
 
-const unused = (token: Token): boolean => token.firstUsedTime === undefined;
-
 /**
- * The token Convex Auth calls active: the session's newest unused one, found as the library finds
- * it, from the newest token down, or null when the session has none. "deep" when the newest
- * `ACTIVE_DEPTH` are all used, which only marked branches leave above it.
+ * The token Convex Auth calls active: the session's newest unused one, which the library finds by
+ * scanning the session's tokens from the newest down. `by_session_use` holds the unused ones
+ * together, so the store reads it at once, or null when the session has none.
  */
-const activeToken = async (
-  db: MutationCtx["db"],
-  sessionId: Id<"authSessions">,
-): Promise<Token | null | "deep"> => {
-  const newest = (count: number) =>
-    tokens(db)
-      .withIndex("sessionId", (q) => q.eq("sessionId", sessionId))
-      .order("desc")
-      .take(count);
-
-  const near = await newest(ACTIVE_NEAR);
-  const nearActive = near.find(unused);
-
-  if (nearActive !== undefined) return nearActive;
-
-  if (near.length < ACTIVE_NEAR) return null;
-
-  const far = await newest(ACTIVE_DEPTH + 1);
-
-  return far.find(unused) ?? (far.length > ACTIVE_DEPTH ? "deep" : null);
-};
-
-/**
- * Whether `token` has an unused child, read newest first through the parent index; "deep" when
- * its newest `CHILDREN_READ` children are all used, which proves nothing either way.
- */
-const hasUnusedChild = async (db: MutationCtx["db"], token: Token): Promise<boolean | "deep"> => {
-  const children = await tokens(db)
-    .withIndex("sessionIdAndParentRefreshTokenId", (q) =>
-      q.eq("sessionId", token.sessionId).eq("parentRefreshTokenId", token._id),
-    )
+const activeToken = (db: MutationCtx["db"], sessionId: Id<"authSessions">): Promise<Token | null> =>
+  tokens(db)
+    .withIndex("by_session_use", (q) => q.eq("sessionId", sessionId).eq("firstUsedTime", undefined))
     .order("desc")
-    .take(CHILDREN_READ + 1);
-
-  if (children.some(unused)) return true;
-
-  return children.length > CHILDREN_READ ? "deep" : false;
-};
+    .first();
 
 /**
  * Marks the tokens under the top frame used, as of `marked`, depth first, until `budget` reads and
@@ -217,12 +169,8 @@ export const invalidateTokens = internalMutation({
   },
 });
 
-/** What the store does with a refresh: answers it with null, or hands the library a token. */
-export type Refresh =
-  | { readonly kind: "answered" }
-  | { readonly kind: "library"; readonly refreshToken: string };
-
-const ANSWERED: Refresh = { kind: "answered" };
+/** What the store does with a refresh: answers it with null, or hands it to the library. */
+export type Refresh = "answered" | "library";
 
 /**
  * Decides a refresh before Convex Auth sees it, answering the cases where the library would read
@@ -233,19 +181,11 @@ const ANSWERED: Refresh = { kind: "answered" };
  * - An expired token, or one whose session is gone or expired, ends its session through
  *   `endSession`, which does nothing once the session is gone. The library deletes every token in
  *   one call.
- * - A used token is answered as the library answers it. The library hands back the active token
- *   when the reused token is its parent; otherwise, inside the reuse window, it mints a child of
- *   the reused token, and past it, it marks every token descended from the reused one used and
- *   refreshes nothing. The store marks them `MARKS_PER_CALL` a call, and the session and its other
- *   branches go on. A late retry of a token with no unused child is answered that way without the
- *   search for the active token, since no child can be it.
- * - A late retry is handed the active token only when the store found it and the reused token is
- *   its parent. When the search runs out at `ACTIVE_DEPTH`, it is answered as one that is not, so
- *   the store refuses where it cannot prove what the library would accept.
- * - Inside the window the library always returns a token. When the active token lies below
- *   `ACTIVE_DEPTH` used ones, where the library's own search would read them all, the store adds a
- *   fresh child of the reused token and hands the library that instead: on first use the library
- *   reads only the token and its session, and what it mints stays in the reused token's branch.
+ * - A used token is answered by the library's rule. The library hands back the active token when
+ *   the reused token is its parent, and inside the reuse window it mints the reused token a child;
+ *   both go on to the library. Past the window it refreshes nothing and marks every token
+ *   descended from the reused one used, in one call; the store marks them `MARKS_PER_CALL` a call,
+ *   and the session and its other branches go on.
  */
 export const decideRefresh = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
@@ -253,13 +193,11 @@ export const decideRefresh = async (
 ): Promise<Refresh> => {
   const ids = idsOf(ctx, refreshToken);
 
-  const library: Refresh = { kind: "library", refreshToken };
-
-  if (ids === null) return library;
+  if (ids === null) return "library";
 
   const token = await ctx.db.get(ids.tokenId);
 
-  if (token === null || token.sessionId !== ids.sessionId) return ANSWERED;
+  if (token === null || token.sessionId !== ids.sessionId) return "answered";
 
   const now = Date.now();
   const session = await ctx.db.get(token.sessionId);
@@ -267,42 +205,23 @@ export const decideRefresh = async (
   if (token.expirationTime < now || session === null || session.expirationTime < now) {
     await endSession(ctx, token.sessionId);
 
-    return ANSWERED;
+    return "answered";
   }
 
-  if (token.firstUsedTime === undefined) return library;
-
-  const inWindow = token.firstUsedTime + REUSE_WINDOW_MS > now;
-  const child = await hasUnusedChild(ctx.db, token);
-
-  const invalidated = async (): Promise<Refresh> => {
-    await invalidate(
-      ctx,
-      token.sessionId,
-      [{ parent: token._id, after: null, skip: null }],
-      now - REUSE_WINDOW_MS,
-    );
-
-    return ANSWERED;
-  };
-
-  if (!inWindow && child === false) return invalidated();
+  if (token.firstUsedTime === undefined || token.firstUsedTime + REUSE_WINDOW_MS > now) {
+    return "library";
+  }
 
   const active = await activeToken(ctx.db, token.sessionId);
 
-  if (active !== "deep" && active?.parentRefreshTokenId === token._id) return library;
+  if (active?.parentRefreshTokenId === token._id) return "library";
 
-  if (!inWindow) return invalidated();
+  await invalidate(
+    ctx,
+    token.sessionId,
+    [{ parent: token._id, after: null, skip: null }],
+    now - REUSE_WINDOW_MS,
+  );
 
-  if (active === "deep") {
-    const fresh = await ctx.db.insert("authRefreshTokens", {
-      sessionId: token.sessionId,
-      expirationTime: now + SESSION_MS,
-      parentRefreshTokenId: token._id,
-    });
-
-    return { kind: "library", refreshToken: `${fresh}${DIVIDER}${token.sessionId}` };
-  }
-
-  return library;
+  return "answered";
 };
