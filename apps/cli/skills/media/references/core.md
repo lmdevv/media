@@ -812,6 +812,27 @@ Limit what a member sees by movie rating, explicit music, and library, or lift t
 - Arguments: `{ userId: Id<"users">; restrictions: { maxMovieAge: number | null; hideUnrated: boolean; hideExplicitMusic: boolean; libraries: Array<Id<"libraries">> | null } | null }`
 - Result: `null`
 
+## `core.server.backups.list`
+
+List the server's database backups, newest first.
+
+- CLI: `media admin backups list`
+- Kind: query
+- Scope: admin
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ id: Id<"backups">; fileName: string; sizeBytes: number; trigger: "nightly" | "manual"; takenAt: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `core.server.backups.run`
+
+Back up the server's database now, or join the backup already queued or running.
+
+- CLI: `media admin backups run`
+- Kind: mutation
+- Scope: admin
+- Arguments: none
+- Result: `{ jobId: Id<"jobs"> }`
+
 ## `core.server.info`
 
 Show this server's name and version, and whether its owner has set it up.
@@ -821,6 +842,16 @@ Show this server's name and version, and whether its owner has set it up.
 - Scope: public
 - Arguments: none
 - Result: `{ name: string; version: string; hasOwner: boolean }`
+
+## `core.server.status`
+
+Show what the media server last reported: its version, hardware acceleration, streams, and when.
+
+- CLI: `media admin server status`
+- Kind: query
+- Scope: admin
+- Arguments: none
+- Result: `null | { version: string; hardwareAcceleration: "qsv" | "vaapi" | "none"; activeStreams: number; runsAwaitingExit: number; startedAt: number; reportedAt: number }`
 
 ## `core.settings.get`
 

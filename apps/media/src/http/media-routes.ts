@@ -182,6 +182,7 @@ interface Answer {
 type Authorize = (
   token: Redacted.Redacted,
   purposes: ReadonlyArray<PlaybackToken.TokenPurpose>,
+  within?: PlaybackToken.Within,
 ) => Effect.Effect<PlaybackToken.PlaybackGrant, PlaybackTokenInvalid | PlaybackSessionEnded>;
 
 const MAX_LOGGED_PARAM = 64;
@@ -214,8 +215,8 @@ const observed = <R>(
     const failureKind = yield* Ref.make<FailureKind>("failure");
     const params = yield* HttpRouter.params;
 
-    const authorize: Authorize = (token, purposes) =>
-      failures.tokens.authorize(token, purposes).pipe(
+    const authorize: Authorize = (token, purposes, within) =>
+      failures.tokens.authorize(token, purposes, within).pipe(
         Effect.tap((grant) => Ref.set(sessionForLog, Option.some(grant))),
         Effect.catch((refused: PlaybackToken.TokenRefused) =>
           Effect.all([
@@ -395,7 +396,12 @@ export const layer: Layer.Layer<
         }
 
         const { fileId = "" } = yield* HttpRouter.params;
-        const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.PLAY_OR_DOWNLOAD);
+
+        const grant = yield* authorize(
+          yield* tokenOf(request, failures.tokens.param),
+          PlaybackToken.PLAY_OR_DOWNLOAD,
+          PlaybackToken.READ,
+        );
 
         if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
 
@@ -418,7 +424,11 @@ export const layer: Layer.Layer<
         }
 
         const { fileId = "", name = "" } = yield* HttpRouter.params;
-        const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.DOWNLOAD);
+
+        const grant = yield* authorize(
+          yield* tokenOf(request, failures.tokens.param),
+          PlaybackToken.DOWNLOAD,
+        );
 
         if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
 
@@ -455,11 +465,11 @@ export const layer: Layer.Layer<
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { streamId, generation } = yield* streamParams;
-        const token = yield* tokenOf(request);
-        const grant = yield* authorize(token, PlaybackToken.PLAY);
+        const token = yield* tokenOf(request, failures.tokens.param);
+        const grant = yield* authorize(token, PlaybackToken.PLAY, streamId);
 
         const view = yield* sessions.playlist(streamId, generation, grant);
-        const query = `?token=${encodeURIComponent(Redacted.value(token))}`;
+        const query = `?${failures.tokens.param}=${encodeURIComponent(Redacted.value(token))}`;
 
         const body = renderPlaylist(view.plan, {
           init: `init.mp4${query}`,
@@ -477,7 +487,12 @@ export const layer: Layer.Layer<
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { streamId, generation, file } = yield* streamParams;
-        const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.PLAY);
+
+        const grant = yield* authorize(
+          yield* tokenOf(request, failures.tokens.param),
+          PlaybackToken.PLAY,
+          streamId,
+        );
 
         const segmentMatch = /^(\d+)\.m4s$/.exec(file);
 
@@ -550,7 +565,12 @@ export const layer: Layer.Layer<
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { fileId = "", track = "" } = yield* HttpRouter.params;
-        const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.PLAY_OR_DOWNLOAD);
+
+        const grant = yield* authorize(
+          yield* tokenOf(request, failures.tokens.param),
+          PlaybackToken.PLAY_OR_DOWNLOAD,
+          PlaybackToken.READ,
+        );
 
         if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
         const file = yield* resolve(grant.fileId, { sidecars: true });

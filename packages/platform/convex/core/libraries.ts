@@ -1,6 +1,7 @@
 import { register } from "../../commands/core/libraries";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
+import { releaseClaims } from "./folderClaims";
 import { claimFolders, foldersOf, parseFolders, releaseFolders } from "./folders";
 import { scanKindOf } from "./jobs/kinds";
 import { progressOf } from "./jobs/machine";
@@ -118,6 +119,8 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
 
     if (added.length === 0 && removed.length === 0) return { scanJobId: null };
 
+    await releaseClaims(ctx, doc._id);
+
     if (removed.length > 0) await schedulePurge(ctx, doc);
 
     return { scanJobId: (await restartScan(ctx, doc)).jobId };
@@ -133,6 +136,7 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
     if (doc.lastScan !== null) await cancel(ctx, doc.lastScan);
 
     await releaseFolders(ctx, doc._id);
+    await releaseClaims(ctx, doc._id);
     await forgetItemCount(ctx.db, doc._id);
     await deleteGrantsOn(ctx, libraryRef(doc._id));
     await ctx.db.delete(doc._id);

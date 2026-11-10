@@ -1,7 +1,7 @@
 # 0024. Libraries have a kind, their own folders, grants, and one scan kind per domain
 
 - Status: Accepted, 2026-11-04. Amended 2026-11-09 with the movies catalog, and again the same
-  day with each movies document's size bound.
+  day with each movies document's size bound. Amended 2026-11-10 with folder identity.
 - Decisions: D01, D02, D16, D17, D28, D29, D50
 
 ## Context
@@ -306,6 +306,45 @@ text, so a title with an absurd overview could make a call reserve far more than
   every identity field at its maximum, every free text at 64 characters, and lists empty, all in
   3-byte UTF-8 characters, and checks it fits its bound, so fitting always reaches its target.
 
+### Folder identity (amended 2026-11-10)
+
+Two spellings can name one folder: a symbolic link, a bind mount, or a case-insensitive or
+Unicode-normalizing mount. Path checks in `core/folders.ts` cannot see that, so every scan also
+claims its library's folders by what they are on disk.
+
+- Right after `core/scans:target` and before any write, the scanner calls
+  `core/scans:claimFolders({ lease, kind, bootId, folders })` under `withScanLease`. Each entry
+  names one of the library's current folders and its chain: the `<dev>:<ino>` identity of the
+  folder's real path, then of each parent up to `/`. A chain has 1 to 64 identities of at most 48
+  characters each. `bootId` is the host's boot id, because identities compare only within one
+  boot; it is null when the server cannot read it.
+- The call throws, as a server defect, when it gets more than 16 folders, a folder that is not
+  the library's, a missing or repeated folder, or a malformed chain.
+- `folderClaims` keeps one row per chain identity: `{ libraryId, folder, bootId, chainId, depth }`,
+  with the folder itself at depth 0. Only claims with the same `bootId` count, and null matches
+  null. A claim is refused with `{ claimed: false, folder }` in three cases. The first is when
+  another library's chain holds the folder's own identity, so its folder is this one or lies
+  inside it. The second is when another library's folder itself (depth 0) is anywhere in this
+  folder's chain, so this folder lies inside it. The third is when two folders of this library
+  reach each other the same way, which is one folder sent twice through a link. `folder` is the
+  first such folder of this library in path order. A refusal writes nothing, so the library's
+  earlier claims stay. The scanner stops, and the library stays refused until the other claim
+  goes.
+- A successful claim replaces the library's rows, and an unchanged claim writes nothing. At its
+  largest, 16 folders of 64 identities, it reads one range of at most 1,024 own rows and at most
+  1,040 ranges of `by_boot_chain`. It deletes at most 1,024 rows and inserts at most 1,024, inside
+  the 4,096-range and 8,192-write limits. A stack test runs it at that size. Two concurrent claims
+  that overlap each read a range the other writes, so Convex runs them one after the other.
+- `setFolders` deletes a library's claims when its folders change, and `remove` deletes them with
+  the library. Both stay within one mutation, because a library holds at most 1,024 rows. The next
+  scan claims again.
+- Before it claims, the server checks each folder as the scan would: it resolves, is a folder, and
+  lies inside `LIBRARY_ROOTS`; a missing folder fails the scan to be retried and an unapproved one
+  fails it for good. It then reads each folder's chain with the folder's real path and `stat`
+  with 64-bit device and inode numbers for it and each parent, and the boot id from
+  `/proc/sys/kernel/random/boot_id`. A refused claim fails the scan for good with "Another
+  library already uses <folder> under another path", so nothing of it is written twice.
+
 ## Consequences
 
 - A domain author writes scanner callbacks as `serverMutation`s that call `withScanLease`, a purge
@@ -342,9 +381,11 @@ text, so a title with an absurd overview could make a call reserve far more than
 
 ## Left for later units
 
-- Claiming folders through links, bind mounts, and case-insensitive or Unicode-normalizing mounts,
-  where two spellings name one folder, needs the server's file access: phase 4, with the scanner,
-  by folder identity as old music's `claimRoot` did.
+- On the core, rescans after a file changes need a server function that queues a scan of the
+  library whose folder changed. Old movies' library monitor scans in the server itself, which the
+  core's lease-fenced writes do not allow; `p4-movies-cutover` adds the function and points the
+  monitor at it.
+
 - A library whose last manager's account is deleted has no one who can see it. Account deletion
   does not exist yet; the unit that adds it decides who inherits.
 - Guest links (p3-guests) must be a capability of their own, not grants on a title, or items would

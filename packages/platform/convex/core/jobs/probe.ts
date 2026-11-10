@@ -70,3 +70,25 @@ export const hasItems = internalQuery({
       .withIndex("by_job_seq", (q) => q.eq("jobId", jobId))
       .first()) !== null,
 });
+
+/**
+ * Moves a finished job's end back in time, so a test can make a job old enough for the sweep of
+ * finished jobs without waiting a week.
+ *
+ * @throws Error when the job is gone, queued, or running.
+ */
+export const backdate = internalMutation({
+  args: { jobId: v.id("jobs"), finishedAt: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { jobId, finishedAt }) => {
+    const job = await ctx.db.get("jobs", jobId);
+
+    if (job === null || job.status === "queued" || job.status === "running") {
+      throw new Error(`Only a finished job is backdated; ${jobId} is ${job?.status ?? "gone"}`);
+    }
+
+    await ctx.db.patch("jobs", jobId, { finishedAt });
+
+    return null;
+  },
+});

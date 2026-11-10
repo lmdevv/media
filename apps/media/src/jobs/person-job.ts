@@ -49,6 +49,50 @@ export const personDetailsOf = Effect.fnUntraced(function* (
   } satisfies ScannedPersonDetails;
 });
 
+/**
+ * Looks a person up at the metadata provider by their TMDB id. A person the provider no longer
+ * knows keeps their name and ids with no details. Fails with `JobFailed` when they have no id.
+ */
+export const lookUpPerson = Effect.fn("PersonJob.lookUp")(function* (
+  target: Pick<ScannedPersonDetails, "name" | "externalIds">,
+) {
+  const plugin = yield* MetadataPlugin.Service;
+  const keys = yield* ArtworkKeys.Service;
+
+  if (target.externalIds.tmdb === null) {
+    return yield* new JobFailed({
+      message: `${target.name} has no TMDB ID to look up`,
+      retry: false,
+    });
+  }
+
+  const found = yield* plugin.personDetails(target.externalIds.tmdb).pipe(
+    Effect.asSome,
+    Effect.catchIf(isFinal, () => Effect.succeedNone),
+    Effect.mapError(providerFailure),
+  );
+
+  const details: ScannedPersonDetails = Option.isSome(found)
+    ? yield* personDetailsOf(found.value, keys.seal)
+    : {
+        name: target.name,
+        externalIds: target.externalIds,
+        profile: null,
+        biography: null,
+        birthDate: null,
+        deathDate: null,
+        birthPlace: null,
+        knownFor: null,
+      };
+
+  return {
+    details,
+    summary: Option.isSome(found)
+      ? `Fetched details of ${found.value.name}`
+      : `No details for ${target.name} at the metadata provider`,
+  };
+});
+
 /** The person job handler. */
 export const handler: Effect.Effect<
   JobHandler,
@@ -72,31 +116,10 @@ export const handler: Effect.Effect<
         .call("mediaService.personTarget", { personId: payload.personId })
         .pipe(Effect.mapError(backendFailure));
 
-      if (target.externalIds.tmdb === null) {
-        return yield* new JobFailed({
-          message: `${target.name} has no TMDB ID to look up`,
-          retry: false,
-        });
-      }
-
-      const found = yield* plugin.personDetails(target.externalIds.tmdb).pipe(
-        Effect.asSome,
-        Effect.catchIf(isFinal, () => Effect.succeedNone),
-        Effect.mapError(providerFailure),
+      const { details, summary } = yield* lookUpPerson(target).pipe(
+        Effect.provideService(MetadataPlugin.Service, plugin),
+        Effect.provideService(ArtworkKeys.Service, keys),
       );
-
-      const details = Option.isSome(found)
-        ? yield* personDetailsOf(found.value, keys.seal)
-        : {
-            name: target.name,
-            externalIds: target.externalIds,
-            profile: null,
-            biography: null,
-            birthDate: null,
-            deathDate: null,
-            birthPlace: null,
-            knownFor: null,
-          };
 
       yield* backend
         .call("mediaService.applyPerson", {
@@ -107,9 +130,7 @@ export const handler: Effect.Effect<
         })
         .pipe(Effect.mapError(backendFailure));
 
-      return Option.isSome(found)
-        ? `Fetched details of ${found.value.name}`
-        : `No details for ${target.name} at the metadata provider`;
+      return summary;
     }),
   } satisfies JobHandler;
 });

@@ -6,6 +6,7 @@ import type { ContentDomain } from "../../commands/scopes";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
+import { claimIdentities, parseChains } from "./folderClaims";
 import { foldersOf, isInside, isPlainPath } from "./folders";
 import { scanKindOf } from "./jobs/kinds";
 import { withJobLease, leaseAnswer } from "./jobs/held";
@@ -241,6 +242,43 @@ export const target = serverMutation({
   handler: (ctx, { lease: held, kind }) =>
     withScanLease(ctx, kind, held, async (scan) => ({
       value: { libraryId: scan.library._id, folders: [...scan.folders] },
+      added: 0,
+      removed: 0,
+    })),
+});
+
+/**
+ * The scanner's second call, right after `target` and before any write: claims the library's
+ * folders by what they are on disk (ADR 0024, "Folder identity"), so two libraries never reach one
+ * folder through a link, a bind mount, or another spelling. `chain` holds the `<dev>:<ino>` of the
+ * folder's real path and of each parent up to `/`, the folder first, read during the host boot
+ * `bootId`. A refusal names the first of the library's folders that another library reaches, or
+ * that another of its own folders reaches, and writes nothing; the scanner then stops.
+ *
+ * @throws Error when the folders sent are not exactly the library's, or a chain is malformed: a
+ * defect in the server, which sends what `target` answered.
+ */
+export const claimFolders = serverMutation({
+  args: {
+    lease,
+    kind: contentDomain,
+    bootId: v.union(v.string(), v.null()),
+    folders: v.array(v.object({ folder: v.string(), chain: v.array(v.string()) })),
+  },
+  returns: leaseAnswer(
+    v.union(
+      v.object({ claimed: v.literal(true) }),
+      v.object({ claimed: v.literal(false), folder: v.string() }),
+    ),
+  ),
+  handler: (ctx, { lease: held, kind, bootId, folders }) =>
+    withScanLease(ctx, kind, held, async (scan) => ({
+      value: await claimIdentities(
+        ctx,
+        scan.library._id,
+        bootId,
+        parseChains(scan.folders, bootId, folders),
+      ),
       added: 0,
       removed: 0,
     })),

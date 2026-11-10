@@ -1,7 +1,7 @@
 # 0011. Use one signed ticket format for every route that serves bytes
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the format as built and with how long
-  playback and Cast keep their ticket.
+  playback and Cast keep their ticket, and 2026-11-10 with the server's admission of tickets.
 - Decisions: D26, D46
 
 ## Context
@@ -162,3 +162,49 @@ it was given, get a new ticket. D46 settles the principle, and this section sett
   restarts its encoder.
 - A download resumed after its ticket expired needs a new ticket from the download command.
 - A Cast session paused until the server drops its stream resumes through the sender's reload.
+
+## The server admits tickets (amended 2026-11-10)
+
+`p4-server-core` built ticket admission into the byte routes behind the routes' grant interface
+(`PlaybackToken.Service`). On old movies the routes keep checking playback tokens; on the core
+(`core/core-tickets.ts`) they admit tickets. The cutover switches which one the server runs.
+
+- **Parameter.** A ticket travels in `ticket` (`TICKET_PARAM`). The grant interface names its
+  parameter and builds media URLs with it, so a playlist copies the ticket it was given onto its
+  segment URLs, and negotiation, downloads, and subtitles build URLs the same way.
+- **A playback per start.** Each `movies.play.start` issues its own ticket, and the server keys
+  the stream sessions of a start by a digest of that ticket (`t` and 32 hex digits). Logs name the
+  digest, never the ticket. A ticket names whole seconds, so two starts of the same file by the
+  same session in the same second get the same ticket and share one playback: the second start's
+  stream replaces the first, as a renegotiation does.
+- **Starting.** Negotiation, direct play, subtitles, scrub thumbnails, and downloads admit the
+  ticket with `TicketKeyRing.admit` for the purposes the route serves and the file the ticket
+  names; the route then checks the file against its path, as before. A play admission is kept by
+  its playback.
+- **Continuing.** A playlist, a segment, a seek, and a stop name their stream. The server finds the
+  stream's playback through the stream owner registry, by the stream's id, and continues that
+  playback's admission with `TicketAdmission.continue`: the same ticket, a `play` admission, and a
+  live session, whatever the ticket's expiry. Another start's ticket and a download ticket are
+  refused (`other_ticket`). A stream that is not running has no admission to continue, so its
+  ticket is admitted afresh and refused once expired.
+- **Reads** start no encoder: direct play, which has no stream id, and a running stream's
+  subtitles and scrub thumbnails. An expired play ticket keeps reading its playback's file while
+  that playback has an open stream or was used within `STREAM_IDLE_SECONDS`. A start, such as a
+  negotiation, never continues, and a download ticket is admitted on each request.
+- **Ending.** One watch of `core/tickets:sessionStatus` per signed-in session serves every ticket
+  and stream of it, kept a minute past its last user. A stream ends with `session-ended` when that
+  watch answers ended or when the session's own expiry passes on the server's clock, and a play
+  grant's expiry is the session's, so a stream never ends merely because its ticket expired
+  (D46). The core reports no positions, so a live stream keeps its encoder on its requests and
+  releases it after the idle time, as a stream with no reports always did.
+- **Downloads** are admitted on every request with byte ranges, so a cut transfer resumes with a
+  new ticket from `core.downloads.fetch` (ADR 0019).
+- **Artwork.** Artwork URLs on the core carry a shareable `image` ticket for the artwork's ticket
+  id, `artworkTicketId(key)` in `@media/contracts/artwork`: the unpadded base64url SHA-256 of the
+  key, since a key can be longer than a resource id. The artwork route admits it on every request.
+  Commands still return keys; the client-facing URLs with tickets come with the cutover.
+- **Refusals** read in the old tokens' terms players already handle: an ended session is
+  `PlaybackSessionEnded` (410), every other refusal `PlaybackTokenInvalid` (401) with a reason the
+  old tokens had. A session the server cannot confirm within 5 seconds is refused as expired.
+- **Logs.** The log redaction treats `ticket` as a secret field and query parameter and removes any
+  ticket-shaped text, and a stack test greps the in-process server's log after it streamed.

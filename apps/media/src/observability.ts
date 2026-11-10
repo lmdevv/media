@@ -20,7 +20,7 @@ const resource = { serviceName: "movies-media" };
 const REDACTED = "<redacted>";
 
 const SECRET_FIELD =
-  /(?:token|secret|password|passwd|api[-_]?key|authorization|cookie|credentials?)$/i;
+  /(?:token|ticket|secret|password|passwd|api[-_]?key|authorization|cookie|credentials?)$/i;
 
 const URL_FIELDS: ReadonlySet<string> = new Set([
   "http.url",
@@ -85,7 +85,7 @@ const redactInviteUrl = (url: string): string => {
 
 const SECRET_VALUES: ReadonlyArray<readonly [RegExp, string]> = [
   [
-    /\b((?:access_|x-plex-|x-emby-)?token|api_?key|key|secret|password)=[^\s&"',;\\]+/gi,
+    /\b((?:access_|x-plex-|x-emby-)?token|ticket|api_?key|key|secret|password)=[^\s&"',;\\]+/gi,
     `$1=${REDACTED}`,
   ],
   [
@@ -96,6 +96,8 @@ const SECRET_VALUES: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bToken="[^"]*"/g, `Token="${REDACTED}"`],
   [/\beyJ[\w-]+\.[\w-]+(?:\.[\w-]+)?/g, REDACTED],
   [/\bmk_[\w-]{16,}/g, REDACTED],
+  // A core ticket (ADR 0011): `t1.<kid>.<aud>.<iat>.<exp>.` and the rest up to its MAC.
+  [/\bt1\.[a-z0-9]{1,16}\.[a-z0-9]+\.\d+\.\d+\.[\w.-]+/g, REDACTED],
   [/\b[\w-]+\|[0-9a-f]{32,}\b/g, REDACTED],
 ];
 

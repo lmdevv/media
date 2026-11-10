@@ -1,7 +1,8 @@
 # 0012. Run all background work through one job framework in the core
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the framework's shape, and 2026-11-09
-  with movies' kinds, pools, and the general lease check.
+  with movies' kinds, pools, and the general lease check. Amended 2026-11-10 with the sweep of
+  finished jobs.
 - Decisions: D27
 
 ## Context
@@ -130,7 +131,6 @@ Left for the first unit that needs each one:
   internal mutation that the domain names per kind, in a list outside `kinds.ts`, because
   `schema.ts` imports `kinds.ts` and must not import `convex/_generated`.
 - A delayed retry and a pause of a whole kind, which music's lyrics lookups need.
-- Deleting finished jobs after a retention period, before trickplay queues thousands of jobs.
 - A command that recounts a kind's `jobKinds` row from its running jobs, for an operator who
   edited jobs by hand. Every write in this unit goes through `store.ts`, so nothing else moves
   the count.
@@ -205,3 +205,27 @@ Rejected for this shape:
   queue moved through keeps the index entries of every job that left it until Convex's retention
   removes them, and a claim scans them all. After 5,000 jobs of one kind, an idle claim took 10 ms
   against 2 ms, and 1,000-job runs with 4 workers slowed from 31 s to between 72 s and 81 s.
+
+## Finished jobs (amended 2026-11-10)
+
+A first scan queues one trickplay job per video file, so finished jobs must not pile up forever.
+
+- The hourly cron `delete week-old finished jobs` runs `core/jobs/cleanup:sweep`. It deletes
+  succeeded, failed, and canceled jobs that finished more than 7 days ago, of the kinds nothing
+  points at: `movies.trickplay`, `movies.metadata`, `movies.person`, `server.backup`,
+  `probe.capped`, `probe.wide`, and `probe.items`. Scans stay, because `libraries.lastScan` is a
+  library's scan state. `probe.import` stays, because an `imports` row names its job.
+- It reads `jobs.by_kind_status_finished` once for each kind and status, so it never reads the
+  jobs it keeps. One call deletes at most 256 jobs and 4,000 of their items, each job's items
+  before the job. A job with more items carries on in the next call. A call that fills either
+  budget schedules the next one at once. Deleted jobs leave the index, so the sweep needs no
+  cursor. `store.deleteFinishedJob` does the delete, so `store.ts` stays the only writer of
+  `jobs` and `jobItems`. A finished job is neither running nor queued, so `jobKinds` rows stay as
+  they are.
+- A file's pending trickplay state may name a finished job. A failed job is the failure of the
+  contents it was for, and `queueTrickplay` reads it to avoid queuing again. In the mutation that
+  deletes such a job, `releaseTrickplayJob` writes that failure into the file. After a canceled or
+  succeeded job it drops the file's state, as a gone job already meant. No file then names a
+  deleted job.
+- The stack suite's `core/jobs/probe:backdate` moves a finished job's end back a week, so a test
+  need not wait. It is the one write to `jobs` outside `store.ts`, and only the suite calls it.

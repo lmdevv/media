@@ -117,6 +117,14 @@ export type ScanError =
 /** Scans libraries. */
 export interface Interface {
   readonly scan: (request: ScanRequest) => Effect.Effect<ScanSummary, ScanError>;
+  /**
+   * The real path of a library folder a scan may read: one that resolves, is a folder, and lies
+   * inside `LIBRARY_ROOTS`. A scan checks this itself; a caller checks it before claiming the
+   * folder, so an unapproved or missing folder fails the same way either side of the claim.
+   */
+  readonly openRoot: (
+    root: string,
+  ) => Effect.Effect<string, LibraryRootNotApproved | LibraryRootUnavailable>;
 }
 
 /** The library scanner. */
@@ -272,7 +280,8 @@ interface Counters {
   missing: number;
 }
 
-const make = Effect.gen(function* () {
+/** Builds a scanner over the `LibrarySink` in context, such as one scan job's own sink. */
+export const make = Effect.gen(function* () {
   const config = yield* MediaConfig.Service;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -837,7 +846,7 @@ const make = Effect.gen(function* () {
     (effect, request) => effect.pipe(Effect.annotateLogs({ libraryId: request.libraryId })),
   );
 
-  return Service.of({ scan });
+  return Service.of({ scan, openRoot });
 });
 
 /** The scanner with its dependencies left open for composition. */

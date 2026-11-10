@@ -68,7 +68,12 @@ export const layer: Layer.Layer<
     const thumbnails = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
       const { fileId = "", version = "", name = "" } = yield* HttpRouter.params;
-      const grant = yield* verifier.verify(yield* playbackTokenOf(request), PlaybackToken.PLAY);
+
+      const grant = yield* verifier.verify(
+        yield* playbackTokenOf(request, verifier.param),
+        PlaybackToken.PLAY,
+        PlaybackToken.READ,
+      );
 
       if (grant.fileId !== fileId) return yield* new TrickplayAccessDenied();
       const stored = yield* store.find(fileId, version, name);

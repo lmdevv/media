@@ -1,4 +1,5 @@
 import type { Doc } from "../_generated/dataModel";
+import type { PayloadOf } from "../core/jobs/kinds";
 import { cancel, enqueue } from "../core/jobs/queue";
 import type { JobCtx } from "../core/jobs/store";
 import { patchMediaFile, replaceMediaFile } from "./write";
@@ -96,4 +97,32 @@ export const forgetTrickplay = async (
   const { _id: _fileId, _creationTime: _created, trickplay, ...kept } = file;
 
   return trickplay === undefined ? file : replaceMediaFile(ctx.db, file, kept);
+};
+
+/**
+ * Releases a file from its finished trickplay job as the job is deleted, so no file waits on a job
+ * that is gone. A failed job is the failure of the contents it was for, which `queueTrickplay`
+ * keeps from queuing again, so the file records that failure itself; after a canceled or succeeded
+ * job the file is as if no job had been queued, which is what a gone job meant already.
+ */
+export const releaseTrickplayJob = async (
+  ctx: JobCtx,
+  job: Pick<Doc<"jobs">, "_id" | "status"> & { readonly payload: PayloadOf<"movies.trickplay"> },
+): Promise<void> => {
+  const file = await ctx.db.get(job.payload.fileId);
+  const waiting = file?.trickplay;
+
+  if (file === null || waiting?.status !== "pending" || waiting.jobId !== job._id) return;
+
+  if (job.status === "failed") {
+    await patchMediaFile(ctx.db, file, {
+      trickplay: { status: "failed", sizeBytes: waiting.sizeBytes, mtimeMs: waiting.mtimeMs },
+    });
+
+    return;
+  }
+
+  const { _id: _fileId, _creationTime: _created, trickplay: _released, ...kept } = file;
+
+  await replaceMediaFile(ctx.db, file, kept);
 };

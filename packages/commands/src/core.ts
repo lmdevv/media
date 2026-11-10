@@ -174,6 +174,43 @@ export const core = [
     args: {},
     result: v.object({ name: v.string(), version: v.string(), hasOwner: v.boolean() }),
   }),
+  query("core.server.status", {
+    summary:
+      "Show what the media server last reported: its version, hardware acceleration, streams, and when",
+    scope: "admin",
+    args: {},
+    result: v.union(
+      v.null(),
+      v.object({
+        version: v.string(),
+        hardwareAcceleration: v.union(v.literal("qsv"), v.literal("vaapi"), v.literal("none")),
+        activeStreams: v.number(),
+        runsAwaitingExit: v.number(),
+        startedAt: v.number(),
+        reportedAt: v.number(),
+      }),
+    ),
+  }),
+  query("core.server.backups.list", {
+    summary: "List the server's database backups, newest first",
+    scope: "admin",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({
+        id: v.id("backups"),
+        fileName: v.string(),
+        sizeBytes: v.number(),
+        trigger: v.union(v.literal("nightly"), v.literal("manual")),
+        takenAt: v.number(),
+      }),
+    ),
+  }),
+  mutation("core.server.backups.run", {
+    summary: "Back up the server's database now, or join the backup already queued or running",
+    scope: "admin",
+    args: {},
+    result: v.object({ jobId: v.id("jobs") }),
+  }),
 
   query("core.auth.sessions.current", {
     summary: "Show who is signed in, how, with which scopes, and on which device in what order",

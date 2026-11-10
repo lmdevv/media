@@ -461,6 +461,24 @@ export default defineSchema({
     .index("by_library_path", ["libraryId", "path"]),
 
   /**
+   * What a scan of a library found its folders to be on disk (ADR 0024, "Folder identity"): one
+   * row per `<dev>:<ino>` identity in each folder's chain, the folder itself at depth 0 and each
+   * parent above it, so two libraries that reach one folder through a link or a mount are told
+   * apart from two that do not. Identities compare only within one boot. `core/folderClaims.ts`
+   * is its only writer.
+   */
+  folderClaims: defineTable({
+    libraryId: v.id("libraries"),
+    folder: v.string(),
+    /** The host's boot id when the scan read the chain; null when the server could not tell. */
+    bootId: v.union(v.string(), v.null()),
+    chainId: v.string(),
+    depth: v.number(),
+  })
+    .index("by_boot_chain", ["bootId", "chainId", "depth"])
+    .index("by_library", ["libraryId"]),
+
+  /**
    * The test seam for a track in a music library until the music port: a path a scan found, its
    * size and change time, and whether it is explicit. Movies keep their own rows (`movies/`).
    */
@@ -489,7 +507,9 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_status_lease", ["status", "leaseExpiresAt"])
     .index("by_kind", ["payload.kind"])
-    .index("by_dedupe_status", ["dedupeKey", "status"]),
+    .index("by_dedupe_status", ["dedupeKey", "status"])
+    /** The finished jobs of one kind and status by age, for `core/jobs/cleanup.ts`. */
+    .index("by_kind_status_finished", ["payload.kind", "status", "finishedAt"]),
 
   jobItems: defineTable(jobItemDocument).index("by_job_seq", ["jobId", "seq"]),
 
@@ -524,6 +544,37 @@ export default defineSchema({
   shareLinks: defineTable(linkDocument).index("by_maker", ["maker"]),
 
   guestAccess: defineTable(guestAccessDocument),
+
+  /**
+   * The archives in the server's backup folder (`convex export`), as it last reported them.
+   * `core/backups.ts` is its only writer.
+   */
+  backups: defineTable({
+    /** A plain file name in the backup folder, at most 255 characters. */
+    fileName: v.string(),
+    sizeBytes: v.number(),
+    trigger: v.union(v.literal("nightly"), v.literal("manual")),
+    takenAt: v.number(),
+  })
+    .index("by_taken", ["takenAt"])
+    .index("by_file", ["fileName"]),
+
+  /**
+   * What each media server last said about itself, one row per service principal.
+   * `core/serverStatus.ts` is its only writer.
+   */
+  serverStatus: defineTable({
+    serviceId: v.id("users"),
+    version: v.string(),
+    hardwareAcceleration: v.union(v.literal("qsv"), v.literal("vaapi"), v.literal("none")),
+    activeStreams: v.number(),
+    runsAwaitingExit: v.number(),
+    startedAt: v.number(),
+    /** Server time of the report; clients judge staleness from it. */
+    reportedAt: v.number(),
+  })
+    .index("by_service", ["serviceId"])
+    .index("by_reported", ["reportedAt"]),
 
   imports: defineTable({
     source: importSource,

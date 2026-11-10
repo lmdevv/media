@@ -1506,11 +1506,75 @@ const core_restrictions_set = mutation({
   result: Schema.Null,
 });
 
+const core_server_backups_list = query({
+  name: "core.server.backups.list",
+  path: "core/server/backups:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<backups>")),
+        fileName: Schema.String,
+        sizeBytes: Schema.Finite,
+        trigger: Schema.Union([Schema.Literal("nightly"), Schema.Literal("manual")]),
+        takenAt: Schema.Finite,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const core_server_backups_run = mutation({
+  name: "core.server.backups.run",
+  path: "core/server/backups:run",
+  args: Schema.Struct({}),
+  result: Schema.Struct({ jobId: Schema.String.pipe(Schema.brand("Id<jobs>")) }),
+});
+
 const core_server_info = query({
   name: "core.server.info",
   path: "core/server:info",
   args: Schema.Struct({}),
   result: Schema.Struct({ name: Schema.String, version: Schema.String, hasOwner: Schema.Boolean }),
+});
+
+const core_server_status = query({
+  name: "core.server.status",
+  path: "core/server:status",
+  args: Schema.Struct({}),
+  result: Schema.Union([
+    Schema.Null,
+    Schema.Struct({
+      version: Schema.String,
+      hardwareAcceleration: Schema.Union([
+        Schema.Literal("qsv"),
+        Schema.Literal("vaapi"),
+        Schema.Literal("none"),
+      ]),
+      activeStreams: Schema.Finite,
+      runsAwaitingExit: Schema.Finite,
+      startedAt: Schema.Finite,
+      reportedAt: Schema.Finite,
+    }),
+  ]),
 });
 
 const core_settings_get = query({
@@ -3566,8 +3630,16 @@ export const effectMethods = (method: EffectBuilder) => ({
       set: method.mutation(core_restrictions_set),
     },
     server: {
+      backups: {
+        /** `core.server.backups.list` (query, admin): List the server's database backups, newest first. */
+        list: method.query(core_server_backups_list),
+        /** `core.server.backups.run` (mutation, admin): Back up the server's database now, or join the backup already queued or running. */
+        run: method.mutation(core_server_backups_run),
+      },
       /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */
       info: method.query(core_server_info),
+      /** `core.server.status` (query, admin): Show what the media server last reported: its version, hardware acceleration, streams, and when. */
+      status: method.query(core_server_status),
     },
     settings: {
       /** `core.settings.get` (query, signed-in): Show your settings: the ones that follow you to every device, and your own on this device. */
@@ -3884,8 +3956,16 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       set: method.mutation(core_restrictions_set),
     },
     server: {
+      backups: {
+        /** `core.server.backups.list` (query, admin): List the server's database backups, newest first. */
+        list: method.query(core_server_backups_list),
+        /** `core.server.backups.run` (mutation, admin): Back up the server's database now, or join the backup already queued or running. */
+        run: method.mutation(core_server_backups_run),
+      },
       /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */
       info: method.query(core_server_info),
+      /** `core.server.status` (query, admin): Show what the media server last reported: its version, hardware acceleration, streams, and when. */
+      status: method.query(core_server_status),
     },
     settings: {
       /** `core.settings.get` (query, signed-in): Show your settings: the ones that follow you to every device, and your own on this device. */

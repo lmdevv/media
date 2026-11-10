@@ -272,3 +272,40 @@ export const deleteItemBatch = async (
 
   return rows.length < ITEM_BATCH_MAX || last === undefined ? null : { next: last.seq + 1 };
 };
+
+/** What `deleteFinishedJob` did: how many items it deleted, and whether the job went with them. */
+interface FinishedDeletion {
+  readonly items: number;
+  readonly deleted: boolean;
+}
+
+/**
+ * Deletes up to `itemBudget` of a finished job's items, and the job itself once none are left. A
+ * finished job is in no kind's running count or queue, so its kind's row stays as it is.
+ *
+ * @throws Error when the job is queued or running, which only a defect in the caller gives.
+ */
+export const deleteFinishedJob = async (
+  ctx: JobCtx,
+  job: Doc<"jobs">,
+  itemBudget: number,
+): Promise<FinishedDeletion> => {
+  if (job.status === "queued" || job.status === "running") {
+    throw new Error(`Job ${job._id} is ${job.status}; only a finished job is deleted`);
+  }
+
+  const rows = await ctx.db
+    .query("jobItems")
+    .withIndex("by_job_seq", (q) => q.eq("jobId", job._id))
+    .take(itemBudget + 1);
+
+  const deleting = rows.slice(0, itemBudget);
+
+  await Promise.all(deleting.map((row) => ctx.db.delete("jobItems", row._id)));
+
+  const deleted = rows.length <= itemBudget;
+
+  if (deleted) await ctx.db.delete("jobs", job._id);
+
+  return { items: deleting.length, deleted };
+};

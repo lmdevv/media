@@ -26,6 +26,7 @@ import type { Refs as core_permissions_grants } from "./core/permissions/grants"
 import type { Refs as core_permissions_groups } from "./core/permissions/groups";
 import type { Refs as core_restrictions } from "./core/restrictions";
 import type { Refs as core_server } from "./core/server";
+import type { Refs as core_server_backups } from "./core/server/backups";
 import type { Refs as core_settings } from "./core/settings";
 import type { Refs as core_together } from "./core/together";
 import type { Refs as movies_collections } from "./movies/collections";
@@ -163,6 +164,9 @@ export const commandRefs = {
   "core.restrictions.get": api.core.restrictions.get satisfies core_restrictions["get"],
   "core.restrictions.set": api.core.restrictions.set satisfies core_restrictions["set"],
   "core.server.info": api.core.server.info satisfies core_server["info"],
+  "core.server.status": api.core.server.status satisfies core_server["status"],
+  "core.server.backups.list": api.core.server.backups.list satisfies core_server_backups["list"],
+  "core.server.backups.run": api.core.server.backups.run satisfies core_server_backups["run"],
   "core.settings.get": api.core.settings.get satisfies core_settings["get"],
   "core.settings.set": api.core.settings.set satisfies core_settings["set"],
   "core.together.add": api.core.together.add satisfies core_together["add"],

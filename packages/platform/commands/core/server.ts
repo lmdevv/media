@@ -7,10 +7,26 @@ import type { Infer } from "convex/values";
 
 import { query } from "../../convex/_generated/server";
 import type { QueryCtx } from "../../convex/_generated/server";
+import { requireCaller } from "../../convex/core/auth/caller";
+import type { Caller } from "../../convex/core/auth/caller";
 
 const infoArgs = v.object({});
 
 const infoResult = v.object({ name: v.string(), version: v.string(), hasOwner: v.boolean() });
+
+const statusArgs = v.object({});
+
+const statusResult = v.union(
+  v.null(),
+  v.object({
+    version: v.string(),
+    hardwareAcceleration: v.union(v.literal("qsv"), v.literal("vaapi"), v.literal("none")),
+    activeStreams: v.number(),
+    runsAwaitingExit: v.number(),
+    startedAt: v.number(),
+    reportedAt: v.number(),
+  }),
+);
 
 /** The handlers `convex/core/server.ts` passes to `register`, one per `core.server` command. */
 export interface Handlers {
@@ -19,6 +35,13 @@ export interface Handlers {
     ctx: Omit<QueryCtx, "auth">,
     args: Record<string, never>,
   ) => Infer<typeof infoResult> | Promise<Infer<typeof infoResult>>;
+
+  /** `core.server.status` (query, admin): Show what the media server last reported: its version, hardware acceleration, streams, and when. */
+  readonly status: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Record<string, never>,
+    caller: Caller,
+  ) => Infer<typeof statusResult> | Promise<Infer<typeof statusResult>>;
 }
 
 /** The `api` reference of each `core.server` command; `commands/refs.ts` checks them. */
@@ -29,6 +52,12 @@ export interface Refs {
     Record<string, never>,
     Infer<typeof infoResult>
   >;
+  readonly status: FunctionReference<
+    "query",
+    "public",
+    Record<string, never>,
+    Infer<typeof statusResult>
+  >;
 }
 
 /** Registers the `core.server` commands as public Convex functions with their declared arguments and result. */
@@ -37,5 +66,10 @@ export const register = (handlers: Handlers) => ({
     args: infoArgs,
     returns: infoResult,
     handler: async (ctx, args) => handlers.info(ctx, args),
+  }),
+  status: query({
+    args: statusArgs,
+    returns: statusResult,
+    handler: async (ctx, args) => handlers.status(ctx, args, await requireCaller(ctx, "admin")),
   }),
 });
