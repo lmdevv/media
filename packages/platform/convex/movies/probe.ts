@@ -456,7 +456,7 @@ export const seedCredits = internalMutation({
   },
 });
 
-/** Up to 1,000 of a library's files with their paths, for a test to name files it scanned. */
+/** Up to 500 of a library's files with their paths, for a test to name files it scanned. */
 export const files = internalQuery({
   args: { libraryId: v.id("libraries") },
   returns: v.array(v.object({ fileId: v.id("mediaFiles"), path: v.string() })),
@@ -464,7 +464,7 @@ export const files = internalQuery({
     const found = await ctx.db
       .query("mediaFiles")
       .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId))
-      .take(1000);
+      .take(500);
 
     return found.map((file) => ({ fileId: file._id, path: file.path }));
   },

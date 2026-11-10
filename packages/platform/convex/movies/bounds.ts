@@ -1,5 +1,7 @@
 import type { Infer } from "convex/values";
 
+import { sha256Hex } from "../core/lib/sha256";
+
 import type {
   externalIds,
   scannedCollection,
@@ -15,9 +17,11 @@ import type {
  * The longest identity fields the movies tables keep (ADR 0024). The server functions that take
  * them from the scanner, a metadata job, or a person job apply these before anything is written,
  * and the document fitters (`fit.ts`) apply them again, so no writer stores more: an id over its
- * maximum is stored as null (a cut id would name another title), a key or a digest is cut to its
- * maximum (its leading part still identifies), and a file whose path is over the filesystem's
- * limit is skipped, so a scan never fails on one. The fitters reserve room for each at its maximum.
+ * maximum is stored as null (a cut id would name another title), a key or a digest over its
+ * maximum keeps its leading part and adds a hash of the whole (`uniqueWithin`), so distinct keys
+ * stay distinct and one key always maps the same way, and a file whose path or subtitle file
+ * name is over the filesystem's limit is skipped, so a scan never fails on one. The fitters
+ * reserve room for each at its maximum.
  */
 export const BOUNDS = {
   /** A provider's id: a TMDB, IMDb, or TVDB id, a recommendation, a trailer's video key. */
@@ -26,7 +30,7 @@ export const BOUNDS = {
   key: 512,
   /** A collection's source key, `tmdb:<id>` or `set:<name>`. */
   sourceKey: 512,
-  /** A digest of credits, a collection, or a file's companions. */
+  /** A digest of credits, a collection, or a file's companions, or a thumbnail version. */
   digest: 128,
   /** A genre a title is listed under. */
   genre: 64,
@@ -34,6 +38,8 @@ export const BOUNDS = {
   genreSortKey: 128,
   /** A file's path, in UTF-8 bytes: Linux's `PATH_MAX`. */
   pathBytes: 4096,
+  /** A subtitle file's name beside its video, in UTF-8 bytes: Linux's `NAME_MAX`. */
+  fileNameBytes: 255,
   /** A playback's id from `movies.play.start`, which a progress row keeps: a UUID is 36. */
   playbackId: 64,
 } as const;
@@ -64,15 +70,31 @@ const boundedIds = (ids: ExternalIds): ExternalIds => ({
   tvdb: idFits(ids.tvdb) ? ids.tvdb : null,
 });
 
-export const boundedKey = (key: string): string => cut(key, BOUNDS.key);
+/** What `uniqueWithin` adds after a key's leading part: `#` and 64 hex digits of SHA-256. */
+const HASHED = 1 + 64;
 
-export const boundedDigest = (digest: string): string => cut(digest, BOUNDS.digest);
+/**
+ * `key` itself when it is at most `max` long, else its leading part, `#`, and the hex SHA-256 of
+ * the whole key, `max` long at most. Two keys that differ anywhere stay different, and the same
+ * key always maps to the same stored key, so a rescan finds the row it wrote.
+ */
+export const uniqueWithin = (key: string, max: number): string =>
+  key.length <= max ? key : `${cut(key, max - HASHED)}#${sha256Hex(key)}`;
+
+export const boundedKey = (key: string): string => uniqueWithin(key, BOUNDS.key);
+
+export const boundedDigest = (digest: string): string => uniqueWithin(digest, BOUNDS.digest);
 
 const encoder = new TextEncoder();
 
+const bytesWithin = (text: string, max: number): boolean =>
+  text.length <= max && encoder.encode(text).length <= max;
+
 /** Whether a file's path is within the filesystem's limit. */
-export const pathFits = (path: string): boolean =>
-  path.length <= BOUNDS.pathBytes && encoder.encode(path).length <= BOUNDS.pathBytes;
+export const pathFits = (path: string): boolean => bytesWithin(path, BOUNDS.pathBytes);
+
+/** Whether a subtitle file's name is within the filesystem's limit. */
+export const fileNameFits = (name: string): boolean => bytesWithin(name, BOUNDS.fileNameBytes);
 
 /*
  * Each of these keeps one field within its bound and answers its argument itself when the field
@@ -145,7 +167,29 @@ export const sourceKeyWithin = <Fields extends { readonly sourceKey: string | nu
 ): Fields =>
   fields.sourceKey === null || fields.sourceKey.length <= BOUNDS.sourceKey
     ? fields
-    : { ...fields, sourceKey: null };
+    : { ...fields, sourceKey: uniqueWithin(fields.sourceKey, BOUNDS.sourceKey) };
+
+export const sidecarDigestWithin = <Fields extends { readonly sidecarDigest: string | null }>(
+  fields: Fields,
+): Fields =>
+  fields.sidecarDigest === null || fields.sidecarDigest.length <= BOUNDS.digest
+    ? fields
+    : { ...fields, sidecarDigest: boundedDigest(fields.sidecarDigest) };
+
+/** Subtitle files whose names the filesystem could hold; no other can exist. */
+export const subtitlesWithin = <
+  Fields extends { readonly externalSubtitles: ReadonlyArray<{ readonly fileName: string }> },
+>(
+  fields: Fields,
+): Fields =>
+  fields.externalSubtitles.every((subtitle) => fileNameFits(subtitle.fileName))
+    ? fields
+    : {
+        ...fields,
+        externalSubtitles: fields.externalSubtitles.filter((subtitle) =>
+          fileNameFits(subtitle.fileName),
+        ),
+      };
 
 type ScannedTitle = Infer<typeof scannedTitle>;
 
@@ -160,12 +204,16 @@ export const boundedEpisode = (episode: ScannedEpisode): ScannedEpisode =>
 
 type ScannedItem = Infer<typeof scannedItem>;
 
-/** A scanned file with its companions' digest, its title, and its episode within their bounds. */
+/**
+ * A scanned file with its companions' digest, its subtitle files, its title, and its episode
+ * within their bounds.
+ */
 export const boundedItem = (item: ScannedItem): ScannedItem => ({
-  file:
+  file: subtitlesWithin(
     item.file.sidecarDigest === undefined
       ? item.file
       : { ...item.file, sidecarDigest: boundedDigest(item.file.sidecarDigest) },
+  ),
   title: boundedTitle(item.title),
   episode: item.episode === null ? null : boundedEpisode(item.episode),
 });
@@ -184,10 +232,7 @@ export const boundedPersonDetails = (details: ScannedPersonDetails): ScannedPers
 
 type ScannedCollection = Infer<typeof scannedCollection>;
 
-/** A scanned collection whose source key is null when it is over its maximum. */
-export const boundedCollection = (
-  collection: ScannedCollection,
-): Omit<ScannedCollection, "sourceKey"> & { readonly sourceKey: string | null } =>
-  sourceKeyWithin<Omit<ScannedCollection, "sourceKey"> & { readonly sourceKey: string | null }>(
-    collection,
-  );
+export const boundedCollection = (collection: ScannedCollection): ScannedCollection =>
+  collection.sourceKey.length <= BOUNDS.sourceKey
+    ? collection
+    : { ...collection, sourceKey: uniqueWithin(collection.sourceKey, BOUNDS.sourceKey) };

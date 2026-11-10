@@ -228,49 +228,72 @@ The movies reads reserve, before each read, the most its documents can take (ADR
 kind of document needs a bound. Convex allows a document up to 1 MiB, and old movies capped no
 text, so a title with an absurd overview could make a call reserve far more than it reads.
 
-- **One writer.** Every insert, patch, and replace of a movies table (titles, title genres,
-  seasons, episodes, people, credits, media files, collections, collection items, progress rows,
-  list entries, and watch marks) goes through `movies/write.ts`: the scanner, metadata, credits,
-  person, collection, edit, match, purge, thumbnail, playback, history, and the stack probe's
-  seeds. A patch of a title, an episode, a person, or a collection is merged with the stored
-  document and fitted as a whole, so a merge can never grow a document past its bound. The
-  `media/movies-writer` Oxlint rule (`tools/oxlint/media/`) fails any other write: in
-  `convex/movies/` every write but an insert into a core table, and elsewhere any write that
-  names a movies table.
-- **Document bounds.** The writer keeps each document within a bound, as Convex measures it
-  (`getDocumentSize`): 64 KiB for a title, 16 KiB for an episode, a person, or a collection,
-  2 KiB for a credit, and 1 KiB for a row of a small table (a title genre, a progress row, a list
-  entry, a collection membership, a watch mark) (`movies/fit.ts`). A real title, with an
-  overview of a few kilobytes and 256 genres, is well under its bound.
+- **One writer.** Every insert, patch, and replace of a movies table goes through
+  `movies/write.ts`: the scanner, metadata, credits, person, collection, edit, match, purge,
+  thumbnail, playback, history, and the stack probe's seeds. A patch of a title, a season, an
+  episode, a person, a collection, or a media file is merged with the stored document and fitted
+  as a whole, so a merge can never grow a document past its bound. The `media/movies-writer`
+  Oxlint rule (`tools/oxlint/media/`, with its own tests) fails any other write. In
+  `convex/movies/` it fails every write but an insert into a core table, and elsewhere any write
+  that names a movies table. It follows a database through `ctx.db`, `ctx["db"]`, and any name it
+  is given (`const store = ctx.db`, `{ db: store }`), and fails a write method taken off one
+  without a call (`const { insert } = ctx.db`, `ctx.db.patch.bind`) or called through a computed
+  name.
+- **Every table has a bound, a fitter, and a read reservation.** `TABLE_BYTES` in `movies/fit.ts`
+  is typed over the schema's tables, so a table added without a bound does not compile, and a
+  unit test builds one document per table:
+
+  | Table                                     | Bound  | Fitter                                                               | Reads reserve                                                                                                                                        |
+  | ----------------------------------------- | ------ | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `titles`                                  | 64 KiB | `fitTitle`                                                           | the bound per title read (`TITLE_GET`, `titlesOf`)                                                                                                   |
+  | `episodes`                                | 16 KiB | `fitEpisode`                                                         | the bound per episode read (`EPISODE_GET`, `episodesOf`)                                                                                             |
+  | `people`                                  | 16 KiB | `fitPerson`                                                          | the bound per person read (`peopleOf`)                                                                                                               |
+  | `collections`                             | 16 KiB | `fitCollection`                                                      | the bound per collection read (`collectionsOf`)                                                                                                      |
+  | `mediaFiles`                              | 16 KiB | `fitMediaFile`                                                       | pages sized by the bound: `scanner.known` reads 768 files (12 MiB), a title's or episode's files at most 100 (1.6 MiB), the purge 500 a page (8 MiB) |
+  | `seasons`                                 | 4 KiB  | `fitSeason`                                                          | a title's detail reads at most 200 (800 KiB), the purge 200 at a time                                                                                |
+  | `credits`                                 | 2 KiB  | `fitCredit`                                                          | the bound per credit row (`creditRowsOf`)                                                                                                            |
+  | `titleGenres`                             | 1 KiB  | `fitGenreRow`                                                        | 1 KiB per row, as small rows                                                                                                                         |
+  | `watchProgress`                           | 1 KiB  | `fitProgress` (its playback id)                                      | 1 KiB per row, as small rows                                                                                                                         |
+  | `collectionItems`, `myList`, `watchMarks` | 1 KiB  | none needed: every field is an id, a number, a boolean, or a literal | 1 KiB per row, as small rows                                                                                                                         |
+
+  A real document is well under its bound: a title with an overview of a few kilobytes and 256
+  genres, a file with dozens of tracks and chapters.
+
 - **Fitted, never refused.** A document over its bound is fitted, so no scan, metadata job,
-  person job, or edit fails for it. Every long free text (an overview, an admin's overview, a
-  biography, a role, a name, an artwork key, each genre, tag, studio, and country) is cut to half
-  its length, never below 64 characters, the longest field first, until it fits. Only when no
-  text can shrink do its longest lists (genres, tags, studios, countries, recommendations) lose
-  their later half. Each step halves something, so any document fits in a few dozen steps. Its
-  library, kind, identity fields, literals, and numbers never change, so matching and rescans
-  behave as before. A document under its bound is written exactly as before.
+  person job, or edit fails for it. Every long free text is cut to half its length, never below
+  64 characters, the longest field first, until it fits: an overview, an admin's overview, a
+  biography, a role, a name, an artwork key, each genre, tag, studio, and country, and a media
+  file's chapter titles, track names, languages, codec names, container, and version name. Only
+  when no text can shrink do its longest lists lose their later half: a title's genres, tags,
+  studios, countries, and recommendations, and a file's chapters, subtitle tracks, subtitle
+  files, audio tracks, and video tracks. Each step halves something, so any document fits in a
+  few dozen steps. Its library, kind, identity fields, path, literals, and numbers never change,
+  so matching and rescans behave as before. A document under its bound is written exactly as
+  before.
 - **Identity bounds.** Identity fields are bounded where the server functions take them
   (`movies/bounds.ts`: the scanner's upsert and missing calls, `applyMetadata`, `applyCredits`,
   `applyCollection`, `applyPerson`, and the match command), and the fitters apply the same bounds
   again:
 
-  | Field                                                             | Maximum                          | Over it                                                         |
-  | ----------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------- |
-  | TMDB, IMDb, and TVDB ids; a recommendation; a trailer's video key | 256 characters                   | stored as null (a recommendation is dropped, a trailer removed) |
-  | A title's match key, a person's key                               | 512 characters                   | cut to 512                                                      |
-  | A collection's source key                                         | 512 characters                   | stored as null                                                  |
-  | A credits, collection, or companion digest                        | 128 characters                   | cut to 128                                                      |
-  | A genre                                                           | 64 characters                    | not kept                                                        |
-  | A title genre row's copy of its title's sort key                  | 128 characters                   | cut to 128                                                      |
-  | A file's path                                                     | 4,096 bytes (Linux's `PATH_MAX`) | the file is skipped and counts as done                          |
-  | A playback id                                                     | 64 characters                    | the report is refused (`invalid_args`); start makes it          |
+  | Field                                                                      | Maximum                          | Over it                                                         |
+  | -------------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------- |
+  | TMDB, IMDb, and TVDB ids; a recommendation; a trailer's video key          | 256 characters                   | stored as null (a recommendation is dropped, a trailer removed) |
+  | A title's match key, a person's key, a collection's source key             | 512 characters                   | first 447 characters, `#`, and the key's hex SHA-256            |
+  | A credits, collection, or companion digest; a thumbnail manifest's version | 128 characters                   | first 63 characters, `#`, and the digest's hex SHA-256          |
+  | A genre                                                                    | 64 characters                    | not kept                                                        |
+  | A title genre row's copy of its title's sort key                           | 128 characters                   | cut to 128 (it only orders rows)                                |
+  | A file's path                                                              | 4,096 bytes (Linux's `PATH_MAX`) | the file is skipped and counts as done                          |
+  | A subtitle file's name                                                     | 255 bytes (Linux's `NAME_MAX`)   | that subtitle file is left out                                  |
+  | A playback id                                                              | 64 characters                    | the report is refused (`invalid_args`); start makes it          |
 
-  The rest of the write is kept, so a scan never fails on an over-long id: a cut id would name
-  another title, so an id is dropped, while a key's or a digest's leading part still identifies.
-  A match command's provider id over 256 characters is refused, since an admin typed it.
+  The rest of the write is kept, so a scan never fails on an over-long field. A cut id would name
+  another title, so an id is dropped. A key or a digest over its maximum keeps its leading part
+  and adds a SHA-256 of the whole (`uniqueWithin`), so two keys that differ anywhere, even past
+  the cut, stay two rows, and the same key always maps to the same stored key, so a rescan finds
+  the row it wrote. A match command's provider id over 256 characters is refused, since an admin
+  typed it.
 
-- **Proof.** A unit test builds each kind of document at the smallest a fitter can leave it,
+- **Proof.** A unit test builds one document per table at the smallest a fitter can leave it,
   every identity field at its maximum, every free text at 64 characters, and lists empty, all in
   3-byte UTF-8 characters, and checks it fits its bound, so fitting always reaches its target.
 

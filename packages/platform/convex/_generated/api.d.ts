@@ -63,6 +63,7 @@ import type * as core_lib_passwords from "../core/lib/passwords.js";
 import type * as core_lib_rateLimit from "../core/lib/rateLimit.js";
 import type * as core_lib_secrets from "../core/lib/secrets.js";
 import type * as core_lib_serverFacing from "../core/lib/serverFacing.js";
+import type * as core_lib_sha256 from "../core/lib/sha256.js";
 import type * as core_lib_usernames from "../core/lib/usernames.js";
 import type * as core_libraries from "../core/libraries.js";
 import type * as core_libraryProbe from "../core/libraryProbe.js";
@@ -183,6 +184,7 @@ declare const fullApi: ApiFromModules<{
   "core/lib/rateLimit": typeof core_lib_rateLimit;
   "core/lib/secrets": typeof core_lib_secrets;
   "core/lib/serverFacing": typeof core_lib_serverFacing;
+  "core/lib/sha256": typeof core_lib_sha256;
   "core/lib/usernames": typeof core_lib_usernames;
   "core/libraries": typeof core_libraries;
   "core/libraryProbe": typeof core_libraryProbe;

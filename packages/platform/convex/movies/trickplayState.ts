@@ -1,7 +1,7 @@
 import type { Doc } from "../_generated/dataModel";
 import { cancel, enqueue } from "../core/jobs/queue";
 import type { JobCtx } from "../core/jobs/store";
-import { patchMediaFile } from "./write";
+import { patchMediaFile, replaceMediaFile } from "./write";
 
 const hasFrames = (file: Doc<"mediaFiles">): boolean =>
   !file.missing && file.probe.video.length > 0 && file.probe.durationMs > 0;
@@ -72,7 +72,7 @@ export const queueTrickplay = async (
     revision: contentRevision(file),
   });
 
-  await patchMediaFile(ctx.db, file._id, {
+  await patchMediaFile(ctx.db, file, {
     trickplay: { status: "pending", jobId, sizeBytes: file.sizeBytes, mtimeMs: file.mtimeMs },
   });
 };
@@ -83,13 +83,17 @@ export const currentManifest = (file: Doc<"mediaFiles">) =>
 
 /**
  * Forgets `file`'s thumbnails and cancels its job, as when the file goes missing or leaves the
- * library. The server's sweep deletes the sheets nobody records.
+ * library, and answers the file as stored. The server's sweep deletes the sheets nobody records.
  */
-export const forgetTrickplay = async (ctx: JobCtx, file: Doc<"mediaFiles">): Promise<void> => {
+export const forgetTrickplay = async (
+  ctx: JobCtx,
+  file: Doc<"mediaFiles">,
+): Promise<Doc<"mediaFiles">> => {
   if (file.trickplay?.status === "pending" && (await jobState(ctx, file)) === "active") {
     await cancel(ctx, file.trickplay.jobId);
   }
 
-  if (file.trickplay !== undefined)
-    await patchMediaFile(ctx.db, file._id, { trickplay: undefined });
+  const { _id: _fileId, _creationTime: _created, trickplay, ...kept } = file;
+
+  return trickplay === undefined ? file : replaceMediaFile(ctx.db, file, kept);
 };

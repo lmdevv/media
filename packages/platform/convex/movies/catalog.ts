@@ -16,6 +16,7 @@ import {
   patchEpisode,
   patchMediaFile,
   patchSeason,
+  replaceMediaFile,
   patchTitle,
   patchTitleGenre,
 } from "./write";
@@ -413,7 +414,7 @@ export const upsertEpisode = async (
       externalIds: scanned.seasonExternalIds ?? season.externalIds,
     };
 
-    if (changesAny(season, seasonFields)) await patchSeason(db, season._id, seasonFields);
+    if (changesAny(season, seasonFields)) await patchSeason(db, season, seasonFields);
   }
 
   const existing = await db
@@ -458,7 +459,7 @@ export const upsertEpisode = async (
   const title = await db.get(titleId);
 
   if (seasonDoc !== null) {
-    await patchSeason(db, seasonId, { episodeCount: seasonDoc.episodeCount + 1 });
+    await patchSeason(db, seasonDoc, { episodeCount: seasonDoc.episodeCount + 1 });
   }
 
   if (title !== null) await patchTitle(db, title, { episodeCount: title.episodeCount + 1 });
@@ -619,12 +620,16 @@ export const upsertScannedItem = async (
     return { row: { ...landed, fileId }, moved: { ...found, files: 1 } };
   }
 
-  const { missingSince: _wasMissingSince, ...present } = existingFile;
-  const stillThere = { ...present, ...fields };
+  const {
+    _id: _fileId,
+    _creationTime: _created,
+    missingSince: _wasMissingSince,
+    ...present
+  } = existingFile;
 
-  if (changesAny(existingFile, { ...fields, missingSince: undefined })) {
-    await patchMediaFile(db, existingFile._id, { ...fields, missingSince: undefined });
-  }
+  const stillThere = changesAny(existingFile, { ...fields, missingSince: undefined })
+    ? await replaceMediaFile(db, existingFile, { ...present, ...fields })
+    : existingFile;
 
   await queueTrickplay(ctx, stillThere, false);
 
@@ -652,8 +657,9 @@ export const markFileMissing = async (
 
   if (file === null || file.missing) return false;
 
-  await forgetTrickplay(ctx, file);
-  await patchMediaFile(ctx.db, file._id, { missing: true, missingSince: Date.now() });
+  const forgotten = await forgetTrickplay(ctx, file);
+
+  await patchMediaFile(ctx.db, forgotten, { missing: true, missingSince: Date.now() });
   await adjustPresent(ctx.db, file.titleId, file.episodeId, -1);
 
   return true;

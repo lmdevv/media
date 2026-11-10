@@ -2,7 +2,17 @@ import type { GenericDocument, WithoutSystemFields } from "convex/server";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
-import { fitCollection, fitCredit, fitEpisode, fitGenreRow, fitPerson, fitTitle } from "./fit";
+import {
+  fitCollection,
+  fitCredit,
+  fitEpisode,
+  fitGenreRow,
+  fitMediaFile,
+  fitPerson,
+  fitProgress,
+  fitSeason,
+  fitTitle,
+} from "./fit";
 
 /**
  * The only writer of the movies tables: every insert, patch, and replace of a title, title genre,
@@ -26,6 +36,8 @@ type Patch<Row extends GenericDocument> = {
 
 interface Rows {
   readonly titles: Doc<"titles">;
+  readonly seasons: Doc<"seasons">;
+  readonly mediaFiles: Doc<"mediaFiles">;
   readonly episodes: Doc<"episodes">;
   readonly people: Doc<"people">;
   readonly credits: Doc<"credits">;
@@ -120,27 +132,59 @@ export const patchTitleGenre = async (
   fields: Partial<WithoutSystemFields<Doc<"titleGenres">>>,
 ): Promise<void> => db.patch(id, fitGenreRow(fields));
 
-export const insertSeason = async (
-  db: Db,
-  fields: WithoutSystemFields<Doc<"seasons">>,
-): Promise<Id<"seasons">> => db.insert("seasons", fields);
+export const insertSeason = async (db: Db, fields: Fields<"seasons">): Promise<Id<"seasons">> =>
+  db.insert("seasons", fitSeason(fields));
 
+/** Writes `fields` over a season, fitting the merged document; answers it as stored. */
 export const patchSeason = async (
   db: Db,
-  id: Id<"seasons">,
-  fields: Patch<Doc<"seasons">>,
-): Promise<void> => db.patch(id, fields);
+  existing: Doc<"seasons">,
+  fields: Partial<Fields<"seasons">>,
+): Promise<Doc<"seasons">> => {
+  const merged: Doc<"seasons"> = { ...existing, ...fields };
+  const fitted = fitSeason(merged);
+
+  if (fitted === merged) await db.patch(existing._id, fields);
+  else await db.replace(existing._id, fitted);
+
+  return fitted;
+};
 
 export const insertMediaFile = async (
   db: Db,
-  fields: WithoutSystemFields<Doc<"mediaFiles">>,
-): Promise<Id<"mediaFiles">> => db.insert("mediaFiles", fields);
+  fields: Fields<"mediaFiles">,
+): Promise<Id<"mediaFiles">> => db.insert("mediaFiles", fitMediaFile(fields));
 
+/** Writes `fields` over a media file, fitting the merged document; answers it as stored. */
 export const patchMediaFile = async (
   db: Db,
-  id: Id<"mediaFiles">,
-  fields: Patch<Doc<"mediaFiles">>,
-): Promise<void> => db.patch(id, fields);
+  existing: Doc<"mediaFiles">,
+  fields: Partial<Fields<"mediaFiles">>,
+): Promise<Doc<"mediaFiles">> => {
+  const merged: Doc<"mediaFiles"> = { ...existing, ...fields };
+  const fitted = fitMediaFile(merged);
+
+  if (fitted === merged) await db.patch(existing._id, fields);
+  else await db.replace(existing._id, fitted);
+
+  return fitted;
+};
+
+/**
+ * Writes `next` as the whole of a media file, fitted, so a field `next` leaves out is removed;
+ * answers the file as stored.
+ */
+export const replaceMediaFile = async (
+  db: Db,
+  existing: Doc<"mediaFiles">,
+  next: Fields<"mediaFiles">,
+): Promise<Doc<"mediaFiles">> => {
+  const fitted = fitMediaFile(next);
+
+  await db.replace(existing._id, fitted);
+
+  return { ...fitted, _id: existing._id, _creationTime: existing._creationTime };
+};
 
 export const insertCollectionItem = async (
   db: Db,
@@ -156,13 +200,13 @@ export const patchCollectionItem = async (
 export const insertProgress = async (
   db: Db,
   fields: WithoutSystemFields<Doc<"watchProgress">>,
-): Promise<Id<"watchProgress">> => db.insert("watchProgress", fields);
+): Promise<Id<"watchProgress">> => db.insert("watchProgress", fitProgress(fields));
 
 export const patchProgress = async (
   db: Db,
   id: Id<"watchProgress">,
   fields: Patch<Doc<"watchProgress">>,
-): Promise<void> => db.patch(id, fields);
+): Promise<void> => db.patch(id, fitProgress(fields));
 
 export const insertListEntry = async (
   db: Db,

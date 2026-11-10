@@ -2,6 +2,7 @@ import type { WithoutSystemFields } from "convex/server";
 import { getDocumentSize } from "convex/values";
 
 import type { Doc } from "../_generated/dataModel";
+import type { moviesTables } from "./schema";
 import {
   BOUNDS,
   collectionHashWithin,
@@ -11,9 +12,13 @@ import {
   matchKeyWithin,
   personKeyWithin,
   recommendationsWithin,
+  sidecarDigestWithin,
   sourceKeyWithin,
+  subtitlesWithin,
   trailerWithin,
+  uniqueWithin,
 } from "./bounds";
+import { sha256Hex } from "../core/lib/sha256";
 
 /**
  * The most bytes, as Convex measures a document, each kind of movies document is kept within by
@@ -27,6 +32,8 @@ export const DOCUMENT_BYTES = {
   people: 16 * 1024,
   credits: 2 * 1024,
   collections: 16 * 1024,
+  mediaFiles: 16 * 1024,
+  seasons: 4 * 1024,
   /**
    * A row of a small table: a grant, a library, a group membership, a title genre, a list entry,
    * a progress row, a collection membership, or a watch mark. Its fields are ids, numbers,
@@ -34,6 +41,26 @@ export const DOCUMENT_BYTES = {
    */
   small: 1024,
 } as const;
+
+/**
+ * Every movies table's bound, typed over the schema's tables, so a table added without one fails
+ * to compile. The fixed-shape rows (list entries, collection memberships, watch marks) hold only
+ * ids, numbers, booleans, and literals, so they need no fitter to stay within theirs.
+ */
+export const TABLE_BYTES = {
+  titles: DOCUMENT_BYTES.titles,
+  titleGenres: DOCUMENT_BYTES.small,
+  seasons: DOCUMENT_BYTES.seasons,
+  episodes: DOCUMENT_BYTES.episodes,
+  people: DOCUMENT_BYTES.people,
+  credits: DOCUMENT_BYTES.credits,
+  mediaFiles: DOCUMENT_BYTES.mediaFiles,
+  collections: DOCUMENT_BYTES.collections,
+  collectionItems: DOCUMENT_BYTES.small,
+  watchProgress: DOCUMENT_BYTES.small,
+  myList: DOCUMENT_BYTES.small,
+  watchMarks: DOCUMENT_BYTES.small,
+} as const satisfies { readonly [Table in keyof typeof moviesTables]: number };
 
 /** The shortest a fitter cuts free text to. */
 export const SHORTEST = 64;
@@ -52,7 +79,7 @@ const halvedAll = (list: ReadonlyArray<string>): Array<string> =>
   list.map((text) => (points(text) > SHORTEST ? halved(text) : text));
 
 /** The first half of a list, so a list of any length is gone in a few steps. */
-const firstHalf = (list: ReadonlyArray<string>): Array<string> =>
+const firstHalf = <Item>(list: ReadonlyArray<Item>): Array<Item> =>
   list.slice(0, Math.floor(list.length / 2));
 
 const spareOf = (list: ReadonlyArray<string> | undefined): number =>
@@ -381,3 +408,216 @@ export const fitGenreRow = <Fields extends Partial<GenreRowFields>>(fields: Fiel
     ? genre
     : { ...genre, sortKey: cut(genre.sortKey, BOUNDS.genreSortKey) };
 };
+
+type SeasonFields = WithoutSystemFields<Doc<"seasons">>;
+
+/** A season's fields kept within `DOCUMENT_BYTES.seasons`: its name, then its poster key. */
+export const fitSeason = <Fields extends SeasonFields>(fields: Fields): Fields =>
+  fitWith(
+    idsWithin(fields),
+    DOCUMENT_BYTES.seasons,
+    [
+      { spare: (f) => spare(f.name), shrink: (f) => ({ ...f, name: halved(f.name) }) },
+      {
+        spare: (f) => spare(f.poster),
+        shrink: (f) => ({ ...f, poster: f.poster === null ? null : halved(f.poster) }),
+      },
+    ],
+    [],
+  );
+
+type FileFields = WithoutSystemFields<Doc<"mediaFiles">>;
+
+type Probe = FileFields["probe"];
+
+/** `text` halved when it is longer than `SHORTEST`, else itself. */
+const shortened = (text: string): string => (points(text) > SHORTEST ? halved(text) : text);
+
+const shortenedOrNull = (text: string | null): string | null =>
+  text === null ? null : shortened(text);
+
+const spareAll = (texts: ReadonlyArray<string | null | undefined>): number =>
+  Math.max(0, ...texts.map((text) => spare(text)));
+
+const withProbe = <Fields extends FileFields>(fields: Fields, probe: Probe): Fields => ({
+  ...fields,
+  probe,
+});
+
+/** A thumbnail manifest's version within the digest bound, as other digests are. */
+const trickplayWithin = <Fields extends FileFields>(fields: Fields): Fields => {
+  const { trickplay } = fields;
+
+  return trickplay?.status !== "ready" || trickplay.manifest.version.length <= BOUNDS.digest
+    ? fields
+    : {
+        ...fields,
+        trickplay: {
+          ...trickplay,
+          manifest: {
+            ...trickplay.manifest,
+            version: uniqueWithin(trickplay.manifest.version, BOUNDS.digest),
+          },
+        },
+      };
+};
+
+const fileTexts = <Fields extends FileFields>(): ReadonlyArray<Shrinker<Fields>> => [
+  {
+    spare: (f) => spareAll((f.probe.chapters ?? []).map((chapter) => chapter.title)),
+    shrink: (f) =>
+      f.probe.chapters === undefined
+        ? f
+        : withProbe(f, {
+            ...f.probe,
+            chapters: f.probe.chapters.map((chapter) => ({
+              ...chapter,
+              title: shortenedOrNull(chapter.title),
+            })),
+          }),
+  },
+  {
+    spare: (f) =>
+      spareAll(
+        f.probe.audio.flatMap((track) => [
+          track.title,
+          track.language,
+          track.codec,
+          track.profile,
+          track.channelLayout,
+        ]),
+      ),
+    shrink: (f) =>
+      withProbe(f, {
+        ...f.probe,
+        audio: f.probe.audio.map((track) => ({
+          ...track,
+          title: shortenedOrNull(track.title),
+          language: shortenedOrNull(track.language),
+          codec: shortened(track.codec),
+          profile: shortenedOrNull(track.profile),
+          channelLayout: shortenedOrNull(track.channelLayout),
+        })),
+      }),
+  },
+  {
+    spare: (f) =>
+      spareAll(f.probe.subtitles.flatMap((track) => [track.title, track.language, track.codec])),
+    shrink: (f) =>
+      withProbe(f, {
+        ...f.probe,
+        subtitles: f.probe.subtitles.map((track) => ({
+          ...track,
+          title: shortenedOrNull(track.title),
+          language: shortenedOrNull(track.language),
+          codec: shortened(track.codec),
+        })),
+      }),
+  },
+  {
+    spare: (f) =>
+      spareAll(f.probe.video.flatMap((track) => [track.codec, track.profile, track.pixelFormat])),
+    shrink: (f) =>
+      withProbe(f, {
+        ...f.probe,
+        video: f.probe.video.map((track) => ({
+          ...track,
+          codec: shortened(track.codec),
+          profile: shortenedOrNull(track.profile),
+          pixelFormat: shortenedOrNull(track.pixelFormat),
+        })),
+      }),
+  },
+  {
+    spare: (f) =>
+      spareAll(
+        f.externalSubtitles.flatMap((subtitle) => [
+          subtitle.title,
+          subtitle.language,
+          subtitle.codec,
+        ]),
+      ),
+    shrink: (f) => ({
+      ...f,
+      externalSubtitles: f.externalSubtitles.map((subtitle) => {
+        const shrunk = {
+          ...subtitle,
+          language: shortenedOrNull(subtitle.language),
+          codec: shortened(subtitle.codec),
+        };
+
+        return subtitle.title === undefined
+          ? shrunk
+          : { ...shrunk, title: shortened(subtitle.title) };
+      }),
+    }),
+  },
+  {
+    spare: (f) => spareAll([f.probe.container, f.probe.formatName]),
+    shrink: (f) => {
+      const container = { ...f.probe, container: shortened(f.probe.container) };
+
+      return withProbe(
+        f,
+        container.formatName === undefined
+          ? container
+          : { ...container, formatName: shortened(container.formatName) },
+      );
+    },
+  },
+  {
+    spare: (f) => spare(f.versionName),
+    shrink: (f) => ({ ...f, versionName: shortenedOrNull(f.versionName) }),
+  },
+];
+
+const fileLists = <Fields extends FileFields>(): ReadonlyArray<Shrinker<Fields>> => [
+  {
+    spare: (f) => f.probe.chapters?.length ?? 0,
+    shrink: (f) =>
+      f.probe.chapters === undefined
+        ? f
+        : withProbe(f, { ...f.probe, chapters: firstHalf(f.probe.chapters) }),
+  },
+  {
+    spare: (f) => f.probe.subtitles.length,
+    shrink: (f) => withProbe(f, { ...f.probe, subtitles: firstHalf(f.probe.subtitles) }),
+  },
+  {
+    spare: (f) => f.externalSubtitles.length,
+    shrink: (f) => ({ ...f, externalSubtitles: firstHalf(f.externalSubtitles) }),
+  },
+  {
+    spare: (f) => f.probe.audio.length,
+    shrink: (f) => withProbe(f, { ...f.probe, audio: firstHalf(f.probe.audio) }),
+  },
+  {
+    spare: (f) => f.probe.video.length,
+    shrink: (f) => withProbe(f, { ...f.probe, video: firstHalf(f.probe.video) }),
+  },
+];
+
+/**
+ * A media file's fields kept within `DOCUMENT_BYTES.mediaFiles`: chapter titles, track names,
+ * languages, and codec names first, then the container and version names, then its longest
+ * lists (chapters, tracks, subtitle files). Its library, title, episode, path, sizes, times, and
+ * subtitle file names never change; its digests stay within their bound.
+ */
+export const fitMediaFile = <Fields extends FileFields>(fields: Fields): Fields =>
+  fitWith(
+    trickplayWithin(subtitlesWithin(sidecarDigestWithin(fields))),
+    DOCUMENT_BYTES.mediaFiles,
+    fileTexts<Fields>(),
+    fileLists<Fields>(),
+  );
+
+/**
+ * A progress row's playback id within its bound: `movies.play.report` refuses a longer one, and
+ * a writer that sent one anyway stores its SHA-256 instead, which stays distinct.
+ */
+export const fitProgress = <Fields extends { readonly playId?: string | undefined }>(
+  fields: Fields,
+): Fields =>
+  fields.playId === undefined || fields.playId.length <= BOUNDS.playbackId
+    ? fields
+    : { ...fields, playId: sha256Hex(fields.playId).slice(0, BOUNDS.playbackId) };

@@ -3,15 +3,18 @@ import type { WithoutSystemFields } from "convex/server";
 import { describe, expect, it } from "vitest";
 
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { BOUNDS } from "../../convex/movies/bounds";
+import { BOUNDS, uniqueWithin } from "../../convex/movies/bounds";
 import {
   DOCUMENT_BYTES,
   SHORTEST,
+  TABLE_BYTES,
   fitCollection,
   fitCredit,
   fitEpisode,
   fitGenreRow,
+  fitMediaFile,
   fitPerson,
+  fitSeason,
   fitTitle,
 } from "../../convex/movies/fit";
 
@@ -196,19 +199,31 @@ const widestIds = { tmdb: wide(BOUNDS.id), imdb: wide(BOUNDS.id), tvdb: wide(BOU
  * optional field present, all in the widest characters. If these fit, a fitter that cuts free
  * text to `SHORTEST` and then empties lists always reaches its target.
  */
-interface Floor {
-  readonly title: WithoutSystemFields<Doc<"titles">>;
-  readonly episode: WithoutSystemFields<Doc<"episodes">>;
-  readonly person: WithoutSystemFields<Doc<"people">>;
-  readonly credit: WithoutSystemFields<Doc<"credits">>;
-  readonly collection: WithoutSystemFields<Doc<"collections">>;
-}
+type MoviesTable = keyof typeof TABLE_BYTES;
+
+const MOVIES_TABLES = [
+  "titles",
+  "titleGenres",
+  "seasons",
+  "episodes",
+  "people",
+  "credits",
+  "mediaFiles",
+  "collections",
+  "collectionItems",
+  "watchProgress",
+  "myList",
+  "watchMarks",
+] as const satisfies ReadonlyArray<MoviesTable>;
+
+/** One document of every movies table: the record is typed over them, so none is left out. */
+type Floor = { readonly [Name in MoviesTable]: WithoutSystemFields<Doc<Name>> };
 
 const floor = (text: number): Floor => {
   const free = wide(text);
 
   return {
-    title: {
+    titles: {
       ...title(free, []),
       matchKey: wide(BOUNDS.key),
       name: free,
@@ -246,7 +261,7 @@ const floor = (text: number): Floor => {
       collectionHash: wide(BOUNDS.digest),
       purging: true,
     },
-    episode: {
+    episodes: {
       titleId: ids.titleId,
       seasonId: ids.seasonId,
       seasonNumber: 1,
@@ -261,7 +276,7 @@ const floor = (text: number): Floor => {
       externalIds: widestIds,
       creditsHash: wide(BOUNDS.digest),
     },
-    person: {
+    people: {
       personKey: wide(BOUNDS.key),
       name: free,
       sortKey: free,
@@ -276,7 +291,7 @@ const floor = (text: number): Floor => {
       detailsRequestedAt: 1,
       updatedAt: 1,
     },
-    credit: {
+    credits: {
       titleId: ids.titleId,
       episodeId: ids.episodeId,
       personId: ids.personId,
@@ -284,7 +299,7 @@ const floor = (text: number): Floor => {
       role: free,
       order: 1_000_000,
     },
-    collection: {
+    collections: {
       name: free,
       sortKey: free,
       sourceKey: wide(BOUNDS.sourceKey),
@@ -294,50 +309,100 @@ const floor = (text: number): Floor => {
       poster: free,
       backdrop: free,
     },
+    seasons: {
+      titleId: ids.titleId,
+      seasonNumber: 1_000,
+      name: free,
+      poster: free,
+      episodeCount: 1_000_000,
+      externalIds: widestIds,
+    },
+    mediaFiles: {
+      libraryId,
+      titleId: ids.titleId,
+      episodeId: ids.episodeId,
+      path: `/${"p".repeat(BOUNDS.pathBytes - 1)}`,
+      sizeBytes: 1e12,
+      mtimeMs: 1e12,
+      probe: {
+        container: free,
+        formatName: free,
+        durationMs: 1e9,
+        startMs: 1e9,
+        bitRate: 1e9,
+        video: [],
+        audio: [],
+        subtitles: [],
+        chapters: [],
+      },
+      externalSubtitles: [],
+      versionName: free,
+      hdr: true,
+      missing: true,
+      missingSince: 1e12,
+      addedAt: 1e12,
+      trickplay: {
+        status: "ready",
+        sizeBytes: 1e12,
+        mtimeMs: 1e12,
+        manifest: {
+          version: wide(BOUNDS.digest),
+          intervalMs: 1,
+          tileWidth: 1,
+          tileHeight: 1,
+          columns: 1,
+          rows: 1,
+          thumbnailCount: 1,
+          sheetCount: 1,
+        },
+      },
+      sidecarDigest: wide(BOUNDS.digest),
+    },
+    titleGenres: {
+      titleId: ids.titleId,
+      libraryId,
+      genre: wide(BOUNDS.genre),
+      kind: "movie",
+      sortKey: wide(BOUNDS.genreSortKey),
+      addedAt: 1,
+      year: 2010,
+    },
+    watchProgress: {
+      userId: ids.userId,
+      titleId: ids.titleId,
+      episodeId: ids.episodeId,
+      fileId: ids.fileId,
+      positionMs: 1e12,
+      durationMs: 1e12,
+      watched: true,
+      updatedAt: 1e12,
+      lastPlayedAt: 1e12,
+      playId: wide(BOUNDS.playbackId),
+      playStartedAt: 1e12,
+    },
+    myList: { userId: ids.userId, titleId: ids.titleId, addedAt: 1e12 },
+    collectionItems: {
+      collectionId: ids.collectionId,
+      titleId: ids.titleId,
+      position: 1e6,
+      source: "metadata",
+    },
+    watchMarks: { userId: ids.userId, titleId: ids.titleId, generation: 1e9 },
   };
 };
 
 describe("the movies fitters reach their targets", () => {
-  it("fit every kind of document at its floor within its bound", () => {
+  it("fit every table's document at its floor within its bound", () => {
     const smallest = floor(SHORTEST);
 
-    expect(getDocumentSize(smallest.title)).toBeLessThanOrEqual(DOCUMENT_BYTES.titles);
-    expect(getDocumentSize(smallest.episode)).toBeLessThanOrEqual(DOCUMENT_BYTES.episodes);
-    expect(getDocumentSize(smallest.person)).toBeLessThanOrEqual(DOCUMENT_BYTES.people);
-    expect(getDocumentSize(smallest.credit)).toBeLessThanOrEqual(DOCUMENT_BYTES.credits);
-    expect(getDocumentSize(smallest.collection)).toBeLessThanOrEqual(DOCUMENT_BYTES.collections);
-  });
+    expect([...MOVIES_TABLES].toSorted()).toEqual(Object.keys(TABLE_BYTES).toSorted());
 
-  it("fit every small row at its bounds within the small bound", () => {
-    const rows = [
-      {
-        titleId: ids.titleId,
-        libraryId,
-        genre: wide(BOUNDS.genre),
-        kind: "movie",
-        sortKey: wide(BOUNDS.genreSortKey),
-        addedAt: 1,
-        year: 2010,
-      },
-      {
-        userId: ids.userId,
-        titleId: ids.titleId,
-        episodeId: ids.episodeId,
-        fileId: ids.fileId,
-        positionMs: 1,
-        durationMs: 1,
-        watched: true,
-        updatedAt: 1,
-        lastPlayedAt: 1,
-        playId: wide(BOUNDS.playbackId),
-        playStartedAt: 1,
-      },
-      { userId: ids.userId, titleId: ids.titleId, addedAt: 1 },
-      { collectionId: ids.collectionId, titleId: ids.titleId, position: 1, source: "metadata" },
-      { userId: ids.userId, titleId: ids.titleId, generation: 1_000_000 },
-    ];
-
-    for (const row of rows) expect(getDocumentSize(row)).toBeLessThanOrEqual(DOCUMENT_BYTES.small);
+    for (const table of MOVIES_TABLES) {
+      expect({ table, fits: getDocumentSize(smallest[table]) <= TABLE_BYTES[table] }).toEqual({
+        table,
+        fits: true,
+      });
+    }
   });
 
   it("bring documents far past every bound within them, keeping ids that fit", () => {
@@ -346,7 +411,7 @@ describe("the movies fitters reach their targets", () => {
     const kept = { tmdb: "603", imdb: wide(BOUNDS.id + 1), tvdb: wide(BOUNDS.id) };
 
     const fittedTitle = fitTitle({
-      ...absurd.title,
+      ...absurd.titles,
       externalIds: kept,
       genres,
       studios: genres,
@@ -358,11 +423,11 @@ describe("the movies fitters reach their targets", () => {
 
     const fitted = [
       [fittedTitle, DOCUMENT_BYTES.titles],
-      [fitEpisode({ ...absurd.episode, externalIds: kept }), DOCUMENT_BYTES.episodes],
-      [fitPerson({ ...absurd.person, personKey: wide(100_000) }), DOCUMENT_BYTES.people],
-      [fitCredit(absurd.credit), DOCUMENT_BYTES.credits],
+      [fitEpisode({ ...absurd.episodes, externalIds: kept }), DOCUMENT_BYTES.episodes],
+      [fitPerson({ ...absurd.people, personKey: wide(100_000) }), DOCUMENT_BYTES.people],
+      [fitCredit(absurd.credits), DOCUMENT_BYTES.credits],
       [
-        fitCollection({ ...absurd.collection, sourceKey: wide(100_000) }),
+        fitCollection({ ...absurd.collections, sourceKey: wide(100_000) }),
         DOCUMENT_BYTES.collections,
       ],
       [
@@ -379,12 +444,85 @@ describe("the movies fitters reach their targets", () => {
       ],
     ] as const;
 
+    const track = { codec: wide(20_000), language: wide(20_000), title: wide(20_000) };
+
+    const fittedFile = fitMediaFile({
+      ...absurd.mediaFiles,
+      probe: {
+        ...absurd.mediaFiles.probe,
+        container: wide(1_100_000),
+        audio: Array.from({ length: 200 }, (_, index) => ({
+          ...track,
+          index,
+          profile: null,
+          channels: 2,
+          channelLayout: wide(20_000),
+          default: false,
+          bitRate: null,
+        })),
+        subtitles: Array.from({ length: 200 }, (_, index) => ({
+          ...track,
+          index,
+          kind: "text" as const,
+          default: false,
+          forced: false,
+        })),
+        chapters: Array.from({ length: 2000 }, (_, n) => ({
+          startMs: n,
+          endMs: n + 1,
+          title: wide(2_000),
+        })),
+      },
+      externalSubtitles: [
+        { fileName: "film.en.srt", codec: "srt", language: "en", forced: false },
+        {
+          fileName: "x".repeat(BOUNDS.fileNameBytes + 1),
+          codec: "srt",
+          language: null,
+          forced: false,
+        },
+      ],
+      sidecarDigest: wide(100_000),
+    });
+
+    expect(getDocumentSize(fittedFile)).toBeLessThanOrEqual(DOCUMENT_BYTES.mediaFiles);
+    expect(fittedFile.path).toBe(absurd.mediaFiles.path);
+    expect(fittedFile.externalSubtitles.map((subtitle) => subtitle.fileName)).toEqual([
+      "film.en.srt",
+    ]);
+    expect(
+      getDocumentSize(fitSeason({ ...absurd.seasons, externalIds: kept })),
+    ).toBeLessThanOrEqual(DOCUMENT_BYTES.seasons);
+
     for (const [document, bound] of fitted) {
       expect(getDocumentSize(document)).toBeLessThanOrEqual(bound);
     }
 
     expect(fittedTitle.externalIds).toEqual({ tmdb: "603", imdb: null, tvdb: wide(BOUNDS.id) });
-    expect(fittedTitle.matchKey).toBe(wide(BOUNDS.key));
+    expect(fittedTitle.matchKey).toBe(uniqueWithin(wide(BOUNDS.key * 4), BOUNDS.key));
     expect(fittedTitle.recommendations).toEqual(["550"]);
+  });
+});
+
+describe("long keys stay unique", () => {
+  it("keep a key within its maximum as it is", () => {
+    expect(uniqueWithin("tmdb:603", BOUNDS.key)).toBe("tmdb:603");
+    expect(uniqueWithin(wide(BOUNDS.key), BOUNDS.key)).toBe(wide(BOUNDS.key));
+  });
+
+  it("map long keys that differ only at the end to different keys, the same one each time", () => {
+    const shared = wide(10_000);
+    const [left, right] = [`${shared}A`, `${shared}B`].map((key) => uniqueWithin(key, BOUNDS.key));
+
+    expect(left).not.toBe(right);
+    expect(uniqueWithin(`${shared}A`, BOUNDS.key)).toBe(left);
+
+    for (const key of [left, right]) {
+      expect(key?.length).toBeLessThanOrEqual(BOUNDS.key);
+      expect(key?.startsWith(shared.slice(0, BOUNDS.key - 65))).toBe(true);
+      expect(key).toMatch(/#[0-9a-f]{64}$/u);
+    }
+
+    expect(uniqueWithin(`${shared}A`, BOUNDS.digest).length).toBeLessThanOrEqual(BOUNDS.digest);
   });
 });

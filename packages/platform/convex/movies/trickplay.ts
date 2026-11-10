@@ -40,7 +40,7 @@ export const recordTrickplay = serverMutation({
         mtimeMs === file.mtimeMs;
 
       if (current) {
-        await patchMediaFile(ctx.db, fileId, {
+        await patchMediaFile(ctx.db, file, {
           trickplay: { status: "ready", sizeBytes, mtimeMs, manifest },
         });
       }
