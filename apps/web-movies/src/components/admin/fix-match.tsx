@@ -23,7 +23,7 @@ import { useAction } from "./action";
 import { editFor, overridesFor, parseYear, planFor } from "./match-plan";
 import type { HandEdit } from "./match-plan";
 import { formatRuntime, qualityLabel, titleWithYear } from "./media-quality";
-import { useMediaServer } from "./media-server";
+import { useMediaServer } from "@/session/error-reporting";
 import { Poster } from "./poster";
 import type { LibraryId, TitleId } from "./route-params";
 import type { TitleDetail } from "./types";

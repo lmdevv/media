@@ -10,7 +10,7 @@ import { PageHeader } from "@media/ui/components/page-header";
 import { useAccountActions } from "@/session/account";
 
 import { useActions } from "./action";
-import { useNow } from "./now";
+import { useNow } from "@media/ui/lib/use-now";
 import { usePages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
 import { ItemRow, Muted, Notice, PagedList, Section, formatTime } from "./parts";

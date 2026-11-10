@@ -1,11 +1,12 @@
 import { folderTroubleOf } from "@media/contracts/scan-failure";
 
+import { isActive as isJobActive } from "@/lib/scan-progress";
+
 import { formatAgo } from "./format";
 import type { Scan } from "./types";
 
 /** Whether a library's latest scan is still queued or running. */
-export const isActive = (scan: Scan | null): boolean =>
-  scan !== null && (scan.status === "queued" || scan.status === "running");
+export const isActive = (scan: Scan | null): boolean => scan !== null && isJobActive(scan);
 
 /** Whether a failed scan could not read the library's folders, such as an offline NAS share. */
 export const isUnreachable = (scan: Scan | null): scan is Scan =>

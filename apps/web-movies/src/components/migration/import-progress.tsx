@@ -6,7 +6,7 @@ import { Link } from "@tanstack/react-router";
 
 import { formatCount, formatPercent } from "@/components/admin/format";
 import type { ImportRun } from "@/components/admin/types";
-import { useNow } from "@/lib/use-now";
+import { useNow } from "@media/ui/lib/use-now";
 
 import { PHASE_LABELS, importFraction, importMinutesLeft } from "./migration-model";
 import { Caution, Stat, Stats } from "./parts";

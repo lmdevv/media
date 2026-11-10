@@ -31,6 +31,9 @@ export interface MonitoredLibrary {
   readonly roots: ReadonlyArray<string>;
 }
 
+/** Most paths one burst of file events keeps before it counts as a change to the whole root. */
+const BURST_PATHS_MAX = 256;
+
 /** Why a library is brought up to date. */
 type ScanReason = "startup" | "change" | "reconcile";
 
@@ -153,20 +156,33 @@ const make = Effect.fn("LibraryMonitor.make")(function* (
         Effect.gen(function* () {
           if ((yield* Ref.get(restarts)) > 0) yield* rescan("change");
           const watched = yield* identity(root);
-          const burst = yield* Ref.make<ReadonlySet<string>>(new Set());
+          // Past `BURST_PATHS_MAX` paths a burst stops keeping them and counts as the whole root.
+          let burst: Set<string> | null = new Set();
+
+          const takeBurst = Effect.sync((): ReadonlyArray<string> => {
+            const taken = burst === null ? [] : [...burst];
+
+            burst = new Set();
+
+            return taken;
+          });
 
           yield* fs.watch(root, { recursive: true }).pipe(
             Stream.tap((event) =>
-              Ref.update(burst, (paths) => new Set(paths).add(path.join(root, event.path))),
+              Effect.sync(() => {
+                if (burst === null) return;
+
+                burst.add(path.join(root, event.path));
+
+                if (burst.size > BURST_PATHS_MAX) burst = null;
+              }),
             ),
             Stream.debounce(timing.debounce),
             Stream.runForEach(() =>
               identity(root).pipe(
                 Effect.flatMap((current) =>
                   current === watched
-                    ? Effect.flatMap(Ref.getAndSet(burst, new Set()), (changed) =>
-                        rescan("change", [...changed]),
-                      )
+                    ? Effect.flatMap(takeBurst, (changed) => rescan("change", changed))
                     : Effect.fail(new WatchEnded()),
                 ),
               ),

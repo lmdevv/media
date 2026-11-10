@@ -273,6 +273,10 @@ test("the player switches versions in place, keeping the position and the pause"
   await expect.poll(sessionFile).toBe(fileOf("Standard"));
   await expectPositionNear(page, position, 0.5);
   expect((await videoState(page)).paused).toBe(true);
+  // The switch saves where the old version stopped, not the detached element's 0.
+  await expect
+    .poll(async () => (await owner.platform.movies.titles.get({ titleId: movieId })).progress)
+    .toMatchObject({ positionMs: expect.closeTo(position * 1000, -3) });
 
   await revealControls(page);
   await page.getByRole("button", { name: TRACKS }).click();

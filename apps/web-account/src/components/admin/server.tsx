@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 
 import { PageHeader } from "@media/ui/components/page-header";
 
-import { useNow } from "./now";
+import { useNow } from "@media/ui/lib/use-now";
 import { Failed, formatTime } from "./parts";
 import type { ServerStatus } from "./types";
 

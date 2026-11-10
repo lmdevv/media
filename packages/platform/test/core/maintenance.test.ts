@@ -98,8 +98,13 @@ const claimBackup = async (
   return claimBackup(core, jobId, deadline);
 };
 
-const settle = (core: CoreStack) =>
-  runFunction(core, internal.core.maintenance.settleRestoredJobs, {}, Settled);
+const settle = (core: CoreStack, before?: number) =>
+  runFunction(
+    core,
+    internal.core.maintenance.settleRestoredJobs,
+    before === undefined ? {} : { before },
+    Settled,
+  );
 
 const PROBE_KINDS: ReadonlyArray<ProbeRunKind> = ["probe.wide", "probe.capped", "probe.items"];
 
@@ -204,6 +209,29 @@ describe.skipIf(stack === undefined)("restore maintenance", { timeout: 300_000 }
     if (again.outcome === "claimed") await probe.finish(again.lease, { outcome: "succeeded" });
 
     await inSequence(PROBE_KINDS, async (kind) => freshKind(stack, kind));
+  });
+
+  it("leave a job a live worker claimed after the import started", async () => {
+    if (stack === undefined) return;
+    await freshKind(stack, "probe.wide");
+
+    const importedFrom = Date.now() - 1000;
+
+    await enqueue(stack, "probe.wide", 1);
+
+    const probe = worker(stack, `restore-late-${unique()}`);
+    const claim = await probe.claim(["probe.wide"]);
+
+    if (claim.outcome !== "claimed") throw new Error("No probe job was claimed");
+
+    expect(await settle(stack, importedFrom)).toEqual({ settled: 0 });
+    expect(await jobOf(stack, claim.lease.jobId)).toMatchObject({ status: "running" });
+    expect(await probe.finish(claim.lease, { outcome: "succeeded" })).toMatchObject({
+      outcome: "settled",
+      status: "succeeded",
+    });
+
+    await freshKind(stack, "probe.wide");
   });
 
   // Ends every session on the stack, so it runs last; the stack's other suites sign in afresh.

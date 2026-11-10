@@ -19,7 +19,7 @@ import type { FormEvent } from "react";
 
 import { useAction } from "@/components/admin/action";
 import { formatCount } from "@/components/admin/format";
-import { useMediaServer } from "@/components/admin/media-server";
+import { useMediaServer } from "@/session/error-reporting";
 
 import { usePreview } from "./connect";
 import type { Preview } from "./connect";

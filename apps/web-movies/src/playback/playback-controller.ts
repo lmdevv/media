@@ -651,12 +651,14 @@ export class PlaybackController {
   async #restart(positionMs: number, play = true): Promise<void> {
     const ticket = ++this.#negotiation;
     const previous = this.#playback;
+    // The last report reads the element's position, which detaching resets to 0.
+    const reported = this.#closeReporting();
 
     this.#detach();
     this.#playback = null;
 
     if (previous !== null) void runSdk(Playback.stop(previous));
-    await this.#closeReporting();
+    await reported;
 
     const created = this.#disposed ? null : await this.#createPlay();
 

@@ -109,11 +109,13 @@ old movies adapters in `apps/media/src/convex/`. The server reads one Convex URL
   until `p4-movies-cli`.
 - **A restore on the core** runs these steps with the core's admin key, from `CONVEX_BACKEND_DIR`:
   1. `convex import --replace-all` with the archive.
-  2. `core/maintenance:settleRestoredJobs`. It settles the running jobs in the snapshot that were
-     claimed before the call. A `server.backup` job succeeds with "Restored from this backup",
+  2. `core/maintenance:settleRestoredJobs` with `before`, the server's clock when the import
+     started. It settles the running jobs claimed before then, so a job the live worker claimed
+     from the restored queue after the import keeps running. A `server.backup` job succeeds with "Restored from this backup",
      since the archive is its result. Every other job goes back to the queue with no strike, or
      ends canceled if a cancel was pending. One call settles 4 jobs and schedules the next.
-  3. `core/maintenance:endAllSessions`. It ends every session opened before the call, 100 per
+  3. `core/maintenance:endAllSessions` with the same `before`. It ends every session opened before
+     the import, 100 per
      call, and later calls delete their refresh tokens. API keys and device grants stay, so the
      server signs in again with its key, and an iOS app exchanges its device's grant again.
   4. The server lists the archives on disk again, since the snapshot's backup list is older.

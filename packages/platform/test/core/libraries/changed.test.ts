@@ -12,6 +12,7 @@ import { refusal, unique } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
 import { eventually, inSequence } from "../jobs/driver";
+import { scanCalls } from "./scanner";
 
 const stack = coreStackFromEnvFile();
 
@@ -73,6 +74,41 @@ describe.skipIf(stack === undefined)("rescans after a change", { timeout: 180_00
     expect(await changed(stack, folder)).toEqual({ queued: 1 });
     expect(await changed(stack, `${folder}/./`)).toEqual({ queued: 1 });
     expect(await scanOf(manager, libraryId)).toEqual(first);
+  });
+
+  it("queue one more scan once a running scan a change joined stops", async () => {
+    if (stack === undefined) return;
+    await cancelQueuedScans(stack);
+    const manager = await member(stack, "changed-running", "admin");
+    const { libraryId } = await seedLibrary(stack, manager, movies("Running"));
+    const folder = `/changed-${unique()}/running`;
+
+    await moveTo(stack, libraryId, folder);
+    expect(await changed(stack, `${folder}/Heat.mkv`)).toEqual({ queued: 1 });
+
+    const first = await scanOf(manager, libraryId);
+    const claimed = await scanCalls(stack, `changed-${unique()}`).claim("movies");
+
+    if (first === null || claimed.outcome !== "claimed") throw new Error("No scan to claim");
+    expect(claimed.lease.jobId).toBe(first.jobId);
+
+    expect(await changed(stack, `${folder}/Ronin.mkv`)).toEqual({ queued: 1 });
+    expect(await scanOf(manager, libraryId)).toEqual({ jobId: first.jobId, status: "running" });
+
+    await runServer(
+      stack,
+      api.core.jobs.worker.finish,
+      { lease: claimed.lease, end: { outcome: "succeeded" } },
+      Schema.Unknown,
+    );
+
+    const next = await scanOf(manager, libraryId);
+
+    expect(next?.status).toBe("queued");
+    expect(next?.jobId).not.toBe(first.jobId);
+
+    expect(await changed(stack, `${folder}/Thief.mkv`)).toEqual({ queued: 1 });
+    expect(await scanOf(manager, libraryId)).toEqual(next);
   });
 
   it("queue every movies library inside a root, and no music library", async () => {

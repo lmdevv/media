@@ -19,7 +19,7 @@ import { RotateCwIcon, SearchIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
 
 import { artworkUrl } from "@/lib/artwork";
-import { useNow } from "@/lib/use-now";
+import { useNow } from "@media/ui/lib/use-now";
 import { useMe } from "@/session/session";
 
 import { useAction } from "./action";

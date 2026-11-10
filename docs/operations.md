@@ -133,9 +133,10 @@ docker compose exec media sh -c '
   export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210
   export CONVEX_SELF_HOSTED_ADMIN_KEY="$(sed -n "s/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p" /run/movies/media.env)"
   cd /app/platform
+  before="$(($(date +%s) * 1000))"
   node node_modules/convex/bin/main.js import --replace-all --yes /data/core/backups/<archive>.zip
-  node node_modules/convex/bin/main.js run core/maintenance:settleRestoredJobs
-  node node_modules/convex/bin/main.js run core/maintenance:endAllSessions'
+  node node_modules/convex/bin/main.js run core/maintenance:settleRestoredJobs "{\"before\": $before}"
+  node node_modules/convex/bin/main.js run core/maintenance:endAllSessions "{\"before\": $before}"'
 docker compose restart media
 ```
 

@@ -16,7 +16,7 @@ import { useCallback } from "react";
 import type { FormEvent } from "react";
 
 import { useAction } from "@/components/admin/action";
-import { useMediaServer } from "@/components/admin/media-server";
+import { useMediaServer } from "@/session/error-reporting";
 
 import type { SourceForm } from "./migration-model";
 

@@ -245,13 +245,19 @@ const make = Effect.gen(function* () {
 
         yield* Effect.logWarning("Backups.restore_started").pipe(Effect.annotateLogs({ fileName }));
 
+        const importedFrom = yield* Clock.currentTimeMillis;
+
         yield* cli.importSnapshot(archive);
 
         // The snapshot caught its own backup job, and maybe others, mid-run, and carries the
-        // sessions it was taken with. Every session ends, the server's own included; its key is in
-        // the snapshot, so `CoreSession` signs in again on its next call.
-        const settled = yield* cli.run("core/maintenance:settleRestoredJobs", {});
-        const ended = yield* cli.run("core/maintenance:endAllSessions", {});
+        // sessions it was taken with. Every session from before the import ends, the server's own
+        // included; `CoreSession` signs in again with its key, which works only if the snapshot
+        // holds it (ADR 0010).
+        const settled = yield* cli.run("core/maintenance:settleRestoredJobs", {
+          before: importedFrom,
+        });
+
+        const ended = yield* cli.run("core/maintenance:endAllSessions", { before: importedFrom });
 
         yield* Effect.logWarning("Backups.restored").pipe(
           Effect.annotateLogs({ fileName, jobs: compact(settled), sessions: compact(ended) }),

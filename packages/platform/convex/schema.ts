@@ -449,6 +449,11 @@ export default defineSchema({
      * end are the library's scan state.
      */
     lastScan: v.union(v.id("jobs"), v.null()),
+    /**
+     * A file changed while `lastScan` ran, after it may have passed the file's folder: once that
+     * scan stops running, one more scan is queued (ADR 0024).
+     */
+    rescanAfter: v.optional(v.literal(true)),
   }).index("by_kind", ["kind"]),
 
   /**

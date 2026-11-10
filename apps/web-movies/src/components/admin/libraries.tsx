@@ -10,12 +10,14 @@ import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { RotateCwIcon } from "lucide-react";
 
-import { useNow } from "@/lib/use-now";
+import { useNow } from "@media/ui/lib/use-now";
 import { useMe } from "@/session/session";
 
 import { useAction } from "./action";
 import { formatCount, formatPercent, plural } from "./format";
 import { isActive, lastScanLabel, scanFraction } from "./scan";
+import { ACCOUNT_LIBRARIES } from "@/lib/account-links";
+
 import { PagedView, ShowMore } from "./paged-view";
 import { allows } from "./scope-gate";
 import { Cell, Column, StatusDot, Table, TableHead } from "./table";
@@ -23,7 +25,7 @@ import type { Library, LibraryDetail, Scan } from "./types";
 
 /** Where an admin creates, renames, re-folders, and shares libraries: the account client (D57). */
 export const accountLibraryHref = (library?: Library["libraryId"]): string =>
-  library === undefined ? "/admin/libraries" : `/admin/libraries/${library}`;
+  library === undefined ? ACCOUNT_LIBRARIES : `${ACCOUNT_LIBRARIES}/${library}`;
 
 /** Whether the movies admin lists `library`: a movies library the person may scan and fix. */
 const editable = (library: Library): boolean =>

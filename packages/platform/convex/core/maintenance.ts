@@ -91,12 +91,15 @@ const pageArgs = { before: v.number(), cursor: v.string() };
  * succeeds, since the archive being restored is its result; every other running job goes back to
  * the queue at once with no strike, instead of waiting for its lease to lapse, since the worker
  * that held it moved on. Queued jobs stay. Answers how many jobs the first page settled; later
- * pages run as scheduled calls.
+ * pages run as scheduled calls. `before`, when the import started, leaves alone a job a live worker
+ * claimed from the restored queue after it.
  */
 export const settleRestoredJobs = internalMutation({
-  args: {},
+  args: { before: v.optional(v.number()) },
   returns: v.object({ settled: v.number() }),
-  handler: async (ctx) => ({ settled: await settlePage(ctx, Date.now(), null) }),
+  handler: async (ctx, { before }) => ({
+    settled: await settlePage(ctx, before ?? Date.now(), null),
+  }),
 });
 
 /** A later page of `settleRestoredJobs`. */
@@ -116,12 +119,13 @@ export const settleRestoredJobsFrom = internalMutation({
  * sessions and refresh tokens it was taken with, ones signed out since included, and they keep
  * working until ended, so everyone signs in again. API keys and device grants stay: the media
  * server signs in again with its key, and an app exchanges its device's grant again. Answers how
- * many sessions the first page ended; later pages run as scheduled calls.
+ * many sessions the first page ended; later pages run as scheduled calls. `before`, when the import
+ * started, leaves alone a session opened after it.
  */
 export const endAllSessions = internalMutation({
-  args: {},
+  args: { before: v.optional(v.number()) },
   returns: v.object({ ended: v.number() }),
-  handler: async (ctx) => ({ ended: await endPage(ctx, Date.now(), null) }),
+  handler: async (ctx, { before }) => ({ ended: await endPage(ctx, before ?? Date.now(), null) }),
 });
 
 /** A later page of `endAllSessions`. */

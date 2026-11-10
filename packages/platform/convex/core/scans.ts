@@ -429,7 +429,11 @@ const rescan = async (
 
     if (library === null || !RESCANNED_KINDS.has(library.kind)) return false;
 
-    await queueScan(ctx, library);
+    const scan = await queueScan(ctx, library);
+
+    if (!scan.created && (await ctx.db.get(scan.jobId))?.status === "running") {
+      await ctx.db.patch(library._id, { rescanAfter: true });
+    }
 
     return true;
   });

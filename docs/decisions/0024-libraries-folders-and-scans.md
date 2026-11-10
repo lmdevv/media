@@ -417,8 +417,12 @@ a file changes. It asks the core to queue a scan. Until now "Left for later unit
   `.` parts are dropped, as a folder is written down. A `..` part ends them, and nothing lies
   inside such a path.
 - Each scan is queued through `queueScan`, with its scan kind's dedupe, so a change joins a scan
-  already queued or running. A change during a running scan joins that scan. If the scan already
-  passed the changed folder, the next reconcile catches it.
+  already queued or running. A change that joins a running scan, which may already have passed the
+  changed folder, marks the library `rescanAfter`. When that scan stops running, one more scan is
+  queued (`followUpScan` in `core/jobs/store.ts`, on every way a job leaves `running`); a scan that
+  goes back to the queue starts over, so it only clears the mark. A stream of changes during a long
+  scan therefore queues one scan after it, as old movies' monitor rescanned after its running scan,
+  and never restarts the running one.
 - Music libraries are skipped, since music has no scanner on the server yet.
 - The server's library monitor, `apps/media/src/core/core-rescans.ts`, watches each approved root
   and sends the paths a burst of changes named. A path inside another sent path is left out. A

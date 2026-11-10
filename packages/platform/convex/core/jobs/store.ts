@@ -169,7 +169,34 @@ export const applyEvent = async (ctx: JobCtx, job: Doc<"jobs">, event: JobEvent)
 
   await inOrder(result.writes, (write) => applyWrite(ctx, job._id, write));
 
+  if (wasRunning === 1 && isRunning === 0) await followUpScan(ctx, job.payload, status);
+
   return result;
+};
+
+/**
+ * Queues one more scan of a library whose files changed while its scan ran, once that scan stops
+ * running (`rescanAfter`, ADR 0024). A scan that goes back to the queue starts over, so it only
+ * clears the mark. The enqueue's dedupe joins a scan someone else queued meanwhile.
+ */
+const followUpScan = async (
+  ctx: JobCtx,
+  payload: JobPayload,
+  status: Doc<"jobs">["status"],
+): Promise<void> => {
+  if (payload.kind !== "movies.scan" && payload.kind !== "music.scan") return;
+
+  const library = await ctx.db.get("libraries", payload.libraryId);
+
+  if (library?.rescanAfter !== true) return;
+
+  await ctx.db.patch(library._id, { rescanAfter: undefined });
+
+  if (status === "queued") return;
+
+  const scan = await insertJob(ctx, payload);
+
+  if (scan.created) await ctx.db.patch(library._id, { lastScan: scan.jobId });
 };
 
 /**

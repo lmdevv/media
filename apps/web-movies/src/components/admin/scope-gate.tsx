@@ -9,14 +9,16 @@ import type { Me } from "@/session/session";
 
 /**
  * Who may open an admin screen: `edit` needs the session's `movies:edit` scope, as fixing a match
- * or scanning does; `admin` also needs an owner or admin, as the importer does.
+ * or scanning does; `admin` needs an owner or admin holding the `admin` scope, as the server's
+ * importer routes do.
  */
 export type Access = "edit" | "admin";
 
 /** Whether `me` may open a screen that needs `access`. */
 export const allows = (me: Me, access: Access): boolean =>
-  me.scopes.includes("movies:edit") &&
-  (access === "edit" || me.role === "owner" || me.role === "admin");
+  access === "edit"
+    ? me.scopes.includes("movies:edit")
+    : (me.role === "owner" || me.role === "admin") && me.scopes.includes("admin");
 
 /**
  * Renders `children` only for sessions that {@link allows} `access`. Others see a calm “not for
