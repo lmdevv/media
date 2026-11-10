@@ -24,7 +24,6 @@ const CURRENT = "core/auth/sessions:current";
 
 /** A signed-in person calling one of the server's routes. */
 export interface Caller {
-  /** The core user. */
   readonly userId: UserId;
   readonly role: typeof CurrentSession.Type.role;
   /** What the session may do, as the core cuts it to the role on each call. */
@@ -79,7 +78,6 @@ export interface Interface {
   ) => Effect.Effect<Caller, CallError>;
 }
 
-/** The caller check. */
 export class Service extends Context.Service<Service, Interface>()("@media/server/CoreCallers") {}
 
 /** Checks callers against the core at `coreUrl`, over a connection per call that carries their token. */

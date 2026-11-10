@@ -87,8 +87,6 @@ const systemHandlers = HttpApiBuilder.group(
           backend: yield* backend.status,
         };
       }),
-      // Behind the image's proxy, the movies client this server serves (`WEB_DIST_DIR`) answers
-      // at `/movies` on this address, so links an app builds open it there.
       clientConfig: () =>
         Effect.succeed({
           ...Option.match(config.convexPublicUrl, {

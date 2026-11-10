@@ -15,7 +15,6 @@ import { runCommand, waitForBody } from "../testing/stack-processes.ts";
 
 const enabled = process.env["MEDIA_PACKAGED_STACK"] === "1";
 
-/** The core's public Convex URL, `MEDIA_BASE_URL/convex`. */
 const convexUrl = process.env["MEDIA_PACKAGED_CONVEX_URL"] ?? "";
 
 const mediaUrl = process.env["MEDIA_PACKAGED_SERVER_URL"] ?? "";
@@ -27,7 +26,6 @@ const restartCommand = (process.env["MEDIA_PACKAGED_RESTART"] ?? "").split(" ").
 /** The owner the install is set up with; scripts/stack-e2e.sh signs its CLI in as them. */
 const OWNER = process.env["MEDIA_PACKAGED_OWNER"] ?? "owner";
 
-/** A test value only. */
 const PASSWORD = process.env["MEDIA_PACKAGED_PASSWORD"] ?? "stack-test-password";
 
 const browser: ClientCapabilities = {
@@ -76,7 +74,6 @@ const decodeStreamNotFound = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.TaggedStruct("StreamNotFound", {})),
 );
 
-/** Waits until the media server reports the core connected. */
 const connected = () =>
   waitForBody(
     `${mediaUrl}${MEDIA_ROUTES.health}`,
@@ -117,7 +114,6 @@ const moviesScripts = async (entry: string): Promise<string> => {
   return visit(entry);
 };
 
-/** Waits until `check` answers some value, trying every half second for up to `timeoutMs`. */
 const eventually = <A>(
   what: string,
   check: () => Promise<Option.Option<A>>,
@@ -140,7 +136,6 @@ const eventually = <A>(
   return attempt();
 };
 
-/** A new client of the core, closed with `scope`, signed in with `credentials`. */
 const signIn = (credentials: Platform.Credentials): Promise<Platform.Interface> =>
   run(
     Effect.gen(function* () {
@@ -160,7 +155,6 @@ const signIn = (credentials: Platform.Credentials): Promise<Platform.Interface> 
 const password = () =>
   Platform.Credentials.Password({ username: OWNER, password: Redacted.make(PASSWORD) });
 
-/** The owner's media server routes, called with their session's token (ADR 0010). */
 const mediaServer = (platform: Platform.Interface) =>
   createMediaServer({
     url: mediaUrl,

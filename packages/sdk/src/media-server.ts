@@ -55,7 +55,6 @@ const bearerOf = (options: MediaServerOptions) =>
     Effect.map((token) => Option.map(Option.fromNullishOr(token), Redacted.make)),
   );
 
-/** The media server's routes at `options.url`, as the session `options.accessToken` reads. */
 const callMedia = <Command extends MediaCommand<ArgsSchema, WireSchema>>(
   options: MediaServerOptions,
   name: string,
@@ -79,7 +78,6 @@ const callMedia = <Command extends MediaCommand<ArgsSchema, WireSchema>>(
     }),
   );
 
-/** Posts `body` to the media server's `path` as the signed-in person; nothing while signed out. */
 const postSignedIn = (
   options: MediaServerOptions,
   operation: string,

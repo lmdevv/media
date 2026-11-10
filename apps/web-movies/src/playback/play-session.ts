@@ -33,8 +33,8 @@ export type CoreStart = Awaited<ReturnType<PlayCommands["start"]>>;
 /**
  * One start of a playback. `start` is the core's answer, whose ids name things to the platform and
  * whose `playbackId` and `startedAt` every report carries. `started` is the same start as the
- * media server's playback API and the player diagnostics read it: the ticket stands where the old
- * playback token stood, its expiry as the token's, and `playbackId` as the session.
+ * media server's playback API and the player diagnostics read it: its `token` is the ticket, its
+ * `tokenExpiresAt` the ticket's expiry, and its `sessionId` the `playbackId`.
  */
 export interface StartedPlay {
   readonly start: CoreStart;

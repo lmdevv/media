@@ -19,7 +19,6 @@ export const parseTitleId = Schema.decodeUnknownSync(TitleId);
 /** An import's ID on the core, as `movies.imports.get` takes it. */
 export const ImportRunId = Schema.NonEmptyString.pipe(Schema.brand("Id<imports>"));
 
-/** An import's ID on the core. */
 export type ImportRunId = typeof ImportRunId.Type;
 
 /** Parses an import's ID, such as the one `imports.start` answers with. */

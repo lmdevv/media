@@ -525,7 +525,6 @@ describe("a side's layout", () => {
     writeFileSync(file, `name: media\nservices:\n${services.map((service) => `  ${service}:\n    image: x\n`).join("")}`);
     return file;
   };
-  // Runs `body` with the script's functions, on an after side whose state says `layout`.
   const withLayout = (layout, body) =>
     spawnSync(
       "bash",
@@ -615,7 +614,6 @@ describe("the core seed", () => {
     });
     assert.throws(() => grantArgs({ library: "Music", principal: "aiko", level: "view" }, libraries, users), /no library named Music/);
     assert.throws(() => grantArgs({ library: "Movies", principal: "sam", level: "view" }, libraries, users), /no user sam/);
-    // Every seeded grant names a library and a person the seed makes.
     for (const grant of GRANTS) assert.ok(grantArgs(grant, libraries, users));
   });
 

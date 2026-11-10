@@ -1,11 +1,4 @@
 #!/usr/bin/env node
-// The one-backend layout's half of first-run setup and the seed: one Convex backend, the core's,
-// with each person their own core user and no profiles. verify-media.sh runs it through the paths
-// a person uses: the owner invites three people from the account client, each joins from their
-// invite link in a browser of their own, the owner makes the kid's account there too, and then
-// everyone uses their own CLI, signed in with `media auth login`. It fails when anyone sees more
-// or less than the demo data says.
-//
 //   core-seed.mjs wait --state <dir> --cli <media.js> --container <name> --want <libraries>
 //   core-seed.mjs seed --state <dir> --server <core convex url> --cli <media.js> --browser <browser.mjs>
 import { execFileSync, spawnSync } from "node:child_process";
@@ -18,7 +11,7 @@ import { parseArgs } from "node:util";
 export const PASSWORD = "password123";
 
 // Lucía is the owner that setup created, and her CLI signed in during `up`. The kid is a member
-// the owner limits to PG, in place of old movies' Kids profile.
+// the owner limits to PG.
 export const PEOPLE = [
   { handle: "mateo", role: "admin", joins: "invite" },
   { handle: "aiko", role: "member", joins: "invite" },
@@ -53,8 +46,8 @@ export const SHOWS = ["Caminandes", "Pioneer One"];
 export const KID_SEES = ["Big Buck Bunny", "Caminandes", "Cosmos Laundromat: First Cycle"];
 
 // Who each library is shared with, past Lucía, who made both and manages them. On the core a
-// library is private until shared, admins included, so Mateo manages both, as an admin saw every
-// library before; Movies is for Aiko and the kid; Shows is for everyone on the server.
+// library is private until shared, admins included, so Mateo manages both; Movies is for Aiko and
+// the kid; Shows is for everyone on the server.
 export const GRANTS = [
   { library: "Movies", principal: "mateo", level: "manage" },
   { library: "Movies", principal: "aiko", level: "view" },
@@ -216,8 +209,6 @@ function main() {
       json("lucia", ["movies", "metadata", "edit"], { titleId: id(name), set: { certification, ageRating } });
     }
 
-    // Mateo, Aiko, and Sam: an invite link each from Admin, Users, accepted in their own browser.
-    // The kid: an account Lucía makes there with a password.
     for (const person of PEOPLE) {
       if (person.joins === "invite") {
         const code = browser("invite", "--invite-role", person.role);
@@ -241,7 +232,6 @@ function main() {
     json("lucia", ["admin", "restrictions", "set"], { userId: kid, restrictions: KID_LIMITS });
     json("lucia", ["auth", "tiles", "set-listed"], { userId: kid, listed: true });
 
-    // Aiko: My List, Elephants Dream stopped halfway, and the first two episodes of Pioneer One.
     for (const name of ["Sintel", "Tears of Steel", "Caminandes"]) {
       media("aiko", "movies", "my-list", "add", "--title-id", id(name));
     }
@@ -262,7 +252,6 @@ function main() {
     }
     media("mateo", "movies", "my-list", "add", "--title-id", id("Cosmos Laundromat: First Cycle"));
 
-    // Check that everyone sees what the demo data says, through their own CLI.
     const seen = (handle) => titlesFor(handle).map((title) => title.name);
     for (const handle of ["lucia", "mateo", "aiko"]) {
       if (!same(seen(handle), [...ALL_MOVIES, ...SHOWS])) fail(`${handle} sees ${seen(handle).join(", ")}`);

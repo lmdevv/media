@@ -44,7 +44,6 @@ export type StartChoice = Data.TaggedEnum<{
 /** Constructors and matchers for `StartChoice`. */
 export const StartChoice = Data.taggedEnum<StartChoice>();
 
-/** What to play. */
 export interface PlaybackRequest {
   readonly titleId: TitleId;
   readonly episodeId: EpisodeId | null;
@@ -55,7 +54,6 @@ export interface PlaybackRequest {
   readonly quality: QualityChoice;
 }
 
-/** What a controller plays through. */
 export interface PlaybackServices {
   /** `movies.play.start` and `movies.play.report` of the signed-in person. */
   readonly play: PlayCommands;

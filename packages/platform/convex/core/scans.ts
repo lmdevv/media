@@ -389,7 +389,6 @@ const CHANGED_PATH_CHARS_MAX = 4096;
 /** Folders inside a changed path that one call reads; a scheduled call reads each next page. */
 const INSIDE_PER_CALL = 64;
 
-/** Where a changed path can meet a library's folders. */
 interface ChangedReach {
   /** The folders that could hold the path or be it, shallowest first. */
   readonly holders: ReadonlyArray<string>;
@@ -438,10 +437,6 @@ const rescan = async (
   return queued.filter(Boolean).length;
 };
 
-/**
- * Rescans the libraries of one page of folders inside `inside` (`""` for `/`), one range of
- * `by_path`, and schedules the next page.
- */
 const rescanInside = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   inside: string,

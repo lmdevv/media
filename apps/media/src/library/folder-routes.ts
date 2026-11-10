@@ -23,8 +23,6 @@ export const layer: Layer.Layer<
       MediaConfig.Service | FileSystem.FileSystem | Path.Path
     >();
 
-    // Only who may point a library at folders (`manageFolders` on the core: owners and admins)
-    // browses the server's folders, as only admins could on old movies.
     yield* commandRoute("libraries.folders", ({ path }, caller) =>
       CoreCallers.isAdmin(caller)
         ? ServerFolders.list(path).pipe(Effect.provideContext(context))

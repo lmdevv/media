@@ -21,7 +21,6 @@ export interface Interface {
   readonly follow: SessionReports.Interface["follow"];
 }
 
-/** The scripted sessions. */
 export class Service extends Context.Service<Service, Interface>()(
   "@media/server/test/TestSessions",
 ) {}

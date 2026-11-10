@@ -29,11 +29,6 @@ const restoredEnd = (job: Doc<"jobs">) =>
     ? ({ outcome: "succeed", message: RESTORED_BACKUP } as const)
     : ({ outcome: "requeue" } as const);
 
-/**
- * Settles one page of running jobs from `cursor` that were claimed before `before`, the moment
- * the restore began, and schedules the next page. A job a worker claimed after that is its own and
- * stays running.
- */
 const settlePage = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   before: number,
@@ -59,11 +54,6 @@ const settlePage = async (
   return caught.length;
 };
 
-/**
- * Ends one page of the sessions opened before `before`, the moment the restore began, from
- * `cursor`, and schedules the next page. A session opened after that, such as the media server's
- * own once it signs in again, stays.
- */
 const endPage = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   before: number,

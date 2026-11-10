@@ -66,7 +66,6 @@ export function ServerScreen({
   mediaUrl,
   databaseUrl,
 }: {
-  /** The media server's address. */
   readonly mediaUrl: string;
   /** The core's Convex address. */
   readonly databaseUrl: string;

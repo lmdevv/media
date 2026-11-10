@@ -64,6 +64,7 @@ const FLAGS = {
   music: { type: "string" },
   app: { type: "string" },
   page: { type: "string" },
+  "tab-of": { type: "string" },
   device: { type: "string" },
   width: { type: "string" },
   height: { type: "string" },
@@ -324,20 +325,29 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     const existing = pages.get(options.page);
     if (existing) return existing;
     if (!bases[app]) throw new Error(`this side has no ${app} app`);
-    const device = options.device ? devices[options.device] : undefined;
-    if (options.device && !device) throw new Error(`unknown Playwright device "${options.device}"`);
-    const viewport =
-      options.width && options.height
+    // `--tab-of P` opens another tab in page P's context: the same browser, cookies, storage, and
+    // sign-in, at P's size, as a person opening a second tab does.
+    const tabOf = options["tab-of"] ? pages.get(options["tab-of"]) : undefined;
+    if (options["tab-of"] && !tabOf) throw new Error(`no page named ${options["tab-of"]} to open a tab of`);
+    if (tabOf && tabOf.app !== app) throw new Error(`page ${options["tab-of"]} is a ${tabOf.app} page, not ${app}`);
+    const device = tabOf ? tabOf.device : options.device ? devices[options.device] : undefined;
+    if (!tabOf && options.device && !device) throw new Error(`unknown Playwright device "${options.device}"`);
+    const viewport = tabOf
+      ? tabOf.size
+      : options.width && options.height
         ? { width: Number(options.width), height: Number(options.height) }
         : (device?.viewport ?? { width: 1440, height: 900 });
     const dark = app === "music" ? options.dark : !options.light;
-    const context = await browser.newContext({
-      ...device,
-      viewport,
-      baseURL: bases[app],
-      colorScheme: dark ? "dark" : "light",
-    });
-    await context.addInitScript({ content: TRACK_MEDIA });
+    let context = tabOf?.context;
+    if (!context) {
+      context = await browser.newContext({
+        ...device,
+        viewport,
+        baseURL: bases[app],
+        colorScheme: dark ? "dark" : "light",
+      });
+      await context.addInitScript({ content: TRACK_MEDIA });
+    }
     const page = await context.newPage();
     prefixes.set(page, new URL(bases[app]).pathname.replace(/\/$/, ""));
     // What the player fetched, so `video` can say whether it played the file or an HLS stream.
@@ -360,7 +370,7 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     // Screencast frames come at this size; the device's pixel ratio, up to 2, keeps text sharp.
     const scale = Math.min(device?.deviceScaleFactor ?? 1, 2);
     const frame = { width: viewport.width * scale, height: viewport.height * scale };
-    const entry = { app, context, page, viewport: frame, recording: null, streams, networkChanged };
+    const entry = { app, context, page, device, size: viewport, viewport: frame, recording: null, streams, networkChanged };
     pages.set(options.page, entry);
     return entry;
   };
@@ -597,9 +607,6 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     }
   };
 
-  // The account client at `account`, where every person signs in once for every app on the
-  // one-backend layout. A movies page reaches it in its own context, so the session it keeps there
-  // is the one the movies client reads.
   const openAccount = (page, path) => {
     if (!account) throw new Error("this side has no account client");
     return page.goto(new URL(path, account).href);
@@ -608,7 +615,6 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     page.waitForURL((url) => url.pathname === "/home", { timeout: timeout(options) });
 
   const accountFlows = {
-    // Signs the page in at /, as Lucía by default, and waits for the person's home.
     async signIn(page, options) {
       await openAccount(page, "/");
       await page.getByLabel("Username").fill(options.username ?? OWNER.username);
@@ -617,8 +623,6 @@ async function drive({ base, account, core, music }, network, launchArgs) {
       await accountHome(page, options);
       return `signed in as ${options.username ?? OWNER.username}`;
     },
-    // First-run setup, as an owner does it on a fresh server: the owner account at /, then the
-    // Movies library and the Shows library from Admin, Libraries. Each queues its first scan.
     async setup(page, options) {
       await openAccount(page, "/");
       await page.getByRole("heading", { name: "Set up your server." }).waitFor({ timeout: timeout(options) });
@@ -642,7 +646,6 @@ async function drive({ base, account, core, music }, network, launchArgs) {
       }
       return `set up as ${OWNER.username}`;
     },
-    // Makes an invite link in Admin, Users and prints its code, the link's secret after `#`.
     async invite(page, options) {
       await openAccount(page, "/admin");
       const section = page.getByRole("region", { name: "Invite someone" });
@@ -655,7 +658,6 @@ async function drive({ base, account, core, music }, network, launchArgs) {
       if (!code) throw new Error(`the invite link looks wrong: "${link}"`);
       return code;
     },
-    // Accepts an invite at /invite#<code> and makes the account, as the invited person does.
     async join(page, options) {
       if (!options.code || !options.username) throw new Error("join needs --code and --username on this side");
       await openAccount(page, `/invite#${options.code}`);
@@ -666,7 +668,6 @@ async function drive({ base, account, core, music }, network, launchArgs) {
       await accountHome(page, options);
       return `joined as ${options.username}`;
     },
-    // Makes an account with a password from Admin, Users, as an admin does for a kid.
     async createAccount(page, options) {
       if (!options.username) throw new Error("create-account needs --username");
       await openAccount(page, "/admin");
@@ -695,8 +696,6 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     throw new Error("this side has no profiles: each person, a kid too, is their own user; sign in as them");
   };
 
-  // Movies pages on the one-backend layout: every sign-in goes through the account client, and the
-  // page then opens the movies client, which reads that session.
   const coreMoviesCommands = {
     ...accountCommands,
     async "sign-in"(entry, options) {
@@ -730,6 +729,10 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     },
     async fill({ page }, options) {
       await locate(page, options).fill(options.value ?? "", { timeout: timeout(options) });
+    },
+    async select({ page }, options) {
+      if (options.value === undefined) throw new Error("select needs --value, the option's label");
+      return (await locate(page, options).selectOption({ label: options.value }, { timeout: timeout(options) })).join(",");
     },
     async type({ page }, options) {
       await page.keyboard.type(options.value ?? "");
@@ -965,7 +968,9 @@ async function drive({ base, account, core, music }, network, launchArgs) {
       if (!entry) throw new Error(`no page named ${options.page}`);
       pages.delete(options.page);
       const saved = entry.recording ? await stopRecording(entry) : null;
-      await entry.context.close();
+      // A tab closes alone while another page still uses its context.
+      const shared = [...pages.values()].some((other) => other.context === entry.context);
+      await (shared ? entry.page.close() : entry.context.close());
       return saved ? `closed ${options.page}; saved ${saved}` : `closed ${options.page}`;
     }
     const existing = pages.get(options.page);

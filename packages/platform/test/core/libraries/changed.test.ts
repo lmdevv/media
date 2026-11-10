@@ -69,7 +69,6 @@ describe.skipIf(stack === undefined)("rescans after a change", { timeout: 180_00
 
     expect(first).toMatchObject({ status: "queued" });
 
-    // An odd file name, a folder's own path, and repeated slashes reach the same library.
     expect(await changed(stack, `${folder}//New\u0001name.mkv`)).toEqual({ queued: 1 });
     expect(await changed(stack, folder)).toEqual({ queued: 1 });
     expect(await changed(stack, `${folder}/./`)).toEqual({ queued: 1 });

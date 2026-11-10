@@ -422,7 +422,6 @@ export const ImportStarted = Schema.Struct({
   created: Schema.Boolean,
 });
 
-/** A started import into the core. */
 export interface ImportStarted extends Schema.Schema.Type<typeof ImportStarted> {}
 
 /** The result of starting an import into the core: its run, or why the source could not be read. */

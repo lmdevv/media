@@ -16,10 +16,6 @@ interface Thumbnails {
   readonly sheets: ReadonlyArray<string>;
 }
 
-/**
- * `url` carrying `ticket` in the parameter the media server reads tickets from, in place of the
- * old playback token's parameter the trickplay helpers write.
- */
 const withTicket = (url: string, ticket: string): string => {
   const parsed = new URL(url);
 

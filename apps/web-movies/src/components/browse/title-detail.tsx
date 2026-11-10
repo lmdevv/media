@@ -162,7 +162,6 @@ interface DetailParts {
   readonly links: ReturnType<typeof titleLinks>;
 }
 
-/** The page for `title`. */
 export function TitleDetailView({
   title,
   canManage,

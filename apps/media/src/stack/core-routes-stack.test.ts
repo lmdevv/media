@@ -25,14 +25,12 @@ const Failure = Schema.Struct({ code: Schema.String, message: Schema.String });
 
 const decodeFailure = Schema.decodeUnknownSync(Failure);
 
-/** The bearer `person`'s core session hands the server's own routes. */
 const bearerOf = async (person: Person): Promise<string> =>
   Option.match(await run(person.platform.session.accessToken), {
     onNone: () => expect.unreachable("a signed-in person has a token"),
     onSome: Redacted.value,
   });
 
-/** Posts `body` to one of the server's own routes, as `bearer` when given. */
 const post = (path: string, body: Schema.Json, bearer?: string) => {
   const headers = new Headers({ "content-type": "application/json" });
 

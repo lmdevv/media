@@ -157,8 +157,6 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
   const versions = versionList.status === "success" ? versionList.data : NO_VERSIONS;
   const versionFacts = useMemo(() => withFacts(versions), [versions]);
 
-  // The quality this browser plays at: the device's `streamQuality` setting when the session is on
-  // a device, else (or until the settings load) the choice this browser last kept.
   const settings = usePlatformQuery(platform.core.settings.get);
 
   const deviceQuality =
@@ -434,8 +432,6 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const keptQuality = useRef<QualityChoice | null>(null);
 
-  // Keeps a quality once a stream plays at it: on this browser, and in the device's setting when
-  // the session is on a device. A setting that loads later is not overwritten by what played.
   useEffect(() => {
     if (loadedQuality === null || loadedQuality === keptQuality.current) return;
     keptQuality.current = loadedQuality;
@@ -473,8 +469,6 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     setLeaving({ resume: pause });
   }, [player]);
 
-  // Plays again from what asking paused. Stay is a user gesture, so a stream that now needs one
-  // resumes too.
   const stay = useCallback(() => {
     if (leaving?.resume === true) play();
     setLeaving(null);

@@ -23,9 +23,8 @@ const themeChoice = (theme: string | undefined): ThemeChoice =>
   THEMES.find((choice) => choice.value === theme)?.value ?? "system";
 
 /**
- * This browser's preferences: the theme, kept in this browser as before. Subtitles, audio
- * language, autoplay, and the rest of the core's settings follow the person to every device and
- * are set in the account client's settings.
+ * This browser's preferences: the theme. Subtitles, audio language, autoplay, and the rest of the
+ * core's settings follow the person to every device and are set in the account client's settings.
  */
 function PreferencesPage() {
   const { theme, setTheme } = useTheme();

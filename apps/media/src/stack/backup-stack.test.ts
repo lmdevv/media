@@ -68,7 +68,6 @@ const backUp = async (person: Person): Promise<Listed> => {
   );
 };
 
-/** Asks the server to restore `backupId`, with `person`'s core session token as the bearer. */
 const restore = async (person: Person, backupId: string) => {
   const token = await run(person.platform.session.accessToken);
 

@@ -20,7 +20,6 @@ import * as PlaybackToken from "./playback/playback-token.ts";
 import * as SessionReports from "./playback/session-reports.ts";
 import * as StreamOwners from "./playback/stream-owners.ts";
 
-/** A setting the server needs on the core is missing. */
 class CoreSettingMissing extends Schema.TaggedError<CoreSettingMissing>()("CoreSettingMissing", {
   setting: Schema.Literals(["MEDIA_SERVICE_API_KEY", "MEDIA_TICKET_KEYS"]),
 }) {
@@ -31,10 +30,6 @@ class CoreSettingMissing extends Schema.TaggedError<CoreSettingMissing>()("CoreS
   }
 }
 
-/**
- * The server with no core: it scans the approved roots into memory and reports its health, and
- * its byte routes refuse every request, since nothing issues tickets.
- */
 const standaloneMode = (roots: ReadonlyArray<string>) =>
   Layer.mergeAll(
     HttpServer.layer(Layer.empty),

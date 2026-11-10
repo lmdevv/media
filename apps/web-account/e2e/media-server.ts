@@ -33,7 +33,6 @@ export const mediaEnv = (): Readonly<Record<string, string>> | null => {
     : env;
 };
 
-/** A running media server. */
 export interface MediaServer {
   readonly url: string;
   /** Stops the server and resolves once it exited. */

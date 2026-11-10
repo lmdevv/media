@@ -3,7 +3,6 @@ import type { Value } from "convex/values";
 
 import { issueShareableTicket } from "../core/tickets";
 
-/** The fields of a movies command's result that hold artwork. */
 const ARTWORK_FIELDS: ReadonlySet<string> = new Set([
   "poster",
   "backdrop",

@@ -4,7 +4,6 @@ import { Schema } from "effect";
 import { PlayerScreen } from "@/components/player/player-screen";
 import { asTitleId } from "@/lib/catalog";
 
-// IDs from the URL, branded as the platform brands its tables' IDs; the core checks each one.
 const EpisodeId = Schema.NonEmptyString.pipe(Schema.brand("Id<episodes>"));
 
 const MediaFileId = Schema.NonEmptyString.pipe(Schema.brand("Id<mediaFiles>"));

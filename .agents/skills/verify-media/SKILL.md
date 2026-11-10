@@ -330,6 +330,7 @@ matches `Play from start`.
 | `open [path]`                                    | Full page load. Prints the URL                               |
 | `click`, `hover`                                 | Acts on the element                                          |
 | `fill --value V`                                 | Replaces a field's value                                     |
+| `select --value V`                               | Picks the option labelled V in a select                      |
 | `type --value V`                                 | Types into whatever has focus, such as a PIN or the command menu |
 | `press --key K` (optionally with a locator)      | Presses a key on the page or on the element                  |
 | `wait <locator> [--hidden]`, `wait --url RE`     | Waits up to 30 s (`--timeout ms`)                            |
@@ -386,7 +387,9 @@ says which way it served the stream: `$S logs | grep Stream.started` shows `"mod
 `--page NAME` (default `main`, or `music` with `--app music`) picks a browser context, which the
 app sees as its own device with its own sign-in. The first command that names a new page creates
 it. On that first command, `--device "iPhone 15"` (any Playwright device name) makes it a phone,
-and `--width W --height H` sets the window. Each app follows the system theme: a movies page is
+and `--width W --height H` sets the window. `--tab-of P` instead makes it another tab of page P:
+the same context, size, and sign-in, as in `$S browser open / --page aiko-2 --tab-of aiko`, to
+check what a second tab sees. `close-page` on a tab closes that tab alone. Each app follows the system theme: a movies page is
 dark unless `--light`, and a music page is light unless `--dark`, as each app defaults. Only
 `main` (Lucía, on her own profile in old movies) and `music` are signed in by `up`, so start a
 new page with `sign-in`, as in `$S browser sign-in --page phone --device "iPhone 15"` on

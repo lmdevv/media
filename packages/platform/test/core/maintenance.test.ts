@@ -114,7 +114,6 @@ const freeSlots = async (core: CoreStack): Promise<ReadonlyArray<number>> => {
   return PROBE_KINDS.map((kind) => states.find((state) => state.kind === kind)?.free ?? -1);
 };
 
-/** A media server's key, issued for a new service principal. */
 const serviceKey = async (core: CoreStack): Promise<string> => {
   const serviceId = await runFunction(
     core,
@@ -191,7 +190,6 @@ describe.skipIf(stack === undefined)("restore maintenance", { timeout: 300_000 }
     });
     expect(await freeSlots(stack)).toEqual(PROBE_KINDS.map((kind) => kindDef(kind).cap));
 
-    // The worker that held a job moved on: its lease is gone, and the next claim is attempt 2.
     const [first] = leases;
 
     if (first === undefined) throw new Error("No probe job was claimed");

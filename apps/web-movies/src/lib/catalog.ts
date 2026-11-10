@@ -14,7 +14,6 @@ export type TitleCard = RowOf<Movies["titles"]["list"]>;
 /** A movie or show with its seasons, versions, credits, and your progress and list. */
 export type TitleDetail = Result<Movies["titles"]["get"]>;
 
-/** Home's rows. */
 export type Home = Result<Movies["titles"]["home"]>;
 
 export type TitleKind = TitleCard["kind"];

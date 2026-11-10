@@ -75,7 +75,6 @@ const recoveryStep = (error: PlaybackCallError): PlaybackStep =>
   Match.value(Playback.recoveryFor(error)).pipe(
     Match.when("reload-playlist", () => PlaybackStep.ReloadPlaylist()),
     Match.when("renegotiate", () => PlaybackStep.Renegotiate({ afterMs: 0 })),
-    // The player never renews a ticket (ADR 0011): an expired one takes a new start.
     Match.when("renew-token", () => PlaybackStep.NewSession()),
     Match.when("new-session", () => PlaybackStep.NewSession()),
     Match.when("retry-later", () => PlaybackStep.Renegotiate({ afterMs: RETRY_LATER_MS })),

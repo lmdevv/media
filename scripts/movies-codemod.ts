@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * The mechanical half of moving the movies web client from old movies' Convex backend onto the
- * core (p4-movies-cutover): old command hooks become platform SDK calls, profile arguments go
- * (D36), and imports move to their new homes. What needs judgment, such as a list query becoming
+ * core: old command hooks become platform SDK calls, profile arguments go (D36), and imports
+ * move to their new homes. What needs judgment, such as a list query becoming
  * paginated, a removed screen, or a command the core lacks, is left for a person; the script
  * names each unmapped command it meets.
  *
