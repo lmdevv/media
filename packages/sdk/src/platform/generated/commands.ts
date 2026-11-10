@@ -3513,7 +3513,7 @@ export const effectMethods = (method: EffectBuilder) => ({
         request: method.mutation(core_devices_approvals_request),
       },
       deviceGrants: {
-        /** `core.devices.deviceGrants.issue` (action, account, API keys refused): Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it. */
+        /** `core.devices.deviceGrants.issue` (action, account, API keys refused): Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it; a grant it keeps for someone else is revoked, signing them out of its apps. */
         issue: method.action(core_devices_deviceGrants_issue),
         /** `core.devices.deviceGrants.list` (query, account): List your device grants, newest first, with whether each still signs apps in and the apps signed in with it. */
         list: method.query(core_devices_deviceGrants_list),
@@ -3839,7 +3839,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         request: method.mutation(core_devices_approvals_request),
       },
       deviceGrants: {
-        /** `core.devices.deviceGrants.issue` (action, account, API keys refused): Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it. */
+        /** `core.devices.deviceGrants.issue` (action, account, API keys refused): Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it; a grant it keeps for someone else is revoked, signing them out of its apps. */
         issue: method.action(core_devices_deviceGrants_issue),
         /** `core.devices.deviceGrants.list` (query, account): List your device grants, newest first, with whether each still signs apps in and the apps signed in with it. */
         list: method.query(core_devices_deviceGrants_list),

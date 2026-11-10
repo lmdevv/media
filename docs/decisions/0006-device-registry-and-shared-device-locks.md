@@ -2,8 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the registry and locks as built,
   2026-11-07 with the phase 3 review fixes, 2026-11-07 with one session per device (D52), and
-  2026-11-09 with device grants (D48, D59).
-- Decisions: D18, D19, D35, D40, D47, D48, D52, D59
+  2026-11-09 with device grants (D48, D59), and 2026-11-10 with one person per phone (D64).
+- Decisions: D18, D19, D35, D40, D47, D48, D52, D59, D64
 
 ## Context
 
@@ -246,7 +246,9 @@ the command generator refuses that name, because `media auth grants` is already 
 
 - A grant is a `deviceGrants` row and a code, `dg_<grantId>.<secret>`, that the phone keeps. The
   row holds the person, a name such as "Aiko's iPhone", the SHA-256 of the secret, and a
-  generation. The core never stores the code and never logs it.
+  generation. The core never stores the code and never logs it, and no mutation argument
+  carries it: `issue` parses and hashes the stored code in its action and hands `place` only the
+  grant's id and hash.
 - The generation is the person's `sessionGeneration` when the grant was issued or last confirmed.
   A grant mints sessions only while the two are equal.
 - A grant has no expiry. Like a device code, it lasts until it is revoked or its person signs out
@@ -260,8 +262,18 @@ the command generator refuses that name, because `media auth grants` is already 
   its own revocation, and sessions from that grant would outlive it too.
 - If the stored grant is the caller's own, issuing confirms it. The answer is the same grant, and
   its generation becomes the person's current one, so a password typed on the phone brings back a
-  grant that signing out everywhere had stopped. Any other value, or none, gets a new grant. That
-  keeps one grant per person per phone. A person may issue 20 grants an hour.
+  grant that signing out everywhere had stopped. A tampered, malformed, unknown, or revoked value,
+  or none, gets a new grant and changes nothing else. A person may issue 20 grants an hour.
+- D64: a phone holds one person, as a browser does (D52). If the stored grant is another person's,
+  with a matching secret, issuing revokes it first: the grant is deleted and every session it
+  issued or minted ends, exactly as `revoke` does, in the same transaction that inserts the
+  caller's new grant. The answer is a new grant either way, so it never says whether the phone held
+  someone's grant or whose. Only a password session can do this, since it is the issue rule; an
+  exchanged session, an API key, a device sign-in, a tile, or a guest is refused before the stored
+  grant is read. Holding the code is the authority. The exchange also asks for the person's user
+  id, but that is no secret, so whoever holds the code can already sign that person's apps in, and
+  ending the grant asks for nothing more. The hourly limit is checked before the revoke, and a
+  refused issue revokes nothing.
 - Issuing puts the caller's session in the grant's family (`authSessions.grant`), moving it out of
   any family it was in. Revoking the grant then signs out the app that issued it too. A session
   that issues from a laptop joins that grant's family the same way, so issue only on the phone.
@@ -287,6 +299,7 @@ the command generator refuses that name, because `media auth grants` is already 
 | Event                                                              | Ends                                     | The grant                    |
 | ------------------------------------------------------------------ | ---------------------------------------- | ---------------------------- |
 | `core.devices.deviceGrants.revoke`                                 | every session in the grant's family      | deleted                      |
+| Another person's password sign-in issuing with the grant (D64)     | every session in the grant's family      | deleted                      |
 | `core.auth.sessions.end`, or a later join on the app's device      | that one app's session                   | stays and still mints        |
 | `endAll`, a password change or reset, a role change taking a scope | every session of the person's generation | stays, stopped until confirm |
 | A device mode change or removal                                    | the sessions on that device              | stays and still mints        |
@@ -323,7 +336,9 @@ at most 33 reads, its row and each session with its device, so a page holds at m
 | `list`   | deviceGrant | the grant's own person and `account`                               |
 | `revoke` | deviceGrant | the grant's own person and `account`                               |
 
-Another person's grant is `hidden`, admins included, as an API key is. An admin who must cut a
+Another person's grant is `hidden`, admins included, as an API key is. The D64 switch decides
+`issue` for the caller, not `revoke` on the other person's grant: holding that grant's code is what
+lets the caller end it, and the caller still cannot list it or revoke it by id. An admin who must cut a
 person off resets their password, which stops every grant they hold. Restricting a member into a
 kid stops no grant, as it ends no session (ADR 0005); the restrictions apply on every call.
 

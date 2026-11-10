@@ -671,7 +671,7 @@ export const generatedCommands = [
     scope: "account",
     refusesKeys: true,
     summary:
-      "Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it",
+      "Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it; a grant it keeps for someone else is revoked, signing them out of its apps",
     secrets: [{ field: "grant", variable: "MEDIA_ARG_GRANT", optional: true }],
     paginated: false,
     args: Schema.Struct({ name: Schema.String, grant: Schema.optionalKey(Schema.String) }),

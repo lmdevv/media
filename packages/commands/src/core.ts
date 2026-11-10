@@ -693,7 +693,7 @@ export const core = [
   }),
   action("core.devices.deviceGrants.issue", {
     summary:
-      "Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it",
+      "Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it; a grant it keeps for someone else is revoked, signing them out of its apps",
     scope: "account",
     refusesKeys: true,
     args: { name: v.string(), grant: v.optional(v.string()) },
