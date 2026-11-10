@@ -358,16 +358,16 @@ export const handler = Effect.gen(function* () {
         .call(serverFunctions.scanTarget, { lease, kind: "movies" })
         .pipe(Effect.mapError(backendFailure), Effect.flatMap(CoreJobs.held));
 
-      const known = yield* knownFiles(session, lease);
-      const own = yield* makeSink(lease, target.libraryId, known);
+      // A folder must be readable and approved before it is claimed, so a missing or unapproved
+      // folder fails as the scan itself would, rather than as an identity it could not read. This
+      // check writes nothing, so its scanner's sink is never used.
+      const checker = yield* makeSink(lease, target.libraryId, []);
 
-      const scanner = yield* LibraryScanner.make.pipe(
-        Effect.provideService(LibrarySink.Service, own.sink),
+      const approval = yield* LibraryScanner.make.pipe(
+        Effect.provideService(LibrarySink.Service, checker.sink),
       );
 
-      // A folder must be readable and approved before it is claimed, so a missing or unapproved
-      // folder fails as the scan itself would, rather than as an identity it could not read.
-      yield* Effect.forEach(target.folders, scanner.openRoot, { discard: true }).pipe(
+      yield* Effect.forEach(target.folders, approval.openRoot, { discard: true }).pipe(
         Effect.mapError(scanFailure),
       );
 
@@ -390,10 +390,23 @@ export const handler = Effect.gen(function* () {
 
       if (!claim.claimed) {
         return yield* new JobFailed({
-          message: `Another library already uses ${claim.folder} under another path; this library scans again on its own once that one lets the folder go`,
+          message: `Another library already uses ${claim.folder} under another path; ${
+            claim.rescans
+              ? "this library scans again on its own once that one lets the folder go"
+              : "scan this library again once that one lets the folder go"
+          }`,
           retry: false,
         });
       }
+
+      // Every scanner write, the listing included, needs the claim: the core refuses writes for
+      // folders the library does not own, and cancels the scan then (ADR 0024).
+      const known = yield* knownFiles(session, lease);
+      const own = yield* makeSink(lease, target.libraryId, known);
+
+      const scanner = yield* LibraryScanner.make.pipe(
+        Effect.provideService(LibrarySink.Service, own.sink),
+      );
 
       const publish = own.latest.pipe(
         Effect.flatMap(

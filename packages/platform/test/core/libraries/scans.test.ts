@@ -125,6 +125,8 @@ describe.skipIf(stack === undefined)("library scans", { timeout: 180_000 }, () =
     const lease = await claimScanOf(calls, "music", libraryId);
     const [first, second] = await walk(root);
 
+    expect(await calls.claimOwn(lease, "music")).toBe("held");
+
     if (first === undefined || second === undefined) throw new Error("The tree holds two files");
 
     expect(await calls.upsert(lease, "music", [first, first, second])).toEqual({

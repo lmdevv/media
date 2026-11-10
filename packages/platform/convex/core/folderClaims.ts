@@ -5,6 +5,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { FOLDERS_MAX, isPlainPath } from "./folders";
+import { cancel } from "./jobs/queue";
 import { inOrder } from "./lib/inOrder";
 import { sha256Hex } from "./lib/sha256";
 
@@ -75,10 +76,13 @@ interface CheckedFolder {
   readonly source: string | null;
 }
 
-/** Whether the library now holds its folders, or the first of them another claim reaches. */
+/**
+ * Whether the library now holds its folders, or the first of them another claim reaches and
+ * whether the library is rescanned on its own once that claim goes.
+ */
 type FolderClaim =
   | { readonly claimed: true }
-  | { readonly claimed: false; readonly folder: string };
+  | { readonly claimed: false; readonly folder: string; readonly rescans: boolean };
 
 const isDeviceId = (id: string): boolean => id.length <= CHAIN_ID_CHARS_MAX && CHAIN_ID.test(id);
 
@@ -358,14 +362,14 @@ const wake = async (ctx: ClaimCtx, ownerLibraryId: Id<"libraries">): Promise<voi
 
 /**
  * Records that `libraryId` was refused a folder `ownerLibraryId` holds, once, so the owner's
- * letting go rescans it. A full list on either side records nothing: that library is then
- * rescanned by hand.
+ * letting go rescans it, and says whether that record exists now. A full list on either side
+ * records nothing: that library is then rescanned by hand.
  */
 const recordWait = async (
   ctx: ClaimCtx,
   libraryId: Id<"libraries">,
   ownerLibraryId: Id<"libraries">,
-): Promise<void> => {
+): Promise<boolean> => {
   const [known, waiters, owners] = await Promise.all([
     ctx.db
       .query("folderClaimWaits")
@@ -383,19 +387,26 @@ const recordWait = async (
       .take(WAITS_MAX),
   ]);
 
-  if (known !== null || waiters.length >= WAITS_MAX || owners.length >= WAITS_MAX) return;
+  if (known !== null) return true;
+
+  if (waiters.length >= WAITS_MAX || owners.length >= WAITS_MAX) return false;
 
   await ctx.db.insert("folderClaimWaits", { libraryId, ownerLibraryId });
+
+  return true;
 };
 
+/** Records `libraryId` as waiting on each of `owners`, and says whether it waits on all of them. */
 const recordWaits = async (
   ctx: ClaimCtx,
   libraryId: Id<"libraries">,
   owners: ReadonlyArray<Id<"libraries">>,
-): Promise<void> => {
-  await inOrder(owners.slice(0, WAITS_RECORDED_MAX), async (owner) =>
+): Promise<boolean> => {
+  const recorded = await inOrder(owners.slice(0, WAITS_RECORDED_MAX), async (owner) =>
     recordWait(ctx, libraryId, owner),
   );
+
+  return owners.length <= WAITS_RECORDED_MAX && recorded.every(Boolean);
 };
 
 /** Deletes one claim and its rows, at most 65, and says whether it was still there. */
@@ -412,8 +423,42 @@ const deleteClaim = async (ctx: ClaimCtx, claimId: Id<"folderClaims">): Promise<
 };
 
 /**
- * Evicts up to 4 younger claims that overlap the library's, records each one's library as
- * waiting on this one and rescans the libraries waiting on it, and says whether more are left.
+ * Takes one claim from its library: deletes its rows, at most 65, and marks it lost, so the
+ * library owns the folder no more while it stays configured. Says whether it held the folder.
+ */
+const loseClaim = async (ctx: ClaimCtx, claimId: Id<"folderClaims">): Promise<boolean> => {
+  const [claim, keys] = await Promise.all([ctx.db.get(claimId), keyRowsOf(ctx.db, claimId)]);
+
+  await Promise.all(keys.map((row) => ctx.db.delete(row._id)));
+
+  if (claim === null || claim.lost) return false;
+
+  await ctx.db.patch(claim._id, { lost: true });
+
+  return true;
+};
+
+/**
+ * What follows a library losing a folder: its running scan is canceled, so it writes nothing
+ * more and does not finish as if it had scanned; its purge is scheduled, which deletes its rows
+ * in folders it lost; and the libraries waiting on it are rescanned, since it let a claim go.
+ */
+const disown = async (ctx: ClaimCtx, libraryId: Id<"libraries">): Promise<void> => {
+  const library = await ctx.db.get(libraryId);
+
+  if (library === null) return;
+
+  const scan = library.lastScan === null ? null : await ctx.db.get(library.lastScan);
+
+  if (scan?.status === "running") await cancel(ctx, scan._id);
+
+  await ctx.scheduler.runAfter(0, internal.core.scans.purgeLibrary, { libraryId });
+  await wake(ctx, libraryId);
+};
+
+/**
+ * Takes up to 4 younger claims that overlap the library's from their libraries, records each
+ * one's library as waiting on this one, disowns it, and says whether more are left.
  */
 const evictYounger = async (
   ctx: ClaimCtx,
@@ -423,14 +468,14 @@ const evictYounger = async (
   const evicting = [...younger].slice(0, EVICT_MAX);
 
   const evicted = await Promise.all(
-    evicting.map(async ([claimId, owner]) => ((await deleteClaim(ctx, claimId)) ? [owner] : [])),
+    evicting.map(async ([claimId, owner]) => ((await loseClaim(ctx, claimId)) ? [owner] : [])),
   );
 
   const losers = [...new Set(evicted.flat())];
 
   await inOrder(losers, async (loser) => {
     await recordWait(ctx, loser, libraryId);
-    await wake(ctx, loser);
+    await disown(ctx, loser);
   });
 
   return younger.size > EVICT_MAX;
@@ -458,8 +503,9 @@ const keysOf = (folder: CheckedFolder) => [
 ];
 
 /**
- * Writes the library's claim of one folder: a new claim from now, or the one it holds with its
- * `since` kept, its rows replaced when they changed. Says whether rows it held were replaced.
+ * Writes the library's claim of one folder: a new claim from now, the one it lost claimed again
+ * from now, or the one it holds with its `since` kept, its rows replaced when they changed. Says
+ * whether rows it held were replaced.
  */
 const writeClaim = async (
   ctx: ClaimCtx,
@@ -477,6 +523,7 @@ const writeClaim = async (
       folder: folder.folder,
       since: now,
       bootId,
+      lost: false,
     });
 
     await Promise.all(
@@ -489,6 +536,17 @@ const writeClaim = async (
   }
 
   const { claim } = held;
+
+  if (claim.lost) {
+    await ctx.db.patch(claim._id, { since: now, bootId, lost: false });
+    await Promise.all(
+      wanted.map((row) =>
+        ctx.db.insert("folderClaimKeys", { claimId: claim._id, libraryId, since: now, ...row }),
+      ),
+    );
+
+    return false;
+  }
 
   if (claim.bootId !== bootId) await ctx.db.patch(claim._id, { bootId });
 
@@ -538,8 +596,9 @@ const mergeYounger = (
  * folder that another of the library's folders reaches is refused. A folder that another
  * library's claim reaches, inside or out, goes to the claim that came first, whatever boot either
  * was read in: an older claim refuses this one, naming the first such folder in path order, and
- * the call then writes only the record that this library waits on the older claims' libraries;
- * younger claims are evicted, and their libraries wait on this one. Otherwise its claims become
+ * the call then writes only the record that this library waits on the older claims' libraries,
+ * and `rescans` says whether that record exists for each of them; younger claims are taken from
+ * their libraries (`loseClaim`), which then wait on this one and are disowned (`disown`). Otherwise its claims become
  * `folders`, each folder keeping the time it was first claimed, and an unchanged claim writes
  * nothing. Replacing rows it held, or dropping a folder it no longer has, rescans the libraries
  * waiting on it.
@@ -561,7 +620,7 @@ export const claimIdentities = async (
     folders.some((other) => other !== folder && overlap(folder, other)),
   );
 
-  if (twice !== undefined) return { claimed: false, folder: twice.folder };
+  if (twice !== undefined) return { claimed: false, folder: twice.folder, rescans: false };
 
   const now = Date.now();
   const stored = await storedOf(ctx.db, libraryId);
@@ -573,7 +632,7 @@ export const claimIdentities = async (
   const rankOf = (folder: CheckedFolder): Rank => {
     const held = heldOf(folder)?.claim;
 
-    return held === undefined
+    return held === undefined || held.lost
       ? { since: now, claimId: null }
       : { since: held.since, claimId: held._id };
   };
@@ -583,9 +642,9 @@ export const claimIdentities = async (
   );
 
   if (contested.refused !== null) {
-    await recordWaits(ctx, libraryId, contested.older);
+    const rescans = await recordWaits(ctx, libraryId, contested.older);
 
-    return { claimed: false, folder: contested.refused.folder };
+    return { claimed: false, folder: contested.refused.folder, rescans };
   }
 
   const replaced = await Promise.all(
@@ -625,8 +684,9 @@ const checkedOf = ({ claim, keys }: Stored): CheckedFolder | null => {
 
 /**
  * Goes on with a claim whose overlap reads filled a page or that left younger claims: reads the
- * library's claims again and evicts the younger of each overlapping pair, its own claim of a
- * folder included, recording each loser as waiting on the winner. It schedules itself again while
+ * library's claims again and takes the younger claim of each overlapping pair from its library,
+ * its own claim of a folder included, recording each loser as waiting on the winner and
+ * disowning it. It schedules itself again while
  * a page fills or younger claims are left. Each pass evicts at least one claim while one fills,
  * so it ends. Bounded as `claimIdentities`.
  */
@@ -634,7 +694,7 @@ export const settle = internalMutation({
   args: { libraryId: v.id("libraries") },
   returns: v.null(),
   handler: async (ctx, { libraryId }) => {
-    const stored = await storedOf(ctx.db, libraryId);
+    const stored = (await storedOf(ctx.db, libraryId)).filter((each) => !each.claim.lost);
     const read = overlapReader(ctx.db, libraryId, ownRowsOf(stored));
 
     const contests = await Promise.all(
@@ -657,10 +717,10 @@ export const settle = internalMutation({
 
     const lost = contests.filter(({ contest }) => contest.older.length > 0);
 
-    await Promise.all(lost.map(async ({ each }) => deleteClaim(ctx, each.claim._id)));
+    await Promise.all(lost.map(async ({ each }) => loseClaim(ctx, each.claim._id)));
     await recordWaits(ctx, libraryId, [...new Set(lost.flatMap(({ contest }) => contest.older))]);
 
-    if (lost.length > 0) await wake(ctx, libraryId);
+    if (lost.length > 0) await disown(ctx, libraryId);
 
     const kept = contests.filter(({ contest }) => contest.older.length === 0);
 
@@ -720,4 +780,28 @@ export const takeWaiters = async (
   await Promise.all(waits.map((row) => ctx.db.delete(row._id)));
 
   return { libraryIds: waits.map((row) => row.libraryId), more: waits.length === WAKE_PAGE };
+};
+
+/** Which of a library's folders it owns now, and which it lost to an older claim. */
+export interface Ownership {
+  /** Whether the library holds a live claim of `folder`. */
+  readonly owns: (folder: string) => boolean;
+  /** Whether an older claim took `folder` from the library, which still has it configured. */
+  readonly lost: (folder: string) => boolean;
+}
+
+/** The library's ownership of its folders: one range of at most 16 claims. */
+export const ownershipOf = async (
+  db: DatabaseReader,
+  libraryId: Id<"libraries">,
+): Promise<Ownership> => {
+  const claims = await db
+    .query("folderClaims")
+    .withIndex("by_library_folder", (q) => q.eq("libraryId", libraryId))
+    .take(FOLDERS_MAX);
+
+  return {
+    owns: (folder) => claims.some((claim) => claim.folder === folder && !claim.lost),
+    lost: (folder) => claims.some((claim) => claim.folder === folder && claim.lost),
+  };
 };

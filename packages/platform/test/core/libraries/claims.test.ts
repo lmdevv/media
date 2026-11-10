@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
+import type { ContentDomain } from "../../../commands/scopes";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { logMark, usageSince } from "../../admin";
@@ -10,9 +11,11 @@ import { runServer } from "../../service";
 import { unique } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
+import { claimJob, finishJob, moviesLibrary, rowsOf, upsert } from "../../movies/catalog";
+import { movieFile } from "../../movies/scanned";
 import { eventually, retrying } from "../jobs/driver";
 import { makeTree, removeTree } from "./files";
-import { claimScanOf, scanCalls } from "./scanner";
+import { scanCalls } from "./scanner";
 import type { ScanLease } from "./scanner";
 
 const stack = coreStackFromEnvFile();
@@ -22,7 +25,11 @@ const Claimed = Schema.Union([
     outcome: Schema.Literal("held"),
     value: Schema.Union([
       Schema.Struct({ claimed: Schema.Literal(true) }),
-      Schema.Struct({ claimed: Schema.Literal(false), folder: Schema.String }),
+      Schema.Struct({
+        claimed: Schema.Literal(false),
+        folder: Schema.String,
+        rescans: Schema.Boolean,
+      }),
     ]),
   }),
   Schema.Struct({ outcome: Schema.Literals(["canceled", "lost"]) }),
@@ -56,11 +63,36 @@ const library = async (admin: Member, count = 1): Promise<Library> => {
   return { libraryId, folders: made.toSorted() };
 };
 
+/**
+ * Claims the queued scan of `libraryId`. Another library's scan it claims first it ends at once
+ * without scanning it: a scan claims its folders by stand-in identities, which would replace the
+ * identities these tests claim.
+ */
+const claimScanAlone = (core: CoreStack, libraryId: Id<"libraries">): Promise<ScanLease> => {
+  const calls = scanCalls(core, `claims-${unique()}`);
+
+  return eventually(
+    `a claim of ${libraryId}'s scan`,
+    async () => {
+      const claim = await calls.claim("music");
+
+      if (claim.outcome === "idle") return null;
+
+      if (claim.payload.libraryId === libraryId) return claim.lease;
+
+      await calls.finish(claim.lease);
+
+      return null;
+    },
+    120_000,
+  );
+};
+
 /** Holds a scan of the library: joins its queued scan or queues one, and claims it. */
 const holdScan = async (core: CoreStack, admin: Member, of: Library): Promise<ScanLease> => {
   await admin.signedIn.client.mutation(api.core.libraries.scan, { libraryId: of.libraryId });
 
-  return claimScanOf(scanCalls(core, `claims-${unique()}`), "music", of.libraryId);
+  return claimScanAlone(core, of.libraryId);
 };
 
 /** Where the server found a folder: its mount's device and its path within that filesystem. */
@@ -81,6 +113,7 @@ const claimHeld = async (
   lease: ScanLease,
   bootId: string | null,
   folders: ReadonlyArray<Sent>,
+  kind: ContentDomain = "music",
 ): Promise<Claim> => {
   const answer = await retrying(() =>
     runServer(
@@ -88,7 +121,7 @@ const claimHeld = async (
       api.core.scans.claimFolders,
       {
         lease,
-        kind: "music",
+        kind,
         bootId,
         folders: folders.map((entry) => ({
           folder: entry.folder,
@@ -198,7 +231,7 @@ describe.skipIf(stack === undefined)("folder identity claims", { timeout: 300_00
     });
 
     const [linkedFolder] = linked.folders;
-    const refused = { claimed: false, folder: linkedFolder };
+    const refused = { claimed: false, folder: linkedFolder, rescans: true };
 
     // The same folder through a link, a folder inside it, and a folder that holds it.
     expect(await claim(stack, admin, linked, boot, [chain(9, 100, 10, 1)])).toEqual(refused);
@@ -209,6 +242,7 @@ describe.skipIf(stack === undefined)("folder identity claims", { timeout: 300_00
     expect(await claim(stack, admin, third, boot, [chain(9, 300, 10, 1)])).toEqual({
       claimed: false,
       folder: third.folders[0],
+      rescans: true,
     });
 
     // Another boot, or none, meets the same claims: ownership does not depend on the boot.
@@ -218,6 +252,7 @@ describe.skipIf(stack === undefined)("folder identity claims", { timeout: 300_00
     expect(await claim(stack, admin, third, null, [chain(9, 300, 10, 1)])).toEqual({
       claimed: false,
       folder: third.folders[0],
+      rescans: true,
     });
 
     // A claim of its own folder under a new boot keeps it.
@@ -228,7 +263,7 @@ describe.skipIf(stack === undefined)("folder identity claims", { timeout: 300_00
     await Promise.all([films, linked, third].map(async (each) => remove(admin, each)));
   });
 
-  it("refuse one folder sent twice through a link, naming the first in path order", async () => {
+  it("refuse one folder sent twice through a link, naming the first in path order, and rescan nothing", async () => {
     if (stack === undefined) return;
     const admin = await member(stack, "claims-self", "admin");
     const boot = `boot-${unique()}`;
@@ -237,6 +272,7 @@ describe.skipIf(stack === undefined)("folder identity claims", { timeout: 300_00
     expect(await claim(stack, admin, twice, boot, [chain(4, 50, 1), chain(4, 51, 50, 1)])).toEqual({
       claimed: false,
       folder: twice.folders[0],
+      rescans: false,
     });
     expect(await claim(stack, admin, twice, boot, [chain(4, 50, 1), chain(4, 52, 1)])).toEqual({
       claimed: true,
@@ -285,12 +321,14 @@ describe.skipIf(stack === undefined)("folder identity claims", { timeout: 300_00
     expect(await claim(stack, admin, alias, boot, same)).toEqual({
       claimed: false,
       folder: alias.folders[0],
+      rescans: true,
     });
 
     // After the reboot the alias scans first, and the owner's claim still holds it off.
     expect(await claim(stack, admin, alias, rebooted, same)).toEqual({
       claimed: false,
       folder: alias.folders[0],
+      rescans: true,
     });
     expect(await claim(stack, admin, owner, rebooted, same)).toEqual({ claimed: true });
 
@@ -312,11 +350,7 @@ describe.skipIf(stack === undefined)("folder identity claims", { timeout: 300_00
         : null;
     });
 
-    const lease = await claimScanOf(
-      scanCalls(stack, `claims-${unique()}`),
-      "music",
-      alias.libraryId,
-    );
+    const lease = await claimScanAlone(stack, alias.libraryId);
 
     expect(lease.jobId).toBe(queued.jobId);
     expect(
@@ -333,6 +367,7 @@ describe.skipIf(stack === undefined)("folder identity claims", { timeout: 300_00
     expect(await claim(stack, admin, back, rebooted, same)).toEqual({
       claimed: false,
       folder: moved,
+      rescans: true,
     });
 
     await Promise.all([owner, alias].map(async (each) => remove(admin, each)));
@@ -362,12 +397,12 @@ describe.skipIf(stack === undefined)("folder identity claims", { timeout: 300_00
     ).toEqual({ claimed: true });
     expect(
       await claimRead(stack, admin, bound, boot, sourced(chainB, mount(1), "/lib/library/child")),
-    ).toEqual({ claimed: false, folder: bound.folders[0] });
+    ).toEqual({ claimed: false, folder: bound.folders[0], rescans: true });
 
     // A bind mount of a folder that holds it is refused the same way.
     expect(
       await claimRead(stack, admin, around, boot, sourced(chain(66307, 7001, 2), mount(1), "/lib")),
-    ).toEqual({ claimed: false, folder: around.folders[0] });
+    ).toEqual({ claimed: false, folder: around.folders[0], rescans: true });
 
     // The same path on another device, and a sibling whose name only starts the same, are apart.
     expect(
@@ -391,6 +426,67 @@ describe.skipIf(stack === undefined)("folder identity claims", { timeout: 300_00
 
     await Promise.all(
       [whole, bound, around, elsewhere, sibling].map(async (each) => remove(admin, each)),
+    );
+  });
+
+  it("end a scan whose folder an older claim takes, refuse its writes, and purge what it wrote", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "claims-evict", "admin");
+    const owner = await moviesLibrary(admin, `Owner ${unique()}`);
+    const [ownerFolder = ""] = owner.roots;
+
+    // Each scan claims its folder as the server would before writing; the owner's claim is older.
+    const ownerLease = await claimJob(stack, "movies.scan", owner.scanJobId);
+    const alias = await moviesLibrary(admin, `Alias ${unique()}`);
+    const [aliasFolder = ""] = alias.roots;
+    const aliasLease = await claimJob(stack, "movies.scan", alias.scanJobId);
+    const disk = chain(30, 3001, 30);
+
+    expect(
+      await claimHeld(stack, aliasLease, null, [{ folder: aliasFolder, chain: disk }], "movies"),
+    ).toEqual({ claimed: true });
+    expect(await upsert(stack, aliasLease, [movieFile(`${aliasFolder}/Sintel.mkv`)])).toMatchObject(
+      {
+        outcome: "held",
+        value: { done: 1 },
+      },
+    );
+
+    // The owner's folder now leads to the same disk, as a changed symlink or mount would make it.
+    expect(
+      await claimHeld(stack, ownerLease, null, [{ folder: ownerFolder, chain: disk }], "movies"),
+    ).toEqual({ claimed: true });
+
+    // The alias's scan writes nothing more and ends canceled, not as if it had scanned.
+    expect(await upsert(stack, aliasLease, [movieFile(`${aliasFolder}/Sintel 2.mkv`)])).toEqual({
+      outcome: "canceled",
+    });
+    expect(await finishJob(stack, aliasLease)).toEqual({ outcome: "canceled" });
+
+    expect(await upsert(stack, ownerLease, [movieFile(`${ownerFolder}/Sintel.mkv`)])).toMatchObject(
+      {
+        outcome: "held",
+        value: { done: 1 },
+      },
+    );
+    await finishJob(stack, ownerLease);
+
+    // The alias's purge deletes its rows in the folder it lost, which it still has configured.
+    const empty = { titles: 0, episodes: 0, files: 0 };
+
+    await eventually("the alias's rows to be purged", async () => {
+      const rows = await rowsOf(stack, alias.libraryId);
+
+      return rows.titles === 0 && rows.files === 0 ? rows : null;
+    });
+
+    expect(await rowsOf(stack, alias.libraryId)).toEqual(empty);
+    expect(await rowsOf(stack, owner.libraryId)).toEqual({ titles: 1, episodes: 0, files: 1 });
+
+    await Promise.all(
+      [owner, alias].map(async (each) =>
+        admin.signedIn.client.mutation(api.core.libraries.remove, { libraryId: each.libraryId }),
+      ),
     );
   });
 

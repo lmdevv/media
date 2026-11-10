@@ -472,6 +472,11 @@ export default defineSchema({
     since: v.number(),
     /** The host's boot id at the latest claim, for diagnosis only; null when the server could not tell. */
     bootId: v.union(v.string(), v.null()),
+    /**
+     * Whether an older claim of another library took the folder: the claim then has no keys, the
+     * library's scans write nothing, and its purge deletes its rows there until it claims again.
+     */
+    lost: v.boolean(),
   }).index("by_library_folder", ["libraryId", "folder"]),
 
   /**

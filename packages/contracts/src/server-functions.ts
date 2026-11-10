@@ -303,7 +303,12 @@ export const serverFunctions = {
     result: LeaseAnswer(
       Schema.Union([
         Schema.Struct({ claimed: Schema.Literal(true) }),
-        Schema.Struct({ claimed: Schema.Literal(false), folder: Schema.String }),
+        Schema.Struct({
+          claimed: Schema.Literal(false),
+          folder: Schema.String,
+          /** Whether the core rescans this library on its own once the owner lets go. */
+          rescans: Schema.Boolean,
+        }),
       ]),
     ),
   }),

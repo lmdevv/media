@@ -340,19 +340,35 @@ claims its library's folders by what they are on disk.
   overlapping claims go to the older, the lower `since`, and the lower claim id on a tie; a folder
   claimed for the first time loses a tie. A folder that another of the library's own folders
   reaches is refused, which is one folder sent twice through a link. An older claim of another
-  library refuses the call with `{ claimed: false, folder }`, `folder` being the first such folder
-  of this library in path order. A refusal writes only `folderClaimWaits` rows
+  library refuses the call with `{ claimed: false, folder, rescans }`, `folder` being the first
+  such folder of this library in path order. A refusal writes only `folderClaimWaits` rows
   `{ libraryId, ownerLibraryId }`, one per older library, at most 16 a refusal, deduped, and at
   most 64 waiters per owner and 64 owners per waiter; past those it records nothing and that
-  library is rescanned by hand. The library's earlier claims stay, the scanner stops, and the
-  library stays refused until the older claim goes. When the caller is older, as when a younger
-  library slipped in while the caller's identities had changed across a reboot, the call
-  succeeds and deletes the younger claims of the folders it reaches, at most 8 a call, and each
-  younger library then waits on the caller.
+  library is rescanned by hand. `rescans` is true when a wait row exists for this library on each
+  older library of that folder, so the core rescans it once they let go; it is false past the
+  caps and for a folder that another of the library's own folders reaches. The library's earlier
+  claims stay, the scanner stops, and the library stays refused until the older claim goes.
+- When the caller is older, as when a younger library slipped in while the caller's identities
+  had changed across a reboot, the call succeeds and takes the younger claims of the folders it
+  reaches, at most 4 a call: each loses its keys and is marked `lost`, so its library still has
+  the folder configured but owns it no more. Each younger library then waits on the caller and is
+  disowned in the same mutation: its running scan is canceled, so its `finish` answers
+  `canceled`; its purge is scheduled through `core/scans:purgeLibrary`; and the libraries waiting
+  on it are rescanned, since it let a claim go. A later claim of the lost folder by its library
+  starts a new claim from that time.
+- Every scanner write is fenced by ownership. `withScanLease` reads the library's claims, one
+  range of at most 16, in the same mutation as the write, and a library that does not own every
+  folder it has, because one was lost or it never claimed them, has its scan canceled and the
+  call answers `canceled`, as for a deleted library; `target` and `claimFolders` run before the
+  claim and skip the fence. The taking writes the claim the fence reads, so Convex runs an
+  eviction and a write of the evicted scan one after the other: the evicted scan writes nothing
+  after the eviction commits. The purge keeps a row only inside a configured folder that the
+  library has not lost, so an evicted library's rows there go, batched and budgeted as any purge;
+  a folder it never claimed keeps its rows, as an import writes them before any scan.
 - When an owner lets a claim go, its waiting libraries are rescanned on their own: `setFolders`
   deletes the claims of the folders it removes, `remove` deletes all of the library's claims and
   its own waits, a claim replaces rows that changed, as after a reboot that changed identities,
-  and an eviction deletes the younger claim. Each schedules `core/libraries:wakeWaiting` for that
+  and an eviction takes the younger claim. Each schedules `core/libraries:wakeWaiting` for that
   library, which deletes up to 16 of its waits a call, queues each waiting library's scan through
   the same code that queues every other scan, and schedules itself while more wait. A waiting
   library that still overlaps is refused again and waits again.
@@ -364,9 +380,9 @@ claims its library's folders by what they are on disk.
   4,096 reads, so that is about 3,400 reads, inside that limit and the 32,000-document and
   8,192-write limits; keys are short, so the reads stay a few MiB. A stack test runs it at that
   size. A range that fills its 4 rows, or more than 4 younger claims, schedules
-  `core/folderClaims:settle`, which reads the
-  library's claims again and evicts the younger of each overlapping pair, the library's own claim
-  included, until none is left. Two concurrent claims that overlap each read a range the other
+  `core/folderClaims:settle`, which reads the library's claims again and takes the younger claim
+  of each overlapping pair from its library, the library's own claim included, until none is
+  left. Two concurrent claims that overlap each read a range the other
   writes, so Convex runs them one after the other.
 - Before it claims, the server checks each folder as the scan would: it resolves, is a folder, and
   lies inside `LIBRARY_ROOTS`; a missing folder fails the scan to be retried and an unapproved one
@@ -379,7 +395,10 @@ claims its library's folders by what they are on disk.
   the same device, though its inode chain never reaches the folder. Without a mount table, or for
   a source path longer than the core takes, it sends no source and the inode chain alone decides.
   A refused claim fails the scan with "Another library already uses <folder> under another path"
-  and writes nothing; the core scans the library again once the owner lets the folder go.
+  and writes nothing. The message says the library scans again on its own when the core answered
+  `rescans: true`, and asks for a manual scan once the owner lets go when it answered `false`
+  (past the wait caps). The server reads `known` and writes only after the claim, since every
+  write, the listing included, is fenced on ownership and an unowned scan is canceled.
 
 ## Consequences
 
