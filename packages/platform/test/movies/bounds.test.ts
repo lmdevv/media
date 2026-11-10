@@ -321,6 +321,49 @@ describe.skipIf(stack === undefined)(
       await finishJob(stack, lease);
     });
 
+    it("keep one person for a long name however many times the same credits are written", async () => {
+      if (stack === undefined) return;
+
+      const label = unique();
+      const admin = await member(stack, `bound-again-${label}`, "admin");
+      const { scanJobId, roots } = await moviesLibrary(admin, `bound again ${label}`);
+      const lease = await claimJob(stack, "movies.scan", scanJobId, 300_000);
+
+      const titleId = await landAll(
+        stack,
+        lease,
+        [movieFile(join(roots[0] ?? "", "a.mkv"), 1, 1, scannedTitle("movie", "nfo:r", "Again"))],
+        1,
+      );
+
+      // Its person document holds a cut name, but the key must come from the name a scan sends.
+      const name = `${label} ${absurd(30_000)}A`;
+
+      const people = await inOrder([0, 1, 2, 3], async (round) => {
+        const answered = await runServer(
+          stack,
+          api.movies.metadata.applyCredits,
+          {
+            lease,
+            titleId,
+            episodeId: null,
+            credits: [credit(name, 0, null)],
+            hash: `${label}-${round}`,
+          },
+          Credits,
+        );
+
+        if (answered.outcome !== "held") throw new Error(`credits answered ${answered.outcome}`);
+
+        return answered.value.people.map((person) => person.personId);
+      });
+
+      expect(new Set(people.flat()).size).toBe(1);
+      expect(people.map((round) => round.length)).toEqual([1, 1, 1, 1]);
+
+      await finishJob(stack, lease);
+    });
+
     it("keep two titles whose long match keys differ only at the end apart across rescans", async () => {
       if (stack === undefined) return;
 

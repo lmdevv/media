@@ -400,9 +400,15 @@ access-checked movies read stays under all three by one rule, in `movies/reads.t
   reads, the title list the same way, and collections by what each collection needs to decide
   all 200 of its members at the worst cost, each in a library of its own, with each collection
   on a page given an equal share of the page's budget. So a page's continuation is always exactly
-  after its last row, and no row is skipped. Only a collection that alone costs more than a
-  call can pay (a person in many groups, with members in more libraries than a call can check)
-  runs out of its share; it stays listed with the titles it decided.
+  after its last row, and no row is skipped. A collection is listed only once one of its members
+  is visible to the caller, as old movies' list and `collections.get` required; running out of
+  budget is never taken for visibility. A collection that alone costs more than its share (a
+  person in many groups, with members in more libraries than a call can check) ends the page
+  there, unlisted: the page's cursor names it and the first member it did not decide, so the
+  next page decides it from that member on, and it is listed once a member is visible, or left
+  out once every member is decided and none is. A collection with a visible member whose budget
+  then runs out stays listed with the titles it decided. Collections page by their own cursor, a
+  position in `(sort key, creation time)` order, which a reloaded page's `endCursor` also uses.
 - **Aggregates answer the best for their budget.** Home rows, genres, and similar titles walk
   every movies library shared with the caller with `visiblePage`, as many rows a step as both
   `visiblePage`'s sizing and the budget allow, keeping each step's continuation, with no fixed

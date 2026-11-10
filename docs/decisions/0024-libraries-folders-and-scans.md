@@ -290,7 +290,11 @@ text, so a title with an absurd overview could make a call reserve far more than
   another title, so an id is dropped. A key or a digest over its maximum keeps its leading part
   and adds a SHA-256 of the whole (`uniqueWithin`), so two keys that differ anywhere, even past
   the cut, stay two rows, and the same key always maps to the same stored key, so a rescan finds
-  the row it wrote. A match command's provider id over 256 characters is refused, since an admin
+  the row it wrote. Every key is derived from what a scan, a metadata job, or a person job sent,
+  never from a stored field a fitter may have cut: a title's match key from the scanned title, a
+  collection's source key from the scanned collection, and a person's key from a provider's id
+  once one is known, else from the scanned name, after which merging ids keeps the stored key.
+  A match command's provider id over 256 characters is refused, since an admin
   typed it.
 
 - **Proof.** A unit test builds one document per table at the smallest a fitter can leave it,

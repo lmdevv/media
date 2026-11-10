@@ -340,6 +340,54 @@ describe.skipIf(stack === undefined)("movies reads within one call", { timeout: 
     expect(listed.every((entry) => entry.titles > 0)).toBe(true);
   });
 
+  it("list a collection only once a member of it is visible, however much deciding costs", async () => {
+    if (stack === undefined) return;
+
+    const label = unique();
+    const manager = await member(stack, "unseen-manager");
+    const viewer = await member(stack, "unseen-viewer");
+
+    await inEveryGroup(stack, viewer);
+
+    const hidden = await seedMovies(
+      stack,
+      manager,
+      Array.from({ length: 200 }, (_, n) => ({
+        name: `unseen ${label} ${n}`,
+        titles: [{ name: `Unseen ${label} ${n}`, age: 0, episodes: 0 }],
+      })),
+    );
+
+    const [shared] = await seedMovies(
+      stack,
+      manager,
+      [{ name: `seen ${label}`, titles: [{ name: `Seen ${label}`, age: 0, episodes: 0 }] }],
+      [viewer.userId],
+    );
+
+    const hiddenTitles = hidden.map((library) => titleOf(library));
+
+    const collect = (name: string, titleIds: ReadonlyArray<Id<"titles">>) =>
+      runFunction(
+        stack,
+        internal.movies.probe.seedCollection,
+        { name, titleIds: [...titleIds] },
+        Schema.declare(isId("collections")),
+      );
+
+    // Deciding all 200 members, each in a library of its own, costs more than one call can pay.
+    const unseen = await collect(`aaa unseen ${label}`, hiddenTitles);
+
+    const seenLast = await collect(`aaa unseen ${label} last`, [
+      ...hiddenTitles.slice(0, 199),
+      titleOf(shared),
+    ]);
+
+    expect(await listCollections(viewer, new Set([unseen, seenLast]))).toEqual([
+      { id: seenLast, titles: 1 },
+    ]);
+  });
+
   it("list, open, and credit across 300 libraries of one title each, in 16 groups", async () => {
     if (stack === undefined) return;
 

@@ -13,7 +13,7 @@ import { reachOf } from "../core/permissions/grants";
 import { boundedPersonDetails } from "./bounds";
 import { budgetedViewer } from "./access";
 import type { BudgetedViewer, Seen } from "./access";
-import { CREDIT_LIMIT, mergeIds, personKeyOf } from "./credits";
+import { CREDIT_LIMIT, mergeIds, mergedPersonKey } from "./credits";
 import { patchPerson } from "./write";
 import { presentTitleCard } from "./present";
 import { TITLE_GET, callBudget, creditRowsOf, peopleOf, settleRead } from "./reads";
@@ -65,7 +65,7 @@ export const applyPerson = serverMutation({
 
       await patchPerson(ctx.db, person, {
         name: details.name,
-        personKey: personKeyOf({ name: person.name, externalIds: ids }),
+        personKey: mergedPersonKey(person, ids),
         externalIds: ids,
         profile: details.profile ?? person.profile,
         biography: details.biography,

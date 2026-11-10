@@ -25,19 +25,28 @@ const normalizeName = (name: string): string =>
     .replaceAll(/\s+/gu, " ")
     .trim();
 
-/** The key that identifies a person across titles. */
-export const personKeyOf = (person: {
+/** The key a provider's id gives a person: TMDB's first, then IMDb's, or null for neither. */
+const idKeyOf = (ids: ExternalIds): string | null => {
+  if (ids.tmdb !== null) return boundedKey(`tmdb:${ids.tmdb}`);
+
+  return ids.imdb === null ? null : boundedKey(`imdb:${ids.imdb}`);
+};
+
+/**
+ * The key that identifies a person across titles, from the name and ids a scan or a metadata job
+ * sent, never from a stored name, which its fitter may have cut.
+ */
+const personKeyOf = (person: {
   readonly name: string;
   readonly externalIds: ExternalIds;
-}): string => {
-  if (person.externalIds.tmdb !== null) return boundedKey(`tmdb:${person.externalIds.tmdb}`);
+}): string => idKeyOf(person.externalIds) ?? boundedKey(`name:${normalizeName(person.name)}`);
 
-  return boundedKey(
-    person.externalIds.imdb === null
-      ? `name:${normalizeName(person.name)}`
-      : `imdb:${person.externalIds.imdb}`,
-  );
-};
+/**
+ * A stored person's key once their ids are `ids`: a provider's key once one is known, else the
+ * key they were stored under, which came from the name a scan sent.
+ */
+export const mergedPersonKey = (existing: Doc<"people">, ids: ExternalIds): string =>
+  idKeyOf(ids) ?? existing.personKey;
 
 const sortKeyOf = (name: string): string => {
   const parts = normalizeName(name).split(" ");
@@ -108,7 +117,7 @@ const upsertPerson = async (
 
   const ids = mergeIds(existing.externalIds, person.externalIds);
   const profile = existing.profile ?? person.profile;
-  const personKey = personKeyOf({ name: existing.name, externalIds: ids });
+  const personKey = mergedPersonKey(existing, ids);
 
   const changed =
     personKey !== existing.personKey ||

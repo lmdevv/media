@@ -405,103 +405,108 @@ describe("the movies fitters reach their targets", () => {
     }
   });
 
-  it("bring documents far past every bound within them, keeping ids that fit", () => {
-    const absurd = floor(20_000);
-    const genres = Array.from({ length: 2000 }, (_, n) => `${wide(200)} ${n}`);
-    const kept = { tmdb: "603", imdb: wide(BOUNDS.id + 1), tvdb: wide(BOUNDS.id) };
+  // Fitting megabytes of text takes a few seconds on a loaded machine.
+  it(
+    "bring documents far past every bound within them, keeping ids that fit",
+    { timeout: 60_000 },
+    () => {
+      const absurd = floor(20_000);
+      const genres = Array.from({ length: 2000 }, (_, n) => `${wide(200)} ${n}`);
+      const kept = { tmdb: "603", imdb: wide(BOUNDS.id + 1), tvdb: wide(BOUNDS.id) };
 
-    const fittedTitle = fitTitle({
-      ...absurd.titles,
-      externalIds: kept,
-      genres,
-      studios: genres,
-      countries: genres,
-      tags: genres,
-      recommendations: [wide(BOUNDS.id + 1), "550", wide(100_000)],
-      matchKey: wide(BOUNDS.key * 4),
-    });
+      const fittedTitle = fitTitle({
+        ...absurd.titles,
+        externalIds: kept,
+        genres,
+        studios: genres,
+        countries: genres,
+        tags: genres,
+        recommendations: [wide(BOUNDS.id + 1), "550", wide(100_000)],
+        matchKey: wide(BOUNDS.key * 4),
+      });
 
-    const fitted = [
-      [fittedTitle, DOCUMENT_BYTES.titles],
-      [fitEpisode({ ...absurd.episodes, externalIds: kept }), DOCUMENT_BYTES.episodes],
-      [fitPerson({ ...absurd.people, personKey: wide(100_000) }), DOCUMENT_BYTES.people],
-      [fitCredit(absurd.credits), DOCUMENT_BYTES.credits],
-      [
-        fitCollection({ ...absurd.collections, sourceKey: wide(100_000) }),
-        DOCUMENT_BYTES.collections,
-      ],
-      [
-        fitGenreRow({
-          titleId: ids.titleId,
-          libraryId,
-          genre: wide(BOUNDS.genre),
-          kind: "movie",
-          sortKey: wide(100_000),
-          addedAt: 1,
-          year: null,
-        }),
-        DOCUMENT_BYTES.small,
-      ],
-    ] as const;
+      const fitted = [
+        [fittedTitle, DOCUMENT_BYTES.titles],
+        [fitEpisode({ ...absurd.episodes, externalIds: kept }), DOCUMENT_BYTES.episodes],
+        [fitPerson({ ...absurd.people, personKey: wide(100_000) }), DOCUMENT_BYTES.people],
+        [fitCredit(absurd.credits), DOCUMENT_BYTES.credits],
+        [
+          fitCollection({ ...absurd.collections, sourceKey: wide(100_000) }),
+          DOCUMENT_BYTES.collections,
+        ],
+        [
+          fitGenreRow({
+            titleId: ids.titleId,
+            libraryId,
+            genre: wide(BOUNDS.genre),
+            kind: "movie",
+            sortKey: wide(100_000),
+            addedAt: 1,
+            year: null,
+          }),
+          DOCUMENT_BYTES.small,
+        ],
+      ] as const;
 
-    const track = { codec: wide(20_000), language: wide(20_000), title: wide(20_000) };
+      const track = { codec: wide(20_000), language: wide(20_000), title: wide(20_000) };
 
-    const fittedFile = fitMediaFile({
-      ...absurd.mediaFiles,
-      probe: {
-        ...absurd.mediaFiles.probe,
-        container: wide(1_100_000),
-        audio: Array.from({ length: 200 }, (_, index) => ({
-          ...track,
-          index,
-          profile: null,
-          channels: 2,
-          channelLayout: wide(20_000),
-          default: false,
-          bitRate: null,
-        })),
-        subtitles: Array.from({ length: 200 }, (_, index) => ({
-          ...track,
-          index,
-          kind: "text" as const,
-          default: false,
-          forced: false,
-        })),
-        chapters: Array.from({ length: 2000 }, (_, n) => ({
-          startMs: n,
-          endMs: n + 1,
-          title: wide(2_000),
-        })),
-      },
-      externalSubtitles: [
-        { fileName: "film.en.srt", codec: "srt", language: "en", forced: false },
-        {
-          fileName: "x".repeat(BOUNDS.fileNameBytes + 1),
-          codec: "srt",
-          language: null,
-          forced: false,
+      const fittedFile = fitMediaFile({
+        ...absurd.mediaFiles,
+        probe: {
+          ...absurd.mediaFiles.probe,
+          container: wide(1_100_000),
+          audio: Array.from({ length: 200 }, (_, index) => ({
+            ...track,
+            index,
+            profile: null,
+            channels: 2,
+            channelLayout: wide(20_000),
+            default: false,
+            bitRate: null,
+          })),
+          subtitles: Array.from({ length: 200 }, (_, index) => ({
+            ...track,
+            index,
+            kind: "text" as const,
+            default: false,
+            forced: false,
+          })),
+          chapters: Array.from({ length: 2000 }, (_, n) => ({
+            startMs: n,
+            endMs: n + 1,
+            title: wide(2_000),
+          })),
         },
-      ],
-      sidecarDigest: wide(100_000),
-    });
+        externalSubtitles: [
+          { fileName: "film.en.srt", codec: "srt", language: "en", forced: false },
+          {
+            fileName: "x".repeat(BOUNDS.fileNameBytes + 1),
+            codec: "srt",
+            language: null,
+            forced: false,
+          },
+        ],
+        sidecarDigest: wide(100_000),
+      });
 
-    expect(getDocumentSize(fittedFile)).toBeLessThanOrEqual(DOCUMENT_BYTES.mediaFiles);
-    expect(fittedFile.path).toBe(absurd.mediaFiles.path);
-    expect(fittedFile.externalSubtitles.map((subtitle) => subtitle.fileName)).toEqual([
-      "film.en.srt",
-    ]);
-    expect(
-      getDocumentSize(fitSeason({ ...absurd.seasons, externalIds: kept })),
-    ).toBeLessThanOrEqual(DOCUMENT_BYTES.seasons);
+      expect(getDocumentSize(fittedFile)).toBeLessThanOrEqual(DOCUMENT_BYTES.mediaFiles);
+      expect(fittedFile.path).toBe(absurd.mediaFiles.path);
+      expect(fittedFile.externalSubtitles.map((subtitle) => subtitle.fileName)).toEqual([
+        "film.en.srt",
+      ]);
+      expect(
+        getDocumentSize(fitSeason({ ...absurd.seasons, externalIds: kept })),
+      ).toBeLessThanOrEqual(DOCUMENT_BYTES.seasons);
 
-    for (const [document, bound] of fitted) {
-      expect(getDocumentSize(document)).toBeLessThanOrEqual(bound);
-    }
+      for (const [document, bound] of fitted) {
+        expect(getDocumentSize(document)).toBeLessThanOrEqual(bound);
+      }
 
-    expect(fittedTitle.externalIds).toEqual({ tmdb: "603", imdb: null, tvdb: wide(BOUNDS.id) });
-    expect(fittedTitle.matchKey).toBe(uniqueWithin(wide(BOUNDS.key * 4), BOUNDS.key));
-    expect(fittedTitle.recommendations).toEqual(["550"]);
-  });
+      expect(fittedTitle.externalIds).toEqual({ tmdb: "603", imdb: null, tvdb: wide(BOUNDS.id) });
+      expect(fittedTitle.matchKey).toBe(uniqueWithin(wide(BOUNDS.key * 4), BOUNDS.key));
+      expect(fittedTitle.recommendations).toEqual(["550"]);
+    },
+  );
 });
 
 describe("long keys stay unique", () => {
