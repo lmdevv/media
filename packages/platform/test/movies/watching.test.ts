@@ -126,6 +126,27 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
     ).toBe("not_found");
   });
 
+  it("give every start its own ticket, naming its playback, even within one second", async () => {
+    if (stack === undefined) return;
+
+    const ring = await deploymentTicketKeys();
+    const sintel = titleIn(shelf, "Sintel");
+
+    const [first, second] = await Promise.all([
+      shelf.aiko.signedIn.client.mutation(api.movies.play.start, { titleId: sintel }),
+      shelf.aiko.signedIn.client.mutation(api.movies.play.start, { titleId: sintel }),
+    ]);
+
+    expect(first.playbackId).not.toBe(second.playbackId);
+    expect(first.ticket).not.toBe(second.ticket);
+    expect(await admittedFor(stack, ring, first.ticket, fileIn(shelf, "Sintel"))).toMatchObject({
+      playback: first.playbackId,
+    });
+    expect(await admittedFor(stack, ring, second.ticket, fileIn(shelf, "Sintel"))).toMatchObject({
+      playback: second.playbackId,
+    });
+  });
+
   it("let a link guest start the title the link names and nothing else", async () => {
     if (stack === undefined) return;
 

@@ -1,3 +1,4 @@
+import { cut } from "../../movies/bounds";
 import type { JobItem } from "./kinds";
 import type { JobCommon, JobFields, JobWork, Lease } from "./model";
 
@@ -10,6 +11,16 @@ export const LEASE_MS_MAX = 600_000;
 export const ITEM_BATCH_MAX = 4000;
 
 export const LAPSED_ERROR = "The worker stopped responding";
+
+/** Most characters a job's message or error keeps (ADR 0012, "Finished jobs"). */
+export const JOB_TEXT_MAX = 4096;
+
+/** What ends a message or error that was cut to `JOB_TEXT_MAX`. */
+export const CUT_MARK = "… (cut)";
+
+/** A worker's message or error as a job keeps it: cut to `JOB_TEXT_MAX` with `CUT_MARK`. */
+const bounded = (text: string): string =>
+  text.length <= JOB_TEXT_MAX ? text : `${cut(text, JOB_TEXT_MAX - CUT_MARK.length)}${CUT_MARK}`;
 
 export interface Policy {
   readonly maxStrikes: number;
@@ -211,7 +222,7 @@ const report = (job: Running, event: Report, now: number): Step => {
     {
       ...job,
       work: result.work,
-      message: event.message ?? job.message,
+      message: event.message === undefined ? job.message : bounded(event.message),
       leaseExpiresAt: now + event.leaseMs,
       strikes: result.progressed ? 0 : job.strikes,
       progressed: job.progressed || result.progressed,
@@ -233,7 +244,7 @@ const finish = (job: Running, end: Finish, now: number, policy: Policy): Step =>
 
     return moved({
       ...commonOf(job),
-      message: end.message ?? job.message,
+      message: end.message === undefined ? job.message : bounded(end.message),
       status: "succeeded",
       finishedAt: now,
     });
@@ -241,11 +252,13 @@ const finish = (job: Running, end: Finish, now: number, policy: Policy): Step =>
 
   const strikes = job.strikes + 1;
 
+  const error = bounded(end.error);
+
   if (end.retry && strikes < policy.maxStrikes) {
-    return moved({ ...commonOf(job), strikes, status: "queued", lastError: end.error });
+    return moved({ ...commonOf(job), strikes, status: "queued", lastError: error });
   }
 
-  return failed(job, end.error, strikes, now);
+  return failed(job, error, strikes, now);
 };
 
 const lapse = (job: Running, now: number, policy: Policy): Step => {

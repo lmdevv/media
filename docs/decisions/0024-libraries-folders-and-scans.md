@@ -1,7 +1,7 @@
 # 0024. Libraries have a kind, their own folders, grants, and one scan kind per domain
 
 - Status: Accepted, 2026-11-04. Amended 2026-11-09 with the movies catalog, and again the same
-  day with each movies document's size bound.
+  day with each movies document's size bound. Amended 2026-11-10 with folder identity.
 - Decisions: D01, D02, D16, D17, D28, D29, D50
 
 ## Context
@@ -306,6 +306,100 @@ text, so a title with an absurd overview could make a call reserve far more than
   every identity field at its maximum, every free text at 64 characters, and lists empty, all in
   3-byte UTF-8 characters, and checks it fits its bound, so fitting always reaches its target.
 
+### Folder identity (amended 2026-11-10)
+
+Two spellings can name one folder: a symbolic link, a bind mount, or a case-insensitive or
+Unicode-normalizing mount. Path checks in `core/folders.ts` cannot see that, so every scan also
+claims its library's folders by what they are on disk.
+
+- Right after `core/scans:target` and before any write, the scanner calls
+  `core/scans:claimFolders({ lease, kind, bootId, folders })` under `withScanLease`. Each entry
+  names one of the library's current folders, its chain, and its source. The chain is the
+  `<dev>:<ino>` identity of the folder's real path, then of each parent up to `/`: 1 to 64
+  identities of at most 48 characters each. The source is `{ device, path }`: the folder's mount
+  device as `<major>:<minor>` of at most 48 characters, and its path within that device's
+  filesystem, `/` for its root, absolute without empty, `.`, or `..` parts, at most 4,096
+  characters and 64 parts. It is null when the server has no mount table. `bootId` is the host's
+  boot id, or null; the core keeps it for diagnosis only.
+- The call throws, as a server defect, when it gets more than 16 folders, a folder that is not
+  the library's, a missing or repeated folder, a malformed chain, or a malformed source.
+- A claimed folder is a `folderClaims` row `{ libraryId, folder, since, bootId }` and its keys,
+  `folderClaimKeys` rows `{ claimId, libraryId, since, key, depth }`: `i:<dev>:<ino>` for each
+  identity of its chain, the folder itself at depth 0, and one `s:<device>:/<part>/…/` row at
+  depth 0 for its source, each part the first 16 hex digits of its SHA-256 and `/` alone for the
+  filesystem's root. A folder reaches another when its identity chain holds the other's own
+  identity, or when its source key starts with the other's, so on one device its source equals
+  the other's or lies inside it by whole parts. A claim reads, for each folder, the rows that
+  hold its own identity at any depth and the source keys that start with its own (folders at or
+  inside it), and the depth-0 rows of each parent identity and each parent source path (folders
+  around it). Identities catch links and other spellings, case-insensitive ones included; source
+  paths catch a bind mount of a folder inside another, whose mount point's parents never reach
+  the other's identity.
+- Ownership persists in the core and does not depend on the boot. `since` is when the library
+  first claimed the folder, and every later claim of the same library and folder keeps it. Two
+  overlapping claims go to the older, the lower `since`, and the lower claim id on a tie; a folder
+  claimed for the first time loses a tie. A folder that another of the library's own folders
+  reaches is refused, which is one folder sent twice through a link. An older claim of another
+  library refuses the call with `{ claimed: false, folder, rescans }`, `folder` being the first
+  such folder of this library in path order. A refusal writes only `folderClaimWaits` rows
+  `{ libraryId, ownerLibraryId }`, one per older library, at most 16 a refusal, deduped, and at
+  most 64 waiters per owner and 64 owners per waiter; past those it records nothing and that
+  library is rescanned by hand. `rescans` is true when a wait row exists for this library on each
+  older library of that folder, so the core rescans it once they let go; it is false past the
+  caps and for a folder that another of the library's own folders reaches. The library's earlier
+  claims stay, the scanner stops, and the library stays refused until the older claim goes.
+- When the caller is older, as when a younger library slipped in while the caller's identities
+  had changed across a reboot, the call succeeds and takes the younger claims of the folders it
+  reaches, at most 4 a call: each loses its keys and is marked `lost`, so its library still has
+  the folder configured but owns it no more. Each younger library then waits on the caller and is
+  disowned in the same mutation: its running scan is canceled, so its `finish` answers
+  `canceled`; its purge is scheduled through `core/scans:purgeLibrary`; and the libraries waiting
+  on it are rescanned, since it let a claim go. A later claim of the lost folder by its library
+  starts a new claim from that time.
+- Every scanner write is fenced by ownership. `withScanLease` reads the library's claims, one
+  range of at most 16, in the same mutation as the write, and a library that does not own every
+  folder it has, because one was lost or it never claimed them, has its scan canceled and the
+  call answers `canceled`, as for a deleted library; `target` and `claimFolders` run before the
+  claim and skip the fence. The taking writes the claim the fence reads, so Convex runs an
+  eviction and a write of the evicted scan one after the other: the evicted scan writes nothing
+  after the eviction commits. The purge keeps a row only inside a configured folder that the
+  library has not lost, so an evicted library's rows there go, batched and budgeted as any purge;
+  a folder it never claimed keeps its rows, as an import writes them before any scan.
+- When an owner lets a claim go, its waiting libraries are rescanned on their own: `setFolders`
+  deletes the claims of the folders it removes, `remove` deletes all of the library's claims and
+  its own waits, a claim replaces rows that changed, as after a reboot that changed identities,
+  and an eviction takes the younger claim. Each schedules `core/libraries:wakeWaiting` for that
+  library, which deletes up to 16 of its waits a call, queues each waiting library's scan through
+  the same code that queues every other scan, and schedules itself while more wait. A waiting
+  library that still overlaps is refused again and waits again.
+- A successful claim keeps each folder's claim, replaces its keys when they changed, and an
+  unchanged claim writes nothing. At its largest, 16 folders of 64 identities and a 64-part
+  source, it reads at most 17 ranges and 1,040 rows of its own and at most 2,064 ranges of
+  `by_key_depth`, each at most 4 rows past its own. It deletes at most 1,040 key rows and inserts
+  at most 1,040, and evicts at most 4 claims of 66 rows. Convex counts each delete among a call's
+  4,096 reads, so that is about 3,400 reads, inside that limit and the 32,000-document and
+  8,192-write limits; keys are short, so the reads stay a few MiB. A stack test runs it at that
+  size. A range that fills its 4 rows, or more than 4 younger claims, schedules
+  `core/folderClaims:settle`, which reads the library's claims again and takes the younger claim
+  of each overlapping pair from its library, the library's own claim included, until none is
+  left. Two concurrent claims that overlap each read a range the other
+  writes, so Convex runs them one after the other.
+- Before it claims, the server checks each folder as the scan would: it resolves, is a folder, and
+  lies inside `LIBRARY_ROOTS`; a missing folder fails the scan to be retried and an unapproved one
+  fails it for good. It then reads each folder's chain with the folder's real path and `stat`
+  with 64-bit device and inode numbers for it and each parent, and the boot id from
+  `/proc/sys/kernel/random/boot_id`. It reads each folder's source from `/proc/self/mountinfo`:
+  the innermost mount holding the real path (the last one listed when mounts stack on one point),
+  its device, and the mount's root within that device's file system joined with the path below
+  the mount point. A bind mount of a library folder's child so names a path inside that folder on
+  the same device, though its inode chain never reaches the folder. Without a mount table, or for
+  a source path longer than the core takes, it sends no source and the inode chain alone decides.
+  A refused claim fails the scan with "Another library already uses <folder> under another path"
+  and writes nothing. The message says the library scans again on its own when the core answered
+  `rescans: true`, and asks for a manual scan once the owner lets go when it answered `false`
+  (past the wait caps). The server reads `known` and writes only after the claim, since every
+  write, the listing included, is fenced on ownership and an unowned scan is canceled.
+
 ## Consequences
 
 - A domain author writes scanner callbacks as `serverMutation`s that call `withScanLease`, a purge
@@ -342,9 +436,11 @@ text, so a title with an absurd overview could make a call reserve far more than
 
 ## Left for later units
 
-- Claiming folders through links, bind mounts, and case-insensitive or Unicode-normalizing mounts,
-  where two spellings name one folder, needs the server's file access: phase 4, with the scanner,
-  by folder identity as old music's `claimRoot` did.
+- On the core, rescans after a file changes need a server function that queues a scan of the
+  library whose folder changed. Old movies' library monitor scans in the server itself, which the
+  core's lease-fenced writes do not allow; `p4-movies-cutover` adds the function and points the
+  monitor at it.
+
 - A library whose last manager's account is deleted has no one who can see it. Account deletion
   does not exist yet; the unit that adds it decides who inherits.
 - Guest links (p3-guests) must be a capability of their own, not grants on a title, or items would

@@ -13,12 +13,14 @@ import { type ResolvedMediaFile, resolveInsideRoots } from "../playback/file-res
 import { generate } from "./trickplay-generator.ts";
 import * as TrickplayStore from "./trickplay-store.ts";
 
-const count = (amount: number, noun: string): string =>
+/** `n noun`, with the noun plural unless n is 1. */
+export const count = (amount: number, noun: string): string =>
   `${String(amount)} ${noun}${amount === 1 ? "" : "s"}`;
 
 type GenerateError = Effect.Error<ReturnType<typeof generate>>;
 
-const generateFailure = Match.type<
+/** How a thumbnail build's failure ends its job. */
+export const generateFailure = Match.type<
   GenerateError | TrickplayStore.TrickplayStorageFailed | JobFailed
 >().pipe(
   Match.tagsExhaustive({
@@ -29,7 +31,8 @@ const generateFailure = Match.type<
   }),
 );
 
-const onDisk = Effect.fn("TrickplayJob.onDisk")(function* (path: string) {
+/** The size, change time, and thumbnail version of the file at `path` now. */
+export const onDisk = Effect.fn("TrickplayJob.onDisk")(function* (path: string) {
   const fs = yield* FileSystem.FileSystem;
 
   const info = yield* fs

@@ -286,6 +286,54 @@ describe("issuing and admitting", () => {
     );
   });
 
+  it("gives two starts in one second two tickets when each names its playback", async () => {
+    const ring = await ringOf(TICKET_TEST_KEYS.k1);
+    const principal = { userId: "user1", sessionId: "session1" };
+    const resource = { kind: "file" as const, id: "file1" };
+    const now = 1_700_000_000_000;
+
+    const issue = async (playback?: string) => {
+      const issued = await ring.issuePersonal({
+        principal,
+        playback,
+        resource,
+        purpose: "play",
+        now,
+      });
+
+      if (!issued.ok) throw new Error("not issued");
+
+      return issued.value.ticket;
+    };
+
+    const first = await issue("4b6f1e2a-0c3d-4e5f-8a9b-0c1d2e3f4a5b");
+    const second = await issue("9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a");
+
+    expect(first).not.toBe(second);
+    expect(await issue()).toBe(await issue());
+
+    const route = { purposes: ["play" as const], resource };
+    const admitted = await ring.admit({ ticket: first, route, readSession: live }, now);
+
+    expect(admitted.ok && admitted.value.claims).toEqual({
+      kind: "personal",
+      principal,
+      playback: "4b6f1e2a-0c3d-4e5f-8a9b-0c1d2e3f4a5b",
+      purpose: "play",
+      resource,
+      issuedAt: now,
+      expiresAt: now + PERSONAL_TICKET_MAX_MS,
+    });
+
+    // The playback is signed: naming another one breaks the MAC.
+    const swapped = first.replace("4b6f1e2a", "4b6f1e2b");
+    const refusedSwap = await ring.admit({ ticket: swapped, route, readSession: live }, now);
+
+    expect(!refusedSwap.ok && refusedSwap.error.reason).toBe("bad_signature");
+
+    await expect(issue("Not.A.Playback")).rejects.toThrow(RangeError);
+  });
+
   it("refuses a ticket with any one character changed, inserted, or deleted", async () => {
     const ring = await ringOf(TICKET_TEST_KEYS.k1);
     const { ticket } = playVector;

@@ -1,6 +1,6 @@
 # 0014. Run one server process with per-domain worker caps and one transcode limit
 
-- Status: Accepted, 2026-11-03
+- Status: Accepted, 2026-11-03. Amended 2026-11-10 with the pools on the core and guests' streams.
 - Decisions: D29
 
 ## Context
@@ -140,5 +140,16 @@ mount media read-only.
   request fails as not ready, and the session stays for the player's retry.
 - When household streams fill the limit, another household stream is refused at once, a household
   resume ends its session, and guests wait.
-- Until the server checks core tickets (phase 4), every stream it serves is a household stream.
+- On old movies every stream is a household stream. On the core the server reads
+  `sessionStatus.guest` for the ticket's session when it admits the ticket, and a guest's streams
+  take the `guest` audience in the limit.
 - Original media stays read-only to the server.
+
+## Pools on the core (amended 2026-11-10)
+
+`core/core-jobs.ts` runs the pools above on the core's worker protocol (ADR 0012): each pool
+watches `core/jobs/worker:waiting` for its kinds and claims while it has a free local slot, renews
+its leases with `report` every 15 seconds, and settles with `finish`. A lease-checked call that
+answers canceled or lost stops the job and settles nothing. The `movies` and `movies.background`
+pools claim only while `core/scans:domains` answers that movies has a library (ADR 0024); the
+`server` pool always claims. Music adds its pools with its port.

@@ -33,6 +33,7 @@ import {
   insertSeason,
   insertTitle,
   insertTitleGenre,
+  patchTitle,
 } from "./write";
 
 /**
@@ -684,5 +685,21 @@ export const titleLinks = internalQuery({
           : [{ sourceKey: collection.sourceKey, name: collection.name, source: row.source }];
       }),
     };
+  },
+});
+
+/**
+ * Marks a title as being purged while its files stay, a state the purge itself never leaves, so a
+ * test can see that every reader skips such a title anyway.
+ */
+export const markPurging = internalMutation({
+  args: { titleId: v.id("titles") },
+  returns: v.null(),
+  handler: async (ctx, { titleId }) => {
+    const title = (await ctx.db.get(titleId)) ?? fail("not_found", "No such title");
+
+    await patchTitle(ctx.db, title, { purging: true });
+
+    return null;
   },
 });

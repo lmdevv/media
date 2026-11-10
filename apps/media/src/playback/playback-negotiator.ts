@@ -7,7 +7,8 @@ import {
   UnsupportedPlayback,
 } from "@media/contracts/media-playback";
 import type { PlaybackTokenInvalid } from "@media/contracts/playback-token";
-import { Context, Duration, Effect, FileSystem, Layer, Option, Path, Redacted } from "effect";
+import { Context, Duration, Effect, FileSystem, Layer, Option, Path } from "effect";
+import type { Redacted } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
 import { subtitleTracks } from "../subtitles/subtitle-tracks.ts";
@@ -52,18 +53,16 @@ const burnedStreamIndex = (
   return track?.kind === "bitmap" && track.source === "embedded" ? Number(track.id.slice(1)) : -1;
 };
 
-/** Media URLs carry the token because `<video>` and segment fetches cannot set headers. */
-export const withToken = (url: string, token: Redacted.Redacted): string =>
-  `${url}?token=${encodeURIComponent(Redacted.value(token))}`;
-
 /**
  * The subtitle tracks of `file` as players see them; text tracks carry their WebVTT URL under
- * `base`, authorized by `token`.
+ * `base`, authorized by `token`. Media URLs carry the token because `<video>` and segment fetches
+ * cannot set headers, in the parameter `withToken` puts it in.
  */
 export const subtitleViews = (
   file: FileResolver.CheckedMediaFile,
   base: string,
   token: Redacted.Redacted,
+  withToken: PlaybackToken.Interface["withToken"],
 ) =>
   subtitleTracks(file).map((track) => ({
     id: track.id,
@@ -160,7 +159,7 @@ const make = Effect.gen(function* () {
 
     const base = config.mediaBaseUrl;
 
-    const subtitles = subtitleViews(file, base, request.token);
+    const subtitles = subtitleViews(file, base, request.token, verifier.withToken);
 
     const audioIndex = PlaybackPlan.$is("Direct")(plan)
       ? plan.audioIndex
@@ -207,7 +206,7 @@ const make = Effect.gen(function* () {
       return {
         ...common,
         mode: "direct",
-        url: withToken(`${base}/media/direct/${grant.fileId}`, request.token),
+        url: verifier.withToken(`${base}/media/direct/${grant.fileId}`, request.token),
       } satisfies NegotiateResponse;
     }
 
@@ -254,7 +253,7 @@ const make = Effect.gen(function* () {
       burnedInSubtitle: burnSubtitle === undefined ? undefined : request.burnInSubtitle,
       streamId: started.streamId,
       generation: started.generation,
-      url: withToken(
+      url: verifier.withToken(
         `${base}/media/hls/${started.streamId}/${started.generation}/index.m3u8`,
         request.token,
       ),

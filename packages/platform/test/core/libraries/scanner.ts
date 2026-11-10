@@ -9,6 +9,7 @@ import { runServer } from "../../service";
 import type { CoreStack } from "../../stack-env";
 import { eventually, retrying } from "../jobs/driver";
 import { walk } from "./files";
+import { claimOwnFolders } from "./ownership";
 import type { ScannedFile } from "./files";
 
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
@@ -162,6 +163,7 @@ export const scanCalls = (stack: CoreStack, workerId: string) => ({
     ),
   target: (lease: ScanLease, kind: ContentDomain) =>
     retrying(() => runServer(stack, api.core.scans.target, { lease, kind }, Target)),
+  claimOwn: (lease: ScanLease, kind: ContentDomain) => claimOwnFolders(stack, kind, lease),
   known: async (
     lease: ScanLease,
     kind: ContentDomain,
@@ -284,6 +286,10 @@ const scanClaimed = async (
   const target = await calls.target(lease, kind);
 
   if (target.outcome !== "held") return stopped(target.outcome);
+
+  const claimed = await calls.claimOwn(lease, kind);
+
+  if (claimed !== "held") return stopped(claimed);
 
   const walked = (await Promise.all(target.value.folders.map(walk))).flat();
   const known = await knownFiles(calls, lease, kind);

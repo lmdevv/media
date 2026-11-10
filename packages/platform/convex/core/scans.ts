@@ -5,7 +5,9 @@ import { contentDomain } from "../../commands/scopes";
 import type { ContentDomain } from "../../commands/scopes";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
+import { internalMutation } from "../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
+import { claimIdentities, ownershipOf, parseClaim } from "./folderClaims";
 import { foldersOf, isInside, isPlainPath } from "./folders";
 import { scanKindOf } from "./jobs/kinds";
 import { withJobLease, leaseAnswer } from "./jobs/held";
@@ -119,12 +121,23 @@ const heldScan = (
 };
 
 /**
+ * Whether a scanner callback needs the library to own every folder it scans (ADR 0024, "Folder
+ * identity"). Every write does; `target` and `claimFolders` come before the claim.
+ */
+type Fence = "owned" | "beforeClaim";
+
+/**
  * The lease check every scanner callback runs first, in its own mutation, and the only way to
  * write a library's items under a scan. It runs `withJobLease`, so a canceled job ends on this
  * call and frees its slot, and a call from an older attempt answers `lost`. It then reads the
- * library and its folders, runs `write`, and moves the library's count by what `write` reports, in
+ * library and its folders and, unless `fence` is `beforeClaim`, its claims, one range of at most
+ * 16: a library that does not own every folder it has, because an older claim took one or it
+ * never claimed them, has its scan canceled and the call answers `canceled`, as for a deleted
+ * library. Otherwise it runs `write` and moves the library's count by what `write` reports, in
  * this same mutation. A canceled attempt therefore writes nothing after its cancel commits, which
- * is what lets a library's new scan start while the old one's worker has not yet stopped.
+ * is what lets a library's new scan start while the old one's worker has not yet stopped, and an
+ * evicted scan writes nothing after the eviction commits: the eviction writes the claim this
+ * reads, so Convex runs the two one after the other.
  *
  * @throws Error when the lease is a scan of another domain's library, which only a defect gives.
  */
@@ -133,11 +146,10 @@ export const withScanLease = <Value>(
   kind: ContentDomain,
   held: Lease,
   write: (scan: HeldScan) => Promise<Counted<Value>>,
+  fence: Fence = "owned",
 ): Promise<LeaseAnswer<Value>> =>
   withJobLease(ctx, [scanKindOf(kind)], held, async (job) => {
-    const library = await ctx.db.get(job.payload.libraryId);
-
-    if (library === null) {
+    const stop = async (): Promise<LeaseAnswer<Value>> => {
       await cancel(ctx, job.jobId);
 
       const canceling = await ctx.db.get(job.jobId);
@@ -145,9 +157,20 @@ export const withScanLease = <Value>(
       if (canceling !== null) await applyEvent(ctx, canceling, { type: "check", lease: held });
 
       return { outcome: "canceled" };
-    }
+    };
+
+    const library = await ctx.db.get(job.payload.libraryId);
+
+    if (library === null) return stop();
 
     const folders = await foldersOf(ctx.db, library._id);
+
+    if (fence === "owned") {
+      const ownership = await ownershipOf(ctx.db, library._id);
+
+      if (!folders.every(ownership.owns)) return stop();
+    }
+
     const counted = await write(heldScan(job.jobId, library, folders));
     const value = await moveCount(ctx.db, library._id, counted);
 
@@ -159,15 +182,33 @@ export interface PurgeScope {
   readonly libraryId: Id<"libraries">;
   /** Whether the library itself is gone; its counts went with it, so nothing moves them. */
   readonly gone: boolean;
-  /** Whether a row at `path` stays: inside a current folder. Never, once the library is gone. */
+  /**
+   * Whether a row at `path` stays: inside a current folder that no older claim of another library
+   * took. Never, once the library is gone.
+   */
   readonly keeps: (path: string) => boolean;
 }
+
+/** Whether a path lies in one of the library's folders that it has not lost: three reads. */
+const keptBy = async (
+  db: DatabaseReader,
+  libraryId: Id<"libraries">,
+): Promise<(path: string) => boolean> => {
+  const [folders, ownership] = await Promise.all([
+    foldersOf(db, libraryId),
+    ownershipOf(db, libraryId),
+  ]);
+
+  return keepsIn(folders.filter((folder) => !ownership.lost(folder)));
+};
 
 /**
  * One page of a domain's purge of a library's items: `deletePage` deletes up to a page of rows
  * that `scope` does not keep and says how many. While the library exists, its count moves by
- * them in this mutation; a deleted library's count is already gone. Reads the library and its
- * folders again on every page, so a folder added back mid-purge keeps its rows.
+ * them in this mutation; a deleted library's count is already gone. Reads the library, its
+ * folders, and its claims again on every page, so a folder added back or claimed again mid-purge
+ * keeps its rows. A folder the library never claimed keeps its rows, as an import writes them
+ * before any scan.
  */
 export const purgeStep = async <Value>(
   ctx: Pick<MutationCtx, "db">,
@@ -175,7 +216,7 @@ export const purgeStep = async <Value>(
   deletePage: (scope: PurgeScope) => Promise<Counted<Value>>,
 ): Promise<Value> => {
   const library = await ctx.db.get(libraryId);
-  const keeps = library === null ? () => false : keepsIn(await foldersOf(ctx.db, libraryId));
+  const keeps = library === null ? () => false : await keptBy(ctx.db, libraryId);
   const counted = await deletePage({ libraryId, gone: library === null, keeps });
 
   return library === null ? counted.value : moveCount(ctx.db, libraryId, counted);
@@ -203,6 +244,22 @@ export const schedulePurge = async (
     cursor: null,
   });
 };
+
+/**
+ * Schedules the purge of a library that lost a folder to an older claim, which deletes its rows
+ * there; `core/folderClaims.ts` schedules this when it takes a claim.
+ */
+export const purgeLibrary = internalMutation({
+  args: { libraryId: v.id("libraries") },
+  returns: v.null(),
+  handler: async (ctx, { libraryId }) => {
+    const library = await ctx.db.get(libraryId);
+
+    if (library !== null) await schedulePurge(ctx, library);
+
+    return null;
+  },
+});
 
 /**
  * Whether any library of `kind` exists: one index entry. A domain's cron returns at once when it
@@ -239,9 +296,70 @@ export const target = serverMutation({
   args: { lease, kind: contentDomain },
   returns: leaseAnswer(v.object({ libraryId: v.id("libraries"), folders: v.array(v.string()) })),
   handler: (ctx, { lease: held, kind }) =>
-    withScanLease(ctx, kind, held, async (scan) => ({
-      value: { libraryId: scan.library._id, folders: [...scan.folders] },
-      added: 0,
-      removed: 0,
-    })),
+    withScanLease(
+      ctx,
+      kind,
+      held,
+      async (scan) => ({
+        value: { libraryId: scan.library._id, folders: [...scan.folders] },
+        added: 0,
+        removed: 0,
+      }),
+      "beforeClaim",
+    ),
+});
+
+/**
+ * The scanner's second call, right after `target` and before any write: claims the library's
+ * folders by what they are on disk (ADR 0024, "Folder identity"), so two libraries never reach one
+ * folder through a link, a bind mount, or another spelling. `chain` holds the `<dev>:<ino>` of the
+ * folder's real path and of each parent up to `/`, the folder first. `source` is the folder's
+ * mount device and its path within that filesystem, or null when the server has no mount table.
+ * `bootId` is the host boot the server read them in, kept for diagnosis. An overlap goes to the
+ * claim that came first; a refusal names the first of the library's folders that an older claim
+ * of another library reaches, or that another of its own folders reaches, and writes nothing but
+ * the record that rescans this library when the other lets go; `rescans` says whether that record
+ * exists, which it does not for a folder of its own nor past the cap on waits. The scanner then
+ * stops. A younger claim this one takes loses its folder: its library's running scan is canceled,
+ * its writes are refused from then on (`withScanLease`), and its purge deletes its rows there.
+ *
+ * @throws Error when the folders sent are not exactly the library's, or a chain or source is
+ * malformed: a defect in the server, which sends what `target` answered.
+ */
+export const claimFolders = serverMutation({
+  args: {
+    lease,
+    kind: contentDomain,
+    bootId: v.union(v.string(), v.null()),
+    folders: v.array(
+      v.object({
+        folder: v.string(),
+        chain: v.array(v.string()),
+        source: v.union(v.object({ device: v.string(), path: v.string() }), v.null()),
+      }),
+    ),
+  },
+  returns: leaseAnswer(
+    v.union(
+      v.object({ claimed: v.literal(true) }),
+      v.object({ claimed: v.literal(false), folder: v.string(), rescans: v.boolean() }),
+    ),
+  ),
+  handler: (ctx, { lease: held, kind, bootId, folders }) =>
+    withScanLease(
+      ctx,
+      kind,
+      held,
+      async (scan) => ({
+        value: await claimIdentities(
+          ctx,
+          scan.library._id,
+          bootId,
+          parseClaim(scan.folders, bootId, folders),
+        ),
+        added: 0,
+        removed: 0,
+      }),
+      "beforeClaim",
+    ),
 });

@@ -65,7 +65,7 @@ layer(EndedSessions.layerNone)("PlaybackToken", (it) => {
       yield* TestClock.setTime(5_000);
       const grant = yield* verify(sign(JSON.stringify(claims)));
 
-      assert.deepStrictEqual(grant, {
+      assert.deepStrictEqual<object>(grant, {
         userId: "user_1",
         profileId: "profile_1",
         fileId: "file_1",

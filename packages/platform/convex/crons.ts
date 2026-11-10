@@ -19,4 +19,13 @@ crons.interval(
   {},
 );
 
+crons.interval("delete week-old finished jobs", { hours: 1 }, internal.core.jobs.cleanup.sweep, {});
+
+crons.daily(
+  "request the nightly backup",
+  { hourUTC: 3, minuteUTC: 0 },
+  internal.core.backups.nightly,
+  {},
+);
+
 export default crons;

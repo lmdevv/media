@@ -7,6 +7,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { runFunction } from "../admin";
 import { retrying } from "../core/jobs/driver";
 import { makeTree } from "../core/libraries/files";
+import { claimOwnFolders } from "../core/libraries/ownership";
 import type { Member } from "../devices";
 import { runServer } from "../service";
 import type { CoreStack } from "../stack-env";
@@ -139,7 +140,12 @@ export const claimJob = async (
     ),
   );
 
-  if (claim.outcome === "claimed" && claim.lease.jobId === jobId) return claim.lease;
+  if (claim.outcome === "claimed" && claim.lease.jobId === jobId) {
+    // A scan claims its folders before any write, as the server's does.
+    if (kind === "movies.scan") await claimOwnFolders(stack, "movies", claim.lease);
+
+    return claim.lease;
+  }
 
   if (Date.now() > deadline) throw new Error(`Timed out waiting for a claim of ${jobId}`);
 

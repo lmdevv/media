@@ -14,6 +14,7 @@
     "./clock": "./src/clock.ts",
     "./playback-token": "./src/playback-token.ts",
     "./ticket": "./src/ticket.ts",
+    "./server-functions": "./src/server-functions.ts",
     "./ticket-vectors": "./src/ticket-vectors.ts",
     "./rate-limit": "./src/rate-limit.ts",
     "./commands": "./src/commands/registry.ts",

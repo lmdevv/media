@@ -65,6 +65,7 @@ export const claim = serverMutation({
  * inserts up to 4,000 items numbered from `from`, which must equal the job's `appended`, so a
  * retried append whose first try committed answers `outOfOrder` with the count instead of
  * duplicating. `through` deletes the items below it, at most 4,000 past the current watermark.
+ * A message longer than 4,096 characters is kept cut, with a mark at its end.
  */
 export const report = serverMutation({
   args: {
@@ -163,7 +164,8 @@ export const items = serverMutation({
 /**
  * Ends the held attempt. A repeat with the same lease and outcome answers `settled` again, so a
  * worker may retry a finish whose answer it lost. Success of an item kind needs every appended
- * item done and the items sealed; otherwise it answers `unfinished` and writes nothing.
+ * item done and the items sealed; otherwise it answers `unfinished` and writes nothing. A message
+ * or error longer than 4,096 characters is kept cut, with a mark at its end.
  */
 export const finish = serverMutation({
   args: {

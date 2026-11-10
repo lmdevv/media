@@ -147,6 +147,12 @@ const SEGMENT_CACHE = "private, max-age=3600";
 /** How long a request waits for the library's disk, which a hung network share never answers. */
 const FILE_WAIT = Duration.seconds(30);
 
+/** A byte response stopped because the session that admitted it ended. */
+class SessionEndedMidResponse extends Schema.TaggedError<SessionEndedMidResponse>()(
+  "SessionEndedMidResponse",
+  {},
+) {}
+
 const withinFileWait = <A, E, R>(waiting: Effect.Effect<A, E, R>) =>
   waiting.pipe(
     Effect.timeoutOrElse({
@@ -182,6 +188,7 @@ interface Answer {
 type Authorize = (
   token: Redacted.Redacted,
   purposes: ReadonlyArray<PlaybackToken.TokenPurpose>,
+  within?: PlaybackToken.Within,
 ) => Effect.Effect<PlaybackToken.PlaybackGrant, PlaybackTokenInvalid | PlaybackSessionEnded>;
 
 const MAX_LOGGED_PARAM = 64;
@@ -214,8 +221,8 @@ const observed = <R>(
     const failureKind = yield* Ref.make<FailureKind>("failure");
     const params = yield* HttpRouter.params;
 
-    const authorize: Authorize = (token, purposes) =>
-      failures.tokens.authorize(token, purposes).pipe(
+    const authorize: Authorize = (token, purposes, within) =>
+      failures.tokens.authorize(token, purposes, within).pipe(
         Effect.tap((grant) => Ref.set(sessionForLog, Option.some(grant))),
         Effect.catch((refused: PlaybackToken.TokenRefused) =>
           Effect.all([
@@ -336,7 +343,12 @@ export const layer: Layer.Layer<
       );
 
     const fileResponse = Effect.fnUntraced(
-      function* (request: HttpServerRequest.HttpServerRequest, file: string, contentType: string) {
+      function* (
+        request: HttpServerRequest.HttpServerRequest,
+        file: string,
+        contentType: string,
+        sessionEnded: Effect.Effect<void> | undefined,
+      ) {
         const info = yield* fs.stat(file);
         const size = Number(info.size);
 
@@ -362,15 +374,50 @@ export const layer: Layer.Layer<
         const rangeAllowed = ifRange === undefined || ifRange === etag || ifRange === lastModified;
         const range = parseByteRange(rangeAllowed ? request.headers["range"] : undefined, size);
 
+        // A response admitted for a session stops when that session ends, mid-body included
+        // (ADR 0011): its bytes stream from the file and fail then, which aborts the response.
+        const body = (
+          options: { readonly status: number; readonly offset: number; readonly bytes: number },
+          bodyHeaders: Readonly<Record<string, string>>,
+        ) =>
+          sessionEnded === undefined
+            ? platform.fileResponse(file, {
+                status: options.status,
+                offset: options.offset,
+                bytesToRead: options.bytes,
+                headers: bodyHeaders,
+              })
+            : Effect.succeed(
+                HttpServerResponse.stream(
+                  fs
+                    .stream(file, {
+                      offset: options.offset,
+                      bytesToRead: options.bytes,
+                      chunkSize: READ_CHUNK,
+                    })
+                    .pipe(
+                      Stream.interruptWhen(
+                        sessionEnded.pipe(
+                          Effect.andThen(Effect.fail(new SessionEndedMidResponse())),
+                        ),
+                      ),
+                    ),
+                  {
+                    status: options.status,
+                    headers: bodyHeaders,
+                    contentType,
+                    contentLength: options.bytes,
+                  },
+                ),
+              );
+
         const response = yield* ByteRange.$match(range, {
-          Full: () => platform.fileResponse(file, { headers }),
+          Full: () => body({ status: 200, offset: 0, bytes: size }, headers),
           Partial: ({ start, end }) =>
-            platform.fileResponse(file, {
-              status: 206,
-              offset: start,
-              bytesToRead: end - start + 1,
-              headers: { ...headers, "content-range": `bytes ${start}-${end}/${size}` },
-            }),
+            body(
+              { status: 206, offset: start, bytes: end - start + 1 },
+              { ...headers, "content-range": `bytes ${start}-${end}/${size}` },
+            ),
           Unsatisfiable: () =>
             Effect.succeed(
               HttpServerResponse.empty({
@@ -395,7 +442,12 @@ export const layer: Layer.Layer<
         }
 
         const { fileId = "" } = yield* HttpRouter.params;
-        const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.PLAY_OR_DOWNLOAD);
+
+        const grant = yield* authorize(
+          yield* tokenOf(request, failures.tokens.param),
+          PlaybackToken.PLAY_OR_DOWNLOAD,
+          PlaybackToken.READ,
+        );
 
         if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
 
@@ -403,7 +455,12 @@ export const layer: Layer.Layer<
           Effect.gen(function* () {
             const file = yield* resolve(grant.fileId, { sidecars: false });
 
-            return yield* fileResponse(request, file.path, CONTENT_TYPES[file.probe.container]);
+            return yield* fileResponse(
+              request,
+              file.path,
+              CONTENT_TYPES[file.probe.container],
+              grant.sessionEnded,
+            );
           }),
         );
       }),
@@ -418,7 +475,11 @@ export const layer: Layer.Layer<
         }
 
         const { fileId = "", name = "" } = yield* HttpRouter.params;
-        const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.DOWNLOAD);
+
+        const grant = yield* authorize(
+          yield* tokenOf(request, failures.tokens.param),
+          PlaybackToken.DOWNLOAD,
+        );
 
         if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
 
@@ -429,7 +490,12 @@ export const layer: Layer.Layer<
             if (Option.isNone(output))
               return yield* new MediaFileNotFound({ fileId: grant.fileId });
 
-            return yield* fileResponse(request, output.value, CONTENT_TYPES.mp4);
+            return yield* fileResponse(
+              request,
+              output.value,
+              CONTENT_TYPES.mp4,
+              grant.sessionEnded,
+            );
           }),
         );
       }),
@@ -455,11 +521,11 @@ export const layer: Layer.Layer<
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { streamId, generation } = yield* streamParams;
-        const token = yield* tokenOf(request);
-        const grant = yield* authorize(token, PlaybackToken.PLAY);
+        const token = yield* tokenOf(request, failures.tokens.param);
+        const grant = yield* authorize(token, PlaybackToken.PLAY, streamId);
 
         const view = yield* sessions.playlist(streamId, generation, grant);
-        const query = `?token=${encodeURIComponent(Redacted.value(token))}`;
+        const query = `?${failures.tokens.param}=${encodeURIComponent(Redacted.value(token))}`;
 
         const body = renderPlaylist(view.plan, {
           init: `init.mp4${query}`,
@@ -477,7 +543,12 @@ export const layer: Layer.Layer<
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { streamId, generation, file } = yield* streamParams;
-        const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.PLAY);
+
+        const grant = yield* authorize(
+          yield* tokenOf(request, failures.tokens.param),
+          PlaybackToken.PLAY,
+          streamId,
+        );
 
         const segmentMatch = /^(\d+)\.m4s$/.exec(file);
 
@@ -550,7 +621,12 @@ export const layer: Layer.Layer<
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { fileId = "", track = "" } = yield* HttpRouter.params;
-        const grant = yield* authorize(yield* tokenOf(request), PlaybackToken.PLAY_OR_DOWNLOAD);
+
+        const grant = yield* authorize(
+          yield* tokenOf(request, failures.tokens.param),
+          PlaybackToken.PLAY_OR_DOWNLOAD,
+          PlaybackToken.READ,
+        );
 
         if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
         const file = yield* resolve(grant.fileId, { sidecars: true });

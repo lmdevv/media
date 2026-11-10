@@ -77,6 +77,48 @@ export interface Interface {
   readonly restore: (backupId: BackupId) => Effect.Effect<void, RestoreError>;
 }
 
+/** Where the server records the archives it holds: the backups table of its Convex deployment. */
+export interface CatalogInterface {
+  /**
+   * Makes the table list exactly `archives`, listed from the folder starting at `listedAt`. A row
+   * a backup recorded after that stays, since the listing could not have seen its archive.
+   */
+  readonly sync: (
+    archives: ReadonlyArray<BackupArchive>,
+    listedAt: number,
+  ) => Effect.Effect<void, CallError>;
+  /** The archive a backup row names, for a restore. */
+  readonly fileOf: (backupId: BackupId) => Effect.Effect<{ readonly fileName: string }, CallError>;
+}
+
+/** The backups table the server keeps in step with its folder. */
+export class Catalog extends Context.Service<Catalog, CatalogInterface>()(
+  "@media/server/Backups/Catalog",
+) {}
+
+/** The backups table of old movies' deployment. */
+export const layerMoviesCatalog: Layer.Layer<Catalog, never, MediaBackend.Service> = Layer.effect(
+  Catalog,
+  Effect.gen(function* () {
+    const backend = yield* MediaBackend.Service;
+
+    return Catalog.of({
+      sync: (archives) =>
+        backend.call("mediaService.syncBackups", { archives }).pipe(
+          Effect.tap((result) =>
+            result.added > 0 || result.removed > 0
+              ? Effect.logInfo("Backups.synced").pipe(
+                  Effect.annotateLogs({ added: result.added, removed: result.removed }),
+                )
+              : Effect.void,
+          ),
+          Effect.asVoid,
+        ),
+      fileOf: (backupId) => backend.call("mediaService.backupFile", { backupId }),
+    });
+  }),
+);
+
 /** Database backups. */
 export class Service extends Context.Service<Service, Interface>()("@media/server/Backups") {}
 
@@ -100,7 +142,7 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const cli = yield* ConvexCli.Service;
-  const backend = yield* MediaBackend.Service;
+  const catalog = yield* Catalog;
   const permit = yield* Semaphore.make(1);
   const folder = config.backupDir;
 
@@ -154,14 +196,9 @@ const make = Effect.gen(function* () {
   }).pipe(Effect.mapError(folderFailed("remove")));
 
   const sync = Effect.gen(function* () {
-    const archives = yield* listArchives;
-    const result = yield* backend.call("mediaService.syncBackups", { archives });
+    const listedAt = yield* Clock.currentTimeMillis;
 
-    if (result.added > 0 || result.removed > 0) {
-      yield* Effect.logInfo("Backups.synced").pipe(
-        Effect.annotateLogs({ added: result.added, removed: result.removed }),
-      );
-    }
+    yield* catalog.sync(yield* listArchives, listedAt);
   }).pipe(Effect.withSpan("Backups.sync"));
 
   const create = Effect.fn("Backups.create")(
@@ -236,7 +273,7 @@ const make = Effect.gen(function* () {
   const restore = Effect.fn("Backups.restore")(function* (backupId: BackupId) {
     yield* exclusively(
       Effect.gen(function* () {
-        const { fileName } = yield* backend.call("mediaService.backupFile", { backupId });
+        const { fileName } = yield* catalog.fileOf(backupId);
         const archive = yield* archivePath(fileName);
 
         yield* Effect.logWarning("Backups.restore_started").pipe(Effect.annotateLogs({ fileName }));
@@ -267,7 +304,7 @@ const make = Effect.gen(function* () {
 export const layer: Layer.Layer<
   Service,
   never,
-  MediaConfig.Service | FileSystem.FileSystem | Path.Path | ConvexCli.Service | MediaBackend.Service
+  MediaConfig.Service | FileSystem.FileSystem | Path.Path | ConvexCli.Service | Catalog
 > = Layer.effect(Service, make);
 
 /**

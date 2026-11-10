@@ -1,11 +1,17 @@
+import { v } from "convex/values";
+
 import { register } from "../../commands/core/libraries";
+import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
+import { internalMutation } from "../_generated/server";
 import type { DatabaseReader } from "../_generated/server";
+import { releaseClaims, takeWaiters } from "./folderClaims";
 import { claimFolders, foldersOf, parseFolders, releaseFolders } from "./folders";
 import { scanKindOf } from "./jobs/kinds";
 import { progressOf } from "./jobs/machine";
 import { cancel, enqueue } from "./jobs/queue";
 import type { Enqueued, JobCtx } from "./jobs/store";
+import { inOrder } from "./lib/inOrder";
 import { GIVEN_NAME_MAX, requireGivenName } from "./lib/names";
 import { requireServer } from "./permissions/authorize";
 import { deleteGrantsOn, grantCreator, requireContent, visiblePage } from "./permissions/grants";
@@ -118,6 +124,8 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
 
     if (added.length === 0 && removed.length === 0) return { scanJobId: null };
 
+    await releaseClaims(ctx, doc._id, removed);
+
     if (removed.length > 0) await schedulePurge(ctx, doc);
 
     return { scanJobId: (await restartScan(ctx, doc)).jobId };
@@ -133,10 +141,36 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
     if (doc.lastScan !== null) await cancel(ctx, doc.lastScan);
 
     await releaseFolders(ctx, doc._id);
+    await releaseClaims(ctx, doc._id, null);
     await forgetItemCount(ctx.db, doc._id);
     await deleteGrantsOn(ctx, libraryRef(doc._id));
     await ctx.db.delete(doc._id);
     await schedulePurge(ctx, doc);
+
+    return null;
+  },
+});
+
+/**
+ * Queues a scan of up to 16 libraries that were refused a folder `ownerLibraryId` claimed first,
+ * now that it let a claim go (ADR 0024, "Folder identity"), and schedules itself again while more
+ * wait. A library that still overlaps is refused again and waits again.
+ */
+export const wakeWaiting = internalMutation({
+  args: { ownerLibraryId: v.id("libraries") },
+  returns: v.null(),
+  handler: async (ctx, { ownerLibraryId }) => {
+    const { libraryIds, more } = await takeWaiters(ctx, ownerLibraryId);
+
+    await inOrder(libraryIds, async (libraryId) => {
+      const library = await ctx.db.get(libraryId);
+
+      if (library !== null) await queueScan(ctx, library);
+    });
+
+    if (more) {
+      await ctx.scheduler.runAfter(0, internal.core.libraries.wakeWaiting, { ownerLibraryId });
+    }
 
     return null;
   },

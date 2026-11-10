@@ -2,7 +2,9 @@
  * Artwork URLs. Titles, seasons, and episodes carry artwork keys (`Artwork.poster`,
  * `Season.poster`, `Episode.still`, and so on): opaque, URL-safe strings the media service minted
  * while scanning. Clients load an image from `${mediaBaseUrl}/artwork/${key}`, optionally resized
- * to one of `ARTWORK_WIDTHS` with `?w=`. Images need no token, so `<img>` tags can use the URL as is.
+ * to one of `ARTWORK_WIDTHS` with `?w=`. On old movies images need no token, so `<img>` tags can
+ * use the URL as is; on the core an image URL also carries a shareable `ticket` for the key's
+ * `artworkTicketId`, the same string for a whole week, so images still cache (ADR 0011).
  */
 import { Schema } from "effect";
 
@@ -34,4 +36,18 @@ export const artworkUrl = (mediaBaseUrl: string, key: string, width?: ArtworkWid
   const base = `${mediaBaseUrl.replace(/\/+$/u, "")}/artwork/${encodeURIComponent(key)}`;
 
   return width === undefined ? base : `${base}?w=${String(width)}`;
+};
+
+/**
+ * The id a shareable ticket names for the artwork at `key` (ADR 0011): the unpadded base64url of
+ * the key's SHA-256, 43 characters, since a key can be longer than a ticket's resource id allows.
+ * The core issues tickets for this id, and the server's artwork route admits them for it.
+ */
+export const artworkTicketId = async (key: string): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
 };

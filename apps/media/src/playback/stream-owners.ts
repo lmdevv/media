@@ -1,6 +1,6 @@
 import type { PlaybackSessionId } from "@media/contracts/ids";
 import type { StreamId } from "@media/contracts/media-playback";
-import { Clock, Context, Effect, Layer } from "effect";
+import { Clock, Context, Effect, Layer, Option } from "effect";
 
 /** Stream owners. */
 export interface Interface {
@@ -10,6 +10,10 @@ export interface Interface {
   readonly closed: (streamId: StreamId) => Effect.Effect<void>;
   /** Whether `streamId` is open, or ended a short while ago, for `sessionId`. */
   readonly belongsTo: (streamId: string, sessionId: PlaybackSessionId) => Effect.Effect<boolean>;
+  /** The session `streamId` plays for while it is open; none once it ended or for no stream. */
+  readonly ownerOf: (streamId: string) => Effect.Effect<Option.Option<PlaybackSessionId>>;
+  /** Whether any open stream plays for `sessionId`. */
+  readonly hasOpen: (sessionId: PlaybackSessionId) => Effect.Effect<boolean>;
 }
 
 /** The stream owner registry. */
@@ -59,6 +63,20 @@ const make = Effect.sync((): Interface => {
 
         return owners.get(streamId)?.sessionId === sessionId;
       }),
+    ownerOf: (streamId) =>
+      Effect.sync(() => {
+        const owner = owners.get(streamId);
+
+        return owner === undefined || owner.endedAt !== undefined
+          ? Option.none()
+          : Option.some(owner.sessionId);
+      }),
+    hasOpen: (sessionId) =>
+      Effect.sync(() =>
+        [...owners.values()].some(
+          (owner) => owner.endedAt === undefined && owner.sessionId === sessionId,
+        ),
+      ),
   };
 });
 

@@ -2,6 +2,7 @@ import { ArtworkWidth } from "@media/contracts/artwork";
 import { Effect, Layer, Option, Schema } from "effect";
 import { HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
+import * as ArtworkGate from "../artwork/artwork-gate.ts";
 import * as ArtworkStore from "../artwork/artwork-store.ts";
 
 const decodeWidth = Schema.decodeUnknownOption(
@@ -20,6 +21,7 @@ export const layer: Layer.Layer<
     const router = yield* HttpRouter.HttpRouter;
     const store = yield* ArtworkStore.Service;
     const platform = yield* HttpPlatform.HttpPlatform;
+    const gate = yield* Effect.serviceOption(ArtworkGate.Service);
 
     const artwork = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
@@ -32,6 +34,17 @@ export const layer: Layer.Layer<
         raw === null ? Option.some(Option.none()) : Option.map(decodeWidth(raw), Option.some);
 
       if (Option.isNone(width)) return HttpServerResponse.empty({ status: 400 });
+
+      // On the core, an image needs a shareable ticket for its key (ADR 0011).
+      if (Option.isSome(gate)) {
+        const ticket = new URL(request.url, "http://media.invalid").searchParams.get(
+          gate.value.param,
+        );
+
+        if (ticket === null || !(yield* gate.value.admits(ticket, key))) {
+          return HttpServerResponse.empty({ status: 401 });
+        }
+      }
 
       const image = yield* store.image(key, width.value);
 

@@ -54,27 +54,33 @@ const scrub = (text: string, secrets: ReadonlyArray<string>): string =>
     .toSorted((left, right) => right.length - left.length)
     .reduce((scrubbed, secret) => scrubbed.replaceAll(secret, "<redacted>"), text);
 
-const make = Effect.gen(function* () {
-  const config = yield* MediaConfig.Service;
+/** The deployment the CLI administers, and the setting that names each part when it is absent. */
+export interface Target {
+  readonly url: Option.Option<string>;
+  readonly adminKey: Option.Option<Redacted.Redacted>;
+  readonly backendDir: Option.Option<string>;
+  readonly names: { readonly url: string; readonly adminKey: string; readonly backendDir: string };
+}
 
+const makeFor = (target: Target): Interface => {
   const missing = [
-    ...(Option.isNone(config.convexAdminKey) ? ["CONVEX_SELF_HOSTED_ADMIN_KEY"] : []),
-    ...(Option.isNone(config.convexBackendDir) ? ["CONVEX_BACKEND_DIR"] : []),
-    ...(Option.isNone(config.convexUrl) ? ["CONVEX_URL"] : []),
+    ...(Option.isNone(target.adminKey) ? [target.names.adminKey] : []),
+    ...(Option.isNone(target.backendDir) ? [target.names.backendDir] : []),
+    ...(Option.isNone(target.url) ? [target.names.url] : []),
   ];
 
   const invoke = Effect.fn("ConvexCli.invoke")(
     function* (operation: Operation, args: ReadonlyArray<string>) {
       if (
-        Option.isNone(config.convexAdminKey) ||
-        Option.isNone(config.convexBackendDir) ||
-        Option.isNone(config.convexUrl)
+        Option.isNone(target.adminKey) ||
+        Option.isNone(target.backendDir) ||
+        Option.isNone(target.url)
       ) {
         return yield* new ConvexCliUnavailable({ missing });
       }
 
-      const backendDir = config.convexBackendDir.value;
-      const adminKey = Redacted.value(config.convexAdminKey.value);
+      const backendDir = target.backendDir.value;
+      const adminKey = Redacted.value(target.adminKey.value);
       const secrets = [adminKey, ...args.filter((arg) => arg.startsWith("/")), backendDir];
 
       const failed = (exitCode: number | null, output: string, cause: unknown) =>
@@ -87,7 +93,7 @@ const make = Effect.gen(function* () {
         {
           cwd: backendDir,
           env: {
-            CONVEX_SELF_HOSTED_URL: config.convexUrl.value,
+            CONVEX_SELF_HOSTED_URL: target.url.value,
             CONVEX_SELF_HOSTED_ADMIN_KEY: adminKey,
           },
           stderrTail: OUTPUT_TAIL,
@@ -125,7 +131,25 @@ const make = Effect.gen(function* () {
       ),
     run: (functionName, args) => invoke("run", ["run", functionName, JSON.stringify(args)]),
   });
-});
+};
 
-/** The CLI as a Node child process of the server. */
-export const layer: Layer.Layer<Service, never, MediaConfig.Service> = Layer.effect(Service, make);
+/** The CLI as a Node child process of the server, for old movies' deployment. */
+export const layer: Layer.Layer<Service, never, MediaConfig.Service> = Layer.effect(
+  Service,
+  Effect.map(MediaConfig.Service, (config) =>
+    makeFor({
+      url: config.convexUrl,
+      adminKey: config.convexAdminKey,
+      backendDir: config.convexBackendDir,
+      names: {
+        url: "CONVEX_URL",
+        adminKey: "CONVEX_SELF_HOSTED_ADMIN_KEY",
+        backendDir: "CONVEX_BACKEND_DIR",
+      },
+    }),
+  ),
+);
+
+/** The CLI for the deployment `target` names, such as the core's. */
+export const layerFor = (target: Target): Layer.Layer<Service> =>
+  Layer.succeed(Service, makeFor(target));

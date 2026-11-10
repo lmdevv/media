@@ -1,5 +1,6 @@
+import type { EpisodeId, LibraryId } from "@media/contracts/ids";
+import type { Artwork, ExternalIds, TitleKind } from "@media/contracts/models/catalog";
 import type { ScannedEpisode } from "@media/contracts/models/scan";
-import type { FunctionResult } from "../convex/media-backend.ts";
 import { Effect, Match, Option } from "effect";
 
 import * as ArtworkKeys from "../artwork/artwork-keys.ts";
@@ -32,13 +33,12 @@ import { personDetailsOf } from "./person-job.ts";
 
 const EPISODE_BATCH = 100;
 
-const TOP_BILLED = 10;
-
 const noActorImages = (): undefined => undefined;
 
 const remote = (url: string | undefined) =>
   url === undefined ? undefined : ImageRef.cases.Remote.make({ url });
 
+/** How a metadata provider's failure ends a job: retried only when the request may work later. */
 const providerFailure = Match.type<MetadataPlugin.MetadataError>().pipe(
   Match.tagsExhaustive({
     MetadataProviderUnavailable: (error) => new JobFailed({ message: error.message, retry: false }),
@@ -101,21 +101,34 @@ const episodeMetadataOf = (season: ProviderSeason, episode: number): EpisodeMeta
 const backendFailure = (error: { readonly message: string }) =>
   new JobFailed({ message: error.message, retry: true });
 
-/** The metadata job handler. */
-export const handler: Effect.Effect<
-  JobHandler,
-  never,
-  MediaBackend.Service | MetadataPlugin.Service | ArtworkKeys.Service | Omdb.Service
-> = Effect.gen(function* () {
-  const backend = yield* MediaBackend.Service;
+/** What a metadata lookup needs of a title: its names and ids, artwork, and episodes. */
+export interface LookupTarget<EpisodeKey> {
+  readonly libraryId: LibraryId;
+  readonly kind: TitleKind;
+  readonly name: string;
+  readonly year: number | null;
+  readonly externalIds: ExternalIds;
+  readonly artwork: Artwork;
+  readonly episodes: ReadonlyArray<{
+    readonly episodeId: EpisodeKey;
+    readonly seasonNumber: number;
+    readonly episodeNumber: number;
+  }>;
+}
+
+/**
+ * Looks a title up at the metadata provider, by the match an admin chose when there is one, and
+ * shapes what it found as catalog records. Fails with `JobFailed` when nothing matches.
+ */
+export const lookUp = Effect.fn("MetadataJob.lookUp")(function* <EpisodeKey>(
+  target: LookupTarget<EpisodeKey>,
+  chosen: Option.Option<string>,
+) {
   const plugin = yield* MetadataPlugin.Service;
   const keys = yield* ArtworkKeys.Service;
   const omdb = yield* Omdb.Service;
 
-  const providerIdOf = Effect.fn("MetadataJob.providerId")(function* (
-    target: FunctionResult<"mediaService.metadataTarget">,
-    chosen: Option.Option<string>,
-  ) {
+  const providerIdOf = Effect.gen(function* () {
     if (Option.isSome(chosen)) return Option.some(chosen.value);
 
     if (target.externalIds.tmdb !== null) return Option.some(target.externalIds.tmdb);
@@ -134,6 +147,88 @@ export const handler: Effect.Effect<
     return Option.fromUndefinedOr(bestMatch(query, yield* plugin.search(query))?.providerId);
   });
 
+  const providerId = yield* providerIdOf.pipe(Effect.mapError(providerFailure));
+
+  if (Option.isNone(providerId)) {
+    return yield* new JobFailed({
+      message: `No metadata match for ${target.name}; choose one with metadata.fixMatch`,
+      retry: false,
+    });
+  }
+
+  const details = yield* plugin
+    .titleDetails(target.kind, providerId.value)
+    .pipe(Effect.mapError(providerFailure));
+
+  const collection =
+    details.collection === undefined
+      ? undefined
+      : yield* plugin
+          .collectionDetails(details.collection.providerId)
+          .pipe(Effect.orElseSucceed(() => undefined));
+
+  const imdb = details.ids.imdb ?? target.externalIds.imdb ?? undefined;
+  const scores = imdb === undefined ? {} : yield* omdb.ratings(imdb);
+  const metadata = titleMetadataOf(details, scores, collection);
+  const folder = { libraryId: target.libraryId, root: "" };
+  const scanned = yield* toScannedTitle(folder, metadata, keys.seal);
+
+  const title = {
+    ...scanned,
+    artwork: {
+      poster: scanned.artwork.poster ?? target.artwork.poster,
+      backdrop: scanned.artwork.backdrop ?? target.artwork.backdrop,
+      logo: scanned.artwork.logo ?? target.artwork.logo,
+    },
+  };
+
+  const seasons = [...new Set(target.episodes.map((episode) => episode.seasonNumber))];
+
+  const fetched: ReadonlyArray<{
+    readonly episodeId: EpisodeKey;
+    readonly metadata: EpisodeMetadata;
+  }> =
+    target.kind === "show"
+      ? yield* Effect.forEach(seasons, (season) =>
+          plugin.seasonDetails(providerId.value, season).pipe(
+            Effect.map((seasonDetails) =>
+              target.episodes
+                .filter((episode) => episode.seasonNumber === season)
+                .map((episode) => ({
+                  episodeId: episode.episodeId,
+                  metadata: episodeMetadataOf(seasonDetails, episode.episodeNumber),
+                })),
+            ),
+            Effect.catchTag("MetadataRequestFailed", () => Effect.succeed([])),
+            Effect.mapError(providerFailure),
+          ),
+        ).pipe(Effect.map((perSeason) => perSeason.flat()))
+      : [];
+
+  const episodes: Array<ScannedEpisode> = yield* Effect.forEach(fetched, (episode) =>
+    toScannedEpisode(folder, episode.metadata, keys.seal),
+  );
+
+  return { providerId: providerId.value, details, metadata, folder, title, fetched, episodes };
+});
+
+/** The top-billed people whose details a metadata job fetches itself. */
+export const TOP_BILLED = 10;
+
+/** The metadata job handler. */
+export const handler: Effect.Effect<
+  JobHandler,
+  never,
+  MediaBackend.Service | MetadataPlugin.Service | ArtworkKeys.Service | Omdb.Service
+> = Effect.gen(function* () {
+  const backend = yield* MediaBackend.Service;
+  const plugin = yield* MetadataPlugin.Service;
+  const keys = yield* ArtworkKeys.Service;
+
+  const context = yield* Effect.context<
+    MetadataPlugin.Service | ArtworkKeys.Service | Omdb.Service
+  >();
+
   return {
     kind: "metadata",
     run: Effect.fn("MetadataJob.run")(function* (claim, workerId, reportProgress) {
@@ -147,70 +242,10 @@ export const handler: Effect.Effect<
         .call("mediaService.metadataTarget", { titleId: payload.titleId })
         .pipe(Effect.mapError(backendFailure));
 
-      const providerId = yield* providerIdOf(
+      const { providerId, details, metadata, folder, title, fetched, episodes } = yield* lookUp(
         target,
         Option.fromNullOr(payload.match).pipe(Option.map((match) => match.providerId)),
-      ).pipe(Effect.mapError(providerFailure));
-
-      if (Option.isNone(providerId)) {
-        return yield* new JobFailed({
-          message: `No metadata match for ${target.name}; choose one with metadata.fixMatch`,
-          retry: false,
-        });
-      }
-
-      const details = yield* plugin
-        .titleDetails(target.kind, providerId.value)
-        .pipe(Effect.mapError(providerFailure));
-
-      const collection =
-        details.collection === undefined
-          ? undefined
-          : yield* plugin
-              .collectionDetails(details.collection.providerId)
-              .pipe(Effect.orElseSucceed(() => undefined));
-
-      const imdb = details.ids.imdb ?? target.externalIds.imdb ?? undefined;
-      const scores = imdb === undefined ? {} : yield* omdb.ratings(imdb);
-      const metadata = titleMetadataOf(details, scores, collection);
-      const folder = { libraryId: target.libraryId, root: "" };
-      const scanned = yield* toScannedTitle(folder, metadata, keys.seal);
-
-      const title = {
-        ...scanned,
-        artwork: {
-          poster: scanned.artwork.poster ?? target.artwork.poster,
-          backdrop: scanned.artwork.backdrop ?? target.artwork.backdrop,
-          logo: scanned.artwork.logo ?? target.artwork.logo,
-        },
-      };
-
-      const seasons = [...new Set(target.episodes.map((episode) => episode.seasonNumber))];
-
-      const fetched: ReadonlyArray<{
-        readonly episodeId: (typeof target.episodes)[number]["episodeId"];
-        readonly metadata: EpisodeMetadata;
-      }> =
-        target.kind === "show"
-          ? yield* Effect.forEach(seasons, (season) =>
-              plugin.seasonDetails(providerId.value, season).pipe(
-                Effect.map((seasonDetails) =>
-                  target.episodes
-                    .filter((episode) => episode.seasonNumber === season)
-                    .map((episode) => ({
-                      episodeId: episode.episodeId,
-                      metadata: episodeMetadataOf(seasonDetails, episode.episodeNumber),
-                    })),
-                ),
-                Effect.catchTag("MetadataRequestFailed", () => Effect.succeed([])),
-                Effect.mapError(providerFailure),
-              ),
-            ).pipe(Effect.map((perSeason) => perSeason.flat()))
-          : [];
-
-      const episodes: Array<ScannedEpisode> = yield* Effect.forEach(fetched, (episode) =>
-        toScannedEpisode(folder, episode.metadata, keys.seal),
-      );
+      ).pipe(Effect.provide(context));
 
       const batches = Array.from(
         { length: Math.max(1, Math.ceil(episodes.length / EPISODE_BATCH)) },
@@ -239,10 +274,7 @@ export const handler: Effect.Effect<
 
       const lease = { jobId: claim.job.id, workerId };
 
-      const writeCredits = (
-        episodeId: (typeof fetched)[number]["episodeId"] | null,
-        credits: TitleMetadata["credits"],
-      ) =>
+      const writeCredits = (episodeId: EpisodeId | null, credits: TitleMetadata["credits"]) =>
         Effect.gen(function* () {
           const scannedCredits = yield* toScannedCredits(folder, credits, keys.seal);
 
@@ -303,7 +335,7 @@ export const handler: Effect.Effect<
         { discard: true },
       );
 
-      return `Matched to TMDB ${providerId.value}: ${details.title}${details.year === undefined ? "" : ` (${String(details.year)})`}`;
+      return `Matched to TMDB ${providerId}: ${details.title}${details.year === undefined ? "" : ` (${String(details.year)})`}`;
     }),
   } satisfies JobHandler;
 });

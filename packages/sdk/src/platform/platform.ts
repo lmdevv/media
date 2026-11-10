@@ -22,8 +22,20 @@ export const layer = (options: Client.Options): Layer.Layer<Platform, Client.Ope
     ),
   ).pipe(Layer.provide(Client.layer(options)));
 
+/**
+ * The client underneath `Platform`, with `run` and `watch` for any declared function. The media
+ * server runs the core's server functions through it (`@media/contracts/server-functions`).
+ */
+export { Client, layer as layerClient } from "./client";
+
 export { Credentials, DeviceSignInRefused, TileProof } from "./client";
 
-export type { DeviceSignIn, OpenError, Options, Session } from "./client";
+export type {
+  DeviceSignIn,
+  Interface as ClientInterface,
+  OpenError,
+  Options,
+  Session,
+} from "./client";
 
-export type { Id, PlatformError } from "./command";
+export type { Command, Id, Params, PlatformError } from "./command";

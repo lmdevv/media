@@ -1,6 +1,7 @@
 # 0010. Serve HTTP with Effect HttpApi and sign the server in as a service principal
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-06 with the server's key and its rotation.
+- Status: Accepted, 2026-11-03. Amended 2026-11-06 with the server's key and its rotation, and
+  2026-11-10 with the server's core adapters.
 - Decisions: D24, D25
 
 ## Context
@@ -44,6 +45,40 @@ argument. That secret shows in Convex logs, cannot be scoped, and cannot be rota
   and no `MEDIA_` setting holds the key until phase 4.
 - The Convex function log holds neither the key nor its secret. A stack test reads the log across
   an issue, a sign-in, a refused sign-in, and a rotation.
+
+## The server's core adapters (amended 2026-11-10)
+
+`p4-server-core` built the server's half beside the old movies wiring. `main.ts` still wires old
+movies, so the running server holds one Convex URL (D50); `p4-movies-cutover` switches it.
+
+- `apps/media/src/core/core-wiring.ts` composes the server on the core: `CoreSession` with the
+  service key, the job worker on the core's worker protocol, the file resolver, ticket admission
+  on every byte route, the server status report, and backups. It takes the core's URL, the key,
+  and `MEDIA_TICKET_KEYS` as arguments. The settings that hold them land with the cutover, which
+  adds them to the image, Compose, the NixOS module, and both READMEs.
+- The core's server functions are declared once in `@media/contracts/server-functions` with Effect
+  Schema, in the shape the SDK's platform client runs. `CoreSession.call` and `CoreSession.watch`
+  run them as the service. They are not SDK methods or CLI commands; the SDK exports its client
+  (`Platform.Client`) only so the server can run a declaration it did not generate.
+- `CoreSession` signs in again once when a call answers `Unauthenticated`. A refused sign-in wakes
+  one sign-in loop that retries with backoff and reads the session's state on every try. Before,
+  each refusal started a backoff fiber bound to the generation it saw, unless one already ran: a
+  fiber from before a later sign-in then skipped every try and ended, leaving the server signed
+  out after the next refusal. A unit test that failed before the fix covers it.
+- A watch that fails or ends resubscribes with backoff, and signs in again first when the core
+  answered `Unauthenticated`, so a pool or a session watch never stops on its own.
+- `/api/health` reports the core as `connected` while the server is signed in and the core
+  answered its latest probe, every 30 seconds, as old movies' backend probe did.
+- Backups on the core export the core's deployment with its admin key and Convex folder, which
+  the caller passes; until the cutover's settings exist they fail as unavailable, naming them.
+  The core has no restore yet: old movies' restore runs maintenance functions the core lacks, and
+  nothing in the core wiring serves the restore route. The cutover brings both.
+- Left for the cutover, each because it changes what the running server serves or which
+  deployment a client talks to: TMDB match-candidate search stays the server's own route, which
+  calls TMDB itself and needs no server function, and moves onto the core's caller check when the
+  cutover replaces old movies' viewer check on the command routes; old movies' playback-mode
+  reports have no core function, so on the core the server only logs them; and rescans after a
+  file changes need a core function that queues a scan (ADR 0024).
 
 ## Consequences
 

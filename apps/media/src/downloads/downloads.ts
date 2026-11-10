@@ -42,7 +42,7 @@ import * as FileResolver from "../playback/file-resolver.ts";
 import { type CheckedMediaFile, resolveInsideRoots } from "../playback/file-resolver.ts";
 import * as HardwareAcceleration from "../playback/hardware-acceleration.ts";
 import { AudioPlan, VideoPlan } from "../playback/playback-decision.ts";
-import { subtitleViews, withToken } from "../playback/playback-negotiator.ts";
+import { subtitleViews } from "../playback/playback-negotiator.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
 import * as PlaybackToken from "../playback/playback-token.ts";
 import * as TranscodeSpace from "../playback/transcode-space.ts";
@@ -410,7 +410,7 @@ const make = Effect.gen(function* () {
     const base = config.mediaBaseUrl;
 
     const subtitles = () =>
-      subtitleViews(file, base, request.token).flatMap((view) =>
+      subtitleViews(file, base, request.token, verifier.withToken).flatMap((view) =>
         view.url === undefined ? [] : [{ ...view, url: view.url }],
       );
 
@@ -442,7 +442,7 @@ const make = Effect.gen(function* () {
         subtitles: subtitles(),
         expiresAt: grant.expiresAt,
         mode: "direct",
-        url: withToken(`${base}/media/direct/${grant.fileId}`, request.token),
+        url: verifier.withToken(`${base}/media/direct/${grant.fileId}`, request.token),
         sizeBytes: file.sizeBytes,
         container: file.probe.container,
         video: sourceVideo,
@@ -478,7 +478,10 @@ const make = Effect.gen(function* () {
       subtitles: subtitles(),
       expiresAt: grant.expiresAt,
       mode: plan.mode,
-      url: withToken(`${base}/media/downloads/${grant.fileId}/${job.name}.mp4`, request.token),
+      url: verifier.withToken(
+        `${base}/media/downloads/${grant.fileId}/${job.name}.mp4`,
+        request.token,
+      ),
       sizeBytes: state.sizeBytes,
       container: "mp4",
       video: VideoPlan.$match(plan.video, {

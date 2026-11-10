@@ -23,7 +23,9 @@ import * as TrickplayStore from "./trickplay/trickplay-store.ts";
 
 /**
  * Scanning, metadata, negotiation, streaming, players' diagnostics, downloads, and subtitles over
- * the integration seams, with `tools` running ffmpeg and ffprobe.
+ * the integration seams, with `tools` running ffmpeg and ffprobe. The byte routes' grants
+ * (`PlaybackToken`) and the stream owner registry come from outside, so the grants can be old
+ * movies' playback tokens or core tickets, which read the registry.
  */
 export const servicesLayerWith = (
   tools: Layer.Layer<MediaTools.Service, never, MediaConfig.Service>,
@@ -36,7 +38,6 @@ export const servicesLayerWith = (
     ClientDiagnostics.layer,
   ).pipe(
     Layer.provideMerge(StreamSessions.layer),
-    Layer.provideMerge(StreamOwners.layer),
     Layer.provideMerge(TranscodeSpace.layer),
     Layer.provideMerge(KeyframeIndex.layer),
     Layer.provideMerge(HardwareAcceleration.layer),
@@ -45,11 +46,13 @@ export const servicesLayerWith = (
     Layer.provideMerge(ArtworkKeys.layer),
     Layer.provideMerge(Tmdb.layer),
     Layer.provideMerge(Omdb.layer),
-    Layer.provideMerge(PlaybackToken.layer),
     Layer.provideMerge(DiskCache.layer),
     Layer.provideMerge(TrickplayStore.layer),
     Layer.provideMerge(tools),
   );
 
-/** The services over Node's child processes for ffmpeg and ffprobe. */
-export const servicesLayer = servicesLayerWith(MediaTools.layer);
+/** The services over Node's child processes for ffmpeg and ffprobe, on old movies' tokens. */
+export const servicesLayer = servicesLayerWith(MediaTools.layer).pipe(
+  Layer.provideMerge(PlaybackToken.layer),
+  Layer.provideMerge(StreamOwners.layer),
+);

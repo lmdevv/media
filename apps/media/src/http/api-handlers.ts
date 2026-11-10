@@ -9,7 +9,6 @@ import * as Downloads from "../downloads/downloads.ts";
 import * as MediaConfig from "../media-config.ts";
 import * as HardwareAcceleration from "../playback/hardware-acceleration.ts";
 import * as PlaybackNegotiator from "../playback/playback-negotiator.ts";
-import { withToken } from "../playback/playback-negotiator.ts";
 import * as PlaybackToken from "../playback/playback-token.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
 import { retryAfter } from "./rate-limit.ts";
@@ -27,20 +26,20 @@ const playbackHandlers = HttpApiBuilder.group(
     return handlers.handleAll({
       negotiate: ({ payload }) => negotiator.negotiate(payload),
       seek: Effect.fn("Api.seek")(function* ({ payload }) {
-        const grant = yield* verifier.verify(payload.token, PlaybackToken.PLAY);
+        const grant = yield* verifier.verify(payload.token, PlaybackToken.PLAY, payload.streamId);
         const view = yield* sessions.seek(payload.streamId, payload.positionSeconds, grant);
 
         return {
           streamId: view.streamId,
           generation: view.generation,
-          playlistUrl: withToken(
+          playlistUrl: verifier.withToken(
             `${config.mediaBaseUrl}/media/hls/${view.streamId}/${view.generation}/index.m3u8`,
             payload.token,
           ),
         };
       }),
       stop: Effect.fn("Api.stop")(function* ({ payload }) {
-        const grant = yield* verifier.verify(payload.token, PlaybackToken.PLAY);
+        const grant = yield* verifier.verify(payload.token, PlaybackToken.PLAY, payload.streamId);
         yield* sessions.stop(payload.streamId, grant);
       }),
       diagnostics: ({ payload }) =>

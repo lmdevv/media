@@ -18,6 +18,8 @@ import { servicesLayerWith } from "../media-service.ts";
 import { redactedLine } from "../observability.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
 import * as PlaybackReporter from "../playback/playback-reporter.ts";
+import * as PlaybackToken from "../playback/playback-token.ts";
+import * as StreamOwners from "../playback/stream-owners.ts";
 import * as SessionReports from "../playback/session-reports.ts";
 import * as FixtureWorkspace from "./fixture-workspace.ts";
 import * as TestConvex from "./test-convex.ts";
@@ -107,6 +109,8 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
       ).pipe(Layer.provide(MediaTools.layer));
 
       const services = servicesLayerWith(tools).pipe(
+        Layer.provideMerge(PlaybackToken.layer),
+        Layer.provideMerge(StreamOwners.layer),
         Layer.provideMerge(
           Layer.mergeAll(
             MemoryLibrary.layer,

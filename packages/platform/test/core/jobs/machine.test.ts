@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { JobItem } from "../../../convex/core/jobs/kinds";
-import { ITEM_BATCH_MAX, LAPSED_ERROR, pickClaim, step } from "../../../convex/core/jobs/machine";
+import {
+  CUT_MARK,
+  ITEM_BATCH_MAX,
+  JOB_TEXT_MAX,
+  LAPSED_ERROR,
+  pickClaim,
+  step,
+} from "../../../convex/core/jobs/machine";
 import type { JobEvent, Report, Step } from "../../../convex/core/jobs/machine";
 import type { JobFields, JobWork } from "../../../convex/core/jobs/model";
 
@@ -169,6 +176,44 @@ describe("job machine", () => {
 
   it("fails at once when the worker asks for no retry", () => {
     expect(fail(claim(queued()), false)).toMatchObject({ status: "failed", attempts: 1 });
+  });
+
+  it("keeps a worker's message and error cut to 4,096 characters with a mark, never refusing one", () => {
+    const huge = "e".repeat(1024 * 1024);
+    const cutText = `${"e".repeat(JOB_TEXT_MAX - CUT_MARK.length)}${CUT_MARK}`;
+
+    const finishFailed = (job: JobFields, retry: boolean) =>
+      run(job, {
+        type: "finish",
+        lease: { attempt: job.attempts },
+        finish: { outcome: "failed", error: huge, retry },
+      });
+
+    expect(finishFailed(claim(queued()), false)).toMatchObject({
+      status: "failed",
+      error: cutText,
+    });
+    expect(finishFailed(claim(queued()), true)).toMatchObject({
+      status: "queued",
+      lastError: cutText,
+    });
+    expect(next(report(claim(queued()), { message: huge }))).toMatchObject({ message: cutText });
+    expect(
+      run(claim(queued()), {
+        type: "finish",
+        lease: { attempt: 1 },
+        finish: { outcome: "succeeded", message: huge },
+      }),
+    ).toMatchObject({ status: "succeeded", message: cutText });
+    expect(next(report(claim(queued()), { message: "short" }))).toMatchObject({ message: "short" });
+
+    const kept = JOB_TEXT_MAX - CUT_MARK.length;
+    const split = `${"a".repeat(kept - 1)}😀${"z".repeat(JOB_TEXT_MAX)}`;
+
+    // The cut falls inside the emoji's surrogate pair, so the emoji goes whole.
+    expect(next(report(claim(queued()), { message: split }))).toMatchObject({
+      message: `${"a".repeat(kept - 1)}${CUT_MARK}`,
+    });
   });
 
   it("refuses a stale lease once the job went back to the queue or to another attempt", () => {

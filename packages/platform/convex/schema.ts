@@ -461,6 +461,54 @@ export default defineSchema({
     .index("by_library_path", ["libraryId", "path"]),
 
   /**
+   * A library's claim of one of its folders by what it is on disk (ADR 0024, "Folder identity"):
+   * at most one per library and folder, its keys in `folderClaimKeys`. The claim that came first
+   * keeps a folder two libraries reach. `core/folderClaims.ts` is its only writer.
+   */
+  folderClaims: defineTable({
+    libraryId: v.id("libraries"),
+    folder: v.string(),
+    /** When the library first claimed the folder; every later claim of it keeps this. */
+    since: v.number(),
+    /** The host's boot id at the latest claim, for diagnosis only; null when the server could not tell. */
+    bootId: v.union(v.string(), v.null()),
+    /**
+     * Whether an older claim of another library took the folder: the claim then has no keys, the
+     * library's scans write nothing, and its purge deletes its rows there until it claims again.
+     */
+    lost: v.boolean(),
+  }).index("by_library_folder", ["libraryId", "folder"]),
+
+  /**
+   * One key of a folder claim: an `i:<dev>:<ino>` identity of the folder (depth 0) or of a parent
+   * (its depth), or its source path within its filesystem, `s:<device>:/<part hash>/…/` at depth 0.
+   * Another library's identity row with this folder's own identity holds a folder at or inside
+   * it, and a source key that starts with this folder's is a source at or inside it; a row at
+   * depth 0 with a parent's identity or source key is a folder around it.
+   */
+  folderClaimKeys: defineTable({
+    claimId: v.id("folderClaims"),
+    libraryId: v.id("libraries"),
+    /** The claim's `since`, so an overlap read compares claims without reading them. */
+    since: v.number(),
+    key: v.string(),
+    depth: v.number(),
+  })
+    .index("by_key_depth", ["key", "depth"])
+    .index("by_claim", ["claimId"]),
+
+  /**
+   * A library refused a folder because `ownerLibraryId`'s claim came first. When the owner lets a
+   * claim go, `core/libraries.ts` queues a scan of each waiting library and the row goes.
+   */
+  folderClaimWaits: defineTable({
+    libraryId: v.id("libraries"),
+    ownerLibraryId: v.id("libraries"),
+  })
+    .index("by_owner_library", ["ownerLibraryId", "libraryId"])
+    .index("by_library", ["libraryId"]),
+
+  /**
    * The test seam for a track in a music library until the music port: a path a scan found, its
    * size and change time, and whether it is explicit. Movies keep their own rows (`movies/`).
    */
@@ -489,7 +537,9 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_status_lease", ["status", "leaseExpiresAt"])
     .index("by_kind", ["payload.kind"])
-    .index("by_dedupe_status", ["dedupeKey", "status"]),
+    .index("by_dedupe_status", ["dedupeKey", "status"])
+    /** The finished jobs of one kind and status by age, for `core/jobs/cleanup.ts`. */
+    .index("by_kind_status_finished", ["payload.kind", "status", "finishedAt"]),
 
   jobItems: defineTable(jobItemDocument).index("by_job_seq", ["jobId", "seq"]),
 
@@ -524,6 +574,37 @@ export default defineSchema({
   shareLinks: defineTable(linkDocument).index("by_maker", ["maker"]),
 
   guestAccess: defineTable(guestAccessDocument),
+
+  /**
+   * The archives in the server's backup folder (`convex export`), as it last reported them.
+   * `core/backups.ts` is its only writer.
+   */
+  backups: defineTable({
+    /** A plain file name in the backup folder, at most 255 characters. */
+    fileName: v.string(),
+    sizeBytes: v.number(),
+    trigger: v.union(v.literal("nightly"), v.literal("manual")),
+    takenAt: v.number(),
+  })
+    .index("by_taken", ["takenAt"])
+    .index("by_file", ["fileName"]),
+
+  /**
+   * What each media server last said about itself, one row per service principal.
+   * `core/serverStatus.ts` is its only writer.
+   */
+  serverStatus: defineTable({
+    serviceId: v.id("users"),
+    version: v.string(),
+    hardwareAcceleration: v.union(v.literal("qsv"), v.literal("vaapi"), v.literal("none")),
+    activeStreams: v.number(),
+    runsAwaitingExit: v.number(),
+    startedAt: v.number(),
+    /** Server time of the report; clients judge staleness from it. */
+    reportedAt: v.number(),
+  })
+    .index("by_service", ["serviceId"])
+    .index("by_reported", ["reportedAt"]),
 
   imports: defineTable({
     source: importSource,

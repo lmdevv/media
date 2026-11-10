@@ -93,7 +93,7 @@ const convexMode = (options: MediaBackend.Options) =>
     Backups.layerSyncOnStart,
     CachePruner.layer,
   ).pipe(
-    Layer.provide(Backups.layer.pipe(Layer.provide(ConvexCli.layer))),
+    Layer.provide(Backups.layer.pipe(Layer.provide([ConvexCli.layer, Backups.layerMoviesCatalog]))),
     Layer.provide(LibraryMonitor.layer()),
     Layer.provide(servicesLayer),
     Layer.provide(Migrations.layer.pipe(Layer.provideMerge(MigrationBackend.layer))),

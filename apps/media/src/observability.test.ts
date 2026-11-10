@@ -19,6 +19,8 @@ const secrets = {
   jellyfinToken: "jellyfinSecretTokenValue",
   password: "hunter2-password-value",
   inviteCode: "InviteCodeQ7mZ2xLp",
+  coreTicket:
+    "t1.k1.media.3600.7200.play.file.file1.s.user1.session1.y7LW3OF3tCfjBmsX5DHoBCSzsZWIP7vqhGVPwjkUgqM",
 };
 
 class ImportFailed extends Schema.TaggedError<ImportFailed>()("ImportFailed", {
@@ -33,6 +35,8 @@ const logEverySecret = Effect.gen(function* () {
   yield* Effect.logWarning(
     "Request.failed",
     `GET /media/hls/abc/1/index.m3u8?token=${secrets.playbackToken}`,
+    `GET /media/hls/abc/1/0.m4s?ticket=${encodeURIComponent(secrets.coreTicket)}`,
+    `a ticket in prose: ${secrets.coreTicket}`,
     `https://api.themoviedb.org/3/search/movie?query=x&api_key=${secrets.tmdbKey}`,
     `http://plex.local:32400/library/sections?X-Plex-Token=${secrets.plexToken}`,
     `Authorization: MediaBrowser Client="movies", Token="${secrets.jellyfinToken}"`,
@@ -48,6 +52,7 @@ const logEverySecret = Effect.gen(function* () {
   ).pipe(
     Effect.annotateLogs({
       apiKey: secrets.apiKey,
+      ticket: secrets.coreTicket,
       password: secrets.password,
       nested: { authorization: `Bearer ${secrets.apiKey}`, password: secrets.password },
       fileId: "file_123",
