@@ -4,6 +4,7 @@ import type { DatabaseReader } from "../_generated/server";
 import { paginateAtMost } from "../core/lib/paginate";
 import { decidableRows, reachOf } from "../core/permissions/grants";
 import { requireTitle, titleViewer } from "./access";
+import { registerWithArtworkTickets } from "./artwork";
 import { presentTitleCard } from "./present";
 import { insertListEntry } from "./write";
 
@@ -18,7 +19,7 @@ const entryOf = (db: DatabaseReader, userId: Id<"users">, titleId: Id<"titles">)
     .withIndex("by_user_title", (q) => q.eq("userId", userId).eq("titleId", titleId))
     .unique();
 
-export const { list, add, remove } = register({
+export const { list, add, remove } = registerWithArtworkTickets(register, {
   list: async (ctx, { paginationOpts }, caller) => {
     const reach = await reachOf(ctx.db, caller);
     const sees = titleViewer(ctx.db, caller, reach);

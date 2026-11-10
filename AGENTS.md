@@ -37,7 +37,7 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 
 | Path                 | Role                                                                |
 | -------------------- | ------------------------------------------------------------------- |
-| `apps/web`           | Vite + React + TanStack Router SPA                                  |
+| `apps/web-movies`    | `@media/web-movies`: Vite + React + TanStack Router SPA, `/movies`  |
 | `apps/media`         | `@media/server`: Effect HttpApi media service; serves the SPA       |
 | `apps/cli`           | Effect CLI with JSON output; agent skill in `skills/media/`         |
 | `apps/mobile`        | Expo + Expo Router + Uniwind iOS app over `@media/sdk/react`        |
@@ -47,7 +47,7 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 | `packages/sdk`       | Effect core with `/effect`, `/react`, `/promise` entry points       |
 | `packages/ui`        | shadcn components restyled through Paper tokens                     |
 | `packages/config`    | Shared strict `tsconfig`                                            |
-| `deploy/image`       | All-in-one image: both Convex backends, media, and Caddy under s6   |
+| `deploy/image`       | All-in-one image: the core's Convex backend, media, and Caddy (s6)  |
 | `deploy/compose`     | Docker Compose: the image plus optional sidecars                    |
 | `nix/`               | NixOS module                                                        |
 | `legacy/music`       | Old [music] code, runnable until the music port deletes it          |
@@ -172,11 +172,11 @@ The example identities must be replaced with the model and tool that actually co
   web port, else 3011.
 - Stack suites need Docker and `scripts/dev-stack.sh up`: `pnpm --filter <pkg> test:stack` for
   `@media/platform`, `@media/backend`, `@media/sdk`, `@lmdevv/movies`, and `@media/server`, then
-  `pnpm --filter web exec playwright test`. For the migration suites, pull the pinned image
+  `pnpm --filter @media/web-movies exec playwright test`. For the migration suites, pull the pinned image
   (`docker pull` the `jellyfin/jellyfin:12.2@sha256:…` reference in `.github/workflows/ci.yml`)
   and set `MEDIA_JELLYFIN_DOCKER=1`; without the image the media suite skips the real-Jellyfin
   case silently, but the web migration spec starts Jellyfin anyway, pulling the image or failing.
-- Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, and for Vitest, fresh
+- Repeat runs: `pnpm --filter @media/web-movies exec playwright test --repeat-each=20`, and for Vitest, fresh
   processes that stop at the first failure: `(for run in $(seq 20); do pnpm test <paths> || exit; done)`.
   Don't use Vitest's `--repeats`: `@effect/vitest` 4.0.3 counts each repeat as a finished test and
   closes a `layer(...)` early, which fails with missing files or `ECONNREFUSED`, not a product bug.

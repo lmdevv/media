@@ -3,7 +3,6 @@ import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 import { Effect, Layer, Match, Option, Schema } from "effect";
 import { HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
-import { playbackTokenOf } from "../http/playback-token-param.ts";
 import * as PlaybackToken from "../playback/playback-token.ts";
 import * as TrickplayStore from "./trickplay-store.ts";
 
@@ -70,7 +69,7 @@ export const layer: Layer.Layer<
       const { fileId = "", version = "", name = "" } = yield* HttpRouter.params;
 
       const grant = yield* verifier.verify(
-        yield* playbackTokenOf(request, verifier.param),
+        yield* PlaybackToken.tokenOf(request, verifier.param),
         PlaybackToken.PLAY,
         PlaybackToken.READ,
       );

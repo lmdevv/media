@@ -6,7 +6,7 @@ import { Match, Predicate } from "effect";
 import { createContext, use, useMemo, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
-import type { BrowserStore } from "./browser";
+import type { BrowserStore } from "@media/ui/lib/browser-session";
 import { deviceName } from "./device-name";
 import type { TileProof, UserId } from "./platform-types";
 

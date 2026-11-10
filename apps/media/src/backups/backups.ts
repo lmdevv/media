@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type { BackupId } from "@media/contracts/ids";
 import type { BackupArchive } from "@media/contracts/models/jobs";
 import type { CallError } from "@media/sdk/effect";
@@ -13,13 +11,11 @@ import {
   Option,
   Path,
   type PlatformError,
-  Redacted,
   Schedule,
   Schema,
   Semaphore,
 } from "effect";
 
-import * as MediaBackend from "../convex/media-backend.ts";
 import * as MediaConfig from "../media-config.ts";
 import { modifiedAtMs } from "../platform/file-info.ts";
 import * as Archives from "./backup-archives.ts";
@@ -60,7 +56,7 @@ type RestoreError =
   | ConvexCli.ConvexCliError
   | CallError;
 
-/** Backups of the Convex deployment. */
+/** Backups of the core's Convex deployment. */
 export interface Interface {
   /** Exports the deployment into a new archive and returns it. */
   readonly create: (trigger: Archives.BackupTrigger) => Effect.Effect<BackupArchive, CreateError>;
@@ -77,7 +73,7 @@ export interface Interface {
   readonly restore: (backupId: BackupId) => Effect.Effect<void, RestoreError>;
 }
 
-/** Where the server records the archives it holds: the backups table of its Convex deployment. */
+/** Where the server records the archives it holds: the core's backups table. */
 export interface CatalogInterface {
   /**
    * Makes the table list exactly `archives`, listed from the folder starting at `listedAt`. A row
@@ -95,29 +91,6 @@ export interface CatalogInterface {
 export class Catalog extends Context.Service<Catalog, CatalogInterface>()(
   "@media/server/Backups/Catalog",
 ) {}
-
-/** The backups table of old movies' deployment. */
-export const layerMoviesCatalog: Layer.Layer<Catalog, never, MediaBackend.Service> = Layer.effect(
-  Catalog,
-  Effect.gen(function* () {
-    const backend = yield* MediaBackend.Service;
-
-    return Catalog.of({
-      sync: (archives) =>
-        backend.call("mediaService.syncBackups", { archives }).pipe(
-          Effect.tap((result) =>
-            result.added > 0 || result.removed > 0
-              ? Effect.logInfo("Backups.synced").pipe(
-                  Effect.annotateLogs({ added: result.added, removed: result.removed }),
-                )
-              : Effect.void,
-          ),
-          Effect.asVoid,
-        ),
-      fileOf: (backupId) => backend.call("mediaService.backupFile", { backupId }),
-    });
-  }),
-);
 
 /** Database backups. */
 export class Service extends Context.Service<Service, Interface>()("@media/server/Backups") {}
@@ -264,12 +237,6 @@ const make = Effect.gen(function* () {
     return real;
   });
 
-  const serviceKey = Option.map(config.mediaServiceApiKey, (key) => {
-    const value = Redacted.value(key);
-
-    return { hash: createHash("sha256").update(value).digest("hex"), prefix: value.slice(0, 10) };
-  });
-
   const restore = Effect.fn("Backups.restore")(function* (backupId: BackupId) {
     yield* exclusively(
       Effect.gen(function* () {
@@ -280,10 +247,11 @@ const make = Effect.gen(function* () {
 
         yield* cli.importSnapshot(archive);
 
-        if (Option.isSome(serviceKey)) yield* cli.run("setup:ensureServiceKey", serviceKey.value);
-
-        const settled = yield* cli.run("maintenance:settleRestoredJobs", {});
-        const ended = yield* cli.run("maintenance:endAllSessions", {});
+        // The snapshot caught its own backup job, and maybe others, mid-run, and carries the
+        // sessions it was taken with. Every session ends, the server's own included; its key is in
+        // the snapshot, so `CoreSession` signs in again on its next call.
+        const settled = yield* cli.run("core/maintenance:settleRestoredJobs", {});
+        const ended = yield* cli.run("core/maintenance:endAllSessions", {});
 
         yield* Effect.logWarning("Backups.restored").pipe(
           Effect.annotateLogs({ fileName, jobs: compact(settled), sessions: compact(ended) }),

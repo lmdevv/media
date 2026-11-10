@@ -353,6 +353,13 @@ export const serverFunctions = {
       ]),
     ),
   }),
+  /** Queues a rescan of each movies library whose folder holds, is, or lies inside a changed path. */
+  scanChanged: serverMutation({
+    name: "core.scans.changed",
+    path: "core/scans:changed",
+    args: Schema.Struct({ path: Schema.String }),
+    result: Schema.Struct({ queued: Schema.Int }),
+  }),
   moviesKnown: serverMutation({
     name: "movies.scanner.known",
     path: "movies/scanner:known",

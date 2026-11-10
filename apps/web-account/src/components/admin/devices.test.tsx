@@ -5,7 +5,7 @@ import type { UserId } from "@/session/platform-types";
 
 import { DevicesView } from "./devices";
 import type { DeviceFocus } from "./devices";
-import type { Paged } from "./pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { disabledButton, loaded, noop, textOf } from "./testing";
 import type { Device, User } from "./types";
 

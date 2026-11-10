@@ -30,17 +30,16 @@ cp .env.example .env    # set MEDIA_LIBRARY, MEDIA_BASE_URL, and PUID/PGID
 docker compose up -d
 ```
 
-Open `MEDIA_BASE_URL/movies` (default `http://localhost:8080/movies`), create the owner account
-(the first account is the owner), and add `/media/library` (or a folder in it) as a library.
-`MEDIA_BASE_URL` itself opens the account client, which has its own accounts until the movies port,
-so its owner signs up there separately.
+Open `MEDIA_BASE_URL` (default `http://localhost:8080`), create the owner account (the first
+account is the owner), and add `/media/library` (or a folder in it) as a library. The same sign-in
+opens movies at `MEDIA_BASE_URL/movies`.
 
-- The `media` image (`ghcr.io/lmdevv/media`, amd64 and arm64) runs the core's and old movies'
-  Convex backends, the media service, and both web clients behind Caddy on one port, with the
-  `media` CLI and ffmpeg. Compose runs `:latest`, the newest release; pin `:X.Y` or `:X.Y.Z`, or
+- The `media` image (`ghcr.io/lmdevv/media`, amd64 and arm64) runs the core's Convex backend, the
+  media service, and both web clients behind Caddy on one port, with the `media` CLI and ffmpeg. Compose runs `:latest`, the newest release; pin `:X.Y` or `:X.Y.Z`, or
   follow `:main` for the edge. `docker compose build` builds it from source instead.
-- Each start deploys both projects' functions and configures both deployments; secrets are
-  generated inside Convex, never written to `.env`.
+- Each start deploys the core's functions and configures its deployment, and the first start
+  gives the media service its own key on the core; secrets are generated inside Convex and the
+  data volume, never written to `.env`.
 - The media service runs as `PUID:PGID`, which must be able to read the library. Libraries mount
   read-only; add one line per folder under `volumes:` in `compose.yaml`.
 - Intel Quick Sync: `docker compose -f compose.yaml -f compose.qsv.yaml up -d`; VA-API on Intel or
@@ -68,7 +67,7 @@ services.media = {
 };
 ```
 
-Both Convex backends run as pinned OCI containers; the media service runs natively as a sandboxed
+The core's Convex backend runs as a pinned OCI container; the media service runs natively as a sandboxed
 systemd service built from this repository (`nix build github:lmdevv/media#movies`). Caddy serves
 all of them on one port with the image's routes. Library folders are read-only to the media
 service, and `openFirewall` is off by default.
@@ -115,8 +114,10 @@ default. The NixOS options are in brackets.
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional OTLP/HTTP collector for traces and logs (`otlpEndpoint`)                                      |
 
 On NixOS, `environmentFile` adds secrets (such as `TMDB_API_KEY`) from a root-only file and
-`extraEnvironment` sets anything else. The media service's own settings are listed in
-`apps/media/README.md`.
+`extraEnvironment` sets anything else. The image and the NixOS module connect the media service
+to the core themselves (`CONVEX_URL`, `CONVEX_PUBLIC_URL`, `MEDIA_SERVICE_API_KEY`,
+`MEDIA_TICKET_KEYS`, `CONVEX_SELF_HOSTED_ADMIN_KEY`, `CONVEX_BACKEND_DIR`); the media service's
+own settings are listed in `apps/media/README.md`.
 
 ## Demo library
 
@@ -159,17 +160,12 @@ use `tailscale serve`. The port speaks plain HTTP, and every browser and CLI mus
 
 ## Backups and restore
 
-Every night at 03:00 UTC the media service exports the whole movies database, file storage
-included, to the backup folder (`/data/movies/backups` in the `media-data` volume, or `backupDir`
-on NixOS) and keeps 14 days. Each upgrade also backs up before it deploys; the core's upgrade
-backups go to `/data/core/backups` (`dataDir/core/backups` on NixOS). Restore from Admin →
-Backups, or:
-
-```sh
-media backup --wait
-media backups list
-media restore movies-nightly-2026-10-12T03-00-00-000Z.zip   # everyone signs in again
-```
+Every night at 03:00 UTC the media service exports the core's whole database, file storage
+included, to the backup folder (`/data/core/backups` in the `media-data` volume, or `backupDir`,
+`dataDir/core/backups` by default, on NixOS) and keeps 14 days. Each upgrade also backs up there
+before it deploys. Back up and restore from Admin → Backups at `MEDIA_BASE_URL`; after a restore
+everyone signs in again. An install from before the movies cutover keeps old movies' backups in
+`/data/movies/backups` (`dataDir/movies/backups`).
 
 Archives hold password hashes; store copies as carefully as the server. See
 [docs/operations.md](docs/operations.md) for restoring onto a new machine or without the media
@@ -182,7 +178,7 @@ version as the server.
 
 | Where                       | Install                                                                                        |
 | --------------------------- | ---------------------------------------------------------------------------------------------- |
-| The Compose server          | In the image: `docker compose exec media media login`                                          |
+| The Compose server          | In the image: `docker compose exec media media auth login --username <name>`                   |
 | The NixOS server            | Installed by `services.media`, pointed at the server                                           |
 | Anywhere with Node 22+      | `npm install -g @lmdevv/movies`                                                                |
 | Linux or macOS without Node | `media-<os>-<arch>` from the [latest release](https://github.com/lmdevv/media/releases/latest) |
@@ -191,11 +187,10 @@ version as the server.
 | Nix, once                   | `nix run github:lmdevv/media -- --help`                                                        |
 
 ```sh
-media login --server http://nas.tailnet.ts.net:8080/movies/convex \
-  --media-url http://nas.tailnet.ts.net:8080
-media search alien
-media play "Alien" --open        # mpv; without --open, prints the stream URL
-media libraries list --human
+media auth login --server http://nas.tailnet.ts.net:8080/convex --username lucia
+media movies titles search --query alien
+media movies play start --title-id <id>   # a stream ticket for this session
+media movies titles home --human
 ```
 
 The release binaries cover Linux on x64 and arm64 and macOS on Apple silicon. Download one with
@@ -217,8 +212,8 @@ browser, and Gatekeeper then refuses to run it; `curl` does not quarantine, or c
 `media` commands and for playback. The stream URL `media play` prints is always the server's
 public one (`MEDIA_BASE_URL`), so a player on another machine can open it.
 
-In the Compose image, `MEDIA_CONVEX_URL` and `MEDIA_SERVER_URL` point at that stack from inside
-the container. `docker compose exec media media` runs as root, so its login in the `media-data`
+In the Compose image, `MEDIA_CORE_URL`, `MEDIA_CONVEX_URL`, and `MEDIA_SERVER_URL` point at that
+stack from inside the container. `docker compose exec media media` runs as root, so its login in the `media-data`
 volume (`/data/movies/config`) is readable by root only, and stays across upgrades. On NixOS,
 `services.media` sets both variables for every user, so `media login` needs no `--server`;
 `programs.media.enable = false` leaves the CLI out. Another NixOS machine, or Home Manager on
@@ -229,7 +224,7 @@ Linux or macOS, sets the two URLs itself:
 # Home Manager: inputs.movies.homeManagerModules.movies in home-manager's modules.
 programs.media = {
   enable = true;
-  convexUrl = "http://nas.tailnet.ts.net:8080/movies/convex";
+  convexUrl = "http://nas.tailnet.ts.net:8080/convex";
   mediaUrl = "http://nas.tailnet.ts.net:8080";
   # It builds with your nixpkgs; on an older one, use the flake's own build:
   # package = inputs.movies.packages.${pkgs.stdenv.hostPlatform.system}.cli;
@@ -248,10 +243,10 @@ Output is JSON by default. Agents get an API key from Settings → API keys and 
 [apps/cli/skills/media/SKILL.md](apps/cli/skills/media/SKILL.md), which loads one reference per
 domain. In a checkout, `pnpm --filter @lmdevv/movies build` writes `apps/cli/dist/media.js`.
 
-`media --help` lists the `auth`, `admin`, `movies`, and `music` groups first. Until the movies
-port, the movies commands stay at the top level against the movies server, and the `auth` and
-`admin` groups reach the new core server with their own sign-in (`media auth login`, with
-`MEDIA_BASE_URL/convex` as the server).
+`media --help` lists the `auth`, `admin`, `movies`, and `music` groups first. They reach the core
+with their own sign-in (`media auth login`, with `MEDIA_BASE_URL/convex` as the server). The
+older top-level movies commands (`media login`, `media play`, `media backup`, and the rest) still
+expect old movies' own Convex backend, which installs no longer run.
 `media admin reset-password [<username>]` sets a new password from the server host with the
 core's admin key (`--env-file`, or `MEDIA_CORE_URL` and `MEDIA_CORE_ADMIN_KEY`). In the image,
 `docker compose exec media media admin reset-password <username>` derives the key itself.

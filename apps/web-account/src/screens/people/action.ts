@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { describeFailure } from "@/lib/failure";
+import { describeFailure } from "@media/ui/lib/failure";
 
 /** Where one command a form sends stands: not sent, running, done, or failed with a line to show. */
 export type ActionStatus =

@@ -55,7 +55,7 @@ const scrub = (text: string, secrets: ReadonlyArray<string>): string =>
     .reduce((scrubbed, secret) => scrubbed.replaceAll(secret, "<redacted>"), text);
 
 /** The deployment the CLI administers, and the setting that names each part when it is absent. */
-export interface Target {
+interface Target {
   readonly url: Option.Option<string>;
   readonly adminKey: Option.Option<Redacted.Redacted>;
   readonly backendDir: Option.Option<string>;
@@ -133,7 +133,7 @@ const makeFor = (target: Target): Interface => {
   });
 };
 
-/** The CLI as a Node child process of the server, for old movies' deployment. */
+/** The CLI as a Node child process of the server, for the core's deployment. */
 export const layer: Layer.Layer<Service, never, MediaConfig.Service> = Layer.effect(
   Service,
   Effect.map(MediaConfig.Service, (config) =>
@@ -149,7 +149,3 @@ export const layer: Layer.Layer<Service, never, MediaConfig.Service> = Layer.eff
     }),
   ),
 );
-
-/** The CLI for the deployment `target` names, such as the core's. */
-export const layerFor = (target: Target): Layer.Layer<Service> =>
-  Layer.succeed(Service, makeFor(target));

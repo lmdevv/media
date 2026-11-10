@@ -21,21 +21,20 @@ import {
 import { TestClock } from "effect/testing";
 
 import { decodeRecord } from "../logging/log-query.ts";
-import * as ConvexSessionReports from "../convex/convex-session-reports.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
-import * as PlaybackToken from "../playback/playback-token.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
-import { signTestToken, testConfigLayer } from "../testing/test-config.ts";
-import * as TestConvex from "../testing/test-convex.ts";
+import { testConfigLayer } from "../testing/test-config.ts";
+import { signTestToken, testTokensLayer } from "../testing/test-tokens.ts";
+import * as TestSessions from "../testing/test-sessions.ts";
 import * as ClientDiagnostics from "./client-events.ts";
 import { LogEvent } from "./log-events.ts";
 import { sessionsOf, timelineOf } from "./timeline.ts";
 
 const recorderLayer = ClientDiagnostics.layer.pipe(
-  Layer.provideMerge(PlaybackToken.layer),
-  Layer.provideMerge(EndedSessions.layer.pipe(Layer.provide(ConvexSessionReports.layer))),
+  Layer.provideMerge(testTokensLayer),
+  Layer.provideMerge(EndedSessions.layer.pipe(Layer.provide(TestSessions.reportsLayer))),
   Layer.provideMerge(StreamOwners.layer),
-  Layer.provideMerge(TestConvex.layer),
+  Layer.provideMerge(TestSessions.layer),
   Layer.provide(testConfigLayer({})),
   Layer.orDie,
 );
@@ -44,7 +43,7 @@ const recording = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    ClientDiagnostics.Service | EndedSessions.Service | StreamOwners.Service | TestConvex.Service
+    ClientDiagnostics.Service | EndedSessions.Service | StreamOwners.Service | TestSessions.Service
   >,
 ) =>
   Effect.gen(function* () {
@@ -211,7 +210,7 @@ describe("client diagnostics", () => {
     Effect.gen(function* () {
       const { logged } = yield* recording(
         Effect.gen(function* () {
-          yield* (yield* TestConvex.Service).end("session_test");
+          yield* (yield* TestSessions.Service).end("session_test");
 
           assert.isTrue(
             yield* (yield* EndedSessions.Service).isEnded(PlaybackSessionId.make("session_test")),

@@ -3,8 +3,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useState } from "react";
 
-import { PageHeader, SettingsFrame } from "@/components/shell";
-import { describeFailure, isFailure } from "@/lib/failure";
+import { PageHeader } from "@media/ui/components/page-header";
+import { SettingsFrame } from "@/components/shell";
+import { describeFailure, isFailure } from "@media/ui/lib/failure";
 import { DeviceApprovalView } from "@/screens/entry/device";
 import type { Answer } from "@/screens/entry/device";
 import { deviceStep } from "@/screens/entry/device-step";

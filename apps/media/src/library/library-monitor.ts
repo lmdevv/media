@@ -1,4 +1,7 @@
-import type { LibraryId } from "@media/contracts/ids";
+import { createHash } from "node:crypto";
+
+import { LibraryId } from "@media/contracts/ids";
+import type { CallError } from "@media/sdk/effect";
 import {
   Clock,
   Context,
@@ -28,19 +31,23 @@ export interface MonitoredLibrary {
   readonly roots: ReadonlyArray<string>;
 }
 
-type ScanReason = "startup" | "change" | "reconcile" | "job";
+/** Why a library is brought up to date. */
+type ScanReason = "startup" | "change" | "reconcile";
 
-/** Scans and watches libraries. */
+/**
+ * Brings `library` up to date after `reason`. `changed` lists the absolute paths a burst of file
+ * events named, and is empty when the whole library may have changed: at startup, on the reconcile
+ * interval, after a watcher restart, and when a polled folder changed. `LibraryRootNotApproved`
+ * at startup stops watching the library.
+ */
+export type Rescan = (
+  library: MonitoredLibrary,
+  reason: ScanReason,
+  changed: ReadonlyArray<string>,
+) => Effect.Effect<unknown, LibraryScanner.ScanError | CallError>;
+
+/** Watches libraries and brings them up to date. */
 export interface Interface {
-  /**
-   * Scans every folder of `library` in order, after any scan of the same library already
-   * running. Stops at the first folder that fails, so no folder's files are wrongly marked missing.
-   */
-  readonly scan: (
-    library: MonitoredLibrary,
-    mode: LibraryScanner.ScanMode,
-    reason: ScanReason,
-  ) => Effect.Effect<ReadonlyArray<LibraryScanner.ScanSummary>, LibraryScanner.ScanError>;
   /** Watches and reconciles exactly `libraries`, stopping libraries no longer listed. */
   readonly track: (libraries: ReadonlyArray<MonitoredLibrary>) => Effect.Effect<void>;
 }
@@ -75,8 +82,10 @@ type WatchMode = "events" | "poll";
 const keyOf = (library: MonitoredLibrary): string =>
   `${library.libraryId}\u0000${library.roots.join("\u0000")}`;
 
-const make = Effect.fn("LibraryMonitor.make")(function* (debounce: Duration.Duration) {
-  const scanner = yield* LibraryScanner.Service;
+const make = Effect.fn("LibraryMonitor.make")(function* (
+  debounce: Duration.Duration,
+  rescanLibrary: Rescan,
+) {
   const fs = yield* FileSystem.FileSystem;
   const config = yield* MediaConfig.Service;
   const path = yield* Path.Path;
@@ -87,55 +96,17 @@ const make = Effect.fn("LibraryMonitor.make")(function* (debounce: Duration.Dura
     pollInterval: config.libraryPollInterval,
   };
 
-  const locks = yield* Ref.make<ReadonlyMap<LibraryId, Semaphore.Semaphore>>(new Map());
   const watchers = yield* FiberMap.make<string>();
   const tracked = yield* Ref.make<ReadonlySet<string>>(new Set());
 
-  const lockOf = Effect.fnUntraced(function* (libraryId: LibraryId) {
-    const fresh = yield* Semaphore.make(1);
-
-    return yield* Ref.modify(locks, (current) => {
-      const existing = current.get(libraryId);
-
-      return existing === undefined
-        ? [fresh, new Map(current).set(libraryId, fresh)]
-        : [existing, current];
-    });
-  });
-
-  const scan = Effect.fn("LibraryMonitor.scan")(
-    function* (library: MonitoredLibrary, mode: LibraryScanner.ScanMode, reason: ScanReason) {
-      const lock = yield* lockOf(library.libraryId);
-
-      const summaries = yield* lock.withPermits(1)(
-        Effect.forEach(library.roots, (root) =>
-          scanner.scan({ libraryId: library.libraryId, root, mode }),
+  const scan = (library: MonitoredLibrary, reason: ScanReason, changed: ReadonlyArray<string>) =>
+    rescanLibrary(library, reason, changed).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("LibraryMonitor.scan_failed", error).pipe(
+          Effect.annotateLogs({ reason }),
         ),
-      );
-
-      yield* Effect.logInfo("LibraryMonitor.scanned").pipe(
-        Effect.annotateLogs({
-          reason,
-          discovered: summaries.reduce((total, summary) => total + summary.discovered, 0),
-          processed: summaries.reduce((total, summary) => total + summary.processed, 0),
-          unchanged: summaries.reduce((total, summary) => total + summary.unchanged, 0),
-          missing: summaries.reduce((total, summary) => total + summary.missing, 0),
-          failed: summaries.reduce((total, summary) => total + summary.failed, 0),
-        }),
-      );
-
-      return summaries;
-    },
-    (effect, library, _mode, reason) =>
-      effect.pipe(
-        Effect.tapError((error) =>
-          Effect.logWarning("LibraryMonitor.scan_failed", error).pipe(
-            Effect.annotateLogs({ reason }),
-          ),
-        ),
-        Effect.annotateLogs({ libraryId: library.libraryId }),
       ),
-  );
+    );
 
   const identity = (root: string) =>
     fs.stat(root).pipe(
@@ -163,11 +134,11 @@ const make = Effect.fn("LibraryMonitor.make")(function* (debounce: Duration.Dura
 
   const monitor = Effect.fn("LibraryMonitor.monitor")(
     function* (library: MonitoredLibrary) {
-      const rescan = (reason: "change" | "reconcile") =>
-        scan(library, "incremental", reason).pipe(Effect.ignore);
+      const rescan = (reason: "change" | "reconcile", changed: ReadonlyArray<string> = []) =>
+        scan(library, reason, changed).pipe(Effect.ignore);
 
       const scanned = (reason: "change" | "reconcile") =>
-        scan(library, "incremental", reason).pipe(
+        scan(library, reason, []).pipe(
           Effect.as(true),
           Effect.orElseSucceed(() => false),
         );
@@ -176,18 +147,27 @@ const make = Effect.fn("LibraryMonitor.make")(function* (debounce: Duration.Dura
 
       // After a restart, rescan: changes made while nothing watched were not reported. Node's
       // watcher reports its folder's removal as one event and then nothing, so every burst also
-      // checks that the folder is still the one being watched.
+      // checks that the folder is still the one being watched. A burst's events name paths
+      // relative to the folder; the rescan gets them whole.
       const watchEvents = (root: string) =>
         Effect.gen(function* () {
           if ((yield* Ref.get(restarts)) > 0) yield* rescan("change");
           const watched = yield* identity(root);
+          const burst = yield* Ref.make<ReadonlySet<string>>(new Set());
 
           yield* fs.watch(root, { recursive: true }).pipe(
+            Stream.tap((event) =>
+              Ref.update(burst, (paths) => new Set(paths).add(path.join(root, event.path))),
+            ),
             Stream.debounce(timing.debounce),
             Stream.runForEach(() =>
               identity(root).pipe(
                 Effect.flatMap((current) =>
-                  current === watched ? rescan("change") : Effect.fail(new WatchEnded()),
+                  current === watched
+                    ? Effect.flatMap(Ref.getAndSet(burst, new Set()), (changed) =>
+                        rescan("change", [...changed]),
+                      )
+                    : Effect.fail(new WatchEnded()),
                 ),
               ),
             ),
@@ -235,7 +215,7 @@ const make = Effect.fn("LibraryMonitor.make")(function* (debounce: Duration.Dura
         Effect.forEach(library.roots, watch, { concurrency: "unbounded", discard: true }),
       );
 
-      const approved = yield* scan(library, "incremental", "startup").pipe(
+      const approved = yield* scan(library, "startup", []).pipe(
         Effect.as(true),
         Effect.catchTag("LibraryRootNotApproved", () => Effect.succeed(false)),
         Effect.orElseSucceed(() => true),
@@ -270,17 +250,84 @@ const make = Effect.fn("LibraryMonitor.make")(function* (debounce: Duration.Dura
     );
   });
 
-  return Service.of({ scan, track });
+  return Service.of({ track });
 });
 
-/** The monitor with nothing tracked yet. `debounce` is the quiet period before a change scan. */
+/**
+ * The monitor with nothing tracked yet, bringing each library up to date with `rescan`. `debounce`
+ * is the quiet period before a change rescans.
+ */
+export const layerWith = (
+  rescan: Rescan,
+  debounce: Duration.Duration = DEFAULT_DEBOUNCE,
+): Layer.Layer<Service, never, FileSystem.FileSystem | Path.Path | MediaConfig.Service> =>
+  Layer.effect(Service, make(debounce, rescan));
+
+/**
+ * The monitor scanning in this process, as standalone mode does: every folder of a library in
+ * order, after any scan of the same library already running, stopping at the first folder that
+ * fails, so no folder's files are wrongly marked missing.
+ */
 export const layer = (
   debounce: Duration.Duration = DEFAULT_DEBOUNCE,
 ): Layer.Layer<
   Service,
   never,
   LibraryScanner.Service | FileSystem.FileSystem | Path.Path | MediaConfig.Service
-> => Layer.effect(Service, make(debounce));
+> =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const scanner = yield* LibraryScanner.Service;
+      const locks = yield* Ref.make<ReadonlyMap<LibraryId, Semaphore.Semaphore>>(new Map());
+
+      const lockOf = Effect.fnUntraced(function* (libraryId: LibraryId) {
+        const fresh = yield* Semaphore.make(1);
+
+        return yield* Ref.modify(locks, (current) => {
+          const existing = current.get(libraryId);
+
+          return existing === undefined
+            ? [fresh, new Map(current).set(libraryId, fresh)]
+            : [existing, current];
+        });
+      });
+
+      const scan: Rescan = Effect.fn("LibraryMonitor.scan")(
+        function* (library, reason) {
+          const lock = yield* lockOf(library.libraryId);
+
+          const summaries = yield* lock.withPermits(1)(
+            Effect.forEach(library.roots, (root) =>
+              scanner.scan({ libraryId: library.libraryId, root, mode: "incremental" }),
+            ),
+          );
+
+          yield* Effect.logInfo("LibraryMonitor.scanned").pipe(
+            Effect.annotateLogs({
+              reason,
+              discovered: summaries.reduce((total, summary) => total + summary.discovered, 0),
+              processed: summaries.reduce((total, summary) => total + summary.processed, 0),
+              unchanged: summaries.reduce((total, summary) => total + summary.unchanged, 0),
+              missing: summaries.reduce((total, summary) => total + summary.missing, 0),
+              failed: summaries.reduce((total, summary) => total + summary.failed, 0),
+            }),
+          );
+        },
+        (effect, library) => effect.pipe(Effect.annotateLogs({ libraryId: library.libraryId })),
+      );
+
+      return layerWith(scan, debounce);
+    }),
+  );
+
+/** Each approved root as a library of its own, named by a digest of its path, for watching. */
+export const rootLibraries = (roots: ReadonlyArray<string>): ReadonlyArray<MonitoredLibrary> =>
+  roots.map((root) => ({
+    libraryId: LibraryId.make(
+      `root-${createHash("sha256").update(root).digest("hex").slice(0, 12)}`,
+    ),
+    roots: [root],
+  }));
 
 /** Tracks a fixed set of libraries for the lifetime of the layer, as standalone mode does. */
 export const layerTracking = (

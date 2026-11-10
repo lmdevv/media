@@ -28,8 +28,8 @@ import { writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
-import { signTestToken } from "../testing/test-config.ts";
-import * as TestConvex from "../testing/test-convex.ts";
+import { signTestToken } from "../testing/test-tokens.ts";
+import * as TestSessions from "../testing/test-sessions.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
 import * as PlaybackToken from "./playback-token.ts";
 import * as StreamSessions from "./stream-sessions.ts";
@@ -162,7 +162,7 @@ const negotiate = Effect.fn(function* ({ name, file = "direct", exp, startSecond
   const sid = `${name}-${crypto.randomUUID()}`;
   const server = yield* MediaTestServer.Service;
 
-  yield* (yield* TestConvex.Service).report(sid, "paused", 0);
+  yield* (yield* TestSessions.Service).report(sid, "paused", 0);
   const { library } = yield* FixtureWorkspace.Service;
   const files = { direct: library.directMovie, remux: library.remuxMovie, hdr: library.hdrMovie };
   const fid = server.fileId("movies", files[file]);
@@ -284,11 +284,11 @@ const runFolderGone = (streamId: string, run: number) =>
   );
 
 const playing = Effect.fn(function* (sid: string) {
-  const convex = yield* TestConvex.Service;
+  const scripted = yield* TestSessions.Service;
   const position = yield* Ref.make(0);
 
   return yield* Ref.updateAndGet(position, (ms) => ms + 300).pipe(
-    Effect.flatMap((ms) => convex.report(sid, "playing", ms)),
+    Effect.flatMap((ms) => scripted.report(sid, "playing", ms)),
     Effect.repeat(Schedule.spaced("300 millis")),
     Effect.forkChild,
   );
@@ -331,7 +331,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
   layer(
     MediaTestServer.layer(
       { STREAM_IDLE_SECONDS: "1", MAX_CONCURRENT_TRANSCODES: "1" },
-      { convex: true, fileSystem: scriptedDisk },
+      { reports: true, fileSystem: scriptedDisk },
     ),
     { excludeTestServices: true, timeout: "120 seconds" },
   )("with Convex, a one second idle timeout, and one transcode slot", (it) => {
@@ -339,7 +339,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
       "keeps a playing session's encoder through a request gap past the idle timeout",
       () =>
         Effect.gen(function* () {
-          const convex = yield* TestConvex.Service;
+          const scripted = yield* TestSessions.Service;
           const stream = yield* negotiate({ name: "deep-buffer" });
           const feed = yield* playing(stream.sid);
 
@@ -359,7 +359,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
           assert.deepStrictEqual(yield* endedEvents(stream.streamId), []);
 
           yield* Fiber.interrupt(feed);
-          yield* convex.end(stream.sid);
+          yield* scripted.end(stream.sid);
           yield* awaitEnded(stream.streamId);
         }),
       60_000,
@@ -421,7 +421,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
       "closes a released stream that finds no free slot, so its player negotiates again",
       () =>
         Effect.gen(function* () {
-          const convex = yield* TestConvex.Service;
+          const scripted = yield* TestSessions.Service;
 
           const requests = [
             ["segment", (stream: Negotiated) => fetched(stream.file("1.m4s"))],
@@ -490,7 +490,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
             });
 
             yield* Fiber.interrupt(feed);
-            yield* convex.end(holder.sid);
+            yield* scripted.end(holder.sid);
             yield* awaitEnded(holder.streamId);
           }
         }),
@@ -501,7 +501,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
       "closes running and released streams as soon as their session ends",
       () =>
         Effect.gen(function* () {
-          const convex = yield* TestConvex.Service;
+          const scripted = yield* TestSessions.Service;
           const quiet = yield* negotiate({ name: "ends-released" });
 
           assert.strictEqual(yield* status(quiet.file("0.m4s")), 200);
@@ -512,12 +512,12 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
 
           const active = yield* negotiate({ name: "ends-running" });
 
-          yield* convex.report(active.sid, "playing", 0);
+          yield* scripted.report(active.sid, "playing", 0);
 
           assert.strictEqual(yield* status(active.file("0.m4s")), 200);
 
           for (const stream of [active, quiet]) {
-            yield* convex.end(stream.sid);
+            yield* scripted.end(stream.sid);
             const [event] = yield* awaitEnded(stream.streamId);
 
             assert.strictEqual(event?.reason, "session-ended");
@@ -536,12 +536,12 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
       "closes a stream and refuses its token once its session ends",
       () =>
         Effect.gen(function* () {
-          const convex = yield* TestConvex.Service;
+          const scripted = yield* TestSessions.Service;
           const stream = yield* negotiate({ name: "unlisted-end" });
 
           assert.strictEqual(yield* status(stream.file("0.m4s")), 200);
 
-          yield* convex.end(stream.sid);
+          yield* scripted.end(stream.sid);
           const [event] = yield* awaitEnded(stream.streamId);
 
           assert.strictEqual(event?.reason, "session-ended");
@@ -567,13 +567,13 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
       "refuses the first request of a session that ended before it",
       () =>
         Effect.gen(function* () {
-          const convex = yield* TestConvex.Service;
+          const scripted = yield* TestSessions.Service;
           const server = yield* MediaTestServer.Service;
           const { library } = yield* FixtureWorkspace.Service;
           const sid = `ended-first-${crypto.randomUUID()}`;
 
-          yield* convex.report(sid, "paused", 0);
-          yield* convex.end(sid);
+          yield* scripted.report(sid, "paused", 0);
+          yield* scripted.end(sid);
 
           const refused = yield* posted("/api/playback/negotiate", {
             token: signTestToken({ fid: server.fileId("movies", library.directMovie), sid }),
@@ -617,7 +617,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
       "ends a playing session's HLS stream when the session switches to direct play",
       () =>
         Effect.gen(function* () {
-          const convex = yield* TestConvex.Service;
+          const scripted = yield* TestSessions.Service;
           const stream = yield* negotiate({ name: "to-direct" });
           const feed = yield* playing(stream.sid);
 
@@ -638,7 +638,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
 
           yield* stop(yield* negotiate({ name: "after-direct" }));
           yield* Fiber.interrupt(feed);
-          yield* convex.end(stream.sid);
+          yield* scripted.end(stream.sid);
         }),
       60_000,
     );
@@ -647,7 +647,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
       "keeps a paused session's released stream however long the pause",
       () =>
         Effect.gen(function* () {
-          const convex = yield* TestConvex.Service;
+          const scripted = yield* TestSessions.Service;
           const stream = yield* negotiate({ name: "long-pause" });
 
           assert.strictEqual(yield* status(stream.file("0.m4s")), 200);
@@ -661,7 +661,7 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
           assert.deepStrictEqual(yield* endedEvents(stream.streamId), []);
           assert.strictEqual(yield* status(stream.file("index.m3u8")), 200, "still registered");
 
-          yield* convex.end(stream.sid);
+          yield* scripted.end(stream.sid);
           yield* awaitEnded(stream.streamId);
         }),
       60_000,

@@ -195,7 +195,7 @@
               expected = {
                 server = {
                   cli = true;
-                  convexUrl = "http://nas:8080/movies/convex";
+                  convexUrl = "http://nas:8080/convex";
                   mediaUrl = "http://nas:8080";
                   server = true;
                 };

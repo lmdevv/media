@@ -1,9 +1,9 @@
 # 0020. Ship a branded client per product on a shared base, with one sign-in
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-06 with the account client as built,
-  2026-11-07 with one sign-in session per browser (D52), and 2026-11-09 with what the iOS keychain
-  holds (D48, D59).
-- Decisions: D38, D39, D40, D48, D52, D59
+  2026-11-07 with one sign-in session per browser (D52), 2026-11-09 with what the iOS keychain
+  holds (D48, D59), and 2026-11-10 with the movies client on the web as built (D52, D57, D62).
+- Decisions: D38, D39, D40, D48, D52, D57, D59, D62
 
 ## Context
 
@@ -233,3 +233,72 @@ An invite is `/invite#mi_<id>.<secret>`, and a reset link is `/reset#mr_<id>.<se
   binds it, so the browser could not tell an older sign-in from a newer one.
 - Secrets in the path or the query. Both reach the server's request log and any proxy in the
   first request, and stay in history until the link expires.
+
+## The movies client on the web as built (amended 2026-11-10)
+
+`p4-movies-cutover` moved `apps/web` to `apps/web-movies`, the package `@media/web-movies`, built
+for and served at `/movies/`. It talks to the core only through the platform SDK, and to the
+media server's own routes with the session's token (ADR 0010).
+
+### No sign-in of its own (D52)
+
+- `/movies` opens the origin's shared IndexedDB store, which now lives in
+  `packages/ui/src/lib/browser-session.ts` and serves the account client too. `MoviesSession` in
+  `apps/web-movies/src/session/session.tsx` runs the platform client over it.
+- It follows sign-in, renewal, switching, and sign-out across tabs through that store, as the
+  account client does.
+- A browser with no session, or whose session ends in any tab, goes to `/`. There the account
+  client shows sign-in, or a shared device's picker.
+- Switching person is signing out, then signing in at `/` (D52). The movies client has no sign-in
+  page and no picker.
+- The sign-in, welcome, setup, invite, device, and profile pages, and the admin pages for users,
+  devices, and API keys, are deleted from the movies client. The account client has their
+  replacements.
+- In development, the movies Vite server serves `/movies/` and proxies every other path,
+  WebSockets included, to the account client's dev server at `ACCOUNT_DEV_URL`. Development is
+  then one origin too, and both clients share one store.
+
+### Shared and movies-only UI
+
+The plan asked for this split to be read from the `[movies]` Paper file. Paper Desktop was not
+running during the cutover, so **the split was not read from Paper**. It moves only code that both
+clients duplicated, and it changes no screen's look. Whether Paper agrees stays open
+(`docs/architecture.md`, "Open").
+
+These modules moved into `packages/ui`:
+
+| Module                   | Holds                                                                      |
+| ------------------------ | -------------------------------------------------------------------------- |
+| `lib/failure`            | `describeFailure`, `isFailure`, and `toastFailure` for an expected failure |
+| `lib/browser-session`    | the browser's one session store                                            |
+| `lib/pages`              | paging through a paginated core query                                      |
+| `components/page-header` | a settings screen's heading: breadcrumb, title, facts, and actions         |
+
+Each client keeps its own shell, routes, screens, and styling. The movies client keeps Home, Movies,
+Shows, titles, people, collections, genres, search, My List, the player, its Preferences, and its
+admin pages. The account client keeps sign-in, the picker, invites, device approval, reset links,
+account settings, and its admin.
+
+### Settings and admin (D57)
+
+- The movies client's settings are only Preferences, the theme this browser keeps, and a link to
+  the account client's settings. Preferences that follow the person, such as subtitles and audio
+  language, are set there.
+- The movies client keeps the admin pages for movies content: Libraries, a library's page, a
+  title's match page, and the Jellyfin and Plex importer. They need `movies:edit`, and the
+  importer needs an owner or an admin.
+- The server status and backups pages moved to the account client's admin, since they are the
+  server's and not movies'.
+
+### Left for after the port (D62)
+
+The core lacks some data that old movies' admin pages showed. The cutover ports the pages without
+them and builds no replacement, since this program adds no features:
+
+- a library's file list and its filters, and a file's summary;
+- the match status on a library's title rows;
+- the jobs list, and canceling a scan or an import from it;
+- a scan's start time and message;
+- a backup job's state on the backups page.
+
+Each is a follow-up for after the port.

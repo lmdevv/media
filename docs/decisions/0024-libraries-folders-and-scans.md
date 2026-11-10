@@ -1,7 +1,8 @@
 # 0024. Libraries have a kind, their own folders, grants, and one scan kind per domain
 
 - Status: Accepted, 2026-11-04. Amended 2026-11-09 with the movies catalog, and again the same
-  day with each movies document's size bound. Amended 2026-11-10 with folder identity.
+  day with each movies document's size bound. Amended 2026-11-10 with folder identity, and again
+  the same day with rescans after a file changes.
 - Decisions: D01, D02, D16, D17, D28, D29, D50
 
 ## Context
@@ -400,6 +401,30 @@ claims its library's folders by what they are on disk.
   (past the wait caps). The server reads `known` and writes only after the claim, since every
   write, the listing included, is fenced on ownership and an unowned scan is canceled.
 
+### Rescans after a file changes (amended 2026-11-10)
+
+On the core a scan writes only under its job's lease, so the server no longer scans by itself when
+a file changes. It asks the core to queue a scan. Until now "Left for later units" held this for
+`p4-movies-cutover`.
+
+- `core/scans:changed({ path })` is a server function. `path` is an absolute path of at most 4,096
+  characters: a file or folder that changed, or an approved library root. Any other path is
+  refused with `invalid_args`.
+- It queues a scan of every movies library with a folder that is `path`, holds it, or lies inside
+  it. It checks up to 32 parent folders, the deepest a folder may be. It reads the folders inside
+  `path` 64 per call, and scheduled calls read the rest.
+- The path's plain leading parts decide where it meets folders. Repeated and trailing slashes and
+  `.` parts are dropped, as a folder is written down. A `..` part ends them, and nothing lies
+  inside such a path.
+- Each scan is queued through `queueScan`, with its scan kind's dedupe, so a change joins a scan
+  already queued or running. A change during a running scan joins that scan. If the scan already
+  passed the changed folder, the next reconcile catches it.
+- Music libraries are skipped, since music has no scanner on the server yet.
+- The server's library monitor, `apps/media/src/core/core-rescans.ts`, watches each approved root
+  and sends the paths a burst of changes named. A path inside another sent path is left out. A
+  burst that names no path or more than 32 sends the root instead. The monitor also sends the root
+  at startup, on the reconcile interval, after a watcher restarts, and when a polled root changes.
+
 ## Consequences
 
 - A domain author writes scanner callbacks as `serverMutation`s that call `withScanLease`, a purge
@@ -435,11 +460,6 @@ claims its library's folders by what they are on disk.
   while its manager's account exists.
 
 ## Left for later units
-
-- On the core, rescans after a file changes need a server function that queues a scan of the
-  library whose folder changed. Old movies' library monitor scans in the server itself, which the
-  core's lease-fenced writes do not allow; `p4-movies-cutover` adds the function and points the
-  monitor at it.
 
 - A library whose last manager's account is deleted has no one who can see it. Account deletion
   does not exist yet; the unit that adds it decides who inherits.

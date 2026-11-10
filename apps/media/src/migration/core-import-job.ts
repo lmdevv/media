@@ -24,7 +24,7 @@ import * as CoreJobs from "../core/core-jobs.ts";
 import type { JobStopped } from "../core/core-jobs.ts";
 import * as CoreSession from "../core/core-session.ts";
 import type * as LibraryScanner from "../library/library-scanner.ts";
-import { JobFailed } from "../jobs/job-worker.ts";
+import { JobFailed } from "../core/core-jobs.ts";
 import * as MediaConfig from "../media-config.ts";
 import { coreReads, scannableFolders } from "./core-imports.ts";
 import { openCredentials } from "./credentials.ts";

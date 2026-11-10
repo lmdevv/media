@@ -42,10 +42,6 @@
 		reverse_proxy {$MEDIA_CORE_CONVEX:127.0.0.1:3210}
 	}
 
-	handle_path /movies/convex/* {
-		reverse_proxy {$MEDIA_MOVIES_CONVEX:127.0.0.1:3220}
-	}
-
 	handle /media/* {
 		import media-service
 	}
@@ -61,6 +57,10 @@
 	redir /movies /movies/ 308
 
 	handle_path /movies/* {
+		# Old movies' Convex backend served /movies/convex until movies moved into the core, which
+		# /convex serves. Its old path answers Not Found, not the movies client's page.
+		@convex path /convex /convex/*
+		respond @convex "Not Found" 404
 		encode zstd gzip
 		import media-service
 	}

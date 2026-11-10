@@ -423,7 +423,7 @@ const deleteEnded = async <Row extends Doc<"authSessions"> | Doc<"apiKeys">>(
  * Deletes an ended session and schedules its refresh tokens' deletion, a batch per call, so a page
  * of sessions stays inside one call's reads however many tokens each gathered.
  */
-const dropSession = async (
+export const dropSession = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   sessionId: Id<"authSessions">,
 ): Promise<void> => {

@@ -7,7 +7,7 @@ import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
-import { signTestToken } from "../testing/test-config.ts";
+import { signTestToken } from "../testing/test-tokens.ts";
 import { resolveInsideRoots } from "./file-resolver.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
 import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";

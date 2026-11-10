@@ -56,6 +56,10 @@ export type { PasswordSignIn } from "./auth";
 
 export { createPlatform } from "./platform/promise";
 
+export { createMediaServer } from "./media-server";
+
+export type { MediaServer, MediaServerOptions } from "./media-server";
+
 export { openIndexedDb } from "./shared-store";
 
 export { holdSignIn, readDevice } from "./token-storage";

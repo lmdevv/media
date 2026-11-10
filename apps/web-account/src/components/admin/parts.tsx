@@ -7,7 +7,7 @@ import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 
-import type { Paged } from "./pages";
+import type { Paged } from "@media/ui/lib/pages";
 
 /** A titled part of an admin screen. */
 export function Section({

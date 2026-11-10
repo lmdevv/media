@@ -20,6 +20,7 @@ import {
 } from "../testing/core-stack.ts";
 import type { CoreServer, Person } from "../testing/core-stack.ts";
 import {
+  addFile,
   bytesDigest,
   fileDigest,
   linkFolder,
@@ -58,6 +59,8 @@ const library = (): Platform.Id<"libraries"> =>
   Option.getOrThrowWith(libraryId, () => new Error("The fixture library was not created"));
 
 let moviesRoot = "";
+
+let directMovie = "";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 
@@ -123,6 +126,7 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       const fixtures = await generateFixtureLibrary(join(workDir, "library"));
 
       moviesRoot = fixtures.moviesRoot;
+      directMovie = fixtures.directMovie;
       admin = await personIn(scope, "admin");
 
       server = await startCoreServer(scope, {
@@ -339,6 +343,27 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
 
       expect(Date.now()).toBeLessThan(started.expiresAt);
       expect(Date.now() - signedOutAt).toBeLessThan(30_000);
+    }, 90_000);
+
+    it("asks the core to rescan the library when a file appears in its folder", async () => {
+      const added = join(moviesRoot, "Rescan Fixture (2021)", "Rescan Fixture (2021).mp4");
+
+      await addFile(join(moviesRoot, directMovie), added);
+
+      const titles = await eventually(
+        "the change's scan writes the new title",
+        async () => {
+          const found = await titlesOf(admin.platform, library());
+
+          return found.some((title) => title.name === "Rescan Fixture")
+            ? Option.some(found)
+            : Option.none();
+        },
+        60_000,
+      );
+
+      expect(titles.map((title) => title.name)).toContain("Rescan Fixture");
+      expect(server.logged().some((line) => line.includes("CoreRescans.queued"))).toBe(true);
     }, 90_000);
 
     it("keeps tickets and keys out of the log", () => {

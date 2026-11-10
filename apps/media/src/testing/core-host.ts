@@ -5,10 +5,10 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { TICKET_KEYS_SETTING } from "@media/contracts/ticket";
 
@@ -58,3 +58,13 @@ export const fileDigest = async (path: string): Promise<string> =>
 /** The SHA-256 of `bytes`, in hex. */
 export const bytesDigest = (bytes: Uint8Array): string =>
   createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * Copies the file at `from` to `to` by writing its bytes, making `to`'s folder first, as a person
+ * adding a file to a library would. Writing bytes keeps the copy inside the NixOS unit's system call
+ * filter (`testing/byte-copies.ts`).
+ */
+export const addFile = async (from: string, to: string): Promise<void> => {
+  await mkdir(dirname(to), { recursive: true });
+  await writeFile(to, await readFile(from));
+};

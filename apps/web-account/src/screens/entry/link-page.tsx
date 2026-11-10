@@ -4,7 +4,7 @@ import { Match } from "effect";
 import type { ReactNode } from "react";
 
 import { AuthPage, Lede, PageTitle } from "@/components/auth-page";
-import { isFailure } from "@/lib/failure";
+import { isFailure } from "@media/ui/lib/failure";
 
 import { AccountForm } from "./account-form";
 import type { AccountFields } from "./account-form";

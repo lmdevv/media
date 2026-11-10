@@ -119,7 +119,7 @@
   /* Paddings, gaps, margins, and offsets between the Paper spacing steps. The key is the step on
      Tailwind's 4px grid (`gap-1.5` reads `--spacing-1_5`), so classes keep their usual names, and
      the value is in rem, as Tailwind's multiplier drew it, so it follows the text size setting;
-     `apps/web/src/lib/design-tokens.test.ts` keeps every such class on this list or the Paper scale. */
+     `apps/web-movies/src/lib/design-tokens.test.ts` keeps every such class on this list or the Paper scale. */
   --spacing-0_5: 0.125rem;
   --spacing-0_75: 0.1875rem;
   --spacing-1_25: 0.3125rem;

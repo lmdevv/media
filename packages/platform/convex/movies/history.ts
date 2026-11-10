@@ -10,6 +10,7 @@ import { paginate, paginateAtMost } from "../core/lib/paginate";
 import { decidableRows, reachOf } from "../core/permissions/grants";
 import { principalOf } from "../core/permissions/policy";
 import { budgetedViewer, mayActOnTitle, requireTitle, titleViewer } from "./access";
+import { registerWithArtworkTickets } from "./artwork";
 import { CALL_BUDGET, work } from "./budget";
 import { presentEpisode, presentProgress, presentTitleCard } from "./present";
 import { callBudget } from "./reads";
@@ -154,79 +155,82 @@ export const markRest = internalMutation({
   },
 });
 
-export const { continueWatching, list, markWatched, markUnwatched } = register({
-  continueWatching: async (ctx, _args, caller) => {
-    const reach = await reachOf(ctx.db, caller);
-    const budget = callBudget(reach);
-    const seen = budgetedViewer(ctx.db, caller, reach, budget);
+export const { continueWatching, list, markWatched, markUnwatched } = registerWithArtworkTickets(
+  register,
+  {
+    continueWatching: async (ctx, _args, caller) => {
+      const reach = await reachOf(ctx.db, caller);
+      const budget = callBudget(reach);
+      const seen = budgetedViewer(ctx.db, caller, reach, budget);
 
-    return [...(await continueWatchingOf(ctx.db, caller.userId, seen, budget))];
+      return [...(await continueWatchingOf(ctx.db, caller.userId, seen, budget))];
+    },
+    list: async (ctx, { paginationOpts }, caller) => {
+      const reach = await reachOf(ctx.db, caller);
+      const sees = titleViewer(ctx.db, caller, reach);
+
+      const page = await paginateAtMost(
+        ctx.db,
+        {
+          table: "watchProgress",
+          index: "by_user_played",
+          range: (q) => q.eq("userId", caller.userId),
+          order: "desc",
+        },
+        paginationOpts,
+        Math.min(HISTORY_PAGE_MAX, decidableRows(reach, HISTORY_ROW_READS)),
+      );
+
+      const entries = await Promise.all(
+        page.page.map(async (row) => {
+          const title = await ctx.db.get(row.titleId);
+
+          if (title === null || !(await sees(title))) return [];
+
+          const episode = row.episodeId === null ? null : await ctx.db.get(row.episodeId);
+
+          return [
+            {
+              title: presentTitleCard(title),
+              episode: episode === null ? null : presentEpisode(episode, row),
+              progress: presentProgress(row),
+              lastPlayedAt: row.lastPlayedAt,
+            },
+          ];
+        }),
+      );
+
+      return { ...page, page: entries.flat() };
+    },
+    markWatched: async (ctx, { titleId, episodeId }, caller) => {
+      const { title } = await requireTitle(ctx.db, caller, "play", titleId);
+
+      const at = Date.now();
+      const whole = episodeId === undefined ? at : undefined;
+      const generation = await nextWatchGeneration(ctx, caller.userId, titleId, whole);
+
+      await markTarget(
+        ctx,
+        { userId: caller.userId, title, watched: true, at, generation },
+        episodeId,
+      );
+
+      return null;
+    },
+    markUnwatched: async (ctx, { titleId, episodeId }, caller) => {
+      const { title } = await requireTitle(ctx.db, caller, "play", titleId);
+
+      const at = Date.now();
+      const whole = episodeId === undefined ? at : undefined;
+      const generation = await nextWatchGeneration(ctx, caller.userId, titleId, whole);
+
+      await markTarget(
+        ctx,
+        { userId: caller.userId, title, watched: false, at, generation },
+        episodeId,
+      );
+
+      return null;
+    },
   },
-  list: async (ctx, { paginationOpts }, caller) => {
-    const reach = await reachOf(ctx.db, caller);
-    const sees = titleViewer(ctx.db, caller, reach);
-
-    const page = await paginateAtMost(
-      ctx.db,
-      {
-        table: "watchProgress",
-        index: "by_user_played",
-        range: (q) => q.eq("userId", caller.userId),
-        order: "desc",
-      },
-      paginationOpts,
-      Math.min(HISTORY_PAGE_MAX, decidableRows(reach, HISTORY_ROW_READS)),
-    );
-
-    const entries = await Promise.all(
-      page.page.map(async (row) => {
-        const title = await ctx.db.get(row.titleId);
-
-        if (title === null || !(await sees(title))) return [];
-
-        const episode = row.episodeId === null ? null : await ctx.db.get(row.episodeId);
-
-        return [
-          {
-            title: presentTitleCard(title),
-            episode: episode === null ? null : presentEpisode(episode, row),
-            progress: presentProgress(row),
-            lastPlayedAt: row.lastPlayedAt,
-          },
-        ];
-      }),
-    );
-
-    return { ...page, page: entries.flat() };
-  },
-  markWatched: async (ctx, { titleId, episodeId }, caller) => {
-    const { title } = await requireTitle(ctx.db, caller, "play", titleId);
-
-    const at = Date.now();
-    const whole = episodeId === undefined ? at : undefined;
-    const generation = await nextWatchGeneration(ctx, caller.userId, titleId, whole);
-
-    await markTarget(
-      ctx,
-      { userId: caller.userId, title, watched: true, at, generation },
-      episodeId,
-    );
-
-    return null;
-  },
-  markUnwatched: async (ctx, { titleId, episodeId }, caller) => {
-    const { title } = await requireTitle(ctx.db, caller, "play", titleId);
-
-    const at = Date.now();
-    const whole = episodeId === undefined ? at : undefined;
-    const generation = await nextWatchGeneration(ctx, caller.userId, titleId, whole);
-
-    await markTarget(
-      ctx,
-      { userId: caller.userId, title, watched: false, at, generation },
-      episodeId,
-    );
-
-    return null;
-  },
-});
+);

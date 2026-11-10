@@ -6,12 +6,12 @@ import { Match } from "effect";
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@/components/shell";
-import { describeFailure } from "@/lib/failure";
+import { PageHeader } from "@media/ui/components/page-header";
+import { describeFailure } from "@media/ui/lib/failure";
 
 import { useActions } from "./action";
-import { usePages } from "./pages";
-import type { Paged } from "./pages";
+import { usePages } from "@media/ui/lib/pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { Failed, ItemRow, Muted, Notice, PagedList, Section, formatTime } from "./parts";
 import type { GuestLink, GuestStatus, GuestVisit } from "./types";
 

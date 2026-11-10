@@ -17,8 +17,8 @@ const everyPackage = [
   "apps/cli",
   "apps/media",
   "apps/mobile",
-  "apps/web",
   "apps/web-account",
+  "apps/web-movies",
   "packages/backend",
   "packages/commands",
   "packages/config",
@@ -36,7 +36,9 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
   });
 
   it("affects one app and nothing else when only that app changed", () => {
-    expect(affected("apps/web/src/main.tsx", "apps/web/README.md")).toEqual(["apps/web"]);
+    expect(affected("apps/web-movies/src/main.tsx", "apps/web-movies/README.md")).toEqual([
+      "apps/web-movies",
+    ]);
   });
 
   it("affects a shared package and every package that depends on it", () => {
@@ -44,12 +46,13 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
       "apps/cli",
       "apps/media",
       "apps/mobile",
-      "apps/web",
       "apps/web-account",
+      "apps/web-movies",
       "packages/backend",
       "packages/contracts",
       "packages/platform",
       "packages/sdk",
+      "packages/ui",
     ]);
   });
 

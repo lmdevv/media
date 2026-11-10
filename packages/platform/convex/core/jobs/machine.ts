@@ -12,6 +12,9 @@ export const ITEM_BATCH_MAX = 4000;
 
 export const LAPSED_ERROR = "The worker stopped responding";
 
+/** The `lastError` of a job a restore put back in the queue. */
+export const RESTORED_ERROR = "The server was restored from a backup taken while this ran";
+
 /** Most characters a job's message or error keeps (ADR 0012, "Finished jobs"). */
 export const JOB_TEXT_MAX = 4096;
 
@@ -51,6 +54,11 @@ export type Finish =
       readonly retry: boolean;
     };
 
+/** How a restore ends a running job (the `restored` event). */
+type Restored =
+  | { readonly outcome: "requeue" }
+  | { readonly outcome: "succeed"; readonly message: string };
+
 export type JobEvent =
   | { readonly type: "claim"; readonly workerId: string; readonly leaseMs: number }
   | { readonly type: "report"; readonly lease: Attempt; readonly report: Report }
@@ -58,7 +66,13 @@ export type JobEvent =
   | { readonly type: "check"; readonly lease: Attempt }
   | { readonly type: "finish"; readonly lease: Attempt; readonly finish: Finish }
   | { readonly type: "cancel" }
-  | { readonly type: "lapse" };
+  | { readonly type: "lapse" }
+  /**
+   * A restored snapshot caught the job running, and its worker has moved on: `requeue` puts it
+   * back in the queue at once, whatever its lease, with no strike; `succeed` ends it with
+   * `message`, for a job whose result the restore itself is, such as the backup being restored.
+   */
+  | { readonly type: "restored"; readonly end: Restored };
 
 export type ItemWrite =
   /** Delete the done items with `from <= seq < to`. */
@@ -273,6 +287,19 @@ const lapse = (job: Running, now: number, policy: Policy): Step => {
   return moved({ ...commonOf(job), strikes, status: "queued", lastError: LAPSED_ERROR });
 };
 
+const restored = (job: Running, end: Restored, now: number): Step => {
+  if (end.outcome === "succeed") {
+    return moved(
+      { ...commonOf(job), message: bounded(end.message), status: "succeeded", finishedAt: now },
+      purgeOf(job.work),
+    );
+  }
+
+  if (job.cancelRequestedAt !== null) return canceled(job, now);
+
+  return moved({ ...commonOf(job), status: "queued", lastError: RESTORED_ERROR });
+};
+
 const settledAlready = (job: JobFields, end: Finish): boolean =>
   (job.status === "succeeded" && end.outcome === "succeeded") ||
   (job.status === "failed" && end.outcome === "failed") ||
@@ -315,6 +342,10 @@ export const step = (job: JobFields, event: JobEvent, now: number, policy: Polic
 
   if (event.type === "lapse") {
     return job.status === "running" ? lapse(job, now, policy) : unchanged(job);
+  }
+
+  if (event.type === "restored") {
+    return job.status === "running" ? restored(job, event.end, now) : unchanged(job);
   }
 
   if (

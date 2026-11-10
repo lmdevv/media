@@ -5,6 +5,12 @@ Convex backend, the media service, the web app, the CLI, and the two installs, a
 "Reliability and security" section of the architecture and the decisions in `docs/decisions.md`.
 Each finding says what was wrong, how it was fixed or why it stays, and where the evidence is.
 
+The movies cutover (ADR 0027) replaced the media service's wiring that this review covers. The
+service now signs in to the core and checks a caller with `core.auth.sessions.current` (ADR 0010).
+Its byte routes admit tickets instead of playback tokens, and it seals artwork keys under its
+service key (ADR 0011). `PLAYBACK_TOKEN_SECRET` and `/movies/convex` no longer exist. The review
+below stays as the record of the old code, which `packages/backend` holds until it is deleted.
+
 ## Threat model
 
 - One household, self-hosted on a LAN or a tailnet. The Compose install publishes its one port on

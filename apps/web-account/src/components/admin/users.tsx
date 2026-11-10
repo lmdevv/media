@@ -5,16 +5,16 @@ import { Match } from "effect";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@/components/shell";
-import { describeFailure } from "@/lib/failure";
+import { PageHeader } from "@media/ui/components/page-header";
+import { describeFailure } from "@media/ui/lib/failure";
 import { secretLink } from "@/session/link-secret";
 import { useMe } from "@/session/me";
 import type { UserId } from "@/session/platform-types";
 
 import { useActions } from "./action";
 import { KidLimits } from "./kid-limits";
-import { usePages } from "./pages";
-import type { Paged } from "./pages";
+import { usePages } from "@media/ui/lib/pages";
+import type { Paged } from "@media/ui/lib/pages";
 import {
   Failed,
   ItemRow,

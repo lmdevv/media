@@ -5,7 +5,6 @@ import { Context, Effect, FileSystem, Layer, Logger, Option, Path, References } 
 import { FetchHttpClient, HttpServer } from "effect/http";
 
 import * as BackendHealth from "../backend-health.ts";
-import * as ConvexSessionReports from "../convex/convex-session-reports.ts";
 import { routesLayer, serve } from "../http/http-server.ts";
 import type { LogRecord } from "@media/contracts/diagnostics";
 import { type MediaFileId, LibraryId } from "@media/contracts/ids";
@@ -18,12 +17,12 @@ import { servicesLayerWith } from "../media-service.ts";
 import { redactedLine } from "../observability.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
 import * as PlaybackReporter from "../playback/playback-reporter.ts";
-import * as PlaybackToken from "../playback/playback-token.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import * as SessionReports from "../playback/session-reports.ts";
 import * as FixtureWorkspace from "./fixture-workspace.ts";
-import * as TestConvex from "./test-convex.ts";
+import * as TestSessions from "./test-sessions.ts";
 import { testConfigLayer } from "./test-config.ts";
+import { testArtworkKeysLayer, testTokensLayer } from "./test-tokens.ts";
 
 /** Where the test server listens and how to find fixture files in its store. */
 export interface Interface {
@@ -47,11 +46,11 @@ const SHOWS = LibraryId.make("shows");
 interface Options {
   readonly fileSystem?: (real: FileSystem.FileSystem) => FileSystem.FileSystem;
   /**
-   * Runs as in Convex mode against `TestConvex`, with the real session reports and ended-session
-   * registry over its subscriptions. Standalone, with no session reports and no session ever
-   * ended, when absent; the scripted Convex is then present but nothing follows it.
+   * Follows the sessions `TestSessions` scripts, with the real ended-session registry over its
+   * reports. With no session reports and no session ever ended when absent; the scripted sessions
+   * are then present but nothing follows them.
    */
-  readonly convex?: true;
+  readonly reports?: true;
   /** Wraps the real ffmpeg and ffprobe the server's own services run, such as to hold an exit. */
   readonly mediaTools?: (real: MediaTools.Interface) => MediaTools.Interface;
 }
@@ -94,8 +93,8 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
       );
 
       const reports =
-        options.convex === true
-          ? EndedSessions.layer.pipe(Layer.provideMerge(ConvexSessionReports.layer))
+        options.reports === true
+          ? EndedSessions.layer.pipe(Layer.provideMerge(TestSessions.reportsLayer))
           : Layer.merge(SessionReports.layerNone, EndedSessions.layerNone);
 
       const fileSystem = Layer.effect(
@@ -109,8 +108,9 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
       ).pipe(Layer.provide(MediaTools.layer));
 
       const services = servicesLayerWith(tools).pipe(
-        Layer.provideMerge(PlaybackToken.layer),
+        Layer.provideMerge(testTokensLayer),
         Layer.provideMerge(StreamOwners.layer),
+        Layer.provideMerge(testArtworkKeysLayer),
         Layer.provideMerge(
           Layer.mergeAll(
             MemoryLibrary.layer,
@@ -119,7 +119,7 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
             reports,
           ),
         ),
-        Layer.provideMerge(TestConvex.layer),
+        Layer.provideMerge(TestSessions.layer),
         Layer.provideMerge(config),
         Layer.provide(fileSystem),
       );

@@ -5,7 +5,7 @@ import { Effect, Predicate, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import * as MediaTestServer from "../testing/media-test-server.ts";
-import { signTestToken } from "../testing/test-config.ts";
+import { signTestToken } from "../testing/test-tokens.ts";
 
 const urlOf = (record: LogRecord): string => {
   const url = record.annotations["http.url"];

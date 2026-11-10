@@ -5,11 +5,11 @@ import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@/components/shell";
+import { PageHeader } from "@media/ui/components/page-header";
 
 import { useActions } from "./action";
-import { usePages } from "./pages";
-import type { Paged } from "./pages";
+import { usePages } from "@media/ui/lib/pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { ItemRow, PagedList, Section, SelectField } from "./parts";
 import type { Choice } from "./parts";
 import type { Level, Library, LibraryKind } from "./types";

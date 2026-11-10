@@ -52,12 +52,11 @@ Registry `media` commands answer `{ code, message }` like Convex.
 
 ## Configuration
 
-Required: `MEDIA_BASE_URL`, `DATA_DIR` (`/data/movies/media` in the image), `TRANSCODE_DIR`,
-`PLAYBACK_TOKEN_SECRET` (base64url, ≥ 32 bytes). Optional with defaults: `LIBRARY_ROOTS` (comma
-list of approved mounts; none approves nothing, so every scan is refused), `PORT` (4300), `HOST`
-(all interfaces), `BACKUP_DIR` (`/data/backups`; `/data/movies/backups` in the image),
-`TMDB_API_KEY` (v3 key or v4 read token), `OMDB_API_KEY` (IMDb, Rotten Tomatoes, and Metacritic
-scores; without it titles keep TMDB's), `WEB_DIST_DIR`,
+Required: `MEDIA_BASE_URL`, `DATA_DIR` (`/data/movies/media` in the image), `TRANSCODE_DIR`.
+Optional with defaults: `LIBRARY_ROOTS` (comma list of approved mounts; none approves nothing, so
+every scan is refused), `PORT` (4300), `HOST` (all interfaces), `BACKUP_DIR` (`/data/backups`;
+`/data/core/backups` in the image), `TMDB_API_KEY` (v3 key or v4 read token), `OMDB_API_KEY`
+(IMDb, Rotten Tomatoes, and Metacritic scores; without it titles keep TMDB's), `WEB_DIST_DIR`,
 `MAX_CONCURRENT_TRANSCODES` (3), `MAX_CONCURRENT_REMUXES` (10: HLS streams that copy the video),
 `HARDWARE_ACCELERATION` (`auto` tries Quick Sync, then VA-API, then software; `qsv`, `vaapi`,
 `none`), `QSV_DEVICE` and `VAAPI_DEVICE` (`/dev/dri/renderD128`), `STREAM_IDLE_SECONDS` (60: a
@@ -74,14 +73,25 @@ subtitles, and artwork under `DATA_DIR`, pruned hourly, least recently used firs
 (`on` or `off`: scrub thumbnail jobs), `TRICKPLAY_INTERVAL_SECONDS` (10, from 1 to 600),
 `TRICKPLAY_CONCURRENCY` (1: files given thumbnails at once, besides other jobs), `FFMPEG_PATH`,
 `FFPROBE_PATH`,
-`OTEL_EXPORTER_OTLP_ENDPOINT`, `CONVEX_URL`, `CONVEX_PUBLIC_URL` (the Convex URL browsers use; it
-narrows the web app's content security policy), `MEDIA_SERVICE_API_KEY`,
-`CONVEX_SELF_HOSTED_ADMIN_KEY` and `CONVEX_BACKEND_DIR` (backups), `BACKUP_RETENTION_DAYS` (14),
+`OTEL_EXPORTER_OTLP_ENDPOINT`, `BACKUP_RETENTION_DAYS` (14),
 `LOG_LEVEL` (`info`; `trace`, `debug`, `warn`, `error`: the least severe level logged, on standard
 output and in the retained log), `LOG_RETENTION_DAYS` (14) and `LOG_MAX_MB` (512, from 8 to
 1048576: the size the retained log files under `DATA_DIR/logs`, which `media logs` and
 `media diagnostics playback` read, never grow past together). The dev stack sets
 `LIBRARY_ROOTS` to its own `library` folder unless `MEDIA_LIBRARY_ROOTS` says otherwise.
+
+The connection to the core (`packages/platform`), which the image, the NixOS module, and
+`scripts/dev-stack.sh up` set: `CONVEX_URL` (the core's Convex URL the service connects to,
+`http://127.0.0.1:3210` in the image), `CONVEX_PUBLIC_URL` (the core's Convex URL browsers use,
+`MEDIA_BASE_URL/convex` in the installs; `/api/client-config` reports it, and it narrows the web
+app's content security policy), `MEDIA_SERVICE_API_KEY` (the key the core issued this server's
+service principal with `core/auth/apiKeys:issueServiceKey`; the installs create the principal and
+issue the key on their first start, then keep it in a root-only file under the core's
+`secrets/`), `MEDIA_TICKET_KEYS` (the core deployment's ticket key ring, `<kid>:<key>` entries
+separated by commas, read from the deployment with `convex env get`; the service admits the byte
+tickets the core signs with it, ADR 0011), `CONVEX_SELF_HOSTED_ADMIN_KEY` (the core's admin key)
+and `CONVEX_BACKEND_DIR` (the deployed `packages/platform` folder, whose Convex CLI exports and
+imports the core for backups and restores).
 
 QSV needs an ffmpeg built with libvpl; the Nix dev shell uses `ffmpeg-full` for that. ffmpeg and
 ffprobe see `LIBVA_DRIVER_NAME`, `LIBVA_DRIVERS_PATH`, and `ONEVPL_SEARCH_PATH` when they are set.

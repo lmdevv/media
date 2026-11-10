@@ -6,7 +6,7 @@
 # interface gains or loses an address, which every Docker container start and stop does, so
 # browser runs on a host with other Docker work belong in here.
 #
-#   scripts/private-network.sh pnpm --filter web exec playwright test --project=kit
+#   scripts/private-network.sh pnpm --filter @media/web-movies exec playwright test --project=kit
 #
 # Needs Linux with unprivileged user namespaces, util-linux's `unshare`, and iproute2's `ip`. It
 # fails rather than run the command on the host network.

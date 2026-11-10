@@ -1,17 +1,10 @@
-import type { EpisodeId, LibraryId } from "@media/contracts/ids";
+import type { LibraryId } from "@media/contracts/ids";
 import type { Artwork, ExternalIds, TitleKind } from "@media/contracts/models/catalog";
 import type { ScannedEpisode } from "@media/contracts/models/scan";
 import { Effect, Match, Option } from "effect";
 
 import * as ArtworkKeys from "../artwork/artwork-keys.ts";
-import {
-  digestOf,
-  toScannedCollection,
-  toScannedCredits,
-  toScannedEpisode,
-  toScannedTitle,
-} from "../convex/catalog-records.ts";
-import * as MediaBackend from "../convex/media-backend.ts";
+import { toScannedEpisode, toScannedTitle } from "../core/catalog-records.ts";
 import type { SiteRatings } from "../library/nfo.ts";
 import * as MetadataPlugin from "../metadata/metadata-plugin.ts";
 import type {
@@ -28,10 +21,7 @@ import {
   mergeRatings,
 } from "../metadata/title-metadata.ts";
 import type { EpisodeMetadata, TitleMetadata } from "../metadata/title-metadata.ts";
-import { JobFailed, type JobHandler } from "./job-worker.ts";
-import { personDetailsOf } from "./person-job.ts";
-
-const EPISODE_BATCH = 100;
+import { JobFailed } from "../core/core-jobs.ts";
 
 const noActorImages = (): undefined => undefined;
 
@@ -97,9 +87,6 @@ const episodeMetadataOf = (season: ProviderSeason, episode: number): EpisodeMeta
     sources: ["provider"],
   };
 };
-
-const backendFailure = (error: { readonly message: string }) =>
-  new JobFailed({ message: error.message, retry: true });
 
 /** What a metadata lookup needs of a title: its names and ids, artwork, and episodes. */
 export interface LookupTarget<EpisodeKey> {
@@ -214,128 +201,3 @@ export const lookUp = Effect.fn("MetadataJob.lookUp")(function* <EpisodeKey>(
 
 /** The top-billed people whose details a metadata job fetches itself. */
 export const TOP_BILLED = 10;
-
-/** The metadata job handler. */
-export const handler: Effect.Effect<
-  JobHandler,
-  never,
-  MediaBackend.Service | MetadataPlugin.Service | ArtworkKeys.Service | Omdb.Service
-> = Effect.gen(function* () {
-  const backend = yield* MediaBackend.Service;
-  const plugin = yield* MetadataPlugin.Service;
-  const keys = yield* ArtworkKeys.Service;
-
-  const context = yield* Effect.context<
-    MetadataPlugin.Service | ArtworkKeys.Service | Omdb.Service
-  >();
-
-  return {
-    kind: "metadata",
-    run: Effect.fn("MetadataJob.run")(function* (claim, workerId, reportProgress) {
-      const { payload } = claim.job;
-
-      if (payload.kind !== "metadata") {
-        return yield* new JobFailed({ message: "This is not a metadata job", retry: false });
-      }
-
-      const target = yield* backend
-        .call("mediaService.metadataTarget", { titleId: payload.titleId })
-        .pipe(Effect.mapError(backendFailure));
-
-      const { providerId, details, metadata, folder, title, fetched, episodes } = yield* lookUp(
-        target,
-        Option.fromNullOr(payload.match).pipe(Option.map((match) => match.providerId)),
-      ).pipe(Effect.provide(context));
-
-      const batches = Array.from(
-        { length: Math.max(1, Math.ceil(episodes.length / EPISODE_BATCH)) },
-        (_, index) => episodes.slice(index * EPISODE_BATCH, (index + 1) * EPISODE_BATCH),
-      );
-
-      yield* Effect.forEach(
-        batches,
-        (batch, index) =>
-          backend
-            .call("mediaService.applyMetadata", {
-              jobId: claim.job.id,
-              workerId,
-              titleId: target.titleId,
-              title,
-              episodes: batch,
-            })
-            .pipe(
-              Effect.mapError(backendFailure),
-              Effect.andThen(
-                reportProgress({ done: index + 1, total: batches.length, message: "writing" }),
-              ),
-            ),
-        { discard: true },
-      );
-
-      const lease = { jobId: claim.job.id, workerId };
-
-      const writeCredits = (episodeId: EpisodeId | null, credits: TitleMetadata["credits"]) =>
-        Effect.gen(function* () {
-          const scannedCredits = yield* toScannedCredits(folder, credits, keys.seal);
-
-          const written = yield* backend.call("mediaService.applyCredits", {
-            titleId: target.titleId,
-            episodeId,
-            credits: scannedCredits,
-            hash: digestOf(scannedCredits),
-            lease,
-          });
-
-          return written.people;
-        });
-
-      const cast = yield* writeCredits(null, metadata.credits).pipe(
-        Effect.mapError(backendFailure),
-      );
-
-      const scannedCollection = yield* toScannedCollection(folder, metadata.collection, keys.seal);
-
-      yield* backend
-        .call("mediaService.applyCollection", {
-          titleId: target.titleId,
-          collection: scannedCollection,
-          hash: digestOf(scannedCollection),
-          lease,
-        })
-        .pipe(Effect.mapError(backendFailure));
-
-      yield* Effect.forEach(
-        fetched,
-        (episode) => writeCredits(episode.episodeId, episode.metadata.credits),
-        { discard: true },
-      ).pipe(Effect.mapError(backendFailure));
-
-      yield* Effect.forEach(
-        cast
-          .slice(0, TOP_BILLED)
-          .flatMap((person) =>
-            person.needsDetails && person.tmdbId !== null ? [{ person, tmdb: person.tmdbId }] : [],
-          ),
-        ({ person, tmdb }) =>
-          plugin.personDetails(tmdb).pipe(
-            Effect.flatMap((found) => personDetailsOf(found, keys.seal)),
-            Effect.flatMap((personDetails) =>
-              backend.call("mediaService.applyPerson", {
-                ...lease,
-                personId: person.personId,
-                details: personDetails,
-              }),
-            ),
-            Effect.catch((error) =>
-              Effect.logWarning("MetadataJob.person_failed", error.message).pipe(
-                Effect.annotateLogs({ personId: person.personId }),
-              ),
-            ),
-          ),
-        { discard: true },
-      );
-
-      return `Matched to TMDB ${providerId}: ${details.title}${details.year === undefined ? "" : ` (${String(details.year)})`}`;
-    }),
-  } satisfies JobHandler;
-});

@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Ref } from "effect";
 
-import { JobFailed } from "../jobs/job-worker.ts";
+import { JobFailed } from "./core-jobs.ts";
 import { sendAll } from "./core-scan.ts";
 
 describe("sendAll", () => {

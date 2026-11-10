@@ -5,8 +5,12 @@
 // --app when the page is created. verify-media.sh calls this; agents call it through
 // `verify-media.sh browser`.
 //
-//   node browser.mjs serve --state <dir> --base <movies url> [--account <url>] [--convex <url>] [--music <url>]
-//   node browser.mjs <command> --state <dir> [--app movies|music] [flags]
+//   node browser.mjs serve --state <dir> --base <movies url> [--account <url> [--core]] [--convex <url>] [--music <url>]
+//   node browser.mjs <command> --state <dir> [--app movies|music|account] [flags]
+//
+// With --core, the movies client has no sign-in of its own: it uses the session the account client
+// at --account keeps (the one-backend layout), so movies pages sign in, set up, invite, and join
+// there, and have no profiles.
 //
 // Where the host allows it, the browser runs in a private network namespace (see `isolate`),
 // because Chromium cancels its queued requests whenever any host interface gains or loses an
@@ -20,7 +24,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-const OWNER = { name: "Lucía", email: "admin@movies.local", password: "password123" };
+const OWNER = { name: "Lucía", email: "admin@movies.local", username: "lucia", password: "password123" };
 const APPS = ["movies", "music", "account"];
 
 // Every socket lives in the side's state folder and is named relative to it: a socket address
@@ -55,6 +59,7 @@ const FLAGS = {
   state: { type: "string" },
   base: { type: "string" },
   account: { type: "string" },
+  core: { type: "boolean", default: false },
   convex: { type: "string" },
   music: { type: "string" },
   app: { type: "string" },
@@ -86,6 +91,7 @@ const FLAGS = {
   advance: { type: "string" },
   js: { type: "string" },
   email: { type: "string" },
+  username: { type: "string" },
   password: { type: "string" },
   profile: { type: "string" },
   pin: { type: "string" },
@@ -230,7 +236,7 @@ async function serve(options) {
 // clients, Convex, and streams) and music keep their port numbers inside, so every origin stays
 // `http://localhost:<port>`. The proxy carries HTTPS to the internet for the Cast SDK, TMDB
 // images, and trailers.
-async function isolate({ base, account, convex, music }) {
+async function isolate({ base, account, core, convex, music }) {
   const toHost = (port) =>
     createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, port, host: "127.0.0.1" })));
   const proxy = createServer((request, response) => {
@@ -262,7 +268,8 @@ async function isolate({ base, account, convex, music }) {
     PRIVATE_NETWORK,
     [
       process.execPath, fileURLToPath(import.meta.url), "serve-inside", "--state", ".", "--base", base,
-      ...(account ? ["--account", account] : []), ...(convex ? ["--convex", convex] : []),
+      ...(account ? ["--account", account] : []), ...(core ? ["--core"] : []),
+      ...(convex ? ["--convex", convex] : []),
       ...(music ? ["--music", music] : []),
     ],
     { stdio: ["pipe", "inherit", "inherit"] },
@@ -298,7 +305,7 @@ async function serveInside(options) {
   process.stdin.resume();
 }
 
-async function drive({ base, account, music }, network, launchArgs) {
+async function drive({ base, account, core, music }, network, launchArgs) {
   const { chromium, devices } = await import("@playwright/test");
   const executablePath = process.env.CHROMIUM_PATH || undefined;
   const browser = await chromium.launch({
@@ -590,6 +597,118 @@ async function drive({ base, account, music }, network, launchArgs) {
     }
   };
 
+  // The account client at `account`, where every person signs in once for every app on the
+  // one-backend layout. A movies page reaches it in its own context, so the session it keeps there
+  // is the one the movies client reads.
+  const openAccount = (page, path) => {
+    if (!account) throw new Error("this side has no account client");
+    return page.goto(new URL(path, account).href);
+  };
+  const accountHome = (page, options) =>
+    page.waitForURL((url) => url.pathname === "/home", { timeout: timeout(options) });
+
+  const accountFlows = {
+    // Signs the page in at /, as Lucía by default, and waits for the person's home.
+    async signIn(page, options) {
+      await openAccount(page, "/");
+      await page.getByLabel("Username").fill(options.username ?? OWNER.username);
+      await page.getByLabel("Password", { exact: true }).fill(options.password ?? OWNER.password);
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await accountHome(page, options);
+      return `signed in as ${options.username ?? OWNER.username}`;
+    },
+    // First-run setup, as an owner does it on a fresh server: the owner account at /, then the
+    // Movies library and the Shows library from Admin, Libraries. Each queues its first scan.
+    async setup(page, options) {
+      await openAccount(page, "/");
+      await page.getByRole("heading", { name: "Set up your server." }).waitFor({ timeout: timeout(options) });
+      await page.getByLabel("Username").fill(OWNER.username);
+      await page.getByLabel("Password", { exact: true }).fill(OWNER.password);
+      await page.getByRole("button", { name: "Create owner account" }).click();
+      await accountHome(page, options);
+      const libraries = [["Movies", options.movies ?? "/media/library/Movies"]];
+      if (options.shows) libraries.push(["Shows", options.shows]);
+      await openAccount(page, "/admin/libraries");
+      const form = page.getByRole("region", { name: "Add a library" });
+      for (const [name, folder] of libraries) {
+        await form.getByLabel("Name").fill(name);
+        await form.getByLabel("Kind").selectOption("movies");
+        await form.getByLabel("Folders, one per line").fill(folder);
+        await form.getByRole("button", { name: "Add library" }).click();
+        await page
+          .getByRole("list", { name: "Libraries" })
+          .getByRole("link", { name, exact: true })
+          .waitFor({ timeout: timeout(options) });
+      }
+      return `set up as ${OWNER.username}`;
+    },
+    // Makes an invite link in Admin, Users and prints its code, the link's secret after `#`.
+    async invite(page, options) {
+      await openAccount(page, "/admin");
+      const section = page.getByRole("region", { name: "Invite someone" });
+      await section.getByLabel("Role").selectOption(options["invite-role"] ?? "member");
+      await section.getByRole("button", { name: "Create invite link" }).click();
+      const field = section.getByLabel("Invite link");
+      await field.waitFor({ timeout: timeout(options) });
+      const link = (await field.innerText()).trim();
+      const code = new URL(link).hash.slice(1);
+      if (!code) throw new Error(`the invite link looks wrong: "${link}"`);
+      return code;
+    },
+    // Accepts an invite at /invite#<code> and makes the account, as the invited person does.
+    async join(page, options) {
+      if (!options.code || !options.username) throw new Error("join needs --code and --username on this side");
+      await openAccount(page, `/invite#${options.code}`);
+      await page.getByRole("heading", { name: "You're invited." }).waitFor({ timeout: timeout(options) });
+      await page.getByLabel("Username").fill(options.username);
+      await page.getByLabel("Password", { exact: true }).fill(options.password ?? OWNER.password);
+      await page.getByRole("button", { name: "Create account" }).click();
+      await accountHome(page, options);
+      return `joined as ${options.username}`;
+    },
+    // Makes an account with a password from Admin, Users, as an admin does for a kid.
+    async createAccount(page, options) {
+      if (!options.username) throw new Error("create-account needs --username");
+      await openAccount(page, "/admin");
+      const section = page.getByRole("region", { name: "Create an account" });
+      await section.getByLabel("Username").fill(options.username);
+      await section.getByLabel("Password", { exact: true }).fill(options.password ?? OWNER.password);
+      await section.getByLabel("Role").selectOption(options["invite-role"] ?? "member");
+      await section.getByRole("button", { name: "Create account" }).click();
+      await page
+        .getByRole("list", { name: "People" })
+        .getByText(options.username, { exact: true })
+        .waitFor({ timeout: timeout(options) });
+      return `created ${options.username}`;
+    },
+  };
+
+  const accountCommands = {
+    "sign-in": ({ page }, options) => accountFlows.signIn(page, options),
+    setup: ({ page }, options) => accountFlows.setup(page, options),
+    invite: ({ page }, options) => accountFlows.invite(page, options),
+    join: ({ page }, options) => accountFlows.join(page, options),
+    "create-account": ({ page }, options) => accountFlows.createAccount(page, options),
+  };
+
+  const noProfiles = () => {
+    throw new Error("this side has no profiles: each person, a kid too, is their own user; sign in as them");
+  };
+
+  // Movies pages on the one-backend layout: every sign-in goes through the account client, and the
+  // page then opens the movies client, which reads that session.
+  const coreMoviesCommands = {
+    ...accountCommands,
+    async "sign-in"(entry, options) {
+      await accountFlows.signIn(entry.page, options);
+      await openAppPath(entry.page, "/");
+      await signedIn(entry.page).first().waitFor({ timeout: timeout(options) });
+      return entry.page.url();
+    },
+    profile: noProfiles,
+    "add-profile": noProfiles,
+  };
+
   const commands = {
     async "record-start"(entry, options) {
       return startRecording(entry, options);
@@ -832,7 +951,7 @@ async function drive({ base, account, music }, network, launchArgs) {
       return key;
     },
   };
-  const appCommands = { movies: moviesCommands, music: musicCommands, account: {} };
+  const appCommands = { movies: core ? coreMoviesCommands : moviesCommands, music: musicCommands, account: accountCommands };
 
   const handle = async (options) => {
     if (options.command === "network") return `${network} ${chromiumPid()}`;

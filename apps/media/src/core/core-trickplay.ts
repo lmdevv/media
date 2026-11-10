@@ -3,7 +3,7 @@ import { Bytes, EpochMillis } from "@media/contracts/units";
 import { Array as Arr, Clock, Duration, Effect, Layer, Schedule } from "effect";
 import type { FileSystem, Path } from "effect";
 
-import { JobFailed } from "../jobs/job-worker.ts";
+import { JobFailed } from "./core-jobs.ts";
 import * as MediaConfig from "../media-config.ts";
 import type * as MediaTools from "../media/media-tools.ts";
 import type * as FileResolver from "../playback/file-resolver.ts";

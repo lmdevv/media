@@ -1,9 +1,10 @@
 #!/bin/sh
 # `docker compose exec media media ...`: the CLI against this container's own services, with its
 # logins in the data volume.
-export MEDIA_CONVEX_URL="${MEDIA_CONVEX_URL:-http://127.0.0.1:3220}"
-export MEDIA_SERVER_URL="${MEDIA_SERVER_URL:-http://127.0.0.1:8080}"
+# The install runs one Convex backend, the core's, so both Convex settings name it.
+export MEDIA_CONVEX_URL="${MEDIA_CONVEX_URL:-http://127.0.0.1:3210}"
 export MEDIA_CORE_URL="${MEDIA_CORE_URL:-http://127.0.0.1:3210}"
+export MEDIA_SERVER_URL="${MEDIA_SERVER_URL:-http://127.0.0.1:8080}"
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/data/movies/config}"
 case " $* " in *" admin reset-password "*) reset=1 ;; *) reset=0 ;; esac
 if [ "$reset" = 1 ] && [ -z "${MEDIA_CORE_ADMIN_KEY:-}" ] && [ -r /data/core/secrets/instance_secret ]; then

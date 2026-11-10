@@ -751,3 +751,17 @@ export const loadTicketKeyRing = async (
 
   return accepted(makeRing(new Map(imported), signing[0]));
 };
+
+/**
+ * The id a shareable ticket names for the artwork at `key` (ADR 0011): the unpadded base64url of
+ * the key's SHA-256, 43 characters, since a key can be longer than a ticket's resource id allows.
+ * The core issues tickets for this id, and the server's artwork route admits them for it.
+ */
+export const artworkTicketId = async (key: string): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+};

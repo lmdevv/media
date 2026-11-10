@@ -8,7 +8,7 @@ import { writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
-import { signTestToken } from "../testing/test-config.ts";
+import { signTestToken } from "../testing/test-tokens.ts";
 import { resolveInsideRoots } from "./file-resolver.ts";
 import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
 import * as PlaybackToken from "./playback-token.ts";

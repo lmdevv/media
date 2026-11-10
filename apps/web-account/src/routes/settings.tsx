@@ -4,8 +4,9 @@ import { Skeleton } from "@media/ui/components/skeleton";
 import { FieldError } from "@media/ui/components/text-field";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { PageHeader, SettingsFrame } from "@/components/shell";
-import { describeFailure } from "@/lib/failure";
+import { PageHeader } from "@media/ui/components/page-header";
+import { SettingsFrame } from "@/components/shell";
+import { describeFailure } from "@media/ui/lib/failure";
 import { useAction } from "@/screens/people/action";
 import {
   NameSection,

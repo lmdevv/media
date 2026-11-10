@@ -8,6 +8,8 @@ import { after, before, describe, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+import { cliEnv, grantArgs, GRANTS, openJobs, scanState } from "./core-seed.mjs";
+
 const here = (file) => fileURLToPath(new URL(file, import.meta.url));
 const browserJs = here("browser.mjs");
 const evidenceJs = here("evidence.mjs");
@@ -83,7 +85,7 @@ for (const network of ["isolated", "host"]) {
         [
           browserJs, "serve", "--state", state,
           "--base", `http://localhost:${portOf(servers.media)}/movies/`,
-          "--account", `http://localhost:${portOf(servers.media)}`,
+          "--account", `http://localhost:${portOf(servers.media)}`, "--core",
           "--music", `http://localhost:${portOf(servers.music)}`,
         ],
         { env: { ...process.env, CHROMIUM_PATH: chromium() ?? "", MEDIA_VERIFY_BROWSER_NETWORK: network }, stdio: "inherit" },
@@ -134,6 +136,18 @@ for (const network of ["isolated", "host"]) {
       const moviesOnly = await browser("--page", "music", "invite");
       assert.equal(moviesOnly.status, 1);
       assert.match(moviesOnly.stderr, /unknown music command "invite"/);
+    });
+
+    test("gives a movies page on one backend the account client's commands and no profiles", async () => {
+      const profile = await browser("--page", "kid", "profile", "--profile", "Kids");
+      assert.equal(profile.status, 1);
+      assert.match(profile.stderr, /this side has no profiles: each person, a kid too, is their own user/);
+      const join = await browser("--page", "kid", "join", "--code=abc");
+      assert.equal(join.status, 1);
+      assert.match(join.stderr, /join needs --code and --username on this side/);
+      const account = await browser("--page", "account-only", "--app", "account", "add-profile", "--profile", "Kids");
+      assert.equal(account.status, 1);
+      assert.match(account.stderr, /unknown account command "add-profile"/);
     });
 
     test("plays real audio on a music page", async () => {
@@ -501,5 +515,112 @@ setInterval(() => {}, 1_000);
     assert.match(result.stderr, /removed the after side/);
     assert.match(result.stderr, /asking the owner's CLI who it is did not finish in 1s/);
     assert.equal(alive(), false, `the stubborn CLI ${pid} is gone`);
+  });
+});
+
+describe("a side's layout", () => {
+  const env = { ...process.env, TMPDIR: join(scratch, "layout-tmp"), MEDIA_VERIFY_RUN: `layout-${process.pid}` };
+  const compose = (name, services) => {
+    const file = join(scratch, `${name}.yaml`);
+    writeFileSync(file, `name: media\nservices:\n${services.map((service) => `  ${service}:\n    image: x\n`).join("")}`);
+    return file;
+  };
+  // Runs `body` with the script's functions, on an after side whose state says `layout`.
+  const withLayout = (layout, body) =>
+    spawnSync(
+      "bash",
+      ["-c", `source "$1"; take_side --side after; mkdir -p "$state"; write_state port 4100; write_state layout "$2"; ${body}`, "layout-test", helper, layout],
+      { encoding: "utf8", env },
+    );
+
+  before(() => mkdirSync(env.TMPDIR, { recursive: true }));
+
+  test("is two-port with a Convex service, else one-port while the image holds old movies' backend", () => {
+    const layoutOf = (file, backend) =>
+      spawnSync("bash", ["-c", `source "$1"; layout_of "$2" "$3"`, "layout-test", helper, file, backend], { encoding: "utf8", env });
+    assert.equal(layoutOf(compose("two", ["convex", "movies"]), "1").stdout.trim(), "two-port");
+    assert.equal(layoutOf(compose("one", ["media"]), "1").stdout.trim(), "one-port");
+    assert.equal(layoutOf(compose("core", ["media"]), "0").stdout.trim(), "one-backend");
+  });
+
+  test("reads old movies' backend from the image, and stops when Docker can't look", () => {
+    const bin = join(scratch, "layout-docker");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "docker"), '#!/usr/bin/env bash\necho "$*" >> "$FAKE_DOCKER_CALLS"\nexit "$FAKE_DOCKER_CODE"\n', { mode: 0o755 });
+    const calls = join(bin, "calls");
+    const probe = (code) =>
+      spawnSync("bash", ["-c", `source "$1"; movies_backend_in media:x`, "layout-test", helper], {
+        encoding: "utf8",
+        env: { ...env, PATH: `${bin}:${process.env.PATH}`, FAKE_DOCKER_CODE: String(code), FAKE_DOCKER_CALLS: calls },
+      });
+    assert.equal(probe(0).stdout, "1\n");
+    assert.equal(probe(1).stdout, "0\n");
+    const broken = probe(125);
+    assert.equal(broken.status, 1);
+    assert.match(broken.stderr, /could not look inside media:x for its layout \(docker run exited 125\)/);
+    assert.match(execFileSync("cat", [calls], { encoding: "utf8" }), /^run --rm --network none --entrypoint test media:x -d \/app\/backend$/m);
+  });
+
+  test("points the CLI at the core and the browser at the account client on one backend", () => {
+    const urls = 'echo "$(movies_url) $(convex_url) $(owner_name) $(movies_service)"; core_only && echo core';
+    assert.equal(withLayout("one-backend", urls).stdout, "http://localhost:4100/movies http://localhost:4100/convex lucia media\ncore\n");
+    assert.equal(withLayout("one-port", urls).stdout, "http://localhost:4100/movies http://localhost:4100/movies/convex admin@movies.local media\n");
+  });
+
+  test("refuses the movies iOS app on one backend before it touches the Mac", () => {
+    const result = withLayout("one-backend", 'write_state people lucia; args=(up); MAC_HOST=nowhere.invalid cmd_ios_up');
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /movies iOS app can't reach the after side's one-backend image/);
+  });
+});
+
+describe("the core seed", () => {
+  const record = (message, jobId) =>
+    `media-1  | ${JSON.stringify({ message, level: "INFO", annotations: { jobId, kind: "movies.trickplay" } })}`;
+
+  test("counts a job open from its claim until it ends, in any order of lines", () => {
+    const log = [
+      record("CoreJobs.claimed", "a"),
+      "2026-11-10T18:12:13Z INFO convex: not a job",
+      record("CoreJobs.job_ended", "b"),
+      record("CoreJobs.claimed", "b"),
+      record("CoreJobs.claimed", "c"),
+      '{"message":"CoreJobs.claimed", broken',
+    ].join("\n");
+    assert.deepEqual(openJobs(log), ["a", "c"]);
+    assert.deepEqual(openJobs(`${log}\n${record("CoreJobs.job_ended", "a")}\n${record("CoreJobs.job_ended", "c")}`), []);
+  });
+
+  test("waits for every library's scan and every job, and stops at a failed scan", () => {
+    const library = (name, status, error = null) => ({ name, scan: status === null ? null : { status, error } });
+    const done = [library("Movies", "succeeded"), library("Shows", "succeeded")];
+    assert.equal(scanState(done, [], 2), "done");
+    assert.equal(scanState(done.slice(0, 1), [], 2), "busy 1 of 2 libraries");
+    assert.equal(scanState([done[0], library("Shows", "running")], [], 2), "busy scanning Shows");
+    assert.equal(scanState([done[0], library("Shows", null)], [], 2), "busy scanning Shows");
+    assert.equal(scanState(done, ["a"], 2), "busy 1 jobs");
+    assert.equal(scanState([done[0], library("Shows", "failed", "no folder")], [], 2), "failed Shows: no folder");
+  });
+
+  test("shares each library with a person by id or with everyone", () => {
+    const libraries = new Map([["Movies", "lib-m"], ["Shows", "lib-s"]]);
+    const users = new Map([["mateo", "u-m"], ["aiko", "u-a"], ["kids", "u-k"]]);
+    assert.deepEqual(grantArgs({ library: "Movies", principal: "aiko", level: "view" }, libraries, users), {
+      resource: { type: "library", id: "lib-m" },
+      principal: { kind: "user", userId: "u-a" },
+      level: "view",
+    });
+    assert.deepEqual(grantArgs({ library: "Shows", principal: "household", level: "view" }, libraries, users).principal, {
+      kind: "household",
+    });
+    assert.throws(() => grantArgs({ library: "Music", principal: "aiko", level: "view" }, libraries, users), /no library named Music/);
+    assert.throws(() => grantArgs({ library: "Movies", principal: "sam", level: "view" }, libraries, users), /no user sam/);
+    // Every seeded grant names a library and a person the seed makes.
+    for (const grant of GRANTS) assert.ok(grantArgs(grant, libraries, users));
+  });
+
+  test("gives each person's CLI their own config and none of the caller's servers", () => {
+    const env = cliEnv("/state", "aiko", { PATH: "/bin", MEDIA_CORE_URL: "http://real", MEDIA_CONVEX_URL: "http://real", MEDIA_CORE_API_KEY: "k" });
+    assert.deepEqual(env, { PATH: "/bin", XDG_CONFIG_HOME: "/state/cli/aiko" });
   });
 });

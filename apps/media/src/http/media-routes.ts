@@ -57,7 +57,6 @@ import {
 } from "../subtitles/subtitle-tracks.ts";
 import { ByteRange, parseByteRange } from "./byte-range.ts";
 import { type FailureBudget, type FailureKind, makeFailureBudget } from "./failure-budget.ts";
-import { playbackTokenOf as tokenOf } from "./playback-token-param.ts";
 
 class MediaAccessDenied extends Schema.TaggedError<MediaAccessDenied>()(
   "MediaAccessDenied",
@@ -444,7 +443,7 @@ export const layer: Layer.Layer<
         const { fileId = "" } = yield* HttpRouter.params;
 
         const grant = yield* authorize(
-          yield* tokenOf(request, failures.tokens.param),
+          yield* PlaybackToken.tokenOf(request, failures.tokens.param),
           PlaybackToken.PLAY_OR_DOWNLOAD,
           PlaybackToken.READ,
         );
@@ -477,7 +476,7 @@ export const layer: Layer.Layer<
         const { fileId = "", name = "" } = yield* HttpRouter.params;
 
         const grant = yield* authorize(
-          yield* tokenOf(request, failures.tokens.param),
+          yield* PlaybackToken.tokenOf(request, failures.tokens.param),
           PlaybackToken.DOWNLOAD,
         );
 
@@ -521,7 +520,7 @@ export const layer: Layer.Layer<
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { streamId, generation } = yield* streamParams;
-        const token = yield* tokenOf(request, failures.tokens.param);
+        const token = yield* PlaybackToken.tokenOf(request, failures.tokens.param);
         const grant = yield* authorize(token, PlaybackToken.PLAY, streamId);
 
         const view = yield* sessions.playlist(streamId, generation, grant);
@@ -545,7 +544,7 @@ export const layer: Layer.Layer<
         const { streamId, generation, file } = yield* streamParams;
 
         const grant = yield* authorize(
-          yield* tokenOf(request, failures.tokens.param),
+          yield* PlaybackToken.tokenOf(request, failures.tokens.param),
           PlaybackToken.PLAY,
           streamId,
         );
@@ -623,7 +622,7 @@ export const layer: Layer.Layer<
         const { fileId = "", track = "" } = yield* HttpRouter.params;
 
         const grant = yield* authorize(
-          yield* tokenOf(request, failures.tokens.param),
+          yield* PlaybackToken.tokenOf(request, failures.tokens.param),
           PlaybackToken.PLAY_OR_DOWNLOAD,
           PlaybackToken.READ,
         );

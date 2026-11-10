@@ -49,12 +49,10 @@ export interface Interface {
   readonly backupDir: string;
   /** Archives older than this are pruned after a new backup succeeds. */
   readonly backupRetention: Duration.Duration;
-  /** Admin key of the self-hosted Convex deployment, for `convex export` and `convex import`. */
+  /** Admin key of the core's self-hosted Convex deployment, for `convex export` and `convex import`. */
   readonly convexAdminKey: Option.Option<Redacted.Redacted>;
-  /** The deployed `@media/backend` package, whose Convex CLI backs up and restores. */
+  /** The deployed `packages/platform` folder, whose Convex CLI backs up and restores the core. */
   readonly convexBackendDir: Option.Option<string>;
-  /** Shared HMAC secret Convex signs playback tokens with: base64url of at least 32 bytes. */
-  readonly playbackTokenSecret: Redacted.Redacted;
   /** TMDB API key or read access token. Without it the TMDB plugin reports itself unavailable. */
   readonly tmdbApiKey: Option.Option<Redacted.Redacted>;
   /** OMDb API key for IMDb, Rotten Tomatoes, and Metacritic scores. Without it titles keep TMDB's. */
@@ -62,12 +60,17 @@ export interface Interface {
   /** OTLP/HTTP collector base URL. Telemetry export is off without it. */
   readonly otlpEndpoint: Option.Option<string>;
   readonly logs: LogSettings;
-  /** Convex deployment URL; used once the service subscribes to Convex. */
+  /** The core's Convex URL. Without it the service runs standalone, with no accounts. */
   readonly convexUrl: Option.Option<string>;
-  /** The Convex URL browsers use, for the web app's content security policy. */
+  /** The core's Convex URL as browsers reach it, for the web clients. */
   readonly convexPublicUrl: Option.Option<string>;
-  /** Restricted Convex login of the media service. */
+  /** The key the core issued the media service, its service principal (ADR 0010). */
   readonly mediaServiceApiKey: Option.Option<Redacted.Redacted>;
+  /**
+   * The core's ticket key ring, the same value as the core deployment's `MEDIA_TICKET_KEYS`, which
+   * the byte routes admit tickets with (ADR 0011). Required with `CONVEX_URL`.
+   */
+  readonly mediaTicketKeys: Option.Option<Redacted.Redacted>;
   /** Folder holding the built web app, served with a single-page-app fallback. */
   readonly webDistDir: Option.Option<string>;
   /** Upper bound on simultaneous video transcodes (hardware and software). */
@@ -161,7 +164,6 @@ export const layer: Layer.Layer<Service, Config.ConfigError> = Layer.effect(
 
     const convexAdminKey = yield* Config.option(Config.Redacted("CONVEX_SELF_HOSTED_ADMIN_KEY"));
     const convexBackendDir = yield* Config.option(Config.NonEmptyString("CONVEX_BACKEND_DIR"));
-    const playbackTokenSecret = yield* Config.Redacted("PLAYBACK_TOKEN_SECRET");
     const tmdbApiKey = yield* Config.option(Config.Redacted("TMDB_API_KEY"));
     const omdbApiKey = yield* Config.option(Config.Redacted("OMDB_API_KEY"));
     const otlpEndpoint = yield* Config.option(Config.URL("OTEL_EXPORTER_OTLP_ENDPOINT"));
@@ -179,6 +181,7 @@ export const layer: Layer.Layer<Service, Config.ConfigError> = Layer.effect(
     const convexUrl = yield* Config.option(Config.URL("CONVEX_URL"));
     const convexPublicUrl = yield* Config.option(Config.URL("CONVEX_PUBLIC_URL"));
     const mediaServiceApiKey = yield* Config.option(Config.Redacted("MEDIA_SERVICE_API_KEY"));
+    const mediaTicketKeys = yield* Config.option(Config.Redacted("MEDIA_TICKET_KEYS"));
     const webDistDir = yield* Config.option(Config.NonEmptyString("WEB_DIST_DIR"));
 
     const maxConcurrentTranscodes = yield* Config.schema(
@@ -273,7 +276,6 @@ export const layer: Layer.Layer<Service, Config.ConfigError> = Layer.effect(
       backupRetention: Duration.days(backupRetentionDays),
       convexAdminKey,
       convexBackendDir: Option.map(convexBackendDir, absolute),
-      playbackTokenSecret,
       tmdbApiKey,
       omdbApiKey,
       otlpEndpoint: Option.map(otlpEndpoint, withoutTrailingSlash),
@@ -286,6 +288,7 @@ export const layer: Layer.Layer<Service, Config.ConfigError> = Layer.effect(
       convexUrl: Option.map(convexUrl, withoutTrailingSlash),
       convexPublicUrl: Option.map(convexPublicUrl, withoutTrailingSlash),
       mediaServiceApiKey,
+      mediaTicketKeys,
       webDistDir: Option.map(webDistDir, absolute),
       maxConcurrentTranscodes,
       maxConcurrentRemuxes,

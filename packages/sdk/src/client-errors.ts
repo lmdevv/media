@@ -119,11 +119,21 @@ export class ClientErrors extends Context.Service<ClientErrors, Interface>()(
   "@media/sdk/ClientErrors",
 ) {}
 
-const make = Effect.gen(function* () {
-  const client = yield* MoviesClient;
-  const auth = yield* Auth;
+/** Which reports go out, for one reporter. */
+export interface ReportGate {
+  /**
+   * Whether `report` goes out at `now`: not while a refusal's pause lasts, and not when the same
+   * error went out within `REPEAT_WINDOW_MS`. An admitted report counts as sent, failed or not.
+   */
+  readonly admits: (report: ClientErrorReport, now: number) => boolean;
+  /** The service refused a report at `now` for its budget; send nothing for `retryAfterSeconds`. */
+  readonly pause: (now: number, retryAfterSeconds: number | undefined) => void;
+}
+
+/** A gate with nothing sent yet and no pause. */
+export const reportGate = (): ReportGate => {
   const sentAt = new Map<string, number>();
-  const pause = { until: 0 };
+  const paused = { until: 0 };
 
   const isRepeat = (key: string, now: number): boolean => {
     for (const [seen, at] of sentAt) {
@@ -143,6 +153,24 @@ const make = Effect.gen(function* () {
     return false;
   };
 
+  return {
+    admits: (report, now) =>
+      now >= paused.until &&
+      !isRepeat(
+        `${report.kind}\u0000${report.name}\u0000${report.message}\u0000${report.route}`,
+        now,
+      ),
+    pause: (now, retryAfterSeconds) => {
+      paused.until = now + (retryAfterSeconds ?? DEFAULT_PAUSE_SECONDS) * 1000;
+    },
+  };
+};
+
+const make = Effect.gen(function* () {
+  const client = yield* MoviesClient;
+  const auth = yield* Auth;
+  const gate = reportGate();
+
   const report = Effect.fn("ClientErrors.report")(
     function* (cause: unknown, context: ErrorContext) {
       if ((yield* auth.currentStatus) !== "signedIn") return;
@@ -150,19 +178,15 @@ const make = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
       const sent = reportOf(cause, context);
 
-      if (now < pause.until) return;
+      if (!gate.admits(sent, now)) return;
 
-      if (isRepeat(`${sent.kind}\u0000${sent.name}\u0000${sent.message}\u0000${sent.route}`, now)) {
-        return;
-      }
-
-      yield* client.reportError(sent).pipe(
-        Effect.tapErrorTag("RateLimited", (refused) =>
-          Effect.sync(() => {
-            pause.until = now + (refused.retryAfterSeconds ?? DEFAULT_PAUSE_SECONDS) * 1000;
-          }),
-        ),
-      );
+      yield* client
+        .reportError(sent)
+        .pipe(
+          Effect.tapErrorTag("RateLimited", (refused) =>
+            Effect.sync(() => gate.pause(now, refused.retryAfterSeconds)),
+          ),
+        );
     },
     Effect.catchCause((cause) => Effect.logDebug("ClientErrors.dropped", cause)),
   );

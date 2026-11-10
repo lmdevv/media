@@ -7,6 +7,7 @@ import { reachOf } from "../core/permissions/grants";
 import type { Reach } from "../core/permissions/grants";
 import type { Principal } from "../core/permissions/policy";
 import { budgetedViewer } from "./access";
+import { registerWithArtworkTickets } from "./artwork";
 import { presentTitleCard } from "./present";
 import type { TitleCard } from "./present";
 import {
@@ -213,7 +214,7 @@ const collectionsFrom = async (
   return [...sameKey, ...later];
 };
 
-export const { list, get } = register({
+export const { list, get } = registerWithArtworkTickets(register, {
   list: async (ctx, { paginationOpts }, caller) => {
     const reach = await reachOf(ctx.db, caller);
     const budget = callBudget(reach);

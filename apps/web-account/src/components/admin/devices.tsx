@@ -2,12 +2,12 @@ import { usePlatform } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { useState } from "react";
 
-import { PageHeader } from "@/components/shell";
+import { PageHeader } from "@media/ui/components/page-header";
 import type { UserId } from "@/session/platform-types";
 
 import { useActions } from "./action";
-import { useAllPages, usePages } from "./pages";
-import type { Paged } from "./pages";
+import { useAllPages, usePages } from "@media/ui/lib/pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { ItemRow, Notice, PagedList, SelectField } from "./parts";
 import type { Device, DeviceMode, User } from "./types";
 

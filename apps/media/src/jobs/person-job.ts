@@ -4,11 +4,10 @@ import { Effect, Match, Option } from "effect";
 import type { ArtworkKey } from "@media/contracts/artwork";
 import { ArtworkSource } from "../artwork/artwork-keys.ts";
 import * as ArtworkKeys from "../artwork/artwork-keys.ts";
-import { idsOrNull } from "../convex/catalog-records.ts";
-import * as MediaBackend from "../convex/media-backend.ts";
+import { idsOrNull } from "../core/catalog-records.ts";
 import * as MetadataPlugin from "../metadata/metadata-plugin.ts";
 import type { ProviderPerson } from "../metadata/metadata-plugin.ts";
-import { JobFailed, type JobHandler } from "./job-worker.ts";
+import { JobFailed } from "../core/core-jobs.ts";
 
 const providerFailure = Match.type<MetadataPlugin.MetadataError>().pipe(
   Match.tagsExhaustive({
@@ -25,9 +24,6 @@ const isFinal = Match.type<MetadataPlugin.MetadataError>().pipe(
     PluginPermissionDenied: () => false,
   }),
 );
-
-const backendFailure = (error: { readonly message: string }) =>
-  new JobFailed({ message: error.message, retry: true });
 
 /** The catalog record of a provider's person, with their photo sealed as an artwork key. */
 export const personDetailsOf = Effect.fnUntraced(function* (
@@ -91,46 +87,4 @@ export const lookUpPerson = Effect.fn("PersonJob.lookUp")(function* (
       ? `Fetched details of ${found.value.name}`
       : `No details for ${target.name} at the metadata provider`,
   };
-});
-
-/** The person job handler. */
-export const handler: Effect.Effect<
-  JobHandler,
-  never,
-  MediaBackend.Service | MetadataPlugin.Service | ArtworkKeys.Service
-> = Effect.gen(function* () {
-  const backend = yield* MediaBackend.Service;
-  const plugin = yield* MetadataPlugin.Service;
-  const keys = yield* ArtworkKeys.Service;
-
-  return {
-    kind: "person",
-    run: Effect.fn("PersonJob.run")(function* (claim, workerId) {
-      const { payload } = claim.job;
-
-      if (payload.kind !== "person") {
-        return yield* new JobFailed({ message: "This is not a person job", retry: false });
-      }
-
-      const target = yield* backend
-        .call("mediaService.personTarget", { personId: payload.personId })
-        .pipe(Effect.mapError(backendFailure));
-
-      const { details, summary } = yield* lookUpPerson(target).pipe(
-        Effect.provideService(MetadataPlugin.Service, plugin),
-        Effect.provideService(ArtworkKeys.Service, keys),
-      );
-
-      yield* backend
-        .call("mediaService.applyPerson", {
-          jobId: claim.job.id,
-          workerId,
-          personId: payload.personId,
-          details,
-        })
-        .pipe(Effect.mapError(backendFailure));
-
-      return summary;
-    }),
-  } satisfies JobHandler;
 });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { ActivityView, GuestSettingsView, GuestsView } from "./guests";
 import type { GuestDraft } from "./guests";
-import type { Paged } from "./pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { disabledButton, loaded, noop, textOf } from "./testing";
 import type { GuestLink, GuestStatus, GuestVisit } from "./types";
 

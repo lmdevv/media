@@ -116,6 +116,12 @@ export interface Session {
   readonly startDeviceSignIn: (clientName: string) => Effect.Effect<DeviceSignIn, PlatformError>;
   /** Ends the session on the server when reachable, then forgets it locally. */
   readonly signOut: Effect.Effect<void, TokenStorageError>;
+  /**
+   * The session's current Convex auth token, renewed first when it is about to expire, for a
+   * request to the media server's own routes as a bearer token. None while signed out. It passes
+   * the same check as every token the client sends, so a signed-out session never hands one out.
+   */
+  readonly accessToken: Effect.Effect<Option.Option<Redacted.Redacted>, TokenStorageError>;
 }
 
 /** Runs platform commands as the signed-in session. */
@@ -357,6 +363,7 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
       signIn,
       startDeviceSignIn,
       signOut: engine.signOut,
+      accessToken: engine.accessToken(false),
     },
   });
 });

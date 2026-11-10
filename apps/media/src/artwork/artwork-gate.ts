@@ -1,9 +1,9 @@
 import { Context, type Effect } from "effect";
 
 /**
- * The artwork route's ticket check. Absent while the server runs on old movies, whose artwork
- * URLs carry no ticket; present on the core, whose artwork URLs carry a shareable ticket on a
- * rounded bucket, so images still cache (ADR 0011).
+ * The artwork route's ticket check. Present on the core, whose artwork URLs carry a shareable
+ * ticket on a rounded bucket, so images still cache (ADR 0011); absent in standalone mode and in
+ * unit tests, where the route serves any key this server sealed.
  */
 export interface Interface {
   /** The query parameter the ticket travels in. */

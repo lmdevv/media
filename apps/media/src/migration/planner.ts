@@ -1,4 +1,4 @@
-import type { LibraryId, ProfileId } from "@media/contracts/ids";
+import type { LibraryId } from "@media/contracts/ids";
 import type { LibraryKind } from "@media/contracts/models/catalog";
 import type {
   MigrationReport,
@@ -220,7 +220,7 @@ interface ImportValues {
  * favorite. The dry run's summary and the job's counts both use it, so the Done screen reports
  * what the Review screen promised.
  */
-export const countImports = (items: ReadonlyArray<ImportValues>) => ({
+const countImports = (items: ReadonlyArray<ImportValues>) => ({
   watched: items.filter((values) => values.watched).length,
   inProgress: items.filter((values) => values.positionMs > 0).length,
   playCounts: items.filter(
@@ -473,18 +473,4 @@ export const reportBody = <Person extends string>(
     access: library.access,
   })),
   unmatchedSamples: plan.unmatchedSamples,
-});
-
-/** The report the Review screen shows for `plan`. */
-export const reportOf = (
-  plan: MigrationPlan<ProfileId>,
-  context: ReportContext<ProfileId>,
-): MigrationReport => ({
-  ...reportBody(plan, context),
-  users: context.users.map((user) => ({
-    sourceUserId: user.sourceUserId,
-    name: user.name,
-    profileId: user.person,
-    action: user.action,
-  })),
 });

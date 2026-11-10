@@ -5,7 +5,7 @@ import type { UserId } from "@/session/platform-types";
 
 import { GroupPanelView, GroupsView } from "./groups";
 import type { GroupMode } from "./groups";
-import type { Paged } from "./pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { disabledButton, loaded, noop, textOf } from "./testing";
 import type { Group, Member, User } from "./types";
 

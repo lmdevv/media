@@ -3,7 +3,7 @@
 #
 #   verify-media.sh up [--side after|before] [--image IMG] [--library demo|fixtures|DIR] [--no-music] [--no-setup] [--no-seed]
 #   verify-media.sh doctor [--side S]
-#   verify-media.sh browser [--side S] [--app movies|music] <command> [flags]
+#   verify-media.sh browser [--side S] [--app movies|music|account] <command> [flags]
 #   verify-media.sh cli [--side S] [--app movies|music] [--as PERSON] -- <media or music args>
 #   verify-media.sh logs [--side S] [--service media|movies|convex|music] [lines]
 #   verify-media.sh ios <up|doctor|describe|find|tap|type|swipe|wait|shot|record|appearance|orientation|open|matrix|sign-in|down> [--side S] ...
@@ -16,7 +16,8 @@
 # `after` is built from this checkout, `before` from main. Each side is its own Compose project,
 # media-verify-<run>-<side>: that side's own revision of deploy/compose (the all-in-one image,
 # with the account client at / and movies at /movies, or before it, Convex and movies on two
-# ports), plus old music from legacy/music as one more service.
+# ports), plus old music from legacy/music as one more service. Its image's own layout picks how
+# people sign in: on the core alone (one-backend), or with old movies' own sign-in beside it.
 set -euo pipefail
 
 skill="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -97,11 +98,40 @@ chromium_path() {
 }
 
 url() { echo "http://localhost:$(read_state port)"; }
-# A side runs the layout of its own revision's deploy/compose: `one-port` (the all-in-one image) or
-# `two-port` (a Convex service beside the movies service, before it).
-one_port() { [[ "$(read_state layout)" == one-port ]]; }
+# A side runs the layout of its own revision: `one-backend` (the all-in-one image with one Convex
+# backend, the core's: every person is a core user who signs in once at /, and movies has no
+# sign-in of its own), `one-port` (the all-in-one image with old movies' Convex beside the core's,
+# movies signing in at /movies), or `two-port` (a Convex service beside the movies service).
+#
+# layout_of COMPOSE_FILE HAS_MOVIES_BACKEND prints the layout for a side's compose.yaml and whether
+# its image holds old movies' Convex project (1 or 0).
+layout_of() {
+  if grep -q '^  convex:' "$1"; then echo two-port
+  elif [[ "$2" == 1 ]]; then echo one-port
+  else echo one-backend; fi
+}
+# Prints 1 when an image holds old movies' Convex project, which it deploys beside the core's, and
+# 0 when it doesn't. A container with no network, so no host interface changes under a browser.
+movies_backend_in() {
+  local code=0
+  timeout --kill-after=5 60 docker run --rm --network none --entrypoint test "$1" -d /app/backend || code=$?
+  case "$code" in
+    0) echo 1 ;;
+    1) echo 0 ;;
+    *) die "could not look inside $1 for its layout (docker run exited $code)" ;;
+  esac
+}
+one_port() { [[ "$(read_state layout)" == one-port || "$(read_state layout)" == one-backend ]]; }
+core_only() { [[ "$(read_state layout)" == one-backend ]]; }
 movies_url() { if one_port; then echo "$(url)/movies"; else url; fi; }
-convex_url() { if one_port; then echo "$(url)/movies/convex"; else echo "http://localhost:$(read_state convex_port)"; fi; }
+# The Convex URL the movies CLI signs in to: the core's on the one-backend layout, else old movies'.
+convex_url() {
+  if core_only; then echo "$(url)/convex"
+  elif one_port; then echo "$(url)/movies/convex"
+  else echo "http://localhost:$(read_state convex_port)"; fi
+}
+# The owner's username on the core, or old movies' owner email, which `whoami` prints.
+owner_name() { if core_only; then echo lucia; else echo admin@movies.local; fi; }
 movies_service() { if one_port; then echo media; else echo movies; fi; }
 music_url() { echo "http://localhost:$(read_state music_port)"; }
 has_music() { [[ -n "$(read_state music_port)" ]]; }
@@ -204,6 +234,7 @@ start_browser() {
   has_music && music=(--music "$(music_url)")
   local layout=(--base "$(url)" --convex "$(convex_url)")
   one_port && layout=(--base "$(movies_url)/" --account "$(url)")
+  core_only && layout+=(--core)
   CHROMIUM_PATH="$(chromium_path)" nohup node "$scripts/browser.mjs" serve --state "$state" \
     "${layout[@]}" "${music[@]}" > "$state/browser.log" 2>&1 &
   write_state browser.pid "$!"
@@ -235,7 +266,7 @@ within() {
 as="lucia"
 cli_raw() {
   env -u MEDIA_CONVEX_URL -u MEDIA_SERVER_URL -u MEDIA_API_KEY -u MEDIA_PROFILE -u MEDIA_PASSWORD \
-    XDG_CONFIG_HOME="$state/cli/$as" ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$cli_js" "$@"
+    -u MEDIA_CORE_URL -u MEDIA_CORE_API_KEY -u MEDIA_CORE_ADMIN_KEY XDG_CONFIG_HOME="$state/cli/$as" ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$cli_js" "$@"
 }
 
 music_cli_raw() {
@@ -244,12 +275,19 @@ music_cli_raw() {
     ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$music_cli_js" "$@"
 }
 
-# Signs a person's CLI in with their password, the way `media login` documents it.
+# Signs a person's CLI in with their password, the way `media auth login` documents it on the core
+# and `media login` on old movies. $1 is their username on the core, or their email on old movies.
 cli_login() {
-  local email="$1"
   mkdir -p "$state/cli/$as"
-  printf %s "$password" | cli_raw login --server "$(convex_url)" --media-url "$(url)" --email "$email" --password >/dev/null
+  if core_only; then
+    printf %s "$password" | cli_raw auth login --server "$(convex_url)" --username "$1" >/dev/null
+  else
+    printf %s "$password" | cli_raw login --server "$(convex_url)" --media-url "$(url)" --email "$1" --password >/dev/null
+  fi
 }
+
+# Who a person's CLI is signed in as: `auth sessions current` on the core, `whoami` on old movies.
+cli_whoami() { if core_only; then cli_raw auth sessions current; else cli_raw whoami; fi; }
 
 # Waits until the libraries are really done: `want` libraries exist, none is scanning, and no job
 # is pending or running, including the metadata, people, and scrub-thumbnail (trickplay) jobs a
@@ -275,6 +313,17 @@ wait_libraries() {
     sleep 2
   done
   start_failed "the libraries were still busy after 15 minutes ($state_now)"
+}
+
+# The core's half of the same wait, in core-seed.mjs: the core has no command that lists jobs, so
+# it reads the media service's log for the jobs a scan queues.
+wait_core_libraries() {
+  within 900 "the first scans" core_seed wait --cli "$cli_js" --container "$(container media)" --want "$1" ||
+    start_failed "the first scans failed; see \`logs --side $side\`"
+}
+
+core_seed() {
+  ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$scripts/core-seed.mjs" "$1" --state "$state" "${@:2}"
 }
 
 # ---------------------------------------------------------------------------------------------- up
@@ -321,8 +370,9 @@ cmd_up() {
   else
     cp -R "$root/deploy/compose" "$state/deploy/compose"
   fi
-  if grep -q '^  convex:' "$state/deploy/compose/compose.yaml"; then write_state layout two-port
-  else write_state layout one-port; fi
+  local backend
+  backend="$(movies_backend_in "$image")"
+  write_state layout "$(layout_of "$state/deploy/compose/compose.yaml" "$backend")"
   write_state image "$image"
   write_state built "$built"
   write_state image_id "$(docker image inspect -f '{{.Id}}' "$image")"
@@ -446,7 +496,11 @@ YAML
   wait_healthy
   timing "starting the stack"
 
-  [[ -f "$cli_js" ]] || pnpm --dir "$root" --filter @lmdevv/movies build >/dev/null
+  # The after side's CLI is this checkout's, built fresh, so a change to it counts.
+  if [[ "$side" == after || ! -f "$cli_js" ]]; then
+    pnpm --dir "$root" --filter @lmdevv/movies build > "$state/cli-build.log" 2>&1 ||
+      { tail -20 "$state/cli-build.log" >&2; start_failed "could not build the media CLI"; }
+  fi
   if ((music)) && [[ ! -f "$music_cli_js" ]]; then
     say "building old music's CLI in $music_root"
     { pnpm --dir "$music_root" install --frozen-lockfile --prefer-offline &&
@@ -457,12 +511,18 @@ YAML
   if ((setup)); then
     local shows=()
     [[ "$library" == "$demo_image" || -d "$library/$shows_dir" ]] && shows=(--shows "/media/library/$shows_dir")
-    say "running first-run setup through the web app and scanning the libraries"
-    within 1260 "first-run setup in the movies web app" \
-      browser setup --movies "/media/library/$movies_dir" "${shows[@]}" >/dev/null
-    as=lucia within 60 "signing the owner's CLI in" cli_login admin@movies.local
-    as=lucia within 60 "asking the owner's CLI who it is" cli_raw whoami > "$state/whoami.json"
-    grep -q admin@movies.local "$state/whoami.json" || die "the CLI does not sign in as the owner"
+    if core_only; then
+      say "running first-run setup through the account client and scanning the libraries"
+      within 1260 "first-run setup in the account client" \
+        browser setup --movies "/media/library/$movies_dir" "${shows[@]}" >/dev/null
+    else
+      say "running first-run setup through the web app and scanning the libraries"
+      within 1260 "first-run setup in the movies web app" \
+        browser setup --movies "/media/library/$movies_dir" "${shows[@]}" >/dev/null
+    fi
+    as=lucia within 60 "signing the owner's CLI in" cli_login "$(owner_name)"
+    as=lucia within 60 "asking the owner's CLI who it is" cli_whoami > "$state/whoami.json"
+    grep -q "$(owner_name)" "$state/whoami.json" || die "the CLI does not sign in as the owner"
     if ((music)); then
       say "running old music's first-run setup through its web app and scanning /music"
       within 1260 "first-run setup in the music web app" browser setup --app music >/dev/null
@@ -472,14 +532,20 @@ YAML
       grep -q admin@movies.local "$state/music/whoami.json" || die "the API key does not sign music's CLI in as the owner"
       write_state music/people lucia
     fi
-    wait_libraries "$(( ${#shows[@]} > 0 ? 2 : 1 ))"
+    if core_only; then wait_core_libraries "$(( ${#shows[@]} > 0 ? 2 : 1 ))"
+    else wait_libraries "$(( ${#shows[@]} > 0 ? 2 : 1 ))"; fi
     write_state people lucia
     timing "setup and the first scans"
   fi
   if ((seed)); then
     [[ "$library" == "$demo_image" ]] || say "the seed expects the demo library's titles and albums"
-    say "seeding the demo people, profiles, access, and watching"
-    within 900 "seeding movies" seed
+    if core_only; then
+      say "seeding the demo people, the kid user, library grants, and watching on the core"
+      within 900 "seeding movies" core_seed seed --server "$(convex_url)" --cli "$cli_js" --browser "$scripts/browser.mjs" >&2
+    else
+      say "seeding the demo people, profiles, access, and watching"
+      within 900 "seeding movies" seed
+    fi
     if ((music)); then
       say "seeding the same people in music, with playlists and likes"
       within 900 "seeding music" music_seed
@@ -517,11 +583,12 @@ cmd_doctor() {
   check "port $port maps to $m" "docker port $m 8080/tcp | grep -q ':$port\$'"
   check "/api/health reports the backend connected" "healthy"
   check "the media service runs the image from up" "[[ \$(docker inspect -f '{{.Image}}' $m) == $image_id ]]"
-  # name|version file|project folder
-  local project projects=("movies|/data/movies/version|backend" "core|/data/core/version|platform")
+  # name|version file|project folder. Not `project`: that names the side's Compose project.
+  local deployed name file dir projects=("movies|/data/movies/version|backend" "core|/data/core/version|platform")
   one_port || projects=("movies|/data/version|backend")
-  for project in "${projects[@]}"; do
-    IFS='|' read -r name file dir <<<"$project"
+  core_only && projects=("core|/data/core/version|platform")
+  for deployed in "${projects[@]}"; do
+    IFS='|' read -r name file dir <<<"$deployed"
     check "startup deployed this image's $name functions" \
       "[[ \$(docker exec $m cat $file) == \$(docker exec $m sh -c 'echo \$(node -p \"require(\\\"/app/$dir/package.json\\\").version\")+\$(cat /app/$dir/.functions-hash)') ]]"
   done
@@ -537,7 +604,7 @@ cmd_doctor() {
     *) echo "FAIL  the browser host does not report its network"; failed=1 ;;
   esac
   if [[ -n "$(read_state people)" ]]; then
-    check "the CLI signs in as the owner" "cli_raw whoami | grep -q admin@movies.local"
+    check "the CLI signs in as the owner" "cli_whoami | grep -qF '$(owner_name)'"
   else
     echo "skip  CLI (up ran with --no-setup)"
   fi
@@ -545,7 +612,7 @@ cmd_doctor() {
     if [[ "$(read_state rev)" == "$(checkout_rev)" ]]; then echo "ok    image matches the checkout"
     else echo "FAIL  the checkout changed since up; run \`down --side $side\` and \`up --side $side\` to test it"; failed=1; fi
   fi
-  echo "info  layout $(read_state layout), version $(docker exec "$m" sh -c 'cat /data/movies/version 2>/dev/null || cat /data/version'), image $(read_state image), library $(read_state library)"
+  echo "info  layout $(read_state layout), version $(docker exec "$m" sh -c 'cat /data/movies/version 2>/dev/null || cat /data/version 2>/dev/null || cat /data/core/version'), image $(read_state image), library $(read_state library)"
   if ! has_music; then
     echo "info  no music (up ran with --no-music)"
     return "$failed"
@@ -587,7 +654,7 @@ cmd_browser() {
     done
     start_browser
     if [[ -n "$(read_state people)" ]]; then
-      browser sign-in --profile Lucía >/dev/null
+      if core_only; then browser sign-in >/dev/null; else browser sign-in --profile Lucía >/dev/null; fi
       [[ -n "$(read_state music/people)" ]] && browser sign-in --app music >/dev/null
       echo "browser host restarted; pages main$([[ -n "$(read_state music/people)" ]] && echo " and music") are signed in again as Lucía"
     else
@@ -813,6 +880,8 @@ cmd_ios_up() {
     esac
   done
   [[ -n "$(read_state people)" ]] || die "start the $side side first: \`up --side $side\` (with setup)"
+  # The app signs in to old movies' own Convex, which a one-backend image no longer runs.
+  core_only && die "the movies iOS app can't reach the $side side's one-backend image until it moves to the core (p4-mobile-movies); verify iOS on a side with old movies' backend"
   [[ -z "$(read_state ios_udid)" ]] || die "the $side side already has a simulator; run \`ios down --side $side\`"
   on_mac "test -x $axe" || die "AXe is missing on $mac at ~/music-ios/tools/axe/axe; unpack the release from github.com/cameroncooke/AXe there"
   # The Mac's disk runs nearly full, and a full disk fails a build or a boot halfway with errors

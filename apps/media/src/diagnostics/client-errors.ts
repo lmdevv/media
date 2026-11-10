@@ -1,20 +1,19 @@
 /**
  * `POST /api/client-errors`: an app's unexpected error, written to the retained log at `WARN` as
- * `Client.error`. The caller's Convex auth token must belong to a signed-in session.
+ * `Client.error`. The caller's core session token must belong to a signed-in session.
  *
  * Three budgets keep crash loops from rotating the log's history out: one for requests from
- * anyone, checked before Convex is asked who is calling; one per account; and one for every
+ * anyone, checked before the core is asked who is calling; one per account; and one for every
  * account together, so many accounts at once still cannot. Every 30 s
  * `ClientErrors.suppressed` counts the reports each account, or anyone not yet known, sent over.
  */
 import { ClientErrorReport, DIAGNOSTICS_ROUTES } from "@media/contracts/diagnostics";
 import { RateLimited } from "@media/contracts/errors";
 import type { UserId } from "@media/contracts/ids";
-import type { Viewer } from "@media/contracts/models/account";
 import { Clock, Duration, Effect, Layer, Option, Schedule } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
-import * as ViewerAuth from "../convex/viewer-auth.ts";
+import * as CoreCallers from "../core/core-callers.ts";
 import { bearerOf, bodyDecoder, failureResponse } from "../http/command-routes.ts";
 import { makeLimiter } from "../http/rate-limit.ts";
 
@@ -28,9 +27,9 @@ const SUPPRESSED_REPORT_INTERVAL = Duration.seconds(30);
 
 const decodeReport = bodyDecoder(ClientErrorReport, "Invalid error report");
 
-const annotationsOf = (report: ClientErrorReport, viewer: Viewer) => ({
+const annotationsOf = (report: ClientErrorReport, caller: CoreCallers.Caller) => ({
   source: "client",
-  userId: viewer.user.id,
+  userId: caller.userId,
   platform: report.platform,
   appVersion: report.appVersion,
   kind: report.kind,
@@ -43,11 +42,11 @@ const annotationsOf = (report: ClientErrorReport, viewer: Viewer) => ({
 });
 
 /** Adds the route. */
-export const layer: Layer.Layer<never, never, HttpRouter.HttpRouter | ViewerAuth.Service> =
+export const layer: Layer.Layer<never, never, HttpRouter.HttpRouter | CoreCallers.Service> =
   Layer.effectDiscard(
     Effect.gen(function* () {
       const router = yield* HttpRouter.HttpRouter;
-      const auth = yield* ViewerAuth.Service;
+      const auth = yield* CoreCallers.Service;
       const take = makeLimiter();
       const suppressed = new Map<UserId | null, number>();
 
@@ -85,22 +84,22 @@ export const layer: Layer.Layer<never, never, HttpRouter.HttpRouter | ViewerAuth
 
         if (Option.isSome(attempt)) return yield* refuse(null, attempt.value);
 
-        const viewer = yield* auth.authorize(yield* bearerOf(request), "authenticated");
+        const caller = yield* auth.authorize(yield* bearerOf(request), "authenticated");
 
         const wait = take(
           [
-            [`account\u0000${viewer.user.id}`, ACCOUNT_BUDGET],
+            [`account\u0000${caller.userId}`, ACCOUNT_BUDGET],
             ["all-accounts", ALL_ACCOUNTS_BUDGET],
           ],
           yield* Clock.currentTimeMillis,
         );
 
-        if (Option.isSome(wait)) return yield* refuse(viewer.user.id, wait.value);
+        if (Option.isSome(wait)) return yield* refuse(caller.userId, wait.value);
 
         const report = yield* decodeReport(request);
 
         yield* Effect.logWarning("Client.error").pipe(
-          Effect.annotateLogs(annotationsOf(report, viewer)),
+          Effect.annotateLogs(annotationsOf(report, caller)),
         );
 
         return HttpServerResponse.empty({ status: 204 });

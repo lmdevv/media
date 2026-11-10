@@ -7,7 +7,7 @@ import type { FormEvent } from "react";
 
 import { AuthPage, Lede, PageTitle, PasswordField } from "@/components/auth-page";
 import { SelectField } from "@/components/admin/parts";
-import { describeFailure } from "@/lib/failure";
+import { describeFailure } from "@media/ui/lib/failure";
 import { useAccountActions, useDevice } from "@/session/account";
 import type { Approval, SharedPicker, SharedTile, TileProof } from "@/session/platform-types";
 

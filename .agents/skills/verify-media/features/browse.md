@@ -12,7 +12,7 @@ CLI. Everything shown is limited to the libraries and ratings the profile may se
 - `browse-episodes` lists a show's seasons and episodes on its page.
 - `search-menu` finds a title from the command menu (`Search`).
 - `search-page` finds titles on `/search`, with `All`, `Movies`, and `Shows` counts.
-- `search-cli` finds titles with `media search`.
+- `search-cli` finds titles with `media movies titles search` (`media search` in old movies).
 
 ## How to get to it (user POV)
 
@@ -20,7 +20,9 @@ CLI. Everything shown is limited to the libraries and ratings the profile may se
   `Search` button in the banner.
 - Any poster opens `/title/<id>`.
 - `/search?q=<words>` directly.
-- Terminal: `media search <query>`, `media titles list`, `media titles get <id>`.
+- Terminal: `media movies titles search --query <words>`, `media movies titles list`,
+  `media movies titles get --title-id <id>`; in old movies `media search <query>`,
+  `media titles list`, `media titles get <id>`.
 
 ## Driving it with verify-media
 
@@ -46,8 +48,9 @@ Preconditions:
 - **Search page.** Run `$S browser open "/search?q=steel"`. The searchbox reads `1 result`, the
   filters read `All 1`, `Movies 1`, `Shows 0`, and the region `Results` has
   `Tears of Steel Movie · 2012 · 12m`.
-- **CLI.** Run `$S cli -- search cosmos`: one result, `Cosmos Laundromat: First Cycle`, with
-  `"certification": "PG"`. `$S cli --as sam -- search sintel` prints `[]`.
+- **CLI.** Run `$S cli -- movies titles search --query cosmos` (`$S cli -- search cosmos` in old
+  movies): one result, `Cosmos Laundromat: First Cycle`, with `"certification": "PG"`.
+  `$S cli --as sam -- movies titles search --query sintel` prints `[]`.
 - **Proof.** Run `$S browser screenshot --path captures/verify/<run>/after/browse/title.png` on
   the title page and `$S browser snapshot --in main --path captures/verify/<run>/after/browse/title.aria.txt`.
 
@@ -60,5 +63,5 @@ Preconditions:
 - Search matches titles, not plots: `llama` finds nothing, `caminandes` finds the show.
 - The command menu also lists actions and pages, so typed words can select an action. Read the
   option under `Titles` before you press `Enter`.
-- What a page lists depends on the profile: Kids and Sam see fewer titles, and a title they may
-  not see reads `This title isn't here`.
+- What a page lists depends on who is signed in (and the profile in old movies): the kid and Sam
+  see fewer titles, and a title they may not see reads `This title isn't here`.

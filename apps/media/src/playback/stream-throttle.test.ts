@@ -11,8 +11,8 @@ import * as MediaTools from "../media/media-tools.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
-import { signTestToken } from "../testing/test-config.ts";
-import * as TestConvex from "../testing/test-convex.ts";
+import { signTestToken } from "../testing/test-tokens.ts";
+import * as TestSessions from "../testing/test-sessions.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -130,13 +130,13 @@ const stop = Effect.fn(function* (stream: LongStream) {
 });
 
 const playing = Effect.fn(function* (sid: string) {
-  const convex = yield* TestConvex.Service;
+  const scripted = yield* TestSessions.Service;
   const position = yield* Ref.make(0);
 
-  yield* convex.report(sid, "playing", 0);
+  yield* scripted.report(sid, "playing", 0);
 
   return yield* Ref.updateAndGet(position, (ms) => ms + 300).pipe(
-    Effect.flatMap((ms) => convex.report(sid, "playing", ms)),
+    Effect.flatMap((ms) => scripted.report(sid, "playing", ms)),
     Effect.repeat(Schedule.spaced("300 millis")),
     Effect.forkChild,
   );
@@ -237,7 +237,7 @@ describe.skipIf(!hasFfmpeg)("stream throttling", () => {
         STREAM_IDLE_SECONDS: "1",
         MAX_CONCURRENT_TRANSCODES: "1",
       },
-      { convex: true },
+      { reports: true },
     ),
     { excludeTestServices: true, timeout: "120 seconds" },
   )("with Convex, a one second idle timeout, and one transcode slot", (it) => {
@@ -245,7 +245,7 @@ describe.skipIf(!hasFfmpeg)("stream throttling", () => {
       "keeps a playing session's paused encoder rather than releasing it",
       () =>
         Effect.gen(function* () {
-          const convex = yield* TestConvex.Service;
+          const scripted = yield* TestSessions.Service;
           const fileId = yield* addLongClip.pipe(Effect.orDie);
           const sid = `held-${crypto.randomUUID()}`;
           const feed = yield* playing(sid);
@@ -267,7 +267,7 @@ describe.skipIf(!hasFfmpeg)("stream throttling", () => {
           assert.isAbove(yield* writtenFragments(stream.streamId), paused);
 
           yield* Fiber.interrupt(feed);
-          yield* convex.end(sid);
+          yield* scripted.end(sid);
           yield* awaitLogged("Stream.ended", stream.streamId);
         }),
       60_000,
@@ -278,7 +278,7 @@ describe.skipIf(!hasFfmpeg)("stream throttling", () => {
       () =>
         Effect.gen(function* () {
           const server = yield* MediaTestServer.Service;
-          const convex = yield* TestConvex.Service;
+          const scripted = yield* TestSessions.Service;
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const fileId = yield* addLongClip.pipe(Effect.orDie);
@@ -291,7 +291,7 @@ describe.skipIf(!hasFfmpeg)("stream throttling", () => {
           assert.strictEqual(init.status, 200);
           yield* awaitThrottled(stream.streamId);
           yield* Fiber.interrupt(feed);
-          yield* convex.report(sid, "paused", 3000);
+          yield* scripted.report(sid, "paused", 3000);
 
           const released = yield* awaitLogged("Stream.released", stream.streamId);
 
@@ -310,7 +310,7 @@ describe.skipIf(!hasFfmpeg)("stream throttling", () => {
 
           const slot = `slot-${crypto.randomUUID()}`;
 
-          yield* convex.report(slot, "paused", 0);
+          yield* scripted.report(slot, "paused", 0);
           yield* stop(yield* negotiateLong(slot, fileId));
 
           const far = segmentFrom(new TextDecoder().decode(playlist.body), 240);
@@ -332,7 +332,7 @@ describe.skipIf(!hasFfmpeg)("stream throttling", () => {
           assert.deepStrictEqual(second.body, init.body, "the restarted run's init segment");
           assert.deepStrictEqual(yield* logsOf("Stream.moved", stream.streamId), []);
 
-          yield* convex.end(sid);
+          yield* scripted.end(sid);
           yield* awaitLogged("Stream.ended", stream.streamId);
         }),
       90_000,

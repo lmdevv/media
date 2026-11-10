@@ -27,8 +27,10 @@ import {
 import type { Scope } from "effect";
 
 import { encodeJson, mediaUrl, requestPlayback } from "./media-http";
+import type { PlaybackCallError } from "./media-http";
 import type { Playback } from "./playback";
 import type { PlayerEvent, PlayerPort } from "./room-sync/player-port";
+import { TransportError } from "./sdk-errors";
 
 const MAX_REASON_LENGTH = 120;
 
@@ -156,6 +158,11 @@ export interface Options {
   readonly bufferedAheadSeconds: () => number;
   /** The decoder's frame counts, where the platform reports them. */
   readonly frames: () => Option.Option<FrameCounts>;
+  /**
+   * Sends one batch, such as `MediaServer.reportClientEvents` as the signed-in person; when absent,
+   * the batch goes to the playback's media service with only its token.
+   */
+  readonly send?: (request: ClientDiagnosticsRequest) => Promise<void>;
 }
 
 const FLUSH_INTERVAL = Duration.seconds(5);
@@ -214,35 +221,58 @@ const batches = <A>(events: ReadonlyArray<A>): ReadonlyArray<ReadonlyArray<A>> =
     events.slice(index * MAX_CLIENT_EVENTS, (index + 1) * MAX_CLIENT_EVENTS),
   );
 
+const postWithToken = (
+  playback: Playback,
+  body: Schema.Json,
+): Effect.Effect<void, PlaybackCallError> =>
+  Effect.flatMap(mediaUrl(playback.started, DIAGNOSTICS_ROUTES.clientEvents), (url) =>
+    requestPlayback(
+      {
+        operation: "playback.diagnostics",
+        url,
+        method: "POST",
+        body: Option.some(body),
+        bearer: Option.none(),
+      },
+      Schema.Null,
+    ),
+  );
+
 const send = (
   playback: Playback,
-  platform: ClientPlatform,
+  options: Options,
   events: ReadonlyArray<ClientDiagnosticEvent>,
 ): Effect.Effect<void> =>
   Effect.forEach(
     batches(events),
-    (batch) =>
-      encodeJson(ClientDiagnosticsRequest, {
+    (batch) => {
+      const request: ClientDiagnosticsRequest = {
         token: Redacted.make(playback.started.token),
-        platform,
+        platform: options.platform,
         events: batch,
-      }).pipe(
-        Effect.flatMap((body) =>
-          Effect.flatMap(mediaUrl(playback.started, DIAGNOSTICS_ROUTES.clientEvents), (url) =>
-            requestPlayback(
-              {
-                operation: "playback.diagnostics",
-                url,
-                method: "POST",
-                body: Option.some(body),
-                bearer: Option.none(),
-              },
-              Schema.Null,
-            ),
-          ),
-        ),
+      };
+
+      const viaServer = options.send;
+
+      const sent: Effect.Effect<void, PlaybackCallError> =
+        viaServer === undefined
+          ? Effect.flatMap(encodeJson(ClientDiagnosticsRequest, request), (body) =>
+              postWithToken(playback, body),
+            )
+          : Effect.tryPromise({
+              try: () => viaServer(request),
+              catch: (cause) =>
+                new TransportError({
+                  operation: "playback.diagnostics",
+                  message: "Transport failed during playback.diagnostics: the batch was not sent",
+                  cause,
+                }),
+            });
+
+      return sent.pipe(
         Effect.catch((error) => Effect.logDebug("PlayerDiagnostics.dropped", error)),
-      ),
+      );
+    },
     { discard: true },
   );
 
@@ -474,7 +504,7 @@ export const reportDiagnostics = Effect.fn("PlayerDiagnostics.report")(function*
 
       yield* Effect.forEach(
         Object.values(byToken),
-        (group) => send(group[0].playback, options.platform, toEvents(group, now)),
+        (group) => send(group[0].playback, options, toEvents(group, now)),
         { discard: true },
       );
     }),

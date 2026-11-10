@@ -10,19 +10,25 @@ this index before you drive the app, then use the matching feature file as the r
   titles (`Big Buck Bunny`, `Elephants Dream`, `Sintel`, `Tears of Steel`,
   `Cosmos Laundromat: First Cycle`, and `[movies] Feature Test`), and the `Shows` library at
   `/media/library/Shows` with `Caminandes` (3 episodes) and `Pioneer One` (6 episodes). With
-  the fixture library the names differ. Read them from `$S cli -- titles list`.
+  the fixture library the names differ. Read them from `$S cli -- movies titles list` (`$S cli --
+  titles list` in old movies).
 - The side holds the seeded [demo data](../SKILL.md#demo-data). Each person sees exactly this:
 
   | Who                   | Sees                                                    | Watching                                                                           |
   | --------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-  | Lucía (owner)         | all 8 titles                                            | nothing yet                                                                        |
-  | Lucía's `Kids` (PIN `1234`) | `Big Buck Bunny`, `Caminandes`, `Cosmos Laundromat: First Cycle` | nothing                                                                    |
-  | Mateo (admin)         | all 8 titles                                            | My List: `Cosmos Laundromat: First Cycle`                                          |
-  | Aiko (member, granted `Movies`) | all 8 titles                                  | Continue watching: `Pioneer One · S1:E3` and `Elephants Dream` at 5:29; My List: `Sintel`, `Tears of Steel`, `Caminandes` |
-  | Sam (member)          | `Caminandes` and `Pioneer One` only                     | nothing                                                                            |
+  | Lucía (`lucia`, owner) | all 8 titles                                           | nothing yet                                                                        |
+  | The kid (`kids`; Lucía's `Kids` profile, PIN `1234`, in old movies) | `Big Buck Bunny`, `Caminandes`, `Cosmos Laundromat: First Cycle` | nothing                               |
+  | Mateo (`mateo`, admin) | all 8 titles                                           | My List: `Cosmos Laundromat: First Cycle`                                          |
+  | Aiko (`aiko`, member, shared `Movies`) | all 8 titles                           | Continue watching: `Pioneer One · S1:E3` and `Elephants Dream` at 5:29; My List: `Sintel`, `Tears of Steel`, `Caminandes` |
+  | Sam (`sam`, member)   | `Caminandes` and `Pioneer One` only                     | nothing                                                                            |
 
-- Page `main` is signed in as `admin@movies.local` on the `Lucía` profile, and `$S cli`
-  runs as Lucía. `--as mateo|aiko|sam` runs as the others.
+- `$S doctor` prints the side's layout. On `one-backend` (one Convex backend, the core's), page
+  `main` is signed in as `lucia` at `/` and opens `/movies` with that session; in old movies
+  (`one-port`), it is signed in as `admin@movies.local` on the `Lucía` profile. `$S cli` runs as
+  Lucía, and `--as mateo|aiko|sam` (and `kids` on `one-backend`) as the others.
+- The CLI's words differ by layout: the core's `movies …`, `auth …`, and `admin …` on
+  `one-backend`, and old movies' top-level words (`search`, `titles list`, `continue`) before it.
+  The recipes give both.
 - For iOS steps, `$S ios up [--side S]` printed `ready` and `$S ios doctor` passes.
 - Never drive a stack or simulator that this run did not start.
 
@@ -34,7 +40,7 @@ this index before you drive the app, then use the matching feature file as the r
 - Run browser actions through `$S browser`, the CLI through `$S cli --`, and the simulator
   through `$S ios`.
 - Watching changes the baseline: a title played past its start shows `Resume` and joins
-  Continue watching on that profile. Run a recipe that needs a clean profile first, or as another
+  Continue watching for that person (that profile in old movies). Run a recipe that needs a clean profile first, or as another
   person. Never remove proof artifacts.
 
 ## Proof and skip reporting
@@ -71,8 +77,9 @@ commands, and observable proof.
   command menu, the search page, and CLI search.
 - [Playback](./playback.md) covers direct play, HLS with the audio or the whole video transcoded,
   resuming, the player's controls, and the iOS app.
-- [Profiles and access](./profiles-and-access.md) covers the profile picker, the Kids profile and
-  its PIN, and a restricted library that a member wasn't granted.
+- [People and access](./profiles-and-access.md) covers signing in once at `/` for `/movies`, the
+  kid user (old movies' profile picker, Kids profile, and its PIN), and a library that a member
+  wasn't shared.
 - [My List and Continue watching](./my-list.md) covers adding to My List and the Continue
   watching row with its resume point and next episode.
 

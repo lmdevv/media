@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { UserId } from "@/session/platform-types";
 
-import type { Paged } from "./pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { loaded, noop, textOf } from "./testing";
 import { AddSomeoneView, PeopleView, PendingInvitesView, UserPanelView } from "./users";
 import type { UserPanelViewProps } from "./users";

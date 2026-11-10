@@ -15,8 +15,7 @@ import { TestClock } from "effect/testing";
 
 import { PlaybackSessionId } from "@media/contracts/ids";
 
-import * as ConvexSessionReports from "../convex/convex-session-reports.ts";
-import * as TestConvex from "../testing/test-convex.ts";
+import * as TestSessions from "../testing/test-sessions.ts";
 import * as EndedSessions from "./ended-sessions.ts";
 import * as SessionReports from "./session-reports.ts";
 import { SessionReport } from "./stream-liveness.ts";
@@ -25,29 +24,29 @@ const sessionId = (id: string) => PlaybackSessionId.make(id);
 
 const ANSWER_WAIT = Duration.seconds(5);
 
-const overConvex = EndedSessions.layer.pipe(
-  Layer.provide(ConvexSessionReports.layer),
-  Layer.provideMerge(TestConvex.layer),
+const overReports = EndedSessions.layer.pipe(
+  Layer.provide(TestSessions.reportsLayer),
+  Layer.provideMerge(TestSessions.layer),
 );
 
 describe("ended sessions", () => {
   it.effect("hears an end from the session itself, whatever its stamp", () =>
     Effect.gen(function* () {
-      const context = yield* Layer.build(overConvex);
-      const convex = Context.get(context, TestConvex.Service);
+      const context = yield* Layer.build(overReports);
+      const scripted = Context.get(context, TestSessions.Service);
       const ended = Context.get(context, EndedSessions.Service);
 
       yield* TestClock.setTime(10_000);
-      yield* convex.report("seen", "playing", 0);
-      yield* convex.report("late", "playing", 0);
+      yield* scripted.report("seen", "playing", 0);
+      yield* scripted.report("late", "playing", 0);
 
       assert.isFalse(yield* ended.isEnded(sessionId("seen")));
       assert.isFalse(yield* ended.isEnded(sessionId("late")));
 
-      yield* convex.end("seen");
+      yield* scripted.end("seen");
 
       yield* TestClock.setTime(5_000);
-      yield* convex.end("late");
+      yield* scripted.end("late");
 
       assert.isTrue(yield* ended.isEnded(sessionId("seen")));
       assert.isTrue(yield* ended.isEnded(sessionId("late")));
@@ -56,11 +55,11 @@ describe("ended sessions", () => {
 
   it.effect("counts a session the owner has no record of as ended", () =>
     Effect.gen(function* () {
-      const context = yield* Layer.build(overConvex);
-      const convex = Context.get(context, TestConvex.Service);
+      const context = yield* Layer.build(overReports);
+      const scripted = Context.get(context, TestSessions.Service);
       const ended = Context.get(context, EndedSessions.Service);
 
-      yield* convex.report("known", "paused", 0);
+      yield* scripted.report("known", "paused", 0);
 
       assert.isTrue(yield* ended.isEnded(sessionId("deleted-or-never-created")));
       assert.isFalse(yield* ended.isEnded(sessionId("known")));

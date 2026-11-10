@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { Paged } from "./pages";
+import type { Paged } from "@media/ui/lib/pages";
 
 /** A callback a view test never fires. */
 export const noop = (): void => undefined;

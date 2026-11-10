@@ -6,6 +6,7 @@ import { fail } from "../core/lib/errors";
 import { reachOf } from "../core/permissions/grants";
 import { playableBy } from "../core/permissions/items";
 import { issuePersonalTicket } from "../core/tickets";
+import { registerWithArtworkTickets } from "./artwork";
 import { BOUNDS } from "./bounds";
 import { choosePlayableFile, presentEpisode, presentMediaFile, resolveEpisode } from "./present";
 import { findProgress, nextWatchGeneration, reachedEnd, writeProgress } from "./viewing";
@@ -64,7 +65,7 @@ const liveTitle = async (db: DatabaseReader, file: Doc<"mediaFiles">) => {
   return title === null || title.purging === true ? fail("not_found", NO_TITLE) : title;
 };
 
-export const { start, report, reportOffline } = register({
+export const { start, report, reportOffline } = registerWithArtworkTickets(register, {
   start: async (ctx, { titleId, episodeId, fileId, capabilities }, caller) => {
     const found = await ctx.db.get(titleId);
     const title = found === null || found.purging === true ? fail("not_found", NO_TITLE) : found;

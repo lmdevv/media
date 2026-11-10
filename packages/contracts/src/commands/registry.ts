@@ -2,6 +2,7 @@ import { accountCommands, credentialCommands, userCommands } from "./account";
 import { libraryCommands, maintenanceCommands, metadataCommands } from "./admin";
 import type { AnyCommand } from "./command";
 import { diagnosticsCommands } from "./diagnostics";
+import { importCommands } from "./imports";
 import { roomCommands } from "./rooms";
 import { browseCommands, historyCommands, playbackCommands, profileCommands } from "./viewing";
 
@@ -18,6 +19,7 @@ export const commands = {
   ...libraryCommands,
   ...metadataCommands,
   ...maintenanceCommands,
+  ...importCommands,
   ...diagnosticsCommands,
 } satisfies Record<string, AnyCommand>;
 

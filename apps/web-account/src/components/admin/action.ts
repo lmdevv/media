@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { describeFailure } from "@/lib/failure";
+import { describeFailure } from "@media/ui/lib/failure";
 
 /** A command a screen runs from a button: which one is running, and how to start one. */
 export interface Actions<Name extends string> {

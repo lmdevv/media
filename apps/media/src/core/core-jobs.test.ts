@@ -7,7 +7,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { Deferred, Effect, Layer, Ref, Stream, SubscriptionRef } from "effect";
 import { TestClock } from "effect/testing";
 
-import { JobFailed } from "../jobs/job-worker.ts";
+import { JobFailed } from "./core-jobs.ts";
 import { makeFakeCore, reply, stream } from "../testing/fake-core.ts";
 import * as CoreJobs from "./core-jobs.ts";
 
