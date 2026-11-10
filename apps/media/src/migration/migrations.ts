@@ -174,7 +174,8 @@ export interface PlanTarget<Person extends string> {
   readonly roots: ReadonlyArray<string>;
   /** Read each imported person's progress, for a dry run's conflicts. */
   readonly withLocalProgress: boolean;
-  readonly addsLibraries: boolean;
+  /** Whether the import may add a library on a folder no library covers. */
+  readonly addable: (folder: string) => boolean;
 }
 
 /** The plan a dry run computes, from the source and the catalog as they are now. */
@@ -238,7 +239,7 @@ export const computePlan = Effect.fnUntraced(function* <Person extends string>(
     mappings: target.mappings,
     roots: target.roots,
     existingLibraries,
-    addsLibraries: target.addsLibraries,
+    addable: target.addable,
     catalog,
     localProgress,
   });
@@ -419,7 +420,7 @@ const make = Effect.gen(function* () {
       mappings: connection.mappings,
       roots: config.libraryRoots,
       withLocalProgress: true,
-      addsLibraries: true,
+      addable: () => true,
     }).pipe(
       Effect.map((computedPlan) => ({ computedPlan })),
       Effect.catchTag(SOURCE_ERROR_TAGS, (error) => Effect.succeed(sourceFailure(error))),

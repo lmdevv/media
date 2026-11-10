@@ -23,6 +23,9 @@ type Plan = FunctionArgs<typeof api.movies.imports.start>["plan"];
 /** A mapped source user of a plan. */
 export type PlannedUser = Plan["users"][number];
 
+/** A source library of a plan, with its folders on this host and who saw it. */
+export type PlannedLibrary = Plan["libraries"][number];
+
 /** Starts an import of `serverId` for `requester` as the server's import flow does. */
 export const startImport = (
   stack: CoreStack,
@@ -31,6 +34,7 @@ export const startImport = (
     readonly serverId: string;
     readonly source?: "jellyfin" | "plex";
     readonly users?: ReadonlyArray<PlannedUser>;
+    readonly libraries?: ReadonlyArray<PlannedLibrary>;
   },
 ) =>
   runServer(
@@ -46,13 +50,21 @@ export const startImport = (
         credentials: { version: 1, nonce: "nonce", ciphertext: "sealed" },
         users: [...(options.users ?? [])],
         pathMappings: [],
+        libraries: [...(options.libraries ?? [])],
       },
     },
     Started,
   );
 
 const Checkpoint = Schema.Struct({
-  phase: Schema.Literals(["watchState", "collections", "overrides", "done"]),
+  phase: Schema.Literals([
+    "libraries",
+    "scanning",
+    "watchState",
+    "collections",
+    "overrides",
+    "done",
+  ]),
   unit: Schema.Finite,
   cursor: Schema.Finite,
 });
@@ -62,7 +74,9 @@ export type Checkpoint = typeof Checkpoint.Type;
 
 const Wrote = answer(Schema.Struct({ done: Schema.Finite, at: Checkpoint }));
 
-const Moved = answer(Schema.Struct({ at: Checkpoint }));
+const Moved = answer(
+  Schema.Struct({ at: Checkpoint, imported: Schema.Struct({ librariesAdded: Schema.Finite }) }),
+);
 
 type WatchItem = FunctionArgs<typeof api.movies.imports.writeWatchState>["items"][number];
 
@@ -132,3 +146,16 @@ export const writeAllWatch = async (
     wrote.value.done,
   ]);
 };
+
+/** Covers the planned library at `at` with libraries, as the import's job does. */
+export const ensureLibrary = (stack: CoreStack, lease: Lease, at: Checkpoint) =>
+  runServer(stack, api.movies.imports.ensureLibrary, { lease, at }, Moved);
+
+/** How many of the import's libraries still have a scan queued or running. */
+export const scansPending = (stack: CoreStack, lease: Lease) =>
+  runServer(
+    stack,
+    api.movies.imports.scansPending,
+    { lease },
+    answer(Schema.Struct({ pending: Schema.Finite })),
+  );

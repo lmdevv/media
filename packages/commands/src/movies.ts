@@ -411,6 +411,8 @@ const importRun = v.object({
   serverName: v.string(),
   createdAt: v.number(),
   phase: v.union(
+    v.literal("libraries"),
+    v.literal("scanning"),
     v.literal("watchState"),
     v.literal("collections"),
     v.literal("overrides"),
@@ -419,6 +421,7 @@ const importRun = v.object({
   /** How many source users the run maps onto users here. */
   users: v.number(),
   imported: v.object({
+    librariesAdded: v.number(),
     watched: v.number(),
     inProgress: v.number(),
     favorites: v.number(),

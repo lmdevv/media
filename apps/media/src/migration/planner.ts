@@ -74,10 +74,10 @@ export interface PlanInput<Person extends string> {
   readonly roots: ReadonlyArray<string>;
   readonly existingLibraries: ReadonlyArray<ExistingLibrary>;
   /**
-   * Whether the import adds a library for source folders no library covers, whose items then
-   * wait for its first scan; otherwise those items stay unmatched.
+   * Whether the import may add a library on a local folder no library covers, whose items then
+   * wait for its first scan; the items of a folder it may not stay unmatched.
    */
-  readonly addsLibraries: boolean;
+  readonly addable: (folder: string) => boolean;
   readonly catalog: ReadonlyArray<CatalogFile>;
   /** Each imported person's current progress. */
   readonly localProgress: ReadonlyMap<Person, ReadonlyArray<LocalProgress>>;
@@ -135,6 +135,7 @@ const planLibraries = (
   roots: ReadonlyArray<string>,
   existing: ReadonlyArray<ExistingLibrary>,
   imported: ReadonlySet<string>,
+  addable: (folder: string) => boolean,
 ): ReadonlyArray<PlannedLibrary> =>
   libraries.flatMap((library) => {
     const kind = libraryKindOf(library.kind);
@@ -150,6 +151,10 @@ const planLibraries = (
       ...new Set(folders.flatMap(({ local: found }) => (found === null ? [] : [found]))),
     ];
 
+    const usable = local.filter(
+      (folder) => coveringLibrary(existing, folder) !== undefined || addable(folder),
+    );
+
     const coveringIds = local.flatMap((folder) => {
       const found = coveringLibrary(existing, folder);
 
@@ -161,9 +166,11 @@ const planLibraries = (
         sourceLibraryId: library.libraryId,
         name: library.name,
         kind,
-        roots: local,
+        roots: usable,
         existingLibraryId: coveringIds[0] ?? null,
-        newRoots: local.filter((folder) => coveringLibrary(existing, folder) === undefined),
+        newRoots: local.filter(
+          (folder) => coveringLibrary(existing, folder) === undefined && addable(folder),
+        ),
         unmappedFolders: folders.flatMap(({ path, local: found }) =>
           found === null ? [path] : [],
         ),
@@ -238,9 +245,10 @@ export const planMigration = <Person extends string>(
         user.action === "import" && user.person !== null ? [user.sourceUserId] : [],
       ),
     ),
+    input.addable,
   );
 
-  const pendingRoots = input.addsLibraries ? libraries.flatMap((library) => library.newRoots) : [];
+  const pendingRoots = libraries.flatMap((library) => library.newRoots);
   const index = indexCatalog(input.catalog);
 
   const matches = matchItems(input.items, index, {
@@ -436,29 +444,25 @@ export const planMigration = <Person extends string>(
   };
 };
 
-/** The report the Review screen shows for `plan`. */
-export const reportOf = (
-  plan: MigrationPlan<ProfileId>,
-  context: {
-    readonly connectionId: string;
-    readonly source: MigrationSource;
-    readonly serverName: string;
-    readonly createdAt: number;
-    readonly users: ReadonlyArray<ResolvedUser<ProfileId>>;
-  },
-): MigrationReport => ({
+interface ReportContext<Person extends string> {
+  readonly connectionId: string;
+  readonly source: MigrationSource;
+  readonly serverName: string;
+  readonly createdAt: number;
+  readonly users: ReadonlyArray<ResolvedUser<Person>>;
+}
+
+/** What the Review screen shows for `plan` but who receives each source user's history. */
+export const reportBody = <Person extends string>(
+  plan: MigrationPlan<Person>,
+  context: ReportContext<Person>,
+): Omit<MigrationReport, "users"> => ({
   status: "ready",
   connectionId: context.connectionId,
   source: context.source,
   serverName: context.serverName,
   createdAt: EpochMillis.make(context.createdAt),
   summary: plan.summary,
-  users: context.users.map((user) => ({
-    sourceUserId: user.sourceUserId,
-    name: user.name,
-    profileId: user.person,
-    action: user.action,
-  })),
   libraries: plan.libraries.map((library) => ({
     sourceLibraryId: library.sourceLibraryId,
     name: library.name,
@@ -469,4 +473,18 @@ export const reportOf = (
     access: library.access,
   })),
   unmatchedSamples: plan.unmatchedSamples,
+});
+
+/** The report the Review screen shows for `plan`. */
+export const reportOf = (
+  plan: MigrationPlan<ProfileId>,
+  context: ReportContext<ProfileId>,
+): MigrationReport => ({
+  ...reportBody(plan, context),
+  users: context.users.map((user) => ({
+    sourceUserId: user.sourceUserId,
+    name: user.name,
+    profileId: user.person,
+    action: user.action,
+  })),
 });

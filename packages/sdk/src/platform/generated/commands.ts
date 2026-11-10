@@ -2317,6 +2317,8 @@ const movies_imports_get = query({
     serverName: Schema.String,
     createdAt: Schema.Finite,
     phase: Schema.Union([
+      Schema.Literal("libraries"),
+      Schema.Literal("scanning"),
       Schema.Literal("watchState"),
       Schema.Literal("collections"),
       Schema.Literal("overrides"),
@@ -2324,6 +2326,7 @@ const movies_imports_get = query({
     ]),
     users: Schema.Finite,
     imported: Schema.Struct({
+      librariesAdded: Schema.Finite,
       watched: Schema.Finite,
       inProgress: Schema.Finite,
       favorites: Schema.Finite,
@@ -2371,6 +2374,8 @@ const movies_imports_list = query({
         serverName: Schema.String,
         createdAt: Schema.Finite,
         phase: Schema.Union([
+          Schema.Literal("libraries"),
+          Schema.Literal("scanning"),
           Schema.Literal("watchState"),
           Schema.Literal("collections"),
           Schema.Literal("overrides"),
@@ -2378,6 +2383,7 @@ const movies_imports_list = query({
         ]),
         users: Schema.Finite,
         imported: Schema.Struct({
+          librariesAdded: Schema.Finite,
           watched: Schema.Finite,
           inProgress: Schema.Finite,
           favorites: Schema.Finite,

@@ -138,21 +138,31 @@ export const watchGeneration = async (
 
 /**
  * Moves the generation of a person's history of one title, for every mark and progress report,
- * and answers the new one. A scheduled page of an older change then writes nothing.
+ * and answers the new one. A scheduled page of an older change then writes nothing. A mark of the
+ * whole title passes `markedAt`, its time, which an import defers to.
  */
 export const nextWatchGeneration = async (
   ctx: Pick<MutationCtx, "db">,
   userId: Id<"users">,
   titleId: Id<"titles">,
+  markedAt?: number,
 ): Promise<number> => {
   const mark = await watchMarkOf(ctx.db, userId, titleId);
   const generation = (mark?.generation ?? 0) + 1;
+  const marked = markedAt === undefined ? {} : { markedAt };
 
-  if (mark === null) await insertWatchMark(ctx.db, { userId, titleId, generation });
-  else await patchWatchMark(ctx.db, mark._id, { generation });
+  if (mark === null) await insertWatchMark(ctx.db, { userId, titleId, generation, ...marked });
+  else await patchWatchMark(ctx.db, mark._id, { generation, ...marked });
 
   return generation;
 };
+
+/** When the person last marked the whole title, or null when they never did. */
+export const wholeTitleMarkedAt = async (
+  db: DatabaseReader,
+  userId: Id<"users">,
+  titleId: Id<"titles">,
+): Promise<number | null> => (await watchMarkOf(db, userId, titleId))?.markedAt ?? null;
 
 /** The episode after `episode` in season and episode order, specials (season 0) last. */
 export const nextEpisodeAfter = async (

@@ -2985,6 +2985,8 @@ export const generatedCommands = [
       serverName: Schema.String,
       createdAt: Schema.Finite,
       phase: Schema.Union([
+        Schema.Literal("libraries"),
+        Schema.Literal("scanning"),
         Schema.Literal("watchState"),
         Schema.Literal("collections"),
         Schema.Literal("overrides"),
@@ -2992,6 +2994,7 @@ export const generatedCommands = [
       ]),
       users: Schema.Finite,
       imported: Schema.Struct({
+        librariesAdded: Schema.Finite,
         watched: Schema.Finite,
         inProgress: Schema.Finite,
         favorites: Schema.Finite,
@@ -3045,6 +3048,8 @@ export const generatedCommands = [
           serverName: Schema.String,
           createdAt: Schema.Finite,
           phase: Schema.Union([
+            Schema.Literal("libraries"),
+            Schema.Literal("scanning"),
             Schema.Literal("watchState"),
             Schema.Literal("collections"),
             Schema.Literal("overrides"),
@@ -3052,6 +3057,7 @@ export const generatedCommands = [
           ]),
           users: Schema.Finite,
           imported: Schema.Struct({
+            librariesAdded: Schema.Finite,
             watched: Schema.Finite,
             inProgress: Schema.Finite,
             favorites: Schema.Finite,

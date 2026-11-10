@@ -57,9 +57,14 @@ export const IMPORT_BOUNDS = {
   serverName: 256,
   /** The source server's address. */
   sourceUrl: 2048,
-  /** Path mappings, and the characters of each folder in one. */
+  /** Path mappings, and the characters of each folder in one or in a planned library. */
   pathMappings: 50,
   folder: 1024,
+  /** Planned libraries, and their folders in all. */
+  libraries: 50,
+  libraryRoots: 50,
+  /** Libraries an import found or added, at most 16 for each of its folders. */
+  libraryIds: 64,
   /** Characters of each base64url field of the sealed credentials. */
   sealed: 8192,
   /** Watch items, or title edits, one write takes; its budget decides how many it writes. */

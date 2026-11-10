@@ -1,5 +1,5 @@
 import type { UserId } from "@media/contracts/ids";
-import { Conflict, Forbidden, NotFound } from "@media/contracts/errors";
+import { Conflict, Forbidden, InvalidArgs, NotFound } from "@media/contracts/errors";
 import type { MigrationSource } from "@media/contracts/models/jobs";
 import type {
   ImportConnection,
@@ -13,7 +13,7 @@ import type {
   PathMapping,
 } from "@media/contracts/models/migration";
 import type { CatalogFile, LocalProgress } from "@media/contracts/models/migration-service";
-import { serverFunctions } from "@media/contracts/server-functions";
+import { IMPORT_PLAN_MAX, serverFunctions } from "@media/contracts/server-functions";
 import type { ImportId } from "@media/contracts/models/migration";
 import type { JobId } from "@media/contracts/ids";
 import type { CallError } from "@media/sdk/effect";
@@ -43,7 +43,8 @@ import {
   sourceFailure,
 } from "./migrations.ts";
 import type { PlanReads } from "./migrations.ts";
-import { normalizePath, toLocalPath } from "./paths.ts";
+import { isInside, normalizePath, toLocalPath } from "./paths.ts";
+import { reportBody } from "./planner.ts";
 import type { ExistingLibrary, MigrationPlan, ResolvedUser } from "./planner.ts";
 import { openSource, SOURCE_ERROR_TAGS } from "./sources.ts";
 import type { SourceSession } from "./source-plugin.ts";
@@ -61,6 +62,7 @@ interface ImportStarted {
 interface DryRun {
   readonly usersKey: string;
   readonly users: ReadonlyArray<ResolvedUser<UserId>>;
+  readonly libraries: MigrationPlan<UserId>["libraries"];
 }
 
 interface Connection {
@@ -134,65 +136,19 @@ export const resolveImportUsers = (
       : { ...base, person: null, action: "invite" };
   });
 
-/** The report of `plan` as the core shows it: no library is added, so none waits for a scan. */
+/** The report of `plan` as the core shows it, each source user with their core user. */
 export const coreReportOf = (
   plan: MigrationPlan<UserId>,
-  context: {
-    readonly connectionId: string;
-    readonly source: MigrationSource;
-    readonly serverName: string;
-    readonly createdAt: number;
-    readonly users: ReadonlyArray<ResolvedUser<UserId>>;
-  },
-): ImportReport => {
-  const libraries = plan.libraries.map((library) => ({
-    sourceLibraryId: library.sourceLibraryId,
-    name: library.name,
-    kind: library.kind,
-    roots: library.roots,
-    libraryId:
-      library.roots.length > 0 &&
-      library.newRoots.length === 0 &&
-      library.unmappedFolders.length === 0
-        ? library.existingLibraryId
-        : null,
-    unmappedFolders: library.unmappedFolders,
-  }));
-
-  const covered = libraries.filter((library) => library.libraryId !== null).length;
-  const { summary } = plan;
-
-  return {
-    status: "ready",
-    connectionId: context.connectionId,
-    source: context.source,
-    serverName: context.serverName,
-    createdAt: EpochMillis.make(context.createdAt),
-    summary: {
-      usersMapped: summary.usersMapped,
-      usersUnmapped: summary.usersUnmapped,
-      librariesCovered: covered,
-      librariesUncovered: libraries.length - covered,
-      itemsByPath: summary.itemsByPath,
-      itemsByProviderId: summary.itemsByProviderId,
-      itemsUnmatched: summary.itemsUnmatched + summary.itemsAwaitingScan,
-      watched: summary.watched,
-      inProgress: summary.inProgress,
-      favorites: summary.favorites,
-      collections: summary.collections,
-      overrides: summary.overrides,
-      conflicts: summary.conflicts,
-    },
-    users: context.users.map((user) => ({
-      sourceUserId: user.sourceUserId,
-      name: user.name,
-      userId: user.person,
-      action: user.action,
-    })),
-    libraries,
-    unmatchedSamples: plan.unmatchedSamples,
-  };
-};
+  context: Parameters<typeof reportBody<UserId>>[1],
+): ImportReport => ({
+  ...reportBody(plan, context),
+  users: context.users.map((user) => ({
+    sourceUserId: user.sourceUserId,
+    name: user.name,
+    userId: user.person,
+    action: user.action,
+  })),
+});
 
 interface Paged {
   readonly continueCursor: string;
@@ -239,6 +195,64 @@ export const coreReads = (session: CoreSession.Interface): PlanReads<UserId> => 
       (page): ReadonlyArray<LocalProgress> => page.rows,
     ),
 });
+
+/**
+ * Who sees a library the import adds, as indexes into the plan's mapped users: everyone, or the
+ * mapped users the source let see it (none when it did not say, so owners and admins alone).
+ */
+const accessOf = (
+  library: MigrationPlan<UserId>["libraries"][number],
+  mapped: ReadonlyArray<{ readonly sourceUserId: string }>,
+) =>
+  library.access.kind === "everyone"
+    ? { kind: "everyone" as const }
+    : {
+        kind: "users" as const,
+        users: library.access.sourceUserIds.flatMap((sourceUserId) => {
+          const index = mapped.findIndex((user) => user.sourceUserId === sourceUserId);
+
+          return index === -1 ? [] : [index];
+        }),
+      };
+
+/**
+ * Refuses, before anything is written, a plan the core would refuse to start: more users, path
+ * mappings, libraries, or library folders than one import holds (ADR 0012).
+ */
+const withinBounds = (
+  users: ReadonlyArray<ResolvedUser<UserId>>,
+  mappings: ReadonlyArray<PathMapping>,
+  libraries: MigrationPlan<UserId>["libraries"],
+): Effect.Effect<void, InvalidArgs> => {
+  const counts = [
+    [
+      users.filter((user) => user.action === "import").length,
+      IMPORT_PLAN_MAX.users,
+      "mapped users",
+    ],
+    [mappings.length, IMPORT_PLAN_MAX.pathMappings, "path mappings"],
+    [
+      libraries.filter((library) => library.roots.length > 0).length,
+      IMPORT_PLAN_MAX.libraries,
+      "libraries",
+    ],
+    [
+      libraries.flatMap((library) => library.roots).length,
+      IMPORT_PLAN_MAX.libraryRoots,
+      "library folders",
+    ],
+  ] as const;
+
+  const over = counts.find(([count, max]) => count > max);
+
+  return over === undefined
+    ? Effect.void
+    : Effect.fail(
+        new InvalidArgs({
+          message: `One import holds at most ${String(over[1])} ${over[2]}; this one has ${String(over[0])}`,
+        }),
+      );
+};
 
 const usersKeyOf = (users: ReadonlyArray<ResolvedUser<UserId>>): string =>
   JSON.stringify(users.map((user) => [user.sourceUserId, user.person]));
@@ -407,13 +421,15 @@ const make = (sealKey: Redacted.Redacted) =>
         mappings: connection.mappings,
         roots: config.libraryRoots,
         withLocalProgress: true,
-        addsLibraries: false,
+        addable: (folder) => config.libraryRoots.some((root) => isInside(folder, root)),
       }).pipe(
         Effect.map((plan) => ({ plan })),
         Effect.catchTag(SOURCE_ERROR_TAGS, (error) => Effect.succeed(sourceFailure(error))),
       );
 
       if (isSourceFailure(computed)) return computed;
+
+      yield* withinBounds(users, connection.mappings, computed.plan.libraries);
 
       const now = yield* Clock.currentTimeMillis;
 
@@ -422,7 +438,11 @@ const make = (sealKey: Redacted.Redacted) =>
         all.has(connection.connectionId)
           ? new Map(all).set(connection.connectionId, {
               ...connection,
-              dryRun: Option.some({ usersKey: usersKeyOf(users), users }),
+              dryRun: Option.some({
+                usersKey: usersKeyOf(users),
+                users,
+                libraries: computed.plan.libraries,
+              }),
             })
           : all,
       );
@@ -456,6 +476,14 @@ const make = (sealKey: Redacted.Redacted) =>
 
       const serverId = connection.session.server.serverId;
 
+      const mapped = ready.value.users.flatMap((user) =>
+        user.action === "import" && user.person !== null
+          ? [{ sourceUserId: user.sourceUserId, userId: user.person, history: user.history }]
+          : [],
+      );
+
+      yield* withinBounds(ready.value.users, connection.mappings, ready.value.libraries);
+
       const started = yield* core.call(serverFunctions.importStart, {
         requestedBy: requester,
         source: connection.source,
@@ -468,12 +496,13 @@ const make = (sealKey: Redacted.Redacted) =>
             connection.credentials,
             credentialsBinding(serverId, connection.url),
           ),
-          users: ready.value.users.flatMap((user) =>
-            user.action === "import" && user.person !== null
-              ? [{ sourceUserId: user.sourceUserId, userId: user.person, history: user.history }]
-              : [],
-          ),
+          users: mapped,
           pathMappings: connection.mappings,
+          libraries: ready.value.libraries.flatMap((library) =>
+            library.roots.length === 0
+              ? []
+              : [{ name: library.name, roots: library.roots, access: accessOf(library, mapped) }],
+          ),
         },
       });
 

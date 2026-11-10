@@ -301,6 +301,8 @@ export const scannedPersonDetails = v.object({
 });
 
 export const importPhase = v.union(
+  v.literal("libraries"),
+  v.literal("scanning"),
   v.literal("watchState"),
   v.literal("collections"),
   v.literal("overrides"),
@@ -309,8 +311,8 @@ export const importPhase = v.union(
 
 /**
  * Where an import resumes: its phase, the unit within it (the user index while writing watch
- * state, the member index of the current collection), and the cursor (the item index within the
- * user, or the collection or title index).
+ * state, the member index of the current collection), and the cursor (the planned library's
+ * index, the item index within the user, or the collection or title index).
  */
 export const importCheckpoint = v.object({
   phase: importPhase,
@@ -320,6 +322,7 @@ export const importCheckpoint = v.object({
 
 /** What an import has written so far, for its run's screens. */
 export const importedCounts = v.object({
+  librariesAdded: v.number(),
   watched: v.number(),
   inProgress: v.number(),
   favorites: v.number(),
@@ -339,6 +342,23 @@ export const sealedCredentials = v.object({
 
 const importHistory = v.union(v.literal("full"), v.literal("plays"));
 
+/**
+ * Who sees a library an import adds: everyone in the household, when every source user could see
+ * the source library; otherwise the core users of the plan's users at `users` (indexes into the
+ * plan's users) whom the source let see it, and owners and admins alone when it did not say.
+ */
+export const plannedAccess = v.union(
+  v.object({ kind: v.literal("everyone") }),
+  v.object({ kind: v.literal("users"), users: v.array(v.number()) }),
+);
+
+/** A source library and its folders on this host, which an import covers with libraries. */
+export const plannedLibrary = v.object({
+  name: v.string(),
+  roots: v.array(v.string()),
+  access: plannedAccess,
+});
+
 /** Everything an import needs to run again after a restart, bounded where `start` parses it. */
 export const importPlan = v.object({
   sourceUrl: v.string(),
@@ -348,4 +368,5 @@ export const importPlan = v.object({
     v.object({ sourceUserId: v.string(), userId: v.id("users"), history: importHistory }),
   ),
   pathMappings: v.array(v.object({ from: v.string(), to: v.string() })),
+  libraries: v.array(plannedLibrary),
 });

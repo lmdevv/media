@@ -99,7 +99,12 @@ const settle = Effect.forEach([1, 2, 3, 4, 5], () => TestClock.adjust("200 milli
   discard: true,
 });
 
-const caps: CoreJobs.PoolCaps = { movies: 1, "movies.background": 1, server: 1 };
+const caps: CoreJobs.PoolCaps = {
+  movies: 1,
+  "movies.background": 1,
+  "movies.import": 1,
+  server: 1,
+};
 
 describe("CoreJobs", () => {
   it.effect("runs the movies pool only while the movies domain has a library", () =>

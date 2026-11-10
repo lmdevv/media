@@ -1,6 +1,8 @@
 import { v } from "convex/values";
 import type { Infer } from "convex/values";
 
+import type { GrantPrincipal } from "../../commands/access";
+
 import { register } from "../../commands/movies/imports";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
@@ -13,12 +15,15 @@ import { lease } from "../core/jobs/model";
 import type { Lease } from "../core/jobs/model";
 import type { JobCtx } from "../core/jobs/store";
 import type { Caller } from "../core/auth/caller";
-import { FOLDERS_MAX } from "../core/folders";
+import { FOLDERS_MAX, folderOrNull, isInside, overlapping } from "../core/folders";
+import { makeLibrary } from "../core/libraries";
+import { inOrder } from "../core/lib/inOrder";
+import { GIVEN_NAME_MAX, printableName, printableWithin } from "../core/lib/names";
+import { grant } from "../core/permissions/grants";
 import { fail } from "../core/lib/errors";
 import { paginate, paginateAtMost } from "../core/lib/paginate";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
 import { SERVER, can, principalOf } from "../core/permissions/policy";
-import { hasLibraries } from "../core/scans";
 import { BOUNDS, IMPORT_BOUNDS, idsWithin } from "./bounds";
 import { budgetFor, work } from "./budget";
 import type { Work } from "./budget";
@@ -35,7 +40,7 @@ import {
   nullable,
   titleKind,
 } from "./validators";
-import { findProgress, nextWatchGeneration, writeProgress } from "./viewing";
+import { findProgress, wholeTitleMarkedAt, writeProgress } from "./viewing";
 import {
   insertCollection,
   insertCollectionItem,
@@ -75,6 +80,7 @@ type Checkpoint = Infer<typeof importCheckpoint>;
 type Counts = Infer<typeof importedCounts>;
 
 const NOTHING_IMPORTED: Counts = {
+  librariesAdded: 0,
   watched: 0,
   inProgress: 0,
   favorites: 0,
@@ -85,6 +91,8 @@ const NOTHING_IMPORTED: Counts = {
 };
 
 const PHASES: ReadonlyArray<Checkpoint["phase"]> = [
+  "libraries",
+  "scanning",
   "watchState",
   "collections",
   "overrides",
@@ -216,6 +224,7 @@ const withImport = <Value>(
 const held = <Value>(value: Value): LeaseAnswer<Value> => ({ outcome: "held", value });
 
 const added = (counts: Counts, more: Partial<Counts>): Counts => ({
+  librariesAdded: counts.librariesAdded + (more.librariesAdded ?? 0),
   watched: counts.watched + (more.watched ?? 0),
   inProgress: counts.inProgress + (more.inProgress ?? 0),
   favorites: counts.favorites + (more.favorites ?? 0),
@@ -435,6 +444,26 @@ const checkPlan = (serverId: string, serverName: string, plan: Plan): void => {
   if (new Set(plan.users.map((user) => user.sourceUserId)).size !== plan.users.length) {
     fail("invalid_args", "Map each source user once");
   }
+
+  checkCount(plan.libraries.length, IMPORT_BOUNDS.libraries, "planned libraries");
+
+  const roots = plan.libraries.flatMap((library) => library.roots);
+
+  checkCount(roots.length, IMPORT_BOUNDS.libraryRoots, "folders of planned libraries");
+
+  for (const root of roots) within(root, IMPORT_BOUNDS.folder, "A folder");
+
+  for (const library of plan.libraries) {
+    within(library.name, IMPORT_BOUNDS.serverName, "A library name");
+
+    const known =
+      library.access.kind === "everyone" ||
+      library.access.users.every(
+        (index) => Number.isSafeInteger(index) && index >= 0 && index < plan.users.length,
+      );
+
+    if (!known) fail("invalid_args", "A planned library names a user the plan does not map");
+  }
 };
 
 /**
@@ -484,13 +513,6 @@ export const start = serverMutation({
       );
     }
 
-    if (!(await hasLibraries(ctx.db, "movies"))) {
-      return fail(
-        "conflict",
-        "Add a movies library first: an import matches into libraries and adds none",
-      );
-    }
-
     const payload: PayloadOf<ImportKind> =
       source === "jellyfin"
         ? { kind: "movies.import.jellyfin", source, serverId }
@@ -503,7 +525,8 @@ export const start = serverMutation({
         importId: started.importId,
         requestedBy,
         plan,
-        checkpoint: { phase: "watchState", unit: 0, cursor: 0 },
+        libraryIds: [],
+        checkpoint: { phase: "libraries", unit: 0, cursor: 0 },
         imported: NOTHING_IMPORTED,
       });
     }
@@ -566,6 +589,151 @@ export const advance = serverMutation({
     }),
 });
 
+const libraryNameOf = (sourceName: string): string => {
+  const printable = printableName(sourceName) ?? "";
+  const cut = Array.from(printable).slice(0, GIVEN_NAME_MAX).join("").trim();
+
+  return printableWithin(cut, GIVEN_NAME_MAX) ?? "Imported library";
+};
+
+/** The outermost folders of a planned library as libraries keep them; one that cannot be is left out. */
+const outermostOf = (roots: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const folders = [
+    ...new Set(
+      roots.flatMap((root) => {
+        const folder = folderOrNull(root);
+
+        return folder === null ? [] : [folder];
+      }),
+    ),
+  ];
+
+  return folders
+    .filter((folder) => !folders.some((outer) => outer !== folder && isInside(folder, outer)))
+    .slice(0, FOLDERS_MAX);
+};
+
+/**
+ * Covers the held import's planned library at the checkpoint's cursor with movies libraries, as
+ * old movies' importer did. A folder another library has, holds, or lies in is covered by it,
+ * whose sharing stays as it is. The rest become one new library named after the source library,
+ * made through `makeLibrary` with the requester its first manager and its first scan queued. It is
+ * shared through grants as the source showed it: with the household when every source user saw
+ * it, otherwise with the core users of the source users it named, and with no one else when the
+ * source did not say. Old movies' admins saw every library; on the core an admin sees what they
+ * hold a grant on (ADR 0024), so the requester manages it and shares it further. Moves the
+ * checkpoint to the next planned library and answers the counts; a call whose `at` is not the
+ * stored checkpoint answers the stored one.
+ */
+export const ensureLibrary = serverMutation({
+  args: { lease, at: importCheckpoint },
+  returns: leaseAnswer(v.object({ at: importCheckpoint, imported: importedCounts })),
+  handler: (ctx, { lease: leased, at }) =>
+    withImport(ctx, leased, async ({ row }) => {
+      if (!sameCheckpoint(row.checkpoint, at)) {
+        return held({ at: row.checkpoint, imported: row.imported });
+      }
+
+      if (at.phase !== "libraries") throw new Error(`A library was asked for at ${at.phase}`);
+
+      const planned = row.plan.libraries[at.cursor];
+      const next: Checkpoint = { phase: "libraries", unit: 0, cursor: at.cursor + 1 };
+
+      if (planned === undefined) {
+        await patchImportPlan(ctx.db, row._id, { checkpoint: next });
+
+        return held({ at: next, imported: row.imported });
+      }
+
+      const requester = await ctx.db.get(row.requestedBy);
+
+      if (requester === null || !mayImportAs(requester)) {
+        return fail("forbidden", "The import's requester may no longer add libraries");
+      }
+
+      const folders = outermostOf(planned.roots);
+      const holders = await Promise.all(folders.map(async (folder) => overlapping(ctx.db, folder)));
+      const uncovered = folders.filter((_, index) => (holders[index] ?? []).length === 0);
+      const covering = holders.flat();
+
+      const made =
+        uncovered.length === 0
+          ? null
+          : await makeLibrary(ctx, {
+              name: libraryNameOf(planned.name),
+              kind: "movies",
+              folders: uncovered,
+              creator: requester._id,
+            });
+
+      if (made !== null) {
+        const ref = { type: "library", id: made.libraryId } as const;
+        const by = principalOf(requester);
+
+        const audience: ReadonlyArray<GrantPrincipal> =
+          planned.access.kind === "everyone"
+            ? [{ kind: "household" }]
+            : [
+                ...new Set(
+                  planned.access.users.flatMap((index) => {
+                    const user = row.plan.users[index];
+
+                    return user === undefined ? [] : [user.userId];
+                  }),
+                ),
+              ].map((userId) => ({ kind: "user", userId }));
+
+        await inOrder(audience, async (principal) => grant(ctx, by, ref, principal, "view"));
+      }
+
+      const found = await Promise.all(
+        [...new Set([...covering, ...(made === null ? [] : [made.libraryId])])].map(async (id) =>
+          ctx.db.get(id),
+        ),
+      );
+
+      const movies = found.flatMap((library) =>
+        library !== null && library.kind === "movies" ? [library._id] : [],
+      );
+
+      const imported = added(row.imported, { librariesAdded: made === null ? 0 : 1 });
+
+      await patchImportPlan(ctx.db, row._id, {
+        checkpoint: next,
+        libraryIds: [...new Set([...row.libraryIds, ...movies])].slice(0, IMPORT_BOUNDS.libraryIds),
+        imported,
+      });
+
+      return held({ at: next, imported });
+    }),
+});
+
+/**
+ * How many of the libraries the held import found or added still have a scan queued or running,
+ * so the import waits for its new libraries before it matches history.
+ */
+export const scansPending = serverMutation({
+  args: { lease },
+  returns: leaseAnswer(v.object({ pending: v.number() })),
+  handler: (ctx, { lease: leased }) =>
+    withImport(ctx, leased, async ({ row }) => {
+      const scans = await Promise.all(
+        row.libraryIds.map(async (libraryId) => {
+          const library = await ctx.db.get(libraryId);
+
+          const scan =
+            library === null || library.lastScan === null
+              ? null
+              : await ctx.db.get(library.lastScan);
+
+          return scan !== null && (scan.status === "queued" || scan.status === "running");
+        }),
+      );
+
+      return held({ pending: scans.filter(Boolean).length });
+    }),
+});
+
 /** What a write answers: how many items it got through, the checkpoint now, and the counts. */
 const written = v.object({ done: v.number(), at: importCheckpoint, imported: importedCounts });
 
@@ -588,8 +756,8 @@ type WatchCounts = Pick<Counts, "watched" | "inProgress" | "favorites" | "keptLo
 const NO_CHANGE: WatchCounts = { watched: 0, inProgress: 0, favorites: 0, keptLocal: 0 };
 
 /**
- * One watch item at worst: its user, title, episode, and file read; its progress row read twice
- * and written; its history generation read and written; its list entry read and written.
+ * One watch item at worst: its user, title, episode, and file read; its whole-title mark read;
+ * its progress row read twice and written; its list entry read and written.
  */
 const WATCH_COST = costOf(
   12,
@@ -615,9 +783,10 @@ const checkWatchItem = (item: WatchItem): void => {
 /**
  * Imports one item's progress the way an offline report lands (`movies.play.reportOffline`): only
  * when the source played it more recently than the core did, or the core has no row, so an import
- * never moves a newer row back. Each write moves the user's history generation of the title, so a
- * whole-show mark asked for earlier writes nothing over it (`viewing.ts`). A watched mark only
- * gets set.
+ * never moves a newer row back. Source progress is older data, so it never invalidates the
+ * person's own newer word: an item of a title they marked as a whole after the source played it
+ * is skipped, and an import never moves the title's history generation, so a whole-show mark's
+ * scheduled pages still finish (`viewing.ts`). A watched mark only gets set.
  */
 const importProgress = async (
   ctx: Pick<MutationCtx, "db">,
@@ -628,6 +797,12 @@ const importProgress = async (
   const played = item.watched || item.positionMs > 0 || item.playCount > 0;
 
   if (!played || (title.kind === "show" && item.episodeId === null)) return NO_CHANGE;
+
+  const markedAt = await wholeTitleMarkedAt(ctx.db, item.userId, item.titleId);
+
+  if (markedAt !== null && (item.lastPlayedAt === null || item.lastPlayedAt <= markedAt)) {
+    return { ...NO_CHANGE, keptLocal: 1 };
+  }
 
   const existing = await findProgress(ctx.db, item.userId, item.titleId, item.episodeId);
 
@@ -650,8 +825,6 @@ const importProgress = async (
       origin: null,
     });
 
-    await nextWatchGeneration(ctx, item.userId, item.titleId);
-
     const moved = item.positionMs > 0 && existing?.positionMs !== item.positionMs;
 
     return { ...NO_CHANGE, watched, inProgress: moved ? 1 : 0 };
@@ -659,7 +832,6 @@ const importProgress = async (
 
   if (watched === 1) {
     await patchProgress(ctx.db, existing._id, { watched: true, updatedAt: Date.now() });
-    await nextWatchGeneration(ctx, item.userId, item.titleId);
   }
 
   const differs = existing.positionMs !== item.positionMs || existing.watched !== item.watched;

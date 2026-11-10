@@ -119,7 +119,7 @@ const input = (overrides: Partial<PlanInput<ProfileId>>): PlanInput<ProfileId> =
   mappings: [{ from: "/data", to: "/mnt/nas" }],
   roots: ["/mnt/nas"],
   existingLibraries: [{ id: LibraryId.make("movies"), roots: ["/mnt/nas/movies"] }],
-  addsLibraries: true,
+  addable: () => true,
   catalog: [
     file("heat", "/mnt/nas/movies/Heat.mkv"),
     file("alien", "/mnt/nas/movies/Alien.mkv"),
@@ -174,8 +174,8 @@ describe("planMigration", () => {
     ]);
   });
 
-  it("leaves items in folders no library covers unmatched when the import adds no library", () => {
-    const plan = planMigration(input({ addsLibraries: false }));
+  it("leaves items in folders no library covers unmatched when the import may not add one there", () => {
+    const plan = planMigration(input({ addable: () => false }));
 
     assert.strictEqual(plan.summary.itemsAwaitingScan, 0);
     assert.strictEqual(plan.summary.itemsUnmatched, 2);

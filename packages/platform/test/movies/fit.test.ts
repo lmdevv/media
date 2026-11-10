@@ -418,9 +418,19 @@ const floor = (text: number): Floor => {
           from: wide(IMPORT_BOUNDS.folder),
           to: wide(IMPORT_BOUNDS.folder),
         })),
+        libraries: Array.from({ length: IMPORT_BOUNDS.libraries }, () => ({
+          name: wide(IMPORT_BOUNDS.serverName),
+          roots: [wide(IMPORT_BOUNDS.folder)],
+          access: {
+            kind: "users" as const,
+            users: Array.from({ length: IMPORT_BOUNDS.users }, (_, n) => n),
+          },
+        })),
       },
+      libraryIds: Array.from({ length: IMPORT_BOUNDS.libraryIds }, () => libraryId),
       checkpoint: { phase: "collections", unit: 1e9, cursor: 1e9 },
       imported: {
+        librariesAdded: 1e9,
         watched: 1e9,
         inProgress: 1e9,
         favorites: 1e9,

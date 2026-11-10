@@ -108,7 +108,7 @@ describe("the importer's flow on the core", () => {
     );
   });
 
-  it("reports a folder no library covers as unmatched, never as waiting for a scan", () => {
+  it("reports a folder no library covers as one the import adds, its items waiting for its scan", () => {
     const users: ReadonlyArray<ResolvedUser<UserId>> = [
       { sourceUserId: "u1", name: "lucia", person: LUCIA, action: "import", history: "full" },
     ];
@@ -139,7 +139,7 @@ describe("the importer's flow on the core", () => {
       mappings: [{ from: "/data", to: "/srv" }],
       roots: ["/srv"],
       existingLibraries: [{ id: LibraryId.make("films"), roots: ["/srv/films"] }],
-      addsLibraries: false,
+      addable: () => true,
       catalog: [file("heat", "/srv/films/Heat.mkv")],
       localProgress: new Map(),
     });
@@ -154,24 +154,30 @@ describe("the importer's flow on the core", () => {
 
     assert.deepStrictEqual(
       {
-        librariesCovered: report.summary.librariesCovered,
-        librariesUncovered: report.summary.librariesUncovered,
+        librariesToAdd: report.summary.librariesToAdd,
+        librariesExisting: report.summary.librariesExisting,
         itemsByPath: report.summary.itemsByPath,
+        itemsAwaitingScan: report.summary.itemsAwaitingScan,
         itemsUnmatched: report.summary.itemsUnmatched,
         watched: report.summary.watched,
       },
-      { librariesCovered: 1, librariesUncovered: 1, itemsByPath: 1, itemsUnmatched: 1, watched: 1 },
+      {
+        librariesToAdd: 1,
+        librariesExisting: 1,
+        itemsByPath: 1,
+        itemsAwaitingScan: 1,
+        itemsUnmatched: 0,
+        watched: 2,
+      },
     );
     assert.deepStrictEqual(
-      report.libraries.map((library) => [library.name, library.libraryId]),
+      report.libraries.map((library) => [library.name, library.existingLibraryId]),
       [
         ["Films", LibraryId.make("films")],
         ["Home videos", null],
       ],
     );
-    assert.deepStrictEqual(report.unmatchedSamples, [
-      { name: "party", path: "/data/home/Party.mkv", reason: "not_in_catalog" },
-    ]);
+    assert.deepStrictEqual(report.unmatchedSamples, []);
     assert.deepStrictEqual(
       plan.watchState.flatMap((user) => user.items.map((write) => [write.person, write.titleId])),
       [[LUCIA, TitleId.make("heat")]],
@@ -199,6 +205,7 @@ describe("the importer's flow on the core", () => {
   it("says what a finished run wrote", () => {
     assert.strictEqual(
       doneMessage({
+        librariesAdded: 0,
         watched: 2,
         inProgress: 1,
         favorites: 1,

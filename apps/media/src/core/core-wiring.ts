@@ -54,6 +54,7 @@ const jobs = (sealKey: Redacted.Redacted) =>
     const caps: CoreJobs.PoolCaps = {
       movies: 2,
       "movies.background": config.trickplay.concurrency,
+      "movies.import": 1,
       server: 1,
     };
 

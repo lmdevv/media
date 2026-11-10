@@ -21,7 +21,7 @@ type Tagged<Kind extends string, Fields extends PropertyValidators> = ReturnType
  * kinds together on one server, under each kind's own cap across every worker. `probe` runs only
  * in the stack suite; the server never claims it.
  */
-type JobPool = "movies" | "movies.background" | "music" | "server" | "probe";
+type JobPool = "movies" | "movies.background" | "movies.import" | "music" | "server" | "probe";
 
 interface KindPolicy<Payload extends PropertyValidators> {
   /** What enqueue stores, at most a few KiB. A large plan belongs in the domain's own table. */
@@ -145,7 +145,7 @@ const scanKind = <const Kind extends ContentDomain>(kind: Kind) =>
 const importKind = <const Source extends ImportSource>(source: Source) =>
   defineKind(`movies.import.${source}`, {
     payload: { source: v.literal(source), serverId: v.string() },
-    pool: "movies",
+    pool: "movies.import",
     item: null,
     cap: 1,
     maxStrikes: 3,

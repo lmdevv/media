@@ -204,7 +204,7 @@ export const runMigrationJob = Effect.fn("MigrationJob.run")(function* (
     mappings: state.plan.pathMappings,
     roots: config.libraryRoots,
     withLocalProgress: false,
-    addsLibraries: true,
+    addable: () => true,
   });
 
   yield* add({ unmatched: plan.summary.itemsUnmatched + plan.summary.itemsAwaitingScan });

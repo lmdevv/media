@@ -17,7 +17,7 @@ import {
 } from "@media/contracts/server-functions";
 import type { Lease } from "@media/contracts/server-functions";
 import type { CallError } from "@media/sdk/effect";
-import { Effect, Match, type Redacted } from "effect";
+import { Duration, Effect, Match, type Redacted } from "effect";
 import type { HttpClient } from "effect/http";
 
 import * as CoreJobs from "../core/core-jobs.ts";
@@ -30,9 +30,17 @@ import { openCredentials } from "./credentials.ts";
 import { computePlan, credentialsBinding, sourceFailure } from "./migrations.ts";
 import type { MigrationPlan, ResolvedUser } from "./planner.ts";
 import type { SourceError } from "./source-plugin.ts";
+import { isInside } from "./paths.ts";
 import { openSource } from "./sources.ts";
 
+/** How often an import asks whether the scans of its libraries finished, and how long it waits. */
+const SCAN_POLL = Duration.seconds(5);
+
+const SCAN_WAIT = Duration.hours(6);
+
 const PHASE_MESSAGES: Readonly<Record<ImportPhase, string>> = {
+  libraries: "Adding libraries",
+  scanning: "Waiting for new libraries to finish scanning",
   watchState: "Importing watch history and favorites",
   collections: "Importing collections",
   overrides: "Importing metadata overrides",
@@ -95,6 +103,10 @@ const watchItemsOf = (plan: MigrationPlan<UserId>) =>
     user.items.map(({ person, ...item }): ImportWatchItem => ({ ...item, userId: person })),
   );
 
+const SCANNING: ImportCheckpoint = { phase: "scanning", unit: 0, cursor: 0 };
+
+const WATCH_START: ImportCheckpoint = { phase: "watchState", unit: 0, cursor: 0 };
+
 const DONE: ImportCheckpoint = { phase: "done", unit: 0, cursor: 0 };
 
 const sameCheckpoint = (left: ImportCheckpoint, right: ImportCheckpoint): boolean =>
@@ -108,6 +120,7 @@ const progressAt = (
   const watched = watch.reduce((sum, items) => sum + items.length, 0);
 
   return Match.value(at.phase).pipe(
+    Match.whenOr("libraries", "scanning", () => 0),
     Match.when("watchState", () =>
       watch.slice(0, at.unit).reduce((sum, items) => sum + items.length, at.cursor),
     ),
@@ -143,6 +156,56 @@ const runImport = Effect.fn("CoreImports.run")(function* (
     Effect.mapError((error) => sourceJobFailure(error, state.source)),
   );
 
+  const libraries = state.plan.libraries.length;
+  let at = state.checkpoint;
+  let imported = state.imported;
+
+  // The libraries come first, then their scans, so the plan matches against what they hold.
+  while (at.phase === "libraries") {
+    yield* report({
+      done: Math.min(at.cursor, libraries),
+      total: libraries,
+      message: PHASE_MESSAGES.libraries,
+    });
+
+    const moved =
+      at.cursor < libraries
+        ? yield* call(core.call(serverFunctions.importEnsureLibrary, { lease, at }))
+        : yield* call(
+            core.call(serverFunctions.importAdvance, {
+              lease,
+              at,
+              to: SCANNING,
+              unmatched: imported.unmatched,
+            }),
+          );
+
+    at = moved.at;
+    imported = moved.imported;
+  }
+
+  if (at.phase === "scanning") {
+    yield* report({ done: 0, total: null, message: PHASE_MESSAGES.scanning });
+
+    const pending = call(core.call(serverFunctions.importScansPending, { lease }));
+
+    yield* Effect.gen(function* () {
+      while ((yield* pending).pending > 0) yield* Effect.sleep(SCAN_POLL);
+    }).pipe(Effect.timeoutOption(SCAN_WAIT));
+
+    const moved = yield* call(
+      core.call(serverFunctions.importAdvance, {
+        lease,
+        at,
+        to: WATCH_START,
+        unmatched: imported.unmatched,
+      }),
+    );
+
+    at = moved.at;
+    imported = moved.imported;
+  }
+
   const users: ReadonlyArray<ResolvedUser<UserId>> = state.plan.users.map((user) => ({
     sourceUserId: user.sourceUserId,
     name: user.sourceUserId,
@@ -157,7 +220,7 @@ const runImport = Effect.fn("CoreImports.run")(function* (
     mappings: state.plan.pathMappings,
     roots: config.libraryRoots,
     withLocalProgress: false,
-    addsLibraries: false,
+    addable: (folder) => config.libraryRoots.some((root) => isInside(folder, root)),
   }).pipe(Effect.mapError(planFailure(state.source)));
 
   const unmatched = plan.summary.itemsUnmatched + plan.summary.itemsAwaitingScan;
@@ -176,40 +239,44 @@ const runImport = Effect.fn("CoreImports.run")(function* (
   const total =
     watch.reduce((sum, items) => sum + items.length, 0) + collections.length + overrides.length;
 
-  const advance = (at: ImportCheckpoint, to: ImportCheckpoint) =>
-    call(core.call(serverFunctions.importAdvance, { lease, at, to, unmatched }));
+  const advance = (from: ImportCheckpoint, to: ImportCheckpoint) =>
+    call(core.call(serverFunctions.importAdvance, { lease, at: from, to, unmatched }));
 
-  /** The first checkpoint at or after `at` with items left to send, or the end. */
-  const startOf = (at: ImportCheckpoint): ImportCheckpoint =>
-    Match.value(at.phase).pipe(
+  /** The first checkpoint at or after `from` with items left to send, or the end. */
+  const startOf = (from: ImportCheckpoint): ImportCheckpoint =>
+    Match.value(from.phase).pipe(
+      Match.whenOr("libraries", "scanning", () => startOf(WATCH_START)),
       Match.when("watchState", () => {
         const unit = watch.findIndex(
-          (items, index) => index >= at.unit && items.length > (index === at.unit ? at.cursor : 0),
+          (items, index) =>
+            index >= from.unit && items.length > (index === from.unit ? from.cursor : 0),
         );
 
         if (unit === -1) return startOf({ phase: "collections", unit: 0, cursor: 0 });
 
-        return unit === at.unit ? at : { phase: "watchState" as const, unit, cursor: 0 };
+        return unit === from.unit ? from : { phase: "watchState" as const, unit, cursor: 0 };
       }),
       Match.when("collections", () =>
-        at.cursor < collections.length ? at : startOf({ phase: "overrides", unit: 0, cursor: 0 }),
+        from.cursor < collections.length
+          ? from
+          : startOf({ phase: "overrides", unit: 0, cursor: 0 }),
       ),
-      Match.when("overrides", () => (at.cursor < overrides.length ? at : DONE)),
+      Match.when("overrides", () => (from.cursor < overrides.length ? from : DONE)),
       Match.when("done", () => DONE),
       Match.exhaustive,
     );
 
   /**
-   * The next batch's write from `at`, which has items left. A batch that reaches the end of its
+   * The next batch's write from `from`, which has items left. A batch that reaches the end of its
    * user or phase names where the next items start, so the core moves there in the same call.
    */
-  const write = (at: ImportCheckpoint) =>
-    Match.value(at.phase).pipe(
+  const write = (from: ImportCheckpoint) =>
+    Match.value(from.phase).pipe(
       Match.when("watchState", () => {
-        const items = watch[at.unit] ?? [];
-        const batch = items.slice(at.cursor, at.cursor + IMPORT_ITEMS_MAX);
-        const last = at.cursor + batch.length >= items.length;
-        const args = { lease, at, unmatched, items: batch };
+        const items = watch[from.unit] ?? [];
+        const batch = items.slice(from.cursor, from.cursor + IMPORT_ITEMS_MAX);
+        const last = from.cursor + batch.length >= items.length;
+        const args = { lease, at: from, unmatched, items: batch };
 
         return call(
           core.call(
@@ -217,16 +284,16 @@ const runImport = Effect.fn("CoreImports.run")(function* (
             last
               ? {
                   ...args,
-                  continueAt: startOf({ phase: "watchState", unit: at.unit + 1, cursor: 0 }),
+                  continueAt: startOf({ phase: "watchState", unit: from.unit + 1, cursor: 0 }),
                 }
               : args,
           ),
         );
       }),
       Match.when("collections", () => {
-        const batch = collections.slice(at.cursor, at.cursor + IMPORT_COLLECTIONS_MAX);
-        const last = at.cursor + batch.length >= collections.length;
-        const args = { lease, at, items: batch };
+        const batch = collections.slice(from.cursor, from.cursor + IMPORT_COLLECTIONS_MAX);
+        const last = from.cursor + batch.length >= collections.length;
+        const args = { lease, at: from, items: batch };
 
         return call(
           core.call(
@@ -238,18 +305,15 @@ const runImport = Effect.fn("CoreImports.run")(function* (
         );
       }),
       Match.orElse(() => {
-        const batch = overrides.slice(at.cursor, at.cursor + IMPORT_ITEMS_MAX);
-        const last = at.cursor + batch.length >= overrides.length;
-        const args = { lease, at, items: batch };
+        const batch = overrides.slice(from.cursor, from.cursor + IMPORT_ITEMS_MAX);
+        const last = from.cursor + batch.length >= overrides.length;
+        const args = { lease, at: from, items: batch };
 
         return call(
           core.call(serverFunctions.importEdits, last ? { ...args, continueAt: DONE } : args),
         );
       }),
     );
-
-  let at = state.checkpoint;
-  let imported = state.imported;
 
   for (;;) {
     const start = startOf(at);

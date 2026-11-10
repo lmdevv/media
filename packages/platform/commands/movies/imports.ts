@@ -18,6 +18,8 @@ const getResult = v.object({
   serverName: v.string(),
   createdAt: v.number(),
   phase: v.union(
+    v.literal("libraries"),
+    v.literal("scanning"),
     v.literal("watchState"),
     v.literal("collections"),
     v.literal("overrides"),
@@ -25,6 +27,7 @@ const getResult = v.object({
   ),
   users: v.number(),
   imported: v.object({
+    librariesAdded: v.number(),
     watched: v.number(),
     inProgress: v.number(),
     favorites: v.number(),
@@ -69,6 +72,8 @@ const listResult = v.object({
       serverName: v.string(),
       createdAt: v.number(),
       phase: v.union(
+        v.literal("libraries"),
+        v.literal("scanning"),
         v.literal("watchState"),
         v.literal("collections"),
         v.literal("overrides"),
@@ -76,6 +81,7 @@ const listResult = v.object({
       ),
       users: v.number(),
       imported: v.object({
+        librariesAdded: v.number(),
         watched: v.number(),
         inProgress: v.number(),
         favorites: v.number(),

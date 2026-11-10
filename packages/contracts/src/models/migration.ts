@@ -388,39 +388,12 @@ export const ImportPlanArgs = Schema.Struct({
 export interface ImportPlanArgs extends Schema.Schema.Type<typeof ImportPlanArgs> {}
 
 /**
- * What a dry run into the core found, as counts. An import adds no library: a source folder no
- * movies library covers stays unmatched (ADR 0012).
+ * The dry-run summary of an import into the core, shown before anything is written: the summary
+ * old movies showed, with each source user's core user. `playCounts` counts items whose last-played
+ * date imports; the core keeps no play count.
  */
-export const ImportSummary = Schema.Struct({
-  usersMapped: Schema.Int,
-  usersUnmapped: Schema.Int,
-  /** Source libraries whose every folder lies in a movies library. */
-  librariesCovered: Schema.Int,
-  /** Source libraries with a folder no movies library covers; its items stay unmatched. */
-  librariesUncovered: Schema.Int,
-  itemsByPath: Schema.Int,
-  itemsByProviderId: Schema.Int,
-  itemsUnmatched: Schema.Int,
-  watched: Schema.Int,
-  inProgress: Schema.Int,
-  favorites: Schema.Int,
-  collections: Schema.Int,
-  overrides: Schema.Int,
-  /** Items whose progress on the core was played more recently than the source's; it stays. */
-  conflicts: Schema.Int,
-});
-
-/** Dry-run counts for an import into the core. */
-export interface ImportSummary extends Schema.Schema.Type<typeof ImportSummary> {}
-
-/** The dry-run summary of an import into the core, shown before anything is written. */
 export const ImportReport = Schema.Struct({
-  status: Schema.Literal("ready"),
-  connectionId: Schema.String,
-  source: MigrationSource,
-  serverName: Schema.String,
-  createdAt: EpochMillis,
-  summary: ImportSummary,
+  ...MigrationReport.fields,
   users: Schema.Array(
     Schema.Struct({
       sourceUserId: Schema.String,
@@ -428,27 +401,6 @@ export const ImportReport = Schema.Struct({
       userId: Schema.NullOr(UserId),
       /** `invite`: no user matched and none was chosen; the source user is skipped this time. */
       action: Schema.Literals(["import", "skip", "invite"]),
-    }),
-  ),
-  libraries: Schema.Array(
-    Schema.Struct({
-      sourceLibraryId: Schema.String,
-      name: Schema.String,
-      kind: LibraryKind,
-      /** The folders on this host. */
-      roots: Schema.Array(LibraryRoot),
-      /** The movies library covering every folder, or null when a folder lies in none. */
-      libraryId: Schema.NullOr(LibraryId),
-      /** Source folders without a local folder; their items stay unmatched. */
-      unmappedFolders: Schema.Array(SourcePath),
-    }),
-  ),
-  /** At most 25 unmatched items. */
-  unmatchedSamples: Schema.Array(
-    Schema.Struct({
-      name: Schema.String,
-      path: Schema.NullOr(Schema.String),
-      reason: UnmatchedReason,
     }),
   ),
 });
@@ -474,7 +426,14 @@ export const ImportStartResult = Schema.Union([
 ]);
 
 /** Where an import into the core stands; each phase resumes from its checkpoint after a restart. */
-export const ImportPhase = Schema.Literals(["watchState", "collections", "overrides", "done"]);
+export const ImportPhase = Schema.Literals([
+  "libraries",
+  "scanning",
+  "watchState",
+  "collections",
+  "overrides",
+  "done",
+]);
 
 /** A phase of an import into the core. */
 export type ImportPhase = typeof ImportPhase.Type;

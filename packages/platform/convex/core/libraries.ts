@@ -62,23 +62,43 @@ const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null, shown: ScanS
   };
 };
 
+/**
+ * Makes a library of `kind` on `folders` with `creator` its first manager and queues its first
+ * scan: the one way a library is made, for `create` and for an import that adds one (ADR 0024).
+ * The caller decided that `creator` may point the server at its folders (`manageFolders`).
+ */
+export const makeLibrary = async (
+  ctx: JobCtx,
+  library: {
+    readonly name: string;
+    readonly kind: Doc<"libraries">["kind"];
+    readonly folders: ReadonlyArray<string>;
+    readonly creator: Id<"users">;
+  },
+): Promise<{ readonly libraryId: Id<"libraries">; readonly scanJobId: Id<"jobs"> }> => {
+  const libraryId = await ctx.db.insert("libraries", {
+    name: parseName(library.name),
+    kind: library.kind,
+    lastScan: null,
+  });
+
+  await claimFolders(ctx, libraryId, parseFolders(library.folders));
+  await grantCreator(ctx, libraryRef(libraryId), library.creator);
+
+  const doc = await ctx.db.get(libraryId);
+
+  if (doc === null) throw new Error(`The library ${libraryId} made in this mutation is gone`);
+
+  const first = await queueScan(ctx, doc);
+
+  return { libraryId, scanJobId: first.jobId };
+};
+
 export const { create, list, get, rename, setFolders, scan, remove } = register({
   create: async (ctx, { name, kind, folders }, caller) => {
     requireServer(caller, "manageFolders");
 
-    const libraryId = await ctx.db.insert("libraries", {
-      name: parseName(name),
-      kind,
-      lastScan: null,
-    });
-
-    await claimFolders(ctx, libraryId, parseFolders(folders));
-    await grantCreator(ctx, libraryRef(libraryId), caller.userId);
-
-    const { doc } = await requireContent(ctx, caller, "manage", libraryRef(libraryId));
-    const first = await queueScan(ctx, doc);
-
-    return { libraryId, scanJobId: first.jobId };
+    return makeLibrary(ctx, { name, kind, folders, creator: caller.userId });
   },
   list: async (ctx, { paginationOpts }, caller) => {
     const page = await visiblePage(ctx, caller, "library", paginationOpts);

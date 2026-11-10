@@ -197,11 +197,13 @@ export const { continueWatching, list, markWatched, markUnwatched } = register({
   markWatched: async (ctx, { titleId, episodeId }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "play", titleId);
 
-    const generation = await nextWatchGeneration(ctx, caller.userId, titleId);
+    const at = Date.now();
+    const whole = episodeId === undefined ? at : undefined;
+    const generation = await nextWatchGeneration(ctx, caller.userId, titleId, whole);
 
     await markTarget(
       ctx,
-      { userId: caller.userId, title, watched: true, at: Date.now(), generation },
+      { userId: caller.userId, title, watched: true, at, generation },
       episodeId,
     );
 
@@ -210,11 +212,13 @@ export const { continueWatching, list, markWatched, markUnwatched } = register({
   markUnwatched: async (ctx, { titleId, episodeId }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "play", titleId);
 
-    const generation = await nextWatchGeneration(ctx, caller.userId, titleId);
+    const at = Date.now();
+    const whole = episodeId === undefined ? at : undefined;
+    const generation = await nextWatchGeneration(ctx, caller.userId, titleId, whole);
 
     await markTarget(
       ctx,
-      { userId: caller.userId, title, watched: false, at: Date.now(), generation },
+      { userId: caller.userId, title, watched: false, at, generation },
       episodeId,
     );
 

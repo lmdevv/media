@@ -315,6 +315,11 @@ export const moviesTables = {
     userId: v.id("users"),
     titleId: v.id("titles"),
     generation: v.number(),
+    /**
+     * When the person last marked the whole title watched or unwatched. An import defers to it:
+     * source progress played before it is older than the person's own word (ADR 0012).
+     */
+    markedAt: v.optional(v.number()),
   }).index("by_user_title", ["userId", "titleId"]),
 
   /**
@@ -327,6 +332,8 @@ export const moviesTables = {
     /** Who started it: an owner or an admin when it started. */
     requestedBy: v.id("users"),
     plan: importPlan,
+    /** The movies libraries covering the plan's folders, found or added; at most 64. */
+    libraryIds: v.array(v.id("libraries")),
     checkpoint: importCheckpoint,
     imported: importedCounts,
   }).index("by_import", ["importId"]),

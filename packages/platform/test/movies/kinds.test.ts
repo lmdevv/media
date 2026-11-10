@@ -13,8 +13,8 @@ describe("movies job kinds", () => {
       "movies.metadata": "movies",
       "movies.person": "movies",
       "movies.trickplay": "movies.background",
-      "movies.import.jellyfin": "movies",
-      "movies.import.plex": "movies",
+      "movies.import.jellyfin": "movies.import",
+      "movies.import.plex": "movies.import",
       "music.scan": "music",
       "server.backup": "server",
     });

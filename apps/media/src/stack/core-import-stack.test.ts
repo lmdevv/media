@@ -107,7 +107,6 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
     let serviceKey: Redacted.Redacted;
     let admin: Someone;
     let aiko: Someone;
-    let libraryId: Option.Option<Platform.Id<"libraries">> = Option.none();
     let jellyfin: RecordedServer;
     let plex: RecordedServer;
     let docker: JellyfinServer | undefined;
@@ -189,46 +188,30 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
         workDir: join(workDir, "server"),
       });
 
-      const created = await run(
-        admin.platform.core.libraries.create({
-          name: "Import fixtures",
-          kind: "movies",
-          folders: [join(workspace, "movies"), join(workspace, "shows")],
-        }),
-      );
-
-      libraryId = Option.some(created.libraryId);
-
-      await run(
-        admin.platform.core.permissions.grants.set({
-          resource: { type: "library", id: created.libraryId },
-          principal: { kind: "household" },
-          level: "view",
-        }),
-      );
-
-      await eventually(
-        "the fixture library's scan",
-        async () => {
-          const library = await run(
-            admin.platform.core.libraries.get({ libraryId: created.libraryId }),
-          );
-
-          return library.scan?.status === "succeeded" ? Option.some(true) : Option.none();
-        },
-        180_000,
-      );
-
       jellyfin = await startJellyfinFixture();
       plex = await startPlexFixture();
     }, 300_000);
 
     afterAll(async () => {
-      if (Option.isSome(libraryId)) {
-        await run(
-          admin.platform.core.libraries.remove({ libraryId: libraryId.value }).pipe(Effect.ignore),
-        );
-      }
+      const listed = await run(
+        admin.platform.core.libraries.list({ paginationOpts: { numItems: 200, cursor: null } }),
+      );
+
+      await Promise.all(
+        listed.page.map(async (library) => {
+          const detail = await run(
+            admin.platform.core.libraries.get({ libraryId: library.libraryId }),
+          );
+
+          if (detail.folders?.some((folder) => folder.startsWith(workspace)) === true) {
+            await run(
+              admin.platform.core.libraries
+                .remove({ libraryId: library.libraryId })
+                .pipe(Effect.ignore),
+            );
+          }
+        }),
+      );
 
       await jellyfin.close();
       await plex.close();
@@ -271,8 +254,8 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
 
       expect(report.summary).toMatchObject({
         usersMapped: 2,
-        librariesCovered: 2,
-        librariesUncovered: 0,
+        librariesToAdd: 2,
+        librariesExisting: 0,
         itemsUnmatched: 0,
         watched: 2,
         inProgress: 1,
@@ -281,6 +264,7 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
         overrides: 1,
         conflicts: 0,
       });
+      expect(report.summary.itemsAwaitingScan).toBeGreaterThan(0);
 
       const [one, two] = await Promise.all([start(connection, users), start(connection, users)]);
 
@@ -295,6 +279,7 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
         phase: "done",
         users: 2,
         imported: {
+          librariesAdded: 2,
           watched: report.summary.watched,
           inProgress: report.summary.inProgress,
           favorites: report.summary.favorites,
@@ -392,6 +377,7 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
               ),
               users: [],
               pathMappings: [],
+              libraries: [],
             },
           });
 
@@ -466,7 +452,7 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       const report = await dryRun(connection, users);
 
       expect(report.summary.itemsByPath).toBe(0);
-      expect(report.summary.librariesCovered).toBe(0);
+      expect(report.summary.librariesToAdd).toBe(0);
       expect(report.unmatchedSamples.length).toBeGreaterThan(0);
       expect(report.unmatchedSamples.every((sample) => sample.reason === "not_in_catalog")).toBe(
         true,
@@ -504,7 +490,7 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       const users = mappingsOf(connection, { admin: target });
       const report = await dryRun(connection, users);
 
-      expect(report.summary).toMatchObject({ librariesCovered: 2, itemsUnmatched: 0 });
+      expect(report.summary).toMatchObject({ librariesExisting: 2, itemsUnmatched: 0 });
 
       const started = await start(connection, users);
       const done = await finished(started.importId);

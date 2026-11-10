@@ -44,7 +44,7 @@ export const DOCUMENT_BYTES = {
    * An import's plan within `IMPORT_BOUNDS`, which `movies/imports:start` checks, at up to 3 bytes
    * a character.
    */
-  importPlans: 640 * 1024,
+  importPlans: 896 * 1024,
 } as const;
 
 /**

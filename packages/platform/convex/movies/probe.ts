@@ -35,6 +35,7 @@ import {
   insertTitleGenre,
   patchTitle,
 } from "./write";
+import { findProgress, watchGeneration } from "./viewing";
 
 /**
  * The stack suite's seam into the movies catalog, as `core/libraryProbe.ts` is for music until
@@ -389,6 +390,63 @@ export const progressOrder = internalQuery({
     const [found, last] = await Promise.all([range().take(5000), range().order("desc").first()]);
 
     return { rows: found.length, lastEpisodeId: last?.episodeId ?? null };
+  },
+});
+
+/**
+ * One person's progress through an episode, and their history generation of its show, so a test
+ * can stand in for a page of a whole-show mark that has not run yet by taking its row away.
+ */
+export const episodeProgress = internalQuery({
+  args: {
+    userId: v.id("users"),
+    titleId: v.id("titles"),
+    seasonNumber: v.number(),
+    episodeNumber: v.number(),
+  },
+  returns: v.object({
+    episodeId: v.id("episodes"),
+    watched: v.union(v.boolean(), v.null()),
+    positionMs: v.union(v.number(), v.null()),
+    generation: v.number(),
+  }),
+  handler: async (ctx, { userId, titleId, seasonNumber, episodeNumber }) => {
+    const episode = await ctx.db
+      .query("episodes")
+      .withIndex("by_title_order", (q) =>
+        q
+          .eq("titleId", titleId)
+          .eq("seasonNumber", seasonNumber)
+          .eq("episodeNumber", episodeNumber),
+      )
+      .unique();
+
+    if (episode === null) throw new Error(`No episode ${seasonNumber}x${episodeNumber}`);
+
+    const [row, generation] = await Promise.all([
+      findProgress(ctx.db, userId, titleId, episode._id),
+      watchGeneration(ctx.db, userId, titleId),
+    ]);
+
+    return {
+      episodeId: episode._id,
+      watched: row?.watched ?? null,
+      positionMs: row?.positionMs ?? null,
+      generation,
+    };
+  },
+});
+
+/** Takes one progress row away without moving the history generation. */
+export const forgetProgress = internalMutation({
+  args: { userId: v.id("users"), titleId: v.id("titles"), episodeId: v.id("episodes") },
+  returns: v.null(),
+  handler: async (ctx, { userId, titleId, episodeId }) => {
+    const row = await findProgress(ctx.db, userId, titleId, episodeId);
+
+    if (row !== null) await ctx.db.delete(row._id);
+
+    return null;
   },
 });
 

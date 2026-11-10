@@ -571,6 +571,18 @@ export const serverFunctions = {
     }),
     result: LeaseAnswer(Schema.Struct({ at: ImportCheckpoint, imported: ImportedCounts })),
   }),
+  importEnsureLibrary: serverMutation({
+    name: "movies.imports.ensureLibrary",
+    path: "movies/imports:ensureLibrary",
+    args: Schema.Struct({ lease: Lease, at: ImportCheckpoint }),
+    result: LeaseAnswer(Schema.Struct({ at: ImportCheckpoint, imported: ImportedCounts })),
+  }),
+  importScansPending: serverMutation({
+    name: "movies.imports.scansPending",
+    path: "movies/imports:scansPending",
+    args: Schema.Struct({ lease: Lease }),
+    result: LeaseAnswer(Schema.Struct({ pending: Schema.Int })),
+  }),
   importWatchState: serverMutation({
     name: "movies.imports.writeWatchState",
     path: "movies/imports:writeWatchState",
@@ -612,6 +624,14 @@ export const IMPORT_ITEMS_MAX = 500;
 
 /** The most collections one import write takes. */
 export const IMPORT_COLLECTIONS_MAX = 10;
+
+/** What one import's plan holds at most; the core refuses to start a larger one. */
+export const IMPORT_PLAN_MAX = {
+  users: 200,
+  pathMappings: 50,
+  libraries: 50,
+  libraryRoots: 50,
+} as const;
 
 /** The most members of one collection an import writes. */
 export const IMPORT_MEMBERS_MAX = 1000;

@@ -211,8 +211,8 @@ export interface OverrideImport extends Schema.Schema.Type<typeof OverrideImport
 
 /**
  * Where an import into the core resumes: the phase, the unit within it (the user index while
- * importing watch state, the member index of the current collection), and the cursor (the item
- * index within the user, or the collection or title index).
+ * importing watch state, the member index of the current collection), and the cursor (the planned
+ * library's index, the item index within the user, or the collection or title index).
  */
 export const ImportCheckpoint = Schema.Struct({
   phase: ImportPhase,
@@ -225,6 +225,7 @@ export interface ImportCheckpoint extends Schema.Schema.Type<typeof ImportCheckp
 
 /** What an import into the core has written so far. */
 export const ImportedCounts = Schema.Struct({
+  librariesAdded: Schema.Int,
   watched: Schema.Int,
   inProgress: Schema.Int,
   favorites: Schema.Int,
@@ -253,6 +254,21 @@ export const ImportPlan = Schema.Struct({
     }),
   ).check(Schema.isMaxLength(200)),
   pathMappings: Schema.Array(PathMapping).check(Schema.isMaxLength(50)),
+  /**
+   * The source's libraries and their folders on this host, which the import covers with
+   * libraries, adding one for the folders no library covers yet, shared as the source showed it:
+   * with everyone, or with the plan's users at `users` (indexes into `users`).
+   */
+  libraries: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      roots: Schema.Array(Schema.String),
+      access: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal("everyone") }),
+        Schema.Struct({ kind: Schema.Literal("users"), users: Schema.Array(Schema.Int) }),
+      ]),
+    }),
+  ).check(Schema.isMaxLength(50)),
 });
 
 /** Everything an import into the core needs to run again after a restart. */
