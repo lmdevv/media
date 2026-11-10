@@ -563,6 +563,8 @@ export const movies = [
       episode: nullable(episode),
       file: mediaFile,
       resumePositionMs: v.number(),
+      /** This start's own playback id; its reports carry it with `startedAt`. */
+      playbackId: v.string(),
       /** When this start happened; reports carry it, so an older start cannot drag progress back. */
       startedAt: v.number(),
       /** A personal `play` ticket for the file, naming this session; at most 6 hours. */
@@ -578,7 +580,9 @@ export const movies = [
       positionMs: v.number(),
       durationMs: v.optional(v.number()),
       event: progressEvent,
-      /** `startedAt` from the `movies.play.start` this playback came from. */
+      /** `playbackId` from the `movies.play.start` this playback came from. */
+      playbackId: v.string(),
+      /** `startedAt` from the same start. */
       startedAt: v.number(),
     },
     result: progressReceipt,

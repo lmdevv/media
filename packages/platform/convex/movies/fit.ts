@@ -2,6 +2,18 @@ import type { WithoutSystemFields } from "convex/server";
 import { getDocumentSize } from "convex/values";
 
 import type { Doc } from "../_generated/dataModel";
+import {
+  BOUNDS,
+  collectionHashWithin,
+  creditsHashWithin,
+  cut,
+  idsWithin,
+  matchKeyWithin,
+  personKeyWithin,
+  recommendationsWithin,
+  sourceKeyWithin,
+  trailerWithin,
+} from "./bounds";
 
 /**
  * The most bytes, as Convex measures a document, each kind of movies document is kept within by
@@ -15,36 +27,33 @@ export const DOCUMENT_BYTES = {
   people: 16 * 1024,
   credits: 2 * 1024,
   collections: 16 * 1024,
+  /**
+   * A row of a small table: a grant, a library, a group membership, a title genre, a list entry,
+   * a progress row, a collection membership, or a watch mark. Its fields are ids, numbers,
+   * literals, and text its writer bounds.
+   */
+  small: 1024,
 } as const;
 
-/** The shortest a cut string becomes, longer than any id, literal, or key a writer stores. */
-const SHORTEST = 64;
+/** The shortest a fitter cuts free text to. */
+export const SHORTEST = 64;
 
 const points = (text: string): number => text.length;
 
-/** A lead surrogate at the end, which a cut must not keep without its pair. */
-const DANGLING = /[\uD800-\uDBFF]$/u;
-
 /** `text` cut to half its length, never below `SHORTEST`, never inside a surrogate pair. */
-const halved = (text: string): string => {
-  const cut = text.slice(0, Math.max(SHORTEST, Math.floor(text.length / 2)));
-
-  return DANGLING.test(cut) ? cut.slice(0, -1) : cut;
-};
+const halved = (text: string): string => cut(text, Math.max(SHORTEST, Math.floor(text.length / 2)));
 
 /** How much a string field can still give: its code points past `SHORTEST`, or none. */
 const spare = (text: string | null | undefined): number =>
   text === null || text === undefined ? 0 : Math.max(0, points(text) - SHORTEST);
 
-/** The longest string of a list cut in half, the others kept. */
-const halvedLongest = (list: ReadonlyArray<string>): Array<string> => {
-  const longest = list.reduce(
-    (best, text, index) => (points(text) > points(list[best] ?? "") ? index : best),
-    0,
-  );
+/** Every string of a list cut in half, never below `SHORTEST`, in one step however long the list. */
+const halvedAll = (list: ReadonlyArray<string>): Array<string> =>
+  list.map((text) => (points(text) > SHORTEST ? halved(text) : text));
 
-  return list.map((text, index) => (index === longest ? halved(text) : text));
-};
+/** The first half of a list, so a list of any length is gone in a few steps. */
+const firstHalf = (list: ReadonlyArray<string>): Array<string> =>
+  list.slice(0, Math.floor(list.length / 2));
 
 const spareOf = (list: ReadonlyArray<string> | undefined): number =>
   Math.max(0, ...(list ?? []).map((text) => spare(text)));
@@ -57,8 +66,9 @@ interface Shrinker<Fields> {
 
 /**
  * `fields` kept within `maxBytes` as Convex measures their document: while it is larger, the
- * text shrinker with the most to give halves its string; once no text can shrink, the list
- * shrinker with the longest list drops its last element. It never fails a write.
+ * text shrinker with the most to give halves its text; once no text can shrink, the list shrinker
+ * with the longest list drops its later half. Each step halves something, so a document of any
+ * size fits in a few dozen steps. It never fails a write.
  */
 const fitWith = <Fields extends Parameters<typeof getDocumentSize>[0]>(
   fields: Fields,
@@ -81,6 +91,12 @@ const fitWith = <Fields extends Parameters<typeof getDocumentSize>[0]>(
 
   return next === undefined ? fields : fitWith(next.shrink(fields), maxBytes, texts, lists);
 };
+
+/** A title's identity fields within their bounds (`bounds.ts`), as the server functions keep them. */
+const titleIdentity = <Fields extends TitleFields>(fields: Fields): Fields =>
+  collectionHashWithin(
+    creditsHashWithin(trailerWithin(recommendationsWithin(idsWithin(matchKeyWithin(fields))))),
+  );
 
 type TitleFields = WithoutSystemFields<Doc<"titles">>;
 
@@ -199,43 +215,39 @@ const titleTexts = <Fields extends TitleFields>(): ReadonlyArray<Shrinker<Fields
         ? f
         : { ...f, trailer: { ...f.trailer, name: halved(f.trailer.name) } },
   },
-  { spare: (f) => spareOf(f.genres), shrink: (f) => ({ ...f, genres: halvedLongest(f.genres) }) },
+  { spare: (f) => spareOf(f.genres), shrink: (f) => ({ ...f, genres: halvedAll(f.genres) }) },
   {
     spare: (f) => spareOf(f.tags),
-    shrink: (f) => (f.tags === undefined ? f : { ...f, tags: halvedLongest(f.tags) }),
+    shrink: (f) => (f.tags === undefined ? f : { ...f, tags: halvedAll(f.tags) }),
   },
   {
     spare: (f) => spareOf(f.studios),
-    shrink: (f) => (f.studios === undefined ? f : { ...f, studios: halvedLongest(f.studios) }),
+    shrink: (f) => (f.studios === undefined ? f : { ...f, studios: halvedAll(f.studios) }),
   },
   {
     spare: (f) => spareOf(f.countries),
-    shrink: (f) =>
-      f.countries === undefined ? f : { ...f, countries: halvedLongest(f.countries) },
-  },
-  {
-    spare: (f) => spareOf(f.recommendations),
-    shrink: (f) =>
-      f.recommendations === undefined
-        ? f
-        : { ...f, recommendations: halvedLongest(f.recommendations) },
+    shrink: (f) => (f.countries === undefined ? f : { ...f, countries: halvedAll(f.countries) }),
   },
 ];
 
 const titleLists = <Fields extends TitleFields>(): ReadonlyArray<Shrinker<Fields>> => [
-  { spare: (f) => f.genres.length, shrink: (f) => ({ ...f, genres: f.genres.slice(0, -1) }) },
-  { spare: (f) => f.tags?.length ?? 0, shrink: (f) => ({ ...f, tags: f.tags?.slice(0, -1) }) },
+  { spare: (f) => f.genres.length, shrink: (f) => ({ ...f, genres: firstHalf(f.genres) }) },
+  {
+    spare: (f) => f.tags?.length ?? 0,
+    shrink: (f) => (f.tags === undefined ? f : { ...f, tags: firstHalf(f.tags) }),
+  },
   {
     spare: (f) => f.studios?.length ?? 0,
-    shrink: (f) => ({ ...f, studios: f.studios?.slice(0, -1) }),
+    shrink: (f) => (f.studios === undefined ? f : { ...f, studios: firstHalf(f.studios) }),
   },
   {
     spare: (f) => f.countries?.length ?? 0,
-    shrink: (f) => ({ ...f, countries: f.countries?.slice(0, -1) }),
+    shrink: (f) => (f.countries === undefined ? f : { ...f, countries: firstHalf(f.countries) }),
   },
   {
     spare: (f) => f.recommendations?.length ?? 0,
-    shrink: (f) => ({ ...f, recommendations: f.recommendations?.slice(0, -1) }),
+    shrink: (f) =>
+      f.recommendations === undefined ? f : { ...f, recommendations: firstHalf(f.recommendations) },
   },
 ];
 
@@ -245,14 +257,14 @@ const titleLists = <Fields extends TitleFields>(): ReadonlyArray<Shrinker<Fields
  * match key, ids, and numbers never change.
  */
 export const fitTitle = <Fields extends TitleFields>(fields: Fields): Fields =>
-  fitWith(fields, DOCUMENT_BYTES.titles, titleTexts<Fields>(), titleLists<Fields>());
+  fitWith(titleIdentity(fields), DOCUMENT_BYTES.titles, titleTexts<Fields>(), titleLists<Fields>());
 
 type EpisodeFields = WithoutSystemFields<Doc<"episodes">>;
 
 /** An episode's fields kept within `DOCUMENT_BYTES.episodes`: its overview, then its name. */
 export const fitEpisode = <Fields extends EpisodeFields>(fields: Fields): Fields =>
   fitWith(
-    fields,
+    creditsHashWithin(idsWithin(fields)),
     DOCUMENT_BYTES.episodes,
     [
       {
@@ -277,7 +289,7 @@ type PersonFields = WithoutSystemFields<Doc<"people">>;
 /** A person's fields kept within `DOCUMENT_BYTES.people`: their biography first. */
 export const fitPerson = <Fields extends PersonFields>(fields: Fields): Fields =>
   fitWith(
-    fields,
+    personKeyWithin(idsWithin(fields)),
     DOCUMENT_BYTES.people,
     [
       {
@@ -331,7 +343,7 @@ type CollectionFields = WithoutSystemFields<Doc<"collections">>;
 /** A collection's fields kept within `DOCUMENT_BYTES.collections`: its overview first. */
 export const fitCollection = <Fields extends CollectionFields>(fields: Fields): Fields =>
   fitWith(
-    fields,
+    sourceKeyWithin(fields),
     DOCUMENT_BYTES.collections,
     [
       {
@@ -351,3 +363,21 @@ export const fitCollection = <Fields extends CollectionFields>(fields: Fields): 
     ],
     [],
   );
+
+type GenreRowFields = WithoutSystemFields<Doc<"titleGenres">>;
+
+/**
+ * A title genre row, or fields written over one, within `DOCUMENT_BYTES.small`: its genre and its
+ * copy of the title's sort key cut to their bounds. The catalog keeps no genre past its bound, so
+ * only a sort key is ever cut.
+ */
+export const fitGenreRow = <Fields extends Partial<GenreRowFields>>(fields: Fields): Fields => {
+  const genre =
+    fields.genre === undefined || fields.genre.length <= BOUNDS.genre
+      ? fields
+      : { ...fields, genre: cut(fields.genre, BOUNDS.genre) };
+
+  return genre.sortKey === undefined || genre.sortKey.length <= BOUNDS.genreSortKey
+    ? genre
+    : { ...genre, sortKey: cut(genre.sortKey, BOUNDS.genreSortKey) };
+};

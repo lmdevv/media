@@ -150,6 +150,7 @@ describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 
           durationMs: 60_000,
           event: "pause",
           startedAt: started.startedAt,
+          playbackId: started.playbackId,
         });
 
         const resume = yield* platform.movies.history.continueWatching();

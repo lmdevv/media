@@ -228,18 +228,51 @@ The movies reads reserve, before each read, the most its documents can take (ADR
 kind of document needs a bound. Convex allows a document up to 1 MiB, and old movies capped no
 text, so a title with an absurd overview could make a call reserve far more than it reads.
 
-- The writers keep each document within a bound, as Convex measures it (`getDocumentSize`):
-  64 KiB for a title, 16 KiB for an episode, a person, or a collection, and 2 KiB for a credit
-  (`movies/fit.ts`). A real title, with an overview of a few kilobytes and 256 genres, is well
-  under its bound.
-- A document over its bound is fitted, never refused, so no scan, metadata job, person job, or
-  edit fails for it. The longest free text is cut to half its length, never below 64
-  characters, until it fits: an overview, an admin's overview, a biography, a role, a name. Only
-  when no text can shrink do its longest lists (genres, tags, studios, countries,
-  recommendations) lose their last entries. Its library, kind, match key, person key, source
-  key, ids, literals, and numbers never change, so matching and rescans behave as before.
-- The scanner's and metadata job's title writes, episode writes, person and credit writes, and
-  collection writes all go through it. A document under its bound is written exactly as before.
+- **One writer.** Every insert, patch, and replace of a movies table (titles, title genres,
+  seasons, episodes, people, credits, media files, collections, collection items, progress rows,
+  list entries, and watch marks) goes through `movies/write.ts`: the scanner, metadata, credits,
+  person, collection, edit, match, purge, thumbnail, playback, history, and the stack probe's
+  seeds. A patch of a title, an episode, a person, or a collection is merged with the stored
+  document and fitted as a whole, so a merge can never grow a document past its bound. The
+  `media/movies-writer` Oxlint rule (`tools/oxlint/media/`) fails any other write: in
+  `convex/movies/` every write but an insert into a core table, and elsewhere any write that
+  names a movies table.
+- **Document bounds.** The writer keeps each document within a bound, as Convex measures it
+  (`getDocumentSize`): 64 KiB for a title, 16 KiB for an episode, a person, or a collection,
+  2 KiB for a credit, and 1 KiB for a row of a small table (a title genre, a progress row, a list
+  entry, a collection membership, a watch mark) (`movies/fit.ts`). A real title, with an
+  overview of a few kilobytes and 256 genres, is well under its bound.
+- **Fitted, never refused.** A document over its bound is fitted, so no scan, metadata job,
+  person job, or edit fails for it. Every long free text (an overview, an admin's overview, a
+  biography, a role, a name, an artwork key, each genre, tag, studio, and country) is cut to half
+  its length, never below 64 characters, the longest field first, until it fits. Only when no
+  text can shrink do its longest lists (genres, tags, studios, countries, recommendations) lose
+  their later half. Each step halves something, so any document fits in a few dozen steps. Its
+  library, kind, identity fields, literals, and numbers never change, so matching and rescans
+  behave as before. A document under its bound is written exactly as before.
+- **Identity bounds.** Identity fields are bounded where the server functions take them
+  (`movies/bounds.ts`: the scanner's upsert and missing calls, `applyMetadata`, `applyCredits`,
+  `applyCollection`, `applyPerson`, and the match command), and the fitters apply the same bounds
+  again:
+
+  | Field                                                             | Maximum                          | Over it                                                         |
+  | ----------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------- |
+  | TMDB, IMDb, and TVDB ids; a recommendation; a trailer's video key | 256 characters                   | stored as null (a recommendation is dropped, a trailer removed) |
+  | A title's match key, a person's key                               | 512 characters                   | cut to 512                                                      |
+  | A collection's source key                                         | 512 characters                   | stored as null                                                  |
+  | A credits, collection, or companion digest                        | 128 characters                   | cut to 128                                                      |
+  | A genre                                                           | 64 characters                    | not kept                                                        |
+  | A title genre row's copy of its title's sort key                  | 128 characters                   | cut to 128                                                      |
+  | A file's path                                                     | 4,096 bytes (Linux's `PATH_MAX`) | the file is skipped and counts as done                          |
+  | A playback id                                                     | 64 characters                    | the report is refused (`invalid_args`); start makes it          |
+
+  The rest of the write is kept, so a scan never fails on an over-long id: a cut id would name
+  another title, so an id is dropped, while a key's or a digest's leading part still identifies.
+  A match command's provider id over 256 characters is refused, since an admin typed it.
+
+- **Proof.** A unit test builds each kind of document at the smallest a fitter can leave it,
+  every identity field at its maximum, every free text at 64 characters, and lists empty, all in
+  3-byte UTF-8 characters, and checks it fits its bound, so fitting always reaches its target.
 
 ## Consequences
 

@@ -22,6 +22,35 @@ const ProgressOrder = Schema.Struct({
   lastEpisodeId: Schema.NullOr(Schema.String),
 });
 
+// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
+// stack stored these through a `v.id(...)` validator, which checks each again when sent back.
+const isId =
+  <Table extends "users" | "titles">(_table: Table) =>
+  (value: unknown): value is Id<Table> =>
+    Schema.is(Schema.String)(value);
+
+/** The arguments of a page of marking a whole show, as Convex stored them for `markRest`. */
+const MarkPage = Schema.fromJsonString(
+  Schema.Tuple([
+    Schema.Struct({
+      userId: Schema.declare(isId("users")),
+      titleId: Schema.declare(isId("titles")),
+      watched: Schema.Boolean,
+      at: Schema.Finite,
+      generation: Schema.Finite,
+      cursor: Schema.String,
+    }),
+  ]),
+);
+
+const ScheduledMarks = Schema.Array(Schema.Struct({ state: Schema.String, args: MarkPage }));
+
+/** The pages scheduled for marking `titleId`, newest first. */
+const markPagesOf = async (core: CoreStack, titleId: Id<"titles">) =>
+  (await runFunction(core, internal.movies.historyProbe.scheduledMarks, {}, ScheduledMarks)).filter(
+    ({ args: [page] }) => page.titleId === titleId,
+  );
+
 const byCodeUnits = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
 
@@ -56,9 +85,9 @@ const waitForRows = async (
 ): Promise<typeof ProgressOrder.Type> => {
   const order = await progressOrder(core, userId, titleId);
 
-  if (order.rows >= rows) return order;
+  if (order.rows === rows) return order;
 
-  if (Date.now() > deadline) throw new Error(`only ${order.rows} of ${rows} progress rows`);
+  if (Date.now() > deadline) throw new Error(`${order.rows} progress rows, not ${rows}`);
 
   await sleep(250);
 
@@ -200,10 +229,46 @@ describe.skipIf(stack === undefined)("movies lists across libraries", { timeout:
       durationMs: 600_000,
       event: "pause",
       startedAt: started.startedAt,
+      playbackId: started.playbackId,
     });
 
     const detail = await client.query(api.movies.titles.get, { titleId });
 
     expect(detail.nextEpisode?.id).toBe(episodeId);
+  });
+
+  it("drop a scheduled page of marking a show once a newer mark moved its history", async () => {
+    if (stack === undefined) return;
+
+    const viewer = await member(stack, "fence-viewer");
+
+    const seeded = await seedLibrary(stack, viewer, {
+      name: `fence ${unique()}`,
+      kind: "movies",
+      items: [show("Fenced Show", 0, 501)],
+    });
+
+    const [titleId] = seeded.itemIds;
+
+    if (titleId === undefined) throw new Error("no show seeded");
+
+    const client = viewer.signedIn.client;
+
+    await client.mutation(api.movies.history.markWatched, { titleId });
+    await waitForRows(stack, viewer.userId, titleId, 501);
+
+    const [watchedPage] = (await markPagesOf(stack, titleId)).map(({ args: [page] }) => page);
+
+    expect(watchedPage).toMatchObject({ watched: true });
+
+    await client.mutation(api.movies.history.markUnwatched, { titleId });
+    await waitForRows(stack, viewer.userId, titleId, 0);
+
+    if (watchedPage === undefined) throw new Error("no page scheduled");
+
+    // The watched mark's second page, delivered late: the unwatched mark superseded it.
+    await runFunction(stack, internal.movies.history.markRest, watchedPage, Schema.Null);
+
+    expect((await progressOrder(stack, viewer.userId, titleId)).rows).toBe(0);
   });
 });

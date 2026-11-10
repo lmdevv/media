@@ -5,6 +5,7 @@ import { paginateAtMost } from "../core/lib/paginate";
 import { decidableRows, reachOf } from "../core/permissions/grants";
 import { requireTitle, titleViewer } from "./access";
 import { presentTitleCard } from "./present";
+import { insertListEntry } from "./write";
 
 const LIST_PAGE_MAX = 200;
 
@@ -48,7 +49,7 @@ export const { list, add, remove } = register({
     await requireTitle(ctx.db, caller, "play", titleId);
 
     if ((await entryOf(ctx.db, caller.userId, titleId)) === null) {
-      await ctx.db.insert("myList", { userId: caller.userId, titleId, addedAt: Date.now() });
+      await insertListEntry(ctx.db, { userId: caller.userId, titleId, addedAt: Date.now() });
     }
 
     return null;

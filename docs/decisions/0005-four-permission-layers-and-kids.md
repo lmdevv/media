@@ -380,8 +380,9 @@ access-checked movies read stays under all three by one rule, in `movies/reads.t
 - **Real costs.** A `get` is one range and one document; a query is one range and the rows it
   returns. Bytes are reserved before a read and settled after it: a read reserves the most its
   documents can take (1 KiB a row for small tables of ids, numbers, literals, and bounded text,
-  such as grants, libraries, list and progress rows, and memberships; for titles, episodes,
-  people, credits, and collections, the bound their writers keep, ADR 0024), then gives back
+  such as grants, libraries, title genres, list and progress rows, memberships, and watch marks;
+  for titles, episodes, people, credits, and collections, the bound the one movies writer keeps,
+  ADR 0024), then gives back
   what each document it returned did not take, measured as Convex measures it
   (`getDocumentSize`). Deciding a library is charged once per call, at what `reachOf` and
   `levelOn` read: the library and one grant query per grant key (the person's own, the
@@ -423,9 +424,19 @@ access-checked movies read stays under all three by one rule, in `movies/reads.t
   one to an episode that episode's files, and one to a file that file (ADR 0007). It issues a
   personal `play` ticket for the file, which names the caller's session and lasts at most 6 h
   (ADR 0011).
-- Old movies' playback sessions do not come over. A start answers `startedAt`, each report
-  carries it, and the progress row keeps the session and start of the playback that last
-  reported. A report from an older start on another session is stale and changes nothing, as old
-  movies' reports from an older playback session were.
+- Old movies' playback sessions do not come over, but what they fenced does. Old movies made a
+  playback session on each start and kept, on the progress row, the session and start time of
+  the playback that last reported; a report from a different session that started earlier
+  changed nothing. Each `movies.play.start` answers a fresh `playbackId` (a UUID, at most 64
+  characters) and its `startedAt`, each report carries both, and the progress row keeps the
+  `playId` and start of the playback that last reported. A report from another playback that
+  started earlier is stale and changes nothing, even from the same sign-in, so a second tab or
+  a player restarted on one device never drags a newer position back.
 - Marking a whole show watched or unwatched writes a page of up to 500 episodes in its call and
-  schedules the rest, a page a call, inside the call budget of ADR 0013.
+  schedules the rest, a page a call, inside the call budget of ADR 0013. Every change of a
+  person's history of a title (a mark of the title or an episode, an online or offline progress
+  report that applied) moves a generation stored per person and title (`watchMarks`), and a
+  scheduled page carries the generation its mark moved to. A page whose generation is no longer
+  current writes nothing, so a page delivered after a newer mark or report never undoes it, the
+  same fence as a metadata job's match generation (ADR 0012). The pages themselves do not move
+  it.

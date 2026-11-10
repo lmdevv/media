@@ -264,10 +264,10 @@ export const moviesTables = {
     updatedAt: v.number(),
     lastPlayedAt: v.number(),
     /**
-     * The auth session and start time of the playback that last reported, so a report from an
-     * older start on another session cannot drag a newer one's position back.
+     * The playback that last reported, its id and start time from `movies.play.start`, so a
+     * report from an older start cannot drag a newer one's position back.
      */
-    playSessionId: v.optional(v.id("authSessions")),
+    playId: v.optional(v.string()),
     playStartedAt: v.optional(v.number()),
   })
     .index("by_user_item", ["userId", "titleId", "episodeId"])
@@ -281,4 +281,15 @@ export const moviesTables = {
   })
     .index("by_user_title", ["userId", "titleId"])
     .index("by_user_added", ["userId", "addedAt"]),
+
+  /**
+   * How many times a person's history of one title has changed: every mark and every progress
+   * report moves it. A scheduled page of marking a whole show carries the generation it was asked
+   * at and writes nothing once it moved, so it never undoes a newer change.
+   */
+  watchMarks: defineTable({
+    userId: v.id("users"),
+    titleId: v.id("titles"),
+    generation: v.number(),
+  }).index("by_user_title", ["userId", "titleId"]),
 };

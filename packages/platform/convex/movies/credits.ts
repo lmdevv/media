@@ -3,7 +3,9 @@ import type { Infer } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { inOrder } from "../core/lib/inOrder";
-import { fitCredit, fitPerson } from "./fit";
+import { boundedKey } from "./bounds";
+import { fitPerson } from "./fit";
+import { insertCredit, insertPerson, patchPerson } from "./write";
 import type { externalIds, scannedCredit, scannedPerson } from "./validators";
 
 type Db = MutationCtx["db"];
@@ -28,11 +30,13 @@ export const personKeyOf = (person: {
   readonly name: string;
   readonly externalIds: ExternalIds;
 }): string => {
-  if (person.externalIds.tmdb !== null) return `tmdb:${person.externalIds.tmdb}`;
+  if (person.externalIds.tmdb !== null) return boundedKey(`tmdb:${person.externalIds.tmdb}`);
 
-  return person.externalIds.imdb === null
-    ? `name:${normalizeName(person.name)}`
-    : `imdb:${person.externalIds.imdb}`;
+  return boundedKey(
+    person.externalIds.imdb === null
+      ? `name:${normalizeName(person.name)}`
+      : `imdb:${person.externalIds.imdb}`,
+  );
 };
 
 const sortKeyOf = (name: string): string => {
@@ -97,7 +101,7 @@ const upsertPerson = async (
       updatedAt: now,
     });
 
-    const personId = await db.insert("people", fields);
+    const personId = await insertPerson(db, fields);
 
     return { ...fields, _id: personId, _creationTime: now };
   }
@@ -115,9 +119,7 @@ const upsertPerson = async (
 
   const patch = { personKey, externalIds: ids, profile, updatedAt: now };
 
-  await db.patch(existing._id, patch);
-
-  return { ...existing, ...patch };
+  return patchPerson(db, existing, patch);
 };
 
 /** The stored credits of a title (`episodeId` null) or one episode, in billing order. */
@@ -146,17 +148,14 @@ export const replaceCredits = async (
   return inOrder(credits.slice(0, CREDIT_LIMIT), async (entry) => {
     const person = await upsertPerson(db, entry.person);
 
-    await db.insert(
-      "credits",
-      fitCredit({
-        titleId,
-        episodeId,
-        personId: person._id,
-        kind: entry.kind,
-        role: entry.role,
-        order: entry.order,
-      }),
-    );
+    await insertCredit(db, {
+      titleId,
+      episodeId,
+      personId: person._id,
+      kind: entry.kind,
+      role: entry.role,
+      order: entry.order,
+    });
 
     return person;
   });

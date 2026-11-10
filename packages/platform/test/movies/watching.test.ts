@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
 import { beforeAll, describe, expect, it } from "vitest";
 
 import type { TicketKeyRing } from "@media/contracts/ticket";
@@ -180,6 +182,7 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
         durationMs: 600_000,
         event: "pause",
         startedAt: opened.startedAt,
+        playbackId: opened.playbackId,
       }),
     ).toEqual({ applied: true, watched: false });
 
@@ -200,6 +203,7 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
       durationMs: 600_000,
       event: "tick",
       startedAt: reopened.startedAt,
+      playbackId: reopened.playbackId,
     });
 
     expect(
@@ -209,6 +213,7 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
         durationMs: 600_000,
         event: "tick",
         startedAt: opened.startedAt,
+        playbackId: opened.playbackId,
       }),
     ).toEqual({ applied: false, watched: false });
 
@@ -228,6 +233,7 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
         durationMs: 600_000,
         event: "ended",
         startedAt: reopened.startedAt,
+        playbackId: reopened.playbackId,
       }),
     ).toEqual({ applied: true, watched: true });
     expect(
@@ -240,6 +246,7 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
           positionMs: 1,
           event: "tick",
           startedAt: -1,
+          playbackId: crypto.randomUUID(),
         }),
       ),
     ).toBe("invalid_args");
@@ -250,9 +257,44 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
           positionMs: 1,
           event: "tick",
           startedAt: Date.now(),
+          playbackId: crypto.randomUUID(),
         }),
       ),
     ).toBe("not_found");
+  });
+
+  it("ignore a report from an older start of the same session", async () => {
+    const unrated = titleIn(shelf, "Unrated Short");
+    const fileId = fileIn(shelf, "Unrated Short");
+    const client = shelf.owner.signedIn.client;
+
+    const report = (
+      start: { readonly playbackId: string; readonly startedAt: number },
+      positionMs: number,
+    ) =>
+      client.mutation(api.movies.play.report, {
+        fileId,
+        positionMs,
+        durationMs: 600_000,
+        event: "tick",
+        playbackId: start.playbackId,
+        startedAt: start.startedAt,
+      });
+
+    const older = await client.mutation(api.movies.play.start, { titleId: unrated });
+
+    // Two plays of one title start at different times; a millisecond apart is enough.
+    await sleep(5);
+
+    const newer = await client.mutation(api.movies.play.start, { titleId: unrated });
+
+    expect(newer.playbackId).not.toBe(older.playbackId);
+    expect(newer.startedAt).toBeGreaterThan(older.startedAt);
+    expect(await report(newer, 40_000)).toEqual({ applied: true, watched: false });
+    expect(await report(older, 10_000)).toEqual({ applied: false, watched: false });
+    expect(
+      (await client.mutation(api.movies.play.start, { titleId: unrated })).resumePositionMs,
+    ).toBe(40_000);
   });
 
   it("keep each person's list their own", async () => {

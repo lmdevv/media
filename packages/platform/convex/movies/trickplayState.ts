@@ -1,6 +1,7 @@
 import type { Doc } from "../_generated/dataModel";
 import { cancel, enqueue } from "../core/jobs/queue";
 import type { JobCtx } from "../core/jobs/store";
+import { patchMediaFile } from "./write";
 
 const hasFrames = (file: Doc<"mediaFiles">): boolean =>
   !file.missing && file.probe.video.length > 0 && file.probe.durationMs > 0;
@@ -71,7 +72,7 @@ export const queueTrickplay = async (
     revision: contentRevision(file),
   });
 
-  await ctx.db.patch(file._id, {
+  await patchMediaFile(ctx.db, file._id, {
     trickplay: { status: "pending", jobId, sizeBytes: file.sizeBytes, mtimeMs: file.mtimeMs },
   });
 };
@@ -89,5 +90,6 @@ export const forgetTrickplay = async (ctx: JobCtx, file: Doc<"mediaFiles">): Pro
     await cancel(ctx, file.trickplay.jobId);
   }
 
-  if (file.trickplay !== undefined) await ctx.db.patch(file._id, { trickplay: undefined });
+  if (file.trickplay !== undefined)
+    await patchMediaFile(ctx.db, file._id, { trickplay: undefined });
 };

@@ -5,7 +5,8 @@ import { lease } from "../core/jobs/model";
 import { paginate } from "../core/lib/paginate";
 import { serverMutation } from "../core/lib/serverFacing";
 import { withScanLease } from "../core/scans";
-import { budgetFor, whileBudget, work } from "./budget";
+import { boundedItem, pathFits } from "./bounds";
+import { NO_WORK, budgetFor, whileBudget, work } from "./budget";
 import { MISSING_COST, markFileMissing, upsertCost, upsertScannedItem } from "./catalog";
 import { moveTotals, sumMoved } from "./totals";
 import { knownFile, scannedItem, upsertedFile } from "./validators";
@@ -83,19 +84,21 @@ export const upsert = serverMutation({
 
       const libraryId = scan.library._id;
 
+      // A path over the filesystem's limit names no real file: it is skipped, and counts as done.
       const landed = await whileBudget(
         budgetFor(CALL_COST),
-        items,
-        (item) => upsertCost(ctx.db, libraryId, item),
-        (item) => upsertScannedItem(ctx, libraryId, item),
+        items.map((item) => (pathFits(item.file.path) ? boundedItem(item) : null)),
+        (item) => (item === null ? NO_WORK : upsertCost(ctx.db, libraryId, item)),
+        async (item) => (item === null ? null : upsertScannedItem(ctx, libraryId, item)),
       );
 
-      const moved = sumMoved(landed.map((one) => one.moved));
+      const written = landed.flatMap((one) => (one === null ? [] : [one]));
+      const moved = sumMoved(written.map((one) => one.moved));
 
       await moveTotals(ctx.db, libraryId, moved);
 
       return {
-        value: { files: landed.map((one) => one.row), done: landed.length },
+        value: { files: written.map((one) => one.row), done: landed.length },
         added: moved.titles,
         removed: 0,
       };
@@ -117,8 +120,8 @@ export const missing = serverMutation({
       const marked = await whileBudget(
         budgetFor(CALL_COST),
         scan.admit(paths),
-        () => MISSING_COST,
-        (path) => markFileMissing(ctx, scan.library._id, path),
+        (path) => (pathFits(path) ? MISSING_COST : NO_WORK),
+        async (path) => pathFits(path) && markFileMissing(ctx, scan.library._id, path),
       );
 
       return {

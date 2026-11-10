@@ -10,10 +10,11 @@ import { fail } from "../core/lib/errors";
 import { inOrder } from "../core/lib/inOrder";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
 import { reachOf } from "../core/permissions/grants";
+import { boundedPersonDetails } from "./bounds";
 import { budgetedViewer } from "./access";
 import type { BudgetedViewer, Seen } from "./access";
 import { CREDIT_LIMIT, mergeIds, personKeyOf } from "./credits";
-import { fitPerson } from "./fit";
+import { patchPerson } from "./write";
 import { presentTitleCard } from "./present";
 import { TITLE_GET, callBudget, creditRowsOf, peopleOf, settleRead } from "./reads";
 import type { ReadBudget } from "./reads";
@@ -37,8 +38,10 @@ export const personTarget = serverQuery({
 export const applyPerson = serverMutation({
   args: { lease, personId: v.id("people"), details: scannedPersonDetails },
   returns: leaseAnswer(v.null()),
-  handler: (ctx, { lease: held, personId, details }) =>
+  handler: (ctx, { lease: held, personId, details: sent }) =>
     withJobLease(ctx, ["movies.person", "movies.metadata"], held, async (job) => {
+      const details = boundedPersonDetails(sent);
+
       if (job.payload.kind === "movies.person" && job.payload.personId !== personId) {
         fail("invalid_args", "This job is for another person");
       }
@@ -60,23 +63,19 @@ export const applyPerson = serverMutation({
       const ids = mergeIds(person.externalIds, details.externalIds);
       const now = Date.now();
 
-      await ctx.db.replace(
-        personId,
-        fitPerson({
-          ...person,
-          name: details.name,
-          personKey: personKeyOf({ name: person.name, externalIds: ids }),
-          externalIds: ids,
-          profile: details.profile ?? person.profile,
-          biography: details.biography,
-          birthDate: details.birthDate,
-          deathDate: details.deathDate,
-          birthPlace: details.birthPlace,
-          knownFor: details.knownFor,
-          detailsFetchedAt: now,
-          updatedAt: now,
-        }),
-      );
+      await patchPerson(ctx.db, person, {
+        name: details.name,
+        personKey: personKeyOf({ name: person.name, externalIds: ids }),
+        externalIds: ids,
+        profile: details.profile ?? person.profile,
+        biography: details.biography,
+        birthDate: details.birthDate,
+        deathDate: details.deathDate,
+        birthPlace: details.birthPlace,
+        knownFor: details.knownFor,
+        detailsFetchedAt: now,
+        updatedAt: now,
+      });
 
       return { outcome: "held", value: null };
     }),
@@ -335,7 +334,7 @@ export const { get, search, requestDetails } = register({
         now - person.detailsRequestedAt >= REQUEST_COOLDOWN_MS);
 
     if (due) {
-      await ctx.db.patch(personId, { detailsRequestedAt: now });
+      await patchPerson(ctx.db, person, { detailsRequestedAt: now });
       await enqueue(ctx, { kind: "movies.person", personId, revision: person.updatedAt });
     }
 

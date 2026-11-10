@@ -62,6 +62,7 @@ export default defineConfig({
     { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },
     { name: "anti-slop-effect", specifier: "./tools/oxlint/anti-slop/effect/index.ts" },
     { name: "timmo-effect", specifier: "./tools/oxlint/timmo-effect/index.ts" },
+    { name: "media", specifier: "./tools/oxlint/media/index.ts" },
   ],
   rules: {
     "typescript/no-explicit-any": "error",
@@ -131,6 +132,10 @@ export default defineConfig({
           { ...builderBans, patterns: [...builderBans.patterns, convexAuthBan] },
         ],
       },
+    },
+    {
+      files: ["packages/platform/convex/**"],
+      rules: { "media/movies-writer": "error" },
     },
     {
       files: ["packages/platform/convex/auth.ts", "packages/platform/convex/core/auth/**"],

@@ -13,7 +13,13 @@ import { budgetedViewer, mayActOnTitle, requireTitle, titleViewer } from "./acce
 import { CALL_BUDGET, work } from "./budget";
 import { presentEpisode, presentProgress, presentTitleCard } from "./present";
 import { callBudget } from "./reads";
-import { continueWatching as continueWatchingOf, findProgress, writeProgress } from "./viewing";
+import {
+  continueWatching as continueWatchingOf,
+  findProgress,
+  nextWatchGeneration,
+  watchGeneration,
+  writeProgress,
+} from "./viewing";
 
 const HISTORY_PAGE_MAX = 200;
 
@@ -40,6 +46,8 @@ interface Mark {
   readonly title: Doc<"titles">;
   readonly watched: boolean;
   readonly at: number;
+  /** The person's history generation of the title this change moved it to (`viewing.ts`). */
+  readonly generation: number;
 }
 
 const markOne = async (ctx: Ctx, mark: Mark, episode: Doc<"episodes"> | null): Promise<void> => {
@@ -84,6 +92,7 @@ const markShowPage = async (ctx: Ctx, mark: Mark, cursor: string | null): Promis
       titleId: mark.title._id,
       watched: mark.watched,
       at: mark.at,
+      generation: mark.generation,
       cursor: page.continueCursor,
     });
   }
@@ -107,8 +116,9 @@ const markTarget = async (
 
 /**
  * Marks the next page of a show that `movies.history.markWatched` or `markUnwatched` started, as
- * the person who asked. It stops once the title is gone or being purged, or the person may no
- * longer play it.
+ * the person who asked. It stops once the title is gone or being purged, the person may no longer
+ * play it, or a newer change of their history of the title (a mark or a progress report) moved its
+ * generation past this one's, so a superseded page writes nothing.
  */
 export const markRest = internalMutation({
   args: {
@@ -116,18 +126,24 @@ export const markRest = internalMutation({
     titleId: v.id("titles"),
     watched: v.boolean(),
     at: v.number(),
+    generation: v.number(),
     cursor: v.string(),
   },
   returns: v.null(),
-  handler: async (ctx, { userId, titleId, watched, at, cursor }) => {
-    const [title, user] = await Promise.all([ctx.db.get(titleId), ctx.db.get(userId)]);
+  handler: async (ctx, { userId, titleId, watched, at, generation, cursor }) => {
+    const [title, user, current] = await Promise.all([
+      ctx.db.get(titleId),
+      ctx.db.get(userId),
+      watchGeneration(ctx.db, userId, titleId),
+    ]);
 
     const allowed =
+      current === generation &&
       title !== null &&
       user !== null &&
       (await mayActOnTitle(ctx.db, principalOf(user), "play", titleId));
 
-    if (allowed) await markShowPage(ctx, { userId, title, watched, at }, cursor);
+    if (allowed) await markShowPage(ctx, { userId, title, watched, at, generation }, cursor);
 
     return null;
   },
@@ -181,9 +197,11 @@ export const { continueWatching, list, markWatched, markUnwatched } = register({
   markWatched: async (ctx, { titleId, episodeId }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "play", titleId);
 
+    const generation = await nextWatchGeneration(ctx, caller.userId, titleId);
+
     await markTarget(
       ctx,
-      { userId: caller.userId, title, watched: true, at: Date.now() },
+      { userId: caller.userId, title, watched: true, at: Date.now(), generation },
       episodeId,
     );
 
@@ -192,9 +210,11 @@ export const { continueWatching, list, markWatched, markUnwatched } = register({
   markUnwatched: async (ctx, { titleId, episodeId }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "play", titleId);
 
+    const generation = await nextWatchGeneration(ctx, caller.userId, titleId);
+
     await markTarget(
       ctx,
-      { userId: caller.userId, title, watched: false, at: Date.now() },
+      { userId: caller.userId, title, watched: false, at: Date.now(), generation },
       episodeId,
     );
 

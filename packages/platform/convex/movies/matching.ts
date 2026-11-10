@@ -1,6 +1,7 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import { enqueue } from "../core/jobs/queue";
 import type { JobCtx } from "../core/jobs/store";
+import { patchTitle } from "./write";
 
 /** A match an admin chose for a title. */
 export interface Match {
@@ -22,7 +23,7 @@ export const askForMatch = async (
 ): Promise<Id<"jobs">> => {
   const generation = title.matchGeneration + 1;
 
-  await ctx.db.patch(title._id, { matchGeneration: generation });
+  await patchTitle(ctx.db, title, { matchGeneration: generation });
 
   const queued = await enqueue(ctx, {
     kind: "movies.metadata",

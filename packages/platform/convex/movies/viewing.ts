@@ -4,6 +4,7 @@ import type { BudgetedViewer } from "./access";
 import { presentEpisode, presentProgress, presentTitleCard } from "./present";
 import type { ContinueItem, Episode } from "./present";
 import { EPISODE_GET, TITLE_GET, episodesOf, queryOf, settleRead } from "./reads";
+import { insertProgress, insertWatchMark, patchProgress, patchWatchMark } from "./write";
 import type { ReadBudget, Reads } from "./reads";
 
 const WATCHED_FRACTION = 0.9;
@@ -41,9 +42,13 @@ export const presentEpisodeFor = async (
 ): Promise<Episode> =>
   presentEpisode(episode, await findProgress(db, userId, episode.titleId, episode._id));
 
-/** The playback a report comes from: its auth session and when `movies.play.start` ran. */
+/**
+ * The playback a report comes from: the id `movies.play.start` gave that one start, and when it
+ * ran. Each start is its own playback, as each of old movies' playback sessions was, so two tabs
+ * of one sign-in or a title opened again are two playbacks.
+ */
 export interface PlayOrigin {
-  readonly sessionId: Id<"authSessions">;
+  readonly playId: string;
   readonly startedAt: number;
 }
 
@@ -68,9 +73,10 @@ export interface ProgressReceipt {
 }
 
 /**
- * Writes a person's progress through one item. A report from a start older than the one on
- * another session that last reported is stale and ignored, so an old tab cannot drag a newer
- * device's position back. Watched stays set until the person marks the item unwatched.
+ * Writes a person's progress through one item. A report from another playback that started before
+ * the one that last reported is stale and ignored, even on the same sign-in, so an old tab or an
+ * earlier start cannot drag a newer one's position back. Watched stays set until the person marks
+ * the item unwatched.
  */
 export const writeProgress = async (
   ctx: Pick<MutationCtx, "db">,
@@ -81,8 +87,8 @@ export const writeProgress = async (
 
   const stale =
     origin !== null &&
-    existing?.playSessionId !== undefined &&
-    existing.playSessionId !== origin.sessionId &&
+    existing?.playId !== undefined &&
+    existing.playId !== origin.playId &&
     (existing.playStartedAt ?? 0) > origin.startedAt;
 
   if (stale) return { applied: false, watched: existing.watched };
@@ -101,20 +107,51 @@ export const writeProgress = async (
   const owned =
     origin === null
       ? fields
-      : { ...fields, playSessionId: origin.sessionId, playStartedAt: origin.startedAt };
+      : { ...fields, playId: origin.playId, playStartedAt: origin.startedAt };
 
   if (existing === null) {
-    await ctx.db.insert("watchProgress", {
+    await insertProgress(ctx.db, {
       userId: write.userId,
       titleId: write.titleId,
       episodeId: write.episodeId,
       ...owned,
     });
   } else {
-    await ctx.db.patch(existing._id, owned);
+    await patchProgress(ctx.db, existing._id, owned);
   }
 
   return { applied: true, watched };
+};
+
+const watchMarkOf = (db: DatabaseReader, userId: Id<"users">, titleId: Id<"titles">) =>
+  db
+    .query("watchMarks")
+    .withIndex("by_user_title", (q) => q.eq("userId", userId).eq("titleId", titleId))
+    .unique();
+
+/** The generation of a person's history of one title: 0 until it first changes. */
+export const watchGeneration = async (
+  db: DatabaseReader,
+  userId: Id<"users">,
+  titleId: Id<"titles">,
+): Promise<number> => (await watchMarkOf(db, userId, titleId))?.generation ?? 0;
+
+/**
+ * Moves the generation of a person's history of one title, for every mark and progress report,
+ * and answers the new one. A scheduled page of an older change then writes nothing.
+ */
+export const nextWatchGeneration = async (
+  ctx: Pick<MutationCtx, "db">,
+  userId: Id<"users">,
+  titleId: Id<"titles">,
+): Promise<number> => {
+  const mark = await watchMarkOf(ctx.db, userId, titleId);
+  const generation = (mark?.generation ?? 0) + 1;
+
+  if (mark === null) await insertWatchMark(ctx.db, { userId, titleId, generation });
+  else await patchWatchMark(ctx.db, mark._id, { generation });
+
+  return generation;
 };
 
 /** The episode after `episode` in season and episode order, specials (season 0) last. */

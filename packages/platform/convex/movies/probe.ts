@@ -23,6 +23,17 @@ import { askForMatch, askForRefresh } from "./matching";
 import { filesPage, titlesPage } from "./purge";
 import { moveTotals, nothingMoved, totalsOf } from "./totals";
 import { trickplayState } from "./validators";
+import {
+  insertCollection,
+  insertCollectionItem,
+  insertCredit,
+  insertEpisode,
+  insertMediaFile,
+  insertPerson,
+  insertSeason,
+  insertTitle,
+  insertTitleGenre,
+} from "./write";
 
 /**
  * The stack suite's seam into the movies catalog, as `core/libraryProbe.ts` is for music until
@@ -59,7 +70,7 @@ const seededRows = v.object({
   episodeIds: v.array(v.id("episodes")),
 });
 
-const insertTitle = async (
+const seedTitle = async (
   db: MutationCtx["db"],
   libraryId: Id<"libraries">,
   folder: string,
@@ -75,7 +86,7 @@ const insertTitle = async (
   const kind = title.episodes > 0 ? "show" : "movie";
   const sortKey = title.name.toLowerCase();
 
-  const titleId = await db.insert("titles", {
+  const titleId = await insertTitle(db, {
     libraryId,
     kind,
     matchKey: `seed:${title.name}`,
@@ -101,7 +112,7 @@ const insertTitle = async (
   });
 
   await inOrder(title.genres ?? [], async (genre) =>
-    db.insert("titleGenres", {
+    insertTitleGenre(db, {
       titleId,
       libraryId,
       genre: genre.toLowerCase(),
@@ -114,7 +125,7 @@ const insertTitle = async (
 
   const seasonId =
     title.episodes > 0
-      ? await db.insert("seasons", {
+      ? await insertSeason(db, {
           titleId,
           seasonNumber: 1,
           name: "Season 1",
@@ -130,7 +141,7 @@ const insertTitle = async (
       : await inOrder(
           Array.from({ length: title.episodes }, (_, n) => n + 1),
           async (episodeNumber) =>
-            db.insert("episodes", {
+            insertEpisode(db, {
               titleId,
               seasonId,
               seasonNumber: 1,
@@ -147,7 +158,7 @@ const insertTitle = async (
         );
 
   const fileIds = await inOrder(episodeIds.length === 0 ? [null] : episodeIds, async (episodeId) =>
-    db.insert("mediaFiles", {
+    insertMediaFile(db, {
       libraryId,
       titleId,
       episodeId,
@@ -203,7 +214,7 @@ export const seed = internalMutation({
 
       const rows = await withLibraryItems(ctx, libraryId, async () => {
         const inserted = await inOrder(titles, (title) =>
-          insertTitle(ctx.db, libraryId, folder, title),
+          seedTitle(ctx.db, libraryId, folder, title),
         );
 
         return { value: inserted, added: inserted.length, removed: 0 };
@@ -387,7 +398,7 @@ export const seedCollection = internalMutation({
   handler: async (ctx, { name, titleIds }) => {
     const now = Date.now();
 
-    const collectionId = await ctx.db.insert("collections", {
+    const collectionId = await insertCollection(ctx.db, {
       name,
       sortKey: name.toLowerCase(),
       sourceKey: null,
@@ -401,7 +412,7 @@ export const seedCollection = internalMutation({
     await inOrder(
       titleIds.map((titleId, position) => ({ titleId, position })),
       async ({ titleId, position }) =>
-        ctx.db.insert("collectionItems", { collectionId, titleId, position, source: "import" }),
+        insertCollectionItem(ctx.db, { collectionId, titleId, position, source: "import" }),
     );
 
     return collectionId;
@@ -413,7 +424,7 @@ export const seedCredits = internalMutation({
   args: { name: v.string(), titleIds: v.array(v.id("titles")) },
   returns: v.id("people"),
   handler: async (ctx, { name, titleIds }) => {
-    const personId = await ctx.db.insert("people", {
+    const personId = await insertPerson(ctx.db, {
       personKey: `name:${name.toLowerCase()}`,
       name,
       sortKey: name.toLowerCase(),
@@ -431,7 +442,7 @@ export const seedCredits = internalMutation({
     await inOrder(
       titleIds.map((titleId, order) => ({ titleId, order })),
       async ({ titleId, order }) =>
-        ctx.db.insert("credits", {
+        insertCredit(ctx.db, {
           titleId,
           episodeId: null,
           personId,

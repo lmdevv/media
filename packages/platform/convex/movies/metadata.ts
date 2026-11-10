@@ -11,6 +11,14 @@ import type { JobCtx } from "../core/jobs/store";
 import { fail } from "../core/lib/errors";
 import { paginate } from "../core/lib/paginate";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
+import {
+  BOUNDS,
+  boundedCollection,
+  boundedCredit,
+  boundedDigest,
+  boundedEpisode,
+  boundedTitle,
+} from "./bounds";
 import { budgetFor, whileBudget, work } from "./budget";
 import { requireTitle } from "./access";
 import {
@@ -22,7 +30,14 @@ import {
   writeOverrides,
 } from "./catalog";
 import { CREDIT_LIMIT, creditsOf, replaceCredits } from "./credits";
-import { fitCollection } from "./fit";
+import {
+  insertCollection,
+  insertCollectionItem,
+  patchCollection,
+  patchCollectionItem,
+  patchEpisode,
+  patchTitle,
+} from "./write";
 import { askForMatch, askForRefresh } from "./matching";
 import { moveTotals, sumMoved } from "./totals";
 import {
@@ -136,8 +151,11 @@ export const applyMetadata = serverMutation({
     episodes: v.array(scannedEpisode),
   },
   returns: leaseAnswer(v.object({ done: v.number(), applied: v.boolean() })),
-  handler: (ctx, { lease: held, titleId, title, episodes }) =>
+  handler: (ctx, { lease: held, titleId, title: sent, episodes: sentEpisodes }) =>
     withJobLease(ctx, ["movies.metadata"], held, async (job) => {
+      const title = boundedTitle(sent);
+      const episodes = sentEpisodes.map(boundedEpisode);
+
       if (job.payload.titleId !== titleId) fail("invalid_args", "This job is for another title");
 
       if (episodes.length > EPISODES_MAX) {
@@ -246,8 +264,11 @@ export const applyCredits = serverMutation({
     hash: v.string(),
   },
   returns: leaseAnswer(creditsAnswer),
-  handler: (ctx, { lease: held, titleId, episodeId, credits, hash }) =>
+  handler: (ctx, { lease: held, titleId, episodeId, credits: sent, hash: sentHash }) =>
     withMetadataLease(ctx, held, async (job) => {
+      const credits = sent.map(boundedCredit);
+      const hash = boundedDigest(sentHash);
+
       if (credits.length > CREDIT_LIMIT) {
         fail("invalid_args", `Send at most ${CREDIT_LIMIT} credits per call`);
       }
@@ -279,8 +300,8 @@ export const applyCredits = serverMutation({
 
       const people = await replaceCredits(ctx.db, titleId, episodeId, credits);
 
-      if (episode === null) await ctx.db.patch(titleId, { creditsHash: hash });
-      else await ctx.db.patch(episode._id, { creditsHash: hash });
+      if (episode === null) await patchTitle(ctx.db, title, { creditsHash: hash });
+      else await patchEpisode(ctx.db, episode, { creditsHash: hash });
 
       return { written: true, people: people.map(creditedPerson) };
     }),
@@ -291,12 +312,17 @@ const positionOf = (title: Doc<"titles">): number =>
 
 const collectionFor = async (
   ctx: JobCtx,
-  collection: { readonly sourceKey: string; readonly name: string },
+  collection: { readonly sourceKey: string | null; readonly name: string },
 ): Promise<Doc<"collections"> | null> => {
-  const bySource = await ctx.db
-    .query("collections")
-    .withIndex("by_source_key", (q) => q.eq("sourceKey", collection.sourceKey))
-    .first();
+  const { sourceKey } = collection;
+
+  const bySource =
+    sourceKey === null
+      ? null
+      : await ctx.db
+          .query("collections")
+          .withIndex("by_source_key", (q) => q.eq("sourceKey", sourceKey))
+          .first();
 
   if (bySource !== null) return bySource;
 
@@ -324,47 +350,43 @@ export const applyCollection = serverMutation({
     hash: v.string(),
   },
   returns: leaseAnswer(v.null()),
-  handler: (ctx, { lease: held, titleId, collection, hash }) =>
+  handler: (ctx, { lease: held, titleId, collection: sent, hash: sentHash }) =>
     withMetadataLease(ctx, held, async (job) => {
+      const collection = sent === null ? null : boundedCollection(sent);
+      const hash = boundedDigest(sentHash);
+
       const title = await titleOf(ctx.db, titleId);
 
       if (title.collectionHash === hash || !mayWrite(job, title)) return null;
 
-      await ctx.db.patch(titleId, { collectionHash: hash });
+      await patchTitle(ctx.db, title, { collectionHash: hash });
 
       const now = Date.now();
       const target = collection === null ? null : await collectionFor(ctx, collection);
 
       if (collection !== null && target !== null) {
-        await ctx.db.replace(
-          target._id,
-          fitCollection({
-            ...target,
-            overview: collection.overview ?? target.overview,
-            poster: collection.poster ?? target.poster,
-            backdrop: collection.backdrop ?? target.backdrop,
-            updatedAt: now,
-          }),
-        );
+        await patchCollection(ctx.db, target, {
+          overview: collection.overview ?? target.overview,
+          poster: collection.poster ?? target.poster,
+          backdrop: collection.backdrop ?? target.backdrop,
+          updatedAt: now,
+        });
       }
 
       const collectionId =
         collection === null
           ? null
           : (target?._id ??
-            (await ctx.db.insert(
-              "collections",
-              fitCollection({
-                name: collection.name.trim(),
-                sortKey: collection.name.trim().toLowerCase(),
-                sourceKey: collection.sourceKey,
-                createdAt: now,
-                updatedAt: now,
-                overview: collection.overview,
-                poster: collection.poster,
-                backdrop: collection.backdrop,
-              }),
-            )));
+            (await insertCollection(ctx.db, {
+              name: collection.name.trim(),
+              sortKey: collection.name.trim().toLowerCase(),
+              sourceKey: collection.sourceKey,
+              createdAt: now,
+              updatedAt: now,
+              overview: collection.overview,
+              poster: collection.poster,
+              backdrop: collection.backdrop,
+            })));
 
       const memberships = await ctx.db
         .query("collectionItems")
@@ -382,11 +404,11 @@ export const applyCollection = serverMutation({
       const member = memberships.find((entry) => entry.collectionId === collectionId);
 
       if (member !== undefined && member.source !== "metadata") {
-        await ctx.db.patch(member._id, { source: "metadata" });
+        await patchCollectionItem(ctx.db, member._id, { source: "metadata" });
       }
 
       if (collectionId !== null && member === undefined) {
-        await ctx.db.insert("collectionItems", {
+        await insertCollectionItem(ctx.db, {
           collectionId,
           titleId,
           position: positionOf(title),
@@ -444,6 +466,10 @@ export const { match, refresh, edit } = register({
     const chosen = providerId.trim();
 
     if (chosen.length === 0) return fail("invalid_args", "Choose a match");
+
+    if (chosen.length > BOUNDS.id) {
+      return fail("invalid_args", `Provider ids hold at most ${BOUNDS.id} characters`);
+    }
 
     return { jobId: await askForMatch(ctx, title, { provider, providerId: chosen }) };
   },

@@ -5,6 +5,7 @@ import { lease } from "../core/jobs/model";
 import { fail } from "../core/lib/errors";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
 import { contentRevision, currentManifest } from "./trickplayState";
+import { patchMediaFile } from "./write";
 import { nullable, trickplayManifest } from "./validators";
 
 /** The most file ids one sweep call asks about. */
@@ -39,7 +40,7 @@ export const recordTrickplay = serverMutation({
         mtimeMs === file.mtimeMs;
 
       if (current) {
-        await ctx.db.patch(fileId, {
+        await patchMediaFile(ctx.db, fileId, {
           trickplay: { status: "ready", sizeBytes, mtimeMs, manifest },
         });
       }

@@ -4,8 +4,21 @@ import type { Infer, Value } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { JobCtx } from "../core/jobs/store";
+import { BOUNDS } from "./bounds";
 import { addWork, work } from "./budget";
 import { fitEpisode, fitTitle } from "./fit";
+import {
+  insertEpisode,
+  insertMediaFile,
+  insertSeason,
+  insertTitle,
+  insertTitleGenre,
+  patchEpisode,
+  patchMediaFile,
+  patchSeason,
+  patchTitle,
+  patchTitleGenre,
+} from "./write";
 import type { Work } from "./budget";
 import { nothingMoved } from "./totals";
 import type { Moved } from "./totals";
@@ -84,14 +97,19 @@ const sortKeyOf = (title: Named): string => {
 /** A genre as rows store it and filters compare it. */
 const genreKey = (genre: string): string => genre.trim().toLowerCase();
 
-/** A title's genres as it keeps them: the first `GENRES_HARD_MAX` distinct ones, in order. */
+/**
+ * A title's genres as it keeps them: the first `GENRES_HARD_MAX` distinct ones within their bound
+ * (`bounds.ts`), in order.
+ */
 const keptGenres = (genres: ReadonlyArray<string>): Array<string> => {
   const seen = new Set<string>();
 
   return genres.filter((genre) => {
     const key = genreKey(genre);
 
-    if (key === "" || seen.has(key) || seen.size >= GENRES_HARD_MAX) return false;
+    if (key === "" || key.length > BOUNDS.genre || seen.has(key) || seen.size >= GENRES_HARD_MAX) {
+      return false;
+    }
 
     seen.add(key);
 
@@ -128,13 +146,13 @@ const syncTitleGenres = async (db: Db, title: Doc<"titles">): Promise<void> => {
 
       kept.add(row.genre);
 
-      return changesAny(row, fields) ? db.patch(row._id, fields) : undefined;
+      return changesAny(row, fields) ? patchTitleGenre(db, row._id, fields) : undefined;
     }),
   );
 
   await Promise.all(
     [...wanted].flatMap((genre) =>
-      kept.has(genre) ? [] : [db.insert("titleGenres", { titleId: title._id, genre, ...fields })],
+      kept.has(genre) ? [] : [insertTitleGenre(db, { titleId: title._id, genre, ...fields })],
     ),
   );
 };
@@ -273,11 +291,7 @@ export const rewriteTitle = async (
 ): Promise<Doc<"titles">> => {
   if (!changesAny(existing, fields)) return existing;
 
-  const merged = { ...existing, ...fields, updatedAt: Date.now() };
-  const updated = fitTitle(merged);
-
-  if (updated === merged) await db.patch(existing._id, { ...fields, updatedAt: merged.updatedAt });
-  else await db.replace(existing._id, updated);
+  const updated = await patchTitle(db, existing, { ...fields, updatedAt: Date.now() });
 
   await syncTitleGenres(db, updated);
 
@@ -356,7 +370,7 @@ const upsertTitle = async (
     searchText: searchTextOf(metadata),
   });
 
-  const titleId = await db.insert("titles", fields);
+  const titleId = await insertTitle(db, fields);
   const created = { ...fields, _id: titleId, _creationTime: now };
 
   await syncTitleGenres(db, created);
@@ -383,7 +397,7 @@ export const upsertEpisode = async (
 
   const seasonId =
     season?._id ??
-    (await db.insert("seasons", {
+    (await insertSeason(db, {
       titleId,
       seasonNumber: scanned.seasonNumber,
       name: seasonName,
@@ -399,7 +413,7 @@ export const upsertEpisode = async (
       externalIds: scanned.seasonExternalIds ?? season.externalIds,
     };
 
-    if (changesAny(season, seasonFields)) await db.patch(season._id, seasonFields);
+    if (changesAny(season, seasonFields)) await patchSeason(db, season._id, seasonFields);
   }
 
   const existing = await db
@@ -423,13 +437,11 @@ export const upsertEpisode = async (
   };
 
   if (existing !== null) {
-    const merged = { ...existing, ...fields };
-    const fitted = fitEpisode(merged);
+    const stored = changesAny(existing, fields)
+      ? await patchEpisode(db, existing, fields)
+      : existing;
 
-    if (fitted !== merged) await db.replace(existing._id, fitted);
-    else if (changesAny(existing, fields)) await db.patch(existing._id, fields);
-
-    return { row: fitted, moved: nothingMoved };
+    return { row: stored, moved: nothingMoved };
   }
 
   const row = fitEpisode({
@@ -441,15 +453,15 @@ export const upsertEpisode = async (
     presentFileCount: 0,
   });
 
-  const episodeId = await db.insert("episodes", row);
+  const episodeId = await insertEpisode(db, row);
   const seasonDoc = season ?? (await db.get(seasonId));
   const title = await db.get(titleId);
 
   if (seasonDoc !== null) {
-    await db.patch(seasonId, { episodeCount: seasonDoc.episodeCount + 1 });
+    await patchSeason(db, seasonId, { episodeCount: seasonDoc.episodeCount + 1 });
   }
 
-  if (title !== null) await db.patch(titleId, { episodeCount: title.episodeCount + 1 });
+  if (title !== null) await patchTitle(db, title, { episodeCount: title.episodeCount + 1 });
 
   return {
     row: { ...row, _id: episodeId, _creationTime: Date.now() },
@@ -467,7 +479,9 @@ export const adjustPresent = async (
   const title = await db.get(titleId);
 
   if (title !== null) {
-    await db.patch(titleId, { presentFileCount: Math.max(0, title.presentFileCount + delta) });
+    await patchTitle(db, title, {
+      presentFileCount: Math.max(0, title.presentFileCount + delta),
+    });
   }
 
   if (episodeId === null) return;
@@ -475,7 +489,9 @@ export const adjustPresent = async (
   const episode = await db.get(episodeId);
 
   if (episode !== null) {
-    await db.patch(episodeId, { presentFileCount: Math.max(0, episode.presentFileCount + delta) });
+    await patchEpisode(db, episode, {
+      presentFileCount: Math.max(0, episode.presentFileCount + delta),
+    });
   }
 };
 
@@ -595,7 +611,7 @@ export const upsertScannedItem = async (
   if (existingFile === null) {
     const now = Date.now();
     const row = { libraryId, path: item.file.path, ...fields, addedAt: now };
-    const fileId = await db.insert("mediaFiles", row);
+    const fileId = await insertMediaFile(db, row);
 
     await adjustPresent(db, title.row._id, episodeId, 1);
     await queueTrickplay(ctx, { ...row, _id: fileId, _creationTime: now }, false);
@@ -607,7 +623,7 @@ export const upsertScannedItem = async (
   const stillThere = { ...present, ...fields };
 
   if (changesAny(existingFile, { ...fields, missingSince: undefined })) {
-    await db.patch(existingFile._id, { ...fields, missingSince: undefined });
+    await patchMediaFile(db, existingFile._id, { ...fields, missingSince: undefined });
   }
 
   await queueTrickplay(ctx, stillThere, false);
@@ -637,7 +653,7 @@ export const markFileMissing = async (
   if (file === null || file.missing) return false;
 
   await forgetTrickplay(ctx, file);
-  await ctx.db.patch(file._id, { missing: true, missingSince: Date.now() });
+  await patchMediaFile(ctx.db, file._id, { missing: true, missingSince: Date.now() });
   await adjustPresent(ctx.db, file.titleId, file.episodeId, -1);
 
   return true;

@@ -11,12 +11,8 @@ export interface Reads {
   readonly bytes: number;
 }
 
-/**
- * The most bytes a row of a small table can take, as Convex measures it: grants, libraries (whose
- * names hold at most 64 characters), group memberships, list entries, progress rows, collection
- * memberships, and credits. Their fields are ids, numbers, literals, and short bounded text.
- */
-const SMALL_BYTES = 1024;
+/** The most bytes a row of a small table can take, as Convex measures it. */
+const SMALL_BYTES = DOCUMENT_BYTES.small;
 
 /** The most bytes a title, an episode, a person, or a collection takes: what its writers keep. */
 const TITLE_BYTES = DOCUMENT_BYTES.titles;

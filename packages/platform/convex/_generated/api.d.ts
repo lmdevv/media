@@ -92,6 +92,7 @@ import type * as core_together_sessions from "../core/together/sessions.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as movies_access from "../movies/access.js";
+import type * as movies_bounds from "../movies/bounds.js";
 import type * as movies_browse from "../movies/browse.js";
 import type * as movies_budget from "../movies/budget.js";
 import type * as movies_catalog from "../movies/catalog.js";
@@ -99,6 +100,7 @@ import type * as movies_collections from "../movies/collections.js";
 import type * as movies_credits from "../movies/credits.js";
 import type * as movies_fit from "../movies/fit.js";
 import type * as movies_history from "../movies/history.js";
+import type * as movies_historyProbe from "../movies/historyProbe.js";
 import type * as movies_items from "../movies/items.js";
 import type * as movies_matching from "../movies/matching.js";
 import type * as movies_metadata from "../movies/metadata.js";
@@ -117,6 +119,7 @@ import type * as movies_trickplay from "../movies/trickplay.js";
 import type * as movies_trickplayState from "../movies/trickplayState.js";
 import type * as movies_validators from "../movies/validators.js";
 import type * as movies_viewing from "../movies/viewing.js";
+import type * as movies_write from "../movies/write.js";
 
 import type {
   ApiFromModules,
@@ -209,6 +212,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   http: typeof http;
   "movies/access": typeof movies_access;
+  "movies/bounds": typeof movies_bounds;
   "movies/browse": typeof movies_browse;
   "movies/budget": typeof movies_budget;
   "movies/catalog": typeof movies_catalog;
@@ -216,6 +220,7 @@ declare const fullApi: ApiFromModules<{
   "movies/credits": typeof movies_credits;
   "movies/fit": typeof movies_fit;
   "movies/history": typeof movies_history;
+  "movies/historyProbe": typeof movies_historyProbe;
   "movies/items": typeof movies_items;
   "movies/matching": typeof movies_matching;
   "movies/metadata": typeof movies_metadata;
@@ -234,6 +239,7 @@ declare const fullApi: ApiFromModules<{
   "movies/trickplayState": typeof movies_trickplayState;
   "movies/validators": typeof movies_validators;
   "movies/viewing": typeof movies_viewing;
+  "movies/write": typeof movies_write;
 }>;
 
 /**

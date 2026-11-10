@@ -6,8 +6,9 @@ import { fail } from "../core/lib/errors";
 import { reachOf } from "../core/permissions/grants";
 import { playableBy } from "../core/permissions/items";
 import { issuePersonalTicket } from "../core/tickets";
+import { BOUNDS } from "./bounds";
 import { choosePlayableFile, presentEpisode, presentMediaFile, resolveEpisode } from "./present";
-import { findProgress, reachedEnd, writeProgress } from "./viewing";
+import { findProgress, nextWatchGeneration, reachedEnd, writeProgress } from "./viewing";
 
 const NO_TITLE = "No such title";
 
@@ -98,14 +99,19 @@ export const { start, report, reportOffline } = register({
       file: presentMediaFile(file),
       resumePositionMs:
         saved === null || reachedEnd(saved.positionMs, saved.durationMs) ? 0 : saved.positionMs,
+      playbackId: crypto.randomUUID(),
       startedAt: Date.now(),
       ticket: ticket.ticket,
       expiresAt: ticket.expiresAt,
     };
   },
-  report: async (ctx, { fileId, positionMs, durationMs, event, startedAt }, caller) => {
+  report: async (ctx, { fileId, positionMs, durationMs, event, playbackId, startedAt }, caller) => {
     milliseconds(positionMs, "Positions");
     milliseconds(startedAt, "Start times");
+
+    if (playbackId.length === 0 || playbackId.length > BOUNDS.playbackId) {
+      return fail("invalid_args", "This playback id did not come from movies.play.start");
+    }
 
     if (durationMs !== undefined) milliseconds(durationMs, "Durations");
 
@@ -122,7 +128,7 @@ export const { start, report, reportOffline } = register({
     const now = Date.now();
     const duration = durationMs ?? file.probe.durationMs;
 
-    return writeProgress(ctx, {
+    const receipt = await writeProgress(ctx, {
       userId: caller.userId,
       titleId: title._id,
       episodeId: file.episodeId,
@@ -131,8 +137,12 @@ export const { start, report, reportOffline } = register({
       durationMs: duration,
       watched: event === "ended" || reachedEnd(positionMs, duration),
       playedAt: now,
-      origin: { sessionId: caller.sessionId, startedAt: Math.min(startedAt, now) },
+      origin: { playId: playbackId, startedAt: Math.min(startedAt, now) },
     });
+
+    if (receipt.applied) await nextWatchGeneration(ctx, caller.userId, title._id);
+
+    return receipt;
   },
   reportOffline: async (ctx, args, caller) => {
     milliseconds(args.positionMs, "Positions");
@@ -158,7 +168,7 @@ export const { start, report, reportOffline } = register({
       return { applied: false, watched: saved.watched };
     }
 
-    return writeProgress(ctx, {
+    const receipt = await writeProgress(ctx, {
       userId: caller.userId,
       titleId: title._id,
       episodeId: file.episodeId,
@@ -169,5 +179,9 @@ export const { start, report, reportOffline } = register({
       playedAt,
       origin: null,
     });
+
+    if (receipt.applied) await nextWatchGeneration(ctx, caller.userId, title._id);
+
+    return receipt;
   },
 });

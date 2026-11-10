@@ -21,6 +21,7 @@ const reportArgs = v.object({
     v.literal("seek"),
     v.literal("ended"),
   ),
+  playbackId: v.string(),
   startedAt: v.number(),
 });
 
@@ -211,6 +212,7 @@ const startResult = v.object({
     ),
   }),
   resumePositionMs: v.number(),
+  playbackId: v.string(),
   startedAt: v.number(),
   ticket: v.string(),
   expiresAt: v.number(),
