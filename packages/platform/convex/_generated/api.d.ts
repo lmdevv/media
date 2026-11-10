@@ -97,6 +97,7 @@ import type * as movies_budget from "../movies/budget.js";
 import type * as movies_catalog from "../movies/catalog.js";
 import type * as movies_collections from "../movies/collections.js";
 import type * as movies_credits from "../movies/credits.js";
+import type * as movies_fit from "../movies/fit.js";
 import type * as movies_history from "../movies/history.js";
 import type * as movies_items from "../movies/items.js";
 import type * as movies_matching from "../movies/matching.js";
@@ -213,6 +214,7 @@ declare const fullApi: ApiFromModules<{
   "movies/catalog": typeof movies_catalog;
   "movies/collections": typeof movies_collections;
   "movies/credits": typeof movies_credits;
+  "movies/fit": typeof movies_fit;
   "movies/history": typeof movies_history;
   "movies/items": typeof movies_items;
   "movies/matching": typeof movies_matching;

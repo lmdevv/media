@@ -13,8 +13,9 @@ import { reachOf } from "../core/permissions/grants";
 import { budgetedViewer } from "./access";
 import type { BudgetedViewer, Seen } from "./access";
 import { CREDIT_LIMIT, mergeIds, personKeyOf } from "./credits";
+import { fitPerson } from "./fit";
 import { presentTitleCard } from "./present";
-import { TITLE_GET, callBudget, peopleOf, queryOf } from "./reads";
+import { TITLE_GET, callBudget, creditRowsOf, peopleOf, settleRead } from "./reads";
 import type { ReadBudget } from "./reads";
 import { externalIds, scannedPersonDetails } from "./validators";
 
@@ -59,19 +60,23 @@ export const applyPerson = serverMutation({
       const ids = mergeIds(person.externalIds, details.externalIds);
       const now = Date.now();
 
-      await ctx.db.patch(personId, {
-        name: details.name,
-        personKey: personKeyOf({ name: person.name, externalIds: ids }),
-        externalIds: ids,
-        profile: details.profile ?? person.profile,
-        biography: details.biography,
-        birthDate: details.birthDate,
-        deathDate: details.deathDate,
-        birthPlace: details.birthPlace,
-        knownFor: details.knownFor,
-        detailsFetchedAt: now,
-        updatedAt: now,
-      });
+      await ctx.db.replace(
+        personId,
+        fitPerson({
+          ...person,
+          name: details.name,
+          personKey: personKeyOf({ name: person.name, externalIds: ids }),
+          externalIds: ids,
+          profile: details.profile ?? person.profile,
+          biography: details.biography,
+          birthDate: details.birthDate,
+          deathDate: details.deathDate,
+          birthPlace: details.birthPlace,
+          knownFor: details.knownFor,
+          detailsFetchedAt: now,
+          updatedAt: now,
+        }),
+      );
 
       return { outcome: "held", value: null };
     }),
@@ -131,7 +136,11 @@ const seenBy = async (
     if (known !== undefined) return known;
 
     const decided = budget.take(TITLE_GET)
-      ? db.get(titleId).then(async (title) => (title === null ? "hidden" : seen(title)))
+      ? db.get(titleId).then(async (title) => {
+          settleRead(budget, TITLE_GET, [title]);
+
+          return title === null ? "hidden" : seen(title);
+        })
       : Promise.resolve<Seen>("spent");
 
     titles.set(titleId, decided);
@@ -143,7 +152,7 @@ const seenBy = async (
     person: Doc<"people">,
     after: Doc<"credits"> | null,
   ): Promise<boolean> => {
-    if (!budget.take(queryOf(CREDIT_BATCH))) return false;
+    if (!budget.take(creditRowsOf(CREDIT_BATCH))) return false;
 
     const batch = await creditsAfter(db, person, after);
     const decided = await Promise.all(batch.map(async (credit) => shows(credit.titleId)));
@@ -177,7 +186,7 @@ const visibleCredits = async (
   budget: ReadBudget,
   personId: Id<"people">,
 ): Promise<ReadonlyArray<CreditOnTitle>> => {
-  if (!budget.take(queryOf(CREDIT_SCAN))) return [];
+  if (!budget.take(creditRowsOf(CREDIT_SCAN))) return [];
 
   const rows = await db
     .query("credits")
@@ -191,6 +200,8 @@ const visibleCredits = async (
       if (!budget.take(TITLE_GET)) return null;
 
       const title = await db.get(titleId);
+
+      settleRead(budget, TITLE_GET, [title]);
 
       return title !== null && (await seen(title)) === "seen" ? title : null;
     }),
@@ -273,12 +284,16 @@ export const { get, search, requestDetails } = register({
     const reach = await reachOf(ctx.db, caller);
     const budget = callBudget(reach);
 
+    const reserved = peopleOf(SEARCH_SCAN);
+
+    if (!budget.take(reserved)) return [];
+
     const matches = await ctx.db
       .query("people")
       .withSearchIndex("search_name", (q) => q.search("name", text))
       .take(SEARCH_SCAN);
 
-    budget.take(peopleOf(SEARCH_SCAN));
+    settleRead(budget, reserved, matches);
 
     const visible = await seenBy(
       ctx.db,

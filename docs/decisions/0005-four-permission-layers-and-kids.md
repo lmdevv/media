@@ -378,19 +378,24 @@ Convex fails a call past 4,096 index ranges, 32,000 documents, or 16 MiB read (A
 access-checked movies read stays under all three by one rule, in `movies/reads.ts`.
 
 - **Real costs.** A `get` is one range and one document; a query is one range and the rows it
-  returns; a document counts at a size estimate for its table (512 bytes for a grant, a library,
-  or a list or progress row; 6 KiB for a title; 2 KiB for an episode, a person, or a
-  collection). Deciding a library is charged once per call, at what `reachOf` and `levelOn` read:
-  the library and one grant query per grant key (the person's own, the household's, and each of
-  up to 16 groups). The caller, the session, and the reach are charged first, as
-  `decidableRows` charges them. Lookups that find nothing, such as next-episode scans, are
-  charged too.
+  returns. Bytes are reserved before a read and settled after it: a read reserves the most its
+  documents can take (1 KiB a row for small tables of ids, numbers, literals, and bounded text,
+  such as grants, libraries, list and progress rows, and memberships; for titles, episodes,
+  people, credits, and collections, the bound their writers keep, ADR 0024), then gives back
+  what each document it returned did not take, measured as Convex measures it
+  (`getDocumentSize`). Deciding a library is charged once per call, at what `reachOf` and
+  `levelOn` read: the library and one grant query per grant key (the person's own, the
+  household's, and each of up to 16 groups). The caller, the session, and the reach are charged
+  first, as `decidableRows` charges them. Lookups that find nothing, such as next-episode scans,
+  are charged too. Because every read reserves its worst case first, the bytes left before any
+  read always cover everything it can return, and the 4 MiB of headroom below Convex's limit is
+  more than the largest document Convex allows.
 - **One total.** A call spends at most 3,000 ranges, 30,000 documents, and 12 MiB from one
-  shared total, which leaves headroom for estimates that undercount. Parts of a call take shares
+  shared total, which leaves headroom for its fixed work. Parts of a call take shares
   of what is left (home rows: continue watching first, then the list, then the library walk, then
   each row's merge), never a minimum per library.
 - **Pages are sized, never cut.** A paginated list sizes its page before it reads, so its rows
-  can never run out of budget: history and the list by `decidableRows` from each row's own
+  can never run out of ranges or documents: history and the list by `decidableRows` from each row's own
   reads, the title list the same way, and collections by what each collection needs to decide
   all 200 of its members at the worst cost, each in a library of its own, with each collection
   on a page given an equal share of the page's budget. So a page's continuation is always exactly

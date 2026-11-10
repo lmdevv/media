@@ -3,7 +3,7 @@ import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { BudgetedViewer } from "./access";
 import { presentEpisode, presentProgress, presentTitleCard } from "./present";
 import type { ContinueItem, Episode } from "./present";
-import { EPISODE_GET, TITLE_GET, episodesOf, queryOf } from "./reads";
+import { EPISODE_GET, TITLE_GET, episodesOf, queryOf, settleRead } from "./reads";
 import type { ReadBudget, Reads } from "./reads";
 
 const WATCHED_FRACTION = 0.9;
@@ -194,6 +194,11 @@ type Charge = (cost: Reads) => boolean;
 
 const UNBOUNDED: Charge = () => true;
 
+/** Settles a charged read on the documents it returned. */
+type Settle = (reserved: Reads, read: ReadonlyArray<Doc<"episodes">>) => void;
+
+const NO_SETTLE: Settle = () => undefined;
+
 interface Unwatched {
   readonly episode: Doc<"episodes"> | null;
   readonly examined: number;
@@ -236,14 +241,19 @@ const scanUnwatched = async (
   maxSkipped: number,
   giveUp: boolean,
   charge: Charge,
+  settle: Settle = NO_SETTLE,
 ): Promise<Doc<"episodes"> | null> => {
   const step = async (after: Doc<"episodes">, skipped: number): Promise<Doc<"episodes"> | null> => {
     const left = maxSkipped - skipped;
     const wanted = left <= SCAN_BATCH ? left + 1 : SCAN_BATCH;
 
-    if (!charge(episodesOf(wanted, 2))) return null;
+    const reserved = episodesOf(wanted, 2);
+
+    if (!charge(reserved)) return null;
 
     const batch = await followingEpisodes(db, after, wanted);
+
+    settle(reserved, batch);
     const found = await firstUnwatched(db, userId, batch.slice(0, left), 0, charge);
 
     if (found.episode !== null || found.spent) return found.episode;
@@ -317,6 +327,8 @@ const candidateOf = async (
 
   const title = await db.get(row.titleId);
 
+  settleRead(budget, TITLE_GET, [title]);
+
   if (title === null || (await seen(title)) !== "seen") return SKIP;
 
   const finished = isFinished(row);
@@ -338,6 +350,8 @@ const candidateOf = async (
   if (!budget.take(EPISODE_GET)) return SKIP;
 
   const episode = await db.get(row.episodeId);
+
+  settleRead(budget, EPISODE_GET, [episode]);
 
   if (episode === null) return SKIP;
 
@@ -363,7 +377,15 @@ const nextItemOf = async (
   episode: Doc<"episodes">,
   budget: ReadBudget,
 ): Promise<ContinueItem | null> => {
-  const next = await scanUnwatched(db, userId, episode, MAX_SKIPPED_EPISODES, true, budget.take);
+  const next = await scanUnwatched(
+    db,
+    userId,
+    episode,
+    MAX_SKIPPED_EPISODES,
+    true,
+    budget.take,
+    (reserved, read) => settleRead(budget, reserved, read),
+  );
 
   if (next === null || next.presentFileCount === 0 || !budget.take(queryOf(1))) return null;
 

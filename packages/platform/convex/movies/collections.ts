@@ -9,7 +9,16 @@ import type { Principal } from "../core/permissions/policy";
 import { budgetedViewer } from "./access";
 import { presentTitleCard } from "./present";
 import type { TitleCard } from "./present";
-import { TITLE_GET, callBudget, collectionsOf, libraryCheck, plus, queryOf, times } from "./reads";
+import {
+  TITLE_GET,
+  callBudget,
+  collectionsOf,
+  libraryCheck,
+  plus,
+  queryOf,
+  settleRead,
+  times,
+} from "./reads";
 import type { ReadBudget, Reads } from "./reads";
 
 const TITLE_LIMIT = 200;
@@ -88,6 +97,8 @@ const present = async (
 
         const title = await db.get(member.titleId);
 
+        settleRead(budget, TITLE_GET, [title]);
+
         return title === null
           ? { title, seen: "hidden" as const }
           : { title, seen: await seen(title) };
@@ -128,11 +139,12 @@ export const { list, get } = register({
         COLLECTIONS_PAGE_MAX,
         Math.floor(room.ranges / each.ranges),
         Math.floor(room.documents / each.documents),
-        Math.floor(room.bytes / each.bytes),
       ),
     );
 
-    budget.take(collectionsOf(rows));
+    const reserved = collectionsOf(rows);
+
+    budget.take(reserved);
 
     const page = await paginateAtMost(
       ctx.db,
@@ -140,6 +152,8 @@ export const { list, get } = register({
       paginationOpts,
       rows,
     );
+
+    settleRead(budget, reserved, page.page);
 
     const presented = await page.page.reduce<Promise<ReadonlyArray<Shown>>>(
       async (pending, doc, index) => {

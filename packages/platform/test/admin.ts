@@ -110,6 +110,7 @@ const FunctionLog = Schema.Struct({
       usageStats: Schema.optionalKey(
         Schema.Struct({
           databaseReadDocuments: Schema.Finite,
+          databaseReadBytes: Schema.optionalKey(Schema.Finite),
           databaseWriteDocuments: Schema.Finite,
         }),
       ),
@@ -151,6 +152,8 @@ export const logMark = async (stack: CoreStack): Promise<LogMark> => ({
 
 export interface CallUsage {
   readonly reads: number;
+  /** The bytes the attempt read, as the backend logged them; 0 when it logged none. */
+  readonly bytes: number;
   readonly writes: number;
   /**
    * False for an attempt that failed, including one Convex retried after a conflict or the
@@ -208,6 +211,7 @@ export const followLog = (stack: CoreStack, mark: LogMark): LogFollower => {
           ? [
               {
                 reads: entry.usageStats.databaseReadDocuments,
+                bytes: entry.usageStats.databaseReadBytes ?? 0,
                 writes: entry.usageStats.databaseWriteDocuments,
                 committed: (entry.error ?? null) === null && !(entry.willRetry ?? false),
               },

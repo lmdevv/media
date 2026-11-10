@@ -19,6 +19,9 @@ const stack = coreStackFromEnvFile();
 /** What one call may read: Convex's limit, which a passing call stayed under for ranges. */
 const DOCUMENTS_MAX = 32_000;
 
+/** What one call may read in bytes: Convex's limit. */
+const BYTES_MAX = 16 * 1024 * 1024;
+
 /**
  * What counting the 1,000 newest titles across 33 libraries of 300 may read: the titles it needs
  * and a little more, never 300 from each library as a per-library minimum would.
@@ -53,6 +56,7 @@ interface Title {
   readonly age: number | null;
   readonly episodes: number;
   readonly genres?: ReadonlyArray<string>;
+  readonly overview?: string;
 }
 
 /** Seeds movies libraries `manager` manages, 200 a call, each shared `view` with `viewers`. */
@@ -229,6 +233,44 @@ describe.skipIf(stack === undefined)("movies reads within one call", { timeout: 
 
     for (const read of await documentsRead(stack, mark, api.movies.titles.genres)) {
       expect(read).toBeLessThan(GENRES_DOCUMENTS_MAX);
+    }
+  });
+
+  it("count genres of titles with long overviews without reading past 16 MiB", async () => {
+    if (stack === undefined) return;
+
+    const label = unique();
+    const viewer = await member(stack, "rich-viewer");
+    const overview = `A family returns home after years abroad. `.repeat(400).slice(0, 16 * 1024);
+
+    await seedMovies(
+      stack,
+      viewer,
+      Array.from({ length: 6 }, (_, n) => ({
+        name: `rich ${label} ${n}`,
+        titles: Array.from({ length: 200 }, (__, t) => ({
+          name: `Rich ${label} ${n} ${t}`,
+          age: 0,
+          episodes: 0,
+          genres: [`rich${label}`],
+          overview,
+        })),
+      })),
+      [],
+      1,
+    );
+
+    const mark = await logMark(stack);
+    const genres = await viewer.signedIn.client.query(api.movies.titles.genres, {});
+
+    expect(genres.find((genre) => genre.name === `rich${label}`)?.count).toBeGreaterThan(0);
+
+    const usage = await usageSince(stack, mark, api.movies.titles.genres, 1);
+
+    for (const call of usage.filter((one) => one.committed)) {
+      expect(call.bytes).toBeGreaterThan(0);
+      expect(call.bytes).toBeLessThan(BYTES_MAX);
+      expect(call.reads).toBeLessThan(DOCUMENTS_MAX);
     }
   });
 

@@ -5,6 +5,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { JobCtx } from "../core/jobs/store";
 import { addWork, work } from "./budget";
+import { fitEpisode, fitTitle } from "./fit";
 import type { Work } from "./budget";
 import { nothingMoved } from "./totals";
 import type { Moved } from "./totals";
@@ -272,9 +273,12 @@ export const rewriteTitle = async (
 ): Promise<Doc<"titles">> => {
   if (!changesAny(existing, fields)) return existing;
 
-  const updated = { ...existing, ...fields, updatedAt: Date.now() };
+  const merged = { ...existing, ...fields, updatedAt: Date.now() };
+  const updated = fitTitle(merged);
 
-  await db.patch(existing._id, { ...fields, updatedAt: updated.updatedAt });
+  if (updated === merged) await db.patch(existing._id, { ...fields, updatedAt: merged.updatedAt });
+  else await db.replace(existing._id, updated);
+
   await syncTitleGenres(db, updated);
 
   return updated;
@@ -339,7 +343,7 @@ const upsertTitle = async (
   const now = Date.now();
   const metadata = titleMetadata(scanned);
 
-  const fields = {
+  const fields = fitTitle({
     libraryId,
     matchKey: scanned.matchKey,
     ...metadata,
@@ -350,7 +354,7 @@ const upsertTitle = async (
     addedAt: now,
     updatedAt: now,
     searchText: searchTextOf(metadata),
-  };
+  });
 
   const titleId = await db.insert("titles", fields);
   const created = { ...fields, _id: titleId, _creationTime: now };
@@ -419,19 +423,23 @@ export const upsertEpisode = async (
   };
 
   if (existing !== null) {
-    if (changesAny(existing, fields)) await db.patch(existing._id, fields);
+    const merged = { ...existing, ...fields };
+    const fitted = fitEpisode(merged);
 
-    return { row: { ...existing, ...fields }, moved: nothingMoved };
+    if (fitted !== merged) await db.replace(existing._id, fitted);
+    else if (changesAny(existing, fields)) await db.patch(existing._id, fields);
+
+    return { row: fitted, moved: nothingMoved };
   }
 
-  const row = {
+  const row = fitEpisode({
     titleId,
     seasonId,
     seasonNumber: scanned.seasonNumber,
     episodeNumber: scanned.episodeNumber,
     ...fields,
     presentFileCount: 0,
-  };
+  });
 
   const episodeId = await db.insert("episodes", row);
   const seasonDoc = season ?? (await db.get(seasonId));

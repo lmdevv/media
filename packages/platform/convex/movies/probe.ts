@@ -49,6 +49,8 @@ const seededTitle = v.object({
   episodes: v.number(),
   /** Its genres, each with the genre row lists read; none when absent. */
   genres: v.optional(v.array(v.string())),
+  /** Its overview; none when absent. */
+  overview: v.optional(v.string()),
 });
 
 const seededRows = v.object({
@@ -66,6 +68,7 @@ const insertTitle = async (
     readonly age: number | null;
     readonly episodes: number;
     readonly genres?: ReadonlyArray<string> | undefined;
+    readonly overview?: string | undefined;
   },
 ) => {
   const now = Date.now();
@@ -80,7 +83,7 @@ const insertTitle = async (
     sortName: title.name,
     sortKey,
     year: null,
-    overview: null,
+    overview: title.overview ?? null,
     tagline: null,
     genres: [...(title.genres ?? [])],
     certification: null,

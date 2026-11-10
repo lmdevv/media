@@ -9,7 +9,17 @@ import type { BudgetedViewer } from "./access";
 import { countGenres, rankBySimilarity, titlePage } from "./browse";
 import { CREDIT_LIMIT, creditsOf } from "./credits";
 import { newestAcross } from "./newest";
-import { TITLE_GET, callBudget, libraryCheck, plus, queryOf, readsOf, titlesOf } from "./reads";
+import {
+  TITLE_GET,
+  callBudget,
+  libraryCheck,
+  plus,
+  queryOf,
+  readsOf,
+  settleRead,
+  titlesAffordable,
+  titlesOf,
+} from "./reads";
 import type { ReadBudget, Reads } from "./reads";
 import {
   filesOnDisk,
@@ -129,6 +139,8 @@ const firstSeen = async <Item>(
       batch.map(async (item) => {
         const title = await titleOf(item);
 
+        settleRead(budget, TITLE_GET, [title]);
+
         return title === null
           ? { title, seen: "hidden" as const }
           : { title, seen: await seen(title) };
@@ -151,8 +163,6 @@ const firstSeen = async <Item>(
     await iterator.return?.();
   }
 };
-
-const itself = async (title: Doc<"titles">): Promise<Doc<"titles">> => title;
 
 /** What one row of the title list reads besides its title: its library. */
 const TITLE_ROW_READS = 2;
@@ -252,17 +262,27 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
 
       const reach = await reachOf(ctx.db, caller);
       const budget = callBudget(reach);
+      const scan = Math.min(SEARCH_SCAN, titlesAffordable(budget));
+      const reserved = titlesOf(scan);
 
-      const matches = await firstSeen(
-        ctx.db.query("titles").withSearchIndex("search_text", (q) => q.search("searchText", text)),
-        itself,
-        budgetedViewer(ctx.db, caller, reach, budget),
-        budget,
-        titlesOf(1, 0),
-        { limit: resultLimit(limit, 20, 50), scanLimit: SEARCH_SCAN },
-      );
+      if (scan < 1 || !budget.take(reserved)) return [];
 
-      return matches.map(presentTitleCard);
+      const hits = await ctx.db
+        .query("titles")
+        .withSearchIndex("search_text", (q) => q.search("searchText", text))
+        .take(scan);
+
+      settleRead(budget, reserved, hits);
+
+      const seen = budgetedViewer(ctx.db, caller, reach, budget);
+      const decided = await Promise.all(hits.map(async (hit) => seen(hit)));
+      const spentAt = decided.indexOf("spent");
+      const decidable = spentAt < 0 ? hits : hits.slice(0, spentAt);
+
+      return decidable
+        .filter((_, index) => decided[index] === "seen")
+        .slice(0, resultLimit(limit, 20, 50))
+        .map(presentTitleCard);
     },
     similar: async (ctx, { titleId, limit }, caller) => {
       const { title, reach } = await requireTitle(ctx.db, caller, "view", titleId);
@@ -275,12 +295,16 @@ export const { home, list, genres, search, similar, get, versions, episodes, nex
 
       const recommended = await Promise.all(
         (title.recommendations ?? []).map(async (tmdb) => {
-          if (!budget.take(titlesOf(MATCHES_PER_RECOMMENDATION))) return undefined;
+          const reserved = titlesOf(MATCHES_PER_RECOMMENDATION);
+
+          if (!budget.take(reserved)) return undefined;
 
           const matches = await ctx.db
             .query("titles")
             .withIndex("by_kind_tmdb", (q) => q.eq("kind", title.kind).eq("externalIds.tmdb", tmdb))
             .take(MATCHES_PER_RECOMMENDATION);
+
+          settleRead(budget, reserved, matches);
 
           const visible = await Promise.all(
             matches.map(

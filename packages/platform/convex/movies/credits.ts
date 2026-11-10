@@ -3,6 +3,7 @@ import type { Infer } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { inOrder } from "../core/lib/inOrder";
+import { fitCredit, fitPerson } from "./fit";
 import type { externalIds, scannedCredit, scannedPerson } from "./validators";
 
 type Db = MutationCtx["db"];
@@ -81,7 +82,7 @@ const upsertPerson = async (
   const now = Date.now();
 
   if (existing === null) {
-    const fields = {
+    const fields = fitPerson({
       personKey: key,
       name,
       sortKey: sortKeyOf(name),
@@ -94,7 +95,7 @@ const upsertPerson = async (
       knownFor: null,
       detailsFetchedAt: null,
       updatedAt: now,
-    };
+    });
 
     const personId = await db.insert("people", fields);
 
@@ -145,14 +146,17 @@ export const replaceCredits = async (
   return inOrder(credits.slice(0, CREDIT_LIMIT), async (entry) => {
     const person = await upsertPerson(db, entry.person);
 
-    await db.insert("credits", {
-      titleId,
-      episodeId,
-      personId: person._id,
-      kind: entry.kind,
-      role: entry.role,
-      order: entry.order,
-    });
+    await db.insert(
+      "credits",
+      fitCredit({
+        titleId,
+        episodeId,
+        personId: person._id,
+        kind: entry.kind,
+        role: entry.role,
+        order: entry.order,
+      }),
+    );
 
     return person;
   });

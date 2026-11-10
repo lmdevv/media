@@ -2,7 +2,7 @@ import type { Doc } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import type { ItemGate } from "../core/permissions/grants";
 import { titleFacts } from "./items";
-import { titlesOf } from "./reads";
+import { settleRead, titlesAffordable, titlesOf } from "./reads";
 import type { ReadBudget } from "./reads";
 
 type Kind = Doc<"titles">["kind"];
@@ -115,19 +115,24 @@ const refill = async (
   budget: ReadBudget,
   want: number,
 ): Promise<{ readonly stream: Stream; readonly spent: boolean }> => {
-  const cost = stream.last === null ? titlesOf(stream.batch) : titlesOf(stream.batch, 2);
+  const batch = Math.min(stream.batch, titlesAffordable(budget));
+  const cost = titlesOf(batch, stream.last === null ? 1 : 2);
 
-  if (!budget.take(cost)) return { stream: { ...stream, ended: true }, spent: true };
+  if (batch < 1 || !budget.take(cost)) {
+    return { stream: { ...stream, ended: true }, spent: true };
+  }
 
-  const read = await batchOf(db, stream.gate, kind, stream.last, stream.batch);
+  const read = await batchOf(db, stream.gate, kind, stream.last, batch);
+
+  settleRead(budget, cost, read);
 
   return {
     stream: {
       gate: stream.gate,
       buffer: read,
       last: read.at(-1) ?? stream.last,
-      ended: read.length < stream.batch,
-      batch: Math.min(want, stream.batch * 2),
+      ended: read.length < batch,
+      batch: Math.min(want, batch * 2),
     },
     spent: false,
   };

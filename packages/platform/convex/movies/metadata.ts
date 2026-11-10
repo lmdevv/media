@@ -22,6 +22,7 @@ import {
   writeOverrides,
 } from "./catalog";
 import { CREDIT_LIMIT, creditsOf, replaceCredits } from "./credits";
+import { fitCollection } from "./fit";
 import { askForMatch, askForRefresh } from "./matching";
 import { moveTotals, sumMoved } from "./totals";
 import {
@@ -335,28 +336,35 @@ export const applyCollection = serverMutation({
       const target = collection === null ? null : await collectionFor(ctx, collection);
 
       if (collection !== null && target !== null) {
-        await ctx.db.patch(target._id, {
-          overview: collection.overview ?? target.overview,
-          poster: collection.poster ?? target.poster,
-          backdrop: collection.backdrop ?? target.backdrop,
-          updatedAt: now,
-        });
+        await ctx.db.replace(
+          target._id,
+          fitCollection({
+            ...target,
+            overview: collection.overview ?? target.overview,
+            poster: collection.poster ?? target.poster,
+            backdrop: collection.backdrop ?? target.backdrop,
+            updatedAt: now,
+          }),
+        );
       }
 
       const collectionId =
         collection === null
           ? null
           : (target?._id ??
-            (await ctx.db.insert("collections", {
-              name: collection.name.trim(),
-              sortKey: collection.name.trim().toLowerCase(),
-              sourceKey: collection.sourceKey,
-              createdAt: now,
-              updatedAt: now,
-              overview: collection.overview,
-              poster: collection.poster,
-              backdrop: collection.backdrop,
-            })));
+            (await ctx.db.insert(
+              "collections",
+              fitCollection({
+                name: collection.name.trim(),
+                sortKey: collection.name.trim().toLowerCase(),
+                sourceKey: collection.sourceKey,
+                createdAt: now,
+                updatedAt: now,
+                overview: collection.overview,
+                poster: collection.poster,
+                backdrop: collection.backdrop,
+              }),
+            )));
 
       const memberships = await ctx.db
         .query("collectionItems")

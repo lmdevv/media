@@ -1,6 +1,7 @@
 # 0024. Libraries have a kind, their own folders, grants, and one scan kind per domain
 
-- Status: Accepted, 2026-11-04. Amended 2026-11-09 with the movies catalog.
+- Status: Accepted, 2026-11-04. Amended 2026-11-09 with the movies catalog, and again the same
+  day with each movies document's size bound.
 - Decisions: D01, D02, D16, D17, D28, D29, D50
 
 ## Context
@@ -220,6 +221,25 @@ The movies port replaced the movies half of the seam with movies' own rows in
   opens and pages titles through `requireItems`, as the libraryProbe seam does for music. It
   also sets a library's folders without scheduling the purge and runs one purge page at a time,
   so a test can act between pages.
+
+### Movies document sizes (amended 2026-11-09)
+
+The movies reads reserve, before each read, the most its documents can take (ADR 0005), so each
+kind of document needs a bound. Convex allows a document up to 1 MiB, and old movies capped no
+text, so a title with an absurd overview could make a call reserve far more than it reads.
+
+- The writers keep each document within a bound, as Convex measures it (`getDocumentSize`):
+  64 KiB for a title, 16 KiB for an episode, a person, or a collection, and 2 KiB for a credit
+  (`movies/fit.ts`). A real title, with an overview of a few kilobytes and 256 genres, is well
+  under its bound.
+- A document over its bound is fitted, never refused, so no scan, metadata job, person job, or
+  edit fails for it. The longest free text is cut to half its length, never below 64
+  characters, until it fits: an overview, an admin's overview, a biography, a role, a name. Only
+  when no text can shrink do its longest lists (genres, tags, studios, countries,
+  recommendations) lose their last entries. Its library, kind, match key, person key, source
+  key, ids, literals, and numbers never change, so matching and rescans behave as before.
+- The scanner's and metadata job's title writes, episode writes, person and credit writes, and
+  collection writes all go through it. A document under its bound is written exactly as before.
 
 ## Consequences
 
