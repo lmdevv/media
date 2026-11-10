@@ -246,7 +246,9 @@ the command generator refuses that name, because `media auth grants` is already 
 
 - A grant is a `deviceGrants` row and a code, `dg_<grantId>.<secret>`, that the phone keeps. The
   row holds the person, a name such as "Aiko's iPhone", the SHA-256 of the secret, and a
-  generation. The core never stores the code and never logs it.
+  generation. The core never stores the code and never logs it, and no mutation argument
+  carries it: `issue` parses and hashes the stored code in its action and hands `place` only the
+  grant's id and hash.
 - The generation is the person's `sessionGeneration` when the grant was issued or last confirmed.
   A grant mints sessions only while the two are equal.
 - A grant has no expiry. Like a device code, it lasts until it is revoked or its person signs out

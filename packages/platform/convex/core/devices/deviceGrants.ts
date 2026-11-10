@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import type { Infer } from "convex/values";
 
 import { register } from "../../../commands/core/devices/deviceGrants";
 import { internal } from "../../_generated/api";
@@ -15,7 +16,7 @@ import {
   constantTimeEqual,
   formatSecret,
   randomSecret,
-  rowForSecret,
+  parseSecret,
   sha256Hex,
 } from "../lib/secrets";
 import { LIST_CALL_READS } from "../permissions/grants";
@@ -138,18 +139,31 @@ const revokeGrant = async (
   await ctx.db.delete(grantId);
 };
 
-/** The grant row a device's stored code names, when its secret matches; null otherwise. */
+/** The grant a device holds, as its row id and the SHA-256 of its secret; never the code itself. */
+const heldGrantArgs = v.union(v.null(), v.object({ grantId: v.string(), secretHash: v.string() }));
+
+/**
+ * What `place` takes. The action parses and hashes the device's stored code, so no mutation
+ * argument carries a bearer secret.
+ */
+export const placeArgs = v.object({
+  held: heldGrantArgs,
+  secretHash: v.string(),
+  name: v.string(),
+});
+
+/** The grant row a device holds, when its secret matches; null otherwise. */
 const heldGrant = async (
   db: DatabaseReader,
-  held: string | null,
-): Promise<Doc<"deviceGrants"> | null> =>
-  held === null
-    ? null
-    : rowForSecret(GRANT_PREFIX, held, async (rowId) => {
-        const id = db.normalizeId("deviceGrants", rowId);
+  held: Infer<typeof heldGrantArgs>,
+): Promise<Doc<"deviceGrants"> | null> => {
+  const id = held === null ? null : db.normalizeId("deviceGrants", held.grantId);
+  const grant = id === null ? null : await db.get(id);
 
-        return id === null ? null : db.get(id);
-      });
+  return held !== null && grant !== null && constantTimeEqual(grant.secretHash, held.secretHash)
+    ? grant
+    : null;
+};
 
 /**
  * Gives the device the caller's grant. When the grant the device holds is the caller's own, it is
@@ -161,11 +175,7 @@ const heldGrant = async (
  * before the revoke, so a refused issue revokes nothing.
  */
 export const place = internalMutation({
-  args: {
-    held: v.union(v.null(), v.string()),
-    secretHash: v.string(),
-    name: v.string(),
-  },
+  args: placeArgs,
   returns: v.object({ grantId: v.id("deviceGrants"), kept: v.boolean() }),
   handler: async (ctx, { held, secretHash, name }) => {
     const { caller, person } = await issuer(ctx);
@@ -226,12 +236,16 @@ export const { issue, list, revoke } = register({
   issue: async (ctx, { name, grant }) => {
     requireDeviceName(name);
 
-    const held = grant?.trim() ?? null;
+    const stored = grant?.trim() ?? null;
+    const parsed = stored === null ? null : parseSecret(GRANT_PREFIX, stored);
     const secret = randomSecret(32);
 
     const placed: { readonly grantId: Id<"deviceGrants">; readonly kept: boolean } =
       await ctx.runMutation(internal.core.devices.deviceGrants.place, {
-        held,
+        held:
+          parsed === null
+            ? null
+            : { grantId: parsed.rowId, secretHash: await sha256Hex(parsed.secret) },
         secretHash: await sha256Hex(secret),
         name,
       });
@@ -239,7 +253,9 @@ export const { issue, list, revoke } = register({
     return {
       grantId: placed.grantId,
       grant:
-        placed.kept && held !== null ? held : formatSecret(GRANT_PREFIX, placed.grantId, secret),
+        placed.kept && stored !== null
+          ? stored
+          : formatSecret(GRANT_PREFIX, placed.grantId, secret),
     };
   },
   list: async (ctx, { paginationOpts }, caller) => {
