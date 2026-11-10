@@ -659,14 +659,14 @@ const outermostOf = (roots: ReadonlyArray<string>): ReadonlyArray<string> => {
 /**
  * Covers the held import's planned library at the checkpoint's cursor with movies libraries, as
  * old movies' importer did. A folder another library has, holds, or lies in is covered by it,
- * whose sharing stays as it is. The rest become one new library named after the source library,
- * made through `makeLibrary` with the requester its first manager and its first scan queued. It is
- * shared through grants as the source showed it: with the household when every source user saw
- * it, otherwise with the core users of the source users it named, and with no one else when the
- * source did not say. Old movies' admins saw every library; on the core an admin sees what they
- * hold a grant on (ADR 0024), so the requester manages it and shares it further. Moves the
- * checkpoint to the next planned library and answers the counts; a call whose `at` is not the
- * stored checkpoint answers the stored one.
+ * whose sharing stays as it is. The rest become new libraries of up to 16 folders each, named
+ * after the source library ("<name>", "<name> 2", and on), each made through `makeLibrary` with
+ * the requester its manager and its first scan queued. Each is shared through ordinary grants as
+ * `sharesOf` decides: with the household when every source user saw the source library;
+ * otherwise `view` for the core users of the source users it named and for every current owner
+ * and admin, who alone get it when the source did not say. Moves the checkpoint to the next
+ * planned library and answers the counts; a call whose `at` is not the stored checkpoint answers
+ * the stored one.
  */
 export const ensureLibrary = serverMutation({
   args: { lease, at: importCheckpoint },

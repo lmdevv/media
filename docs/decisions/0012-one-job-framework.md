@@ -264,13 +264,12 @@ stays wired until `p4-movies-cutover`.
 - An import adds the libraries it needs, as old movies' importer did (corrected in review, D62):
   the first version added none, which left source folders no library covered unmatched and refused
   an empty install. A run starts in the `libraries` phase. `ensureLibrary` takes the planned
-  libraries one a call:
-  a folder another library has, holds, or lies in is covered by it, whose sharing stays as it is,
-  and the rest become new movies libraries named after the source library, made through
-  `core/libraries.ts:makeLibrary`, the one way a library is made, with the requester their first
-  manager and their first scans queued. A library holds at most 16 folders, so a source library
-  with more becomes several, "<name>", "<name> 2", and on, shared alike, so every folder is
-  claimed and scanned (corrected in review). They are shared through the ordinary grants
+  libraries one a call: a folder another library has, holds, or lies in is covered by it, whose
+  sharing stays as it is, and the rest become new movies libraries named after the source library,
+  made through `core/libraries.ts:makeLibrary`, the one way a library is made, with the requester
+  their first manager and their first scans queued. A library holds at most 16 folders, so a
+  source library with more becomes several, "<name>", "<name> 2", and on, shared alike, so every
+  folder is claimed and scanned (corrected in review). They are shared through the ordinary grants
   (ADR 0024, not a second sharing path), in one read of the new row's grants
   (`grants.ts:shareNew`), which never lowers the requester's `manage`: with the household when
   every source user could see the source library; otherwise a `view` grant to the core user of
@@ -297,14 +296,14 @@ stays wired until `p4-movies-cutover`.
   than the core did, or the core has no row, so an import never moves a newer row back, whatever
   playback last reported. Imported progress is older data, so it never invalidates a person's own
   newer word (corrected in review): an import never moves the title's history generation, so the
-  scheduled pages of a whole-show mark made during the import still finish over what it wrote,
-  and a whole-title mark records when it was made (`watchMarks.markedAt`), so source progress
-  played before it is skipped, a watched or an unwatched mark alike. In turn, a mark's pages leave
-  a row played after the mark as it is, so a late page of an older whole-show mark never rolls
-  back or deletes newer progress an import wrote, or the person's own (corrected in review). The first version moved the
-  generation on every write, which cancelled the rest of a whole-show mark made while it ran.
-  Watched marks only get set, favorites join the list once, and a play count above 0 counts an
-  item as played; the core keeps no count.
+  scheduled pages of a whole-show mark made during the import still finish over what it wrote, and
+  a whole-title mark records when it was made (`watchMarks.markedAt`), so source progress played
+  before it is skipped, a watched or an unwatched mark alike. In turn, a mark's pages leave a row
+  played after the mark as it is, so a late page of an older whole-show mark never rolls back or
+  deletes newer progress an import wrote, or the person's own (corrected in review). The first
+  version moved the generation on every write, which cancelled the rest of a whole-show mark made
+  while it ran. Watched marks only get set, favorites join the list once, and a play count above 0
+  counts an item as played; the core keeps no count.
 - Each write (`writeWatchState`, `writeCollections`, `writeEdits`) charges every item's worst case
   against the call's ranges, writes, and bytes (`movies/budget.ts`, `movies/reads.ts`), writes the
   leading items that fit, and moves the checkpoint past them in the same mutation. The server
@@ -312,16 +311,16 @@ stays wired until `p4-movies-cutover`.
   the stored one, such as a call sent again after it committed, or an older attempt's, writes
   nothing and answers the stored checkpoint. A restarted run therefore goes on from exactly where
   the last one stopped and writes nothing twice. A write that sends the last items of a user or a
-  phase names where the next items start (`continueAt`), and the core moves there in the same mutation,
-  so an empty user or phase costs no call; `advance` moves the checkpoint only past items there
-  were none of to send.
-- The checkpoint indexes the plan a run computes, as old movies' did: the planned library, the user, the item within
-  the user's matched items in source item order, the collection, or the title. A restarted
-  attempt computes the plan again, so a source or catalog that changed between attempts can shift
-  those positions and skip or resend items near the checkpoint. Every write is safe to repeat,
-  so a resent item writes nothing twice. Keying the checkpoint on source item ids would close the
-  gap; it is not old movies' behavior (D62) and is left for the backlog.
-- A source collection keeps its first 1,000 matched members, as old movies kept them. A collection longer than one call's budget
-  continues from its member index.
+  phase names where the next items start (`continueAt`), and the core moves there in the same
+  mutation, so an empty user or phase costs no call; `advance` moves the checkpoint only past
+  items there were none of to send.
+- The checkpoint indexes the plan a run computes, as old movies' did: the planned library, the
+  user, the item within the user's matched items in source item order, the collection, or the
+  title. A restarted attempt computes the plan again, so a source or catalog that changed between
+  attempts can shift those positions and skip or resend items near the checkpoint. Every write is
+  safe to repeat, so a resent item writes nothing twice. Keying the checkpoint on source item ids
+  would close the gap; it is not old movies' behavior (D62) and is left for the backlog.
+- A source collection keeps its first 1,000 matched members, as old movies kept them. A collection
+  longer than one call's budget continues from its member index.
 - A source failure fails the run with the line the connect form shows for it (`failureLine`), so a
   key the source refuses fails with the token field's line. Only an unreachable source retries.

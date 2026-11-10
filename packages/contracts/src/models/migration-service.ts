@@ -256,8 +256,9 @@ export const ImportPlan = Schema.Struct({
   pathMappings: Schema.Array(PathMapping).check(Schema.isMaxLength(50)),
   /**
    * The source's libraries and their folders on this host, which the import covers with
-   * libraries, adding one for the folders no library covers yet, shared as the source showed it:
-   * with everyone, or with the plan's users at `users` (indexes into `users`).
+   * libraries, adding libraries of up to 16 folders for the folders no library covers yet, shared
+   * as the source showed it: with everyone, or with the plan's users at `users` (indexes into
+   * `users`) and every current owner and admin.
    */
   libraries: Schema.Array(
     Schema.Struct({

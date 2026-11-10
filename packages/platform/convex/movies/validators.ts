@@ -343,9 +343,10 @@ export const sealedCredentials = v.object({
 const importHistory = v.union(v.literal("full"), v.literal("plays"));
 
 /**
- * Who sees a library an import adds: everyone in the household, when every source user could see
- * the source library; otherwise the core users of the plan's users at `users` (indexes into the
- * plan's users) whom the source let see it, and owners and admins alone when it did not say.
+ * Who sees a library an import adds besides its requester, who manages it: everyone in the
+ * household, when every source user could see the source library; otherwise the core users of the
+ * plan's users at `users` (indexes into the plan's users) whom the source let see it, and every
+ * current owner and admin, who alone see it when the source did not say.
  */
 export const plannedAccess = v.union(
   v.object({ kind: v.literal("everyone") }),
