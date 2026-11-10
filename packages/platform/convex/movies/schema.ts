@@ -19,10 +19,10 @@ import {
 } from "./validators";
 
 /**
- * The movies catalog, ported from old movies' tables (ADR 0024). Everything a person keeps, such as
- * progress and their list, is keyed by the person in the movies commands; profiles, rooms,
- * playback sessions, and old movies' identity tables do not come over (D12). A library's title
- * total is its core item count, and its episode and file totals are counters in `totals.ts`.
+ * The movies catalog, ported from old movies' tables (ADR 0024), and what each person keeps of it:
+ * progress and their list, keyed by the person (D12, D36). Profiles, rooms, playback sessions, and
+ * old movies' identity tables do not come over. A library's title total is its core item count,
+ * and its episode and file totals are counters in `totals.ts`.
  */
 export const moviesTables = {
   titles: defineTable({
@@ -64,6 +64,11 @@ export const moviesTables = {
     addedAt: v.number(),
     updatedAt: v.number(),
     searchText: v.string(),
+    /**
+     * Unique per row, set once by the movies writer: the last field of the indexes a list walks,
+     * so its cursor names one exact row however many share the fields before it (ADR 0005).
+     */
+    tie: v.string(),
     originalName: v.optional(nullable(v.string())),
     releaseDate: v.optional(nullable(v.string())),
     status: v.optional(nullable(showStatus)),
@@ -90,8 +95,15 @@ export const moviesTables = {
     .index("by_kind_tmdb", ["kind", "externalIds.tmdb"])
     .index("by_library_status", ["libraryId", "matchStatus"])
     .index("by_library_sort", ["libraryId", "sortKey"])
-    .index("by_library_added", ["libraryId", "addedAt"])
+    .index("by_library_added", ["libraryId", "addedAt", "tie"])
+    .index("by_library_kind_added", ["libraryId", "kind", "addedAt", "tie"])
     .index("by_library_year", ["libraryId", "year"])
+    .index("by_sort", ["sortKey"])
+    .index("by_added", ["addedAt"])
+    .index("by_year", ["year"])
+    .index("by_kind_sort", ["kind", "sortKey"])
+    .index("by_kind_added", ["kind", "addedAt"])
+    .index("by_kind_year", ["kind", "year"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["libraryId", "kind"] }),
 
   /**
@@ -112,7 +124,13 @@ export const moviesTables = {
     .index("by_title", ["titleId"])
     .index("by_library_genre_sort", ["libraryId", "genre", "sortKey"])
     .index("by_library_genre_added", ["libraryId", "genre", "addedAt"])
-    .index("by_library_genre_year", ["libraryId", "genre", "year"]),
+    .index("by_library_genre_year", ["libraryId", "genre", "year"])
+    .index("by_genre_sort", ["genre", "sortKey"])
+    .index("by_genre_added", ["genre", "addedAt"])
+    .index("by_genre_year", ["genre", "year"])
+    .index("by_kind_genre_sort", ["kind", "genre", "sortKey"])
+    .index("by_kind_genre_added", ["kind", "genre", "addedAt"])
+    .index("by_kind_genre_year", ["kind", "genre", "year"]),
 
   seasons: defineTable({
     titleId: v.id("titles"),
@@ -147,6 +165,12 @@ export const moviesTables = {
    */
   people: defineTable({
     personKey: v.string(),
+    /**
+     * `name:<normalized name>` from the name a scan first sent, bounded as keys are, whatever
+     * their key became: a credit without ids finds the person by it, never by the stored name,
+     * which the fitter may have cut.
+     */
+    nameKey: v.string(),
     name: v.string(),
     sortKey: v.string(),
     externalIds,
@@ -159,10 +183,12 @@ export const moviesTables = {
     knownFor: nullable(v.string()),
     /** When a person or metadata job last wrote their details; null until then. */
     detailsFetchedAt: nullable(v.number()),
+    /** When someone last asked for their details, so a page opened again queues no new job. */
+    detailsRequestedAt: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_key", ["personKey"])
-    .index("by_name", ["name"])
+    .index("by_name_key", ["nameKey"])
     .index("by_tmdb", ["externalIds.tmdb"])
     .searchIndex("search_name", { searchField: "name" }),
 
@@ -174,9 +200,14 @@ export const moviesTables = {
     kind: creditKind,
     role: nullable(v.string()),
     order: v.number(),
+    /**
+     * Unique per row, set once by the movies writer: the last field of the indexes a list walks,
+     * so its cursor names one exact row however many share the fields before it (ADR 0005).
+     */
+    tie: v.string(),
   })
     .index("by_title_episode", ["titleId", "episodeId", "order"])
-    .index("by_person", ["personId"]),
+    .index("by_person", ["personId", "tie"]),
 
   /** A file a scan found, the title and episode it plays, and what ffprobe saw in it. */
   mediaFiles: defineTable({
@@ -218,9 +249,14 @@ export const moviesTables = {
     overview: nullable(v.string()),
     poster: nullable(v.string()),
     backdrop: nullable(v.string()),
+    /**
+     * Unique per row, set once by the movies writer: the last field of the indexes a list walks,
+     * so its cursor names one exact row however many share the fields before it (ADR 0005).
+     */
+    tie: v.string(),
   })
     .index("by_source_key", ["sourceKey"])
-    .index("by_sort", ["sortKey"]),
+    .index("by_sort", ["sortKey", "tie"]),
 
   collectionItems: defineTable({
     collectionId: v.id("collections"),
@@ -231,4 +267,50 @@ export const moviesTables = {
   })
     .index("by_collection_position", ["collectionId", "position"])
     .index("by_title", ["titleId"]),
+
+  /**
+   * One person's progress through a movie (`episodeId` null) or an episode, and so their watch
+   * history. A row stays when its title is purged; reads skip it, as old movies did.
+   */
+  watchProgress: defineTable({
+    userId: v.id("users"),
+    titleId: v.id("titles"),
+    episodeId: nullable(v.id("episodes")),
+    /** The version last played, which the next start prefers while it is on disk. */
+    fileId: nullable(v.id("mediaFiles")),
+    positionMs: v.number(),
+    durationMs: v.number(),
+    /** Stays set until the person marks the item unwatched, so a rewatch keeps it. */
+    watched: v.boolean(),
+    updatedAt: v.number(),
+    lastPlayedAt: v.number(),
+    /**
+     * The playback that last reported, its id and start time from `movies.play.start`, so a
+     * report from an older start cannot drag a newer one's position back.
+     */
+    playId: v.optional(v.string()),
+    playStartedAt: v.optional(v.number()),
+  })
+    .index("by_user_item", ["userId", "titleId", "episodeId"])
+    .index("by_user_title_played", ["userId", "titleId", "lastPlayedAt"])
+    .index("by_user_played", ["userId", "lastPlayedAt"]),
+
+  myList: defineTable({
+    userId: v.id("users"),
+    titleId: v.id("titles"),
+    addedAt: v.number(),
+  })
+    .index("by_user_title", ["userId", "titleId"])
+    .index("by_user_added", ["userId", "addedAt"]),
+
+  /**
+   * How many times a person's history of one title has changed: every mark and every progress
+   * report moves it. A scheduled page of marking a whole show carries the generation it was asked
+   * at and writes nothing once it moved, so it never undoes a newer change.
+   */
+  watchMarks: defineTable({
+    userId: v.id("users"),
+    titleId: v.id("titles"),
+    generation: v.number(),
+  }).index("by_user_title", ["userId", "titleId"]),
 };

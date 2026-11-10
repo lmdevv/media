@@ -3,6 +3,9 @@ import type { Infer } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { inOrder } from "../core/lib/inOrder";
+import { boundedKey } from "./bounds";
+import { fitPerson } from "./fit";
+import { insertCredit, insertPerson, patchPerson } from "./write";
 import type { externalIds, scannedCredit, scannedPerson } from "./validators";
 
 type Db = MutationCtx["db"];
@@ -22,17 +25,31 @@ const normalizeName = (name: string): string =>
     .replaceAll(/\s+/gu, " ")
     .trim();
 
-/** The key that identifies a person across titles. */
-export const personKeyOf = (person: {
+/** The key a name gives a person, from the name a scan sent, bounded as keys are. */
+const nameKeyOf = (name: string): string => boundedKey(`name:${normalizeName(name)}`);
+
+/** The key a provider's id gives a person: TMDB's first, then IMDb's, or null for neither. */
+const idKeyOf = (ids: ExternalIds): string | null => {
+  if (ids.tmdb !== null) return boundedKey(`tmdb:${ids.tmdb}`);
+
+  return ids.imdb === null ? null : boundedKey(`imdb:${ids.imdb}`);
+};
+
+/**
+ * The key that identifies a person across titles, from the name and ids a scan or a metadata job
+ * sent, never from a stored name, which its fitter may have cut.
+ */
+const personKeyOf = (person: {
   readonly name: string;
   readonly externalIds: ExternalIds;
-}): string => {
-  if (person.externalIds.tmdb !== null) return `tmdb:${person.externalIds.tmdb}`;
+}): string => idKeyOf(person.externalIds) ?? nameKeyOf(person.name);
 
-  return person.externalIds.imdb === null
-    ? `name:${normalizeName(person.name)}`
-    : `imdb:${person.externalIds.imdb}`;
-};
+/**
+ * A stored person's key once their ids are `ids`: a provider's key once one is known, else the
+ * key they were stored under, which came from the name a scan sent.
+ */
+export const mergedPersonKey = (existing: Doc<"people">, ids: ExternalIds): string =>
+  idKeyOf(ids) ?? existing.personKey;
 
 const sortKeyOf = (name: string): string => {
   const parts = normalizeName(name).split(" ");
@@ -62,6 +79,7 @@ const upsertPerson = async (
 ): Promise<Doc<"people">> => {
   const name = person.name.trim();
   const key = personKeyOf({ name, externalIds: person.externalIds });
+  const nameKey = nameKeyOf(name);
 
   const byKey = await db
     .query("people")
@@ -73,7 +91,7 @@ const upsertPerson = async (
     (
       await db
         .query("people")
-        .withIndex("by_name", (q) => q.eq("name", name))
+        .withIndex("by_name_key", (q) => q.eq("nameKey", nameKey))
         .take(NAMESAKES)
     ).find((candidate) => compatible(candidate.externalIds, person.externalIds)) ??
     null;
@@ -81,8 +99,9 @@ const upsertPerson = async (
   const now = Date.now();
 
   if (existing === null) {
-    const fields = {
+    const fields = fitPerson({
       personKey: key,
+      nameKey,
       name,
       sortKey: sortKeyOf(name),
       externalIds: person.externalIds,
@@ -94,16 +113,16 @@ const upsertPerson = async (
       knownFor: null,
       detailsFetchedAt: null,
       updatedAt: now,
-    };
+    });
 
-    const personId = await db.insert("people", fields);
+    const personId = await insertPerson(db, fields);
 
     return { ...fields, _id: personId, _creationTime: now };
   }
 
   const ids = mergeIds(existing.externalIds, person.externalIds);
   const profile = existing.profile ?? person.profile;
-  const personKey = personKeyOf({ name: existing.name, externalIds: ids });
+  const personKey = mergedPersonKey(existing, ids);
 
   const changed =
     personKey !== existing.personKey ||
@@ -114,9 +133,7 @@ const upsertPerson = async (
 
   const patch = { personKey, externalIds: ids, profile, updatedAt: now };
 
-  await db.patch(existing._id, patch);
-
-  return { ...existing, ...patch };
+  return patchPerson(db, existing, patch);
 };
 
 /** The stored credits of a title (`episodeId` null) or one episode, in billing order. */
@@ -145,7 +162,7 @@ export const replaceCredits = async (
   return inOrder(credits.slice(0, CREDIT_LIMIT), async (entry) => {
     const person = await upsertPerson(db, entry.person);
 
-    await db.insert("credits", {
+    await insertCredit(db, {
       titleId,
       episodeId,
       personId: person._id,

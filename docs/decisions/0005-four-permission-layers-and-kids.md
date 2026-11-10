@@ -2,7 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the first role and the `admin` scope,
   and again the same day with the permissions as built. Amended 2026-11-06 with the service
-  principal's scope and key, and 2026-11-09 with the guarded server functions and movies' facts.
+  principal's scope and key, and 2026-11-09 with the guarded server functions, movies' facts,
+  and the movies commands' access.
 - Decisions: D16, D17
 
 ## Context
@@ -323,8 +324,133 @@ Rejected in this build:
 
 - Access declared on each command and checked by the generated wrapper before the handler runs.
   Lists and commands whose action depends on an argument, such as `setRole` (`promote` or
-  `demote`), fit no single declared target. It is worth another look in the movies port, when
-  many commands each open one title.
+  `demote`), fit no single declared target. The movies port looked again and kept loaders; see
+  Movies commands below.
 - A table of each person's effective level per resource. A household grant would write a row per
   person, and a group change a row per resource shared with the group.
 - Admins who see all content, and a `play` or `edit` scope that needs `read`.
+
+## Movies commands (amended 2026-11-09)
+
+The movies commands (ADR 0009) port old movies' actions onto the core. A person's progress,
+history, and list are theirs (D12, D36), in `watchProgress` and `myList` keyed by user.
+
+### Title commands do not declare their target
+
+This build left open whether a command that opens one title should declare it, so the generated
+wrapper checks access before the handler runs. The port keeps loaders, and the generator stays
+as it is.
+
+- Of the 27 movies commands, 10 open one title by its id and decide it. The rest decide many
+  titles (home rows, lists, search, genres, history, the list, collections, people), open a
+  title through another row (an episode, a file, a person, a collection), decide by what a
+  guest's link covers (`movies.play.start` and the play reports), or need no decision
+  (`movies.myList.remove` takes a title off the caller's own list). A declared target fits only
+  the 10.
+- The 10 call one loader, `requireTitle` in `convex/movies/access.ts`, as their first line. It
+  reads the title, its library, the caller's reach, and the library's grants, and asks
+  `can(principal, action, item)` with the title's facts. A title being purged, one in no movies
+  library, and one the caller may not see all fail `not_found` with one message; one they see
+  but may not act on fails `forbidden`. The declaration would save that one line and add a
+  second way to check access.
+- Metadata match, refresh, and edits ask `edit`, so they need `movies:edit` and an `edit` grant
+  on the title's library. The list and marking watched ask `play`, as old movies asked the `play`
+  scope.
+
+### Lists across libraries
+
+- `movies.titles.list` keeps one order across every library, as old movies' list did: by name,
+  newest added, or newest year. It pages one household-wide index with `paginate`, the titles
+  table's own (`by_sort`, `by_added`, `by_year`, and the same by kind) or the genre rows'
+  (`by_genre_*`, `by_kind_genre_*`), and decides each row through `can()` at its library's
+  level. Titles the caller may not see, restrictions, and filters make a page short or empty
+  while its cursor goes on. With a library named, the list pages that library's own index after
+  `requireItems` decides it.
+- A season's episodes come a page at a time, so a season of any length lists whole. Where a show
+  resumes comes from the person's newest progress row on it, through the
+  `(user, title, played at)` index.
+- A row whose title is gone or being purged is skipped, as old movies skipped it; the purge
+  leaves the person's rows behind.
+
+### One read budget per call
+
+Convex fails a call past 4,096 index ranges, 32,000 documents, or 16 MiB read (ADR 0013). Every
+access-checked movies read stays under all three by one rule, in `movies/reads.ts`.
+
+- **Real costs.** A `get` is one range and one document; a query is one range and the rows it
+  returns. Bytes are reserved before a read and settled after it: a read reserves the most its
+  documents can take (1 KiB a row for small tables of ids, numbers, literals, and bounded text,
+  such as grants, libraries, title genres, list and progress rows, memberships, and watch marks;
+  for titles, episodes, people, credits, and collections, the bound the one movies writer keeps,
+  ADR 0024), then gives back
+  what each document it returned did not take, measured as Convex measures it
+  (`getDocumentSize`). Deciding a library is charged once per call, at what `reachOf` and
+  `levelOn` read: the library and one grant query per grant key (the person's own, the
+  household's, and each of up to 16 groups). The caller, the session, and the reach are charged
+  first, as `decidableRows` charges them. Lookups that find nothing, such as next-episode scans,
+  are charged too. Because every read reserves its worst case first, the bytes left before any
+  read always cover everything it can return, and the 4 MiB of headroom below Convex's limit is
+  more than the largest document Convex allows.
+- **One total.** A call spends at most 3,000 ranges, 30,000 documents, and 12 MiB from one
+  shared total, which leaves headroom for its fixed work. Parts of a call take shares
+  of what is left (home rows: continue watching first, then the list, then the library walk, then
+  each row's merge), never a minimum per library.
+- **Pages are sized, never cut.** A paginated list sizes its page before it reads, so its rows
+  can never run out of ranges or documents: history and the list by `decidableRows` from each row's own
+  reads, the title list the same way, and collections by what each collection needs to decide
+  all 200 of its members at the worst cost, each in a library of its own, with each collection
+  on a page given an equal share of the page's budget. So a page's continuation is always exactly
+  after its last row, and no row is skipped. A collection is listed only once one of its members
+  is visible to the caller, as old movies' list and `collections.get` required; running out of
+  budget is never taken for visibility. A collection that alone costs more than its share (a
+  person in many groups, with members in more libraries than a call can check) ends the page
+  there, unlisted: the page's cursor names it and the first member it did not decide, so the
+  next page decides it from that member on, and it is listed once a member is visible, or left
+  out once every member is decided and none is. A collection with a visible member whose budget
+  then runs out stays listed with the titles it decided. Collections page by their own cursor, which names one exact row: a collection's
+  sort key and its tie. Each collection, title, and credit gets a tie when the movies writer
+  inserts it, a UUID unique to the row and never changed, and it is the last field of the
+  indexes the paging walks use (collections by `(sort key, tie)`, titles by `(library, kind,
+  added, tie)`, credits by `(person, tie)`). A page goes on strictly after the tie its cursor
+  names within an equal prefix, so it reads only forward, deleting or adding rows between pages
+  never skips or repeats one, and a page's reads stay within the budget however many rows share
+  a sort key, an added time, or a creation time. A reloaded page's `endCursor` uses the same
+  position. The newest merge and people search's walk through a person's credits continue the
+  same way inside a call.
+- **Aggregates answer the best for their budget.** Home rows, genres, and similar titles walk
+  every movies library shared with the caller with `visiblePage`, as many rows a step as both
+  `visiblePage`'s sizing and the budget allow, keeping each step's continuation, with no fixed
+  number of steps; music libraries and libraries the caller cannot browse cost a step but never
+  push a movies library out. They then merge the libraries' own newest titles from the
+  `(library, kind, added)` index, a batch at a time, reading a library further only while its
+  titles are still among the newest, so a library of newer titles of another kind or of titles
+  the caller may not see hides nothing. When the walk cannot finish within its share, the
+  aggregate uses the libraries it covered; when a merge runs out, it answers the newest it found
+  among what it read. Search, a person's credits, people search, and a collection's titles decide
+  rows until the budget runs out and answer what they decided; continue watching keeps the most
+  recent items it could decide.
+
+### Playback
+
+- `movies.play.start` decides one file. A person in the household needs `play` on the title
+  through their grants, decided before any file is chosen. A guest's link decides instead,
+  through `playableBy` in `permissions/items.ts`: a link to the title covers each of its files,
+  one to an episode that episode's files, and one to a file that file (ADR 0007). It issues a
+  personal `play` ticket for the file, which names the caller's session and lasts at most 6 h
+  (ADR 0011).
+- Old movies' playback sessions do not come over, but what they fenced does. Old movies made a
+  playback session on each start and kept, on the progress row, the session and start time of
+  the playback that last reported; a report from a different session that started earlier
+  changed nothing. Each `movies.play.start` answers a fresh `playbackId` (a UUID, at most 64
+  characters) and its `startedAt`, each report carries both, and the progress row keeps the
+  `playId` and start of the playback that last reported. A report from another playback that
+  started earlier is stale and changes nothing, even from the same sign-in, so a second tab or
+  a player restarted on one device never drags a newer position back.
+- Marking a whole show watched or unwatched writes a page of up to 500 episodes in its call and
+  schedules the rest, a page a call, inside the call budget of ADR 0013. Every change of a
+  person's history of a title (a mark of the title or an episode, an online or offline progress
+  report that applied) moves a generation stored per person and title (`watchMarks`), and a
+  scheduled page carries the generation its mark moved to. A page whose generation is no longer
+  current writes nothing, so a page delivered after a newer mark or report never undoes it, the
+  same fence as a metadata job's match generation (ADR 0012). The pages themselves do not move
+  it.

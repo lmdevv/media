@@ -21,20 +21,39 @@ const convex = (args: ReadonlyArray<string>): string =>
     stdio: ["ignore", "pipe", "ignore"],
   });
 
-export const importRows = <Table extends TableNames>(
-  table: Table,
-  rows: ReadonlyArray<WithoutSystemFields<Doc<Table>>>,
-): void => {
+const importLines = (table: TableNames, lines: ReadonlyArray<string>): void => {
   const directory = mkdtempSync(join(tmpdir(), "media-import-"));
   const file = join(directory, `${table}.jsonl`);
 
   try {
-    writeFileSync(file, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
+    writeFileSync(file, `${lines.join("\n")}\n`);
     convex(["import", "--table", table, "--append", "--yes", file]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 };
+
+export const importRows = <Table extends TableNames>(
+  table: Table,
+  rows: ReadonlyArray<WithoutSystemFields<Doc<Table>>>,
+): void =>
+  importLines(
+    table,
+    rows.map((row) => JSON.stringify(row)),
+  );
+
+/**
+ * Imports `rows` into `table` with the creation times they name, as a restore does, so a test can
+ * make rows that only their ids order.
+ */
+export const importRowsAt = <Table extends TableNames>(
+  table: Table,
+  rows: ReadonlyArray<WithoutSystemFields<Doc<Table>> & { readonly _creationTime: number }>,
+): void =>
+  importLines(
+    table,
+    rows.map((row) => JSON.stringify(row)),
+  );
 
 export const newestRows = (table: TableNames, limit = 200): ReadonlyArray<string> =>
   convex(["data", table, "--format", "jsonl", "--order", "desc", "--limit", String(limit)])

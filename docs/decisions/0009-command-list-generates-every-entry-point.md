@@ -1,7 +1,8 @@
 # 0009. Declare each action once and generate its Convex function and clients
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the generator's layout, and again on
-  2026-11-04 with `refusesKeys` and with the SDK target.
+  2026-11-04 with `refusesKeys` and with the SDK target. Amended 2026-11-09 with the movies
+  commands.
 - Decisions: D23
 
 ## Context
@@ -170,3 +171,33 @@ Rejected for the SDK target:
 - Methods keyed by name, such as `client.query("core.server.info", args)`. The caller picks the
   kind, and no method has its own hover.
 - A copy of `Auth` for the platform. Every refresh fix would land twice.
+
+## The movies commands (amended 2026-11-09)
+
+The movies port declares old movies' actions as the `movies` domain, so the core serves them and
+the same generator run writes every entry point.
+
+- **Where they live.** The declarations are in `packages/commands/src/movies.ts`, beside
+  `core.ts`, each with a `movies:read`, `movies:play`, or `movies:edit` scope (`domain-scope` in
+  `check.ts` refuses anything else). Their handlers are in `packages/platform/convex/movies/`.
+  `people.ts` and `metadata.ts` hold commands beside the server functions the scanner and
+  metadata jobs call, as the layout above allows.
+- **What one run writes.** One `pnpm --filter @media/commands generate` writes a contract per
+  movies module under `packages/platform/commands/movies/`, `platform.movies.*` in the SDK's
+  `/effect`, `/promise`, and `/react` entry points, the `media movies` group of the CLI, and
+  `apps/cli/skills/media/references/movies.md`. A second run writes nothing.
+- **What came over.** Home rows, the title list with its filters, genres, search, similar
+  titles, a title with its seasons, episodes, versions, and credits, the next episode, a person
+  and people search, collections, the caller's list, continue watching and history, marking
+  watched, starting playback, progress reports online and offline, and metadata match, refresh,
+  and edits. Profiles, rooms, playback sessions, the active-playback list, and token renewal do
+  not: a person replaces a profile (ADR 0003), group sessions replace rooms (ADR 0017), and a new
+  start replaces renewal (ADR 0011). Searching TMDB for match candidates runs on the server, not
+  in Convex, and moves with the server's adapters.
+- **Old words beside the new.** `media movies ...` reaches the core. The old movies server's
+  words stay at the top level of `media` (`media search`, `media play`) until the CLI folds onto
+  the core, and the skill names a reference for each.
+- **One paginated query per call.** Convex runs one paginated query in each function, so a list
+  that must keep one order across many containers, such as the title list across libraries,
+  pages one household-wide index and decides each row's access, rather than merging one range
+  per container (ADR 0005).

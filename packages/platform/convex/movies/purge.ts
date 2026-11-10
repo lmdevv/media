@@ -12,6 +12,7 @@ import type { Budget, Work } from "./budget";
 import { adjustPresent, purgingKey } from "./catalog";
 import { forgetTotals, moveTotals, nothingMoved } from "./totals";
 import { forgetTrickplay } from "./trickplayState";
+import { patchTitle } from "./write";
 
 type Db = MutationCtx["db"];
 
@@ -133,7 +134,7 @@ export const files = internalMutation({
  * purged.
  */
 const markPurging = async (db: Db, scope: PurgeScope, title: Doc<"titles">): Promise<void> => {
-  await db.patch(title._id, { purging: true, matchKey: purgingKey(title._id) });
+  await patchTitle(db, title, { purging: true, matchKey: purgingKey(title._id) });
 
   if (!scope.gone) {
     await moveTotals(db, title.libraryId, { ...nothingMoved, episodes: -title.episodeCount });

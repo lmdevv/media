@@ -23,6 +23,17 @@ import { askForMatch, askForRefresh } from "./matching";
 import { filesPage, titlesPage } from "./purge";
 import { moveTotals, nothingMoved, totalsOf } from "./totals";
 import { trickplayState } from "./validators";
+import {
+  insertCollection,
+  insertCollectionItem,
+  insertCredit,
+  insertEpisode,
+  insertMediaFile,
+  insertPerson,
+  insertSeason,
+  insertTitle,
+  insertTitleGenre,
+} from "./write";
 
 /**
  * The stack suite's seam into the movies catalog, as `core/libraryProbe.ts` is for music until
@@ -47,6 +58,10 @@ const seededTitle = v.object({
   age: v.union(v.number(), v.null()),
   /** A show's episode count, each with a file; a movie has none and one file. */
   episodes: v.number(),
+  /** Its genres, each with the genre row lists read; none when absent. */
+  genres: v.optional(v.array(v.string())),
+  /** Its overview; none when absent. */
+  overview: v.optional(v.string()),
 });
 
 const seededRows = v.object({
@@ -55,17 +70,23 @@ const seededRows = v.object({
   episodeIds: v.array(v.id("episodes")),
 });
 
-const insertTitle = async (
+const seedTitle = async (
   db: MutationCtx["db"],
   libraryId: Id<"libraries">,
   folder: string,
-  title: { readonly name: string; readonly age: number | null; readonly episodes: number },
+  title: {
+    readonly name: string;
+    readonly age: number | null;
+    readonly episodes: number;
+    readonly genres?: ReadonlyArray<string> | undefined;
+    readonly overview?: string | undefined;
+  },
 ) => {
   const now = Date.now();
   const kind = title.episodes > 0 ? "show" : "movie";
   const sortKey = title.name.toLowerCase();
 
-  const titleId = await db.insert("titles", {
+  const { _id: titleId } = await insertTitle(db, {
     libraryId,
     kind,
     matchKey: `seed:${title.name}`,
@@ -73,9 +94,9 @@ const insertTitle = async (
     sortName: title.name,
     sortKey,
     year: null,
-    overview: null,
+    overview: title.overview ?? null,
     tagline: null,
-    genres: [],
+    genres: [...(title.genres ?? [])],
     certification: null,
     ageRating: title.age,
     runtimeMs: null,
@@ -90,9 +111,21 @@ const insertTitle = async (
     searchText: title.name,
   });
 
+  await inOrder(title.genres ?? [], async (genre) =>
+    insertTitleGenre(db, {
+      titleId,
+      libraryId,
+      genre: genre.toLowerCase(),
+      kind,
+      sortKey,
+      addedAt: now,
+      year: null,
+    }),
+  );
+
   const seasonId =
     title.episodes > 0
-      ? await db.insert("seasons", {
+      ? await insertSeason(db, {
           titleId,
           seasonNumber: 1,
           name: "Season 1",
@@ -108,7 +141,7 @@ const insertTitle = async (
       : await inOrder(
           Array.from({ length: title.episodes }, (_, n) => n + 1),
           async (episodeNumber) =>
-            db.insert("episodes", {
+            insertEpisode(db, {
               titleId,
               seasonId,
               seasonNumber: 1,
@@ -125,7 +158,7 @@ const insertTitle = async (
         );
 
   const fileIds = await inOrder(episodeIds.length === 0 ? [null] : episodeIds, async (episodeId) =>
-    db.insert("mediaFiles", {
+    insertMediaFile(db, {
       libraryId,
       titleId,
       episodeId,
@@ -155,9 +188,11 @@ export const seed = internalMutation({
   args: {
     managerId: v.id("users"),
     libraries: v.array(v.object({ name: v.string(), titles: v.array(seededTitle) })),
+    /** People given `view` on every library made, as a share would. */
+    viewers: v.optional(v.array(v.id("users"))),
   },
   returns: v.array(v.object({ libraryId: v.id("libraries"), titles: v.array(seededRows) })),
-  handler: async (ctx, { managerId, libraries }) => {
+  handler: async (ctx, { managerId, libraries, viewers }) => {
     if (libraries.length === 0 || libraries.length > SEED_MAX) {
       throw new Error(`seed makes 1 to ${SEED_MAX} libraries; got ${libraries.length}`);
     }
@@ -168,10 +203,18 @@ export const seed = internalMutation({
 
       await claimFolders(ctx, libraryId, [folder]);
       await grantCreator(ctx, { type: "library", id: libraryId }, managerId);
+      await inOrder(viewers ?? [], async (viewerId) =>
+        ctx.db.insert("grants", {
+          resourceType: "library",
+          resourceId: libraryId,
+          principal: viewerId,
+          level: "view",
+        }),
+      );
 
       const rows = await withLibraryItems(ctx, libraryId, async () => {
         const inserted = await inOrder(titles, (title) =>
-          insertTitle(ctx.db, libraryId, folder, title),
+          seedTitle(ctx.db, libraryId, folder, title),
         );
 
         return { value: inserted, added: inserted.length, removed: 0 };
@@ -329,7 +372,92 @@ export const hasRows = internalQuery({
   },
 });
 
-/** Up to 1,000 of a library's files with their paths, for a test to name files it scanned. */
+/**
+ * How many progress rows a person has on a show, and the episode whose row comes last in
+ * `(user, title, episode)` order: the row a read of the first 1,000 in that order would miss.
+ */
+export const progressOrder = internalQuery({
+  args: { userId: v.id("users"), titleId: v.id("titles") },
+  returns: v.object({ rows: v.number(), lastEpisodeId: v.union(v.id("episodes"), v.null()) }),
+  handler: async (ctx, { userId, titleId }) => {
+    const range = () =>
+      ctx.db
+        .query("watchProgress")
+        .withIndex("by_user_item", (q) => q.eq("userId", userId).eq("titleId", titleId));
+
+    const [found, last] = await Promise.all([range().take(5000), range().order("desc").first()]);
+
+    return { rows: found.length, lastEpisodeId: last?.episodeId ?? null };
+  },
+});
+
+/** A collection holding `titleIds` in order, written without a metadata job. */
+export const seedCollection = internalMutation({
+  args: { name: v.string(), titleIds: v.array(v.id("titles")) },
+  returns: v.id("collections"),
+  handler: async (ctx, { name, titleIds }) => {
+    const now = Date.now();
+
+    const collectionId = await insertCollection(ctx.db, {
+      name,
+      sortKey: name.toLowerCase(),
+      sourceKey: null,
+      createdAt: now,
+      updatedAt: now,
+      overview: null,
+      poster: null,
+      backdrop: null,
+    });
+
+    await inOrder(
+      titleIds.map((titleId, position) => ({ titleId, position })),
+      async ({ titleId, position }) =>
+        insertCollectionItem(ctx.db, { collectionId, titleId, position, source: "import" }),
+    );
+
+    return collectionId;
+  },
+});
+
+/** A person credited as an actor on each of `titleIds`, written without a metadata job. */
+export const seedCredits = internalMutation({
+  args: { name: v.string(), titleIds: v.array(v.id("titles")) },
+  returns: v.id("people"),
+  handler: async (ctx, { name, titleIds }) => {
+    const personId = await insertPerson(ctx.db, {
+      personKey: `name:${name.toLowerCase()}`,
+      nameKey: `name:${name.toLowerCase()}`,
+      name,
+      sortKey: name.toLowerCase(),
+      externalIds: NO_EXTERNAL_IDS,
+      profile: null,
+      biography: null,
+      birthDate: null,
+      deathDate: null,
+      birthPlace: null,
+      knownFor: null,
+      detailsFetchedAt: null,
+      updatedAt: Date.now(),
+    });
+
+    await inOrder(
+      titleIds.map((titleId, order) => ({ titleId, order })),
+      async ({ titleId, order }) =>
+        insertCredit(ctx.db, {
+          titleId,
+          episodeId: null,
+          personId,
+          kind: "actor",
+          role: null,
+          order,
+        }),
+    );
+
+    return personId;
+  },
+});
+
+/** Up to 500 of a library's files with their paths, for a test to name files it scanned. */
 export const files = internalQuery({
   args: { libraryId: v.id("libraries") },
   returns: v.array(v.object({ fileId: v.id("mediaFiles"), path: v.string() })),
@@ -337,7 +465,7 @@ export const files = internalQuery({
     const found = await ctx.db
       .query("mediaFiles")
       .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId))
-      .take(1000);
+      .take(500);
 
     return found.map((file) => ({ fileId: file._id, path: file.path }));
   },

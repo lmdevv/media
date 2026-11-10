@@ -9,6 +9,7 @@ export default defineConfig({
       "packages/commands/test/**/*.test.ts",
       "packages/platform/test/**/*.test.ts",
       "scripts/*.test.ts",
+      "tools/oxlint/media/**/*.test.ts",
     ],
     passWithNoTests: true,
   },
