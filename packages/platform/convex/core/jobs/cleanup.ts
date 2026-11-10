@@ -36,8 +36,8 @@ const JOB_BYTES_MAX = 1024 * 1024;
 
 /**
  * The kinds whose finished jobs nothing needs (ADR 0012, "Finished jobs"). Scans stay, because a
- * library's `lastScan` is its scan state, and so does `probe.import`, which an `imports` row
- * names. A trickplay job that a file still waits on is released from the file first.
+ * library's `lastScan` is its scan state, and so do imports, which an `imports` row names. A
+ * trickplay job that a file still waits on is released from the file first.
  */
 const SWEPT_KINDS = [
   "movies.trickplay",

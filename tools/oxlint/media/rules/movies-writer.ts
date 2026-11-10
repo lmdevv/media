@@ -21,6 +21,7 @@ export const MOVIES_TABLES: ReadonlySet<string> = new Set([
   "watchProgress",
   "myList",
   "watchMarks",
+  "importPlans",
 ]);
 
 /** Core tables a module in `movies/` may insert into: the stack probe's libraries and grants. */

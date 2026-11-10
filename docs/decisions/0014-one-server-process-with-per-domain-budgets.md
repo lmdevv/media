@@ -153,3 +153,8 @@ its leases with `report` every 15 seconds, and settles with `finish`. A lease-ch
 answers canceled or lost stops the job and settles nothing. The `movies` and `movies.background`
 pools claim only while `core/scans:domains` answers that movies has a library (ADR 0024); the
 `server` pool always claims. Music adds its pools with its port.
+
+Jellyfin and Plex imports, old movies' `migration` kind in the `movies` pool, run on the core in a
+pool of their own, `movies.import`, cap 1, which always claims (amended 2026-11-10): an import adds
+the libraries it needs (ADR 0012), so on an empty install it must run before movies has one. Its
+own pool also keeps a long import from holding a slot that scans and metadata need.

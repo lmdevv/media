@@ -4,7 +4,13 @@ import { EpisodeId, LibraryId, MediaFileId, ProfileId, TitleId, UserId } from ".
 import { EpochMillis, Milliseconds } from "../units";
 import { ExternalIds, LibraryKind, LibraryRoots, MetadataOverrides, TitleKind } from "./catalog";
 import { MigrationSource } from "./jobs";
-import { MigrationImported, MigrationPhase, PathMapping, PlannedLibraryAccess } from "./migration";
+import {
+  ImportPhase,
+  MigrationImported,
+  MigrationPhase,
+  PathMapping,
+  PlannedLibraryAccess,
+} from "./migration";
 
 /** A [movies] account and its profiles, for mapping migration source users. */
 export const MigrationTarget = Schema.Struct({
@@ -202,3 +208,91 @@ export const OverrideImport = Schema.Struct({
 
 /** Locked source metadata and provider IDs for one matched title. */
 export interface OverrideImport extends Schema.Schema.Type<typeof OverrideImport> {}
+
+/**
+ * Where an import into the core resumes: the phase, the unit within it (the user index while
+ * importing watch state, the member index of the current collection), and the cursor (the planned
+ * library's index, the item index within the user, or the collection or title index).
+ */
+export const ImportCheckpoint = Schema.Struct({
+  phase: ImportPhase,
+  unit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  cursor: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+
+/** Where an import into the core resumes. */
+export interface ImportCheckpoint extends Schema.Schema.Type<typeof ImportCheckpoint> {}
+
+/** What an import into the core has written so far. */
+export const ImportedCounts = Schema.Struct({
+  librariesAdded: Schema.Int,
+  watched: Schema.Int,
+  inProgress: Schema.Int,
+  favorites: Schema.Int,
+  collections: Schema.Int,
+  overrides: Schema.Int,
+  /** Items where the core kept its own, more recent progress. */
+  keptLocal: Schema.Int,
+  unmatched: Schema.Int,
+});
+
+/** What an import into the core has written so far. */
+export interface ImportedCounts extends Schema.Schema.Type<typeof ImportedCounts> {}
+
+/**
+ * Everything an import into the core needs to run again after a restart. The credentials are
+ * sealed by the server under its own key, so neither the core nor a backup can open them.
+ */
+export const ImportPlan = Schema.Struct({
+  sourceUrl: Schema.String.check(Schema.isMaxLength(2048)),
+  credentials: SealedCredentials,
+  users: Schema.Array(
+    Schema.Struct({
+      sourceUserId: Schema.String,
+      userId: UserId,
+      history: Schema.Literals(["full", "plays"]),
+    }),
+  ).check(Schema.isMaxLength(200)),
+  pathMappings: Schema.Array(PathMapping).check(Schema.isMaxLength(50)),
+  /**
+   * The source's libraries and their folders on this host, which the import covers with
+   * libraries, adding libraries of up to 16 folders for the folders no library covers yet, shared
+   * as the source showed it: with everyone, or with the plan's users at `users` (indexes into
+   * `users`) and every current owner and admin.
+   */
+  libraries: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      roots: Schema.Array(Schema.String),
+      access: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal("everyone") }),
+        Schema.Struct({ kind: Schema.Literal("users"), users: Schema.Array(Schema.Int) }),
+      ]),
+    }),
+  ).check(Schema.isMaxLength(50)),
+});
+
+/** Everything an import into the core needs to run again after a restart. */
+export interface ImportPlan extends Schema.Schema.Type<typeof ImportPlan> {}
+
+/**
+ * One matched item's watch state for one core user. Writing it again changes nothing: watched
+ * marks stay set, a position applies only when the source played the item more recently than the
+ * core did, and a favorite joins the user's list once.
+ */
+export const ImportWatchItem = Schema.Struct({
+  userId: UserId,
+  titleId: TitleId,
+  /** The episode for shows; null for movies, and for a show itself (favorites only). */
+  episodeId: Schema.NullOr(EpisodeId),
+  fileId: Schema.NullOr(MediaFileId),
+  watched: Schema.Boolean,
+  positionMs: Milliseconds,
+  /** A play count above 0 counts the item as played; the core keeps no count. */
+  playCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  lastPlayedAt: Schema.NullOr(EpochMillis),
+  favorite: Schema.Boolean,
+});
+
+/** One matched item's watch state for one core user. */
+export interface ImportWatchItem extends Schema.Schema.Type<typeof ImportWatchItem> {}

@@ -11,8 +11,6 @@ const probeRunKind = v.union(
   v.literal("probe.items"),
 );
 
-const probeKind = v.union(probeRunKind, v.literal("probe.import"));
-
 const PROBE_BATCH = 1000;
 
 /** Most characters `inflate` writes, under a Convex document's 1 MiB. */
@@ -46,7 +44,7 @@ export const enqueue = internalMutation({
  * its lease's lapse. Says whether queued jobs remain; the caller loops.
  */
 export const reset = internalMutation({
-  args: { kind: probeKind },
+  args: { kind: probeRunKind },
   returns: v.object({ more: v.boolean() }),
   handler: async (ctx, { kind }) => {
     const jobs = (status: "queued" | "running", limit: number) =>

@@ -2,7 +2,7 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the framework's shape, and 2026-11-09
   with movies' kinds, pools, and the general lease check. Amended 2026-11-10 with the sweep of
-  finished jobs.
+  finished jobs, and again the same day with the Jellyfin and Plex import kinds.
 - Decisions: D27
 
 ## Context
@@ -214,7 +214,7 @@ A first scan queues one trickplay job per video file, so finished jobs must not 
   succeeded, failed, and canceled jobs that finished more than 7 days ago, of the kinds nothing
   points at: `movies.trickplay`, `movies.metadata`, `movies.person`, `server.backup`,
   `probe.capped`, `probe.wide`, and `probe.items`. Scans stay, because `libraries.lastScan` is a
-  library's scan state. `probe.import` stays, because an `imports` row names its job.
+  library's scan state. Imports stay, because an `imports` row names its job.
 - A job keeps at most 4,096 characters of each worker's text: the message of a report or a
   success, and the error of a failure, both as `error` and as a queued retry's `lastError`. The
   machine cuts a longer one, never inside a surrogate pair, and ends it with "… (cut)"; a report or
@@ -239,3 +239,88 @@ A first scan queues one trickplay job per video file, so finished jobs must not 
   deleted job.
 - The stack suite's `core/jobs/probe:backdate` moves a finished job's end back a week, so a test
   need not wait. It is the one write to `jobs` outside `store.ts`, and only the suite calls it.
+
+## Jellyfin and Plex imports (amended 2026-11-10)
+
+`p4-movies-importer` moved old movies' importer onto the core's imports, beside the old one, which
+stays wired until `p4-movies-cutover`.
+
+- `movies.import.jellyfin` and `movies.import.plex` replace `probe.import`. Each takes
+  `{ source, serverId }`, runs in the `movies.import` pool (ADR 0014) with cap 1 and 3 strikes, and
+  dedupes on the server id, so a second start of a server while its import is queued or running
+  answers that one. `core/imports.ts:startImport` queues it; the kind's dedupe decides, and the
+  `imports` row and movies' `importPlans` row are written only for a new job, in the same
+  mutation.
+- A run's row in `imports` names its job for good: the sweep keeps import jobs. `importPlans`
+  holds the plan (the source's address, credentials the server sealed under its own key, the
+  mapped users, the path mappings, the planned libraries), the libraries the import found or
+  added, the checkpoint, and the counts, keyed by the import. It is a movies table written only
+  through `movies/write.ts`, within its 896 KiB bound (`IMPORT_BOUNDS`). The server's dry run and
+  start refuse a plan past those bounds (200 mapped users, 50 path mappings, 50 libraries, 50
+  library folders) before anything is written, and `start` checks them again.
+- Each source user maps to a core user, never to a profile (D12). A source user mapped to no one
+  is absent from the plan, and a write for a user the plan does not map, or one no longer in the
+  household, writes nothing. Progress, history, and the list are each user's own (D36).
+- An import adds the libraries it needs, as old movies' importer did (corrected in review, D62):
+  the first version added none, which left source folders no library covered unmatched and refused
+  an empty install. A run starts in the `libraries` phase. `ensureLibrary` takes the planned
+  libraries one a call: a folder another library has, holds, or lies in is covered by it, whose
+  sharing stays as it is, and the rest become new movies libraries named after the source library,
+  made through `core/libraries.ts:makeLibrary`, the one way a library is made, with the requester
+  their first manager and their first scans queued. A library holds at most 16 folders, so a
+  source library with more becomes several, "<name>", "<name> 2", and on, shared alike, so every
+  folder is claimed and scanned (corrected in review). They are shared through the ordinary grants
+  (ADR 0024, not a second sharing path), in one read of the new row's grants
+  (`grants.ts:shareNew`), which never lowers the requester's `manage`: with the household when
+  every source user could see the source library; otherwise a `view` grant to the core user of
+  each mapped source user it let see it and to every current owner and admin, and to the owners
+  and admins alone when the source did not say (Plex). Old movies' admins saw every library; the
+  core expresses that with per-user grants when the library is added (decided in review), and an
+  admin promoted later gets no grant from it. A library is added only on folders the scanner
+  itself accepts (`LibraryScanner.openRoot`: the folder's real path lies inside an approved root's
+  real path), so a mapped link that leads inside an approved root counts and a folder outside
+  every one does not; the items of other folders stay unmatched. The run then waits in the
+  `scanning` phase, up to 6 hours an attempt, until the scans of the libraries it found or added
+  finish, before it matches history, as old movies did.
+- Imports run in their own `movies.import` pool (cap 1 on a server, ADR 0014), which claims whether
+  or not movies has a library: the `movies` pool claims only once one exists, and on an empty
+  install the import is what adds the first.
+- Starting needs what pointing a library at folders needs: `manageFolders` in `can()`, which an
+  owner or an admin holds, because the path mappings point the server at folders on its own disk.
+  The server's flow (`apps/media/src/migration/core-imports.ts`) asks `mayImport` before it
+  connects, and `start` checks again with the user the flow names. Connect, dry run, and start stay
+  the server's: only it reaches the source and its disk, and the source's credentials never reach
+  the core unsealed. `movies.imports.list` and `get` are commands for reading runs, `movies:edit`
+  in scope and owners and admins only in `can()`.
+- Progress lands as an offline report does: only when the source played the item more recently
+  than the core did, or the core has no row, so an import never moves a newer row back, whatever
+  playback last reported. Imported progress is older data, so it never invalidates a person's own
+  newer word (corrected in review): an import never moves the title's history generation, so the
+  scheduled pages of a whole-show mark made during the import still finish over what it wrote, and
+  a whole-title mark records when it was made (`watchMarks.markedAt`), so source progress played
+  before it is skipped, a watched or an unwatched mark alike. In turn, a mark's pages leave a row
+  played after the mark as it is, so a late page of an older whole-show mark never rolls back or
+  deletes newer progress an import wrote, or the person's own (corrected in review). The first
+  version moved the generation on every write, which cancelled the rest of a whole-show mark made
+  while it ran. Watched marks only get set, favorites join the list once, and a play count above 0
+  counts an item as played; the core keeps no count.
+- Each write (`writeWatchState`, `writeCollections`, `writeEdits`) charges every item's worst case
+  against the call's ranges, writes, and bytes (`movies/budget.ts`, `movies/reads.ts`), writes the
+  leading items that fit, and moves the checkpoint past them in the same mutation. The server
+  sends the rest again. A call carries the checkpoint it starts from; one whose checkpoint is not
+  the stored one, such as a call sent again after it committed, or an older attempt's, writes
+  nothing and answers the stored checkpoint. A restarted run therefore goes on from exactly where
+  the last one stopped and writes nothing twice. A write that sends the last items of a user or a
+  phase names where the next items start (`continueAt`), and the core moves there in the same
+  mutation, so an empty user or phase costs no call; `advance` moves the checkpoint only past
+  items there were none of to send.
+- The checkpoint indexes the plan a run computes, as old movies' did: the planned library, the
+  user, the item within the user's matched items in source item order, the collection, or the
+  title. A restarted attempt computes the plan again, so a source or catalog that changed between
+  attempts can shift those positions and skip or resend items near the checkpoint. Every write is
+  safe to repeat, so a resent item writes nothing twice. Keying the checkpoint on source item ids
+  would close the gap; it is not old movies' behavior (D62) and is left for the backlog.
+- A source collection keeps its first 1,000 matched members, as old movies kept them. A collection
+  longer than one call's budget continues from its member index.
+- A source failure fails the run with the line the connect form shows for it (`failureLine`), so a
+  key the source refuses fails with the token field's line. Only an unreachable source retries.

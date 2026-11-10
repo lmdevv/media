@@ -26,6 +26,22 @@ export const isPlainPath = (path: string): boolean =>
     .slice(1)
     .every((segment) => segment !== "");
 
+/** What is wrong with `folder`, written down by `normalizeFolder`, or null when it may be stored. */
+const folderProblem = (folder: string, typed: string): string | null => {
+  if (!folder.startsWith("/") || hasDotSegment(folder) || CONTROL.test(folder)) {
+    return `Folders are absolute paths without . or .. parts: ${typed}`;
+  }
+
+  if (folder === "/") return "A library cannot hold the whole disk";
+
+  if (folder.length > FOLDER_CHARS_MAX)
+    return `Folders have at most ${FOLDER_CHARS_MAX} characters`;
+
+  return folder.split("/").length - 1 > FOLDER_DEPTH_MAX
+    ? `Folders are at most ${FOLDER_DEPTH_MAX} levels deep`
+    : null;
+};
+
 /**
  * A typed folder as stored and compared, written down by `normalizeFolder` as the web app does.
  * Refuses with `invalid_args` a relative path, a `.` or `..` segment, a control
@@ -34,20 +50,16 @@ export const isPlainPath = (path: string): boolean =>
  */
 export const parseFolder = (typed: string): string => {
   const folder = normalizeFolder(typed);
+  const problem = folderProblem(folder, typed);
 
-  if (!folder.startsWith("/") || hasDotSegment(folder) || CONTROL.test(folder)) {
-    return fail("invalid_args", `Folders are absolute paths without . or .. parts: ${typed}`);
-  }
+  return problem === null ? folder : fail("invalid_args", problem);
+};
 
-  if (folder === "/") return fail("invalid_args", "A library cannot hold the whole disk");
+/** `typed` as `parseFolder` stores it, or null where `parseFolder` refuses it. */
+export const folderOrNull = (typed: string): string | null => {
+  const folder = normalizeFolder(typed);
 
-  if (folder.length > FOLDER_CHARS_MAX) {
-    return fail("invalid_args", `Folders have at most ${FOLDER_CHARS_MAX} characters`);
-  }
-
-  return folder.split("/").length - 1 > FOLDER_DEPTH_MAX
-    ? fail("invalid_args", `Folders are at most ${FOLDER_DEPTH_MAX} levels deep`)
-    : folder;
+  return folderProblem(folder, typed) === null ? folder : null;
 };
 
 /** Whether `path` is `folder` or lies inside it; both parsed. */
@@ -95,12 +107,15 @@ export const foldersOf = async (
   libraryId: Id<"libraries">,
 ): Promise<ReadonlyArray<string>> => (await folderRows(db, libraryId)).map((row) => row.path);
 
-// Convex serializes a concurrent claim of an overlapping folder: it writes a key this reads.
-const takenByOther = async (
+/**
+ * The libraries that have `folder`, a folder that holds it, or one inside it: at most one index
+ * read per level and one range. Convex serializes a concurrent claim of an overlapping folder,
+ * because it writes a key this reads.
+ */
+export const overlapping = async (
   db: DatabaseReader,
   folder: string,
-  libraryId: Id<"libraries">,
-): Promise<boolean> => {
+): Promise<ReadonlyArray<Id<"libraries">>> => {
   const [holders, inside] = await Promise.all([
     Promise.all(
       selfAndAncestors(folder).map((path) =>
@@ -116,8 +131,14 @@ const takenByOther = async (
       .take(FOLDERS_MAX + 1),
   ]);
 
-  return [...holders.flat(), ...inside].some((row) => row.libraryId !== libraryId);
+  return [...new Set([...holders.flat(), ...inside].map((row) => row.libraryId))];
 };
+
+const takenByOther = async (
+  db: DatabaseReader,
+  folder: string,
+  libraryId: Id<"libraries">,
+): Promise<boolean> => (await overlapping(db, folder)).some((holder) => holder !== libraryId);
 
 /**
  * Makes `folders`, parsed, the library's folders, and says which it added and removed. A folder

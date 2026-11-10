@@ -26,8 +26,8 @@ const HISTORY_PAGE_MAX = 200;
 /** What one history row reads besides its grant checks: the row, its title, episode, and library. */
 const HISTORY_ROW_READS = 4;
 
-/** Marking one episode: its progress row read (1 range), then written or deleted (1, 1). */
-const MARK_COST = work(2, 1);
+/** Marking one episode: its progress row read (1 range), then read again and written or deleted. */
+const MARK_COST = work(3, 1);
 
 /**
  * Episodes one call marks for a whole show: as many as the call budget admits at each one's worst
@@ -50,13 +50,18 @@ interface Mark {
   readonly generation: number;
 }
 
+/**
+ * Marks one movie or episode. A row played after the mark, such as newer progress an import wrote
+ * while a whole show's pages were still running, is newer than the mark and stays as it is.
+ */
 const markOne = async (ctx: Ctx, mark: Mark, episode: Doc<"episodes"> | null): Promise<void> => {
   const { userId, title } = mark;
   const episodeId = episode?._id ?? null;
+  const row = await findProgress(ctx.db, userId, title._id, episodeId);
+
+  if (row !== null && row.lastPlayedAt > mark.at) return;
 
   if (!mark.watched) {
-    const row = await findProgress(ctx.db, userId, title._id, episodeId);
-
     if (row !== null) await ctx.db.delete(row._id);
 
     return;
@@ -197,11 +202,13 @@ export const { continueWatching, list, markWatched, markUnwatched } = register({
   markWatched: async (ctx, { titleId, episodeId }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "play", titleId);
 
-    const generation = await nextWatchGeneration(ctx, caller.userId, titleId);
+    const at = Date.now();
+    const whole = episodeId === undefined ? at : undefined;
+    const generation = await nextWatchGeneration(ctx, caller.userId, titleId, whole);
 
     await markTarget(
       ctx,
-      { userId: caller.userId, title, watched: true, at: Date.now(), generation },
+      { userId: caller.userId, title, watched: true, at, generation },
       episodeId,
     );
 
@@ -210,11 +217,13 @@ export const { continueWatching, list, markWatched, markUnwatched } = register({
   markUnwatched: async (ctx, { titleId, episodeId }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "play", titleId);
 
-    const generation = await nextWatchGeneration(ctx, caller.userId, titleId);
+    const at = Date.now();
+    const whole = episodeId === undefined ? at : undefined;
+    const generation = await nextWatchGeneration(ctx, caller.userId, titleId, whole);
 
     await markTarget(
       ctx,
-      { userId: caller.userId, title, watched: false, at: Date.now(), generation },
+      { userId: caller.userId, title, watched: false, at, generation },
       episodeId,
     );
 

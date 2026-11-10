@@ -554,6 +554,13 @@ export const rewriteCost = (current: Doc<"titles">, scanned: ScannedTitle): Work
   return work(rows, rows);
 };
 
+/** The worst case of `writeOverrides` on `current`: its row, and each of its genre rows. */
+export const overridesCost = (current: Doc<"titles">): Work => {
+  const rows = 2 + 2 * genreRows(current.genres);
+
+  return work(rows, rows);
+};
+
 /**
  * The worst case of `upsertEpisode`: a season and an episode looked up and written, the season
  * read again and its count moved, and the title read and its episode count moved.

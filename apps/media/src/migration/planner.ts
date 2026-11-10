@@ -14,7 +14,6 @@ import type {
   OverrideImport,
   WatchStateImport,
 } from "@media/contracts/models/migration-service";
-import type { MediaLibrary } from "@media/contracts/models/scan";
 import type { MigrationSource } from "@media/contracts/models/jobs";
 import { EpochMillis, Milliseconds } from "@media/contracts/units";
 
@@ -31,13 +30,22 @@ import type {
 
 const SAMPLE_LIMIT = 25;
 
-/** A source user and the profile receiving their history, if any. */
-export interface ResolvedUser {
+/**
+ * A source user and who receives their history, if anyone: a profile of old movies, or a user of
+ * the core (`Person`).
+ */
+export interface ResolvedUser<Person extends string> {
   readonly sourceUserId: string;
   readonly name: string;
-  readonly profileId: ProfileId | null;
+  readonly person: Person | null;
   readonly action: "import" | "skip" | "invite";
   readonly history: "full" | "plays";
+}
+
+/** A library already here and its folders. */
+export interface ExistingLibrary {
+  readonly id: LibraryId;
+  readonly roots: ReadonlyArray<string>;
 }
 
 interface PlannedLibrary {
@@ -52,31 +60,41 @@ interface PlannedLibrary {
 }
 
 /** Everything a plan is computed from. */
-export interface PlanInput {
+export interface PlanInput<Person extends string> {
   readonly source: MigrationSource;
   readonly server: SourceServer;
   readonly libraries: ReadonlyArray<SourceLibrary>;
   readonly items: ReadonlyArray<SourceItem>;
   readonly collections: ReadonlyArray<SourceCollection>;
-  readonly users: ReadonlyArray<ResolvedUser>;
+  readonly users: ReadonlyArray<ResolvedUser<Person>>;
   /** Each imported user's states, by source user ID. */
   readonly states: ReadonlyMap<string, ReadonlyArray<SourceItemState>>;
   readonly mappings: ReadonlyArray<PathMapping>;
   /** Approved library roots of this host. */
   readonly roots: ReadonlyArray<string>;
-  readonly existingLibraries: ReadonlyArray<MediaLibrary>;
+  readonly existingLibraries: ReadonlyArray<ExistingLibrary>;
+  /**
+   * Whether the import may add a library on a local folder no library covers, whose items then
+   * wait for its first scan; the items of a folder it may not stay unmatched.
+   */
+  readonly addable: (folder: string) => boolean;
   readonly catalog: ReadonlyArray<CatalogFile>;
-  /** Each imported profile's current progress. */
-  readonly localProgress: ReadonlyMap<ProfileId, ReadonlyArray<LocalProgress>>;
+  /** Each imported person's current progress. */
+  readonly localProgress: ReadonlyMap<Person, ReadonlyArray<LocalProgress>>;
 }
 
-interface UserWatchState {
+/** One matched item's watch state for the person receiving a source user's history. */
+type WatchWrite<Person extends string> = Omit<WatchStateImport, "profileId"> & {
+  readonly person: Person;
+};
+
+interface UserWatchState<Person extends string> {
   readonly sourceUserId: string;
-  readonly items: ReadonlyArray<WatchStateImport>;
+  readonly items: ReadonlyArray<WatchWrite<Person>>;
 }
 
 /** A computed migration plan. */
-export interface MigrationPlan {
+export interface MigrationPlan<Person extends string> {
   readonly libraries: ReadonlyArray<PlannedLibrary>;
   readonly summary: MigrationSummary;
   readonly unmatchedSamples: ReadonlyArray<{
@@ -84,7 +102,7 @@ export interface MigrationPlan {
     readonly path: string | null;
     readonly reason: UnmatchedReason;
   }>;
-  readonly watchState: ReadonlyArray<UserWatchState>;
+  readonly watchState: ReadonlyArray<UserWatchState<Person>>;
   readonly collections: ReadonlyArray<CollectionImport>;
   readonly overrides: ReadonlyArray<OverrideImport>;
 }
@@ -106,7 +124,7 @@ const plannedAccess = (
   return { kind: "users", sourceUserIds: access.userIds.filter((userId) => imported.has(userId)) };
 };
 
-const coveringLibrary = (existing: ReadonlyArray<MediaLibrary>, folder: string) =>
+const coveringLibrary = (existing: ReadonlyArray<ExistingLibrary>, folder: string) =>
   existing.find((candidate) =>
     candidate.roots.some((root) => isInside(folder, root) || isInside(root, folder)),
   );
@@ -115,8 +133,9 @@ const planLibraries = (
   libraries: ReadonlyArray<SourceLibrary>,
   mappings: ReadonlyArray<PathMapping>,
   roots: ReadonlyArray<string>,
-  existing: ReadonlyArray<MediaLibrary>,
+  existing: ReadonlyArray<ExistingLibrary>,
   imported: ReadonlySet<string>,
+  addable: (folder: string) => boolean,
 ): ReadonlyArray<PlannedLibrary> =>
   libraries.flatMap((library) => {
     const kind = libraryKindOf(library.kind);
@@ -132,6 +151,10 @@ const planLibraries = (
       ...new Set(folders.flatMap(({ local: found }) => (found === null ? [] : [found]))),
     ];
 
+    const usable = local.filter(
+      (folder) => coveringLibrary(existing, folder) !== undefined || addable(folder),
+    );
+
     const coveringIds = local.flatMap((folder) => {
       const found = coveringLibrary(existing, folder);
 
@@ -143,9 +166,11 @@ const planLibraries = (
         sourceLibraryId: library.libraryId,
         name: library.name,
         kind,
-        roots: local,
+        roots: usable,
         existingLibraryId: coveringIds[0] ?? null,
-        newRoots: local.filter((folder) => coveringLibrary(existing, folder) === undefined),
+        newRoots: local.filter(
+          (folder) => coveringLibrary(existing, folder) === undefined && addable(folder),
+        ),
         unmappedFolders: folders.flatMap(({ path, local: found }) =>
           found === null ? [path] : [],
         ),
@@ -157,10 +182,10 @@ const planLibraries = (
 const progressKey = (titleId: string, episodeId: string | null): string =>
   `${titleId}|${episodeId ?? ""}`;
 
-const isPlayed = (write: WatchStateImport): boolean =>
+const isPlayed = (write: ImportValues): boolean =>
   write.watched || write.positionMs > 0 || write.playCount > 0;
 
-const keepsLocal = (write: WatchStateImport, local: LocalProgress | undefined): boolean => {
+const keepsLocal = (write: ImportValues, local: LocalProgress | undefined): boolean => {
   if (local === undefined || !isPlayed(write)) return false;
   const sourceNewer = write.lastPlayedAt !== null && local.lastPlayedAt < write.lastPlayedAt;
 
@@ -207,7 +232,9 @@ export const countImports = (items: ReadonlyArray<ImportValues>) => ({
 });
 
 /** Computes the plan. */
-export const planMigration = (input: PlanInput): MigrationPlan => {
+export const planMigration = <Person extends string>(
+  input: PlanInput<Person>,
+): MigrationPlan<Person> => {
   const libraries = planLibraries(
     input.libraries,
     input.mappings,
@@ -215,9 +242,10 @@ export const planMigration = (input: PlanInput): MigrationPlan => {
     input.existingLibraries,
     new Set(
       input.users.flatMap((user) =>
-        user.action === "import" && user.profileId !== null ? [user.sourceUserId] : [],
+        user.action === "import" && user.person !== null ? [user.sourceUserId] : [],
       ),
     ),
+    input.addable,
   );
 
   const pendingRoots = libraries.flatMap((library) => library.newRoots);
@@ -232,7 +260,7 @@ export const planMigration = (input: PlanInput): MigrationPlan => {
   const itemsById = new Map(input.items.map((item) => [item.itemId, item]));
   const media = input.items.filter((item) => item.kind !== "series");
   const counts = { byPath: 0, byProviderId: 0, awaitingScan: 0, unmatched: 0 };
-  const samples: Array<MigrationPlan["unmatchedSamples"][number]> = [];
+  const samples: Array<MigrationPlan<Person>["unmatchedSamples"][number]> = [];
 
   for (const item of media) {
     const match = matches.get(item.itemId) ?? ItemMatch.Unmatched({ reason: "not_in_catalog" });
@@ -268,19 +296,17 @@ export const planMigration = (input: PlanInput): MigrationPlan => {
   };
 
   const imported = input.users.flatMap((user) =>
-    user.action === "import" && user.profileId !== null
-      ? [{ ...user, profileId: user.profileId }]
-      : [],
+    user.action === "import" && user.person !== null ? [{ ...user, person: user.person }] : [],
   );
 
   const watchState = imported
     .toSorted((left, right) => left.sourceUserId.localeCompare(right.sourceUserId))
-    .map((user): UserWatchState => {
+    .map((user): UserWatchState<Person> => {
       const states = (input.states.get(user.sourceUserId) ?? []).toSorted((left, right) =>
         left.itemId.localeCompare(right.itemId),
       );
 
-      const items = states.flatMap((state): Array<WatchStateImport> => {
+      const items = states.flatMap((state): Array<WatchWrite<Person>> => {
         const match = matchedOf(state.itemId);
         const item = itemsById.get(state.itemId);
         const values = item === undefined ? null : valuesOf(state, item);
@@ -289,7 +315,7 @@ export const planMigration = (input: PlanInput): MigrationPlan => {
 
         return [
           {
-            profileId: user.profileId,
+            person: user.person,
             titleId: match.titleId,
             episodeId: match.episodeId,
             fileId: match.fileId,
@@ -303,9 +329,9 @@ export const planMigration = (input: PlanInput): MigrationPlan => {
 
   const writes = watchState.flatMap((user) => user.items);
 
-  const localByProfile = new Map(
-    [...input.localProgress].map(([profileId, rows]) => [
-      profileId,
+  const localByPerson = new Map(
+    [...input.localProgress].map(([person, rows]) => [
+      person,
       new Map(rows.map((row) => [progressKey(row.titleId, row.episodeId), row])),
     ]),
   );
@@ -313,7 +339,7 @@ export const planMigration = (input: PlanInput): MigrationPlan => {
   const conflicts = writes.filter((write) =>
     keepsLocal(
       write,
-      localByProfile.get(write.profileId)?.get(progressKey(write.titleId, write.episodeId)),
+      localByPerson.get(write.person)?.get(progressKey(write.titleId, write.episodeId)),
     ),
   ).length;
 
@@ -418,29 +444,25 @@ export const planMigration = (input: PlanInput): MigrationPlan => {
   };
 };
 
-/** The report the Review screen shows for `plan`. */
-export const reportOf = (
-  plan: MigrationPlan,
-  context: {
-    readonly connectionId: string;
-    readonly source: MigrationSource;
-    readonly serverName: string;
-    readonly createdAt: number;
-    readonly users: ReadonlyArray<ResolvedUser>;
-  },
-): MigrationReport => ({
+interface ReportContext<Person extends string> {
+  readonly connectionId: string;
+  readonly source: MigrationSource;
+  readonly serverName: string;
+  readonly createdAt: number;
+  readonly users: ReadonlyArray<ResolvedUser<Person>>;
+}
+
+/** What the Review screen shows for `plan` but who receives each source user's history. */
+export const reportBody = <Person extends string>(
+  plan: MigrationPlan<Person>,
+  context: ReportContext<Person>,
+): Omit<MigrationReport, "users"> => ({
   status: "ready",
   connectionId: context.connectionId,
   source: context.source,
   serverName: context.serverName,
   createdAt: EpochMillis.make(context.createdAt),
   summary: plan.summary,
-  users: context.users.map((user) => ({
-    sourceUserId: user.sourceUserId,
-    name: user.name,
-    profileId: user.profileId,
-    action: user.action,
-  })),
   libraries: plan.libraries.map((library) => ({
     sourceLibraryId: library.sourceLibraryId,
     name: library.name,
@@ -451,4 +473,18 @@ export const reportOf = (
     access: library.access,
   })),
   unmatchedSamples: plan.unmatchedSamples,
+});
+
+/** The report the Review screen shows for `plan`. */
+export const reportOf = (
+  plan: MigrationPlan<ProfileId>,
+  context: ReportContext<ProfileId>,
+): MigrationReport => ({
+  ...reportBody(plan, context),
+  users: context.users.map((user) => ({
+    sourceUserId: user.sourceUserId,
+    name: user.name,
+    profileId: user.person,
+    action: user.action,
+  })),
 });

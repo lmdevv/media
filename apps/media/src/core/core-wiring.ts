@@ -8,6 +8,8 @@ import * as LibrarySink from "../library/library-sink.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as MediaConfig from "../media-config.ts";
 import { servicesLayerWith } from "../media-service.ts";
+import * as CoreImportJob from "../migration/core-import-job.ts";
+import * as CoreImports from "../migration/core-imports.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
 import * as PlaybackReporter from "../playback/playback-reporter.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
@@ -36,24 +38,28 @@ export interface Options {
   }>;
 }
 
-const jobs = Effect.gen(function* () {
-  const config = yield* MediaConfig.Service;
+const jobs = (sealKey: Redacted.Redacted) =>
+  Effect.gen(function* () {
+    const config = yield* MediaConfig.Service;
 
-  const always = yield* Effect.all([
-    CoreScan.handler,
-    CoreMetadata.handler,
-    CoreMetadata.personHandler,
-    CoreBackups.handler,
-  ]);
+    const always = yield* Effect.all([
+      CoreScan.handler,
+      CoreMetadata.handler,
+      CoreMetadata.personHandler,
+      CoreBackups.handler,
+    ]);
 
-  const caps: CoreJobs.PoolCaps = {
-    movies: 2,
-    "movies.background": config.trickplay.concurrency,
-    server: 1,
-  };
+    const imports = yield* CoreImportJob.handlers(sealKey);
 
-  return { handlers: [...always, ...(yield* CoreTrickplay.handlers)], caps };
-});
+    const caps: CoreJobs.PoolCaps = {
+      movies: 2,
+      "movies.background": config.trickplay.concurrency,
+      "movies.import": 1,
+      server: 1,
+    };
+
+    return { handlers: [...always, ...imports, ...(yield* CoreTrickplay.handlers)], caps };
+  });
 
 /**
  * Scans write only through a scan job's own sink, under its lease, so the scanner the shared
@@ -74,9 +80,10 @@ const noSharedSink: Layer.Layer<LibrarySink.Service> = Layer.succeed(
 
 /**
  * The server on the core: signed in as its service principal, running the core's jobs, serving
- * bytes to core tickets, and reporting its status. `main.ts` keeps wiring old movies until the
- * cutover switches to this, so the running server never holds two Convex URLs (D50); until then
- * it runs in tests and the in-process server.
+ * bytes to core tickets, reporting its status, and running the Jellyfin and Plex importer's flow
+ * (`CoreImports`). `main.ts` keeps wiring old movies until the cutover switches to this, so the
+ * running server never holds two Convex URLs (D50); until then it runs in tests and the in-process
+ * server.
  */
 export const layer = (options: Options) =>
   Layer.unwrap(
@@ -90,7 +97,8 @@ export const layer = (options: Options) =>
 
       return Layer.mergeAll(
         HttpServer.layer(Layer.empty),
-        CoreJobs.layer(jobs),
+        CoreJobs.layer(jobs(options.serviceKey)),
+        CoreImports.layer(options.serviceKey),
         CoreTrickplay.sweepLayer,
         CoreStatus.layer,
         Backups.layerSyncOnStart,

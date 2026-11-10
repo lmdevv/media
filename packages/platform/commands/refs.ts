@@ -31,6 +31,7 @@ import type { Refs as core_settings } from "./core/settings";
 import type { Refs as core_together } from "./core/together";
 import type { Refs as movies_collections } from "./movies/collections";
 import type { Refs as movies_history } from "./movies/history";
+import type { Refs as movies_imports } from "./movies/imports";
 import type { Refs as movies_metadata } from "./movies/metadata";
 import type { Refs as movies_myList } from "./movies/myList";
 import type { Refs as movies_people } from "./movies/people";
@@ -190,6 +191,8 @@ export const commandRefs = {
     .markUnwatched satisfies movies_history["markUnwatched"],
   "movies.history.markWatched": api.movies.history
     .markWatched satisfies movies_history["markWatched"],
+  "movies.imports.get": api.movies.imports.get satisfies movies_imports["get"],
+  "movies.imports.list": api.movies.imports.list satisfies movies_imports["list"],
   "movies.metadata.edit": api.movies.metadata.edit satisfies movies_metadata["edit"],
   "movies.metadata.match": api.movies.metadata.match satisfies movies_metadata["match"],
   "movies.metadata.refresh": api.movies.metadata.refresh satisfies movies_metadata["refresh"],

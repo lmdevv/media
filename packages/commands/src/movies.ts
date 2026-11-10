@@ -392,6 +392,55 @@ const watchTarget = {
   episodeId: v.optional(v.id("episodes")),
 };
 
+const jobStatus = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("succeeded"),
+  v.literal("failed"),
+  v.literal("canceled"),
+);
+
+/**
+ * One run of the Jellyfin or Plex importer: its server, its job, the phase it reached, and what it
+ * wrote. The server's import flow connects, previews, and starts runs; these commands read them,
+ * for owners and admins only, which the handlers decide through `can()`.
+ */
+const importRun = v.object({
+  importId: v.id("imports"),
+  source: v.union(v.literal("jellyfin"), v.literal("plex")),
+  serverName: v.string(),
+  createdAt: v.number(),
+  phase: v.union(
+    v.literal("libraries"),
+    v.literal("scanning"),
+    v.literal("watchState"),
+    v.literal("collections"),
+    v.literal("overrides"),
+    v.literal("done"),
+  ),
+  /** How many source users the run maps onto users here. */
+  users: v.number(),
+  imported: v.object({
+    librariesAdded: v.number(),
+    watched: v.number(),
+    inProgress: v.number(),
+    favorites: v.number(),
+    collections: v.number(),
+    overrides: v.number(),
+    keptLocal: v.number(),
+    unmatched: v.number(),
+  }),
+  job: v.object({
+    jobId: v.id("jobs"),
+    status: jobStatus,
+    done: v.number(),
+    total: v.union(v.number(), v.null()),
+    message: v.union(v.string(), v.null()),
+    error: v.union(v.string(), v.null()),
+    finishedAt: v.union(v.number(), v.null()),
+  }),
+});
+
 /**
  * The movies commands, ported from old movies (D62). Everything a person keeps (progress,
  * history, their list) is theirs alone (D36); nothing is keyed by a profile.
@@ -622,5 +671,17 @@ export const movies = [
       clear: v.optional(v.array(metadataField)),
     },
     result: v.null(),
+  }),
+  query("movies.imports.list", {
+    summary: "List Jellyfin and Plex imports, newest first, with their phase and what they wrote",
+    scope: "movies:edit",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(importRun),
+  }),
+  query("movies.imports.get", {
+    summary: "Show one Jellyfin or Plex import, its job, and what it wrote",
+    scope: "movies:edit",
+    args: { importId: v.id("imports") },
+    result: importRun,
   }),
 ] as const satisfies ReadonlyArray<Command>;

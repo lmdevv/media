@@ -1,32 +1,8 @@
-import { paginationOptsValidator, paginationResultValidator } from "convex/server";
-import { v } from "convex/values";
-import type { Infer } from "convex/values";
-
 import type { Doc, Id } from "../_generated/dataModel";
-import type { DatabaseReader, MutationCtx } from "../_generated/server";
-import { internalMutation, internalQuery } from "../_generated/server";
-import { importSource } from "./jobs/kinds";
-import type { JobKind, PayloadOf } from "./jobs/kinds";
+import type { DatabaseReader } from "../_generated/server";
+import type { ImportKind, PayloadOf } from "./jobs/kinds";
 import { enqueue } from "./jobs/queue";
-import { paginate } from "./lib/paginate";
-
-type ImportSource = Infer<typeof importSource>;
-
-type ImportKind = {
-  [Kind in JobKind]: PayloadOf<Kind> extends {
-    readonly kind: Kind;
-    readonly source: ImportSource;
-    readonly serverId: string;
-  }
-    ? Kind
-    : never;
-}[JobKind];
-
-interface SourceServer {
-  readonly source: ImportSource;
-  readonly serverId: string;
-  readonly serverName: string;
-}
+import type { JobCtx } from "./jobs/store";
 
 interface Started {
   readonly importId: Id<"imports">;
@@ -35,7 +11,11 @@ interface Started {
   readonly created: boolean;
 }
 
-const importOfJob = (db: DatabaseReader, jobId: Id<"jobs">): Promise<Doc<"imports"> | null> =>
+/** The import row of a job, or null for a job no import started. */
+export const importOfJob = (
+  db: DatabaseReader,
+  jobId: Id<"jobs">,
+): Promise<Doc<"imports"> | null> =>
   db
     .query("imports")
     .withIndex("by_job", (q) => q.eq("jobId", jobId))
@@ -49,18 +29,19 @@ const importOfJob = (db: DatabaseReader, jobId: Id<"jobs">): Promise<Doc<"import
  * @throws Error when the active import job has no import row, which only `startImport` writes.
  */
 export const startImport = async (
-  ctx: MutationCtx,
-  kind: ImportKind,
-  server: SourceServer,
+  ctx: JobCtx,
+  payload: PayloadOf<ImportKind>,
+  serverName: string,
 ): Promise<Started> => {
-  const { jobId, created } = await enqueue(ctx, {
-    kind,
-    source: server.source,
-    serverId: server.serverId,
-  });
+  const { jobId, created } = await enqueue(ctx, payload);
 
   if (created) {
-    const importId = await ctx.db.insert("imports", { ...server, jobId });
+    const importId = await ctx.db.insert("imports", {
+      source: payload.source,
+      serverId: payload.serverId,
+      serverName,
+      jobId,
+    });
 
     return { importId, jobId, created };
   }
@@ -71,47 +52,3 @@ export const startImport = async (
 
   return { importId: active._id, jobId, created };
 };
-
-const importView = v.object({
-  id: v.id("imports"),
-  source: importSource,
-  serverId: v.string(),
-  serverName: v.string(),
-  jobId: v.id("jobs"),
-  createdAt: v.number(),
-});
-
-export const listByServer = internalQuery({
-  args: { source: importSource, serverId: v.string(), paginationOpts: paginationOptsValidator },
-  returns: paginationResultValidator(importView),
-  handler: async (ctx, { source, serverId, paginationOpts }) => {
-    const result = await paginate(
-      ctx.db,
-      {
-        table: "imports",
-        index: "by_source_server",
-        range: (q) => q.eq("source", source).eq("serverId", serverId),
-        order: "desc",
-      },
-      paginationOpts,
-    );
-
-    return {
-      ...result,
-      page: result.page.map((row) => ({
-        id: row._id,
-        source: row.source,
-        serverId: row.serverId,
-        serverName: row.serverName,
-        jobId: row.jobId,
-        createdAt: row._creationTime,
-      })),
-    };
-  },
-});
-
-export const probeStart = internalMutation({
-  args: { source: importSource, serverId: v.string(), serverName: v.string() },
-  returns: v.object({ importId: v.id("imports"), jobId: v.id("jobs"), created: v.boolean() }),
-  handler: (ctx, server) => startImport(ctx, "probe.import", server),
-});

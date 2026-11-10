@@ -6,6 +6,7 @@ import { Context, Effect, Exit, Layer, Logger, Option, Redacted, References, Sch
 import type { Scope } from "effect";
 
 import * as CoreWiring from "../core/core-wiring.ts";
+import * as CoreImports from "../migration/core-imports.ts";
 import * as Outbound from "../http/outbound.ts";
 import * as MediaConfig from "../media-config.ts";
 import { redactedLine } from "../observability.ts";
@@ -111,6 +112,7 @@ export const personIn = async (
 /** An in-process server on the core, listening on `baseUrl`. */
 export interface CoreServer {
   readonly baseUrl: string;
+  readonly imports: CoreImports.Interface;
   /** Every log line so far, redacted as the server redacts its log. */
   readonly logged: () => ReadonlyArray<string>;
 }
@@ -167,9 +169,9 @@ export const startCoreServer = async (
     ),
   );
 
-  await Effect.runPromise(Layer.buildWithScope(server, scope).pipe(Effect.asVoid));
+  const built = await Effect.runPromise(Layer.buildWithScope(server, scope));
 
-  return { baseUrl, logged: () => logged };
+  return { baseUrl, imports: Context.get(built, CoreImports.Service), logged: () => logged };
 };
 
 /** Waits until `check` answers some value, trying every `everyMs` for up to `timeoutMs`. */

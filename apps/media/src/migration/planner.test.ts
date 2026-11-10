@@ -53,12 +53,12 @@ const state = (itemId: string, extra: Partial<SourceItemState>): SourceItemState
   ...extra,
 });
 
-const users: ReadonlyArray<ResolvedUser> = [
-  { sourceUserId: "u1", name: "Alice", profileId: ALICE, action: "import", history: "full" },
-  { sourceUserId: "u2", name: "Bob", profileId: null, action: "invite", history: "full" },
+const users: ReadonlyArray<ResolvedUser<ProfileId>> = [
+  { sourceUserId: "u1", name: "Alice", person: ALICE, action: "import", history: "full" },
+  { sourceUserId: "u2", name: "Bob", person: null, action: "invite", history: "full" },
 ];
 
-const input = (overrides: Partial<PlanInput>): PlanInput => ({
+const input = (overrides: Partial<PlanInput<ProfileId>>): PlanInput<ProfileId> => ({
   source: "jellyfin",
   server: { serverId: "server", name: "Home", version: "10.10.7" },
   libraries: [
@@ -118,9 +118,8 @@ const input = (overrides: Partial<PlanInput>): PlanInput => ({
   ]),
   mappings: [{ from: "/data", to: "/mnt/nas" }],
   roots: ["/mnt/nas"],
-  existingLibraries: [
-    { id: LibraryId.make("movies"), name: "Movies", kind: "movies", roots: ["/mnt/nas/movies"] },
-  ],
+  existingLibraries: [{ id: LibraryId.make("movies"), roots: ["/mnt/nas/movies"] }],
+  addable: () => true,
   catalog: [
     file("heat", "/mnt/nas/movies/Heat.mkv"),
     file("alien", "/mnt/nas/movies/Alien.mkv"),
@@ -175,6 +174,20 @@ describe("planMigration", () => {
     ]);
   });
 
+  it("leaves items in folders no library covers unmatched when the import may not add one there", () => {
+    const plan = planMigration(input({ addable: () => false }));
+
+    assert.strictEqual(plan.summary.itemsAwaitingScan, 0);
+    assert.strictEqual(plan.summary.itemsUnmatched, 2);
+    assert.deepStrictEqual(
+      plan.unmatchedSamples.map((sample) => [sample.name, sample.reason]),
+      [
+        ["fresh", "not_in_catalog"],
+        ["ghost", "path_unmapped"],
+      ],
+    );
+  });
+
   it("carries provider IDs and keeps overrides when two source items match one title", () => {
     const plan = planMigration(
       input({
@@ -214,12 +227,7 @@ describe("planMigration", () => {
   });
 
   it("reuses a library inside a source folder instead of adding one around it", () => {
-    const inner = {
-      id: LibraryId.make("inner"),
-      name: "Inner",
-      kind: "movies" as const,
-      roots: ["/mnt/nas/kids/inner"],
-    };
+    const inner = { id: LibraryId.make("inner"), roots: ["/mnt/nas/kids/inner"] };
 
     const plan = planMigration(
       input({ existingLibraries: [...input({}).existingLibraries, inner] }),

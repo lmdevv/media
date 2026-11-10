@@ -95,7 +95,15 @@ export interface AnyHandler {
 
 /** The server's worker pools (ADR 0014) and the domain whose libraries gate each, if any. */
 const POOLS = {
-  movies: { domain: "movies", kinds: ["movies.scan", "movies.metadata", "movies.person"] },
+  movies: {
+    domain: "movies",
+    kinds: ["movies.scan", "movies.metadata", "movies.person"],
+  },
+  /**
+   * Imports claim whether or not movies has a library yet: an import adds the libraries it needs,
+   * so on an empty install it is what makes the first one.
+   */
+  "movies.import": { domain: null, kinds: ["movies.import.jellyfin", "movies.import.plex"] },
   "movies.background": { domain: "movies", kinds: ["movies.trickplay"] },
   server: { domain: null, kinds: ["server.backup"] },
 } as const satisfies Record<
@@ -106,7 +114,7 @@ const POOLS = {
 /** A pool's name. */
 type Pool = keyof typeof POOLS;
 
-const POOL_NAMES: ReadonlyArray<Pool> = ["movies", "movies.background", "server"];
+const POOL_NAMES: ReadonlyArray<Pool> = ["movies", "movies.background", "movies.import", "server"];
 
 /** The most jobs each pool runs at once on this server; each a whole number of at least 1. */
 export type PoolCaps = { readonly [Name in Pool]: number };

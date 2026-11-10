@@ -96,7 +96,9 @@ const RowsPage = Schema.Struct({
   isDone: Schema.Boolean,
 });
 
-type MoviesKind = "movies.scan" | "movies.metadata" | "movies.person" | "movies.trickplay";
+type CatalogKind = "movies.scan" | "movies.metadata" | "movies.person" | "movies.trickplay";
+
+type MoviesKind = CatalogKind | "movies.import.jellyfin" | "movies.import.plex";
 
 /** A movies library on a new empty folder, made by `admin`, and the scan its creation queued. */
 export const moviesLibrary = async (
@@ -169,7 +171,7 @@ export const claimJob = async (
 };
 
 /** Cancels every queued job of `kind`, such as the thumbnails a large scan queued. */
-export const cancelQueued = async (stack: CoreStack, kind: MoviesKind): Promise<void> => {
+export const cancelQueued = async (stack: CoreStack, kind: CatalogKind): Promise<void> => {
   const { more } = await runFunction(
     stack,
     internal.movies.probe.cancelQueued,

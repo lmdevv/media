@@ -23,7 +23,7 @@ import {
   waiting,
   worker,
 } from "./driver";
-import type { Lease, ProbeKind, ProbeRunKind } from "./driver";
+import type { Lease, ProbeRunKind } from "./driver";
 
 const stack = coreStackFromEnvFile();
 
@@ -53,7 +53,7 @@ const claimed = async (claim: Promise<Awaited<ReturnType<ReturnType<typeof worke
 
 const countOf = async (
   core: CoreStack,
-  kind: ProbeKind,
+  kind: ProbeRunKind,
   status: "queued" | "running",
 ): Promise<number> =>
   (
@@ -65,7 +65,7 @@ const countOf = async (
     )
   ).page.length;
 
-const runningOf = (core: CoreStack, kind: ProbeKind): Promise<number> =>
+const runningOf = (core: CoreStack, kind: ProbeRunKind): Promise<number> =>
   countOf(core, kind, "running");
 
 const hasItems = (core: CoreStack, jobId: Id<"jobs">): Promise<boolean> =>
@@ -471,73 +471,5 @@ describe.skipIf(stack === undefined)("core jobs, live", { timeout: 180_000 }, ()
     expect(Math.max(...writes.map((call) => call.writes))).toBeGreaterThanOrEqual(BATCH);
     expect(Math.max(...writes.map((call) => call.reads))).toBeLessThanOrEqual(32_000);
     expect(await jobOf(stack, jobId)).toMatchObject({ status: "canceled", done: 30_000 });
-  });
-
-  it("keeps one active import per server and dedupes its enqueue", async () => {
-    if (stack === undefined) return;
-
-    await freshKind(stack, "probe.import");
-
-    const den = { source: "jellyfin" as const, serverId: freshRun("server"), serverName: "Den" };
-
-    const Started = Schema.Struct({
-      importId: Schema.String,
-      jobId: Schema.String,
-      created: Schema.Boolean,
-    });
-
-    const start = (serverId = den.serverId) =>
-      runFunction(stack, internal.core.imports.probeStart, { ...den, serverId }, Started);
-
-    const first = await start();
-    const queuedAgain = await start();
-    const other = await start(freshRun("other"));
-
-    expect(first.created).toBe(true);
-    expect(queuedAgain).toEqual({ ...first, created: false });
-    expect(other.jobId).not.toBe(first.jobId);
-
-    const w = worker(stack, "imports");
-    const { lease } = await claimed(w.claim(["probe.import"], 30_000));
-
-    expect(lease.jobId).toBe(first.jobId);
-    expect(await start()).toEqual({ ...first, created: false });
-
-    await w.finish(lease, { outcome: "succeeded" });
-
-    const next = await start();
-
-    expect(next.created).toBe(true);
-    expect(next.jobId).not.toBe(first.jobId);
-
-    const listed = await runFunction(
-      stack,
-      internal.core.imports.listByServer,
-      {
-        source: den.source,
-        serverId: den.serverId,
-        paginationOpts: { numItems: 10, cursor: null },
-      },
-      Schema.Struct({ page: Schema.Array(Schema.Struct({ id: Schema.String })) }),
-    );
-
-    expect(listed.page.map((row) => row.id)).toEqual([next.importId, first.importId]);
-
-    const older = await claimed(w.claim(["probe.import"], 30_000));
-
-    expect(older.lease.jobId).toBe(other.jobId);
-
-    await w.finish(older.lease, { outcome: "succeeded" });
-
-    const held = await claimed(w.claim(["probe.import"], 30_000));
-
-    expect(held.lease.jobId).toBe(next.jobId);
-    expect(await cancel(stack, held.lease.jobId)).toMatchObject({ outcome: "canceling" });
-
-    const restarted = await start();
-
-    expect(restarted.created).toBe(true);
-    expect(restarted.jobId).not.toBe(next.jobId);
-    expect(await w.report(held.lease)).toEqual({ outcome: "canceled" });
   });
 });

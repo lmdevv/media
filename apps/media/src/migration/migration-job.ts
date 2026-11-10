@@ -1,3 +1,4 @@
+import type { ProfileId } from "@media/contracts/ids";
 import type { JobProgress } from "@media/contracts/models/jobs";
 import type { MigrationImported, MigrationPhase } from "@media/contracts/models/migration";
 import {
@@ -14,7 +15,7 @@ import * as MediaConfig from "../media-config.ts";
 import { CredentialsUnreadable, openCredentials } from "./credentials.ts";
 import * as MigrationBackend from "./migration-backend.ts";
 import type { Lease } from "./migration-backend.ts";
-import { computePlan, credentialsBinding } from "./migrations.ts";
+import { backendReads, computePlan, credentialsBinding } from "./migrations.ts";
 import { countImports, type MigrationPlan, type ResolvedUser } from "./planner.ts";
 import type { SourceError } from "./source-plugin.ts";
 import { openSource } from "./sources.ts";
@@ -189,22 +190,22 @@ export const runMigrationJob = Effect.fn("MigrationJob.run")(function* (
     }).pipe(Effect.timeoutOption(options.scanWait));
   }
 
-  const users: ReadonlyArray<ResolvedUser> = state.plan.users.map((user) => ({
+  const users: ReadonlyArray<ResolvedUser<ProfileId>> = state.plan.users.map((user) => ({
     sourceUserId: user.sourceUserId,
     name: user.sourceUserId,
-    profileId: user.profileId,
+    person: user.profileId,
     action: "import",
     history: user.history,
   }));
 
-  const plan: MigrationPlan = yield* computePlan(
-    session,
-    state.source,
+  const plan: MigrationPlan<ProfileId> = yield* computePlan(session, backendReads(backend), {
+    source: state.source,
     users,
-    state.plan.pathMappings,
-    config.libraryRoots,
-    false,
-  ).pipe(Effect.provideService(MigrationBackend.Service, backend));
+    mappings: state.plan.pathMappings,
+    roots: config.libraryRoots,
+    withLocalProgress: false,
+    addable: () => true,
+  });
 
   yield* add({ unmatched: plan.summary.itemsUnmatched + plan.summary.itemsAwaitingScan });
 
@@ -229,7 +230,10 @@ export const runMigrationJob = Effect.fn("MigrationJob.run")(function* (
       const from = unit === resume.unit ? resume.cursor : 0;
 
       for (const batch of batchesOf(user.items, from, MigrationBackend.BATCH_SIZE)) {
-        const { keptLocal } = yield* backend.importWatchState(lease, batch.items);
+        const { keptLocal } = yield* backend.importWatchState(
+          lease,
+          batch.items.map(({ person, ...item }) => ({ ...item, profileId: person })),
+        );
 
         yield* add({ ...countImports(batch.items), keptLocal });
         done += batch.items.length;

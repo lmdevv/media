@@ -5,6 +5,8 @@ import type { ContentDomain } from "../../../commands/scopes";
 
 export const importSource = v.union(v.literal("jellyfin"), v.literal("plex"));
 
+type ImportSource = Infer<typeof importSource>;
+
 const tagged = <const Kind extends string, Fields extends PropertyValidators>(
   kind: Kind,
   fields: Fields,
@@ -19,7 +21,7 @@ type Tagged<Kind extends string, Fields extends PropertyValidators> = ReturnType
  * kinds together on one server, under each kind's own cap across every worker. `probe` runs only
  * in the stack suite; the server never claims it.
  */
-type JobPool = "movies" | "movies.background" | "music" | "server" | "probe";
+type JobPool = "movies" | "movies.background" | "movies.import" | "music" | "server" | "probe";
 
 interface KindPolicy<Payload extends PropertyValidators> {
   /** What enqueue stores, at most a few KiB. A large plan belongs in the domain's own table. */
@@ -139,6 +141,17 @@ const scanKind = <const Kind extends ContentDomain>(kind: Kind) =>
     dedupe: (payload) => payload.libraryId,
   });
 
+/** The import of one Jellyfin or Plex server into movies (ADR 0012). */
+const importKind = <const Source extends ImportSource>(source: Source) =>
+  defineKind(`movies.import.${source}`, {
+    payload: { source: v.literal(source), serverId: v.string() },
+    pool: "movies.import",
+    item: null,
+    cap: 1,
+    maxStrikes: 3,
+    dedupe: (payload) => payload.serverId,
+  });
+
 export const KINDS = [
   defineKind("probe.capped", {
     payload: probeRun,
@@ -163,14 +176,6 @@ export const KINDS = [
     cap: 2,
     maxStrikes: 3,
     dedupe: null,
-  }),
-  defineKind("probe.import", {
-    payload: { source: importSource, serverId: v.string() },
-    pool: "probe",
-    item: null,
-    cap: 1,
-    maxStrikes: 3,
-    dedupe: (payload) => `import:${payload.source}:${payload.serverId}`,
   }),
   scanKind("movies"),
   scanKind("music"),
@@ -223,6 +228,8 @@ export const KINDS = [
      */
     dedupe: (payload) => `${payload.fileId}:${payload.revision}`,
   }),
+  importKind("jellyfin"),
+  importKind("plex"),
   defineKind("server.backup", {
     payload: { trigger: v.union(v.literal("nightly"), v.literal("manual")) },
     pool: "server",
@@ -239,6 +246,9 @@ export type JobKind = KindDef["kind"];
 
 /** A job kind that scans a library. */
 export type ScanKind = Extract<JobKind, `${ContentDomain}.scan`>;
+
+/** A job kind that imports a Jellyfin or Plex server. */
+export type ImportKind = Extract<JobKind, `movies.import.${string}`>;
 
 /**
  * The job kind that scans a library of `kind`, the one place a library kind names its scan. It
