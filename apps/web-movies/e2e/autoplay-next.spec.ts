@@ -17,17 +17,14 @@ const stack = await reachableStack();
 
 test.skip(stack === null, NO_STACK);
 
-let person: Person | undefined;
+/**
+ * A new person for one test. Each test signs in, and the core limits sign-ins per username, so
+ * one person shared by the whole file runs out of tries when the tests run one after another.
+ */
+const kitPerson = (): Promise<Person> => {
+  if (stack === null) throw new Error("No stack to make the kit's person on");
 
-test.beforeAll(async () => {
-  if (stack !== null) person = await createPerson(stack, "kit", "member");
-});
-
-/** The kit's person, once `beforeAll` made them. */
-const kitPerson = (): Person => {
-  if (person === undefined) throw new Error("The kit's person was not made");
-
-  return person;
+  return createPerson(stack, "kit", "member");
 };
 
 const DOUBLE_TEXT = `:root { font-size: 200%; --text-caption: 24px; --leading-caption: 32px;
@@ -107,7 +104,7 @@ const openIn = async (
   options: Parameters<Browser["newContext"]>[0],
   query: string,
 ): Promise<Page> => {
-  const page = await signedInPage(browser, kitPerson(), options);
+  const page = await signedInPage(browser, await kitPerson(), options);
 
   await page.goto(moviesPath(`/dev/autoplay?${query}`));
   await expect(card(page)).toBeVisible();
@@ -167,7 +164,7 @@ for (const state of [STATES[0], STATES[3]]) {
   test(`${state.name}: the countdown's digits change without moving the button, its label, or each other`, async ({
     browser,
   }) => {
-    const context = (await signedInPage(browser, kitPerson(), state.options)).context();
+    const context = (await signedInPage(browser, await kitPerson(), state.options)).context();
 
     const measure = async (value: number) => {
       const page = await context.newPage();
@@ -204,7 +201,7 @@ for (const state of [STATES[0], STATES[3]]) {
 test("Play next has focus and plays the next episode; Watch credits closes the card", async ({
   page,
 }) => {
-  await signIn(page, kitPerson());
+  await signIn(page, await kitPerson());
   await page.goto(moviesPath("/dev/autoplay?seconds=1"));
   await expect(page.getByRole("button", { name: "Play next" })).toBeFocused();
 
