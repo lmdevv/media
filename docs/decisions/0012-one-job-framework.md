@@ -215,10 +215,20 @@ A first scan queues one trickplay job per video file, so finished jobs must not 
   points at: `movies.trickplay`, `movies.metadata`, `movies.person`, `server.backup`,
   `probe.capped`, `probe.wide`, and `probe.items`. Scans stay, because `libraries.lastScan` is a
   library's scan state. `probe.import` stays, because an `imports` row names its job.
-- It reads `jobs.by_kind_status_finished` once for each kind and status, so it never reads the
-  jobs it keeps. One call deletes at most 256 jobs and 4,000 of their items, each job's items
-  before the job. A job with more items carries on in the next call. A call that fills either
-  budget schedules the next one at once. Deleted jobs leave the index, so the sweep needs no
+- A job keeps at most 4,096 characters of each worker's text: the message of a report or a
+  success, and the error of a failure, both as `error` and as a queued retry's `lastError`. The
+  machine cuts a longer one, never inside a surrogate pair, and ends it with "… (cut)"; a report or
+  finish never fails for length.
+- It reads `jobs.by_kind_status_finished` for each kind and status, so it never reads the jobs
+  it keeps. One call deletes at most 256 jobs, 4,000 of their items, and 12 MiB of reads, each
+  job's items before the job. A job with more items carries on in the next call. Before each read
+  it reserves 1 MiB per job it may return, a Convex document's limit, because a job written
+  before the text bound may be that large, plus a trickplay job's file at its 16 KiB bound, each
+  counted twice because Convex reads a document again to delete or rewrite it. It reads only as
+  many jobs as the budget holds, measures each one it read, and deletes them before the next read,
+  so a call always deletes the jobs it read and never reads past 16 MiB; the 4 MiB left over holds
+  the items it deletes. A call that fills any budget schedules the next one at
+  once. Deleted jobs leave the index, so the sweep needs no
   cursor. `store.deleteFinishedJob` does the delete, so `store.ts` stays the only writer of
   `jobs` and `jobItems`. A finished job is neither running nor queued, so `jobKinds` rows stay as
   they are.

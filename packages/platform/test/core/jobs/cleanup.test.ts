@@ -12,7 +12,7 @@ import { movieFile, scannedTitle } from "../../movies/scanned";
 import { runServer } from "../../service";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
-import { freshRun, retrying } from "./driver";
+import { freshRun, inSequence, retrying } from "./driver";
 
 const stack = coreStackFromEnvFile();
 
@@ -104,6 +104,46 @@ describe.skipIf(stack === undefined)("the sweep of finished jobs", { timeout: 18
     expect(await exists(stack, imported.jobId)).toBe(true);
 
     await admin.signedIn.client.mutation(api.core.libraries.remove, { libraryId });
+  });
+
+  it("delete at least one job per call when their messages hold over 16 MiB", async () => {
+    if (stack === undefined) return;
+
+    const count = 40;
+
+    const jobIds = await runFunction(
+      stack,
+      internal.core.jobs.probe.enqueue,
+      { kind: "probe.wide", run: freshRun("sweep-bytes"), count },
+      Schema.Array(JobId),
+    );
+
+    // 40 messages of 512 KiB each, as jobs written before messages were bounded may hold.
+    await inSequence(jobIds, async (jobId) => {
+      await retrying(() => cancel(stack, jobId));
+      await retrying(() => backdate(stack, jobId));
+      await retrying(() =>
+        runFunction(
+          stack,
+          internal.core.jobs.probe.inflate,
+          { jobId, chars: 512 * 1024 },
+          Schema.Null,
+        ),
+      );
+    });
+
+    const first = await retrying(() =>
+      runFunction(stack, internal.core.jobs.cleanup.sweep, {}, Swept),
+    );
+
+    expect(first.jobs).toBeGreaterThanOrEqual(1);
+    expect(first.more).toBe(true);
+
+    await sweepAll(stack);
+
+    const left = await Promise.all(jobIds.map(async (jobId) => exists(stack, jobId)));
+
+    expect(left.filter(Boolean)).toEqual([]);
   });
 
   it("record a deleted failed trickplay job's failure on its file, so no file names it", async () => {

@@ -172,11 +172,14 @@ it was given, get a new ticket. D46 settles the principle, and this section sett
 - **Parameter.** A ticket travels in `ticket` (`TICKET_PARAM`). The grant interface names its
   parameter and builds media URLs with it, so a playlist copies the ticket it was given onto its
   segment URLs, and negotiation, downloads, and subtitles build URLs the same way.
-- **A playback per start.** Each `movies.play.start` issues its own ticket, and the server keys
-  the stream sessions of a start by a digest of that ticket (`t` and 32 hex digits). Logs name the
-  digest, never the ticket. A ticket names whole seconds, so two starts of the same file by the
-  same session in the same second get the same ticket and share one playback: the second start's
-  stream replaces the first, as a renegotiation does.
+- **A playback per start.** A personal ticket may name the one playback it starts, signed into it
+  as an optional last part of its principal: `s.<userId>.<sessionId>.<playback>`, where
+  `<playback>` is `[a-z0-9-]{1,64}`. A ticket that names none keeps its earlier bytes.
+  `movies.play.start` names its `playbackId`, so every start has its own ticket even when two
+  starts of one file by one session fall in the same second, and the server keys a start's stream
+  sessions, session reports, and stream binding by that playback. Neither start's ticket reaches the
+  other's stream, so neither can continue or stop it. For a ticket that names no playback the
+  server keys by a digest of the ticket. Logs name the playback or the digest, never the ticket.
 - **Starting.** Negotiation, direct play, subtitles, scrub thumbnails, and downloads admit the
   ticket with `TicketKeyRing.admit` for the purposes the route serves and the file the ticket
   names; the route then checks the file against its path, as before. A play admission is kept by
@@ -197,6 +200,10 @@ it was given, get a new ticket. D46 settles the principle, and this section sett
   grant's expiry is the session's, so a stream never ends merely because its ticket expired
   (D46). The core reports no positions, so a live stream keeps its encoder on its requests and
   releases it after the idle time, as a stream with no reports always did.
+- **Open responses end with the session.** A byte response a personal ticket admitted, such as
+  direct play or a prepared download, streams from its file and is cut off when the session's
+  watch answers ended, mid-body included, so a long response does not outlive a sign-out. Artwork
+  admits shareable tickets, which name no session.
 - **Downloads** are admitted on every request with byte ranges, so a cut transfer resumes with a
   new ticket from `core.downloads.fetch` (ADR 0019).
 - **Artwork.** Artwork URLs on the core carry a shareable `image` ticket for the artwork's ticket

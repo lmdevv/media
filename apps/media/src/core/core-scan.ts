@@ -22,7 +22,7 @@ import * as LibrarySink from "../library/library-sink.ts";
 import type * as MediaTools from "../media/media-tools.ts";
 import type * as MediaConfig from "../media-config.ts";
 import type * as MetadataResolver from "../metadata/title-metadata.ts";
-import { bootId, folderChain } from "../platform/folder-identity.ts";
+import { bootId, folderChain, folderSource } from "../platform/folder-identity.ts";
 import * as CoreJobs from "./core-jobs.ts";
 import { JobStopped } from "./core-jobs.ts";
 import * as CoreSession from "./core-session.ts";
@@ -375,9 +375,13 @@ export const handler = Effect.gen(function* () {
 
       const folders = yield* Effect.forEach(target.folders, (folder) =>
         Effect.tryPromise({
-          try: () => folderChain(folder),
+          try: async () => ({
+            folder,
+            chain: [...(await folderChain(folder))],
+            source: await folderSource(folder),
+          }),
           catch: () => claimFailure(folder),
-        }).pipe(Effect.map((chain) => ({ folder, chain: [...chain] }))),
+        }),
       );
 
       const claim = yield* session
@@ -386,7 +390,7 @@ export const handler = Effect.gen(function* () {
 
       if (!claim.claimed) {
         return yield* new JobFailed({
-          message: `Another library already uses ${claim.folder} under another path`,
+          message: `Another library already uses ${claim.folder} under another path; this library scans again on its own once that one lets the folder go`,
           retry: false,
         });
       }

@@ -1,9 +1,10 @@
-import { v } from "convex/values";
+import { getDocumentSize, v } from "convex/values";
 
 import { internal } from "../../_generated/api";
 import type { Doc } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { MutationCtx } from "../../_generated/server";
+import { DOCUMENT_BYTES } from "../../movies/fit";
 import { releaseTrickplayJob } from "../../movies/trickplayState";
 import type { JobKind } from "./kinds";
 import { ITEM_BATCH_MAX } from "./machine";
@@ -17,6 +18,21 @@ const SWEEP_JOBS_MAX = 256;
 
 /** Most of their items one sweep call deletes; a job with more goes on in the next call. */
 const SWEEP_ITEMS_MAX = ITEM_BATCH_MAX;
+
+/**
+ * Most bytes of jobs one sweep call reads, with the trickplay files it releases. Convex allows 16
+ * MiB; the rest holds the items it deletes, at most 4,256 rows of a number each, read twice.
+ */
+const SWEEP_BYTES_MAX = 12 * 1024 * 1024;
+
+/** Convex reads a document again to delete or rewrite it, so its bytes count twice. */
+const READS_PER_DELETE = 2;
+
+/**
+ * What one job may cost before it is read: a Convex document is at most 1 MiB, and a job written
+ * before its message and error were bounded may be that large.
+ */
+const JOB_BYTES_MAX = 1024 * 1024;
 
 /**
  * The kinds whose finished jobs nothing needs (ADR 0012, "Finished jobs"). Scans stay, because a
@@ -52,23 +68,15 @@ const oldJobs = (
     )
     .take(limit);
 
-const collect = async (
-  ctx: Pick<MutationCtx, "db">,
-  lanes: ReadonlyArray<Lane>,
-  before: number,
-  found: ReadonlyArray<Doc<"jobs">> = [],
-): Promise<ReadonlyArray<Doc<"jobs">>> => {
-  const [lane, ...rest] = lanes;
-  const room = SWEEP_JOBS_MAX - found.length;
-
-  if (lane === undefined || room === 0) return found;
-
-  return collect(ctx, rest, before, [...found, ...(await oldJobs(ctx, lane, before, room))]);
-};
+/** What deleting a job of the kind reads besides the job: a trickplay job's file, rewritten. */
+const releaseBytes = (kind: JobKind): number =>
+  kind === "movies.trickplay" ? READS_PER_DELETE * DOCUMENT_BYTES.mediaFiles : 0;
 
 interface Swept {
   readonly jobs: number;
   readonly items: number;
+  /** Bytes read so far: each job as stored, and what deleting it read. */
+  readonly bytes: number;
   /** Whether a budget ran out, so more may be left. */
   readonly full: boolean;
 }
@@ -76,7 +84,7 @@ interface Swept {
 const sweepJobs = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   jobs: ReadonlyArray<Doc<"jobs">>,
-  swept: Swept = { jobs: 0, items: 0, full: false },
+  swept: Swept,
 ): Promise<Swept> => {
   const [job, ...rest] = jobs;
 
@@ -91,29 +99,77 @@ const sweepJobs = async (
     await releaseTrickplayJob(ctx, { _id: job._id, status: job.status, payload });
   }
 
-  const items = swept.items + deletion.items;
+  const next = {
+    jobs: swept.jobs + (deletion.deleted ? 1 : 0),
+    items: swept.items + deletion.items,
+    bytes: swept.bytes + READS_PER_DELETE * getDocumentSize(job) + releaseBytes(payload.kind),
+    full: !deletion.deleted,
+  };
 
-  return deletion.deleted
-    ? sweepJobs(ctx, rest, { jobs: swept.jobs + 1, items, full: false })
-    : { jobs: swept.jobs, items, full: true };
+  return next.full ? next : sweepJobs(ctx, rest, next);
 };
 
 /**
- * Deletes finished jobs of `SWEPT_KINDS` that finished more than 7 days ago, at most 256 jobs and
- * 4,000 of their items per call, each job's items before the job. It schedules itself again at
- * once while a budget ran out. The hourly cron starts it; deleted jobs leave the index it reads, so
- * it needs no cursor, and two runs at once conflict and run one after the other.
+ * Deletes old jobs of one lane while the budgets last. Each read takes only as many jobs as the
+ * byte budget holds at 1 MiB each, read twice, so a call never reads past it, and the jobs it
+ * reads are deleted before the next read.
+ */
+const sweepLane = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  lane: Lane,
+  before: number,
+  swept: Swept,
+): Promise<Swept> => {
+  const room = Math.min(
+    SWEEP_JOBS_MAX - swept.jobs,
+    Math.floor(
+      (SWEEP_BYTES_MAX - swept.bytes) /
+        (READS_PER_DELETE * JOB_BYTES_MAX + releaseBytes(lane.kind)),
+    ),
+  );
+
+  if (room <= 0) return { ...swept, full: true };
+
+  const jobs = await oldJobs(ctx, lane, before, room);
+  const next = await sweepJobs(ctx, jobs, swept);
+
+  return next.full || jobs.length < room ? next : sweepLane(ctx, lane, before, next);
+};
+
+const sweepLanes = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  lanes: ReadonlyArray<Lane>,
+  before: number,
+  swept: Swept,
+): Promise<Swept> => {
+  const [lane, ...rest] = lanes;
+
+  if (lane === undefined) return swept;
+
+  const next = await sweepLane(ctx, lane, before, swept);
+
+  return next.full ? next : sweepLanes(ctx, rest, before, next);
+};
+
+/**
+ * Deletes finished jobs of `SWEPT_KINDS` that finished more than 7 days ago, at most 256 jobs, 4,000
+ * of their items, and 12 MiB of reads per call, each job's items before the job. It schedules
+ * itself again at once while a budget ran out. The hourly cron starts it; deleted jobs leave the
+ * index it reads, so it needs no cursor, and two runs at once conflict and run one after the other.
  */
 export const sweep = internalMutation({
   args: {},
   returns: v.object({ jobs: v.number(), items: v.number(), more: v.boolean() }),
   handler: async (ctx) => {
-    const old = await collect(ctx, LANES, Date.now() - FINISHED_KEPT_MS);
-    const swept = await sweepJobs(ctx, old);
-    const more = swept.full || old.length === SWEEP_JOBS_MAX;
+    const swept = await sweepLanes(ctx, LANES, Date.now() - FINISHED_KEPT_MS, {
+      jobs: 0,
+      items: 0,
+      bytes: 0,
+      full: false,
+    });
 
-    if (more) await ctx.scheduler.runAfter(0, internal.core.jobs.cleanup.sweep, {});
+    if (swept.full) await ctx.scheduler.runAfter(0, internal.core.jobs.cleanup.sweep, {});
 
-    return { jobs: swept.jobs, items: swept.items, more };
+    return { jobs: swept.jobs, items: swept.items, more: swept.full };
   },
 });

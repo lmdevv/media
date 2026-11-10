@@ -1,6 +1,15 @@
+import { v } from "convex/values";
+
+import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
+import { internalMutation } from "../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
-import { FOLDERS_MAX } from "./folders";
+import { FOLDERS_MAX, isPlainPath } from "./folders";
+import { inOrder } from "./lib/inOrder";
+import { sha256Hex } from "./lib/sha256";
+
+/** What claims write: the database, and the scheduler for rescans and continuations. */
+type ClaimCtx = Pick<MutationCtx, "db" | "scheduler">;
 
 /** Most identities in one folder's chain: the folder and each parent up to `/`. */
 const CHAIN_MAX = 64;
@@ -11,40 +20,146 @@ const CHAIN_ID = /^[0-9]+:[0-9]+$/u;
 
 const BOOT_ID_CHARS_MAX = 64;
 
-/** Most claim rows one library holds: 16 folders of 64 identities each. */
-const CLAIM_ROWS_MAX = FOLDERS_MAX * CHAIN_MAX;
+const SOURCE_PATH_CHARS_MAX = 4096;
 
-/** One folder of a library and the `<dev>:<ino>` identities of it and each parent, itself first. */
-interface FolderChain {
+const SOURCE_SEGMENTS_MAX = 64;
+
+/** Most keys one folder holds: its identity chain and its source path. */
+const KEYS_PER_FOLDER_MAX = CHAIN_MAX + 1;
+
+/** Hex digits of SHA-256 that stand for one part of a source path in its key. */
+const SEGMENT_HASH_CHARS = 16;
+
+/**
+ * Other libraries' rows one range of `by_key_depth` reads past the library's own. A range that
+ * fills it may hold more, which a continuation reads.
+ */
+const OVERLAP_PAGE = 4;
+
+/** Most younger claims one call evicts; a continuation evicts the rest. */
+const EVICT_MAX = 4;
+
+/** Most libraries one refusal records as waiting on. */
+const WAITS_RECORDED_MAX = 16;
+
+/** Most libraries kept waiting on one owner, and most owners one library waits on. */
+const WAITS_MAX = 64;
+
+/** Most waiting libraries one call of `takeWaiters` hands over. */
+const WAKE_PAGE = 16;
+
+/** Where the server found a folder: its mount's device and its path within that filesystem. */
+interface FolderSource {
+  readonly device: string;
+  readonly path: string;
+}
+
+/** One folder of a library as the server read it on disk. */
+interface SentFolder {
   readonly folder: string;
+  /** The `<dev>:<ino>` identities of the folder's real path and each parent, itself first. */
   readonly chain: ReadonlyArray<string>;
+  /** Null when the server has no mount table. */
+  readonly source: FolderSource | null;
 }
 
-/** A folder's chain as `parseChains` checked it: its own identity, then its parents'. */
-interface CheckedChain extends FolderChain {
-  readonly self: string;
+/** The keys of an identity chain: the folder's own first, then each parent's up to `/`. */
+type KeyChain = readonly [self: string, ...parents: ReadonlyArray<string>];
+
+/** A folder's keys as `parseClaim` checked them. */
+interface CheckedFolder {
+  readonly folder: string;
+  /** `i:<dev>:<ino>` of the folder's real path and of each parent, itself first. */
+  readonly identities: KeyChain;
+  /** The `s:` key of its source path (`sourceKey`), or null without a mount table. */
+  readonly source: string | null;
 }
 
-/** Whether the library now holds its folders by identity, or the first of them another reaches. */
+/** Whether the library now holds its folders, or the first of them another claim reaches. */
 type FolderClaim =
   | { readonly claimed: true }
   | { readonly claimed: false; readonly folder: string };
 
-const isChainId = (id: string): boolean => id.length <= CHAIN_ID_CHARS_MAX && CHAIN_ID.test(id);
+const isDeviceId = (id: string): boolean => id.length <= CHAIN_ID_CHARS_MAX && CHAIN_ID.test(id);
+
+const isSourcePath = (path: string): boolean =>
+  path.length <= SOURCE_PATH_CHARS_MAX &&
+  (path === "/" || (isPlainPath(path) && path.split("/").length - 1 <= SOURCE_SEGMENTS_MAX));
+
+const keyChainOf = (keys: ReadonlyArray<string>): KeyChain | null => {
+  const [self, ...parents] = keys;
+
+  return self === undefined ? null : [self, ...parents];
+};
 
 /**
- * The sent chains in the order of the library's folders, one for each.
+ * A source path as one key, `s:<device>:/<part>/<part>/`, each part 16 hex digits of its SHA-256
+ * and `/` alone for the filesystem's root. A folder's key starts with another's exactly when its
+ * source lies at or inside the other's on the same device, by whole parts, and stays at most
+ * about 1,100 characters however long the path is.
+ */
+const sourceKey = ({ device, path }: FolderSource): string => {
+  const parts = path === "/" ? [] : path.split("/").slice(1);
+
+  return `s:${device}:/${parts.map((part) => `${sha256Hex(part).slice(0, SEGMENT_HASH_CHARS)}/`).join("")}`;
+};
+
+/** The keys of the source paths that hold a source key's path, `/` first. */
+const sourceParents = (key: string): ReadonlyArray<string> => {
+  const root = key.slice(0, key.indexOf("/") + 1);
+
+  const parts = key
+    .slice(root.length, -1)
+    .split("/")
+    .filter((part) => part !== "");
+
+  return parts.map(
+    (_part, n) =>
+      `${root}${parts
+        .slice(0, n)
+        .map((part) => `${part}/`)
+        .join("")}`,
+  );
+};
+
+/** The end of the range of keys that start with a source key: its last `/` raised by one. */
+const sourceRangeEnd = (key: string): string => `${key.slice(0, -1)}0`;
+
+const checkedFolder = ({ folder, chain, source }: SentFolder): CheckedFolder => {
+  const identities = keyChainOf(chain.map((id) => `i:${id}`));
+
+  if (identities === null || chain.length > CHAIN_MAX || !chain.every(isDeviceId)) {
+    throw new Error(
+      `${folder} needs 1 to ${CHAIN_MAX} identities as <dev>:<ino>; got ${JSON.stringify(chain)}`,
+    );
+  }
+
+  if (source === null) return { folder, identities, source: null };
+
+  if (!isDeviceId(source.device) || !isSourcePath(source.path)) {
+    throw new Error(
+      `${folder} needs a source device as <major>:<minor> and an absolute path of at most ${SOURCE_SEGMENTS_MAX} parts; got ${JSON.stringify(source).slice(0, 256)}`,
+    );
+  }
+
+  return { folder, identities, source: sourceKey(source) };
+};
+
+/**
+ * The sent folders in the order of the library's folders, one for each, as keys.
  *
  * @throws Error when more than 16 are sent, a folder is not one of the library's, one of them is
- * missing or sent twice, a chain holds no identity or more than 64, or an identity is not
- * `<dev>:<ino>` of at most 48 characters, or the boot id is empty or longer than 64 characters:
- * each a defect in the server, which sends what `target` answered.
+ * missing or sent twice, a chain holds no identity or more than 64, an identity is not
+ * `<dev>:<ino>` of at most 48 characters, a source's device is not `<major>:<minor>` of at most 48
+ * characters or its path is not absolute and plain with at most 4,096 characters and 64 parts, or
+ * the boot id is empty or longer than 64 characters: each a defect in the server, which sends what
+ * `target` answered.
  */
-export const parseChains = (
+export const parseClaim = (
   folders: ReadonlyArray<string>,
   bootId: string | null,
-  sent: ReadonlyArray<FolderChain>,
-): ReadonlyArray<CheckedChain> => {
+  sent: ReadonlyArray<SentFolder>,
+): ReadonlyArray<CheckedFolder> => {
   if (sent.length > FOLDERS_MAX) {
     throw new Error(`A claim sends at most ${FOLDERS_MAX} folders; got ${sent.length}`);
   }
@@ -57,7 +172,7 @@ export const parseChains = (
 
   if (stranger !== undefined) throw new Error(`${stranger.folder} is not a folder of the library`);
 
-  const ordered = folders.map((folder) => {
+  return folders.map((folder) => {
     const matching = sent.filter((entry) => entry.folder === folder);
     const [only] = matching;
 
@@ -67,27 +182,47 @@ export const parseChains = (
       );
     }
 
-    return only;
-  });
-
-  return ordered.map(({ folder, chain }) => {
-    const [self] = chain;
-
-    if (self === undefined || chain.length > CHAIN_MAX || !chain.every(isChainId)) {
-      throw new Error(
-        `${folder} needs 1 to ${CHAIN_MAX} identities as <dev>:<ino>; got ${JSON.stringify(chain)}`,
-      );
-    }
-
-    return { folder, self, chain };
+    return checkedFolder(only);
   });
 };
 
-const claimRows = (db: DatabaseReader, libraryId: Id<"libraries">) =>
+/**
+ * Whether `inner` is `outer` or lies inside it: the identity chain of `inner` holds the identity of
+ * `outer`, or the source of `inner` lies at or inside the source of `outer`.
+ */
+const reaches = (inner: CheckedFolder, outer: CheckedFolder): boolean =>
+  inner.identities.includes(outer.identities[0]) ||
+  (inner.source !== null && outer.source !== null && inner.source.startsWith(outer.source));
+
+const overlap = (left: CheckedFolder, right: CheckedFolder): boolean =>
+  reaches(left, right) || reaches(right, left);
+
+/** One stored claim of the library and its key rows. */
+interface Stored {
+  readonly claim: Doc<"folderClaims">;
+  readonly keys: ReadonlyArray<Doc<"folderClaimKeys">>;
+}
+
+const keyRowsOf = (db: DatabaseReader, claimId: Id<"folderClaims">) =>
   db
+    .query("folderClaimKeys")
+    .withIndex("by_claim", (q) => q.eq("claimId", claimId))
+    .take(KEYS_PER_FOLDER_MAX);
+
+/** The library's claims, at most 16, one per folder it holds, and their rows, at most 1,040. */
+const storedOf = async (
+  db: DatabaseReader,
+  libraryId: Id<"libraries">,
+): Promise<ReadonlyArray<Stored>> => {
+  const claims = await db
     .query("folderClaims")
-    .withIndex("by_library", (q) => q.eq("libraryId", libraryId))
-    .take(CLAIM_ROWS_MAX);
+    .withIndex("by_library_folder", (q) => q.eq("libraryId", libraryId))
+    .take(FOLDERS_MAX);
+
+  return Promise.all(
+    claims.map(async (claim) => ({ claim, keys: await keyRowsOf(db, claim._id) })),
+  );
+};
 
 const tally = (keys: ReadonlyArray<string>): ReadonlyMap<string, number> =>
   keys.reduce(
@@ -95,58 +230,218 @@ const tally = (keys: ReadonlyArray<string>): ReadonlyMap<string, number> =>
     new Map<string, number>(),
   );
 
-/** The library's rows of one boot that a range of `by_boot_chain` may read, so it reads past them. */
+/** The library's own rows that a range of `by_key_depth` may read, so it reads past them. */
 interface OwnRows {
   readonly anyDepth: ReadonlyMap<string, number>;
   readonly folderItself: ReadonlyMap<string, number>;
+  readonly sources: ReadonlyArray<string>;
 }
 
-const ownRowsOf = (own: ReadonlyArray<Doc<"folderClaims">>, bootId: string | null): OwnRows => {
-  const sameBoot = own.filter((row) => row.bootId === bootId);
+const ownRowsOf = (stored: ReadonlyArray<Stored>): OwnRows => {
+  const rows = stored.flatMap(({ keys }) => keys);
 
   return {
-    anyDepth: tally(sameBoot.map((row) => row.chainId)),
-    folderItself: tally(sameBoot.flatMap((row) => (row.depth === 0 ? [row.chainId] : []))),
+    anyDepth: tally(rows.map((row) => row.key)),
+    folderItself: tally(rows.flatMap((row) => (row.depth === 0 ? [row.key] : []))),
+    sources: rows.flatMap((row) => (row.key.startsWith("s:") ? [row.key] : [])),
   };
 };
 
+/** Other libraries' rows that one range read, and whether it filled its page. */
+interface Found {
+  readonly rows: ReadonlyArray<Doc<"folderClaimKeys">>;
+  readonly full: boolean;
+}
+
+/** How a range of `by_key_depth` reads one key. */
+type Reach =
+  /** Rows of the key at any depth: identity chains that hold it, so folders at or inside it. */
+  | "chains"
+  /** Rows of the key at depth 0: the folder that is it, so one that holds the folder. */
+  | "itself"
+  /** Source keys that start with it: sources at or inside it. */
+  | "inside";
+
 /**
- * Whether another library of the boot claims `chainId`: anywhere in a chain, so its folder is that
- * folder or inside it, or, with `depth` 0, as a folder itself, so that folder holds it. It reads
- * past this library's own rows, at most 1,024, which the claim replaces.
+ * The overlap reads of one library, each range of `by_key_depth` read once, each reading at most
+ * 4 rows past the library's own.
  */
-const otherClaims = async (
-  db: DatabaseReader,
-  libraryId: Id<"libraries">,
-  bootId: string | null,
-  chainId: string,
-  depth: 0 | "any",
-  own: OwnRows,
-): Promise<boolean> => {
-  const skip = (depth === 0 ? own.folderItself : own.anyDepth).get(chainId) ?? 0;
+const overlapReader = (db: DatabaseReader, libraryId: Id<"libraries">, own: OwnRows) => {
+  const ranges = new Map<string, Promise<Found>>();
 
-  const rows = await db
-    .query("folderClaims")
-    .withIndex("by_boot_chain", (q) =>
-      depth === 0
-        ? q.eq("bootId", bootId).eq("chainId", chainId).eq("depth", 0)
-        : q.eq("bootId", bootId).eq("chainId", chainId),
-    )
-    .take(skip + 1);
+  const ownIn = (key: string, reach: Reach): number => {
+    if (reach === "inside") return own.sources.filter((source) => source.startsWith(key)).length;
 
-  return rows.some((row) => row.libraryId !== libraryId);
+    return (reach === "itself" ? own.folderItself : own.anyDepth).get(key) ?? 0;
+  };
+
+  const range = (key: string, reach: Reach): Promise<Found> => {
+    const id = `${reach}:${key}`;
+    const known = ranges.get(id);
+
+    if (known !== undefined) return known;
+
+    const limit = ownIn(key, reach) + OVERLAP_PAGE;
+
+    const found = db
+      .query("folderClaimKeys")
+      .withIndex("by_key_depth", (q) => {
+        if (reach === "inside") return q.gte("key", key).lt("key", sourceRangeEnd(key));
+
+        return reach === "itself" ? q.eq("key", key).eq("depth", 0) : q.eq("key", key);
+      })
+      .take(limit)
+      .then((rows) => ({
+        rows: rows.filter((row) => row.libraryId !== libraryId),
+        full: rows.length === limit,
+      }));
+
+    ranges.set(id, found);
+
+    return found;
+  };
+
+  /**
+   * Other libraries' rows whose folders are `folder`, lie inside it, or hold it: at most 64
+   * ranges for its identities and 65 for its source.
+   */
+  return async (folder: CheckedFolder): Promise<Found> => {
+    const [self, ...parents] = folder.identities;
+    const { source } = folder;
+
+    const found = await Promise.all([
+      range(self, "chains"),
+      ...parents.map(async (parent) => range(parent, "itself")),
+      ...(source === null
+        ? []
+        : [
+            range(source, "inside"),
+            ...sourceParents(source).map(async (parent) => range(parent, "itself")),
+          ]),
+    ]);
+
+    return { rows: found.flatMap((each) => each.rows), full: found.some((each) => each.full) };
+  };
 };
 
-/** Whether two folders of one library reach each other: one is the other, or lies inside it. */
-const overlap = (left: CheckedChain, right: CheckedChain): boolean =>
-  right.chain.includes(left.self) || left.chain.includes(right.self);
+/** Which of two claims came first: the earlier `since`, and the lower id on a tie. */
+interface Rank {
+  readonly since: number;
+  /** Null for a folder the library claims for the first time, which loses a tie. */
+  readonly claimId: Id<"folderClaims"> | null;
+}
 
-const rowKey = (row: Pick<Doc<"folderClaims">, "folder" | "bootId" | "chainId" | "depth">) =>
-  JSON.stringify([row.folder, row.bootId, row.chainId, row.depth]);
+const isOlder = (row: Pick<Doc<"folderClaimKeys">, "since" | "claimId">, than: Rank): boolean =>
+  row.since < than.since ||
+  (row.since === than.since && (than.claimId === null || row.claimId < than.claimId));
 
-const sameRows = (
-  stored: ReadonlyArray<Doc<"folderClaims">>,
-  wanted: ReadonlyArray<Pick<Doc<"folderClaims">, "folder" | "bootId" | "chainId" | "depth">>,
+/** What overlaps one folder: the libraries whose claims came first, and the younger claims. */
+interface Contest {
+  readonly older: ReadonlyArray<Id<"libraries">>;
+  readonly younger: ReadonlyMap<Id<"folderClaims">, Id<"libraries">>;
+  readonly full: boolean;
+}
+
+const contestOf = (found: Found, rank: Rank): Contest => ({
+  older: [...new Set(found.rows.filter((row) => isOlder(row, rank)).map((row) => row.libraryId))],
+  younger: new Map(
+    found.rows.flatMap((row) =>
+      isOlder(row, rank) ? [] : [[row.claimId, row.libraryId] as const],
+    ),
+  ),
+  full: found.full,
+});
+
+const wake = async (ctx: ClaimCtx, ownerLibraryId: Id<"libraries">): Promise<void> => {
+  await ctx.scheduler.runAfter(0, internal.core.libraries.wakeWaiting, { ownerLibraryId });
+};
+
+/**
+ * Records that `libraryId` was refused a folder `ownerLibraryId` holds, once, so the owner's
+ * letting go rescans it. A full list on either side records nothing: that library is then
+ * rescanned by hand.
+ */
+const recordWait = async (
+  ctx: ClaimCtx,
+  libraryId: Id<"libraries">,
+  ownerLibraryId: Id<"libraries">,
+): Promise<void> => {
+  const [known, waiters, owners] = await Promise.all([
+    ctx.db
+      .query("folderClaimWaits")
+      .withIndex("by_owner_library", (q) =>
+        q.eq("ownerLibraryId", ownerLibraryId).eq("libraryId", libraryId),
+      )
+      .first(),
+    ctx.db
+      .query("folderClaimWaits")
+      .withIndex("by_owner_library", (q) => q.eq("ownerLibraryId", ownerLibraryId))
+      .take(WAITS_MAX),
+    ctx.db
+      .query("folderClaimWaits")
+      .withIndex("by_library", (q) => q.eq("libraryId", libraryId))
+      .take(WAITS_MAX),
+  ]);
+
+  if (known !== null || waiters.length >= WAITS_MAX || owners.length >= WAITS_MAX) return;
+
+  await ctx.db.insert("folderClaimWaits", { libraryId, ownerLibraryId });
+};
+
+const recordWaits = async (
+  ctx: ClaimCtx,
+  libraryId: Id<"libraries">,
+  owners: ReadonlyArray<Id<"libraries">>,
+): Promise<void> => {
+  await inOrder(owners.slice(0, WAITS_RECORDED_MAX), async (owner) =>
+    recordWait(ctx, libraryId, owner),
+  );
+};
+
+/** Deletes one claim and its rows, at most 65, and says whether it was still there. */
+const deleteClaim = async (ctx: ClaimCtx, claimId: Id<"folderClaims">): Promise<boolean> => {
+  const [claim, keys] = await Promise.all([ctx.db.get(claimId), keyRowsOf(ctx.db, claimId)]);
+
+  await Promise.all(keys.map((row) => ctx.db.delete(row._id)));
+
+  if (claim === null) return false;
+
+  await ctx.db.delete(claim._id);
+
+  return true;
+};
+
+/**
+ * Evicts up to 4 younger claims that overlap the library's, records each one's library as
+ * waiting on this one and rescans the libraries waiting on it, and says whether more are left.
+ */
+const evictYounger = async (
+  ctx: ClaimCtx,
+  libraryId: Id<"libraries">,
+  younger: ReadonlyMap<Id<"folderClaims">, Id<"libraries">>,
+): Promise<boolean> => {
+  const evicting = [...younger].slice(0, EVICT_MAX);
+
+  const evicted = await Promise.all(
+    evicting.map(async ([claimId, owner]) => ((await deleteClaim(ctx, claimId)) ? [owner] : [])),
+  );
+
+  const losers = [...new Set(evicted.flat())];
+
+  await inOrder(losers, async (loser) => {
+    await recordWait(ctx, loser, libraryId);
+    await wake(ctx, loser);
+  });
+
+  return younger.size > EVICT_MAX;
+};
+
+const rowKey = (row: Pick<Doc<"folderClaimKeys">, "key" | "depth">): string =>
+  JSON.stringify([row.key, row.depth]);
+
+const sameKeys = (
+  stored: ReadonlyArray<Doc<"folderClaimKeys">>,
+  wanted: ReadonlyArray<Pick<Doc<"folderClaimKeys">, "key" | "depth">>,
 ): boolean => {
   const storedKeys = tally(stored.map(rowKey));
   const wantedKeys = tally(wanted.map(rowKey));
@@ -157,85 +452,272 @@ const sameRows = (
   );
 };
 
+const keysOf = (folder: CheckedFolder) => [
+  ...folder.identities.map((key, depth) => ({ key, depth })),
+  ...(folder.source === null ? [] : [{ key: folder.source, depth: 0 }]),
+];
+
 /**
- * Claims the library's folders by identity (ADR 0024, "Folder identity"): refused, naming its
- * first folder in path order that another library's claim of the same boot reaches, or that
- * another of its own folders reaches, and then it writes nothing and its earlier claims stay.
- * Otherwise its claims become `chains`, and an unchanged claim writes nothing.
- *
- * Bounded at the largest claim, 16 folders of 64 identities: one range for the library's own rows
- * (at most 1,024), at most 16 + 1,024 ranges of `by_boot_chain`, and at most 1,024 deletes and
- * 1,024 inserts. Convex serializes two concurrent claims that overlap: each reads a range the
- * other writes into.
+ * Writes the library's claim of one folder: a new claim from now, or the one it holds with its
+ * `since` kept, its rows replaced when they changed. Says whether rows it held were replaced.
  */
-export const claimIdentities = async (
-  ctx: Pick<MutationCtx, "db">,
+const writeClaim = async (
+  ctx: ClaimCtx,
   libraryId: Id<"libraries">,
   bootId: string | null,
-  chains: ReadonlyArray<CheckedChain>,
-): Promise<FolderClaim> => {
-  const stored = await claimRows(ctx.db, libraryId);
-  const own = ownRowsOf(stored, bootId);
-  const asFolder = new Map<string, Promise<boolean>>();
+  folder: CheckedFolder,
+  held: Stored | undefined,
+  now: number,
+): Promise<boolean> => {
+  const wanted = keysOf(folder);
 
-  const heldAsFolder = (chainId: string): Promise<boolean> => {
-    const known = asFolder.get(chainId);
+  if (held === undefined) {
+    const claimId = await ctx.db.insert("folderClaims", {
+      libraryId,
+      folder: folder.folder,
+      since: now,
+      bootId,
+    });
 
-    if (known !== undefined) return known;
+    await Promise.all(
+      wanted.map((row) =>
+        ctx.db.insert("folderClaimKeys", { claimId, libraryId, since: now, ...row }),
+      ),
+    );
 
-    const found = otherClaims(ctx.db, libraryId, bootId, chainId, 0, own);
+    return false;
+  }
 
-    asFolder.set(chainId, found);
+  const { claim } = held;
 
-    return found;
-  };
+  if (claim.bootId !== bootId) await ctx.db.patch(claim._id, { bootId });
 
-  const reached = async (entry: CheckedChain): Promise<boolean> => {
-    if (chains.some((other) => other !== entry && overlap(entry, other))) return true;
+  if (sameKeys(held.keys, wanted)) return false;
 
-    const found = await Promise.all([
-      otherClaims(ctx.db, libraryId, bootId, entry.self, "any", own),
-      ...[...new Set(entry.chain.slice(1))].map(heldAsFolder),
-    ]);
-
-    return found.some(Boolean);
-  };
-
-  const firstReached = async (
-    remaining: ReadonlyArray<CheckedChain>,
-  ): Promise<CheckedChain | null> => {
-    const [first, ...rest] = remaining;
-
-    if (first === undefined) return null;
-
-    return (await reached(first)) ? first : firstReached(rest);
-  };
-
-  const refused = await firstReached(chains);
-
-  if (refused !== null) return { claimed: false, folder: refused.folder };
-
-  const wanted = chains.flatMap(({ folder, chain }) =>
-    chain.map((chainId, depth) => ({ libraryId, folder, bootId, chainId, depth })),
+  await Promise.all(held.keys.map((row) => ctx.db.delete(row._id)));
+  await Promise.all(
+    wanted.map((row) =>
+      ctx.db.insert("folderClaimKeys", {
+        claimId: claim._id,
+        libraryId,
+        since: claim.since,
+        ...row,
+      }),
+    ),
   );
 
-  if (sameRows(stored, wanted)) return { claimed: true };
+  return true;
+};
 
-  await Promise.all(stored.map((row) => ctx.db.delete(row._id)));
-  await Promise.all(wanted.map((row) => ctx.db.insert("folderClaims", row)));
+const firstContested = async (
+  remaining: ReadonlyArray<CheckedFolder>,
+  contest: (folder: CheckedFolder) => Promise<Contest>,
+  settled: ReadonlyArray<Contest> = [],
+): Promise<
+  | { readonly refused: CheckedFolder; readonly older: ReadonlyArray<Id<"libraries">> }
+  | { readonly refused: null; readonly contests: ReadonlyArray<Contest> }
+> => {
+  const [first, ...rest] = remaining;
+
+  if (first === undefined) return { refused: null, contests: settled };
+
+  const found = await contest(first);
+
+  return found.older.length > 0
+    ? { refused: first, older: found.older }
+    : firstContested(rest, contest, [...settled, found]);
+};
+
+const mergeYounger = (
+  contests: ReadonlyArray<Contest>,
+): ReadonlyMap<Id<"folderClaims">, Id<"libraries">> =>
+  new Map(contests.flatMap((contest) => [...contest.younger]));
+
+/**
+ * Claims the library's folders by identity and source path (ADR 0024, "Folder identity"). A
+ * folder that another of the library's folders reaches is refused. A folder that another
+ * library's claim reaches, inside or out, goes to the claim that came first, whatever boot either
+ * was read in: an older claim refuses this one, naming the first such folder in path order, and
+ * the call then writes only the record that this library waits on the older claims' libraries;
+ * younger claims are evicted, and their libraries wait on this one. Otherwise its claims become
+ * `folders`, each folder keeping the time it was first claimed, and an unchanged claim writes
+ * nothing. Replacing rows it held, or dropping a folder it no longer has, rescans the libraries
+ * waiting on it.
+ *
+ * Bounded at the largest claim, 16 folders of 64 identities and a 64-part source path: at most
+ * 17 ranges and 1,040 rows of its own, at most 2,064 ranges of `by_key_depth` that each read at
+ * most 4 rows past its own, at most 1,040 deletes and 1,040 inserts of its rows, and at most 4
+ * evictions of 2 reads and 66 deletes each. Convex counts a delete among its 4,096 reads, so that
+ * is at most about 3,400. A range that fills its page, or more younger claims, schedule `settle`.
+ * Convex serializes two concurrent claims that overlap: each reads a range the other writes into.
+ */
+export const claimIdentities = async (
+  ctx: ClaimCtx,
+  libraryId: Id<"libraries">,
+  bootId: string | null,
+  folders: ReadonlyArray<CheckedFolder>,
+): Promise<FolderClaim> => {
+  const twice = folders.find((folder) =>
+    folders.some((other) => other !== folder && overlap(folder, other)),
+  );
+
+  if (twice !== undefined) return { claimed: false, folder: twice.folder };
+
+  const now = Date.now();
+  const stored = await storedOf(ctx.db, libraryId);
+  const read = overlapReader(ctx.db, libraryId, ownRowsOf(stored));
+
+  const heldOf = (folder: CheckedFolder) =>
+    stored.find((each) => each.claim.folder === folder.folder);
+
+  const rankOf = (folder: CheckedFolder): Rank => {
+    const held = heldOf(folder)?.claim;
+
+    return held === undefined
+      ? { since: now, claimId: null }
+      : { since: held.since, claimId: held._id };
+  };
+
+  const contested = await firstContested(folders, async (folder) =>
+    contestOf(await read(folder), rankOf(folder)),
+  );
+
+  if (contested.refused !== null) {
+    await recordWaits(ctx, libraryId, contested.older);
+
+    return { claimed: false, folder: contested.refused.folder };
+  }
+
+  const replaced = await Promise.all(
+    folders.map(async (folder) => writeClaim(ctx, libraryId, bootId, folder, heldOf(folder), now)),
+  );
+
+  const dropped = await Promise.all(
+    stored
+      .filter((each) => !folders.some((folder) => folder.folder === each.claim.folder))
+      .map(async (each) => deleteClaim(ctx, each.claim._id)),
+  );
+
+  if ([...replaced, ...dropped].some(Boolean)) await wake(ctx, libraryId);
+
+  const more = await evictYounger(ctx, libraryId, mergeYounger(contested.contests));
+
+  if (more || contested.contests.some((contest) => contest.full)) {
+    await ctx.scheduler.runAfter(0, internal.core.folderClaims.settle, { libraryId });
+  }
 
   return { claimed: true };
 };
 
+/** A stored claim's folder and keys, or null for one that has no identity, which no claim writes. */
+const checkedOf = ({ claim, keys }: Stored): CheckedFolder | null => {
+  const identities = keyChainOf(
+    keys
+      .filter((row) => row.key.startsWith("i:"))
+      .toSorted((left, right) => left.depth - right.depth)
+      .map((row) => row.key),
+  );
+
+  const source = keys.find((row) => row.key.startsWith("s:"))?.key ?? null;
+
+  return identities === null ? null : { folder: claim.folder, identities, source };
+};
+
 /**
- * Deletes every claim of a library whose folders changed or that is being deleted: at most 1,024
- * rows, so one mutation holds it. Its next scan claims its folders again.
+ * Goes on with a claim whose overlap reads filled a page or that left younger claims: reads the
+ * library's claims again and evicts the younger of each overlapping pair, its own claim of a
+ * folder included, recording each loser as waiting on the winner. It schedules itself again while
+ * a page fills or younger claims are left. Each pass evicts at least one claim while one fills,
+ * so it ends. Bounded as `claimIdentities`.
+ */
+export const settle = internalMutation({
+  args: { libraryId: v.id("libraries") },
+  returns: v.null(),
+  handler: async (ctx, { libraryId }) => {
+    const stored = await storedOf(ctx.db, libraryId);
+    const read = overlapReader(ctx.db, libraryId, ownRowsOf(stored));
+
+    const contests = await Promise.all(
+      stored.flatMap((each) => {
+        const folder = checkedOf(each);
+
+        return folder === null
+          ? []
+          : [
+              (async () => ({
+                each,
+                contest: contestOf(await read(folder), {
+                  since: each.claim.since,
+                  claimId: each.claim._id,
+                }),
+              }))(),
+            ];
+      }),
+    );
+
+    const lost = contests.filter(({ contest }) => contest.older.length > 0);
+
+    await Promise.all(lost.map(async ({ each }) => deleteClaim(ctx, each.claim._id)));
+    await recordWaits(ctx, libraryId, [...new Set(lost.flatMap(({ contest }) => contest.older))]);
+
+    if (lost.length > 0) await wake(ctx, libraryId);
+
+    const kept = contests.filter(({ contest }) => contest.older.length === 0);
+
+    const more = await evictYounger(
+      ctx,
+      libraryId,
+      mergeYounger(kept.map(({ contest }) => contest)),
+    );
+
+    if (more || kept.some(({ contest }) => contest.full)) {
+      await ctx.scheduler.runAfter(0, internal.core.folderClaims.settle, { libraryId });
+    }
+
+    return null;
+  },
+});
+
+/**
+ * Deletes the library's claims of `folders`, or of every folder when null, at most 16 claims of
+ * 65 rows, and rescans the libraries waiting on it when one went. A library being deleted also
+ * drops its own waits, at most 64. Its next scan claims its folders again.
  */
 export const releaseClaims = async (
-  ctx: Pick<MutationCtx, "db">,
+  ctx: ClaimCtx,
   libraryId: Id<"libraries">,
+  folders: ReadonlyArray<string> | null,
 ): Promise<void> => {
-  const rows = await claimRows(ctx.db, libraryId);
+  const stored = await storedOf(ctx.db, libraryId);
+  const going = stored.filter((each) => folders === null || folders.includes(each.claim.folder));
+  const deleted = await Promise.all(going.map(async (each) => deleteClaim(ctx, each.claim._id)));
 
-  await Promise.all(rows.map((row) => ctx.db.delete(row._id)));
+  if (deleted.some(Boolean)) await wake(ctx, libraryId);
+
+  if (folders !== null) return;
+
+  const waits = await ctx.db
+    .query("folderClaimWaits")
+    .withIndex("by_library", (q) => q.eq("libraryId", libraryId))
+    .take(WAITS_MAX);
+
+  await Promise.all(waits.map((row) => ctx.db.delete(row._id)));
+};
+
+/**
+ * Hands over up to 16 libraries that wait on `ownerLibraryId`, deleting their waits, and says
+ * whether more wait. The owner let a folder go, so each may claim now.
+ */
+export const takeWaiters = async (
+  ctx: Pick<MutationCtx, "db">,
+  ownerLibraryId: Id<"libraries">,
+): Promise<{ readonly libraryIds: ReadonlyArray<Id<"libraries">>; readonly more: boolean }> => {
+  const waits = await ctx.db
+    .query("folderClaimWaits")
+    .withIndex("by_owner_library", (q) => q.eq("ownerLibraryId", ownerLibraryId))
+    .take(WAKE_PAGE);
+
+  await Promise.all(waits.map((row) => ctx.db.delete(row._id)));
+
+  return { libraryIds: waits.map((row) => row.libraryId), more: waits.length === WAKE_PAGE };
 };

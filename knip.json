@@ -9,7 +9,8 @@
     },
     "apps/media": {
       "entry": ["src/main.ts", "scripts/*.ts"],
-      "project": ["src/**/*.ts", "scripts/**/*.ts"]
+      "project": ["src/**/*.ts", "scripts/**/*.ts"],
+      "ignoreBinaries": ["unshare"]
     },
     "apps/web": {},
     "apps/web-account": {},

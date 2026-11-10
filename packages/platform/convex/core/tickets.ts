@@ -45,6 +45,8 @@ const keyRing = (): Promise<TicketKeyRing> => {
 };
 
 interface PersonalTicketFor {
+  /** The one playback the ticket starts, signed into it, such as `movies.play.start`'s id. */
+  readonly playback?: string | undefined;
   readonly resource: TicketResource;
   readonly purpose: TicketPurpose;
   readonly lifetimeMs?: number | undefined;
@@ -75,6 +77,7 @@ export const issuePersonalTicket = async (
 
   const issued = await ring.issuePersonal({
     principal: { userId: caller.userId, sessionId: caller.sessionId },
+    playback: request.playback,
     resource: request.resource,
     purpose: request.purpose,
     now,

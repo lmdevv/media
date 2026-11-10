@@ -74,6 +74,8 @@ interface Entry {
   readonly guest: boolean;
   readonly endsAt: number;
   readonly lastUsedAt: number;
+  /** A digest of the admitted ticket, to match a report's ticket without keeping the ticket. */
+  readonly digest: string;
 }
 
 const keyOf = (principal: SessionPrincipal): string => `${principal.userId}.${principal.sessionId}`;
@@ -84,13 +86,28 @@ const principalOf = (key: string): SessionPrincipal => {
   return { userId, sessionId };
 };
 
+const digestOf = (ticket: string): string =>
+  createHash("sha256").update(ticket).digest("hex").slice(0, 32);
+
 /**
- * The playback a ticket starts: one per `movies.play.start`, since each start issues its own
- * ticket. It names the stream sessions the ticket's streams join, and it is a digest, so logs
- * that name the session never hold the ticket.
+ * The playback a ticket starts, which names the stream sessions its streams join: the playback
+ * the ticket signs (`movies.play.start`'s `playbackId`, one per start, so two starts in one second
+ * are two playbacks), or for a ticket that names none a digest of it. Logs that name the session
+ * never hold the ticket.
  */
-const playbackOf = (ticket: string): PlaybackSessionId =>
-  PlaybackSessionId.make(`t${createHash("sha256").update(ticket).digest("hex").slice(0, 32)}`);
+const playbackOf = (claims: TicketClaims | undefined, ticket: string): PlaybackSessionId =>
+  claims?.kind === "personal" && claims.playback !== undefined
+    ? PlaybackSessionId.make(claims.playback)
+    : PlaybackSessionId.make(`t${digestOf(ticket)}`);
+
+/** The playback a ticket's text names, unchecked: a key to find its entry, then compare digests. */
+const claimedPlaybackOf = (ticket: string): PlaybackSessionId => {
+  const parts = ticket.split(".");
+
+  return parts.length === 13 && parts[8] === "s"
+    ? PlaybackSessionId.make(parts[11] ?? "")
+    : PlaybackSessionId.make(`t${digestOf(ticket)}`);
+};
 
 const RESOURCE_ID = /^[\w-]{1,128}$/u;
 
@@ -228,6 +245,32 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
       }),
     );
 
+  /**
+   * One element once the session ends or reaches its own expiry on the server's clock, holding the
+   * session's shared watch while it waits.
+   */
+  const endOf = (principal: SessionPrincipal): Stream.Stream<void> =>
+    Stream.unwrap(
+      RcMap.get(watches, keyOf(principal)).pipe(
+        Effect.map((status) =>
+          SubscriptionRef.changes(status).pipe(
+            Stream.filter(Option.isSome),
+            Stream.map((known) => known.value),
+            Stream.switchMap((known) =>
+              known.state === "ended"
+                ? Stream.make(undefined)
+                : Stream.fromEffect(
+                    Clock.currentTimeMillis.pipe(
+                      Effect.flatMap((now) => Effect.sleep(Math.max(0, known.endsAt - now))),
+                    ),
+                  ),
+            ),
+            Stream.take(1),
+          ),
+        ),
+      ),
+    );
+
   const grantOf = (
     entry: Pick<Entry, "claims" | "guest" | "endsAt">,
     playback: PlaybackSessionId,
@@ -244,6 +287,7 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
       // A stream keeps playing while its session holds, past its ticket (D46); a download is
       // admitted on each request, so its ticket's own expiry bounds it.
       expiresAt: purpose === "play" ? Math.max(entry.endsAt, claims.expiresAt) : claims.expiresAt,
+      sessionEnded: Stream.runDrain(endOf(claims.principal)),
     } satisfies PlaybackGrant;
   };
 
@@ -267,7 +311,6 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
   const admitted = Effect.fnUntraced(function* (
     ticket: string,
     purposes: ReadonlyArray<TokenPurpose>,
-    playback: PlaybackSessionId,
     read: boolean,
   ) {
     const now = yield* Clock.currentTimeMillis;
@@ -280,6 +323,8 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
     const result = yield* Effect.promise(() => ring.admit({ ticket, route, readSession }, now));
 
     if (!result.ok) {
+      const playback = playbackOf(result.error.claims, ticket);
+
       // A read starts no encoder: direct play, which has no stream id to continue by, and a
       // running stream's subtitles and thumbnails. Its expired play ticket keeps reading while
       // the playback has an open stream or was used within the idle time; a start never does.
@@ -297,6 +342,7 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
     }
 
     const { claims } = result.value;
+    const playback = playbackOf(claims, ticket);
 
     // A shareable ticket is always for artwork, which no play or download route admits.
     if (claims.kind !== "personal") {
@@ -318,6 +364,7 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
         onSome: (known) => known.endsAt,
       }),
       lastUsedAt: now,
+      digest: digestOf(ticket),
     };
 
     if (claims.purpose === "play") entries.set(playback, entry);
@@ -328,7 +375,6 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
   const authorize: PlaybackToken.Interface["authorize"] = Effect.fn("CoreTickets.authorize")(
     function* (token, purposes, within) {
       const ticket = Redacted.value(token);
-      const playback = playbackOf(ticket);
 
       if (within !== undefined && within !== PlaybackToken.READ) {
         const owner = yield* owners.ownerOf(within);
@@ -341,7 +387,7 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
         }
       }
 
-      return yield* admitted(ticket, purposes, playback, within === PlaybackToken.READ);
+      return yield* admitted(ticket, purposes, within === PlaybackToken.READ);
     },
   );
 
@@ -353,8 +399,10 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
     verify: (token, purposes, within) =>
       authorize(token, purposes, within).pipe(Effect.mapError((refused) => refused.error)),
     verifyReport: (token) => {
-      const playback = playbackOf(Redacted.value(token));
-      const entry = entries.get(playback);
+      const ticket = Redacted.value(token);
+      const playback = claimedPlaybackOf(ticket);
+      const found = entries.get(playback);
+      const entry = found?.digest === digestOf(ticket) ? found : undefined;
 
       return entry === undefined
         ? authorize(token, PlaybackToken.PLAY).pipe(
@@ -379,27 +427,7 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
 
       if (entry === undefined) return Stream.never;
 
-      return Stream.unwrap(
-        RcMap.get(watches, keyOf(entry.claims.principal)).pipe(
-          Effect.map((status) =>
-            SubscriptionRef.changes(status).pipe(
-              Stream.filter(Option.isSome),
-              Stream.map((known) => known.value),
-              Stream.switchMap((known) =>
-                known.state === "ended"
-                  ? Stream.make(SessionReport.Ended())
-                  : Stream.fromEffect(
-                      Clock.currentTimeMillis.pipe(
-                        Effect.flatMap((now) => Effect.sleep(Math.max(0, known.endsAt - now))),
-                        Effect.as(SessionReport.Ended()),
-                      ),
-                    ),
-              ),
-              Stream.take(1),
-            ),
-          ),
-        ),
-      );
+      return endOf(entry.claims.principal).pipe(Stream.map(() => SessionReport.Ended()));
     },
   });
 

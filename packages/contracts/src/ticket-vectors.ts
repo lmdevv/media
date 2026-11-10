@@ -227,11 +227,12 @@ export const TICKET_TEST_VECTORS: ReadonlyArray<TicketVector> = [
     admits: { ok: false, reason: "malformed" },
   },
   {
+    // The principal takes one optional playback segment (`[a-z0-9-]`); this one is outside it.
     name: "an extra segment",
     keys: TICKET_TEST_KEYS.k1,
     issue: null,
     ticket:
-      "t1.k1.media.1760000000.1760021600.play.file.kd7ay8r0ty1ry6q9y6eqvdc3y97t2wmf.s.j5701yqbmrsg2s1bjvhwj6x5a97t3qd5.jx76k6ga36g7tfhf9vtm1yahbs7t3ccv.x.fonybPBe6YpKNEd2U_-Ih0XeYvD2LjUny3thssRwYRk",
+      "t1.k1.media.1760000000.1760021600.play.file.kd7ay8r0ty1ry6q9y6eqvdc3y97t2wmf.s.j5701yqbmrsg2s1bjvhwj6x5a97t3qd5.jx76k6ga36g7tfhf9vtm1yahbs7t3ccv.X_.fonybPBe6YpKNEd2U_-Ih0XeYvD2LjUny3thssRwYRk",
     route: playRoute,
     now: 1760000001500,
     session: "live",

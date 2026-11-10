@@ -15,6 +15,9 @@ const probeKind = v.union(probeRunKind, v.literal("probe.import"));
 
 const PROBE_BATCH = 1000;
 
+/** Most characters `inflate` writes, under a Convex document's 1 MiB. */
+const INFLATE_CHARS_MAX = 900_000;
+
 /**
  * Queues `count` probe jobs `{ run, n }` of one kind, n from 0.
  *
@@ -88,6 +91,33 @@ export const backdate = internalMutation({
     }
 
     await ctx.db.patch("jobs", jobId, { finishedAt });
+
+    return null;
+  },
+});
+
+/**
+ * Gives a finished job a message of `chars` characters, past the bound a worker's message gets,
+ * as a job written before that bound may hold, so a test can fill the sweep's read budget.
+ *
+ * @throws Error when the job is gone, queued, or running, or `chars` is not a whole number from 0
+ * to 900,000.
+ */
+export const inflate = internalMutation({
+  args: { jobId: v.id("jobs"), chars: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { jobId, chars }) => {
+    const job = await ctx.db.get("jobs", jobId);
+
+    if (job === null || job.status === "queued" || job.status === "running") {
+      throw new Error(`Only a finished job is inflated; ${jobId} is ${job?.status ?? "gone"}`);
+    }
+
+    if (!Number.isSafeInteger(chars) || chars < 0 || chars > INFLATE_CHARS_MAX) {
+      throw new Error(`A job is inflated by 0 to ${INFLATE_CHARS_MAX} characters; got ${chars}`);
+    }
+
+    await ctx.db.patch("jobs", jobId, { message: "x".repeat(chars) });
 
     return null;
   },

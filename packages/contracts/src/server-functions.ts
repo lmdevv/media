@@ -147,11 +147,16 @@ export const SessionStatus = Schema.Union([
 /** Whether a personal ticket's session holds. */
 export type SessionStatus = typeof SessionStatus.Type;
 
-/** A folder's identity chain, read by the scanner before it writes (ADR 0024). */
+/** A folder's identity, read by the scanner before it writes (ADR 0024). */
 export const FolderClaim = Schema.Struct({
   folder: Schema.String,
   /** `<dev>:<ino>` of the folder's real path and of every folder above it, the folder first. */
   chain: Schema.Array(Schema.String),
+  /**
+   * The folder's device (`<major>:<minor>`) and its path within that device's file system, from
+   * the mount table, so a bind mount of a child still lies inside its folder; null without one.
+   */
+  source: Schema.NullOr(Schema.Struct({ device: Schema.String, path: Schema.String })),
 });
 
 /** A folder's identity chain. */

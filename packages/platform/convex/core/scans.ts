@@ -6,7 +6,7 @@ import type { ContentDomain } from "../../commands/scopes";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
-import { claimIdentities, parseChains } from "./folderClaims";
+import { claimIdentities, parseClaim } from "./folderClaims";
 import { foldersOf, isInside, isPlainPath } from "./folders";
 import { scanKindOf } from "./jobs/kinds";
 import { withJobLease, leaseAnswer } from "./jobs/held";
@@ -251,19 +251,28 @@ export const target = serverMutation({
  * The scanner's second call, right after `target` and before any write: claims the library's
  * folders by what they are on disk (ADR 0024, "Folder identity"), so two libraries never reach one
  * folder through a link, a bind mount, or another spelling. `chain` holds the `<dev>:<ino>` of the
- * folder's real path and of each parent up to `/`, the folder first, read during the host boot
- * `bootId`. A refusal names the first of the library's folders that another library reaches, or
- * that another of its own folders reaches, and writes nothing; the scanner then stops.
+ * folder's real path and of each parent up to `/`, the folder first. `source` is the folder's
+ * mount device and its path within that filesystem, or null when the server has no mount table.
+ * `bootId` is the host boot the server read them in, kept for diagnosis. An overlap goes to the
+ * claim that came first; a refusal names the first of the library's folders that an older claim
+ * of another library reaches, or that another of its own folders reaches, and writes nothing but
+ * the record that rescans this library when the other lets go. The scanner then stops.
  *
- * @throws Error when the folders sent are not exactly the library's, or a chain is malformed: a
- * defect in the server, which sends what `target` answered.
+ * @throws Error when the folders sent are not exactly the library's, or a chain or source is
+ * malformed: a defect in the server, which sends what `target` answered.
  */
 export const claimFolders = serverMutation({
   args: {
     lease,
     kind: contentDomain,
     bootId: v.union(v.string(), v.null()),
-    folders: v.array(v.object({ folder: v.string(), chain: v.array(v.string()) })),
+    folders: v.array(
+      v.object({
+        folder: v.string(),
+        chain: v.array(v.string()),
+        source: v.union(v.object({ device: v.string(), path: v.string() }), v.null()),
+      }),
+    ),
   },
   returns: leaseAnswer(
     v.union(
@@ -277,7 +286,7 @@ export const claimFolders = serverMutation({
         ctx,
         scan.library._id,
         bootId,
-        parseChains(scan.folders, bootId, folders),
+        parseClaim(scan.folders, bootId, folders),
       ),
       added: 0,
       removed: 0,

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { internal } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { LAPSED_ERROR } from "../../../convex/core/jobs/machine";
+import { CUT_MARK, JOB_TEXT_MAX, LAPSED_ERROR } from "../../../convex/core/jobs/machine";
 import { logMark, runFunction, usageSince } from "../../admin";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
@@ -368,6 +368,24 @@ describe.skipIf(stack === undefined)("core jobs, live", { timeout: 180_000 }, ()
       error: "boom",
     });
     expect(await w.claim(["probe.wide"])).toEqual({ outcome: "idle" });
+  });
+
+  it("stores a 1 MiB error cut to 4,096 characters with its mark, and settles the finish", async () => {
+    if (stack === undefined) return;
+
+    await freshKind(stack, "probe.wide");
+
+    const jobId = only(await enqueue(stack, "probe.wide", 1));
+    const w = worker(stack, "loud");
+    const { lease } = await claimed(w.claim(["probe.wide"]));
+
+    expect(
+      await w.finish(lease, { outcome: "failed", error: "e".repeat(1024 * 1024), retry: false }),
+    ).toEqual({ outcome: "settled", status: "failed" });
+    expect(await jobOf(stack, jobId)).toMatchObject({
+      status: "failed",
+      error: `${"e".repeat(JOB_TEXT_MAX - CUT_MARK.length)}${CUT_MARK}`,
+    });
   });
 
   it("succeeds a sealed item job once every item is done", async () => {

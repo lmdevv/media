@@ -88,6 +88,11 @@ export type TicketClaims =
   | {
       readonly kind: "personal";
       readonly principal: SessionPrincipal;
+      /**
+       * The one playback this ticket starts, such as `movies.play.start`'s `playbackId`, so two
+       * starts of one item by one session in the same second still get two tickets.
+       */
+      readonly playback?: string;
       readonly purpose: TicketPurpose;
       readonly resource: TicketResource;
       readonly issuedAt: number;
@@ -109,6 +114,8 @@ export type TicketResult<A, E extends Error> =
 /** What a personal ticket is issued for. Times are milliseconds since the epoch. */
 export interface PersonalTicketRequest {
   readonly principal: SessionPrincipal;
+  /** The playback the ticket starts: `[a-z0-9-]{1,64}`, signed into the ticket. */
+  readonly playback?: string | undefined;
   readonly resource: TicketResource;
   readonly purpose: TicketPurpose;
   readonly now: number;
@@ -236,6 +243,8 @@ const PRINCIPAL_ID_SOURCE = "[a-z0-9]{1,64}";
 
 const RESOURCE_ID_SOURCE = "[\\w-]{1,128}";
 
+const PLAYBACK_ID_SOURCE = "[a-z0-9-]{1,64}";
+
 const MAC_SOURCE = `[\\w-]{${MAC_CHARS}}`;
 
 const WORD_SOURCE = "[a-z]{1,16}";
@@ -250,6 +259,8 @@ const PRINCIPAL_ID = whole(PRINCIPAL_ID_SOURCE);
 
 const RESOURCE_ID = whole(RESOURCE_ID_SOURCE);
 
+const PLAYBACK_ID = whole(PLAYBACK_ID_SOURCE);
+
 const TICKET_SYNTAX = whole(
   [
     TICKET_VERSION,
@@ -260,7 +271,7 @@ const TICKET_SYNTAX = whole(
     `(?<purpose>${WORD_SOURCE})`,
     `(?<kind>${WORD_SOURCE})`,
     `(?<id>${RESOURCE_ID_SOURCE})`,
-    `(?:s\\.(?<userId>${PRINCIPAL_ID_SOURCE})\\.(?<sessionId>${PRINCIPAL_ID_SOURCE})|a)`,
+    `(?:s\\.(?<userId>${PRINCIPAL_ID_SOURCE})\\.(?<sessionId>${PRINCIPAL_ID_SOURCE})(?:\\.(?<playback>${PLAYBACK_ID_SOURCE}))?|a)`,
     `(?<mac>${MAC_SOURCE})`,
   ].join("\\."),
 );
@@ -304,8 +315,13 @@ const refused = (
   error: new TicketRefused(reason, claims),
 });
 
-const principalText = (claims: TicketClaims): string =>
-  claims.kind === "personal" ? `s.${claims.principal.userId}.${claims.principal.sessionId}` : "a";
+const principalText = (claims: TicketClaims): string => {
+  if (claims.kind === "shareable") return "a";
+
+  const session = `s.${claims.principal.userId}.${claims.principal.sessionId}`;
+
+  return claims.playback === undefined ? session : `${session}.${claims.playback}`;
+};
 
 const signedText = (keyId: string, audience: string, claims: TicketClaims): string =>
   [
@@ -466,10 +482,11 @@ const parseTicket = (ticket: string): ParsedTicket | null => {
   const expiresAt = Number(groups["exp"]) * SECOND_MS;
   const userId = groups["userId"];
   const sessionId = groups["sessionId"];
+  const playback = groups["playback"];
   const signed = ticket.slice(0, ticket.length - MAC_CHARS - 1);
 
   if (userId !== undefined && sessionId !== undefined) {
-    const claims: TicketClaims = {
+    const session: TicketClaims = {
       kind: "personal",
       principal: { userId, sessionId },
       purpose,
@@ -477,6 +494,8 @@ const parseTicket = (ticket: string): ParsedTicket | null => {
       issuedAt,
       expiresAt,
     };
+
+    const claims = playback === undefined ? session : { ...session, playback };
 
     return { keyId, audience, claims, signed, mac };
   }
@@ -557,6 +576,12 @@ const makeRing = (keys: ReadonlyMap<string, CryptoKey>, signingKeyId: string): T
       throw new RangeError(`principal.sessionId must match ${PRINCIPAL_ID_SOURCE}`);
     }
 
+    const { playback } = request;
+
+    if (playback !== undefined && !PLAYBACK_ID.test(playback)) {
+      throw new RangeError(`playback must match ${PLAYBACK_ID_SOURCE}`);
+    }
+
     if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs < PERSONAL_TICKET_MIN_MS) {
       return { ok: false, error: new PersonalTicketInvalid("lifetime") };
     }
@@ -568,7 +593,7 @@ const makeRing = (keys: ReadonlyMap<string, CryptoKey>, signingKeyId: string): T
       return { ok: false, error: new PersonalTicketInvalid("ends_too_soon") };
     }
 
-    const issued = await sign({
+    const claims: TicketClaims = {
       kind: "personal",
       principal: { userId: principal.userId, sessionId: principal.sessionId },
       purpose,
@@ -579,7 +604,9 @@ const makeRing = (keys: ReadonlyMap<string, CryptoKey>, signingKeyId: string): T
         issuedAt + PERSONAL_TICKET_MAX_MS,
         ceiling,
       ),
-    });
+    };
+
+    const issued = await sign(playback === undefined ? claims : { ...claims, playback });
 
     return accepted(issued);
   };

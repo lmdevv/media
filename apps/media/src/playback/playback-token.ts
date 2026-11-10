@@ -38,6 +38,11 @@ export interface PlaybackGrant {
   readonly audience: Audience;
   /** Expiry in milliseconds since the epoch. */
   readonly expiresAt: number;
+  /**
+   * Completes once the session the grant was admitted for ends, for a byte response to stop
+   * then (ADR 0011). Absent for old movies' tokens, whose responses run to their end.
+   */
+  readonly sessionEnded?: Effect.Effect<void>;
 }
 
 /** The session and account an authentic token was signed for. */

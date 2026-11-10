@@ -87,7 +87,11 @@ export const { start, report, reportOffline } = register({
       return fail("not_found", NO_TITLE);
     }
 
+    const playbackId = crypto.randomUUID();
+
+    // The ticket names this start's playback, so every start has its own ticket and stream.
     const ticket = await issuePersonalTicket(ctx, caller, {
+      playback: playbackId,
       resource: { kind: "file", id: file._id },
       purpose: "play",
     });
@@ -99,7 +103,7 @@ export const { start, report, reportOffline } = register({
       file: presentMediaFile(file),
       resumePositionMs:
         saved === null || reachedEnd(saved.positionMs, saved.durationMs) ? 0 : saved.positionMs,
-      playbackId: crypto.randomUUID(),
+      playbackId,
       startedAt: Date.now(),
       ticket: ticket.ticket,
       expiresAt: ticket.expiresAt,
