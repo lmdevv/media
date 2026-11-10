@@ -232,10 +232,122 @@ describe.skipIf(stack === undefined)("device grants", { timeout: 180_000 }, () =
       ),
     ).toBe("not_found");
     expect(await grantsOf(bo)).toEqual([]);
-    expect(await issue(bo.signedIn, "Bo's phone", issued.grant)).not.toMatchObject({
-      grantId: issued.grantId,
-    });
     expect(await refusal(current(minted))).toBe("accepted");
+  });
+
+  it("revokes another person's grant when they sign in on the phone holding it, ending its sessions", async () => {
+    if (stack === undefined) return;
+    const aiko = await phone(stack, "aiko");
+    const music = await app(stack, aiko.who.userId, aiko.issued.grant, "Music on phone");
+    const other = await app(stack, aiko.who.userId, aiko.issued.grant, "Other on phone");
+    const laptop = await signInAs(stack, aiko.who.person);
+    const mateo = await member(stack, "mateo");
+
+    const switched = await issue(mateo.signedIn, "Mateo's phone", aiko.issued.grant);
+    const fresh = await issue(await signInAs(stack, mateo.person), "Mateo's tablet");
+
+    expect(switched.grant).toMatch(/^dg_[a-z0-9]+\.[\w-]{40,}$/u);
+    expect(switched.grantId).not.toBe(aiko.issued.grantId);
+    expect(Object.keys(switched).toSorted()).toEqual(Object.keys(fresh).toSorted());
+    expect(await refusal(current(aiko.who.signedIn))).toBe("unauthenticated");
+    expect(await refusal(current(music.signedIn))).toBe("unauthenticated");
+    expect(await refusal(current(other.signedIn))).toBe("unauthenticated");
+    expect(await failureOf(exchange(stack, aiko.who.userId, aiko.issued.grant))).toEqual(BAD_GRANT);
+    expect(await refusal(current(laptop))).toBe("accepted");
+    expect(await grantsOf({ ...aiko.who, signedIn: laptop })).toEqual([]);
+    expect(await refusal(current(mateo.signedIn))).toBe("accepted");
+    expect(await current(await exchange(stack, mateo.userId, switched.grant))).toMatchObject({
+      userId: mateo.userId,
+      kind: "grant",
+    });
+  });
+
+  it("gives a fresh grant for a tampered, unknown, or revoked one and changes nothing else", async () => {
+    if (stack === undefined) return;
+    const aiko = await phone(stack, "aiko");
+    const music = await app(stack, aiko.who.userId, aiko.issued.grant, "Music on phone");
+    const mateo = await member(stack, "mateo");
+    const gone = await issue(mateo.signedIn, "Gone");
+
+    await mateo.signedIn.client.mutation(api.core.devices.deviceGrants.revoke, {
+      grantId: gone.grantId,
+    });
+
+    const [prefix, secret = ""] = aiko.issued.grant.split(".");
+    const flipped = `${secret.slice(0, -1)}${secret.endsWith("A") ? "B" : "A"}`;
+    const caller = await signInAs(stack, mateo.person);
+
+    const issued = await inOrder(
+      [`${prefix}.${flipped}`, "dg_nothing.short", gone.grant, `dg_${mateo.userId}.${secret}`],
+      async (held) => issue(caller, "Mateo's phone", held),
+    );
+
+    expect(new Set(issued.map((answer) => answer.grantId)).size).toBe(issued.length);
+    expect(issued.map((answer) => answer.grantId)).not.toContain(aiko.issued.grantId);
+    expect(await refusal(current(aiko.who.signedIn))).toBe("accepted");
+    expect(await refusal(current(music.signedIn))).toBe("accepted");
+    expect(await refusal(current(await exchange(stack, aiko.who.userId, aiko.issued.grant)))).toBe(
+      "accepted",
+    );
+  });
+
+  it("lets only a password sign-in revoke another person's grant", async () => {
+    if (stack === undefined) return;
+    const aiko = await phone(stack, "aiko");
+    const music = await app(stack, aiko.who.userId, aiko.issued.grant, "Music on phone");
+    const mateo = await phone(stack, "mateo");
+    const minted = await exchange(stack, mateo.who.userId, mateo.issued.grant);
+
+    const { key } = await mateo.who.signedIn.client.action(api.core.auth.apiKeys.create, {
+      name: "script",
+      scopes: ["account"],
+    });
+
+    const keyed = await signIn(stack, "apiKey", { key });
+    const anonymous = new ConvexHttpClient(stack.url, { logger: false });
+
+    const started = await anonymous.action(api.core.auth.deviceCodes.start, {
+      clientName: "TV",
+    });
+
+    await mateo.who.signedIn.client.mutation(api.core.auth.deviceCodes.approve, {
+      userCode: started.userCode,
+      scopes: ["account"],
+    });
+
+    const tv = await signIn(stack, "deviceCode", { deviceCode: started.deviceCode });
+
+    const answers = await inOrder([minted, keyed, tv], async (signedIn) =>
+      refusal(issue(signedIn, "Phone", aiko.issued.grant)),
+    );
+
+    expect(answers).toEqual(["forbidden", "forbidden", "forbidden"]);
+    expect(await refusal(current(aiko.who.signedIn))).toBe("accepted");
+    expect(await refusal(current(music.signedIn))).toBe("accepted");
+    expect(await grantsOf(aiko.who)).toMatchObject([
+      { grantId: aiko.issued.grantId, signsIn: true },
+    ]);
+  });
+
+  it("ends every session of another person's grant at its cap when someone else signs in", async () => {
+    if (stack === undefined) return;
+    const aiko = await phone(stack, "aiko");
+
+    // The issuer holds one place; these exchanges fill the rest of the cap.
+    const exchanged = await inOrder(
+      Array.from({ length: GRANT_SESSIONS_MAX - 1 }, (_, n) => n),
+      async () => exchange(stack, aiko.who.userId, aiko.issued.grant),
+    );
+
+    const mateo = await member(stack, "mateo");
+
+    await issue(mateo.signedIn, "Mateo's phone", aiko.issued.grant);
+
+    const answers = await Promise.all(
+      [aiko.who.signedIn, ...exchanged].map(async (signedIn) => refusal(current(signedIn))),
+    );
+
+    expect(answers).toEqual(Array.from({ length: GRANT_SESSIONS_MAX }, () => "unauthenticated"));
   });
 
   it("keeps at most its cap of sessions, ending unenrolled ones before any app's", async () => {

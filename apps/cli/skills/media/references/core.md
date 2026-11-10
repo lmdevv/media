@@ -334,7 +334,7 @@ From a shared device, ask someone signed in elsewhere to open their locked tile,
 
 ## `core.devices.deviceGrants.issue`
 
-Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it.
+Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it; a grant it keeps for someone else is revoked, signing them out of its apps.
 
 - CLI: `media auth device-grants issue`
 - Kind: action

@@ -129,43 +129,57 @@ const joinGrant = async (
   await trimGrantSessions(ctx, grantId, caller.sessionId);
 };
 
-/**
- * Confirms the grant the device keeps when it is the caller's own: the password the caller just
- * signed in with makes it mint sessions again, as after signing out everywhere. Null when the
- * code names no grant of the caller's, so the device gets a new one.
- */
-export const confirm = internalMutation({
-  args: { grantId: v.string(), secretHash: v.string(), name: v.string() },
-  returns: v.union(v.id("deviceGrants"), v.null()),
-  handler: async (ctx, { grantId, secretHash, name }) => {
-    const { caller, person } = await issuer(ctx);
-    const id = ctx.db.normalizeId("deviceGrants", grantId);
-    const grant = id === null ? null : await ctx.db.get(id);
+/** Deletes a grant and ends every session it issued or minted, in one transaction. */
+const revokeGrant = async (
+  ctx: Pick<MutationCtx, "db">,
+  grantId: Id<"deviceGrants">,
+): Promise<void> => {
+  await endGrantSessions(ctx, grantId);
+  await ctx.db.delete(grantId);
+};
 
-    if (
-      grant === null ||
-      grant.userId !== person._id ||
-      !constantTimeEqual(grant.secretHash, secretHash)
-    ) {
-      return null;
+/** The grant row a device's stored code names, when its secret matches; null otherwise. */
+const heldGrant = async (
+  db: DatabaseReader,
+  held: { readonly grantId: string; readonly secretHash: string } | null,
+): Promise<Doc<"deviceGrants"> | null> => {
+  if (held === null) return null;
+
+  const id = db.normalizeId("deviceGrants", held.grantId);
+  const grant = id === null ? null : await db.get(id);
+
+  return grant !== null && constantTimeEqual(grant.secretHash, held.secretHash) ? grant : null;
+};
+
+/**
+ * Gives the device the caller's grant. When the grant the device holds is the caller's own, it is
+ * confirmed: the password the caller just signed in with makes it mint sessions again, as after
+ * signing out everywhere. When it is another person's, that grant is revoked first, ending every
+ * session it issued or minted, since a phone holds one person (D64). Otherwise, as for a tampered,
+ * unknown, or revoked code, the caller gets a new grant and nothing else changes. Both of the last
+ * two answer alike, so the answer never tells whose grant the device held.
+ */
+export const place = internalMutation({
+  args: {
+    held: v.union(v.null(), v.object({ grantId: v.string(), secretHash: v.string() })),
+    secretHash: v.string(),
+    name: v.string(),
+  },
+  returns: v.object({ grantId: v.id("deviceGrants"), kept: v.boolean() }),
+  handler: async (ctx, { held, secretHash, name }) => {
+    const { caller, person } = await issuer(ctx);
+    const deviceName = requireDeviceName(name);
+    const grant = await heldGrant(ctx.db, held);
+
+    if (grant !== null && grant.userId === person._id) {
+      await ctx.db.patch(grant._id, { name: deviceName, generation: person.sessionGeneration });
+      await joinGrant(ctx, caller, grant._id);
+
+      return { grantId: grant._id, kept: true };
     }
 
-    await ctx.db.patch(grant._id, {
-      name: requireDeviceName(name),
-      generation: person.sessionGeneration,
-    });
-    await joinGrant(ctx, caller, grant._id);
+    if (grant !== null) await revokeGrant(ctx, grant._id);
 
-    return grant._id;
-  },
-});
-
-/** Stores a new grant for the caller and puts the caller's session in its family. */
-export const insert = internalMutation({
-  args: { secretHash: v.string(), name: v.string() },
-  returns: v.id("deviceGrants"),
-  handler: async (ctx, { secretHash, name }) => {
-    const { caller, person } = await issuer(ctx);
     const limit = { identifier: `deviceGrants:${person._id}`, perHour: ISSUES_PER_HOUR };
 
     if (!(await takeAttempt(ctx, limit, Date.now()))) {
@@ -174,14 +188,14 @@ export const insert = internalMutation({
 
     const grantId = await ctx.db.insert("deviceGrants", {
       userId: person._id,
-      name: requireDeviceName(name),
+      name: deviceName,
       secretHash,
       generation: person.sessionGeneration,
     });
 
     await joinGrant(ctx, caller, grantId);
 
-    return grantId;
+    return { grantId, kept: false };
   },
 });
 
@@ -213,24 +227,25 @@ export const { issue, list, revoke } = register({
 
     const stored = grant?.trim();
     const parsed = stored === undefined ? null : parseSecret(GRANT_PREFIX, stored);
-
-    if (stored !== undefined && parsed !== null) {
-      const confirmed: Id<"deviceGrants"> | null = await ctx.runMutation(
-        internal.core.devices.deviceGrants.confirm,
-        { grantId: parsed.rowId, secretHash: await sha256Hex(parsed.secret), name },
-      );
-
-      if (confirmed !== null) return { grantId: confirmed, grant: stored };
-    }
-
     const secret = randomSecret(32);
 
-    const grantId: Id<"deviceGrants"> = await ctx.runMutation(
-      internal.core.devices.deviceGrants.insert,
-      { secretHash: await sha256Hex(secret), name },
-    );
+    const placed: { readonly grantId: Id<"deviceGrants">; readonly kept: boolean } =
+      await ctx.runMutation(internal.core.devices.deviceGrants.place, {
+        held:
+          parsed === null
+            ? null
+            : { grantId: parsed.rowId, secretHash: await sha256Hex(parsed.secret) },
+        secretHash: await sha256Hex(secret),
+        name,
+      });
 
-    return { grantId, grant: formatSecret(GRANT_PREFIX, grantId, secret) };
+    return {
+      grantId: placed.grantId,
+      grant:
+        placed.kept && stored !== undefined
+          ? stored
+          : formatSecret(GRANT_PREFIX, placed.grantId, secret),
+    };
   },
   list: async (ctx, { paginationOpts }, caller) => {
     requireGrantAction(caller, "list", caller.userId);
@@ -268,8 +283,7 @@ export const { issue, list, revoke } = register({
 
     requireGrantAction(caller, "revoke", grant.userId);
 
-    await endGrantSessions(ctx, grant._id);
-    await ctx.db.delete(grant._id);
+    await revokeGrant(ctx, grant._id);
 
     return null;
   },

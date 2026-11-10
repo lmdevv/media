@@ -49,7 +49,7 @@ const revokeResult = v.null();
 
 /** The handlers `convex/core/devices/deviceGrants.ts` passes to `register`, one per `core.devices.deviceGrants` command. */
 export interface Handlers {
-  /** `core.devices.deviceGrants.issue` (action, account, API keys refused): Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it. */
+  /** `core.devices.deviceGrants.issue` (action, account, API keys refused): Issue the grant this phone or tablet keeps for your other apps, or confirm the one it keeps, and show it; a grant it keeps for someone else is revoked, signing them out of its apps. */
   readonly issue: (
     ctx: Omit<ActionCtx, "auth">,
     args: Infer<typeof issueArgs>,
