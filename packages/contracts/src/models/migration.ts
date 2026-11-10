@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-import { JobId, LibraryId, ProfileId, UserId } from "../ids";
+import { CONVEX_TABLE_ANNOTATION, JobId, LibraryId, ProfileId, UserId } from "../ids";
 import { EpochMillis } from "../units";
 import { LibraryKind, LibraryRoot } from "./catalog";
 import { Job, MigrationSource } from "./jobs";
@@ -324,3 +324,157 @@ export const MigrationRun = Schema.Struct({
 
 /** A migration job with its phase and counts. */
 export interface MigrationRun extends Schema.Schema.Type<typeof MigrationRun> {}
+
+/**
+ * An import on the core: one run of the Jellyfin or Plex importer, named by its `imports` row
+ * (ADR 0012).
+ */
+export const ImportId = Schema.NonEmptyString.pipe(Schema.brand("ImportId")).annotate({
+  [CONVEX_TABLE_ANNOTATION]: "imports",
+});
+
+/** An import ID. */
+export type ImportId = typeof ImportId.Type;
+
+/**
+ * The core user a source user's history goes to by default, matched by name: the core keeps no
+ * email (D13). Import never creates users.
+ */
+export const ImportUserSuggestion = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("user"),
+    userId: UserId,
+    matchedBy: Schema.Literal("name"),
+  }),
+  /** No user matches; invite this person, then map them. */
+  Schema.Struct({ kind: Schema.Literal("invite") }),
+]);
+
+/** A source user who can be mapped to a core user. */
+export const ImportSourceUser = Schema.Struct({
+  ...SourceUser.fields,
+  suggestion: ImportUserSuggestion,
+});
+
+/** A source user who can be mapped to a core user. */
+export interface ImportSourceUser extends Schema.Schema.Type<typeof ImportSourceUser> {}
+
+/** A source server connected for an import into the core. */
+export const ImportConnection = Schema.Struct({
+  ...MigrationConnection.fields,
+  users: Schema.Array(ImportSourceUser),
+});
+
+/** A source server connected for an import into the core. */
+export interface ImportConnection extends Schema.Schema.Type<typeof ImportConnection> {}
+
+/** Which core user receives a source user's history; null skips the source user entirely. */
+export const ImportUserMapping = Schema.Struct({
+  sourceUserId: Schema.String,
+  userId: Schema.NullOr(UserId),
+});
+
+/** A source user's core user. */
+export interface ImportUserMapping extends Schema.Schema.Type<typeof ImportUserMapping> {}
+
+/** Arguments for a dry run or an import into the core. */
+export const ImportPlanArgs = Schema.Struct({
+  connectionId: Schema.String,
+  /** Overrides of the suggested users. Source users not listed follow their suggestion. */
+  users: Schema.optionalKey(Schema.Array(ImportUserMapping).check(Schema.isMaxLength(200))),
+});
+
+/** Arguments for a dry run or an import into the core. */
+export interface ImportPlanArgs extends Schema.Schema.Type<typeof ImportPlanArgs> {}
+
+/**
+ * What a dry run into the core found, as counts. An import adds no library: a source folder no
+ * movies library covers stays unmatched (ADR 0012).
+ */
+export const ImportSummary = Schema.Struct({
+  usersMapped: Schema.Int,
+  usersUnmapped: Schema.Int,
+  /** Source libraries whose every folder lies in a movies library. */
+  librariesCovered: Schema.Int,
+  /** Source libraries with a folder no movies library covers; its items stay unmatched. */
+  librariesUncovered: Schema.Int,
+  itemsByPath: Schema.Int,
+  itemsByProviderId: Schema.Int,
+  itemsUnmatched: Schema.Int,
+  watched: Schema.Int,
+  inProgress: Schema.Int,
+  favorites: Schema.Int,
+  collections: Schema.Int,
+  overrides: Schema.Int,
+  /** Items whose progress on the core was played more recently than the source's; it stays. */
+  conflicts: Schema.Int,
+});
+
+/** Dry-run counts for an import into the core. */
+export interface ImportSummary extends Schema.Schema.Type<typeof ImportSummary> {}
+
+/** The dry-run summary of an import into the core, shown before anything is written. */
+export const ImportReport = Schema.Struct({
+  status: Schema.Literal("ready"),
+  connectionId: Schema.String,
+  source: MigrationSource,
+  serverName: Schema.String,
+  createdAt: EpochMillis,
+  summary: ImportSummary,
+  users: Schema.Array(
+    Schema.Struct({
+      sourceUserId: Schema.String,
+      name: Schema.String,
+      userId: Schema.NullOr(UserId),
+      /** `invite`: no user matched and none was chosen; the source user is skipped this time. */
+      action: Schema.Literals(["import", "skip", "invite"]),
+    }),
+  ),
+  libraries: Schema.Array(
+    Schema.Struct({
+      sourceLibraryId: Schema.String,
+      name: Schema.String,
+      kind: LibraryKind,
+      /** The folders on this host. */
+      roots: Schema.Array(LibraryRoot),
+      /** The movies library covering every folder, or null when a folder lies in none. */
+      libraryId: Schema.NullOr(LibraryId),
+      /** Source folders without a local folder; their items stay unmatched. */
+      unmappedFolders: Schema.Array(SourcePath),
+    }),
+  ),
+  /** At most 25 unmatched items. */
+  unmatchedSamples: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      path: Schema.NullOr(Schema.String),
+      reason: UnmatchedReason,
+    }),
+  ),
+});
+
+/** The dry-run summary of an import into the core. */
+export interface ImportReport extends Schema.Schema.Type<typeof ImportReport> {}
+
+/** The result of a dry run into the core. */
+export const ImportDryRunResult = Schema.Union([ImportReport, MigrationSourceFailure]);
+
+/**
+ * The result of starting an import into the core: its run, or the one of the same server already
+ * queued or running (`created` false), or why the source could not be read.
+ */
+export const ImportStartResult = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("queued"),
+    importId: ImportId,
+    jobId: JobId,
+    created: Schema.Boolean,
+  }),
+  MigrationSourceFailure,
+]);
+
+/** Where an import into the core stands; each phase resumes from its checkpoint after a restart. */
+export const ImportPhase = Schema.Literals(["watchState", "collections", "overrides", "done"]);
+
+/** A phase of an import into the core. */
+export type ImportPhase = typeof ImportPhase.Type;

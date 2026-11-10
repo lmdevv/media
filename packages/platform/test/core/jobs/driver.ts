@@ -45,7 +45,7 @@ const Claim = Schema.Union([
     lease: Lease,
     leaseExpiresAt: Schema.Finite,
     payload: Schema.Struct({
-      kind: Schema.Literals(["probe.capped", "probe.wide", "probe.items", "probe.import"]),
+      kind: Schema.Literals(["probe.capped", "probe.wide", "probe.items"]),
     }),
     work: Work,
   }),
@@ -93,14 +93,12 @@ const Waiting = Schema.Array(
 
 export type ProbeRunKind = "probe.capped" | "probe.wide" | "probe.items";
 
-export type ProbeKind = ProbeRunKind | "probe.import";
-
 const LEASE_MS = 5000;
 
 export const freshRun = (label: string): string =>
   `${label}-${Math.random().toString(36).slice(2, 8)}`;
 
-export const waiting = (stack: CoreStack, kinds: ReadonlyArray<ProbeKind>) =>
+export const waiting = (stack: CoreStack, kinds: ReadonlyArray<ProbeRunKind>) =>
   runServer(stack, server.waiting, { kinds: [...kinds] }, Waiting);
 
 export const jobOf = async (stack: CoreStack, jobId: Id<"jobs">): Promise<JobView> => {
@@ -168,7 +166,7 @@ export const waitForJob = (
     timeoutMs,
   );
 
-export const freshKind = async (stack: CoreStack, kind: ProbeKind): Promise<void> => {
+export const freshKind = async (stack: CoreStack, kind: ProbeRunKind): Promise<void> => {
   const { more } = await runFunction(
     stack,
     internal.core.jobs.probe.reset,
@@ -244,7 +242,7 @@ export const retrying = async <Value>(send: () => Promise<Value>, attempt = 1): 
 };
 
 export const worker = (stack: CoreStack, workerId: string) => ({
-  claim: (kinds: ReadonlyArray<ProbeKind>, leaseMs = LEASE_MS) =>
+  claim: (kinds: ReadonlyArray<ProbeRunKind>, leaseMs = LEASE_MS) =>
     retrying(() => runServer(stack, server.claim, { kinds: [...kinds], workerId, leaseMs }, Claim)),
   report: (lease: Lease, fields: ReportFields = {}) =>
     retrying(() =>

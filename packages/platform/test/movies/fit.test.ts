@@ -3,7 +3,7 @@ import type { WithoutSystemFields } from "convex/server";
 import { describe, expect, it } from "vitest";
 
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { BOUNDS, uniqueWithin } from "../../convex/movies/bounds";
+import { BOUNDS, IMPORT_BOUNDS, uniqueWithin } from "../../convex/movies/bounds";
 import {
   DOCUMENT_BYTES,
   SHORTEST,
@@ -26,7 +26,8 @@ type Table =
   | "people"
   | "collections"
   | "mediaFiles"
-  | "users";
+  | "users"
+  | "imports";
 
 // SAFETY: a type predicate, not checked by the compiler. These tests read no table; the strings
 // only stand in for ids, and no validator sees them.
@@ -191,6 +192,7 @@ const ids = {
   collectionId: idOf("collections", "k57collectionidforaboundtestxxxx"),
   fileId: idOf("mediaFiles", "k57fileidforaboundtestxxxxxxxxxx"),
   userId: idOf("users", "k57useridforaboundtestxxxxxxxxxx"),
+  importId: idOf("imports", "k57importidforaboundtestxxxxxxxx"),
 };
 
 /** A tie as the writer makes it: a UUID. */
@@ -219,6 +221,7 @@ const MOVIES_TABLES = [
   "watchProgress",
   "myList",
   "watchMarks",
+  "importPlans",
 ] as const satisfies ReadonlyArray<MoviesTable>;
 
 /** One document of every movies table: the record is typed over them, so none is left out. */
@@ -396,6 +399,37 @@ const floor = (text: number): Floor => {
       source: "metadata",
     },
     watchMarks: { userId: ids.userId, titleId: ids.titleId, generation: 1e9 },
+    importPlans: {
+      importId: ids.importId,
+      requestedBy: ids.userId,
+      plan: {
+        sourceUrl: wide(IMPORT_BOUNDS.sourceUrl),
+        credentials: {
+          version: 1,
+          nonce: wide(IMPORT_BOUNDS.sealed),
+          ciphertext: wide(IMPORT_BOUNDS.sealed),
+        },
+        users: Array.from({ length: IMPORT_BOUNDS.users }, () => ({
+          sourceUserId: wide(IMPORT_BOUNDS.sourceId),
+          userId: ids.userId,
+          history: "plays" as const,
+        })),
+        pathMappings: Array.from({ length: IMPORT_BOUNDS.pathMappings }, () => ({
+          from: wide(IMPORT_BOUNDS.folder),
+          to: wide(IMPORT_BOUNDS.folder),
+        })),
+      },
+      checkpoint: { phase: "collections", unit: 1e9, cursor: 1e9 },
+      imported: {
+        watched: 1e9,
+        inProgress: 1e9,
+        favorites: 1e9,
+        collections: 1e9,
+        overrides: 1e9,
+        keptLocal: 1e9,
+        unmatched: 1e9,
+      },
+    },
   };
 };
 

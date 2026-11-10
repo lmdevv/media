@@ -44,6 +44,31 @@ export const BOUNDS = {
   playbackId: 64,
 } as const;
 
+/**
+ * What one import's plan holds at most (ADR 0012): `movies/imports:start` refuses a plan past any
+ * of these, so a plan row stays within its table's bound.
+ */
+export const IMPORT_BOUNDS = {
+  /** Mapped source users. */
+  users: 200,
+  /** A source server's or a source user's id. */
+  sourceId: 256,
+  /** The source server's name. */
+  serverName: 256,
+  /** The source server's address. */
+  sourceUrl: 2048,
+  /** Path mappings, and the characters of each folder in one. */
+  pathMappings: 50,
+  folder: 1024,
+  /** Characters of each base64url field of the sealed credentials. */
+  sealed: 8192,
+  /** Watch items, or title edits, one write takes; its budget decides how many it writes. */
+  items: 500,
+  /** Collections one write takes, and the members of each. */
+  collections: 10,
+  members: 1000,
+} as const;
+
 type ExternalIds = Infer<typeof externalIds>;
 
 /** A lead surrogate at the end, which a cut must not keep without its pair. */

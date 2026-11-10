@@ -40,6 +40,11 @@ export const DOCUMENT_BYTES = {
    * literals, and text its writer bounds.
    */
   small: 1024,
+  /**
+   * An import's plan within `IMPORT_BOUNDS`, which `movies/imports:start` checks, at up to 3 bytes
+   * a character.
+   */
+  importPlans: 640 * 1024,
 } as const;
 
 /**
@@ -60,6 +65,7 @@ export const TABLE_BYTES = {
   watchProgress: DOCUMENT_BYTES.small,
   myList: DOCUMENT_BYTES.small,
   watchMarks: DOCUMENT_BYTES.small,
+  importPlans: DOCUMENT_BYTES.importPlans,
 } as const satisfies { readonly [Table in keyof typeof moviesTables]: number };
 
 /** The shortest a fitter cuts free text to. */

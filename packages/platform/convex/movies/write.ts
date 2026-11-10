@@ -17,10 +17,10 @@ import {
 /**
  * The only writer of the movies tables: every insert, patch, and replace of a title, title genre,
  * season, episode, person, credit, media file, collection, collection item, progress row, list
- * entry, or watch mark goes through here (a test fails on any other). Titles, episodes, people,
- * credits, and collections are fitted within their bounds as whole documents (ADR 0024), so the
- * reads may reserve those bounds (ADR 0005); the other tables hold ids, numbers, literals, and
- * fields bounded where the server functions parse them.
+ * entry, watch mark, or import plan goes through here (a test fails on any other). Titles,
+ * episodes, people, credits, and collections are fitted within their bounds as whole documents
+ * (ADR 0024), so the reads may reserve those bounds (ADR 0005); the other tables hold ids, numbers,
+ * literals, and fields bounded where the server functions parse them.
  */
 
 type Db = MutationCtx["db"];
@@ -236,4 +236,15 @@ export const patchWatchMark = async (
   db: Db,
   id: Id<"watchMarks">,
   fields: Patch<Doc<"watchMarks">>,
+): Promise<void> => db.patch(id, fields);
+
+export const insertImportPlan = async (
+  db: Db,
+  fields: WithoutSystemFields<Doc<"importPlans">>,
+): Promise<Id<"importPlans">> => db.insert("importPlans", fields);
+
+export const patchImportPlan = async (
+  db: Db,
+  id: Id<"importPlans">,
+  fields: Patch<Doc<"importPlans">>,
 ): Promise<void> => db.patch(id, fields);

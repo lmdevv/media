@@ -12,7 +12,11 @@ import type {
 } from "@media/contracts/models/migration";
 import type { MigrationSource } from "@media/contracts/models/jobs";
 import { MigrationSourceFailure } from "@media/contracts/models/migration";
-import type { MigrationTarget } from "@media/contracts/models/migration-service";
+import type {
+  CatalogFile,
+  LocalProgress,
+  MigrationTarget,
+} from "@media/contracts/models/migration-service";
 import { Conflict, Internal, NotFound } from "@media/contracts/errors";
 import type { CallError } from "@media/sdk/effect";
 import { EpochMillis } from "@media/contracts/units";
@@ -34,7 +38,13 @@ import * as MediaConfig from "../media-config.ts";
 import { sealCredentials } from "./credentials.ts";
 import * as MigrationBackend from "./migration-backend.ts";
 import { mappingCandidates, normalizePath, toLocalPath } from "./paths.ts";
-import { type MigrationPlan, planMigration, reportOf, type ResolvedUser } from "./planner.ts";
+import {
+  type ExistingLibrary,
+  type MigrationPlan,
+  planMigration,
+  reportOf,
+  type ResolvedUser,
+} from "./planner.ts";
 import { openSource, SOURCE_ERROR_TAGS } from "./sources.ts";
 import type { SourceError, SourceSession } from "./source-plugin.ts";
 import { failureReasonOf } from "./source-plugin.ts";
@@ -43,8 +53,8 @@ const CONNECTION_TTL = Duration.hours(1);
 
 interface DryRun {
   readonly usersKey: string;
-  readonly users: ReadonlyArray<ResolvedUser>;
-  readonly plan: MigrationPlan;
+  readonly users: ReadonlyArray<ResolvedUser<ProfileId>>;
+  readonly plan: MigrationPlan<ProfileId>;
   readonly report: MigrationReport;
 }
 
@@ -83,13 +93,15 @@ export interface Interface {
 /** The migration flow. */
 export class Service extends Context.Service<Service, Interface>()("@media/server/Migrations") {}
 
-const sourceFailure = (error: SourceError): MigrationSourceFailure => ({
+/** A source failure as the "Couldn't connect" screen shows it. */
+export const sourceFailure = (error: SourceError): MigrationSourceFailure => ({
   status: "failed",
   reason: failureReasonOf(error),
   message: error.message,
 });
 
-const isSourceFailure = Schema.is(MigrationSourceFailure);
+/** Whether a connect, dry run, or import answered a source failure. */
+export const isSourceFailure = Schema.is(MigrationSourceFailure);
 
 const sameText = (left: string | null, right: string | null): boolean =>
   left !== null && right !== null && left.trim().toLowerCase() === right.trim().toLowerCase();
@@ -128,77 +140,146 @@ export const suggestProfile = (
 export const resolveUsers = (
   users: ReadonlyArray<ContractSourceUser>,
   overrides: ReadonlyArray<UserMapping>,
-): ReadonlyArray<ResolvedUser> =>
-  users.map((user): ResolvedUser => {
+): ReadonlyArray<ResolvedUser<ProfileId>> =>
+  users.map((user): ResolvedUser<ProfileId> => {
     const chosen = overrides.find((mapping) => mapping.sourceUserId === user.sourceUserId);
     const base = { sourceUserId: user.sourceUserId, name: user.name, history: user.history };
 
     if (chosen !== undefined) {
       return chosen.profileId === null
-        ? { ...base, profileId: null, action: "skip" }
-        : { ...base, profileId: chosen.profileId, action: "import" };
+        ? { ...base, person: null, action: "skip" }
+        : { ...base, person: chosen.profileId, action: "import" };
     }
 
     return user.suggestion.kind === "profile"
-      ? { ...base, profileId: user.suggestion.profileId, action: "import" }
-      : { ...base, profileId: null, action: "invite" };
+      ? { ...base, person: user.suggestion.profileId, action: "import" }
+      : { ...base, person: null, action: "invite" };
   });
 
-/** The plan a dry run computes, from the source and [movies] as they are now. */
-export const computePlan = Effect.fnUntraced(function* (
+/** What a plan reads of the catalog it imports into: old movies' or the core's. */
+export interface PlanReads<Person extends string> {
+  readonly libraries: Effect.Effect<ReadonlyArray<ExistingLibrary>, CallError>;
+  /** Every catalog file, read page by page. */
+  readonly catalog: Effect.Effect<ReadonlyArray<CatalogFile>, CallError>;
+  readonly localProgress: (
+    person: Person,
+  ) => Effect.Effect<ReadonlyArray<LocalProgress>, CallError>;
+}
+
+/** What `computePlan` plans for. */
+export interface PlanTarget<Person extends string> {
+  readonly source: MigrationSource;
+  readonly users: ReadonlyArray<ResolvedUser<Person>>;
+  readonly mappings: ReadonlyArray<PathMapping>;
+  readonly roots: ReadonlyArray<string>;
+  /** Read each imported person's progress, for a dry run's conflicts. */
+  readonly withLocalProgress: boolean;
+  readonly addsLibraries: boolean;
+}
+
+/** The plan a dry run computes, from the source and the catalog as they are now. */
+export const computePlan = Effect.fnUntraced(function* <Person extends string>(
   session: SourceSession,
-  source: MigrationSource,
-  users: ReadonlyArray<ResolvedUser>,
-  mappings: ReadonlyArray<PathMapping>,
-  roots: ReadonlyArray<string>,
-  withLocalProgress: boolean,
+  reads: PlanReads<Person>,
+  target: PlanTarget<Person>,
 ) {
-  const backend = yield* MigrationBackend.Service;
-  const items = yield* session.items;
-  const collections = yield* session.collections;
+  const { users } = target;
   const imported = users.filter((user) => user.action === "import");
 
-  const states = new Map(
-    yield* Effect.forEach(imported, (user) => {
-      const sourceUser = session.users.find((candidate) => candidate.userId === user.sourceUserId);
-
-      return sourceUser === undefined
-        ? Effect.succeed([user.sourceUserId, []] as const)
-        : session
-            .userStates(sourceUser)
-            .pipe(Effect.map((found) => [user.sourceUserId, found] as const));
-    }),
-  );
-
-  const existingLibraries = yield* backend.libraries;
-  const catalog = yield* backend.catalog;
-
-  const profiles = [
-    ...new Set(imported.flatMap((user) => (user.profileId === null ? [] : [user.profileId]))),
+  const people = [
+    ...new Set(imported.flatMap((user) => (user.person === null ? [] : [user.person]))),
   ];
 
-  const localProgress = new Map(
-    withLocalProgress
-      ? yield* Effect.forEach(profiles, (profileId: ProfileId) =>
-          backend.localProgress(profileId).pipe(Effect.map((rows) => [profileId, rows] as const)),
-        )
-      : [],
+  const stateOf = (user: ResolvedUser<Person>) => {
+    const sourceUser = session.users.find((candidate) => candidate.userId === user.sourceUserId);
+
+    return sourceUser === undefined
+      ? Effect.succeed([user.sourceUserId, []] as const)
+      : session
+          .userStates(sourceUser)
+          .pipe(Effect.map((found) => [user.sourceUserId, found] as const));
+  };
+
+  // The source and the catalog answer independently, so their reads overlap; each still asks
+  // one thing at a time, as a small server can take.
+  const [source, catalogReads] = yield* Effect.all(
+    [
+      Effect.all({
+        items: session.items,
+        collections: session.collections,
+        states: Effect.forEach(imported, stateOf),
+      }),
+      Effect.all({
+        existingLibraries: reads.libraries,
+        catalog: reads.catalog,
+        localProgress: target.withLocalProgress
+          ? Effect.forEach(people, (person) =>
+              reads.localProgress(person).pipe(Effect.map((rows) => [person, rows] as const)),
+            )
+          : Effect.succeed([]),
+      }),
+    ],
+    { concurrency: 2 },
   );
 
+  const { items, collections } = source;
+  const { existingLibraries, catalog } = catalogReads;
+  const states = new Map(source.states);
+  const localProgress = new Map(catalogReads.localProgress);
+
   return planMigration({
-    source,
+    source: target.source,
     server: session.server,
     libraries: session.libraries,
     items,
     collections,
     users,
     states,
-    mappings,
-    roots,
+    mappings: target.mappings,
+    roots: target.roots,
     existingLibraries,
+    addsLibraries: target.addsLibraries,
     catalog,
     localProgress,
   });
+});
+
+/** Old movies' catalog as a plan reads it, through the migration backend. */
+export const backendReads = (backend: MigrationBackend.Interface): PlanReads<ProfileId> => ({
+  libraries: backend.libraries,
+  catalog: backend.catalog,
+  localProgress: backend.localProgress,
+});
+
+/**
+ * Local folders under `roots` for each source folder no mapping in `given` or root covers: the
+ * first candidate (`mappingCandidates`) that is a directory on this host.
+ */
+export const inferMappings = Effect.fnUntraced(function* (
+  folders: ReadonlyArray<string>,
+  given: ReadonlyArray<PathMapping>,
+  roots: ReadonlyArray<string>,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const inferred: Array<PathMapping> = [];
+
+  for (const folder of folders) {
+    if (toLocalPath(folder, [...given, ...inferred], roots) !== null) continue;
+
+    for (const candidate of mappingCandidates(folder, roots)) {
+      const isDirectory = yield* fs.stat(candidate).pipe(
+        Effect.map((info) => info.type === "Directory"),
+        Effect.orElseSucceed(() => false),
+      );
+
+      if (isDirectory) {
+        inferred.push({ from: normalizePath(folder), to: candidate });
+        break;
+      }
+    }
+  }
+
+  return inferred;
 });
 
 /** The binding sealed credentials carry, so they open only for the plan they were sealed for. */
@@ -217,31 +298,6 @@ const make = Effect.gen(function* () {
     Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
     Effect.orDie,
   );
-
-  const inferMappings = Effect.fnUntraced(function* (
-    folders: ReadonlyArray<string>,
-    given: ReadonlyArray<PathMapping>,
-  ) {
-    const inferred: Array<PathMapping> = [];
-
-    for (const folder of folders) {
-      if (toLocalPath(folder, [...given, ...inferred], config.libraryRoots) !== null) continue;
-
-      for (const candidate of mappingCandidates(folder, config.libraryRoots)) {
-        const isDirectory = yield* fs.stat(candidate).pipe(
-          Effect.map((info) => info.type === "Directory"),
-          Effect.orElseSucceed(() => false),
-        );
-
-        if (isDirectory) {
-          inferred.push({ from: normalizePath(folder), to: candidate });
-          break;
-        }
-      }
-    }
-
-    return inferred;
-  });
 
   const connectionOf = Effect.fnUntraced(function* (connectionId: string, viewer: Viewer) {
     const now = yield* Clock.currentTimeMillis;
@@ -282,7 +338,10 @@ const make = Effect.gen(function* () {
       .filter((library) => library.kind !== "other")
       .flatMap((library) => library.paths);
 
-    const inferred = yield* inferMappings(folders, given);
+    const inferred = yield* inferMappings(folders, given, config.libraryRoots).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+    );
+
     const mappings = [...given, ...inferred];
     const targets = yield* backend.targets;
     const now = yield* Clock.currentTimeMillis;
@@ -352,17 +411,16 @@ const make = Effect.gen(function* () {
 
   const plan = Effect.fnUntraced(function* (connection: Connection, args: MigrationPlanArgs) {
     const users = resolveUsers(connection.view.users, args.users ?? []);
-    const usersKey = JSON.stringify(users.map((user) => [user.sourceUserId, user.profileId]));
+    const usersKey = JSON.stringify(users.map((user) => [user.sourceUserId, user.person]));
 
-    const computed = yield* computePlan(
-      connection.session,
-      connection.source,
+    const computed = yield* computePlan(connection.session, backendReads(backend), {
+      source: connection.source,
       users,
-      connection.mappings,
-      config.libraryRoots,
-      true,
-    ).pipe(
-      Effect.provideService(MigrationBackend.Service, backend),
+      mappings: connection.mappings,
+      roots: config.libraryRoots,
+      withLocalProgress: true,
+      addsLibraries: true,
+    }).pipe(
       Effect.map((computedPlan) => ({ computedPlan })),
       Effect.catchTag(SOURCE_ERROR_TAGS, (error) => Effect.succeed(sourceFailure(error))),
     );
@@ -407,7 +465,7 @@ const make = Effect.gen(function* () {
   ) {
     const connection = yield* connectionOf(args.connectionId, viewer);
     const users = resolveUsers(connection.view.users, args.users ?? []);
-    const usersKey = JSON.stringify(users.map((user) => [user.sourceUserId, user.profileId]));
+    const usersKey = JSON.stringify(users.map((user) => [user.sourceUserId, user.person]));
 
     const previous = Option.filter(connection.dryRun, (run) => run.usersKey === usersKey);
 
@@ -440,11 +498,11 @@ const make = Effect.gen(function* () {
           credentialsBinding(serverId, connection.url),
         ),
         users: ready.users.flatMap((user) =>
-          user.action === "import" && user.profileId !== null
+          user.action === "import" && user.person !== null
             ? [
                 {
                   sourceUserId: user.sourceUserId,
-                  profileId: user.profileId,
+                  profileId: user.person,
                   history: user.history,
                 },
               ]

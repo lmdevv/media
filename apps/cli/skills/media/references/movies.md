@@ -64,6 +64,27 @@ Mark a movie, an episode, or a whole show watched.
 - Arguments: `{ titleId: Id<"titles">; episodeId?: Id<"episodes"> }`
 - Result: `null`
 
+## `movies.imports.get`
+
+Show one Jellyfin or Plex import, its job, and what it wrote.
+
+- CLI: `media movies imports get`
+- Kind: query
+- Scope: movies:edit
+- Arguments: `{ importId: Id<"imports"> }`
+- Result: `{ importId: Id<"imports">; source: "jellyfin" | "plex"; serverName: string; createdAt: number; phase: "watchState" | "collections" | "overrides" | "done"; users: number; imported: { watched: number; inProgress: number; favorites: number; collections: number; overrides: number; keptLocal: number; unmatched: number }; job: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number; total: number | null; message: string | null; error: string | null; finishedAt: number | null } }`
+
+## `movies.imports.list`
+
+List Jellyfin and Plex imports, newest first, with their phase and what they wrote.
+
+- CLI: `media movies imports list`
+- Kind: query
+- Scope: movies:edit
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ importId: Id<"imports">; source: "jellyfin" | "plex"; serverName: string; createdAt: number; phase: "watchState" | "collections" | "overrides" | "done"; users: number; imported: { watched: number; inProgress: number; favorites: number; collections: number; overrides: number; keptLocal: number; unmatched: number }; job: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number; total: number | null; message: string | null; error: string | null; finishedAt: number | null } }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
 ## `movies.metadata.edit`
 
 Set or clear your edits to a title's name, sort name, year, overview, or rating.

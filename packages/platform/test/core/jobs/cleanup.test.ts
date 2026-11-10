@@ -8,6 +8,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { runFunction } from "../../admin";
 import { member } from "../../devices";
 import { JobId, claimJob, finishJob, moviesLibrary, upsert } from "../../movies/catalog";
+import { startImport } from "../../movies/importing";
 import { movieFile, scannedTitle } from "../../movies/scanned";
 import { runServer } from "../../service";
 import { coreStackFromEnvFile } from "../../stack-env";
@@ -85,12 +86,7 @@ describe.skipIf(stack === undefined)("the sweep of finished jobs", { timeout: 18
     await cancel(stack, scanJobId);
     await backdate(stack, scanJobId);
 
-    const imported = await runFunction(
-      stack,
-      internal.core.imports.probeStart,
-      { source: "jellyfin", serverId: freshRun("sweep-import"), serverName: "Old server" },
-      Schema.Struct({ importId: Schema.String, jobId: JobId, created: Schema.Boolean }),
-    );
+    const imported = await startImport(stack, admin, { serverId: freshRun("sweep-import") });
 
     await cancel(stack, imported.jobId);
     await backdate(stack, imported.jobId);

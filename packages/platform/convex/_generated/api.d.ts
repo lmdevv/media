@@ -108,6 +108,7 @@ import type * as movies_files from "../movies/files.js";
 import type * as movies_fit from "../movies/fit.js";
 import type * as movies_history from "../movies/history.js";
 import type * as movies_historyProbe from "../movies/historyProbe.js";
+import type * as movies_imports from "../movies/imports.js";
 import type * as movies_items from "../movies/items.js";
 import type * as movies_matching from "../movies/matching.js";
 import type * as movies_metadata from "../movies/metadata.js";
@@ -236,6 +237,7 @@ declare const fullApi: ApiFromModules<{
   "movies/fit": typeof movies_fit;
   "movies/history": typeof movies_history;
   "movies/historyProbe": typeof movies_historyProbe;
+  "movies/imports": typeof movies_imports;
   "movies/items": typeof movies_items;
   "movies/matching": typeof movies_matching;
   "movies/metadata": typeof movies_metadata;

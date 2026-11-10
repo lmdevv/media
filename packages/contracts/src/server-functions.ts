@@ -7,9 +7,29 @@
 import { Schema } from "effect";
 
 import type { FunctionPath } from "./commands/command";
-import { BackupId, EpisodeId, JobId, LibraryId, MediaFileId, PersonId, TitleId } from "./ids";
+import {
+  BackupId,
+  EpisodeId,
+  JobId,
+  LibraryId,
+  MediaFileId,
+  PersonId,
+  TitleId,
+  UserId,
+} from "./ids";
 import { Artwork, ExternalIds, TitleKind } from "./models/catalog";
-import { BackupArchive, BackupTrigger } from "./models/jobs";
+import { BackupArchive, BackupTrigger, MigrationSource } from "./models/jobs";
+import { ImportId } from "./models/migration";
+import {
+  CatalogFile,
+  CollectionImport,
+  ImportCheckpoint,
+  ImportPlan,
+  ImportWatchItem,
+  ImportedCounts,
+  LocalProgress,
+  OverrideImport,
+} from "./models/migration-service";
 import {
   IndexedFile,
   ResolvedFile,
@@ -73,6 +93,8 @@ export const CoreJobKind = Schema.Literals([
   "movies.metadata",
   "movies.person",
   "movies.trickplay",
+  "movies.import.jellyfin",
+  "movies.import.plex",
   "server.backup",
 ]);
 
@@ -102,6 +124,16 @@ export const CoreJobPayload = Schema.Union([
     fileId: MediaFileId,
     /** The contents the thumbnails are for: `size:mtime`. */
     revision: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("movies.import.jellyfin"),
+    source: Schema.Literal("jellyfin"),
+    serverId: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("movies.import.plex"),
+    source: Schema.Literal("plex"),
+    serverId: Schema.String,
   }),
   Schema.Struct({ kind: Schema.Literal("server.backup"), trigger: BackupTrigger }),
 ]);
@@ -198,6 +230,15 @@ export const ServerReport = Schema.Struct({
 
 /** What the server reports about itself. */
 export interface ServerReport extends Schema.Schema.Type<typeof ServerReport> {}
+
+/** A page of an import's reads, from `cursor`. */
+const ImportPage = <Rows extends Schema.Struct.Fields>(rows: Rows) =>
+  Schema.Struct({ ...rows, continueCursor: Schema.String, isDone: Schema.Boolean });
+
+/** What a write of an import answers: how many items it got through, and its checkpoint now. */
+const ImportWrote = LeaseAnswer(
+  Schema.Struct({ done: Schema.Int, at: ImportCheckpoint, imported: ImportedCounts }),
+);
 
 /** The core's server functions by name. */
 export const serverFunctions = {
@@ -456,7 +497,124 @@ export const serverFunctions = {
     args: ServerReport,
     result: Schema.Null,
   }),
+  importAllowed: serverQuery({
+    name: "movies.imports.mayImport",
+    path: "movies/imports:mayImport",
+    args: Schema.Struct({ userId: UserId }),
+    result: Schema.Boolean,
+  }),
+  importTargets: serverQuery({
+    name: "movies.imports.targets",
+    path: "movies/imports:targets",
+    args: Schema.Struct({ cursor: Cursor }),
+    result: ImportPage({
+      users: Schema.Array(Schema.Struct({ userId: UserId, username: Schema.String })),
+    }),
+  }),
+  importLibraries: serverQuery({
+    name: "movies.imports.libraries",
+    path: "movies/imports:libraries",
+    args: Schema.Struct({ cursor: Cursor }),
+    result: ImportPage({
+      libraries: Schema.Array(
+        Schema.Struct({ libraryId: LibraryId, folders: Schema.Array(Schema.String) }),
+      ),
+    }),
+  }),
+  importCatalog: serverQuery({
+    name: "movies.imports.catalog",
+    path: "movies/imports:catalog",
+    args: Schema.Struct({ cursor: Cursor }),
+    result: ImportPage({ files: Schema.Array(CatalogFile) }),
+  }),
+  importProgress: serverQuery({
+    name: "movies.imports.progress",
+    path: "movies/imports:progress",
+    args: Schema.Struct({ userId: UserId, cursor: Cursor }),
+    result: ImportPage({ rows: Schema.Array(LocalProgress) }),
+  }),
+  importStart: serverMutation({
+    name: "movies.imports.start",
+    path: "movies/imports:start",
+    args: Schema.Struct({
+      requestedBy: UserId,
+      source: MigrationSource,
+      serverId: Schema.String,
+      serverName: Schema.String,
+      plan: ImportPlan,
+    }),
+    result: Schema.Struct({ importId: ImportId, jobId: JobId, created: Schema.Boolean }),
+  }),
+  importState: serverMutation({
+    name: "movies.imports.state",
+    path: "movies/imports:state",
+    args: Schema.Struct({ lease: Lease }),
+    result: LeaseAnswer(
+      Schema.Struct({
+        source: MigrationSource,
+        serverId: Schema.String,
+        serverName: Schema.String,
+        plan: ImportPlan,
+        checkpoint: ImportCheckpoint,
+        imported: ImportedCounts,
+      }),
+    ),
+  }),
+  importAdvance: serverMutation({
+    name: "movies.imports.advance",
+    path: "movies/imports:advance",
+    args: Schema.Struct({
+      lease: Lease,
+      at: ImportCheckpoint,
+      to: ImportCheckpoint,
+      unmatched: Schema.Int,
+    }),
+    result: LeaseAnswer(Schema.Struct({ at: ImportCheckpoint, imported: ImportedCounts })),
+  }),
+  importWatchState: serverMutation({
+    name: "movies.imports.writeWatchState",
+    path: "movies/imports:writeWatchState",
+    args: Schema.Struct({
+      lease: Lease,
+      at: ImportCheckpoint,
+      continueAt: Schema.optionalKey(ImportCheckpoint),
+      unmatched: Schema.Int,
+      items: Schema.Array(ImportWatchItem),
+    }),
+    result: ImportWrote,
+  }),
+  importCollections: serverMutation({
+    name: "movies.imports.writeCollections",
+    path: "movies/imports:writeCollections",
+    args: Schema.Struct({
+      lease: Lease,
+      at: ImportCheckpoint,
+      continueAt: Schema.optionalKey(ImportCheckpoint),
+      items: Schema.Array(CollectionImport),
+    }),
+    result: ImportWrote,
+  }),
+  importEdits: serverMutation({
+    name: "movies.imports.writeEdits",
+    path: "movies/imports:writeEdits",
+    args: Schema.Struct({
+      lease: Lease,
+      at: ImportCheckpoint,
+      continueAt: Schema.optionalKey(ImportCheckpoint),
+      items: Schema.Array(OverrideImport),
+    }),
+    result: ImportWrote,
+  }),
 } as const;
+
+/** The most watch items, or title edits, one import write takes. */
+export const IMPORT_ITEMS_MAX = 500;
+
+/** The most collections one import write takes. */
+export const IMPORT_COLLECTIONS_MAX = 10;
+
+/** The most members of one collection an import writes. */
+export const IMPORT_MEMBERS_MAX = 1000;
 
 /** The most items one `movies/scanner:upsert` or `missing` call takes (ADR 0024). */
 export const SCANNER_BATCH_MAX = 500;

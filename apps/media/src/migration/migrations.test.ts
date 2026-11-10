@@ -98,7 +98,7 @@ describe("resolveUsers", () => {
     ]);
 
     assert.deepStrictEqual(
-      resolved.map((user) => [user.sourceUserId, user.action, user.profileId]),
+      resolved.map((user) => [user.sourceUserId, user.action, user.person]),
       [
         ["1", "import", "Alice-Alice"],
         ["2", "invite", null],

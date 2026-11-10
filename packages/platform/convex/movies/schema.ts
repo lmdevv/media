@@ -7,6 +7,9 @@ import {
   creditKind,
   externalIds,
   externalSubtitle,
+  importCheckpoint,
+  importPlan,
+  importedCounts,
   matchStatus,
   metadataOverrides,
   nullable,
@@ -313,4 +316,18 @@ export const moviesTables = {
     titleId: v.id("titles"),
     generation: v.number(),
   }).index("by_user_title", ["userId", "titleId"]),
+
+  /**
+   * A Jellyfin or Plex import's plan, where it resumes, and what it wrote, keyed by its core
+   * `imports` row (ADR 0012). Each write of the import moves the checkpoint in its own mutation, so
+   * a restarted import goes on from exactly where the last one stopped.
+   */
+  importPlans: defineTable({
+    importId: v.id("imports"),
+    /** Who started it: an owner or an admin when it started. */
+    requestedBy: v.id("users"),
+    plan: importPlan,
+    checkpoint: importCheckpoint,
+    imported: importedCounts,
+  }).index("by_import", ["importId"]),
 };

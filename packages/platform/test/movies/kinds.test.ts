@@ -13,6 +13,8 @@ describe("movies job kinds", () => {
       "movies.metadata": "movies",
       "movies.person": "movies",
       "movies.trickplay": "movies.background",
+      "movies.import.jellyfin": "movies",
+      "movies.import.plex": "movies",
       "music.scan": "music",
       "server.backup": "server",
     });
@@ -33,6 +35,8 @@ describe("movies job kinds", () => {
       { kind: "movies.person", personId: "p", revision: 2 },
       { kind: "movies.trickplay", fileId: "f", revision: "10:1" },
       { kind: "movies.trickplay", fileId: "f", revision: "20:2" },
+      { kind: "movies.import.jellyfin", source: "jellyfin", serverId: "den" },
+      { kind: "movies.import.plex", source: "plex", serverId: "den" },
       { kind: "server.backup", trigger: "manual" },
     ] as const;
 
@@ -44,6 +48,8 @@ describe("movies job kinds", () => {
       "movies.person:p:2",
       "movies.trickplay:f:10:1",
       "movies.trickplay:f:20:2",
+      "movies.import.jellyfin:den",
+      "movies.import.plex:den",
       "server.backup:server",
     ]);
   });

@@ -95,7 +95,16 @@ export interface AnyHandler {
 
 /** The server's worker pools (ADR 0014) and the domain whose libraries gate each, if any. */
 const POOLS = {
-  movies: { domain: "movies", kinds: ["movies.scan", "movies.metadata", "movies.person"] },
+  movies: {
+    domain: "movies",
+    kinds: [
+      "movies.scan",
+      "movies.metadata",
+      "movies.person",
+      "movies.import.jellyfin",
+      "movies.import.plex",
+    ],
+  },
   "movies.background": { domain: "movies", kinds: ["movies.trickplay"] },
   server: { domain: null, kinds: ["server.backup"] },
 } as const satisfies Record<

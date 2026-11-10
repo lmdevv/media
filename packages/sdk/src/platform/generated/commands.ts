@@ -2307,6 +2307,115 @@ const movies_history_markWatched = mutation({
   result: Schema.Null,
 });
 
+const movies_imports_get = query({
+  name: "movies.imports.get",
+  path: "movies/imports:get",
+  args: Schema.Struct({ importId: Schema.String.pipe(Schema.brand("Id<imports>")) }),
+  result: Schema.Struct({
+    importId: Schema.String.pipe(Schema.brand("Id<imports>")),
+    source: Schema.Union([Schema.Literal("jellyfin"), Schema.Literal("plex")]),
+    serverName: Schema.String,
+    createdAt: Schema.Finite,
+    phase: Schema.Union([
+      Schema.Literal("watchState"),
+      Schema.Literal("collections"),
+      Schema.Literal("overrides"),
+      Schema.Literal("done"),
+    ]),
+    users: Schema.Finite,
+    imported: Schema.Struct({
+      watched: Schema.Finite,
+      inProgress: Schema.Finite,
+      favorites: Schema.Finite,
+      collections: Schema.Finite,
+      overrides: Schema.Finite,
+      keptLocal: Schema.Finite,
+      unmatched: Schema.Finite,
+    }),
+    job: Schema.Struct({
+      jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+      status: Schema.Union([
+        Schema.Literal("queued"),
+        Schema.Literal("running"),
+        Schema.Literal("succeeded"),
+        Schema.Literal("failed"),
+        Schema.Literal("canceled"),
+      ]),
+      done: Schema.Finite,
+      total: Schema.Union([Schema.Finite, Schema.Null]),
+      message: Schema.Union([Schema.String, Schema.Null]),
+      error: Schema.Union([Schema.String, Schema.Null]),
+      finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
+    }),
+  }),
+});
+
+const movies_imports_list = query({
+  name: "movies.imports.list",
+  path: "movies/imports:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        importId: Schema.String.pipe(Schema.brand("Id<imports>")),
+        source: Schema.Union([Schema.Literal("jellyfin"), Schema.Literal("plex")]),
+        serverName: Schema.String,
+        createdAt: Schema.Finite,
+        phase: Schema.Union([
+          Schema.Literal("watchState"),
+          Schema.Literal("collections"),
+          Schema.Literal("overrides"),
+          Schema.Literal("done"),
+        ]),
+        users: Schema.Finite,
+        imported: Schema.Struct({
+          watched: Schema.Finite,
+          inProgress: Schema.Finite,
+          favorites: Schema.Finite,
+          collections: Schema.Finite,
+          overrides: Schema.Finite,
+          keptLocal: Schema.Finite,
+          unmatched: Schema.Finite,
+        }),
+        job: Schema.Struct({
+          jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+          status: Schema.Union([
+            Schema.Literal("queued"),
+            Schema.Literal("running"),
+            Schema.Literal("succeeded"),
+            Schema.Literal("failed"),
+            Schema.Literal("canceled"),
+          ]),
+          done: Schema.Finite,
+          total: Schema.Union([Schema.Finite, Schema.Null]),
+          message: Schema.Union([Schema.String, Schema.Null]),
+          error: Schema.Union([Schema.String, Schema.Null]),
+          finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
+        }),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
 const movies_metadata_edit = mutation({
   name: "movies.metadata.edit",
   path: "movies/metadata:edit",
@@ -3691,6 +3800,12 @@ export const effectMethods = (method: EffectBuilder) => ({
       /** `movies.history.markWatched` (mutation, movies:play): Mark a movie, an episode, or a whole show watched. */
       markWatched: method.mutation(movies_history_markWatched),
     },
+    imports: {
+      /** `movies.imports.get` (query, movies:edit): Show one Jellyfin or Plex import, its job, and what it wrote. */
+      get: method.query(movies_imports_get),
+      /** `movies.imports.list` (query, movies:edit): List Jellyfin and Plex imports, newest first, with their phase and what they wrote. */
+      list: method.query(movies_imports_list),
+    },
     metadata: {
       /** `movies.metadata.edit` (mutation, movies:edit): Set or clear your edits to a title's name, sort name, year, overview, or rating. */
       edit: method.mutation(movies_metadata_edit),
@@ -4016,6 +4131,12 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       markUnwatched: method.mutation(movies_history_markUnwatched),
       /** `movies.history.markWatched` (mutation, movies:play): Mark a movie, an episode, or a whole show watched. */
       markWatched: method.mutation(movies_history_markWatched),
+    },
+    imports: {
+      /** `movies.imports.get` (query, movies:edit): Show one Jellyfin or Plex import, its job, and what it wrote. */
+      get: method.query(movies_imports_get),
+      /** `movies.imports.list` (query, movies:edit): List Jellyfin and Plex imports, newest first, with their phase and what they wrote. */
+      list: method.query(movies_imports_list),
     },
     metadata: {
       /** `movies.metadata.edit` (mutation, movies:edit): Set or clear your edits to a title's name, sort name, year, overview, or rating. */
