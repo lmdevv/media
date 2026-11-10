@@ -16,6 +16,7 @@ import {
   libraryCheck,
   plus,
   queryOf,
+  readsOf,
   settleRead,
   times,
 } from "./reads";
@@ -129,71 +130,135 @@ const present = async (
 /**
  * Where a collections page starts or ends: after a collection (`member` null), or at one, from
  * its `member`th member, when the budget ran out before any of its earlier members was visible.
+ * Collections order by sort key, then creation time, then id, as their index does. A range can
+ * name the first two, so a position also counts the rows of its sort key and creation time that
+ * come before it (`ties`), which an import can make more than one.
  */
 interface Position {
   readonly sortKey: string;
   readonly creationTime: number;
+  readonly ties: number;
   readonly member: number | null;
 }
 
-const cursorOf = ({ sortKey, creationTime, member }: Position): string =>
-  `${creationTime}:${member ?? "-"}:${sortKey}`;
+/** A collection read for a page, with how many rows of its sort key and time come before it. */
+interface Placed {
+  readonly doc: Doc<"collections">;
+  readonly ties: number;
+}
+
+const cursorOf = ({ sortKey, creationTime, ties, member }: Position): string =>
+  `${creationTime}:${ties}:${member ?? "-"}:${sortKey}`;
 
 const positionOf = (cursor: string | null | undefined): Position | null => {
   if (cursor === undefined || cursor === null || cursor === "") return null;
 
-  const [time = "", member = "", ...rest] = cursor.split(":");
+  const [time = "", tied = "", member = "", ...rest] = cursor.split(":");
   const creationTime = Number(time);
+  const ties = Number(tied);
   const index = member === "-" ? null : Number(member);
 
   if (
     !Number.isFinite(creationTime) ||
+    !Number.isInteger(ties) ||
+    ties < 0 ||
     rest.length === 0 ||
-    (index !== null && !Number.isInteger(index))
+    (index !== null && (!Number.isInteger(index) || index < 0))
   ) {
     return fail("invalid_args", "This page cursor did not come from this list");
   }
 
-  return { sortKey: rest.join(":"), creationTime, member: index };
+  return { sortKey: rest.join(":"), creationTime, ties, member: index };
 };
 
-const after = (doc: Doc<"collections">): Position => ({
+const tiedWith = (doc: Doc<"collections">, position: Position): boolean =>
+  doc.sortKey === position.sortKey && doc._creationTime === position.creationTime;
+
+/** The position just after a collection. */
+const after = ({ doc, ties }: Placed): Position => ({
   sortKey: doc.sortKey,
   creationTime: doc._creationTime,
+  ties: ties + 1,
   member: null,
 });
 
-const isAt = (doc: Doc<"collections">, position: Position): boolean =>
-  doc.sortKey === position.sortKey && doc._creationTime === position.creationTime;
+/** The position at a collection, from its `member`th member. */
+const at = ({ doc, ties }: Placed, member: number): Position => ({
+  sortKey: doc.sortKey,
+  creationTime: doc._creationTime,
+  ties,
+  member,
+});
 
-/** Up to `count` collections in name order from `position`, in at most two index ranges. */
+/** Whether `placed` is the collection a position starts at (`at`) or ends after (`after`). */
+const isAt = (placed: Placed, position: Position): boolean =>
+  tiedWith(placed.doc, position) &&
+  placed.ties === (position.member === null ? position.ties - 1 : position.ties);
+
+/** Whether two collections share a sort key and a creation time, which only their ids order. */
+const sameRank = (left: Doc<"collections">, right: Doc<"collections">): boolean =>
+  left.sortKey === right.sortKey && left._creationTime === right._creationTime;
+
+/** The index ranges `collectionsFrom` reads from a position: the rest of its key, later keys. */
+const FROM_RANGES = 2;
+
+/**
+ * Up to `count` collections in index order from `position`: the rest of its sort key from its
+ * creation time on, past the `ties` that come before it, then later sort keys. Each comes with
+ * how many rows of its sort key and time precede it.
+ */
 const collectionsFrom = async (
   db: DatabaseReader,
   position: Position | null,
   count: number,
-): Promise<ReadonlyArray<Doc<"collections">>> => {
-  if (position === null) return db.query("collections").withIndex("by_sort").take(count);
+): Promise<{
+  readonly found: ReadonlyArray<Placed>;
+  readonly passed: ReadonlyArray<Doc<"collections">>;
+}> => {
+  const read = async (): Promise<{
+    readonly docs: ReadonlyArray<Doc<"collections">>;
+    readonly passed: ReadonlyArray<Doc<"collections">>;
+  }> => {
+    if (position === null) {
+      return { docs: await db.query("collections").withIndex("by_sort").take(count), passed: [] };
+    }
 
-  const ties = await db
-    .query("collections")
-    .withIndex("by_sort", (q) => {
-      const named = q.eq("sortKey", position.sortKey);
+    // Its sort key from its creation time on: the `ties` passed already come first, in order.
+    const tiesAndAfter = await db
+      .query("collections")
+      .withIndex("by_sort", (q) =>
+        q.eq("sortKey", position.sortKey).gte("_creationTime", position.creationTime),
+      )
+      .take(position.ties + count);
 
-      return position.member === null
-        ? named.gt("_creationTime", position.creationTime)
-        : named.gte("_creationTime", position.creationTime);
-    })
-    .take(count);
+    const sameKey = tiesAndAfter.slice(position.ties);
 
-  const later =
-    ties.length >= count
-      ? []
-      : await db
-          .query("collections")
-          .withIndex("by_sort", (q) => q.gt("sortKey", position.sortKey))
-          .take(count - ties.length);
+    const later =
+      sameKey.length >= count
+        ? []
+        : await db
+            .query("collections")
+            .withIndex("by_sort", (q) => q.gt("sortKey", position.sortKey))
+            .take(count - sameKey.length);
 
-  return [...ties, ...later];
+    return { docs: [...sameKey, ...later], passed: tiesAndAfter.slice(0, position.ties) };
+  };
+
+  const { docs, passed } = await read();
+
+  /** How many rows of the `index`th collection's sort key and time come before it. */
+  const tiesAt = (index: number): number => {
+    const doc = docs[index];
+    const previous = docs[index - 1];
+
+    if (doc === undefined) return 0;
+
+    if (previous !== undefined && sameRank(previous, doc)) return tiesAt(index - 1) + 1;
+
+    return position !== null && tiedWith(doc, position) ? position.ties : 0;
+  };
+
+  return { found: docs.map((doc, index) => ({ doc, ties: tiesAt(index) })), passed };
 };
 
 export const { list, get } = register({
@@ -217,16 +282,19 @@ export const { list, get } = register({
       ),
     );
 
-    // One more than the page holds, to tell whether more follow, over at most two ranges.
-    const reserved = plus(collectionsOf(rows + 1), queryOf(0));
+    // One more than the page holds, to tell whether more follow, and the ties it passes over.
+    const reserved = plus(
+      readsOf(FROM_RANGES - 1, 0, 0),
+      collectionsOf(rows + 1 + (start?.ties ?? 0)),
+    );
 
     budget.take(reserved);
 
-    const found = await collectionsFrom(ctx.db, start, rows + 1);
+    const { found, passed } = await collectionsFrom(ctx.db, start, rows + 1);
 
-    settleRead(budget, reserved, found);
+    settleRead(budget, reserved, [...passed, ...found.map((placed) => placed.doc)]);
 
-    const endsAt = end === null ? -1 : found.findIndex((doc) => isAt(doc, end));
+    const endsAt = end === null ? -1 : found.findIndex((placed) => isAt(placed, end));
     const reachesEnd = endsAt !== -1 && endsAt < rows + (end?.member === null ? 0 : 1);
 
     const window = reachesEnd
@@ -247,24 +315,27 @@ export const { list, get } = register({
       readonly listed: ReadonlyArray<Shown["collection"]>;
       readonly stop: Position | null;
     }> => {
-      const doc = window[index];
+      const placed = window[index];
 
-      if (doc === undefined) return { listed, stop: null };
+      if (placed === undefined) return { listed, stop: null };
 
       const from =
-        index === 0 && start !== null && start.member !== null && isAt(doc, start)
+        index === 0 && start !== null && start.member !== null && isAt(placed, start)
           ? start.member
           : 0;
 
-      const shown = await present(context, doc, budget.part(1 / (window.length - index)), from);
+      const shown = await present(
+        context,
+        placed.doc,
+        budget.part(1 / (window.length - index)),
+        from,
+      );
 
       if (shown.collection.titles.length > 0) {
         return walk(index + 1, [...listed, shown.collection]);
       }
 
-      return shown.complete
-        ? walk(index + 1, listed)
-        : { listed, stop: { ...after(doc), member: shown.decided } };
+      return shown.complete ? walk(index + 1, listed) : { listed, stop: at(placed, shown.decided) };
     };
 
     const { listed, stop } = await walk(0, []);

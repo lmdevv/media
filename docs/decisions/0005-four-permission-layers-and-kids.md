@@ -408,7 +408,12 @@ access-checked movies read stays under all three by one rule, in `movies/reads.t
   next page decides it from that member on, and it is listed once a member is visible, or left
   out once every member is decided and none is. A collection with a visible member whose budget
   then runs out stays listed with the titles it decided. Collections page by their own cursor, a
-  position in `(sort key, creation time)` order, which a reloaded page's `endCursor` also uses.
+  position in the index's `(sort key, creation time, id)` order, which a reloaded page's
+  `endCursor` also uses. No range can name an id, so the cursor also counts the rows of its sort
+  key and creation time already passed, and the next page reads on from there within them;
+  collections an import gave one name and one creation time are each listed once. The newest
+  merge and people search's walk through a person's credits continue the same way past rows of
+  one time.
 - **Aggregates answer the best for their budget.** Home rows, genres, and similar titles walk
   every movies library shared with the caller with `visiblePage`, as many rows a step as both
   `visiblePage`'s sizing and the budget allow, keeping each step's continuation, with no fixed

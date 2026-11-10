@@ -25,6 +25,9 @@ const normalizeName = (name: string): string =>
     .replaceAll(/\s+/gu, " ")
     .trim();
 
+/** The key a name gives a person, from the name a scan sent, bounded as keys are. */
+const nameKeyOf = (name: string): string => boundedKey(`name:${normalizeName(name)}`);
+
 /** The key a provider's id gives a person: TMDB's first, then IMDb's, or null for neither. */
 const idKeyOf = (ids: ExternalIds): string | null => {
   if (ids.tmdb !== null) return boundedKey(`tmdb:${ids.tmdb}`);
@@ -39,7 +42,7 @@ const idKeyOf = (ids: ExternalIds): string | null => {
 const personKeyOf = (person: {
   readonly name: string;
   readonly externalIds: ExternalIds;
-}): string => idKeyOf(person.externalIds) ?? boundedKey(`name:${normalizeName(person.name)}`);
+}): string => idKeyOf(person.externalIds) ?? nameKeyOf(person.name);
 
 /**
  * A stored person's key once their ids are `ids`: a provider's key once one is known, else the
@@ -76,6 +79,7 @@ const upsertPerson = async (
 ): Promise<Doc<"people">> => {
   const name = person.name.trim();
   const key = personKeyOf({ name, externalIds: person.externalIds });
+  const nameKey = nameKeyOf(name);
 
   const byKey = await db
     .query("people")
@@ -87,7 +91,7 @@ const upsertPerson = async (
     (
       await db
         .query("people")
-        .withIndex("by_name", (q) => q.eq("name", name))
+        .withIndex("by_name_key", (q) => q.eq("nameKey", nameKey))
         .take(NAMESAKES)
     ).find((candidate) => compatible(candidate.externalIds, person.externalIds)) ??
     null;
@@ -97,6 +101,7 @@ const upsertPerson = async (
   if (existing === null) {
     const fields = fitPerson({
       personKey: key,
+      nameKey,
       name,
       sortKey: sortKeyOf(name),
       externalIds: person.externalIds,

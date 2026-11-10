@@ -426,6 +426,7 @@ export const seedCredits = internalMutation({
   handler: async (ctx, { name, titleIds }) => {
     const personId = await insertPerson(ctx.db, {
       personKey: `name:${name.toLowerCase()}`,
+      nameKey: `name:${name.toLowerCase()}`,
       name,
       sortKey: name.toLowerCase(),
       externalIds: NO_EXTERNAL_IDS,

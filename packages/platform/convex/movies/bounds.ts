@@ -127,12 +127,14 @@ export const matchKeyWithin = <Fields extends { readonly matchKey: string }>(
     ? fields
     : { ...fields, matchKey: boundedKey(fields.matchKey) };
 
-export const personKeyWithin = <Fields extends { readonly personKey: string }>(
+export const personKeyWithin = <
+  Fields extends { readonly personKey: string; readonly nameKey: string },
+>(
   fields: Fields,
 ): Fields =>
-  fields.personKey.length <= BOUNDS.key
+  fields.personKey.length <= BOUNDS.key && fields.nameKey.length <= BOUNDS.key
     ? fields
-    : { ...fields, personKey: boundedKey(fields.personKey) };
+    : { ...fields, personKey: boundedKey(fields.personKey), nameKey: boundedKey(fields.nameKey) };
 
 export const recommendationsWithin = <Fields extends { readonly recommendations?: Array<string> }>(
   fields: Fields,

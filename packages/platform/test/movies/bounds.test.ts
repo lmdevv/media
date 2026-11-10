@@ -321,6 +321,58 @@ describe.skipIf(stack === undefined)(
       await finishJob(stack, lease);
     });
 
+    it("keep one person for a long name when a provider's id comes and goes", async () => {
+      if (stack === undefined) return;
+
+      const label = unique();
+      const admin = await member(stack, `bound-later-${label}`, "admin");
+      const { scanJobId, roots } = await moviesLibrary(admin, `bound later ${label}`);
+      const lease = await claimJob(stack, "movies.scan", scanJobId, 300_000);
+
+      const titleId = await landAll(
+        stack,
+        lease,
+        [movieFile(join(roots[0] ?? "", "a.mkv"), 1, 1, scannedTitle("movie", "nfo:l", "Later"))],
+        1,
+      );
+
+      const name = `${label} ${absurd(30_000)}A`;
+      const tmdb = `${Date.now()}${label.length}`;
+
+      const rounds = [null, tmdb, null, tmdb].map((id, round) => ({ id, round }));
+
+      const people = await inOrder(rounds, async ({ id, round }) => {
+        const answered = await runServer(
+          stack,
+          api.movies.metadata.applyCredits,
+          {
+            lease,
+            titleId,
+            episodeId: null,
+            credits: [
+              {
+                person: { name, externalIds: { tmdb: id, imdb: null, tvdb: null }, profile: null },
+                kind: "actor" as const,
+                role: null,
+                order: 0,
+              },
+            ],
+            hash: `${label}-${round}`,
+          },
+          Credits,
+        );
+
+        if (answered.outcome !== "held") throw new Error(`credits answered ${answered.outcome}`);
+
+        return answered.value.people.map((person) => person.personId);
+      });
+
+      expect(people.map((round) => round.length)).toEqual([1, 1, 1, 1]);
+      expect(new Set(people.flat()).size).toBe(1);
+
+      await finishJob(stack, lease);
+    });
+
     it("keep one person for a long name however many times the same credits are written", async () => {
       if (stack === undefined) return;
 

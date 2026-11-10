@@ -19,6 +19,8 @@ interface Stream {
   readonly gate: ItemGate;
   readonly buffer: ReadonlyArray<Title>;
   readonly last: Title | null;
+  /** How many titles of `last`'s added and creation times it read, `last` among them. */
+  readonly tied: number;
   readonly ended: boolean;
   readonly batch: number;
 }
@@ -29,17 +31,29 @@ interface Stream {
  */
 const FIRST_BATCH = 1;
 
+/** The ranges a batch after the first reads: the rest of its added time, then older ones. */
+const BATCH_RANGES = 2;
+
 const newerFirst = (left: Title, right: Title): number =>
   right.addedAt - left.addedAt || right._creationTime - left._creationTime;
 
-/** The newest titles of a library, of `kind` or of any kind, after `last` in that order. */
+/** Whether two titles share their added and creation times, which only their ids then order. */
+const tiedWith = (left: Title, right: Title): boolean =>
+  left.addedAt === right.addedAt && left._creationTime === right._creationTime;
+
+/**
+ * The newest titles of a library, of `kind` or of any kind, after `last` in index order: the
+ * rest of its added time from its creation time down, past the `tied` of that time read
+ * already, then older ones.
+ */
 const batchOf = async (
   db: DatabaseReader,
   gate: ItemGate,
   kind: Kind | undefined,
   last: Title | null,
+  tied: number,
   count: number,
-): Promise<ReadonlyArray<Title>> => {
+): Promise<{ readonly read: ReadonlyArray<Title>; readonly passed: ReadonlyArray<Title> }> => {
   const libraryId = gate.library._id;
 
   const ofLibrary = () =>
@@ -57,7 +71,7 @@ const batchOf = async (
                 q
                   .eq("libraryId", libraryId)
                   .eq("addedAt", title.addedAt)
-                  .lt("_creationTime", title._creationTime),
+                  .lte("_creationTime", title._creationTime),
               )
               .order("desc"),
           past: (title: Title) =>
@@ -84,7 +98,7 @@ const batchOf = async (
                   .eq("libraryId", libraryId)
                   .eq("kind", kind)
                   .eq("addedAt", title.addedAt)
-                  .lt("_creationTime", title._creationTime),
+                  .lte("_creationTime", title._creationTime),
               )
               .order("desc"),
           past: (title: Title) =>
@@ -98,13 +112,32 @@ const batchOf = async (
 
   const ranges = ofLibrary();
 
-  if (last === null) return ranges.start().take(count);
+  if (last === null) return { read: await ranges.start().take(count), passed: [] };
 
-  const tied = await ranges.tie(last).take(count);
+  // Its added time from its creation time down: the `tied` read already come first, in order.
+  const tiedAndAfter = await ranges.tie(last).take(tied + count);
+  const sameAdded = tiedAndAfter.slice(tied);
+  const passed = tiedAndAfter.slice(0, tied);
 
-  return tied.length >= count
-    ? tied
-    : [...tied, ...(await ranges.past(last).take(count - tied.length))];
+  return sameAdded.length >= count
+    ? { read: sameAdded, passed }
+    : {
+        read: [...sameAdded, ...(await ranges.past(last).take(count - sameAdded.length))],
+        passed,
+      };
+};
+
+/** How many titles of the last one's added and creation times a stream has read after `read`. */
+const tiedAfter = (stream: Stream, read: ReadonlyArray<Title>): number => {
+  const end = read.at(-1);
+
+  if (end === undefined) return stream.tied;
+
+  const run = read.length - 1 - read.findLastIndex((title) => !tiedWith(title, end));
+
+  return run === read.length && stream.last !== null && tiedWith(stream.last, end)
+    ? stream.tied + run
+    : run;
 };
 
 /** Reads a stream's next batch when the budget pays for it, or ends it as spent. */
@@ -115,22 +148,25 @@ const refill = async (
   budget: ReadBudget,
   want: number,
 ): Promise<{ readonly stream: Stream; readonly spent: boolean }> => {
-  const batch = Math.min(stream.batch, titlesAffordable(budget));
-  const cost = titlesOf(batch, stream.last === null ? 1 : 2);
+  const passing = stream.last === null ? 0 : stream.tied;
+  const batch = Math.min(stream.batch, titlesAffordable(budget) - passing);
+
+  const cost = stream.last === null ? titlesOf(batch, 1) : titlesOf(batch + passing, BATCH_RANGES);
 
   if (batch < 1 || !budget.take(cost)) {
     return { stream: { ...stream, ended: true }, spent: true };
   }
 
-  const read = await batchOf(db, stream.gate, kind, stream.last, batch);
+  const { read, passed } = await batchOf(db, stream.gate, kind, stream.last, stream.tied, batch);
 
-  settleRead(budget, cost, read);
+  settleRead(budget, cost, [...passed, ...read]);
 
   return {
     stream: {
       gate: stream.gate,
       buffer: read,
       last: read.at(-1) ?? stream.last,
+      tied: tiedAfter(stream, read),
       ended: read.length < batch,
       batch: Math.min(want, batch * 2),
     },
@@ -184,6 +220,7 @@ const mergeStep = async (
           gate: stream.gate,
           buffer: stream.buffer.slice(1),
           last: stream.last,
+          tied: stream.tied,
           ended: stream.ended,
           batch: stream.batch,
         }
@@ -223,6 +260,7 @@ export const newestAcross = async (
         gate,
         buffer: [],
         last: null,
+        tied: 0,
         ended: false,
         batch: FIRST_BATCH,
       })),

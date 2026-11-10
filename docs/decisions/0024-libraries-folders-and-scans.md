@@ -275,16 +275,16 @@ text, so a title with an absurd overview could make a call reserve far more than
   `applyCollection`, `applyPerson`, and the match command), and the fitters apply the same bounds
   again:
 
-  | Field                                                                      | Maximum                          | Over it                                                         |
-  | -------------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------- |
-  | TMDB, IMDb, and TVDB ids; a recommendation; a trailer's video key          | 256 characters                   | stored as null (a recommendation is dropped, a trailer removed) |
-  | A title's match key, a person's key, a collection's source key             | 512 characters                   | first 447 characters, `#`, and the key's hex SHA-256            |
-  | A credits, collection, or companion digest; a thumbnail manifest's version | 128 characters                   | first 63 characters, `#`, and the digest's hex SHA-256          |
-  | A genre                                                                    | 64 characters                    | not kept                                                        |
-  | A title genre row's copy of its title's sort key                           | 128 characters                   | cut to 128 (it only orders rows)                                |
-  | A file's path                                                              | 4,096 bytes (Linux's `PATH_MAX`) | the file is skipped and counts as done                          |
-  | A subtitle file's name                                                     | 255 bytes (Linux's `NAME_MAX`)   | that subtitle file is left out                                  |
-  | A playback id                                                              | 64 characters                    | the report is refused (`invalid_args`); start makes it          |
+  | Field                                                                       | Maximum                          | Over it                                                         |
+  | --------------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------- |
+  | TMDB, IMDb, and TVDB ids; a recommendation; a trailer's video key           | 256 characters                   | stored as null (a recommendation is dropped, a trailer removed) |
+  | A title's match key, a person's key and name key, a collection's source key | 512 characters                   | first 447 characters, `#`, and the key's hex SHA-256            |
+  | A credits, collection, or companion digest; a thumbnail manifest's version  | 128 characters                   | first 63 characters, `#`, and the digest's hex SHA-256          |
+  | A genre                                                                     | 64 characters                    | not kept                                                        |
+  | A title genre row's copy of its title's sort key                            | 128 characters                   | cut to 128 (it only orders rows)                                |
+  | A file's path                                                               | 4,096 bytes (Linux's `PATH_MAX`) | the file is skipped and counts as done                          |
+  | A subtitle file's name                                                      | 255 bytes (Linux's `NAME_MAX`)   | that subtitle file is left out                                  |
+  | A playback id                                                               | 64 characters                    | the report is refused (`invalid_args`); start makes it          |
 
   The rest of the write is kept, so a scan never fails on an over-long field. A cut id would name
   another title, so an id is dropped. A key or a digest over its maximum keeps its leading part
@@ -294,6 +294,10 @@ text, so a title with an absurd overview could make a call reserve far more than
   never from a stored field a fitter may have cut: a title's match key from the scanned title, a
   collection's source key from the scanned collection, and a person's key from a provider's id
   once one is known, else from the scanned name, after which merging ids keeps the stored key.
+  A person also keeps a name key (`nameKey`, indexed), `name:<normalized name>` from the name a
+  scan first sent and bounded the same way, so a credit without ids finds them by it, never by
+  comparing a scanned name with the stored one; a provider's id that turns up later attaches to
+  that row, which takes the provider's key and keeps its name key.
   A match command's provider id over 256 characters is refused, since an admin
   typed it.
 

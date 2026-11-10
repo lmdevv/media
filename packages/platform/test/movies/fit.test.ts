@@ -129,6 +129,7 @@ describe("movies document bounds", () => {
 
     const person = fitPerson({
       personKey: "name:a person",
+      nameKey: "name:a person",
       name: "A Person",
       sortKey: "person a",
       externalIds: NO_IDS,
@@ -278,6 +279,7 @@ const floor = (text: number): Floor => {
     },
     people: {
       personKey: wide(BOUNDS.key),
+      nameKey: wide(BOUNDS.key),
       name: free,
       sortKey: free,
       externalIds: widestIds,

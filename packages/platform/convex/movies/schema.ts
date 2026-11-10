@@ -160,6 +160,12 @@ export const moviesTables = {
    */
   people: defineTable({
     personKey: v.string(),
+    /**
+     * `name:<normalized name>` from the name a scan first sent, bounded as keys are, whatever
+     * their key became: a credit without ids finds the person by it, never by the stored name,
+     * which the fitter may have cut.
+     */
+    nameKey: v.string(),
     name: v.string(),
     sortKey: v.string(),
     externalIds,
@@ -177,7 +183,7 @@ export const moviesTables = {
     updatedAt: v.number(),
   })
     .index("by_key", ["personKey"])
-    .index("by_name", ["name"])
+    .index("by_name_key", ["nameKey"])
     .index("by_tmdb", ["externalIds.tmdb"])
     .searchIndex("search_name", { searchField: "name" }),
 
