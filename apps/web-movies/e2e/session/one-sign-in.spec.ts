@@ -7,10 +7,10 @@ const stack = await reachableStack();
 
 test.skip(stack === null, NO_STACK);
 
-/** The movies Home of `username`: its large title on a phone, its account menu on a desktop. */
+/** The movies Home of `username`, with their account button. */
 const expectMoviesHome = async (tab: Page, username: string): Promise<void> => {
   await expect(tab).toHaveURL(/\/movies\/$/u);
-  await expect(tab.getByRole("button", { name: `${username}: account` })).toBeVisible();
+  await expect(tab.getByRole("button", { name: `${username}: switch person` })).toBeVisible();
   await expect(tab.getByLabel("Username")).toHaveCount(0);
 };
 
@@ -39,8 +39,8 @@ test("one sign-in at / opens /movies signed in in every tab, and a sign-out ther
   await expectMoviesHome(second, person.username);
 
   await page.bringToFront();
-  await page.getByRole("button", { name: `${person.username}: account` }).click();
-  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: `${person.username}: switch person` }).click();
+  await page.getByRole("option", { name: `Sign out ${person.username}` }).click();
 
   await expectSignedOut(page);
   await expectSignedOut(second);

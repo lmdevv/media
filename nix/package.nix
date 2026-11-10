@@ -99,8 +99,11 @@ stdenv.mkDerivation (finalAttrs: {
     cp -r apps/web-movies/dist $lib/web
     cp -r apps/web-account/dist $lib/account
 
+    # Without --enable-source-maps and with two malloc arenas, as in the image's run file
+    # (docs/decisions/0027, "Idle memory").
     makeWrapper ${lib.getExe nodejs} $out/bin/movies-media \
-      --add-flags "--enable-source-maps $lib/media/dist/main.js" \
+      --add-flags "$lib/media/dist/main.js" \
+      --set-default MALLOC_ARENA_MAX 2 \
       --set-default FFMPEG_PATH ${lib.getExe' ffmpeg-full "ffmpeg"} \
       --set-default FFPROBE_PATH ${lib.getExe' ffmpeg-full "ffprobe"} \
       --set-default CONVEX_BACKEND_DIR $lib/platform

@@ -1,5 +1,7 @@
 #!/command/with-contenv sh
+# Without --enable-source-maps: Node parses the bundle's 14 MB source map into memory at start,
+# about 100 MiB that stays resident (docs/decisions/0027, "Idle memory").
 cd /app/media
 exec setpriv --reuid=movies --regid=movies --init-groups --inh-caps=-all \
-  env -i PATH=/usr/local/bin:/usr/bin:/bin NODE_ENV=production TZ="${TZ:-UTC}" \
-  node --env-file=/run/movies/media.env --enable-source-maps dist/main.js
+  env -i PATH=/usr/local/bin:/usr/bin:/bin NODE_ENV=production TZ="${TZ:-UTC}" MALLOC_ARENA_MAX=2 \
+  node --env-file=/run/movies/media.env dist/main.js

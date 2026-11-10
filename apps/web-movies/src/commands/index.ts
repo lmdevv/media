@@ -13,6 +13,8 @@ import { usePreferenceCommands } from "./preferences";
 
 export type { CommandContext, PlayerCommands } from "./contribution";
 
+export { SWITCH_PERSON_COMMAND } from "./preferences";
+
 /** Every contribution merged into the menu's root page, in menu order. */
 export const useCommandRoot = (context: CommandContext): CommandPage => {
   const playback = usePlaybackCommands(context);

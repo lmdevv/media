@@ -57,6 +57,9 @@ let
       DISABLE_BEACON = "1";
       REDACT_LOGS_TO_CLIENT = "1";
       DO_NOT_REQUIRE_SSL = "1";
+      # Idle memory, as in the image (docs/decisions/0027).
+      MALLOC_ARENA_MAX = "2";
+      ISOLATE_IDLE_TIMEOUT_SECONDS = "60";
     };
     volumes = [ "${dataDir}:/convex/data" ];
   };

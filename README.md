@@ -37,6 +37,9 @@ opens movies at `MEDIA_BASE_URL/movies`.
 - The `media` image (`ghcr.io/lmdevv/media`, amd64 and arm64) runs the core's Convex backend, the
   media service, and both web clients behind Caddy on one port, with the `media` CLI and ffmpeg. Compose runs `:latest`, the newest release; pin `:X.Y` or `:X.Y.Z`, or
   follow `:main` for the edge. `docker compose build` builds it from source instead.
+- Idle, with an empty library, the image uses about 190 MiB. It runs the media service without
+  source maps, so stack traces in its log point at the bundle (`dist/main.js`), not at `src/`
+  ([ADR 0027](docs/decisions/0027-run-one-convex-backend-the-cores-in-the-image.md#idle-memory)).
 - Each start deploys the core's functions and configures its deployment, and the first start
   gives the media service its own key on the core; secrets are generated inside Convex and the
   data volume, never written to `.env`.

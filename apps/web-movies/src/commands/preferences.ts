@@ -1,9 +1,10 @@
 import type { CommandItem } from "@media/ui/lib/command-menu";
-import { LogOutIcon, MonitorIcon, UsersRoundIcon } from "lucide-react";
+import { LogOutIcon, MonitorIcon, UserRoundCogIcon, UsersRoundIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useMemo } from "react";
 
-import { useSignOut } from "@/session/session";
+import { ACCOUNT_SETTINGS } from "@/lib/account-links";
+import { useMe, useSignOut } from "@/session/session";
 
 import type { CommandContribution } from "./contribution";
 
@@ -15,6 +16,9 @@ const THEMES: ReadonlyArray<{ readonly id: ThemeChoice; readonly title: string }
   { id: "system", title: "Match system" },
 ];
 
+/** The submenu the account button opens: who is signed in, and switching person. */
+export const SWITCH_PERSON_COMMAND = "switch-person";
+
 /**
  * This browser's preferences and the session: the theme, switching person, and signing out.
  * Switching person signs this person out so the next one signs in at `/` (D52).
@@ -22,6 +26,7 @@ const THEMES: ReadonlyArray<{ readonly id: ThemeChoice; readonly title: string }
 export const usePreferenceCommands = (): CommandContribution => {
   const { theme, setTheme } = useTheme();
   const signOut = useSignOut();
+  const name = useMe()?.username ?? "";
   const current: ThemeChoice = theme === "dark" || theme === "light" ? theme : "system";
 
   return useMemo(
@@ -56,12 +61,40 @@ export const usePreferenceCommands = (): CommandContribution => {
               },
             },
             {
-              kind: "action",
-              id: "switch-person",
+              kind: "submenu",
+              id: SWITCH_PERSON_COMMAND,
               title: "Switch person",
+              detail: name,
               keywords: ["profile", "who", "account", "user"],
               leading: { kind: "icon", icon: UsersRoundIcon },
-              perform: signOut,
+              page: {
+                id: SWITCH_PERSON_COMMAND,
+                breadcrumb: "Switch person",
+                placeholder: "Switch person…",
+                groups: [
+                  {
+                    id: "person",
+                    items: [
+                      {
+                        kind: "action",
+                        id: "switch-person:sign-out",
+                        title: name === "" ? "Sign out" : `Sign out ${name}`,
+                        keywords: ["switch", "log out"],
+                        leading: { kind: "icon", icon: LogOutIcon },
+                        perform: signOut,
+                      },
+                      {
+                        kind: "action",
+                        id: "switch-person:account",
+                        title: "Account settings",
+                        keywords: ["password", "name"],
+                        leading: { kind: "icon", icon: UserRoundCogIcon },
+                        perform: () => window.location.assign(ACCOUNT_SETTINGS),
+                      },
+                    ],
+                  },
+                ],
+              },
             },
             {
               kind: "action",
@@ -75,6 +108,6 @@ export const usePreferenceCommands = (): CommandContribution => {
         },
       ],
     }),
-    [current, setTheme, signOut],
+    [current, setTheme, signOut, name],
   );
 };

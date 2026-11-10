@@ -1,10 +1,4 @@
 import { Avatar } from "@media/ui/components/avatar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@media/ui/components/dropdown-menu";
 import { CommandMenu } from "@media/ui/components/command-menu";
 import { CompactTopBar, LargeTitle } from "@media/ui/components/phone-title";
 import { TabBar, TabBarItem, TabBarSearch } from "@media/ui/components/tab-bar";
@@ -14,20 +8,21 @@ import { moveRowFocus } from "@media/ui/lib/row-focus";
 import { useKeymap } from "@media/ui/lib/use-keymap";
 import { cn } from "@media/ui/lib/utils";
 import { Link, useLocation, useMatches, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import { useCommandRoot } from "@/commands";
+import { SWITCH_PERSON_COMMAND, useCommandRoot } from "@/commands";
 import { TitlePrefetchProvider } from "@/components/browse/prefetch";
-import { ACCOUNT_SETTINGS } from "@/lib/account-links";
 import { keymap, shortcutLabel } from "@/lib/keymap";
-import { useMe, useScopes, useSignOut } from "@/session/session";
+import { useMe, useScopes } from "@/session/session";
 
 import { InShell } from "./route-states";
 import { ScanToast } from "./scan-toast";
 import { SECTIONS, sectionOf } from "./sections";
 
 const SCROLL_THRESHOLD_PX = 48;
+
+type MenuState = { readonly open: false } | { readonly open: true; readonly start?: string };
 
 function useScrolledPast(threshold: number): boolean {
   const [scrolled, setScrolled] = useState(false);
@@ -45,40 +40,11 @@ function useScrolledPast(threshold: number): boolean {
 }
 
 /**
- * The person signed in, as an avatar that opens their account menu: their account settings on the
- * account client, and switching person or signing out. Switching person signs this person out, so
- * the next one signs in at `/` (D52).
- */
-function AccountMenu({ size, round }: { readonly size: "xs" | "sm"; readonly round: boolean }) {
-  const me = useMe();
-  const signOut = useSignOut();
-  const name = me?.username ?? "";
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={me === null ? "Account" : `${name}: account`}
-        className={cn("cursor-pointer", round ? "rounded-pill" : "rounded-poster")}
-      >
-        <Avatar name={name} size={size} round={round} decorative />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {me === null ? null : (
-          <p className="px-2 py-2 text-label/label font-semibold text-text">{name}</p>
-        )}
-        <DropdownMenuItem render={<a href={ACCOUNT_SETTINGS} />}>Account</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void signOut()}>Switch person</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void signOut()}>Sign out</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/**
  * The signed-in app frame. At `md` and up: the Netflix-style top bar, transparent over a route's
  * hero and solid once scrolled. Below `md`: a large title that hands over to a compact glass bar,
  * and the floating glass tab bar with its search circle. It hosts the command menu, the global
- * keyboard shortcuts, the account menu, and the scanning toast.
+ * keyboard shortcuts, the account button that opens it at switching person, and the scanning
+ * toast.
  *
  * A route opts into the transparent bar over its billboard with `staticData: { hero: true }`, and
  * out of the phone large title with `staticData: { phoneTitle: false }`.
@@ -86,7 +52,7 @@ function AccountMenu({ size, round }: { readonly size: "xs" | "sm"; readonly rou
 export function AppShell({ children }: { readonly children: ReactNode }) {
   const me = useMe();
   const scopes = useScopes();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menu, setMenu] = useState<MenuState>({ open: false });
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -111,9 +77,26 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
 
   const root = useCommandRoot({ navigate, query, scopes, player: null });
 
+  const openMenu = useCallback((start?: string) => {
+    setMenu(start === undefined ? { open: true } : { open: true, start });
+  }, []);
+
+  const name = me?.username ?? "";
+
+  const accountButton = (size: "xs" | "sm", round: boolean) => (
+    <button
+      type="button"
+      aria-label={`${name}: switch person`}
+      onClick={() => openMenu(SWITCH_PERSON_COMMAND)}
+      className={cn("cursor-pointer", round ? "rounded-pill" : "rounded-poster")}
+    >
+      <Avatar name={name} size={size} round={round} decorative />
+    </button>
+  );
+
   useKeymap(keymap, {
-    "menu.toggle": () => setMenuOpen((open) => !open),
-    "search.open": () => setMenuOpen(true),
+    "menu.toggle": () => setMenu((state) => (state.open ? { open: false } : { open: true })),
+    "search.open": () => openMenu(),
     "go.home": () => void navigate({ to: "/" }),
     "go.movies": () => void navigate({ to: "/movies" }),
     "go.shows": () => void navigate({ to: "/shows" }),
@@ -155,9 +138,9 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
               <SearchTrigger
                 keycaps={shortcutLabel("menu.toggle")}
                 aria-keyshortcuts="Meta+K Control+K"
-                onClick={() => setMenuOpen(true)}
+                onClick={() => openMenu()}
               />
-              <AccountMenu size="sm" round={false} />
+              {accountButton("sm", false)}
             </>
           }
         />
@@ -168,7 +151,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
           title={title}
           visible={scrolled}
           className="fixed inset-x-0 top-0 z-40 md:hidden"
-          trailing={<AccountMenu size="xs" round />}
+          trailing={accountButton("xs", true)}
         />
       ) : null}
 
@@ -177,7 +160,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
           <LargeTitle
             title={title}
             className="pt-[max(env(safe-area-inset-top),var(--spacing-4))] md:hidden"
-            trailing={<AccountMenu size="sm" round />}
+            trailing={accountButton("sm", true)}
           />
         )}
         <TitlePrefetchProvider>
@@ -209,9 +192,10 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
       {scopes.has("movies:edit") ? <ScanToast /> : null}
 
       <CommandMenu
-        open={menuOpen}
+        open={menu.open}
+        start={menu.open ? menu.start : undefined}
         onOpenChange={(open) => {
-          setMenuOpen(open);
+          setMenu(open ? { open: true } : { open: false });
 
           if (!open) setQuery("");
         }}

@@ -76,6 +76,35 @@ running server never holds two Convex URLs (D50).
   from before the cutover keeps old movies' database in `/data/movies/convex` and its backups in
   `/data/movies/backups`, and nothing reads them.
 
+## Idle memory
+
+The owner's rule (D54) holds the image to 356 MiB idle and to no more than the `v0.2.0` stack.
+With defaults, the image sat at about 450 MiB. The core's Convex backend held about 215 MiB of
+anonymous memory, the media service about 190 MiB, and Caddy 11 MiB. Three settings bring the
+image under the rule. They change no product behavior, and both install methods use them.
+
+- **The media service runs without `--enable-source-maps`.** Node parses the bundle's 14 MB
+  source map at start and keeps it, about 100 MiB. Stack traces in the log now point at
+  `dist/main.js` lines with the bundle's function names, not at `src/*.ts`. The map still ships
+  next to the bundle for reading a trace offline. `pnpm dev`, `pnpm start`, and the test stacks
+  keep source maps.
+- **`MALLOC_ARENA_MAX=2` for the media service and the Convex backend.** glibc gives each thread
+  its own malloc arena. The backend runs one Tokio worker and one V8 thread per core, plus a
+  thread per isolate, and each arena keeps freed memory. Two arenas saved about 40 MiB in the
+  backend and about 10 MiB in Node.
+- **`ISOLATE_IDLE_TIMEOUT_SECONDS=60` for the Convex backend.** The default is 600. The backend
+  keeps an isolate per worker thread it has ever needed, each holding the core's loaded modules
+  and heap. After a minute idle, an isolate is recreated empty, which saved 70 to 75 MiB. The
+  next function on that worker loads the modules again, a one-time cost of milliseconds. The
+  core's 10-second crons keep the isolates they use warm.
+
+Not used: concurrency caps (`MAX_ISOLATE_WORKERS`, `RUNTIME_WORKER_THREADS`, `V8_THREADS`,
+`APPLICATION_MAX_CONCURRENT_*`), because the idle knobs were enough; a smaller V8 young
+generation (`--max-semi-space-size=8`), whose 10 MiB or less was within run-to-run noise and
+costs more scavenges during scans; a cap on Node's old space, which risks an out-of-memory crash
+during a large scan; and Go knobs for Caddy, whose anonymous memory is 11 MiB. The receipt is
+`captures/verify/p4-movies-cutover/perf-2.md`.
+
 ## Consequences
 
 - Signing in once at `/` signs `/movies` in too (ADR 0020).
@@ -93,12 +122,13 @@ running server never holds two Convex URLs (D50).
   stack still runs its backend on the base port, and the media server and both web clients use the
   core.
 
-## Acceptance still to measure
+## Acceptance
 
 The owner's deferred acceptance from #123 (D54) binds this change: the image's idle memory must be
 at or below the `v0.2.0` Compose stack's 356 MiB. The probe is `docker stats` summed over the
 project's containers after 5 idle minutes, the median of five runs interleaved with the `v0.2.0`
-stack. The cutover's perf lane measures it before merge.
+stack. With the settings under "Idle memory", the image measured 187.5 MiB against `v0.2.0`'s
+354.1 MiB on 2026-11-10 (`captures/verify/p4-movies-cutover/perf-2.md`).
 
 ## Alternatives rejected
 
