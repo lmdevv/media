@@ -264,17 +264,24 @@ stays wired until `p4-movies-cutover`.
 - An import adds the libraries it needs, as old movies' importer did (corrected in review, D62):
   the first version added none, which left source folders no library covered unmatched and refused
   an empty install. A run starts in the `libraries` phase. `ensureLibrary` takes the planned
-  libraries one a call: a folder another library has, holds, or lies in is covered by it, whose
-  sharing stays as it is, and the rest become one new movies library named after the source
-  library, made through `core/libraries.ts:makeLibrary`, the one way a library is made, with the
-  requester its first manager and its first scan queued. It is shared through the ordinary grants
-  (ADR 0024, not a second sharing path): with the household when every source user could see the
-  source library, otherwise a `view` grant to the core user of each mapped source user it let see
-  it, and with no one else when the source did not say (Plex). Old movies' admins saw every
-  library; on the core an admin sees what they hold a grant on, so the requester manages the new
-  library and shares it further. A library is added only on folders inside the server's approved
-  library roots, which its scan can read; the items of other folders stay unmatched. The run then
-  waits in the `scanning` phase, up to 6 hours, until the scans of the libraries it found or added
+  libraries one a call:
+  a folder another library has, holds, or lies in is covered by it, whose sharing stays as it is,
+  and the rest become new movies libraries named after the source library, made through
+  `core/libraries.ts:makeLibrary`, the one way a library is made, with the requester their first
+  manager and their first scans queued. A library holds at most 16 folders, so a source library
+  with more becomes several, "<name>", "<name> 2", and on, shared alike, so every folder is
+  claimed and scanned (corrected in review). They are shared through the ordinary grants
+  (ADR 0024, not a second sharing path), in one read of the new row's grants
+  (`grants.ts:shareNew`), which never lowers the requester's `manage`: with the household when
+  every source user could see the source library; otherwise a `view` grant to the core user of
+  each mapped source user it let see it and to every current owner and admin, and to the owners
+  and admins alone when the source did not say (Plex). Old movies' admins saw every library; the
+  core expresses that with per-user grants when the library is added (decided in review), and an
+  admin promoted later gets no grant from it. A library is added only on folders the scanner
+  itself accepts (`LibraryScanner.openRoot`: the folder's real path lies inside an approved root's
+  real path), so a mapped link that leads inside an approved root counts and a folder outside
+  every one does not; the items of other folders stay unmatched. The run then waits in the
+  `scanning` phase, up to 6 hours an attempt, until the scans of the libraries it found or added
   finish, before it matches history, as old movies did.
 - Imports run in their own `movies.import` pool (cap 1 on a server, ADR 0014), which claims whether
   or not movies has a library: the `movies` pool claims only once one exists, and on an empty
@@ -292,7 +299,9 @@ stays wired until `p4-movies-cutover`.
   newer word (corrected in review): an import never moves the title's history generation, so the
   scheduled pages of a whole-show mark made during the import still finish over what it wrote,
   and a whole-title mark records when it was made (`watchMarks.markedAt`), so source progress
-  played before it is skipped, a watched or an unwatched mark alike. The first version moved the
+  played before it is skipped, a watched or an unwatched mark alike. In turn, a mark's pages leave
+  a row played after the mark as it is, so a late page of an older whole-show mark never rolls
+  back or deletes newer progress an import wrote, or the person's own (corrected in review). The first version moved the
   generation on every write, which cancelled the rest of a whole-show mark made while it ran.
   Watched marks only get set, favorites join the list once, and a play count above 0 counts an
   item as played; the core keeps no count.

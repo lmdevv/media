@@ -19,7 +19,7 @@ import { FOLDERS_MAX, folderOrNull, isInside, overlapping } from "../core/folder
 import { makeLibrary } from "../core/libraries";
 import { inOrder } from "../core/lib/inOrder";
 import { GIVEN_NAME_MAX, printableName, printableWithin } from "../core/lib/names";
-import { grant } from "../core/permissions/grants";
+import { shareNew } from "../core/permissions/grants";
 import { fail } from "../core/lib/errors";
 import { paginate, paginateAtMost } from "../core/lib/paginate";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
@@ -589,11 +589,54 @@ export const advance = serverMutation({
     }),
 });
 
-const libraryNameOf = (sourceName: string): string => {
+/** The name of the `n`th library a source library becomes: its own, then "<name> 2" and on. */
+const libraryNameOf = (sourceName: string, n: number): string => {
+  const suffix = n === 0 ? "" : ` ${String(n + 1)}`;
   const printable = printableName(sourceName) ?? "";
-  const cut = Array.from(printable).slice(0, GIVEN_NAME_MAX).join("").trim();
+  const room = GIVEN_NAME_MAX - Array.from(suffix).length;
+  const base = Array.from(printable).slice(0, room).join("").trim();
 
-  return printableWithin(cut, GIVEN_NAME_MAX) ?? "Imported library";
+  return printableWithin(`${base}${suffix}`, GIVEN_NAME_MAX) ?? `Imported library${suffix}`;
+};
+
+/** Owners and admins an added library is shared with, at most this many of each role. */
+const ADMINS_READ = 512;
+
+/**
+ * Who sees a library an import adds besides its requester, its manager: everyone in the household
+ * when every source user saw the source library; otherwise the core users of the source users it
+ * named and every current owner and admin, as old movies showed admins every library.
+ */
+const sharesOf = async (
+  db: DatabaseReader,
+  plan: Plan,
+  planned: Plan["libraries"][number],
+  requester: Doc<"users">,
+): Promise<ReadonlyArray<{ readonly principal: GrantPrincipal; readonly level: "view" }>> => {
+  if (planned.access.kind === "everyone")
+    return [{ principal: { kind: "household" }, level: "view" }];
+
+  const named = planned.access.users.flatMap((index) => {
+    const user = plan.users[index];
+
+    return user === undefined ? [] : [user.userId];
+  });
+
+  const admins = await Promise.all(
+    (["owner", "admin"] as const).map(async (role) =>
+      db
+        .query("users")
+        .withIndex("by_role", (q) => q.eq("role", role))
+        .order("desc")
+        .take(ADMINS_READ),
+    ),
+  );
+
+  const viewers = new Set([...named, ...admins.flat().map((user) => user._id)]);
+
+  viewers.delete(requester._id);
+
+  return [...viewers].map((userId) => ({ principal: { kind: "user", userId }, level: "view" }));
 };
 
 /** The outermost folders of a planned library as libraries keep them; one that cannot be is left out. */
@@ -608,9 +651,9 @@ const outermostOf = (roots: ReadonlyArray<string>): ReadonlyArray<string> => {
     ),
   ];
 
-  return folders
-    .filter((folder) => !folders.some((outer) => outer !== folder && isInside(folder, outer)))
-    .slice(0, FOLDERS_MAX);
+  return folders.filter(
+    (folder) => !folders.some((outer) => outer !== folder && isInside(folder, outer)),
+  );
 };
 
 /**
@@ -656,47 +699,38 @@ export const ensureLibrary = serverMutation({
       const uncovered = folders.filter((_, index) => (holders[index] ?? []).length === 0);
       const covering = holders.flat();
 
-      const made =
-        uncovered.length === 0
-          ? null
-          : await makeLibrary(ctx, {
-              name: libraryNameOf(planned.name),
-              kind: "movies",
-              folders: uncovered,
-              creator: requester._id,
-            });
+      // A library holds at most 16 folders, so a source library with more becomes several.
+      const parts = Array.from({ length: Math.ceil(uncovered.length / FOLDERS_MAX) }, (_, n) =>
+        uncovered.slice(n * FOLDERS_MAX, (n + 1) * FOLDERS_MAX),
+      );
 
-      if (made !== null) {
-        const ref = { type: "library", id: made.libraryId } as const;
-        const by = principalOf(requester);
+      const shares = parts.length === 0 ? [] : await sharesOf(ctx.db, row.plan, planned, requester);
 
-        const audience: ReadonlyArray<GrantPrincipal> =
-          planned.access.kind === "everyone"
-            ? [{ kind: "household" }]
-            : [
-                ...new Set(
-                  planned.access.users.flatMap((index) => {
-                    const user = row.plan.users[index];
+      const made = await inOrder(
+        parts.map((part, n) => ({ part, n })),
+        async ({ part, n }) => {
+          const library = await makeLibrary(ctx, {
+            name: libraryNameOf(planned.name, n),
+            kind: "movies",
+            folders: part,
+            creator: requester._id,
+          });
 
-                    return user === undefined ? [] : [user.userId];
-                  }),
-                ),
-              ].map((userId) => ({ kind: "user", userId }));
+          await shareNew(ctx, { type: "library", id: library.libraryId }, shares);
 
-        await inOrder(audience, async (principal) => grant(ctx, by, ref, principal, "view"));
-      }
+          return library.libraryId;
+        },
+      );
 
       const found = await Promise.all(
-        [...new Set([...covering, ...(made === null ? [] : [made.libraryId])])].map(async (id) =>
-          ctx.db.get(id),
-        ),
+        [...new Set([...covering, ...made])].map(async (id) => ctx.db.get(id)),
       );
 
       const movies = found.flatMap((library) =>
         library !== null && library.kind === "movies" ? [library._id] : [],
       );
 
-      const imported = added(row.imported, { librariesAdded: made === null ? 0 : 1 });
+      const imported = added(row.imported, { librariesAdded: made.length });
 
       await patchImportPlan(ctx.db, row._id, {
         checkpoint: next,

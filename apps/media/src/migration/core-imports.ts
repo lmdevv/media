@@ -33,6 +33,7 @@ import {
 import type { HttpClient } from "effect/http";
 
 import * as CoreSession from "../core/core-session.ts";
+import * as LibraryScanner from "../library/library-scanner.ts";
 import * as MediaConfig from "../media-config.ts";
 import { sealCredentials } from "./credentials.ts";
 import {
@@ -43,7 +44,7 @@ import {
   sourceFailure,
 } from "./migrations.ts";
 import type { PlanReads } from "./migrations.ts";
-import { isInside, normalizePath, toLocalPath } from "./paths.ts";
+import { normalizePath, toLocalPath } from "./paths.ts";
 import { reportBody } from "./planner.ts";
 import type { ExistingLibrary, MigrationPlan, ResolvedUser } from "./planner.ts";
 import { openSource, SOURCE_ERROR_TAGS } from "./sources.ts";
@@ -254,6 +255,42 @@ const withinBounds = (
       );
 };
 
+/**
+ * The local folders of `session`'s libraries an import may add a library on: the ones the scanner
+ * itself accepts (`LibraryScanner.openRoot`), which resolves each folder and every approved root
+ * to its real path, so a mapped link that leads inside an approved root counts and a folder outside
+ * every one does not.
+ */
+export const scannableFolders = Effect.fnUntraced(function* (
+  session: SourceSession,
+  mappings: ReadonlyArray<PathMapping>,
+  roots: ReadonlyArray<string>,
+) {
+  const scanner = yield* LibraryScanner.Service;
+
+  const folders = [
+    ...new Set(
+      session.libraries
+        .filter((library) => library.kind !== "other")
+        .flatMap((library) => library.paths)
+        .flatMap((path) => {
+          const local = toLocalPath(path, mappings, roots);
+
+          return local === null ? [] : [local];
+        }),
+    ),
+  ];
+
+  const accepted = yield* Effect.forEach(folders, (folder) =>
+    scanner.openRoot(folder).pipe(
+      Effect.as([folder]),
+      Effect.orElseSucceed(() => []),
+    ),
+  );
+
+  return new Set(accepted.flat());
+});
+
 const usersKeyOf = (users: ReadonlyArray<ResolvedUser<UserId>>): string =>
   JSON.stringify(users.map((user) => [user.sourceUserId, user.person]));
 
@@ -261,6 +298,7 @@ const make = (sealKey: Redacted.Redacted) =>
   Effect.gen(function* () {
     const config = yield* MediaConfig.Service;
     const core = yield* CoreSession.Service;
+    const scanner = yield* LibraryScanner.Service;
     const fs = yield* FileSystem.FileSystem;
     const crypto = yield* Crypto.Crypto;
     const context = yield* Effect.context<HttpClient.HttpClient>();
@@ -415,13 +453,19 @@ const make = (sealKey: Redacted.Redacted) =>
       const connection = yield* connectionOf(args.connectionId, requester);
       const users = resolveImportUsers(connection.view.users, args.users ?? []);
 
+      const scannable = yield* scannableFolders(
+        connection.session,
+        connection.mappings,
+        config.libraryRoots,
+      ).pipe(Effect.provideService(LibraryScanner.Service, scanner));
+
       const computed = yield* computePlan(connection.session, reads, {
         source: connection.source,
         users,
         mappings: connection.mappings,
         roots: config.libraryRoots,
         withLocalProgress: true,
-        addable: (folder) => config.libraryRoots.some((root) => isInside(folder, root)),
+        addable: (folder) => scannable.has(folder),
       }).pipe(
         Effect.map((plan) => ({ plan })),
         Effect.catchTag(SOURCE_ERROR_TAGS, (error) => Effect.succeed(sourceFailure(error))),
@@ -523,6 +567,7 @@ export const layer = (
   never,
   | MediaConfig.Service
   | CoreSession.Service
+  | LibraryScanner.Service
   | FileSystem.FileSystem
   | Crypto.Crypto
   | HttpClient.HttpClient

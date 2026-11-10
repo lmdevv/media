@@ -27,7 +27,7 @@ import {
 import { FIXTURE_API_KEY, startJellyfinFixture } from "../migration/testing/jellyfin-fixture.ts";
 import { FIXTURE_PLEX_TOKEN, startPlexFixture } from "../migration/testing/plex-fixture.ts";
 import type { RecordedServer } from "../migration/testing/recorded-server.ts";
-import { makeWorkDir, removeDir } from "../testing/core-host.ts";
+import { linkFolder, makeWorkDir, removeDir } from "../testing/core-host.ts";
 import {
   core,
   eventually,
@@ -219,6 +219,34 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       await removeDir(workDir);
       process.stderr.write(`core import stack timings ${JSON.stringify(timings)}\n`);
     }, 120_000);
+
+    it("plans a library on a mapped link the scanner accepts, and none outside the approved folder", async () => {
+      const alias = join(workDir, "alias");
+      const outside = await makeWorkDir("media-core-import-outside-");
+
+      await linkFolder(join(workspace, "movies"), alias);
+
+      const connection = await connect({
+        source: "jellyfin",
+        url: jellyfin.url,
+        credentials: token(FIXTURE_API_KEY),
+        pathMappings: [
+          { from: "/media/movies", to: alias },
+          { from: "/media/shows", to: outside },
+        ],
+      });
+
+      const report = await dryRun(connection, mappingsOf(connection, { admin: null, bob: null }));
+
+      expect(report.libraries.map((library) => [library.name, library.roots])).toEqual(
+        expect.arrayContaining([
+          [expect.any(String), [alias]],
+          [expect.any(String), []],
+        ]),
+      );
+      expect(report.summary.librariesToAdd).toBe(1);
+      await removeDir(outside);
+    });
 
     it("imports a Jellyfin server's progress, history, and list onto the mapped core users", async () => {
       const begin = performance.now();

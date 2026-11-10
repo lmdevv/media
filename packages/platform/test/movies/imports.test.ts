@@ -109,6 +109,11 @@ const eventually = async <Value>(
   return eventually(check, deadline);
 };
 
+const sorted = (
+  rows: ReadonlyArray<readonly [string, string]>,
+): ReadonlyArray<readonly [string, string]> =>
+  rows.toSorted(([left], [right]) => left.localeCompare(right));
+
 const runOf = (who: Member, importId: Id<"imports">): Promise<Run> =>
   who.signedIn.client.query(api.movies.imports.get, { importId });
 
@@ -551,33 +556,40 @@ describe.skipIf(stack === undefined)("the Jellyfin and Plex importer", { timeout
 
     await finishJob(stack, coveredScan);
 
-    const [everyoneRoot, aikoRoot, hiddenRoot] = await Promise.all([
+    const [everyoneRoot, aikoRoot, hiddenRoot, ...manyRoots] = await Promise.all([
       makeTree(["Gem.mkv"]),
       makeTree([]),
       makeTree([]),
+      ...Array.from({ length: 17 }, async () => makeTree([])),
     ]);
 
     const names = {
       everyone: label("Everyone films"),
       aiko: label("Aiko films"),
       hidden: label("Hidden films"),
+      many: label("Many films"),
+      manyMore: "",
     };
+
+    names.manyMore = `${names.many} 2`;
 
     const started = await startImport(stack, owner, {
       serverId: label("libraries"),
       users: [
         { sourceUserId: "aiko", userId: aiko.userId, history: "full" },
         { sourceUserId: "sam", userId: sam.userId, history: "full" },
+        { sourceUserId: "owner", userId: owner.userId, history: "full" },
       ],
       libraries: [
         { name: names.everyone, roots: [everyoneRoot], access: { kind: "everyone" } },
-        { name: names.aiko, roots: [aikoRoot], access: { kind: "users", users: [0] } },
+        { name: names.aiko, roots: [aikoRoot], access: { kind: "users", users: [0, 2] } },
         { name: names.hidden, roots: [hiddenRoot], access: { kind: "users", users: [] } },
         {
           name: label("Already here"),
           roots: [join(covered.roots[0] ?? "", "inside")],
           access: { kind: "everyone" },
         },
+        { name: names.many, roots: manyRoots, access: { kind: "everyone" } },
       ],
     });
 
@@ -589,10 +601,10 @@ describe.skipIf(stack === undefined)("the Jellyfin and Plex importer", { timeout
       return covering(held(await ensureLibrary(stack, lease, at)).at, left - 1);
     };
 
-    const afterLibraries = await covering(LIBRARIES, 4);
+    const afterLibraries = await covering(LIBRARIES, 5);
 
-    expect(afterLibraries).toEqual({ ...LIBRARIES, cursor: 4 });
-    expect((await runOf(owner, started.importId)).imported.librariesAdded).toBe(3);
+    expect(afterLibraries).toEqual({ ...LIBRARIES, cursor: 5 });
+    expect((await runOf(owner, started.importId)).imported.librariesAdded).toBe(5);
 
     const seen = async (who: Member) =>
       (
@@ -604,17 +616,23 @@ describe.skipIf(stack === undefined)("the Jellyfin and Plex importer", { timeout
         .map((library) => [library.name, library.level] as const)
         .toSorted(([left], [right]) => left.localeCompare(right));
 
-    expect(await seen(sam)).toEqual([[names.everyone, "view"]]);
-    expect(await seen(aiko)).toEqual(
-      [
-        [names.aiko, "view"],
-        [names.everyone, "view"],
-      ].toSorted(([left = ""], [right = ""]) => left.localeCompare(right)),
-    );
-    expect(await seen(outsider)).toEqual([[names.everyone, "view"]]);
-    expect((await seen(owner)).map(([, level]) => level)).toEqual(["manage", "manage", "manage"]);
+    const shared = [
+      [names.everyone, "view"],
+      [names.many, "view"],
+      [names.manyMore, "view"],
+    ] as const;
 
-    expect(held(await scansPending(stack, lease)).pending).toBe(3);
+    expect(await seen(sam)).toEqual(sorted(shared));
+    expect(await seen(aiko)).toEqual(sorted([...shared, [names.aiko, "view"]]));
+    // Current admins see restricted and unknown libraries too, as old movies' admins saw all.
+    expect(await seen(outsider)).toEqual(
+      sorted([...shared, [names.aiko, "view"], [names.hidden, "view"]]),
+    );
+    expect(await seen(owner)).toEqual(
+      sorted(Object.values(names).map((name) => [name, "manage"] as const)),
+    );
+
+    expect(held(await scansPending(stack, lease)).pending).toBe(5);
 
     const libraries = await owner.signedIn.client.query(api.core.libraries.list, {
       paginationOpts: { numItems: 200, cursor: null },
@@ -647,6 +665,8 @@ describe.skipIf(stack === undefined)("the Jellyfin and Plex importer", { timeout
     await finishJob(stack, everyoneScan);
     await finishJob(stack, await scanOf(names.aiko));
     await finishJob(stack, await scanOf(names.hidden));
+    await finishJob(stack, await scanOf(names.many));
+    await finishJob(stack, await scanOf(names.manyMore));
 
     expect(held(await scansPending(stack, lease)).pending).toBe(0);
 
@@ -797,5 +817,103 @@ describe.skipIf(stack === undefined)("the Jellyfin and Plex importer", { timeout
     await finishJob(stack, relet);
 
     expect((await episode(501)).watched).toBe(true);
+  });
+  it("leave newer imported progress as it is when an older whole-show mark's page runs late", async () => {
+    if (stack === undefined) return;
+
+    const viewer = await member(stack, label("late-page-viewer"));
+
+    const seeded = await seedLibrary(stack, viewer, {
+      name: label("Late pages"),
+      kind: "movies",
+      items: [show(label("Late Show"), 0, 501)],
+    });
+
+    const [titleId] = seeded.itemIds;
+
+    if (titleId === undefined) throw new Error("no show seeded");
+
+    const episode = (number: number) =>
+      runFunction(
+        stack,
+        internal.movies.probe.episodeProgress,
+        { userId: viewer.userId, titleId, seasonNumber: 1, episodeNumber: number },
+        EpisodeState,
+      );
+
+    const pageOf = async (watched: boolean) =>
+      eventually(async () => {
+        return (await markPagesOf(titleId))
+          .map(({ args: [args] }) => args)
+          .find((args) => args.watched === watched);
+      });
+
+    /** Imports progress for the last episode, played `after` ms after `page`'s mark. */
+    const importLast = async (page: { readonly at: number }, after: number, serverId: string) => {
+      const started = await startImport(stack, shelf.owner, {
+        serverId: label(serverId),
+        users: [{ sourceUserId: "viewer", userId: viewer.userId, history: "full" }],
+      });
+
+      const lease = await claimJob(stack, "movies.import.jellyfin", started.jobId);
+
+      held(await advance(stack, lease, LIBRARIES, START));
+      held(
+        await writeWatch(stack, lease, START, [
+          {
+            userId: viewer.userId,
+            titleId,
+            episodeId: (await episode(501)).episodeId,
+            fileId: null,
+            watched: false,
+            positionMs: 5000,
+            playCount: 1,
+            lastPlayedAt: page.at + after,
+            favorite: false,
+          },
+        ]),
+      );
+
+      await finishJob(stack, lease);
+    };
+
+    // A watched mark of the whole show; its last page has not reached the last episode yet.
+    await viewer.signedIn.client.mutation(api.movies.history.markWatched, { titleId });
+
+    const watchedPage = await pageOf(true);
+
+    await eventually(async () => ((await episode(501)).watched === true ? true : undefined));
+    await runFunction(
+      stack,
+      internal.movies.probe.forgetProgress,
+      { userId: viewer.userId, titleId, episodeId: (await episode(501)).episodeId },
+      Schema.Null,
+    );
+
+    // The source played it after the mark: the import's progress lands.
+    await importLast(watchedPage, 1000, "late-watched");
+    expect(await episode(501)).toMatchObject({ watched: false, positionMs: 5000 });
+
+    // The mark's page runs late and leaves the newer row as it is.
+    await runFunction(stack, internal.movies.history.markRest, watchedPage, Schema.Null);
+    expect(await episode(501)).toMatchObject({ watched: false, positionMs: 5000 });
+
+    // An unwatched mark of the whole show, then newer source progress, then its page late.
+    await runFunction(
+      stack,
+      internal.movies.probe.forgetProgress,
+      { userId: viewer.userId, titleId, episodeId: (await episode(501)).episodeId },
+      Schema.Null,
+    );
+    await viewer.signedIn.client.mutation(api.movies.history.markUnwatched, { titleId });
+
+    const unwatchedPage = await pageOf(false);
+
+    await eventually(async () => ((await episode(1)).watched === null ? true : undefined));
+    await importLast(unwatchedPage, 1000, "late-unwatched");
+    expect(await episode(501)).toMatchObject({ positionMs: 5000 });
+
+    await runFunction(stack, internal.movies.history.markRest, unwatchedPage, Schema.Null);
+    expect(await episode(501)).toMatchObject({ watched: false, positionMs: 5000 });
   });
 });

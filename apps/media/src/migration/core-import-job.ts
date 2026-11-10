@@ -23,14 +23,14 @@ import type { HttpClient } from "effect/http";
 import * as CoreJobs from "../core/core-jobs.ts";
 import type { JobStopped } from "../core/core-jobs.ts";
 import * as CoreSession from "../core/core-session.ts";
+import type * as LibraryScanner from "../library/library-scanner.ts";
 import { JobFailed } from "../jobs/job-worker.ts";
 import * as MediaConfig from "../media-config.ts";
-import { coreReads } from "./core-imports.ts";
+import { coreReads, scannableFolders } from "./core-imports.ts";
 import { openCredentials } from "./credentials.ts";
 import { computePlan, credentialsBinding, sourceFailure } from "./migrations.ts";
 import type { MigrationPlan, ResolvedUser } from "./planner.ts";
 import type { SourceError } from "./source-plugin.ts";
-import { isInside } from "./paths.ts";
 import { openSource } from "./sources.ts";
 
 /** How often an import asks whether the scans of its libraries finished, and how long it waits. */
@@ -214,13 +214,15 @@ const runImport = Effect.fn("CoreImports.run")(function* (
     history: user.history,
   }));
 
+  const scannable = yield* scannableFolders(session, state.plan.pathMappings, config.libraryRoots);
+
   const plan = yield* computePlan(session, coreReads(core), {
     source: state.source,
     users,
     mappings: state.plan.pathMappings,
     roots: config.libraryRoots,
     withLocalProgress: false,
-    addable: (folder) => config.libraryRoots.some((root) => isInside(folder, root)),
+    addable: (folder) => scannable.has(folder),
   }).pipe(Effect.mapError(planFailure(state.source)));
 
   const unmatched = plan.summary.itemsUnmatched + plan.summary.itemsAwaitingScan;
@@ -358,11 +360,11 @@ export const handlers = (
 ): Effect.Effect<
   ReadonlyArray<CoreJobs.AnyHandler>,
   never,
-  CoreSession.Service | MediaConfig.Service | HttpClient.HttpClient
+  CoreSession.Service | MediaConfig.Service | LibraryScanner.Service | HttpClient.HttpClient
 > =>
   Effect.gen(function* () {
     const context = yield* Effect.context<
-      CoreSession.Service | MediaConfig.Service | HttpClient.HttpClient
+      CoreSession.Service | MediaConfig.Service | LibraryScanner.Service | HttpClient.HttpClient
     >();
 
     const run = (lease: Lease, report: Parameters<CoreJobs.Handler["run"]>[1]) =>

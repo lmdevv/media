@@ -12,6 +12,7 @@ import type { LinkDoc } from "../guests/model";
 import { guestLinkOf } from "../guests/standing";
 import type { ShareStanding } from "../guests/standing";
 import { fail } from "../lib/errors";
+import { inOrder } from "../lib/inOrder";
 import { PAGE_ROWS_MAX, pageRows, paginate } from "../lib/paginate";
 import { memberIn, placeOf } from "../together/access";
 import type { SessionDoc } from "../together/access";
@@ -502,6 +503,46 @@ export const grantCreator = async <T extends ResourceType>(
     resourceId: ref.id,
     principal: userId,
     level: "manage",
+  });
+};
+
+/**
+ * Shares a row made in this same mutation, after `grantCreator`: each principal gets its level
+ * unless it already holds a grant on the row, so the creator keeps `manage` and a repeat changes
+ * nothing. It reads the row's grants once, where a `grant` per principal would read them each
+ * time, and keeps the row within its 1,000 grants.
+ *
+ * @throws Error when a share would make a group or the household a manager, which only a defect
+ * gives.
+ */
+export const shareNew = async <T extends ResourceType>(
+  ctx: Pick<MutationCtx, "db">,
+  ref: ResourceRef<T>,
+  shares: ReadonlyArray<{ readonly principal: GrantPrincipal; readonly level: Level }>,
+): Promise<void> => {
+  const held = new Set((await grantsOn(ctx.db, ref)).map((row) => row.principal));
+
+  await inOrder(shares, async ({ principal, level }) => {
+    if (level === "manage" && principal.kind !== "user") {
+      throw new Error("Only a person can manage something");
+    }
+
+    const key = await keyOf(ctx.db, principal);
+
+    if (held.has(key)) return;
+
+    if (held.size >= RESOURCE_GRANTS_MAX) {
+      fail("conflict", `Something can be shared at most ${RESOURCE_GRANTS_MAX} ways`);
+    }
+
+    held.add(key);
+
+    await ctx.db.insert("grants", {
+      resourceType: ref.type,
+      resourceId: ref.id,
+      principal: key,
+      level,
+    });
   });
 };
 
