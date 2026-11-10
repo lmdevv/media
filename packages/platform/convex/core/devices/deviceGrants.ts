@@ -14,8 +14,8 @@ import { takeAttempt } from "../lib/rateLimit";
 import {
   constantTimeEqual,
   formatSecret,
-  parseSecret,
   randomSecret,
+  rowForSecret,
   sha256Hex,
 } from "../lib/secrets";
 import { LIST_CALL_READS } from "../permissions/grants";
@@ -141,27 +141,28 @@ const revokeGrant = async (
 /** The grant row a device's stored code names, when its secret matches; null otherwise. */
 const heldGrant = async (
   db: DatabaseReader,
-  held: { readonly grantId: string; readonly secretHash: string } | null,
-): Promise<Doc<"deviceGrants"> | null> => {
-  if (held === null) return null;
+  held: string | null,
+): Promise<Doc<"deviceGrants"> | null> =>
+  held === null
+    ? null
+    : rowForSecret(GRANT_PREFIX, held, async (rowId) => {
+        const id = db.normalizeId("deviceGrants", rowId);
 
-  const id = db.normalizeId("deviceGrants", held.grantId);
-  const grant = id === null ? null : await db.get(id);
-
-  return grant !== null && constantTimeEqual(grant.secretHash, held.secretHash) ? grant : null;
-};
+        return id === null ? null : db.get(id);
+      });
 
 /**
  * Gives the device the caller's grant. When the grant the device holds is the caller's own, it is
  * confirmed: the password the caller just signed in with makes it mint sessions again, as after
  * signing out everywhere. When it is another person's, that grant is revoked first, ending every
  * session it issued or minted, since a phone holds one person (D64). Otherwise, as for a tampered,
- * unknown, or revoked code, the caller gets a new grant and nothing else changes. Both of the last
- * two answer alike, so the answer never tells whose grant the device held.
+ * unknown, or revoked code, the caller gets a new grant and nothing else changes. The last two
+ * answer alike, so the answer never tells whose grant the device held. The hourly limit comes
+ * before the revoke, so a refused issue revokes nothing.
  */
 export const place = internalMutation({
   args: {
-    held: v.union(v.null(), v.object({ grantId: v.string(), secretHash: v.string() })),
+    held: v.union(v.null(), v.string()),
     secretHash: v.string(),
     name: v.string(),
   },
@@ -178,13 +179,13 @@ export const place = internalMutation({
       return { grantId: grant._id, kept: true };
     }
 
-    if (grant !== null) await revokeGrant(ctx, grant._id);
-
     const limit = { identifier: `deviceGrants:${person._id}`, perHour: ISSUES_PER_HOUR };
 
     if (!(await takeAttempt(ctx, limit, Date.now()))) {
       return fail("rate_limited", "Too many device grants issued; try again in a few minutes");
     }
+
+    if (grant !== null) await revokeGrant(ctx, grant._id);
 
     const grantId = await ctx.db.insert("deviceGrants", {
       userId: person._id,
@@ -225,16 +226,12 @@ export const { issue, list, revoke } = register({
   issue: async (ctx, { name, grant }) => {
     requireDeviceName(name);
 
-    const stored = grant?.trim();
-    const parsed = stored === undefined ? null : parseSecret(GRANT_PREFIX, stored);
+    const held = grant?.trim() ?? null;
     const secret = randomSecret(32);
 
     const placed: { readonly grantId: Id<"deviceGrants">; readonly kept: boolean } =
       await ctx.runMutation(internal.core.devices.deviceGrants.place, {
-        held:
-          parsed === null
-            ? null
-            : { grantId: parsed.rowId, secretHash: await sha256Hex(parsed.secret) },
+        held,
         secretHash: await sha256Hex(secret),
         name,
       });
@@ -242,9 +239,7 @@ export const { issue, list, revoke } = register({
     return {
       grantId: placed.grantId,
       grant:
-        placed.kept && stored !== undefined
-          ? stored
-          : formatSecret(GRANT_PREFIX, placed.grantId, secret),
+        placed.kept && held !== null ? held : formatSecret(GRANT_PREFIX, placed.grantId, secret),
     };
   },
   list: async (ctx, { paginationOpts }, caller) => {

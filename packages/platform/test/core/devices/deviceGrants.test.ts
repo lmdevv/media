@@ -329,6 +329,25 @@ describe.skipIf(stack === undefined)("device grants", { timeout: 180_000 }, () =
     ]);
   });
 
+  it("revokes nothing when the person signing in may issue no more grants this hour", async () => {
+    if (stack === undefined) return;
+    const aiko = await phone(stack, "aiko");
+    const mateo = await member(stack, "mateo");
+
+    await inOrder(
+      Array.from({ length: 20 }, (_, n) => n),
+      async (n) => issue(mateo.signedIn, `Mateo's phone ${n}`),
+    );
+
+    expect(await refusal(issue(mateo.signedIn, "Mateo's phone", aiko.issued.grant))).toBe(
+      "rate_limited",
+    );
+    expect(await refusal(current(aiko.who.signedIn))).toBe("accepted");
+    expect(await grantsOf(aiko.who)).toMatchObject([
+      { grantId: aiko.issued.grantId, signsIn: true },
+    ]);
+  });
+
   it("ends every session of another person's grant at its cap when someone else signs in", async () => {
     if (stack === undefined) return;
     const aiko = await phone(stack, "aiko");

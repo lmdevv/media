@@ -268,9 +268,10 @@ the command generator refuses that name, because `media auth grants` is already 
   caller's new grant. The answer is a new grant either way, so it never says whether the phone held
   someone's grant or whose. Only a password session can do this, since it is the issue rule; an
   exchanged session, an API key, a device sign-in, a tile, or a guest is refused before the stored
-  grant is read. Holding the code is the authority, as it is for the exchange: the phone that
-  keeps it could already sign that person's apps in, so the core needs no other check. A refused
-  issue, such as the hourly limit, revokes nothing.
+  grant is read. Holding the code is the authority. The exchange also asks for the person's user
+  id, but that is no secret, so whoever holds the code can already sign that person's apps in, and
+  ending the grant asks for nothing more. The hourly limit is checked before the revoke, and a
+  refused issue revokes nothing.
 - Issuing puts the caller's session in the grant's family (`authSessions.grant`), moving it out of
   any family it was in. Revoking the grant then signs out the app that issued it too. A session
   that issues from a laptop joins that grant's family the same way, so issue only on the phone.
@@ -333,9 +334,9 @@ at most 33 reads, its row and each session with its device, so a page holds at m
 | `list`   | deviceGrant | the grant's own person and `account`                               |
 | `revoke` | deviceGrant | the grant's own person and `account`                               |
 
-Another person's grant is `hidden`, admins included, as an API key is. The D64 switch decides `issue` for the
-caller, not `revoke` on the other person's grant: holding that grant's code is what lets the
-caller end it, and the caller still cannot list it or revoke it by id. An admin who must cut a
+Another person's grant is `hidden`, admins included, as an API key is. The D64 switch decides
+`issue` for the caller, not `revoke` on the other person's grant: holding that grant's code is what
+lets the caller end it, and the caller still cannot list it or revoke it by id. An admin who must cut a
 person off resets their password, which stops every grant they hold. Restricting a member into a
 kid stops no grant, as it ends no session (ADR 0005); the restrictions apply on every call.
 
