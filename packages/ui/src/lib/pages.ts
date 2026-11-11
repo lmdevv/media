@@ -128,8 +128,8 @@ interface Loaded<Row> {
  * One store over a list's pages. Loading the next page pins the page above to end where the next
  * one starts, so a row that moves into or out of the pages above never shows twice or goes
  * missing. The open-ended subscription keeps serving the page until the pinned one answers, then
- * stops. A pinned page that grew past what one call may read comes back `SplitRequired`, and the
- * store loads it again as two pages at its `splitCursor`. A last page that holds no rows (every
+ * stops. A page that holds more than one call may read comes back `SplitRequired`, and the store
+ * loads it again as two pages at its `splitCursor`; for the last page the second one is open. A last page that holds no rows (every
  * row in its range hidden from this person) but is not the end loads the next page by itself, so
  * a screen never shows an empty list that is not done. Its snapshot stays the same object until a
  * page changes, as `useSyncExternalStore` needs.
@@ -171,23 +171,25 @@ export const pagedStore = <Row>(
     }
   };
 
-  /** Loads each pinned page the server asked to split as the two pages either side of the split. */
+  /**
+   * Loads each page the server asked to split as the two pages either side of the split: the
+   * page above pinned to end at the split, and the rest pinned to the page's own end, or open
+   * when it was the last page and had none.
+   */
   const splitPages = (): void => {
     for (const [index, loaded] of pages.entries()) {
       const state = loaded.watch.getSnapshot();
       const start = starts[index];
       const end = starts[index + 1];
 
-      if (
-        state.status === "success" &&
-        mustSplit(state.data) &&
-        start !== undefined &&
-        end !== undefined &&
-        end !== null
-      ) {
+      if (state.status === "success" && mustSplit(state.data) && start !== undefined) {
         const split = state.data.splitCursor;
         const lower = pageAt({ cursor: start, endCursor: split });
-        const upper = pageAt({ cursor: split, endCursor: end });
+
+        const upper =
+          end === undefined || end === null
+            ? pageAt({ cursor: split })
+            : pageAt({ cursor: split, endCursor: end });
 
         pages.splice(index, 1, { watch: lower, before: null }, { watch: upper, before: null });
         starts.splice(index + 1, 0, split);

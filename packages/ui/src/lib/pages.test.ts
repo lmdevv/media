@@ -294,4 +294,33 @@ describe("pagedStore", () => {
 
     stop();
   });
+
+  it("loads the rest from the split as the next page when the last page must split", () => {
+    const first = watchOf(split(["a"], "after-a", "after-b"));
+    const lower = watchOf(page(["a"], false, "after-a"));
+    const rest = watchOf(page(["b"], true));
+    const asked: Array<PageSpan> = [];
+
+    const store = pagedStore((span) => {
+      asked.push(span);
+
+      if (span.cursor === "after-a") return rest.watch;
+
+      return span.endCursor === "after-a" ? lower.watch : first.watch;
+    });
+
+    const stop = store.subscribe(() => undefined);
+
+    expect(asked).toEqual([
+      { cursor: null },
+      { cursor: null, endCursor: "after-a" },
+      { cursor: "after-a" },
+    ]);
+    expect(first.listening()).toBe(0);
+    expect(store.getSnapshot()).toMatchObject({ rows: ["a", "b"], next: { kind: "done" } });
+
+    stop();
+
+    expect(lower.listening() + rest.listening()).toBe(0);
+  });
 });

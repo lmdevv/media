@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { api, internal } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { runFunction } from "../../admin";
+import { logMark, runFunction, usageSince } from "../../admin";
 import { member } from "../../devices";
 import type { Member } from "../../devices";
 import { share } from "../../probe";
@@ -67,6 +67,67 @@ const watchedOfKind = makeFunctionReference<
   { kind: string; paginationOpts: { numItems: number; cursor: string | null } },
   unknown
 >("core/scans:watched");
+
+/** `core/scans:watched` as a reactive client would reload a page, pinned to where it ended. */
+const watchedPinned = makeFunctionReference<
+  "query",
+  { paginationOpts: { numItems: number; cursor: string | null; endCursor: string } },
+  unknown
+>("core/scans:watched");
+
+/** Convex's per-call limit on bytes read (ADR 0013). */
+const BYTES_MAX = 16 * 1024 * 1024;
+
+/** A folder at its bounds: 1,024 characters, each three bytes in UTF-8, unique by `prefix`. */
+const longFolder = (prefix: string): string =>
+  `/${prefix.padEnd(31, "-")}${`/${"界".repeat(247)}`.repeat(4)}`;
+
+/** Creates `count` movies libraries one after another, each with 16 folders at their bounds. */
+const longLibraries = async (
+  admin: Member,
+  run: string,
+  count: number,
+  made: ReadonlyArray<Id<"libraries">> = [],
+): Promise<ReadonlyArray<Id<"libraries">>> => {
+  if (made.length >= count) return made;
+
+  const { libraryId } = await admin.signedIn.client.mutation(api.core.libraries.create, {
+    name: `Long ${made.length}`,
+    kind: "movies",
+    folders: Array.from({ length: 16 }, (_, folder) =>
+      longFolder(`${run}-${made.length}-${folder}`),
+    ),
+  });
+
+  return longLibraries(admin, run, count, [...made, libraryId]);
+};
+
+/** The cursor each page of `watched` ended at, read page by page with open cursors. */
+const watchedCursors = async (
+  core: CoreStack,
+  cursor: string | null = null,
+  seen: ReadonlyArray<string> = [],
+): Promise<ReadonlyArray<string>> => {
+  const page = await runServer(
+    core,
+    api.core.scans.watched,
+    { paginationOpts: { numItems: 64, cursor } },
+    Watched,
+  );
+
+  const cursors = [...seen, page.continueCursor];
+
+  return page.isDone ? cursors : watchedCursors(core, page.continueCursor, cursors);
+};
+
+const removeAll = async (admin: Member, libraryIds: ReadonlyArray<Id<"libraries">>) => {
+  const [libraryId, ...rest] = libraryIds;
+
+  if (libraryId === undefined) return;
+
+  await admin.signedIn.client.mutation(api.core.libraries.remove, { libraryId });
+  await removeAll(admin, rest);
+};
 
 const Watched = Schema.Struct({
   page: Schema.Array(
@@ -339,5 +400,31 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
     await admin.signedIn.client.mutation(api.core.libraries.remove, { libraryId });
 
     expect((await watchedFolders(stack)).has(libraryId)).toBe(false);
+  });
+
+  it("page every movies library's folders within one call's reads, and refuse a page pinned to an end", async () => {
+    if (stack === undefined) return;
+
+    const admin = await member(stack, "watched-long", "admin");
+    const libraryIds = await longLibraries(admin, `w${Date.now() % 100_000_000}`, 400);
+    const mark = await logMark(stack);
+    const cursors = await watchedCursors(stack);
+    const usage = await usageSince(stack, mark, api.core.scans.watched, cursors.length);
+
+    expect(cursors.length).toBeGreaterThan(6);
+    expect(usage.every((call) => call.committed && call.bytes < BYTES_MAX)).toBe(true);
+
+    const end = cursors.at(-2) ?? "";
+
+    await expect(
+      runServer(
+        stack,
+        watchedPinned,
+        { paginationOpts: { numItems: 64, cursor: null, endCursor: end } },
+        Watched,
+      ),
+    ).rejects.toThrow(/endCursor/u);
+
+    await removeAll(admin, libraryIds);
   });
 });

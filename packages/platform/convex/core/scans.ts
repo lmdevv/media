@@ -1,4 +1,4 @@
-import { paginationOptsValidator, paginationResultValidator } from "convex/server";
+import { paginationResultValidator } from "convex/server";
 import type { FunctionReference } from "convex/server";
 import { v } from "convex/values";
 
@@ -315,7 +315,10 @@ export const domains = serverQuery({
     ),
 });
 
-/** Libraries one page of `watched` lists, each with its up to 16 folders. */
+/**
+ * Libraries one page of `watched` lists, each with its up to 16 folders of up to 1,024
+ * characters: at most 3 MiB of folders, inside Convex's 16 MiB a call (ADR 0013).
+ */
 const WATCHED_PAGE_MAX = 64;
 
 /**
@@ -325,7 +328,11 @@ const WATCHED_PAGE_MAX = 64;
  * that links into a root names the library's own path and `changed` finds the library.
  */
 export const watched = serverQuery({
-  args: { paginationOpts: paginationOptsValidator },
+  // An open cursor only: a page reloaded to an `endCursor` may hold any number of libraries, as
+  // Convex ignores the page size then, and the server never reloads one; it follows the next page.
+  args: {
+    paginationOpts: v.object({ numItems: v.number(), cursor: v.union(v.string(), v.null()) }),
+  },
   returns: paginationResultValidator(
     v.object({ libraryId: v.id("libraries"), folders: v.array(v.string()) }),
   ),
