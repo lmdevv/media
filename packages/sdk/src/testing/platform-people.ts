@@ -2,6 +2,7 @@ import { Context, Effect, Layer, Redacted, Schema } from "effect";
 
 import * as Platform from "../platform/platform";
 import * as TokenStorage from "../token-storage";
+import { ownClientFetch } from "./own-client";
 import type { PlatformStack } from "./stack-env";
 
 const decodeAdminAnswer = Schema.decodeUnknownSync(
@@ -26,10 +27,24 @@ export const newPlatformPerson = (label: string): PlatformPerson => {
   return { username: `${label}-${unique}`, password: `password-${unique}` };
 };
 
+/**
+ * Where a stack client signs in: the stack's boundary, as a client of its own
+ * (`ownClientFetch`), so a suite's many sign-ins never share one address's budget.
+ */
+export const stackSignIn = (stack: PlatformStack): Platform.SignInRoute =>
+  Platform.SignInRoute.Boundary({ url: stack.signInUrl, fetch: ownClientFetch() });
+
 /** A signed-out platform client over its own in-memory session, for the scope's lifetime. */
-const openPlatform = (url: string) =>
+const openPlatform = (stack: PlatformStack) =>
   Effect.map(
-    Layer.build(Platform.layer({ url, connection: "http", storage: TokenStorage.layerMemory })),
+    Layer.build(
+      Platform.layer({
+        url: stack.url,
+        connection: "http",
+        storage: TokenStorage.layerMemory,
+        signIn: stackSignIn(stack),
+      }),
+    ),
     (context) => Context.get(context, Platform.Platform),
   );
 
@@ -37,7 +52,7 @@ const setUpOnce = (stack: PlatformStack) =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const platform = yield* openPlatform(stack.url);
+        const platform = yield* openPlatform(stack);
 
         if ((yield* platform.core.server.info()).hasOwner) return;
 

@@ -50,6 +50,8 @@ export const findStack = (): Stack | undefined => {
 export interface CoreStack {
   readonly url: string;
   readonly envFile: string;
+  /** The stack's sign-in boundary (`scripts/dev-stack.sh`), where every sign-in goes. */
+  readonly signInUrl: string;
 }
 
 /**
@@ -61,11 +63,13 @@ export const findCoreStack = (): CoreStack | undefined => {
   if (process.env["MEDIA_STACK_TESTS"] !== "1") return undefined;
 
   const envFile = join(repoRoot, "packages/platform/.env.local");
-  const url = readEnvFile(envFile).get("CONVEX_SELF_HOSTED_URL");
+  const file = readEnvFile(envFile);
+  const url = file.get("CONVEX_SELF_HOSTED_URL");
+  const signInUrl = file.get("MEDIA_SIGN_IN_URL");
 
-  if (url === undefined) {
+  if (url === undefined || signInUrl === undefined) {
     throw new Error("MEDIA_STACK_TESTS=1 but no core is configured; run scripts/dev-stack.sh up");
   }
 
-  return { url, envFile };
+  return { url, envFile, signInUrl };
 };

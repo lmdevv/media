@@ -35,6 +35,11 @@ export interface CoreTarget {
   /** `MEDIA_CORE_API_KEY`: signs in for this run only. */
   readonly apiKey: Option.Option<Redacted.Redacted>;
   /**
+   * `MEDIA_CORE_SIGN_IN_URL`, the server's sign-in boundary, where every sign-in goes (ADR 0007).
+   * Without it, the boundary beside the core, as an install serves both (`signInUrlBeside`).
+   */
+  readonly signInUrl: Option.Option<string>;
+  /**
    * Where the session lives: in the profile's file, or only in memory when `MEDIA_CORE_API_KEY`
    * signs in or `MEDIA_CORE_URL` names another core than the file's.
    */
@@ -79,6 +84,15 @@ export const coreTarget = Effect.fn("Core.target")(function* (env: Environment, 
   }
 
   const apiKey = Option.map(yield* nonEmpty("MEDIA_CORE_API_KEY"), Redacted.make);
+  const signInUrl = Option.map(yield* nonEmpty("MEDIA_CORE_SIGN_IN_URL"), normalizeUrl);
+
+  if (Option.isSome(signInUrl) && !isServerUrl(signInUrl.value)) {
+    return yield* new UsageError({
+      message: `MEDIA_CORE_SIGN_IN_URL is not an http(s) URL: "${signInUrl.value}"`,
+      command: null,
+    });
+  }
+
   const path = join(env.configHome, "media", "sessions", `${encodeURIComponent(profile)}.json`);
   const stored = yield* readStored(path);
 
@@ -91,6 +105,7 @@ export const coreTarget = Effect.fn("Core.target")(function* (env: Environment, 
     path,
     url: Option.orElse(url, () => Option.map(stored, (file) => file.url)),
     apiKey,
+    signInUrl,
     storage: Option.isSome(apiKey) || shadowed ? "memory" : "file",
   };
 
@@ -167,20 +182,35 @@ export const storageFailure =
   (error: TokenStorage.TokenStorageError): ConfigFileError =>
     new ConfigFileError({ path, message: error.message, cause: error });
 
-const openPlatform = (url: string, storage: Layer.Layer<TokenStorage.TokenStorage>, path: string) =>
-  Layer.build(Platform.layer({ url, connection: "http", storage })).pipe(
+const openPlatform = (
+  target: CoreTarget,
+  url: string,
+  storage: Layer.Layer<TokenStorage.TokenStorage>,
+) =>
+  Layer.build(
+    Platform.layer({
+      url,
+      connection: "http",
+      storage,
+      signIn: Platform.SignInRoute.Boundary({
+        url: Option.getOrElse(target.signInUrl, () => Platform.signInUrlBeside(url)),
+      }),
+    }),
+  ).pipe(
     Effect.map((context) => Context.get(context, Platform.Platform)),
-    Effect.catchTag("TokenStorageError", (error) => Effect.fail(storageFailure(path)(error))),
+    Effect.catchTag("TokenStorageError", (error) =>
+      Effect.fail(storageFailure(target.path)(error)),
+    ),
   );
 
 /** The platform client of `url` over the target's session store, for the scope's lifetime. */
 const openCore = (target: CoreTarget, url: string) =>
   openPlatform(
+    target,
     url,
     target.storage === "file"
       ? layerSessionFile(target.path, url, "stored")
       : TokenStorage.layerMemory,
-    target.path,
   );
 
 /**
@@ -188,7 +218,7 @@ const openCore = (target: CoreTarget, url: string) =>
  * once it succeeds.
  */
 export const openForSignIn = (target: CoreTarget, url: string) =>
-  openPlatform(url, layerSessionFile(target.path, url, "signedOut"), target.path);
+  openPlatform(target, url, layerSessionFile(target.path, url, "signedOut"));
 
 /** A session the profile's file holds, and the core that issued it. */
 interface HeldSession {
@@ -211,7 +241,7 @@ export const heldSession = (
 
 /** Ends `held` on the core that issued it, when that core answers. Writes nothing. */
 export const endSession = (target: CoreTarget, held: HeldSession): Effect.Effect<void> =>
-  openPlatform(held.url, layerHolding(held.session), target.path).pipe(
+  openPlatform(target, held.url, layerHolding(held.session)).pipe(
     Effect.flatMap((platform) => platform.session.signOut),
     Effect.scoped,
     Effect.ignore,

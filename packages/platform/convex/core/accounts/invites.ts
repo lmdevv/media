@@ -15,6 +15,7 @@ import { SERVER, can, principalOf } from "../permissions/policy";
 import type { PersonDoc } from "../permissions/policy";
 import { openSession, signedIn } from "../sessions";
 import { DEFAULT_ROLE, asPerson, insertUser } from "./users";
+import { spendPass, spentPass } from "../auth/passes";
 
 const PREFIX = "mi";
 
@@ -84,9 +85,16 @@ export const insert = internalMutation({
 });
 
 export const accept = internalMutation({
-  args: { code: v.string(), username: v.string(), hash: v.string() },
+  args: {
+    pass: spentPass,
+    code: v.string(),
+    username: v.string(),
+    hash: v.string(),
+  },
   returns: signedIn,
-  handler: async (ctx, { code, username, hash }) => {
+  handler: async (ctx, { pass, code, username, hash }) => {
+    await spendPass(ctx, pass);
+
     const now = Date.now();
     const found = await openInviteFor(ctx.db, code, now);
     const user = await insertUser(ctx, { username, hash, role: found.invite.role });

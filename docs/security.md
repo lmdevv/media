@@ -155,6 +155,9 @@ A review of `packages/backend` found these after the table above; each has a sta
   `0700` folder, and an environment-only API key is never written to it.
 - **Sign-in rate limiting:** Convex Auth refuses an account's password sign-ins with `rate_limited`
   after ten failures, even with the right password, for a while (tried against the dev stack).
+  Every sign-in to the core also passes the media service's `/api/auth/sign-in`, which allows one
+  client address 10 sign-ins at once, then one every 5 seconds, and relays each with a one-time
+  pass; the core refuses a sign-in without one, so none reaches it over `/convex` (ADR 0007).
 
 ## Accepted, with reasons
 

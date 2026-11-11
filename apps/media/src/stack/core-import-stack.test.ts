@@ -33,6 +33,7 @@ import {
   eventually,
   issueServiceKey,
   personIn,
+  stackPasses,
   startCoreServer,
 } from "../testing/core-stack.ts";
 import type { CoreServer, Person } from "../testing/core-stack.ts";
@@ -382,7 +383,10 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       const other = Context.get(
         await run(
           Layer.buildWithScope(
-            CoreSession.layer({ convexUrl: core?.url ?? "", apiKey: await issueServiceKey() }),
+            CoreSession.layer({
+              convexUrl: core?.url ?? "",
+              apiKey: await issueServiceKey(),
+            }).pipe(Layer.provide(stackPasses)),
             scope,
           ),
         ),

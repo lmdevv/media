@@ -6,6 +6,8 @@ const crons = cronJobs();
 
 crons.interval("sweep sign-in rows", { hours: 1 }, internal.core.auth.sweep.sweep, {});
 
+crons.interval("forget spent sign-in passes", { minutes: 10 }, internal.core.auth.passes.sweep, {});
+
 crons.interval(
   "release expired job leases",
   { seconds: 10 },

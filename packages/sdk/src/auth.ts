@@ -36,6 +36,7 @@ import {
 } from "effect";
 
 import * as ConvexTransport from "./convex-transport";
+import * as MediaHttp from "./media-http";
 import type { CallError } from "./sdk-errors";
 import { ProtocolError } from "./sdk-errors";
 import * as TokenStorage from "./token-storage";
@@ -90,6 +91,33 @@ export interface SignInRequest {
   readonly params: Readonly<Record<string, Value>>;
 }
 
+/** Where a sign-in goes. Refreshes and sign-outs always go to the deployment itself. */
+export type SignInRoute = Data.TaggedEnum<{
+  /**
+   * To the deployment's `auth:signIn`, with the params `prepare` answers, as the movies backend
+   * takes them and as the media server signs itself in to the core with a pass of its own.
+   */
+  Direct: { readonly prepare: (request: SignInRequest) => Effect.Effect<SignInRequest> };
+  /**
+   * Through the media server's sign-in boundary at `url` (`@media/contracts/sign-in`), which
+   * limits sign-ins per client address and relays them to the core. The core takes no other.
+   */
+  Boundary: {
+    readonly url: string;
+    /**
+     * The `fetch` the sign-in goes through; the global one when absent. A test that signs many
+     * people in from one host passes one that names each as its own client, as a proxy in front
+     * of the server does with `X-Forwarded-For`.
+     */
+    readonly fetch?: typeof fetch;
+  };
+}>;
+
+/** Constructors for `SignInRoute`. */
+export const SignInRoute = Data.taggedEnum<SignInRoute>();
+
+const straight = SignInRoute.Direct({ prepare: Effect.succeed });
+
 /**
  * The provider has not signed anyone in yet: the core's device code provider answers `pending`
  * until the code is approved and `denied` once it is refused.
@@ -105,6 +133,8 @@ const WaitingFailure = Schema.Struct({
 });
 
 const decodeWaiting = Schema.decodeUnknownOption(WaitingFailure);
+
+const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
 
 /** Signs in and out and supplies the session's current token. */
 export interface Interface {
@@ -231,6 +261,8 @@ export interface Options {
    * session's token.
    */
   readonly revoke?: FunctionPath;
+  /** Where sign-ins go; straight to the deployment when absent. */
+  readonly signIn?: SignInRoute;
 }
 
 type RefreshOutcome = Data.TaggedEnum<{
@@ -363,12 +395,10 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     });
   });
 
-  const requestTokens = Effect.fn("Auth.requestTokens")(function* (
-    args: Readonly<Record<string, Value>>,
+  const decodeTokens = Effect.fn("Auth.decodeTokens")(function* (
+    raw: Schema.Json,
     answer: typeof SignInResult | typeof RefreshResult,
   ) {
-    const raw = yield* callGateway(SIGN_IN, args, Option.none());
-
     const result = yield* Schema.decodeUnknownEffect(answer)(raw).pipe(
       Effect.mapError(
         (cause) =>
@@ -382,6 +412,14 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
     return Option.map(Option.fromNullishOr(result.tokens), toSession);
   });
+
+  const requestTokens = (
+    args: Readonly<Record<string, Value>>,
+    answer: typeof SignInResult | typeof RefreshResult,
+  ) =>
+    callGateway(SIGN_IN, args, Option.none()).pipe(
+      Effect.flatMap((raw) => decodeTokens(raw, answer)),
+    );
 
   const currentToken = Effect.map(
     Ref.get(session),
@@ -879,11 +917,60 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     );
   }
 
-  const open = Effect.fn("Auth.open")(function* (request: SignInRequest) {
-    const opened = yield* requestTokens(
-      { provider: request.provider, params: request.params },
-      SignInResult,
+  const throughBoundary = Effect.fn("Auth.throughBoundary")(function* (
+    route: { readonly url: string; readonly fetch?: typeof fetch },
+    request: SignInRequest,
+  ) {
+    const body = yield* decodeJson(request).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProtocolError({
+            operation: SIGN_IN,
+            message: "Protocol error in auth:signIn: the sign-in's params are not JSON",
+            cause,
+          }),
+      ),
     );
+
+    const sent: MediaHttp.MediaRequest = {
+      operation: SIGN_IN,
+      url: route.url,
+      method: "POST",
+      body: Option.some(body),
+      bearer: Option.none(),
+    };
+
+    const response = yield* MediaHttp.send(sent, route.fetch);
+
+    if (response.ok) return response.body;
+    const waiting = decodeWaiting(response.body);
+
+    if (Option.isSome(waiting)) {
+      return yield* new SignInWaiting({
+        state: waiting.value.code,
+        message: waiting.value.message,
+      });
+    }
+
+    return yield* MediaHttp.commandFailureOf(sent, response);
+  });
+
+  const signInTokens = (request: SignInRequest) =>
+    SignInRoute.$match(options.signIn ?? straight, {
+      Direct: ({ prepare }) =>
+        prepare(request).pipe(
+          Effect.flatMap((prepared) =>
+            requestTokens({ provider: prepared.provider, params: prepared.params }, SignInResult),
+          ),
+        ),
+      Boundary: (route) =>
+        throughBoundary(route, request).pipe(
+          Effect.flatMap((raw) => decodeTokens(raw, SignInResult)),
+        ),
+    });
+
+  const open = Effect.fn("Auth.open")(function* (request: SignInRequest) {
+    const opened = yield* signInTokens(request);
 
     if (Option.isNone(opened)) {
       return yield* new Unauthenticated({

@@ -1,7 +1,8 @@
 # 0007. Build guests into identity and keep v1 on the home network or Tailscale
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-07 with the phase 3 review fixes.
-- Decisions: D20, D21
+- Status: Accepted, 2026-11-03. Amended 2026-11-07 with the phase 3 review fixes, and 2026-11-11
+  with the sign-in boundary.
+- Decisions: D20, D21, D45
 
 ## Context
 
@@ -167,11 +168,8 @@ links in phase 7.
   `signIn` (10 at once, then one every 5 seconds) and `public` (60 at once, then 2 a second),
   and `admit`, a pure token bucket. The core never sees a client address, so the server applies
   them from phase 4.
-- Until phase 4, nothing limits sign-ins per address. The `guest` provider, like every Convex
-  Auth sign-in, travels over the Convex WebSocket or `auth:signIn`, which no per-path HTTP limit
-  can count, and `@media/contracts/rate-limit` has no caller in production. Only the per-link and
-  per-maker limits in the core apply. Phase 4 routes sign-ins through a boundary that knows the
-  address and applies the `signIn` budget there.
+- Every sign-in passes the server's sign-in boundary, which applies the `signIn` budget per
+  client address ("The sign-in boundary" below). The core refuses a sign-in that skipped it.
 
 ### Rules in `can`
 
@@ -208,9 +206,134 @@ three of them the live check on the link.
 
 ### Left for later
 
-- Phase 4: the server applies `@media/contracts/rate-limit`, routes sign-ins where an address is
-  known, and reads `sessionStatus.guest` for transcode priority.
+- Phase 4: the server reads `sessionStatus.guest` for transcode priority. The sign-in boundary
+  below applies `@media/contracts/rate-limit`.
 - Phase 7: the guest page in the account web client and a guest sign-in in the SDK.
 - A purge of old links and their guests. The caps bound the rows until then.
 - Connect: `deviceFor` names a guest's session membership once a device report names the session
   it plays (phase 6).
+
+## The sign-in boundary (amended 2026-11-11)
+
+Rate limits on sign-in always apply (D21), and the core never sees a client address. Every Convex
+Auth sign-in used to travel straight to `auth:signIn`, over the Convex WebSocket or the HTTP API,
+where no per-address limit could count it. `p4-signin-boundary` puts a boundary in front of every
+sign-in that knows the address, and makes the core refuse any sign-in that skipped it.
+
+### The route
+
+- The media service answers `POST /api/auth/sign-in` (`SIGN_IN_PATH` in
+  `@media/contracts/sign-in`, `apps/media/src/http/sign-in-boundary.ts`) with a body of
+  `{ provider, params }`, as `auth:signIn` takes them, for every provider the core has:
+  `password`, `apiKey`, `deviceCode`, `setup`, `invite`, `reset`, `tile`, `guest`, and `grant`. The
+  route reads at most 16 KiB and refuses any other provider with `invalid_args`.
+- It resolves the client's address as the other unauthenticated limits do (ADR 0027): the last
+  `X-Forwarded-For` entry from a loopback peer, which Caddy sets to the client it resolved through
+  `MEDIA_TRUSTED_PROXIES`, and the peer itself otherwise. Every client behind an untrusted proxy is
+  that proxy, and a client that sends its own `X-Forwarded-For` through Caddy is still itself.
+  Unlike the health route, a loopback peer without the header has no exemption here: the server's
+  own sign-in never comes through the route.
+- It takes a try from the address's `signIn` bucket (10 at once, then one every 5 seconds) before
+  it reads the body, so a malformed or refused sign-in costs a try too. Past the budget it answers
+  `429` with `{ code: "rate_limited" }` and `Retry-After`, and the core never sees the call.
+- Otherwise it relays the sign-in to the core's `auth:signIn` over the internal API URL
+  (`CONVEX_URL`), with a pass for it among the params, and answers what the core answered: `200`
+  with `{ tokens }`, or the core's `{ code, message }` with a status for its code (`pending` and
+  `denied` included, which a device code's poll reads). A core that failed answers `500`, and an
+  unreachable one `502`.
+- The body holds a password, a key, or a link code, so nothing logs it. The route logs one INFO
+  line per relayed sign-in with its provider and outcome, never the address or params; refusals
+  past the budget log at DEBUG, as the access log does (`access-log.ts`), so a flood cannot rotate
+  the retained log.
+- A device code polls every 5 seconds, which the `signIn` door refills at, so a waiting device
+  stays inside its budget.
+
+### How the core refuses a sign-in that skipped the boundary
+
+Every provider of the core is built with `behindBoundary` (`convex/core/auth/passes.ts`). Before
+the provider sees its params, it takes the `boundaryPass` param out and checks it; with no good
+pass it refuses with `forbidden`, one message for every reason. A refresh never reaches a provider,
+so `auth:store` and the refresh path are unchanged.
+
+- **A pass is an HMAC the server signs for one sign-in.** It is
+  `p1.<kid>.<issuedAt>.<nonce>.<address>.<mac>`: the ring key's id, the time in milliseconds, 16
+  random bytes, the first 16 bytes of the resolved address's SHA-256, and an HMAC-SHA256 over those
+  and the SHA-256 of the provider and its params in canonical JSON (`canonicalJson`, keys sorted at
+  every level). The digest has one size for any address, so no forwarded value can make a pass
+  too long, and no address is in the pass.
+- **The keys derive from `MEDIA_TICKET_KEYS`.** Each ring key gives a pass key, the HMAC of the
+  label `media sign-in pass v1` under it (`loadDerivedKeyRing` in `ticket.ts`). In the core,
+  `core/tickets.ts` derives them, so it stays the only module that reads the ring. The server and the
+  core already hold the ring, so no new setting exists, and passes rotate with tickets. A pass key
+  never signs a ticket and a ticket key never signs a pass.
+- **Not forgeable.** Only the server and the core hold the ring. A pass signed with any other key,
+  or altered at all, fails its HMAC.
+- **Not replayable.** The core takes a pass for 60 seconds after it was signed, 5 seconds of clock
+  skew allowed, and only once. The provider checks the pass in its action, then hands it to the
+  first mutation it makes (`password:attempt`, `apiKeys:redeem`, `deviceCodes:redeem`,
+  `deviceGrants:redeem`, `users:setUp`, `invites:accept`, `resetLinks:redeem`, `links:open`),
+  which records the nonce in `signInPasses` with `spendPass` before it writes anything else, and
+  refuses a nonce already there. The `tile` provider spends it in `core/auth/passes:spend` first,
+  on its own, because its proof check writes in mutations of its own (a password try, an unlock
+  code strike) before `tiles:open`. The spend commits with the sign-in's first
+  write, so no second sign-in, try, or session comes from one pass. A sign-in refused before any
+  write (a malformed key, a refused lookup, or a mutation that throws and rolls back) leaves its
+  nonce unspent, and the same request sent again within the 60 seconds is decided again, with the
+  same params, as a new attempt; it changes nothing the first one did not. A sweep every 10
+  minutes forgets nonces of passes past their 60 seconds, which the core would refuse anyway.
+- **Not usable for another sign-in or from another address.** The HMAC covers the provider, the
+  params, and the address's digest, so a pass works only for the exact sign-in the boundary admitted for
+  that address. The pass never leaves the server: the route signs it, sends it to the core on the
+  install's loopback, and answers the client only what the core answered. A client never holds a
+  pass to take elsewhere.
+- **No secret in a mutation argument or a log.** The pass travels as an action param, as the
+  password beside it does. The core checks it in the action and hands the mutation only the nonce
+  and expiry, neither of them secret. The route logs neither.
+- **The server's own sign-in.** `CoreSession` signs in with the server's service key straight to
+  `auth:signIn`, with a pass it signs itself for the address `server`
+  (`SignInPasses.ownSignIn`). The server is the boundary, and it never comes through the route, so
+  a restart signs it in without spending a client's budget.
+
+### Measured
+
+A password sign-in, from the call to holding tokens, over 100 sign-ins a side in blocks of 10
+interleaved, trunk straight to its core and the head through the boundary, each on a fresh core
+on the same host: head minus trunk p50 was +1.0, +8.8, +3.4, +1.6, and +4.7 ms over five runs
+(trunk p50 158.8 to 191.1 ms; Scrypt dominates). The boundary's own hop measured within noise:
+189.6 ms straight to the core with a pass against 187.6 ms through the boundary. A first version
+spent the nonce in a mutation of its own, one more commit per sign-in, about 12 ms on this host.
+
+### Clients
+
+- The platform SDK signs in through the boundary (`SignInRoute.Boundary` in `@media/sdk/effect`;
+  `signInUrl` in `createPlatform` and `PlatformProvider`). Refreshes and sign-outs still go to the
+  core directly. `signInUrlFor(server)` names the route of a server, and `signInUrlBeside(core)` the
+  route beside a core at `<server>/convex`, as an install serves them.
+- The web clients sign in at their own origin's `/api/auth/sign-in`; `VITE_SIGN_IN_URL` overrides
+  it in development. The CLI signs in beside its core URL, or at `MEDIA_CORE_SIGN_IN_URL`, which
+  the image's CLI wrapper points at its own Caddy.
+- The development stack (`scripts/dev-stack.sh`) runs the boundary alone in a container on
+  base + 7, built from the checkout (`apps/media/src/sign-in-boundary-main.ts`), and waits for it
+  with a CORS preflight, which spends no try, so every stack
+  suite and the web clients' development servers sign in through it with the refusal on. A suite
+  that signs many people in from one host names each one as a client of its own with
+  `X-Forwarded-For` from loopback, as Caddy would (`@media/sdk/testing/own-client`), so each gets
+  a person's budget.
+
+### Rejected
+
+- **A sign-in admission from the server's service session.** The server would call a
+  server-facing mutation for a one-time token before each sign-in. It costs a second round trip
+  per sign-in, fails every sign-in while the server is signed out, and cannot admit the server's
+  own sign-in.
+- **A fixed shared secret in the params.** It is replayable by anyone who sees it once and binds
+  no sign-in or address.
+- **A new `MEDIA_SIGN_IN_KEY` setting.** It would hold the same trust as the ticket ring, held by
+  the same two parties, and need a place in the image, Compose, the NixOS module, and both READMEs.
+- **Exempting service keys from the pass.** The server can sign its own pass, so no provider needs
+  an exemption that an attacker could aim at.
+- **A public Convex HTTP action for sign-in.** It would need a site path on the public address
+  (ADR 0025), and a Convex HTTP action still cannot see the client's address behind Caddy any
+  better than the server can.
+- **A switch that turns the refusal off for tests.** The development stack runs the boundary, so
+  no suite needs one.

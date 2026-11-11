@@ -8,7 +8,7 @@
       "ignoreBinaries": ["ffmpeg"]
     },
     "apps/media": {
-      "entry": ["src/main.ts", "scripts/*.ts"],
+      "entry": ["src/main.ts", "src/sign-in-boundary-main.ts", "scripts/*.ts"],
       "project": ["src/**/*.ts", "scripts/**/*.ts"],
       "ignoreBinaries": ["unshare"]
     },

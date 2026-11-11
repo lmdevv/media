@@ -89,7 +89,8 @@ names what is missing.
 
 Each worktree gets its own stack: `scripts/dev-stack.sh up` starts two self-hosted Convex backends
 in Docker, one for old movies and one for the core, deploys both, configures both backends' auth keys,
-movies' playback token secret and media service credential, and writes the `.env.local` files. Ports, the data volume, and the temporary
+movies' playback token secret and media service credential, runs the media service's sign-in
+boundary alone in a third container, and writes the `.env.local` files. Ports, the data volume, and the temporary
 output directory derive from the worktree name; `scripts/dev-stack.sh env` prints them, and
 `down` / `destroy` stop or remove the stack. Commit the regenerated `convex/_generated/`.
 
@@ -169,8 +170,9 @@ The example identities must be replaced with the model and tool that actually co
 ## Verify and review
 
 - Ports come from the worktree's stack: Convex API at base, auth at base + 1, media at base + 2, web
-  at base + 3, the core's Convex API at base + 4, its HTTP actions at base + 5, and the account
-  client at base + 6.
+  at base + 3, the core's Convex API at base + 4, its HTTP actions at base + 5, the account
+  client at base + 6, and the sign-in boundary at base + 7, which every stack suite signs in
+  through.
   `scripts/dev-stack.sh env` prints them. Playwright uses `E2E_PORT`, else the stack's
   web port, else 3011.
 - Stack suites need Docker and `scripts/dev-stack.sh up`: `pnpm --filter <pkg> test:stack` for

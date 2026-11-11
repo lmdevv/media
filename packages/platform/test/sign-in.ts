@@ -1,3 +1,4 @@
+import type { SignInProvider } from "@media/contracts/sign-in";
 import { ConvexHttpClient } from "convex/browser";
 import { ConvexError } from "convex/values";
 import type { Value } from "convex/values";
@@ -22,8 +23,6 @@ export interface SignedIn {
 }
 
 const Token = Schema.Struct({ token: Schema.String, refreshToken: Schema.String });
-
-const decodeTokens = Schema.decodeUnknownSync(Token);
 
 export const unique = (): string => Math.random().toString(36).slice(2, 10);
 
@@ -80,29 +79,65 @@ const clientWith = (stack: CoreStack, token: string): ConvexHttpClient => {
   return client;
 };
 
-/** Signs in with a provider and its params; rejects as `auth:signIn` does. */
-export const signIn = async (
+/** The sign-in providers of the core. */
+export type Provider = SignInProvider;
+
+const Refusal = Schema.Struct({ code: Schema.String, message: Schema.String });
+
+const decodeAnswer = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Union([Schema.Struct({ tokens: Token }), Refusal])),
+);
+
+const ADDRESSES = 1 << 17;
+
+const [first = 0] = crypto.getRandomValues(new Uint32Array(1));
+
+let clients = first % ADDRESSES;
+
+/**
+ * An address of its own for each sign-in, as the proxy in front of the server names each client:
+ * the boundary limits sign-ins per address and trusts `X-Forwarded-For` from a loopback peer. The
+ * addresses run through 198.18.0.0/15 from a random start, so processes rarely share one.
+ */
+export const newClientAddress = (): string => {
+  clients = (clients + 1) % ADDRESSES;
+
+  return `198.${String(18 + (clients >> 16))}.${String((clients >> 8) & 255)}.${String(clients & 255)}`;
+};
+
+/**
+ * Posts a sign-in to the stack's boundary from `address`, as a client does, and answers its status
+ * and body.
+ */
+export const postSignIn = async (
   stack: CoreStack,
-  provider:
-    | "password"
-    | "apiKey"
-    | "deviceCode"
-    | "setup"
-    | "invite"
-    | "reset"
-    | "tile"
-    | "guest"
-    | "grant",
+  provider: Provider,
   params: Readonly<Record<string, Value>>,
-): Promise<SignedIn> => {
-  const result = await new ConvexHttpClient(stack.url, { logger: false }).action(api.auth.signIn, {
-    provider,
-    params,
+  address: string = newClientAddress(),
+): Promise<{ readonly status: number; readonly text: string }> => {
+  const response = await fetch(stack.signInUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-forwarded-for": address },
+    body: JSON.stringify({ provider, params }),
   });
 
-  const tokens = decodeTokens(result.tokens);
+  return { status: response.status, text: await response.text() };
+};
 
-  return { ...tokens, client: clientWith(stack, tokens.token) };
+/**
+ * Signs in with a provider and its params through the stack's boundary, from an address of its
+ * own; rejects as `auth:signIn` does, with a `ConvexError` holding the refusal.
+ */
+export const signIn = async (
+  stack: CoreStack,
+  provider: Provider,
+  params: Readonly<Record<string, Value>>,
+): Promise<SignedIn> => {
+  const answer = decodeAnswer((await postSignIn(stack, provider, params)).text);
+
+  if (!("tokens" in answer)) throw new ConvexError({ code: answer.code, message: answer.message });
+
+  return { ...answer.tokens, client: clientWith(stack, answer.tokens.token) };
 };
 
 /** Signs `person` in with their password. */

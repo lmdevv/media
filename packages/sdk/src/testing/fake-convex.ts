@@ -19,6 +19,7 @@ import { createServer } from "node:http";
 import type { Duplex } from "node:stream";
 
 import type { ErrorCode } from "@media/contracts/errors";
+import { SIGN_IN_PATH, signInRefusalStatus } from "@media/contracts/sign-in";
 import { Data, Effect, Option, Predicate, Schema } from "effect";
 import type { Scope } from "effect";
 
@@ -58,6 +59,11 @@ type Handler = (request: RecordedRequest) => Effect.Effect<Reply>;
 export interface FakeConvex {
   /** The deployment URL to hand the SDK. */
   readonly url: string;
+  /**
+   * A sign-in boundary in front of the fake, as the media server's (`@media/contracts/sign-in`):
+   * it records each sign-in as a call to `auth:signIn` and answers as the boundary relays.
+   */
+  readonly signInUrl: string;
   /** Answers every later call to `path` with `handler`, replacing any earlier one. */
   readonly handle: (path: string, handler: Handler) => Effect.Effect<void>;
   /** Answers every later call to `path` with `reply`. */
@@ -103,6 +109,31 @@ const send = (response: ServerResponse, status: number, body: string): void => {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(body);
 };
+
+const SignInBody = Schema.fromJsonString(
+  Schema.Struct({ provider: Schema.String, params: Schema.Json }),
+);
+
+const decodeSignIn = Schema.decodeUnknownOption(SignInBody);
+
+/** Answers a sign-in at the boundary as the media server relays the core's answer. */
+const writeBoundary = (response: ServerResponse, reply: Reply): void =>
+  Reply.$match(reply, {
+    Success: ({ value }) => send(response, 200, JSON.stringify(value)),
+    Failure: ({ code, message }) =>
+      send(response, signInRefusalStatus[code], JSON.stringify({ code, message })),
+    Crash: () =>
+      send(
+        response,
+        500,
+        JSON.stringify({ code: "internal", message: "The core failed while signing in" }),
+      ),
+    TokenRejected: () =>
+      send(response, 401, JSON.stringify({ code: "unauthenticated", message: "Refused" })),
+    Drop: () => {
+      response.socket?.destroy();
+    },
+  });
 
 const write = (response: ServerResponse, reply: Reply): void =>
   Reply.$match(reply, {
@@ -355,6 +386,32 @@ export const make: Effect.Effect<FakeConvex, never, Scope.Scope> = Effect.gen(fu
     });
 
     incoming.on("end", () => {
+      if (incoming.url === SIGN_IN_PATH && incoming.method === "POST") {
+        const signIn = decodeSignIn(text);
+
+        if (Option.isNone(signIn)) {
+          send(response, 400, JSON.stringify({ code: "invalid_args", message: "Not a sign-in" }));
+
+          return;
+        }
+
+        const request: RecordedRequest = {
+          kind: "action",
+          path: "auth:signIn",
+          args: { provider: signIn.value.provider, params: signIn.value.params },
+          authorization: incoming.headers.authorization,
+        };
+
+        received.push(request);
+
+        void Effect.runPromiseWith(context)(answer(request)).then(
+          (reply) => writeBoundary(response, reply),
+          (cause: unknown) => writeBoundary(response, Reply.Crash({ message: String(cause) })),
+        );
+
+        return;
+      }
+
       const kind = kindOf(incoming.url);
       const body = decodeBody(text);
 
@@ -593,6 +650,7 @@ export const make: Effect.Effect<FakeConvex, never, Scope.Scope> = Effect.gen(fu
 
   return {
     url: `http://127.0.0.1:${String(port)}`,
+    signInUrl: `http://127.0.0.1:${String(port)}${SIGN_IN_PATH}`,
     handle: (path, handler) =>
       Effect.sync(() => {
         handlers.set(path, handler);

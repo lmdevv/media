@@ -32,6 +32,7 @@ import {
   signedIn,
   trimGrantSessions,
 } from "../sessions";
+import { spendPass, spentPass } from "../auth/passes";
 
 /** A device grant reads `dg_<grantId>.<secret>`. */
 export const GRANT_PREFIX = "dg";
@@ -84,9 +85,16 @@ const signsIn = (grant: Doc<"deviceGrants">, user: Doc<"users">): boolean =>
 
 /** Exchanges a grant for a new session of its person; null when the grant does not sign in. */
 export const redeem = internalMutation({
-  args: { userId: v.string(), grantId: v.string(), secretHash: v.string() },
+  args: {
+    pass: spentPass,
+    userId: v.string(),
+    grantId: v.string(),
+    secretHash: v.string(),
+  },
   returns: v.union(v.null(), signedIn),
-  handler: async (ctx, { userId, grantId, secretHash }) => {
+  handler: async (ctx, { pass, userId, grantId, secretHash }) => {
+    await spendPass(ctx, pass);
+
     const id = ctx.db.normalizeId("deviceGrants", grantId);
     const grant = id === null ? null : await ctx.db.get(id);
 

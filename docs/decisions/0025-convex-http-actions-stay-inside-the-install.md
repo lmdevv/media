@@ -1,7 +1,8 @@
 # 0025. Keep Convex's HTTP actions inside the install, off the public address
 
-- Status: Accepted, 2026-11-08. Amended 2026-11-10 with one backend in the image (ADR 0027).
-- Decisions: D30, D45
+- Status: Accepted, 2026-11-08. Amended 2026-11-10 with one backend in the image (ADR 0027), and
+  2026-11-11 with the sign-in boundary's relay (ADR 0007).
+- Decisions: D21, D30, D45
 
 ## Context
 
@@ -64,3 +65,17 @@ The image and the NixOS module now run only the core's backend (ADR 0027). Its H
 stays `http://127.0.0.1:3211` inside the install. Old movies' backend, with its origin
 `http://127.0.0.1:3221` and its `/movies/convex` route, is gone from both installs. Caddy answers
 `404` for `/movies/convex`.
+
+## Sign-ins through the server's boundary (amended 2026-11-11)
+
+D45 says clients sign in through Convex actions behind `/convex`. They no longer call
+`auth:signIn` themselves for a sign-in: they post to the media server's `/api/auth/sign-in`, which
+limits sign-ins per client address and relays each one to `auth:signIn` over the core's internal API
+URL (`CONVEX_URL`, `http://127.0.0.1:3210` in the image), with a pass the core requires (ADR 0007,
+"The sign-in boundary").
+
+- The relay calls a Convex action over the API port, as clients did. It needs no HTTP action, so
+  the public address still has no site path, and the JWKS and discovery document stay on loopback.
+- `/convex` still carries everything else a client does: queries, mutations, actions, the sync
+  WebSocket, refreshes, and sign-outs. A sign-in a client sends straight to `auth:signIn` behind
+  `/convex` reaches the core and is refused with `forbidden`.

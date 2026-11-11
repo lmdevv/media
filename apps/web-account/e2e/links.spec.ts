@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { createPerson, newSecret, openPlatform, signIn } from "./people";
+import { asOwnClient, createPerson, newSecret, openPlatform, signIn } from "./people";
 import { stackEnv } from "./stack";
 
 const stack = stackEnv();
@@ -31,6 +31,7 @@ test("accepting an invite lands the new person at home", async ({ page }) => {
 
     await open(page, `/invite#${code}`);
     await expect(page.getByRole("heading", { name: "You're invited." })).toBeVisible();
+    await asOwnClient(page);
     await page.getByLabel("Username").fill(username);
     await page.getByLabel("Password", { exact: true }).fill(newSecret());
     await page.getByRole("button", { name: "Create account" }).click();
@@ -78,6 +79,7 @@ test("an invite link keeps its code out of requests, referrers, the address, and
     await expect(invitee.getByRole("heading", { name: "You're invited." })).toBeVisible();
     expect(invitee.url().includes(code), "the address holds the code after opening").toBe(false);
 
+    await asOwnClient(invitee);
     await invitee.getByLabel("Username").fill(username);
     await invitee.getByLabel("Password", { exact: true }).fill(newSecret());
     await invitee.getByRole("button", { name: "Create account" }).click();

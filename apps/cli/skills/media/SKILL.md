@@ -56,6 +56,11 @@ No install holds a credential; sign in as each reference says.
   (mode 0600). `media auth logout` signs out.
 - **Agents and CI.** Set `MEDIA_CORE_URL` and `MEDIA_CORE_API_KEY` instead of signing in, so the
   key never touches the disk.
+- **Where sign-ins go.** Every sign-in goes through the server's sign-in route, which limits
+  sign-ins per address: 10 at once, then one every 5 seconds. The CLI finds it beside the core,
+  so `http://nas:8080/convex` signs in at `http://nas:8080/api/auth/sign-in`. Set
+  `MEDIA_CORE_SIGN_IN_URL` when the core and the server are not at those addresses. A
+  `rate_limited` answer says how long to wait.
 - **Names to words.** Each reference lists its commands with their `media` lines. Admin
   commands are in `media admin`, the rest of the core's in `media auth`, and movies in
   `media movies`: `core.accounts.users.list` is `media admin users list`, and

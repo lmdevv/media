@@ -5,14 +5,20 @@ import { parseArgs } from "node:util";
 
 import { build, type BuildOptions, context } from "esbuild";
 
-const { values } = parseArgs({ options: { watch: { type: "boolean", default: false } } });
+const { values } = parseArgs({
+  options: {
+    watch: { type: "boolean", default: false },
+    // The sign-in boundary alone, which the development stack runs (scripts/dev-stack.sh).
+    boundary: { type: "boolean", default: false },
+  },
+});
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 const options: BuildOptions = {
   absWorkingDir: root,
-  entryPoints: ["src/main.ts"],
-  outfile: "dist/main.js",
+  entryPoints: [values.boundary ? "src/sign-in-boundary-main.ts" : "src/main.ts"],
+  outfile: values.boundary ? "dist/sign-in-boundary.js" : "dist/main.js",
   bundle: true,
   platform: "node",
   target: "node24",

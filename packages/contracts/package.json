@@ -17,6 +17,7 @@
     "./server-functions": "./src/server-functions.ts",
     "./ticket-vectors": "./src/ticket-vectors.ts",
     "./rate-limit": "./src/rate-limit.ts",
+    "./sign-in": "./src/sign-in.ts",
     "./commands": "./src/commands/registry.ts",
     "./command": "./src/commands/command.ts",
     "./media-service": "./src/media-service.ts",

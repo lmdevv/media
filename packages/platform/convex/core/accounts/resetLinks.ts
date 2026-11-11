@@ -15,6 +15,7 @@ import { accountTarget, can, principalOf } from "../permissions/policy";
 import type { PersonDoc } from "../permissions/policy";
 import { endUserCredentials, openSession, signedIn } from "../sessions";
 import { asPerson } from "./users";
+import { spendPass, spentPass } from "../auth/passes";
 
 const PREFIX = "mr";
 
@@ -84,9 +85,15 @@ export const insert = internalMutation({
 });
 
 export const redeem = internalMutation({
-  args: { code: v.string(), hash: v.string() },
+  args: {
+    pass: spentPass,
+    code: v.string(),
+    hash: v.string(),
+  },
   returns: signedIn,
-  handler: async (ctx, { code, hash }) => {
+  handler: async (ctx, { pass, code, hash }) => {
+    await spendPass(ctx, pass);
+
     const now = Date.now();
     const { link, user } = await openLinkFor(ctx.db, code, now);
 

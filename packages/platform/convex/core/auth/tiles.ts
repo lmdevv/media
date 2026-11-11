@@ -1,10 +1,9 @@
-import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
 import { makeFunctionReference } from "convex/server";
 import { v } from "convex/values";
 import type { Infer, Value } from "convex/values";
 
 import { internal } from "../../_generated/api";
-import type { DataModel, Id } from "../../_generated/dataModel";
+import type { Id } from "../../_generated/dataModel";
 import { internalMutation, internalQuery } from "../../_generated/server";
 import type { ActionCtx } from "../../_generated/server";
 import { asPerson } from "../accounts/users";
@@ -23,6 +22,7 @@ import { checkTypedPassword, passwordHashOf, passwordMatches, signInLimit } from
 import { takeAttempt } from "../lib/rateLimit";
 import { parseSecret, sha256Hex } from "../lib/secrets";
 import type { SignedIn } from "../sessions";
+import { behindBoundary } from "./passes";
 
 const tileProof = v.union(
   v.object({ kind: v.literal("password"), by: v.id("users"), password: v.string() }),
@@ -167,12 +167,16 @@ const checkProof = async (
  * The `tile` provider: opens a person's tile on a shared device as a new media-only session. The
  * proof is absent for an open tile, or a password, an unlock code, or an approval for a locked one.
  */
-export const tileProvider = ConvexCredentials<DataModel>({
+export const tileProvider = behindBoundary({
   id: "tile",
-  authorize: async (params, ctx): Promise<SignedIn> => {
+  authorize: async (params, ctx, pass): Promise<SignedIn> => {
     const { device, userId, proof } = await ctx.runQuery(parseTileParams, params);
     const parsed = parseSecret(DEVICE_PREFIX, device.trim()) ?? fail("not_found", NO_DEVICE);
     const key = { deviceId: parsed.rowId, secretHash: await sha256Hex(parsed.secret), userId };
+
+    // A proof writes in mutations of its own (a password try, an unlock code strike), so the pass
+    // is spent first, on its own.
+    await ctx.runMutation(internal.core.auth.passes.spend, { pass });
 
     return ctx.runMutation(internal.core.devices.tiles.open, {
       ...key,

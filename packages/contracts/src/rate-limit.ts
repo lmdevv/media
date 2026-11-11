@@ -2,10 +2,15 @@
  * How often one client address may call what needs no session, before the server answers 429
  * (ADR 0007). The core never sees a client address, so the server applies these in front of it;
  * the core keeps its own limits per person and per link. Each door is a token bucket: up to
- * `burst` calls at once, refilling at `perSecond`.
+ * `burst` calls at once, refilling at `perSecond`. An address is the client the server resolves
+ * through `MEDIA_TRUSTED_PROXIES` (ADR 0027), so every client behind an untrusted proxy is one.
  */
 export const addressBudgets = {
-  /** `auth:signIn` with any provider, a guest opening a share link included. */
+  /**
+   * A sign-in with any provider through the server's boundary (`sign-in.ts`), a guest opening a
+   * share link and each poll of a device code included. A device code polls every 5 seconds,
+   * which this door refills at, so a waiting device stays inside it.
+   */
   signIn: { burst: 10, perSecond: 0.2 },
   /** Any other call that needs no session, such as looking up an invite or starting a device code. */
   public: { burst: 60, perSecond: 2 },
