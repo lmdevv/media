@@ -170,7 +170,15 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     quality: deviceQuality === null ? loadQualityChoice() : qualityOfSetting(deviceQuality),
   });
 
-  const handle = usePlayback(video, buildRequest, `${titleId}:${episodeId ?? ""}`);
+  // The first request takes the person's saved quality, so playback waits for the settings to
+  // answer once; settings that fail to load fall back to this browser's choice, and a later reload
+  // of them never stops playback.
+  const [settled, setSettled] = useState(false);
+
+  if (!settled && settings.status !== "loading") setSettled(true);
+
+  const handle = usePlayback(video, settled ? buildRequest : null, `${titleId}:${episodeId ?? ""}`);
+
   const controller = handle?.controller ?? null;
   const snapshot = handle?.snapshot ?? null;
   const phase = snapshot?.phase ?? PlaybackPhase.Starting();

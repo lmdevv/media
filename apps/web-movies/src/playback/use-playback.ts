@@ -23,7 +23,8 @@ const subscribeNothing = (): (() => void) => () => undefined;
  * Plays the request `buildRequest` makes in `element` as the signed-in person, disposing the
  * controller (and reporting where playback stopped) when the element, the platform client, or
  * `key` changes, or on unmount. `key` names the request: a new key starts a new playback, and only
- * then is the request built, from the latest render. Pass `null` while there is nothing to play.
+ * then is the request built, from the latest render. Pass `null` while there is nothing to play;
+ * passing a request again starts playback.
  */
 export const usePlayback = (
   element: HTMLVideoElement | null,
@@ -44,6 +45,7 @@ export const usePlayback = (
 
   const [controller, setController] = useState<PlaybackController | null>(null);
   const currentRequest = useEffectEvent(() => (buildRequest === null ? null : buildRequest()));
+  const ready = buildRequest !== null;
 
   useEffect(() => {
     const started = currentRequest();
@@ -67,7 +69,7 @@ export const usePlayback = (
       created.dispose();
       setController(null);
     };
-  }, [services, element, key]);
+  }, [services, element, key, ready]);
 
   const snapshot = useSyncExternalStore(
     controller?.subscribe ?? subscribeNothing,
