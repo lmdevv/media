@@ -324,29 +324,7 @@ export interface Engine extends Omit<Interface, "signIn"> {
   readonly open: (
     request: SignInRequest,
   ) => Effect.Effect<void, CallError | SignInWaiting | TokenStorage.TokenStorageError>;
-  /** The token of the session held now, as a call sends it, without renewing it. */
-  readonly heldToken: Effect.Effect<Option.Option<Redacted.Redacted>>;
-  /**
-   * What a server's refusal of a call sent with `sent` means for the session (D51), fenced on
-   * that token: a refusal of an older session than the one held never refreshes or ends this one.
-   */
-  readonly refuse: (
-    sent: Option.Option<Redacted.Redacted>,
-  ) => Effect.Effect<Refusal, TokenStorage.TokenStorageError>;
 }
-
-/** What `Engine.refuse` found: retry once with the session held now, or report the refusal. */
-export type Refusal = Data.TaggedEnum<{
-  /** Another call renewed the session since the refused call went out: retry it once. */
-  Renewed: {};
-  /** A forced refresh kept a session: the refusal was the call's own. */
-  Kept: {};
-  /** No session is held now: it was refused on refresh, or was never held. */
-  Ended: {};
-}>;
-
-/** Constructors and matchers for `Refusal`. */
-export const Refusal = Data.taggedEnum<Refusal>();
 
 /**
  * Builds the session engine: reads the stored session, then gives the Convex connection a token
@@ -854,8 +832,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       Effect.asVoid,
     );
 
-  /** Refreshes `seen` unless another call already did; the caller holds the `refreshing` permit. */
-  const refreshHeld = Effect.fn("Auth.refreshHeld")(function* (
+  const refresh = Effect.fn("Auth.refresh")(function* (
     seen: StoredSession,
     generation: number,
     forced: boolean,
@@ -884,36 +861,6 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     }));
 
     return yield* commitRefresh(seen, outcome);
-  });
-
-  const refresh = (seen: StoredSession, generation: number, forced: boolean) =>
-    refreshing.withPermits(1)(refreshHeld(seen, generation, forced));
-
-  const heldToken = Effect.map(
-    Ref.get(session),
-    Option.map((held) => held.token),
-  );
-
-  /**
-   * After a server refused a call sent with `sent`, under the `refreshing` permit, so refusals of
-   * one session share one refresh: `Renewed` when the session held now is not the one the call
-   * went out with (another call renewed it, or none was held), `Kept` after a forced refresh that
-   * kept a session, and `Ended` when none is held, or the refresh was refused and ended it.
-   */
-  const refuse = Effect.fn("Auth.refuse")(function* (sent: Option.Option<Redacted.Redacted>) {
-    const current = yield* Ref.get(session);
-
-    if (Option.isNone(current)) return Refusal.Ended();
-
-    if (Option.isNone(sent) || Redacted.value(sent.value) !== Redacted.value(current.value.token)) {
-      return Refusal.Renewed();
-    }
-
-    const { finished: generation } = yield* Ref.get(lastAttempt);
-
-    yield* refreshHeld(current.value, generation, true);
-
-    return Option.isSome(yield* Ref.get(session)) ? Refusal.Kept() : Refusal.Ended();
   }, refreshing.withPermits(1));
 
   function accessToken(
@@ -1100,8 +1047,6 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     open,
     signOut: signOut(),
     accessToken,
-    heldToken,
-    refuse,
   };
 
   return engine;

@@ -124,15 +124,12 @@ export interface Session {
    */
   readonly accessToken: Effect.Effect<Option.Option<Redacted.Redacted>, TokenStorageError>;
   /**
-   * Runs `effect`, a call some server answers as this session, under the one refusal rule (D51),
-   * fenced on the session the call goes out with. When it fails with `Unauthenticated` and that
-   * session is still held, the session refreshes once at once, shared with every other refusal of
-   * it, and a refused refresh signs it out; the call is not repeated, so read `currentStatus` to
-   * tell an ended session from a refusal of the call alone. When another call renewed the session
-   * since, it never refreshes or ends: `effect` runs once more with the session held now. Other
-   * failures, such as `Forbidden` or a network error, leave the session alone. Every platform call
-   * runs under it; wrap a call to another server that sends `accessToken`, such as the media
-   * server's own routes, so that `effect` reads the token when it runs.
+   * Runs `effect`, a call some server answered as this session, under the one refusal rule
+   * (D51): when it fails with `Unauthenticated`, the session refreshes once at once, and a refused
+   * refresh signs it out. The call is never repeated, so the failure still comes back; read
+   * `currentStatus` to tell an ended session from a refusal of the call alone. Every platform
+   * call already runs under it; wrap a call to another server that sends `accessToken`, such as
+   * the media server's own routes.
    */
   readonly refreshOnRefusal: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 }
@@ -246,39 +243,20 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
     signIn: signInRoute,
   });
 
-  const refusalOf = (sent: Option.Option<Redacted.Redacted>) =>
-    engine
-      .refuse(sent)
-      .pipe(
-        Effect.catchTag("TokenStorageError", (error) =>
-          Effect.logWarning("Platform.sessionStorageFailed").pipe(
-            Effect.annotateLogs({ operation: error.operation, message: error.message }),
-            Effect.as(Auth.Refusal.Kept()),
-          ),
+  const refreshAfterRefusal = engine
+    .accessToken(true)
+    .pipe(
+      Effect.catchTag("TokenStorageError", (error) =>
+        Effect.logWarning("Platform.sessionStorageFailed").pipe(
+          Effect.annotateLogs({ operation: error.operation, message: error.message }),
         ),
-      );
+      ),
+    );
 
-  /**
-   * D51, fenced on the session each call goes out with. A refusal of the session held now
-   * refreshes it once, and refusals of one session share that refresh. A refusal that answers an
-   * older session, which another call has renewed since, never refreshes or ends this one: the
-   * call runs once more with the session held now.
-   */
-  const refreshOnRefusal = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => {
-    const attempt = (retried: boolean): Effect.Effect<A, E, R> =>
-      Effect.flatMap(engine.heldToken, (sent) =>
-        Effect.catchIf(
-          effect,
-          (error) => Predicate.isTagged(error, "Unauthenticated"),
-          (error) =>
-            Effect.flatMap(refusalOf(sent), (refusal) =>
-              Auth.Refusal.$is("Renewed")(refusal) && !retried ? attempt(true) : Effect.fail(error),
-            ),
-        ),
-      );
-
-    return attempt(false);
-  };
+  const refreshOnRefusal = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Effect.tapError(effect, (error) =>
+      Predicate.isTagged(error, "Unauthenticated") ? refreshAfterRefusal : Effect.void,
+    );
 
   const run: Interface["run"] = (command, params) => {
     const [args] = params;
@@ -296,21 +274,18 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
     const [args] = params;
 
     return Stream.unwrap(
-      Effect.gen(function* () {
-        const wire = yield* encodeArgs(command.name, command.args, args);
-        const sent = yield* engine.heldToken;
-
-        return acrossReconnects(
+      Effect.map(encodeArgs(command.name, command.args, args), (wire) =>
+        acrossReconnects(
           engine,
           transport
             .subscribe(command.path, wire)
             .pipe(Stream.mapEffect((raw) => decodeResult(command.name, command.result, raw))),
-        ).pipe(
-          Stream.mapError(toPlatformError(command.name)),
-          Stream.tapErrorTag("Unauthenticated", () => refusalOf(sent)),
-        );
-      }),
-    ).pipe(Stream.mapError(toPlatformError(command.name)));
+        ),
+      ),
+    ).pipe(
+      Stream.mapError(toPlatformError(command.name)),
+      Stream.tapErrorTag("Unauthenticated", () => refreshAfterRefusal),
+    );
   };
 
   const methods = effectMethods(effectBuilder({ run, watch }));
