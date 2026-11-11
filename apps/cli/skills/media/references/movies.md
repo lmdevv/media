@@ -87,7 +87,7 @@ Mark a movie, an episode, or a whole show watched.
 
 ## `movies.imports.cancel`
 
-Stop a Jellyfin or Plex import; what it already wrote stays.
+Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays.
 
 - CLI: `media movies imports cancel`
 - Kind: mutation

@@ -88,11 +88,11 @@ describe("CoreRescans.foldersToWatch", () => {
             { libraryId, folders: [inside, linked, outside, escaping, unmounted] },
           ]);
 
-          assert.deepStrictEqual(watched, [
-            { libraryId, roots: [inside] },
-            { libraryId, roots: [linked] },
-            { libraryId, roots: [unmounted] },
-          ]);
+          assert.deepStrictEqual(watched, [{ libraryId, roots: [inside, linked, unmounted] }]);
+
+          const outsideOnly = yield* foldersToWatch([{ libraryId, folders: [outside, escaping] }]);
+
+          assert.deepStrictEqual(outsideOnly, []);
         }),
     );
   });

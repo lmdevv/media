@@ -129,7 +129,7 @@ const listResult = v.object({
 
 /** The handlers `convex/movies/imports.ts` passes to `register`, one per `movies.imports` command. */
 export interface Handlers {
-  /** `movies.imports.cancel` (mutation, movies:edit): Stop a Jellyfin or Plex import; what it already wrote stays. */
+  /** `movies.imports.cancel` (mutation, movies:edit): Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays. */
   readonly cancel: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof cancelArgs>,

@@ -110,19 +110,23 @@ export const useLibraryCommands = (context: CommandContext): CommandContribution
       },
     };
 
+    const cancelable = scans.filter((active) => !active.scan.canceling);
+
     const cancelScans: ReadonlyArray<CommandItem> =
-      scans.length === 0
+      cancelable.length === 0
         ? []
         : [
             {
               kind: "action",
               id: "scan:cancel",
-              title: scans.length === 1 ? "Cancel scan" : "Cancel scans",
+              title: cancelable.length === 1 ? "Cancel scan" : "Cancel scans",
               keywords: ["stop", "scan"],
               leading: { kind: "icon", icon: CircleXIcon },
               perform: async () => {
                 try {
-                  await Promise.all(scans.map((active) => cancel({ jobId: active.scan.jobId })));
+                  await Promise.all(
+                    cancelable.map((active) => cancel({ jobId: active.scan.jobId })),
+                  );
                 } catch (cause) {
                   toastFailure(cause);
                 }

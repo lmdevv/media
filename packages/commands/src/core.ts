@@ -486,6 +486,8 @@ export const core = [
           message: v.union(v.string(), v.null()),
           /** When the attempt running now started; null unless it runs. */
           startedAt: v.union(v.number(), v.null()),
+          /** True while a cancel waits for the running scan's worker to stop. */
+          canceling: v.boolean(),
           finishedAt: v.union(v.number(), v.null()),
         }),
         v.null(),

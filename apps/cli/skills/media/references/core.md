@@ -641,7 +641,7 @@ Show a library, how many items it holds, its latest scan, and to its managers it
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ libraryId: Id<"libraries"> }`
-- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number | null; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number | null; total: number | null; error: string | null; message: string | null; startedAt: number | null; finishedAt: number | null } | null }`
+- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number | null; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number | null; total: number | null; error: string | null; message: string | null; startedAt: number | null; canceling: boolean; finishedAt: number | null } | null }`
 
 ## `core.libraries.list`
 

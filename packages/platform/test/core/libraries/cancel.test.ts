@@ -121,6 +121,7 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
 
     expect(await cancel(editor, running.jobId)).toEqual({ outcome: "canceling" });
     expect(await cancel(editor, running.jobId)).toEqual({ outcome: "canceling" });
+    expect(await scanOf(editor, libraryId)).toMatchObject({ status: "running", canceling: true });
 
     expect(await upsert(stack, lease, [movieFile(join(root, "late.mkv"))])).toEqual({
       outcome: "canceled",

@@ -194,7 +194,9 @@ function LibraryRow({ library, now }: { readonly library: Library; readonly now:
           {detail === null ? null : <ScanStatus scan={scan} />}
         </Cell>
         <Cell className="flex w-22 justify-end">
-          {active && scan !== null ? (
+          {scan?.canceling === true ? (
+            <span className="font-sans text-label/label text-text-muted">Canceling…</span>
+          ) : active && scan !== null ? (
             <button
               type="button"
               disabled={stopScan.pending}

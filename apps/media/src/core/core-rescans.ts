@@ -9,7 +9,7 @@
  */
 import type { LibraryId } from "@media/contracts/ids";
 import { serverFunctions } from "@media/contracts/server-functions";
-import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
+import { Duration, Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 
 import * as LibraryMonitor from "../library/library-monitor.ts";
 import * as MediaConfig from "../media-config.ts";
@@ -69,10 +69,13 @@ const isWithin = (root: string, candidate: string, separator: string): boolean =
   candidate === root ||
   candidate.startsWith(root.endsWith(separator) ? root : `${root}${separator}`);
 
+/** How long resolving one folder may take before it counts as not resolvable now. */
+const RESOLVE_TIMEOUT = Duration.seconds(5);
+
 /**
- * Each folder of `libraries` to watch, as a library of its own so a change names its folder.
- * A folder that leads outside every approved root is left out, as the scanner refuses it; one
- * that cannot be resolved now, such as a share not mounted yet, stays, and its watch retries.
+ * Each library of `libraries` with the folders of it to watch. A folder that leads outside every
+ * approved root is left out, as the scanner refuses it; one that cannot be resolved now, such as a
+ * share not mounted yet, stays, and its watch retries. A library left with no folder is left out.
  */
 export const foldersToWatch = Effect.fn("CoreRescans.foldersToWatch")(function* (
   libraries: ReadonlyArray<WatchedLibrary>,
@@ -85,19 +88,24 @@ export const foldersToWatch = Effect.fn("CoreRescans.foldersToWatch")(function* 
     fs.realPath(root).pipe(Effect.option),
   )).flatMap((root) => (Option.isSome(root) ? [root.value] : []));
 
-  const watched = yield* Effect.forEach(
-    libraries.flatMap((library) =>
-      library.folders.map((folder) => ({ libraryId: library.libraryId, folder })),
-    ),
-    ({ libraryId, folder }) =>
-      fs.realPath(folder).pipe(
-        Effect.option,
-        Effect.map((real) =>
-          Option.isSome(real) && !roots.some((root) => isWithin(root, real.value, path.sep))
-            ? []
-            : [{ libraryId, roots: [folder] }],
-        ),
+  const leadsOutside = (folder: string) =>
+    fs.realPath(folder).pipe(
+      Effect.timeoutOption(RESOLVE_TIMEOUT),
+      Effect.orElseSucceed(() => Option.none<string>()),
+      Effect.map(
+        (real) =>
+          Option.isSome(real) && !roots.some((root) => isWithin(root, real.value, path.sep)),
       ),
+    );
+
+  const watched = yield* Effect.forEach(libraries, (library) =>
+    Effect.filter(library.folders, (folder) =>
+      Effect.map(leadsOutside(folder), (out) => !out),
+    ).pipe(
+      Effect.map((folders) =>
+        folders.length === 0 ? [] : [{ libraryId: library.libraryId, roots: folders }],
+      ),
+    ),
   );
 
   return watched.flat();
@@ -110,6 +118,7 @@ export const layer: Layer.Layer<
   MediaConfig.Service | CoreSession.Service | FileSystem.FileSystem | Path.Path
 > = Layer.unwrap(
   Effect.gen(function* () {
+    const config = yield* MediaConfig.Service;
     const session = yield* CoreSession.Service;
 
     const rescan: LibraryMonitor.Rescan = Effect.fn("CoreRescans.rescan")(
@@ -137,7 +146,12 @@ export const layer: Layer.Layer<
       Effect.gen(function* () {
         const monitor = yield* LibraryMonitor.Service;
 
+        // The list is checked again on the reconcile interval too, so a folder mounted later
+        // outside the approved roots stops being watched without waiting for a library to change.
         yield* watchedLibraries(session).pipe(
+          Stream.switchMap((libraries) =>
+            Stream.tick(config.reconcileInterval).pipe(Stream.as(libraries)),
+          ),
           Stream.runForEach((libraries) =>
             foldersToWatch(libraries).pipe(Effect.flatMap(monitor.track)),
           ),

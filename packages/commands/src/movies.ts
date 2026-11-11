@@ -730,7 +730,7 @@ export const movies = [
     result: importRun,
   }),
   mutation("movies.imports.cancel", {
-    summary: "Stop a Jellyfin or Plex import; what it already wrote stays",
+    summary: "Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays",
     scope: "movies:edit",
     args: { importId: v.id("imports") },
     result: canceled,

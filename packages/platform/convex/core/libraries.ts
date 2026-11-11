@@ -52,6 +52,7 @@ const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null, shown: ScanS
     error: shown.error && job.status === "failed" ? job.error : null,
     message: shown.progress ? job.message : null,
     startedAt: job.status === "running" ? job.claimedAt : null,
+    canceling: job.status === "running" && job.cancelRequestedAt !== null,
     finishedAt: job.status === "queued" || job.status === "running" ? null : job.finishedAt,
   };
 };

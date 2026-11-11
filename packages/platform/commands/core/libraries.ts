@@ -52,6 +52,7 @@ const getResult = v.object({
       error: v.union(v.string(), v.null()),
       message: v.union(v.string(), v.null()),
       startedAt: v.union(v.number(), v.null()),
+      canceling: v.boolean(),
       finishedAt: v.union(v.number(), v.null()),
     }),
     v.null(),

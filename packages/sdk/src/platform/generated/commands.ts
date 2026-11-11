@@ -1184,6 +1184,7 @@ const core_libraries_get = query({
         error: Schema.Union([Schema.String, Schema.Null]),
         message: Schema.Union([Schema.String, Schema.Null]),
         startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+        canceling: Schema.Boolean,
         finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
       }),
       Schema.Null,
@@ -3965,7 +3966,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       markWatched: method.mutation(movies_history_markWatched),
     },
     imports: {
-      /** `movies.imports.cancel` (mutation, movies:edit): Stop a Jellyfin or Plex import; what it already wrote stays. */
+      /** `movies.imports.cancel` (mutation, movies:edit): Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays. */
       cancel: method.mutation(movies_imports_cancel),
       /** `movies.imports.get` (query, movies:edit): Show one Jellyfin or Plex import, its job, and what it wrote. */
       get: method.query(movies_imports_get),
@@ -4309,7 +4310,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       markWatched: method.mutation(movies_history_markWatched),
     },
     imports: {
-      /** `movies.imports.cancel` (mutation, movies:edit): Stop a Jellyfin or Plex import; what it already wrote stays. */
+      /** `movies.imports.cancel` (mutation, movies:edit): Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays. */
       cancel: method.mutation(movies_imports_cancel),
       /** `movies.imports.get` (query, movies:edit): Show one Jellyfin or Plex import, its job, and what it wrote. */
       get: method.query(movies_imports_get),
