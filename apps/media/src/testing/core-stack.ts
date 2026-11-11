@@ -90,6 +90,42 @@ export interface Person {
   readonly platform: Platform.Interface;
 }
 
+const setUpOwner = (url: string) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(
+          Platform.layer({ url, connection: "http", storage: TokenStorage.layerMemory }),
+        );
+
+        const platform = Context.get(context, Platform.Platform);
+
+        if ((yield* platform.core.server.info()).hasOwner) return;
+
+        yield* platform.session
+          .signIn(
+            Platform.Credentials.Setup({
+              username: `owner${crypto.randomUUID().slice(0, 8)}`,
+              password: Redacted.make(`password-${crypto.randomUUID()}`),
+            }),
+          )
+          .pipe(Effect.catchTag("Conflict", () => Effect.void));
+      }),
+    ),
+  );
+
+const owners = new Map<string, Promise<void>>();
+
+/** Sets up the core's owner unless it has one, once per stack; the core refuses users before it. */
+const ensureOwner = (): Promise<void> => {
+  const url = coreUrl();
+  const setUp = owners.get(url) ?? setUpOwner(url);
+
+  owners.set(url, setUp);
+
+  return setUp;
+};
+
 /** Creates a person with `role` and signs them in; the client closes with `scope`. */
 export const personIn = async (
   scope: Scope.Scope,
@@ -103,6 +139,7 @@ export const personIn = async (
 
   const { username, password } = person;
 
+  await ensureOwner();
   await runHost("core/accounts/host:createUser", { username, password, role }, Schema.String);
 
   const platform = await signIn(scope, username, password);
