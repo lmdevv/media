@@ -1,0 +1,16 @@
+name: ffmpeg
+description: >-
+  Puts the flake's ffmpeg-full, the one the dev shell pins, on PATH from cache.nixos.org. Ubuntu's
+  Azure mirror served ffmpeg's packages at about 90 kB/s often enough to stall jobs for minutes.
+runs:
+  using: composite
+  steps:
+    - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+    - shell: bash
+      run: |
+        ffmpeg="$(nix build --no-link --print-out-paths --inputs-from "$GITHUB_WORKSPACE" nixpkgs#ffmpeg-full.bin)"
+        echo "$ffmpeg/bin" >> "$GITHUB_PATH"
+        # Nix's fontconfig reads its own configuration, which lists none of the runner's fonts;
+        # libass needs them.
+        echo "FONTCONFIG_FILE=/etc/fonts/fonts.conf" >> "$GITHUB_ENV"
+        "$ffmpeg/bin/ffmpeg" -hide_banner -version | head -1

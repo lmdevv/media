@@ -179,6 +179,8 @@ The example identities must be replaced with the model and tool that actually co
   (`docker pull` the `jellyfin/jellyfin:12.2@sha256:…` reference in `.github/workflows/ci.yml`)
   and set `MEDIA_JELLYFIN_DOCKER=1`; without the image the media suite skips the real-Jellyfin
   case silently, but the web migration spec starts Jellyfin anyway, pulling the image or failing.
+  `E2E_GROUP=<group>` runs one of the Playwright groups that CI runs in separate jobs, each on its
+  own stack; the groups are in `apps/web-movies/playwright.config.ts`.
 - Repeat runs: `pnpm --filter @media/web-movies exec playwright test --repeat-each=20`, and for Vitest, fresh
   processes that stop at the first failure: `(for run in $(seq 20); do pnpm test <paths> || exit; done)`.
   Don't use Vitest's `--repeats`: `@effect/vitest` 4.0.3 counts each repeat as a finished test and
@@ -205,12 +207,14 @@ The example identities must be replaced with the model and tool that actually co
   Node and ffmpeg, in a `systemd-run --user` unit that kills on any denied call. Run it after a
   change to the media service's file or process handling, its dependencies, or the module's
   sandbox. Copy test files with `testing/byte-copies.ts`: `copyFile` calls `fchown`.
-- CI runs `check`, `legacy/music checks`, both stack jobs, the sandbox job, and the Nix job. On a
-  PR, the `changed workspaces` job skips each of the last five when the diff does not reach the
-  workspaces it tests. PRs matching the `paths` in `.github/workflows/image.yml` also run its
-  `build and smoke-test`. `main` has no branch protection, so check every one yourself before
-  merging. Never merge with admin
-  bypass.
+- CI runs `check`, `legacy/music checks`, both stack jobs, the sandbox job, and the Nix job. Each
+  stack job is a matrix: the backend one runs the platform's files in four shards and the other
+  packages beside them, and the web one runs each Playwright group. On a PR, the `changed
+  workspaces` job skips each of the last five when the diff does not reach the workspaces it tests.
+  `CI passed` fails when any of them fails or is cancelled, and `main` requires it. A new push to a
+  PR cancels its older run. PRs matching the `paths` in `.github/workflows/image.yml` also run its
+  `build and smoke-test`, which `main` does not require, so check it yourself before merging. Never
+  merge with admin bypass.
 - Run `/pstack:no-comments` on the diff before `/code-review` when a PR adds or changes comments,
   with or without `/pstack:poteto-mode`. Tell it to keep required `// SAFETY:` comments; its agent
   does not know this repo's rule.

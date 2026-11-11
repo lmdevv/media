@@ -12,6 +12,11 @@ env:
   # pull_request runs check out GitHub's merge commit, whose first parent is the base branch tip.
   CHANGED: ${{ github.event_name == 'pull_request' && '--since HEAD^1' || '--all' }}
 
+# A new push to a pull request cancels its older run; every push to main runs to the end.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   changes:
     name: changed workspaces
@@ -19,6 +24,7 @@ jobs:
     outputs:
       workspaces: ${{ steps.scope.outputs.workspaces }}
       verify-media: ${{ steps.skill.outputs.changed }}
+      e2e-groups: ${{ steps.e2e.outputs.groups }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,6 +48,10 @@ jobs:
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
+      - id: e2e
+        run: |
+          groups="$(grep -oE 'group: "[^"]+"' apps/web-movies/playwright.config.ts | cut -d'"' -f2 | sort -u)"
+          echo "groups=$(jq -Rsc 'split("\n") | map(select(. != ""))' <<<"$groups")" >> "$GITHUB_OUTPUT"
 
   check:
     runs-on: ubuntu-latest
@@ -55,7 +65,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - uses: ./.github/actions/ffmpeg
       - run: pnpm install --frozen-lockfile
       - id: scope
         run: |
@@ -93,9 +103,9 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - uses: ./.github/actions/ffmpeg
       - run: pnpm install --frozen-lockfile --filter=. --ignore-scripts
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install chromium
       # The isolated browser host runs in an unprivileged user and network namespace.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: scripts/private-network.sh true
@@ -121,7 +131,7 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: legacy/music/pnpm-lock.yaml
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - uses: ./.github/actions/ffmpeg
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
@@ -134,7 +144,7 @@ jobs:
       - run: pnpm knip
 
   stack:
-    name: backend against a local Convex
+    name: backend against a local Convex (${{ matrix.suite }})
     needs: changes
     if: >-
       contains(fromJSON(needs.changes.outputs.workspaces), 'packages/backend')
@@ -143,6 +153,28 @@ jobs:
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/cli')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
     runs-on: ubuntu-latest
+    # The platform's files run one at a time within a shard, as their read and write budgets come
+    # from the backend's shared function log.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: platform 1/4
+            run: pnpm --filter @media/platform test:stack --shard=1/4
+          - suite: platform 2/4
+            run: pnpm --filter @media/platform test:stack --shard=2/4
+          - suite: platform 3/4
+            run: pnpm --filter @media/platform test:stack --shard=3/4
+          - suite: platform 4/4
+            run: pnpm --filter @media/platform test:stack --shard=4/4
+          - suite: backend, SDK and CLI
+            run: |
+              pnpm --filter @media/backend test:stack
+              pnpm --filter @media/sdk test:stack
+              pnpm --filter @lmdevv/movies test:stack
+          - suite: media server
+            media: true
+            run: pnpm --filter @media/server test:stack
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -152,22 +184,20 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - if: matrix.media
+        uses: ./.github/actions/ffmpeg
       - run: pnpm install --frozen-lockfile
       - run: scripts/dev-stack.sh up
-      - run: pnpm --filter @media/platform test:stack
-      - run: pnpm --filter @media/backend test:stack
-      - run: pnpm --filter @media/sdk test:stack
-      - run: pnpm --filter @lmdevv/movies test:stack
-      - run: docker pull jellyfin/jellyfin:12.2@sha256:357724bf0ae27a672c7cbaa899db2d9abeb13dbd8657ccce750258a4c059d037
-      - run: pnpm --filter @media/server test:stack
+      - if: matrix.media
+        run: docker pull jellyfin/jellyfin:12.2@sha256:357724bf0ae27a672c7cbaa899db2d9abeb13dbd8657ccce750258a4c059d037
+      - run: ${{ matrix.run }}
         env:
           MEDIA_JELLYFIN_DOCKER: "1"
       - if: always()
         run: scripts/dev-stack.sh destroy
 
   web-stack:
-    name: movies client against a local Convex
+    name: movies client against a local Convex (${{ matrix.group }})
     needs: changes
     if: >-
       contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web-movies')
@@ -175,6 +205,10 @@ jobs:
       || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/platform')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.changes.outputs.e2e-groups) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -184,18 +218,38 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - uses: ./.github/actions/ffmpeg
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @media/web-movies exec playwright install --with-deps chromium
+      - run: pnpm --filter @media/web-movies exec playwright install chromium
       - run: scripts/dev-stack.sh up
-      - run: docker pull jellyfin/jellyfin:12.2@sha256:357724bf0ae27a672c7cbaa899db2d9abeb13dbd8657ccce750258a4c059d037
       - run: pnpm --filter @media/web-movies exec playwright test
         env:
+          E2E_GROUP: ${{ matrix.group }}
           MEDIA_JELLYFIN_DOCKER: "1"
+      - name: Time per suite
+        if: always() && hashFiles('apps/web-movies/playwright-report/results.json') != ''
+        run: |
+          {
+            echo "| suite | tests | minutes |"
+            echo "| --- | ---: | ---: |"
+            jq -r '
+              [.. | objects | select(has("projectName") and has("results")) | .projectName as $suite
+                | .results[] | {suite: $suite, start: (.startTime | sub("\\.[0-9]+Z$"; "Z") | fromdate), ms: .duration}]
+              | group_by(.suite)
+              | map({suite: .[0].suite, tests: length, seconds: ((map(.start + .ms / 1000) | max) - (map(.start) | min))})
+              | sort_by(-.seconds)[]
+              | "| \(.suite) | \(.tests) | \(.seconds / 6 | round / 10) |"' apps/web-movies/playwright-report/results.json
+          } >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report-${{ matrix.group }}
+          path: apps/web-movies/playwright-report
+          retention-days: 7
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-results
+          name: playwright-results-${{ matrix.group }}
           path: apps/web-movies/test-results
           retention-days: 7
       - if: always()
@@ -218,7 +272,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @media/web-account exec playwright install --with-deps chromium
+      - run: pnpm --filter @media/web-account exec playwright install chromium
       - run: scripts/dev-stack.sh up
       - run: pnpm --filter @media/web-account exec playwright test
       - if: failure()
@@ -270,3 +324,34 @@ jobs:
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
       - run: nix flake check -L
+
+  # main requires this check, so a new job goes in `needs`.
+  passed:
+    name: CI passed
+    if: always()
+    needs:
+      [
+        changes,
+        check,
+        verify-media-skill,
+        legacy-music,
+        stack,
+        web-stack,
+        account-stack,
+        sandbox,
+        nix,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *)
+                echo "a job ended $result: $RESULTS" >&2
+                exit 1
+                ;;
+            esac
+          done

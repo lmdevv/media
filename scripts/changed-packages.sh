@@ -44,7 +44,7 @@ route() {
   done
   case "$path" in
     legacy/*) echo legacy/music ;;
-    .github/workflows/ci.yml) printf '%s\n' . legacy/music ;;
+    .github/workflows/ci.yml | .github/actions/*) printf '%s\n' . legacy/music ;;
     scripts/changed-packages.sh) echo . ;;
     nix/* | scripts/check-sandbox.sh) echo apps/media ;;
     scripts/dev-stack.sh | deploy/convex-backend.image) printf '%s\n' packages/backend packages/platform ;;
