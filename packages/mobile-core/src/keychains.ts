@@ -1,5 +1,6 @@
 import type { PlatformOptions, SharedStore } from "@media/sdk/promise";
 
+import { KeychainWriteFailed } from "./keychain";
 import type { Keychain } from "./keychain";
 
 /** The calls the keychains make on expo-secure-store, which the app passes in as itself. */
@@ -47,13 +48,20 @@ const optionsFor = (group: string | null): StoreOptions =>
 
 /**
  * A keychain in one access group. Every call names the group: an item written without one lands
- * in the first group the app's entitlement lists, which could be the shared one. A write the
- * keychain refuses, as while the device is locked, holds in memory until a later write lands or
- * the app quits. Only refused writes are held, so values another app writes to the shared group
- * are read fresh.
+ * in the first group the app's entitlement lists, which could be the shared one. A best-effort
+ * write the keychain refuses, as while the device is locked, holds in memory until a later write
+ * lands or the app quits; a durable write throws instead and holds nothing. Only refused writes
+ * are held, so values another app writes to the shared group are read fresh.
  */
 const keychainIn = (store: SecureStoreModule, options: StoreOptions): Keychain => {
   const refused = new Map<string, string | null>();
+
+  // Clearing writes an empty value synchronously rather than deleting, so a clear followed by a
+  // write can never land out of order.
+  const persist = (key: string, value: string | null): void => {
+    store.setItem(key, value ?? "", options);
+    refused.delete(key);
+  };
 
   return {
     read: (key) => {
@@ -69,14 +77,24 @@ const keychainIn = (store: SecureStoreModule, options: StoreOptions): Keychain =
         return null;
       }
     },
-    // Clearing writes an empty value synchronously rather than deleting, so a clear followed by a
-    // write can never land out of order.
     write: (key, value) => {
       try {
-        store.setItem(key, value ?? "", options);
-        refused.delete(key);
+        persist(key, value);
       } catch {
         refused.set(key, value);
+      }
+    },
+    writeDurably: (key, value) => {
+      try {
+        persist(key, value);
+      } catch (cause) {
+        // A held value would let this launch read what a later one never could.
+        refused.delete(key);
+
+        throw new KeychainWriteFailed({
+          key,
+          message: `The keychain refused ${key}: ${cause instanceof Error ? cause.message : String(cause)}`,
+        });
       }
     },
   };

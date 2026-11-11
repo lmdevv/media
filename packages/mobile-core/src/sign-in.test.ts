@@ -3,6 +3,8 @@ import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { memoryKeychain } from "./keychain";
+import { openKeychains } from "./keychains";
+import type { SecureStoreModule, StoreOptions } from "./keychains";
 import type { Keychain } from "./keychain";
 import { readAppRecord, readPhoneAccount } from "./records";
 import type { UserId } from "./records";
@@ -442,14 +444,15 @@ const snapshotting = () => {
     readonly shared: Map<string, string>;
   }> = [];
 
-  const over = (values: Map<string, string>): Keychain => ({
-    read: (key) => values.get(key) ?? null,
-    write: (key, value) => {
+  const over = (values: Map<string, string>): Keychain => {
+    const write = (key: string, value: string | null): void => {
       if (value === null) values.delete(key);
       else values.set(key, value);
       snapshots.push({ own: new Map(own), shared: new Map(shared) });
-    },
-  });
+    };
+
+    return { read: (key) => values.get(key) ?? null, write, writeDurably: write };
+  };
 
   return { own: over(own), shared: over(shared), snapshots };
 };
@@ -457,13 +460,12 @@ const snapshotting = () => {
 const restored = (values: Map<string, string>): Keychain => {
   const copy = new Map(values);
 
-  return {
-    read: (key) => copy.get(key) ?? null,
-    write: (key, value) => {
-      if (value === null) copy.delete(key);
-      else copy.set(key, value);
-    },
+  const write = (key: string, value: string | null): void => {
+    if (value === null) copy.delete(key);
+    else copy.set(key, value);
   };
+
+  return { read: (key) => copy.get(key) ?? null, write, writeDurably: write };
 };
 
 /**
@@ -538,5 +540,106 @@ describe("a crash part way through a sign-in", () => {
     ).toBe("exchanged");
 
     await expectNoSilentExchange(core, keychains.snapshots);
+  });
+});
+
+const MOVIES_GROUP = "J9DZZ82K23.dev.lmdevv.movies";
+
+const MUSIC_GROUP = "J9DZZ82K23.dev.lmdevv.music";
+
+const SHARED_GROUP = "J9DZZ82K23.dev.lmdevv.media";
+
+const slot = (key: string, options: StoreOptions) => `${options.accessGroup ?? ""}/${key}`;
+
+/**
+ * A device keychain whose items outlive the app's process, and which refuses every write to the
+ * groups in `refusing`, as iOS does while the device is locked. The set may change as a test runs.
+ */
+const deviceKeychain = (refusing: ReadonlySet<string>): SecureStoreModule => {
+  const items = new Map<string, string>();
+
+  const refuse = (options: StoreOptions): void => {
+    if (refusing.has(options.accessGroup ?? "")) throw new Error("errSecInteractionNotAllowed");
+  };
+
+  return {
+    getItem: (key, options) => items.get(slot(key, options)) ?? null,
+    setItem: (key, value, options) => {
+      refuse(options);
+      items.set(slot(key, options), value);
+    },
+    getItemAsync: async (key, options) => items.get(slot(key, options)) ?? null,
+    setItemAsync: async (key, value, options) => {
+      refuse(options);
+      items.set(slot(key, options), value);
+    },
+    deleteItemAsync: async (key, options) => {
+      items.delete(slot(key, options));
+    },
+  };
+};
+
+/** The movies app on a phone whose keychain `store` holds, opened afresh as after a process death. */
+const moviesOn = (store: SecureStoreModule): Phone => {
+  const { own, shared } = openKeychains(store, { own: MOVIES_GROUP, shared: SHARED_GROUP });
+
+  return { own, shared, server: SERVER, deviceName: "Aiko's iPhone" };
+};
+
+describe("a keychain that refuses the D59 mark", () => {
+  it("asks for the password, and never exchanges, on every launch while the mark cannot be stored", async () => {
+    const core = fakeCore();
+    const store = deviceKeychain(new Set([MOVIES_GROUP]));
+    const music = openKeychains(store, { own: MUSIC_GROUP, shared: SHARED_GROUP });
+
+    // The phone's other app signed Aiko in and left her grant in the shared group.
+    await signInWithPassword(
+      core.platform([]),
+      { own: music.own, shared: music.shared, server: SERVER, deviceName: "Aiko's iPhone" },
+      { username: "aiko", password: "aiko-password" },
+    );
+
+    const first: Array<string> = [];
+    const again: Array<string> = [];
+
+    expect(await signInOnLaunch(core.platform(first), moviesOn(store))).toBe("askPassword");
+    // The process dies and the app opens again over the same keychain.
+    expect(await signInOnLaunch(core.platform(again), moviesOn(store))).toBe("askPassword");
+    expect([...first, ...again]).not.toContain("exchange");
+  });
+
+  it("stops a password sign-in before it opens a session when the mark cannot be stored", async () => {
+    const core = fakeCore();
+    const calls: Array<string> = [];
+
+    await expect(
+      signInWithPassword(core.platform(calls), moviesOn(deviceKeychain(new Set([MOVIES_GROUP]))), {
+        username: "aiko",
+        password: "aiko-password",
+      }),
+    ).rejects.toMatchObject({ _tag: "KeychainWriteFailed" });
+    expect(calls).toEqual([]);
+    expect(core.current()).toBeNull();
+  });
+
+  it("signs a session out again when the grant cannot be stored, and keeps no grant", async () => {
+    const core = fakeCore();
+    const calls: Array<string> = [];
+    const refusing = new Set<string>();
+    const store = deviceKeychain(refusing);
+    const phone = moviesOn(store);
+
+    // The device locks after the app opened its keychains, so only writing the grant fails.
+    refusing.add(SHARED_GROUP);
+
+    await expect(
+      signInWithPassword(core.platform(calls), phone, {
+        username: "aiko",
+        password: "aiko-password",
+      }),
+    ).rejects.toMatchObject({ _tag: "KeychainWriteFailed" });
+    expect(calls.at(-1)).toBe("signOut");
+    expect(readPhoneAccount(moviesOn(store).shared)).toBeNull();
+    expect(await signInOnLaunch(core.platform([]), moviesOn(store))).toBe("askPassword");
   });
 });

@@ -13,7 +13,7 @@ import { useMadeKeys } from "@/session/made-keys";
 const create = () => router.push("/api-keys/new");
 
 export default function ApiKeys() {
-  const keys = useMadeKeys();
+  const { keys } = useMadeKeys();
 
   return (
     <Screen

@@ -336,6 +336,10 @@ Every sign-in goes to the media server's sign-in boundary, `signInUrlFor` the se
 - Every keychain read, write, and delete names its group. iOS puts an item written without one in
   the first group the entitlement lists, so an unnamed write could land in the shared group, where
   the phone's other apps would read a session. Listing the own group first is a second guard.
+- The records sign-in's safety depends on, the D59 mark, the person, and the grant, are written
+  durably: a write the keychain refuses, as while the device is locked, throws and holds nothing,
+  so the sign-in stops and the password prompt stays. Only records whose loss is harmless, the
+  connection and the app's local preferences, fall back to memory for the launch.
 - A build that cannot write the group, such as one without a team, keeps the shared record in the
   app's own keychain. It then works alone: nothing reaches the phone's other apps.
 - An app with no connection of its own, whose shared keychain names a server, connects there on

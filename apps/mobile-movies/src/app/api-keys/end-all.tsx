@@ -2,10 +2,11 @@ import { usePlatform } from "@media/sdk/react";
 import { KeyRound } from "lucide-react-native";
 
 import { ConfirmSheet } from "@/components/settings/confirm-sheet";
-import { MADE_KEYS } from "@/session/made-keys";
+import { useMadeKeys } from "@/session/made-keys";
 
 export default function EndAllKeys() {
   const platform = usePlatform();
+  const { endedAll } = useMadeKeys();
 
   return (
     <ConfirmSheet
@@ -15,7 +16,7 @@ export default function EndAllKeys() {
       icon={KeyRound}
       onConfirm={async () => {
         await platform.core.auth.apiKeys.endAll();
-        MADE_KEYS.endedAll();
+        endedAll();
       }}
     />
   );

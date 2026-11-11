@@ -97,6 +97,18 @@ describe("openKeychains", () => {
     ]);
   });
 
+  it("throws on a refused durable write and holds nothing, not even over an earlier held value", () => {
+    const { store } = recordingStore(new Set());
+    const keychains = openKeychains(store, { own: OWN, shared: null });
+
+    keychains.own.write("media.app.x", "held");
+
+    expect(() => keychains.own.writeDurably("media.app.x", "mark")).toThrow(
+      expect.objectContaining({ _tag: "KeychainWriteFailed", key: "media.app.x" }),
+    );
+    expect(keychains.own.read("media.app.x")).toBeNull();
+  });
+
   it("holds a refused write for the launch", () => {
     const { store } = recordingStore(new Set());
     const keychains = openKeychains(store, { own: OWN, shared: null });

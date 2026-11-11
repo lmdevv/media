@@ -3,12 +3,13 @@ import { useLocalSearchParams } from "expo-router";
 import { KeyRound } from "lucide-react-native";
 
 import { ConfirmSheet } from "@/components/settings/confirm-sheet";
-import { MADE_KEYS, useMadeKeys } from "@/session/made-keys";
+import { useMadeKeys } from "@/session/made-keys";
 
 export default function RevokeKey() {
   const params = useLocalSearchParams<{ keyId: string; name?: string }>();
   const platform = usePlatform();
-  const key = useMadeKeys().find((made) => made.keyId === params.keyId) ?? null;
+  const made = useMadeKeys();
+  const key = made.keys.find((each) => each.keyId === params.keyId) ?? null;
 
   return (
     <ConfirmSheet
@@ -19,7 +20,7 @@ export default function RevokeKey() {
       onConfirm={async () => {
         if (key === null) throw new Error("This key can’t be found. Go back and try again.");
         await platform.core.auth.apiKeys.revoke({ keyId: key.keyId });
-        MADE_KEYS.revoked(key.keyId);
+        made.revoked(key.keyId);
       }}
     />
   );

@@ -38,32 +38,46 @@ export const broadestLabel = (scopes: ReadonlyArray<KeyScope>): string =>
     "",
   );
 
-/**
- * The keys made on this phone since the app opened, newest first. The core has no query that lists
- * a person's keys, so API Keys can show, and revoke by ID, only the keys made here; every key ends
- * with End All Keys.
- */
-export interface MadeKeys {
-  readonly list: () => ReadonlyArray<MadeKey>;
-  readonly subscribe: (listener: () => void) => () => void;
-  readonly add: (key: MadeKey) => void;
-  readonly revoked: (keyId: ApiKeyId) => void;
-  readonly endedAll: () => void;
+/** Whose keys a list holds: one person on one server. */
+interface KeyOwner {
+  readonly server: string;
+  readonly userId: string;
 }
 
-/** An empty list of keys made here. */
+/**
+ * The keys made on this phone since the app opened, newest first, kept apart for each person on
+ * each server, so switching person or server never shows another account's keys. The core has no
+ * query that lists a person's keys, so API Keys can show, and revoke by ID, only the keys made
+ * here; every key ends with End All Keys.
+ */
+export interface MadeKeys {
+  readonly list: (owner: KeyOwner) => ReadonlyArray<MadeKey>;
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly add: (owner: KeyOwner, key: MadeKey) => void;
+  readonly revoked: (owner: KeyOwner, keyId: ApiKeyId) => void;
+  readonly endedAll: (owner: KeyOwner) => void;
+}
+
+const NONE: ReadonlyArray<MadeKey> = [];
+
+/** The list for `owner`, as a key no server address or user id can collide in. */
+const ownerKey = (owner: KeyOwner): string => JSON.stringify([owner.server, owner.userId]);
+
+/** No keys made yet, for anyone. */
 export const madeKeys = (): MadeKeys => {
-  let keys: ReadonlyArray<MadeKey> = [];
+  const lists = new Map<string, ReadonlyArray<MadeKey>>();
   const listeners = new Set<() => void>();
 
-  const set = (next: ReadonlyArray<MadeKey>): void => {
-    keys = next;
+  const list = (owner: KeyOwner): ReadonlyArray<MadeKey> => lists.get(ownerKey(owner)) ?? NONE;
+
+  const set = (owner: KeyOwner, next: ReadonlyArray<MadeKey>): void => {
+    lists.set(ownerKey(owner), next);
 
     for (const listener of listeners) listener();
   };
 
   return {
-    list: () => keys,
+    list,
     subscribe: (listener) => {
       listeners.add(listener);
 
@@ -71,8 +85,13 @@ export const madeKeys = (): MadeKeys => {
         listeners.delete(listener);
       };
     },
-    add: (key) => set([key, ...keys.filter((each) => each.keyId !== key.keyId)]),
-    revoked: (keyId) => set(keys.filter((each) => each.keyId !== keyId)),
-    endedAll: () => set([]),
+    add: (owner, key) =>
+      set(owner, [key, ...list(owner).filter((each) => each.keyId !== key.keyId)]),
+    revoked: (owner, keyId) =>
+      set(
+        owner,
+        list(owner).filter((each) => each.keyId !== keyId),
+      ),
+    endedAll: (owner) => set(owner, NONE),
   };
 };

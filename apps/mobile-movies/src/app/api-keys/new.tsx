@@ -17,7 +17,7 @@ import { Toggle } from "@/components/ui/toggle";
 import { broadestLabel, grantablePermissions } from "@/lib/api-keys";
 import type { KeyScope } from "@/lib/api-keys";
 import { describeFailure } from "@/lib/failure";
-import { MADE_KEYS } from "@/session/made-keys";
+import { useMadeKeys } from "@/session/made-keys";
 import { useMe } from "@/session/me";
 
 const DEFAULT_SCOPES: ReadonlyArray<KeyScope> = ["movies:read", "movies:play"];
@@ -69,6 +69,7 @@ function Created({ created }: { readonly created: CreatedKey }) {
 export default function CreateApiKey() {
   const me = useMe();
   const platform = usePlatform();
+  const made = useMadeKeys();
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState<ReadonlyArray<KeyScope>>(DEFAULT_SCOPES);
   const [busy, setBusy] = useState(false);
@@ -96,14 +97,14 @@ export default function CreateApiKey() {
     setError(null);
 
     try {
-      const made = await platform.core.auth.apiKeys.create({
+      const key = await platform.core.auth.apiKeys.create({
         name: trimmed,
         scopes: chosen,
         expiresInDays: EXPIRES_IN_DAYS,
       });
 
-      MADE_KEYS.add({ keyId: made.keyId, name: trimmed, detail: broadestLabel(chosen) });
-      setCreated({ name: trimmed, key: made.key });
+      made.add({ keyId: key.keyId, name: trimmed, detail: broadestLabel(chosen) });
+      setCreated({ name: trimmed, key: key.key });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (cause) {
       setError(describeFailure(cause));

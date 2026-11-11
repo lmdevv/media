@@ -84,9 +84,15 @@ const readJson = <A>(
 export const readPhoneAccount = (shared: Keychain): PhoneAccount | null =>
   readJson(shared, PHONE_KEY, PhoneAccountJson);
 
-/** Keeps the phone's shared account for every app on it, or forgets it with null. */
+/**
+ * Keeps the phone's shared account for every app on it, or forgets it with null. Throws
+ * `KeychainWriteFailed` when the keychain refuses it.
+ */
 export const writePhoneAccount = (shared: Keychain, account: PhoneAccount | null): void => {
-  shared.write(PHONE_KEY, account === null ? null : Schema.encodeSync(PhoneAccountJson)(account));
+  shared.writeDurably(
+    PHONE_KEY,
+    account === null ? null : Schema.encodeSync(PhoneAccountJson)(account),
+  );
 };
 
 const NO_RECORD: AppRecord = { device: null, person: null, opened: false };
@@ -95,9 +101,12 @@ const NO_RECORD: AppRecord = { device: null, person: null, opened: false };
 export const readAppRecord = (own: Keychain, server: string): AppRecord =>
   readJson(own, appKey(server), AppRecordJson) ?? NO_RECORD;
 
-/** Keeps what this app knows about its sign-in on `server`. */
+/**
+ * Keeps what this app knows about its sign-in on `server`. Throws `KeychainWriteFailed` when the
+ * keychain refuses it: the D59 mark must be stored, not only held in memory.
+ */
 export const writeAppRecord = (own: Keychain, server: string, record: AppRecord): void => {
-  own.write(appKey(server), Schema.encodeSync(AppRecordJson)(record));
+  own.writeDurably(appKey(server), Schema.encodeSync(AppRecordJson)(record));
 };
 
 /** The server this app connects to, or null before anyone connected it. */

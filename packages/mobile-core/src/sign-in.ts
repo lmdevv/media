@@ -49,7 +49,8 @@ export interface Phone {
 /**
  * Marks that this app began a sign-in of its own on this server, before the call that opens a
  * session. Every state a crash can leave from here on has the mark, so a launch asks for the
- * password and never exchanges the phone's grant silently (D59).
+ * password and never exchanges the phone's grant silently (D59). Throws `KeychainWriteFailed` when
+ * the keychain refuses the mark, so no sign-in starts without it stored.
  */
 const markOpened = (phone: Phone): void => {
   const record = readAppRecord(phone.own, phone.server);
@@ -110,7 +111,8 @@ const finish = async (
 
 /**
  * Signs in with a username and password, issues the phone's grant, and enrolls the app. Rejects
- * with `Unauthenticated` for a refused password.
+ * with `Unauthenticated` for a refused password, and with `KeychainWriteFailed`, before any call,
+ * when the keychain cannot store the D59 mark.
  */
 export const signInWithPassword = async (
   platform: SignInPlatform,
@@ -198,7 +200,14 @@ export const signInOnLaunch = async (
 
   if (account === null || account.server !== phone.server) return "signIn";
 
-  markOpened(phone);
+  try {
+    markOpened(phone);
+  } catch (cause) {
+    // Without the mark stored, a later launch could exchange again after this session is revoked.
+    if (Predicate.isTagged(cause, "KeychainWriteFailed")) return "askPassword";
+
+    throw cause;
+  }
 
   try {
     await platform.session.exchangeGrant({ userId: account.userId, grant: account.grant });
