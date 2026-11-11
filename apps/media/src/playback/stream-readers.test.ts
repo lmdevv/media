@@ -332,7 +332,12 @@ describe.skipIf(!hasFfmpeg)("stream readers", () => {
           const started = yield* start(who);
           const runFolder = `${server.transcodeDir}/${started.streamId}/1`;
 
+          const waiting = yield* sessions
+            .segment(started.streamId, started.generation, started.segmentIndex + 1, who.grant)
+            .pipe(Effect.scoped, Effect.forkChild);
+
           yield* Effect.promise(() => opens.reached.promise);
+          yield* Fiber.interrupt(waiting);
 
           assert.strictEqual(
             yield* until(
