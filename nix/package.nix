@@ -11,6 +11,7 @@
   nodejs_24,
   ffmpeg-full,
   makeWrapper,
+  patchelf,
 }:
 let
   root = ../.;
@@ -32,6 +33,7 @@ stdenv.mkDerivation (finalAttrs: {
         ../apps
         ../packages
         ../deploy/functions-hash.sh
+        ../deploy/image/argv-secret.c
         ../deploy/image/rootfs/etc/caddy/Caddyfile
       ]
     );
@@ -61,6 +63,7 @@ stdenv.mkDerivation (finalAttrs: {
     pnpm
     pnpmConfigHook
     makeWrapper
+    patchelf
   ];
 
   buildPhase = ''
@@ -93,6 +96,13 @@ stdenv.mkDerivation (finalAttrs: {
     cp packages/platform/scripts/configure.mjs $lib/platform/scripts/
     rm $lib/platform/scripts/configure.ts
     install -D -m 644 deploy/image/rootfs/etc/caddy/Caddyfile $lib/Caddyfile
+
+    # The image's argv-secret shim, which the module's Convex container preloads so the instance
+    # secret never appears in a command line (deploy/image/argv-secret.c, docs/security.md). It
+    # loads into the container's own glibc, so it carries no store path.
+    mkdir -p $lib/convex
+    $CC -shared -fPIC -O2 -Wall -Wextra -Werror -o $lib/convex/argv-secret.so deploy/image/argv-secret.c
+    patchelf --remove-rpath $lib/convex/argv-secret.so
 
     cp -r apps/media/dist $lib/media/dist
     cp apps/media/scripts/configure-web.ts $lib/media/scripts/

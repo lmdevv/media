@@ -46,22 +46,29 @@ let
   moviesDataDir = "${cfg.dataDir}/movies";
   mediaDataDir = "${moviesDataDir}/media";
 
+  # The instance secret's file inside the Convex container, on its data volume, where
+  # `convex-entry.sh` keeps it.
+  convexSecretFile = "/convex/data/credentials/instance_secret";
+
   # Its HTTP actions stay inside its container (docs/decisions/0025).
   convexContainer = name: port: origin: dataDir: {
     image = cfg.convexImage;
+    entrypoint = "/bin/bash";
+    cmd = [ "/media-convex-entry.sh" ];
     ports = [ "127.0.0.1:${toString port}:3210" ];
     environment = {
       INSTANCE_NAME = name;
       CONVEX_CLOUD_ORIGIN = origin;
       CONVEX_SITE_ORIGIN = "http://127.0.0.1:3211";
-      DISABLE_BEACON = "1";
-      REDACT_LOGS_TO_CLIENT = "1";
-      DO_NOT_REQUIRE_SSL = "1";
       # Idle memory, as in the image (docs/decisions/0027).
       MALLOC_ARENA_MAX = "2";
       ISOLATE_IDLE_TIMEOUT_SECONDS = "60";
     };
-    volumes = [ "${dataDir}:/convex/data" ];
+    volumes = [
+      "${dataDir}:/convex/data"
+      "${./convex-entry.sh}:/media-convex-entry.sh:ro"
+      "${cfg.package}/lib/movies/convex/argv-secret.so:/argv-secret.so:ro"
+    ];
   };
 
   setup = pkgs.writeShellApplication {
@@ -112,7 +119,10 @@ let
       done
       curl -fsS "$url/version" >/dev/null
 
-      admin_key="$(${containerRuntime} exec media-core-convex ./generate_admin_key.sh | tail -n 1)"
+      # `generate_key` takes the secret only as an argument; the shim reads it from its file.
+      admin_key="$(${containerRuntime} exec -e LD_PRELOAD=/argv-secret.so \
+        -e ARGV_SECRET_FILE=${convexSecretFile} media-core-convex \
+        /convex/generate_key core @ARGV_SECRET_FILE | tail -n 1)"
       export CONVEX_SELF_HOSTED_URL="$url" CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
 
       if [ -s "$data/version" ] && [ "$(cat "$data/version")" != "$version" ] &&

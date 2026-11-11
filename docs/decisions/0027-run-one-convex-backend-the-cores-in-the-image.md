@@ -145,6 +145,9 @@ stack. With the settings under "Idle memory", the image measured 187.5 MiB again
 
 - `/movies/convex` and every path under it answer `404 Not Found` from Caddy, not the movies
   client's page.
+- No command line holds the Convex instance secret, in the image or under the NixOS module: both
+  start the backend and run `generate_key` through the argv-secret shim, and the module replaces
+  the upstream entrypoint with `nix/convex-entry.sh` (docs/security.md).
 - `/music` is still not served until the music port, as under ADR 0026.
 - An upgrade backup is `core-manual-<timestamp>.zip` in `/data/core/backups`, owned by the media
   user, so the media service lists and restores it.

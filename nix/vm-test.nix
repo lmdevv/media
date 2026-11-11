@@ -121,6 +121,17 @@ testers.runNixOSTest {
             "tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value movies)/cmdline | grep -q 'KEY\\|SECRET'"
         )
 
+    with subtest("the Convex instance secret is on no command line"):
+        secret = "/var/lib/media/core/convex/credentials/instance_secret"
+        machine.succeed(f"grep -qE '^[0-9a-f]{{64}}$' {secret}")
+        machine.succeed(f"! grep -sqaF \"$(cat {secret})\" /proc/[0-9]*/cmdline")
+        machine.succeed(
+            "tr '\\0' ' ' < /proc/$(pgrep -f convex-local-backend | head -n 1)/cmdline"
+            " | grep -qF -- '--instance-secret @ARGV_SECRET_FILE'"
+        )
+        # The setup's admin key came through the shim: the core is deployed and configured.
+        machine.succeed("[ -s /var/lib/media/core/version ]")
+
     with subtest("the library is read-only to the service"):
         machine.fail(
             "nsenter -t $(systemctl show -p MainPID --value movies) -m touch /srv/media/movies/written"

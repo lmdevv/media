@@ -195,6 +195,9 @@ The example identities must be replaced with the model and tool that actually co
 - `scripts/stack-e2e.sh` builds the image and smoke-tests the packaged stack;
   `scripts/nixos-module-e2e.sh` does the same for the NixOS module on a NixOS host, and
   `nix build .#checks.x86_64-linux.vm -L` boots the module in a NixOS VM (needs KVM).
+- `scripts/check-convex-argv.sh` runs the pinned Convex image as the NixOS module does and checks
+  that the instance secret appears on no command line. Run it after a change to
+  `nix/convex-entry.sh`, the module's Convex container, or `deploy/image/argv-secret.c`.
 - `scripts/check-sandbox.sh` runs the media tests under the module's system call filter, on its
   Node and ffmpeg, in a `systemd-run --user` unit that kills on any denied call. Run it after a
   change to the media service's file or process handling, its dependencies, or the module's
