@@ -76,6 +76,15 @@ export interface EngineOptions {
   readonly settings: DownloadSettings;
 }
 
+/**
+ * A byte count from expo-file-system as a number. Its iOS module answers an `Int64`, which Expo
+ * hands over as a BigInt although it is typed as a number, and no sum with a number survives one.
+ */
+const byteCount = (value: number | bigint): number => Number(value);
+
+/** The phone's free space in bytes. */
+const freeSpace = (): number => byteCount(Paths.availableDiskSpace);
+
 /** Rows asked for per page of `core.downloads.list`, the most it answers. */
 const LIST_PAGE_SIZE = 200;
 
@@ -850,7 +859,7 @@ export class DownloadEngine {
 
     const received = this.#find(download.id)?.receivedBytes ?? 0;
 
-    if (spaceShortfall(response.estimatedBytes - received, Paths.availableDiskSpace) > 0) {
+    if (spaceShortfall(response.estimatedBytes - received, freeSpace()) > 0) {
       this.#dispatch(
         DownloadEvent.NoSpace({ id: download.id, totalBytes: response.estimatedBytes }),
       );
@@ -941,7 +950,7 @@ export class DownloadEngine {
 
     const { ticket, ready } = prepared;
 
-    if (spaceShortfall(ready.sizeBytes, Paths.availableDiskSpace) > 0) {
+    if (spaceShortfall(ready.sizeBytes, freeSpace()) > 0) {
       this.#dispatch(DownloadEvent.NoSpace({ id: queued.id, totalBytes: ready.sizeBytes }));
 
       return;
@@ -1000,9 +1009,9 @@ export class DownloadEngine {
     }
   }
 
-  #progressOf(id: string): (progress: { readonly bytesWritten: number }) => void {
+  #progressOf(id: string): (progress: { readonly bytesWritten: number | bigint }) => void {
     return ({ bytesWritten }) =>
-      this.#dispatch(DownloadEvent.Received({ id, bytes: bytesWritten }), "soon");
+      this.#dispatch(DownloadEvent.Received({ id, bytes: byteCount(bytesWritten) }), "soon");
   }
 
   async #transfer(
