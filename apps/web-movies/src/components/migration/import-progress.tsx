@@ -8,14 +8,21 @@ import { formatCount, formatPercent } from "@/components/admin/format";
 import type { ImportRun } from "@/components/admin/types";
 import { useNow } from "@media/ui/lib/use-now";
 
+import { useState } from "react";
+
 import { PHASE_LABELS, importFraction, importMinutesLeft } from "./migration-model";
+import type { ImportSeen } from "./migration-model";
 import { Caution, Stat, Stats } from "./parts";
 
 /** 03 Importing: the import's share done, time left, and the phase it is in. */
 export function Importing({ run }: { readonly run: ImportRun }) {
   const now = useNow(5_000);
   const fraction = importFraction(run);
-  const minutesLeft = importMinutesLeft(run, fraction, now);
+  const [seen, setSeen] = useState<ImportSeen | null>(null);
+
+  if (seen === null && run.job.status === "running") setSeen({ at: now, fraction });
+
+  const minutesLeft = importMinutesLeft(run, fraction, now, seen);
   const { done, total } = run.job;
   const phase = PHASE_LABELS[run.phase];
 

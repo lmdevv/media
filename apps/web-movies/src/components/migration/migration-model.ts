@@ -128,14 +128,30 @@ export const importFraction = (run: ImportRun): number => {
   return Math.min(1, before + weight * within);
 };
 
+/** Where a running import stood when this page first saw it run. */
+export interface ImportSeen {
+  readonly at: number;
+  readonly fraction: number;
+}
+
 /**
- * Whole minutes left at the pace since the import was made, at least 1; null until there is a
- * pace (2% done), while it waits for the media service, and once it is complete.
+ * Whole minutes left at the pace since `seen`, when this page first saw the import running, at
+ * least 1. The core reports no job start, and the import's creation includes its wait in the
+ * queue, so the pace starts at the first sight of it running. Null until it has moved 2% since,
+ * while it waits for the media service, and once it is complete.
  */
-export const importMinutesLeft = (run: ImportRun, fraction: number, now: number): number | null => {
-  if (run.job.status !== "running" || fraction < 0.02 || fraction >= 1) return null;
+export const importMinutesLeft = (
+  run: ImportRun,
+  fraction: number,
+  now: number,
+  seen: ImportSeen | null,
+): number | null => {
+  if (run.job.status !== "running" || seen === null || fraction >= 1) return null;
 
-  const elapsed = Math.max(0, now - run.createdAt);
+  const moved = fraction - seen.fraction;
+  const elapsed = now - seen.at;
 
-  return Math.max(1, Math.round((elapsed / fraction - elapsed) / 60_000));
+  if (moved < 0.02 || elapsed <= 0) return null;
+
+  return Math.max(1, Math.round(((1 - fraction) * elapsed) / moved / 60_000));
 };

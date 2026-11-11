@@ -141,8 +141,16 @@ describe("importFraction", () => {
     expect(importFraction(run({ job: { status: "succeeded" } }))).toBe(1);
   });
 
-  it("estimates minutes left only while running", () => {
-    expect(importMinutesLeft(run({}), 0.5, 10 * 60_000)).toBe(10);
-    expect(importMinutesLeft(run({ job: { status: "queued" } }), 0.5, 10 * 60_000)).toBeNull();
+  it("estimates minutes left from the pace since the import was first seen running", () => {
+    const seen = { at: 60 * 60_000, fraction: 0.25 };
+
+    // A quarter done an hour after it was made, after a long wait in the queue; another quarter in
+    // the 10 minutes since leaves the last half 20 more at that pace, whatever the wait.
+    expect(importMinutesLeft(run({}), 0.5, 70 * 60_000, seen)).toBe(20);
+    expect(importMinutesLeft(run({}), 0.26, 70 * 60_000, seen)).toBeNull();
+    expect(importMinutesLeft(run({}), 0.5, 70 * 60_000, null)).toBeNull();
+    expect(
+      importMinutesLeft(run({ job: { status: "queued" } }), 0.5, 70 * 60_000, seen),
+    ).toBeNull();
   });
 });
