@@ -241,7 +241,7 @@ const stream = coreShortcut("movies", "stream", {
         file: { ...start.file, missing: false },
         token: start.ticket,
         tokenExpiresAt: start.expiresAt,
-        mediaBaseUrl: connection.media.url,
+        mediaBaseUrl: connection.mediaUrl,
         resumePositionMs: start.resumePositionMs,
       }).pipe(
         Effect.mapError(

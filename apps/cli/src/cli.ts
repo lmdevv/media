@@ -78,31 +78,55 @@ const word = (text: string): string => kebabCase(text).toLowerCase();
 const topWords = [...coreGroups, "logs", "diagnostics", "commands", "call", "help"];
 
 /**
- * The old movies server's top-level words that the port renamed, and the command that does their
- * job now. Words that only moved under a group, such as `titles list`, are found by `movedTo`.
+ * The old movies server's commands that the port renamed, by their words, and the commands that do
+ * their job now. Words that only moved under a group, such as `titles list`, are found by
+ * `movedTo`. The room words go to the core's group sessions, except the next-episode countdown,
+ * which returns with p6-together-movies.
  */
-const RENAMED: ReadonlyMap<string, string> = new Map([
-  ["login", "auth login"],
-  ["logout", "auth logout"],
-  ["whoami", "auth sessions current"],
-  ["keys", "auth api-keys"],
-  ["search", "movies titles search"],
-  ["play", "movies stream"],
-  ["progress", "movies titles get"],
-  ["continue", "movies history continue-watching"],
-  ["scan", "auth libraries scan"],
-  ["backup", "admin backups run"],
+const RENAMED: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+  ["login", ["auth login"]],
+  ["logout", ["auth logout"]],
+  ["whoami", ["auth sessions current"]],
+  ["keys", ["auth api-keys"]],
+  ["search", ["movies titles search"]],
+  ["play", ["movies stream"]],
+  ["progress", ["movies titles get", "movies history list"]],
+  ["continue", ["movies history continue-watching"]],
+  ["scan", ["auth libraries scan"]],
+  ["backup", ["admin backups run"]],
+  ["rooms", ["auth together"]],
+  ["rooms create", ["auth together create"]],
+  ["rooms join", ["auth together join"]],
+  ["rooms play", ["auth together control"]],
+  ["rooms pause", ["auth together control"]],
+  ["rooms seek", ["auth together control"]],
+  ["rooms next", ["auth together control"]],
+  ["rooms status", ["auth together get"]],
+  ["rooms leave", ["auth together leave"]],
 ]);
 
-/** Where an old top-level command lives now: under a group, or renamed. */
-const movedTo = (path: ReadonlyArray<string>): Option.Option<string> =>
-  Option.orElse(Option.fromNullishOr(RENAMED.get(path[0] ?? "")), () =>
+/** The renamed command for the leading words: two words, else the first, unless it is `rooms`. */
+const renamed = (path: ReadonlyArray<string>): Option.Option<ReadonlyArray<string>> => {
+  const [first = "", second] = path;
+
+  return Option.orElse(
+    Option.fromNullishOr(second === undefined ? undefined : RENAMED.get(`${first} ${second}`)),
+    () =>
+      second === undefined || first !== "rooms"
+        ? Option.fromNullishOr(RENAMED.get(first))
+        : Option.none(),
+  );
+};
+
+/** Where an old top-level command lives now: renamed, or under a group. */
+const movedTo = (path: ReadonlyArray<string>): Option.Option<ReadonlyArray<string>> =>
+  Option.orElse(renamed(path), () =>
     Option.firstSomeOf(
       (["movies", "auth", "admin"] as const).map((group) => {
         const words = [group, ...path];
 
         return Option.isSome(resolveCore(words)) || Option.isSome(prefixHelp(words))
-          ? Option.some(words.join(" "))
+          ? Option.some([words.join(" ")])
           : Option.none();
       }),
     ),
@@ -112,8 +136,8 @@ const unknownCommand = (typed: string, path: ReadonlyArray<string>): UsageError 
   Option.match(movedTo(path), {
     onSome: (moved) =>
       new UsageError({
-        message: `Unknown command "${typed}"; it moved: run media ${moved}`,
-        command: moved.split(" ")[0] ?? null,
+        message: `Unknown command "${typed}"; it moved: run ${moved.map((words) => `media ${words}`).join(", or ")}`,
+        command: moved[0]?.split(" ")[0] ?? null,
       }),
     onNone: () => {
       const [head = ""] = path;
@@ -363,16 +387,24 @@ const runShortcut = Effect.fn("Cli.runShortcut")(function* (
 
 /**
  * A generated command's `--json` takes its arguments as an object. Given bare, at the end or
- * before another flag, it asks for JSON output, as it does for every other command.
+ * before another flag, it asks for JSON output, as it does for every other command. Nothing after
+ * `--` is a flag, so the rewrite stops there.
  */
-const bareJsonAsFormat = (rest: ReadonlyArray<string>): ReadonlyArray<string> =>
-  rest.map((token, index) => {
-    const next = rest[index + 1];
+const bareJsonAsFormat = (rest: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const terminator = rest.indexOf("--");
+  const flags = terminator === -1 ? rest : rest.slice(0, terminator);
 
-    return token === "--json" && (next === undefined || next.startsWith("-"))
-      ? "--format=json"
-      : token;
-  });
+  return [
+    ...flags.map((token, index) => {
+      const next = flags[index + 1];
+
+      return token === "--json" && (next === undefined || next.startsWith("-"))
+        ? "--format=json"
+        : token;
+    }),
+    ...(terminator === -1 ? [] : rest.slice(terminator)),
+  ];
+};
 
 const runGenerated = Effect.fn("Cli.runGenerated")(function* (
   command: CoreCommand,

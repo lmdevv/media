@@ -6,6 +6,7 @@ import {
   Layer,
   Match,
   Option,
+  Predicate,
   Redacted,
   Schedule,
   Schema,
@@ -122,6 +123,15 @@ export interface Session {
    * the same check as every token the client sends, so a signed-out session never hands one out.
    */
   readonly accessToken: Effect.Effect<Option.Option<Redacted.Redacted>, TokenStorageError>;
+  /**
+   * Runs `effect`, a call some server answered as this session, under the one refusal rule
+   * (D51): when it fails with `Unauthenticated`, the session refreshes once at once, and a refused
+   * refresh signs it out. The call is never repeated, so the failure still comes back; read
+   * `currentStatus` to tell an ended session from a refusal of the call alone. Every platform
+   * call already runs under it; wrap a call to another server that sends `accessToken`, such as
+   * the media server's own routes.
+   */
+  readonly refreshOnRefusal: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 }
 
 /** Runs platform commands as the signed-in session. */
@@ -243,6 +253,11 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
       ),
     );
 
+  const refreshOnRefusal = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Effect.tapError(effect, (error) =>
+      Predicate.isTagged(error, "Unauthenticated") ? refreshAfterRefusal : Effect.void,
+    );
+
   const run: Interface["run"] = (command, params) => {
     const [args] = params;
 
@@ -250,7 +265,7 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
       Effect.flatMap((wire) => transport.call(command.kind, command.path, wire)),
       Effect.flatMap((raw) => decodeResult(command.name, command.result, raw)),
       Effect.mapError(toPlatformError(command.name)),
-      Effect.tapErrorTag("Unauthenticated", () => refreshAfterRefusal),
+      refreshOnRefusal,
       Effect.withSpan("Platform.call", { attributes: { command: command.name } }),
     );
   };
@@ -374,6 +389,7 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
       startDeviceSignIn,
       signOut: engine.signOut,
       accessToken: engine.accessToken(false),
+      refreshOnRefusal,
     },
   });
 });

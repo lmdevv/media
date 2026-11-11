@@ -112,6 +112,11 @@ describe("the media command", () => {
       login: "media auth login",
       whoami: "media auth sessions current",
       continue: "media movies history continue-watching",
+      progress: "media movies titles get, or media movies history list",
+      "rooms create Sintel": "media auth together create",
+      "rooms pause": "media auth together control",
+      "rooms status": "media auth together get",
+      rooms: "media auth together",
     };
 
     const runs = await Promise.all(
@@ -132,11 +137,16 @@ describe("the media command", () => {
   });
 
   it("reports other unknown commands as usage errors with suggestions", async () => {
-    const [close, flag, typo] = await Promise.all([
+    const [close, flag, typo, countdown] = await Promise.all([
       media("mov"),
       media("--json"),
       media("diagnostics", "sesions"),
+      media("rooms", "countdown"),
     ]);
+
+    expect(JSON.parse(countdown.stderr)).toStrictEqual({
+      error: { code: "usage", message: 'Unknown command "rooms countdown"' },
+    });
 
     expect(close.code).toBe(ExitCode.usage);
     expect(close.stderr).toContain("did you mean movies");
@@ -566,6 +576,63 @@ describe("troubleshooting commands", () => {
 
         expect(run.code, run.stderr).toBe(ExitCode.ok);
         expect(run.stdout).toContain("Audio/video drift: median -12 ms, worst -41 ms over 54");
+      },
+    );
+  });
+
+  it("refreshes once when the service refuses the session, then asks to sign in (D51)", async () => {
+    const refreshes: Array<string> = [];
+
+    await withMediaService(
+      (request, response) => {
+        let body = "";
+
+        request.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        request.on("end", () => {
+          response.writeHead(request.url === "/api/action" ? 200 : 401, {
+            "content-type": "application/json",
+          });
+
+          if (request.url === "/api/action") {
+            refreshes.push(body);
+            response.end(
+              JSON.stringify({ status: "success", value: { tokens: null }, logLines: [] }),
+            );
+          } else {
+            response.end(
+              JSON.stringify({ code: "unauthenticated", message: "This session has ended" }),
+            );
+          }
+        });
+      },
+      async (url) => {
+        const homes = [storedHome(url), storedHome(url)];
+
+        const runs = await Promise.all(
+          [["logs"], ["diagnostics", "sessions"]].map((argv, index) =>
+            runInProcess(argv, {
+              XDG_CONFIG_HOME: homes[index]?.home ?? "",
+              MEDIA_PROFILE: "home",
+            }),
+          ),
+        );
+
+        expect(refreshes).toHaveLength(2);
+
+        for (const refresh of refreshes) expect(refresh).toContain('"refreshToken":"refresh-home"');
+
+        for (const run of runs) {
+          expect(run.code, run.stderr).toBe(ExitCode.unauthenticated);
+          expect(JSON.parse(run.stderr)).toMatchObject({ error: { code: "not_logged_in" } });
+          expect(run.stderr).toContain("media auth login");
+        }
+
+        for (const { home: signedIn, path } of homes) {
+          expect(JSON.parse(readFileSync(path, "utf8"))).toStrictEqual({ url });
+          rmSync(signedIn, { recursive: true, force: true });
+        }
       },
     );
   });

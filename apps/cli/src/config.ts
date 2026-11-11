@@ -396,14 +396,21 @@ export interface Connection {
   readonly platform: Platform.Interface;
   readonly url: string;
   readonly target: Target;
-  /** The media server's routes, called with the session's token. */
-  readonly media: MediaRoutes.Options;
+  /** The media server's base URL, where playback, logs, and diagnostics go. */
+  readonly mediaUrl: string;
   /**
-   * Runs a call, reporting `not_logged_in` once the core has ended the session: the client has
-   * already tried one refresh (D51).
+   * Runs a platform call, reporting `not_logged_in` once the core has ended the session. The
+   * platform client has already refreshed once after a refusal (D51).
    */
   readonly signedIn: <A>(
     effect: Effect.Effect<A, MediaRoutes.MediaRouteError>,
+  ) => Effect.Effect<A, CallError | ConfigFileError | NotLoggedIn>;
+  /**
+   * Runs a call to the media server's own routes with the session's token, under the same refusal
+   * rule as a platform call (`session.refreshOnRefusal`), and reports it as `signedIn` does.
+   */
+  readonly media: <A>(
+    call: (routes: MediaRoutes.Options) => Effect.Effect<A, MediaRoutes.MediaRouteError>,
   ) => Effect.Effect<A, CallError | ConfigFileError | NotLoggedIn>;
 }
 
@@ -463,21 +470,24 @@ export const connect = Effect.fn("Config.connect")(function* (
       ),
     );
 
+  const signedIn: Connection["signedIn"] = (effect) =>
+    effect.pipe(
+      Effect.catchTags({
+        Unauthenticated: endedSession,
+        TokenStorageError: (error) => Effect.fail(storageFailure(target.path)(error)),
+      }),
+    );
+
+  const mediaUrl = Option.getOrElse(target.mediaUrl, () => Platform.serverUrlBeside(url));
+  const routes: MediaRoutes.Options = { url: mediaUrl, bearer: platform.session.accessToken };
+
   const connection: Connection = {
     platform,
     url,
     target,
-    media: {
-      url: Option.getOrElse(target.mediaUrl, () => Platform.serverUrlBeside(url)),
-      bearer: platform.session.accessToken,
-    },
-    signedIn: (effect) =>
-      effect.pipe(
-        Effect.catchTags({
-          Unauthenticated: endedSession,
-          TokenStorageError: (error) => Effect.fail(storageFailure(target.path)(error)),
-        }),
-      ),
+    mediaUrl,
+    signedIn,
+    media: (call) => signedIn(platform.session.refreshOnRefusal(call(routes))),
   };
 
   return connection;

@@ -128,7 +128,17 @@ NixOS module now run alone (ADR 0027).
   only, and documents the hand-written commands itself. The hand-maintained `movies.md` and its
   `skill:reference` script are gone.
 
+- **Group sessions.** The old `rooms` words map to the generated `media auth together`
+  commands: `create`, `join`, `leave`, `status` (`together get`), and `play`, `pause`, `seek`,
+  and `next` (`together control`). The next-episode countdown (`rooms countdown` and
+  `rooms cancel-countdown`) has no core command; it returns with p6-together-movies.
+- **Refusals (D51).** One rule covers every call the CLI makes as the session. When the core or
+  the media server refuses the session (`Unauthenticated`, HTTP 401), the platform client
+  refreshes once at once. A refused refresh clears the stored session, and the CLI reports
+  `not_logged_in`, naming `media auth login`. Platform calls run under it inside the client; the
+  media server's routes (`media logs`, `media diagnostics`) run under the same rule through
+  `session.refreshOnRefusal`.
+
 Old words with no replacement on the core, left out under D62 until the backlog brings them back:
-`profiles use` (one person per session now), `keys list`, `rooms *` (group sessions return for
-movies in p6-together-movies), `import` (the importer page lives in the movies client, D57),
-`restore`, and `--wait` on queued jobs.
+`profiles use` (one person per session now), `keys list`, the room countdown above, `import` (the
+importer page lives in the movies client, D57), `restore`, and `--wait` on queued jobs.

@@ -252,7 +252,7 @@ const logs: ShortcutCommand = {
       const query = yield* logQuery(invocation);
       const json = printsJson(invocation);
       const connection = yield* connect(invocation.target, "required");
-      const found = yield* connection.signedIn(MediaRoutes.logs(connection.media, query));
+      const found = yield* connection.media((routes) => MediaRoutes.logs(routes, query));
 
       if (Option.isSome(found.unavailableSince)) {
         yield* output.err(
@@ -363,8 +363,8 @@ const playbackTimeline: ShortcutCommand = {
 
       const connection = yield* connect(invocation.target, "required");
 
-      const diagnostics = yield* connection.signedIn(
-        MediaRoutes.run(connection.media, "diagnostics.playback", {
+      const diagnostics = yield* connection.media((routes) =>
+        MediaRoutes.run(routes, "diagnostics.playback", {
           sessionId: PlaybackSessionId.make(sessionId.value),
           measuredDrift: true,
         }),
@@ -402,9 +402,9 @@ const sessions: ShortcutCommand = {
 
       const connection = yield* connect(invocation.target, "required");
 
-      const found = yield* connection.signedIn(
+      const found = yield* connection.media((routes) =>
         MediaRoutes.run(
-          connection.media,
+          routes,
           "diagnostics.sessions",
           Option.match(since, { onNone: () => ({}), onSome: (value) => ({ since: value }) }),
         ),

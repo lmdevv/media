@@ -333,6 +333,37 @@ describe("a core command", () => {
     expect(await storedFile(env)).toEqual({ url: answer.url });
   });
 
+  it("reads a bare --json as JSON output, but never past --", async () => {
+    const env = freshHome();
+
+    const sent = await withFakeCore((fake) =>
+      Effect.gen(function* () {
+        yield* storeSession(env, fake.url);
+        yield* fake.reply("movies/titles:search", Reply.Success({ value: [] }));
+
+        const runs = yield* Effect.forEach(
+          [
+            ["movies", "titles", "search", "--", "--json"],
+            ["movies", "titles", "search", "--json", '{"query":"-foo"}'],
+            ["movies", "titles", "search", "--query=--json"],
+            ["movies", "titles", "search", "alien", "--json"],
+          ],
+          (argv) => Effect.promise(() => media(argv, env)),
+        );
+
+        return {
+          codes: runs.map((run) => run.code),
+          args: (yield* fake.requestsTo("movies/titles:search")).map((call) => call.args),
+        };
+      }),
+    );
+
+    expect(sent).toStrictEqual({
+      codes: [ExitCode.ok, ExitCode.ok, ExitCode.ok, ExitCode.ok],
+      args: [{ query: "--json" }, { query: "-foo" }, { query: "--json" }, { query: "alien" }],
+    });
+  });
+
   it("lets --limit and --cursor override a page given in --json", async () => {
     const env = freshHome();
 
