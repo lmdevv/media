@@ -1,8 +1,21 @@
-import { Brand, Context, Effect, Layer, Predicate, Redacted } from "effect";
+import {
+  Brand,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Predicate,
+  Redacted,
+} from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { Forbidden, Unauthenticated } from "@media/contracts/errors";
+
+import { TransportError } from "../sdk-errors";
 
 import * as FakeConvex from "../testing/fake-convex";
 import { jwtExpiringAt, Reply } from "../testing/fake-convex";
@@ -70,6 +83,81 @@ const refusedAfterSignIn = (refresh: Reply) =>
         status: yield* platform.session.currentStatus,
         calls: (yield* fake.requestsTo("core/accounts/me:changePassword")).length,
         signIns: (yield* fake.requestsTo("auth:signIn")).map((request) => request.args),
+      };
+    }),
+  );
+
+/**
+ * Two calls go out with the first session. `order` releases their refusals: one after the
+ * other (`a`, then `b` once `a`'s refresh is done) or together. A call that runs again with
+ * the renewed token succeeds. The server renews `refresh-1` and refuses `refresh-2`.
+ */
+const overlapping = (order: "one after the other" | "together") =>
+  withPlatform((platform, fake) =>
+    Effect.gen(function* () {
+      yield* fake.handle("auth:signIn", (request) =>
+        Effect.succeed(
+          Predicate.hasProperty(request.args, "refreshToken")
+            ? request.args.refreshToken === "refresh-1"
+              ? Reply.Success({
+                  value: { tokens: { token: RENEWED, refreshToken: "refresh-2" } },
+                })
+              : Reply.Success({ value: { tokens: null } })
+            : signedIn,
+        ),
+      );
+      yield* platform.session.signIn(
+        Platform.Credentials.Password({ username: "ada", password: Redacted.make("secret") }),
+      );
+
+      const sentWith: Array<string> = [];
+      const gates = { a: yield* Deferred.make<void>(), b: yield* Deferred.make<void>() };
+      const sent = { a: yield* Deferred.make<void>(), b: yield* Deferred.make<void>() };
+
+      const call = (name: "a" | "b") =>
+        platform.session.refreshOnRefusal(
+          Effect.gen(function* () {
+            const token = Option.getOrElse(
+              Option.map(yield* platform.session.accessToken, Redacted.value),
+              () => "",
+            );
+
+            sentWith.push(`${name}:${token === RENEWED ? "renewed" : "first"}`);
+
+            if (token === RENEWED) return name;
+            yield* Deferred.succeed(sent[name], undefined);
+            yield* Deferred.await(gates[name]);
+
+            return yield* new Unauthenticated({ message: "Not this session" });
+          }),
+        );
+
+      const a = yield* Effect.forkChild(Effect.exit(call("a")));
+      const b = yield* Effect.forkChild(Effect.exit(call("b")));
+
+      yield* Deferred.await(sent.a);
+      yield* Deferred.await(sent.b);
+
+      if (order === "together") {
+        yield* Deferred.succeed(gates.a, undefined);
+        yield* Deferred.succeed(gates.b, undefined);
+      } else {
+        yield* Deferred.succeed(gates.a, undefined);
+        yield* Fiber.await(a);
+        yield* Deferred.succeed(gates.b, undefined);
+      }
+
+      const results = [yield* Fiber.join(a), yield* Fiber.join(b)].map((exit) =>
+        Exit.isSuccess(exit) ? exit.value : "refused",
+      );
+
+      return {
+        results: results.toSorted(),
+        sentWith: sentWith.toSorted(),
+        status: yield* platform.session.currentStatus,
+        refreshes: (yield* fake.requestsTo("auth:signIn")).flatMap((request) =>
+          Predicate.hasProperty(request.args, "refreshToken") ? [request.args.refreshToken] : [],
+        ),
       };
     }),
   );
@@ -171,6 +259,12 @@ describe("Platform", () => {
             ),
           );
 
+          const unreachable = yield* Effect.flip(
+            platform.session.refreshOnRefusal(
+              Effect.fail(new TransportError({ operation: "logs", message: "down", cause: null })),
+            ),
+          );
+
           const afterForbidden = yield* platform.session.currentStatus;
 
           const refused = yield* Effect.flip(
@@ -181,6 +275,7 @@ describe("Platform", () => {
 
           return {
             forbidden,
+            unreachable,
             afterForbidden,
             refused,
             status: yield* platform.session.currentStatus,
@@ -193,10 +288,30 @@ describe("Platform", () => {
 
       expect(answer).toMatchObject({
         forbidden: { _tag: "Forbidden" },
+        unreachable: { _tag: "TransportError" },
         afterForbidden: "signedIn",
         refused: { _tag: "Unauthenticated" },
         status: "signedOut",
         refreshes: 1,
+      });
+    });
+
+    describe("refusals of a session another call renewed", () => {
+      it("retries a refusal that arrives after the refresh once, and keeps the session", async () => {
+        expect(await overlapping("one after the other")).toStrictEqual({
+          results: ["b", "refused"],
+          sentWith: ["a:first", "b:first", "b:renewed"],
+          status: "signedIn",
+          refreshes: ["refresh-1"],
+        });
+      });
+
+      it("shares one refresh between refusals of one session", async () => {
+        const answer = await overlapping("together");
+
+        expect(answer.refreshes).toStrictEqual(["refresh-1"]);
+        expect(answer.status).toBe("signedIn");
+        expect(answer.results.filter((result) => result === "refused")).toHaveLength(1);
       });
     });
 
