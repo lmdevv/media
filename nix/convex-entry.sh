@@ -12,6 +12,10 @@ if [ ! -s "$secret" ]; then
   head -c 32 /dev/urandom | od -An -v -tx1 | tr -d ' \n' >"$secret.new"
   mv "$secret.new" "$secret"
 fi
+# An older install may have left the secret readable; it is the backend's alone at every start.
+chown "$(id -u):$(id -g)" "$data/credentials" "$secret"
+chmod 700 "$data/credentials"
+chmod 600 "$secret"
 printf '%s\n' "$INSTANCE_NAME" >"$data/credentials/instance_name"
 export TMPDIR="$data/tmp" LD_PRELOAD=/argv-secret.so ARGV_SECRET_FILE="$secret"
 cd /convex

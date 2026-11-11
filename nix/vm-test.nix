@@ -115,16 +115,18 @@ testers.runNixOSTest {
             "[ \"$(sed -n 's/^MEDIA_SERVICE_API_KEY=//p' /run/movies/media.env)\" = "
             "\"$(cat /var/lib/media/core/secrets/media-service-key)\" ]"
         )
-        machine.fail("journalctl -u movies.service | grep -qF \"$(cat /var/lib/media/core/secrets/media-service-key)\"")
+        machine.fail("journalctl -u movies.service | grep -qF -f /var/lib/media/core/secrets/media-service-key")
         machine.succeed("[ \"$(stat -c '%U' /proc/$(systemctl show -p MainPID --value movies))\" = movies ]")
         machine.fail(
             "tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value movies)/cmdline | grep -q 'KEY\\|SECRET'"
         )
 
     with subtest("the Convex instance secret is on no command line"):
+        # Every command here names the secret's file, never the secret: `grep -f` reads it.
         secret = "/var/lib/media/core/convex/credentials/instance_secret"
-        machine.succeed(f"grep -qE '^[0-9a-f]{{64}}$' {secret}")
-        machine.succeed(f"! grep -sqaF \"$(cat {secret})\" /proc/[0-9]*/cmdline")
+        machine.succeed(f"grep -qxE '[0-9a-f]{{64}}' {secret}")
+        assert machine.succeed(f"stat -c %a {secret} $(dirname {secret})").split() == ["600", "700"]
+        machine.succeed(f"! grep -sqaF -f {secret} /proc/[0-9]*/cmdline")
         machine.succeed(
             "tr '\\0' ' ' < /proc/$(pgrep -f convex-local-backend | head -n 1)/cmdline"
             " | grep -qF -- '--instance-secret @ARGV_SECRET_FILE'"

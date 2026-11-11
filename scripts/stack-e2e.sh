@@ -18,6 +18,8 @@ if [[ -z "$image" ]]; then
 fi
 
 library="$(mktemp -d)"
+# Secrets the checks look for, as `grep -f` pattern files: never as an argument (docs/security.md).
+secrets="$(mktemp -d)"
 node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
 # Ten minutes of video, so its transcode still runs when the crash check kills the media service.
 mkdir -p "$library/movies/Long Fixture (2020)"
@@ -52,6 +54,7 @@ cleanup() {
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
     rm -rf "$library"
   fi
+  rm -rf "$secrets"
   exit $status
 }
 trap cleanup EXIT
@@ -137,9 +140,20 @@ check "the media service signs in to the core with its stored key and the core's
     in_movies grep -qx "CONVEX_BACKEND_DIR=/app/platform" /run/movies/media.env &&
     in_movies grep -q "^MEDIA_TICKET_KEYS=." /run/movies/media.env &&
     ! in_movies grep -q "^PLAYBACK_TOKEN_SECRET=" /run/movies/media.env'
+# The service key and the ticket keys, by redirection only, one pattern per line in a private file.
+secret_patterns() {
+  (
+    umask 077
+    {
+      in_movies cat /data/core/secrets/media-service-key
+      printf '\n'
+      in_movies sed -n 's/^MEDIA_TICKET_KEYS=//p' /run/movies/media.env
+    } >"$secrets/patterns"
+  )
+  printf '%s\n' "$secrets/patterns"
+}
 check "the service key and ticket keys stay out of the log" \
-  '! compose logs --no-color media 2>&1 | grep -qF -e "$(in_movies cat /data/core/secrets/media-service-key)" \
-    -e "$(in_movies sed -n s/^MEDIA_TICKET_KEYS=//p /run/movies/media.env)"'
+  '! compose logs --no-color media 2>&1 | grep -qF -f "$(secret_patterns)"'
 check "the library is read-only" '! in_movies setpriv --reuid=0 touch /media/library/written 2>/dev/null'
 check "no secret is in the command line" \
   '! in_movies cat "/proc/${media_pid}/cmdline" | tr "\0" "\n" | grep -q "KEY\|SECRET"'

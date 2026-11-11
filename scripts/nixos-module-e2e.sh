@@ -159,9 +159,17 @@ check "the rest of the system is read-only for the service" \
   '! sudo nsenter -t "$pid" -m touch "$base/outside" 2>/dev/null'
 check "no secret is in the command line" '! sudo cat "/proc/$pid/cmdline" | tr "\0" "\n" | grep -q "KEY\|SECRET"'
 setup_script="$(sed -n 's/^ExecStartPre=+//p' "$unit_file")"
+# The admin key and the service key as `grep -f` patterns, by redirection only: a check for a
+# secret never puts it in an argument (docs/security.md).
+secrets="$(mktemp -d)"
+(
+  umask 077
+  sudo sed -n -e 's/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p' -e 's/^MEDIA_SERVICE_API_KEY=//p' \
+    /run/movies/media.env >"$secrets/patterns"
+)
 check "no secret is in the unit or its startup script" \
-  '! sudo grep -qF -e "$(sudo sed -n "s/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p" /run/movies/media.env)" \
-    -e "$(sudo sed -n "s/^MEDIA_SERVICE_API_KEY=//p" /run/movies/media.env)" "$unit_file" "$setup_script"'
+  '[[ -s "$secrets/patterns" ]] && ! sudo grep -qF -f "$secrets/patterns" "$unit_file" "$setup_script"'
+rm -rf "$secrets"
 sudo systemd-analyze security "$unit" --no-pager | tail -1
 
 MEDIA_PACKAGED_STACK=1 \
