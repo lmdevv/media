@@ -6,6 +6,7 @@
  *
  * Plain TypeScript with no Effect import, as the core's Convex functions read it.
  */
+import { canonicalAddress } from "./rate-limit";
 import { fromCanonicalBase64Url, loadDerivedKeyRing, toBase64Url } from "./ticket";
 import type { TicketKeysInvalid, TicketResult } from "./ticket";
 
@@ -82,6 +83,12 @@ export const PASS_LIFETIME_MS = 60 * 1000;
 /** How far ahead of the core's clock the server's may run. */
 export const PASS_CLOCK_SKEW_MS = 5 * 1000;
 
+/**
+ * How long after its pass expires the core keeps a spent nonce. The spender refuses an expired
+ * pass on its own, so forgetting the nonce later can never let the pass in again.
+ */
+export const SPENT_PASS_KEPT_MS = 60 * 1000;
+
 /** The address a pass names for the server's own sign-in with its service key. */
 export const SERVER_ADDRESS = "server";
 
@@ -130,7 +137,8 @@ export interface PassRequest {
   readonly params: { readonly [key: string]: SignInJson };
   /**
    * The client's address as the boundary resolved it, or `SERVER_ADDRESS`. The pass names the
-   * first 16 bytes of its SHA-256, so any text fits and no address is in the pass.
+   * first 16 bytes of the SHA-256 of its canonical form (`canonicalAddress`), so any text fits,
+   * one client has one digest however its address is written, and no address is in the pass.
    */
   readonly address: string;
   /** When the boundary signs, in milliseconds since the epoch. */
@@ -141,8 +149,10 @@ export interface PassRequest {
 export interface CheckedPass {
   /** The pass's random id, unpadded base64url. Not a secret: the core stores it as is. */
   readonly nonce: string;
-  /** When the core stops taking the pass, so a spent nonce can be forgotten after it. */
+  /** When the core stops taking the pass. Its spender refuses it from then on. */
   readonly expiresAt: number;
+  /** The digest of the address the pass names, unpadded base64url, as the pass carries it. */
+  readonly addressDigest: string;
 }
 
 /** Why the core refused a pass. Every reason reads the same to the client. */
@@ -215,7 +225,7 @@ export const loadPassKeys = async (
     const nonce = toBase64Url(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
 
     const addressDigest = new Uint8Array(
-      await crypto.subtle.digest("SHA-256", encoder.encode(address)),
+      await crypto.subtle.digest("SHA-256", encoder.encode(canonicalAddress(address))),
     ).slice(0, ADDRESS_DIGEST_BYTES);
 
     const head = `${PASS_VERSION}.${signingKeyId}.${String(now)}.${nonce}.${toBase64Url(addressDigest)}`;
@@ -264,7 +274,7 @@ export const loadPassKeys = async (
 
     if (issuedAt > now + PASS_CLOCK_SKEW_MS || now >= expiresAt) return refuse("expired");
 
-    return { ok: true, value: { nonce, expiresAt } };
+    return { ok: true, value: { nonce, expiresAt, addressDigest: addressText } };
   };
 
   return { ok: true, value: Object.freeze({ sign, verify }) };

@@ -93,7 +93,7 @@ export const redeem = internalMutation({
   },
   returns: v.union(v.null(), signedIn),
   handler: async (ctx, { pass, userId, grantId, secretHash }) => {
-    await spendPass(ctx, pass);
+    await spendPass(ctx, pass, "grant");
 
     const id = ctx.db.normalizeId("deviceGrants", grantId);
     const grant = id === null ? null : await ctx.db.get(id);

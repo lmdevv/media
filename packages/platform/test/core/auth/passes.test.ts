@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { api, internal } from "../../../convex/_generated/api";
 import { runFunction } from "../../admin";
+import { newestRows } from "../../rows";
 import {
   createPerson,
   failureOf,
@@ -168,6 +169,80 @@ describe.skipIf(stack === undefined)("the sign-in boundary", { timeout: 120_000 
     );
 
     expect(elsewhere.status).toBe(200);
+  });
+
+  it("refuses a pass spent once and expired, after the sweep, and takes no second try", async () => {
+    if (stack === undefined) return;
+    const usernameKey = `replay-${unique()}`;
+    const params = { username: usernameKey, password: `wrong-${unique()}` };
+    const keys = await keysOf(deploymentTicketKeysText());
+    const lifetimeLeftMs = 3000;
+
+    const signed = await keys.sign({
+      provider: "password",
+      params,
+      address: newClientAddress(),
+      now: Date.now() - PASS_LIFETIME_MS + lifetimeLeftMs,
+    });
+
+    const checked = await keys.verify(signed, "password", params, Date.now());
+
+    if (!checked.ok) throw new Error(`the pass did not verify: ${checked.error.reason}`);
+    const pass = { ...checked.value, provider: "password" };
+
+    const attempt = () =>
+      runFunction(
+        stack,
+        internal.core.auth.password.attempt,
+        { pass, usernameKey },
+        Schema.Unknown,
+      );
+
+    const budget = () =>
+      newestRows("rateLimits", 1000).find((line) => line.includes(`"password:${usernameKey}"`));
+
+    expect(await refusal(attempt())).toBe("accepted");
+    const afterFirst = budget();
+
+    await new Promise((resolve) => setTimeout(resolve, lifetimeLeftMs + 500));
+    await runFunction(stack, internal.core.auth.passes.sweep, {}, Schema.Null);
+
+    expect(await refusal(attempt())).toBe("forbidden");
+    expect(afterFirst).toBeDefined();
+    expect(budget()).toBe(afterFirst);
+  });
+
+  it("refuses a pass in a mutation of another kind of sign-in", async () => {
+    if (stack === undefined) return;
+    const usernameKey = `kind-${unique()}`;
+    const params = { key: `mk_${unique()}.${unique()}` };
+    const keys = await keysOf(deploymentTicketKeysText());
+
+    const signed = await keys.sign({
+      provider: "apiKey",
+      params,
+      address: newClientAddress(),
+      now: Date.now(),
+    });
+
+    const checked = await keys.verify(signed, "apiKey", params, Date.now());
+
+    if (!checked.ok) throw new Error(`the pass did not verify: ${checked.error.reason}`);
+
+    expect(
+      await refusal(
+        runFunction(
+          stack,
+          internal.core.auth.password.attempt,
+          { pass: { ...checked.value, provider: "apiKey" }, usernameKey },
+          Schema.Unknown,
+        ),
+      ),
+    ).toBe("forbidden");
+
+    expect(
+      newestRows("rateLimits", 1000).some((line) => line.includes(`"password:${usernameKey}"`)),
+    ).toBe(false);
   });
 
   it("forgets no pass it took while the pass could still be sent", async () => {

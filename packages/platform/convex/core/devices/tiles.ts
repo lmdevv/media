@@ -25,6 +25,7 @@ import {
 } from "./facts";
 import type { SharedDevice } from "./facts";
 import { clearStrikes, codeOf } from "./unlockCodes";
+import { spendPass, spentPass } from "../auth/passes";
 
 /** A proof the provider checked, which `open` checks again against the rows it reads. */
 export const checkedProof = v.union(
@@ -68,13 +69,16 @@ const proverFor = async (
 /** Opens `userId`'s tile with a checked proof, ending the tile session the device held. */
 export const open = internalMutation({
   args: {
+    /** The sign-in's pass, unless a proof's mutation spent it already. */
+    pass: v.union(v.null(), spentPass),
     deviceId: v.string(),
     secretHash: v.string(),
     userId: v.id("users"),
     proof: checkedProof,
   },
   returns: signedIn,
-  handler: async (ctx, { deviceId, secretHash, userId, proof }) => {
+  handler: async (ctx, { pass, deviceId, secretHash, userId, proof }) => {
+    if (pass !== null) await spendPass(ctx, pass, "tile");
     const device = await sharedDeviceById(ctx.db, deviceId, secretHash);
     const person = await tilePerson(ctx.db, userId);
     const now = Date.now();

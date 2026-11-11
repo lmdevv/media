@@ -147,6 +147,13 @@ describe("rate limit", () => {
     assert.strictEqual(clientAddress(Option.some("::1"), "203.0.113.9"), "203.0.113.9");
     assert.strictEqual(clientAddress(Option.some("192.168.1.30"), "127.0.0.1"), "192.168.1.30");
     assert.strictEqual(clientAddress(Option.none(), "127.0.0.1"), "unknown");
+    assert.strictEqual(clientAddress(proxy, "::ffff:203.0.113.9"), "203.0.113.9");
+    assert.strictEqual(
+      clientAddress(Option.some("::ffff:127.0.0.1"), "2001:DB8::0001"),
+      "2001:db8::1",
+    );
+    assert.strictEqual(clientAddress(Option.some("::FFFF:CB00:7109"), undefined), "203.0.113.9");
+    assert.strictEqual(clientAddress(Option.some("fe80::1%eth0"), "203.0.113.9"), "fe80::1");
   });
 
   it("keeps one sign-in bucket per address, with the contract's budget", () => {

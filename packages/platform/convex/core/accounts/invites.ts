@@ -93,7 +93,7 @@ export const accept = internalMutation({
   },
   returns: signedIn,
   handler: async (ctx, { pass, code, username, hash }) => {
-    await spendPass(ctx, pass);
+    await spendPass(ctx, pass, "invite");
 
     const now = Date.now();
     const found = await openInviteFor(ctx.db, code, now);

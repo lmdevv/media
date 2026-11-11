@@ -233,6 +233,11 @@ sign-in that knows the address, and makes the core refuse any sign-in that skipp
   that proxy, and a client that sends its own `X-Forwarded-For` through Caddy is still itself.
   Unlike the health route, a loopback peer without the header has no exemption here: the server's
   own sign-in never comes through the route.
+- Every address becomes one written form before it keys a bucket or a pass's digest
+  (`canonicalAddress` in `@media/contracts/rate-limit`): an IPv4-mapped IPv6 address becomes its
+  IPv4 address, IPv6 is lowercased and compressed (RFC 5952), and brackets and zone ids are
+  dropped. `203.0.113.9` and `::ffff:203.0.113.9` are one client with one budget, as Caddy keeps
+  whichever form the socket gave it.
 - It takes a try from the address's `signIn` bucket (10 at once, then one every 5 seconds) before
   it reads the body, so a malformed or refused sign-in costs a try too. Past the budget it answers
   `429` with `{ code: "rate_limited" }` and `Retry-After`, and the core never sees the call.
@@ -257,7 +262,7 @@ so `auth:store` and the refresh path are unchanged.
 
 - **A pass is an HMAC the server signs for one sign-in.** It is
   `p1.<kid>.<issuedAt>.<nonce>.<address>.<mac>`: the ring key's id, the time in milliseconds, 16
-  random bytes, the first 16 bytes of the resolved address's SHA-256, and an HMAC-SHA256 over those
+  random bytes, the first 16 bytes of the SHA-256 of the resolved address's canonical form, and an HMAC-SHA256 over those
   and the SHA-256 of the provider and its params in canonical JSON (`canonicalJson`, keys sorted at
   every level). The digest has one size for any address, so no forwarded value can make a pass
   too long, and no address is in the pass.
@@ -269,18 +274,27 @@ so `auth:store` and the refresh path are unchanged.
 - **Not forgeable.** Only the server and the core hold the ring. A pass signed with any other key,
   or altered at all, fails its HMAC.
 - **Not replayable.** The core takes a pass for 60 seconds after it was signed, 5 seconds of clock
-  skew allowed, and only once. The provider checks the pass in its action, then hands it to the
-  first mutation it makes (`password:attempt`, `apiKeys:redeem`, `deviceCodes:redeem`,
-  `deviceGrants:redeem`, `users:setUp`, `invites:accept`, `resetLinks:redeem`, `links:open`),
-  which records the nonce in `signInPasses` with `spendPass` before it writes anything else, and
-  refuses a nonce already there. The `tile` provider spends it in `core/auth/passes:spend` first,
-  on its own, because its proof check writes in mutations of its own (a password try, an unlock
-  code strike) before `tiles:open`. The spend commits with the sign-in's first
-  write, so no second sign-in, try, or session comes from one pass. A sign-in refused before any
-  write (a malformed key, a refused lookup, or a mutation that throws and rolls back) leaves its
-  nonce unspent, and the same request sent again within the 60 seconds is decided again, with the
-  same params, as a new attempt; it changes nothing the first one did not. A sweep every 10
-  minutes forgets nonces of passes past their 60 seconds, which the core would refuse anyway.
+  skew allowed, and only once. The provider checks the pass's HMAC in its action, where the key
+  is, then hands the pass to the first mutation that writes for the sign-in (`password:attempt`,
+  `apiKeys:redeem`, `deviceCodes:redeem`, `deviceGrants:redeem`, `users:setUp`,
+  `invites:accept`, `resetLinks:redeem`, `links:open`; for a tile, `tiles:passwordAttempt` or
+  `unlockCodes:attempt` when a proof is tried, and `tiles:open` otherwise). That mutation calls
+  `spendPass` before any other write, and `spendPass` decides everything that needs no key, in the
+  same transaction as the nonce and the writes it guards: the pass was signed for this provider,
+  it has not expired by the mutation's own clock, and its nonce is not in `signInPasses`. Then it
+  records the nonce with the provider and the address digest. The action's own expiry check only
+  spares a call; a call that verified in time and reached its mutation after expiry is refused
+  there.
+- **A spent nonce outlives its pass.** The sweep, every 10 minutes, forgets a nonce only once its
+  pass expired more than a minute ago (`SPENT_PASS_KEPT_MS`). By then every spender refuses the
+  pass by its expiry alone, so forgetting the nonce never lets it in again. An earlier version
+  forgot nonces at expiry and checked expiry only in the action, so two calls that verified before
+  expiry could both spend one pass, the second after the sweep.
+- **A refused sign-in.** The spend commits with the sign-in's first write, so no second sign-in,
+  try, or session comes from one pass. A sign-in refused before any write (a malformed key, a
+  refused lookup, or a mutation that throws and rolls back) leaves its nonce unspent, and the same
+  request sent again within the 60 seconds is decided again, with the same params, as a new
+  attempt; it changes nothing the first one did not.
 - **Not usable for another sign-in or from another address.** The HMAC covers the provider, the
   params, and the address's digest, so a pass works only for the exact sign-in the boundary admitted for
   that address. The pass never leaves the server: the route signs it, sends it to the core on the

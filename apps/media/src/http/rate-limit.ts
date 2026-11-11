@@ -1,4 +1,4 @@
-import { admit } from "@media/contracts/rate-limit";
+import { admit, canonicalAddress } from "@media/contracts/rate-limit";
 import type { Admission, AddressBucket, Door } from "@media/contracts/rate-limit";
 import { Clock, Effect, Layer, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -88,23 +88,28 @@ export const retryAfter = (
 ): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.setHeader(response, "retry-after", String(seconds));
 
-const isLoopback = (address: string): boolean =>
-  address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
+/** Whether a canonical address (`canonicalAddress`) is the loopback interface's. */
+const isLoopback = (address: string): boolean => address === "::1" || address.startsWith("127.");
+
+/** The canonical address of a request's peer, `unknown` when the socket names none. */
+const peerAddress = (peer: Option.Option<string>): string =>
+  canonicalAddress(Option.getOrElse(peer, () => "unknown"));
 
 /**
  * The client a request came from. The installs put Caddy in front on loopback, and Caddy always
  * sets `X-Forwarded-For` to the client it resolved (through MEDIA_TRUSTED_PROXIES), so the header
  * counts only from a loopback peer, and only its last entry. A client that reaches the service
- * directly is its own peer, whatever header it sends.
+ * directly is its own peer, whatever header it sends. The answer is canonical
+ * (`canonicalAddress`), so one client has one bucket however its address is written.
  */
 export const clientAddress = (
   peer: Option.Option<string>,
   forwardedFor: string | undefined,
 ): string => {
-  const direct = Option.getOrElse(peer, () => "unknown");
+  const direct = peerAddress(peer);
   const forwarded = isLoopback(direct) ? forwardedFor?.split(",").at(-1)?.trim() : undefined;
 
-  return forwarded === undefined || forwarded === "" ? direct : forwarded;
+  return forwarded === undefined || forwarded === "" ? direct : canonicalAddress(forwarded);
 };
 
 interface LimitedRequest {
@@ -127,10 +132,7 @@ export const limitRequest = (
 
   if (limited === undefined) return Option.none();
 
-  if (
-    isLoopback(Option.getOrElse(request.peer, () => "unknown")) &&
-    request.forwardedFor === undefined
-  ) {
+  if (isLoopback(peerAddress(request.peer)) && request.forwardedFor === undefined) {
     return Option.none();
   }
 

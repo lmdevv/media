@@ -106,7 +106,7 @@ export const setUp = internalMutation({
   },
   returns: signedIn,
   handler: async (ctx, { pass, username, hash }) => {
-    await spendPass(ctx, pass);
+    await spendPass(ctx, pass, "setup");
 
     const user = await insertUser(ctx, { username, hash, role: "owner" });
 

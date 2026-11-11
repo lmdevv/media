@@ -1,6 +1,6 @@
 import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
 import type { GenericActionCtxWithAuthConfig } from "@convex-dev/auth/server";
-import { PASS_PARAM } from "@media/contracts/sign-in";
+import { PASS_PARAM, SPENT_PASS_KEPT_MS } from "@media/contracts/sign-in";
 import type { SignInProvider } from "@media/contracts/sign-in";
 import { convexToJson, v } from "convex/values";
 import type { Infer, Value } from "convex/values";
@@ -21,8 +21,16 @@ const REFUSED = "Sign in through the server: the core takes sign-ins only from i
 
 const SWEEP_BATCH = 1000;
 
-/** The pass a sign-in carried, checked, for the first mutation of its provider to spend. */
-export const spentPass = v.object({ nonce: v.string(), expiresAt: v.number() });
+/**
+ * The pass a sign-in carried, checked against its key, for the first mutation of its provider to
+ * spend: the nonce, when it expires, the provider it was signed for, and its address's digest.
+ */
+export const spentPass = v.object({
+  nonce: v.string(),
+  expiresAt: v.number(),
+  provider: v.string(),
+  addressDigest: v.string(),
+});
 
 /** A checked pass, as `spentPass` holds it. */
 export type CheckedPass = Infer<typeof spentPass>;
@@ -42,17 +50,26 @@ const checkPass = async (
     await passKeys()
   ).verify(pass === undefined ? null : convexToJson(pass), provider, convexToJson(own), Date.now());
 
-  return checked.ok
-    ? { own, pass: { nonce: checked.value.nonce, expiresAt: checked.value.expiresAt } }
-    : fail("forbidden", REFUSED);
+  return checked.ok ? { own, pass: { ...checked.value, provider } } : fail("forbidden", REFUSED);
 };
 
 /**
- * Records the pass's nonce, at the start of the first mutation its sign-in makes, so the pass
- * works once and its spend commits with the sign-in's first write. A pass spent already refuses
- * the sign-in.
+ * Spends the pass at the start of the first mutation its sign-in makes, so its spend commits with
+ * the sign-in's first write. Everything about the pass that needs no key is decided here, in the
+ * same transaction as the nonce and the writes it guards: the pass is for `provider`, it has not
+ * expired by this mutation's clock, and no sign-in spent its nonce. The action checked the key,
+ * and the expiry there only spares a call; the one that counts is here, so a call delayed past
+ * expiry is refused whatever the sweep has forgotten.
  */
-export const spendPass = async (ctx: MutationCtx, pass: CheckedPass): Promise<void> => {
+export const spendPass = async (
+  ctx: MutationCtx,
+  pass: CheckedPass,
+  provider: SignInProvider,
+): Promise<void> => {
+  if (pass.provider !== provider || Date.now() >= pass.expiresAt) {
+    return fail("forbidden", REFUSED);
+  }
+
   const seen = await ctx.db
     .query("signInPasses")
     .withIndex("by_nonce", (q) => q.eq("nonce", pass.nonce))
@@ -84,27 +101,16 @@ export const behindBoundary = (provider: {
   });
 
 /**
- * Spends a pass in a mutation of its own, for a provider whose first write is not one mutation
- * that can spend it, as a tile's proof check is.
+ * Forgets nonces of passes expired more than `SPENT_PASS_KEPT_MS` ago, a batch a call. Their
+ * spender refuses them by expiry alone by then, so forgetting the nonce re-opens nothing.
  */
-export const spend = internalMutation({
-  args: { pass: spentPass },
-  returns: v.null(),
-  handler: async (ctx, { pass }) => {
-    await spendPass(ctx, pass);
-
-    return null;
-  },
-});
-
-/** Forgets nonces of passes the core no longer takes, a batch a call. */
 export const sweep = internalMutation({
   args: {},
   returns: v.null(),
   handler: async (ctx) => {
     const ended = await ctx.db
       .query("signInPasses")
-      .withIndex("by_expiration", (q) => q.lt("expiresAt", Date.now()))
+      .withIndex("by_expiration", (q) => q.lt("expiresAt", Date.now() - SPENT_PASS_KEPT_MS))
       .take(SWEEP_BATCH);
 
     await Promise.all(ended.map((row) => ctx.db.delete(row._id)));

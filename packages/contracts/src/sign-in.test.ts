@@ -78,6 +78,21 @@ describe("sign-in passes", () => {
     expect(first).not.toContain(key(9));
   });
 
+  it("names one client by one digest however its address is written", async () => {
+    const keys = await keysOf(`k1:${key(5)}`);
+
+    const digests = await Promise.all(
+      ["203.0.113.9", "::ffff:203.0.113.9", "::FFFF:CB00:7109"].map(async (address) => {
+        const pass = await keys.sign({ provider: "password", params, address, now: NOW });
+        const checked = await keys.verify(pass, "password", params, NOW);
+
+        return checked.ok ? checked.value.addressDigest : "";
+      }),
+    );
+
+    expect(new Set(digests).size).toBe(1);
+  });
+
   it("names any address by a digest of fixed size, never the address itself", async () => {
     const keys = await keysOf(`k1:${key(4)}`);
 

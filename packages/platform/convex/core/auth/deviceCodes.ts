@@ -140,7 +140,7 @@ export const redeem = internalMutation({
   },
   returns: redemption,
   handler: async (ctx, { pass, codeId, secretHash }) => {
-    await spendPass(ctx, pass);
+    await spendPass(ctx, pass, "deviceCode");
 
     const id = ctx.db.normalizeId("deviceCodes", codeId);
     const code = id === null ? null : await ctx.db.get(id);

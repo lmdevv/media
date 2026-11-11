@@ -6,6 +6,7 @@ import type { Doc, Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { refuseKeys, requireCaller } from "../auth/caller";
+import { spendPass, spentPass } from "../auth/passes";
 import { fail } from "../lib/errors";
 import { PASSWORD_MIN, hashUnlockCode } from "../lib/passwords";
 import { refundAttempt, takeAttempt } from "../lib/rateLimit";
@@ -84,7 +85,13 @@ export const clearStrikes = async (
 };
 
 export const attempt = internalMutation({
-  args: { deviceId: v.string(), secretHash: v.string(), userId: v.id("users"), by: v.id("users") },
+  args: {
+    pass: spentPass,
+    deviceId: v.string(),
+    secretHash: v.string(),
+    userId: v.id("users"),
+    by: v.id("users"),
+  },
   returns: v.union(
     v.object({ kind: v.literal("none") }),
     v.object({ kind: v.literal("off") }),
@@ -97,7 +104,8 @@ export const attempt = internalMutation({
       left: v.number(),
     }),
   ),
-  handler: async (ctx, { deviceId, secretHash, userId, by }) => {
+  handler: async (ctx, { pass, deviceId, secretHash, userId, by }) => {
+    await spendPass(ctx, pass, "tile");
     const device = await sharedDeviceById(ctx.db, deviceId, secretHash);
     const typist = asPerson(await ctx.db.get(by));
     const code = typist === null ? null : await codeOf(ctx.db, typist._id);

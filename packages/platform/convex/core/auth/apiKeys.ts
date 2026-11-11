@@ -97,7 +97,7 @@ export const redeem = internalMutation({
   },
   returns: v.union(v.null(), v.object({ userId: v.id("users"), sessionId: v.id("authSessions") })),
   handler: async (ctx, { pass, keyId, secretHash }) => {
-    await spendPass(ctx, pass);
+    await spendPass(ctx, pass, "apiKey");
 
     const id = ctx.db.normalizeId("apiKeys", keyId);
     const key = id === null ? null : await ctx.db.get(id);

@@ -92,7 +92,7 @@ export const redeem = internalMutation({
   },
   returns: signedIn,
   handler: async (ctx, { pass, code, hash }) => {
-    await spendPass(ctx, pass);
+    await spendPass(ctx, pass, "reset");
 
     const now = Date.now();
     const { link, user } = await openLinkFor(ctx.db, code, now);

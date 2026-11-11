@@ -90,7 +90,7 @@ export const attempt = internalMutation({
     v.object({ kind: v.literal("known"), userId: v.id("users"), hash: v.string() }),
   ),
   handler: async (ctx, { pass, usernameKey }) => {
-    await spendPass(ctx, pass);
+    await spendPass(ctx, pass, "password");
 
     if (!(await takeAttempt(ctx, signInLimit(usernameKey), Date.now()))) {
       return { kind: "limited" as const };

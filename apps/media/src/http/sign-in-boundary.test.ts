@@ -279,6 +279,28 @@ describe("the sign-in boundary", () => {
         }),
     );
 
+    it.effect("counts an IPv4 client and its IPv4-mapped IPv6 form as one address", () =>
+      Effect.gen(function* () {
+        const core = yield* FakeCore;
+        const statuses: Array<number> = [];
+
+        core.answer.current = () => refusedWith("unauthenticated", "Wrong username or password");
+
+        for (const address of ["198.51.100.77", "::ffff:198.51.100.77", "::FFFF:C633:644D"]) {
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            statuses.push(
+              (yield* signIn({ username: "aiko", password: secret() }, address)).status,
+            );
+          }
+        }
+
+        assert.deepStrictEqual(statuses, [
+          ...Array.from({ length: addressBudgets.signIn.burst }, () => 401),
+          ...Array.from({ length: 15 - addressBudgets.signIn.burst }, () => 429),
+        ]);
+      }),
+    );
+
     it.effect("refuses a body that is not a sign-in, without asking the core", () =>
       Effect.gen(function* () {
         const core = yield* FakeCore;

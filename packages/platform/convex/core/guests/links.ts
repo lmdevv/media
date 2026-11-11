@@ -196,7 +196,7 @@ export const open = internalMutation({
   },
   returns: signedIn,
   handler: async (ctx, { pass, code, name }) => {
-    await spendPass(ctx, pass);
+    await spendPass(ctx, pass, "guest");
 
     const now = Date.now();
     const username = requireGuestName(name);
