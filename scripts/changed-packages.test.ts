@@ -77,6 +77,12 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
     expect(affected("deploy/functions-hash.sh")).toEqual(["packages/backend"]);
   });
 
+  it("takes Vitest arguments after test and nowhere else", () => {
+    expect(() =>
+      execFileSync(script, ["-", "lint", "--project", "other"], { input: "", stdio: "pipe" }),
+    ).toThrow(/usage/u);
+  });
+
   it("lists every workspace for --all", () => {
     expect(workspaces(["--all"])).toEqual([".", ...everyPackage, "legacy/music"]);
   });

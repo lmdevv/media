@@ -11,14 +11,15 @@
 # and every package that depends on it. A change to the root workspace affects every package.
 #
 # With a task it runs `pnpm <task>` over the affected packages of the root workspace, over the whole
-# workspace when `.` is affected, or not at all. It never runs a task over legacy/music.
+# workspace when `.` is affected, or not at all. It never runs a task over legacy/music. Arguments
+# after `test` go to Vitest, such as `--project playback`.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
 usage() {
-  echo "usage: scripts/changed-packages.sh --staged | --since <ref> | --all | - [typecheck | lint | test]" >&2
+  echo "usage: scripts/changed-packages.sh --staged | --since <ref> | --all | - [typecheck | lint | test [vitest arguments]]" >&2
   exit 2
 }
 
@@ -64,8 +65,9 @@ if [[ "$mode" == --since ]]; then
   shift
 fi
 task="${1:-}"
-[[ $# -le 1 ]] || usage
-case "$task" in "" | typecheck | lint | test) ;; *) usage ;; esac
+[[ $# -eq 0 ]] || shift
+extra=("$@")
+case "$task" in "" | typecheck | lint) ((${#extra[@]} == 0)) || usage ;; test) ;; *) usage ;; esac
 
 # Command substitutions, not process substitutions, so a failing git or turbo stops the script
 # instead of reading as an empty diff.
@@ -109,7 +111,7 @@ if [[ -z "$task" ]]; then
   if ((${#affected[@]} > 0)); then printf '%s\n' "${affected[@]}"; fi
   if $legacy; then echo legacy/music; fi
 elif $whole; then
-  exec pnpm "$task"
+  exec pnpm "$task" "${extra[@]}"
 elif ((${#affected[@]} == 0)); then
   echo "$task: skipped, no package changed"
 else
@@ -117,6 +119,6 @@ else
   case "$task" in
     typecheck) exec node_modules/.bin/turbo run typecheck "${affected[@]/#/--filter=./}" ;;
     lint) exec pnpm lint "${affected[@]}" ;;
-    test) exec pnpm test "${affected[@]/%//}" ;;
+    test) exec pnpm test "${affected[@]/%//}" "${extra[@]}" ;;
   esac
 fi
