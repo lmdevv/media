@@ -171,7 +171,7 @@ describe.skipIf(stack === undefined)("the sign-in boundary", { timeout: 120_000 
     expect(elsewhere.status).toBe(200);
   });
 
-  it("refuses a pass spent once, after it expired and the sweep ran, and takes no second try", async () => {
+  it("refuses a spent pass after it expires, and takes no second try", async () => {
     if (stack === undefined) return;
     const usernameKey = `replay-${unique()}`;
     const params = { username: usernameKey, password: `wrong-${unique()}` };
