@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { assert, describe, layer } from "@effect/vitest";
-import { Duration, Effect, FileSystem, Option, Result, Schedule, Schema } from "effect";
+import { Duration, Effect, Fiber, FileSystem, Option, Result, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import {
@@ -33,6 +33,11 @@ const failingQsv = await writeFakeFfmpeg({
 const slowStart = await writeFakeFfmpeg({ hlsDelayMs: 10_000 });
 
 const slowQsv = await writeFakeFfmpeg({ hlsDelayMs: 3000, qsvFailsAfterSeconds: 0 });
+
+const slowHardwareStart = await writeFakeFfmpeg({
+  hlsDelayMs: 10_000,
+  qsvFailsFromSeconds: 100_000,
+});
 
 const brokenStart = await writeFakeFfmpeg({ hlsFailsAtStart: true });
 
@@ -80,6 +85,44 @@ const smallScreen: ClientCapabilities = {
   maxHeight: 120,
   hls: false,
   mse: true,
+};
+
+const FIRST_RUN_FOLDER = /\/transcode\/[^/]+\/1$/u;
+
+const listings = {
+  armed: false,
+  reached: Promise.withResolvers<void>(),
+  release: Promise.withResolvers<void>(),
+};
+
+const stallNextFirstRunListing = Effect.sync(() => {
+  listings.armed = true;
+  listings.reached = Promise.withResolvers<void>();
+  listings.release = Promise.withResolvers<void>();
+});
+
+const listingsUntilRunStops = {
+  fileSystem: (real: FileSystem.FileSystem) =>
+    FileSystem.FileSystem.of({
+      ...real,
+      readDirectory: (directory, options) =>
+        listings.armed && FIRST_RUN_FOLDER.test(directory)
+          ? Effect.suspend(() => {
+              listings.armed = false;
+              listings.reached.resolve();
+
+              return Effect.promise(() => listings.release.promise);
+            }).pipe(Effect.andThen(real.readDirectory(directory, options)))
+          : real.readDirectory(directory, options),
+    }),
+  mediaTools: (real: MediaTools.Interface) =>
+    MediaTools.Service.of({
+      ...real,
+      startFfmpeg: (args) =>
+        Effect.addFinalizer(() => Effect.sync(() => listings.release.resolve())).pipe(
+          Effect.andThen(real.startFfmpeg(args)),
+        ),
+    }),
 };
 
 const decodeNegotiation = Schema.decodeUnknownEffect(Schema.toCodecJson(NegotiateResponse));
@@ -276,6 +319,45 @@ describe.skipIf(!hasFfmpeg)("stream failures", () => {
           );
 
           assert.sameMembers(yield* streamFolders(), [...before, negotiated.streamId ?? ""]);
+        }),
+      30_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer(
+      { FFMPEG_PATH: slowHardwareStart, HARDWARE_ACCELERATION: "qsv" },
+      listingsUntilRunStops,
+    ),
+    { excludeTestServices: true, timeout: "120 seconds" },
+  )((it) => {
+    it.effect(
+      "answers a negotiation replaced while it reads its run's folder",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+
+          const token = signTestToken({
+            fid: server.fileId("movies", library.directMovie),
+            sid: "replaced-mid-read",
+          });
+
+          yield* stallNextFirstRunListing;
+
+          const first = yield* negotiateRequest(server.baseUrl, token).pipe(
+            Effect.orDie,
+            Effect.forkChild,
+          );
+
+          yield* Effect.promise(() => listings.reached.promise);
+
+          const second = yield* negotiateRequest(server.baseUrl, token).pipe(Effect.orDie);
+          const replaced = yield* Fiber.join(first);
+
+          assert.strictEqual(replaced.status, 404);
+          assert.deepInclude(yield* replaced.json.pipe(Effect.orDie), { _tag: "StreamNotFound" });
+          assert.strictEqual(second.status, 200);
         }),
       30_000,
     );
