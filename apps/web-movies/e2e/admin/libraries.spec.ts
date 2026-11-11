@@ -171,7 +171,7 @@ test("an admin adds a library in the account client, cancels and restarts its sc
   await page.getByRole("button", { name: "Apply match" }).click();
   await expect(page.getByRole("heading", { name })).toBeVisible();
   await expect(fileRow("Stalker.1979.Criterion.mkv")).toContainText("Stalker (Criterion)");
-  await expect(fileRow("Stalker.1979.Criterion.mkv")).toContainText("Matched by hand");
+  await expect(fileRow("Stalker.1979.Criterion.mkv")).toContainText("Unmatched");
 
   await fileRow("Arrival.2016.1080p.mkv").getByRole("link", { name: "Arrival (2016)" }).click();
   const poster = page.getByRole("img", { name: "Arrival" });

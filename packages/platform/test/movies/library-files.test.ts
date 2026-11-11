@@ -11,6 +11,7 @@ import { share } from "../probe";
 import { refusal } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
 import {
+  applyMetadataAll,
   cancelQueued,
   claimJob,
   finishJob,
@@ -163,11 +164,43 @@ describe.skipIf(stack === undefined)("movies.files", { timeout: 600_000 }, () =>
     await markMissing(stack, lease, [c]);
     await finishJob(stack, lease);
 
+    const handMatched = byPath.get(c)?.title.id;
+
+    if (handMatched === undefined) throw new Error("c.mkv has no title");
+
+    const { jobId } = await editor.signedIn.client.mutation(api.movies.metadata.match, {
+      titleId: handMatched,
+      provider: "tmdb",
+      providerId: "604",
+    });
+
+    const matching = await claimJob(stack, "movies.metadata", jobId);
+
+    await applyMetadataAll(
+      stack,
+      matching,
+      handMatched,
+      {
+        ...scannedTitle("movie", "tmdb:604", "Hand Matched"),
+        externalIds: { tmdb: "604", imdb: null, tvdb: null },
+        matchStatus: "matched",
+      },
+      [],
+    );
+    await finishJob(stack, matching);
+
+    const afterMatch = (await allFiles(editor, libraryId, "all", 10)).flat();
+
+    expect(afterMatch.find((file) => file.path === c)?.title).toMatchObject({
+      name: "Hand Matched",
+      matchStatus: "manual",
+    });
+
     expect(await refusal(summaryOf(viewer, libraryId))).toBe("forbidden");
     expect(await refusal(listPage(viewer, libraryId, "all", 10, null))).toBe("forbidden");
     expect(await refusal(summaryOf(outsider, libraryId))).toBe("not_found");
     expect(await refusal(listPage(outsider, libraryId, "missing", 10, null))).toBe("not_found");
-    expect(await summaryOf(admin, libraryId)).toMatchObject({ missing: 1, unmatched: 3 });
+    expect(await summaryOf(admin, libraryId)).toMatchObject({ missing: 1, unmatched: 2 });
 
     await setFoldersQuietly(stack, libraryId, [other]);
     await purgeStage(stack, libraryId, "files");
