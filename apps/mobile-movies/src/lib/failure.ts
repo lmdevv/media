@@ -14,6 +14,10 @@ export const describeFailure = (cause: unknown): string => {
     return "Can't reach the server. Check the connection and try again.";
   }
 
+  if (Predicate.isTagged(cause, "KeychainWriteFailed")) {
+    return "This iPhone couldn’t save your sign-in. Unlock it and try again.";
+  }
+
   if (
     Predicate.isTagged(cause, "ProtocolError") ||
     Predicate.isTagged(cause, "TokenStorageError")
