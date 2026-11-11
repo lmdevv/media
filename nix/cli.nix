@@ -2,8 +2,8 @@
 #
 #   nix run github:lmdevv/media#cli -- login --server http://nas.tailnet.ts.net:3210
 #
-# Dependencies come from pnpm-lock.yaml through fetchPnpmDeps. When the lockfile changes, update
-# `hash` below: set it to "" and copy the hash from the error `nix build .#cli` prints.
+# Dependencies come from pnpm-lock.yaml through fetchPnpmDeps. When the lockfile changes,
+# `scripts/check-pnpm-deps-hash.sh --write` updates `hash` below.
 {
   lib,
   stdenvNoCC,

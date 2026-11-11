@@ -14,9 +14,14 @@ on:
       - "pnpm-lock.yaml"
       - ".dockerignore"
       - ".github/workflows/image.yml"
+      - ".github/actions/ffmpeg/**"
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   image:
@@ -51,7 +56,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - uses: ./.github/actions/ffmpeg
       - run: pnpm install --frozen-lockfile
       - name: Packaged-stack smoke test
         run: scripts/stack-e2e.sh

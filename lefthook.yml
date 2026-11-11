@@ -19,6 +19,9 @@ pre-commit:
     - name: commands
       exclude: ["legacy/**"]
       run: pnpm --filter @media/commands check
+    - name: pnpm-deps-hash
+      glob: ["pnpm-lock.yaml", "pnpm-workspace.yaml", "nix/package.nix", "nix/cli.nix"]
+      run: scripts/check-pnpm-deps-hash.sh
     - name: verify-media
       glob: [".agents/skills/verify-media/**", "scripts/private-network.sh"]
       # The evidence tests need ffmpeg, which the dev shell pins and a bare host may lack.

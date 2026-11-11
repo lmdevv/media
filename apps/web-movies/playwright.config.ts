@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 
 import { defineConfig, devices } from "@playwright/test";
-import type { LaunchOptions } from "@playwright/test";
+import type { LaunchOptions, Project } from "@playwright/test";
 
 import { stackEnv } from "./e2e/stack/stack-env";
 
@@ -27,13 +27,16 @@ if (chromium !== undefined && chromium !== "") launchOptions.executablePath = ch
 
 const desktop = { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } };
 
-/** One project of the stack chain: it runs `spec` after `after`, as the media service is shared. */
-const chained = (name: string, spec: RegExp, after: string) => ({
-  name,
-  testMatch: spec,
-  dependencies: [after],
-  use: desktop,
-});
+interface Suite {
+  readonly name: string;
+  readonly group: "core" | "player" | "streams";
+  readonly testMatch: RegExp;
+  readonly device?: Project["use"];
+  /** Runs a media service, so it takes its turn after the suite before it in its group. */
+  readonly chained: boolean;
+}
+
+const phone = { ...devices["iPhone 15"], defaultBrowserType: "chromium" };
 
 /**
  * Browser tests against both dev servers on one origin: the movies client at `/movies/` and the
@@ -50,44 +53,104 @@ const chained = (name: string, spec: RegExp, after: string) => ({
  * `scrubbing` checks scrub thumbnails and chapters, `versions` chooses among a title's files,
  * `subtitles` delays subtitles, `migration` imports from a Jellyfin, and `liveness` pauses HLS
  * streams past the media service's idle time, one of them on a Quick Sync encoder that cannot
- * restart, last. The suites that run a media service take turns, as it owns the stack's port.
+ * restart, last. The suites that run a media service take turns in this order, as it owns the
+ * stack's port.
+ *
+ * Each suite creates the people it signs in as, so CI runs each group on its own stack in its own
+ * job, `E2E_GROUP` naming it.
  */
+const suites: ReadonlyArray<Suite> = [
+  {
+    name: "kit",
+    group: "core",
+    testMatch: /e2e\/(kit|route-states|track-menu|autoplay-next)\.spec\.ts$/u,
+    chained: false,
+  },
+  { name: "session", group: "core", testMatch: /e2e\/session\/.*\.spec\.ts$/u, chained: false },
+  {
+    name: "session phone",
+    group: "core",
+    testMatch: /e2e\/session\/.*\.spec\.ts$/u,
+    device: phone,
+    chained: false,
+  },
+  { name: "stack", group: "core", testMatch: /e2e\/stack\/.*\.spec\.ts$/u, chained: true },
+  {
+    name: "admin",
+    group: "core",
+    testMatch: /e2e\/admin\/(libraries|not-found)\.spec\.ts$/u,
+    chained: true,
+  },
+  { name: "metadata", group: "core", testMatch: /e2e\/metadata\/.*\.spec\.ts$/u, chained: true },
+  {
+    name: "player",
+    group: "player",
+    testMatch: /e2e\/playback\/player\.spec\.ts$/u,
+    chained: true,
+  },
+  {
+    name: "scrubbing",
+    group: "player",
+    testMatch: /e2e\/playback\/scrubbing\.spec\.ts$/u,
+    chained: true,
+  },
+  {
+    name: "versions",
+    group: "streams",
+    testMatch: /e2e\/playback\/versions\.spec\.ts$/u,
+    chained: true,
+  },
+  {
+    name: "subtitles",
+    group: "streams",
+    testMatch: /e2e\/playback\/subtitle-timing\.spec\.ts$/u,
+    chained: true,
+  },
+  {
+    name: "migration",
+    group: "streams",
+    testMatch: /e2e\/admin\/migration\.spec\.ts$/u,
+    chained: true,
+  },
+  {
+    name: "liveness",
+    group: "streams",
+    testMatch: /e2e\/playback\/stream-liveness\.spec\.ts$/u,
+    chained: true,
+  },
+];
+
+const group = process.env["E2E_GROUP"] ?? "";
+
+const chosen = suites.filter((suite) => group === "" || suite.group === group);
+
+if (chosen.length === 0) throw new Error(`E2E_GROUP names no group: ${group}`);
+
+const turns = chosen.filter((suite) => suite.chained);
+
+const ci = Boolean(process.env["CI"]);
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
-  forbidOnly: Boolean(process.env["CI"]),
+  forbidOnly: ci,
   timeout: 60_000,
+  reporter: ci ? [["dot"], ["json", { outputFile: "playwright-report/results.json" }]] : "list",
   use: {
     baseURL: `http://localhost:${port}`,
     trace: "retain-on-failure",
     launchOptions,
   },
-  projects: [
-    {
-      name: "kit",
-      testMatch: /e2e\/(kit|route-states|track-menu|autoplay-next)\.spec\.ts$/u,
-      use: desktop,
-    },
-    {
-      name: "session",
-      testMatch: /e2e\/session\/.*\.spec\.ts$/u,
-      use: desktop,
-    },
-    {
-      name: "session phone",
-      testMatch: /e2e\/session\/.*\.spec\.ts$/u,
-      use: { ...devices["iPhone 15"], defaultBrowserType: "chromium" },
-    },
-    { name: "stack", testMatch: /e2e\/stack\/.*\.spec\.ts$/u, use: desktop },
-    chained("admin", /e2e\/admin\/(libraries|not-found)\.spec\.ts$/u, "stack"),
-    chained("metadata", /e2e\/metadata\/.*\.spec\.ts$/u, "admin"),
-    chained("player", /e2e\/playback\/player\.spec\.ts$/u, "metadata"),
-    chained("scrubbing", /e2e\/playback\/scrubbing\.spec\.ts$/u, "player"),
-    chained("versions", /e2e\/playback\/versions\.spec\.ts$/u, "scrubbing"),
-    chained("subtitles", /e2e\/playback\/subtitle-timing\.spec\.ts$/u, "versions"),
-    chained("migration", /e2e\/admin\/migration\.spec\.ts$/u, "subtitles"),
-    chained("liveness", /e2e\/playback\/stream-liveness\.spec\.ts$/u, "migration"),
-  ],
+  projects: chosen.map((suite) => {
+    const before = suite.chained ? turns[turns.indexOf(suite) - 1] : undefined;
+
+    return {
+      name: suite.name,
+      testMatch: suite.testMatch,
+      dependencies: before === undefined ? [] : [before.name],
+      use: suite.device ?? desktop,
+    };
+  }),
   webServer: [
     {
       command: `pnpm exec vite --port ${accountUrl.port} --strictPort`,
