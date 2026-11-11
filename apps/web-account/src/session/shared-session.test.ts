@@ -208,6 +208,14 @@ const eventually = <E>(check: Effect.Effect<boolean, E>, within = 1_000) =>
     Effect.map(Option.isSome),
   );
 
+/** The session `platform` authorizes as once its tab takes up a delivered sign-in, if it does. */
+const signedInBearerOf = (platform: Platform.Interface, fake: FakeConvex.FakeConvex) =>
+  bearerOf(platform, fake).pipe(
+    Effect.repeat({ until: Option.isSome, schedule: Schedule.spaced(10) }),
+    Effect.timeoutOption(2_000),
+    Effect.map(Option.flatten),
+  );
+
 /** The sign-outs the core was asked for: each a refresh token to revoke. */
 const signedOutRequests = (fake: FakeConvex.FakeConvex) =>
   fake.requestsTo("core/auth/sessions:revoke");
@@ -306,8 +314,7 @@ describe("clients sharing one session store", () => {
 
         yield* signInOn(fake, tabs.tab(0), "ada", 1);
         tabs.deliver();
-        yield* settle;
-        const ada = yield* bearerOf(second, fake);
+        const ada = yield* signedInBearerOf(second, fake);
 
         const release = yield* gateRefresh(
           fake,
@@ -361,8 +368,7 @@ describe("clients sharing one session store", () => {
 
         yield* signInOn(fake, tabs.tab(0), "ada", 1);
         tabs.deliver();
-        yield* settle;
-        const ada = yield* bearerOf(second, fake);
+        const ada = yield* signedInBearerOf(second, fake);
 
         const release = yield* gateRefresh(
           fake,
@@ -548,8 +554,7 @@ describe("two sign-ins at once", () => {
           bind("bo|session-2");
           yield* keepOn(tabs.tab(0), ada, 4);
           tabs.deliver();
-          yield* settle;
-          const before = yield* bearerOf(second, fake);
+          const before = yield* signedInBearerOf(second, fake);
 
           if (when === "after") yield* keepOn(tabs.tab(0), bo, 5);
           yield* refreshOnce(second);
@@ -800,8 +805,7 @@ describe("a sign-out that cannot be stored or confirmed at first", () => {
 
         yield* signInOn(fake, tabs.tab(0), "ada", 1);
         tabs.deliver();
-        yield* settle;
-        const before = yield* bearerOf(second, fake);
+        const before = yield* signedInBearerOf(second, fake);
 
         yield* Ref.set(down, true);
         tabs.fill(true);
@@ -827,8 +831,7 @@ describe("a sign-out that cannot be stored or confirmed at first", () => {
 
         yield* signInOn(fake, tabs.tab(0), "ada", 1);
         tabs.deliver();
-        yield* settle;
-        const ada = yield* bearerOf(second, fake);
+        const ada = yield* signedInBearerOf(second, fake);
 
         yield* refreshOnce(second);
         yield* refreshOnce(second);
