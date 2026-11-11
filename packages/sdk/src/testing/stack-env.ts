@@ -47,10 +47,12 @@ export const findStack = (): Stack | undefined => {
   return { convexUrl, mediaServiceKey };
 };
 
-/** What the platform stack suites need: the core deployment and its admin key. */
+/** What the platform stack suites need: the core deployment, its admin key, and the boundary. */
 export interface PlatformStack {
   readonly url: string;
   readonly adminKey: string;
+  /** The stack's sign-in boundary (`scripts/dev-stack.sh`), where every sign-in goes. */
+  readonly signInUrl: string;
 }
 
 /**
@@ -64,12 +66,13 @@ export const findPlatformStack = (): PlatformStack | undefined => {
   const platform = readEnvFile(join(repoRoot, "packages/platform/.env.local"));
   const url = platform.get("CONVEX_SELF_HOSTED_URL");
   const adminKey = platform.get("CONVEX_SELF_HOSTED_ADMIN_KEY");
+  const signInUrl = platform.get("MEDIA_SIGN_IN_URL");
 
-  if (url === undefined || adminKey === undefined) {
+  if (url === undefined || adminKey === undefined || signInUrl === undefined) {
     throw new Error(
       "MEDIA_STACK_TESTS=1 but no core stack is configured; run scripts/dev-stack.sh up",
     );
   }
 
-  return { url, adminKey };
+  return { url, adminKey, signInUrl };
 };

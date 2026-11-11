@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { Context, Duration, Effect, Layer, Redacted, Schedule, Schema } from "effect";
 
 import * as CoreSession from "../core/core-session.ts";
+import { stackPasses } from "../testing/core-stack.ts";
 import { findCoreStack } from "../testing/stack-processes.ts";
 
 const core = findCoreStack();
@@ -47,7 +48,9 @@ const issueKey = (serviceId: string) =>
   );
 
 const openSession = (apiKey: Redacted.Redacted) =>
-  Layer.build(CoreSession.layer({ convexUrl: core?.url ?? "", apiKey })).pipe(
+  Layer.build(
+    CoreSession.layer({ convexUrl: core?.url ?? "", apiKey }).pipe(Layer.provide(stackPasses)),
+  ).pipe(
     Effect.map((context) => Context.get(context, CoreSession.Service)),
     Effect.orDie,
   );

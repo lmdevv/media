@@ -1,3 +1,5 @@
+import { loadPassKeys } from "@media/contracts/sign-in";
+import type { PassKeys } from "@media/contracts/sign-in";
 import { loadTicketKeyRing, TICKET_KEYS_SETTING } from "@media/contracts/ticket";
 import type {
   ArtworkResource,
@@ -42,6 +44,40 @@ const keyRing = (): Promise<TicketKeyRing> => {
   }
 
   return imported.ring;
+};
+
+const importPassKeys = async (text: string): Promise<PassKeys> => {
+  const loaded = await loadPassKeys(text);
+
+  if (!loaded.ok) {
+    throw new Error(
+      `${TICKET_KEYS_SETTING} is not usable on this deployment: ${loaded.error.problem}`,
+    );
+  }
+
+  return loaded.value;
+};
+
+let importedPasses: { readonly text: string; readonly keys: Promise<PassKeys> } | undefined;
+
+/**
+ * The sign-in pass keys, which derive from the ticket keys (`@media/contracts/sign-in`, ADR 0007),
+ * derived once per setting value. The sign-in providers check passes with them
+ * (`core/auth/passes.ts`).
+ */
+export const passKeys = (): Promise<PassKeys> => {
+  const text = process.env[TICKET_KEYS_SETTING] ?? "";
+
+  if (importedPasses?.text !== text) {
+    const keys = importPassKeys(text);
+
+    importedPasses = { text, keys };
+    keys.catch(() => {
+      if (importedPasses?.keys === keys) importedPasses = undefined;
+    });
+  }
+
+  return importedPasses.keys;
 };
 
 interface PersonalTicketFor {

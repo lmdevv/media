@@ -211,6 +211,13 @@ export const StopRequest = Schema.Struct({
 });
 
 /**
+ * A `StopRequest` as a JSON string, the body of a stop sent as `text/plain`. A page going away
+ * sends its stop this way: it needs no CORS preflight, which a browser does not send from
+ * `pagehide`.
+ */
+export const StopRequestText = Schema.fromJsonString(Schema.toCodecJson(StopRequest));
+
+/**
  * How large a download may be: `standard` caps it at 720p and 4 Mb/s, `high` at 1080p and
  * 10 Mb/s (the players' 720p and 1080p presets). A source within the cap downloads as it is.
  */

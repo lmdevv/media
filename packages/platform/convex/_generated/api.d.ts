@@ -19,6 +19,7 @@ import type * as core_auth_caller from "../core/auth/caller.js";
 import type * as core_auth_deviceCodes from "../core/auth/deviceCodes.js";
 import type * as core_auth_deviceGrants from "../core/auth/deviceGrants.js";
 import type * as core_auth_flows from "../core/auth/flows.js";
+import type * as core_auth_passes from "../core/auth/passes.js";
 import type * as core_auth_password from "../core/auth/password.js";
 import type * as core_auth_sessions from "../core/auth/sessions.js";
 import type * as core_auth_store from "../core/auth/store.js";
@@ -151,6 +152,7 @@ declare const fullApi: ApiFromModules<{
   "core/auth/deviceCodes": typeof core_auth_deviceCodes;
   "core/auth/deviceGrants": typeof core_auth_deviceGrants;
   "core/auth/flows": typeof core_auth_flows;
+  "core/auth/passes": typeof core_auth_passes;
   "core/auth/password": typeof core_auth_password;
   "core/auth/sessions": typeof core_auth_sessions;
   "core/auth/store": typeof core_auth_store;

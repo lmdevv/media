@@ -433,6 +433,8 @@ const followStatus = (platform: PlatformSdk): StatusStore => {
 export interface PlatformProviderProps {
   /** The platform deployment's URL. */
   readonly url: string;
+  /** The media server's sign-in boundary, where every sign-in goes (ADR 0007). */
+  readonly signInUrl: string;
   /**
    * Where the session lives: a `SharedStore` the origin's clients share, such as IndexedDB from
    * `openIndexedDb`, or a store this client owns. Pass the same object on every render: a new one
@@ -453,11 +455,17 @@ export interface PlatformProviderProps {
  * use; children render once it exists.
  */
 export const PlatformProvider = (props: PlatformProviderProps): ReactNode => {
-  const { url, storage, storageKey } = props;
+  const { url, signInUrl, storage, storageKey } = props;
   const [open, setOpen] = useState<OpenPlatform | null>(null);
 
   useEffect(() => {
-    const platform = createPlatform({ url, connection: "websocket", storage, storageKey });
+    const platform = createPlatform({
+      url,
+      signInUrl,
+      connection: "websocket",
+      storage,
+      storageKey,
+    });
 
     setOpen({ platform, status: followStatus(platform) });
 
@@ -465,7 +473,7 @@ export const PlatformProvider = (props: PlatformProviderProps): ReactNode => {
       setOpen(null);
       void platform.dispose();
     };
-  }, [url, storage, storageKey]);
+  }, [url, signInUrl, storage, storageKey]);
 
   if (open === null) return null;
 

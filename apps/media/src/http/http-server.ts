@@ -14,6 +14,13 @@ import * as MediaRoutes from "./media-routes.ts";
 import * as RateLimit from "./rate-limit.ts";
 import * as WebApp from "./web-app.ts";
 
+/** Lets the web clients call the service from another origin, as in development. */
+export const cors = HttpRouter.cors({
+  allowedOrigins: ["*"],
+  allowedHeaders: ["authorization", "content-type", "range", "x-request-id"],
+  exposedHeaders: ["content-range", "content-length", "accept-ranges", "x-request-id"],
+});
+
 /** Every route the service answers. */
 export const routesLayer = Layer.mergeAll(
   apiLayer,
@@ -23,11 +30,7 @@ export const routesLayer = Layer.mergeAll(
   WebApp.layer,
   Hardening.layer,
   RateLimit.layer,
-  HttpRouter.cors({
-    allowedOrigins: ["*"],
-    allowedHeaders: ["authorization", "content-type", "range", "x-request-id"],
-    exposedHeaders: ["content-range", "content-length", "accept-ranges", "x-request-id"],
-  }),
+  cors,
 );
 
 const SPAN_BASE = "http://media.invalid";

@@ -1,10 +1,9 @@
-import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
 import { makeFunctionReference } from "convex/server";
 import { v } from "convex/values";
 import type { Infer, Value } from "convex/values";
 
 import { internal } from "../../_generated/api";
-import type { DataModel, Id } from "../../_generated/dataModel";
+import type { Id } from "../../_generated/dataModel";
 import { internalMutation, internalQuery } from "../../_generated/server";
 import type { ActionCtx } from "../../_generated/server";
 import { asPerson } from "../accounts/users";
@@ -23,6 +22,8 @@ import { checkTypedPassword, passwordHashOf, passwordMatches, signInLimit } from
 import { takeAttempt } from "../lib/rateLimit";
 import { parseSecret, sha256Hex } from "../lib/secrets";
 import type { SignedIn } from "../sessions";
+import { behindBoundary, spendPass, spentPass } from "./passes";
+import type { CheckedPass } from "./passes";
 
 const tileProof = v.union(
   v.object({ kind: v.literal("password"), by: v.id("users"), password: v.string() }),
@@ -58,13 +59,20 @@ const WRONG_PASSWORD = "Wrong password";
 
 /** Takes a sign-in try for the person typing their password on a lock screen, and finds the hash. */
 export const passwordAttempt = internalMutation({
-  args: { deviceId: v.string(), secretHash: v.string(), userId: v.id("users"), by: v.id("users") },
+  args: {
+    pass: spentPass,
+    deviceId: v.string(),
+    secretHash: v.string(),
+    userId: v.id("users"),
+    by: v.id("users"),
+  },
   returns: v.union(
     v.object({ kind: v.literal("limited") }),
     v.object({ kind: v.literal("unknown") }),
-    v.object({ kind: v.literal("known"), hash: v.string(), usernameKey: v.string() }),
+    v.object({ kind: v.literal("known"), hash: v.string() }),
   ),
-  handler: async (ctx, { deviceId, secretHash, userId, by }) => {
+  handler: async (ctx, { pass, deviceId, secretHash, userId, by }) => {
+    await spendPass(ctx, pass, "tile");
     const device = await sharedDeviceById(ctx.db, deviceId, secretHash);
     const person = asPerson(await ctx.db.get(by));
 
@@ -78,15 +86,14 @@ export const passwordAttempt = internalMutation({
 
     const hash = await passwordHashOf(ctx.db, by);
 
-    return hash === undefined
-      ? { kind: "unknown" as const }
-      : { kind: "known" as const, hash, usernameKey: person.usernameKey };
+    return hash === undefined ? { kind: "unknown" as const } : { kind: "known" as const, hash };
   },
 });
 
 const checkPassword = async (
   ctx: Pick<ActionCtx, "runMutation">,
   key: TileKey,
+  pass: CheckedPass,
   by: Id<"users">,
   password: string,
 ): Promise<CheckedProof> => {
@@ -94,6 +101,7 @@ const checkPassword = async (
 
   const attempt = await ctx.runMutation(internal.core.auth.tiles.passwordAttempt, {
     ...key,
+    pass,
     by,
   });
 
@@ -105,12 +113,13 @@ const checkPassword = async (
     return fail("unauthenticated", WRONG_PASSWORD);
   }
 
-  return { kind: "password", by, hash: attempt.hash, usernameKey: attempt.usernameKey };
+  return { kind: "password", by, hash: attempt.hash };
 };
 
 const checkCode = async (
   ctx: Pick<ActionCtx, "runMutation">,
   key: TileKey,
+  pass: CheckedPass,
   by: Id<"users">,
   code: string,
 ): Promise<CheckedProof> => {
@@ -118,7 +127,11 @@ const checkCode = async (
 
   if (!isUnlockCode(digits)) return fail("invalid_args", `An unlock code is ${CODE_DIGITS}`);
 
-  const attempt = await ctx.runMutation(internal.core.devices.unlockCodes.attempt, { ...key, by });
+  const attempt = await ctx.runMutation(internal.core.devices.unlockCodes.attempt, {
+    ...key,
+    pass,
+    by,
+  });
 
   if (attempt.kind === "none")
     return fail("unauthenticated", "No unlock code is set for this person");
@@ -146,37 +159,50 @@ const checkCode = async (
   await ctx.runMutation(internal.core.devices.unlockCodes.refundRightCode, {
     deviceId: attempt.deviceId,
     by,
+    codeId: attempt.codeId,
   });
 
   return { kind: "code", by, codeId: attempt.codeId };
 };
 
+/**
+ * Checks `proof`. A password or an unlock code is tried in a mutation, which spends `pass` first;
+ * `spent` says so, and otherwise `tiles.open`, the first write, spends it.
+ */
 const checkProof = async (
   ctx: Pick<ActionCtx, "runMutation">,
   key: TileKey,
+  pass: CheckedPass,
   proof: Infer<typeof tileProof> | undefined,
-): Promise<CheckedProof> => {
-  if (proof === undefined) return { kind: "none" };
+): Promise<{ readonly proof: CheckedProof; readonly spent: boolean }> => {
+  if (proof === undefined) return { proof: { kind: "none" }, spent: false };
 
-  if (proof.kind === "password") return checkPassword(ctx, key, proof.by, proof.password);
+  if (proof.kind === "password") {
+    return { proof: await checkPassword(ctx, key, pass, proof.by, proof.password), spent: true };
+  }
 
-  return proof.kind === "code" ? checkCode(ctx, key, proof.by, proof.code) : proof;
+  return proof.kind === "code"
+    ? { proof: await checkCode(ctx, key, pass, proof.by, proof.code), spent: true }
+    : { proof, spent: false };
 };
 
 /**
  * The `tile` provider: opens a person's tile on a shared device as a new media-only session. The
  * proof is absent for an open tile, or a password, an unlock code, or an approval for a locked one.
  */
-export const tileProvider = ConvexCredentials<DataModel>({
+export const tileProvider = behindBoundary({
   id: "tile",
-  authorize: async (params, ctx): Promise<SignedIn> => {
+  authorize: async (params, ctx, pass): Promise<SignedIn> => {
     const { device, userId, proof } = await ctx.runQuery(parseTileParams, params);
     const parsed = parseSecret(DEVICE_PREFIX, device.trim()) ?? fail("not_found", NO_DEVICE);
     const key = { deviceId: parsed.rowId, secretHash: await sha256Hex(parsed.secret), userId };
 
+    const checked = await checkProof(ctx, key, pass, proof);
+
     return ctx.runMutation(internal.core.devices.tiles.open, {
       ...key,
-      proof: await checkProof(ctx, key, proof),
+      pass: checked.spent ? null : pass,
+      proof: checked.proof,
     });
   },
 });

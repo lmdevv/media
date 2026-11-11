@@ -13,6 +13,8 @@ import {
   Stream,
 } from "effect";
 
+import * as SignInPasses from "../http/sign-in-passes.ts";
+
 /**
  * `signed-in` once the core accepted the server's key; `signed-out` while it signs in, and after
  * the core refused the key. The server learns that the core ended its session only from a call,
@@ -184,17 +186,25 @@ const connect = Effect.fn("CoreSession.connect")(function* (options: Options) {
 
 /**
  * Signs the server in to the core at `options.convexUrl` with its key, over a connection of its
- * own, and keeps trying with backoff until the core accepts it. Fails only when the URL is not
- * valid.
+ * own, and keeps trying with backoff until the core accepts it. The server is the sign-in
+ * boundary, so it passes its own sign-in (`SignInPasses.ownSignIn`). Fails only when the URL is
+ * not valid.
  */
-export const layer = (options: Options): Layer.Layer<Service, Platform.OpenError> =>
+export const layer = (
+  options: Options,
+): Layer.Layer<Service, Platform.OpenError, SignInPasses.Passes> =>
   layerFrom.pipe(
     Layer.provide(Layer.effect(Connection, connect(options))),
     Layer.provide(
-      Platform.layerClient({
-        url: options.convexUrl,
-        connection: "websocket",
-        storage: TokenStorage.layerMemory,
-      }),
+      Layer.unwrap(
+        Effect.map(SignInPasses.Passes, (passes) =>
+          Platform.layerClient({
+            url: options.convexUrl,
+            connection: "websocket",
+            storage: TokenStorage.layerMemory,
+            signIn: Platform.SignInRoute.Direct({ prepare: SignInPasses.ownSignIn(passes) }),
+          }),
+        ),
+      ),
     ),
   );

@@ -13,8 +13,8 @@ describe.skipIf(stack === undefined)("sign-up", { timeout: 120_000 }, () => {
     await ensureOwner(stack);
 
     expect(await refusal(signIn(stack, "setup", person))).toBe("conflict");
-    expect(await refusal(signIn(stack, "password", { ...person, flow: "signUp" }))).toMatch(
-      /^failed: /u,
+    expect(await refusal(signIn(stack, "password", { ...person, flow: "signUp" }))).toBe(
+      "internal",
     );
     expect(
       await refusal(

@@ -3,12 +3,13 @@
 # backends in Docker, each with its own volume and ports, plus the media service's credentials and
 # a temporary output directory. The core (packages/platform) holds movies, and the media service and
 # both web clients use it. Old movies' backend (packages/backend) stays only for its own stack tests
-# until its package is deleted.
+# until its package is deleted. The media service's sign-in boundary also runs alone in a container,
+# so the stack suites and the web clients' development servers sign in through it (ADR 0007).
 #
 #   scripts/dev-stack.sh up        # start (or reuse) both backends, deploy, configure both, write .env.local
 #   scripts/dev-stack.sh env       # print this worktree's name, ports, and directories
-#   scripts/dev-stack.sh down      # stop and remove both containers (the data volumes stay)
-#   scripts/dev-stack.sh destroy   # remove both containers and their data volumes
+#   scripts/dev-stack.sh down      # stop and remove the containers (the data volumes stay)
+#   scripts/dev-stack.sh destroy   # remove the containers and their data volumes
 #
 # `up` creates the media service's service principal on the core and issues its key once, keeping
 # it in the state directory while the core's volume lives.
@@ -22,6 +23,7 @@
 #   base + 4  core Convex API
 #   base + 5  core Convex HTTP actions
 #   base + 6  account client dev server (apps/web-account)
+#   base + 7  sign-in boundary (the media service's /api/auth/sign-in route alone)
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,8 +46,10 @@ web_port=$((base + 3))
 core_port=$((base + 4))
 core_site_port=$((base + 5))
 account_port=$((base + 6))
+boundary_port=$((base + 7))
 container="movies-convex-${name}"
 core_container="media-platform-convex-${name}"
+boundary_container="media-boundary-${name}"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/movies-dev/${name}"
 data_dir="${state_dir}/data"
 transcode_dir="${TMPDIR:-/tmp}/movies-dev-${name}/transcode"
@@ -64,6 +68,8 @@ core_container=${core_container}
 core_convex_url=http://127.0.0.1:${core_port}
 core_convex_site_url=http://127.0.0.1:${core_site_port}
 account_url=http://localhost:${account_port}
+boundary_container=${boundary_container}
+sign_in_url=http://127.0.0.1:${boundary_port}/api/auth/sign-in
 data_dir=${data_dir}
 transcode_dir=${transcode_dir}
 backup_dir=${backup_dir}
@@ -77,15 +83,15 @@ case "${1:-up}" in
     exit 0
     ;;
   down)
-    docker rm -f "$container" "$core_container" >/dev/null 2>&1 || true
-    echo "stopped ${container} and ${core_container}"
+    docker rm -f "$container" "$core_container" "$boundary_container" >/dev/null 2>&1 || true
+    echo "stopped ${container}, ${core_container}, and ${boundary_container}"
     exit 0
     ;;
   destroy)
-    docker rm -f "$container" "$core_container" >/dev/null 2>&1 || true
+    docker rm -f "$container" "$core_container" "$boundary_container" >/dev/null 2>&1 || true
     docker volume rm "${container}-data" "${core_container}-data" >/dev/null 2>&1 || true
     rm -rf "$state_dir" "$(dirname "$transcode_dir")"
-    echo "destroyed ${container} and ${core_container}"
+    echo "destroyed ${container}, ${core_container}, and ${boundary_container}"
     exit 0
     ;;
   up) ;;
@@ -152,20 +158,25 @@ fi
 
 core_admin_key="$(docker exec "$core_container" ./generate_admin_key.sh | tail -n 1)"
 
+sign_in_url="http://127.0.0.1:${boundary_port}/api/auth/sign-in"
+
 cat >"${root}/packages/platform/.env.local" <<ENV
 CONVEX_SELF_HOSTED_URL=http://127.0.0.1:${core_port}
 CONVEX_SELF_HOSTED_ADMIN_KEY=${core_admin_key}
+MEDIA_SIGN_IN_URL=${sign_in_url}
 ENV
 
 cat >"${root}/apps/web-account/.env.local" <<ENV
 VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
 VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
+VITE_SIGN_IN_URL=${sign_in_url}
 ACCOUNT_PORT=${account_port}
 ENV
 
 cat >"${root}/apps/web-movies/.env.local" <<ENV
 VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
 VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
+VITE_SIGN_IN_URL=${sign_in_url}
 WEB_PORT=${web_port}
 ACCOUNT_DEV_URL=http://localhost:${account_port}
 ENV
@@ -212,6 +223,39 @@ if [[ ! -s "$service_key_file" ]]; then
   mv "${service_key_file}.partial" "$service_key_file"
 fi
 media_ticket_keys="$(pnpm exec convex env get MEDIA_TICKET_KEYS)"
+
+# The sign-in boundary, built from this checkout and run alone on the host's network, so it reaches
+# the core on loopback. Its settings, the ticket keys among them, go through a file, never argv.
+node "${root}/apps/media/scripts/build.ts" --boundary >/dev/null
+boundary_env="${state_dir}/boundary.env"
+(
+  umask 077
+  cat >"$boundary_env" <<ENV
+CONVEX_URL=http://127.0.0.1:${core_port}
+MEDIA_TICKET_KEYS=${media_ticket_keys}
+HOST=127.0.0.1
+PORT=${boundary_port}
+ENV
+)
+node_image="$(sed -n 's/^ARG NODE_IMAGE=//p' "${root}/deploy/image/Dockerfile")"
+docker rm -f "$boundary_container" >/dev/null 2>&1 || true
+docker run -d --name "$boundary_container" --network host \
+  --user "$(id -u):$(id -g)" --env-file "$boundary_env" \
+  -v "${root}/apps/media/dist:/app:ro" "$node_image" node /app/sign-in-boundary.js >/dev/null
+# A CORS preflight answers 204 once the route is up, and spends no sign-in try, as a POST would.
+boundary_ready() {
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS -H 'Origin: http://localhost' \
+    -H 'Access-Control-Request-Method: POST' "$sign_in_url")" == 204 ]]
+}
+for _ in $(seq 1 60); do
+  boundary_ready && break
+  sleep 0.5
+done
+if ! boundary_ready; then
+  echo "The sign-in boundary did not answer at ${sign_in_url} within 30 s" >&2
+  docker logs --tail 40 "$boundary_container" >&2 || true
+  exit 1
+fi
 
 (
   umask 077

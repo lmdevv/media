@@ -26,6 +26,8 @@ export interface Stack {
   readonly accountPort: number;
   /** The media server's address, which the admin pages call. */
   readonly mediaUrl: string;
+  /** The stack's sign-in boundary (`scripts/dev-stack.sh`), where every sign-in goes. */
+  readonly signInUrl: string;
 }
 
 /** The stack's settings, or null when this worktree has no stack. */
@@ -35,13 +37,22 @@ export const stackEnv = (): Stack | null => {
   const platformUrl = platform.get("CONVEX_SELF_HOSTED_URL");
   const adminKey = platform.get("CONVEX_SELF_HOSTED_ADMIN_KEY");
   const accountPort = account.get("ACCOUNT_PORT");
+  const signInUrl = account.get("VITE_SIGN_IN_URL");
 
-  if (platformUrl === undefined || adminKey === undefined || accountPort === undefined) return null;
+  if (
+    platformUrl === undefined ||
+    adminKey === undefined ||
+    accountPort === undefined ||
+    signInUrl === undefined
+  ) {
+    return null;
+  }
 
   return {
     platformUrl,
     adminKey,
     accountPort: Number(accountPort),
     mediaUrl: account.get("VITE_MEDIA_BASE_URL") ?? "",
+    signInUrl,
   };
 };

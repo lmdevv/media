@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { addressBudgets, admit, doors } from "./rate-limit";
+import { addressBudgets, admit, canonicalAddress, doors } from "./rate-limit";
 import type { AddressBucket, Door } from "./rate-limit";
 
 const replay = (door: Door, times: ReadonlyArray<number>): ReadonlyArray<boolean> => {
@@ -107,5 +107,47 @@ describe("per-address rate limits", () => {
     expect(source).not.toMatch(/\bimport\s*\(/u);
     expect(source).not.toMatch(/\brequire\s*\(/u);
     expect(source).not.toMatch(/^\s*export\s[^\n]*\sfrom\s/mu);
+  });
+});
+
+describe("canonical client addresses", () => {
+  it.each([
+    ["203.0.113.9", "203.0.113.9"],
+    [" 203.0.113.9 ", "203.0.113.9"],
+    ["::ffff:203.0.113.9", "203.0.113.9"],
+    ["::FFFF:203.0.113.9", "203.0.113.9"],
+    ["::ffff:cb00:7109", "203.0.113.9"],
+    ["0:0:0:0:0:ffff:cb00:7109", "203.0.113.9"],
+    ["[::ffff:203.0.113.9]", "203.0.113.9"],
+    ["2001:DB8:0:0:0:0:0:1", "2001:db8::1"],
+    ["2001:db8::0001", "2001:db8::1"],
+    ["2001:db8:0:0:1:0:0:1", "2001:db8::1:0:0:1"],
+    ["fe80::1%eth0", "fe80::1"],
+    ["[fe80::1%25eth0]", "fe80::1"],
+    ["0:0:0:0:0:0:0:1", "::1"],
+    ["::", "::"],
+    ["unknown", "unknown"],
+    ["server", "server"],
+    ["2001:db8::1::2", "2001:db8::1::2"],
+    ["203.0.113.256", "203.0.113.256"],
+  ])("writes %j as %j", (written, canonical) => {
+    expect(canonicalAddress(written)).toBe(canonical);
+  });
+
+  it("gives every written form of one address the same form", () => {
+    fc.assert(
+      fc.property(fc.ipV4(), (address) => {
+        expect(canonicalAddress(`::ffff:${address}`)).toBe(canonicalAddress(address));
+      }),
+    );
+    fc.assert(
+      fc.property(fc.ipV6(), (address) => {
+        const canonical = canonicalAddress(address);
+
+        expect(canonicalAddress(address.toUpperCase())).toBe(canonical);
+        expect(canonicalAddress(`[${address}%eth0]`)).toBe(canonical);
+        expect(canonicalAddress(canonical)).toBe(canonical);
+      }),
+    );
   });
 });

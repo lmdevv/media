@@ -36,6 +36,7 @@ import {
 } from "./model";
 import type { GuestAccess, LinkDoc, ShareTarget, StoredTarget } from "./model";
 import { newLinkStanding, standingOf } from "./standing";
+import { spendPass, spentPass } from "../auth/passes";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -188,9 +189,15 @@ const seat = async (
  * rate-limit token behind; only guests who get in count against the link.
  */
 export const open = internalMutation({
-  args: { code: v.string(), name: v.string() },
+  args: {
+    pass: spentPass,
+    code: v.string(),
+    name: v.string(),
+  },
   returns: signedIn,
-  handler: async (ctx, { code, name }) => {
+  handler: async (ctx, { pass, code, name }) => {
+    await spendPass(ctx, pass, "guest");
+
     const now = Date.now();
     const username = requireGuestName(name);
 

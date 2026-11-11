@@ -2,12 +2,14 @@ import { join } from "node:path";
 
 import { NodeServices } from "@effect/platform-node";
 import { Platform, TokenStorage } from "@media/sdk/effect";
+import { ownClientFetch } from "@media/sdk/testing/own-client";
 import { Context, Effect, Exit, Layer, Logger, Option, Redacted, References, Schema } from "effect";
 import type { Scope } from "effect";
 
 import * as CoreWiring from "../core/core-wiring.ts";
 import * as CoreImports from "../migration/core-imports.ts";
 import * as Outbound from "../http/outbound.ts";
+import * as SignInPasses from "../http/sign-in-passes.ts";
 import * as RetainedLogs from "../logging/retained-logs.ts";
 import * as MediaConfig from "../media-config.ts";
 import { redactedLine } from "../observability.ts";
@@ -47,6 +49,10 @@ export const runHost = async <A>(
   return Schema.decodeUnknownSync(result)(answer.value.value);
 };
 
+/** Passes for the server's own sign-in, signed with the stack core's ticket keys. */
+export const stackPasses: Layer.Layer<SignInPasses.Passes, SignInPasses.PassKeysUnusable> =
+  Layer.unwrap(Effect.sync(() => SignInPasses.layer(Redacted.make(ticketKeysText()))));
+
 /** A new service principal and the key the operator issues it. */
 export const issueServiceKey = async (): Promise<Redacted.Redacted> => {
   const serviceId = await runHost(
@@ -69,7 +75,15 @@ const signIn = (scope: Scope.Scope, username: string, password: string) =>
   Effect.runPromise(
     Effect.gen(function* () {
       const context = yield* Layer.buildWithScope(
-        Platform.layer({ url: coreUrl(), connection: "http", storage: TokenStorage.layerMemory }),
+        Platform.layer({
+          url: coreUrl(),
+          connection: "http",
+          storage: TokenStorage.layerMemory,
+          signIn: Platform.SignInRoute.Boundary({
+            url: core?.signInUrl ?? "",
+            fetch: ownClientFetch(),
+          }),
+        }),
         scope,
       );
 
@@ -95,7 +109,15 @@ const setUpOwner = (url: string) =>
     Effect.scoped(
       Effect.gen(function* () {
         const context = yield* Layer.build(
-          Platform.layer({ url, connection: "http", storage: TokenStorage.layerMemory }),
+          Platform.layer({
+            url,
+            connection: "http",
+            storage: TokenStorage.layerMemory,
+            signIn: Platform.SignInRoute.Boundary({
+              url: core?.signInUrl ?? "",
+              fetch: ownClientFetch(),
+            }),
+          }),
         );
 
         const platform = Context.get(context, Platform.Platform);

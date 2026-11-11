@@ -140,7 +140,12 @@ const signIn = (credentials: Platform.Credentials): Promise<Platform.Interface> 
   run(
     Effect.gen(function* () {
       const context = yield* Layer.buildWithScope(
-        Platform.layer({ url: convexUrl, connection: "http", storage: TokenStorage.layerMemory }),
+        Platform.layer({
+          url: convexUrl,
+          connection: "http",
+          storage: TokenStorage.layerMemory,
+          signIn: Platform.SignInRoute.Boundary({ url: Platform.signInUrlBeside(convexUrl) }),
+        }),
         scope,
       );
 
@@ -208,7 +213,12 @@ describe.skipIf(!enabled)("the packaged install", { timeout: 180_000 }, () => {
     const info = await run(
       Effect.gen(function* () {
         const context = yield* Layer.buildWithScope(
-          Platform.layer({ url: convexUrl, connection: "http", storage: TokenStorage.layerMemory }),
+          Platform.layer({
+            url: convexUrl,
+            connection: "http",
+            storage: TokenStorage.layerMemory,
+            signIn: Platform.SignInRoute.Boundary({ url: Platform.signInUrlBeside(convexUrl) }),
+          }),
           scope,
         );
 

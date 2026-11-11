@@ -15,6 +15,7 @@ import {
   SeekRequest,
   SeekResponse,
   StopRequest,
+  StopRequestText,
 } from "@media/contracts/media-playback";
 import type { Episode, MediaFile } from "@media/contracts/models/catalog";
 import type {
@@ -26,7 +27,7 @@ import { Milliseconds } from "@media/contracts/units";
 import { Clock, Duration, Effect, Match, Option, Redacted, Schedule, Schema, Stream } from "effect";
 
 import type { PlaybackCallError } from "./media-http";
-import { encodeJson, mediaUrl, requestPlayback, withRenewedToken } from "./media-http";
+import { baseUrl, encodeJson, mediaUrl, requestPlayback, withRenewedToken } from "./media-http";
 import { MoviesClient } from "./movies-client";
 import type { PlayerEvent, PlayerPort } from "./room-sync/player-port";
 import { playerEvents } from "./room-sync/player-port";
@@ -153,7 +154,9 @@ export const seekStream = Effect.fn("Playback.seekStream")(function* (
 /**
  * Ends an HLS stream so the media service can stop encoding and delete its segments; a direct
  * stream has nothing to stop. `reportProgress` stops the stream it was given when its scope
- * closes; stop a stream that replaced it (a renegotiation) with this.
+ * closes; stop a stream that replaced it (a renegotiation) with this. The request outlives the
+ * page that sends it (`keepalive`), so a stop sent as the page goes away still frees the stream's
+ * transcode slot rather than holding it until the service's idle release.
  */
 export const stop = (playback: Playback): Effect.Effect<void, PlaybackCallError> =>
   Option.match(Option.fromNullishOr(playback.stream.streamId), {
@@ -172,11 +175,39 @@ export const stop = (playback: Playback): Effect.Effect<void, PlaybackCallError>
               }),
             ),
             bearer: Option.none(),
+            keepalive: true,
           },
           Schema.Null,
         );
       }),
   });
+
+const encodeStop = Schema.encodeSync(StopRequestText);
+
+/**
+ * Sends `playback`'s stop before it returns, for a page that is going away: a `pagehide` handler,
+ * or a player torn down by a navigation that may unload the page next. `stop` runs as an Effect
+ * fiber, which can yield to the scheduler before it reaches `fetch`, and a page in `pagehide`
+ * never runs that later task, so its stream would hold a transcode slot until the media service's
+ * idle release. This encodes the request and calls `fetch` at once, with `keepalive` so the
+ * request outlives the page, and ignores the answer. The JSON body goes as `text/plain`, a simple
+ * request with no CORS preflight, which a browser does not send from `pagehide`: a client on
+ * another origin than the media service, as in development, needs one for JSON. A direct stream
+ * has nothing to stop.
+ */
+export const stopNow = (playback: Playback): void => {
+  const streamId = playback.stream.streamId;
+
+  if (streamId === undefined) return;
+  const body = encodeStop({ token: Redacted.make(playback.started.token), streamId });
+
+  void fetch(`${baseUrl(playback.started.mediaBaseUrl)}${MEDIA_ROUTES.stop}`, {
+    method: "POST",
+    keepalive: true,
+    headers: { "content-type": "text/plain;charset=UTF-8" },
+    body,
+  }).catch(() => undefined);
+};
 
 /**
  * What a player should do after a playback API failure:

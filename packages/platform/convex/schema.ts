@@ -193,6 +193,20 @@ export default defineSchema({
   /** A user's password, as a Scrypt hash. */
   passwords: defineTable({ userId: v.id("users"), hash: v.string() }).index("by_user", ["userId"]),
 
+  /**
+   * The nonce of every sign-in pass the core took, with the provider and address digest it was
+   * signed for, until a minute after the pass expires, so each pass signs in once
+   * (`core/auth/passes.ts`, ADR 0007).
+   */
+  signInPasses: defineTable({
+    nonce: v.string(),
+    expiresAt: v.number(),
+    provider: v.string(),
+    addressDigest: v.string(),
+  })
+    .index("by_nonce", ["nonce"])
+    .index("by_expiration", ["expiresAt"]),
+
   rateLimits: defineTable({
     identifier: v.string(),
     attemptsLeft: v.number(),

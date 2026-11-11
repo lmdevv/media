@@ -17,6 +17,7 @@ import { requireAccount } from "../permissions/authorize";
 import { endsCredentials } from "../permissions/policy";
 import type { PersonDoc } from "../permissions/policy";
 import { endUserCredentials, openSession, signedIn } from "../sessions";
+import { spendPass, spentPass } from "../auth/passes";
 
 export const DEFAULT_ROLE: AssignableRole = "member";
 
@@ -98,9 +99,15 @@ export const renameUser = async (
 };
 
 export const setUp = internalMutation({
-  args: { username: v.string(), hash: v.string() },
+  args: {
+    pass: spentPass,
+    username: v.string(),
+    hash: v.string(),
+  },
   returns: signedIn,
-  handler: async (ctx, { username, hash }) => {
+  handler: async (ctx, { pass, username, hash }) => {
+    await spendPass(ctx, pass, "setup");
+
     const user = await insertUser(ctx, { username, hash, role: "owner" });
 
     return {

@@ -1,5 +1,6 @@
 import { Effect, Fiber, ManagedRuntime, Match, Option, Redacted, Stream } from "effect";
 
+import { SignInRoute } from "../auth";
 import type { AuthStatus } from "../auth";
 import type { FunctionKind } from "../convex-transport";
 import * as QueryWatch from "../query-watch";
@@ -14,6 +15,16 @@ import { promiseMethods } from "./generated/commands";
 export interface PlatformOptions {
   /** The platform deployment's URL. */
   readonly url: string;
+  /**
+   * The media server's sign-in boundary, where every sign-in goes (ADR 0007): `signInUrlFor` the
+   * server's address, or `signInUrlBeside` the platform's URL in an install.
+   */
+  readonly signInUrl: string;
+  /**
+   * The `fetch` sign-ins go through; the global one when omitted. A test that signs many people in
+   * from one host passes one that names each as its own client, as a proxy does.
+   */
+  readonly signInFetch?: typeof fetch;
   /** `websocket` (default) for apps; `http` for short-lived scripts. */
   readonly connection?: "websocket" | "http";
   /**
@@ -162,6 +173,10 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
       url: options.url,
       connection: options.connection ?? "websocket",
       storage: storageLayer(options.storage, options.storageKey ?? DEFAULT_STORAGE_KEY),
+      signIn:
+        options.signInFetch === undefined
+          ? SignInRoute.Boundary({ url: options.signInUrl })
+          : SignInRoute.Boundary({ url: options.signInUrl, fetch: options.signInFetch }),
     }),
   );
 

@@ -1,3 +1,5 @@
+import { admit, canonicalAddress } from "@media/contracts/rate-limit";
+import type { Admission, AddressBucket, Door } from "@media/contracts/rate-limit";
 import { Clock, Effect, Layer, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
@@ -24,16 +26,13 @@ interface Bucket {
  * forgotten (a quiet address, which has refilled anyway), so many new addresses cannot reset the
  * busy ones.
  */
-export const makeLimiter = (maxBuckets = MAX_BUCKETS) => {
-  const buckets = new Map<string, Bucket>();
+const makeBucketStore = <B>(maxBuckets: number) => {
+  const buckets = new Map<string, B>();
 
-  return (
-    keyed: ReadonlyArray<readonly [key: string, budget: Budget]>,
-    now: number,
-    cost = 1,
-  ): Option.Option<number> => {
-    const refilled = keyed.map(([key, budget]) => {
-      const previous = buckets.get(key) ?? { tokens: budget.burst, updatedAt: now };
+  return {
+    /** Takes `key`'s bucket out, making room for it as the most recently used. */
+    take: (key: string): B | undefined => {
+      const previous = buckets.get(key);
 
       buckets.delete(key);
 
@@ -42,6 +41,25 @@ export const makeLimiter = (maxBuckets = MAX_BUCKETS) => {
 
         if (oldest.done !== true) buckets.delete(oldest.value);
       }
+
+      return previous;
+    },
+    keep: (key: string, bucket: B): void => {
+      buckets.set(key, bucket);
+    },
+  };
+};
+
+export const makeLimiter = (maxBuckets = MAX_BUCKETS) => {
+  const buckets = makeBucketStore<Bucket>(maxBuckets);
+
+  return (
+    keyed: ReadonlyArray<readonly [key: string, budget: Budget]>,
+    now: number,
+    cost = 1,
+  ): Option.Option<number> => {
+    const refilled = keyed.map(([key, budget]) => {
+      const previous = buckets.take(key) ?? { tokens: budget.burst, updatedAt: now };
 
       const tokens = Math.min(
         budget.burst,
@@ -56,7 +74,7 @@ export const makeLimiter = (maxBuckets = MAX_BUCKETS) => {
     );
 
     for (const { key, tokens } of refilled) {
-      buckets.set(key, { tokens: waits.length === 0 ? tokens - cost : tokens, updatedAt: now });
+      buckets.keep(key, { tokens: waits.length === 0 ? tokens - cost : tokens, updatedAt: now });
     }
 
     return waits.length === 0 ? Option.none() : Option.some(Math.max(...waits));
@@ -70,8 +88,29 @@ export const retryAfter = (
 ): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.setHeader(response, "retry-after", String(seconds));
 
-const isLoopback = (address: string): boolean =>
-  address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
+/** Whether a canonical address (`canonicalAddress`) is the loopback interface's. */
+const isLoopback = (address: string): boolean => address === "::1" || address.startsWith("127.");
+
+/** The canonical address of a request's peer, `unknown` when the socket names none. */
+const peerAddress = (peer: Option.Option<string>): string =>
+  canonicalAddress(Option.getOrElse(peer, () => "unknown"));
+
+/**
+ * The client a request came from. The installs put Caddy in front on loopback, and Caddy always
+ * sets `X-Forwarded-For` to the client it resolved (through MEDIA_TRUSTED_PROXIES), so the header
+ * counts only from a loopback peer, and only its last entry. A client that reaches the service
+ * directly is its own peer, whatever header it sends. The answer is canonical
+ * (`canonicalAddress`), so one client has one bucket however its address is written.
+ */
+export const clientAddress = (
+  peer: Option.Option<string>,
+  forwardedFor: string | undefined,
+): string => {
+  const direct = peerAddress(peer);
+  const forwarded = isLoopback(direct) ? forwardedFor?.split(",").at(-1)?.trim() : undefined;
+
+  return forwarded === undefined || forwarded === "" ? direct : canonicalAddress(forwarded);
+};
 
 interface LimitedRequest {
   readonly pathname: string;
@@ -80,11 +119,8 @@ interface LimitedRequest {
 }
 
 /**
- * The seconds `request` must wait, or none. The installs put Caddy in front on loopback, and Caddy
- * always sets `X-Forwarded-For` to the client it resolved (through MEDIA_TRUSTED_PROXIES), so the
- * header counts only from a loopback peer, and only its last entry. A client that reaches the
- * service directly is its own peer, whatever header it sends. The one caller never limited is a
- * loopback peer without the header: the container's health check, which bypasses Caddy, since
+ * The seconds `request` must wait, or none, by its `clientAddress`. The one caller never limited
+ * is a loopback peer without the header: the container's health check, which bypasses Caddy, since
  * every request through Caddy carries it.
  */
 export const limitRequest = (
@@ -95,14 +131,34 @@ export const limitRequest = (
   const limited = BUDGETS.find(([prefix]) => request.pathname.startsWith(prefix));
 
   if (limited === undefined) return Option.none();
-  const peer = Option.getOrElse(request.peer, () => "unknown");
 
-  if (isLoopback(peer) && request.forwardedFor === undefined) return Option.none();
-  const forwarded = isLoopback(peer) ? request.forwardedFor?.split(",").at(-1)?.trim() : undefined;
-  const address = forwarded === undefined || forwarded === "" ? peer : forwarded;
+  if (isLoopback(peerAddress(request.peer)) && request.forwardedFor === undefined) {
+    return Option.none();
+  }
+
   const [prefix, budget] = limited;
 
-  return take([[`${prefix}\u0000${address}`, budget]], now);
+  return take(
+    [[`${prefix}\u0000${clientAddress(request.peer, request.forwardedFor)}`, budget]],
+    now,
+  );
+};
+
+/**
+ * One bucket per door of `@media/contracts/rate-limit` and client address, kept as `makeLimiter`
+ * keeps its buckets, deciding each call with the contract's `admit`.
+ */
+export const makeDoors = (maxBuckets = MAX_BUCKETS) => {
+  const buckets = makeBucketStore<AddressBucket>(maxBuckets);
+
+  return (door: Door, address: string, now: number): Admission => {
+    const key = `${door}\u0000${address}`;
+    const admission = admit(door, buckets.take(key), now);
+
+    buckets.keep(key, admission.bucket);
+
+    return admission;
+  };
 };
 
 /** Limits the unauthenticated routes by client address. */

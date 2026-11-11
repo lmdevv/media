@@ -25,10 +25,11 @@ const readEnvFile = (path: string): ReadonlyMap<string, string> => {
   );
 };
 
-/** Where the dev stack's core is, and its admin key. */
+/** Where the dev stack's core is, its admin key, and its sign-in boundary. */
 export interface CoreStack {
   readonly url: string;
   readonly adminKey: string;
+  readonly signInUrl: string;
 }
 
 /**
@@ -42,14 +43,15 @@ export const findCoreStack = (): CoreStack | undefined => {
   const platform = readEnvFile(join(repoRoot, "packages", "platform", ".env.local"));
   const url = platform.get("CONVEX_SELF_HOSTED_URL");
   const adminKey = platform.get("CONVEX_SELF_HOSTED_ADMIN_KEY");
+  const signInUrl = platform.get("MEDIA_SIGN_IN_URL");
 
-  if (url === undefined || adminKey === undefined) {
+  if (url === undefined || adminKey === undefined || signInUrl === undefined) {
     throw new Error(
       "MEDIA_STACK_TESTS=1 but no core stack is configured; run scripts/dev-stack.sh up",
     );
   }
 
-  return { url, adminKey };
+  return { url, adminKey, signInUrl };
 };
 
 /** Bundles the media service so a test runs the file that ships. */

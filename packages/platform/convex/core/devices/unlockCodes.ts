@@ -6,6 +6,7 @@ import type { Doc, Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { refuseKeys, requireCaller } from "../auth/caller";
+import { spendPass, spentPass } from "../auth/passes";
 import { fail } from "../lib/errors";
 import { PASSWORD_MIN, hashUnlockCode } from "../lib/passwords";
 import { refundAttempt, takeAttempt } from "../lib/rateLimit";
@@ -84,7 +85,13 @@ export const clearStrikes = async (
 };
 
 export const attempt = internalMutation({
-  args: { deviceId: v.string(), secretHash: v.string(), userId: v.id("users"), by: v.id("users") },
+  args: {
+    pass: spentPass,
+    deviceId: v.string(),
+    secretHash: v.string(),
+    userId: v.id("users"),
+    by: v.id("users"),
+  },
   returns: v.union(
     v.object({ kind: v.literal("none") }),
     v.object({ kind: v.literal("off") }),
@@ -97,7 +104,8 @@ export const attempt = internalMutation({
       left: v.number(),
     }),
   ),
-  handler: async (ctx, { deviceId, secretHash, userId, by }) => {
+  handler: async (ctx, { pass, deviceId, secretHash, userId, by }) => {
+    await spendPass(ctx, pass, "tile");
     const device = await sharedDeviceById(ctx.db, deviceId, secretHash);
     const typist = asPerson(await ctx.db.get(by));
     const code = typist === null ? null : await codeOf(ctx.db, typist._id);
@@ -130,14 +138,25 @@ export const attempt = internalMutation({
   },
 });
 
+/**
+ * Gives back the try a right code took, and clears its strikes on the device, but only while the
+ * code the action checked, `codeId`, is still the person's code. The check ran in the action,
+ * outside this transaction, so a code replaced in between keeps its own strikes and tries: a
+ * proof against the old code is no proof of the new one. Answers whether it refunded.
+ */
 export const refundRightCode = internalMutation({
-  args: { deviceId: v.id("devices"), by: v.id("users") },
-  returns: v.null(),
-  handler: async (ctx, { deviceId, by }) => {
-    await clearStrikes(ctx, deviceId, by);
+  args: { deviceId: v.id("devices"), by: v.id("users"), codeId: v.id("unlockCodes") },
+  returns: v.boolean(),
+  handler: async (ctx, { deviceId, by, codeId }) => {
+    const current = await codeOf(ctx.db, by);
+
+    if (current?._id !== codeId) return false;
+    const strike = await strikeOf(ctx.db, deviceId, by);
+
+    if (strike?.codeId === codeId) await ctx.db.delete(strike._id);
     await refundAttempt(ctx, unlockLimit(by), Date.now());
 
-    return null;
+    return true;
   },
 });
 

@@ -223,6 +223,8 @@ export class PlaybackController {
     readonly stopDrift: () => void;
   } | null = null;
   #disposed = false;
+  /** Where playback was when the page went into the back-forward cache with its stream stopped. */
+  #parked: { readonly positionMs: number; readonly play: boolean } | null = null;
   readonly #retimer: SubtitleRetimer;
   #delay: SubtitleDelay | null = null;
 
@@ -249,7 +251,46 @@ export class PlaybackController {
     element.addEventListener("loadeddata", this.#onFirstFrame);
     element.addEventListener("pause", this.#onSettled);
     element.addEventListener("seeking", this.#onSettled);
+    element.ownerDocument.defaultView?.addEventListener("pagehide", this.#onPageHide);
+    element.ownerDocument.defaultView?.addEventListener("pageshow", this.#onPageShow);
   }
+
+  /**
+   * A reload or a navigation away ends the page without unmounting the player, so `dispose` never
+   * runs: stop the stream here, at once, or it holds a transcode slot until the media service's
+   * idle release. A page going into the back-forward cache (`persisted`) stops it too, as it may
+   * stay there indefinitely, and keeps where it was for `#onPageShow`.
+   */
+  readonly #onPageHide = (event: PageTransitionEvent): void => {
+    const playback = this.#playback;
+
+    if (playback === null) return;
+    Playback.stopNow(playback);
+
+    if (event.persisted && playback.stream.streamId !== undefined) {
+      this.#parked = { positionMs: this.positionMs(), play: this.playing() };
+    }
+  };
+
+  /**
+   * A page back from the back-forward cache holds the stream `#onPageHide` stopped: start again
+   * where it was, with a new start of the same version, quality, and tracks. The stopped stream is
+   * forgotten first, so neither its failures nor a second stop reach the service.
+   */
+  readonly #onPageShow = (event: PageTransitionEvent): void => {
+    const parked = this.#parked;
+
+    this.#parked = null;
+
+    if (!event.persisted || parked === null || this.#disposed) return;
+
+    this.#playback = null;
+    this.#recoveries = 0;
+    this.#update({
+      phase: PlaybackPhase.Preparing({ startAtMs: parked.positionMs, progress: 0.2 }),
+    });
+    void this.#restart(parked.positionMs, parked.play);
+  };
 
   /** The current state; a new object after every change. */
   readonly getSnapshot = (): PlaybackSnapshot => this.#snapshot;
@@ -1089,13 +1130,16 @@ export class PlaybackController {
 
     const current = this.#playback;
 
-    if (current !== null) void runSdk(Playback.stop(current));
+    // A navigation that unmounts the player may unload the page next, so the stop goes out now.
+    if (current !== null) Playback.stopNow(current);
 
     this.#disposed = true;
     this.#element.removeEventListener("playing", this.#onPlaying);
     this.#element.removeEventListener("loadeddata", this.#onFirstFrame);
     this.#element.removeEventListener("pause", this.#onSettled);
     this.#element.removeEventListener("seeking", this.#onSettled);
+    this.#element.ownerDocument.defaultView?.removeEventListener("pagehide", this.#onPageHide);
+    this.#element.ownerDocument.defaultView?.removeEventListener("pageshow", this.#onPageShow);
     this.player.dispose();
     this.#retimer.dispose();
     this.#detach();

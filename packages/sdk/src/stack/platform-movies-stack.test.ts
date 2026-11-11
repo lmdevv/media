@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import * as Platform from "../platform/platform";
 import { createPlatform } from "../platform/promise";
-import { createPlatformPerson } from "../testing/platform-people";
+import { createPlatformPerson, stackSignIn } from "../testing/platform-people";
+import { ownClientFetch } from "../testing/own-client";
 import type { PlatformPerson } from "../testing/platform-people";
 import { findPlatformStack } from "../testing/stack-env";
 import type { PlatformStack } from "../testing/stack-env";
@@ -13,6 +14,11 @@ import * as TokenStorage from "../token-storage";
 const stack = findPlatformStack();
 
 const url = stack?.url ?? "";
+
+const stackOrEmpty = stack ?? { url, adminKey: "", signInUrl: "" };
+
+/** The Promise entry's sign-in options: the stack's boundary, as a client of its own. */
+const signInOptions = () => ({ signInUrl: stackOrEmpty.signInUrl, signInFetch: ownClientFetch() });
 
 const Seeded = Schema.fromJsonString(
   Schema.Struct({
@@ -59,7 +65,12 @@ const signedInAs = (person: PlatformPerson) =>
   Effect.gen(function* () {
     const platform = Context.get(
       yield* Layer.build(
-        Platform.layer({ url, connection: "http", storage: TokenStorage.layerMemory }),
+        Platform.layer({
+          url,
+          connection: "http",
+          storage: TokenStorage.layerMemory,
+          signIn: stackSignIn(stackOrEmpty),
+        }),
       ),
       Platform.Platform,
     );
@@ -189,7 +200,7 @@ describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 
     if (stack === undefined) return;
 
     const person = await createPlatformPerson(stack, "sdk-movies-search");
-    const platform = createPlatform({ url, connection: "http" });
+    const platform = createPlatform({ url, connection: "http", ...signInOptions() });
 
     try {
       await platform.session.signInWithPassword(person);

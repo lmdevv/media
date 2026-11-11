@@ -9,6 +9,8 @@ import * as ClientErrors from "../diagnostics/client-errors.ts";
 import * as DiagnosticsRoutes from "../diagnostics/diagnostics-routes.ts";
 import * as HttpServer from "../http/http-server.ts";
 import * as MetadataRoutes from "../http/metadata-routes.ts";
+import * as SignInBoundary from "../http/sign-in-boundary.ts";
+import * as SignInPasses from "../http/sign-in-passes.ts";
 import * as FolderRoutes from "../library/folder-routes.ts";
 import * as LibrarySink from "../library/library-sink.ts";
 import * as LogsRoutes from "../logging/logs-routes.ts";
@@ -45,16 +47,21 @@ export interface Options {
   readonly ticketKeys: Redacted.Redacted;
 }
 
-/** The server's own routes, each checking its caller against the core. */
-const commandRoutes = Layer.mergeAll(
-  MetadataRoutes.layer,
-  ImportRoutes.layer,
-  BackupRoutes.layer,
-  FolderRoutes.layer,
-  LogsRoutes.layer,
-  DiagnosticsRoutes.layer,
-  ClientErrors.layer,
-);
+/**
+ * The server's own routes, each checking its caller against the core, and the sign-in boundary
+ * at `coreUrl`, which every client signs in through (ADR 0007).
+ */
+const commandRoutes = (coreUrl: string) =>
+  Layer.mergeAll(
+    SignInBoundary.layer({ coreUrl }),
+    MetadataRoutes.layer,
+    ImportRoutes.layer,
+    BackupRoutes.layer,
+    FolderRoutes.layer,
+    LogsRoutes.layer,
+    DiagnosticsRoutes.layer,
+    ClientErrors.layer,
+  );
 
 const jobs = (sealKey: Redacted.Redacted) =>
   Effect.gen(function* () {
@@ -115,7 +122,7 @@ export const layer = (options: Options) =>
       });
 
       return Layer.mergeAll(
-        HttpServer.layer(commandRoutes),
+        HttpServer.layer(commandRoutes(options.coreUrl)),
         CoreJobs.layer(jobs(options.serviceKey)),
         CoreTrickplay.sweepLayer,
         CoreStatus.layer,
@@ -144,6 +151,7 @@ export const layer = (options: Options) =>
         Layer.provideMerge(
           CoreSession.layer({ convexUrl: options.coreUrl, apiKey: options.serviceKey }),
         ),
+        Layer.provideMerge(SignInPasses.layer(options.ticketKeys)),
       );
     }),
   );

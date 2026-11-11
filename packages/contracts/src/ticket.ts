@@ -278,13 +278,18 @@ const TICKET_SYNTAX = whole(
 
 const encoder = new TextEncoder();
 
-const toBase64Url = (bytes: Uint8Array): string =>
+/** `bytes` as unpadded base64url. */
+export const toBase64Url = (bytes: Uint8Array): string =>
   btoa(Array.from(bytes, (byte) => String.fromCodePoint(byte)).join(""))
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/u, "");
 
-const fromCanonicalBase64Url = (text: string, size: number): Uint8Array<ArrayBuffer> | null => {
+/** The `size` bytes `text` holds as canonical unpadded base64url, or null. */
+export const fromCanonicalBase64Url = (
+  text: string,
+  size: number,
+): Uint8Array<ArrayBuffer> | null => {
   if (!/^[\w-]*$/u.test(text) || text.length % 4 === 1) return null;
 
   const binary = atob(text.replaceAll("-", "+").replaceAll("_", "/"));
@@ -709,16 +714,8 @@ const parseEntry = (entry: string, position: number): KeyEntry | TicketKeysInval
   return bytes === null ? new TicketKeysInvalid("key_bytes", position) : { keyId, bytes };
 };
 
-/**
- * Reads a `MEDIA_TICKET_KEYS` value: `<kid>:<key>[,<kid>:<key>]…`, no spaces, 1 to 8 entries with
- * unique kids of `[a-z0-9]{1,16}`, each key the unpadded base64url of 32 random bytes. The first
- * entry signs; every entry verifies. Keys are imported as non-extractable HMAC keys.
- *
- * @returns The ring, or `TicketKeysInvalid` naming the problem and the entry, never the text.
- */
-export const loadTicketKeyRing = async (
-  text: string,
-): Promise<TicketResult<TicketKeyRing, TicketKeysInvalid>> => {
+/** The entries of a `MEDIA_TICKET_KEYS` value, in setting order, or the first problem. */
+const parseRing = (text: string): TicketResult<ReadonlyArray<KeyEntry>, TicketKeysInvalid> => {
   if (text === "") return { ok: false, error: new TicketKeysInvalid("missing", null) };
 
   const entries = text.split(",");
@@ -741,8 +738,25 @@ export const loadTicketKeyRing = async (
     parsed.push(key);
   }
 
+  return accepted(parsed);
+};
+
+/**
+ * Reads a `MEDIA_TICKET_KEYS` value: `<kid>:<key>[,<kid>:<key>]…`, no spaces, 1 to 8 entries with
+ * unique kids of `[a-z0-9]{1,16}`, each key the unpadded base64url of 32 random bytes. The first
+ * entry signs; every entry verifies. Keys are imported as non-extractable HMAC keys.
+ *
+ * @returns The ring, or `TicketKeysInvalid` naming the problem and the entry, never the text.
+ */
+export const loadTicketKeyRing = async (
+  text: string,
+): Promise<TicketResult<TicketKeyRing, TicketKeysInvalid>> => {
+  const parsed = parseRing(text);
+
+  if (!parsed.ok) return parsed;
+
   const imported = await Promise.all(
-    parsed.map(async ({ keyId, bytes }) => [keyId, await importKey(bytes)] as const),
+    parsed.value.map(async ({ keyId, bytes }) => [keyId, await importKey(bytes)] as const),
   );
 
   const [signing] = imported;
@@ -764,4 +778,44 @@ export const artworkTicketId = async (key: string): Promise<string> => {
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/u, "");
+};
+
+/** HMAC keys derived from a ticket key ring for another purpose. Holds no key bytes or text. */
+export interface DerivedKeyRing {
+  /** The id of the key that signs: the ring's first entry. */
+  readonly signingKeyId: string;
+  /** Each listed key id with its derived key. Each verifies. */
+  readonly keys: ReadonlyMap<string, CryptoKey>;
+}
+
+/**
+ * Reads a `MEDIA_TICKET_KEYS` value as `loadTicketKeyRing` does and derives one HMAC-SHA256 key per
+ * entry for the purpose `label` names: the HMAC of `label` under the entry's key. A derived key
+ * never signs a ticket, and a ticket key never signs what a derived key signs, so the ring serves
+ * a second purpose without a second setting, and rotates with the tickets'.
+ *
+ * @returns The derived keys, or `TicketKeysInvalid` as `loadTicketKeyRing` answers it.
+ */
+export const loadDerivedKeyRing = async (
+  text: string,
+  label: string,
+): Promise<TicketResult<DerivedKeyRing, TicketKeysInvalid>> => {
+  const parsed = parseRing(text);
+
+  if (!parsed.ok) return parsed;
+
+  const derived = await Promise.all(
+    parsed.value.map(async ({ keyId, bytes }) => {
+      const parent = await importKey(bytes);
+      const derivedBytes = await crypto.subtle.sign("HMAC", parent, encoder.encode(label));
+
+      return [keyId, await importKey(new Uint8Array(derivedBytes))] as const;
+    }),
+  );
+
+  const [signing] = derived;
+
+  if (signing === undefined) return { ok: false, error: new TicketKeysInvalid("missing", null) };
+
+  return accepted(Object.freeze({ signingKeyId: signing[0], keys: new Map(derived) }));
 };

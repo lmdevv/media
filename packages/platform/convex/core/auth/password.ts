@@ -1,10 +1,8 @@
-import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
 import { makeFunctionReference } from "convex/server";
 import { v } from "convex/values";
 import type { Value } from "convex/values";
 
 import { internal } from "../../_generated/api";
-import type { DataModel } from "../../_generated/dataModel";
 import { internalMutation, internalQuery } from "../../_generated/server";
 import { fail } from "../lib/errors";
 import { checkTypedPassword, passwordHashOf, passwordMatches, signInLimit } from "../lib/passwords";
@@ -12,6 +10,7 @@ import { refundAttempt, takeAttempt } from "../lib/rateLimit";
 import { parseUsername } from "../lib/usernames";
 import { openSession, signedIn } from "../sessions";
 import type { SignedIn } from "../sessions";
+import { behindBoundary, spendPass, spentPass } from "./passes";
 
 /**
  * Convex Auth's own password accounts are not used: its `retrieveAccount` does not limit unknown
@@ -42,9 +41,9 @@ export const parse = internalQuery({
  * The password provider. Refuses with `invalid_args` for malformed params or an overlong password,
  * `rate_limited` once the username's bucket is empty, and one `unauthenticated` message otherwise.
  */
-export const passwordProvider = ConvexCredentials<DataModel>({
+export const passwordProvider = behindBoundary({
   id: "password",
-  authorize: async (params, ctx): Promise<SignedIn> => {
+  authorize: async (params, ctx, pass): Promise<SignedIn> => {
     const { username, password } = await ctx.runQuery(parseCredentials, params);
 
     checkTypedPassword(password);
@@ -54,6 +53,7 @@ export const passwordProvider = ConvexCredentials<DataModel>({
     if (parsed === null) return fail("unauthenticated", WRONG);
 
     const attempted = await ctx.runMutation(internal.core.auth.password.attempt, {
+      pass,
       usernameKey: parsed.usernameKey,
     });
 
@@ -80,13 +80,18 @@ export const passwordProvider = ConvexCredentials<DataModel>({
 
 /** Takes a sign-in try, then finds the user and their password hash. */
 export const attempt = internalMutation({
-  args: { usernameKey: v.string() },
+  args: {
+    pass: spentPass,
+    usernameKey: v.string(),
+  },
   returns: v.union(
     v.object({ kind: v.literal("limited") }),
     v.object({ kind: v.literal("unknown") }),
     v.object({ kind: v.literal("known"), userId: v.id("users"), hash: v.string() }),
   ),
-  handler: async (ctx, { usernameKey }) => {
+  handler: async (ctx, { pass, usernameKey }) => {
+    await spendPass(ctx, pass, "password");
+
     if (!(await takeAttempt(ctx, signInLimit(usernameKey), Date.now()))) {
       return { kind: "limited" as const };
     }

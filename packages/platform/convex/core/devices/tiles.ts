@@ -25,6 +25,7 @@ import {
 } from "./facts";
 import type { SharedDevice } from "./facts";
 import { clearStrikes, codeOf } from "./unlockCodes";
+import { spendPass, spentPass } from "../auth/passes";
 
 /** A proof the provider checked, which `open` checks again against the rows it reads. */
 export const checkedProof = v.union(
@@ -33,7 +34,6 @@ export const checkedProof = v.union(
     kind: v.literal("password"),
     by: v.id("users"),
     hash: v.string(),
-    usernameKey: v.string(),
   }),
   v.object({ kind: v.literal("code"), by: v.id("users"), codeId: v.id("unlockCodes") }),
   v.object({ kind: v.literal("approval"), approvalId: v.id("tileApprovals") }),
@@ -68,13 +68,16 @@ const proverFor = async (
 /** Opens `userId`'s tile with a checked proof, ending the tile session the device held. */
 export const open = internalMutation({
   args: {
+    /** The sign-in's pass, unless a proof's mutation spent it already. */
+    pass: v.union(v.null(), spentPass),
     deviceId: v.string(),
     secretHash: v.string(),
     userId: v.id("users"),
     proof: checkedProof,
   },
   returns: signedIn,
-  handler: async (ctx, { deviceId, secretHash, userId, proof }) => {
+  handler: async (ctx, { pass, deviceId, secretHash, userId, proof }) => {
+    if (pass !== null) await spendPass(ctx, pass, "tile");
     const device = await sharedDeviceById(ctx.db, deviceId, secretHash);
     const person = await tilePerson(ctx.db, userId);
     const now = Date.now();
@@ -92,7 +95,11 @@ export const open = internalMutation({
 
     if (prover !== null) await clearStrikes(ctx, device._id, prover.userId);
 
-    if (proof.kind === "password") await refundAttempt(ctx, signInLimit(proof.usernameKey), now);
+    // The try goes back to the bucket of the name the typist has now, read here, not to the one
+    // the action saw: a rename in between would give the try to someone else's bucket.
+    const typist = proof.kind === "password" ? asPerson(await ctx.db.get(proof.by)) : null;
+
+    if (typist !== null) await refundAttempt(ctx, signInLimit(typist.usernameKey), now);
 
     if (proof.kind === "approval") await markRedeemed(ctx, proof.approvalId, sessionId);
 

@@ -170,15 +170,22 @@ for _ in $(seq 1 60); do
 done
 check "s6 restarts the media service when it dies" '[[ -n "$restarted" && "$restarted" != "$media_pid" ]] && healthy'
 
-statuses="$(for _ in $(seq 1 80); do curl -s -o /dev/null -w "%{http_code}\n" "${MEDIA_BASE_URL}/api/health"; done)"
+# The status of each of `$2` requests for the URL `$1`, one a line, sent by one curl over one
+# connection, so a slow host refills no bucket between them; curl arguments, such as a header,
+# follow. A separate curl for each request took long enough under load to refill a limit.
+burst() {
+  local url="$1" count="$2"
+  shift 2
+  curl -s -w '\nSTATUS %{http_code}\n' "$@" "${url}?n=[1-${count}]" | sed -n 's/^STATUS //p'
+}
+
+statuses="$(burst "${MEDIA_BASE_URL}/api/health" 80)"
 check "a client past its limit through Caddy gets 429" 'grep -qx 429 <<<"$statuses"'
 check "the container's health check is never limited" \
   '[[ "$(in_movies curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4300/api/health)" == 200 ]] &&
     [[ "$(docker inspect -f "{{.State.Health.Status}}" "$(compose ps -q media)")" == healthy ]]'
 sleep 7
-spoofed="$(for _ in $(seq 1 80); do
-  curl -s -o /dev/null -w "%{http_code}\n" -H "X-Forwarded-For: 127.0.0.1" "${MEDIA_BASE_URL}/api/health"
-done)"
+spoofed="$(burst "${MEDIA_BASE_URL}/api/health" 80 -H "X-Forwarded-For: 127.0.0.1")"
 check "a client cannot pass as the install by sending X-Forwarded-For" 'grep -qx 429 <<<"$spoofed"'
 sleep 7
 
@@ -215,6 +222,24 @@ cli_ticket() {
   title="$(in_movies media movies titles search --query "$1" | json_at 0.id)" &&
     in_movies media movies play start --title-id "$title" | json_at ticket
 }
+
+# The sign-in boundary (ADR 0007). Sign-ins straight to the core are refused, and one client gets
+# 10 sign-ins at once through the boundary. An unknown username keeps the owner's own limit whole.
+straight_sign_in="$(curl -s -X POST -H "content-type: application/json" \
+  -d "{\"path\":\"auth:signIn\",\"args\":{\"provider\":\"password\",\"params\":{\"username\":\"$owner_name\",\"password\":\"$owner_password\"}},\"format\":\"json\"}" \
+  "${core_convex_url}/api/action")"
+check "a sign-in sent straight to auth:signIn over /convex is refused" \
+  'grep -qF "\"code\":\"forbidden\"" <<<"$straight_sign_in" && ! grep -qF "refreshToken" <<<"$straight_sign_in"'
+# The packaged suite above signed in from this host, so wait until the host's budget is whole:
+# 10 tries, one every 5 seconds.
+sleep 50
+sign_ins="$(burst "${MEDIA_BASE_URL}/api/auth/sign-in" 11 -X POST -H "content-type: application/json" \
+  -d '{"provider":"password","params":{"username":"nobody-e2e","password":"wrong-password"}}')"
+check "the eleventh fast sign-in from one client gets a rate limit" \
+  '[[ "$(head -n 10 <<<"$sign_ins" | sort -u)" == 401 && "$(tail -n 1 <<<"$sign_ins")" == 429 ]]'
+check "the boundary logs its sign-ins without a password" \
+  'compose logs --no-color media 2>&1 | grep -F "SignInBoundary.relayed" >/dev/null &&
+    ! compose logs --no-color media 2>&1 | grep -qF -e "$owner_password" -e wrong-password'
 
 release="$("$root/scripts/check-version.sh")"
 check "the image's CLI reports the release version" '[[ "$(in_movies media --version)" == "$release" ]]'
@@ -302,11 +327,14 @@ check "a lost service key is issued again to the same principal" \
     "$(in_movies cat /data/core/secrets/media-service-key)" != "$service_key" ]]'
 
 # An outer proxy on the container's loopback, as a TLS proxy beside the NixOS module connects:
-# 80 requests for one client, then one for another, in one shell so no refill falls between.
+# 80 requests for one client, then one for another, all from one curl over one connection, so no
+# refill falls between them. A curl for each request let a slow host refill the bucket past the
+# burst, and the last request land after a refill, which made the untrusted check flake.
 through_outer_proxy() {
-  in_movies sh -c 'health() { curl -s -o /dev/null -w "%{http_code}\n" -H "X-Forwarded-For: $1" \
-    http://127.0.0.1:8080/api/health; }
-  for _ in $(seq 1 80); do health 203.0.113.1; done; health 203.0.113.2'
+  in_movies curl -s -w '\nSTATUS %{http_code}\n' -H "X-Forwarded-For: 203.0.113.1" \
+    'http://127.0.0.1:8080/api/health?n=[1-80]' --next \
+    -s -w '\nSTATUS %{http_code}\n' -H "X-Forwarded-For: 203.0.113.2" \
+    http://127.0.0.1:8080/api/health | sed -n 's/^STATUS //p'
 }
 outer="$(through_outer_proxy)"
 check "an untrusted outer proxy's clients count as one client" \

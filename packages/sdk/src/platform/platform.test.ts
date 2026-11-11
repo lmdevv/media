@@ -31,6 +31,7 @@ const withPlatform = <A, E>(
             url: fake.url,
             connection: "http",
             storage: TokenStorage.layerMemory,
+            signIn: Platform.SignInRoute.Boundary({ url: fake.signInUrl }),
           }),
         );
 
@@ -386,7 +387,11 @@ describe("createPlatform", () => {
             Reply.Failure({ code: "forbidden", message: "This session lacks the account scope" }),
           );
 
-          const platform = createPlatform({ url: fake.url, connection: "http" });
+          const platform = createPlatform({
+            url: fake.url,
+            signInUrl: fake.signInUrl,
+            connection: "http",
+          });
 
           return yield* Effect.promise(async () => {
             const info = await platform.core.server.info();
@@ -436,7 +441,12 @@ describe("opening a tile", () => {
           const fake = yield* FakeConvex.make;
 
           yield* fake.reply("auth:signIn", signedIn);
-          const platform = createPlatform({ url: fake.url, connection: "http" });
+
+          const platform = createPlatform({
+            url: fake.url,
+            signInUrl: fake.signInUrl,
+            connection: "http",
+          });
 
           yield* Effect.promise(async () => {
             await platform.session.openTile({ device: "dv_1.secret", userId: ada });

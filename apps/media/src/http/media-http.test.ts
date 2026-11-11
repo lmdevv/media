@@ -134,6 +134,14 @@ const post = (url: string, body: RequestBody | WireBatch) =>
     Effect.orDie,
   );
 
+/** Posts `body` as JSON in `text/plain`, as a page going away sends its stop. */
+const postText = (url: string, body: RequestBody) =>
+  HttpClient.execute(
+    HttpClientRequest.post(url).pipe(
+      HttpClientRequest.bodyText(JSON.stringify(body), "text/plain;charset=UTF-8"),
+    ),
+  ).pipe(Effect.orDie);
+
 const bytes = (response: HttpClientResponse.HttpClientResponse) =>
   response.arrayBuffer.pipe(
     Effect.map((buffer) => new Uint8Array(buffer)),
@@ -803,7 +811,7 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
           playlistUrl: `http://media.test/media/hls/${streamId}/2/index.m3u8?token=${encodeURIComponent(token)}`,
         });
 
-        const stop = yield* post(`${server.baseUrl}/api/playback/stop`, {
+        const stop = yield* postText(`${server.baseUrl}/api/playback/stop`, {
           token,
           streamId,
         });

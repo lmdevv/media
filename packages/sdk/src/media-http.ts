@@ -70,6 +70,11 @@ export interface MediaRequest {
   readonly body: Option.Option<Schema.Json>;
   /** The caller's Convex auth token, sent as a bearer token. */
   readonly bearer: Option.Option<Redacted.Redacted>;
+  /**
+   * Whether the request must reach the media service even when the page that sends it is going
+   * away, as a stream's stop must (`fetch`'s `keepalive`). Only small bodies may use it.
+   */
+  readonly keepalive?: boolean;
 }
 
 const TaggedFailure = Schema.Struct({ tag: Schema.String }).pipe(
@@ -118,7 +123,8 @@ interface Fetched {
   readonly identity: RequestIdentity;
 }
 
-interface MediaResponse {
+/** A media service answer, its body read as JSON. */
+export interface MediaResponse {
   readonly status: number;
   readonly ok: boolean;
   readonly body: Schema.Json;
@@ -169,6 +175,7 @@ const readResponse = (
 const fetchResponse = (
   request: MediaRequest,
   accept: string,
+  fetchWith: typeof fetch = fetch,
 ): Effect.Effect<Fetched, TransportError> =>
   Effect.gen(function* () {
     const headers = new Headers({ accept });
@@ -181,10 +188,11 @@ const fetchResponse = (
 
     const response = yield* Effect.tryPromise({
       try: (signal) =>
-        fetch(request.url, {
+        fetchWith(request.url, {
           method: request.method,
           headers,
           signal,
+          keepalive: request.keepalive ?? false,
           ...Option.match(request.body, {
             onNone: () => ({}),
             onSome: (body) => ({ body: JSON.stringify(body) }),
@@ -216,10 +224,12 @@ const fetchResponse = (
     return { response, identity };
   });
 
-const send = (
+/** Sends `request` with `fetchWith`, the global `fetch` by default, and reads its answer. */
+export const send = (
   request: MediaRequest,
+  fetchWith?: typeof fetch,
 ): Effect.Effect<MediaResponse, TransportError | ProtocolError> =>
-  Effect.flatMap(fetchResponse(request, "application/json"), (fetched) =>
+  Effect.flatMap(fetchResponse(request, "application/json", fetchWith), (fetched) =>
     readResponse(request, fetched),
   );
 
@@ -242,7 +252,8 @@ const failureOf = (request: MediaRequest, response: MediaResponse): CommandError
   );
 };
 
-const commandFailureOf = (request: MediaRequest, response: MediaResponse): CommandError => {
+/** The command error a refused `request` answered with, its `Retry-After` included. */
+export const commandFailureOf = (request: MediaRequest, response: MediaResponse): CommandError => {
   const failure = failureOf(request, response);
 
   return failure instanceof RateLimited && Option.isSome(response.retryAfterSeconds)

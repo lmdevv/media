@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { createPlatform } from "@media/sdk/promise";
 import type { PlatformSdk } from "@media/sdk/promise";
+import { ownClientFetch } from "@media/sdk/testing/own-client";
 import { Schema } from "effect";
 
 import type { Stack } from "./stack";
@@ -49,9 +50,30 @@ const createUserAsHost = async (
   }
 };
 
-/** A platform client from Node over its own in-memory session. */
+/** A platform client from Node over its own in-memory session, signing in as its own client. */
 export const openPlatform = (stack: Stack): PlatformSdk =>
-  createPlatform({ url: stack.platformUrl, connection: "http" });
+  createPlatform({
+    url: stack.platformUrl,
+    signInUrl: stack.signInUrl,
+    signInFetch: ownClientFetch(),
+    connection: "http",
+  });
+
+/**
+ * Names the browser behind `page` as a client of its own at the sign-in boundary, as the proxy in
+ * front of the server names each client with `X-Forwarded-For`. The boundary limits sign-ins per
+ * address (ADR 0007), and the suite signs many people in from one host.
+ */
+export const asOwnClient = async (page: Page): Promise<void> => {
+  const [high = 0, low = 0] = crypto.getRandomValues(new Uint8Array(2));
+  const address = `198.18.${String(high)}.${String(low)}`;
+
+  await page
+    .context()
+    .route("**/api/auth/sign-in", (route) =>
+      route.continue({ headers: { ...route.request().headers(), "x-forwarded-for": address } }),
+    );
+};
 
 /**
  * Creates a person with the admin key, as the server host does. The core refuses users before
@@ -81,6 +103,7 @@ export const createPerson = async (
 
 /** Signs `person` in at `/` through the sign-in form. */
 export const signIn = async (page: Page, person: Person): Promise<void> => {
+  await asOwnClient(page);
   await page.goto("/");
   await page.getByLabel("Username").fill(person.username);
   await page.getByLabel("Password", { exact: true }).fill(person.password);

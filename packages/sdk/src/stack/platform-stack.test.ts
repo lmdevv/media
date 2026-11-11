@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import * as Platform from "../platform/platform";
 import { createPlatform } from "../platform/promise";
-import { createPlatformPerson, newPlatformPerson } from "../testing/platform-people";
+import { createPlatformPerson, newPlatformPerson, stackSignIn } from "../testing/platform-people";
+import { ownClientFetch } from "../testing/own-client";
 import type { PlatformPerson } from "../testing/platform-people";
 import { findPlatformStack } from "../testing/stack-env";
 import * as TokenStorage from "../token-storage";
@@ -14,6 +15,11 @@ import type { KeyValueStore } from "../token-storage";
 const stack = findPlatformStack();
 
 const url = stack?.url ?? "";
+
+const stackOrEmpty = stack ?? { url, adminKey: "", signInUrl: "" };
+
+/** The Promise entry's sign-in options: the stack's boundary, as a client of its own. */
+const signInOptions = () => ({ signInUrl: stackOrEmpty.signInUrl, signInFetch: ownClientFetch() });
 
 const KEY = "media.session";
 
@@ -65,6 +71,7 @@ const open = (store: KeyValueStore = memoryStore().store) =>
         url,
         connection: "http",
         storage: TokenStorage.layerKeyValue(store, KEY),
+        signIn: stackSignIn(stackOrEmpty),
       }),
     ),
     (context) => Context.get(context, Platform.Platform),
@@ -89,7 +96,7 @@ const scoped = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>): Promise<A> =>
 
 describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout: 60_000 }, () => {
   it("tells a Node script the server's name through the Promise entry", async () => {
-    const platform = createPlatform({ url, connection: "http" });
+    const platform = createPlatform({ url, connection: "http", ...signInOptions() });
 
     try {
       expect(await platform.core.server.info()).toMatchObject({ name: "[media]" });
@@ -148,7 +155,8 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
   });
 
   it("signs a newcomer in from an admin's invite, once", async () => {
-    const admin = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-admin", "admin");
+    const admin = await createPlatformPerson(stackOrEmpty, "sdk-admin", "admin");
+
     const newcomer = newPlatformPerson("sdk-invited");
 
     const invite = await scoped(
@@ -157,7 +165,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
       ),
     );
 
-    const platform = createPlatform({ url, connection: "http" });
+    const platform = createPlatform({ url, connection: "http", ...signInOptions() });
 
     try {
       await platform.session.acceptInvite({ code: invite.code, ...newcomer });
@@ -191,8 +199,10 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
   });
 
   it("sets a new password from a reset link and ends the old sessions", async () => {
-    const admin = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-admin", "admin");
-    const person = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-reset");
+    const admin = await createPlatformPerson(stackOrEmpty, "sdk-admin", "admin");
+
+    const person = await createPlatformPerson(stackOrEmpty, "sdk-reset");
+
     const { password: newPassword } = newPlatformPerson("sdk-reset");
 
     const answer = await scoped(
@@ -235,7 +245,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
   });
 
   it("signs in with a password, calls a scoped command, and signs out", async () => {
-    const person = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk");
+    const person = await createPlatformPerson(stackOrEmpty, "sdk");
 
     const answer = await scoped(
       Effect.gen(function* () {
@@ -277,7 +287,8 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
   });
 
   it("renews a token about to expire and keeps the same session", async () => {
-    const person = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-refresh");
+    const person = await createPlatformPerson(stackOrEmpty, "sdk-refresh");
+
     const memory = memoryStore();
 
     const answer = await scoped(
@@ -314,7 +325,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
   });
 
   it("refuses a command the session lacks the scope for with Forbidden", async () => {
-    const person = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-scope");
+    const person = await createPlatformPerson(stackOrEmpty, "sdk-scope");
 
     const answer = await scoped(
       Effect.gen(function* () {
@@ -346,7 +357,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
   });
 
   it("refuses a session that was ended elsewhere with Unauthenticated", async () => {
-    const person = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-ended");
+    const person = await createPlatformPerson(stackOrEmpty, "sdk-ended");
 
     const refused = await scoped(
       Effect.gen(function* () {
@@ -364,7 +375,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
   });
 
   it("signs a device in once a signed-in session approves its code", async () => {
-    const person = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-device");
+    const person = await createPlatformPerson(stackOrEmpty, "sdk-device");
 
     const answer = await scoped(
       Effect.gen(function* () {
@@ -386,13 +397,9 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
   });
 
   it("opens a person's tile on a shared device with their password", async () => {
-    const admin = await createPlatformPerson(
-      stack ?? { url, adminKey: "" },
-      "sdk-tv-admin",
-      "admin",
-    );
+    const admin = await createPlatformPerson(stackOrEmpty, "sdk-tv-admin", "admin");
 
-    const person = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-tile");
+    const person = await createPlatformPerson(stackOrEmpty, "sdk-tile");
 
     const answer = await scoped(
       Effect.gen(function* () {
@@ -424,7 +431,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
   });
 
   it("exchanges a phone's grant for each app's own session until the grant is revoked", async () => {
-    const person = await createPlatformPerson(stack ?? { url, adminKey: "" }, "sdk-grant");
+    const person = await createPlatformPerson(stackOrEmpty, "sdk-grant");
 
     const answer = await scoped(
       Effect.gen(function* () {
@@ -461,7 +468,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
     expect(answer.afterRevoke).toMatchObject({ _tag: "Unauthenticated" });
     expect(answer.issuerAfterRevoke).toMatchObject({ _tag: "Unauthenticated" });
 
-    const platform = createPlatform({ url, connection: "http" });
+    const platform = createPlatform({ url, connection: "http", ...signInOptions() });
 
     try {
       await expect(
