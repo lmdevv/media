@@ -2,23 +2,95 @@ import type { ParseArgsOptionsConfig } from "node:util";
 
 import type { Platform } from "@media/sdk/effect";
 import { ProtocolError } from "@media/sdk/effect";
-import { Config, Effect, Match, Option, Redacted, Schema } from "effect";
+import { Config, Effect, Match, Option, Redacted, Schema, SchemaAST } from "effect";
 
-import type { CatalogEntry } from "../catalog";
-import {
-  argsJsonSchema,
-  exitCodeLine,
-  flagNote,
-  pad,
-  positionalUsage,
-  synopsisPart,
-} from "../catalog";
+import { ExitCode } from "../cli-errors";
 import type { ConfigFileError, UsageError } from "../cli-errors";
-import type { FlagSet, WireArgs } from "../flags";
-import { buildArgs, deriveFlags, flagTypeLabel, flagUsage, withoutFields } from "../flags";
+import type { FlagSet, FlagSpec, WireArgs } from "../flags";
+import {
+  buildArgs,
+  deriveFlags,
+  FlagType,
+  flagTypeLabel,
+  flagUsage,
+  withoutFields,
+} from "../flags";
 import type { Invocation, ShortcutCommand } from "../invocation";
 import { secretGiven, stringFlag, usage } from "../invocation";
 import type { coreGroups } from "../generated/groups";
+
+/** Two columns of help, the left padded to one width up to 48 characters. */
+export const pad = (rows: ReadonlyArray<readonly [string, string]>): ReadonlyArray<string> => {
+  const width = Math.min(48, Math.max(0, ...rows.map(([left]) => left.length)));
+
+  return rows.map(([left, right]) =>
+    left.length > width
+      ? `  ${left}\n  ${"".padEnd(width)}  ${right}`
+      : `  ${left.padEnd(width)}  ${right}`,
+  );
+};
+
+/** The help line listing every exit code. */
+export const exitCodeLine = `Exit codes: ${Object.entries(ExitCode)
+  .map(([name, code]) => `${String(code)} ${name}`)
+  .join(", ")}.`;
+
+/** How a positional reads in a synopsis: `<user-id>`, `<admin|member>`. */
+const positionalUsage = (spec: FlagSpec): string =>
+  FlagType.$match(spec.type, {
+    List: () => `<${spec.flag}...>`,
+    Choice: ({ choices }) => `<${choices.join("|")}>`,
+    Text: () => `<${spec.flag}>`,
+    Number: () => `<${spec.flag}>`,
+    Boolean: () => `<${spec.flag}>`,
+    Json: () => `<${spec.flag}>`,
+  });
+
+/** How a flag reads in a synopsis: `[--role <admin|member>]` when optional. */
+const synopsisPart = (spec: FlagSpec): string => {
+  if (!spec.required) return `[${flagUsage(spec)}]`;
+
+  return FlagType.$is("Boolean")(spec.type) ? `(${flagUsage(spec)})` : flagUsage(spec);
+};
+
+/** Whether a flag is required, and how a list is given. */
+const flagNote = (spec: FlagSpec): string =>
+  [
+    spec.required ? "required" : "optional",
+    ...(FlagType.$is("List")(spec.type) ? ["repeat the flag or separate values with commas"] : []),
+  ].join("; ");
+
+/** Help for a hand-written command: its synopsis after `media`, and its summary. */
+export const shortcutHelp = (synopsis: string, summary: string): string =>
+  [`Usage: media ${synopsis}`, "", `${summary}.`, "", exitCodeLine].join("\n");
+
+const toJson = Schema.decodeUnknownSync(Schema.Json);
+
+const dialect = "https://json-schema.org/draft/2020-12/schema";
+
+/**
+ * The wire arguments as JSON Schema. Effect describes an empty struct as "anything but null";
+ * agents read it better as an object with no properties, which is what the CLI sends.
+ */
+const argsJsonSchema = (args: Schema.Top): Schema.Json => {
+  const ast = SchemaAST.toEncoded(args.ast);
+
+  if (
+    SchemaAST.isObjects(ast) &&
+    ast.propertySignatures.length === 0 &&
+    ast.indexSignatures.length === 0
+  ) {
+    return { $schema: dialect, type: "object", properties: {} };
+  }
+
+  const document = Schema.toJsonSchemaDocument(args);
+
+  return toJson(
+    Object.keys(document.definitions).length === 0
+      ? { $schema: dialect, ...document.schema }
+      : { $schema: dialect, ...document.schema, $defs: document.definitions },
+  );
+};
 
 /** A generated command's group word. */
 export type CoreGroup = (typeof coreGroups)[number];
@@ -52,12 +124,9 @@ interface Spec<Args, Result> {
   ) => (args: Args) => Effect.Effect<Result, Platform.PlatformError>;
 }
 
-/** A hand-written command in a core group, with its help line. */
+/** A hand-written command in a core group. */
 export interface CoreShortcut extends ShortcutCommand {
   readonly group: CoreGroup;
-  /** What follows the command's words in its synopsis, such as `[--server <convex-url>]`. */
-  readonly usage: string;
-  readonly summary: string;
 }
 
 /** The hand-written command at `media <group> <words>`. */
@@ -68,7 +137,7 @@ export const coreShortcut = (
 ): CoreShortcut => ({ ...command, group, path: `${group} ${words}` });
 
 /** A hand-written command's synopsis, after `media`. */
-export const shortcutSynopsis = (command: CoreShortcut): string =>
+export const shortcutSynopsis = (command: ShortcutCommand): string =>
   command.usage.length === 0 ? command.path : `${command.path} ${command.usage}`;
 
 type Call = (platform: Platform.Interface) => Effect.Effect<Schema.Json, Platform.PlatformError>;
@@ -226,7 +295,7 @@ export const wireArgsOf = Effect.fn("Core.wireArgs")(function* (
   invocation: Invocation,
 ) {
   const flags = flagsOf(command);
-  const given = yield* Effect.fromResult(buildArgs(flags, invocation.tokens, command.path, {}));
+  const given = yield* Effect.fromResult(buildArgs(flags, invocation.tokens, command.path));
 
   const clears = (secret: Secret) => secret.clearable === true && given[secret.field] === null;
 
@@ -324,10 +393,27 @@ export const commandHelp = (command: CoreCommand): string => {
   ].join("\n");
 };
 
-/** A generated command's `media commands` entry, with the variables its secrets come from. */
-export type CoreCatalogEntry = Omit<CatalogEntry, "group" | "kind"> & {
+/**
+ * One entry of `media commands`, with the variables its secrets come from. A type alias so it
+ * stays assignable to JSON.
+ */
+export type CoreCatalogEntry = {
+  readonly name: string;
+  readonly command: string;
+  readonly synopsis: string;
   readonly group: CoreGroup;
   readonly kind: Kind | "shortcut";
+  readonly scope: string;
+  readonly summary: string;
+  readonly positional: string | null;
+  readonly flags: ReadonlyArray<{
+    readonly flag: string;
+    readonly field: string;
+    readonly type: string;
+    readonly required: boolean;
+  }>;
+  /** JSON Schema (draft 2020-12) of the wire arguments; `--json` accepts a matching object. */
+  readonly args: Schema.Json;
   readonly secrets: ReadonlyArray<Secret>;
 };
 
@@ -342,7 +428,6 @@ export const catalogEntry = (command: CoreCommand): CoreCatalogEntry => {
     group: command.group,
     kind: command.kind,
     scope: command.scope,
-    job: false,
     summary: command.summary,
     positional: positional === null ? null : `--${positional.flag}`,
     flags: [

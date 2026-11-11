@@ -2,42 +2,69 @@ import { hostname } from "node:os";
 
 import { Platform } from "@media/sdk/effect";
 import { Effect, Option } from "effect";
+import { renderUnicodeCompact } from "uqr";
 
 import { LoginRefused } from "../cli-errors";
-import { isServerUrl, normalizeUrl } from "../config";
+import type { Target } from "../config";
+import {
+  endSession,
+  forgetSession,
+  heldSession,
+  isServerUrl,
+  normalizeUrl,
+  openForSignIn,
+  retarget,
+  storageFailure,
+} from "../config";
 import type { Invocation } from "../invocation";
 import { booleanFlag, readSecret, stringFlag, textOutcome, usage } from "../invocation";
 import { Output } from "../output";
 import type { CoreShortcut } from "./command";
 import { coreShortcut } from "./command";
-import {
-  coreTarget,
-  endSession,
-  forgetSession,
-  heldSession,
-  openForSignIn,
-  storageFailure,
-} from "./session";
+
+const LOOPBACK = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?$/u;
+
+/**
+ * Whether another device could open the media server at `url`: not a loopback address, such as
+ * the image's own `http://127.0.0.1:8080`. Approving from there needs the server's public address,
+ * which only the person knows.
+ */
+const reachableElsewhere = (url: string): boolean => !LOOPBACK.test(url);
 
 const announceDevice = Effect.fn("Core.announceDevice")(function* (
   invocation: Invocation,
+  server: Target,
   pending: Platform.DeviceSignIn,
 ) {
   const output = yield* Output;
   const approve = `media auth device-codes approve --user-code ${pending.userCode} --scopes account`;
+
+  const verificationUrl = Option.map(
+    Option.filter(server.mediaUrl, reachableElsewhere),
+    (url) => `${url}/device?code=${encodeURIComponent(pending.userCode)}`,
+  );
 
   yield* invocation.format === "json"
     ? output.err(
         JSON.stringify({
           event: "device_code",
           userCode: pending.userCode,
+          verificationUrl: Option.getOrNull(verificationUrl),
           expiresAt: pending.expiresAt,
           approve,
         }),
       )
     : output.err(
         [
-          `Approve code ${pending.userCode} from a device signed in to this server:`,
+          ...Option.match(verificationUrl, {
+            onNone: () => [],
+            onSome: (url) => [
+              `Open ${url} on a signed-in device and confirm code ${pending.userCode}.`,
+              "",
+              renderUnicodeCompact(url),
+              "Or approve it from a device signed in to this server:",
+            ],
+          }),
           `  ${approve}`,
           "Add admin to --scopes to let this device run media admin. Waiting for approval…",
         ].join("\n"),
@@ -45,19 +72,19 @@ const announceDevice = Effect.fn("Core.announceDevice")(function* (
 });
 
 const login = coreShortcut("auth", "login", {
-  usage: "[--server <convex-url>] [--username <name> | --api-key]",
+  usage: "[--server <core-url>] [--media-url <url>] [--username <name> | --api-key]",
   summary:
-    "Sign in to the core: a device code by default, which a signed-in device approves; --username with the password from stdin or MEDIA_PASSWORD; --api-key with the key from stdin or MEDIA_CORE_API_KEY",
+    "Sign in: a device code by default, which a signed-in device approves; --username with the password from stdin or MEDIA_PASSWORD; --api-key with the key from stdin or MEDIA_CORE_API_KEY. --media-url names the media server when it is not the core's address without /convex",
   options: {
     server: { type: "string" },
+    "media-url": { type: "string" },
     username: { type: "string" },
     "api-key": { type: "boolean" },
   },
   positionals: false,
   run: (invocation) =>
     Effect.gen(function* () {
-      const { tokens } = invocation;
-      const target = yield* coreTarget(invocation.env, invocation.target.name);
+      const { target, tokens } = invocation;
 
       const url = Option.orElse(
         Option.map(stringFlag(tokens, "server"), normalizeUrl),
@@ -67,8 +94,14 @@ const login = coreShortcut("auth", "login", {
       if (Option.isNone(url) || !isServerUrl(url.value)) {
         return yield* usage(
           invocation,
-          "auth login needs --server with the core's Convex URL, such as http://nas.tailnet.ts.net:8080/convex",
+          "auth login needs --server with the core's URL, such as http://nas.tailnet.ts.net:8080/convex",
         );
+      }
+
+      const mediaUrl = Option.map(stringFlag(tokens, "media-url"), normalizeUrl);
+
+      if (Option.isSome(mediaUrl) && !isServerUrl(mediaUrl.value)) {
+        return yield* usage(invocation, `--media-url is not an http(s) URL: "${mediaUrl.value}"`);
       }
 
       const username = stringFlag(tokens, "username");
@@ -79,7 +112,8 @@ const login = coreShortcut("auth", "login", {
       }
 
       const previous = yield* heldSession(target);
-      const platform = yield* openForSignIn(target, url.value);
+      const server = retarget(target, url.value, mediaUrl);
+      const platform = yield* openForSignIn(server, url.value);
       const failStorage = storageFailure(target.path);
 
       const signIn = (credentials: Platform.Credentials) =>
@@ -98,7 +132,7 @@ const login = coreShortcut("auth", "login", {
       } else {
         const pending = yield* platform.session.startDeviceSignIn(`media CLI on ${hostname()}`);
 
-        yield* announceDevice(invocation, pending);
+        yield* announceDevice(invocation, server, pending);
         yield* pending.complete.pipe(
           Effect.catchTags({
             DeviceSignInRefused: (refused) =>
@@ -115,6 +149,7 @@ const login = coreShortcut("auth", "login", {
       return textOutcome(
         {
           server: url.value,
+          mediaUrl: Option.getOrNull(server.mediaUrl),
           profile: target.profile,
           session: {
             userId: session.userId,
@@ -132,18 +167,18 @@ const login = coreShortcut("auth", "login", {
 
 const logout = coreShortcut("auth", "logout", {
   usage: "",
-  summary: "Sign out of the core and forget the session; the profile keeps its server",
+  summary: "Sign out and forget the session; the profile keeps its server",
   options: {},
   positionals: false,
   run: (invocation) =>
     Effect.gen(function* () {
       const output = yield* Output;
-      const target = yield* coreTarget(invocation.env, invocation.target.name);
+      const { target } = invocation;
       const held = yield* heldSession(target);
 
       if (Option.isSome(held)) {
         yield* endSession(target, held.value);
-        yield* forgetSession(target, held.value.url);
+        yield* forgetSession(target, held.value);
       }
 
       if (Option.isSome(target.apiKey)) {
@@ -152,13 +187,13 @@ const logout = coreShortcut("auth", "logout", {
 
       return textOutcome(
         {
-          server: Option.getOrNull(Option.map(held, (session) => session.url)),
+          server: Option.getOrNull(Option.map(held, (session) => session.server.url)),
           profile: target.profile,
           signedOut: Option.isSome(held),
         },
         Option.match(held, {
-          onNone: () => `Profile ${target.profile} holds no core session.`,
-          onSome: (session) => `Signed out of ${session.url}.`,
+          onNone: () => `Profile ${target.profile} holds no session.`,
+          onSome: (session) => `Signed out of ${session.server.url}.`,
         }),
       );
     }),

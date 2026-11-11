@@ -1,115 +1,160 @@
 import { join } from "node:path";
 
-import { TokenStorage } from "@media/sdk/effect";
-import { Context, Effect, Layer, Option, Redacted } from "effect";
+import { ConfigProvider, Effect, Option, Redacted } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
-import type { Environment, StoredConfig } from "./config";
-import { layerProfileStorage, loadConfig, resolveTarget, saveConfig } from "./config";
-import { makeTempDir, permissions, removeDir } from "./testing/process";
+import { resolveTarget, retarget } from "./config";
+import { writePrivateFile } from "./files";
+import { makeTempDir, removeDir } from "./testing/process";
 
-const dir = await makeTempDir("movies-config-test-");
+const home = await makeTempDir("media-config-test-");
 
-afterAll(() => removeDir(dir));
+afterAll(() => removeDir(home));
 
-const env = (overrides: Partial<Environment>): Environment => ({
-  configHome: dir,
-  configPath: join(dir, "movies", "config.json"),
-  convexUrl: Option.none(),
-  mediaUrl: Option.none(),
-  apiKey: Option.none(),
-  profile: Option.none(),
-  ...overrides,
-});
+let homes = 0;
 
-const config: StoredConfig = {
-  defaultProfile: "home",
-  profiles: {
-    home: { convexUrl: "https://home.example/convex", deviceId: "cli-home", apiKey: "mk_home" },
-    work: { convexUrl: "https://work.example/convex", deviceId: "cli-work" },
-  },
+/** A profile file as `media auth login` writes it. */
+interface StoredFile {
+  readonly url: string;
+  readonly mediaUrl?: string;
+  readonly session?: { readonly token: string; readonly refreshToken: string };
+}
+
+/** A config home whose `default` profile file holds `stored`, if given. */
+const homeWith = async (stored?: StoredFile): Promise<string> => {
+  homes += 1;
+  const dir = join(home, String(homes));
+
+  if (stored !== undefined) {
+    await writePrivateFile(join(dir, "media", "sessions", "default.json"), JSON.stringify(stored));
+  }
+
+  return dir;
 };
 
+const SESSION = { token: "jwt", refreshToken: "refresh" };
+
+const targetOf = (
+  env: Readonly<Record<string, string>>,
+  profile: Option.Option<string> = Option.none(),
+) =>
+  Effect.runPromise(
+    resolveTarget(profile).pipe(
+      Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env })),
+    ),
+  );
+
 describe("target resolution", () => {
-  it("prefers the flag, then MEDIA_PROFILE, then the stored default", () => {
-    expect(resolveTarget(config, env({}), Option.none()).name).toBe("home");
-    expect(resolveTarget(config, env({ profile: Option.some("work") }), Option.none()).name).toBe(
-      "work",
-    );
-    expect(
-      resolveTarget(config, env({ profile: Option.some("work") }), Option.some("home")).name,
-    ).toBe("home");
+  it("prefers the flag, then MEDIA_PROFILE, then default, each in its own file", async () => {
+    const dir = await homeWith();
+    const flag = await targetOf({ XDG_CONFIG_HOME: dir, MEDIA_PROFILE: "env" }, Option.some("tv"));
+    const fromEnv = await targetOf({ XDG_CONFIG_HOME: dir, MEDIA_PROFILE: "env" });
+    const fallback = await targetOf({ XDG_CONFIG_HOME: dir });
+
+    expect([flag.profile, fromEnv.profile, fallback.profile]).toStrictEqual([
+      "tv",
+      "env",
+      "default",
+    ]);
+    expect(flag.path).toBe(join(dir, "media", "sessions", "tv.json"));
   });
 
-  it("lets the environment override the stored server and key", () => {
-    const target = resolveTarget(
-      config,
-      env({
-        convexUrl: Option.some("https://env.example/convex"),
-        apiKey: Option.some(Redacted.make("mk_env")),
-      }),
+  it("finds the media server and its sign-in beside an install's core", async () => {
+    const target = await targetOf({
+      XDG_CONFIG_HOME: await homeWith({ url: "http://nas:8080/convex", session: SESSION }),
+    });
+
+    expect(target.url).toStrictEqual(Option.some("http://nas:8080/convex"));
+    expect(target.mediaUrl).toStrictEqual(Option.some("http://nas:8080"));
+    expect(target.signInUrl).toStrictEqual(Option.some("http://nas:8080/api/auth/sign-in"));
+    expect(target.storage).toBe("file");
+  });
+
+  it("never stores the environment's addresses, and keeps the stored one for its core", async () => {
+    const dir = await homeWith({ url: "http://nas:3210", mediaUrl: "http://nas:8080" });
+
+    const target = await targetOf({
+      XDG_CONFIG_HOME: dir,
+      MEDIA_SERVER_URL: "http://media.local",
+    });
+
+    expect(target.mediaUrl).toStrictEqual(Option.some("http://media.local"));
+    expect(target.savedMediaUrl).toStrictEqual(Option.some("http://nas:8080"));
+    expect(retarget(target, "http://nas:3210", Option.none()).savedMediaUrl).toStrictEqual(
+      Option.some("http://nas:8080"),
+    );
+    expect(retarget(target, "http://other:3210", Option.none()).savedMediaUrl).toStrictEqual(
       Option.none(),
     );
-
-    expect(Option.getOrNull(target.convexUrl)).toBe("https://env.example/convex");
-    expect(Option.map(target.apiKey, Redacted.value)).toStrictEqual(Option.some("mk_env"));
-    expect(target.apiKeyFromEnvironment).toBe(true);
   });
 
-  it("keeps the stored profile's credentials away from another server in MEDIA_CONVEX_URL", () => {
-    const target = resolveTarget(
-      config,
-      env({ convexUrl: Option.some("https://other.example/convex") }),
-      Option.none(),
-    );
+  it("keeps a stored media server, and lets the environment name each address", async () => {
+    const dir = await homeWith({
+      url: "http://nas:3210",
+      mediaUrl: "http://nas:8080",
+      session: SESSION,
+    });
 
-    expect(Option.getOrNull(target.convexUrl)).toBe("https://other.example/convex");
-    expect(target.stored).toStrictEqual(Option.none());
-    expect(target.shadowed).toStrictEqual(Option.fromNullishOr(config.profiles["home"]));
-    expect(target.apiKey).toStrictEqual(Option.none());
-    expect(target.sessionStorage).toBe("memory");
+    const stored = await targetOf({ XDG_CONFIG_HOME: dir });
+
+    const overridden = await targetOf({
+      XDG_CONFIG_HOME: dir,
+      MEDIA_SERVER_URL: "http://media.local/",
+      MEDIA_CORE_SIGN_IN_URL: "http://boundary.local/api/auth/sign-in",
+    });
+
+    expect(stored.mediaUrl).toStrictEqual(Option.some("http://nas:8080"));
+    expect(stored.signInUrl).toStrictEqual(Option.some("http://nas:8080/api/auth/sign-in"));
+    expect(overridden.mediaUrl).toStrictEqual(Option.some("http://media.local"));
+    expect(overridden.signInUrl).toStrictEqual(
+      Option.some("http://boundary.local/api/auth/sign-in"),
+    );
   });
 
-  it("uses the stored profile when MEDIA_CONVEX_URL names its server", () => {
-    const target = resolveTarget(
-      config,
-      env({ convexUrl: Option.some("https://home.example/convex") }),
-      Option.none(),
-    );
+  it("keeps the stored session and media server away from another core in MEDIA_CORE_URL", async () => {
+    const target = await targetOf({
+      XDG_CONFIG_HOME: await homeWith({ url: "http://nas:3210", mediaUrl: "http://nas:8080" }),
+      MEDIA_CORE_URL: "http://other:8080/convex",
+    });
 
-    expect(target.stored).toStrictEqual(Option.fromNullishOr(config.profiles["home"]));
-    expect(Option.map(target.apiKey, Redacted.value)).toStrictEqual(Option.some("mk_home"));
-    expect(target.sessionStorage).toBe("profile");
+    expect(target.url).toStrictEqual(Option.some("http://other:8080/convex"));
+    expect(target.mediaUrl).toStrictEqual(Option.some("http://other:8080"));
+    expect(target.storage).toBe("memory");
   });
-});
 
-describe("the config file", () => {
-  it("round-trips with mode 0600 and stores sessions per profile", async () => {
-    const path = env({}).configPath;
+  it("signs in for one run with MEDIA_CORE_API_KEY, storing nothing", async () => {
+    const target = await targetOf({
+      XDG_CONFIG_HOME: await homeWith(),
+      MEDIA_CORE_URL: "http://nas:3210",
+      MEDIA_CORE_API_KEY: " mk_key ",
+    });
 
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* saveConfig(path, config);
-        expect(yield* loadConfig(path)).toStrictEqual(config);
-        expect(yield* Effect.promise(() => permissions(path))).toBe(0o600);
+    expect(Option.map(target.apiKey, Redacted.value)).toStrictEqual(Option.some("mk_key"));
+    expect(target.storage).toBe("memory");
+  });
 
-        const storage = Context.get(
-          yield* Effect.scoped(Layer.build(layerProfileStorage(path, "work", Option.none()))),
-          TokenStorage.TokenStorage,
-        );
+  it("refuses an address that is not an http(s) URL", async () => {
+    await expect(
+      targetOf({ XDG_CONFIG_HOME: await homeWith(), MEDIA_SERVER_URL: "nas:8080" }),
+    ).rejects.toThrow("MEDIA_SERVER_URL is not an http(s) URL");
+  });
 
-        const session = { token: Redacted.make("jwt"), refreshToken: Redacted.make("refresh") };
+  it("points a login at the new core's media server unless one is named", async () => {
+    const env = {
+      XDG_CONFIG_HOME: await homeWith({ url: "http://old:3210", mediaUrl: "http://old:8080" }),
+    };
 
-        yield* storage.save(session);
-        expect((yield* loadConfig(path)).profiles["work"]?.session).toStrictEqual({
-          token: "jwt",
-          refreshToken: "refresh",
-        });
-        expect(Option.isSome(yield* storage.load)).toBe(true);
+    const target = await targetOf(env);
 
-        yield* storage.revoke(session);
-        expect((yield* loadConfig(path)).profiles["work"]).toStrictEqual(config.profiles["work"]);
-      }),
-    );
+    const run = (url: string, mediaUrl: Option.Option<string>) => retarget(target, url, mediaUrl);
+
+    const same = run("http://old:3210", Option.none());
+    const moved = run("http://new:8080/convex", Option.none());
+    const named = run("http://new:3210", Option.some("http://new:8080"));
+
+    expect(same.mediaUrl).toStrictEqual(Option.some("http://old:8080"));
+    expect(moved.mediaUrl).toStrictEqual(Option.some("http://new:8080"));
+    expect(moved.signInUrl).toStrictEqual(Option.some("http://new:8080/api/auth/sign-in"));
+    expect(named.signInUrl).toStrictEqual(Option.some("http://new:8080/api/auth/sign-in"));
   });
 });

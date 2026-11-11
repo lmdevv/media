@@ -6,7 +6,6 @@ import { jwtExpiringAt, Reply } from "@media/sdk/testing/fake-convex";
 import { Effect, Schema } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { groupWords, shortcuts } from "../catalog";
 import { ExitCode } from "../cli-errors";
 import { writePrivateFile } from "../files";
 import { withMediaService } from "../testing/media-service";
@@ -65,7 +64,7 @@ const storedFile = async (env: Readonly<Record<string, string>>) =>
   Schema.decodeSync(SessionFile)(await readText(sessionFile(env)));
 
 describe("media's groups", () => {
-  it("lists movies, music, admin, and auth first in media --help, then the movies server", async () => {
+  it("lists auth, admin, movies, and music in media --help", async () => {
     const help = await media(["--help"]);
 
     expect(help.code).toBe(ExitCode.ok);
@@ -78,7 +77,7 @@ describe("media's groups", () => {
 
     expect(groups).toEqual(["auth", "admin", "movies", "music"]);
     expect(help.stdout).toContain("Usage: media <group> <command> [flags]");
-    expect(help.stdout).toContain("Usage: media <command> [flags]");
+    expect(help.stdout).not.toContain("Usage: media <command> [flags]");
   });
 
   it("lists each group's commands, and says when a group has none yet", async () => {
@@ -92,6 +91,7 @@ describe("media's groups", () => {
 
     expect([movies.code, movies.stdout.includes("None yet")]).toEqual([ExitCode.ok, false]);
     expect(movies.stdout).toContain("media movies titles list");
+    expect(movies.stdout).toContain("media movies stream <title>");
     expect([music.code, music.stdout.includes("None yet")]).toEqual([ExitCode.ok, true]);
 
     expect((await media(["admin", "users"])).stdout).not.toContain("media admin invites");
@@ -110,7 +110,7 @@ describe("media's groups", () => {
     }
   });
 
-  it("gives every command its own words, apart from the movies server's", () => {
+  it("gives every command its own words, apart from the troubleshooting ones", () => {
     const paths = coreEntries.map((entry) => entry.command.path);
 
     expect(
@@ -120,12 +120,9 @@ describe("media's groups", () => {
     ).toEqual([]);
     expect(new Set(paths).size).toBe(paths.length);
 
-    const oldWords = new Set([
-      ...groupWords,
-      ...shortcuts.map((shortcut) => shortcut.path.split(" ")[0] ?? ""),
-    ]);
+    const topLevel = new Set(["logs", "diagnostics", "commands", "call", "help"]);
 
-    expect(coreGroups.filter((group) => oldWords.has(group))).toEqual([]);
+    expect(coreGroups.filter((group) => topLevel.has(group))).toEqual([]);
   });
 
   it("lists every generated command in media commands with its words and secrets", async () => {
@@ -334,6 +331,37 @@ describe("a core command", () => {
     expect(answer.run.code).toBe(ExitCode.ok);
     expect(answer.signOuts).toBe(1);
     expect(await storedFile(env)).toEqual({ url: answer.url });
+  });
+
+  it("reads a bare --json as JSON output, but never past --", async () => {
+    const env = freshHome();
+
+    const sent = await withFakeCore((fake) =>
+      Effect.gen(function* () {
+        yield* storeSession(env, fake.url);
+        yield* fake.reply("movies/titles:search", Reply.Success({ value: [] }));
+
+        const runs = yield* Effect.forEach(
+          [
+            ["movies", "titles", "search", "--", "--json"],
+            ["movies", "titles", "search", "--json", '{"query":"-foo"}'],
+            ["movies", "titles", "search", "--query=--json"],
+            ["movies", "titles", "search", "alien", "--json"],
+          ],
+          (argv) => Effect.promise(() => media(argv, env)),
+        );
+
+        return {
+          codes: runs.map((run) => run.code),
+          args: (yield* fake.requestsTo("movies/titles:search")).map((call) => call.args),
+        };
+      }),
+    );
+
+    expect(sent).toStrictEqual({
+      codes: [ExitCode.ok, ExitCode.ok, ExitCode.ok, ExitCode.ok],
+      args: [{ query: "--json" }, { query: "-foo" }, { query: "--json" }, { query: "alien" }],
+    });
   });
 
   it("lets --limit and --cursor override a page given in --json", async () => {

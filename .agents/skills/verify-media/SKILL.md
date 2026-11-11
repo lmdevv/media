@@ -406,9 +406,10 @@ the side as Lucía, or as a seeded person, each signed in with their password an
 `up` builds it from this checkout for the after side. On `one-backend` each signed in to the core
 with `media auth login --username <user>`, so use the core's words: `movies titles list`, `movies
 titles search --query Q`, `movies play start --title-id ID`, `movies my-list list`, `movies
-history continue-watching`, `auth sessions current`, and for admins `admin users list`. The old
-top-level words (`search`, `titles list`, `whoami`) reach only old movies' own Convex, so they
-work on the before side alone until the CLI moves them. A command whose arguments nest takes
+history continue-watching`, `auth sessions current`, and for admins `admin users list`, and
+`movies stream <title>` to get a stream URL for a local player. The old top-level words
+(`search`, `titles list`, `whoami`, `login`) are gone and exit 2 naming where they moved, so the
+CLI can't sign in to a `one-port` side's old movies. A command whose arguments nest takes
 `--json '<object>'`. Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3`
 unauthenticated, `4` forbidden, `5` notFound. `$S cli -- --help` lists every command. `kids` has a
 CLI only on `one-backend`.

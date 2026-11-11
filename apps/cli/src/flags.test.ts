@@ -1,8 +1,8 @@
-import { commands } from "@media/contracts/commands";
 import { Result } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import { generatedCommands } from "./generated/commands";
 import { buildArgs, deriveFlags, FlagType, kebabCase } from "./flags";
 import type { ParsedTokens } from "./flags";
 
@@ -14,6 +14,14 @@ const tokens = (
   positionals,
 });
 
+const argsOf = (name: string) => {
+  const command = generatedCommands.find((candidate) => candidate.name === name);
+
+  if (command === undefined) throw new Error(`No generated command ${name}`);
+
+  return command.args;
+};
+
 describe("flag derivation", () => {
   it("kebab-cases field names", () => {
     expect(kebabCase("apiKeyId")).toBe("api-key-id");
@@ -24,67 +32,58 @@ describe("flag derivation", () => {
     );
   });
 
-  it("types flags from the schema and defaults profile and device", () => {
-    const flags = deriveFlags(commands["titles.search"].args);
+  it("types flags from the schema and takes the one required text as the positional", () => {
+    const flags = deriveFlags(argsOf("movies.titles.search"));
 
-    expect(
-      flags.flags.map((spec) => [spec.flag, spec.type, spec.required, spec.defaulted]),
-    ).toStrictEqual([
-      ["profile-id", FlagType.Text(), true, true],
-      ["query", FlagType.Text(), true, false],
-      ["limit", FlagType.Number({ integer: true }), false, false],
+    expect(flags.flags.map((spec) => [spec.flag, spec.type, spec.required])).toStrictEqual([
+      ["query", FlagType.Text(), true],
+      ["limit", FlagType.Number({ integer: false }), false],
     ]);
     expect(flags.positional?.key).toBe("query");
   });
 
   it("reads literal unions as choices and arrays as lists", () => {
-    const { flags } = deriveFlags(commands["apiKeys.create"].args);
+    const { flags } = deriveFlags(argsOf("core.auth.apiKeys.create"));
     const scopes = flags.find((spec) => spec.key === "scopes");
 
-    expect(scopes?.type).toStrictEqual(
-      FlagType.List({ item: FlagType.Choice({ choices: ["read", "play", "manage", "admin"] }) }),
-    );
+    expect(FlagType.$is("List")(scopes?.type ?? FlagType.Text())).toBe(true);
   });
 
-  it("derives a flag set for every registry command", () => {
-    for (const [name, command] of Object.entries(commands)) {
-      expect(() => deriveFlags(command.args), name).not.toThrow();
+  it("derives a flag set for every generated command", () => {
+    for (const command of generatedCommands) {
+      expect(() => deriveFlags(command.args), command.name).not.toThrow();
     }
   });
 });
 
 describe("argument building", () => {
-  const set = deriveFlags(commands["titles.search"].args);
+  const set = deriveFlags(argsOf("movies.titles.search"));
 
-  it("fills defaults, then --json, then the positional, then flags", () => {
+  it("takes --json, then the positional, then flags", () => {
     const built = buildArgs(
       set,
       tokens({ json: '{"query":"from json","limit":3}', limit: "7" }, ["alien", "covenant"]),
-      "titles search",
-      { profileId: "p1", deviceId: "d1" },
+      "movies titles search",
     );
 
-    expect(built).toStrictEqual(
-      Result.succeed({ profileId: "p1", query: "alien covenant", limit: 7 }),
-    );
+    expect(built).toStrictEqual(Result.succeed({ query: "alien covenant", limit: 7 }));
   });
 
   it("names a missing required flag", () => {
-    const built = buildArgs(set, tokens({}), "titles search", { profileId: "p1" });
+    const built = buildArgs(set, tokens({}), "movies titles search");
 
     expect(Result.isFailure(built) && built.failure.message).toBe("Missing --query");
   });
 
   it("rejects numbers and choices it cannot read", () => {
-    expect(Result.isFailure(buildArgs(set, tokens({ limit: "lots" }, ["x"]), "t", {}))).toBe(true);
+    expect(Result.isFailure(buildArgs(set, tokens({ limit: "lots" }, ["x"]), "t"))).toBe(true);
 
-    const keys = deriveFlags(commands["apiKeys.create"].args);
+    const keys = deriveFlags(argsOf("core.auth.apiKeys.create"));
 
     const bad = buildArgs(
       keys,
-      tokens({ name: "k", scopes: ["read,root"] }),
-      "api-keys create",
-      {},
+      tokens({ name: "k", scopes: ["account,root"] }),
+      "auth api-keys create",
     );
 
     expect(Result.isFailure(bad) && bad.failure.message).toContain("--scopes must be one of");

@@ -10,4 +10,11 @@ export const signInUrlFor = (serverUrl: string): string =>
  * end in `/convex` is taken as the server's own.
  */
 export const signInUrlBeside = (platformUrl: string): string =>
-  signInUrlFor(platformUrl.replace(/\/+$/u, "").replace(/\/convex$/u, ""));
+  signInUrlFor(serverUrlBeside(platformUrl));
+
+/**
+ * The media server beside the platform at `platformUrl` in an install: the address without its
+ * `/convex` (ADR 0027). A URL that does not end in `/convex` is taken as the server's own.
+ */
+export const serverUrlBeside = (platformUrl: string): string =>
+  platformUrl.replace(/\/+$/u, "").replace(/\/convex$/u, "");

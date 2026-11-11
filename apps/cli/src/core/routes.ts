@@ -1,12 +1,12 @@
 import { Data, Option } from "effect";
 
-import { pad } from "../catalog";
 import { generatedCommands } from "../generated/commands";
 import { authCommands } from "./auth-commands";
 import type { CoreCatalogEntry, CoreCommand, CoreGroup, CoreShortcut } from "./command";
 import { coreGroups } from "../generated/groups";
-import { catalogEntry, shortcutSynopsis } from "./command";
+import { catalogEntry, pad, shortcutSynopsis } from "./command";
 import { hostCommands } from "./host";
+import { moviesCommands } from "./stream";
 
 /** A command in a core group: generated from the command list, or written by hand. */
 export type CoreEntry = Data.TaggedEnum<{
@@ -19,7 +19,9 @@ export const CoreEntry = Data.taggedEnum<CoreEntry>();
 
 /** Every command in the core groups, hand-written first. */
 export const coreEntries: ReadonlyArray<CoreEntry> = [
-  ...[...authCommands, ...hostCommands].map((command) => CoreEntry.HandWritten({ command })),
+  ...[...authCommands, ...hostCommands, ...moviesCommands].map((command) =>
+    CoreEntry.HandWritten({ command }),
+  ),
   ...generatedCommands.map((command) => CoreEntry.Generated({ command })),
 ];
 
@@ -63,7 +65,7 @@ export const coreCommandNamed = (name: string): Option.Option<CoreCommand> =>
   Option.fromNullishOr(generatedCommands.find((command) => command.name === name));
 
 const SUMMARIES = {
-  auth: "Sign in to the core server, and manage your sessions, API keys, device sign-ins, and account",
+  auth: "Sign in, and manage your sessions, API keys, device sign-ins, and account",
   admin:
     "Manage the core's users, invites, reset links, groups, and restrictions; reset a password on the server host",
   movies: "Movies and shows",
@@ -73,7 +75,7 @@ const SUMMARIES = {
 const EMPTY = {
   auth: "None yet",
   admin: "None yet",
-  movies: "None yet; until the movies port, use the movies server's commands below",
+  movies: "None yet",
   music: "None yet; they arrive with the music port",
 } as const satisfies { readonly [Group in CoreGroup]: string };
 
@@ -134,7 +136,6 @@ export const coreCatalog = (): ReadonlyArray<CoreCatalogEntry> =>
         group: command.group,
         kind: "shortcut",
         scope: "varies",
-        job: false,
         summary: command.summary,
         positional: null,
         flags: Object.entries(command.options).map(([flag, option]) => ({

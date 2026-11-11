@@ -160,7 +160,7 @@
                 }).config;
               summary = config: {
                 cli = builtins.any (package: package.pname or "" == "movies-cli") config.environment.systemPackages;
-                convexUrl = config.environment.sessionVariables.MEDIA_CONVEX_URL or null;
+                convexUrl = config.environment.sessionVariables.MEDIA_CORE_URL or null;
                 mediaUrl = config.environment.sessionVariables.MEDIA_SERVER_URL or null;
                 server = config.systemd.services ? movies;
               };
@@ -270,7 +270,7 @@
                 configured = {
                   cli = true;
                   sessionVariables = {
-                    MEDIA_CONVEX_URL = "http://nas:3210";
+                    MEDIA_CORE_URL = "http://nas:3210";
                     MEDIA_SERVER_URL = "http://nas:8080";
                   };
                 };

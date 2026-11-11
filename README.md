@@ -211,14 +211,17 @@ The macOS binary is signed ad hoc, not notarized. macOS quarantines a file downl
 browser, and Gatekeeper then refuses to run it; `curl` does not quarantine, or clear it with
 `xattr -d com.apple.quarantine media-darwin-arm64`.
 
-`MEDIA_SERVER_URL` (or `login --media-url`) is where the CLI reaches the media service, for its
-`media` commands and for playback. The stream URL `media play` prints is always the server's
-public one (`MEDIA_BASE_URL`), so a player on another machine can open it.
+`media auth login --server <url>` signs in once, with the install's address plus `/convex` as
+the server, such as `http://nas.tailnet.ts.net:8080/convex`, and every command uses that one
+session. The CLI reaches the media server at that address without `/convex`; `MEDIA_SERVER_URL`
+(or `auth login --media-url`) names it when it is elsewhere. The stream URL `media movies stream`
+prints is always the server's public one (`MEDIA_BASE_URL`), so a player on another machine can
+open it.
 
-In the Compose image, `MEDIA_CORE_URL`, `MEDIA_CONVEX_URL`, and `MEDIA_SERVER_URL` point at that
-stack from inside the container. `docker compose exec media media` runs as root, so its login in the `media-data`
-volume (`/data/movies/config`) is readable by root only, and stays across upgrades. On NixOS,
-`services.media` sets both variables for every user, so `media login` needs no `--server`;
+In the Compose image, `MEDIA_CORE_URL` and `MEDIA_SERVER_URL` point at that stack from inside the
+container. `docker compose exec media media` runs as root, so its login in the `media-data` volume
+(`/data/movies/config`) is readable by root only, and stays across upgrades. On NixOS,
+`services.media` sets both variables for every user, so `media auth login` needs no `--server`;
 `programs.media.enable = false` leaves the CLI out. Another NixOS machine, or Home Manager on
 Linux or macOS, sets the two URLs itself:
 
@@ -234,22 +237,22 @@ programs.media = {
 };
 ```
 
-The variables win over a login's stored server: while `MEDIA_CONVEX_URL` names another server, a
+The variables win over a login's stored server: while `MEDIA_CORE_URL` names another server, a
 profile saved for a different one stays unused, whatever `--profile` says. To use that profile,
-clear both for the command: `MEDIA_CONVEX_URL= MEDIA_SERVER_URL= media whoami`. The NixOS
-modules set them for every user on the machine. Home Manager sets them in `home.sessionVariables`,
-which only shells Home Manager configures load: on macOS, enable `programs.zsh` (or your shell) in
-Home Manager, or pass `--server` and `--media-url` to `media login` instead.
+clear both for the command: `MEDIA_CORE_URL= MEDIA_SERVER_URL= media auth sessions current`. The
+NixOS modules set them for every user on the machine. Home Manager sets them in
+`home.sessionVariables`, which only shells Home Manager configures load: on macOS, enable
+`programs.zsh` (or your shell) in Home Manager, or pass `--server` and `--media-url` to
+`media auth login` instead.
 
-No install stores a credential: each user runs `media login` once, or sets `MEDIA_API_KEY`.
-Output is JSON by default. Agents get an API key from Settings → API keys and follow
-[apps/cli/skills/media/SKILL.md](apps/cli/skills/media/SKILL.md), which loads one reference per
-domain. In a checkout, `pnpm --filter @lmdevv/movies build` writes `apps/cli/dist/media.js`.
+No install stores a credential: each user runs `media auth login` once, or sets
+`MEDIA_CORE_API_KEY`. Output is JSON by default. Agents get an API key from the account page and
+follow [apps/cli/skills/media/SKILL.md](apps/cli/skills/media/SKILL.md), which loads one generated
+reference per domain. In a checkout, `pnpm --filter @lmdevv/movies build` writes
+`apps/cli/dist/media.js`.
 
-`media --help` lists the `auth`, `admin`, `movies`, and `music` groups first. They reach the core
-with their own sign-in (`media auth login`, with `MEDIA_BASE_URL/convex` as the server). The
-older top-level movies commands (`media login`, `media play`, `media backup`, and the rest) still
-expect old movies' own Convex backend, which installs no longer run.
+`media --help` lists the `auth`, `admin`, `movies`, and `music` groups, then `media logs` and
+`media diagnostics` for troubleshooting playback.
 `media admin reset-password [<username>]` sets a new password from the server host with the
 core's admin key (`--env-file`, or `MEDIA_CORE_URL` and `MEDIA_CORE_ADMIN_KEY`). In the image,
 `docker compose exec media media admin reset-password <username>` derives the key itself.

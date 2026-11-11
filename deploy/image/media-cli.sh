@@ -1,8 +1,6 @@
 #!/bin/sh
 # `docker compose exec media media ...`: the CLI against this container's own services, with its
 # logins in the data volume.
-# The install runs one Convex backend, the core's, so both Convex settings name it.
-export MEDIA_CONVEX_URL="${MEDIA_CONVEX_URL:-http://127.0.0.1:3210}"
 export MEDIA_CORE_URL="${MEDIA_CORE_URL:-http://127.0.0.1:3210}"
 export MEDIA_SERVER_URL="${MEDIA_SERVER_URL:-http://127.0.0.1:8080}"
 # Sign-ins go through the server's boundary behind Caddy, as every client's do (ADR 0007).

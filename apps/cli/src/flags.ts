@@ -26,11 +26,7 @@ export interface FlagSpec {
   readonly flag: string;
   readonly type: FlagType;
   readonly required: boolean;
-  /** Filled from the CLI config when not given: the viewing profile or this install's device. */
-  readonly defaulted: boolean;
 }
-
-const DEFAULTED_FIELDS: ReadonlySet<string> = new Set(["profileId", "deviceId"]);
 
 /** The flags of a command plus the field, if any, that may be given as positional arguments. */
 export interface FlagSet {
@@ -114,7 +110,6 @@ export const deriveFlags = (args: Schema.Top): FlagSet => {
       flag: kebabCase(String(property.name)),
       type: flagTypeOf(property.type),
       required: !SchemaAST.isOptional(property.type),
-      defaulted: DEFAULTED_FIELDS.has(String(property.name)),
     })),
   );
 };
@@ -122,10 +117,7 @@ export const deriveFlags = (args: Schema.Top): FlagSet => {
 const withPositional = (flags: ReadonlyArray<FlagSpec>): FlagSet => {
   const positionalCandidates = flags.filter(
     (spec) =>
-      spec.required &&
-      !spec.defaulted &&
-      !FlagType.$is("Boolean")(spec.type) &&
-      !FlagType.$is("Json")(spec.type),
+      spec.required && !FlagType.$is("Boolean")(spec.type) && !FlagType.$is("Json")(spec.type),
   );
 
   const [positional] = positionalCandidates;
@@ -225,12 +217,6 @@ export const globalOptions: ParseArgsOptionsConfig = {
   format: { type: "string" },
   human: { type: "boolean" },
   verbose: { type: "boolean" },
-};
-
-/** `--wait` and `--timeout <seconds>`, for commands that queue a background job. */
-export const waitOptions: ParseArgsOptionsConfig = {
-  wait: { type: "boolean" },
-  timeout: { type: "string" },
 };
 
 /** The option table for a command's derived flags plus the global flags and `--json`. */
@@ -401,14 +387,13 @@ const single = (
 };
 
 /**
- * Builds wire arguments from parsed tokens: config defaults for `profileId` and `deviceId`
- * first, then `--json`, then the positional value, then explicit flags, each overriding the last.
+ * Builds wire arguments from parsed tokens: `--json`, then the positional value, then explicit
+ * flags, each overriding the last.
  */
 export const buildArgs = (
   set: FlagSet,
   tokens: ParsedTokens,
   command: string,
-  defaults: WireArgs,
 ): Result.Result<WireArgs, UsageError> =>
   Result.gen(function* () {
     const raw = tokens.values["json"];
@@ -430,14 +415,7 @@ export const buildArgs = (
       ),
     );
 
-    const fromDefaults = set.flags.flatMap((spec) => {
-      const value = defaults[spec.key];
-
-      return spec.defaulted && value !== undefined ? [[spec.key, value] as const] : [];
-    });
-
     const args: WireArgs = Object.fromEntries([
-      ...fromDefaults,
       ...Object.entries(base),
       ...Object.entries(fromPositionals),
       ...fromFlags.flat(),

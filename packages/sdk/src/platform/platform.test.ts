@@ -2,6 +2,8 @@ import { Brand, Context, Effect, Layer, Predicate, Redacted } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { Forbidden, Unauthenticated } from "@media/contracts/errors";
+
 import * as FakeConvex from "../testing/fake-convex";
 import { jwtExpiringAt, Reply } from "../testing/fake-convex";
 import * as TokenStorage from "../token-storage";
@@ -146,6 +148,55 @@ describe("Platform", () => {
         failure: { _tag: "Unauthenticated" },
         status: "signedIn",
         calls: 1,
+      });
+    });
+
+    it("applies the same rule to another server's refusal, once, and leaves other failures alone", async () => {
+      const answer = await withPlatform((platform, fake) =>
+        Effect.gen(function* () {
+          yield* fake.handle("auth:signIn", (request) =>
+            Effect.succeed(
+              Predicate.hasProperty(request.args, "refreshToken")
+                ? Reply.Success({ value: { tokens: null } })
+                : signedIn,
+            ),
+          );
+          yield* platform.session.signIn(
+            Platform.Credentials.Password({ username: "ada", password: Redacted.make("secret") }),
+          );
+
+          const forbidden = yield* Effect.flip(
+            platform.session.refreshOnRefusal(
+              Effect.fail(new Forbidden({ message: "Admins only" })),
+            ),
+          );
+
+          const afterForbidden = yield* platform.session.currentStatus;
+
+          const refused = yield* Effect.flip(
+            platform.session.refreshOnRefusal(
+              Effect.fail(new Unauthenticated({ message: "This session has ended" })),
+            ),
+          );
+
+          return {
+            forbidden,
+            afterForbidden,
+            refused,
+            status: yield* platform.session.currentStatus,
+            refreshes: (yield* fake.requestsTo("auth:signIn")).filter((request) =>
+              Predicate.hasProperty(request.args, "refreshToken"),
+            ).length,
+          };
+        }),
+      );
+
+      expect(answer).toMatchObject({
+        forbidden: { _tag: "Forbidden" },
+        afterForbidden: "signedIn",
+        refused: { _tag: "Unauthenticated" },
+        status: "signedOut",
+        refreshes: 1,
       });
     });
 

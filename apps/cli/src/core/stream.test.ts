@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { MediaVersion, TitleCard } from "@media/contracts/models/catalog";
 
-import { bestTitle, pickVersion } from "./watch-commands";
+import { bestTitle, pickVersion } from "./stream";
 
 const card = (id: string, name: string) =>
   Schema.decodeSync(TitleCard)({
