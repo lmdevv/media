@@ -1109,6 +1109,9 @@ const make = Effect.gen(function* () {
       const wake = MutableRef.get(generation.wake);
       const finished = yield* Deferred.isDone(generation.exit);
       const parsed = yield* parsedNewFragments(generation);
+
+      // The stream can close while the read waits, which also stops this generation.
+      if (isClosed(session.scope)) return yield* new StreamNotFound({ streamId: session.streamId });
       const fragments = yield* Ref.get(generation.fragments);
       const produced = producedRange(session, generation, fragments);
       const next = session.plan.starts[index + 1];
