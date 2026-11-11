@@ -34,7 +34,6 @@ export const checkedProof = v.union(
     kind: v.literal("password"),
     by: v.id("users"),
     hash: v.string(),
-    usernameKey: v.string(),
   }),
   v.object({ kind: v.literal("code"), by: v.id("users"), codeId: v.id("unlockCodes") }),
   v.object({ kind: v.literal("approval"), approvalId: v.id("tileApprovals") }),
@@ -96,7 +95,11 @@ export const open = internalMutation({
 
     if (prover !== null) await clearStrikes(ctx, device._id, prover.userId);
 
-    if (proof.kind === "password") await refundAttempt(ctx, signInLimit(proof.usernameKey), now);
+    // The try goes back to the bucket of the name the typist has now, read here, not to the one
+    // the action saw: a rename in between would give the try to someone else's bucket.
+    const typist = proof.kind === "password" ? asPerson(await ctx.db.get(proof.by)) : null;
+
+    if (typist !== null) await refundAttempt(ctx, signInLimit(typist.usernameKey), now);
 
     if (proof.kind === "approval") await markRedeemed(ctx, proof.approvalId, sessionId);
 

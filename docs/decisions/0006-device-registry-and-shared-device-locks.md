@@ -2,7 +2,7 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the registry and locks as built,
   2026-11-07 with the phase 3 review fixes, 2026-11-07 with one session per device (D52), and
-  2026-11-09 with device grants (D48, D59), and 2026-11-10 with one person per phone (D64).
+  2026-11-09 with device grants (D48, D59), 2026-11-10 with one person per phone (D64), and 2026-11-11 with refunds checked against the code they verified.
 - Decisions: D18, D19, D35, D40, D47, D48, D52, D59, D64
 
 ## Context
@@ -165,6 +165,13 @@ never stored. `lockOf` derives it from three reasons:
   gives back its hourly try, in its own transaction before the tile opens, so a right code costs
   nothing even when the tile cannot open after all, as when a kid takes the device meanwhile. A
   new code starts at zero on every device.
+- The refund (`unlockCodes:refundRightCode`) takes the id of the code the provider checked, and
+  gives back the try and clears the strikes only while that code is still the person's, in the
+  same transaction as the read. The digits were checked in the action, so a code replaced in
+  between keeps its strikes and its tries: a right guess at the old code is no proof of the new
+  one (amended 2026-11-11).
+- A password proof's try goes back to the bucket of the name the person has when the tile opens,
+  read in that transaction, not the one the action saw.
 
 ### Approvals
 

@@ -69,7 +69,7 @@ export const passwordAttempt = internalMutation({
   returns: v.union(
     v.object({ kind: v.literal("limited") }),
     v.object({ kind: v.literal("unknown") }),
-    v.object({ kind: v.literal("known"), hash: v.string(), usernameKey: v.string() }),
+    v.object({ kind: v.literal("known"), hash: v.string() }),
   ),
   handler: async (ctx, { pass, deviceId, secretHash, userId, by }) => {
     await spendPass(ctx, pass, "tile");
@@ -86,9 +86,7 @@ export const passwordAttempt = internalMutation({
 
     const hash = await passwordHashOf(ctx.db, by);
 
-    return hash === undefined
-      ? { kind: "unknown" as const }
-      : { kind: "known" as const, hash, usernameKey: person.usernameKey };
+    return hash === undefined ? { kind: "unknown" as const } : { kind: "known" as const, hash };
   },
 });
 
@@ -115,7 +113,7 @@ const checkPassword = async (
     return fail("unauthenticated", WRONG_PASSWORD);
   }
 
-  return { kind: "password", by, hash: attempt.hash, usernameKey: attempt.usernameKey };
+  return { kind: "password", by, hash: attempt.hash };
 };
 
 const checkCode = async (
@@ -161,6 +159,7 @@ const checkCode = async (
   await ctx.runMutation(internal.core.devices.unlockCodes.refundRightCode, {
     deviceId: attempt.deviceId,
     by,
+    codeId: attempt.codeId,
   });
 
   return { kind: "code", by, codeId: attempt.codeId };

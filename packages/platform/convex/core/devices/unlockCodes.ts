@@ -138,14 +138,25 @@ export const attempt = internalMutation({
   },
 });
 
+/**
+ * Gives back the try a right code took, and clears its strikes on the device, but only while the
+ * code the action checked, `codeId`, is still the person's code. The check ran in the action,
+ * outside this transaction, so a code replaced in between keeps its own strikes and tries: a
+ * proof against the old code is no proof of the new one. Answers whether it refunded.
+ */
 export const refundRightCode = internalMutation({
-  args: { deviceId: v.id("devices"), by: v.id("users") },
-  returns: v.null(),
-  handler: async (ctx, { deviceId, by }) => {
-    await clearStrikes(ctx, deviceId, by);
+  args: { deviceId: v.id("devices"), by: v.id("users"), codeId: v.id("unlockCodes") },
+  returns: v.boolean(),
+  handler: async (ctx, { deviceId, by, codeId }) => {
+    const current = await codeOf(ctx.db, by);
+
+    if (current?._id !== codeId) return false;
+    const strike = await strikeOf(ctx.db, deviceId, by);
+
+    if (strike?.codeId === codeId) await ctx.db.delete(strike._id);
     await refundAttempt(ctx, unlockLimit(by), Date.now());
 
-    return null;
+    return true;
   },
 });
 

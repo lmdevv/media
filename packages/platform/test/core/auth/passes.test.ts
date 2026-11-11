@@ -171,7 +171,7 @@ describe.skipIf(stack === undefined)("the sign-in boundary", { timeout: 120_000 
     expect(elsewhere.status).toBe(200);
   });
 
-  it("refuses a pass spent once and expired, after the sweep, and takes no second try", async () => {
+  it("refuses a pass spent once, after it expired and the sweep ran, and takes no second try", async () => {
     if (stack === undefined) return;
     const usernameKey = `replay-${unique()}`;
     const params = { username: usernameKey, password: `wrong-${unique()}` };
@@ -210,6 +210,43 @@ describe.skipIf(stack === undefined)("the sign-in boundary", { timeout: 120_000 
     expect(await refusal(attempt())).toBe("forbidden");
     expect(afterFirst).toBeDefined();
     expect(budget()).toBe(afterFirst);
+  });
+
+  it("refuses an expired pass whose nonce no row names, by its expiry alone", async () => {
+    if (stack === undefined) return;
+    const usernameKey = `expired-${unique()}`;
+    const params = { username: usernameKey, password: `wrong-${unique()}` };
+    const keys = await keysOf(deploymentTicketKeysText());
+
+    const signed = await keys.sign({
+      provider: "password",
+      params,
+      address: newClientAddress(),
+      now: Date.now(),
+    });
+
+    const checked = await keys.verify(signed, "password", params, Date.now());
+
+    if (!checked.ok) throw new Error(`the pass did not verify: ${checked.error.reason}`);
+    const expired = { ...checked.value, provider: "password", expiresAt: Date.now() - 1 };
+
+    expect(newestRows("signInPasses", 1000).some((row) => row.includes(expired.nonce))).toBe(false);
+
+    expect(
+      await refusal(
+        runFunction(
+          stack,
+          internal.core.auth.password.attempt,
+          { pass: expired, usernameKey },
+          Schema.Unknown,
+        ),
+      ),
+    ).toBe("forbidden");
+
+    expect(newestRows("signInPasses", 1000).some((row) => row.includes(expired.nonce))).toBe(false);
+    expect(
+      newestRows("rateLimits", 1000).some((line) => line.includes(`"password:${usernameKey}"`)),
+    ).toBe(false);
   });
 
   it("refuses a pass in a mutation of another kind of sign-in", async () => {
