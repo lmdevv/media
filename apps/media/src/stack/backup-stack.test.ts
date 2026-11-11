@@ -174,14 +174,20 @@ describe.skipIf(core === undefined)(
 
       expect(restored.status, await restored.clone().text()).toBe(200);
 
-      const stale = await run(Effect.exit(admin.platform.core.auth.sessions.current()));
+      // Every session from before the import ends, the one of an account made after the backup
+      // included. The core ends them 100 a call in scheduled calls, so a stack holding many
+      // sessions reaches these two a little after the restore answers.
+      await eventually("the admin's session to end", async () =>
+        Exit.isFailure(await run(Effect.exit(admin.platform.core.auth.sessions.current())))
+          ? Option.some(true)
+          : Option.none(),
+      );
 
-      expect(Exit.isFailure(stale)).toBe(true);
-
-      // Every session ends, the one of an account made after the backup included.
-      const lateAgain = await run(Effect.exit(late.platform.core.auth.sessions.current()));
-
-      expect(Exit.isFailure(lateAgain)).toBe(true);
+      await eventually("the late member's session to end", async () =>
+        Exit.isFailure(await run(Effect.exit(late.platform.core.auth.sessions.current())))
+          ? Option.some(true)
+          : Option.none(),
+      );
 
       // The server's key is in the archive, so its next claim signs it in again and runs a job.
 
