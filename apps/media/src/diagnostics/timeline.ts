@@ -475,7 +475,7 @@ const missingEvidence = (
     ...(fromPlayer || dropsInfo
       ? []
       : [
-          "The player sent no diagnostics: an app from before diagnostics, a player that does not report them (mpv or VLC through media play), or events lost on the way. Stalls and player errors are unknown.",
+          "The player sent no diagnostics: an app from before diagnostics, a player that does not report them (mpv or VLC through media movies stream), or events lost on the way. Stalls and player errors are unknown.",
         ]),
     ...(direct
       ? ["Direct play serves byte ranges, which are not timed; only failed requests show."]

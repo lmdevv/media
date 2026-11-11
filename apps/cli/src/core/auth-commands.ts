@@ -22,6 +22,15 @@ import { Output } from "../output";
 import type { CoreShortcut } from "./command";
 import { coreShortcut } from "./command";
 
+const LOOPBACK = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?$/u;
+
+/**
+ * Whether another device could open the media server at `url`: not a loopback address, such as
+ * the image's own `http://127.0.0.1:8080`. Approving from there needs the server's public address,
+ * which only the person knows.
+ */
+const reachableElsewhere = (url: string): boolean => !LOOPBACK.test(url);
+
 const announceDevice = Effect.fn("Core.announceDevice")(function* (
   invocation: Invocation,
   server: Target,
@@ -31,7 +40,7 @@ const announceDevice = Effect.fn("Core.announceDevice")(function* (
   const approve = `media auth device-codes approve --user-code ${pending.userCode} --scopes account`;
 
   const verificationUrl = Option.map(
-    server.mediaUrl,
+    Option.filter(server.mediaUrl, reachableElsewhere),
     (url) => `${url}/device?code=${encodeURIComponent(pending.userCode)}`,
   );
 
@@ -103,7 +112,7 @@ const login = coreShortcut("auth", "login", {
       }
 
       const previous = yield* heldSession(target);
-      const server = yield* retarget(target, url.value, mediaUrl);
+      const server = retarget(target, url.value, mediaUrl);
       const platform = yield* openForSignIn(server, url.value);
       const failStorage = storageFailure(target.path);
 

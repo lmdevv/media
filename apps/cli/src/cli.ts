@@ -168,10 +168,23 @@ const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> 
     return Result.succeed(Route.Shortcut({ command: oneWord, rest: restAfter(1) }));
 
   if (head === "diagnostics") {
-    return Result.succeed(Route.CoreHelp({ help: diagnosticsHelp() }));
+    return sub === undefined
+      ? Result.succeed(Route.CoreHelp({ help: diagnosticsHelp() }))
+      : Result.fail(
+          new UsageError({
+            message: `Unknown command "${leadingWords(words).join(" ")}"`,
+            command: "diagnostics",
+          }),
+        );
   }
 
-  return Result.fail(unknownCommand(leadingWords(words).join(" "), pathOf(words)));
+  const typed = leadingWords(words);
+
+  return Result.fail(
+    typed.length === 0
+      ? new UsageError({ message: `Unknown command "${rawHead}"`, command: null })
+      : unknownCommand(typed.join(" "), pathOf(words)),
+  );
 };
 
 const resolveInGroup = (

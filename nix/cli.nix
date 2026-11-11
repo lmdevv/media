@@ -1,6 +1,6 @@
 # The `media` CLI, bundled by esbuild into one file and run with Node.
 #
-#   nix run github:lmdevv/media#cli -- login --server http://nas.tailnet.ts.net:3210
+#   nix run github:lmdevv/media#cli -- auth login --server http://nas.tailnet.ts.net:8080/convex
 #
 # Dependencies come from pnpm-lock.yaml through fetchPnpmDeps. When the lockfile changes,
 # `scripts/check-pnpm-deps-hash.sh --write` updates `hash` below.

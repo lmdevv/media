@@ -63,12 +63,13 @@ const decodeStored = Schema.decodeUnknownResult(Schema.fromJsonString(StoredProf
 
 const encodeStored = Schema.encodeSync(Schema.fromJsonString(StoredProfile));
 
-/**
- * The media server beside the core at `url` in an install, which serves the core at
- * `<server>/convex` and the media server at `<server>` (ADR 0027). A URL that does not end in
- * `/convex` is taken as the server's own.
- */
-const besideCore = (url: string): string => normalizeUrl(url).replace(/\/convex$/u, "");
+/** The addresses the environment names for one run, never stored. */
+interface Overrides {
+  /** `MEDIA_SERVER_URL`. */
+  readonly mediaUrl: Option.Option<string>;
+  /** `MEDIA_CORE_SIGN_IN_URL`. */
+  readonly signInUrl: Option.Option<string>;
+}
 
 /** The profile, server, and credentials a command runs with. */
 export interface Target {
@@ -81,9 +82,12 @@ export interface Target {
    * core and is never sent to another.
    */
   readonly url: Option.Option<string>;
+  /** The media server the profile keeps for this core (`auth login --media-url`), if any. */
+  readonly savedMediaUrl: Option.Option<string>;
+  readonly overrides: Overrides;
   /**
-   * `MEDIA_SERVER_URL`, else the media server the profile's file names, else the one beside the
-   * core (`besideCore`): where playback, logs, and diagnostics go.
+   * `MEDIA_SERVER_URL`, else `savedMediaUrl`, else the one beside the core: where playback,
+   * logs, and diagnostics go.
    */
   readonly mediaUrl: Option.Option<string>;
   /** `MEDIA_CORE_API_KEY`: signs in for this run only. */
@@ -100,6 +104,24 @@ export interface Target {
   readonly storage: "file" | "memory";
 }
 
+/** Where the media server and the sign-in boundary are for the core at `url`. */
+const addressesOf = (
+  url: Option.Option<string>,
+  savedMediaUrl: Option.Option<string>,
+  overrides: Overrides,
+): Pick<Target, "mediaUrl" | "signInUrl"> => {
+  const mediaUrl = Option.orElse(overrides.mediaUrl, () =>
+    Option.orElse(savedMediaUrl, () => Option.map(url, Platform.serverUrlBeside)),
+  );
+
+  return {
+    mediaUrl,
+    signInUrl: Option.orElse(overrides.signInUrl, () =>
+      Option.map(mediaUrl, Platform.signInUrlFor),
+    ),
+  };
+};
+
 const readStored = Effect.fn("Config.readStored")(function* (path: string) {
   const text = yield* Effect.tryPromise({
     try: () => readTextFile(path),
@@ -112,7 +134,7 @@ const readStored = Effect.fn("Config.readStored")(function* (path: string) {
   if (Result.isFailure(decoded)) {
     return yield* new ConfigFileError({
       path,
-      message: `${path} is not a valid [media] profile; delete it or run media auth login again`,
+      message: `${path} is not a valid [media] profile; delete it, then run media auth login`,
       cause: decoded.failure,
     });
   }
@@ -160,8 +182,11 @@ export const resolveTarget = Effect.fn("Config.resolveTarget")(function* (
   );
 
   const url = yield* urlVariable("MEDIA_CORE_URL");
-  const mediaUrl = yield* urlVariable("MEDIA_SERVER_URL");
-  const signInUrl = yield* urlVariable("MEDIA_CORE_SIGN_IN_URL");
+
+  const overrides: Overrides = {
+    mediaUrl: yield* urlVariable("MEDIA_SERVER_URL"),
+    signInUrl: yield* urlVariable("MEDIA_CORE_SIGN_IN_URL"),
+  };
 
   const apiKey = Option.map(yield* nonEmpty("MEDIA_CORE_API_KEY"), (key) =>
     Redacted.make(key.trim()),
@@ -176,21 +201,16 @@ export const resolveTarget = Effect.fn("Config.resolveTarget")(function* (
 
   const stored = shadowed ? Option.none<StoredProfile>() : onDisk;
   const core = Option.orElse(url, () => Option.map(stored, (held) => held.url));
-
-  const media = Option.orElse(mediaUrl, () =>
-    Option.orElse(
-      Option.flatMap(stored, (held) => Option.fromNullishOr(held.mediaUrl)),
-      () => Option.map(core, besideCore),
-    ),
-  );
+  const savedMediaUrl = Option.flatMap(stored, (held) => Option.fromNullishOr(held.mediaUrl));
 
   const target: Target = {
     profile: named,
     path,
     url: core,
-    mediaUrl: media,
+    savedMediaUrl,
+    overrides,
+    ...addressesOf(core, savedMediaUrl, overrides),
     apiKey,
-    signInUrl: Option.orElse(signInUrl, () => Option.map(media, Platform.signInUrlFor)),
     storage: Option.isSome(apiKey) || shadowed ? "memory" : "file",
   };
 
@@ -198,35 +218,22 @@ export const resolveTarget = Effect.fn("Config.resolveTarget")(function* (
 }, environmentError);
 
 /**
- * The target pointed at another server, as `media auth login --server <url> --media-url <url>`
- * names it: the media server and the sign-in boundary follow the new core unless the environment
- * names them.
+ * The target pointed at the core `url`, as `media auth login --server <url> --media-url <url>`
+ * names it. The profile keeps `mediaUrl`, else the media server it kept for that core; the
+ * environment's addresses still win for this run.
  */
-export const retarget = Effect.fn("Config.retarget")(function* (
-  target: Target,
-  url: string,
-  mediaUrl: Option.Option<string>,
-) {
-  const fromEnv = yield* urlVariable("MEDIA_SERVER_URL");
-
-  const media = Option.orElse(mediaUrl, () =>
-    Option.orElse(fromEnv, () =>
-      Option.filter(target.mediaUrl, () => Option.contains(target.url, url)),
-    ),
+export const retarget = (target: Target, url: string, mediaUrl: Option.Option<string>): Target => {
+  const savedMediaUrl = Option.orElse(mediaUrl, () =>
+    Option.filter(target.savedMediaUrl, () => Option.contains(target.url, url)),
   );
 
-  const resolved = Option.getOrElse(media, () => besideCore(url));
-  const signInUrl = yield* urlVariable("MEDIA_CORE_SIGN_IN_URL");
-
-  const next: Target = {
+  return {
     ...target,
     url: Option.some(url),
-    mediaUrl: Option.some(resolved),
-    signInUrl: Option.orElse(signInUrl, () => Option.some(Platform.signInUrlFor(resolved))),
+    savedMediaUrl,
+    ...addressesOf(Option.some(url), savedMediaUrl, target.overrides),
   };
-
-  return next;
-}, environmentError);
+};
 
 const storageError =
   (operation: "load" | "save" | "clear") =>
@@ -334,10 +341,13 @@ const openPlatform = (
     ),
   );
 
-/** The media server the target names, kept in the file only when it is not beside the core. */
+/** The servers the profile's file keeps: the core, and its media server when it is not beside it. */
 const serverOf = (target: Target, url: string): Server => ({
   url,
-  mediaUrl: Option.filter(target.mediaUrl, (mediaUrl) => mediaUrl !== besideCore(url)),
+  mediaUrl: Option.filter(
+    target.savedMediaUrl,
+    (mediaUrl) => mediaUrl !== Platform.serverUrlBeside(url),
+  ),
 });
 
 /**
@@ -458,7 +468,7 @@ export const connect = Effect.fn("Config.connect")(function* (
     url,
     target,
     media: {
-      url: Option.getOrElse(target.mediaUrl, () => besideCore(url)),
+      url: Option.getOrElse(target.mediaUrl, () => Platform.serverUrlBeside(url)),
       bearer: platform.session.accessToken,
     },
     signedIn: (effect) =>

@@ -32,7 +32,7 @@ export { Credentials, DeviceSignInRefused, TileProof } from "./client";
 
 export { SignInRoute } from "../auth";
 
-export { signInUrlBeside, signInUrlFor } from "./sign-in-url";
+export { serverUrlBeside, signInUrlBeside, signInUrlFor } from "./sign-in-url";
 
 export type {
   DeviceSignIn,

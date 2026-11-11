@@ -132,10 +132,19 @@ describe("the media command", () => {
   });
 
   it("reports other unknown commands as usage errors with suggestions", async () => {
-    const run = await media("mov");
+    const [close, flag, typo] = await Promise.all([
+      media("mov"),
+      media("--json"),
+      media("diagnostics", "sesions"),
+    ]);
 
-    expect(run.code).toBe(ExitCode.usage);
-    expect(run.stderr).toContain("did you mean movies");
+    expect(close.code).toBe(ExitCode.usage);
+    expect(close.stderr).toContain("did you mean movies");
+    expect(JSON.parse(flag.stderr)).toStrictEqual({
+      error: { code: "usage", message: 'Unknown command "--json"' },
+    });
+    expect(typo.code).toBe(ExitCode.usage);
+    expect(typo.stderr).toContain('Unknown command \\"diagnostics sesions\\"');
   });
 
   it("accepts camelCase words", async () => {

@@ -70,6 +70,24 @@ describe("target resolution", () => {
     expect(target.storage).toBe("file");
   });
 
+  it("never stores the environment's addresses, and keeps the stored one for its core", async () => {
+    const dir = await homeWith({ url: "http://nas:3210", mediaUrl: "http://nas:8080" });
+
+    const target = await targetOf({
+      XDG_CONFIG_HOME: dir,
+      MEDIA_SERVER_URL: "http://media.local",
+    });
+
+    expect(target.mediaUrl).toStrictEqual(Option.some("http://media.local"));
+    expect(target.savedMediaUrl).toStrictEqual(Option.some("http://nas:8080"));
+    expect(retarget(target, "http://nas:3210", Option.none()).savedMediaUrl).toStrictEqual(
+      Option.some("http://nas:8080"),
+    );
+    expect(retarget(target, "http://other:3210", Option.none()).savedMediaUrl).toStrictEqual(
+      Option.none(),
+    );
+  });
+
   it("keeps a stored media server, and lets the environment name each address", async () => {
     const dir = await homeWith({
       url: "http://nas:3210",
@@ -128,16 +146,11 @@ describe("target resolution", () => {
 
     const target = await targetOf(env);
 
-    const run = (url: string, mediaUrl: Option.Option<string>) =>
-      Effect.runPromise(
-        retarget(target, url, mediaUrl).pipe(
-          Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env })),
-        ),
-      );
+    const run = (url: string, mediaUrl: Option.Option<string>) => retarget(target, url, mediaUrl);
 
-    const same = await run("http://old:3210", Option.none());
-    const moved = await run("http://new:8080/convex", Option.none());
-    const named = await run("http://new:3210", Option.some("http://new:8080"));
+    const same = run("http://old:3210", Option.none());
+    const moved = run("http://new:8080/convex", Option.none());
+    const named = run("http://new:3210", Option.some("http://new:8080"));
 
     expect(same.mediaUrl).toStrictEqual(Option.some("http://old:8080"));
     expect(moved.mediaUrl).toStrictEqual(Option.some("http://new:8080"));

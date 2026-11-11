@@ -8,8 +8,8 @@
 #     mediaUrl = "http://nas.tailnet.ts.net:8080";
 #   };
 #
-# Each user still runs `media login` once (or sets MEDIA_API_KEY), so no key enters the Nix
-# store.
+# Each user still runs `media auth login` once (or sets MEDIA_CORE_API_KEY), so no key enters the
+# Nix store.
 {
   config,
   lib,
