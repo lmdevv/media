@@ -247,8 +247,27 @@ describe("stopping a stream as the page goes away", () => {
     received.length = 0;
     receivedBodies.length = 0;
     receivedTypes.length = 0;
+
+    const sent = vi.spyOn(globalThis, "fetch");
+
     stopNow({ started: session, stream });
     stopNow({ started: session, stream: { ...stream, streamId: undefined } });
+
+    // Called before `stopNow` returned, with what lets it leave a page in `pagehide`.
+    const calls = [...sent.mock.calls];
+
+    sent.mockRestore();
+    expect(calls).toStrictEqual([
+      [
+        new URL("/api/playback/stop", mediaServiceUrl).href,
+        {
+          method: "POST",
+          keepalive: true,
+          headers: { "content-type": "text/plain;charset=UTF-8" },
+          body: JSON.stringify({ token: session.token, streamId: STREAM_ID }),
+        },
+      ],
+    ]);
 
     await vi.waitFor(() => {
       expect(received).toStrictEqual(["/api/playback/stop"]);
