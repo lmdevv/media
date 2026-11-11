@@ -261,3 +261,27 @@ export const useAllPages = <Args, Row>(
 
   return paged;
 };
+
+/**
+ * Follows a paginated core query until it holds `count` rows or ends, for a row that shows the
+ * first few. A core page can hold fewer rows than asked, even none, when the caller may not see
+ * the rows its range covers, so the first page alone can leave such a row empty.
+ */
+export const useFirstRows = <Args, Row>(
+  query: PagedQuery<Args, Row>,
+  argsAt: (paginationOpts: PageOpts) => Args,
+  count: number,
+): Paged<Row> => {
+  const paged = usePages(query, argsAt);
+
+  const load =
+    paged.status === "ready" && paged.rows.length < count && paged.next.kind === "more"
+      ? paged.next.load
+      : null;
+
+  useEffect(() => {
+    load?.();
+  }, [load]);
+
+  return paged;
+};

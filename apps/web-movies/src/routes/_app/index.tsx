@@ -1,5 +1,6 @@
 import type { Home, TitleCard } from "@/lib/catalog";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
+import { useFirstRows } from "@media/ui/lib/pages";
 import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
 import { MediaRow } from "@media/ui/components/media-row";
@@ -161,15 +162,17 @@ function HomeRows({ home }: { readonly home: Home }) {
 function CollectionsRow() {
   const platform = usePlatform();
 
-  const collections = usePlatformQuery(platform.movies.collections.list, {
-    paginationOpts: { numItems: ROW_COLLECTIONS, cursor: null },
-  });
+  const collections = useFirstRows(
+    platform.movies.collections.list,
+    (paginationOpts) => ({ paginationOpts }),
+    ROW_COLLECTIONS,
+  );
 
-  if (collections.status !== "success" || collections.data.page.length === 0) return null;
+  if (collections.status !== "ready" || collections.rows.length === 0) return null;
 
   return (
     <MediaRow title="Collections" seeAll={<Link to="/collections" />}>
-      {collections.data.page.map((collection) => (
+      {collections.rows.slice(0, ROW_COLLECTIONS).map((collection) => (
         <CollectionCard key={collection.id} collection={collection} />
       ))}
     </MediaRow>
