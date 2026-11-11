@@ -43,7 +43,7 @@ test("an unknown address inside the app keeps the shell", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "This page isn't here" })).toBeVisible();
   await expect(page.getByRole("link", { name: "[movies] home" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: /: account$/u })).toBeVisible();
+  await expect(page.getByRole("button", { name: /: switch person$/u })).toBeVisible();
 
   await page.getByRole("link", { name: "Go home" }).click();
   await expect(page).toHaveURL(/\/movies\/$/u);
