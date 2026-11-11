@@ -18,7 +18,7 @@ import { displayHost } from "@/lib/local-network";
 import { useSheetOptions } from "@/lib/sheet";
 import { useThemeColor } from "@/lib/theme-color";
 import { ConnectionProvider, useConnection, useServer } from "@/session/connection";
-import { DownloadsProvider, rememberPerson, useOfflinePerson } from "@/session/downloads";
+import { DownloadsProvider, useOfflinePerson } from "@/session/downloads";
 import { ReportRenderErrors } from "@/session/error-reporting";
 import { OfflineContext } from "@/session/offline";
 import { FirstRunProvider, useHomeAfterSetup } from "@/session/first-run";
@@ -229,7 +229,6 @@ function ConnectionTrouble({
 function ConnectedApp() {
   const phase = useLiveSessionPhase();
   const settled = useSettledPhase(phase);
-  const { mediaUrl } = useServer();
   const offlinePerson = useOfflinePerson();
   const [offline, setOffline] = useState(false);
 
@@ -241,10 +240,6 @@ function ConnectedApp() {
     () => (signedIn === null ? null : { userId: signedIn.userId, username: signedIn.username }),
     [signedIn],
   );
-
-  useEffect(() => {
-    if (person !== null) rememberPerson(mediaUrl, person);
-  }, [person, mediaUrl]);
 
   if (offline && offlinePerson !== null) {
     return (

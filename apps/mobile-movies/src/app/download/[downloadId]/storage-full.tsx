@@ -1,11 +1,11 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { Paths } from "expo-file-system";
 
 import { Sheet, useSheetExit } from "@/components/title/sheet";
 import { Button } from "@/components/ui/button";
 import { nameOf, spaceShortfall } from "@/lib/downloads/model";
 import { formatBytes } from "@/lib/owner-format";
 import { DOWNLOADS_HREF } from "@/lib/routes";
+import { freeSpace } from "@/session/download-engine";
 import { useDownload } from "@/session/downloads";
 
 export default function StorageFull() {
@@ -16,7 +16,7 @@ export default function StorageFull() {
   if (found === null) return <Sheet title="Download" error="This download was removed." />;
   const { download } = found;
   const needed = (download.totalBytes ?? 0) - download.receivedBytes;
-  const shortfall = spaceShortfall(needed, Paths.availableDiskSpace);
+  const shortfall = spaceShortfall(needed, freeSpace());
 
   return (
     <Sheet

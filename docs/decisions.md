@@ -459,7 +459,7 @@ choices made while implementing them. Update it in the same PR that changes a de
 
 - The iOS app keeps one store per server and account in `downloads/<server>/<account>/index.json`
   under its documents folder, with one folder per download: the video, its text subtitles as
-  WebVTT, and its picture. The pure model (`apps/mobile/src/lib/downloads`) reduces every change;
+  WebVTT, and its picture. The pure model (`apps/mobile-movies/src/lib/downloads`) reduces every change;
   the engine (`session/download-engine.ts`) works through the store two downloads at a time, oldest first:
   - a session, prepare every three seconds until ready, a space check (keeping 500 MB free, H21),
     then the video in an iOS background-capable download task;

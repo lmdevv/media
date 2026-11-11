@@ -47,10 +47,12 @@ export interface Phone {
 }
 
 /**
- * Finishes a sign-in the platform client just opened: for a password session, issues the phone's
- * device grant, handing over the grant the shared keychain holds so that one held by someone else
- * is revoked (D64); then enrolls the app's own device and remembers who signed in. Anything that
- * fails signs the new session out again, so the app never stays signed in half way.
+ * Finishes a sign-in the platform client just opened: enrolls the app's own device, then, for a
+ * password session, issues the phone's device grant, handing over the grant the shared keychain
+ * holds so that one held by someone else is revoked (D64), and remembers who signed in. The shared
+ * keychain gets the grant only after every call succeeded, so a sign-in that fails leaves nothing
+ * an app could exchange; it also signs the new session out again, so the app never stays signed in
+ * half way.
  */
 const finish = async (
   platform: SignInPlatform,
@@ -59,6 +61,16 @@ const finish = async (
 ): Promise<void> => {
   try {
     const me = await platform.core.auth.sessions.current();
+    const record = readAppRecord(phone.own, phone.server);
+
+    const enrolled = await platform.core.devices.registry.enroll(
+      record.device === null
+        ? { name: phone.deviceName }
+        : { name: phone.deviceName, device: record.device },
+    );
+
+    // The device code is kept even if what follows fails, so the next sign-in reuses the device.
+    writeAppRecord(phone.own, phone.server, { device: enrolled.device, person: record.person });
 
     if (opened === "password") {
       const held = readPhoneAccount(phone.shared);
@@ -76,14 +88,6 @@ const finish = async (
         grant: issued.grant,
       });
     }
-
-    const record = readAppRecord(phone.own, phone.server);
-
-    const enrolled = await platform.core.devices.registry.enroll(
-      record.device === null
-        ? { name: phone.deviceName }
-        : { name: phone.deviceName, device: record.device },
-    );
 
     writeAppRecord(phone.own, phone.server, {
       device: enrolled.device,

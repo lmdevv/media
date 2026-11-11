@@ -8,26 +8,40 @@ type Options = SecureStore.SecureStoreOptions;
 /** A store the SDK keeps one client's session in, under one key. */
 type SessionStore = Exclude<NonNullable<PlatformOptions["storage"]>, SharedStore>;
 
-const keychainOver = (options: Options): Keychain => ({
-  read: (key) => {
-    try {
-      const value = SecureStore.getItem(key, options);
+/**
+ * A keychain over expo-secure-store. A write the keychain refuses, as while the device is locked,
+ * holds in memory until a later write lands or the app quits. Only refused writes are held, so
+ * values another app writes to the shared group are read fresh.
+ */
+const keychainOver = (options: Options): Keychain => {
+  const refused = new Map<string, string | null>();
 
-      return value === "" ? null : value;
-    } catch {
-      return null;
-    }
-  },
-  // Clearing writes an empty value synchronously rather than deleting, so a clear followed by a
-  // write can never land out of order.
-  write: (key, value) => {
-    try {
-      SecureStore.setItem(key, value ?? "", options);
-    } catch {
-      // The keychain refuses writes while the device is locked; the app keeps working in memory.
-    }
-  },
-});
+  return {
+    read: (key) => {
+      const held = refused.get(key);
+
+      if (held !== undefined) return held;
+
+      try {
+        const value = SecureStore.getItem(key, options);
+
+        return value === "" ? null : value;
+      } catch {
+        return null;
+      }
+    },
+    // Clearing writes an empty value synchronously rather than deleting, so a clear followed by a
+    // write can never land out of order.
+    write: (key, value) => {
+      try {
+        SecureStore.setItem(key, value ?? "", options);
+        refused.delete(key);
+      } catch {
+        refused.set(key, value);
+      }
+    },
+  };
+};
 
 /** The app's own keychain, which no other app reads. */
 export const ownKeychain: Keychain = keychainOver({});

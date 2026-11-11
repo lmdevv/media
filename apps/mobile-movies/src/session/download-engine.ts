@@ -83,7 +83,7 @@ export interface EngineOptions {
 const byteCount = (value: number | bigint): number => Number(value);
 
 /** The phone's free space in bytes. */
-const freeSpace = (): number => byteCount(Paths.availableDiskSpace);
+export const freeSpace = (): number => byteCount(Paths.availableDiskSpace);
 
 /** Rows asked for per page of `core.downloads.list`, the most it answers. */
 const LIST_PAGE_SIZE = 200;

@@ -338,11 +338,13 @@ Every sign-in goes to the media server's sign-in boundary, `signInUrlFor` the se
 
 ### Signing in
 
-- **A password, an owner setup, or an invite** opens a session. The app then issues the phone's
-  grant with `core.devices.deviceGrants.issue`, handing over the grant the shared keychain holds
-  for this server, and keeps the answer there. A grant of the same person is confirmed. Another
-  person's is revoked, with every session it minted (D64). Then the app enrolls its own device
-  with the device code it keeps, and records who signed in.
+- **A password, an owner setup, or an invite** opens a session. The app enrolls its own device
+  with the device code it keeps, then issues the phone's grant with
+  `core.devices.deviceGrants.issue`, handing over the grant the shared keychain holds for this
+  server, and keeps the answer there. A grant of the same person is confirmed. Another person's is
+  revoked, with every session it minted (D64). Last it records who signed in. The shared keychain
+  gets the grant only once every call has succeeded, so a sign-in that fails part way leaves no
+  grant an app could exchange.
 - **A device code** that someone approves opens a session that may not issue a grant (ADR 0006),
   so the app only enrolls. The shared keychain keeps whatever grant it held, and the phone's next
   password sign-in confirms or revokes it.

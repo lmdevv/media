@@ -199,14 +199,14 @@ describe("signInWithPassword", () => {
       password: "aiko-password",
     });
 
-    expect(calls).toEqual(["password", "issue:none", "enroll"]);
+    expect(calls).toEqual(["password", "enroll", "issue:none"]);
     expect(readPhoneAccount(phone.shared)).toEqual({
       server: SERVER,
       userId: "u_aiko",
-      grant: "dg_1.secret1",
+      grant: "dg_2.secret2",
     });
     expect(readAppRecord(phone.own, SERVER)).toEqual({
-      device: "dv_2",
+      device: "dv_1",
       person: { userId: "u_aiko", username: "aiko" },
     });
   });
@@ -220,10 +220,10 @@ describe("signInWithPassword", () => {
     await signInWithPassword(core.platform(calls), phone, aiko);
     await signInWithPassword(core.platform(calls), phone, aiko);
 
-    expect(calls.slice(3)).toEqual(["password", "issue:dg_1.secret1", "enroll"]);
+    expect(calls.slice(3)).toEqual(["password", "enroll", "issue:dg_2.secret2"]);
     expect(core.revoked).toEqual([]);
-    expect(readPhoneAccount(phone.shared)?.grant).toBe("dg_1.secret1");
-    expect(core.enrolled.at(-1)?.device).toBe("dv_2");
+    expect(readPhoneAccount(phone.shared)?.grant).toBe("dg_2.secret2");
+    expect(core.enrolled.at(-1)?.device).toBe("dv_1");
   });
 
   it("revokes the grant another person holds on the phone when a second person signs in (D64)", async () => {
@@ -243,12 +243,12 @@ describe("signInWithPassword", () => {
       password: "mateo-password",
     });
 
-    expect(calls).toEqual(["password", "issue:dg_1.secret1", "enroll"]);
-    expect(core.revoked).toEqual(["dg_1"]);
+    expect(calls).toEqual(["password", "enroll", "issue:dg_2.secret2"]);
+    expect(core.revoked).toEqual(["dg_2"]);
     expect(readPhoneAccount(shared)).toEqual({
       server: SERVER,
       userId: "u_mateo",
-      grant: "dg_3.secret3",
+      grant: "dg_4.secret4",
     });
 
     // The phone's second app, still holding nothing of its own, now finds only Mateo's grant.
@@ -304,6 +304,39 @@ describe("signInWithPassword", () => {
     expect(calls.at(-1)).toBe("signOut");
     expect(core.current()).toBeNull();
     expect(lastPerson(phone)).toBeNull();
+  });
+
+  it("leaves the shared keychain alone and signs out when issuing the grant fails", async () => {
+    const core = fakeCore();
+    const calls: Array<string> = [];
+    const phone = phoneWith(memoryKeychain());
+    const platform = core.platform(calls);
+
+    const refusing: SignInPlatform = {
+      ...platform,
+      core: {
+        ...platform.core,
+        devices: {
+          ...platform.core.devices,
+          deviceGrants: {
+            issue: async () => {
+              calls.push("issue");
+
+              throw new Conflict({ message: "too many grants" });
+            },
+          },
+        },
+      },
+    };
+
+    await expect(
+      signInWithPassword(refusing, phone, { username: "aiko", password: "aiko-password" }),
+    ).rejects.toMatchObject({ _tag: "Conflict" });
+    expect(calls).toEqual(["password", "enroll", "issue", "signOut"]);
+    expect(readPhoneAccount(phone.shared)).toBeNull();
+    // The device is kept for the next sign-in, but no one is recorded, so nothing is exchanged.
+    expect(readAppRecord(phone.own, SERVER)).toEqual({ device: "dv_1", person: null });
+    expect(await signInOnLaunch(core.platform([]), phone)).toBe("signIn");
   });
 });
 

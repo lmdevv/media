@@ -216,7 +216,7 @@ Convex backend upgrades ride along with [movies] releases; never change its imag
 For maintainers. One version covers the image, the Nix packages, `@lmdevv/movies` on npm, and the
 CLI binaries. `scripts/check-version.sh`, run by CI and the pre-commit hook, fails while any
 workspace package carries another version. The iOS app's store version (`expo.version` in
-`apps/mobile/app.json`) is not part of it: the App Store build ships through review on its own
+`apps/mobile-movies/app.json`) is not part of it: the App Store build ships through review on its own
 schedule, so a server release does not bump it.
 
 1. On `main`, set every package's version, then commit and merge it:
