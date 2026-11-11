@@ -1,4 +1,6 @@
 import { Platform, TokenStorage } from "@media/sdk/effect";
+import { ownClientFetch, startOwnClientProxy } from "@media/sdk/testing/own-client";
+import type { OwnClientProxy } from "@media/sdk/testing/own-client";
 import { Context, Effect, Layer, Redacted, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -18,12 +20,18 @@ const id = Math.random().toString(36).slice(2, 8);
 
 const homes: Array<string> = [];
 
+/**
+ * The stack's boundary through a proxy that names each sign-in as a client of its own, as Caddy
+ * names each client, so the suite's sign-ins never share one address's budget.
+ */
+let proxy: OwnClientProxy | undefined;
+
 const install = async (): Promise<Readonly<Record<string, string>>> => {
   const home = await makeTempDir("media-core-stack-");
 
   homes.push(home);
 
-  return { XDG_CONFIG_HOME: home, HOME: home };
+  return { XDG_CONFIG_HOME: home, HOME: home, MEDIA_CORE_SIGN_IN_URL: proxy?.url ?? "" };
 };
 
 const parse =
@@ -63,7 +71,15 @@ const setUpOwner = (username: string) =>
     Effect.scoped(
       Effect.gen(function* () {
         const context = yield* Layer.build(
-          Platform.layer({ url, connection: "http", storage: TokenStorage.layerMemory }),
+          Platform.layer({
+            url,
+            connection: "http",
+            storage: TokenStorage.layerMemory,
+            signIn: Platform.SignInRoute.Boundary({
+              url: core?.signInUrl ?? "",
+              fetch: ownClientFetch(),
+            }),
+          }),
         );
 
         yield* Context.get(context, Platform.Platform).session.signIn(
@@ -83,6 +99,7 @@ let ownerName = "";
 describe.skipIf(core === undefined)("the media CLI against the core", () => {
   beforeAll(async () => {
     buildCli();
+    proxy = await startOwnClientProxy(core?.signInUrl ?? "");
     owner = await install();
 
     const info = await runMovies(["auth", "server", "info"], { ...owner, MEDIA_CORE_URL: url });
@@ -102,6 +119,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
 
   afterAll(async () => {
     await Promise.all(homes.map(removeDir));
+    await proxy?.close();
   });
 
   it("lists the core's users as its owner", async () => {

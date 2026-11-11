@@ -13,6 +13,7 @@ import type { TileProof, UserId } from "./platform-types";
 interface AccountContext {
   readonly store: BrowserStore;
   readonly url: string;
+  readonly signInUrl: string;
   readonly device: BrowserDevice | null;
 }
 
@@ -33,18 +34,25 @@ export const useDevice = (): BrowserDevice | null => useAccountContext().device;
 export function AccountProvider({
   store,
   url,
+  signInUrl,
   children,
 }: {
   readonly store: BrowserStore;
   readonly url: string;
+  /** The media server's sign-in boundary, where every sign-in goes (ADR 0007). */
+  readonly signInUrl: string;
   readonly children: ReactNode;
 }) {
   const device = useSyncExternalStore(store.subscribe, store.device, store.device);
-  const context = useMemo(() => ({ store, url, device }), [store, url, device]);
+
+  const context = useMemo(
+    () => ({ store, url, signInUrl, device }),
+    [store, url, signInUrl, device],
+  );
 
   return (
     <Context value={context}>
-      <PlatformProvider url={url} storage={store.sessions}>
+      <PlatformProvider url={url} signInUrl={signInUrl} storage={store.sessions}>
         {children}
       </PlatformProvider>
     </Context>
@@ -96,7 +104,7 @@ const signInWith = (opener: PlatformSdk): ((signIn: SignIn) => Promise<void>) =>
 
 /** The actions on this browser's session, for the current client. */
 export const useAccountActions = (): AccountActions => {
-  const { store, url } = useAccountContext();
+  const { store, url, signInUrl } = useAccountContext();
   const platform = usePlatform();
   const navigate = useNavigate();
   const router = useRouter();
@@ -106,7 +114,7 @@ export const useAccountActions = (): AccountActions => {
   ): Promise<void> => {
     const kept = await readDevice(store.sessions);
     const held = holdSignIn();
-    const opener = createPlatform({ url, connection: "http", storage: held.storage });
+    const opener = createPlatform({ url, signInUrl, connection: "http", storage: held.storage });
 
     try {
       const order = await start(opener, kept);

@@ -15,6 +15,9 @@ const platformUrl = stack?.platformUrl ?? "http://127.0.0.1:3214";
 
 const mediaUrl = stack?.mediaUrl ?? "";
 
+/** The stack's sign-in boundary, which the account client signs in through (ADR 0007). */
+const signInUrl = stack?.signInUrl ?? "";
+
 /**
  * A Chromium to run instead of Playwright's download, for hosts that cannot run that build (NixOS
  * without nix-ld). It must decode H.264 and AAC, as the playback suites expect.
@@ -157,7 +160,11 @@ export default defineConfig({
       cwd: fileURLToPath(new URL("../web-account", import.meta.url)),
       url: accountUrl.origin,
       reuseExistingServer: true,
-      env: { VITE_PLATFORM_URL: platformUrl, VITE_MEDIA_BASE_URL: mediaUrl },
+      env: {
+        VITE_PLATFORM_URL: platformUrl,
+        VITE_MEDIA_BASE_URL: mediaUrl,
+        VITE_SIGN_IN_URL: signInUrl,
+      },
     },
     {
       command: `pnpm exec vite --port ${port} --strictPort`,
@@ -166,6 +173,7 @@ export default defineConfig({
       env: {
         VITE_PLATFORM_URL: platformUrl,
         VITE_MEDIA_BASE_URL: mediaUrl,
+        VITE_SIGN_IN_URL: signInUrl,
         ACCOUNT_DEV_URL: accountUrl.origin,
       },
     },

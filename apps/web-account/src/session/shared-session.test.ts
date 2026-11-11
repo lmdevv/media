@@ -147,9 +147,14 @@ const fakeCore = (tokenLifetime = 3_600_000) =>
   });
 
 const clientOver = (fake: FakeConvex.FakeConvex, storage: Layer.Layer<TokenStorage.TokenStorage>) =>
-  Layer.build(Platform.layer({ url: fake.url, connection: "http", storage })).pipe(
-    Effect.map((context) => Context.get(context, Platform.Platform)),
-  );
+  Layer.build(
+    Platform.layer({
+      url: fake.url,
+      connection: "http",
+      storage,
+      signIn: Platform.SignInRoute.Boundary({ url: fake.signInUrl }),
+    }),
+  ).pipe(Effect.map((context) => Context.get(context, Platform.Platform)));
 
 const openClient = (fake: FakeConvex.FakeConvex, store: SharedStore) =>
   clientOver(fake, TokenStorage.layerShared(store));

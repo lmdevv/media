@@ -2,7 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with how sign-in was built, again on
   2026-11-04 to give each API key sign-in its own session, again on 2026-11-04 with the
-  account sign-ins, and on 2026-11-09 with the core's store in front of Convex Auth's.
+  account sign-ins, on 2026-11-09 with the core's store in front of Convex Auth's, and on
+  2026-11-11 with the sign-in boundary.
 - Decisions: D14
 
 ## Context
@@ -247,3 +248,19 @@ token past the window left its session unrevoked.
 - This narrows the rejection above of intercepting Convex Auth's refresh. Since every client has
   its own session, the store does not skip a delete; it does in batches what the library does in
   one call, apart from the two refusals above.
+
+## Every sign-in through the server's boundary (amended 2026-11-11)
+
+"Sign-in calls" above had clients call `auth:signIn` with a provider and its params. A client now
+posts the same `{ provider, params }` to the media server's `POST /api/auth/sign-in`, which limits
+sign-ins per client address and relays them to `auth:signIn` with a one-time pass (ADR 0007, "The
+sign-in boundary"). Each provider takes the pass out of its params before it parses them, through
+`behindBoundary` in `convex/core/auth/passes.ts`, and refuses a sign-in without a good pass with
+`forbidden`.
+
+- Refresh still calls `auth:signIn` with `{ refreshToken }` straight over the API, and sign-out
+  still calls `auth:signOut` or `core.auth.sessions.revoke`. A refresh never reaches a provider, so
+  the core's store (`auth:store`) and its refresh rules above are unchanged.
+- The per-username bucket stays in the password provider: the boundary limits an address, the
+  core limits a username, and a sign-in takes from both.
+- The interface rule holds: `passes.ts` is in `convex/core/auth/`, and it reads no caller.

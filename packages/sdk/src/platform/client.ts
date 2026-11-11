@@ -161,6 +161,11 @@ export interface Options {
    * clients on one origin do (ADR 0020).
    */
   readonly storage: Layer.Layer<TokenStorage, TokenStorageError>;
+  /**
+   * Where sign-ins go: the media server's sign-in boundary, `Boundary` at `signInUrlFor` the
+   * server, as every client signs in (ADR 0007). The core refuses a sign-in that skipped it.
+   */
+  readonly signIn: Auth.SignInRoute;
 }
 
 /** Opening the client fails when the URL is invalid or the stored session cannot be read. */
@@ -219,9 +224,14 @@ const effectBuilder = (client: Pick<Interface, "run" | "watch">): EffectBuilder 
   };
 };
 
-const make = Effect.fn("Platform.make")(function* (url: string) {
+const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Auth.SignInRoute) {
   const transport = yield* ConvexTransport.ConvexTransport;
-  const engine = yield* Auth.makeEngine({ convexUrl: url, revoke: "core/auth/sessions:revoke" });
+
+  const engine = yield* Auth.makeEngine({
+    convexUrl: url,
+    revoke: "core/auth/sessions:revoke",
+    signIn: signInRoute,
+  });
 
   const refreshAfterRefusal = engine
     .accessToken(true)
@@ -370,7 +380,7 @@ const make = Effect.fn("Platform.make")(function* (url: string) {
 
 /** The client of the platform at `options.url`, over a connection and a session of its own. */
 export const layer = (options: Options): Layer.Layer<Client, OpenError> =>
-  Layer.effect(Client, make(options.url)).pipe(
+  Layer.effect(Client, make(options.url, options.signIn)).pipe(
     Layer.provide(
       Layer.merge(
         options.connection === "websocket"

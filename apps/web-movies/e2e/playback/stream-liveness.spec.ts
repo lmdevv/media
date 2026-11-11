@@ -1,12 +1,11 @@
 import { dirname, join } from "node:path";
 
-import { LogRecord } from "@media/contracts/diagnostics";
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
-import { Option, Schema } from "effect";
 
 import { createLibrary, removeLibrary, titlesByName } from "../stack/libraries";
 import type { LibraryId, TitleId } from "../stack/libraries";
+import { loggedAbout } from "../stack/media-logs";
 import { buildMediaService, startMediaService, writeFakeFfmpeg } from "../stack/media-service";
 import type { MediaService } from "../stack/media-service";
 import {
@@ -84,14 +83,6 @@ const recordHls = (page: Page): ReadonlyArray<HlsResponse> => {
 };
 
 const isSegment = (response: HlsResponse): boolean => response.file.endsWith(".m4s");
-
-const decodeRecord = Schema.decodeUnknownOption(Schema.fromJsonString(LogRecord));
-
-const loggedAbout = (message: string, streamId: string): ReadonlyArray<LogRecord> =>
-  (media?.logs() ?? "")
-    .split("\n")
-    .flatMap((line) => Option.toArray(decodeRecord(line)))
-    .filter((record) => record.message === message && record.annotations["streamId"] === streamId);
 
 const bufferedAhead = (page: Page): Promise<number> =>
   page.getByTestId("player-video").evaluate((element) => {
@@ -253,14 +244,16 @@ test("a paused viewer resumes on the same stream after the media service's idle 
   )?.generation;
 
   expect(
-    loggedAbout("Stream.released", streamId).map(({ annotations }) => ({
+    loggedAbout(media, "Stream.released", streamId).map(({ annotations }) => ({
       liveness: annotations["liveness"],
       generation: annotations["generation"],
     })),
     "the paused stream's encoder stopped once, the core reporting no positions",
   ).toEqual([{ liveness: "unknown", generation }]);
   expect(
-    loggedAbout("Stream.resumed", streamId).map(({ annotations }) => annotations["generation"]),
+    loggedAbout(media, "Stream.resumed", streamId).map(
+      ({ annotations }) => annotations["generation"],
+    ),
     "and restarted once, in the generation the player holds",
   ).toEqual([generation]);
 });
@@ -302,7 +295,9 @@ test("a Quick Sync stream that cannot restart after a pause reloads into softwar
   await new Promise((resolve) => setTimeout(resolve, PAUSE_MS));
 
   expect(
-    loggedAbout("Stream.released", streamId).map(({ annotations }) => annotations["liveness"]),
+    loggedAbout(media, "Stream.released", streamId).map(
+      ({ annotations }) => annotations["liveness"],
+    ),
     "the paused stream's encoder stopped",
   ).toEqual(["unknown"]);
 
@@ -340,7 +335,7 @@ test("a Quick Sync stream that cannot restart after a pause reloads into softwar
     "the player negotiated no other stream",
   ).toEqual([streamId]);
   expect(
-    loggedAbout("Stream.mode_changed", streamId).map(({ annotations }) => [
+    loggedAbout(media, "Stream.mode_changed", streamId).map(({ annotations }) => [
       annotations["from"],
       annotations["to"],
     ]),

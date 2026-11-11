@@ -35,6 +35,9 @@ const platformUrl = stack?.platformUrl ?? "http://127.0.0.1:3214";
 
 const mediaUrl = stack?.mediaUrl ?? "";
 
+/** The stack's sign-in boundary, which the account client signs in through (ADR 0007). */
+const signInUrl = stack?.signInUrl ?? "";
+
 /** The admin pages that need the media server, which `server.spec.ts` starts on the stack's port. */
 const SERVER_SPEC = /e2e\/server\.spec\.ts$/u;
 
@@ -81,7 +84,11 @@ export default defineConfig({
       command: `pnpm exec vite --port ${port} --strictPort`,
       url: `http://localhost:${port}`,
       reuseExistingServer: true,
-      env: { VITE_PLATFORM_URL: platformUrl, VITE_MEDIA_BASE_URL: mediaUrl },
+      env: {
+        VITE_PLATFORM_URL: platformUrl,
+        VITE_MEDIA_BASE_URL: mediaUrl,
+        VITE_SIGN_IN_URL: signInUrl,
+      },
     },
     ...(lanAddress === undefined
       ? []
@@ -90,7 +97,11 @@ export default defineConfig({
             command: `pnpm exec vite --host ${lanAddress} --port ${lanPort} --strictPort`,
             url: `http://${lanAddress}:${lanPort}`,
             reuseExistingServer: true,
-            env: { VITE_PLATFORM_URL: platformUrl, VITE_MEDIA_BASE_URL: mediaUrl },
+            env: {
+              VITE_PLATFORM_URL: platformUrl,
+              VITE_MEDIA_BASE_URL: mediaUrl,
+              VITE_SIGN_IN_URL: signInUrl,
+            },
           },
         ]),
   ],

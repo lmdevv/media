@@ -1,7 +1,7 @@
 import { Toaster } from "@media/ui/components/sonner";
 import { HeadContent, createRootRouteWithContext } from "@tanstack/react-router";
 
-import { PLATFORM_URL } from "@/env";
+import { PLATFORM_URL, SIGN_IN_URL } from "@/env";
 import { AccountProvider } from "@/session/account";
 import type { BrowserStore } from "@media/ui/lib/browser-session";
 import { Gate } from "@/session/gate";
@@ -39,7 +39,7 @@ function RootComponent() {
   return (
     <>
       <HeadContent />
-      <AccountProvider store={store} url={PLATFORM_URL}>
+      <AccountProvider store={store} url={PLATFORM_URL} signInUrl={SIGN_IN_URL}>
         <Gate />
       </AccountProvider>
       <Toaster />

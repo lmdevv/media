@@ -12,6 +12,7 @@ import type { BrowserContext, Page, Request, Route } from "@playwright/test";
 import { drawStill } from "../stack/fixture-library";
 import { createLibrary, removeLibrary, titlesByName } from "../stack/libraries";
 import type { LibraryId, TitleId } from "../stack/libraries";
+import { loggedAbout } from "../stack/media-logs";
 import { buildMediaService, startMediaService } from "../stack/media-service";
 import type { MediaService } from "../stack/media-service";
 import {
@@ -751,8 +752,18 @@ test("a picture subtitle burns into a transcode and back out; a lower quality tr
     .toMatchObject({ mode: "transcode-software", height: 480 });
   await expectPlayingPast(page, 1);
 
+  const leaving = streams.at(-1)?.streamId ?? "";
+
   before = streams.length;
   await page.reload();
+  // A reload unmounts nothing, so the player stops its stream as the page goes away; otherwise the
+  // transcode keeps one of the service's slots until its idle release. The page reports no request
+  // it sends while it unloads, so the service's log shows the stop.
+  await expect
+    .poll(() =>
+      loggedAbout(media, "Stream.ended", leaving).map(({ annotations }) => annotations["reason"]),
+    )
+    .toEqual(["stopped"]);
   await expect.poll(() => streams.slice(before).at(-1)?.height).toBe(480);
   await expectPlayingPast(page, 0.5);
   await openPanel();
@@ -761,6 +772,81 @@ test("a picture subtitle burns into a transcode and back out; a lower quality tr
   before = streams.length;
   await choose("Auto");
   await expect.poll(() => streams.slice(before).at(-1)?.mode).toBe("remux");
+});
+
+test("a page back from the back-forward cache plays on from where it left, at its quality", async ({
+  baseURL,
+  playwright,
+}) => {
+  if (baseURL === undefined) throw new Error("The player suite runs at a baseURL");
+
+  const executablePath = process.env["E2E_CHROMIUM"];
+
+  // Playwright turns the back-forward cache off, and its headless shell has none; a full Chromium
+  // launched without that switch keeps pages in it.
+  const cached = await playwright.chromium.launch({
+    ...(executablePath === undefined || executablePath === ""
+      ? { channel: "chromium" }
+      : { executablePath }),
+    ignoreDefaultArgs: ["--disable-back-forward-cache"],
+  });
+
+  try {
+    const viewer = await signedInPage(cached, owner.person, {
+      ...devices["Desktop Chrome"],
+      baseURL,
+    });
+
+    const viewerStreams = recordStreams(viewer);
+
+    await viewer.addInitScript(() => {
+      addEventListener("pageshow", (event) => {
+        if (event.persisted) document.documentElement.dataset["restored"] = "true";
+      });
+    });
+    await viewer.goto(moviesPath(`/watch/${titleId(MOVIES.pictures)}?start=0`));
+    await expectPlayingPast(viewer, 0.5);
+    await revealControls(viewer);
+    await viewer.getByRole("button", { name: TRACKS }).click();
+    await viewer
+      .getByRole("dialog", { name: TRACKS })
+      .getByRole("radio", { name: "480p" })
+      .last()
+      .click();
+    await expect
+      .poll(() => viewerStreams.at(-1))
+      .toMatchObject({ mode: "transcode-software", height: 480 });
+    await expectPlayingPast(viewer, 3);
+
+    const leaving = viewerStreams.at(-1)?.streamId ?? "";
+    const leftAt = (await videoState(viewer)).currentTime;
+    const before = viewerStreams.length;
+
+    await viewer.goto(moviesPath());
+    // The page in the cache keeps no transcode slot.
+    await expect
+      .poll(() =>
+        loggedAbout(media, "Stream.ended", leaving).map(({ annotations }) => annotations["reason"]),
+      )
+      .toEqual(["stopped"]);
+
+    const negotiated = viewer.waitForRequest((request) =>
+      request.url().endsWith(MEDIA_ROUTES.negotiate),
+    );
+
+    await viewer.goBack({ waitUntil: "commit" });
+    await expect(viewer.locator("html")).toHaveAttribute("data-restored", "true");
+    const startSeconds = /"startSeconds":([\d.]+)/u.exec((await negotiated).postData() ?? "")?.[1];
+
+    expect(Number(startSeconds)).toBeGreaterThanOrEqual(leftAt);
+    await expect
+      .poll(() => viewerStreams.slice(before).at(-1))
+      .toMatchObject({ mode: "transcode-software", height: 480 });
+    expect(viewerStreams.slice(before).map((stream) => stream.streamId)).not.toContain(leaving);
+    await expectPlayingPast(viewer, leftAt + 1);
+  } finally {
+    await cached.close();
+  }
 });
 
 test("pausing while a stream moves to where it resumes keeps the position", async () => {

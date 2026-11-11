@@ -30,6 +30,10 @@ export { Client, layer as layerClient } from "./client";
 
 export { Credentials, DeviceSignInRefused, TileProof } from "./client";
 
+export { SignInRoute } from "../auth";
+
+export { signInUrlBeside, signInUrlFor } from "./sign-in-url";
+
 export type {
   DeviceSignIn,
   Interface as ClientInterface,

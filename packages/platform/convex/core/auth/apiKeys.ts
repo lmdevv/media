@@ -1,4 +1,3 @@
-import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
 import { makeFunctionReference } from "convex/server";
 import { v } from "convex/values";
 import type { Value } from "convex/values";
@@ -6,7 +5,7 @@ import type { Value } from "convex/values";
 import { register } from "../../../commands/core/auth/apiKeys";
 import { credentialScope } from "../../../commands/scopes";
 import { internal } from "../../_generated/api";
-import type { DataModel, Doc, Id } from "../../_generated/dataModel";
+import type { Doc, Id } from "../../_generated/dataModel";
 import { internalAction, internalMutation, internalQuery } from "../../_generated/server";
 import type { MutationCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
@@ -21,6 +20,7 @@ import {
 import { endKeySessions, endUserKeys, keyWorks, openSession } from "../sessions";
 import type { SignedIn } from "../sessions";
 import { callerUser, refuseKeys, requireCaller } from "./caller";
+import { behindBoundary, spendPass, spentPass } from "./passes";
 
 const PREFIX = "mk";
 
@@ -50,15 +50,16 @@ export const parse = internalQuery({
 });
 
 /** The API key provider. Every refusal is one `unauthenticated` message. */
-export const apiKeyProvider = ConvexCredentials<DataModel>({
+export const apiKeyProvider = behindBoundary({
   id: "apiKey",
-  authorize: async (params, ctx): Promise<SignedIn> => {
+  authorize: async (params, ctx, pass): Promise<SignedIn> => {
     const { key } = await ctx.runQuery(parseKeyParams, params);
     const parsed = parseSecret(PREFIX, key);
 
     if (parsed === null) return fail("unauthenticated", BAD_KEY);
 
     const opened: SignedIn | null = await ctx.runMutation(internal.core.auth.apiKeys.redeem, {
+      pass,
       keyId: parsed.rowId,
       secretHash: await sha256Hex(parsed.secret),
     });
@@ -89,9 +90,15 @@ const retireKeysBefore = async (
  * retires the service's earlier keys, so the first sign-in with a new key completes a rotation.
  */
 export const redeem = internalMutation({
-  args: { keyId: v.string(), secretHash: v.string() },
+  args: {
+    pass: spentPass,
+    keyId: v.string(),
+    secretHash: v.string(),
+  },
   returns: v.union(v.null(), v.object({ userId: v.id("users"), sessionId: v.id("authSessions") })),
-  handler: async (ctx, { keyId, secretHash }) => {
+  handler: async (ctx, { pass, keyId, secretHash }) => {
+    await spendPass(ctx, pass, "apiKey");
+
     const id = ctx.db.normalizeId("apiKeys", keyId);
     const key = id === null ? null : await ctx.db.get(id);
 

@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { Brand } from "effect";
 
-import { createPerson, newSecret, openPlatform, signIn } from "./people";
+import { asOwnClient, createPerson, newSecret, openPlatform, signIn } from "./people";
 import type { Person } from "./people";
 import { stackEnv } from "./stack";
 import type { Stack } from "./stack";
@@ -77,6 +77,7 @@ test("switching person signs the first out on the core, then signs the next in",
   expect(await rememberedWorks(page, stack, "first")).toBe(true);
 
   await page.getByRole("button", { name: "Sign out" }).click();
+  await asOwnClient(page);
   await page.getByLabel("Username").fill(second.username);
   await page.getByLabel("Password", { exact: true }).fill(second.password);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -102,6 +103,7 @@ const holdEnrollments = async (tab: Page) => {
 
 const fillIn = async (tab: Page, person: Person): Promise<void> => {
   await tab.goto("/");
+  await asOwnClient(tab);
   await tab.getByLabel("Username").fill(person.username);
   await tab.getByLabel("Password", { exact: true }).fill(person.password);
 };
@@ -256,7 +258,7 @@ test("two tabs opening tiles at once keep the tile the core opened last", async 
   const { promise: reachedCore, resolve: opened } = Promise.withResolvers<void>();
 
   // Tab A's tile opening reaches the core first, but its answer waits until tab B is done.
-  await page.route("**/api/action", async (route) => {
+  await page.route("**/api/auth/sign-in", async (route) => {
     if (!(route.request().postData() ?? "").includes('"tile"')) return route.fallback();
 
     const response = await route.fetch();
@@ -370,6 +372,7 @@ test("a CLI link signs in, then approves its code on the same page", async ({ pa
     const signedIn = pending.complete();
 
     await page.goto(`/device?code=${pending.userCode.replace("-", "")}`);
+    await asOwnClient(page);
     await page.getByLabel("Username").fill(person.username);
     await page.getByLabel("Password", { exact: true }).fill(person.password);
     await page.getByRole("button", { name: "Sign in" }).click();

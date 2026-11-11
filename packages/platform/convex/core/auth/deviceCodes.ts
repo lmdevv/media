@@ -1,11 +1,10 @@
-import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
 import { makeFunctionReference } from "convex/server";
 import { v } from "convex/values";
 import type { Infer, Value } from "convex/values";
 
 import { register } from "../../../commands/core/auth/deviceCodes";
 import { internal } from "../../_generated/api";
-import type { DataModel, Doc } from "../../_generated/dataModel";
+import type { Doc } from "../../_generated/dataModel";
 import { internalMutation, internalQuery } from "../../_generated/server";
 import type { QueryCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
@@ -20,6 +19,7 @@ import {
 import { liveSession, openSession } from "../sessions";
 import type { SignedIn } from "../sessions";
 import { callerUser } from "./caller";
+import { behindBoundary, spendPass, spentPass } from "./passes";
 
 const PREFIX = "dc";
 
@@ -107,9 +107,9 @@ export const parse = internalQuery({
 });
 
 /** The device code provider. */
-export const deviceCodeProvider = ConvexCredentials<DataModel>({
+export const deviceCodeProvider = behindBoundary({
   id: "deviceCode",
-  authorize: async (params, ctx): Promise<SignedIn> => {
+  authorize: async (params, ctx, pass): Promise<SignedIn> => {
     const { deviceCode } = await ctx.runQuery(parseDeviceParams, params);
     const parsed = parseSecret(PREFIX, deviceCode);
 
@@ -117,6 +117,7 @@ export const deviceCodeProvider = ConvexCredentials<DataModel>({
       parsed === null
         ? { kind: "expired" as const }
         : await ctx.runMutation(internal.core.auth.deviceCodes.redeem, {
+            pass,
             codeId: parsed.rowId,
             secretHash: await sha256Hex(parsed.secret),
           });
@@ -132,9 +133,15 @@ export const deviceCodeProvider = ConvexCredentials<DataModel>({
  * expires, so a lost answer costs only a retry. An unknown or voided code reads as `expired`.
  */
 export const redeem = internalMutation({
-  args: { codeId: v.string(), secretHash: v.string() },
+  args: {
+    pass: spentPass,
+    codeId: v.string(),
+    secretHash: v.string(),
+  },
   returns: redemption,
-  handler: async (ctx, { codeId, secretHash }) => {
+  handler: async (ctx, { pass, codeId, secretHash }) => {
+    await spendPass(ctx, pass, "deviceCode");
+
     const id = ctx.db.normalizeId("deviceCodes", codeId);
     const code = id === null ? null : await ctx.db.get(id);
     const now = Date.now();

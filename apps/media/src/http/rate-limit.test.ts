@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Option } from "effect";
 
-import { limitRequest, makeLimiter } from "./rate-limit.ts";
+import { clientAddress, limitRequest, makeDoors, makeLimiter } from "./rate-limit.ts";
 
 const budget = { burst: 3, perSecond: 2 };
 
@@ -138,5 +138,31 @@ describe("rate limit", () => {
       assert.strictEqual(refusedOf(checks), 0);
       assert.isTrue(Option.isSome(limitRequest(take, health(proxy, "127.0.0.1"), 0)));
     });
+  });
+
+  it("resolves the client from the proxy's last X-Forwarded-For entry, and only from loopback", () => {
+    assert.strictEqual(clientAddress(proxy, "203.0.113.9"), "203.0.113.9");
+    assert.strictEqual(clientAddress(proxy, "127.0.0.1, 203.0.113.9"), "203.0.113.9");
+    assert.strictEqual(clientAddress(proxy, undefined), "127.0.0.1");
+    assert.strictEqual(clientAddress(Option.some("::1"), "203.0.113.9"), "203.0.113.9");
+    assert.strictEqual(clientAddress(Option.some("192.168.1.30"), "127.0.0.1"), "192.168.1.30");
+    assert.strictEqual(clientAddress(Option.none(), "127.0.0.1"), "unknown");
+    assert.strictEqual(clientAddress(proxy, "::ffff:203.0.113.9"), "203.0.113.9");
+    assert.strictEqual(
+      clientAddress(Option.some("::ffff:127.0.0.1"), "2001:DB8::0001"),
+      "2001:db8::1",
+    );
+    assert.strictEqual(clientAddress(Option.some("::FFFF:CB00:7109"), undefined), "203.0.113.9");
+    assert.strictEqual(clientAddress(Option.some("fe80::1%eth0"), "203.0.113.9"), "fe80::1");
+  });
+
+  it("keeps one sign-in bucket per address, with the contract's budget", () => {
+    const take = makeDoors();
+    const burst = Array.from({ length: 11 }, () => take("signIn", "203.0.113.9", 0).admitted);
+
+    assert.deepStrictEqual(burst, [...Array.from({ length: 10 }, () => true), false]);
+    assert.isTrue(take("signIn", "203.0.113.10", 0).admitted);
+    assert.isTrue(take("public", "203.0.113.9", 0).admitted);
+    assert.isTrue(take("signIn", "203.0.113.9", 5000).admitted);
   });
 });

@@ -82,8 +82,9 @@ describe.skipIf(stack === undefined)("password sign-in", { timeout: 120_000 }, (
       ),
     ).toBe("unauthenticated");
 
-    expect(await refusal(signIn(stack, "password", { username: person.username }))).toMatch(
-      /^failed: /u,
+    // Malformed params fail the core's argument check, which the boundary relays as `internal`.
+    expect(await refusal(signIn(stack, "password", { username: person.username }))).toBe(
+      "internal",
     );
   });
 

@@ -33,6 +33,8 @@ export interface StackEnv {
   readonly webPort: number;
   /** The account client's dev server. */
   readonly accountUrl: string;
+  /** The stack's sign-in boundary (`scripts/dev-stack.sh`), where every sign-in goes. */
+  readonly signInUrl: string;
   /** The media service's environment as `scripts/dev-stack.sh` wrote it. */
   readonly mediaEnv: Readonly<Record<string, string>>;
 }
@@ -47,6 +49,7 @@ export const stackEnv = (): StackEnv | null => {
   const mediaUrl = pick("VITE_MEDIA_BASE_URL", web);
   const webPort = pick("WEB_PORT", web);
   const accountUrl = pick("ACCOUNT_DEV_URL", web);
+  const signInUrl = pick("VITE_SIGN_IN_URL", web);
   const adminKey = platform.get("CONVEX_SELF_HOSTED_ADMIN_KEY");
 
   if (
@@ -54,6 +57,7 @@ export const stackEnv = (): StackEnv | null => {
     mediaUrl === undefined ||
     webPort === undefined ||
     accountUrl === undefined ||
+    signInUrl === undefined ||
     adminKey === undefined ||
     media.get("MEDIA_SERVICE_API_KEY") === undefined
   ) {
@@ -66,6 +70,7 @@ export const stackEnv = (): StackEnv | null => {
     mediaUrl,
     webPort: Number(webPort),
     accountUrl,
+    signInUrl,
     mediaEnv: Object.fromEntries(media),
   };
 };

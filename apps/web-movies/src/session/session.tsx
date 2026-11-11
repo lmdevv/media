@@ -9,6 +9,7 @@ import type { PlatformSdk } from "@media/sdk/promise";
 import { useCallback, useEffect, useMemo } from "react";
 import type { ReactNode } from "react";
 
+import { SIGN_IN_URL } from "../env";
 import { BlankPage } from "./redirect";
 
 /** Where a signed-out browser signs in: the account client at the origin's root (ADR 0020). */
@@ -29,7 +30,7 @@ export function MoviesSession({
   readonly children: ReactNode;
 }) {
   return (
-    <PlatformProvider url={url} storage={store.sessions}>
+    <PlatformProvider url={url} signInUrl={SIGN_IN_URL} storage={store.sessions}>
       {children}
     </PlatformProvider>
   );

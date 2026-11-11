@@ -9,7 +9,8 @@
     "./effect": "./src/effect.ts",
     "./react": "./src/react.tsx",
     "./promise": "./src/promise.ts",
-    "./testing/fake-convex": "./src/testing/fake-convex.ts"
+    "./testing/fake-convex": "./src/testing/fake-convex.ts",
+    "./testing/own-client": "./src/testing/own-client.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
