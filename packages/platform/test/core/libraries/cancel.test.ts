@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 
 import { api, internal } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { logMark, runFunction, usageSince } from "../../admin";
+import { followLog, logMark, runFunction } from "../../admin";
+import type { CallUsage, LogMark } from "../../admin";
 import { member } from "../../devices";
 import type { Member } from "../../devices";
 import { share } from "../../probe";
@@ -78,10 +79,13 @@ const watchedPinned = makeFunctionReference<
 /** Convex's per-call limit on bytes read (ADR 0013). */
 const BYTES_MAX = 16 * 1024 * 1024;
 
-/** What a page of 64 libraries with 16 folders at their bounds reads at least: 64 × 16 × 3,072. */
+/** What a page of 64 libraries with 16 folders at their bounds reads at least: 64 × 16 × 3,000. */
 const FULL_PAGE_BYTES = 3_000_000;
 
-/** A folder at its bounds: 1,024 characters, each three bytes in UTF-8, unique by `prefix`. */
+/**
+ * A folder at its bounds: 1,024 characters, 3,000 bytes in UTF-8 (32 ASCII, then four of `/` and
+ * 247 three-byte characters), unique by `prefix`.
+ */
 const longFolder = (prefix: string): string =>
   `/${prefix.padEnd(31, "-")}${`/${"界".repeat(247)}`.repeat(4)}`;
 
@@ -103,6 +107,35 @@ const longLibraries = async (
   });
 
   return longLibraries(admin, run, count, [...made, libraryId]);
+};
+
+/**
+ * Each `watched` call logged since `mark`, once one of them read a full page of libraries at their
+ * bounds. A page whose libraries did not change since another test read it comes from the query
+ * cache and logs nothing, so how many calls log depends on the tests before; a page holding new
+ * libraries always logs.
+ */
+const watchedUntilFullPage = async (
+  core: CoreStack,
+  mark: LogMark,
+  timeoutMs = 30_000,
+): Promise<ReadonlyArray<CallUsage>> => {
+  const log = followLog(core, mark);
+  const deadline = Date.now() + timeoutMs;
+
+  const logged = async (): Promise<ReadonlyArray<CallUsage>> => {
+    const usage = log.usage(api.core.scans.watched);
+
+    if (usage.some((call) => call.committed && call.bytes > FULL_PAGE_BYTES)) return usage;
+
+    if (Date.now() > deadline) throw new Error("No core/scans:watched call read a full page");
+
+    await log.catchUp();
+
+    return logged();
+  };
+
+  return logged();
 };
 
 /** The cursor each page of `watched` ended at, read page by page with open cursors. */
@@ -413,13 +446,10 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
     const libraryIds = await longLibraries(admin, `w${Date.now() % 100_000_000}`, 128);
     const mark = await logMark(stack);
     const cursors = await watchedCursors(stack);
-    // Pages of libraries other tests left are served from the query cache and log nothing; the
-    // two pages holding these libraries cannot be.
-    const usage = await usageSince(stack, mark, api.core.scans.watched, 2);
+    const usage = await watchedUntilFullPage(stack, mark);
 
     expect(cursors.length).toBeGreaterThan(1);
     expect(usage.every((call) => call.committed && call.bytes < BYTES_MAX)).toBe(true);
-    expect(Math.max(...usage.map((call) => call.bytes))).toBeGreaterThan(FULL_PAGE_BYTES);
 
     const end = cursors.at(-2) ?? "";
 
