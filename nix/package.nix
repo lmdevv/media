@@ -1,7 +1,7 @@
 #   nix build .#movies
 #
-# After a change to pnpm-lock.yaml, set `pnpmDeps.hash` to "" and build once; Nix prints the
-# new hash.
+# After a change to pnpm-lock.yaml, `scripts/check-pnpm-deps-hash.sh --write` updates
+# `pnpmDeps.hash`.
 {
   lib,
   stdenv,

@@ -74,15 +74,18 @@ pnpm test            # Vitest
 pnpm test:e2e        # Playwright
 pnpm knip            # unused files, exports, and dependencies
 scripts/check-deploy.sh  # installs pin one Convex backend and expose every media setting
+scripts/check-pnpm-deps-hash.sh  # the Nix packages pin pnpm-lock.yaml's dependency hash
 ```
 
 `typecheck`, `lint`, `fmt:check`, `test`, `knip`, and `scripts/check-deploy.sh` run in the lefthook
-pre-commit hook and in CI. All must pass before every commit. The hook and pull request CI run
-typecheck, lint, and test only over the packages a diff affects and their dependents, and run
-everything when a root config file changes; `scripts/changed-packages.sh` prints that set. CI on
-`main` runs everything. A new media service setting goes in `deploy/image/rootfs/app/bin/init`,
-`deploy/compose` (`compose.yaml`, `.env.example`), the root `.env.example`, `nix/module.nix`, and
-both READMEs; `check-deploy.sh` names what is missing.
+pre-commit hook and in CI. The hook also runs `scripts/check-pnpm-deps-hash.sh` when the lockfile
+changes, as CI's Nix job finds a stale hash only after the push. All must pass before every
+commit. The hook and pull request CI run typecheck, lint, and test only over the packages a diff
+affects and their dependents, and run everything when a root config file changes;
+`scripts/changed-packages.sh` prints that set. CI on `main` runs everything. A new media service
+setting goes in `deploy/image/rootfs/app/bin/init`, `deploy/compose` (`compose.yaml`,
+`.env.example`), the root `.env.example`, `nix/module.nix`, and both READMEs; `check-deploy.sh`
+names what is missing.
 
 Each worktree gets its own stack: `scripts/dev-stack.sh up` starts two self-hosted Convex backends
 in Docker, one for old movies and one for the core, deploys both, configures both backends' auth keys,
