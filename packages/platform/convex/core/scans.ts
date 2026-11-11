@@ -320,10 +320,8 @@ const WATCHED_PAGE_MAX = 64;
 
 /**
  * Every library of `kind` with its folders as recorded, a page at a time, for the server to watch
- * them (ADR 0024). The server watches each library's folders at the paths the library names, not
- * only its approved roots, so a change under a folder that reaches an approved root through a
- * link names the library's own path and `changed` finds the library. The server never watches a
- * folder that leads outside its approved roots.
+ * (ADR 0024). Folders, not approved roots, so a change under a folder that links into a root names
+ * the library's own path and `changed` finds the library.
  */
 export const watched = serverQuery({
   args: { kind: contentDomain, paginationOpts: paginationOptsValidator },

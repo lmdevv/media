@@ -29,8 +29,7 @@ export const { list, active, run } = register({
       })),
     };
   },
-  // The running backup first, then a queued one; a canceled backup still running counts until its
-  // worker stops, since it still holds the kind's one slot.
+  // A canceled backup still running counts until its worker stops: it holds the kind's one slot.
   active: async (ctx) => {
     const job = (await backupIn(ctx.db, "running")) ?? (await backupIn(ctx.db, "queued"));
 

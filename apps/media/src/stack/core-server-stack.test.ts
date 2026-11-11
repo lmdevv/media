@@ -407,8 +407,6 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
     }, 90_000);
 
     it("rescans a library whose folder links into an approved root when a file changes there", async () => {
-      // The folder sits inside the approved root, and the library names it through a link outside
-      // it: the server watches the library's own path, so a change there reaches the library.
       const real = join(workDir, "library", "Linked films");
       const linked = join(workDir, "linked-films");
 

@@ -89,7 +89,6 @@ export const makeLibrary = async (
   return { libraryId, scanJobId: first.jobId };
 };
 
-/** The library a scan job scans, or null for a job of another kind. */
 const scannedLibrary = (job: Doc<"jobs">): Id<"libraries"> | null =>
   job.payload.kind === "movies.scan" || job.payload.kind === "music.scan"
     ? job.payload.libraryId

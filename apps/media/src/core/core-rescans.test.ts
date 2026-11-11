@@ -37,7 +37,6 @@ describe("CoreRescans.pathsToSend", () => {
   });
 });
 
-/** The folders a test lays out: an approved root, and paths in and around it. */
 class Folders extends Context.Service<
   Folders,
   {

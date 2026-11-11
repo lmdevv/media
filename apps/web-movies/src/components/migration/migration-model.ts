@@ -129,9 +129,8 @@ export const importFraction = (run: ImportRun): number => {
 };
 
 /**
- * Whole minutes left at the pace since the job started running, at least 1, not since the import
- * was made, which includes its wait in the queue. Null until there is a pace (2% done), while it
- * waits for the media service, and once it is complete.
+ * Whole minutes left at the pace since the job started running, so its wait in the queue does not
+ * count; at least 1. Null below 2% done, before the job starts, and once it is complete.
  */
 export const importMinutesLeft = (run: ImportRun, fraction: number, now: number): number | null => {
   if (run.job.startedAt === null || fraction < 0.02 || fraction >= 1) return null;

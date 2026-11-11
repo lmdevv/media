@@ -143,8 +143,6 @@ describe("importFraction", () => {
   });
 
   it("estimates minutes left from the pace since the job started, not since it was made", () => {
-    // Made at 0, started an hour later after a wait in the queue; half done 10 minutes after it
-    // started leaves the other half 10 more at that pace, whatever the wait.
     expect(importMinutesLeft(run({}), 0.5, 70 * 60_000)).toBe(10);
     expect(importMinutesLeft(run({}), 0.01, 70 * 60_000)).toBeNull();
     expect(importMinutesLeft(run({}), 1, 70 * 60_000)).toBeNull();

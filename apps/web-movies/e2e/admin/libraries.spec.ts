@@ -111,7 +111,6 @@ test("an admin adds a library in the account client, cancels and restarts its sc
   await expect(row).toContainText(root);
   await expect(row).toContainText("Queued");
 
-  // The queued scan cancels from its row, and the command menu cancels the next one.
   await row.getByRole("button", { name: `Cancel the scan of ${name}` }).click();
   await expect(row.getByRole("button", { name: `Scan ${name} now` })).toBeVisible();
   await row.getByRole("button", { name: `Scan ${name} now` }).click();
@@ -134,7 +133,6 @@ test("an admin adds a library in the account client, cancels and restarts its sc
   const fileRow = (file: string) => files.getByRole("row").filter({ hasText: file });
   const filter = (label: string) => page.getByRole("radio", { name: new RegExp(`^${label}`, "u") });
 
-  // One row per file: what it plays as, its name with the whole path on hover, quality, and state.
   await expect(fileRow("Arrival.2016.1080p.mkv")).toContainText("Arrival (2016)");
   await expect(
     fileRow("Arrival.2016.1080p.mkv").getByText("Arrival.2016.1080p.mkv"),
@@ -152,7 +150,6 @@ test("an admin adds a library in the account client, cancels and restarts its sc
   await expect(fileRow("The.Prestige.2006.mkv")).toContainText("since");
   await expect(fileRow("Arrival.2016.1080p.mkv")).not.toContainText("Missing");
 
-  // The banner counts the missing files since the first went, and reviews them.
   const notice = page.getByRole("note");
   await expect(notice).toContainText("1 file disappeared since");
   await notice.getByRole("button", { name: "Review 1 missing" }).click();

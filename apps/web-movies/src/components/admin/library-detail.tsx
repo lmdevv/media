@@ -305,10 +305,7 @@ const matches = (file: LibraryFile, needle: string): boolean =>
   file.title.name.toLowerCase().includes(needle) ||
   file.path.toLowerCase().includes(needle);
 
-/**
- * The library's files, a page at a time: all of them by path, the missing ones, or the unmatched
- * titles' files, filtered by title or filename over the pages loaded.
- */
+/** The title or filename filter searches only the pages loaded so far. */
 function FileList({
   libraryId,
   filter,
@@ -405,7 +402,6 @@ const episodeLabel = (file: LibraryFile): string =>
     ? titleWithYear(file.title)
     : `${file.title.name} · S${file.episode.seasonNumber} E${file.episode.episodeNumber}`;
 
-/** What a file plays as: the title or episode, and its version when it has one. */
 const fileLabel = (file: LibraryFile): string =>
   file.version.versionName === null
     ? episodeLabel(file)

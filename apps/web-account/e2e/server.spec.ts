@@ -83,7 +83,6 @@ test("an admin backs up now, sees it listed, and asks before restoring", async (
     await expect(page.getByRole("heading", { level: 1, name: "Backups" })).toBeVisible();
     await page.getByRole("button", { name: "Back up now" }).click();
 
-    // Back up now stays off while the backup job is queued or running on the server.
     await expect(
       page.getByRole("button", { name: /^(Backup queued|Backing up…)$/u }),
     ).toBeDisabled();

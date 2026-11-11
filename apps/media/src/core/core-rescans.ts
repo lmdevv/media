@@ -36,16 +36,13 @@ export const pathsToSend = (
   return outermost.length === 0 || outermost.length > PATHS_MAX ? [root] : outermost;
 };
 
-/** Libraries one page of the core's list of watched folders asks for. */
 const WATCHED_PAGE = 64;
 
-/** A movies library's folders, as the core lists them for watching. */
 interface WatchedLibrary {
   readonly libraryId: LibraryId;
   readonly folders: ReadonlyArray<string>;
 }
 
-/** Every movies library with its folders, now and after every change, page after page. */
 const watchedLibraries = (
   session: CoreSession.Interface,
   cursor: string | null = null,
@@ -69,7 +66,6 @@ const isWithin = (root: string, candidate: string, separator: string): boolean =
   candidate === root ||
   candidate.startsWith(root.endsWith(separator) ? root : `${root}${separator}`);
 
-/** How long resolving one folder may take before it counts as not resolvable now. */
 const RESOLVE_TIMEOUT = Duration.seconds(5);
 
 /**

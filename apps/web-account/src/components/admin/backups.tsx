@@ -103,10 +103,7 @@ export function BackupsScreen({ mediaUrl }: { readonly mediaUrl: string }) {
   );
 }
 
-/**
- * The backups page: Back up now, the schedule, the list, and the restore confirmation. Back up now
- * stays off for as long as a backup is queued or running on the server, not only while it starts.
- */
+/** The backups page: Back up now, the schedule, the list, and the restore confirmation. */
 export function BackupsView({
   backups,
   selected,
@@ -121,7 +118,7 @@ export function BackupsView({
   /** The backup whose restore is being confirmed. */
   readonly selected: Backup | null;
   readonly running: BackupAction | null;
-  /** The server's backup job queued or running now, null when none is. */
+  /** The server's backup job, as opposed to this page's own `running` request. */
   readonly job: "queued" | "running" | null;
   readonly now: number;
   readonly onBackUp: () => void;

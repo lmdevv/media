@@ -44,7 +44,6 @@ const listPage = (
     paginationOpts: { numItems, cursor },
   });
 
-/** Every page of a library's files under `filter`, from the first, `numItems` asked per page. */
 const allFiles = async (
   who: Member,
   libraryId: Id<"libraries">,
@@ -124,7 +123,6 @@ describe.skipIf(stack === undefined)("movies.files", { timeout: 600_000 }, () =>
     expect(empty).toMatchObject({ missing: 1, unmatched: 4 });
     expect(empty.missingSince).toBeGreaterThanOrEqual(before - 60_000);
 
-    // Every file once, by path, however small the pages.
     const all = await allFiles(editor, libraryId, "all", 2);
 
     expect(all.every((page) => page.length <= 2)).toBe(true);
@@ -147,7 +145,6 @@ describe.skipIf(stack === undefined)("movies.files", { timeout: 600_000 }, () =>
       [a, b, c, e1, e2].toSorted(),
     );
 
-    // A rescan that matches a title, and a file that returns, move the totals at once.
     await upsert(stack, lease, [
       movieFile(a, 1, 1, {
         ...scannedTitle("movie", `file:${a}`, "a.mkv"),
@@ -166,14 +163,12 @@ describe.skipIf(stack === undefined)("movies.files", { timeout: 600_000 }, () =>
     await markMissing(stack, lease, [c]);
     await finishJob(stack, lease);
 
-    // Only people who may edit the library see its files, as old movies' admin screens required.
     expect(await refusal(summaryOf(viewer, libraryId))).toBe("forbidden");
     expect(await refusal(listPage(viewer, libraryId, "all", 10, null))).toBe("forbidden");
     expect(await refusal(summaryOf(outsider, libraryId))).toBe("not_found");
     expect(await refusal(listPage(outsider, libraryId, "missing", 10, null))).toBe("not_found");
     expect(await summaryOf(admin, libraryId)).toMatchObject({ missing: 1, unmatched: 3 });
 
-    // The purge of a removed folder takes its missing file and its titles out of the totals.
     await setFoldersQuietly(stack, libraryId, [other]);
     await purgeStage(stack, libraryId, "files");
     await purgeStage(stack, libraryId, "titles");

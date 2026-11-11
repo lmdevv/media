@@ -51,7 +51,6 @@ const Watched = Schema.Struct({
   isDone: Schema.Boolean,
 });
 
-/** Every movies library the server is told to watch, with its folders, page by page. */
 const watchedFolders = async (
   core: CoreStack,
   cursor: string | null = null,
@@ -83,7 +82,6 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
     await share(admin, libraryId, { kind: "user", userId: editor.userId }, "edit");
     await share(admin, libraryId, { kind: "user", userId: viewer.userId }, "view");
 
-    // A running scan shows when it started and what it is doing.
     const first = await claimJob(stack, "movies.scan", scanJobId);
     const before = Date.now();
 
@@ -101,12 +99,10 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
     expect(await refusal(cancel(viewer, scanJobId))).toBe("forbidden");
     expect(await refusal(cancel(outsider, scanJobId))).toBe("not_found");
 
-    // A finished scan stays as it ended.
     await finishJob(stack, first);
     expect(await cancel(editor, scanJobId)).toEqual({ outcome: "finished", status: "succeeded" });
     expect(await scanOf(editor, libraryId)).toMatchObject({ status: "succeeded" });
 
-    // A queued scan is canceled at once, and no worker claims it.
     const queued = await editor.signedIn.client.mutation(api.core.libraries.scan, { libraryId });
 
     expect(await cancel(editor, queued.jobId)).toEqual({ outcome: "finished", status: "canceled" });
@@ -115,7 +111,6 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
       status: "canceled",
     });
 
-    // A running scan stops at its worker's next call, and no late write or finish undoes it.
     const running = await editor.signedIn.client.mutation(api.core.libraries.scan, { libraryId });
     const lease = await claimJob(stack, "movies.scan", running.jobId);
 
@@ -138,7 +133,6 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
       status: "canceled",
     });
 
-    // The scan after it runs; the earlier cancel never reaches it.
     const next = await editor.signedIn.client.mutation(api.core.libraries.scan, { libraryId });
 
     expect(next.jobId).not.toBe(running.jobId);
@@ -148,7 +142,6 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
     });
     expect(await scanOf(editor, libraryId)).toMatchObject({ jobId: next.jobId, status: "queued" });
 
-    // Only a scan job is a scan.
     const backup = await admin.signedIn.client.mutation(api.core.server.backups.run, {});
 
     expect(await refusal(cancel(admin, backup.jobId))).toBe("not_found");
@@ -182,7 +175,6 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
     expect((await run()).job).toMatchObject({ status: "canceled", startedAt: null });
     expect(await cancelImport(owner)).toEqual({ outcome: "finished", status: "canceled" });
 
-    // A new import of the same server starts afresh; the old cancel never reaches it.
     const again = await startImport(stack, owner, { serverId });
 
     expect(again.created).toBe(true);

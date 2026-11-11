@@ -70,31 +70,23 @@ export const resolveFile = serverQuery({
   },
 });
 
-/** Most files one page of a library's files holds, as old movies' file list paged. */
 const FILES_PAGE_MAX = 100;
 
-/** Most files the unmatched filter lists of each title, as old movies listed. */
 const FILES_PER_UNMATCHED_TITLE = 50;
 
-/** Most unmatched titles one page holds, each with its files, as old movies paged. */
 const UNMATCHED_PAGE_MAX = 20;
 
-/** Reading one file of the list: the file, its title, and its episode, each at its bound. */
 const FILE_ROW: Reads = plus(
   readsOf(0, 1, DOCUMENT_BYTES.mediaFiles),
   plus(TITLE_GET, EPISODE_GET),
 );
 
-/**
- * Reading one unmatched title of the list: the title, one query of its files, and each file with
- * its episode.
- */
 const UNMATCHED_ROW: Reads = plus(
   plus(readsOf(0, 1, DOCUMENT_BYTES.titles), readsOf(1, 0, 0)),
   times(plus(readsOf(0, 1, DOCUMENT_BYTES.mediaFiles), EPISODE_GET), FILES_PER_UNMATCHED_TITLE),
 );
 
-/** How many rows of `cost` each fit what is left of `budget`, at least 1 and at most `max`. */
+/** How many rows of `cost` fit what is left of `budget`, at least 1 and at most `max`. */
 const rowsAffordable = (budget: ReadBudget, cost: Reads, max: number): number => {
   const left = budget.left();
 
@@ -109,7 +101,6 @@ const rowsAffordable = (budget: ReadBudget, cost: Reads, max: number): number =>
   );
 };
 
-/** The movies library `libraryId` when the caller may edit it; refuses as `requireItems` does. */
 const editableLibrary = async (
   db: DatabaseReader,
   caller: Caller,
@@ -152,10 +143,7 @@ const presentFile = (
 
 type LibraryFile = ReturnType<typeof presentFile>;
 
-/**
- * `files` as list rows, each with its title and episode, read once each. A file whose title is
- * gone or being purged is left out, as every read leaves it, and so is one the gate hides.
- */
+/** A file whose title is gone, being purged, or hidden by the gate is left out. */
 const presentFiles = async (
   db: DatabaseReader,
   gate: ItemGate,
@@ -209,10 +197,7 @@ const filePage = (
         rows,
       );
 
-/**
- * A page of the library's unmatched titles, each with up to 50 of its files, as old movies listed
- * them: a page holds files of whole titles, so it may hold more or fewer files than asked.
- */
+/** A page holds files of whole titles, so it may hold more or fewer files than asked. */
 const unmatchedPage = async (
   db: DatabaseReader,
   gate: ItemGate,
@@ -289,7 +274,6 @@ const listFiles = async (
   return { ...page, page: [...(await presentFiles(db, gate, page.page))] };
 };
 
-/** When the library's file missing longest went missing, or null when none is. */
 const missingSince = async (
   db: DatabaseReader,
   libraryId: Id<"libraries">,
@@ -297,6 +281,7 @@ const missingSince = async (
   const oldest = await db
     .query("mediaFiles")
     .withIndex("by_library_missing", (q) =>
+      // Skips missing files with no time, which the index sorts first.
       q.eq("libraryId", libraryId).eq("missing", true).gte("missingSince", 0),
     )
     .first();
