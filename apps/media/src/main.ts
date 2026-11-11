@@ -1,132 +1,48 @@
-import { createHash } from "node:crypto";
-
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { LibraryId } from "@media/contracts/ids";
 import { Cause, Context, Effect, Exit, Layer, Option, Runtime, Schema } from "effect";
 
 import * as ArtworkKeys from "./artwork/artwork-keys.ts";
-import * as BackupJob from "./backups/backup-job.ts";
-import * as BackupRoutes from "./backups/backup-routes.ts";
-import * as Backups from "./backups/backups.ts";
-import * as ConvexCli from "./backups/convex-cli.ts";
 import * as BackendHealth from "./backend-health.ts";
 import * as CachePruner from "./cache-pruner.ts";
-import * as ConvexFileResolver from "./convex/convex-file-resolver.ts";
-import * as ConvexLibrarySink from "./convex/convex-library-sink.ts";
-import * as ConvexPlaybackReporter from "./convex/convex-playback-reporter.ts";
-import * as ConvexSessionReports from "./convex/convex-session-reports.ts";
-import * as ClientErrors from "./diagnostics/client-errors.ts";
-import * as DiagnosticsRoutes from "./diagnostics/diagnostics-routes.ts";
-import * as LibrarySync from "./convex/library-sync.ts";
-import * as MediaBackend from "./convex/media-backend.ts";
-import * as ViewerAuth from "./convex/viewer-auth.ts";
+import * as CoreWiring from "./core/core-wiring.ts";
 import * as HttpServer from "./http/http-server.ts";
-import * as MetadataRoutes from "./http/metadata-routes.ts";
 import * as Outbound from "./http/outbound.ts";
-import * as JobWorker from "./jobs/job-worker.ts";
-import * as MetadataJob from "./jobs/metadata-job.ts";
-import * as PersonJob from "./jobs/person-job.ts";
-import * as ScanJob from "./jobs/scan-job.ts";
-import * as FolderRoutes from "./library/folder-routes.ts";
 import * as LibraryMonitor from "./library/library-monitor.ts";
-import * as LogsRoutes from "./logging/logs-routes.ts";
-import * as RetainedLogs from "./logging/retained-logs.ts";
 import * as MemoryLibrary from "./library/memory-library.ts";
+import * as RetainedLogs from "./logging/retained-logs.ts";
+import * as MediaTools from "./media/media-tools.ts";
 import * as MediaConfig from "./media-config.ts";
-import { servicesLayer } from "./media-service.ts";
-import * as MigrationBackend from "./migration/migration-backend.ts";
-import * as MigrationJob from "./migration/migration-job.ts";
-import * as MigrationRoutes from "./migration/migration-routes.ts";
-import * as Migrations from "./migration/migrations.ts";
+import { servicesLayerWith } from "./media-service.ts";
 import * as Observability from "./observability.ts";
 import * as EndedSessions from "./playback/ended-sessions.ts";
 import * as PlaybackReporter from "./playback/playback-reporter.ts";
+import * as PlaybackToken from "./playback/playback-token.ts";
 import * as SessionReports from "./playback/session-reports.ts";
-import * as TrickplayJob from "./trickplay/trickplay-job.ts";
-import * as TrickplaySweep from "./trickplay/trickplay-sweep.ts";
+import * as StreamOwners from "./playback/stream-owners.ts";
 
-class MediaServiceKeyMissing extends Schema.TaggedError<MediaServiceKeyMissing>()(
-  "MediaServiceKeyMissing",
-  {},
-) {
+class CoreSettingMissing extends Schema.TaggedError<CoreSettingMissing>()("CoreSettingMissing", {
+  setting: Schema.Literals(["MEDIA_SERVICE_API_KEY", "MEDIA_TICKET_KEYS"]),
+}) {
   override get message(): string {
-    return "Media service key missing: CONVEX_URL is set but MEDIA_SERVICE_API_KEY is not; run packages/backend/scripts/configure.ts";
+    return this.setting === "MEDIA_SERVICE_API_KEY"
+      ? "Core setting missing: CONVEX_URL is set but MEDIA_SERVICE_API_KEY is not; issue the server a key with core/auth/apiKeys:issueServiceKey"
+      : "Core setting missing: CONVEX_URL is set but MEDIA_TICKET_KEYS is not; set it to the core deployment's MEDIA_TICKET_KEYS";
   }
 }
-
-const jobs = Effect.gen(function* () {
-  const config = yield* MediaConfig.Service;
-
-  const always = yield* Effect.all([
-    ScanJob.handler,
-    MetadataJob.handler,
-    PersonJob.handler,
-    MigrationJob.handler,
-    BackupJob.handler,
-  ]);
-
-  const caps: JobWorker.PoolCaps = {
-    movies: 2,
-    "movies.background": config.trickplay.concurrency,
-    server: 1,
-  };
-
-  return { handlers: [...always, ...(yield* TrickplayJob.handlers)], caps };
-});
-
-const commandRoutes = Layer.mergeAll(
-  MetadataRoutes.layer,
-  MigrationRoutes.layer,
-  BackupRoutes.layer,
-  FolderRoutes.layer,
-  LogsRoutes.layer,
-  DiagnosticsRoutes.layer,
-  ClientErrors.layer,
-);
-
-const convexMode = (options: MediaBackend.Options) =>
-  Layer.mergeAll(
-    HttpServer.layer(commandRoutes),
-    JobWorker.layer(jobs),
-    LibrarySync.layer,
-    TrickplaySweep.layer,
-    Backups.layerSyncOnStart,
-    CachePruner.layer,
-  ).pipe(
-    Layer.provide(Backups.layer.pipe(Layer.provide([ConvexCli.layer, Backups.layerMoviesCatalog]))),
-    Layer.provide(LibraryMonitor.layer()),
-    Layer.provide(servicesLayer),
-    Layer.provide(Migrations.layer.pipe(Layer.provideMerge(MigrationBackend.layer))),
-    Layer.provide(
-      Layer.mergeAll(
-        ConvexLibrarySink.layer,
-        ConvexFileResolver.layer,
-        ConvexPlaybackReporter.layer,
-        EndedSessions.layer.pipe(Layer.provideMerge(ConvexSessionReports.layer)),
-      ),
-    ),
-    Layer.provide(ArtworkKeys.layer),
-    Layer.provide(ViewerAuth.layer(options.convexUrl)),
-    Layer.provideMerge(MediaBackend.layer(options)),
-  );
 
 const standaloneMode = (roots: ReadonlyArray<string>) =>
   Layer.mergeAll(
     HttpServer.layer(Layer.empty),
-    LibraryMonitor.layerTracking(
-      roots.map((root) => ({
-        libraryId: LibraryId.make(
-          `root-${createHash("sha256").update(root).digest("hex").slice(0, 12)}`,
-        ),
-        roots: [root],
-      })),
-    ),
+    LibraryMonitor.layerTracking(LibraryMonitor.rootLibraries(roots)),
     CachePruner.layer,
   ).pipe(
     Layer.provide(LibraryMonitor.layer()),
-    Layer.provide(servicesLayer),
+    Layer.provide(servicesLayerWith(MediaTools.layer)),
     Layer.provide(
       Layer.mergeAll(
+        PlaybackToken.layerRefusing,
+        StreamOwners.layer,
+        ArtworkKeys.layerEphemeral,
         MemoryLibrary.layer,
         PlaybackReporter.layerLog,
         BackendHealth.layerStandalone,
@@ -146,11 +62,18 @@ const application = Layer.unwrap(
       return standaloneMode(config.libraryRoots);
     }
 
-    if (Option.isNone(config.mediaServiceApiKey)) return yield* new MediaServiceKeyMissing();
+    if (Option.isNone(config.mediaServiceApiKey)) {
+      return yield* new CoreSettingMissing({ setting: "MEDIA_SERVICE_API_KEY" });
+    }
 
-    return convexMode({
-      convexUrl: config.convexUrl.value,
-      apiKey: config.mediaServiceApiKey.value,
+    if (Option.isNone(config.mediaTicketKeys)) {
+      return yield* new CoreSettingMissing({ setting: "MEDIA_TICKET_KEYS" });
+    }
+
+    return CoreWiring.layer({
+      coreUrl: config.convexUrl.value,
+      serviceKey: config.mediaServiceApiKey.value,
+      ticketKeys: config.mediaTicketKeys.value,
     });
   }),
 ).pipe(

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Draws the [movies] mark and writes the web app's favicons, app icons and manifest into
-# apps/web/public. Colors come from the Paper tokens in packages/ui/src/styles/globals.css, so rerun
+# apps/web-movies/public. Colors come from the Paper tokens in packages/ui/src/styles/globals.css, so rerun
 # this after the tokens change and commit the outputs.
 #
 # Needs ImageMagick 7 with its librsvg delegate; without `magick` on PATH it reruns itself in a
@@ -14,7 +14,7 @@ if ! command -v magick >/dev/null; then
 fi
 
 tokens="$root/packages/ui/src/styles/globals.css"
-public="$root/apps/web/public"
+public="$root/apps/web-movies/public"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -112,4 +112,4 @@ cat >"$public/manifest.webmanifest" <<EOF
 }
 EOF
 
-echo "app-icons: wrote favicons, app icons and manifest.webmanifest to apps/web/public"
+echo "app-icons: wrote favicons, app icons and manifest.webmanifest to apps/web-movies/public"

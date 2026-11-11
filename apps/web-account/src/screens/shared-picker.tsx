@@ -6,7 +6,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Lede } from "@/components/auth-page";
-import { describeFailure } from "@/lib/failure";
+import { describeFailure } from "@media/ui/lib/failure";
 import { useAccountActions, useDevice } from "@/session/account";
 import type { SharedPicker, SharedTile } from "@/session/platform-types";
 

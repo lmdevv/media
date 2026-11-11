@@ -4,12 +4,12 @@ import { TextField } from "@media/ui/components/text-field";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@/components/shell";
+import { PageHeader } from "@media/ui/components/page-header";
 import type { UserId } from "@/session/platform-types";
 
 import { useActions } from "./action";
-import { useAllPages, usePages } from "./pages";
-import type { Paged } from "./pages";
+import { useAllPages, usePages } from "@media/ui/lib/pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { ItemRow, Muted, Notice, PagedList, SelectField } from "./parts";
 import type { Group, Member, User } from "./types";
 

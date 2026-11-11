@@ -18,6 +18,8 @@ if [[ -z "$image" ]]; then
 fi
 
 library="$(mktemp -d)"
+# Secrets the checks look for, as `grep -f` pattern files: never as an argument (docs/security.md).
+secrets="$(mktemp -d)"
 node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
 # Ten minutes of video, so its transcode still runs when the crash check kills the media service.
 mkdir -p "$library/movies/Long Fixture (2020)"
@@ -32,7 +34,10 @@ export MEDIA_IMAGE="$image"
 export MEDIA_LIBRARY="$library"
 export MEDIA_PORT="$port"
 export MEDIA_BASE_URL="http://127.0.0.1:${port}"
-movies_convex_url="${MEDIA_BASE_URL}/movies/convex"
+core_convex_url="${MEDIA_BASE_URL}/convex"
+# The owner the packaged-stack suite sets the core up with, and the image's CLI signs in as.
+owner_name=owner
+owner_password=stack-test-password
 export PUID="$(id -u)" PGID="$(id -g)"
 compose_args=(-p "$project" -f "$root/deploy/compose/compose.yaml")
 if [[ "${QSV:-0}" == 1 ]]; then
@@ -49,6 +54,7 @@ cleanup() {
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
     rm -rf "$library"
   fi
+  rm -rf "$secrets"
   exit $status
 }
 trap cleanup EXIT
@@ -88,37 +94,73 @@ owners() {
 
 check "the image publishes one port" \
   '[[ "$(docker port "$(compose ps -q media)" | wc -l)" -le 2 && -z "$(docker port "$(compose ps -q media)" | grep -v "^8080/tcp ")" ]]'
-check "/convex is the core's Convex backend" '[[ "$(curl -fsS "${MEDIA_BASE_URL}/convex/instance_name")" == core ]]'
-check "/movies/convex is old movies' Convex backend" '[[ "$(curl -fsS "${movies_convex_url}/instance_name")" == movies ]]'
+status_of() { curl -s -o /dev/null -w "%{http_code}" "${MEDIA_BASE_URL}$1"; }
+check "/convex is the core's Convex backend" '[[ "$(curl -fsS "${core_convex_url}/instance_name")" == core ]]'
+check "/movies/convex answers Not Found" \
+  '[[ "$(status_of /movies/convex)" == 404 && "$(status_of /movies/convex/instance_name)" == 404 ]] &&
+    ! curl -s "${MEDIA_BASE_URL}/movies/convex/version" | grep -qF "<html"'
+convex_backends() {
+  in_movies sh -c 'for p in /proc/[0-9]*; do
+    tr "\0" " " <"$p/cmdline" 2>/dev/null | grep -q "^/app/convex/convex-local-backend " && echo "${p#/proc/}"
+  done' | wc -l
+}
+check "the image runs one Convex backend" \
+  '[[ "$(convex_backends)" -eq 1 ]] &&
+    ! in_movies test -e /app/backend && ! in_movies test -e /etc/s6-overlay/s6-rc.d/convex-movies &&
+    ! in_movies curl -fsS http://127.0.0.1:3220/version >/dev/null 2>&1'
 check "/api is the media service" 'answers /api/health "\"backend\":\"connected\""'
 check "/ is the account client" 'answers / "<title>[media]</title>"'
 check "/movies is the movies client" \
   '[[ "$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" "${MEDIA_BASE_URL}/movies")" == "308 ${MEDIA_BASE_URL}/movies/" ]] &&
     answers /movies/ "<title>[movies]</title>" && answers /movies/title/x "/movies/assets/"'
-check "the web clients reach Convex on this address" \
-  'in_movies grep -rqF "${MEDIA_BASE_URL}/convex" /run/media/account &&
-    in_movies grep -rqF "${movies_convex_url}" /run/media/web'
+check "both web clients reach the core on this address" \
+  'in_movies grep -rqF "${core_convex_url}" /run/media/account &&
+    in_movies grep -rqF "${core_convex_url}" /run/media/web &&
+    ! in_movies grep -rqF "${MEDIA_BASE_URL}/movies/convex" /run/media/web'
 check "Convex HTTP actions stay inside the container" \
   '! curl -fsS "${MEDIA_BASE_URL}/convex/.well-known/jwks.json" 2>/dev/null | grep -qF "\"keys\"" &&
     in_movies curl -fsS http://127.0.0.1:3211/.well-known/jwks.json | grep -qF "\"keys\""'
 check "the data root has one folder per domain" '[[ "$(in_movies ls /data | tr "\n" " ")" == "core movies " ]]'
-check "each Convex backend runs unprivileged" '[[ "$(owners /app/convex/convex-local-backend)" == convex ]]'
+check "the Convex backend runs unprivileged" '[[ "$(owners /app/convex/convex-local-backend)" == convex ]]'
 check "Caddy runs unprivileged" '[[ "$(owners "caddy run")" == caddy ]]'
-check "no instance secret is on a command line" \
-  '! in_movies sh -c "cat /proc/[0-9]*/cmdline 2>/dev/null | tr \"\\0\" \"\\n\" | grep -qxFf /data/core/secrets/instance_secret -f /data/movies/secrets/instance_secret"'
+check "no instance secret or service key is on a command line" \
+  '! in_movies sh -c "cat /proc/[0-9]*/cmdline 2>/dev/null | tr \"\\0\" \"\\n\" | grep -qxFf /data/core/secrets/instance_secret -f /data/core/secrets/media-service-key"'
 
 check "the media service runs unprivileged" '[[ -n "$media_pid" && "$media_uid" == "$PUID" && "$media_uid" != 0 ]]'
 check "the service environment is private" \
   '[[ "$(in_movies stat -c "%u %a" /run/movies/media.env)" == "$PUID 600" ]]'
-check "backups are private" '[[ "$(in_movies stat -c "%a" /data/movies/backups /data/core/backups | sort -u)" == 700 ]]'
+check "backups are the media user's and private" \
+  '[[ "$(in_movies stat -c "%u %a" /data/core/backups)" == "$PUID 700" ]]'
+check "the media service's key is root's and private" \
+  '[[ "$(in_movies stat -c "%U %a" /data/core/secrets/media-service-key /data/core/secrets/media-service-id | sort -u)" == "root 600" ]]'
+check "the media service signs in to the core with its stored key and the core's ticket keys" \
+  '[[ "$(in_movies sed -n s/^MEDIA_SERVICE_API_KEY=//p /run/movies/media.env)" == "$(in_movies cat /data/core/secrets/media-service-key)" ]] &&
+    in_movies grep -qx "CONVEX_URL=http://127.0.0.1:3210" /run/movies/media.env &&
+    in_movies grep -qx "CONVEX_PUBLIC_URL=${core_convex_url}" /run/movies/media.env &&
+    in_movies grep -qx "CONVEX_BACKEND_DIR=/app/platform" /run/movies/media.env &&
+    in_movies grep -q "^MEDIA_TICKET_KEYS=." /run/movies/media.env &&
+    ! in_movies grep -q "^PLAYBACK_TOKEN_SECRET=" /run/movies/media.env'
+# The service key and the ticket keys, by redirection only, one pattern per line in a private file.
+secret_patterns() {
+  (
+    umask 077
+    {
+      in_movies cat /data/core/secrets/media-service-key
+      printf '\n'
+      in_movies sed -n 's/^MEDIA_TICKET_KEYS=//p' /run/movies/media.env
+    } >"$secrets/patterns"
+  )
+  printf '%s\n' "$secrets/patterns"
+}
+check "the service key and ticket keys stay out of the log" \
+  '! compose logs --no-color media 2>&1 | grep -qF -f "$(secret_patterns)"'
 check "the library is read-only" '! in_movies setpriv --reuid=0 touch /media/library/written 2>/dev/null'
 check "no secret is in the command line" \
   '! in_movies cat "/proc/${media_pid}/cmdline" | tr "\0" "\n" | grep -q "KEY\|SECRET"'
 check "the admin key is not in the web app" \
   '! in_movies sh -c "grep -rqF \"\$(sed -n s/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p /run/movies/media.env)\" /run/media /app/web /app/account"'
 check "Convex refuses admin calls without the key" \
-  '[[ "$(curl -s -o /dev/null -w "%{http_code}" "${movies_convex_url}/api/check_admin_key")" =~ ^40[13]$ &&
-    "$(curl -s -o /dev/null -w "%{http_code}" "${MEDIA_BASE_URL}/convex/api/check_admin_key")" =~ ^40[13]$ ]]'
+  '[[ "$(status_of /convex/api/check_admin_key)" =~ ^40[13]$ ]]'
 
 in_movies sh -c "kill $media_pid"
 for _ in $(seq 1 60); do
@@ -140,38 +182,59 @@ done)"
 check "a client cannot pass as the install by sending X-Forwarded-For" 'grep -qx 429 <<<"$spoofed"'
 sleep 7
 
-pnpm --dir "$root" --filter @lmdevv/movies build >/dev/null
-
 MEDIA_PACKAGED_STACK=1 \
-  MEDIA_PACKAGED_CONVEX_URL="$movies_convex_url" \
+  MEDIA_PACKAGED_CONVEX_URL="$core_convex_url" \
   MEDIA_PACKAGED_SERVER_URL="$MEDIA_BASE_URL" \
   MEDIA_PACKAGED_LIBRARY=/media/library \
+  MEDIA_PACKAGED_OWNER="$owner_name" \
+  MEDIA_PACKAGED_PASSWORD="$owner_password" \
   MEDIA_PACKAGED_RESTART="docker compose ${compose_args[*]} restart media" \
   pnpm --dir "$root" exec vitest run --root "$root" apps/media/src/stack/packaged-stack.test.ts
 
+# The first value at a path, such as `0.id`, of the JSON on stdin.
+json_at() {
+  node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+    const v = process.argv[1].split(".").reduce((o, k) => o?.[k], JSON.parse(s));
+    if (v === undefined || v === null) process.exit(1);
+    process.stdout.write(String(v)); })' "$1"
+}
+# Negotiates a stream for a ticket, as a player at most `$2` pixels tall; prints the stream URL.
+negotiate() {
+  node -e 'const [url, ticket, height] = process.argv.slice(1);
+    const capabilities = { containers: ["mp4"], videoCodecs: [{ codec: "h264", maxBitDepth: 8 }],
+      audioCodecs: [{ codec: "aac" }], maxWidth: Math.round((Number(height) * 16) / 9),
+      maxHeight: Number(height), hls: false, mse: true };
+    fetch(`${url}/api/playback/negotiate`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: ticket, capabilities, startSeconds: 0 }) })
+      .then(async (r) => { const b = await r.json(); if (r.status !== 200) throw new Error(JSON.stringify(b)); process.stdout.write(b.url); })
+      .catch((e) => { console.error(String(e)); process.exit(1); });' "$MEDIA_BASE_URL" "$1" "$2"
+}
+# A new stream ticket for the title the image's CLI finds by `$1`.
+cli_ticket() {
+  local title
+  title="$(in_movies media movies titles search --query "$1" | json_at 0.id)" &&
+    in_movies media movies play start --title-id "$title" | json_at ticket
+}
+
 release="$("$root/scripts/check-version.sh")"
 check "the image's CLI reports the release version" '[[ "$(in_movies media --version)" == "$release" ]]'
-check "the image's CLI signs in to its own stack" \
-  'printf %s stack-test-password | in_movies media login --email owner@movies.test --password >/dev/null'
-check "the image's CLI calls its own stack" 'in_movies media whoami | grep -qF "owner@movies.test"'
-played="$(in_movies media play "Big Buck Fixture")" ||
-  { echo "check failed: the image's CLI plays in its own stack" >&2; exit 1; }
-play_url="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).url)' "$played")"
-stream_url_without_token="${play_url%%\?*}"
-echo "ok: the image's CLI plays in its own stack: ${stream_url_without_token}"
-check "the image's CLI plays at the public URL" '[[ "$play_url" == "$MEDIA_BASE_URL/"* ]]'
-check "the printed stream URL plays from the host" \
+check "the image's CLI signs in to the core" \
+  'printf %s "$owner_password" | in_movies media auth login --username "$owner_name" >/dev/null'
+check "the image's CLI calls the core as the owner" \
+  '[[ "$(in_movies media auth sessions current | json_at username)" == "$owner_name" ]]'
+ticket="$(cli_ticket "Big Buck Fixture")" ||
+  { echo "check failed: the image's CLI starts a play on the core" >&2; exit 1; }
+play_url="$(negotiate "$ticket" 1080)" ||
+  { echo "check failed: the media service admits the CLI's ticket" >&2; exit 1; }
+echo "ok: the image's CLI starts a play the media service admits: ${play_url%%\?*}"
+check "the stream URL is at the public URL" '[[ "$play_url" == "$MEDIA_BASE_URL/"* ]]'
+check "the stream URL plays from the host" \
   '[[ "$(curl -fsS -r 0-0 -o /dev/null -w "%{http_code}" "$play_url")" =~ ^20[06]$ ]]'
 check "the CLI login is root's and private, in the data volume" \
-  '[[ "$(in_movies stat -c "%U %a" /data/movies/config/movies/config.json)" == "root 600" ]]'
-retained="$(in_movies media logs --since 5m --json 2>&1)" || true
-if ! grep -qF '"message":"Stream.started"' <<<"$retained"; then
-  echo "media logs answered $(wc -l <<<"$retained") lines; the last ten:" >&2
-  tail -n 10 <<<"$retained" | cut -c1-300 >&2
-  in_movies ls -l /data/movies/media/logs >&2 || true
-fi
-check "the image's CLI reads the retained log as the owner" \
-  'grep -qF "\"message\":\"Stream.started\"" <<<"$retained"'
+  '[[ -n "$(in_movies find /data/movies/config/media/sessions -type f)" &&
+    -z "$(in_movies find /data/movies/config/media/sessions -type f \( ! -user root -o ! -perm 600 \))" ]]'
+check "the retained log records the streams" \
+  'in_movies grep -rqF "\"message\":\"Stream.started\"" /data/movies/media/logs'
 check "the retained log is private to the media user" \
   '[[ "$(in_movies stat -c "%u %a" /data/movies/media/logs)" == "$PUID 700" ]] &&
     ! in_movies find /data/movies/media/logs -type f ! -perm 600 | grep -q .'
@@ -182,8 +245,9 @@ running_ffmpeg() {
       echo "${p#/proc/}"
   done' || true
 }
-in_movies media play "Long Fixture" --max-height 144 >/dev/null ||
-  { echo "check failed: the image's CLI transcodes the long fixture" >&2; exit 1; }
+long_ticket="$(cli_ticket "Long Fixture")" && long_url="$(negotiate "$long_ticket" 144)" &&
+  curl -fsS -o /dev/null "$long_url" ||
+  { echo "check failed: the media service transcodes the long fixture" >&2; exit 1; }
 check "the media service runs ffmpeg before it crashes" '[[ -n "$(running_ffmpeg)" ]]'
 crashed="$(media_pid)"
 in_movies sh -c "kill -KILL $crashed"
@@ -198,30 +262,44 @@ done
 check "s6 restarts the media service after it crashes" \
   '[[ -n "$restarted" && "$restarted" != "$crashed" ]] && healthy'
 
-archives() { in_movies sh -c "ls /data/$1/backups | grep -c '^$1-.*\.zip$'" || true; }
-before="$(archives movies)"
-core_before="$(archives core)"
-in_movies sh -c 'echo 0.0.0-previous > /data/movies/version && echo 0.0.0-previous > /data/core/version'
+archives() { in_movies sh -c "ls /data/core/backups | grep -c '^core-manual-.*\.zip$'" || true; }
+service_key="$(in_movies cat /data/core/secrets/media-service-key)"
+before="$(archives)"
+in_movies sh -c 'echo 0.0.0-previous > /data/core/version'
 compose restart media >/dev/null
 for _ in $(seq 1 60); do
   healthy && break
   sleep 2
 done
-check "an upgrade backs up first" '[[ "$(archives movies)" -gt "$before" ]]'
-check "an upgrade of the core backs it up first" '[[ "$(archives core)" -gt "$core_before" ]]'
+check "an upgrade of the core backs it up first" '[[ "$(archives)" -gt "$before" ]]'
+check "the upgrade backup is the media user's" \
+  '[[ -z "$(in_movies find /data/core/backups -name "core-manual-*.zip" ! -uid "$PUID")" ]]'
 check "the restarted service keeps its secrets" 'healthy'
+check "a restart reuses the media service's key" \
+  '[[ "$(in_movies cat /data/core/secrets/media-service-key)" == "$service_key" ]]'
 
-check "a deployed upgrade clears its backup marker" '! in_movies test -e /data/movies/upgrade-backup'
+check "a deployed upgrade clears its backup marker" '! in_movies test -e /data/core/upgrade-backup'
 
-after="$(archives movies)"
-in_movies sh -c 'cp /data/movies/version /data/movies/upgrade-backup && echo 0.0.0-previous > /data/movies/version'
+after="$(archives)"
+in_movies sh -c 'cp /data/core/version /data/core/upgrade-backup && echo 0.0.0-previous > /data/core/version'
 compose restart media >/dev/null
 for _ in $(seq 1 60); do
   healthy && break
   sleep 2
 done
 check "the service is healthy after the retried upgrade" 'healthy'
-check "a retried upgrade does not back up again" '[[ "$(archives movies)" -eq "$after" ]]'
+check "a retried upgrade does not back up again" '[[ "$(archives)" -eq "$after" ]]'
+
+service_id="$(in_movies cat /data/core/secrets/media-service-id)"
+in_movies rm /data/core/secrets/media-service-key
+compose restart media >/dev/null
+for _ in $(seq 1 60); do
+  healthy && break
+  sleep 2
+done
+check "a lost service key is issued again to the same principal" \
+  'healthy && [[ "$(in_movies cat /data/core/secrets/media-service-id)" == "$service_id" &&
+    "$(in_movies cat /data/core/secrets/media-service-key)" != "$service_key" ]]'
 
 # An outer proxy on the container's loopback, as a TLS proxy beside the NixOS module connects:
 # 80 requests for one client, then one for another, in one shell so no refill falls between.

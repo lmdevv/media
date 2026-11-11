@@ -308,7 +308,10 @@ export interface HealthResponse extends Schema.Schema.Type<typeof HealthResponse
  * to sign in to, as clients reach it (`CONVEX_PUBLIC_URL`). Absent when none is configured.
  */
 export const ClientConfigResponse = Schema.Struct({
+  /** The core's public Convex URL, which clients sign in to. */
   convexUrl: Schema.optional(Schema.String),
+  /** The movies web client's address, `${MEDIA_BASE_URL}/movies`, for links apps build. */
+  moviesUrl: Schema.optional(Schema.String),
 });
 
 /** What an app needs to connect from this service's address. */

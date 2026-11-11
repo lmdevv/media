@@ -1,9 +1,7 @@
-import { createCipheriv, createDecipheriv, createHmac } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 
 import { ArtworkKey } from "@media/contracts/artwork";
 import { Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect";
-
-import * as MediaConfig from "../media-config.ts";
 
 /** Where an artwork image lives. */
 export type ArtworkSource = Data.TaggedEnum<{
@@ -42,7 +40,7 @@ const decodeSealed = Schema.decodeUnknownOption(Schema.fromJsonString(SealedSour
 const derive = (secret: Buffer, label: string): Buffer =>
   createHmac("sha256", secret).update(label, "utf8").digest();
 
-/** Builds the codec from the raw bytes of `PLAYBACK_TOKEN_SECRET`. */
+/** Builds the codec from the bytes of a secret only this server holds. */
 export const make = (secret: Buffer): Interface => {
   const encryptionKey = derive(secret, "movies artwork key v1");
   const ivKey = derive(secret, "movies artwork iv v1");
@@ -105,12 +103,19 @@ export const make = (secret: Buffer): Interface => {
   };
 };
 
-/** The codec keyed by `PLAYBACK_TOKEN_SECRET`, which the token verifier has already validated. */
-export const layer: Layer.Layer<Service, never, MediaConfig.Service> = Layer.effect(
-  Service,
-  Effect.gen(function* () {
-    const config = yield* MediaConfig.Service;
+/**
+ * The codec keyed by `secret`. On the core that is the server's own service key, which the core
+ * stores only as a hash, as the importer seals source credentials, so the core and its backups
+ * hold keys that only this server opens. A new service key makes earlier artwork keys unreadable
+ * until a rescan and a metadata refresh write new ones.
+ */
+export const layerKeyed = (secret: Redacted.Redacted): Layer.Layer<Service> =>
+  Layer.succeed(Service, Service.of(make(Buffer.from(Redacted.value(secret), "utf8"))));
 
-    return Service.of(make(Buffer.from(Redacted.value(config.playbackTokenSecret), "base64url")));
-  }),
+/**
+ * The codec keyed by a secret drawn when the layer is built, for standalone mode, whose library
+ * lives only in memory and so never outlives its keys.
+ */
+export const layerEphemeral: Layer.Layer<Service> = Layer.sync(Service, () =>
+  Service.of(make(randomBytes(32))),
 );

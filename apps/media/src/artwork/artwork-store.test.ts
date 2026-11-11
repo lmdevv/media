@@ -16,6 +16,7 @@ import {
 import * as MediaConfig from "../media-config.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
+import { testArtworkKeysLayer } from "../testing/test-tokens.ts";
 import * as ArtworkKeys from "./artwork-keys.ts";
 import * as ArtworkStore from "./artwork-store.ts";
 
@@ -74,7 +75,7 @@ const storeLayer = Layer.unwrap(
     const library = yield* fs.makeTempDirectoryScoped({ prefix: "movies-artwork-library-" });
 
     return ArtworkStore.layer.pipe(
-      Layer.provideMerge(ArtworkKeys.layer),
+      Layer.provideMerge(testArtworkKeysLayer),
       Layer.provide(MediaTools.layer),
       Layer.provide(redirectedClient),
       Layer.provideMerge(testConfigLayer({ DATA_DIR: dataDir, LIBRARY_ROOTS: library })),

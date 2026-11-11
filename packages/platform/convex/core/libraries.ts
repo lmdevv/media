@@ -7,28 +7,19 @@ import { internalMutation } from "../_generated/server";
 import type { DatabaseReader } from "../_generated/server";
 import { releaseClaims, takeWaiters } from "./folderClaims";
 import { claimFolders, foldersOf, parseFolders, releaseFolders } from "./folders";
-import { scanKindOf } from "./jobs/kinds";
 import { progressOf } from "./jobs/machine";
-import { cancel, enqueue } from "./jobs/queue";
+import { cancel } from "./jobs/queue";
 import type { Enqueued, JobCtx } from "./jobs/store";
 import { inOrder } from "./lib/inOrder";
 import { GIVEN_NAME_MAX, requireGivenName } from "./lib/names";
 import { requireServer } from "./permissions/authorize";
 import { deleteGrantsOn, grantCreator, requireContent, visiblePage } from "./permissions/grants";
-import { forgetItemCount, itemCount, schedulePurge } from "./scans";
+import { forgetItemCount, itemCount, queueScan, schedulePurge } from "./scans";
 
 const parseName = (typed: string): string =>
   requireGivenName(typed, `Name a library with 1 to ${GIVEN_NAME_MAX} printable characters`);
 
 const libraryRef = (id: Id<"libraries">) => ({ type: "library", id }) as const;
-
-const queueScan = async (ctx: JobCtx, library: Doc<"libraries">): Promise<Enqueued> => {
-  const scan = await enqueue(ctx, { kind: scanKindOf(library.kind), libraryId: library._id });
-
-  if (scan.created) await ctx.db.patch(library._id, { lastScan: scan.jobId });
-
-  return scan;
-};
 
 const restartScan = async (ctx: JobCtx, library: Doc<"libraries">): Promise<Enqueued> => {
   const joined = await queueScan(ctx, library);
@@ -150,10 +141,10 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
 
     return { scanJobId: (await restartScan(ctx, doc)).jobId };
   },
-  scan: async (ctx, { libraryId }, caller) => {
+  scan: async (ctx, { libraryId, mode }, caller) => {
     const { doc } = await requireContent(ctx, caller, "edit", libraryRef(libraryId));
 
-    return queueScan(ctx, doc);
+    return queueScan(ctx, doc, mode);
   },
   remove: async (ctx, { libraryId }, caller) => {
     const { doc } = await requireContent(ctx, caller, "manage", libraryRef(libraryId));

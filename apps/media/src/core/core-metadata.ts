@@ -6,8 +6,8 @@ import type { CallError } from "@media/sdk/effect";
 import { Effect, Option, Predicate } from "effect";
 
 import * as ArtworkKeys from "../artwork/artwork-keys.ts";
-import { digestOf, toScannedCollection, toScannedCredits } from "../convex/catalog-records.ts";
-import { JobFailed } from "../jobs/job-worker.ts";
+import { digestOf, toScannedCollection, toScannedCredits } from "./catalog-records.ts";
+import { JobFailed } from "./core-jobs.ts";
 import { lookUp, TOP_BILLED } from "../jobs/metadata-job.ts";
 import { lookUpPerson, personDetailsOf } from "../jobs/person-job.ts";
 import * as MetadataPlugin from "../metadata/metadata-plugin.ts";

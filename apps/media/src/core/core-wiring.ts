@@ -1,42 +1,60 @@
-import { Effect, Layer, Option, type Redacted } from "effect";
+import { Effect, Layer, type Redacted } from "effect";
 
+import * as ArtworkKeys from "../artwork/artwork-keys.ts";
+import * as BackupRoutes from "../backups/backup-routes.ts";
 import * as Backups from "../backups/backups.ts";
 import * as ConvexCli from "../backups/convex-cli.ts";
 import * as CachePruner from "../cache-pruner.ts";
+import * as ClientErrors from "../diagnostics/client-errors.ts";
+import * as DiagnosticsRoutes from "../diagnostics/diagnostics-routes.ts";
 import * as HttpServer from "../http/http-server.ts";
+import * as MetadataRoutes from "../http/metadata-routes.ts";
+import * as FolderRoutes from "../library/folder-routes.ts";
 import * as LibrarySink from "../library/library-sink.ts";
+import * as LogsRoutes from "../logging/logs-routes.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as MediaConfig from "../media-config.ts";
 import { servicesLayerWith } from "../media-service.ts";
 import * as CoreImportJob from "../migration/core-import-job.ts";
 import * as CoreImports from "../migration/core-imports.ts";
+import * as ImportRoutes from "../migration/import-routes.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
 import * as PlaybackReporter from "../playback/playback-reporter.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import * as CoreBackups from "./core-backups.ts";
+import * as CoreCallers from "./core-callers.ts";
 import * as CoreFiles from "./core-files.ts";
 import * as CoreJobs from "./core-jobs.ts";
 import * as CoreMetadata from "./core-metadata.ts";
+import * as CoreRescans from "./core-rescans.ts";
 import * as CoreScan from "./core-scan.ts";
 import * as CoreSession from "./core-session.ts";
 import * as CoreStatus from "./core-status.ts";
 import * as CoreTickets from "./core-tickets.ts";
 import * as CoreTrickplay from "./core-trickplay.ts";
 
-/** Where the core is, the key it issued this server, and the ring its tickets are signed with. */
+/**
+ * Where the core is (`CONVEX_URL`), the key it issued this server (`MEDIA_SERVICE_API_KEY`), and
+ * the ring its tickets are signed with (`MEDIA_TICKET_KEYS`). Backups and restores run the core's
+ * Convex CLI with `CONVEX_SELF_HOSTED_ADMIN_KEY` from `CONVEX_BACKEND_DIR`; without them they fail
+ * as unavailable, naming the missing settings.
+ */
 export interface Options {
   readonly coreUrl: string;
   readonly serviceKey: Redacted.Redacted;
   readonly ticketKeys: Redacted.Redacted;
-  /**
-   * The core deployment's admin key and the folder its Convex CLI runs from, for backups: they
-   * export the core, never old movies. Without them a backup fails as unavailable, naming them.
-   */
-  readonly backups: Option.Option<{
-    readonly adminKey: Redacted.Redacted;
-    readonly backendDir: string;
-  }>;
 }
+
+/** The server's own routes, each checking its caller against the core. */
+const commandRoutes = Layer.mergeAll(
+  MetadataRoutes.layer,
+  ImportRoutes.layer,
+  BackupRoutes.layer,
+  FolderRoutes.layer,
+  LogsRoutes.layer,
+  DiagnosticsRoutes.layer,
+  ClientErrors.layer,
+);
 
 const jobs = (sealKey: Redacted.Redacted) =>
   Effect.gen(function* () {
@@ -80,10 +98,11 @@ const noSharedSink: Layer.Layer<LibrarySink.Service> = Layer.succeed(
 
 /**
  * The server on the core: signed in as its service principal, running the core's jobs, serving
- * bytes to core tickets, reporting its status, and running the Jellyfin and Plex importer's flow
- * (`CoreImports`). `main.ts` keeps wiring old movies until the cutover switches to this, so the
- * running server never holds two Convex URLs (D50); until then it runs in tests and the in-process
- * server.
+ * bytes to core tickets, serving its own routes to people signed in to the core, asking the core
+ * to rescan what changes on disk, reporting its status, and running the Jellyfin and Plex
+ * importer's flow (`CoreImports`). The retained log (`RetainedLogs`) comes from outside, as the
+ * process's logging builds it. The core keeps no playback sessions (ADR 0011), so the server only
+ * logs a playback's mode reports (`PlaybackReporter.layerLog`).
  */
 export const layer = (options: Options) =>
   Layer.unwrap(
@@ -96,32 +115,21 @@ export const layer = (options: Options) =>
       });
 
       return Layer.mergeAll(
-        HttpServer.layer(Layer.empty),
+        HttpServer.layer(commandRoutes),
         CoreJobs.layer(jobs(options.serviceKey)),
-        CoreImports.layer(options.serviceKey),
         CoreTrickplay.sweepLayer,
         CoreStatus.layer,
+        CoreRescans.layer,
         Backups.layerSyncOnStart,
         CachePruner.layer,
       ).pipe(
-        Layer.provide(
-          Backups.layer.pipe(
-            Layer.provide([
-              ConvexCli.layerFor({
-                url: Option.some(options.coreUrl),
-                adminKey: Option.map(options.backups, (backups) => backups.adminKey),
-                backendDir: Option.map(options.backups, (backups) => backups.backendDir),
-                names: {
-                  url: "the core's URL",
-                  adminKey: "the core's admin key",
-                  backendDir: "the core's Convex folder",
-                },
-              }),
-              CoreBackups.catalogLayer,
-            ]),
-          ),
+        Layer.provideMerge(CoreImports.layer(options.serviceKey)),
+        Layer.provideMerge(
+          Backups.layer.pipe(Layer.provide([ConvexCli.layer, CoreBackups.catalogLayer])),
         ),
+        Layer.provide(CoreCallers.layer(options.coreUrl)),
         Layer.provideMerge(servicesLayerWith(MediaTools.layer)),
+        Layer.provideMerge(ArtworkKeys.layerKeyed(options.serviceKey)),
         Layer.provideMerge(grants),
         Layer.provideMerge(StreamOwners.layer),
         Layer.provide(

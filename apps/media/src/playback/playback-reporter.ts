@@ -71,7 +71,7 @@ export class Service extends Context.Service<Service, Interface>()(
 ) {}
 
 /** Logs `event` at `INFO` under its playback event name, with its fields as annotations. */
-export const logEvent = (event: PlaybackEvent): Effect.Effect<void> => {
+const logEvent = (event: PlaybackEvent): Effect.Effect<void> => {
   const { _tag, ...fields } = event;
 
   return Effect.logInfo(
@@ -83,7 +83,10 @@ export const logEvent = (event: PlaybackEvent): Effect.Effect<void> => {
   ).pipe(Effect.annotateLogs(fields));
 };
 
-/** Only logs events, for standalone mode. */
+/**
+ * Only logs events: in standalone mode, and on the core, which keeps no playback sessions (ADR
+ * 0011), so the retained log is where a playback's mode, stream starts, and ends are kept.
+ */
 export const layerLog: Layer.Layer<Service> = Layer.succeed(
   Service,
   Service.of({ report: logEvent }),

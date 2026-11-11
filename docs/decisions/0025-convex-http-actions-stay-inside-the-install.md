@@ -1,6 +1,6 @@
 # 0025. Keep Convex's HTTP actions inside the install, off the public address
 
-- Status: Accepted, 2026-11-08
+- Status: Accepted, 2026-11-08. Amended 2026-11-10 with one backend in the image (ADR 0027).
 - Decisions: D30, D45
 
 ## Context
@@ -57,3 +57,10 @@ Old movies' Compose file and NixOS module already set the site origin to
   its container. That serves the same purpose and is not a public route.
 - Convex Auth's OAuth callback routes need a public HTTP action. ADR 0003 rules out SSO, so no
   provider needs one.
+
+## One backend in the image (amended 2026-11-10)
+
+The image and the NixOS module now run only the core's backend (ADR 0027). Its HTTP actions origin
+stays `http://127.0.0.1:3211` inside the install. Old movies' backend, with its origin
+`http://127.0.0.1:3221` and its `/movies/convex` route, is gone from both installs. Caddy answers
+`404` for `/movies/convex`.

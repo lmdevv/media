@@ -6,6 +6,7 @@ import { paginateAtMost } from "../core/lib/paginate";
 import { decidableRows, reachOf, requireItems } from "../core/permissions/grants";
 import { budgetedViewer, requireTitle, titleViewer, walkMovieLibraries } from "./access";
 import type { BudgetedViewer } from "./access";
+import { registerWithArtworkTickets } from "./artwork";
 import { countGenres, rankBySimilarity, titlePage } from "./browse";
 import { CREDIT_LIMIT, creditsOf } from "./credits";
 import { newestAcross } from "./newest";
@@ -184,7 +185,7 @@ const namedLibrary = async (
 };
 
 export const { home, list, genres, search, similar, get, versions, episodes, nextEpisode } =
-  register({
+  registerWithArtworkTickets(register, {
     home: async (ctx, _args, caller) => {
       const reach = await reachOf(ctx.db, caller);
       const budget = callBudget(reach);

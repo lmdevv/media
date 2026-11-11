@@ -2,21 +2,20 @@ import type { CommandArgs, CommandResult } from "@media/contracts/commands";
 import { commands } from "@media/contracts/commands";
 import type { CommandNameOfKind } from "@media/contracts/commands";
 import { type CommandError, InvalidArgs, Unauthenticated } from "@media/contracts/errors";
-import type { Viewer } from "@media/contracts/models/account";
 import type { CallError } from "@media/sdk/effect";
 import { Effect, Match, Redacted, Schema, SchemaIssue } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
-import * as ViewerAuth from "../convex/viewer-auth.ts";
+import * as CoreCallers from "../core/core-callers.ts";
 import { retryAfter } from "./rate-limit.ts";
 
 /** Commands the media service serves. */
 export type MediaCommandName = CommandNameOfKind<"media">;
 
-/** Implements one media command for an authorized viewer. */
+/** Implements one media command for an authorized caller. */
 export type CommandHandler<Name extends MediaCommandName> = (
   args: CommandArgs<Name>,
-  viewer: Viewer,
+  caller: CoreCallers.Caller,
 ) => Effect.Effect<CommandResult<Name>, CallError>;
 
 const failureOf = Match.type<CallError>().pipe(
@@ -38,12 +37,12 @@ const failureOf = Match.type<CallError>().pipe(
     TransportError: () => ({
       code: "internal",
       status: 503,
-      message: "The media service could not reach Convex",
+      message: "The media service could not reach the core",
     }),
     ProtocolError: () => ({
       code: "internal",
       status: 502,
-      message: "Convex answered with something the media service does not understand",
+      message: "The core answered with something the media service does not understand",
     }),
   }),
 );
@@ -105,18 +104,18 @@ export const commandRoute = Effect.fnUntraced(function* <Name extends MediaComma
   handler: CommandHandler<Name>,
 ) {
   const router = yield* HttpRouter.HttpRouter;
-  const auth = yield* ViewerAuth.Service;
+  const auth = yield* CoreCallers.Service;
   const command = commands[name];
   const decodeArgs = bodyDecoder(command.args, `Invalid arguments for ${name}`);
   const encodeResult = Schema.encodeEffect(Schema.toCodecJson(command.result));
 
   const route = Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
-    const viewer = yield* auth.authorize(yield* bearerOf(request), command.scope);
+    const caller = yield* auth.authorize(yield* bearerOf(request), command.scope);
 
     const args = yield* decodeArgs(request);
 
-    const result = yield* handler(args, viewer);
+    const result = yield* handler(args, caller);
     const encoded = yield* encodeResult(result).pipe(Effect.orDie);
 
     return HttpServerResponse.jsonUnsafe(encoded, { headers: { "cache-control": "no-store" } });

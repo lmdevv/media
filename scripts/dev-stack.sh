@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # Runs an isolated [media] development stack for the current worktree: two self-hosted Convex
-# backends in Docker, one for old movies (packages/backend) and one for the platform core
-# (packages/platform), each with its own volume and ports, plus the movies service credential and
-# a temporary output directory. The core has its own backend until the movies port moves movies
-# into it (docs/decisions/0023).
+# backends in Docker, each with its own volume and ports, plus the media service's credentials and
+# a temporary output directory. The core (packages/platform) holds movies, and the media service and
+# both web clients use it. Old movies' backend (packages/backend) stays only for its own stack tests
+# until its package is deleted.
 #
 #   scripts/dev-stack.sh up        # start (or reuse) both backends, deploy, configure both, write .env.local
 #   scripts/dev-stack.sh env       # print this worktree's name, ports, and directories
 #   scripts/dev-stack.sh down      # stop and remove both containers (the data volumes stay)
 #   scripts/dev-stack.sh destroy   # remove both containers and their data volumes
 #
+# `up` creates the media service's service principal on the core and issues its key once, keeping
+# it in the state directory while the core's volume lives.
+#
 # The stack name defaults to the worktree directory name; override with MEDIA_STACK. Ports derive
 # from the name so worktrees do not collide; override the base with MEDIA_PORT_BASE.
-#   base      Convex API
-#   base + 1  Convex HTTP actions (auth)
+#   base      old movies' Convex API (packages/backend tests only)
+#   base + 1  old movies' Convex HTTP actions (auth)
 #   base + 2  media service
-#   base + 3  web dev server
+#   base + 3  movies web dev server (apps/web-movies at /movies/; every other path goes to base + 6)
 #   base + 4  core Convex API
 #   base + 5  core Convex HTTP actions
 #   base + 6  account client dev server (apps/web-account)
@@ -56,7 +59,7 @@ container=${container}
 convex_url=http://127.0.0.1:${convex_port}
 convex_site_url=http://127.0.0.1:${site_port}
 media_url=http://127.0.0.1:${media_port}
-web_url=http://localhost:${web_port}
+web_url=http://localhost:${web_port}/movies/
 core_container=${core_container}
 core_convex_url=http://127.0.0.1:${core_port}
 core_convex_site_url=http://127.0.0.1:${core_site_port}
@@ -136,34 +139,16 @@ CONVEX_SELF_HOSTED_URL=http://127.0.0.1:${convex_port}
 CONVEX_SELF_HOSTED_ADMIN_KEY=${admin_key}
 ENV
 
-cat >"${root}/apps/web/.env.local" <<ENV
-VITE_CONVEX_URL=http://127.0.0.1:${convex_port}
-VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
-WEB_PORT=${web_port}
-ENV
-
 cd "${root}/packages/backend"
 pnpm exec convex deploy --yes >/dev/null
-
-media_env=""
+# Configures old movies' own deployment for its stack tests, which read the media service
+# credentials it prints from packages/backend/.env.local; the media service itself uses the core.
 if [[ -f scripts/configure.ts ]]; then
-  media_env="$(node scripts/configure.ts --site-url "http://localhost:${web_port}" \
+  backend_media_env="$(node scripts/configure.ts --site-url "http://localhost:${web_port}" \
     --media-url "http://127.0.0.1:${media_port}")"
+  printf '%s\n' "$backend_media_env" >>"${root}/packages/backend/.env.local"
+  unset backend_media_env
 fi
-
-cat >"${root}/apps/media/.env.local" <<ENV
-CONVEX_URL=http://127.0.0.1:${convex_port}
-CONVEX_PUBLIC_URL=http://127.0.0.1:${convex_port}
-MEDIA_BASE_URL=http://127.0.0.1:${media_port}
-PORT=${media_port}
-DATA_DIR=${data_dir}
-TRANSCODE_DIR=${transcode_dir}
-BACKUP_DIR=${backup_dir}
-LIBRARY_ROOTS=${library_roots}
-CONVEX_BACKEND_DIR=${root}/packages/backend
-CONVEX_SELF_HOSTED_ADMIN_KEY=${admin_key}
-${media_env}
-ENV
 
 core_admin_key="$(docker exec "$core_container" ./generate_admin_key.sh | tail -n 1)"
 
@@ -174,12 +159,76 @@ ENV
 
 cat >"${root}/apps/web-account/.env.local" <<ENV
 VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
+VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
 ACCOUNT_PORT=${account_port}
+ENV
+
+cat >"${root}/apps/web-movies/.env.local" <<ENV
+VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
+VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
+WEB_PORT=${web_port}
+ACCOUNT_DEV_URL=http://localhost:${account_port}
 ENV
 
 cd "${root}/packages/platform"
 pnpm exec convex deploy --yes >/dev/null
 node scripts/configure.ts
 pnpm exec convex run core/schemaMigrations:run >/dev/null
+
+# The media service's service principal and key on the core. The key is shown once, so it is kept
+# in the state directory, beside the creation time of the core's volume it belongs to; a new volume
+# gets a new principal, and a lost key a new key, whose first use retires the old ones. The key
+# goes from the CLI's output to the file, never to a command line.
+service_id_file="${state_dir}/core-service-id"
+service_key_file="${state_dir}/core-service-key"
+service_volume_file="${state_dir}/core-service-volume"
+core_volume="$(docker volume inspect -f '{{.CreatedAt}}' "${core_container}-data")"
+if [[ "$(cat "$service_volume_file" 2>/dev/null)" != "$core_volume" ]]; then
+  rm -f "$service_id_file" "$service_key_file"
+fi
+json_value() {
+  node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+    const v = JSON.parse(s); process.stdout.write(process.argv[1] ? v[process.argv[1]] : v); })' "${1:-}"
+}
+create_service() {
+  pnpm exec convex run core/accounts/host:createService '{"name":"media server"}' | json_value \
+    >"${service_id_file}.partial"
+  mv "${service_id_file}.partial" "$service_id_file"
+  printf '%s\n' "$core_volume" >"$service_volume_file"
+}
+issue_service_key() {
+  pnpm exec convex run core/auth/apiKeys:issueServiceKey "{\"serviceId\":\"$(<"$service_id_file")\"}" |
+    json_value key >"${service_key_file}.partial"
+}
+if [[ ! -s "$service_key_file" ]]; then
+  [[ -s "$service_id_file" ]] || create_service
+  (
+    umask 077
+    if ! issue_service_key; then
+      create_service
+      issue_service_key
+    fi
+  )
+  mv "${service_key_file}.partial" "$service_key_file"
+fi
+media_ticket_keys="$(pnpm exec convex env get MEDIA_TICKET_KEYS)"
+
+(
+  umask 077
+  cat >"${root}/apps/media/.env.local" <<ENV
+CONVEX_URL=http://127.0.0.1:${core_port}
+CONVEX_PUBLIC_URL=http://127.0.0.1:${core_port}
+MEDIA_SERVICE_API_KEY=$(<"$service_key_file")
+MEDIA_TICKET_KEYS=${media_ticket_keys}
+CONVEX_SELF_HOSTED_ADMIN_KEY=${core_admin_key}
+CONVEX_BACKEND_DIR=${root}/packages/platform
+MEDIA_BASE_URL=http://127.0.0.1:${media_port}
+PORT=${media_port}
+DATA_DIR=${data_dir}
+TRANSCODE_DIR=${transcode_dir}
+BACKUP_DIR=${backup_dir}
+LIBRARY_ROOTS=${library_roots}
+ENV
+)
 
 print_env

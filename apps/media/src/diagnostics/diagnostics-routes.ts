@@ -1,7 +1,6 @@
 import { type LogQuery, MAX_LOG_LIMIT } from "@media/contracts/diagnostics";
 import { NotFound, RateLimited } from "@media/contracts/errors";
 import { EpochMillis } from "@media/contracts/units";
-import type { Viewer } from "@media/contracts/models/account";
 import {
   Clock,
   Duration,
@@ -16,7 +15,7 @@ import {
 } from "effect";
 import type { HttpRouter } from "effect/http";
 
-import type * as ViewerAuth from "../convex/viewer-auth.ts";
+import * as CoreCallers from "../core/core-callers.ts";
 import { commandRoute } from "../http/command-routes.ts";
 import { makeLimiter } from "../http/rate-limit.ts";
 import * as LogReader from "../logging/log-reader.ts";
@@ -29,8 +28,6 @@ const MAX_SESSIONS = 50;
 
 const READ_BUDGET = { burst: 10, perSecond: 0.2 };
 
-const isAdmin = (viewer: Viewer): boolean => viewer.scopes.includes("admin");
-
 const namesSession: LogReader.Keep = (record) =>
   Predicate.isString(record.annotations["sessionId"]);
 
@@ -39,7 +36,7 @@ export const layer: Layer.Layer<
   never,
   never,
   | HttpRouter.HttpRouter
-  | ViewerAuth.Service
+  | CoreCallers.Service
   | RetainedLogs.Service
   | FileSystem.FileSystem
   | Path.Path
@@ -51,11 +48,11 @@ export const layer: Layer.Layer<
 
     const take = makeLimiter();
 
-    const allowRead = (viewer: Viewer) =>
+    const allowRead = (caller: CoreCallers.Caller) =>
       Clock.currentTimeMillis.pipe(
         Effect.flatMap((now) =>
           Option.match(
-            isAdmin(viewer) ? Option.none() : take([[viewer.user.id, READ_BUDGET]], now),
+            CoreCallers.isAdmin(caller) ? Option.none() : take([[caller.userId, READ_BUDGET]], now),
             {
               onNone: () => Effect.void,
               onSome: (seconds) =>
@@ -89,14 +86,15 @@ export const layer: Layer.Layer<
 
     yield* commandRoute(
       "diagnostics.playback",
-      Effect.fn("DiagnosticsRoutes.playback")(function* ({ sessionId, measuredDrift }, viewer) {
-        yield* allowRead(viewer);
+      Effect.fn("DiagnosticsRoutes.playback")(function* ({ sessionId, measuredDrift }, caller) {
+        yield* allowRead(caller);
         const found = yield* read({ sessionId });
         const records = found.matches.map((match) => match.record);
         const owners = ownersOf(records);
 
         const allowed =
-          isAdmin(viewer) || (owners.size > 0 && [...owners].every((id) => id === viewer.user.id));
+          CoreCallers.isAdmin(caller) ||
+          (owners.size > 0 && [...owners].every((id) => id === caller.userId));
 
         const logLevel = yield* References.MinimumLogLevel;
 
@@ -118,20 +116,20 @@ export const layer: Layer.Layer<
 
     yield* commandRoute(
       "diagnostics.sessions",
-      Effect.fn("DiagnosticsRoutes.sessions")(function* ({ since }, viewer) {
-        yield* allowRead(viewer);
+      Effect.fn("DiagnosticsRoutes.sessions")(function* ({ since }, caller) {
+        yield* allowRead(caller);
         const now = yield* Clock.currentTimeMillis;
 
         const found = yield* read(
           {
             since: since ?? EpochMillis.make(Math.max(0, now - Duration.toMillis(RECENT))),
-            grep: isAdmin(viewer) ? '"sessionId"' : viewer.user.id,
+            grep: CoreCallers.isAdmin(caller) ? '"sessionId"' : caller.userId,
           },
           namesSession,
         );
 
         return sessionsOf(found.matches.map((match) => match.record))
-          .filter((session) => isAdmin(viewer) || session.userId === viewer.user.id)
+          .filter((session) => CoreCallers.isAdmin(caller) || session.userId === caller.userId)
           .slice(0, MAX_SESSIONS);
       }),
     );

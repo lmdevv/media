@@ -10,6 +10,7 @@ import { fail } from "../core/lib/errors";
 import { inOrder } from "../core/lib/inOrder";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
 import { reachOf } from "../core/permissions/grants";
+import { registerWithArtworkTickets } from "./artwork";
 import { boundedPersonDetails } from "./bounds";
 import { budgetedViewer } from "./access";
 import type { BudgetedViewer, Seen } from "./access";
@@ -236,7 +237,7 @@ const visibleCredits = async (
 
 const yearOf = (title: Doc<"titles">): number => title.overrides?.year ?? title.year ?? 0;
 
-export const { get, search, requestDetails } = register({
+export const { get, search, requestDetails } = registerWithArtworkTickets(register, {
   get: async (ctx, { personId }, caller) => {
     const person = await ctx.db.get(personId);
 

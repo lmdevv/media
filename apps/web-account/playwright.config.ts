@@ -33,9 +33,17 @@ const desktop = { ...devices["Desktop Chrome"], viewport: { width: 1440, height:
 
 const platformUrl = stack?.platformUrl ?? "http://127.0.0.1:3214";
 
+const mediaUrl = stack?.mediaUrl ?? "";
+
+/** The admin pages that need the media server, which `server.spec.ts` starts on the stack's port. */
+const SERVER_SPEC = /e2e\/server\.spec\.ts$/u;
+
 /**
  * The account client against the worktree's core (`scripts/dev-stack.sh up`): sign in, accepting
- * an invite, and approving a device sign-in. It skips without a stack.
+ * an invite, and approving a device sign-in, on the desktop and again over a plain-HTTP LAN
+ * address. `server` runs the admin Server and Backups pages once, against the media server it
+ * starts from source on the stack's settings, as only one can hold the stack's media port. Each
+ * skips without a stack.
  */
 // A failed test's error context holds the page's text, such as an admin page's invite link.
 process.env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1";
@@ -56,17 +64,24 @@ export default defineConfig({
     launchOptions,
   },
   projects: [
-    { name: "desktop", use: desktop },
+    { name: "desktop", testIgnore: SERVER_SPEC, use: desktop },
     ...(lanAddress === undefined
       ? []
-      : [{ name: "plain HTTP", use: { ...desktop, baseURL: `http://${lanAddress}:${lanPort}` } }]),
+      : [
+          {
+            name: "plain HTTP",
+            testIgnore: SERVER_SPEC,
+            use: { ...desktop, baseURL: `http://${lanAddress}:${lanPort}` },
+          },
+        ]),
+    { name: "server", testMatch: SERVER_SPEC, use: desktop },
   ],
   webServer: [
     {
       command: `pnpm exec vite --port ${port} --strictPort`,
       url: `http://localhost:${port}`,
       reuseExistingServer: true,
-      env: { VITE_PLATFORM_URL: platformUrl },
+      env: { VITE_PLATFORM_URL: platformUrl, VITE_MEDIA_BASE_URL: mediaUrl },
     },
     ...(lanAddress === undefined
       ? []
@@ -75,7 +90,7 @@ export default defineConfig({
             command: `pnpm exec vite --host ${lanAddress} --port ${lanPort} --strictPort`,
             url: `http://${lanAddress}:${lanPort}`,
             reuseExistingServer: true,
-            env: { VITE_PLATFORM_URL: platformUrl },
+            env: { VITE_PLATFORM_URL: platformUrl, VITE_MEDIA_BASE_URL: mediaUrl },
           },
         ]),
   ],

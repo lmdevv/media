@@ -1,10 +1,11 @@
 import { Internal, RateLimited } from "@media/contracts/errors";
 import type { MetadataCandidate } from "@media/contracts/models/catalog";
+import { serverFunctions } from "@media/contracts/server-functions";
 import { Effect, Layer, Match } from "effect";
 import type { HttpRouter } from "effect/http";
 
-import * as MediaBackend from "../convex/media-backend.ts";
-import type * as ViewerAuth from "../convex/viewer-auth.ts";
+import type * as CoreCallers from "../core/core-callers.ts";
+import * as CoreSession from "../core/core-session.ts";
 import * as MetadataPlugin from "../metadata/metadata-plugin.ts";
 import { commandRoute } from "./command-routes.ts";
 
@@ -26,16 +27,16 @@ const providerFailure = Match.type<MetadataPlugin.MetadataError>().pipe(
 export const layer: Layer.Layer<
   never,
   never,
-  HttpRouter.HttpRouter | ViewerAuth.Service | MediaBackend.Service | MetadataPlugin.Service
+  HttpRouter.HttpRouter | CoreCallers.Service | CoreSession.Service | MetadataPlugin.Service
 > = Layer.effectDiscard(
   Effect.gen(function* () {
-    const backend = yield* MediaBackend.Service;
+    const core = yield* CoreSession.Service;
     const plugin = yield* MetadataPlugin.Service;
 
     yield* commandRoute(
       "metadata.searchCandidates",
       Effect.fn("MetadataRoutes.searchCandidates")(function* ({ titleId, query, year }) {
-        const target = yield* backend.call("mediaService.metadataTarget", { titleId });
+        const target = yield* core.call(serverFunctions.metadataTarget, { titleId, cursor: null });
 
         if (MetadataPlugin.PluginAvailability.guards.Unavailable(yield* plugin.availability)) {
           return yield* new Internal({

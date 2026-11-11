@@ -1,10 +1,11 @@
 /**
  * `POST /api/logs`: the retained log for admins, as NDJSON. The body is a `LogQuery`, and the
- * caller's Convex auth token must hold the `admin` scope. Without `follow` the answer ends after
- * the last matching record; with it, new matching records stream until the caller disconnects,
- * and a blank line every 15 seconds keeps idle proxies from closing the connection. A follow ends
- * as the service begins to shut down, so an open one never holds the shutdown up. While the log
- * folder cannot be written or read, the answer says since when (`LOG_UNAVAILABLE_SINCE_HEADER`).
+ * caller's core session token must belong to an owner or an admin. Without `follow` the answer
+ * ends after the last matching record; with it, new matching records stream until the caller
+ * disconnects, and a blank line every 15 seconds keeps idle proxies from closing the connection. A
+ * follow ends as the service begins to shut down, so an open one never holds the shutdown up.
+ * While the log folder cannot be written or read, the answer says since when
+ * (`LOG_UNAVAILABLE_SINCE_HEADER`).
  *
  * NDJSON over a plain chunked response rather than server-sent events: it is the files' own
  * format, so the CLI passes lines through untouched, and `fetch` sends the bearer token, which a
@@ -20,7 +21,7 @@ import { InvalidArgs } from "@media/contracts/errors";
 import { Duration, Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
-import * as ViewerAuth from "../convex/viewer-auth.ts";
+import * as CoreCallers from "../core/core-callers.ts";
 import { bearerOf, bodyDecoder, failureResponse } from "../http/command-routes.ts";
 import * as LogReader from "./log-reader.ts";
 import * as RetainedLogs from "./retained-logs.ts";
@@ -34,14 +35,14 @@ export const layer: Layer.Layer<
   never,
   never,
   | HttpRouter.HttpRouter
-  | ViewerAuth.Service
+  | CoreCallers.Service
   | RetainedLogs.Service
   | FileSystem.FileSystem
   | Path.Path
 > = Layer.effectDiscard(
   Effect.gen(function* () {
     const router = yield* HttpRouter.HttpRouter;
-    const auth = yield* ViewerAuth.Service;
+    const auth = yield* CoreCallers.Service;
     const retained = yield* RetainedLogs.Service;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;

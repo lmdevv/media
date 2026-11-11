@@ -7,6 +7,7 @@ import {
   JOB_TEXT_MAX,
   LAPSED_ERROR,
   pickClaim,
+  RESTORED_ERROR,
   step,
 } from "../../../convex/core/jobs/machine";
 import type { JobEvent, Report, Step } from "../../../convex/core/jobs/machine";
@@ -412,6 +413,58 @@ describe("job machine", () => {
         policy,
       ),
     ).toMatchObject({ ok: true, next: { status: "failed" }, writes: [{ type: "purge", from: 6 }] });
+  });
+
+  it("puts a job a restore caught running back in the queue at once, with no strike", () => {
+    const running = claim(lapse(claim(queued(noItems))));
+
+    const progressed = next(
+      report(running, { append: { from: 0, items: items(0, 4), sealed: false }, through: 2 }),
+    );
+
+    const requeue = { type: "restored", end: { outcome: "requeue" } } as const;
+
+    expect(run(running, requeue, NOW + 1)).toMatchObject({
+      status: "queued",
+      attempts: 2,
+      strikes: 1,
+      lastError: RESTORED_ERROR,
+    });
+    expect(step(progressed, requeue, NOW, policy)).toMatchObject({
+      ok: true,
+      next: {
+        status: "queued",
+        work: { mode: "items", done: 2, appended: 4, sealed: false },
+        strikes: 0,
+      },
+      writes: [],
+    });
+    expect(claim(run(running, requeue))).toMatchObject({ status: "running", attempts: 3 });
+    expect(run(run(running, { type: "cancel" }), requeue).status).toBe("canceled");
+  });
+
+  it("ends a job whose result the restore is as succeeded, and leaves jobs not running", () => {
+    const restoredOk = {
+      type: "restored",
+      end: { outcome: "succeed", message: "Restored" },
+    } as const;
+
+    const waiting = queued();
+    const released = lapse(claim(queued()));
+
+    expect(run(claim(queued()), restoredOk)).toMatchObject({
+      status: "succeeded",
+      finishedAt: NOW,
+      message: "Restored",
+    });
+    expect(run(run(claim(queued()), { type: "cancel" }), restoredOk).status).toBe("succeeded");
+    expect(step(waiting, restoredOk, NOW, policy)).toEqual({
+      ok: true,
+      changed: false,
+      next: waiting,
+      writes: [],
+    });
+    expect(run(released, { type: "restored", end: { outcome: "requeue" } })).toBe(released);
   });
 
   it("claims the oldest queued job among kinds below their cap", () => {

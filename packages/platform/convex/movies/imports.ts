@@ -24,6 +24,7 @@ import { fail } from "../core/lib/errors";
 import { paginate, paginateAtMost } from "../core/lib/paginate";
 import { serverMutation, serverQuery } from "../core/lib/serverFacing";
 import { SERVER, can, principalOf } from "../core/permissions/policy";
+import { registerWithArtworkTickets } from "./artwork";
 import { BOUNDS, IMPORT_BOUNDS, idsWithin } from "./bounds";
 import { budgetFor, work } from "./budget";
 import type { Work } from "./budget";
@@ -1406,7 +1407,7 @@ const requireImporter = (caller: Caller): void => {
 };
 
 /** The import commands. */
-export const { list, get } = register({
+export const { list, get } = registerWithArtworkTickets(register, {
   list: async (ctx, { paginationOpts }, caller) => {
     requireImporter(caller);
 

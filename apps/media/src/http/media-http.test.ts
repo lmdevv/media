@@ -32,8 +32,8 @@ import {
 import { copyBytes } from "../testing/byte-copies.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
-import { signTestToken } from "../testing/test-config.ts";
-import * as TestConvex from "../testing/test-convex.ts";
+import { signTestToken } from "../testing/test-tokens.ts";
+import * as TestSessions from "../testing/test-sessions.ts";
 import { sidecarTrackId } from "../subtitles/subtitle-tracks.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
@@ -1554,17 +1554,17 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
     );
   });
 
-  layer(MediaTestServer.layer({ LOG_LEVEL: "debug" }, { convex: true }), {
+  layer(MediaTestServer.layer({ LOG_LEVEL: "debug" }, { reports: true }), {
     excludeTestServices: true,
     timeout: "120 seconds",
   })("with Convex and debug logs", (it) => {
     it.effect("files every request after its session ended under it, outside the budget", () =>
       Effect.gen(function* () {
         const server = yield* MediaTestServer.Service;
-        const convex = yield* TestConvex.Service;
+        const scripted = yield* TestSessions.Service;
 
-        yield* convex.end("hammered");
-        yield* convex.report("after-hammered", "paused", 0);
+        yield* scripted.end("hammered");
+        yield* scripted.report("after-hammered", "paused", 0);
 
         for (let index = 0; index < 100; index += 1) {
           const exp = index % 2 === 0 ? Date.now() + 60_000 : Date.now() - 1;
@@ -1615,14 +1615,14 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
     );
   });
 
-  layer(MediaTestServer.layer({}, { convex: true }), {
+  layer(MediaTestServer.layer({}, { reports: true }), {
     excludeTestServices: true,
     timeout: "120 seconds",
   })("with Convex and default logs", (it) => {
     it.effect("files no failure for a request after its session ended, its token expired too", () =>
       Effect.gen(function* () {
         const server = yield* MediaTestServer.Service;
-        yield* (yield* TestConvex.Service).end("finished");
+        yield* (yield* TestSessions.Service).end("finished");
 
         for (const exp of [Date.now() + 60_000, Date.now() - 1]) {
           const refused = yield* get(
@@ -1650,6 +1650,27 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         const response = yield* get(`${server.baseUrl}/api/client-config`);
 
         assert.deepStrictEqual(yield* json(response), { convexUrl: "https://convex.example.com" });
+      }),
+    );
+  });
+
+  layer(
+    MediaTestServer.layer({
+      CONVEX_PUBLIC_URL: "https://media.example.com/convex",
+      MEDIA_BASE_URL: "https://media.example.com",
+      WEB_DIST_DIR: "/nonexistent/web",
+    }),
+    { excludeTestServices: true, timeout: "120 seconds" },
+  )("serving the movies client", (it) => {
+    it.effect("tells apps where the core and the movies client answer", () =>
+      Effect.gen(function* () {
+        const server = yield* MediaTestServer.Service;
+        const response = yield* get(`${server.baseUrl}/api/client-config`);
+
+        assert.deepStrictEqual(yield* json(response), {
+          convexUrl: "https://media.example.com/convex",
+          moviesUrl: "https://media.example.com/movies",
+        });
       }),
     );
   });

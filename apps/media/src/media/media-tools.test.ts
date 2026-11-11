@@ -39,7 +39,6 @@ describe("media tools", () => {
         LIBVA_DRIVERS_PATH: "/run/opengl-driver/lib/dri",
         MEDIA_SERVICE_API_KEY: "mk_service_secret",
         CONVEX_SELF_HOSTED_ADMIN_KEY: "convex-self-hosted|secret",
-        PLAYBACK_TOKEN_SECRET: "secret",
         TZ: undefined,
       }),
       { PATH: "/usr/bin", LIBVA_DRIVERS_PATH: "/run/opengl-driver/lib/dri" },

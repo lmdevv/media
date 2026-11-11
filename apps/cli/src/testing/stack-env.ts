@@ -34,11 +34,10 @@ export const findStack = (): Stack | undefined => {
   if (process.env["MEDIA_STACK_TESTS"] !== "1") return undefined;
 
   const backend = readEnvFile(join(repoRoot, "packages/backend/.env.local"));
-  const media = readEnvFile(join(repoRoot, "apps/media/.env.local"));
   const convexUrl = process.env["CONVEX_SELF_HOSTED_URL"] ?? backend.get("CONVEX_SELF_HOSTED_URL");
 
   const mediaServiceKey =
-    process.env["MEDIA_SERVICE_API_KEY"] ?? media.get("MEDIA_SERVICE_API_KEY");
+    process.env["MEDIA_SERVICE_API_KEY"] ?? backend.get("MEDIA_SERVICE_API_KEY");
 
   if (convexUrl === undefined || mediaServiceKey === undefined) {
     throw new Error("MEDIA_STACK_TESTS=1 but no stack is configured; run scripts/dev-stack.sh up");

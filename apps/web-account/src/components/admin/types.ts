@@ -58,3 +58,9 @@ export type GuestLink = RowOf<Core["guests"]["links"]["list"]>;
 
 /** A guest who opened a link. */
 export type GuestVisit = RowOf<Core["guests"]["links"]["activity"]>;
+
+/** What the media server last reported about itself; null before it ever reported. */
+export type ServerStatus = Result<Core["server"]["status"]>;
+
+/** A database backup. */
+export type Backup = RowOf<Core["server"]["backups"]["list"]>;

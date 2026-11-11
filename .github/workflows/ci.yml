@@ -167,11 +167,12 @@ jobs:
         run: scripts/dev-stack.sh destroy
 
   web-stack:
-    name: web app against a local Convex
+    name: movies client against a local Convex
     needs: changes
     if: >-
-      contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web')
-      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/backend')
+      contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web-movies')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web-account')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/platform')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
     runs-on: ubuntu-latest
     steps:
@@ -185,17 +186,17 @@ jobs:
           cache: pnpm
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter web exec playwright install --with-deps chromium
+      - run: pnpm --filter @media/web-movies exec playwright install --with-deps chromium
       - run: scripts/dev-stack.sh up
       - run: docker pull jellyfin/jellyfin:12.2@sha256:357724bf0ae27a672c7cbaa899db2d9abeb13dbd8657ccce750258a4c059d037
-      - run: pnpm --filter web exec playwright test
+      - run: pnpm --filter @media/web-movies exec playwright test
         env:
           MEDIA_JELLYFIN_DOCKER: "1"
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-results
-          path: apps/web/test-results
+          path: apps/web-movies/test-results
           retention-days: 7
       - if: always()
         run: scripts/dev-stack.sh destroy
@@ -258,9 +259,10 @@ jobs:
     needs: changes
     if: >-
       contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
-      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web-movies')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web-account')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/cli')
-      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/backend')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/platform')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

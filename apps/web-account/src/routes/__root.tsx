@@ -3,7 +3,7 @@ import { HeadContent, createRootRouteWithContext } from "@tanstack/react-router"
 
 import { PLATFORM_URL } from "@/env";
 import { AccountProvider } from "@/session/account";
-import type { BrowserStore } from "@/session/browser";
+import type { BrowserStore } from "@media/ui/lib/browser-session";
 import { Gate } from "@/session/gate";
 import type { LinkSecret } from "@/session/link-secret";
 import type { Need } from "@/session/screen";

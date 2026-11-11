@@ -36,20 +36,18 @@ RUN corepack enable
 WORKDIR /src
 COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts --os=linux --cpu=x64 --cpu=arm64 --libc=glibc
-RUN VITE_CONVEX_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter web build --base=/movies/ \
+RUN VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter @media/web-movies build --base=/movies/ \
  && VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter @media/web-account build \
  && pnpm --config.verify-deps-before-run=false --filter @media/server build \
  && pnpm --config.verify-deps-before-run=false --filter @lmdevv/movies build
-# Each Convex project's tsconfig extends the shared config, which `convex deploy` reads. The
-# core's configure script imports TypeScript from a workspace package, which Node does not strip
-# inside node_modules, so it ships bundled.
-RUN for project in backend platform; do \
-      pnpm --filter "@media/$project" deploy --prod --legacy "/out/$project" \
-      && rm -rf "/out/$project/test" \
-      && mkdir -p "/out/$project/node_modules/@media" \
-      && cp -r packages/config "/out/$project/node_modules/@media/config" \
-      && sh deploy/functions-hash.sh "/out/$project" >"/out/$project/.functions-hash"; \
-    done \
+# The core's tsconfig extends the shared config, which `convex deploy` reads. Its configure script
+# imports TypeScript from a workspace package, which Node does not strip inside node_modules, so it
+# ships bundled.
+RUN pnpm --filter @media/platform deploy --prod --legacy /out/platform \
+ && rm -rf /out/platform/test \
+ && mkdir -p /out/platform/node_modules/@media \
+ && cp -r packages/config /out/platform/node_modules/@media/config \
+ && sh deploy/functions-hash.sh /out/platform >/out/platform/.functions-hash \
  && pnpm --config.verify-deps-before-run=false --filter @media/server exec esbuild ../../packages/platform/scripts/configure.ts \
       --bundle --platform=node --format=esm --target=node24 --log-level=warning \
       --outfile=/out/platform/scripts/configure.mjs \
@@ -57,7 +55,7 @@ RUN for project in backend platform; do \
  && mkdir -p /out/media/scripts \
  && cp -r apps/media/dist /out/media/dist \
  && cp apps/media/scripts/configure-web.ts /out/media/scripts/ \
- && cp -r apps/web/dist /out/web \
+ && cp -r apps/web-movies/dist /out/web \
  && cp -r apps/web-account/dist /out/account \
  && install -D -m 644 apps/cli/dist/media.js /out/cli/media.mjs \
  && install -m 644 apps/cli/dist/THIRD_PARTY_LICENSES.md /out/cli/
@@ -107,13 +105,12 @@ RUN userdel --remove node \
  && useradd --system --uid 902 --gid caddy --no-create-home --home-dir /nonexistent \
       --shell /usr/sbin/nologin caddy
 
-# The Convex image ships its binaries executable by root only; the backends run as `convex`.
+# The Convex image ships its binaries executable by root only; the backend runs as `convex`.
 COPY --from=convex --chmod=755 /convex/convex-local-backend /convex/generate_key /app/convex/
 COPY --from=argv-secret --chmod=755 /argv-secret.so /app/convex/argv-secret.so
 COPY --from=caddy /usr/bin/caddy /usr/bin/caddy
 ARG CONVEX_IMAGE
 RUN printf '%s\n' "$CONVEX_IMAGE" >/app/convex/image
-COPY --from=build /out/backend /app/backend
 COPY --from=build /out/platform /app/platform
 COPY --from=build /out/media /app/media
 COPY --from=build /out/web /app/web
@@ -132,14 +129,14 @@ ENV NODE_ENV=production \
     S6_SERVICES_GRACETIME=24000 \
     S6_KILL_GRACETIME=3000
 # On a stop, s6 stops the media service first, which ends open responses 3 s in and then closes
-# its streams, then both Convex backends (with SIGINT, which shuts their databases down cleanly)
-# and Caddy. It waits up to 24 seconds for them and 3 more before it kills what is left, so give
+# its streams, then the Convex backend (with SIGINT, which shuts its database down cleanly) and
+# Caddy. It waits up to 24 seconds for them and 3 more before it kills what is left, so give
 # the container a 30-second stop timeout (`--stop-timeout 30`, or Compose's stop_grace_period).
 
 VOLUME ["/data", "/transcode"]
 EXPOSE 8080
-# The media service starts only after init, which backs up before an upgrade and deploys both
-# projects, so the start period is long; it ends at the first passing check. The media service is
+# The media service starts only after init, which backs up before an upgrade and deploys the core,
+# so the start period is long; it ends at the first passing check. The media service is
 # checked directly, past Caddy, which its per-client rate limits never count; Caddy through /convex.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --start-interval=2s \
   CMD curl -fsS http://127.0.0.1:4300/api/health | grep -q '"backend":"connected"' \

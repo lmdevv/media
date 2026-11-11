@@ -5,8 +5,8 @@ import { useState } from "react";
 
 import { useActions } from "./action";
 import { LEVEL_LABELS } from "./libraries";
-import { useAllPages, usePages } from "./pages";
-import type { Paged } from "./pages";
+import { useAllPages, usePages } from "@media/ui/lib/pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { ItemRow, PagedList, Section, SelectField } from "./parts";
 import type { Choice } from "./parts";
 import type { Grant, Group, Level, LibraryId, Principal, User } from "./types";

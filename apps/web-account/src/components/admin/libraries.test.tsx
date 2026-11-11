@@ -7,7 +7,7 @@ import type { NewLibrary } from "./libraries";
 import { LibraryView } from "./library";
 import type { LibraryMode, LibraryState } from "./library";
 import { SharingView } from "./sharing";
-import type { Paged } from "./pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { disabledButton, loaded, noop, textOf } from "./testing";
 import type { Grant, Group, Library, LibraryDetail, LibraryId, User } from "./types";
 

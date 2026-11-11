@@ -5,106 +5,144 @@ restores, upgrades, hardware acceleration, and telemetry. The README has the qui
 
 ## What runs
 
-| Piece           | Compose (`deploy/compose`)                                  | NixOS (`services.media`)                               |
-| --------------- | ----------------------------------------------------------- | ------------------------------------------------------ |
-| Convex backends | the core's and old movies', in the image                    | `media-core-convex` and `movies-convex` OCI containers |
-| Media service   | in the image, runs as `PUID:PGID`                           | native `movies.service`, user `movies`                 |
-| Caddy, one port | in the image, port 8080                                     | `media-proxy.service` on `listenAddress:port`          |
-| Web clients     | account client by Caddy, movies client by the media service | the same                                               |
-| Core database   | `media-data` volume, `/data/core`                           | `dataDir/core` (`/var/lib/media/core`)                 |
-| Movies database | `media-data` volume, `/data/movies/convex`                  | `dataDir/movies/convex`                                |
-| Service state   | `media-data` volume, `/data/movies/media`                   | `dataDir/movies/media`                                 |
-| Backups         | `media-data` volume, `/data/movies/backups`                 | `backupDir` (`dataDir/movies/backups`)                 |
-| HLS segments    | `media-transcode` volume                                    | `transcodeDir` (`/var/cache/movies/...`)               |
-| Libraries       | bind mounts under `/media`, read-only                       | `libraryDirs`, read-only to the service                |
+| Piece             | Compose (`deploy/compose`)                                  | NixOS (`services.media`)                      |
+| ----------------- | ----------------------------------------------------------- | --------------------------------------------- |
+| Convex backend    | the core's, in the image                                    | `media-core-convex` OCI container             |
+| Media service     | in the image, runs as `PUID:PGID`                           | native `movies.service`, user `movies`        |
+| Caddy, one port   | in the image, port 8080                                     | `media-proxy.service` on `listenAddress:port` |
+| Web clients       | account client by Caddy, movies client by the media service | the same                                      |
+| Core database     | `media-data` volume, `/data/core`                           | `dataDir/core` (`/var/lib/media/core`)        |
+| Media service key | `media-data` volume, `/data/core/secrets`, root only        | `dataDir/core/secrets`, root only             |
+| Service state     | `media-data` volume, `/data/movies/media`                   | `dataDir/movies/media`                        |
+| Backups           | `media-data` volume, `/data/core/backups`                   | `backupDir` (`dataDir/core/backups`)          |
+| HLS segments      | `media-transcode` volume                                    | `transcodeDir` (`/var/cache/movies/...`)      |
+| Libraries         | bind mounts under `/media`, read-only                       | `libraryDirs`, read-only to the service       |
 
-Both Convex backends and the media service listen on loopback only. Caddy serves them on the one
-port with the routes in `deploy/image/rootfs/etc/caddy/Caddyfile` (ADR 0026). Convex's HTTP actions
-stay inside the install (ADR 0025).
+One Convex backend, the core's, holds every domain (ADR 0027). It and the media service listen on
+loopback only. Caddy serves them on the one port with the routes in
+`deploy/image/rootfs/etc/caddy/Caddyfile`, and answers `404` for `/movies/convex`, where old
+movies' backend answered before the movies cutover. Convex's HTTP actions stay inside the install
+(ADR 0025).
 
-Every start, as root, before the media service runs unprivileged (steps 1 to 4 run for the core,
-then for old movies):
+Every start, as root, before the media service runs unprivileged:
 
-1. Derive the Convex admin key from the backend's instance secret. It is never written to disk
-   except movies' key into the service's private environment under `/run/movies` (tmpfs).
-2. If the release or the project's functions changed, export a backup first
-   (`core-manual-<timestamp>.zip` in `/data/core/backups`, `movies-manual-<timestamp>.zip` in the
-   movies backup folder).
-3. Deploy the project's bundled Convex functions.
-4. Configure the deployment. The core's (`packages/platform/scripts/configure.ts`) also runs its
-   schema migrations. Movies' (`packages/backend/scripts/configure.ts`) sets Convex Auth's JWT
-   keys, `SITE_URL` (the public URL plus `/movies`), `MEDIA_BASE_URL`, `PLAYBACK_TOKEN_SECRET`,
-   and the media service's restricted key. Existing secrets are kept, so this is safe to repeat.
-5. Write each public Convex URL into a copy of its web client: `MEDIA_BASE_URL/convex` for the
-   account client, `MEDIA_BASE_URL/movies/convex` for the movies client.
-6. Start the media service with its secrets in `/run/movies/media.env` (mode 0600, owned by the
-   service user). No secret is in the image, the Nix store, a command line, or the web app.
+1. Derive the core's admin key from the backend's instance secret. It is never written to disk
+   except into the service's private environment under `/run/movies` (tmpfs).
+2. If the release or the core's functions changed, export a backup first:
+   `core-manual-<timestamp>.zip` in the backup folder, owned by the service user.
+3. Deploy the core's bundled Convex functions (`packages/platform`).
+4. Configure the deployment with `packages/platform/scripts/configure.ts`: Convex Auth's JWT keys
+   and the ticket key ring, `MEDIA_TICKET_KEYS`. Existing values are kept, so this is safe to
+   repeat. Then run the core's schema migrations.
+5. On the first start, create the media service's service principal and issue its key into
+   `core/secrets/media-service-key`, which only root can read. Later starts reuse the file. If
+   the file is missing, the start issues a new key to the same principal, and that key's first
+   sign-in retires the old one.
+6. Read `MEDIA_TICKET_KEYS` from the core deployment for the media service.
+7. Write the core's public URL, `MEDIA_BASE_URL/convex`, into a copy of each web client.
+8. Start the media service with its secrets in `/run/movies/media.env` (mode 0600, owned by the
+   service user). No secret is in the image, the Nix store, a command line, or the web clients.
+
+## Run Convex CLI commands against the core
+
+The core's Convex CLI runs inside the install with the core's admin key. In the image:
+
+```sh
+docker compose exec media sh -c '
+  export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210
+  export CONVEX_SELF_HOSTED_ADMIN_KEY="$(sed -n "s/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p" /run/movies/media.env)"
+  cd /app/platform
+  node node_modules/convex/bin/main.js env list'
+```
+
+On NixOS, run the same commands as root with `media-core-convex` (from the package) in place of
+`node node_modules/convex/bin/main.js`, `CONVEX_SELF_HOSTED_URL` set to
+`http://127.0.0.1:<internalPorts.coreConvex>` (3210 by default), and the admin key from
+`/run/movies/media.env`.
 
 ## Backups
 
 - A Convex cron requests a backup every night at 03:00 UTC. The media service runs it as a job:
-  `convex export --include-file-storage` into a hidden partial file in the backup folder, renamed
-  to `movies-nightly-<timestamp>.zip` only when the export succeeded.
+  `convex export --include-file-storage` of the core into a hidden partial file in the backup
+  folder, renamed to `movies-nightly-<timestamp>.zip` only when the export succeeded. The name
+  keeps old movies' prefix, though the archive holds the core.
 - Archives are `0600` in a `0700` folder owned by the service user: they hold every account's
-  password hash and the media service key's hash. Copy them off the machine with the same care.
+  password hash and the hashes of the API keys, the media service's included. Copy them off the
+  machine with the same care.
 - After a new backup succeeds, archives older than `BACKUP_RETENTION_DAYS` (14) are deleted. The
   new archive is never deleted, and nothing is pruned after a failed backup.
-- Back up now: Admin → Backups in the web app, or `media backup --wait`.
-- Deployment environment variables (JWT keys, playback secret, service key) are not part of an
-  export. A restore keeps the current ones and the startup configuration fills in anything
+- Back up now: **Admin** → **Backups** in the account client, or `media admin backups run`.
+- Deployment environment variables, Convex Auth's JWT keys and `MEDIA_TICKET_KEYS`, are not part
+  of an export. A restore keeps the current ones, and the startup configuration fills in anything
   missing.
 
 ## Restore
 
-Admin → Backups → Restore in the web app, or with the CLI as an admin:
-
-```sh
-media backups list
-media restore movies-nightly-2026-10-12T03-00-00-000Z.zip
-```
+Restore from **Admin** → **Backups** in the account client, as an owner or an admin. The CLI's
+`media backups restore` is one of the old top-level words, which cannot reach this install until
+the movies CLI moves onto the core.
 
 The media service (`POST /api/backups/restore`) then:
 
 1. runs `convex import --replace-all` with the archive (only archives inside the backup folder),
-2. registers its own key again (the snapshot may come from another deployment),
-3. settles the jobs the snapshot caught mid-run (`maintenance:settleRestoredJobs`),
-4. ends every session (`maintenance:endAllSessions`): everyone, including the admin who
-   restored, signs in again; the media service signs back in by itself,
-5. lists the archives on disk again, since the snapshot's backup list is older.
+2. settles the jobs the snapshot caught mid-run (`core/maintenance:settleRestoredJobs`): the
+   backup being restored succeeds, and the other jobs go back to the queue,
+3. ends every session opened before the restore (`core/maintenance:endAllSessions`): everyone,
+   including the admin who restored, signs in again. API keys and device grants stay, so the media
+   service signs back in with its key,
+4. lists the archives on disk again, since the snapshot's backup list is older.
 
-The restore replaces everything in Convex: accounts, profiles, libraries, history, and rooms.
+The restore replaces everything in the core: accounts, libraries, catalogs, history, and settings.
 Files on disk are not touched; the next library scan reconciles them.
+
+### Issue the service key again after a restore
+
+An archive holds only the service keys that existed when it was taken. After you restore an
+archive older than the media service's key, or one from another install, the core refuses the
+key, and `/api/health` reports the backend as `connecting` from then on. To issue a new key:
+
+- Compose: run `docker compose exec media rm /data/core/secrets/media-service-key`, then
+  `docker compose restart media`.
+- NixOS: run `rm /var/lib/media/core/secrets/media-service-key` as root, then
+  `systemctl restart movies`.
+
+The start issues a new key, to a new service principal if the restored database does not hold the
+recorded one. Artwork keys are sealed under the service key, so images fail until the next scan
+of each library or a metadata refresh writes new keys. Start again any import that was queued
+before the new key.
 
 ### Restoring onto a new machine
 
-1. Install [movies] (Compose or NixOS) and start it once.
+1. Install [media] (Compose or NixOS) and start it once.
 2. Copy the archive into the backup folder
-   (`docker compose cp backup.zip media:/data/movies/backups/` and
-   `docker compose exec media chown movies:movies /data/movies/backups/backup.zip`, or into
+   (`docker compose cp backup.zip media:/data/core/backups/` and
+   `docker compose exec media chown movies:movies /data/core/backups/backup.zip`, or into
    `backupDir` owned by `movies` on NixOS) and restart the media service, which lists it.
-3. Create a temporary owner account in the movies client (the first account on an empty
-   deployment is the owner), then restore the archive as above. The temporary account is replaced by the
-   snapshot's accounts.
-4. Mount the libraries at the same paths as before, or edit each library's folders afterwards.
+3. Create a temporary owner account in the account client at `/` (the first account on an empty
+   deployment is the owner), then restore the archive as above. The snapshot's accounts replace
+   the temporary account.
+4. Issue the service key again, as above, since the new install's key is not in the archive.
+5. Mount the libraries at the same paths as before, or edit each library's folders afterwards.
 
 ### Restoring without the media service
 
-If the media service cannot start, restore with the Convex CLI in the image:
+If the media service cannot start, restore with the core's Convex CLI in the image:
 
 ```sh
 docker compose exec media sh -c '
-  export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3220
+  export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210
   export CONVEX_SELF_HOSTED_ADMIN_KEY="$(sed -n "s/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p" /run/movies/media.env)"
-  cd /app/backend
-  node node_modules/convex/bin/main.js import --replace-all --yes /data/movies/backups/<archive>.zip
-  node node_modules/convex/bin/main.js run maintenance:settleRestoredJobs
-  node node_modules/convex/bin/main.js run maintenance:endAllSessions'
-docker compose restart media    # configures again and re-registers the service key
+  cd /app/platform
+  before="$(($(date +%s) * 1000))"
+  node node_modules/convex/bin/main.js import --replace-all --yes /data/core/backups/<archive>.zip
+  node node_modules/convex/bin/main.js run core/maintenance:settleRestoredJobs "{\"before\": $before}"
+  node node_modules/convex/bin/main.js run core/maintenance:endAllSessions "{\"before\": $before}"'
+docker compose restart media
 ```
 
-On NixOS, run the same commands as root with `movies-convex` (from the package) in place of
-`node node_modules/convex/bin/main.js`, `CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3220`, the
-admin key from `/run/movies/media.env`, then `systemctl restart movies`.
+On NixOS, run the same commands as described in "Run Convex CLI commands against the core", then
+`systemctl restart movies`. If the archive is older than the media service's key, issue the key
+again before the restart.
 
 ## Upgrading
 
@@ -119,7 +157,7 @@ npm and standalone binaries on the tag's GitHub Release. Upgrade a CLI installed
 ad hoc signed binary until `xattr -d com.apple.quarantine`); the image and the Nix modules carry
 their own.
 
-The all-in-one image (ADR 0026) is a fresh install, not an upgrade of a v0.2 install. Its Compose
+The all-in-one image (ADR 0027) is a fresh install, not an upgrade of a v0.2 install. Its Compose
 project, volumes, and data layout are new (`media`, `media-data`, `/data/core` and `/data/movies`),
 and the NixOS module's `dataDir` moved to `/var/lib/media`. Nothing moves the old data over (ADR
 0002). Stop the old install before starting the new one, since both take port 8080, and keep its
@@ -133,7 +171,7 @@ volumes or `/var/lib/movies` until you no longer need them.
 ### Compose
 
 Keep the checkout and `MEDIA_IMAGE` on the same release, since `compose.yaml` passes the settings
-and volumes that release's image expects. The image carries both Convex backends itself. `:latest`
+and volumes that release's image expects. The image carries the core's Convex backend itself. `:latest`
 follows the newest release whatever the checkout, so pin the version when you check out a tag.
 
 ```sh
@@ -142,7 +180,7 @@ cd deploy/compose
 # .env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.2.0             # or :main for the edge
 docker compose pull
 docker compose up -d
-docker compose logs -f media     # "upgrading movies from 0.1.0 to 0.2.0; backing up to ... first"
+docker compose logs -f media     # "upgrading the core from 0.1.0 to 0.2.0; backing up to ... first"
 ```
 
 ### NixOS
@@ -155,10 +193,10 @@ journalctl -u movies -f
 
 ### What an upgrade does
 
-The first start of a new version exports a backup of each project, `core-manual-<timestamp>.zip`
-and `movies-manual-<timestamp>.zip`, before it deploys the new functions. A new version is a new
-release or any build whose Convex functions differ: the image and the Nix package record a hash of
-each project's functions, so following `main` or building locally backs up too. Convex refuses to
+The first start of a new version exports a backup of the core, `core-manual-<timestamp>.zip`,
+before it deploys the new functions. A new version is a new release or any build whose Convex
+functions differ: the image and the Nix package record a hash of the core's functions, so
+following `main` or building locally backs up too. Convex refuses to
 deploy a schema the stored documents do not match, so such a deploy fails and the start stops with
 the old functions still in place; restarts after that do not export again for the same version.
 Convex backend upgrades ride along with [movies] releases; never change its image on your own.
@@ -168,8 +206,8 @@ Convex backend upgrades ride along with [movies] releases; never change its imag
 1. Go back to the previous version: `git checkout v0.1.0` and its image tag
    (`MEDIA_IMAGE=ghcr.io/lmdevv/media:0.1.0`, then `docker compose up -d`), or
    `nixos-rebuild switch --rollback`.
-2. If the older functions start, restore the `movies-manual-…` archive the upgrade took (Admin →
-   Backups, or `media restore`). If they do not deploy over the newer data, restore without the
+2. If the older functions start, restore the `core-manual-…` archive the upgrade took (**Admin** →
+   **Backups** in the account client). If they do not deploy over the newer data, restore without the
    media service (above) and start it again.
 
 ### Releasing
@@ -335,16 +373,17 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
   messages. Playback URLs carry tokens, so automatic HTTP spans for `/media/` are off as well,
   and so are spans for paths that start with `//`, which a span would read as a host. With OTLP
   on, the console and the retained log keep the same redacted lines.
-- [movies] sends nothing anywhere else: no analytics, no update checks. Both Convex backends run
-  with their beacon disabled.
+- [media] sends nothing anywhere else: no analytics, no update checks. The Convex backend runs
+  with its beacon disabled.
 
 ## Verifying an install
 
 - `scripts/stack-e2e.sh` builds the image and runs the packaged suite against a fresh Compose
-  stack: privilege and secret checks, owner sign-up, library, scan, direct and HLS playback, a
-  media restart (streams answer a typed `StreamNotFound`, then play again), CLI backup and
-  restore, the image's own `media` signing in to its stack, and an upgrade backup. CI runs it on
-  every image change.
+  stack: privilege and secret checks, one Convex backend and `/movies/convex` answering Not Found,
+  the owner's sign-in on the core, library, scan, direct and HLS playback of a `movies.play.start`
+  ticket, a media restart (streams answer a typed `StreamNotFound`, then play again), backup and
+  restore through the media service, the image's own `media` signing in to the core, an upgrade
+  backup, and a lost service key issued again. CI runs it on every image change.
 - `scripts/nixos-module-e2e.sh` does the same against the NixOS module's own unit on a NixOS host
   (needs sudo and Docker), and checks the sandbox.
 - `scripts/check-sandbox.sh` runs the media tests (encoders started, released, and restarted

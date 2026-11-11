@@ -12,6 +12,7 @@
     "test:e2e": "playwright test --pass-with-no-tests"
   },
   "dependencies": {
+    "@media/contracts": "workspace:*",
     "@media/sdk": "workspace:*",
     "@media/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
@@ -24,7 +25,6 @@
   },
   "devDependencies": {
     "@media/config": "workspace:*",
-    "@media/contracts": "workspace:*",
     "@playwright/test": "1.64.0",
     "@tanstack/router-plugin": "^1.168.35",
     "@types/node": "catalog:",

@@ -39,11 +39,10 @@ export interface Stack {
 export const findStack = (): Stack | undefined => {
   if (process.env["MEDIA_STACK_TESTS"] !== "1") return undefined;
   const backend = readEnvFile(join(backendDir, ".env.local"));
-  const media = readEnvFile(join(backendDir, "../../apps/media/.env.local"));
 
   const convexUrl = pick("CONVEX_SELF_HOSTED_URL", backend);
-  const mediaServiceKey = pick("MEDIA_SERVICE_API_KEY", media);
-  const playbackTokenSecret = pick("PLAYBACK_TOKEN_SECRET", media);
+  const mediaServiceKey = pick("MEDIA_SERVICE_API_KEY", backend);
+  const playbackTokenSecret = pick("PLAYBACK_TOKEN_SECRET", backend);
 
   if (
     convexUrl === undefined ||

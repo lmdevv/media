@@ -1,9 +1,8 @@
-import { artworkTicketId } from "@media/contracts/artwork";
 import { PlaybackSessionEnded, StreamId } from "@media/contracts/media-playback";
 import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 import { serverFunctions } from "@media/contracts/server-functions";
 import type { SessionStatus } from "@media/contracts/server-functions";
-import { loadTicketKeyRing } from "@media/contracts/ticket";
+import { artworkTicketId, loadTicketKeyRing } from "@media/contracts/ticket";
 import { EpochMillis } from "@media/contracts/units";
 import type { TicketPurpose } from "@media/contracts/ticket";
 import { TICKET_TEST_KEYS } from "@media/contracts/ticket-vectors";

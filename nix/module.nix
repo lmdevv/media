@@ -1,7 +1,7 @@
-# NixOS module for [media]: the core's and old movies' self-hosted Convex backends as pinned OCI
-# containers, the media service (which also serves the movies client) as a native, hardened
-# systemd service built from this repository (nix/package.nix), and Caddy in front of them on one
-# address, with the image's routes (deploy/image/rootfs/etc/caddy/Caddyfile, docs/decisions/0015).
+# NixOS module for [media]: the core's self-hosted Convex backend as a pinned OCI container, the
+# media service (which also serves the movies client) as a native, hardened systemd service built
+# from this repository (nix/package.nix), and Caddy in front of them on one address, with the
+# image's routes (deploy/image/rootfs/etc/caddy/Caddyfile, docs/decisions/0015).
 #
 #   services.media = {
 #     enable = true;
@@ -14,11 +14,12 @@
 #     omdbApiKeyFile = "/run/secrets/omdb-api-key";
 #   };
 #
-# Every startup derives each Convex admin key from its backend's instance secret, backs up before
-# an upgrade, deploys both projects' functions, configures both deployments (keys and secrets are
+# Every startup derives the core's admin key from its backend's instance secret, backs up before
+# an upgrade, deploys the core's functions, configures the deployment (keys and secrets are
 # generated inside Convex and kept there) and both web clients, and writes the service's
-# environment to /run/movies/media.env, readable by the service user only. No secret enters the
-# Nix store.
+# environment to /run/movies/media.env, readable by the service user only. The first startup also
+# creates the media service's service principal on the core and issues its key, which later
+# startups reuse from a root-only file. No secret enters the Nix store.
 #
 # The host also gets the `media` CLI, pointed at this server (programs.media, in cli-module.nix).
 {
@@ -34,33 +35,40 @@ let
 
   backend = config.virtualisation.oci-containers.backend;
   containerRuntime = lib.getExe pkgs.${backend};
-  containerUnits = [
-    "${backend}-media-core-convex.service"
-    "${backend}-movies-convex.service"
-  ];
+  containerUnits = [ "${backend}-media-core-convex.service" ];
 
   hardware = cfg.hardwareAcceleration != "none";
   ports = cfg.internalPorts;
   publicUrl = lib.removeSuffix "/" cfg.publicUrl;
   coreConvexUrl = "http://127.0.0.1:${toString ports.coreConvex}";
-  moviesConvexUrl = "http://127.0.0.1:${toString ports.moviesConvex}";
   coreDataDir = "${cfg.dataDir}/core";
+  secretsDir = "${coreDataDir}/secrets";
   moviesDataDir = "${cfg.dataDir}/movies";
   mediaDataDir = "${moviesDataDir}/media";
 
-  # Their HTTP actions stay inside their containers (docs/decisions/0025).
+  # The instance secret's file inside the Convex container, on its data volume, where
+  # `convex-entry.sh` keeps it.
+  convexSecretFile = "/convex/data/credentials/instance_secret";
+
+  # Its HTTP actions stay inside its container (docs/decisions/0025).
   convexContainer = name: port: origin: dataDir: {
     image = cfg.convexImage;
+    entrypoint = "/bin/bash";
+    cmd = [ "/media-convex-entry.sh" ];
     ports = [ "127.0.0.1:${toString port}:3210" ];
     environment = {
       INSTANCE_NAME = name;
       CONVEX_CLOUD_ORIGIN = origin;
       CONVEX_SITE_ORIGIN = "http://127.0.0.1:3211";
-      DISABLE_BEACON = "1";
-      REDACT_LOGS_TO_CLIENT = "1";
-      DO_NOT_REQUIRE_SSL = "1";
+      # Idle memory, as in the image (docs/decisions/0027).
+      MALLOC_ARENA_MAX = "2";
+      ISOLATE_IDLE_TIMEOUT_SECONDS = "60";
     };
-    volumes = [ "${dataDir}:/convex/data" ];
+    volumes = [
+      "${dataDir}:/convex/data"
+      "${./convex-entry.sh}:/media-convex-entry.sh:ro"
+      "${cfg.package}/lib/movies/convex/argv-secret.so:/argv-secret.so:ro"
+    ];
   };
 
   setup = pkgs.writeShellApplication {
@@ -69,7 +77,8 @@ let
       cfg.package
       pkgs.coreutils
       pkgs.curl
-      pkgs.gnused
+      pkgs.findutils
+      pkgs.jq
     ];
     text = ''
       umask 077
@@ -84,81 +93,96 @@ let
       public_url=${lib.escapeShellArg publicUrl}
       owner=${lib.escapeShellArg "${cfg.user}:${cfg.group}"}
 
-      # The service's folders, in case they were removed since boot (tmpfiles creates them).
+      # The service's folders, in case they were removed since boot (tmpfiles creates them). The
+      # core's backups are the service's: it takes the nightly ones and restores them.
       install -d -m 700 -o ${lib.escapeShellArg cfg.user} -g ${lib.escapeShellArg cfg.group} \
         ${lib.escapeShellArgs [
           mediaDataDir
           cfg.backupDir
           cfg.transcodeDir
         ]}
-      install -d -m 700 ${lib.escapeShellArg "${coreDataDir}/backups"}
+      find ${lib.escapeShellArg cfg.backupDir} \( \! -user ${lib.escapeShellArg cfg.user} -o \! -group ${lib.escapeShellArg cfg.group} \) \
+        -exec chown -h "$owner" {} +
+      install -d -m 700 ${lib.escapeShellArg secretsDir}
 
-      # Shell functions return one status, so these leave $admin_key and $deployed_version behind.
-      deploy() {
-        local domain="$1" url="$2" container="$3" convex="$4" hash_file="$5" data="$6" backups="$7"
-        local backup_owner="$8" version name
-        version=${lib.escapeShellArg cfg.package.version}
-        [ -s "$hash_file" ] && version="$version+$(cat "$hash_file")"
+      url=${lib.escapeShellArg coreConvexUrl}
+      data=${lib.escapeShellArg coreDataDir}
+      backups=${lib.escapeShellArg cfg.backupDir}
+      version=${lib.escapeShellArg cfg.package.version}
+      hash_file=${lib.escapeShellArg "${cfg.package}/lib/movies/platform/.functions-hash"}
+      [ -s "$hash_file" ] && version="$version+$(cat "$hash_file")"
 
-        log "waiting for the $domain Convex backend at $url"
-        for _ in $(seq 1 120); do
-          curl -fsS "$url/version" >/dev/null 2>&1 && break
-          sleep 1
-        done
-        curl -fsS "$url/version" >/dev/null
+      log "waiting for the core's Convex backend at $url"
+      for _ in $(seq 1 120); do
+        curl -fsS "$url/version" >/dev/null 2>&1 && break
+        sleep 1
+      done
+      curl -fsS "$url/version" >/dev/null
 
-        admin_key="$(${containerRuntime} exec "$container" ./generate_admin_key.sh | tail -n 1)"
-        export CONVEX_SELF_HOSTED_URL="$url" CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
+      # `generate_key` takes the secret only as an argument; the shim reads it from its file.
+      admin_key="$(${containerRuntime} exec -e LD_PRELOAD=/argv-secret.so \
+        -e ARGV_SECRET_FILE=${convexSecretFile} media-core-convex \
+        /convex/generate_key core @ARGV_SECRET_FILE | tail -n 1)"
+      export CONVEX_SELF_HOSTED_URL="$url" CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
 
-        if [ -s "$data/version" ] && [ "$(cat "$data/version")" != "$version" ] &&
-          [ "$(cat "$data/upgrade-backup" 2>/dev/null)" != "$version" ]; then
-          name="$domain-manual-$(date -u +%Y-%m-%dT%H-%M-%S-000Z).zip"
-          log "upgrading $domain from $(cat "$data/version") to $version; backing up to $name first"
-          "$convex" export --include-file-storage --path "$backups/.partial-$name"
-          mv "$backups/.partial-$name" "$backups/$name"
-          chown "$backup_owner" "$backups/$name"
-          printf '%s\n' "$version" >"$data/upgrade-backup"
-        fi
+      if [ -s "$data/version" ] && [ "$(cat "$data/version")" != "$version" ] &&
+        [ "$(cat "$data/upgrade-backup" 2>/dev/null)" != "$version" ]; then
+        name="core-manual-$(date -u +%Y-%m-%dT%H-%M-%S-000Z).zip"
+        log "upgrading the core from $(cat "$data/version") to $version; backing up to $name first"
+        media-core-convex export --include-file-storage --path "$backups/.partial-$name"
+        mv "$backups/.partial-$name" "$backups/$name"
+        chown "$owner" "$backups/$name"
+        printf '%s\n' "$version" >"$data/upgrade-backup"
+      fi
 
-        log "deploying the $domain functions ($version)"
-        "$convex" deploy --yes --codegen disable --typecheck disable
-        deployed_version="$version"
-      }
-
-      finish() {
-        printf '%s\n' "$deployed_version" >"$1/version"
-        rm -f "$1/upgrade-backup"
-      }
-
-      deploy core ${lib.escapeShellArg coreConvexUrl} media-core-convex media-core-convex \
-        ${lib.escapeShellArg "${cfg.package}/lib/movies/platform/.functions-hash"} \
-        ${lib.escapeShellArg coreDataDir} ${lib.escapeShellArg "${coreDataDir}/backups"} root:root
+      log "deploying the core's functions ($version)"
+      media-core-convex deploy --yes --codegen disable --typecheck disable
       log "configuring the core deployment"
       media-core-configure
       media-core-convex run core/schemaMigrations:run >/dev/null
-      finish ${lib.escapeShellArg coreDataDir}
+      printf '%s\n' "$version" >"$data/version"
+      rm -f "$data/upgrade-backup"
 
-      deploy movies ${lib.escapeShellArg moviesConvexUrl} movies-convex movies-convex \
-        ${lib.escapeShellArg "${cfg.package}/lib/movies/backend/.functions-hash"} \
-        ${lib.escapeShellArg mediaDataDir} ${lib.escapeShellArg cfg.backupDir} "$owner"
-      log "configuring the movies deployment"
-      media_env="$(movies-configure --site-url="$public_url/movies" --media-url="$public_url")"
-      media_service_api_key="$(sed -n 's/^MEDIA_SERVICE_API_KEY=//p' <<<"$media_env")"
-      playback_token_secret="$(sed -n 's/^PLAYBACK_TOKEN_SECRET=//p' <<<"$media_env")"
-      unset media_env
+      # The media service signs in to the core as its own service principal, created on the first
+      # startup. Its key is shown once, so it is kept in a root-only file that later startups
+      # reuse; without the file, the principal gets a new key, and its first use retires the old
+      # ones. The key goes from the CLI's output to the file, never to a command line or the log.
+      service_id_file=${lib.escapeShellArg "${secretsDir}/media-service-id"}
+      service_key_file=${lib.escapeShellArg "${secretsDir}/media-service-key"}
+      create_service() {
+        log "creating the media server's service principal"
+        media-core-convex run core/accounts/host:createService '{"name":"media server"}' |
+          jq -er . >"$service_id_file.partial"
+        mv "$service_id_file.partial" "$service_id_file"
+      }
+      issue_service_key() {
+        media-core-convex run core/auth/apiKeys:issueServiceKey \
+          "$(jq -cn --arg id "$(cat "$service_id_file")" '{serviceId: $id}')" |
+          jq -er .key >"$service_key_file.partial"
+      }
+      if ! [ -s "$service_key_file" ]; then
+        [ -s "$service_id_file" ] || create_service
+        log "issuing the media server's service key"
+        # A restored database may not hold the recorded principal; then the server gets a new one.
+        if ! issue_service_key; then
+          create_service
+          issue_service_key
+        fi
+        mv "$service_key_file.partial" "$service_key_file"
+      fi
+      media_ticket_keys="$(media-core-convex env get MEDIA_TICKET_KEYS)"
+      [ -n "$media_ticket_keys" ] || { log "the core deployment has no MEDIA_TICKET_KEYS"; exit 1; }
 
       umask 022
       movies-configure-account --to /run/media-account --convex-url "$public_url/convex"
-      movies-configure-web --to /run/movies/web --convex-url "$public_url/movies/convex"
-      finish ${lib.escapeShellArg mediaDataDir}
-      chown "$owner" ${lib.escapeShellArg "${mediaDataDir}/version"}
+      movies-configure-web --to /run/movies/web --convex-url "$public_url/convex"
 
       umask 077
       env_file=/run/movies/media.env
       install -m 600 -o ${lib.escapeShellArg cfg.user} -g ${lib.escapeShellArg cfg.group} /dev/null "$env_file"
       {
-        printf 'MEDIA_SERVICE_API_KEY=%s\n' "$media_service_api_key"
-        printf 'PLAYBACK_TOKEN_SECRET=%s\n' "$playback_token_secret"
+        printf 'MEDIA_SERVICE_API_KEY=%s\n' "$(cat "$service_key_file")"
+        printf 'MEDIA_TICKET_KEYS=%s\n' "$media_ticket_keys"
         printf 'CONVEX_SELF_HOSTED_ADMIN_KEY=%s\n' "$admin_key"
         ${lib.optionalString (cfg.tmdbApiKeyFile != null) ''
           printf 'TMDB_API_KEY=%s\n' "$(cat ${lib.escapeShellArg cfg.tmdbApiKeyFile})"
@@ -171,7 +195,12 @@ let
   };
 in
 {
-  imports = [ ./cli-module.nix ];
+  imports = [
+    ./cli-module.nix
+    (lib.mkRemovedOptionModule [ "services" "media" "internalPorts" "moviesConvex" ] ''
+      Movies moved into the core's Convex backend, which serves at /convex on internalPorts.coreConvex.
+    '')
+  ];
 
   options.services.media = {
     enable = lib.mkEnableOption "[media], self-hosted media for people and agents";
@@ -181,7 +210,7 @@ in
       default = pkgs.callPackage ./package.nix { };
       defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
       description = ''
-        The [media] package: media service, web clients, and both Convex projects. Set it to `pkgs.movies`
+        The [media] package: media service, web clients, and the core's Convex project. Set it to `pkgs.movies`
         to use the flake's overlay (or your override of it).
       '';
     };
@@ -211,16 +240,17 @@ in
       type = lib.types.path;
       default = "/var/lib/media";
       description = ''
-        State, one folder per domain: the core's Convex database (`core/convex/`), and old movies'
-        Convex database (`movies/convex/`) and the media service's caches (`movies/media/`).
+        State, one folder per domain: the core's Convex database (`core/convex/`), the media
+        service's key (`core/secrets/`), and the media service's caches (`movies/media/`). An
+        install from before the movies cutover also keeps old movies' database (`movies/convex/`).
       '';
     };
 
     backupDir = lib.mkOption {
       type = lib.types.path;
-      default = "${cfg.dataDir}/movies/backups";
-      defaultText = lib.literalExpression ''"''${config.services.media.dataDir}/movies/backups"'';
-      description = "Nightly database backups (Convex exports with file storage).";
+      default = "${cfg.dataDir}/core/backups";
+      defaultText = lib.literalExpression ''"''${config.services.media.dataDir}/core/backups"'';
+      description = "Nightly backups of the core's database (Convex exports with file storage).";
     };
 
     backupRetentionDays = lib.mkOption {
@@ -259,12 +289,6 @@ in
         description = "Loopback port of the core's Convex backend, which Caddy serves at /convex.";
       };
 
-      moviesConvex = lib.mkOption {
-        type = lib.types.port;
-        default = 3220;
-        description = "Loopback port of old movies' Convex backend, which Caddy serves at /movies/convex.";
-      };
-
       media = lib.mkOption {
         type = lib.types.port;
         default = 4300;
@@ -285,7 +309,7 @@ in
       example = "100.64.0.1";
       description = ''
         Address the port listens on. The default keeps [media] local; set the host's Tailscale
-        address to reach it over the tailnet only. Both Convex backends and the media service listen
+        address to reach it over the tailnet only. The Convex backend and the media service listen
         on loopback only.
       '';
     };
@@ -296,7 +320,7 @@ in
       defaultText = lib.literalExpression ''"http://localhost:''${toString config.services.media.port}"'';
       description = ''
         URL people use for [media]: the account client at its root, movies at `/movies`, and the
-        Convex backends and streams under it.
+        core's Convex backend (`/convex`) and streams under it.
       '';
     };
 
@@ -550,7 +574,7 @@ in
   config = lib.mkIf cfg.enable {
     programs.media = {
       enable = lib.mkDefault true;
-      convexUrl = lib.mkDefault "${publicUrl}/movies/convex";
+      convexUrl = lib.mkDefault "${publicUrl}/convex";
       mediaUrl = lib.mkDefault cfg.publicUrl;
     };
 
@@ -580,18 +604,17 @@ in
       "d ${cfg.dataDir} 0711 root root -"
       "d ${coreDataDir} 0711 root root -"
       "d ${coreDataDir}/convex 0700 root root -"
+      "d ${secretsDir} 0700 root root -"
       "d ${moviesDataDir} 0711 root root -"
-      "d ${moviesDataDir}/convex 0700 root root -"
       "d ${mediaDataDir} 0700 ${cfg.user} ${cfg.group} -"
       "d ${cfg.backupDir} 0700 ${cfg.user} ${cfg.group} -"
       "d ${cfg.transcodeDir} 0700 ${cfg.user} ${cfg.group} -"
     ];
 
     virtualisation.oci-containers.containers = {
-      media-core-convex = convexContainer "core" ports.coreConvex "${publicUrl}/convex" "${coreDataDir}/convex";
-      movies-convex =
-        convexContainer "movies" ports.moviesConvex "${publicUrl}/movies/convex"
-          "${moviesDataDir}/convex";
+      media-core-convex =
+        convexContainer "core" ports.coreConvex "${publicUrl}/convex"
+          "${coreDataDir}/convex";
     };
 
     systemd.services.media-proxy = {
@@ -602,7 +625,6 @@ in
         MEDIA_BIND = cfg.listenAddress;
         MEDIA_PORT = toString cfg.port;
         MEDIA_CORE_CONVEX = "127.0.0.1:${toString ports.coreConvex}";
-        MEDIA_MOVIES_CONVEX = "127.0.0.1:${toString ports.moviesConvex}";
         MEDIA_SERVICE = "127.0.0.1:${toString ports.media}";
         MEDIA_ACCOUNT_DIR = "/run/media-account";
         MEDIA_TRUSTED_PROXIES = lib.concatStringsSep " " cfg.trustedProxies;
@@ -664,9 +686,9 @@ in
         HOST = "127.0.0.1";
         PORT = toString ports.media;
         MEDIA_BASE_URL = publicUrl;
-        CONVEX_URL = moviesConvexUrl;
-        CONVEX_PUBLIC_URL = "${publicUrl}/movies/convex";
-        CONVEX_BACKEND_DIR = "${cfg.package}/lib/movies/backend";
+        CONVEX_URL = coreConvexUrl;
+        CONVEX_PUBLIC_URL = "${publicUrl}/convex";
+        CONVEX_BACKEND_DIR = "${cfg.package}/lib/movies/platform";
         DATA_DIR = mediaDataDir;
         BACKUP_DIR = cfg.backupDir;
         BACKUP_RETENTION_DAYS = toString cfg.backupRetentionDays;

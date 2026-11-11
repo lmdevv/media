@@ -412,18 +412,23 @@ export interface ImportReport extends Schema.Schema.Type<typeof ImportReport> {}
 export const ImportDryRunResult = Schema.Union([ImportReport, MigrationSourceFailure]);
 
 /**
- * The result of starting an import into the core: its run, or the one of the same server already
- * queued or running (`created` false), or why the source could not be read.
+ * A started import into the core: its run, or the one of the same server already queued or
+ * running (`created` false).
  */
-export const ImportStartResult = Schema.Union([
-  Schema.Struct({
-    status: Schema.Literal("queued"),
-    importId: ImportId,
-    jobId: JobId,
-    created: Schema.Boolean,
-  }),
-  MigrationSourceFailure,
-]);
+export const ImportStarted = Schema.Struct({
+  status: Schema.Literal("queued"),
+  importId: ImportId,
+  jobId: JobId,
+  created: Schema.Boolean,
+});
+
+export interface ImportStarted extends Schema.Schema.Type<typeof ImportStarted> {}
+
+/** The result of starting an import into the core: its run, or why the source could not be read. */
+export const ImportStartResult = Schema.Union([ImportStarted, MigrationSourceFailure]);
+
+/** The result of connecting to a source for an import into the core. */
+export const ImportConnectResult = Schema.Union([ImportConnection, MigrationSourceFailure]);
 
 /** Where an import into the core stands; each phase resumes from its checkpoint after a restart. */
 export const ImportPhase = Schema.Literals([

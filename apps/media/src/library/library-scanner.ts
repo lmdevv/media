@@ -42,7 +42,7 @@ import { type LocalMetadata, type NfoKind, parseNfo } from "./nfo.ts";
 import { sidecarSubtitles } from "./sidecar-subtitles.ts";
 
 /** How much of a library a scan re-reads. */
-export type ScanMode = "incremental" | "full";
+type ScanMode = "incremental" | "full";
 
 interface ScanRequest {
   readonly libraryId: LibraryId;

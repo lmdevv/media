@@ -667,12 +667,12 @@ Rename a library you manage.
 
 ## `core.libraries.scan`
 
-Scan a library for new, changed, and missing files, or join the scan already queued.
+Scan a library for new, changed, and missing files, or join the scan already queued; full reads every file again.
 
 - CLI: `media auth libraries scan`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ libraryId: Id<"libraries"> }`
+- Arguments: `{ libraryId: Id<"libraries">; mode?: "incremental" | "full" }`
 - Result: `{ jobId: Id<"jobs">; created: boolean }`
 
 ## `core.libraries.setFolders`

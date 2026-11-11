@@ -9,8 +9,6 @@ const repoRoot = join(import.meta.dirname, "..", "..", "..", "..");
 
 const mediaRoot = join(repoRoot, "apps", "media");
 
-const cliRoot = join(repoRoot, "apps", "cli");
-
 const readEnvFile = (path: string): ReadonlyMap<string, string> => {
   if (!existsSync(path)) return new Map();
 
@@ -27,37 +25,7 @@ const readEnvFile = (path: string): ReadonlyMap<string, string> => {
   );
 };
 
-/** What the suite needs from the dev stack. */
-export interface MediaStack {
-  readonly convexUrl: string;
-  /** Where the stack's Convex deployment tells clients the media service is. */
-  readonly mediaUrl: string;
-  readonly mediaServiceKey: string;
-  /** The media service's environment as `scripts/dev-stack.sh` wrote it. */
-  readonly mediaEnv: Readonly<Record<string, string>>;
-}
-
-/**
- * The stack to test, or undefined unless `MEDIA_STACK_TESTS=1`, so `pnpm test` stays green
- * without Docker.
- *
- * @throws When `MEDIA_STACK_TESTS=1` but no stack is configured, a setup mistake.
- */
-export const findMediaStack = (): MediaStack | undefined => {
-  if (process.env["MEDIA_STACK_TESTS"] !== "1") return undefined;
-
-  const media = readEnvFile(join(mediaRoot, ".env.local"));
-  const convexUrl = media.get("CONVEX_URL");
-  const mediaUrl = media.get("MEDIA_BASE_URL");
-  const mediaServiceKey = media.get("MEDIA_SERVICE_API_KEY");
-
-  if (convexUrl === undefined || mediaUrl === undefined || mediaServiceKey === undefined) {
-    throw new Error("MEDIA_STACK_TESTS=1 but no stack is configured; run scripts/dev-stack.sh up");
-  }
-
-  return { convexUrl, mediaUrl, mediaServiceKey, mediaEnv: Object.fromEntries(media) };
-};
-
+/** Where the dev stack's core is, and its admin key. */
 export interface CoreStack {
   readonly url: string;
   readonly adminKey: string;
@@ -87,12 +55,6 @@ export const findCoreStack = (): CoreStack | undefined => {
 /** Bundles the media service so a test runs the file that ships. */
 export const buildService = (): void => {
   execFileSync(process.execPath, [join(mediaRoot, "scripts", "build.ts")]);
-};
-
-/** Bundles the media service and the CLI so the suite runs the files that ship. */
-export const buildServiceAndCli = (): void => {
-  buildService();
-  execFileSync(process.execPath, [join(cliRoot, "scripts", "build.ts")]);
 };
 
 /** A running media service process. */
@@ -166,50 +128,6 @@ export const waitForBody = async <A>(
 
   return attempt();
 };
-
-/** The outcome of one `media` invocation. */
-export interface CliRun {
-  readonly code: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-/** Runs the built CLI with only PATH plus `env` in its environment, feeding `stdin`. */
-export const runMovies = (
-  args: ReadonlyArray<string>,
-  env: Readonly<Record<string, string>>,
-  stdin = "",
-): Promise<CliRun> =>
-  new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [join(cliRoot, "dist", "media.js"), ...args], {
-      env: { PATH: process.env["PATH"] ?? "", ...env },
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
-    });
-
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-    });
-
-    child.stdin.end(stdin);
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({ code, stdout, stderr });
-    });
-  });
-
-/** Runs ffprobe on `url` and returns its JSON description. */
-export const ffprobeUrl = (url: string): string =>
-  execFileSync(
-    process.env["FFPROBE_PATH"] ?? "ffprobe",
-    ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", url],
-    { encoding: "utf8" },
-  );
 
 /** Creates an empty temporary directory. */
 export const makeTempDir = (prefix: string): Promise<string> => mkdtemp(join(tmpdir(), prefix));

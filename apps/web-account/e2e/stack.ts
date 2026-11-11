@@ -24,6 +24,8 @@ export interface Stack {
   readonly platformUrl: string;
   readonly adminKey: string;
   readonly accountPort: number;
+  /** The media server's address, which the admin pages call. */
+  readonly mediaUrl: string;
 }
 
 /** The stack's settings, or null when this worktree has no stack. */
@@ -36,5 +38,10 @@ export const stackEnv = (): Stack | null => {
 
   if (platformUrl === undefined || adminKey === undefined || accountPort === undefined) return null;
 
-  return { platformUrl, adminKey, accountPort: Number(accountPort) };
+  return {
+    platformUrl,
+    adminKey,
+    accountPort: Number(accountPort),
+    mediaUrl: account.get("VITE_MEDIA_BASE_URL") ?? "",
+  };
 };

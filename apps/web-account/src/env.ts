@@ -1,6 +1,20 @@
 import { Schema } from "effect";
 
-const AccountEnv = Schema.Struct({ VITE_PLATFORM_URL: Schema.NonEmptyString });
+const AccountEnv = Schema.Struct({
+  VITE_PLATFORM_URL: Schema.NonEmptyString,
+  VITE_MEDIA_BASE_URL: Schema.optionalKey(Schema.String),
+});
+
+const ENV = Schema.decodeUnknownSync(AccountEnv)(import.meta.env);
 
 /** The core deployment this client talks to. */
-export const PLATFORM_URL = Schema.decodeUnknownSync(AccountEnv)(import.meta.env).VITE_PLATFORM_URL;
+export const PLATFORM_URL = ENV.VITE_PLATFORM_URL;
+
+const configuredMediaUrl = ENV.VITE_MEDIA_BASE_URL?.replace(/\/+$/u, "") ?? "";
+
+/**
+ * Where the media server answers: this client's own origin in production, where the server serves
+ * it, or the configured address in development.
+ */
+export const MEDIA_BASE_URL =
+  configuredMediaUrl === "" ? window.location.origin : configuredMediaUrl;

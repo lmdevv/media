@@ -1,8 +1,8 @@
 # 0010. Serve HTTP with Effect HttpApi and sign the server in as a service principal
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-06 with the server's key and its rotation, and
-  2026-11-10 with the server's core adapters.
-- Decisions: D24, D25
+  2026-11-10 with the server's core adapters, and again the same day with the server on the core.
+- Decisions: D24, D25, D50
 
 ## Context
 
@@ -79,6 +79,61 @@ movies, so the running server holds one Convex URL (D50); `p4-movies-cutover` sw
   cutover replaces old movies' viewer check on the command routes; old movies' playback-mode
   reports have no core function, so on the core the server only logs them; and rescans after a
   file changes need a core function that queues a scan (ADR 0024).
+
+## The server on the core (amended 2026-11-10)
+
+`p4-movies-cutover` switched `main.ts` to the core wiring, `core/core-wiring.ts`, and deleted the
+old movies adapters in `apps/media/src/convex/`. The server reads one Convex URL, the core's. ADR
+0027 records its settings and how the image and the NixOS module issue its key.
+
+- **The server's own routes check the caller on the core.** A client sends its core session's
+  Convex auth token as `Authorization: Bearer`, through `createMediaServer` from
+  `@media/sdk/promise`. `core/core-callers.ts` calls `core.auth.sessions.current` with that token
+  and maps the route's access level:
+
+  | Access level             | The session needs                                        |
+  | ------------------------ | -------------------------------------------------------- |
+  | `authenticated`          | any session                                              |
+  | `read`, `play`, `manage` | the `movies:read`, `movies:play`, or `movies:edit` scope |
+  | `account`                | the `account` scope                                      |
+  | `admin`                  | the role owner or admin, and the `admin` scope           |
+
+  A token the core refuses is `Unauthenticated`. A session without the access is `Forbidden`.
+
+- **Routes served.** The media commands `metadata.searchCandidates`, `imports.connect`,
+  `imports.preview`, `imports.start`, `backups.restore`, `libraries.folders` (owners and admins),
+  `diagnostics.playback`, and `diagnostics.sessions`, then `POST /api/logs` and
+  `POST /api/client-errors`. The player's client events, `POST /api/playback/diagnostics`, carry
+  their playback ticket in the body, and the server checks that ticket instead of a bearer. The old
+  `migration.*` routes are no longer served. `@media/contracts` keeps them for the CLI's old words
+  until `p4-movies-cli`.
+- **A restore on the core** runs these steps with the core's admin key, from `CONVEX_BACKEND_DIR`:
+  1. `convex import --replace-all` with the archive.
+  2. `core/maintenance:settleRestoredJobs` with `before`, the server's clock when the import
+     started. It settles the running jobs claimed before then, so a job the live worker claimed
+     from the restored queue after the import keeps running. A `server.backup` job succeeds with "Restored from this backup",
+     since the archive is its result. Every other job goes back to the queue with no strike, or
+     ends canceled if a cancel was pending. One call settles 4 jobs and schedules the next.
+  3. `core/maintenance:endAllSessions` with the same `before`. It ends every session opened before
+     the import, 100 per
+     call, and later calls delete their refresh tokens. API keys and device grants stay, so the
+     server signs in again with its key, and an iOS app exchanges its device's grant again.
+  4. The server lists the archives on disk again, since the snapshot's backup list is older.
+- **A restored archive holds only the service keys issued before it was taken.** After restoring
+  an archive older than the server's key, or one from another install, the core refuses the key,
+  and the server cannot sign in until the operator issues a new one. On the image and the NixOS
+  module, delete the key file in `core/secrets/` and restart. Setup then issues a new key, to a new
+  principal if the restored database lacks the recorded one (ADR 0027). Elsewhere, issue a key
+  with `core/auth/apiKeys:issueServiceKey` and set `MEDIA_SERVICE_API_KEY`.
+- **Artwork keys and import credentials are sealed under the service key.** A new service key
+  makes the artwork keys the core holds unreadable until a rescan or a metadata refresh writes new
+  ones. An import queued under the old key cannot open its source's credentials and must be
+  started again.
+- **Playback-mode reports are only logged** (`PlaybackReporter.layerLog`), because the core keeps
+  no playback sessions (ADR 0011).
+- **Rescans after a file changes** go through `core/scans:changed` (ADR 0024).
+- **Standalone mode**, with no `CONVEX_URL`, scans the approved roots into memory and reports its
+  health. Its byte routes refuse every request, since nothing issues tickets.
 
 ## Consequences
 

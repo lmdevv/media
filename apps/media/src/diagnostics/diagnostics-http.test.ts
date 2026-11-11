@@ -4,10 +4,7 @@ import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { assert, layer } from "@effect/vitest";
 import { DiagnosedSession, PlaybackDiagnostics } from "@media/contracts/diagnostics";
 import { Forbidden, Unauthenticated } from "@media/contracts/errors";
-import { AuthSessionId, UserId } from "@media/contracts/ids";
-import type { Viewer } from "@media/contracts/models/account";
-import { type Role, roleScopes } from "@media/contracts/scopes";
-import { EpochMillis } from "@media/contracts/units";
+import { UserId } from "@media/contracts/ids";
 import {
   Context,
   Duration,
@@ -21,7 +18,7 @@ import {
 } from "effect";
 import { FetchHttpClient, HttpServer } from "effect/http";
 
-import * as ViewerAuth from "../convex/viewer-auth.ts";
+import * as CoreCallers from "../core/core-callers.ts";
 import { serve } from "../http/http-server.ts";
 import * as LogsRoutes from "../logging/logs-routes.ts";
 import * as RetainedLogs from "../logging/retained-logs.ts";
@@ -29,37 +26,31 @@ import { appendRecord } from "../testing/log-lines.ts";
 import * as DiagnosticsRoutes from "./diagnostics-routes.ts";
 import { LogEvent } from "./log-events.ts";
 
-const viewer = (id: string, role: Role): Viewer => ({
-  user: {
-    id: UserId.make(id),
-    email: `${id}@example.test`,
-    name: id,
-    role,
-    disabled: false,
-    createdAt: EpochMillis.make(0),
-  },
-  sessionId: AuthSessionId.make(`auth_${id}`),
-  sessionKind: "password",
-  scopes: roleScopes(role),
+const DOMAIN_SCOPES = ["movies:read", "movies:play", "movies:edit"];
+
+const caller = (id: string, role: "admin" | "member"): CoreCallers.Caller => ({
+  userId: UserId.make(id),
+  role,
+  scopes: role === "admin" ? ["account", "admin", ...DOMAIN_SCOPES] : ["account", ...DOMAIN_SCOPES],
 });
 
-const VIEWERS: ReadonlyMap<string, Viewer> = new Map([
-  ["admin-token", viewer("user_admin", "admin")],
-  ["member-token", viewer("user_a", "member")],
-  ["other-token", viewer("user_b", "member")],
+const CALLERS: ReadonlyMap<string, CoreCallers.Caller> = new Map([
+  ["admin-token", caller("user_admin", "admin")],
+  ["member-token", caller("user_a", "member")],
+  ["other-token", caller("user_b", "member")],
 ]);
 
 const authLayer = Layer.succeed(
-  ViewerAuth.Service,
-  ViewerAuth.Service.of({
+  CoreCallers.Service,
+  CoreCallers.Service.of({
     authorize: (bearer, access) => {
-      const found = VIEWERS.get(Redacted.value(bearer));
+      const found = CALLERS.get(Redacted.value(bearer));
 
       if (found === undefined) {
         return Effect.fail(new Unauthenticated({ message: "Unknown token" }));
       }
 
-      return access === "authenticated" || found.scopes.some((scope) => scope === access)
+      return CoreCallers.holds(found, access)
         ? Effect.succeed(found)
         : Effect.fail(new Forbidden({ message: `This session lacks the ${access} scope` }));
     },

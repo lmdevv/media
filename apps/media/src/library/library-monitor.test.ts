@@ -256,3 +256,78 @@ describe("watch restarts", () => {
     assert.strictEqual(Duration.toMinutes(LibraryMonitor.restartDelay(40)), 5);
   });
 });
+
+describe("change bursts", () => {
+  type Call = { readonly reason: string; readonly changed: ReadonlyArray<string> };
+
+  const recorded = Ref.makeUnsafe<ReadonlyArray<Call>>([]);
+
+  const rescan: LibraryMonitor.Rescan = (_library, reason, changed) =>
+    Ref.update(recorded, (calls) => [...calls, { reason, changed }]);
+
+  const burstLayer = Layer.unwrap(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "monitor-burst-" });
+
+      return LibraryMonitor.layerTracking([{ libraryId, roots: [root] }]).pipe(
+        Layer.provideMerge(LibraryMonitor.layerWith(rescan, Duration.millis(300))),
+        Layer.merge(Layer.succeed(Watched, Watched.of({ root }))),
+        Layer.provideMerge(
+          testConfigLayer({
+            LIBRARY_ROOTS: root,
+            DATA_DIR: root,
+            LIBRARY_WATCH: "events",
+            LIBRARY_RECONCILE_MINUTES: "600",
+          }),
+        ),
+      );
+    }),
+  ).pipe(Layer.provideMerge(NodeServices.layer));
+
+  const nextChange = (after: number) =>
+    Ref.get(recorded).pipe(
+      Effect.map((calls) =>
+        Option.fromNullishOr(calls.slice(after).find((call) => call.reason === "change")),
+      ),
+      Effect.repeat({ until: Option.isSome, schedule: Schedule.spaced("100 millis") }),
+      Effect.timeout("15 seconds"),
+      Effect.orDie,
+    );
+
+  layer(burstLayer, { excludeTestServices: true, timeout: "60 seconds" })((it) => {
+    it.effect(
+      "names a small burst's paths, and a burst past its cap as the whole root",
+      () =>
+        Effect.gen(function* () {
+          const { root } = yield* Watched;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+
+          yield* Effect.sleep(Duration.millis(500));
+          yield* fs.writeFileString(path.join(root, "one.mkv"), "1");
+          yield* fs.writeFileString(path.join(root, "two.mkv"), "2");
+
+          const small = yield* nextChange(0);
+
+          assert.includeMembers(
+            [...Option.getOrThrow(small).changed],
+            [path.join(root, "one.mkv"), path.join(root, "two.mkv")],
+          );
+
+          const seen = (yield* Ref.get(recorded)).length;
+
+          yield* Effect.forEach(
+            Array.from({ length: 300 }, (_, index) => index),
+            (index) => fs.writeFileString(path.join(root, `many-${String(index)}.mkv`), "x"),
+            { discard: true },
+          );
+
+          const large = yield* nextChange(seen);
+
+          assert.deepStrictEqual(Option.getOrThrow(large).changed, []);
+        }),
+      60_000,
+    );
+  });
+});

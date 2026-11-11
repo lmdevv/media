@@ -20,6 +20,7 @@ import {
 } from "../testing/core-stack.ts";
 import type { CoreServer, Person } from "../testing/core-stack.ts";
 import {
+  addFile,
   bytesDigest,
   fileDigest,
   linkFolder,
@@ -58,6 +59,8 @@ const library = (): Platform.Id<"libraries"> =>
   Option.getOrThrowWith(libraryId, () => new Error("The fixture library was not created"));
 
 let moviesRoot = "";
+
+let directMovie = "";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 
@@ -105,6 +108,36 @@ const withTicket = (url: string, ticket: string): string => {
   return parsed.toString();
 };
 
+const ScanEnd = Schema.Struct({ status: Schema.String, message: Schema.NullOr(Schema.String) });
+
+type ScanEnd = typeof ScanEnd.Type;
+
+/** A job once it has ended, as the core's admin read shows it. */
+const ended = (jobId: string): Promise<ScanEnd> =>
+  eventually(
+    "the scan to end",
+    async () => {
+      const job = await runHost("core/jobs/admin:get", { jobId }, ScanEnd);
+
+      return job.status === "succeeded" || job.status === "failed"
+        ? Option.some(job)
+        : Option.none();
+    },
+    120_000,
+  );
+
+/**
+ * Asks for a scan of the fixture library as its admin and waits for it to end. A scan already
+ * queued or running is joined whatever its mode, so this asks again until its own scan ran: the
+ * server's startup rescan can leave one queued behind the first scan.
+ */
+const scanNow = async (mode: "incremental" | "full"): Promise<ScanEnd> => {
+  const queued = await run(admin.platform.core.libraries.scan({ libraryId: library(), mode }));
+  const job = await ended(queued.jobId);
+
+  return queued.created ? job : scanNow(mode);
+};
+
 const health = async () => {
   const response = await fetch(`${server.baseUrl}${MEDIA_ROUTES.health}`);
 
@@ -123,6 +156,7 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       const fixtures = await generateFixtureLibrary(join(workDir, "library"));
 
       moviesRoot = fixtures.moviesRoot;
+      directMovie = fixtures.directMovie;
       admin = await personIn(scope, "admin");
 
       server = await startCoreServer(scope, {
@@ -170,6 +204,16 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
 
       expect(titles.map((title) => title.name)).toContain("HDR Fixture");
     }, 150_000);
+
+    it("reads every file again on a full scan, unchanged ones included", async () => {
+      const incremental = await scanNow("incremental");
+      const full = await scanNow("full");
+
+      expect(incremental).toMatchObject({ status: "succeeded" });
+      expect(incremental.message).toMatch(/, 0 new or changed, [1-9]\d* unchanged/u);
+      expect(full).toMatchObject({ status: "succeeded" });
+      expect(full.message).toMatch(/, [1-9]\d* new or changed, 0 unchanged/u);
+    }, 300_000);
 
     it("serves a stream to a ticket from movies.play.start and binds it to that ticket", async () => {
       const title = (await titlesOf(admin.platform, library())).find(
@@ -339,6 +383,27 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
 
       expect(Date.now()).toBeLessThan(started.expiresAt);
       expect(Date.now() - signedOutAt).toBeLessThan(30_000);
+    }, 90_000);
+
+    it("asks the core to rescan the library when a file appears in its folder", async () => {
+      const added = join(moviesRoot, "Rescan Fixture (2021)", "Rescan Fixture (2021).mp4");
+
+      await addFile(join(moviesRoot, directMovie), added);
+
+      const titles = await eventually(
+        "the change's scan writes the new title",
+        async () => {
+          const found = await titlesOf(admin.platform, library());
+
+          return found.some((title) => title.name === "Rescan Fixture")
+            ? Option.some(found)
+            : Option.none();
+        },
+        60_000,
+      );
+
+      expect(titles.map((title) => title.name)).toContain("Rescan Fixture");
+      expect(server.logged().some((line) => line.includes("CoreRescans.queued"))).toBe(true);
     }, 90_000);
 
     it("keeps tickets and keys out of the log", () => {

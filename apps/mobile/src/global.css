@@ -89,7 +89,7 @@
   --radius-sheet: 28px;
 }
 
-/* The profile avatar set, shared with the web app (`apps/web/public/avatars/<key>.svg`): each key
+/* The profile avatar set, shared with the web app (`apps/web-movies/public/avatars/<key>.svg`): each key
    is a diagonal gradient from top left to bottom right, the same in both themes. Components read
    these through `useCSSVariable` rather than classes, so `static` keeps Tailwind from dropping them. */
 @theme static {

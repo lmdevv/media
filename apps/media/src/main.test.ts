@@ -41,7 +41,6 @@ const freePort = (): Promise<number> =>
 const standaloneEnv = (port: number) => ({
   PORT: String(port),
   MEDIA_BASE_URL: `http://127.0.0.1:${port}`,
-  PLAYBACK_TOKEN_SECRET: Buffer.alloc(32, 9).toString("base64url"),
   LIBRARY_ROOTS: join(workspace, "library"),
   DATA_DIR: join(workspace, "data"),
   TRANSCODE_DIR: join(workspace, "transcode"),
@@ -84,4 +83,24 @@ describe("media service process", () => {
 
     expect(media.child.exitCode).toBe(1);
   }, 30_000);
+
+  it.each([
+    ["MEDIA_SERVICE_API_KEY", { MEDIA_TICKET_KEYS: "k1:test" }],
+    ["MEDIA_TICKET_KEYS", { MEDIA_SERVICE_API_KEY: "mk_test" }],
+  ] as const)(
+    "exits 1 naming %s when CONVEX_URL is set without it",
+    async (missing, given) => {
+      const media = startMedia({
+        ...standaloneEnv(await freePort()),
+        CONVEX_URL: "http://127.0.0.1:9",
+        ...given,
+      });
+
+      await once(media.child, "close");
+
+      expect(media.child.exitCode).toBe(1);
+      expect(media.logs()).toContain(`${missing} is not`);
+    },
+    30_000,
+  );
 });

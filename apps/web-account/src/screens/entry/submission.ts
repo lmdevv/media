@@ -1,8 +1,8 @@
 import { Predicate } from "effect";
 import { useState } from "react";
 
-import { describeFailure } from "@/lib/failure";
-import type { FailureTag } from "@/lib/failure";
+import { describeFailure } from "@media/ui/lib/failure";
+import type { FailureTag } from "@media/ui/lib/failure";
 import { SharedDeviceError } from "@/session/account";
 
 /** What a sign-in form's submit is doing. */

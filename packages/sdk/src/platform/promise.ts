@@ -120,6 +120,11 @@ export interface PlatformSession {
   readonly exchangeGrant: (grant: PlatformGrant) => Promise<void>;
   /** Ends the session on the server when reachable, then forgets it locally. */
   readonly signOut: () => Promise<void>;
+  /**
+   * The session's current auth token, for the media server's own routes as a bearer token; null
+   * while signed out. Never log or store it.
+   */
+  readonly accessToken: () => Promise<string | null>;
 }
 
 type PromiseMethods = ReturnType<typeof promiseMethods>;
@@ -257,6 +262,12 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
           client.session.signIn(Client.Credentials.Grant({ userId, grant: Redacted.make(grant) })),
         ),
       signOut: () => withClient((client) => client.session.signOut),
+      accessToken: () =>
+        withClient((client) =>
+          Effect.map(client.session.accessToken, (token) =>
+            Option.match(token, { onNone: () => null, onSome: Redacted.value }),
+          ),
+        ),
     },
     dispose: () => runtime.dispose(),
   };

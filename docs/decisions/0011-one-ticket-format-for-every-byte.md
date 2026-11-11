@@ -1,7 +1,8 @@
 # 0011. Use one signed ticket format for every route that serves bytes
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the format as built and with how long
-  playback and Cast keep their ticket, and 2026-11-10 with the server's admission of tickets.
+  playback and Cast keep their ticket, and 2026-11-10 with the server's admission of tickets, and
+  again the same day with the movies client's side.
 - Decisions: D26, D46
 
 ## Context
@@ -215,3 +216,23 @@ it was given, get a new ticket. D46 settles the principle, and this section sett
   old tokens had. A session the server cannot confirm within 5 seconds is refused as expired.
 - **Logs.** The log redaction treats `ticket` as a secret field and query parameter and removes any
   ticket-shaped text, and a stack test greps the in-process server's log after it streamed.
+
+## The movies client's side (amended 2026-11-10)
+
+`p4-movies-cutover` moved the movies web client and the server onto tickets together.
+
+- **Each start takes one ticket.** `movies.play.start` returns it, and it goes where old movies'
+  playback token went: `NegotiateRequest.token`, seeks, stops, and media URLs.
+- **The player never renews a ticket.** It starts again from the current position, with a new
+  `movies.play.start` and so a new ticket, in two cases: a new negotiation answers
+  `PlaybackTokenInvalid` with reason `expired`, or the server answers `PlaybackSessionEnded`.
+- **A final `pause` report replaces old movies' `endSession`.** The core keeps no playback
+  sessions, so the player's last `movies.play.report` is a `pause` at the position it stopped at.
+- **Artwork fields in movies results are paths with a ticket.** Each holds
+  `/artwork/<key>?ticket=<ticket>`: the key URL-encoded, and a shareable `image` ticket for
+  `artworkTicketId(key)`. A client loads `MEDIA_BASE_URL` plus the path, and adds `&w=<width>` for
+  a resize. `packages/platform/convex/movies/artwork.ts` rewrites every movies command's result in
+  one place, by field name (`poster`, `backdrop`, `logo`, `still`, and `profile`), and only for a
+  value shaped like an artwork key, since a stream's codec `profile` has the same name. A key that
+  appears twice in one result is signed once. Stored rows and server functions keep bare keys.
+- **`artworkTicketId` moved to `@media/contracts/ticket`**, beside the rest of the ticket format.

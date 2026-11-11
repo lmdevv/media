@@ -9,8 +9,8 @@ export const FOLDERS_MAX = 16;
 
 const FOLDER_CHARS_MAX = 1024;
 
-/** Each level of a folder costs its overlap check one index read. */
-const FOLDER_DEPTH_MAX = 32;
+/** Most levels of a folder; each costs its overlap check one index read. */
+export const FOLDER_DEPTH_MAX = 32;
 
 const CONTROL = /\p{Cc}/u;
 

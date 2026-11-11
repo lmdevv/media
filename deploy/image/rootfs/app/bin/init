@@ -42,70 +42,84 @@ for node in /dev/dri/renderD*; do
   usermod -a -G "$(getent group "$gid" | cut -d: -f1)" movies
 done
 
-install -d -m 700 /data/core/backups /data/movies/config
-install -d -m 700 -o movies -g movies /data/movies/media /data/movies/backups /transcode
-find /data/movies/media /data/movies/backups /transcode \( \! -user movies -o \! -group movies \) \
+# The core's nightly and upgrade backups sit beside its database. The media service takes them, so
+# they are its own; /data/movies keeps its caches and the image CLI's logins.
+install -d -m 700 /data/core/secrets /data/movies/config
+install -d -m 700 -o movies -g movies /data/core/backups /data/movies/media /transcode
+find /data/core/backups /data/movies/media /transcode \( \! -user movies -o \! -group movies \) \
   -exec chown -h movies:movies {} +
 
-# Shell functions return one status, so these leave $admin_key and $deployed_version behind.
-deploy() {
-  local domain="$1" port="$2" dir="$3" owner="$4"
-  local url="http://127.0.0.1:$port" data="/data/$domain" version stamp backup
+convex() { (cd /app/platform && node node_modules/convex/bin/main.js "$@"); }
 
-  log "waiting for the $domain Convex backend"
-  for _ in $(seq 1 120); do
-    curl -fsS "$url/version" >/dev/null 2>&1 && break
-    sleep 1
-  done
-  curl -fsS "$url/version" >/dev/null || { log "the $domain Convex backend did not answer"; exit 1; }
+log "waiting for the core's Convex backend"
+for _ in $(seq 1 120); do
+  curl -fsS http://127.0.0.1:3210/version >/dev/null 2>&1 && break
+  sleep 1
+done
+curl -fsS http://127.0.0.1:3210/version >/dev/null || { log "the core's Convex backend did not answer"; exit 1; }
 
-  admin_key="$(LD_PRELOAD=/app/convex/argv-secret.so ARGV_SECRET_FILE="$data/secrets/instance_secret" \
-    /app/convex/generate_key "$domain" @ARGV_SECRET_FILE | tail -n 1)"
-  export CONVEX_SELF_HOSTED_URL="$url" CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
+admin_key="$(LD_PRELOAD=/app/convex/argv-secret.so ARGV_SECRET_FILE=/data/core/secrets/instance_secret \
+  /app/convex/generate_key core @ARGV_SECRET_FILE | tail -n 1)"
+export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 CONVEX_SELF_HOSTED_ADMIN_KEY="$admin_key"
 
-  version="$(node -p "require('$dir/package.json').version")+$(cat "$dir/.functions-hash")"
-  if [ -s "$data/version" ] && [ "$(cat "$data/version")" != "$version" ] &&
-    [ "$(cat "$data/upgrade-backup" 2>/dev/null)" != "$version" ]; then
-    stamp="$(date -u +%Y-%m-%dT%H-%M-%S-000Z)"
-    backup="$data/backups/$domain-manual-$stamp.zip"
-    log "upgrading $domain from $(cat "$data/version") to $version; backing up to $backup first"
-    (cd "$dir" && node node_modules/convex/bin/main.js export --include-file-storage \
-      --path "$data/backups/.partial-$domain-manual-$stamp.zip")
-    mv "$data/backups/.partial-$domain-manual-$stamp.zip" "$backup"
-    chown "$owner" "$backup"
-    printf '%s\n' "$version" >"$data/upgrade-backup"
-  fi
+version="$(node -p "require('/app/platform/package.json').version")+$(cat /app/platform/.functions-hash)"
+if [ -s /data/core/version ] && [ "$(cat /data/core/version)" != "$version" ] &&
+  [ "$(cat /data/core/upgrade-backup 2>/dev/null)" != "$version" ]; then
+  stamp="$(date -u +%Y-%m-%dT%H-%M-%S-000Z)"
+  backup="/data/core/backups/core-manual-$stamp.zip"
+  log "upgrading the core from $(cat /data/core/version) to $version; backing up to $backup first"
+  convex export --include-file-storage --path "/data/core/backups/.partial-core-manual-$stamp.zip"
+  mv "/data/core/backups/.partial-core-manual-$stamp.zip" "$backup"
+  chown movies:movies "$backup"
+  printf '%s\n' "$version" >/data/core/upgrade-backup
+fi
 
-  log "deploying the $domain functions ($version)"
-  (cd "$dir" && node node_modules/convex/bin/main.js deploy --yes --codegen disable --typecheck disable)
-  deployed_version="$version"
-}
-
-finish() {
-  local data="/data/$1"
-  printf '%s\n' "$deployed_version" >"$data/version"
-  rm -f "$data/upgrade-backup"
-}
-
-deploy core 3210 /app/platform root:root
+log "deploying the core's functions ($version)"
+convex deploy --yes --codegen disable --typecheck disable
 log "configuring the core deployment"
-(cd /app/platform && node scripts/configure.mjs && node node_modules/convex/bin/main.js run core/schemaMigrations:run >/dev/null)
-finish core
+(cd /app/platform && node scripts/configure.mjs)
+convex run core/schemaMigrations:run >/dev/null
+printf '%s\n' "$version" >/data/core/version
+rm -f /data/core/upgrade-backup
 
-deploy movies 3220 /app/backend movies:movies
-log "configuring the movies deployment"
-media_env="$(cd /app/backend && node scripts/configure.ts "--site-url=$public_url/movies" "--media-url=$public_url")"
-media_service_api_key="$(sed -n 's/^MEDIA_SERVICE_API_KEY=//p' <<<"$media_env")"
-playback_token_secret="$(sed -n 's/^PLAYBACK_TOKEN_SECRET=//p' <<<"$media_env")"
-unset media_env
-finish movies
+# The media service signs in to the core as its own service principal, created on the first start.
+# Its key is shown once, so it is kept in a root-only file that later starts reuse; without the
+# file, the principal gets a new key, and the first use of that key retires the old ones.
+service_id_file=/data/core/secrets/media-service-id
+service_key_file=/data/core/secrets/media-service-key
+create_service() {
+  log "creating the media server's service principal"
+  convex run core/accounts/host:createService '{"name":"media server"}' |
+    node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => process.stdout.write(JSON.parse(s)))' \
+      >"$service_id_file.partial"
+  mv "$service_id_file.partial" "$service_id_file"
+}
+# Reads the key from the CLI's output on stdin, so it never reaches a command line or the log.
+issue_service_key() {
+  convex run core/auth/apiKeys:issueServiceKey "{\"serviceId\":\"$(cat "$service_id_file")\"}" |
+    node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => process.stdout.write(JSON.parse(s).key))' \
+      >"$service_key_file.partial"
+}
+if ! [ -s "$service_key_file" ]; then
+  [ -s "$service_id_file" ] || create_service
+  log "issuing the media server's service key"
+  # A restored database may not hold the recorded principal; then the server gets a new one.
+  if ! issue_service_key; then
+    create_service
+    issue_service_key
+  fi
+  mv "$service_key_file.partial" "$service_key_file"
+fi
+media_service_api_key="$(cat "$service_key_file")"
+media_ticket_keys="$(convex env get MEDIA_TICKET_KEYS)"
+[ -n "$media_ticket_keys" ] || { log "the core deployment has no MEDIA_TICKET_KEYS"; exit 1; }
 
 umask 022
 install -d -m 755 /run/media
 node /app/media/scripts/configure-web.ts --from /app/account --to /run/media/account \
   --convex-url "$public_url/convex"
 node /app/media/scripts/configure-web.ts --from /app/web --to /run/media/web \
-  --convex-url "$public_url/movies/convex"
+  --convex-url "$public_url/convex"
 
 umask 077
 install -d -m 755 /run/movies
@@ -115,14 +129,14 @@ setting() { [ -z "$2" ] || printf '%s=%s\n' "$1" "$2" >>"$env_file"; }
 setting HOST 127.0.0.1
 setting PORT 4300
 setting MEDIA_BASE_URL "$public_url"
-setting CONVEX_URL http://127.0.0.1:3220
-setting CONVEX_PUBLIC_URL "$public_url/movies/convex"
+setting CONVEX_URL http://127.0.0.1:3210
+setting CONVEX_PUBLIC_URL "$public_url/convex"
 setting MEDIA_SERVICE_API_KEY "$media_service_api_key"
-setting PLAYBACK_TOKEN_SECRET "$playback_token_secret"
+setting MEDIA_TICKET_KEYS "$media_ticket_keys"
 setting CONVEX_SELF_HOSTED_ADMIN_KEY "$admin_key"
-setting CONVEX_BACKEND_DIR /app/backend
+setting CONVEX_BACKEND_DIR /app/platform
 setting DATA_DIR /data/movies/media
-setting BACKUP_DIR /data/movies/backups
+setting BACKUP_DIR /data/core/backups
 setting TRANSCODE_DIR /transcode
 setting WEB_DIST_DIR /run/media/web
 setting LIBRARY_ROOTS "${LIBRARY_ROOTS:-/media}"

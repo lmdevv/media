@@ -8,16 +8,19 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { claimIdentities, ownershipOf, parseClaim } from "./folderClaims";
-import { foldersOf, isInside, isPlainPath } from "./folders";
+import { FOLDER_DEPTH_MAX, foldersOf, isInside, isPlainPath } from "./folders";
 import { scanKindOf } from "./jobs/kinds";
 import { withJobLease, leaseAnswer } from "./jobs/held";
 import type { LeaseAnswer } from "./jobs/held";
-import { cancel } from "./jobs/queue";
+import { cancel, enqueue } from "./jobs/queue";
 import { lease } from "./jobs/model";
 import type { Lease } from "./jobs/model";
 import { applyEvent } from "./jobs/store";
-import type { JobCtx } from "./jobs/store";
+import type { Enqueued, JobCtx } from "./jobs/store";
 import { deleteCounter, incrementCounter, readCounter } from "./lib/counters";
+import { fail } from "./lib/errors";
+import { inOrder } from "./lib/inOrder";
+import { paginate } from "./lib/paginate";
 import { serverMutation, serverQuery } from "./lib/serverFacing";
 
 const itemsCounter = (libraryId: Id<"libraries">): string => `libraryItems:${libraryId}`;
@@ -72,6 +75,30 @@ export const withLibraryItems = async <Value>(
   if (library === null) throw new Error(`No library ${libraryId} to write items to`);
 
   return moveCount(ctx.db, libraryId, await write(library));
+};
+
+/**
+ * Queues a scan of `library` with its kind's dedupe, so a scan already queued or running is
+ * joined, and points `lastScan` at a scan this made: the one way a scan is queued, for a manager's
+ * scan, a change of folders, a wait that ended, and a file that changed (ADR 0024). A `full` scan
+ * reads every file again, as a manager may ask; a scan already queued or running is joined
+ * whatever its mode, as old movies' scan did.
+ */
+export const queueScan = async (
+  ctx: JobCtx,
+  library: Doc<"libraries">,
+  mode: "incremental" | "full" = "incremental",
+): Promise<Enqueued> => {
+  const kind = scanKindOf(library.kind);
+
+  const scan = await enqueue(
+    ctx,
+    mode === "full" ? { kind, libraryId: library._id, mode } : { kind, libraryId: library._id },
+  );
+
+  if (scan.created) await ctx.db.patch(library._id, { lastScan: scan.jobId });
+
+  return scan;
 };
 
 /** A scan the caller's lease holds, and the library it scans. */
@@ -362,4 +389,151 @@ export const claimFolders = serverMutation({
       }),
       "beforeClaim",
     ),
+});
+
+/** The kinds a changed file rescans: those with a scanner on the server. Music has none yet. */
+const RESCANNED_KINDS: ReadonlySet<ContentDomain> = new Set(["movies"]);
+
+/** Most characters of a changed path, the longest path Linux takes. */
+const CHANGED_PATH_CHARS_MAX = 4096;
+
+/** Folders inside a changed path that one call reads; a scheduled call reads each next page. */
+const INSIDE_PER_CALL = 64;
+
+interface ChangedReach {
+  /** The folders that could hold the path or be it, shallowest first. */
+  readonly holders: ReadonlyArray<string>;
+  /** The path whose inside holds the folders inside it, `""` for `/`, or null for none. */
+  readonly inside: string | null;
+}
+
+/**
+ * Where a changed path can meet a library's folders: the folders that could hold it, and the
+ * start of the folders that could lie inside it. Both follow its plain parts: repeated and
+ * trailing slashes and `.` parts are dropped, as a folder is written down, and a `..` part ends
+ * them, since only the server's disk knows where it leads; past one, nothing lies inside the path.
+ * A folder is at most 32 levels deep, so only that many leading parts can name one.
+ */
+const changedReach = (path: string): ChangedReach => {
+  const parts = path.split("/").filter((part) => part !== "" && part !== ".");
+  const up = parts.indexOf("..");
+  const plain = up === -1 ? parts : parts.slice(0, up);
+
+  return {
+    holders: plain
+      .slice(0, FOLDER_DEPTH_MAX)
+      .map((_, index) => `/${plain.slice(0, index + 1).join("/")}`),
+    inside: up === -1 ? plain.map((part) => `/${part}`).join("") : null,
+  };
+};
+
+/**
+ * Queues a scan of each library of a kind with a scanner, joining one already queued or running.
+ * Calls run one after another, as each enqueue reads and writes its kind's row.
+ */
+const rescan = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  libraryIds: ReadonlyArray<Id<"libraries">>,
+): Promise<number> => {
+  const queued = await inOrder([...new Set(libraryIds)], async (libraryId) => {
+    const library = await ctx.db.get(libraryId);
+
+    if (library === null || !RESCANNED_KINDS.has(library.kind)) return false;
+
+    const scan = await queueScan(ctx, library);
+
+    if (!scan.created && (await ctx.db.get(scan.jobId))?.status === "running") {
+      await ctx.db.patch(library._id, { rescanAfter: true });
+    }
+
+    return true;
+  });
+
+  return queued.filter(Boolean).length;
+};
+
+const rescanInside = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  inside: string,
+  cursor: string | null,
+): Promise<number> => {
+  const page = await paginate(
+    ctx.db,
+    {
+      table: "libraryFolders",
+      index: "by_path",
+      range: (q) => q.gte("path", `${inside}/`).lt("path", `${inside}0`),
+    },
+    { numItems: INSIDE_PER_CALL, cursor },
+  );
+
+  const queued = await rescan(
+    ctx,
+    page.page.map((row) => row.libraryId),
+  );
+
+  if (!page.isDone) {
+    await ctx.scheduler.runAfter(0, internal.core.scans.changedInside, {
+      inside,
+      cursor: page.continueCursor,
+    });
+  }
+
+  return queued;
+};
+
+/**
+ * Rescans after a change on the server's disk (ADR 0024): `path` is an absolute path that changed,
+ * a file or a folder, or a library root the server approved, which it sends at startup, on its
+ * reconcile interval, after its watcher restarts, and when a root it polls changed. Queues a scan
+ * of every movies library with a folder that is `path`, holds it, or lies inside it, and joins a
+ * scan already queued or running, as every scan is queued (`queueScan`). Music has no scanner yet,
+ * so its libraries are not queued. Answers how many libraries this call queued or joined; the
+ * folders inside `path` past its first page are rescanned by scheduled calls. A file name need not
+ * be plain, since a change event carries whatever name the disk has: the folders that hold it are
+ * its plain leading parts (`changedReach`). Refuses with `invalid_args` a path that is not absolute
+ * or is longer than 4,096 characters.
+ */
+export const changed = serverMutation({
+  args: { path: v.string() },
+  returns: v.object({ queued: v.number() }),
+  handler: async (ctx, { path }) => {
+    if (!path.startsWith("/") || path.length > CHANGED_PATH_CHARS_MAX) {
+      return fail(
+        "invalid_args",
+        `A changed path is absolute and at most ${CHANGED_PATH_CHARS_MAX} characters`,
+      );
+    }
+
+    const reach = changedReach(path);
+
+    const holders = await Promise.all(
+      reach.holders.map((folder) =>
+        ctx.db
+          .query("libraryFolders")
+          .withIndex("by_path", (q) => q.eq("path", folder))
+          .take(2),
+      ),
+    );
+
+    const held = await rescan(
+      ctx,
+      holders.flat().map((row) => row.libraryId),
+    );
+
+    return {
+      queued: held + (reach.inside === null ? 0 : await rescanInside(ctx, reach.inside, null)),
+    };
+  },
+});
+
+/** A later page of the folders inside a path `changed` was sent. */
+export const changedInside = internalMutation({
+  args: { inside: v.string(), cursor: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { inside, cursor }) => {
+    await rescanInside(ctx, inside, cursor);
+
+    return null;
+  },
 });

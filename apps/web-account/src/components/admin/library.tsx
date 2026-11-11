@@ -6,8 +6,8 @@ import { Match } from "effect";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@/components/shell";
-import { describeFailure, isFailure } from "@/lib/failure";
+import { PageHeader } from "@media/ui/components/page-header";
+import { describeFailure, isFailure } from "@media/ui/lib/failure";
 
 import { useActions } from "./action";
 import { FoldersField, KIND_LABELS, LEVEL_LABELS, foldersOf } from "./libraries";

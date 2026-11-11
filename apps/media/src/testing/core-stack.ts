@@ -8,6 +8,7 @@ import type { Scope } from "effect";
 import * as CoreWiring from "../core/core-wiring.ts";
 import * as CoreImports from "../migration/core-imports.ts";
 import * as Outbound from "../http/outbound.ts";
+import * as RetainedLogs from "../logging/retained-logs.ts";
 import * as MediaConfig from "../media-config.ts";
 import { redactedLine } from "../observability.ts";
 import { freePort, ticketKeysText } from "./core-host.ts";
@@ -152,8 +153,8 @@ export const startCoreServer = async (
     coreUrl: coreUrl(),
     serviceKey: options.serviceKey,
     ticketKeys: Redacted.make(ticketKeysText()),
-    backups: Option.none(),
   }).pipe(
+    Layer.provideMerge(RetainedLogs.layer),
     Layer.provide(config),
     Layer.provide(Layer.mergeAll(NodeServices.layer, Outbound.layer)),
     Layer.provide(

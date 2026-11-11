@@ -494,9 +494,14 @@ export const core = [
     result: v.object({ scanJobId: v.union(v.id("jobs"), v.null()) }),
   }),
   mutation("core.libraries.scan", {
-    summary: "Scan a library for new, changed, and missing files, or join the scan already queued",
+    summary:
+      "Scan a library for new, changed, and missing files, or join the scan already queued; full reads every file again",
     scope: "signed-in",
-    args: { libraryId: v.id("libraries") },
+    args: {
+      libraryId: v.id("libraries"),
+      /** `full` probes every file again, unchanged ones included; `incremental` when omitted. */
+      mode: v.optional(v.union(v.literal("incremental"), v.literal("full"))),
+    },
     result: v.object({ jobId: v.id("jobs"), created: v.boolean() }),
   }),
   mutation("core.libraries.remove", {

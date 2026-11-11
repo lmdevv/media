@@ -2,7 +2,7 @@ import { Conflict, Internal, NotFound } from "@media/contracts/errors";
 import { Effect, Layer } from "effect";
 import type { HttpRouter } from "effect/http";
 
-import type * as ViewerAuth from "../convex/viewer-auth.ts";
+import type * as CoreCallers from "../core/core-callers.ts";
 import { commandRoute } from "../http/command-routes.ts";
 import * as Backups from "./backups.ts";
 
@@ -10,7 +10,7 @@ import * as Backups from "./backups.ts";
 export const layer: Layer.Layer<
   never,
   never,
-  HttpRouter.HttpRouter | ViewerAuth.Service | Backups.Service
+  HttpRouter.HttpRouter | CoreCallers.Service | Backups.Service
 > = Layer.effectDiscard(
   Effect.gen(function* () {
     const backups = yield* Backups.Service;

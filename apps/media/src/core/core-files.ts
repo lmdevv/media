@@ -3,7 +3,7 @@ import { FileResolverUnavailable, MediaFileNotFound } from "@media/contracts/med
 import { serverFunctions } from "@media/contracts/server-functions";
 import { Cache, Duration, Effect, Exit, FileSystem, Layer, Option, Predicate } from "effect";
 
-import { relativeTo, toResolvedMediaFile } from "../convex/catalog-records.ts";
+import { relativeTo, toResolvedMediaFile } from "./catalog-records.ts";
 import * as FileResolver from "../playback/file-resolver.ts";
 import { isNotFound, modifiedAtMs } from "../platform/file-info.ts";
 import * as CoreSession from "./core-session.ts";

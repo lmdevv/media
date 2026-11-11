@@ -133,7 +133,11 @@ const TRICKPLAY_RUNNING_MAX = 8;
 
 const scanKind = <const Kind extends ContentDomain>(kind: Kind) =>
   defineKind(`${kind}.scan`, {
-    payload: { libraryId: v.id("libraries") },
+    payload: {
+      libraryId: v.id("libraries"),
+      /** A full scan reads every file again; absent means incremental. */
+      mode: v.optional(v.literal("full")),
+    },
     pool: kind,
     item: null,
     cap: LIBRARIES_SCANNING_PER_DOMAIN,

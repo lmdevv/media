@@ -8,7 +8,7 @@ import { usePlatform } from "@media/sdk/react";
 import type { UserId } from "@/session/platform-types";
 
 import { useActions } from "./action";
-import type { Paged } from "./pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { Muted, SelectField } from "./parts";
 import type { Choice } from "./parts";
 import type { Library, LibraryId, Restrictions } from "./types";

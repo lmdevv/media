@@ -4,10 +4,7 @@ import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { assert, layer } from "@effect/vitest";
 import { CLIENT_ERROR_LIMITS, LogRecord } from "@media/contracts/diagnostics";
 import { Forbidden, Unauthenticated } from "@media/contracts/errors";
-import { AuthSessionId, UserId } from "@media/contracts/ids";
-import type { Viewer } from "@media/contracts/models/account";
-import { type Role, roleScopes } from "@media/contracts/scopes";
-import { EpochMillis } from "@media/contracts/units";
+import { UserId } from "@media/contracts/ids";
 import {
   Context,
   Duration,
@@ -22,25 +19,19 @@ import {
 import { FetchHttpClient, HttpServer } from "effect/http";
 import { TestClock } from "effect/testing";
 
-import * as ViewerAuth from "../convex/viewer-auth.ts";
+import * as CoreCallers from "../core/core-callers.ts";
 import { serve } from "../http/http-server.ts";
 import * as LogsRoutes from "../logging/logs-routes.ts";
 import * as RetainedLogs from "../logging/retained-logs.ts";
 import { redactedLine } from "../observability.ts";
 import * as ClientErrors from "./client-errors.ts";
 
-const viewer = (id: string, role: Role): Viewer => ({
-  user: {
-    id: UserId.make(id),
-    email: `${id}@example.test`,
-    name: id,
-    role,
-    disabled: false,
-    createdAt: EpochMillis.make(0),
-  },
-  sessionId: AuthSessionId.make(`auth_${id}`),
-  sessionKind: "password",
-  scopes: roleScopes(role),
+const DOMAIN_SCOPES = ["movies:read", "movies:play", "movies:edit"];
+
+const caller = (id: string, role: "admin" | "member"): CoreCallers.Caller => ({
+  userId: UserId.make(id),
+  role,
+  scopes: role === "admin" ? ["account", "admin", ...DOMAIN_SCOPES] : ["account", ...DOMAIN_SCOPES],
 });
 
 const ADMIN_TOKEN = "admin-token";
@@ -48,22 +39,22 @@ const ADMIN_TOKEN = "admin-token";
 const MEMBER_PREFIX = "member-";
 
 /** The admin, and a member named by every `member-<id>` token, so each test has its own budget. */
-const viewerOf = (token: string): Option.Option<Viewer> => {
-  if (token === ADMIN_TOKEN) return Option.some(viewer("user_admin", "admin"));
+const callerOf = (token: string): Option.Option<CoreCallers.Caller> => {
+  if (token === ADMIN_TOKEN) return Option.some(caller("user_admin", "admin"));
 
   return token.startsWith(MEMBER_PREFIX)
-    ? Option.some(viewer(`user_${token.slice(MEMBER_PREFIX.length)}`, "member"))
+    ? Option.some(caller(`user_${token.slice(MEMBER_PREFIX.length)}`, "member"))
     : Option.none();
 };
 
 const authorized = { count: 0 };
 
 const authLayer = Layer.succeed(
-  ViewerAuth.Service,
-  ViewerAuth.Service.of({
+  CoreCallers.Service,
+  CoreCallers.Service.of({
     authorize: (bearer, access) => {
       authorized.count += 1;
-      const known = viewerOf(Redacted.value(bearer));
+      const known = callerOf(Redacted.value(bearer));
 
       if (Option.isNone(known)) {
         return Effect.fail(new Unauthenticated({ message: "Unknown token" }));
@@ -71,7 +62,7 @@ const authLayer = Layer.succeed(
 
       const found = known.value;
 
-      return access === "authenticated" || found.scopes.some((scope) => scope === access)
+      return CoreCallers.holds(found, access)
         ? Effect.succeed(found)
         : Effect.fail(new Forbidden({ message: `This session lacks the ${access} scope` }));
     },

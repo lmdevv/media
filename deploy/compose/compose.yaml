@@ -1,11 +1,11 @@
-# [media] with Docker Compose: the all-in-one image (the core's and old movies' Convex backends,
-# the media service, and the web clients behind one port), plus optional sidecars. From this folder:
+# [media] with Docker Compose: the all-in-one image (the core's Convex backend, the media service,
+# and the web clients behind one port), plus optional sidecars. From this folder:
 #
 #   cp .env.example .env        # then set MEDIA_LIBRARY and MEDIA_BASE_URL; see docs/homelab.md
 #   docker compose up -d
 #
-# Open MEDIA_BASE_URL for the account client and MEDIA_BASE_URL/movies for movies, create each
-# owner account, and add /media/library as a movies library. Optional: Intel Quick Sync with
+# Open MEDIA_BASE_URL, create the owner account, and add /media/library as a movies library; the
+# same sign-in opens movies at MEDIA_BASE_URL/movies. Optional: Intel Quick Sync with
 # `-f compose.yaml -f compose.qsv.yaml`; an OpenTelemetry collector with `--profile telemetry`.
 # Upgrades: docs/operations.md.
 name: media
@@ -19,7 +19,7 @@ services:
       dockerfile: deploy/image/Dockerfile
     restart: unless-stopped
     # s6 in the image stops the media service, which ends open responses 3 s into a stop and then
-    # closes its streams, before both Convex backends; it allows them 27 s in all.
+    # closes its streams, before the Convex backend; it allows them 27 s in all.
     stop_grace_period: 30s
     environment:
       MEDIA_BASE_URL: ${MEDIA_BASE_URL:-http://localhost:8080}
@@ -59,9 +59,9 @@ services:
     ports:
       - "${MEDIA_BIND:-127.0.0.1}:${MEDIA_PORT:-8080}:8080"
     volumes:
-      # Everything to keep, one folder per domain: /data/core (the core's Convex database) and
-      # /data/movies (old movies' Convex database, the media service's state, and nightly backups
-      # in /data/movies/backups).
+      # Everything to keep, one folder per domain: /data/core (the core's Convex database, its
+      # secrets, and nightly backups in /data/core/backups) and /data/movies (the media service's
+      # state). An install from before the movies cutover also keeps old movies' database there.
       - media-data:/data
       # Disposable HLS segments. To keep them in memory instead, replace this line with
       #   - { type: tmpfs, target: /transcode, tmpfs: { size: 8g } }

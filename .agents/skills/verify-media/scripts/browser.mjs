@@ -5,8 +5,12 @@
 // --app when the page is created. verify-media.sh calls this; agents call it through
 // `verify-media.sh browser`.
 //
-//   node browser.mjs serve --state <dir> --base <movies url> [--account <url>] [--convex <url>] [--music <url>]
-//   node browser.mjs <command> --state <dir> [--app movies|music] [flags]
+//   node browser.mjs serve --state <dir> --base <movies url> [--account <url> [--core]] [--convex <url>] [--music <url>]
+//   node browser.mjs <command> --state <dir> [--app movies|music|account] [flags]
+//
+// With --core, the movies client has no sign-in of its own: it uses the session the account client
+// at --account keeps (the one-backend layout), so movies pages sign in, set up, invite, and join
+// there, and have no profiles.
 //
 // Where the host allows it, the browser runs in a private network namespace (see `isolate`),
 // because Chromium cancels its queued requests whenever any host interface gains or loses an
@@ -20,7 +24,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-const OWNER = { name: "Lucía", email: "admin@movies.local", password: "password123" };
+const OWNER = { name: "Lucía", email: "admin@movies.local", username: "lucia", password: "password123" };
 const APPS = ["movies", "music", "account"];
 
 // Every socket lives in the side's state folder and is named relative to it: a socket address
@@ -55,10 +59,12 @@ const FLAGS = {
   state: { type: "string" },
   base: { type: "string" },
   account: { type: "string" },
+  core: { type: "boolean", default: false },
   convex: { type: "string" },
   music: { type: "string" },
   app: { type: "string" },
   page: { type: "string" },
+  "tab-of": { type: "string" },
   device: { type: "string" },
   width: { type: "string" },
   height: { type: "string" },
@@ -86,6 +92,7 @@ const FLAGS = {
   advance: { type: "string" },
   js: { type: "string" },
   email: { type: "string" },
+  username: { type: "string" },
   password: { type: "string" },
   profile: { type: "string" },
   pin: { type: "string" },
@@ -230,7 +237,7 @@ async function serve(options) {
 // clients, Convex, and streams) and music keep their port numbers inside, so every origin stays
 // `http://localhost:<port>`. The proxy carries HTTPS to the internet for the Cast SDK, TMDB
 // images, and trailers.
-async function isolate({ base, account, convex, music }) {
+async function isolate({ base, account, core, convex, music }) {
   const toHost = (port) =>
     createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, port, host: "127.0.0.1" })));
   const proxy = createServer((request, response) => {
@@ -262,7 +269,8 @@ async function isolate({ base, account, convex, music }) {
     PRIVATE_NETWORK,
     [
       process.execPath, fileURLToPath(import.meta.url), "serve-inside", "--state", ".", "--base", base,
-      ...(account ? ["--account", account] : []), ...(convex ? ["--convex", convex] : []),
+      ...(account ? ["--account", account] : []), ...(core ? ["--core"] : []),
+      ...(convex ? ["--convex", convex] : []),
       ...(music ? ["--music", music] : []),
     ],
     { stdio: ["pipe", "inherit", "inherit"] },
@@ -298,7 +306,7 @@ async function serveInside(options) {
   process.stdin.resume();
 }
 
-async function drive({ base, account, music }, network, launchArgs) {
+async function drive({ base, account, core, music }, network, launchArgs) {
   const { chromium, devices } = await import("@playwright/test");
   const executablePath = process.env.CHROMIUM_PATH || undefined;
   const browser = await chromium.launch({
@@ -317,20 +325,29 @@ async function drive({ base, account, music }, network, launchArgs) {
     const existing = pages.get(options.page);
     if (existing) return existing;
     if (!bases[app]) throw new Error(`this side has no ${app} app`);
-    const device = options.device ? devices[options.device] : undefined;
-    if (options.device && !device) throw new Error(`unknown Playwright device "${options.device}"`);
-    const viewport =
-      options.width && options.height
+    // `--tab-of P` opens another tab in page P's context: the same browser, cookies, storage, and
+    // sign-in, at P's size, as a person opening a second tab does.
+    const tabOf = options["tab-of"] ? pages.get(options["tab-of"]) : undefined;
+    if (options["tab-of"] && !tabOf) throw new Error(`no page named ${options["tab-of"]} to open a tab of`);
+    if (tabOf && tabOf.app !== app) throw new Error(`page ${options["tab-of"]} is a ${tabOf.app} page, not ${app}`);
+    const device = tabOf ? tabOf.device : options.device ? devices[options.device] : undefined;
+    if (!tabOf && options.device && !device) throw new Error(`unknown Playwright device "${options.device}"`);
+    const viewport = tabOf
+      ? tabOf.size
+      : options.width && options.height
         ? { width: Number(options.width), height: Number(options.height) }
         : (device?.viewport ?? { width: 1440, height: 900 });
     const dark = app === "music" ? options.dark : !options.light;
-    const context = await browser.newContext({
-      ...device,
-      viewport,
-      baseURL: bases[app],
-      colorScheme: dark ? "dark" : "light",
-    });
-    await context.addInitScript({ content: TRACK_MEDIA });
+    let context = tabOf?.context;
+    if (!context) {
+      context = await browser.newContext({
+        ...device,
+        viewport,
+        baseURL: bases[app],
+        colorScheme: dark ? "dark" : "light",
+      });
+      await context.addInitScript({ content: TRACK_MEDIA });
+    }
     const page = await context.newPage();
     prefixes.set(page, new URL(bases[app]).pathname.replace(/\/$/, ""));
     // What the player fetched, so `video` can say whether it played the file or an HLS stream.
@@ -353,7 +370,7 @@ async function drive({ base, account, music }, network, launchArgs) {
     // Screencast frames come at this size; the device's pixel ratio, up to 2, keeps text sharp.
     const scale = Math.min(device?.deviceScaleFactor ?? 1, 2);
     const frame = { width: viewport.width * scale, height: viewport.height * scale };
-    const entry = { app, context, page, viewport: frame, recording: null, streams, networkChanged };
+    const entry = { app, context, page, device, size: viewport, viewport: frame, recording: null, streams, networkChanged };
     pages.set(options.page, entry);
     return entry;
   };
@@ -590,6 +607,107 @@ async function drive({ base, account, music }, network, launchArgs) {
     }
   };
 
+  const openAccount = (page, path) => {
+    if (!account) throw new Error("this side has no account client");
+    return page.goto(new URL(path, account).href);
+  };
+  const accountHome = (page, options) =>
+    page.waitForURL((url) => url.pathname === "/home", { timeout: timeout(options) });
+
+  const accountFlows = {
+    async signIn(page, options) {
+      await openAccount(page, "/");
+      await page.getByLabel("Username").fill(options.username ?? OWNER.username);
+      await page.getByLabel("Password", { exact: true }).fill(options.password ?? OWNER.password);
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await accountHome(page, options);
+      return `signed in as ${options.username ?? OWNER.username}`;
+    },
+    async setup(page, options) {
+      await openAccount(page, "/");
+      await page.getByRole("heading", { name: "Set up your server." }).waitFor({ timeout: timeout(options) });
+      await page.getByLabel("Username").fill(OWNER.username);
+      await page.getByLabel("Password", { exact: true }).fill(OWNER.password);
+      await page.getByRole("button", { name: "Create owner account" }).click();
+      await accountHome(page, options);
+      const libraries = [["Movies", options.movies ?? "/media/library/Movies"]];
+      if (options.shows) libraries.push(["Shows", options.shows]);
+      await openAccount(page, "/admin/libraries");
+      const form = page.getByRole("region", { name: "Add a library" });
+      for (const [name, folder] of libraries) {
+        await form.getByLabel("Name").fill(name);
+        await form.getByLabel("Kind").selectOption("movies");
+        await form.getByLabel("Folders, one per line").fill(folder);
+        await form.getByRole("button", { name: "Add library" }).click();
+        await page
+          .getByRole("list", { name: "Libraries" })
+          .getByRole("link", { name, exact: true })
+          .waitFor({ timeout: timeout(options) });
+      }
+      return `set up as ${OWNER.username}`;
+    },
+    async invite(page, options) {
+      await openAccount(page, "/admin");
+      const section = page.getByRole("region", { name: "Invite someone" });
+      await section.getByLabel("Role").selectOption(options["invite-role"] ?? "member");
+      await section.getByRole("button", { name: "Create invite link" }).click();
+      const field = section.getByLabel("Invite link");
+      await field.waitFor({ timeout: timeout(options) });
+      const link = (await field.innerText()).trim();
+      const code = new URL(link).hash.slice(1);
+      if (!code) throw new Error(`the invite link looks wrong: "${link}"`);
+      return code;
+    },
+    async join(page, options) {
+      if (!options.code || !options.username) throw new Error("join needs --code and --username on this side");
+      await openAccount(page, `/invite#${options.code}`);
+      await page.getByRole("heading", { name: "You're invited." }).waitFor({ timeout: timeout(options) });
+      await page.getByLabel("Username").fill(options.username);
+      await page.getByLabel("Password", { exact: true }).fill(options.password ?? OWNER.password);
+      await page.getByRole("button", { name: "Create account" }).click();
+      await accountHome(page, options);
+      return `joined as ${options.username}`;
+    },
+    async createAccount(page, options) {
+      if (!options.username) throw new Error("create-account needs --username");
+      await openAccount(page, "/admin");
+      const section = page.getByRole("region", { name: "Create an account" });
+      await section.getByLabel("Username").fill(options.username);
+      await section.getByLabel("Password", { exact: true }).fill(options.password ?? OWNER.password);
+      await section.getByLabel("Role").selectOption(options["invite-role"] ?? "member");
+      await section.getByRole("button", { name: "Create account" }).click();
+      await page
+        .getByRole("list", { name: "People" })
+        .getByText(options.username, { exact: true })
+        .waitFor({ timeout: timeout(options) });
+      return `created ${options.username}`;
+    },
+  };
+
+  const accountCommands = {
+    "sign-in": ({ page }, options) => accountFlows.signIn(page, options),
+    setup: ({ page }, options) => accountFlows.setup(page, options),
+    invite: ({ page }, options) => accountFlows.invite(page, options),
+    join: ({ page }, options) => accountFlows.join(page, options),
+    "create-account": ({ page }, options) => accountFlows.createAccount(page, options),
+  };
+
+  const noProfiles = () => {
+    throw new Error("this side has no profiles: each person, a kid too, is their own user; sign in as them");
+  };
+
+  const coreMoviesCommands = {
+    ...accountCommands,
+    async "sign-in"(entry, options) {
+      await accountFlows.signIn(entry.page, options);
+      await openAppPath(entry.page, "/");
+      await signedIn(entry.page).first().waitFor({ timeout: timeout(options) });
+      return entry.page.url();
+    },
+    profile: noProfiles,
+    "add-profile": noProfiles,
+  };
+
   const commands = {
     async "record-start"(entry, options) {
       return startRecording(entry, options);
@@ -611,6 +729,10 @@ async function drive({ base, account, music }, network, launchArgs) {
     },
     async fill({ page }, options) {
       await locate(page, options).fill(options.value ?? "", { timeout: timeout(options) });
+    },
+    async select({ page }, options) {
+      if (options.value === undefined) throw new Error("select needs --value, the option's label");
+      return (await locate(page, options).selectOption({ label: options.value }, { timeout: timeout(options) })).join(",");
     },
     async type({ page }, options) {
       await page.keyboard.type(options.value ?? "");
@@ -832,7 +954,7 @@ async function drive({ base, account, music }, network, launchArgs) {
       return key;
     },
   };
-  const appCommands = { movies: moviesCommands, music: musicCommands, account: {} };
+  const appCommands = { movies: core ? coreMoviesCommands : moviesCommands, music: musicCommands, account: accountCommands };
 
   const handle = async (options) => {
     if (options.command === "network") return `${network} ${chromiumPid()}`;
@@ -846,7 +968,9 @@ async function drive({ base, account, music }, network, launchArgs) {
       if (!entry) throw new Error(`no page named ${options.page}`);
       pages.delete(options.page);
       const saved = entry.recording ? await stopRecording(entry) : null;
-      await entry.context.close();
+      // A tab closes alone while another page still uses its context.
+      const shared = [...pages.values()].some((other) => other.context === entry.context);
+      await (shared ? entry.page.close() : entry.context.close());
       return saved ? `closed ${options.page}; saved ${saved}` : `closed ${options.page}`;
     }
     const existing = pages.get(options.page);

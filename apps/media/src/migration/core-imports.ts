@@ -6,6 +6,7 @@ import type {
   ImportPlanArgs,
   ImportReport,
   ImportSourceUser,
+  ImportStarted,
   ImportUserMapping,
   MigrationConnectArgs,
   MigrationCredentials,
@@ -14,8 +15,6 @@ import type {
 } from "@media/contracts/models/migration";
 import type { CatalogFile, LocalProgress } from "@media/contracts/models/migration-service";
 import { IMPORT_PLAN_MAX, serverFunctions } from "@media/contracts/server-functions";
-import type { ImportId } from "@media/contracts/models/migration";
-import type { JobId } from "@media/contracts/ids";
 import type { CallError } from "@media/sdk/effect";
 import { EpochMillis } from "@media/contracts/units";
 import {
@@ -51,14 +50,6 @@ import { openSource, SOURCE_ERROR_TAGS } from "./sources.ts";
 import type { SourceSession } from "./source-plugin.ts";
 
 const CONNECTION_TTL = Duration.hours(1);
-
-/** A run the core started, or the one of the same server already queued or running. */
-interface ImportStarted {
-  readonly status: "queued";
-  readonly importId: ImportId;
-  readonly jobId: JobId;
-  readonly created: boolean;
-}
 
 interface DryRun {
   readonly usersKey: string;

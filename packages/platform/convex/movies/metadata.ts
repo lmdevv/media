@@ -19,6 +19,7 @@ import {
   boundedEpisode,
   boundedTitle,
 } from "./bounds";
+import { registerWithArtworkTickets } from "./artwork";
 import { budgetFor, whileBudget, work } from "./budget";
 import { requireTitle } from "./access";
 import {
@@ -460,7 +461,7 @@ const checkedOverrides = (overrides: Overrides): Overrides => {
  * which `requireTitle` decides through `can()`. A match or a refresh goes through
  * `askForMatch` and `askForRefresh`, so the match generation fences every metadata job.
  */
-export const { match, refresh, edit } = register({
+export const { match, refresh, edit } = registerWithArtworkTickets(register, {
   match: async (ctx, { titleId, provider, providerId }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "edit", titleId);
     const chosen = providerId.trim();

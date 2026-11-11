@@ -441,6 +441,9 @@ and newer [movies] progress is kept unless the source played the item more recen
 - `media migration dry-run <connection-id> [--users <json>]`: Preview what a migration would import without writing anything. (scope admin)
 - `media migration import <connection-id> [--users <json>] [--wait [--timeout <seconds>]]`: Import libraries, watch history, favorites, collections, and metadata overrides. (scope admin; job: add `--wait`)
 - `media migration status`: Show migration jobs, their phase, and what they imported. (scope admin)
+- `media imports connect --source <jellyfin|plex> --url <text> --credentials <json> [--path-mappings <json>]`: Connect to a Jellyfin or Plex server to import from. (scope admin)
+- `media imports preview <connection-id> [--users <json>]`: Preview what an import would bring in without writing anything. (scope admin)
+- `media imports start <connection-id> [--users <json>] [--wait [--timeout <seconds>]]`: Import libraries, watch history, favorites, collections, and metadata overrides. (scope admin; job: add `--wait`)
 
 ### diagnostics
 

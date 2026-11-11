@@ -1,39 +1,20 @@
 import { join } from "node:path";
 
-import { NotFound } from "@media/contracts/errors";
-import type { JobId } from "@media/contracts/ids";
-import { HealthResponse, MEDIA_ROUTES } from "@media/contracts/media-playback";
-import type { Backup } from "@media/contracts/models/jobs";
-import { Effect, Exit, Option, Schema, Scope } from "effect";
+import { Effect, Exit, Option, Redacted, Schema, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import type { MediaProcess } from "../testing/stack-processes.ts";
+import { fileInfo, writeText } from "../testing/stack-processes.ts";
 import {
-  client,
-  finished,
-  openSession,
-  runIn,
-  signInOwner,
-  type StackSession,
-} from "../testing/stack-owner.ts";
-import {
-  buildServiceAndCli,
-  fileInfo,
-  findMediaStack,
-  makeTempDir,
-  removeDir,
-  startMedia,
-  waitForBody,
-  writeText,
-} from "../testing/stack-processes.ts";
+  core,
+  eventually,
+  issueServiceKey,
+  personIn,
+  startCoreServer,
+} from "../testing/core-stack.ts";
+import type { CoreServer, Person } from "../testing/core-stack.ts";
+import { makeWorkDir, removeDir } from "../testing/core-host.ts";
 
-const stack = findMediaStack();
-
-const id = Math.random().toString(36).slice(2, 8);
-
-const convexUrl = stack?.convexUrl ?? "";
-
-const mediaUrl = stack?.mediaUrl ?? "";
+const platformRoot = join(import.meta.dirname, "..", "..", "..", "..", "packages", "platform");
 
 const EXPIRED = "movies-nightly-2020-01-01T03-00-00-000Z.zip";
 
@@ -41,101 +22,122 @@ const PARTIAL = ".partial-movies-manual-2020-01-02T03-00-00-000Z.zip";
 
 let scope: Scope.Closeable;
 
-let owner: StackSession;
-
-let media: MediaProcess;
+let workDir = "";
 
 let backupDir = "";
 
-let taken: Backup;
+let admin: Person;
 
-const decodeHealth = Schema.decodeUnknownOption(Schema.fromJsonString(HealthResponse));
+let member: Person;
 
-const connected = () =>
-  waitForBody(
-    `${mediaUrl}${MEDIA_ROUTES.health}`,
-    (text) =>
-      decodeHealth(text).pipe(
-        Option.filter((health) => health.backend === "connected"),
-        Option.getOrUndefined,
-      ),
-    60_000,
+let server: CoreServer;
+
+let serviceKey: Redacted.Redacted;
+
+const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
+
+interface Listed {
+  readonly id: string;
+  readonly fileName: string;
+  readonly sizeBytes: number;
+  readonly trigger: "nightly" | "manual";
+}
+
+const listBackups = async (person: Person): Promise<ReadonlyArray<Listed>> =>
+  (
+    await run(
+      person.platform.core.server.backups.list({
+        paginationOpts: { numItems: 50, cursor: null },
+      }),
+    )
+  ).page;
+
+const backUp = async (person: Person): Promise<Listed> => {
+  const before = new Set((await listBackups(person)).map((backup) => backup.fileName));
+
+  await run(person.platform.core.server.backups.run({}));
+
+  return eventually(
+    "the backup job records a new archive",
+    async () => {
+      const added = (await listBackups(person)).find((backup) => !before.has(backup.fileName));
+
+      return Option.fromNullishOr(added);
+    },
+    120_000,
   );
-
-const signedIn = async (): Promise<StackSession> => {
-  const session = await Effect.runPromise(openSession(convexUrl, mediaUrl, scope));
-
-  await runIn(session, signInOwner);
-
-  return session;
 };
 
-const listBackups = (session: StackSession) =>
-  runIn(
-    session,
-    Effect.flatMap(client, (movies) => movies.query("backups.list", {})),
-  );
+const restore = async (person: Person, backupId: string) => {
+  const token = await run(person.platform.session.accessToken);
 
-const profileNames = (session: StackSession) =>
-  runIn(
-    session,
-    Effect.flatMap(client, (movies) => movies.query("profiles.list", {})),
-  ).then((profiles) => profiles.map((profile) => profile.name));
+  return fetch(`${server.baseUrl}/api/backups/restore`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...Option.match(token, {
+        onNone: () => ({}),
+        onSome: (value) => ({ authorization: `Bearer ${Redacted.value(value)}` }),
+      }),
+    },
+    body: JSON.stringify({ backupId }),
+  });
+};
 
-const backUp = (session: StackSession) =>
-  runIn(
-    session,
-    Effect.gen(function* () {
-      const movies = yield* client;
-      const { jobId } = yield* movies.mutate("backups.run", {});
+const Failure = Schema.Struct({ code: Schema.String, message: Schema.String });
 
-      return yield* finished(jobId satisfies JobId, "90 seconds");
-    }),
-  );
-
-describe.skipIf(stack === undefined)(
-  "backups and restores against a real stack",
-  { timeout: 120_000 },
+describe.skipIf(core === undefined)(
+  "backups and restores of the core",
+  { timeout: 180_000 },
   () => {
     beforeAll(async () => {
-      buildServiceAndCli();
-      backupDir = await makeTempDir("movies-backup-stack-");
+      scope = await run(Scope.make());
+      workDir = await makeWorkDir("media-core-backup-");
+      backupDir = await makeWorkDir("media-core-backups-");
       await writeText(join(backupDir, EXPIRED), "an expired archive");
       await writeText(join(backupDir, PARTIAL), "a partial export");
-      scope = Scope.makeUnsafe();
-      owner = await signedIn();
-      media = startMedia({ ...stack?.mediaEnv, BACKUP_DIR: backupDir });
-      await connected();
+      admin = await personIn(scope, "admin");
+      member = await personIn(scope, "member");
+      serviceKey = await issueServiceKey();
+
+      server = await startCoreServer(scope, {
+        serviceKey,
+        libraryRoot: join(workDir, "library"),
+        workDir: join(workDir, "server"),
+        env: {
+          BACKUP_DIR: backupDir,
+          CONVEX_URL: core?.url ?? "",
+          CONVEX_SELF_HOSTED_ADMIN_KEY: core?.adminKey ?? "",
+          CONVEX_BACKEND_DIR: platformRoot,
+        },
+      });
     }, 180_000);
 
     afterAll(async () => {
-      await media.stop("SIGTERM");
-      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await run(Scope.close(scope, Exit.void));
+      await removeDir(workDir);
       await removeDir(backupDir);
     }, 60_000);
 
     it("lists archives found in the folder at startup", async () => {
-      await expect
-        .poll(async () => (await listBackups(owner)).map((backup) => backup.fileName), {
-          timeout: 30_000,
-        })
-        .toContain(EXPIRED);
+      await eventually("the startup sync lists the expired archive", async () =>
+        (await listBackups(admin)).some((backup) => backup.fileName === EXPIRED)
+          ? Option.some(true)
+          : Option.none(),
+      );
     });
 
     it("backs up into a private archive, records it, and prunes past the retention", async () => {
-      const job = await backUp(owner);
+      const taken = await backUp(admin);
 
-      expect(job.status, job.error ?? "").toBe("succeeded");
-      expect(job.progress.done).toBe(job.progress.total);
+      expect(taken.fileName).toMatch(/^movies-manual-.*\.zip$/u);
+      expect(taken.trigger).toBe("manual");
 
-      const backups = await listBackups(owner);
-      const names = backups.map((backup) => backup.fileName);
-      const newest = backups[0];
-
-      expect(newest?.fileName).toMatch(/^movies-manual-.*\.zip$/u);
-      expect(newest?.trigger).toBe("manual");
-      expect(names).not.toContain(EXPIRED);
-      taken = newest ?? expect.unreachable();
+      await eventually("the prune drops the expired archive", async () =>
+        (await listBackups(admin)).every((backup) => backup.fileName !== EXPIRED)
+          ? Option.some(true)
+          : Option.none(),
+      );
 
       expect(await fileInfo(join(backupDir, taken.fileName))).toEqual({
         size: taken.sizeBytes,
@@ -146,59 +148,67 @@ describe.skipIf(stack === undefined)(
       expect(await fileInfo(join(backupDir, PARTIAL))).toBeUndefined();
     });
 
-    it("restores the archive, ends every session, and keeps the service signed in", async () => {
-      const after = `After backup ${id}`;
+    it("refuses a restore to a member and to a request with no session", async () => {
+      const [taken] = await listBackups(admin);
+      const backupId = taken?.id ?? expect.unreachable();
 
-      await runIn(
-        owner,
-        Effect.flatMap(client, (movies) =>
-          movies.mutate("profiles.create", { name: after, avatar: "blue", kids: false }),
-        ),
+      const refused = await restore(member, backupId);
+
+      const anonymous = await fetch(`${server.baseUrl}/api/backups/restore`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ backupId }),
+      });
+
+      expect(refused.status).toBe(403);
+      expect(Schema.decodeUnknownSync(Failure)(await refused.json()).code).toBe("forbidden");
+      expect(anonymous.status).toBe(401);
+    });
+
+    it("restores the archive, ends every session, and signs the server in again", async () => {
+      const [taken] = await listBackups(admin);
+      const backupId = taken?.id ?? expect.unreachable();
+      const late = await personIn(scope, "member", "late");
+
+      const restored = await restore(admin, backupId);
+
+      expect(restored.status, await restored.clone().text()).toBe(200);
+
+      // Every session from before the import ends, the one of an account made after the backup
+      // included. The core ends them 100 a call in scheduled calls, so a stack holding many
+      // sessions reaches these two a little after the restore answers.
+      await eventually("the admin's session to end", async () =>
+        Exit.isFailure(await run(Effect.exit(admin.platform.core.auth.sessions.current())))
+          ? Option.some(true)
+          : Option.none(),
       );
 
-      expect(await profileNames(owner)).toContain(after);
-
-      await runIn(
-        owner,
-        Effect.flatMap(client, (movies) => movies.media("backups.restore", { backupId: taken.id })),
+      await eventually("the late member's session to end", async () =>
+        Exit.isFailure(await run(Effect.exit(late.platform.core.auth.sessions.current())))
+          ? Option.some(true)
+          : Option.none(),
       );
 
-      const stale = await runIn(
-        owner,
-        Effect.flatMap(client, (movies) => movies.query("profiles.list", {})).pipe(Effect.exit),
-      );
+      // The server's key is in the archive, so its next claim signs it in again and runs a job.
 
-      expect(Exit.isFailure(stale)).toBe(true);
-
-      const again = await signedIn();
-
-      expect(await profileNames(again)).not.toContain(after);
-      expect((await listBackups(again)).map((backup) => backup.fileName)).toContain(taken.fileName);
-
-      await connected();
+      const again = await personIn(scope, "admin", "after");
       const next = await backUp(again);
 
-      expect(next.status, next.error ?? "").toBe("succeeded");
-      expect(media.logs()).not.toContain(stack?.mediaEnv["CONVEX_SELF_HOSTED_ADMIN_KEY"] ?? "-");
-      expect(media.logs()).not.toContain(stack?.mediaServiceKey ?? "-");
+      expect(next.trigger).toBe("manual");
+      expect(server.logged().join("\n")).not.toContain(Redacted.value(serviceKey));
+      expect(server.logged().join("\n")).not.toContain(core?.adminKey ?? "-");
     });
 
     it("refuses a backup whose archive is gone", async () => {
-      const session = await signedIn();
+      const someone = await personIn(scope, "admin", "remover");
+      const [newest] = await listBackups(someone);
+      const gone = newest ?? expect.unreachable();
 
-      const backups = await listBackups(session);
-      const restorable = backups[0] ?? expect.unreachable();
+      await removeDir(join(backupDir, gone.fileName));
 
-      await removeDir(join(backupDir, restorable.fileName));
+      const refused = await restore(someone, gone.id);
 
-      const refused = await runIn(
-        session,
-        Effect.flatMap(client, (movies) =>
-          movies.media("backups.restore", { backupId: restorable.id }),
-        ).pipe(Effect.flip),
-      );
-
-      expect(refused).toBeInstanceOf(NotFound);
+      expect(refused.status).toBe(404);
     });
   },
 );

@@ -11,10 +11,12 @@ import { Route as InviteRouteImport } from './routes/invite'
 import { Route as ResetRouteImport } from './routes/reset'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
+import { Route as AdminBackupsRouteImport } from './routes/admin.backups'
 import { Route as AdminDevicesRouteImport } from './routes/admin.devices'
 import { Route as AdminGroupsRouteImport } from './routes/admin.groups'
 import { Route as AdminGuestsRouteImport } from './routes/admin.guests'
 import { Route as AdminLibrariesRouteImport } from './routes/admin.libraries'
+import { Route as AdminServerRouteImport } from './routes/admin.server'
 import { Route as TileUserIdRouteImport } from './routes/tile.$userId'
 import { Route as AdminLibrariesLibraryIdRouteImport } from './routes/admin.libraries_.$libraryId'
 
@@ -58,6 +60,11 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminBackupsRoute = AdminBackupsRouteImport.update({
+  id: '/backups',
+  path: '/backups',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminDevicesRoute = AdminDevicesRouteImport.update({
   id: '/devices',
   path: '/devices',
@@ -76,6 +83,11 @@ const AdminGuestsRoute = AdminGuestsRouteImport.update({
 const AdminLibrariesRoute = AdminLibrariesRouteImport.update({
   id: '/libraries',
   path: '/libraries',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminServerRoute = AdminServerRouteImport.update({
+  id: '/server',
+  path: '/server',
   getParentRoute: () => AdminRoute,
 } as any)
 const TileUserIdRoute = TileUserIdRouteImport.update({
@@ -97,10 +109,12 @@ export interface FileRoutesByFullPath {
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
+  '/admin/backups': typeof AdminBackupsRoute
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
   '/admin/guests': typeof AdminGuestsRoute
   '/admin/libraries': typeof AdminLibrariesRoute
+  '/admin/server': typeof AdminServerRoute
   '/tile/$userId': typeof TileUserIdRoute
   '/admin/': typeof AdminIndexRoute
   '/admin/libraries/$libraryId': typeof AdminLibrariesLibraryIdRoute
@@ -112,10 +126,12 @@ export interface FileRoutesByTo {
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
+  '/admin/backups': typeof AdminBackupsRoute
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
   '/admin/guests': typeof AdminGuestsRoute
   '/admin/libraries': typeof AdminLibrariesRoute
+  '/admin/server': typeof AdminServerRoute
   '/tile/$userId': typeof TileUserIdRoute
   '/admin': typeof AdminIndexRoute
   '/admin/libraries/$libraryId': typeof AdminLibrariesLibraryIdRoute
@@ -129,10 +145,12 @@ export interface FileRoutesById {
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
+  '/admin/backups': typeof AdminBackupsRoute
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
   '/admin/guests': typeof AdminGuestsRoute
   '/admin/libraries': typeof AdminLibrariesRoute
+  '/admin/server': typeof AdminServerRoute
   '/tile/$userId': typeof TileUserIdRoute
   '/admin/': typeof AdminIndexRoute
   '/admin/libraries_/$libraryId': typeof AdminLibrariesLibraryIdRoute
@@ -147,10 +165,12 @@ export interface FileRouteTypes {
     | '/invite'
     | '/reset'
     | '/settings'
+    | '/admin/backups'
     | '/admin/devices'
     | '/admin/groups'
     | '/admin/guests'
     | '/admin/libraries'
+    | '/admin/server'
     | '/tile/$userId'
     | '/admin/'
     | '/admin/libraries/$libraryId'
@@ -162,10 +182,12 @@ export interface FileRouteTypes {
     | '/invite'
     | '/reset'
     | '/settings'
+    | '/admin/backups'
     | '/admin/devices'
     | '/admin/groups'
     | '/admin/guests'
     | '/admin/libraries'
+    | '/admin/server'
     | '/tile/$userId'
     | '/admin'
     | '/admin/libraries/$libraryId'
@@ -178,10 +200,12 @@ export interface FileRouteTypes {
     | '/invite'
     | '/reset'
     | '/settings'
+    | '/admin/backups'
     | '/admin/devices'
     | '/admin/groups'
     | '/admin/guests'
     | '/admin/libraries'
+    | '/admin/server'
     | '/tile/$userId'
     | '/admin/'
     | '/admin/libraries_/$libraryId'
@@ -256,6 +280,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/backups': {
+      id: '/admin/backups'
+      path: '/backups'
+      fullPath: '/admin/backups'
+      preLoaderRoute: typeof AdminBackupsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/devices': {
       id: '/admin/devices'
       path: '/devices'
@@ -284,6 +315,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminLibrariesRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/server': {
+      id: '/admin/server'
+      path: '/server'
+      fullPath: '/admin/server'
+      preLoaderRoute: typeof AdminServerRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/tile/$userId': {
       id: '/tile/$userId'
       path: '/tile/$userId'
@@ -302,19 +340,23 @@ declare module '@tanstack/react-router' {
 }
 
 interface AdminRouteChildren {
+  AdminBackupsRoute: typeof AdminBackupsRoute
   AdminDevicesRoute: typeof AdminDevicesRoute
   AdminGroupsRoute: typeof AdminGroupsRoute
   AdminGuestsRoute: typeof AdminGuestsRoute
   AdminLibrariesRoute: typeof AdminLibrariesRoute
+  AdminServerRoute: typeof AdminServerRoute
   AdminIndexRoute: typeof AdminIndexRoute
   AdminLibrariesLibraryIdRoute: typeof AdminLibrariesLibraryIdRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminBackupsRoute: AdminBackupsRoute,
   AdminDevicesRoute: AdminDevicesRoute,
   AdminGroupsRoute: AdminGroupsRoute,
   AdminGuestsRoute: AdminGuestsRoute,
   AdminLibrariesRoute: AdminLibrariesRoute,
+  AdminServerRoute: AdminServerRoute,
   AdminIndexRoute: AdminIndexRoute,
   AdminLibrariesLibraryIdRoute: AdminLibrariesLibraryIdRoute,
 }

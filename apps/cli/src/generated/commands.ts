@@ -1640,10 +1640,16 @@ export const generatedCommands = [
     kind: "mutation",
     scope: "signed-in",
     refusesKeys: false,
-    summary: "Scan a library for new, changed, and missing files, or join the scan already queued",
+    summary:
+      "Scan a library for new, changed, and missing files, or join the scan already queued; full reads every file again",
     secrets: [],
     paginated: false,
-    args: Schema.Struct({ libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")) }),
+    args: Schema.Struct({
+      libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+      mode: Schema.optionalKey(
+        Schema.Union([Schema.Literal("incremental"), Schema.Literal("full")]),
+      ),
+    }),
     result: Schema.Struct({
       jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
       created: Schema.Boolean,

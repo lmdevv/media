@@ -4,7 +4,7 @@ import { EpochMillis } from "@media/contracts/units";
 import { Effect, Layer, Match } from "effect";
 
 import * as Backups from "../backups/backups.ts";
-import { JobFailed } from "../jobs/job-worker.ts";
+import { JobFailed } from "./core-jobs.ts";
 import * as CoreJobs from "./core-jobs.ts";
 import * as CoreSession from "./core-session.ts";
 

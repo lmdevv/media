@@ -72,6 +72,9 @@ const PROBE_EVERY = Duration.seconds(30);
 
 const PROBE_TIMEOUT = Duration.seconds(10);
 
+/** How soon an unanswered probe asks again, so a start or an outage turns connected promptly. */
+const PROBE_RETRY = Duration.seconds(1);
+
 /**
  * The health route's `backend`: `connected` while the core accepts the server's key and answered
  * its latest probe, `connecting` otherwise. The probe asks about a session that cannot exist, a
@@ -91,10 +94,20 @@ export const healthLayer: Layer.Layer<BackendHealth.Service, never, CoreSession.
           .call(serverFunctions.sessionStatus, { userId: "probe", sessionId: `probe${String(at)}` })
           .pipe(Effect.timeoutOption(PROBE_TIMEOUT), Effect.option);
 
-        yield* Ref.set(answered, Option.isSome(Option.flatten(answer)));
+        const ok = Option.isSome(Option.flatten(answer));
+
+        yield* Ref.set(answered, ok);
+
+        return ok;
       });
 
-      yield* probe.pipe(Effect.repeat(Schedule.spaced(PROBE_EVERY)), Effect.forkScoped);
+      // An answered probe waits `PROBE_EVERY`; an unanswered one, such as the first while the
+      // server is still signing in, asks again after `PROBE_RETRY`.
+      yield* probe.pipe(
+        Effect.flatMap((ok) => Effect.sleep(ok ? PROBE_EVERY : PROBE_RETRY)),
+        Effect.forever,
+        Effect.forkScoped,
+      );
 
       return BackendHealth.Service.of({
         status: Effect.gen(function* () {

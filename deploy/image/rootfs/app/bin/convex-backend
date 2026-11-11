@@ -25,6 +25,9 @@ export TMPDIR="$data/convex/tmp"
 export NO_COLOR=1
 # Convex refuses to start with TZ set ("Convex requires UTC"); TZ only localizes the other logs.
 unset TZ
+# Idle memory (docs/decisions/0027): two glibc malloc arenas instead of one per thread, and
+# isolates idle for a minute are recreated empty instead of after ten.
+export MALLOC_ARENA_MAX=2 ISOLATE_IDLE_TIMEOUT_SECONDS=60
 # The backend takes its secret only as an argument, and every process can read every other's
 # arguments in /proc/<pid>/cmdline. The argv-secret shim swaps the placeholder for the file's
 # contents inside the process, so the command line only ever shows the placeholder.

@@ -267,16 +267,6 @@ export const generateFixtureLibrary = async (root: string): Promise<FixtureLibra
   return { moviesRoot, showsRoot, directMovie, remuxMovie, hdrMovie, messyMovie, episodes };
 };
 
-/**
- * Encodes an H.264/AAC test movie `seconds` long at `output`, creating its folder, for suites that
- * need one clip longer than the fixture library's.
- */
-export const encodeTestMovie = (output: string, seconds: number): Promise<void> =>
-  encode(
-    [...testVideo(seconds, "320x180"), ...testAudio(seconds, 440), ...h264, "-c:a", "aac"],
-    output,
-  );
-
 /** True when an ffmpeg binary can be started. */
 export const ffmpegAvailable = async (): Promise<boolean> => {
   try {

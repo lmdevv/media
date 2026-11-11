@@ -14,8 +14,7 @@ import {
   toScannedCollection,
   toScannedCredits,
   toScannedItem,
-} from "../convex/catalog-records.ts";
-import { JobFailed } from "../jobs/job-worker.ts";
+} from "./catalog-records.ts";
 import * as LibraryScanner from "../library/library-scanner.ts";
 import type { ScanError, ScanSummary } from "../library/library-scanner.ts";
 import * as LibrarySink from "../library/library-sink.ts";
@@ -24,7 +23,7 @@ import type * as MediaConfig from "../media-config.ts";
 import type * as MetadataResolver from "../metadata/title-metadata.ts";
 import { bootId, folderChain, folderSource } from "../platform/folder-identity.ts";
 import * as CoreJobs from "./core-jobs.ts";
-import { JobStopped } from "./core-jobs.ts";
+import { JobFailed, JobStopped } from "./core-jobs.ts";
 import * as CoreSession from "./core-session.ts";
 
 const PROGRESS_EVERY = Duration.seconds(2);
@@ -423,7 +422,11 @@ export const handler = Effect.gen(function* () {
       );
 
       const summaries = yield* Effect.forEach(target.folders, (root) =>
-        scanner.scan({ libraryId: target.libraryId, root, mode: "incremental" }),
+        scanner.scan({
+          libraryId: target.libraryId,
+          root,
+          mode: job.payload.mode ?? "incremental",
+        }),
       ).pipe(
         Effect.catch((error) =>
           Effect.flatMap(own.stopped, (stopped): Effect.Effect<never, JobFailed | JobStopped> =>

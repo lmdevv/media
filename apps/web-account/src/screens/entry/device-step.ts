@@ -1,4 +1,4 @@
-import { describeFailure, isFailure } from "@/lib/failure";
+import { describeFailure, isFailure } from "@media/ui/lib/failure";
 
 import type { Answer, CodeProblem, DeviceStep } from "./device";
 import type { Lookup } from "./lookup";

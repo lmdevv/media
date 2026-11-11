@@ -1,18 +1,19 @@
+import { Forbidden } from "@media/contracts/errors";
 import { Layer, Effect } from "effect";
 import type { FileSystem, Path } from "effect";
 import type { HttpRouter } from "effect/http";
 
-import type * as ViewerAuth from "../convex/viewer-auth.ts";
+import * as CoreCallers from "../core/core-callers.ts";
 import { commandRoute } from "../http/command-routes.ts";
 import type * as MediaConfig from "../media-config.ts";
 import * as ServerFolders from "./server-folders.ts";
 
-/** Adds the folder browser route. */
+/** Adds the folder browser route, for owners and admins. */
 export const layer: Layer.Layer<
   never,
   never,
   | HttpRouter.HttpRouter
-  | ViewerAuth.Service
+  | CoreCallers.Service
   | MediaConfig.Service
   | FileSystem.FileSystem
   | Path.Path
@@ -22,8 +23,12 @@ export const layer: Layer.Layer<
       MediaConfig.Service | FileSystem.FileSystem | Path.Path
     >();
 
-    yield* commandRoute("libraries.folders", ({ path }) =>
-      ServerFolders.list(path).pipe(Effect.provideContext(context)),
+    yield* commandRoute("libraries.folders", ({ path }, caller) =>
+      CoreCallers.isAdmin(caller)
+        ? ServerFolders.list(path).pipe(Effect.provideContext(context))
+        : Effect.fail(
+            new Forbidden({ message: "Only an owner or an admin may browse the server's folders" }),
+          ),
     );
   }),
 );

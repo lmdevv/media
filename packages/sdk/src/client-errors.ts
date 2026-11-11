@@ -6,104 +6,16 @@
  * refuses one for its budget, nothing is sent until its `Retry-After` has passed; reports in
  * between are dropped.
  */
-import {
-  CLIENT_ERROR_LIMITS,
-  type ClientErrorKind,
-  type ClientErrorReport,
-  type ClientPlatform,
-} from "@media/contracts/diagnostics";
-import type { PlaybackSessionId } from "@media/contracts/ids";
-import { RequestId } from "@media/contracts/request-id";
-import { Clock, Context, Effect, Layer, Option, Predicate, Schema } from "effect";
+import { Clock, Context, Effect, Layer } from "effect";
 
 import { Auth } from "./auth";
-import { decodeTagged } from "./media-http";
+import { reportGate, reportOf } from "./client-error-report";
+import type { ErrorContext } from "./client-error-report";
 import { MoviesClient } from "./movies-client";
 
-/** Where an app caught an error. */
-export interface ErrorContext {
-  readonly platform: ClientPlatform;
-  readonly appVersion: string;
-  readonly kind: ClientErrorKind;
-  /** The path or screen the app showed, such as `/titles/abc`. */
-  readonly route: string;
-  /** The playback session playing then, when the app knows it. */
-  readonly sessionId?: PlaybackSessionId;
-}
+export { REPEAT_WINDOW_MS, reportGate, reportOf } from "./client-error-report";
 
-/** How long an error that was sent is not sent again. */
-export const REPEAT_WINDOW_MS = 30_000;
-
-const MAX_REMEMBERED = 100;
-
-const DEFAULT_PAUSE_SECONDS = 60;
-
-const cut = (text: string, maxLength: number): string =>
-  text.length <= maxLength ? text : `${text.slice(0, maxLength - 1)}…`;
-
-const bounded = (text: string, maxLength: number, fallback: string): string =>
-  cut(text.length === 0 ? fallback : text, maxLength);
-
-const decodeIdentity = Schema.decodeUnknownOption(Schema.Struct({ requestId: RequestId }));
-
-const textOf = Option.liftThrowable(String);
-
-const jsonOf = Option.liftThrowable(JSON.stringify);
-
-const textField = Option.liftPredicate(Predicate.isString);
-
-/**
- * `cause` as a report from `context`, with every text field cut to its bound. An SDK error is
- * named by its tag and keeps the media service request it failed.
- */
-export const reportOf = (cause: unknown, context: ErrorContext): ClientErrorReport => {
-  const error = cause instanceof Error ? Option.some(cause) : Option.none<Error>();
-
-  const name = Option.firstSomeOf([
-    Option.map(decodeTagged(cause), (tagged) => tagged.tag),
-    Option.flatMap(error, (value) => textField(value.name)),
-  ]).pipe(Option.getOrElse(() => "NonError"));
-
-  const message = Option.match(error, {
-    onNone: () =>
-      Option.orElse(
-        Predicate.isObject(cause) ? Option.flatMap(jsonOf(cause), textField) : Option.none(),
-        () => textOf(cause),
-      ),
-    onSome: (value) => textField(value.message),
-  }).pipe(Option.getOrElse(() => "A value that cannot be shown"));
-
-  const stack = error.pipe(
-    Option.flatMap((value) => textField(value.stack)),
-    Option.filter((text) => text.length > 0),
-  );
-
-  return {
-    platform: context.platform,
-    appVersion: bounded(context.appVersion, CLIENT_ERROR_LIMITS.appVersion, "unknown"),
-    kind: context.kind,
-    route: bounded(context.route, CLIENT_ERROR_LIMITS.route, "/"),
-    name: bounded(name, CLIENT_ERROR_LIMITS.name, "Error"),
-    message: cut(message, CLIENT_ERROR_LIMITS.message),
-    ...Option.match(stack, {
-      onNone: () => ({}),
-      onSome: (text) => ({ stack: cut(text, CLIENT_ERROR_LIMITS.stack) }),
-    }),
-    ...Option.match(decodeIdentity(cause), {
-      onNone: () => ({}),
-      onSome: ({ requestId }) => ({ requestId }),
-    }),
-    ...Option.match(
-      Option.fromNullishOr(context.sessionId).pipe(
-        Option.filter((id) => id.length <= CLIENT_ERROR_LIMITS.sessionId),
-      ),
-      {
-        onNone: () => ({}),
-        onSome: (sessionId) => ({ sessionId }),
-      },
-    ),
-  };
-};
+export type { ErrorContext, ReportGate } from "./client-error-report";
 
 /** Reports apps' unexpected errors. */
 export interface Interface {
@@ -122,26 +34,7 @@ export class ClientErrors extends Context.Service<ClientErrors, Interface>()(
 const make = Effect.gen(function* () {
   const client = yield* MoviesClient;
   const auth = yield* Auth;
-  const sentAt = new Map<string, number>();
-  const pause = { until: 0 };
-
-  const isRepeat = (key: string, now: number): boolean => {
-    for (const [seen, at] of sentAt) {
-      if (now - at >= REPEAT_WINDOW_MS) sentAt.delete(seen);
-    }
-
-    if (sentAt.has(key)) return true;
-
-    if (sentAt.size >= MAX_REMEMBERED) {
-      const oldest = sentAt.keys().next();
-
-      if (oldest.done !== true) sentAt.delete(oldest.value);
-    }
-
-    sentAt.set(key, now);
-
-    return false;
-  };
+  const gate = reportGate();
 
   const report = Effect.fn("ClientErrors.report")(
     function* (cause: unknown, context: ErrorContext) {
@@ -150,19 +43,15 @@ const make = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
       const sent = reportOf(cause, context);
 
-      if (now < pause.until) return;
+      if (!gate.admits(sent, now)) return;
 
-      if (isRepeat(`${sent.kind}\u0000${sent.name}\u0000${sent.message}\u0000${sent.route}`, now)) {
-        return;
-      }
-
-      yield* client.reportError(sent).pipe(
-        Effect.tapErrorTag("RateLimited", (refused) =>
-          Effect.sync(() => {
-            pause.until = now + (refused.retryAfterSeconds ?? DEFAULT_PAUSE_SECONDS) * 1000;
-          }),
-        ),
-      );
+      yield* client
+        .reportError(sent)
+        .pipe(
+          Effect.tapErrorTag("RateLimited", (refused) =>
+            Effect.sync(() => gate.pause(now, refused.retryAfterSeconds)),
+          ),
+        );
     },
     Effect.catchCause((cause) => Effect.logDebug("ClientErrors.dropped", cause)),
   );

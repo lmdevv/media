@@ -88,12 +88,16 @@ const systemHandlers = HttpApiBuilder.group(
         };
       }),
       clientConfig: () =>
-        Effect.succeed(
-          Option.match(config.convexPublicUrl, {
+        Effect.succeed({
+          ...Option.match(config.convexPublicUrl, {
             onNone: () => ({}),
             onSome: (url) => ({ convexUrl: url }),
           }),
-        ),
+          ...Option.match(config.webDistDir, {
+            onNone: () => ({}),
+            onSome: () => ({ moviesUrl: `${config.mediaBaseUrl}/movies` }),
+          }),
+        }),
     });
   }),
 );

@@ -5,6 +5,39 @@ Convex backend, the media service, the web app, the CLI, and the two installs, a
 "Reliability and security" section of the architecture and the decisions in `docs/decisions.md`.
 Each finding says what was wrong, how it was fixed or why it stays, and where the evidence is.
 
+The movies cutover (ADR 0027) replaced the media service's wiring that this review covers. The
+service now signs in to the core and checks a caller with `core.auth.sessions.current` (ADR 0010).
+Its byte routes admit tickets instead of playback tokens, and it seals artwork keys under its
+service key (ADR 0011). `PLAYBACK_TOKEN_SECRET` and `/movies/convex` no longer exist. The review
+below stays as the record of the old code, which `packages/backend` holds until it is deleted.
+
+## The Convex instance secret stays off command lines (2026-11-11)
+
+The Convex backend takes its instance secret only as an argument, and `generate_key` derives the
+admin key from the same argument. Any local process can read every process's arguments in
+`/proc/<pid>/cmdline` (mode 0444), and the admin key gives full control of the core. The pinned
+upstream image's entrypoint (`run_backend.sh`) and `generate_admin_key.sh` pass the secret as
+that argument.
+
+- **The image** runs both through `deploy/image/argv-secret.c`, an `LD_PRELOAD` shim that swaps an
+  `@ARGV_SECRET_FILE` placeholder for the first line of a file before `main` runs, so the kernel's
+  copy of the arguments, the one `/proc` shows, holds only the placeholder. It fails closed when
+  the file is missing or empty.
+- **The NixOS module** did not, until the movies cutover's fix round: it started the upstream
+  entrypoint and ran `generate_admin_key.sh`, which exposed the secret to every local user of the
+  host, since the container's processes show in the host's `/proc`. The Nix package now builds
+  the same shim (`lib/movies/convex/argv-secret.so`, with no store path, so it loads into the
+  container's own glibc). The module mounts it and `nix/convex-entry.sh` into the container, the
+  entrypoint keeps the secret in `credentials/instance_secret` on the data volume (creating it on
+  first start), and the setup runs `generate_key` through the shim with `podman exec -e`.
+- **Evidence.** `scripts/check-convex-argv.sh` (Docker and Nix) runs the pinned image as the
+  module does and checks that no host process's command line holds the secret while the
+  backend's shows the placeholder, that the backend's environment holds only the file's path,
+  and that the shim's `generate_key` gives an admin key the backend accepts. Run against the
+  upstream entrypoint instead, the same `/proc` scan finds the secret. The NixOS VM test
+  (`nix/vm-test.nix`, "the Convex instance secret is on no command line") checks the module itself
+  on a host with KVM.
+
 ## Threat model
 
 - One household, self-hosted on a LAN or a tailnet. The Compose install publishes its one port on
