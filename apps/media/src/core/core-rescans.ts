@@ -1,7 +1,8 @@
 /**
  * Rescans after a file changes, on the core (ADR 0024). The server watches each approved library
  * root, as standalone mode does, and asks the core to queue a scan of the movies libraries a change
- * reaches (`core/scans:changed`). It never scans itself: on the core a scan writes only under a scan
+ * reaches (`core/scans:changed`), and of every movies library at startup and on its reconcile
+ * interval (`core/scans:reconcile`). It never scans itself: on the core a scan writes only under a scan
  * job's lease, so the core's scan queue runs it, joining a scan already queued or running.
  */
 import { serverFunctions } from "@media/contracts/server-functions";
@@ -48,9 +49,15 @@ export const layer: Layer.Layer<
 
         if (root === undefined) return;
 
-        const answers = yield* Effect.forEach(pathsToSend(root, changed), (path) =>
-          session.call(serverFunctions.scanChanged, { path }),
-        );
+        // At startup and on the reconcile interval every movies library is brought up to date,
+        // as old movies' reconcile did, which reaches a library whose folder lies under this root
+        // only through a symlink and so never matches a changed path.
+        const answers =
+          reason === "change"
+            ? yield* Effect.forEach(pathsToSend(root, changed), (path) =>
+                session.call(serverFunctions.scanChanged, { path }),
+              )
+            : [yield* session.call(serverFunctions.scanReconcile, {})];
 
         const queued = answers.reduce((total, answer) => total + answer.queued, 0);
 

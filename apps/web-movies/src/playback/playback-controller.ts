@@ -580,7 +580,16 @@ export class PlaybackController {
     this.#diagnostics?.recorder.record(observation);
   };
 
-  async #follow(step: PlaybackStep, positionMs: number, reason: string): Promise<void> {
+  /**
+   * Takes the recovery `step` from `positionMs`. `resume` says whether playback goes on afterwards
+   * when it starts again with a new ticket; by default it plays.
+   */
+  async #follow(
+    step: PlaybackStep,
+    positionMs: number,
+    reason: string,
+    resume = true,
+  ): Promise<void> {
     if (this.#disposed) return;
 
     const recovery = recoveryObservation(step, reason);
@@ -596,7 +605,9 @@ export class PlaybackController {
     const playback = this.#playback;
     const play = this.#current;
 
-    if (play === null || PlaybackStep.$is("NewSession")(step)) return this.#restart(positionMs);
+    if (play === null || PlaybackStep.$is("NewSession")(step)) {
+      return this.#restart(positionMs, resume);
+    }
 
     if (playback === null) {
       if (PlaybackStep.$is("Renegotiate")(step)) await sleep(step.afterMs);
@@ -849,19 +860,18 @@ export class PlaybackController {
       }
     }
 
+    const resume = options.play ?? (wasPlaying || !isPlaying(this.#snapshot.phase));
+
     if (Result.isFailure(negotiated)) {
       return this.#follow(
         afterPlaybackFailure(negotiated.failure),
         positionMs,
         negotiated.failure.message,
+        resume,
       );
     }
 
-    await this.#load(
-      { started: playback.started, stream: negotiated.success },
-      options.play ?? (wasPlaying || !isPlaying(this.#snapshot.phase)),
-      chosen,
-    );
+    await this.#load({ started: playback.started, stream: negotiated.success }, resume, chosen);
 
     this.#catchUpOnChoices(version, ticket);
   }
