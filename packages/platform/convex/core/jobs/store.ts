@@ -194,7 +194,8 @@ const followUpScan = async (
 
   if (status === "queued") return;
 
-  const scan = await insertJob(ctx, payload);
+  // A change needs only an incremental scan, whatever mode the scan it waited for ran in.
+  const scan = await insertJob(ctx, { kind: payload.kind, libraryId: payload.libraryId });
 
   if (scan.created) await ctx.db.patch(library._id, { lastScan: scan.jobId });
 };

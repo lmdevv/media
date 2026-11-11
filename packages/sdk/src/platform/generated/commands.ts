@@ -1231,7 +1231,10 @@ const core_libraries_rename = mutation({
 const core_libraries_scan = mutation({
   name: "core.libraries.scan",
   path: "core/libraries:scan",
-  args: Schema.Struct({ libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")) }),
+  args: Schema.Struct({
+    libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+    mode: Schema.optionalKey(Schema.Union([Schema.Literal("incremental"), Schema.Literal("full")])),
+  }),
   result: Schema.Struct({
     jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
     created: Schema.Boolean,
@@ -3707,7 +3710,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       remove: method.mutation(core_libraries_remove),
       /** `core.libraries.rename` (mutation, signed-in): Rename a library you manage. */
       rename: method.mutation(core_libraries_rename),
-      /** `core.libraries.scan` (mutation, signed-in): Scan a library for new, changed, and missing files, or join the scan already queued. */
+      /** `core.libraries.scan` (mutation, signed-in): Scan a library for new, changed, and missing files, or join the scan already queued; full reads every file again. */
       scan: method.mutation(core_libraries_scan),
       /** `core.libraries.setFolders` (mutation, admin, API keys refused): Change the folders of a library you manage; what a removed folder held leaves the library. */
       setFolders: method.mutation(core_libraries_setFolders),
@@ -4039,7 +4042,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       remove: method.mutation(core_libraries_remove),
       /** `core.libraries.rename` (mutation, signed-in): Rename a library you manage. */
       rename: method.mutation(core_libraries_rename),
-      /** `core.libraries.scan` (mutation, signed-in): Scan a library for new, changed, and missing files, or join the scan already queued. */
+      /** `core.libraries.scan` (mutation, signed-in): Scan a library for new, changed, and missing files, or join the scan already queued; full reads every file again. */
       scan: method.mutation(core_libraries_scan),
       /** `core.libraries.setFolders` (mutation, admin, API keys refused): Change the folders of a library you manage; what a removed folder held leaves the library. */
       setFolders: method.mutation(core_libraries_setFolders),

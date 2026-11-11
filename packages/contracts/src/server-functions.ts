@@ -103,8 +103,17 @@ export type CoreJobKind = typeof CoreJobKind.Type;
 
 /** A claimed job's payload, tagged by its kind. */
 export const CoreJobPayload = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("movies.scan"), libraryId: LibraryId }),
-  Schema.Struct({ kind: Schema.Literal("music.scan"), libraryId: LibraryId }),
+  Schema.Struct({
+    kind: Schema.Literal("movies.scan"),
+    libraryId: LibraryId,
+    /** A full scan reads every file again; absent means incremental. */
+    mode: Schema.optionalKey(Schema.Literal("full")),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("music.scan"),
+    libraryId: LibraryId,
+    mode: Schema.optionalKey(Schema.Literal("full")),
+  }),
   Schema.Struct({
     kind: Schema.Literal("movies.metadata"),
     titleId: TitleId,

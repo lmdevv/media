@@ -126,9 +126,12 @@ function ScanButton({ library }: { readonly library: LibraryDetail }) {
   const platform = usePlatform();
   const active = isActive(library.scan);
 
-  const action = useAction(() => platform.core.libraries.scan({ libraryId: library.libraryId }), {
-    success: () => `Scanning ${library.name}`,
-  });
+  const action = useAction(
+    () => platform.core.libraries.scan({ libraryId: library.libraryId, mode: "full" }),
+    {
+      success: () => `Scanning ${library.name}`,
+    },
+  );
 
   return (
     <Button

@@ -80,10 +80,21 @@ export const withLibraryItems = async <Value>(
 /**
  * Queues a scan of `library` with its kind's dedupe, so a scan already queued or running is
  * joined, and points `lastScan` at a scan this made: the one way a scan is queued, for a manager's
- * scan, a change of folders, a wait that ended, and a file that changed (ADR 0024).
+ * scan, a change of folders, a wait that ended, and a file that changed (ADR 0024). A `full` scan
+ * reads every file again, as a manager may ask; a scan already queued or running is joined
+ * whatever its mode, as old movies' scan did.
  */
-export const queueScan = async (ctx: JobCtx, library: Doc<"libraries">): Promise<Enqueued> => {
-  const scan = await enqueue(ctx, { kind: scanKindOf(library.kind), libraryId: library._id });
+export const queueScan = async (
+  ctx: JobCtx,
+  library: Doc<"libraries">,
+  mode: "incremental" | "full" = "incremental",
+): Promise<Enqueued> => {
+  const kind = scanKindOf(library.kind);
+
+  const scan = await enqueue(
+    ctx,
+    mode === "full" ? { kind, libraryId: library._id, mode } : { kind, libraryId: library._id },
+  );
 
   if (scan.created) await ctx.db.patch(library._id, { lastScan: scan.jobId });
 

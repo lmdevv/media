@@ -466,6 +466,11 @@ a file changes. It asks the core to queue a scan. Until now "Left for later unit
 
 ## Edge cases settled
 
+- A manager may ask for a full scan (`core.libraries.scan` with `mode: "full"`, the job payload's
+  `mode`), which probes every file again, unchanged ones included, as after an ffprobe upgrade. It
+  joins a scan already queued or running whatever that scan's mode, as old movies' scan did; the
+  follow-up scan after a change during a running scan is always incremental.
+
 - A folder inside another library's folder is refused across kinds: a grant on a music library
   inside a movies library would show the movies library's files.
 - A member granted `manage` may rename, share, and remove a library an admin made, but cannot

@@ -290,10 +290,10 @@ account settings, and its admin.
 - The server status and backups pages moved to the account client's admin, since they are the
   server's and not movies'.
 
-### Left for after the port (D62)
+### Left for p4-movies-parity (D62)
 
 The core lacks some data that old movies' admin pages showed. The cutover ports the pages without
-them and builds no replacement, since this program adds no features:
+them, and the parity unit `p4-movies-parity` brings them back before the release:
 
 - a library's file list and its filters, and a file's summary;
 - the match status on a library's title rows;
@@ -301,4 +301,6 @@ them and builds no replacement, since this program adds no features:
 - a scan's start time and message;
 - a backup job's state on the backups page.
 
-Each is a follow-up for after the port.
+The library page's "Scan now" asks for a full scan, which reads every file again, as old movies'
+did: `core.libraries.scan` takes `mode: "full"`, carried in the scan job's payload to the server's
+scanner. A full request joins a scan already queued or running, whatever its mode, as before.

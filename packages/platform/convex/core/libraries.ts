@@ -141,10 +141,10 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
 
     return { scanJobId: (await restartScan(ctx, doc)).jobId };
   },
-  scan: async (ctx, { libraryId }, caller) => {
+  scan: async (ctx, { libraryId, mode }, caller) => {
     const { doc } = await requireContent(ctx, caller, "edit", libraryRef(libraryId));
 
-    return queueScan(ctx, doc);
+    return queueScan(ctx, doc, mode);
   },
   remove: async (ctx, { libraryId }, caller) => {
     const { doc } = await requireContent(ctx, caller, "manage", libraryRef(libraryId));

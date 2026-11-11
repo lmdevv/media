@@ -422,7 +422,11 @@ export const handler = Effect.gen(function* () {
       );
 
       const summaries = yield* Effect.forEach(target.folders, (root) =>
-        scanner.scan({ libraryId: target.libraryId, root, mode: "incremental" }),
+        scanner.scan({
+          libraryId: target.libraryId,
+          root,
+          mode: job.payload.mode ?? "incremental",
+        }),
       ).pipe(
         Effect.catch((error) =>
           Effect.flatMap(own.stopped, (stopped): Effect.Effect<never, JobFailed | JobStopped> =>

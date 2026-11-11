@@ -82,7 +82,10 @@ const renameArgs = v.object({ libraryId: v.id("libraries"), name: v.string() });
 
 const renameResult = v.null();
 
-const scanArgs = v.object({ libraryId: v.id("libraries") });
+const scanArgs = v.object({
+  libraryId: v.id("libraries"),
+  mode: v.optional(v.union(v.literal("incremental"), v.literal("full"))),
+});
 
 const scanResult = v.object({ jobId: v.id("jobs"), created: v.boolean() });
 
@@ -127,7 +130,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof renameResult> | Promise<Infer<typeof renameResult>>;
 
-  /** `core.libraries.scan` (mutation, signed-in): Scan a library for new, changed, and missing files, or join the scan already queued. */
+  /** `core.libraries.scan` (mutation, signed-in): Scan a library for new, changed, and missing files, or join the scan already queued; full reads every file again. */
   readonly scan: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof scanArgs>,
