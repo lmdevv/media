@@ -108,7 +108,7 @@ describe("the media command", () => {
       "titles list": "media movies titles list",
       "my-list add": "media movies my-list add",
       "api-keys create": "media auth api-keys create",
-      play: "media movies stream",
+      "play Sintel": "media movies stream",
       login: "media auth login",
       whoami: "media auth sessions current",
       continue: "media movies history continue-watching",
@@ -125,7 +125,9 @@ describe("the media command", () => {
     for (const { typed, moved, run } of runs) {
       expect(run.code, typed).toBe(ExitCode.usage);
       expect(JSON.parse(run.stderr), typed).toMatchObject({ error: { code: "usage" } });
-      expect(run.stderr, typed).toContain(`run ${moved}`);
+      expect(JSON.parse(run.stderr), typed).toMatchObject({
+        error: { message: `Unknown command "${typed}"; it moved: run ${moved}` },
+      });
     }
   });
 

@@ -129,12 +129,16 @@ const unknownCommand = (typed: string, path: ReadonlyArray<string>): UsageError 
     },
   });
 
-/** The leading words before the first flag, in kebab case. */
-const pathOf = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
+/** The leading words before the first flag, as typed. */
+const leadingWords = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
   const end = words.findIndex((token) => token.startsWith("-"));
 
-  return (end === -1 ? words : words.slice(0, end)).map(word);
+  return end === -1 ? words : words.slice(0, end);
 };
+
+/** The leading words before the first flag, in kebab case. */
+const pathOf = (words: ReadonlyArray<string>): ReadonlyArray<string> =>
+  leadingWords(words).map(word);
 
 const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> => {
   const { globals, words } = splitLeadingGlobals(argv);
@@ -167,9 +171,7 @@ const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> 
     return Result.succeed(Route.CoreHelp({ help: diagnosticsHelp() }));
   }
 
-  const path = pathOf(words);
-
-  return Result.fail(unknownCommand(path.join(" "), path));
+  return Result.fail(unknownCommand(leadingWords(words).join(" "), pathOf(words)));
 };
 
 const resolveInGroup = (
@@ -263,10 +265,20 @@ const print = (format: Format, outcome: Outcome): Effect.Effect<void, never, Out
     }),
   );
 
+/**
+ * One row per troubleshooting command: its words with a required argument, and the first clause
+ * of its summary. Each command's `--help` has the rest.
+ */
 const troubleshootingRows = (): ReadonlyArray<readonly [string, string]> =>
-  diagnosticsCommands.map(
-    (command) => [`media ${shortcutSynopsis(command)}`, command.summary] as const,
-  );
+  diagnosticsCommands.map((command) => {
+    const [first = ""] = command.usage.split(" ");
+    const argument = first.startsWith("<") ? first : "[flags]";
+
+    return [
+      `media ${command.path} ${argument}`,
+      command.summary.split(/[;:]/u)[0] ?? command.summary,
+    ] as const;
+  });
 
 const diagnosticsHelp = (): string =>
   [
