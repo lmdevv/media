@@ -38,8 +38,9 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: media:ci
-          cache-from: type=gha
-          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max' || '' }}
+          # Read-only: saving here uploaded the build stage, which the next commit's `COPY . .`
+          # never reuses, and replaced the publish job's arm64 layers.
+          cache-from: type=gha,scope=image
       - name: Image size
         run: |
           size="$(docker image inspect media:ci --format '{{.Size}}')"
@@ -108,5 +109,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # mode=min saves the final image's layers for both architectures, not the build stage.
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,scope=image,mode=min
