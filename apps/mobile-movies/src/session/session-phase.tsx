@@ -1,11 +1,11 @@
 import { lastPerson } from "@media/mobile-core/sign-in";
 import type { AppRecord } from "@media/mobile-core/records";
-import { ownKeychain } from "@media/mobile-core/expo-keychain";
 import type { QueryState } from "@media/sdk/react";
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { isFailure } from "@/lib/failure";
+import { appKeychains } from "@/lib/keychains";
 
 import { useServer } from "./connection";
 import { useFirstRun } from "./first-run";
@@ -122,7 +122,11 @@ export const useLiveSessionPhase = (): SessionPhase => {
         return { kind: "unavailable", cause: launch.cause, retry: retryLaunch };
       }
 
-      return signedOutPhase(info, settingUp, lastPerson({ own: ownKeychain, server: mediaUrl }));
+      return signedOutPhase(
+        info,
+        settingUp,
+        lastPerson({ own: appKeychains().own, server: mediaUrl }),
+      );
     }
 
     // Signed in, but still issuing the grant and enrolling: the sign-in screens stay.

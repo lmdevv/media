@@ -6,8 +6,8 @@ import { Data, Effect, Exit, Option, Result, Scope, Struct } from "effect";
 import { createVideoPlayer } from "expo-video";
 import type { VideoMetadata, VideoPlayer } from "expo-video";
 
-import { appStateStep } from "@/lib/player/app-state";
-import type { AppStatus, HeldStream } from "@/lib/player/app-state";
+import { StreamLifecycle } from "@/lib/player/app-state";
+import type { AppStatus, HeldStream, LifecycleStep } from "@/lib/player/app-state";
 import { IOS_CAPABILITIES } from "@/lib/player/capabilities";
 import {
   bufferedAheadSeconds,
@@ -154,9 +154,11 @@ export interface PlayerControllerOptions {
   readonly intentAt: number | null;
   /** Whether the first stream plays once it loads, or stays paused there. */
   readonly play: boolean;
+  /** Whether the app is in the background as the player opens, from `AppState.currentState`. */
+  readonly background: boolean;
 }
 
-/** Where playback was when the app went to the background and its stream stopped. */
+/** Where playback was when the app went away and its stream stopped, or its start was deferred. */
 interface Parked {
   readonly positionMs: number;
   readonly play: boolean;
@@ -171,8 +173,9 @@ interface Parked {
  * (ADR 0011): the media server continues a running stream past the ticket's expiry. When the
  * server answers that the session ended, or refuses an expired ticket for a new stream, the
  * controller asks the screen for a new start (`onNewSession`). The media service runs only a few
- * transcodes, so the controller stops its stream at once (`Playback.stopNow`) when it is disposed
- * and when the app goes to the background (`appStateChanged`).
+ * transcodes, so the controller stops its stream at once (`Playback.stopNow`) when it is disposed,
+ * and when nobody watches or hears it while the app is away (`StreamLifecycle`): in the background
+ * with no Picture in Picture and nothing playing.
  */
 export class PlayerController {
   /** The player as the progress reporter and the diagnostics see it. */
@@ -193,6 +196,7 @@ export class PlayerController {
   /** The negotiation in flight, by its number; null when none is. */
   #negotiating: number | null = null;
   #parked: Parked | null = null;
+  readonly #lifecycle: StreamLifecycle;
   #video: VideoPlayer | null = null;
   #diagnostics: {
     readonly recorder: PlayerDiagnostics.Recorder;
@@ -229,11 +233,15 @@ export class PlayerController {
 
   constructor(options: PlayerControllerOptions) {
     this.#options = options;
+    this.#lifecycle = new StreamLifecycle(options.background, options.play);
     this.#snapshot = { ...this.#snapshot, quality: options.quality };
     this.#unsubscribePort = this.port.subscribe((event) => {
       if (event === "playing") {
         this.#recoveries = 0;
         this.#reloadedAfterError = false;
+        this.#followLifecycle(this.#lifecycle.playing(true, this.#holds()));
+      } else if (event === "paused" || event === "ended") {
+        this.#followLifecycle(this.#lifecycle.playing(false, this.#holds()));
       }
     });
   }
@@ -290,7 +298,10 @@ export class PlayerController {
         this.#startAtMs = atMs;
         this.#diagnose();
         this.#update({ audioStreamIndex });
-        void this.#renegotiate(atMs);
+
+        // The start may answer after the app went away: then no stream opens until it is back.
+        if (this.#lifecycle.started() === "negotiate") void this.#renegotiate(atMs);
+        else this.#parked = { positionMs: atMs, play: this.#options.play, restart: true };
       },
     });
     this.#watchForStalls();
@@ -301,18 +312,21 @@ export class PlayerController {
     return this.#playback === null ? this.#startAtMs : this.port.positionMs();
   }
 
-  /**
-   * Follows the app's state (`appStateStep`): in the background the server stream stops at once,
-   * since the app may stay there for hours or be killed there without running any more code. Back
-   * in the foreground, playback starts again where it was, with a new start.
-   */
+  /** Follows the app's state; see `StreamLifecycle`. */
   appStateChanged(status: AppStatus): void {
+    this.#followLifecycle(this.#lifecycle.appState(status, this.#holds()));
+  }
+
+  /** Follows Picture in Picture opening and closing; see `StreamLifecycle`. */
+  pictureInPictureChanged(active: boolean): void {
+    this.#followLifecycle(this.#lifecycle.pictureInPicture(active, this.#holds()));
+  }
+
+  #followLifecycle(step: LifecycleStep): void {
     if (this.#disposed) return;
 
-    const step = appStateStep(status, { parked: this.#parked !== null, holds: this.#holds() });
-
-    if (step === "park") this.#park();
-    else if (step === "return") this.#return();
+    if (step === "stop") this.#park();
+    else if (step === "restart") this.#return();
   }
 
   #holds(): HeldStream {
@@ -911,6 +925,7 @@ export class PlayerController {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#lifecycle.close();
     clearInterval(this.#stallTimer);
     this.#unsubscribePort();
 

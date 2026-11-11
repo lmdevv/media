@@ -1,4 +1,3 @@
-import { ownKeychain } from "@media/mobile-core/expo-keychain";
 import {
   readConnection,
   readPhoneAccount,
@@ -10,7 +9,7 @@ import type { ServerConnection } from "@media/mobile-core/server";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { sharedPhoneKeychain } from "./phone";
+import { appKeychains } from "@/lib/keychains";
 
 /** The connection and the ways to change it. */
 export interface ConnectionState {
@@ -35,22 +34,22 @@ const ConnectionContext = createContext<ConnectionState | null>(null);
  */
 export function ConnectionProvider({ children }: { readonly children: ReactNode }) {
   const [connection, setConnection] = useState<ServerConnection | null>(() =>
-    readConnection(ownKeychain),
+    readConnection(appKeychains().own),
   );
 
   const [joining, setJoining] = useState(
-    () => connection === null && readPhoneAccount(sharedPhoneKeychain()) !== null,
+    () => connection === null && readPhoneAccount(appKeychains().shared) !== null,
   );
 
   const connect = useCallback((next: ServerConnection) => {
-    writeConnection(ownKeychain, next);
+    writeConnection(appKeychains().own, next);
     setConnection(next);
   }, []);
 
   useEffect(() => {
     if (!joining) return undefined;
 
-    const account = readPhoneAccount(sharedPhoneKeychain());
+    const account = readPhoneAccount(appKeychains().shared);
 
     if (account === null) {
       setJoining(false);
@@ -76,9 +75,9 @@ export function ConnectionProvider({ children }: { readonly children: ReactNode 
   }, [joining, connect]);
 
   const disconnect = useCallback(() => {
-    writeConnection(ownKeychain, null);
+    writeConnection(appKeychains().own, null);
 
-    if (connection !== null) ownKeychain.write(sessionKeyFor(connection.mediaUrl), null);
+    if (connection !== null) appKeychains().own.write(sessionKeyFor(connection.mediaUrl), null);
 
     setConnection(null);
   }, [connection]);

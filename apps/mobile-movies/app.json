@@ -20,7 +20,10 @@
         "UIViewControllerBasedStatusBarAppearance": true
       },
       "entitlements": {
-        "keychain-access-groups": ["$(AppIdentifierPrefix)dev.lmdevv.media"]
+        "keychain-access-groups": [
+          "$(AppIdentifierPrefix)dev.lmdevv.movies",
+          "$(AppIdentifierPrefix)dev.lmdevv.media"
+        ]
       }
     },
     "plugins": [

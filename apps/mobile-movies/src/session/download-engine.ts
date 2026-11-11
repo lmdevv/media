@@ -48,6 +48,7 @@ import type {
   SyncPlan,
 } from "@/lib/downloads/model";
 import type { DownloadSettings } from "@/lib/downloads/settings";
+import { coreQueue } from "@/lib/downloads/core-queue";
 import { IOS_CAPABILITIES } from "@/lib/player/capabilities";
 
 type DownloadReady = Extract<PrepareDownloadResponse, { readonly _tag: "Ready" }>;
@@ -228,6 +229,7 @@ const deliveryOf = (ready: DownloadReady, kept: ReadonlySet<string>): Delivery =
  */
 export class DownloadEngine {
   readonly #platform: PlatformSdk;
+  readonly #coreCalls = coreQueue();
   readonly #options: EngineOptions;
   readonly #listeners = new Set<() => void>();
   #snapshot: DownloadsSnapshot;
@@ -565,7 +567,10 @@ export class DownloadEngine {
 
   async #forget(id: FileId): Promise<void> {
     this.#settled.delete(id);
-    await attempt(() => this.#platform.core.downloads.remove({ item: itemOf(id) }));
+    // After any add of the same file still in flight, so a cancel right after Download sticks.
+    await attempt(() =>
+      this.#coreCalls.run(id, () => this.#platform.core.downloads.remove({ item: itemOf(id) })),
+    );
   }
 
   #stop(id: string): void {
@@ -726,7 +731,9 @@ export class DownloadEngine {
     if (this.#find(download.id)?.added ?? download.added) return true;
 
     const added = await attempt(() =>
-      this.#platform.core.downloads.add({ item: itemOf(download.id) }),
+      this.#coreCalls.run(download.id, () =>
+        this.#platform.core.downloads.add({ item: itemOf(download.id) }),
+      ),
     );
 
     if (this.#stopped(active)) return false;

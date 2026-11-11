@@ -208,6 +208,8 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
       quality: startQuality,
       intentAt: attemptIntent.current,
       play: attemptPlay.current,
+      // The app may already be away when the player opens; a start then opens no stream.
+      background: AppState.currentState === "background",
     });
 
     setController(created);
@@ -510,6 +512,8 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
             nativeControls={false}
             allowsPictureInPicture
             startsPictureInPictureAutomatically
+            onPictureInPictureStart={() => controller?.pictureInPictureChanged(true)}
+            onPictureInPictureStop={() => controller?.pictureInPictureChanged(false)}
             onFirstFrameRender={() => controller?.showedFrame()}
           />
         )}

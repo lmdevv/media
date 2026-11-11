@@ -208,6 +208,7 @@ describe("signInWithPassword", () => {
     expect(readAppRecord(phone.own, SERVER)).toEqual({
       device: "dv_1",
       person: { userId: "u_aiko", username: "aiko" },
+      opened: true,
     });
   });
 
@@ -334,9 +335,9 @@ describe("signInWithPassword", () => {
     ).rejects.toMatchObject({ _tag: "Conflict" });
     expect(calls).toEqual(["password", "enroll", "issue", "signOut"]);
     expect(readPhoneAccount(phone.shared)).toBeNull();
-    // The device is kept for the next sign-in, but no one is recorded, so nothing is exchanged.
-    expect(readAppRecord(phone.own, SERVER)).toEqual({ device: "dv_1", person: null });
-    expect(await signInOnLaunch(core.platform([]), phone)).toBe("signIn");
+    // The device is kept for the next sign-in, and the app asks for the password, never the grant.
+    expect(readAppRecord(phone.own, SERVER)).toMatchObject({ device: "dv_1", opened: true });
+    expect(await signInOnLaunch(core.platform([]), phone)).toBe("askPassword");
   });
 });
 
@@ -425,5 +426,117 @@ describe("other sign-ins", () => {
     expect(calls).toEqual(["deviceCode:Aiko's iPhone", "enroll"]);
     expect(readPhoneAccount(phone.shared)).toBeNull();
     expect(lastPerson(phone)?.username).toBe("mateo");
+  });
+});
+
+/**
+ * Keychains that save a snapshot of both after every write, so a test can start again from the
+ * state a crash right after that write would leave.
+ */
+const snapshotting = () => {
+  const own = new Map<string, string>();
+  const shared = new Map<string, string>();
+
+  const snapshots: Array<{
+    readonly own: Map<string, string>;
+    readonly shared: Map<string, string>;
+  }> = [];
+
+  const over = (values: Map<string, string>): Keychain => ({
+    read: (key) => values.get(key) ?? null,
+    write: (key, value) => {
+      if (value === null) values.delete(key);
+      else values.set(key, value);
+      snapshots.push({ own: new Map(own), shared: new Map(shared) });
+    },
+  });
+
+  return { own: over(own), shared: over(shared), snapshots };
+};
+
+const restored = (values: Map<string, string>): Keychain => {
+  const copy = new Map(values);
+
+  return {
+    read: (key) => copy.get(key) ?? null,
+    write: (key, value) => {
+      if (value === null) copy.delete(key);
+      else copy.set(key, value);
+    },
+  };
+};
+
+/**
+ * Starts from each state a crash after a write of a sign-in leaves, with the app's own session
+ * gone, as when it is revoked: a launch must never exchange the phone's grant silently (D59).
+ */
+const expectNoSilentExchange = async (
+  core: ReturnType<typeof fakeCore>,
+  snapshots: ReadonlyArray<{ own: Map<string, string>; shared: Map<string, string> }>,
+) => {
+  expect(snapshots.length).toBeGreaterThan(0);
+
+  const launches = await Promise.all(
+    snapshots.map(async (snapshot) => {
+      const calls: Array<string> = [];
+      const phone = phoneWith(restored(snapshot.shared), restored(snapshot.own));
+
+      return { result: await signInOnLaunch(core.platform(calls), phone), calls };
+    }),
+  );
+
+  for (const launch of launches) {
+    expect(launch.result).not.toBe("exchanged");
+    expect(launch.calls).not.toContain("exchange");
+  }
+};
+
+describe("a crash part way through a sign-in", () => {
+  it("leaves no state a launch exchanges, at any write of a password sign-in", async () => {
+    const core = fakeCore();
+    const keychains = snapshotting();
+
+    await signInWithPassword(core.platform([]), phoneWith(keychains.shared, keychains.own), {
+      username: "aiko",
+      password: "aiko-password",
+    });
+
+    await expectNoSilentExchange(core, keychains.snapshots);
+  });
+
+  it("leaves no state a launch exchanges, at any write of a second password sign-in on the phone", async () => {
+    const core = fakeCore();
+    const keychains = snapshotting();
+
+    // The phone's other app signed in first and left Aiko's grant in the shared keychain.
+    await signInWithPassword(core.platform([]), phoneWith(keychains.shared), {
+      username: "aiko",
+      password: "aiko-password",
+    });
+    keychains.snapshots.length = 0;
+
+    await signInWithPassword(core.platform([]), phoneWith(keychains.shared, keychains.own), {
+      username: "mateo",
+      password: "mateo-password",
+    });
+
+    await expectNoSilentExchange(core, keychains.snapshots);
+  });
+
+  it("leaves no state a launch exchanges again, at any write of a first launch's exchange", async () => {
+    const core = fakeCore();
+    const keychains = snapshotting();
+
+    await signInWithPassword(core.platform([]), phoneWith(keychains.shared), {
+      username: "aiko",
+      password: "aiko-password",
+    });
+    keychains.snapshots.length = 0;
+
+    expect(
+      await signInOnLaunch(core.platform([]), phoneWith(keychains.shared, keychains.own)),
+    ).toBe("exchanged");
+
+    await expectNoSilentExchange(core, keychains.snapshots);
   });
 });

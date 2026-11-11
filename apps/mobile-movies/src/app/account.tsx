@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { Lock, Server } from "lucide-react-native";
+import { KeyRound, Lock, Server } from "lucide-react-native";
 import { View } from "react-native";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,9 @@ export default function Account() {
           title="Change Password"
           onPress={() => router.push("/change-password")}
         />
+      ) : null}
+      {me.scopes.includes("account") ? (
+        <ListRow icon={KeyRound} title="API Keys" onPress={() => router.push("/api-keys")} />
       ) : null}
       <ListRow
         icon={Server}

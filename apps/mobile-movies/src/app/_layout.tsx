@@ -121,6 +121,10 @@ function RootStack({ phase }: { readonly phase: SessionPhase["kind"] | "offline"
         <Stack.Screen name="settings/licenses" />
         <Stack.Screen name="settings/privacy" options={sheet} />
         <Stack.Screen name="devices/index" />
+        <Stack.Screen name="api-keys/index" />
+        <Stack.Screen name="api-keys/new" />
+        <Stack.Screen name="api-keys/revoke" options={sheet} />
+        <Stack.Screen name="api-keys/end-all" options={sheet} />
         <Stack.Screen name="devices/sign-out" options={sheet} />
         <Stack.Screen name="approve-device/index" />
         <Stack.Screen name="approve-device/scan" />

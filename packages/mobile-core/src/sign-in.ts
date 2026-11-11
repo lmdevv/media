@@ -47,12 +47,22 @@ export interface Phone {
 }
 
 /**
- * Finishes a sign-in the platform client just opened: enrolls the app's own device, then, for a
- * password session, issues the phone's device grant, handing over the grant the shared keychain
- * holds so that one held by someone else is revoked (D64), and remembers who signed in. The shared
- * keychain gets the grant only after every call succeeded, so a sign-in that fails leaves nothing
- * an app could exchange; it also signs the new session out again, so the app never stays signed in
- * half way.
+ * Marks that this app began a sign-in of its own on this server, before the call that opens a
+ * session. Every state a crash can leave from here on has the mark, so a launch asks for the
+ * password and never exchanges the phone's grant silently (D59).
+ */
+const markOpened = (phone: Phone): void => {
+  const record = readAppRecord(phone.own, phone.server);
+
+  if (!record.opened) writeAppRecord(phone.own, phone.server, { ...record, opened: true });
+};
+
+/**
+ * Finishes a sign-in the platform client just opened: enrolls the app's own device and records
+ * who signed in, then, for a password session, issues the phone's device grant, handing over the
+ * grant the shared keychain holds so that one held by someone else is revoked (D64). The grant is
+ * the last thing written, after every call succeeded. Anything that fails signs the new session
+ * out again, so the app never stays signed in half way.
  */
 const finish = async (
   platform: SignInPlatform,
@@ -69,8 +79,11 @@ const finish = async (
         : { name: phone.deviceName, device: record.device },
     );
 
-    // The device code is kept even if what follows fails, so the next sign-in reuses the device.
-    writeAppRecord(phone.own, phone.server, { device: enrolled.device, person: record.person });
+    writeAppRecord(phone.own, phone.server, {
+      device: enrolled.device,
+      person: { userId: me.userId, username: me.username },
+      opened: true,
+    });
 
     if (opened === "password") {
       const held = readPhoneAccount(phone.shared);
@@ -88,11 +101,6 @@ const finish = async (
         grant: issued.grant,
       });
     }
-
-    writeAppRecord(phone.own, phone.server, {
-      device: enrolled.device,
-      person: { userId: me.userId, username: me.username },
-    });
   } catch (cause) {
     await platform.session.signOut().catch(() => undefined);
 
@@ -109,6 +117,7 @@ export const signInWithPassword = async (
   phone: Phone,
   credentials: PlatformPassword,
 ): Promise<void> => {
+  markOpened(phone);
   await platform.session.signInWithPassword(credentials);
   await finish(platform, phone, "password");
 };
@@ -122,6 +131,7 @@ export const setUpOwner = async (
   phone: Phone,
   credentials: PlatformPassword,
 ): Promise<void> => {
+  markOpened(phone);
   await platform.session.setUpOwner(credentials);
   await finish(platform, phone, "password");
 };
@@ -132,6 +142,7 @@ export const acceptInvite = async (
   phone: Phone,
   invite: PlatformInvite,
 ): Promise<void> => {
+  markOpened(phone);
   await platform.session.acceptInvite(invite);
   await finish(platform, phone, "password");
 };
@@ -150,6 +161,7 @@ export const startDeviceSignIn = async (
     userCode: pending.userCode,
     expiresAt: pending.expiresAt,
     complete: async () => {
+      markOpened(phone);
       await pending.complete();
       await finish(platform, phone, "other");
     },
@@ -161,8 +173,8 @@ export type LaunchSignIn =
   /** The app exchanged the phone's grant for a session of its own and is signed in. */
   | "exchanged"
   /**
-   * The app had a session of its own once and it ended: it asks for the password, never the
-   * grant, so a revocation sticks (D59).
+   * The app began a sign-in of its own here once, whether it finished or not, and has no session
+   * now: it asks for the password, never the grant, so a revocation sticks (D59).
    */
   | "askPassword"
   /** No app on the phone signed in to this server, or the core refused the grant: sign in. */
@@ -177,11 +189,16 @@ export const signInOnLaunch = async (
   platform: SignInPlatform,
   phone: Phone,
 ): Promise<LaunchSignIn> => {
-  if (readAppRecord(phone.own, phone.server).person !== null) return "askPassword";
+  const record = readAppRecord(phone.own, phone.server);
+
+  // Any sign-in this app began, finished or not, rules the grant out (D59).
+  if (record.opened || record.person !== null) return "askPassword";
 
   const account = readPhoneAccount(phone.shared);
 
   if (account === null || account.server !== phone.server) return "signIn";
+
+  markOpened(phone);
 
   try {
     await platform.session.exchangeGrant({ userId: account.userId, grant: account.grant });

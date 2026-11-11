@@ -1,4 +1,3 @@
-import { ownKeychain } from "@media/mobile-core/expo-keychain";
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { Directory, Paths } from "expo-file-system";
@@ -14,6 +13,7 @@ import {
 import type { ReactNode } from "react";
 
 import { accountFolder } from "@/lib/downloads/files";
+import { appKeychains } from "@/lib/keychains";
 import { downloadFor } from "@/lib/downloads/model";
 import type { DownloadRecord, NetworkNow } from "@/lib/downloads/model";
 
@@ -35,7 +35,7 @@ export const useOfflinePerson = (): Person | null => {
   const signedIn = usePlatformStatus() === "signedIn";
 
   return useMemo(
-    () => (signedIn ? lastPerson({ own: ownKeychain, server: mediaUrl }) : null),
+    () => (signedIn ? lastPerson({ own: appKeychains().own, server: mediaUrl }) : null),
     [signedIn, mediaUrl],
   );
 };

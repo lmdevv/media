@@ -31,17 +31,23 @@ export interface AppRecord {
   /** The app's device code, `dv_` and its secret, once the app enrolled on this server. */
   readonly device: string | null;
   /**
-   * Who this app last signed in as on this server, or null before it ever signed in. Once set the
-   * app never exchanges the phone's grant again: an app whose session ends asks for the password
-   * (D59). Signing out keeps it, so the sign-in screen can name the person.
+   * Who this app last signed in as on this server, or null before it ever signed in. Signing out
+   * keeps it, so the sign-in screen can name the person.
    */
   readonly person: { readonly userId: UserId; readonly username: string } | null;
+  /**
+   * True once this app began any sign-in of its own on this server: written before the call that
+   * opens a session, so a crash at any later point leaves it set. From then on the app never
+   * exchanges the phone's grant again, and an app whose session ends asks for the password (D59).
+   */
+  readonly opened: boolean;
 }
 
 const AppRecordJson = Schema.fromJsonString(
   Schema.Struct({
     device: Schema.NullOr(Schema.String),
     person: Schema.NullOr(Schema.Struct({ userId: UserIdText, username: Schema.String })),
+    opened: Schema.Boolean,
   }),
 );
 
@@ -83,7 +89,7 @@ export const writePhoneAccount = (shared: Keychain, account: PhoneAccount | null
   shared.write(PHONE_KEY, account === null ? null : Schema.encodeSync(PhoneAccountJson)(account));
 };
 
-const NO_RECORD: AppRecord = { device: null, person: null };
+const NO_RECORD: AppRecord = { device: null, person: null, opened: false };
 
 /** What this app keeps about its sign-in on `server`. */
 export const readAppRecord = (own: Keychain, server: string): AppRecord =>
