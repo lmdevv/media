@@ -12,6 +12,7 @@ import type { BrowserContext, Page, Request, Route } from "@playwright/test";
 import { drawStill } from "../stack/fixture-library";
 import { createLibrary, removeLibrary, titlesByName } from "../stack/libraries";
 import type { LibraryId, TitleId } from "../stack/libraries";
+import { loggedAbout } from "../stack/media-logs";
 import { buildMediaService, startMediaService } from "../stack/media-service";
 import type { MediaService } from "../stack/media-service";
 import {
@@ -751,8 +752,18 @@ test("a picture subtitle burns into a transcode and back out; a lower quality tr
     .toMatchObject({ mode: "transcode-software", height: 480 });
   await expectPlayingPast(page, 1);
 
+  const leaving = streams.at(-1)?.streamId ?? "";
+
   before = streams.length;
   await page.reload();
+  // A reload unmounts nothing, so the player stops its stream as the page goes away; otherwise the
+  // transcode keeps one of the service's slots until its idle release. The page reports no request
+  // it sends while it unloads, so the service's log shows the stop.
+  await expect
+    .poll(() =>
+      loggedAbout(media, "Stream.ended", leaving).map(({ annotations }) => annotations["reason"]),
+    )
+    .toEqual(["stopped"]);
   await expect.poll(() => streams.slice(before).at(-1)?.height).toBe(480);
   await expectPlayingPast(page, 0.5);
   await openPanel();

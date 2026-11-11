@@ -31,6 +31,7 @@ import {
   SeekResponse,
   StopErrors,
   StopRequest,
+  StopRequestText,
 } from "./media-playback";
 
 /** Playback negotiation, HLS stream control, and the events players report. */
@@ -46,7 +47,7 @@ export class PlaybackGroup extends HttpApiGroup.make("playback").add(
     error: SeekErrors,
   }),
   HttpApiEndpoint.post("stop", MEDIA_ROUTES.stop, {
-    payload: StopRequest,
+    payload: [StopRequest, StopRequestText.pipe(HttpApiSchema.asText())],
     success: HttpApiSchema.NoContent,
     error: StopErrors,
   }),

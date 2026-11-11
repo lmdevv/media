@@ -249,7 +249,17 @@ export class PlaybackController {
     element.addEventListener("loadeddata", this.#onFirstFrame);
     element.addEventListener("pause", this.#onSettled);
     element.addEventListener("seeking", this.#onSettled);
+    element.ownerDocument.defaultView?.addEventListener("pagehide", this.#onPageHide);
   }
+
+  /**
+   * A reload or a navigation away ends the page without unmounting the player, so `dispose` never
+   * runs: stop the stream here, at once, or it holds a transcode slot until the media service's
+   * idle release.
+   */
+  readonly #onPageHide = (): void => {
+    if (this.#playback !== null) Playback.stopNow(this.#playback);
+  };
 
   /** The current state; a new object after every change. */
   readonly getSnapshot = (): PlaybackSnapshot => this.#snapshot;
@@ -1089,13 +1099,15 @@ export class PlaybackController {
 
     const current = this.#playback;
 
-    if (current !== null) void runSdk(Playback.stop(current));
+    // A navigation that unmounts the player may unload the page next, so the stop goes out now.
+    if (current !== null) Playback.stopNow(current);
 
     this.#disposed = true;
     this.#element.removeEventListener("playing", this.#onPlaying);
     this.#element.removeEventListener("loadeddata", this.#onFirstFrame);
     this.#element.removeEventListener("pause", this.#onSettled);
     this.#element.removeEventListener("seeking", this.#onSettled);
+    this.#element.ownerDocument.defaultView?.removeEventListener("pagehide", this.#onPageHide);
     this.player.dispose();
     this.#retimer.dispose();
     this.#detach();

@@ -6,7 +6,7 @@ import { StartedPlayback } from "@media/contracts/models/playback";
 import { Milliseconds } from "@media/contracts/units";
 import { Effect, Exit, Fiber, Layer, Option, Predicate, Ref, Schema, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import * as ConvexTransport from "./convex-transport";
 import type { WireArgs } from "./convex-transport";
@@ -17,6 +17,7 @@ import {
   PROGRESS_INTERVAL_MS,
   reportProgress,
   stop,
+  stopNow,
 } from "./playback";
 import type { Playback } from "./playback";
 import { clientLayer } from "./testing/client-context";
@@ -135,15 +136,25 @@ describe("progress reporting", () => {
 
 const received: Array<string> = [];
 
+const receivedBodies: Array<string> = [];
+
+const receivedTypes: Array<string> = [];
+
 const PUBLIC_URL = "http://movies.invalid:18480";
 
 const STREAM_ID = "stream-0123456789abcde";
 
 const mediaService = createServer((request: IncomingMessage, response: ServerResponse) => {
-  request.resume();
+  let text = "";
+
+  request.on("data", (chunk: Buffer) => {
+    text += chunk.toString("utf8");
+  });
 
   request.on("end", () => {
     received.push(request.url ?? "");
+    receivedBodies.push(text);
+    receivedTypes.push(request.headers["content-type"] ?? "");
 
     const body =
       request.url === "/api/playback/negotiate"
@@ -222,6 +233,32 @@ describe("reaching the media service", () => {
 
     expect(received).toStrictEqual(["/api/playback/negotiate", "/api/playback/stop"]);
     expect(url).toBe(`${PUBLIC_URL}/media/hls/${STREAM_ID}/0/index.m3u8?token=t`);
+  });
+});
+
+describe("stopping a stream as the page goes away", () => {
+  it("sends the stop as a simple request before it returns, and nothing for a direct stream", async () => {
+    const session = { ...started, mediaBaseUrl: mediaServiceUrl };
+
+    const stream = await Effect.runPromise(
+      negotiate(session, DESKTOP, Milliseconds.make(0), Option.none()),
+    );
+
+    received.length = 0;
+    receivedBodies.length = 0;
+    receivedTypes.length = 0;
+    stopNow({ started: session, stream });
+    stopNow({ started: session, stream: { ...stream, streamId: undefined } });
+
+    await vi.waitFor(() => {
+      expect(received).toStrictEqual(["/api/playback/stop"]);
+    });
+    expect(JSON.parse(receivedBodies[0] ?? "null")).toStrictEqual({
+      token: session.token,
+      streamId: STREAM_ID,
+    });
+    // `text/plain` needs no CORS preflight, which a page in `pagehide` would never send.
+    expect(receivedTypes).toStrictEqual(["text/plain;charset=UTF-8"]);
   });
 });
 

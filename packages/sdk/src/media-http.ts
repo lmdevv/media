@@ -70,6 +70,11 @@ export interface MediaRequest {
   readonly body: Option.Option<Schema.Json>;
   /** The caller's Convex auth token, sent as a bearer token. */
   readonly bearer: Option.Option<Redacted.Redacted>;
+  /**
+   * Whether the request must reach the media service even when the page that sends it is going
+   * away, as a stream's stop must (`fetch`'s `keepalive`). Only small bodies may use it.
+   */
+  readonly keepalive?: boolean;
 }
 
 const TaggedFailure = Schema.Struct({ tag: Schema.String }).pipe(
@@ -187,6 +192,7 @@ const fetchResponse = (
           method: request.method,
           headers,
           signal,
+          keepalive: request.keepalive ?? false,
           ...Option.match(request.body, {
             onNone: () => ({}),
             onSome: (body) => ({ body: JSON.stringify(body) }),
