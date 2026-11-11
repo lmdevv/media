@@ -207,9 +207,11 @@ The example identities must be replaced with the model and tool that actually co
   Node and ffmpeg, in a `systemd-run --user` unit that kills on any denied call. Run it after a
   change to the media service's file or process handling, its dependencies, or the module's
   sandbox. Copy test files with `testing/byte-copies.ts`: `copyFile` calls `fchown`.
-- CI runs `check`, `legacy/music checks`, both stack jobs, the sandbox job, and the Nix job. Each
-  stack job is a matrix: the backend one runs the platform's files in four shards and the other
-  packages beside them, and the web one runs each Playwright group. On a PR, the `changed
+- CI runs `check`, the unit tests, `legacy/music checks`, both stack jobs, the sandbox job, and the
+  Nix job. The unit tests run in two jobs, one per Vitest project in `vitest.config.ts`: the media
+  service's playback tests, which take most of the time, and the rest. Each stack job is a matrix:
+  the backend one runs the platform's files in four shards and the other packages beside them, and
+  the web one runs each Playwright group. On a PR, the `changed
   workspaces` job skips each of the last five when the diff does not reach the workspaces it tests.
   `CI passed` fails when any of them fails or is cancelled, and `main` requires it. A new push to a
   PR cancels its older run. PRs matching the `paths` in `.github/workflows/image.yml` also run its
