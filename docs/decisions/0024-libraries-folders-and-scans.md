@@ -427,12 +427,17 @@ a file changes. It asks the core to queue a scan. Until now "Left for later unit
 - The server's library monitor, `apps/media/src/core/core-rescans.ts`, watches each approved root
   and sends the paths a burst of changes named. A path inside another sent path is left out. A
   burst that names no path or more than 32 (a burst stops keeping paths past 256) sends the root
-  instead, as do a watcher restart and a polled root that changed. At startup and on the reconcile
-  interval it calls `core/scans:reconcile`, which queues a scan of every movies library, 64 per
-  call and then scheduled calls, as old movies' reconcile scanned each library. That is what
-  rescans a library whose folder reaches an approved root only through a symlink: change events
-  carry the root's real paths, which never match that folder's own path, so its changes wait for
-  the next reconcile.
+  instead. The monitor also sends the root at startup, on the reconcile interval, after a watcher
+  restarts, and when a polled root changes.
+- **Not ported: a library folder reached through a symlink.** A folder outside every approved root
+  that resolves inside one, such as `/films` linking to `/media/films` with `LIBRARY_ROOTS=/media`,
+  scans when asked, but change events and the reconcile carry the root's real paths, which never
+  match the folder's own path, so it is not rescanned on its own. Old movies watched each library's
+  folders as stored. The follow-up is a server query of the movies libraries' folders that the
+  monitor tracks (`LibraryMonitor.track`), within the per-call limits. Queuing every library from
+  the reconcile instead was tried and dropped: on a core with hundreds of libraries its scheduled
+  enqueues kept the scan kind's `jobKinds` row busy, so managers' scans and new libraries failed on
+  conflicts, and the worker scanned every stale library.
 
 ## Consequences
 

@@ -360,12 +360,6 @@ export const serverFunctions = {
     args: Schema.Struct({ path: Schema.String }),
     result: Schema.Struct({ queued: Schema.Int }),
   }),
-  scanReconcile: serverMutation({
-    name: "core.scans.reconcile",
-    path: "core/scans:reconcile",
-    args: Schema.Struct({}),
-    result: Schema.Struct({ queued: Schema.Int }),
-  }),
   moviesKnown: serverMutation({
     name: "movies.scanner.known",
     path: "movies/scanner:known",

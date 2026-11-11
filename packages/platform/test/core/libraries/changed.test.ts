@@ -21,8 +21,6 @@ const Queued = Schema.Struct({ queued: Schema.Finite });
 const changed = (core: CoreStack, path: string) =>
   runServer(core, api.core.scans.changed, { path }, Queued);
 
-const reconcile = (core: CoreStack) => runServer(core, api.core.scans.reconcile, {}, Queued);
-
 /** The scan a library's `lastScan` names, as its manager reads it, or null when it has none. */
 const scanOf = async (manager: Member, libraryId: Id<"libraries">) => {
   const library = await manager.signedIn.client.query(api.core.libraries.get, { libraryId });
@@ -133,25 +131,6 @@ describe.skipIf(stack === undefined)("rescans after a change", { timeout: 180_00
     });
     expect(await scanOf(manager, music.libraryId)).toBeNull();
     expect(await changed(stack, `${root}/music/Song.flac`)).toEqual({ queued: 0 });
-    expect(await scanOf(manager, music.libraryId)).toBeNull();
-  });
-
-  it("queue every movies library on a reconcile, wherever its folders are, and no music library", async () => {
-    if (stack === undefined) return;
-    const manager = await member(stack, "changed-reconcile", "admin");
-    const film = await seedLibrary(stack, manager, movies("Linked"));
-    const music = await seedLibrary(stack, manager, { name: "M", kind: "music", items: [] });
-
-    // A folder outside every root the server watches, as one reached through a symlink is.
-    await moveTo(stack, film.libraryId, `/linked-${unique()}/films`);
-    await moveTo(stack, music.libraryId, `/linked-${unique()}/music`);
-
-    expect((await reconcile(stack)).queued).toBeGreaterThanOrEqual(1);
-
-    await eventually("the linked library's scan to be queued", async () =>
-      (await scanOf(manager, film.libraryId)) === null ? null : true,
-    );
-    expect(await scanOf(manager, film.libraryId)).toMatchObject({ status: "queued" });
     expect(await scanOf(manager, music.libraryId)).toBeNull();
   });
 
