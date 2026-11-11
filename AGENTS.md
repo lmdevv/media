@@ -35,22 +35,23 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 
 ## Layout
 
-| Path                 | Role                                                                |
-| -------------------- | ------------------------------------------------------------------- |
-| `apps/web-movies`    | `@media/web-movies`: Vite + React + TanStack Router SPA, `/movies`  |
-| `apps/media`         | `@media/server`: Effect HttpApi media service; serves the SPA       |
-| `apps/cli`           | Effect CLI with JSON output; agent skill in `skills/media/`         |
-| `apps/mobile`        | Expo + Expo Router + Uniwind iOS app over `@media/sdk/react`        |
-| `packages/backend`   | Old movies' Convex schema, functions, and Convex Auth               |
-| `packages/platform`  | The core's Convex project; movies and music port into it (ADR 0023) |
-| `packages/contracts` | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces   |
-| `packages/sdk`       | Effect core with `/effect`, `/react`, `/promise` entry points       |
-| `packages/ui`        | shadcn components restyled through Paper tokens                     |
-| `packages/config`    | Shared strict `tsconfig`                                            |
-| `deploy/image`       | All-in-one image: the core's Convex backend, media, and Caddy (s6)  |
-| `deploy/compose`     | Docker Compose: the image plus optional sidecars                    |
-| `nix/`               | NixOS module                                                        |
-| `legacy/music`       | Old [music] code, runnable until the music port deletes it          |
+| Path                   | Role                                                                  |
+| ---------------------- | --------------------------------------------------------------------- |
+| `apps/web-movies`      | `@media/web-movies`: Vite + React + TanStack Router SPA, `/movies`    |
+| `apps/media`           | `@media/server`: Effect HttpApi media service; serves the SPA         |
+| `apps/cli`             | Effect CLI with JSON output; agent skill in `skills/media/`           |
+| `apps/mobile-movies`   | Expo + Expo Router + Uniwind movies iOS app over `@media/mobile-core` |
+| `packages/backend`     | Old movies' Convex schema, functions, and Convex Auth                 |
+| `packages/platform`    | The core's Convex project; movies and music port into it (ADR 0023)   |
+| `packages/mobile-core` | iOS apps' connection, shared keychain, sign-in, and enrollment        |
+| `packages/contracts`   | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces     |
+| `packages/sdk`         | Effect core with `/effect`, `/react`, `/promise` entry points         |
+| `packages/ui`          | shadcn components restyled through Paper tokens                       |
+| `packages/config`      | Shared strict `tsconfig`                                              |
+| `deploy/image`         | All-in-one image: the core's Convex backend, media, and Caddy (s6)    |
+| `deploy/compose`       | Docker Compose: the image plus optional sidecars                      |
+| `nix/`                 | NixOS module                                                          |
+| `legacy/music`         | Old [music] code, runnable until the music port deletes it            |
 
 Ownership: Convex owns accounts, profiles, grants, libraries, titles, files, jobs, watch history,
 and playback sessions. Disk owns original media, which is read-only. The media service owns

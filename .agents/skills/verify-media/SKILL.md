@@ -27,7 +27,7 @@ records it:
 
 | Layout        | What runs                                                                                  |
 | ------------- | ------------------------------------------------------------------------------------------ |
-| `one-backend` | The all-in-one image with one Convex backend, the core's. Everyone is a core user who signs in once at `/`; `/movies` has no sign-in, profiles, or iOS app yet |
+| `one-backend` | The all-in-one image with one Convex backend, the core's. Everyone is a core user who signs in once at `/`; `/movies` has no sign-in or profiles, and the movies iOS app signs in to the core with a username |
 | `one-port`    | The all-in-one image with old movies' Convex at `/movies/convex` beside the core's. Movies signs in at `/movies/sign-in` and has profiles |
 | `two-port`    | A `convex` service beside a `movies` service, movies at `/`                                |
 
@@ -423,10 +423,11 @@ command that is new in the checkout fails there.
 
 ### iOS simulator
 
-The movies iOS app runs on a simulator on `darwin` (set `MAC_HOST` for another Mac). It signs in
-to old movies' own Convex, so `ios up` refuses a `one-backend` side until the app moves to the
-core; drive it on a `one-port` side, such as the before side or an `--image` from before the
-movies cutover. Old music's
+The movies iOS app (`apps/mobile-movies`) runs on a simulator on `darwin` (set `MAC_HOST` for
+another Mac). It signs in to the core through the media server's sign-in boundary, so `ios up`
+refuses a side whose image still runs old movies' own Convex (`one-port`, `two-port`): run an iOS
+lane against such an image from a checkout of that image's revision, with its own verify skill.
+Old music's
 iOS app is not driven here; the `ios` commands sign in to movies only. Its JavaScript comes
 from a Metro on this machine. For the before side, Metro serves a main checkout that `ios up`
 makes with `git worktree` under the side's state. The simulator reaches the side as
@@ -453,9 +454,10 @@ less than 3 GB free, or 10 GB when it must build the dev client. It does these s
    and builds, which takes several minutes.
 5. It turns off the dev client's own UI (its first-launch introduction, its floating button, and
    the gestures that open its menu), so screenshots show only the app.
-6. It opens the app on Metro, connects to the side's server, signs in as Lucía, and picks her
-   profile. A new simulator's first sign-in brings up iOS's `Save Password?` sheet over the app;
-   `ios up` and `ios sign-in` answer `Not Now`.
+6. It opens the app on Metro, connects to the side's server, and signs in as Lucía with her
+   username and password. The app has no profiles (D12): switching person is signing out, then
+   `ios sign-in --as <person>`. A new simulator's first sign-in brings up iOS's `Save Password?`
+   sheet over the app; `ios up` and `ios sign-in` answer `Not Now`.
 
 It prints `ready: ios <side> on simulator <udid>` when the app shows Home. Then:
 
@@ -465,7 +467,7 @@ It prints `ready: ios <side> on simulator <udid>` when the app shows Home. Then:
 | `ios find <label>`                               | Prints where `ios tap --label` would tap, or fails when it's off screen |
 | `ios tap --label L` or `--id ID` or `-x X -y Y`  | Taps an element by its exact accessibility label or id, or a point |
 | `ios type <text>`                                | Replaces the focused field's text                       |
-| `ios sign-in`                                    | Connects and signs in again from the welcome or sign-in screen |
+| `ios sign-in [--as P]`                           | Connects and signs in as Lucía, or person P, from the welcome or sign-in screen |
 | `ios swipe <x1> <y1> <x2> <y2>`                  | Swipes, in points                                       |
 | `ios wait <label> [seconds]`                     | Waits until the label appears in the tree               |
 | `ios shot <path.png>`                            | Saves a screenshot                                      |

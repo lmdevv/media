@@ -1,0 +1,30 @@
+{
+  "name": "@media/mobile-core",
+  "version": "0.2.0",
+  "private": true,
+  "description": "What every [media] iOS app shares: the server connection, the shared keychain, sign-in, and device enrollment.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root ../.. --project other packages/mobile-core"
+  },
+  "dependencies": {
+    "@media/contracts": "workspace:*",
+    "@media/sdk": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@media/config": "workspace:*",
+    "@types/node": "catalog:",
+    "expo-secure-store": "~58.0.2",
+    "typescript": "catalog:",
+    "vitest": "5.0.3"
+  },
+  "peerDependencies": {
+    "expo-secure-store": "~58.0.2"
+  }
+}

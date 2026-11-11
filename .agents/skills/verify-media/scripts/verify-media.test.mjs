@@ -566,10 +566,10 @@ describe("a side's layout", () => {
     assert.equal(withLayout("one-port", urls).stdout, "http://localhost:4100/movies http://localhost:4100/movies/convex admin@movies.local media\n");
   });
 
-  test("refuses the movies iOS app on one backend before it touches the Mac", () => {
-    const result = withLayout("one-backend", 'write_state people lucia; args=(up); MAC_HOST=nowhere.invalid cmd_ios_up');
+  test("refuses the movies iOS app on old movies' backend before it touches the Mac", () => {
+    const result = withLayout("one-port", 'write_state people lucia; args=(up); MAC_HOST=nowhere.invalid cmd_ios_up');
     assert.equal(result.status, 1, result.stderr);
-    assert.match(result.stderr, /movies iOS app can't reach the after side's one-backend image/);
+    assert.match(result.stderr, /iOS app signs in to the core, which the after side's one-port image does not serve/);
   });
 });
 

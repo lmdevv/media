@@ -75,8 +75,8 @@ jobs:
       - run: pnpm fmt:check
       - run: pnpm --filter @media/commands check
       - run: pnpm knip
-      - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/mobile')
-        run: pnpm --filter mobile bundle
+      - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/mobile-movies')
+        run: pnpm --filter @media/mobile-movies bundle
       - run: scripts/check-deploy.sh
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/cli')
         run: pnpm --filter @lmdevv/movies build:sea
