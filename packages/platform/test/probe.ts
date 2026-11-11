@@ -135,7 +135,8 @@ export const sessionOf = async (signedIn: SignedIn): Promise<Session> => {
   };
 };
 
-const SEED_BATCH = 200;
+/** Libraries one seed call makes, few enough to finish inside a mutation's time on a busy host. */
+const SEED_BATCH = 50;
 
 const batchesOf = <Item>(items: ReadonlyArray<Item>): ReadonlyArray<ReadonlyArray<Item>> =>
   Array.from({ length: Math.ceil(items.length / SEED_BATCH) }, (_, n) =>

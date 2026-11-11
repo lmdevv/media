@@ -78,6 +78,9 @@ const watchedPinned = makeFunctionReference<
 /** Convex's per-call limit on bytes read (ADR 0013). */
 const BYTES_MAX = 16 * 1024 * 1024;
 
+/** What a page of 64 libraries with 16 folders at their bounds reads at least: 64 × 16 × 3,072. */
+const FULL_PAGE_BYTES = 3_000_000;
+
 /** A folder at its bounds: 1,024 characters, each three bytes in UTF-8, unique by `prefix`. */
 const longFolder = (prefix: string): string =>
   `/${prefix.padEnd(31, "-")}${`/${"界".repeat(247)}`.repeat(4)}`;
@@ -406,13 +409,17 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
     if (stack === undefined) return;
 
     const admin = await member(stack, "watched-long", "admin");
-    const libraryIds = await longLibraries(admin, `w${Date.now() % 100_000_000}`, 400);
+    // Two pages' worth: whatever libraries come before them, one whole page of 64 is all at bounds.
+    const libraryIds = await longLibraries(admin, `w${Date.now() % 100_000_000}`, 128);
     const mark = await logMark(stack);
     const cursors = await watchedCursors(stack);
-    const usage = await usageSince(stack, mark, api.core.scans.watched, cursors.length);
+    // Pages of libraries other tests left are served from the query cache and log nothing; the
+    // two pages holding these libraries cannot be.
+    const usage = await usageSince(stack, mark, api.core.scans.watched, 2);
 
-    expect(cursors.length).toBeGreaterThan(6);
+    expect(cursors.length).toBeGreaterThan(1);
     expect(usage.every((call) => call.committed && call.bytes < BYTES_MAX)).toBe(true);
+    expect(Math.max(...usage.map((call) => call.bytes))).toBeGreaterThan(FULL_PAGE_BYTES);
 
     const end = cursors.at(-2) ?? "";
 

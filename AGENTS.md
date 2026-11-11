@@ -92,7 +92,11 @@ in Docker, one for old movies and one for the core, deploys both, configures bot
 movies' playback token secret and media service credential, runs the media service's sign-in
 boundary alone in a third container, and writes the `.env.local` files. Ports, the data volume, and the temporary
 output directory derive from the worktree name; `scripts/dev-stack.sh env` prints them, and
-`down` / `destroy` stop or remove the stack. Commit the regenerated `convex/_generated/`.
+`down` / `destroy` stop or remove the stack. Commit the regenerated `convex/_generated/`. The stack's backends lift Convex's
+4 MiB/s write limit (`MAX_BYTES_WRITTEN_PER_SECOND`, a documented self-hosted knob) so back-to-back
+test seeds never meet `TooManyWrites`; a backend from before that is recreated on `up`, keeping its
+data. Only the dev stack sets it: the image and the NixOS module keep the default, so product code
+that writes in bulk must still pace or retry as ADR 0012 says.
 
 `legacy/music` is a nested workspace outside the root one, with its own install, lockfile, and
 checks. Root checks skip it. A commit that touches it runs its typecheck, lint, fmt:check, test,
