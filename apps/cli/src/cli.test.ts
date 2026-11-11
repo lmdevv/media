@@ -3,22 +3,19 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { jwtExpiringAt } from "@media/sdk/testing/fake-convex";
 import { afterAll, describe, expect, it } from "vitest";
 
 import packageJson from "../package.json" with { type: "json" };
 
-import { accountCommands } from "./account-commands";
-import { adminCommands } from "./admin-commands";
-import { registryEntries, shortcuts, visibleRegistryEntries } from "./catalog";
 import { ExitCode } from "./cli-errors";
-import { diagnosticsCommands } from "./diagnostics-commands";
-import { roomCommands } from "./room-commands";
+import { coreEntries } from "./core/routes";
+import { generatedCommands } from "./generated/commands";
 import { withMediaService } from "./testing/media-service";
 import type { CliRun } from "./testing/run-cli";
 import { runInProcess, stderrRecords } from "./testing/run-cli";
-import { watchCommands } from "./watch-commands";
 
-const home = mkdtempSync(join(tmpdir(), "movies-cli-test-"));
+const home = mkdtempSync(join(tmpdir(), "media-cli-test-"));
 
 afterAll(() => {
   rmSync(home, { recursive: true, force: true });
@@ -28,211 +25,217 @@ const env = { XDG_CONFIG_HOME: home, HOME: home };
 
 const media = (...argv: ReadonlyArray<string>) => runInProcess(argv, env);
 
-const storedHome = (convexUrl = "https://home.example/convex") => {
-  const dir = mkdtempSync(join(tmpdir(), "movies-stored-home-"));
-  const path = join(dir, "movies", "config.json");
+/** A home whose `home` profile holds a session for the core at `url`, as `media auth login` saves it. */
+const storedHome = (url: string) => {
+  const dir = mkdtempSync(join(tmpdir(), "media-stored-home-"));
+  const path = join(dir, "media", "sessions", "home.json");
 
   const stored = `${JSON.stringify({
-    defaultProfile: "home",
-    profiles: {
-      home: {
-        convexUrl,
-        deviceId: "cli-home",
-        apiKey: "mk_home",
-        session: { token: "jwt-home", refreshToken: "refresh-home" },
-      },
+    url,
+    session: {
+      token: jwtExpiringAt(Date.now() + 3_600_000, "user-1|session-1"),
+      refreshToken: "refresh-home",
     },
   })}\n`;
 
-  mkdirSync(join(dir, "movies"));
+  mkdirSync(join(dir, "media", "sessions"), { recursive: true });
   writeFileSync(path, stored);
 
   return { home: dir, path, stored };
 };
+
+/** The old movies server's top-level words, which `media movies` and the core replace. */
+const OLD_WORDS = [
+  "login",
+  "logout",
+  "whoami",
+  "profiles",
+  "keys",
+  "search",
+  "play",
+  "progress",
+  "continue",
+  "rooms",
+  "scan",
+  "import",
+  "backup",
+  "restore",
+  "titles",
+  "libraries",
+  "jobs",
+  "metadata",
+];
 
 describe("the media command", () => {
   it("prints help and the version", async () => {
     const help = await media("--help");
 
     expect(help.code).toBe(ExitCode.ok);
-    expect(help.stdout).toContain("Usage: media <command> [flags]");
+    expect(help.stdout).toContain("Usage: media <group> <command> [flags]");
     expect((await media("--version")).stdout).toBe(packageJson.version);
   });
 
-  it("reaches every registry command, at its own path or through call", async () => {
-    const runs = await Promise.all(
-      registryEntries.map((entry) =>
-        visibleRegistryEntries.includes(entry)
-          ? media(...entry.path.split(" "), "--help")
-          : media("call", entry.name, "--help"),
-      ),
-    );
+  it("lists the groups and none of the old movies server's words", async () => {
+    const help = (await media("--help")).stdout;
 
-    for (const [index, entry] of registryEntries.entries()) {
-      expect(runs[index]?.code, entry.name).toBe(ExitCode.ok);
-      expect(runs[index]?.stdout, entry.name).toContain(`Registry command ${entry.name}`);
+    for (const group of ["auth", "admin", "movies", "music"]) {
+      expect(help).toMatch(new RegExp(`^  ${group} `, "mu"));
+    }
+
+    for (const old of OLD_WORDS) {
+      expect(help, old).not.toMatch(new RegExp(`^  media ${old}\\b`, "mu"));
+      expect(help, old).not.toMatch(new RegExp(`^  ${old} `, "mu"));
     }
   });
 
-  it("answers --help for every shortcut", async () => {
-    const helped = shortcuts.filter(
-      (shortcut) => shortcut.path !== "call" && shortcut.path !== "commands",
-    );
-
-    const runs = await Promise.all(
-      helped.map((shortcut) => media(...shortcut.path.split(" "), "--help")),
-    );
-
-    for (const [index, shortcut] of helped.entries()) {
-      expect(runs[index]?.code, shortcut.path).toBe(ExitCode.ok);
-      expect(runs[index]?.stdout, shortcut.path).toContain(`Usage: media ${shortcut.path}`);
-    }
-  });
-
-  it("offers --wait on every command that can queue a job", async () => {
-    const help = await media("migration", "import", "--help");
-
-    expect(help.stdout).toContain("--wait");
-  });
-
-  it("documents exactly the shortcuts it implements", () => {
-    const implemented = [
-      ...accountCommands,
-      ...watchCommands,
-      ...roomCommands,
-      ...adminCommands,
-      ...diagnosticsCommands,
-    ];
-
-    const routed = new Set(["call", "commands"]);
-
-    expect(implemented.map((command) => command.path).toSorted()).toStrictEqual(
-      shortcuts
-        .flatMap((shortcut) => (routed.has(shortcut.path) ? [] : [shortcut.path]))
-        .toSorted(),
-    );
-  });
-
-  it("accepts camelCase registry words", async () => {
-    expect((await media("apiKeys", "create", "--help")).stdout).toContain(
-      "Registry command apiKeys.create",
-    );
-  });
-
-  it("reports unknown commands as usage errors with suggestions", async () => {
-    const run = await media("room");
-
-    expect(run.code).toBe(ExitCode.usage);
-    expect(JSON.parse(run.stderr)).toMatchObject({ error: { code: "usage" } });
-    expect(run.stderr).toContain("rooms");
-  });
-
-  it("validates arguments offline and names the flag", async () => {
-    const missing = await media("libraries", "create", "--name", "Films", "--kind", "movies");
-
-    expect(missing.code).toBe(ExitCode.usage);
-    expect(missing.stderr).toContain("--roots");
-
-    const invalid = await media(
-      "libraries",
-      "create",
-      "--name",
-      "Films",
-      "--kind",
-      "movies",
-      "--roots",
-      "relative/path",
-    );
-
-    expect(invalid.code).toBe(ExitCode.usage);
-    expect(invalid.stderr).toContain("--roots");
-  });
-
-  it("refuses a blank --version offline instead of playing the default version", async () => {
-    const runs = await Promise.all(
-      ["", "   "].map((blank) => media("play", "Alien", "--version", blank)),
-    );
+  it("answers --help for every command and the troubleshooting ones", async () => {
+    const runs = await Promise.all([
+      ...coreEntries.map((entry) => media(...entry.command.path.split(" "), "--help")),
+      media("logs", "--help"),
+      media("diagnostics", "playback", "--help"),
+      media("diagnostics", "sessions", "--help"),
+      media("diagnostics"),
+    ]);
 
     for (const run of runs) {
-      expect(run.code).toBe(ExitCode.usage);
-      expect(run.stderr).toContain("--version expects a version name or its number");
+      expect(run.code, run.stderr).toBe(ExitCode.ok);
+      expect(run.stdout).toContain("Usage: media");
     }
   });
 
-  it("asks to log in before calling the server", async () => {
-    const run = await media("account", "viewer");
+  it("names where an old movies word moved, as a usage error", async () => {
+    const cases = {
+      "titles list": "media movies titles list",
+      "my-list add": "media movies my-list add",
+      "api-keys create": "media auth api-keys create",
+      play: "media movies stream",
+      login: "media auth login",
+      whoami: "media auth sessions current",
+      continue: "media movies history continue-watching",
+    };
 
-    expect(run.code).toBe(ExitCode.unauthenticated);
-    expect(JSON.parse(run.stderr)).toMatchObject({ error: { code: "not_logged_in" } });
+    const runs = await Promise.all(
+      Object.entries(cases).map(async ([typed, moved]) => ({
+        typed,
+        moved,
+        run: await media(...typed.split(" ")),
+      })),
+    );
+
+    for (const { typed, moved, run } of runs) {
+      expect(run.code, typed).toBe(ExitCode.usage);
+      expect(JSON.parse(run.stderr), typed).toMatchObject({ error: { code: "usage" } });
+      expect(run.stderr, typed).toContain(`run ${moved}`);
+    }
+  });
+
+  it("reports other unknown commands as usage errors with suggestions", async () => {
+    const run = await media("mov");
+
+    expect(run.code).toBe(ExitCode.usage);
+    expect(run.stderr).toContain("did you mean movies");
+  });
+
+  it("accepts camelCase words", async () => {
+    const run = await media("movies", "myList", "add", "--help");
+
+    expect(run.code, run.stderr).toBe(ExitCode.ok);
+    expect(run.stdout).toContain("Command movies.myList.add");
+  });
+
+  it("refuses a blank --version or a wild --max-height offline", async () => {
+    const runs = await Promise.all([
+      media("movies", "stream", "Alien", "--version", ""),
+      media("movies", "stream", "Alien", "--version", "   "),
+      media("movies", "stream", "Alien", "--max-height", "9000"),
+      media("movies", "stream"),
+    ]);
+
+    const [blank, , height, missing] = runs;
+
+    for (const run of runs) expect(run.code, run.stderr).toBe(ExitCode.usage);
+    expect(blank.stderr).toContain("--version expects a version name or its number");
+    expect(height.stderr).toContain("--max-height expects lines");
+    expect(missing.stderr).toContain("needs a title name or ID");
+  });
+
+  it("asks to sign in with media auth login before calling the server", async () => {
+    const runs = await Promise.all([
+      media("movies", "titles", "list"),
+      media("movies", "stream", "Alien"),
+      media("logs"),
+    ]);
+
+    for (const run of runs) {
+      expect(run.code).toBe(ExitCode.unauthenticated);
+      expect(JSON.parse(run.stderr)).toMatchObject({ error: { code: "not_logged_in" } });
+      expect(run.stderr).toContain("media auth login");
+    }
+  });
+
+  it("takes a bare --json as JSON output, and --json with an object as the arguments", async () => {
+    const [bare, beforeFlag, withHuman, args] = await Promise.all([
+      media("movies", "titles", "list", "--json"),
+      media("movies", "titles", "list", "--json", "--limit", "5"),
+      media("movies", "titles", "list", "--json", "--human"),
+      media("movies", "titles", "search", "--json", '{"query":"alien"}'),
+    ]);
+
+    for (const run of [bare, beforeFlag, args]) {
+      expect(JSON.parse(run.stderr)).toMatchObject({ error: { code: "not_logged_in" } });
+    }
+
+    expect(withHuman.code).toBe(ExitCode.usage);
   });
 
   it("prints human errors with --human", async () => {
-    const run = await media("account", "viewer", "--human");
+    const run = await media("movies", "titles", "list", "--human");
 
-    expect(run.stderr.startsWith("media: Not logged in")).toBe(true);
+    expect(run.stderr.startsWith("media: Not signed in")).toBe(true);
   });
 
-  it("rejects an unreadable config file with a config error", async () => {
-    const bad = mkdtempSync(join(tmpdir(), "movies-bad-config-"));
+  it("rejects an unreadable profile file with a config error", async () => {
+    const bad = mkdtempSync(join(tmpdir(), "media-bad-config-"));
 
-    mkdirSync(join(bad, "movies"));
-    writeFileSync(join(bad, "movies", "config.json"), "{not json");
-    const run = await runInProcess(["whoami"], { XDG_CONFIG_HOME: bad });
+    mkdirSync(join(bad, "media", "sessions"), { recursive: true });
+    writeFileSync(join(bad, "media", "sessions", "default.json"), "{not json");
+    const run = await runInProcess(["movies", "titles", "list"], { XDG_CONFIG_HOME: bad });
 
     rmSync(bad, { recursive: true, force: true });
     expect(run.code).toBe(ExitCode.failed);
     expect(JSON.parse(run.stderr)).toMatchObject({ error: { code: "config_error" } });
   });
 
-  it("never sends a stored profile's credentials to another server in MEDIA_CONVEX_URL", async () => {
-    const { home: other, path, stored } = storedHome();
-    const overridden = { XDG_CONFIG_HOME: other, MEDIA_CONVEX_URL: "http://127.0.0.1:9" };
-    const run = await runInProcess(["whoami"], overridden);
-    const use = await runInProcess(["profiles", "use", "Kids"], overridden);
-    const login = await runInProcess(["login", "--api-key", "mk_other"], overridden);
-    const logout = await runInProcess(["logout"], overridden);
+  it("reads the profile from --profile, then MEDIA_PROFILE, then default", async () => {
+    const { home: stored, path } = storedHome("http://127.0.0.1:9");
+    const before = readFileSync(path, "utf8");
+
+    const runs = await Promise.all([
+      runInProcess(["auth", "logout", "--profile", "home"], { XDG_CONFIG_HOME: stored }),
+      runInProcess(["auth", "logout"], { XDG_CONFIG_HOME: stored, MEDIA_PROFILE: "other" }),
+      runInProcess(["auth", "logout"], { XDG_CONFIG_HOME: stored }),
+    ]);
+
     const after = readFileSync(path, "utf8");
 
-    rmSync(other, { recursive: true, force: true });
-    expect(run.code).toBe(ExitCode.unauthenticated);
-    expect(JSON.parse(run.stderr)).toMatchObject({ error: { code: "not_logged_in" } });
+    rmSync(stored, { recursive: true, force: true });
+    const [flag, fromEnv, fallback] = runs;
 
-    for (const [name, refused] of Object.entries({ use, login, logout })) {
-      expect(refused.code, name).toBe(ExitCode.usage);
-      expect(refused.stderr, name).toContain("--profile <new-name>");
-    }
-
-    expect(after).toBe(stored);
-  });
-
-  it("logs out of an unreachable server by forgetting the stored session and key", async () => {
-    const { home: offline, path } = storedHome("http://127.0.0.1:9");
-    const run = await runInProcess(["logout"], { XDG_CONFIG_HOME: offline });
-    const after = readFileSync(path, "utf8");
-
-    rmSync(offline, { recursive: true, force: true });
-    expect(run.code, run.stderr).toBe(ExitCode.ok);
-    expect(JSON.parse(after)).toStrictEqual({
-      defaultProfile: "home",
-      profiles: { home: { convexUrl: "http://127.0.0.1:9", deviceId: "cli-home" } },
-    });
+    expect(JSON.parse(flag.stdout)).toMatchObject({ profile: "home", signedOut: true });
+    expect(JSON.parse(fromEnv.stdout)).toMatchObject({ profile: "other", signedOut: false });
+    expect(JSON.parse(fallback.stdout)).toMatchObject({ profile: "default", signedOut: false });
+    expect(JSON.parse(before)).toHaveProperty("session");
+    expect(JSON.parse(after)).toStrictEqual({ url: "http://127.0.0.1:9" });
   });
 
   it("lists every command as JSON with argument schemas", async () => {
     const run = await media("commands");
 
-    for (const entry of registryEntries) expect(run.stdout).toContain(`"name": "${entry.name}"`);
-  });
+    for (const command of generatedCommands) {
+      expect(run.stdout).toContain(`"name": "${command.name}"`);
+    }
 
-  it("keeps the agent skill's movies reference current", async () => {
-    const skill = readFileSync(
-      join(import.meta.dirname, "..", "skills", "media", "movies.md"),
-      "utf8",
-    );
-
-    const reference = (await media("commands", "--markdown")).stdout;
-
-    expect(skill, "run pnpm --filter @lmdevv/movies skill:reference").toContain(reference);
+    expect(run.stdout).toContain('"command": "media movies stream"');
   });
 });
 
@@ -245,7 +248,11 @@ const withSignedInMedia = (
 
     try {
       await run((...argv) =>
-        runInProcess(argv, { XDG_CONFIG_HOME: signedIn, MEDIA_SERVER_URL: mediaUrl }),
+        runInProcess(argv, {
+          XDG_CONFIG_HOME: signedIn,
+          MEDIA_PROFILE: "home",
+          MEDIA_SERVER_URL: mediaUrl,
+        }),
       );
     } finally {
       rmSync(signedIn, { recursive: true, force: true });

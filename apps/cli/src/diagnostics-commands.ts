@@ -10,7 +10,7 @@ import {
 } from "@media/contracts/diagnostics";
 import { PlaybackSessionId } from "@media/contracts/ids";
 import { EpochMillis } from "@media/contracts/units";
-import { TransportError } from "@media/sdk/effect";
+import { MediaRoutes, TransportError } from "@media/sdk/effect";
 import { Clock, Effect, Option, Predicate, Schema, Stream } from "effect";
 
 import type { ShortcutCommand, Invocation } from "./invocation";
@@ -23,8 +23,8 @@ import {
   textOutcome,
   usage,
 } from "./invocation";
+import { connect } from "./config";
 import { Output } from "./output";
-import { connect } from "./session";
 
 const UNITS: ReadonlyMap<string, number> = new Map([
   ["ms", 1],
@@ -229,6 +229,10 @@ const printsJson = (invocation: Invocation): boolean =>
 
 const logs: ShortcutCommand = {
   path: "logs",
+  usage:
+    "[--follow] [--since <duration|time>] [--until <duration|time>] [--level trace|debug|info|warn|error|fatal] [--session-id <id>] [--stream-id <id>] [--slow <duration>] [--grep <text>] [--limit <int>] [--json|--human]",
+  summary:
+    "Read the media service's retained log, newest last (admin sessions only); --follow keeps printing new records, --since 15m or a time starts there, --slow 1s keeps timed requests at least that long, --json prints the NDJSON records; a followed log the service ends fails as unavailable",
   options: {
     follow: { type: "boolean", short: "f" },
     since: { type: "string" },
@@ -247,8 +251,8 @@ const logs: ShortcutCommand = {
       const output = yield* Output;
       const query = yield* logQuery(invocation);
       const json = printsJson(invocation);
-      const connection = yield* connect(invocation.env, invocation.target, "required");
-      const found = yield* connection.withSession(connection.client.logs(query));
+      const connection = yield* connect(invocation.target, "required");
+      const found = yield* connection.signedIn(MediaRoutes.logs(connection.media, query));
 
       if (Option.isSome(found.unavailableSince)) {
         yield* output.err(
@@ -341,6 +345,9 @@ const renderSessions = (sessions: ReadonlyArray<DiagnosedSession>): string =>
 
 const playbackTimeline: ShortcutCommand = {
   path: "diagnostics playback",
+  usage: "<session-id> [--json|--human]",
+  summary:
+    "Print a playback session's timeline: streams and why they ended, slow and failed segments with their time split, the player's startup, stalls, errors, and recoveries, audio/video drift where the player measures it, and the evidence that is missing",
   options: { json: { type: "boolean" } },
   positionals: true,
   run: (invocation) =>
@@ -354,10 +361,10 @@ const playbackTimeline: ShortcutCommand = {
         );
       }
 
-      const connection = yield* connect(invocation.env, invocation.target, "required");
+      const connection = yield* connect(invocation.target, "required");
 
-      const diagnostics = yield* connection.withSession(
-        connection.client.media("diagnostics.playback", {
+      const diagnostics = yield* connection.signedIn(
+        MediaRoutes.run(connection.media, "diagnostics.playback", {
           sessionId: PlaybackSessionId.make(sessionId.value),
           measuredDrift: true,
         }),
@@ -375,6 +382,9 @@ const playbackTimeline: ShortcutCommand = {
 
 const sessions: ShortcutCommand = {
   path: "diagnostics sessions",
+  usage: "[--since <duration|time>] [--json|--human]",
+  summary:
+    "List the playback sessions the retained log mentions (the last day by default), newest first; members see their own",
   options: { since: { type: "string" }, json: { type: "boolean" } },
   positionals: false,
   run: (invocation) =>
@@ -390,10 +400,11 @@ const sessions: ShortcutCommand = {
         );
       }
 
-      const connection = yield* connect(invocation.env, invocation.target, "required");
+      const connection = yield* connect(invocation.target, "required");
 
-      const found = yield* connection.withSession(
-        connection.client.media(
+      const found = yield* connection.signedIn(
+        MediaRoutes.run(
+          connection.media,
           "diagnostics.sessions",
           Option.match(since, { onNone: () => ({}), onSome: (value) => ({ since: value }) }),
         ),

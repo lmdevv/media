@@ -1,30 +1,26 @@
 import type { ParseArgsOptionsConfig } from "node:util";
 
 import type { AnyCommand } from "@media/contracts/command";
-import type { ProfileId } from "@media/contracts/ids";
-import { ProfileId as ProfileIdSchema } from "@media/contracts/ids";
 import { Milliseconds } from "@media/contracts/units";
 import { ProtocolError } from "@media/sdk/effect";
-import { Config, Data, Duration, Effect, Option, Predicate, Redacted, Schema } from "effect";
+import { Config, Data, Effect, Option, Predicate, Redacted, Schema } from "effect";
 import type { Scope } from "effect";
 
 import type { CliError } from "./cli-errors";
 import { ConfigFileError, UsageError } from "./cli-errors";
-import type { Environment, Target } from "./config";
+import type { Target } from "./config";
 import { readStdin } from "./files";
 import type { ParsedTokens } from "./flags";
 import type { Output } from "./output";
-import { renderResult } from "./render";
 
 /** How results print. */
 export type Format = "json" | "table";
 
 /** One run of one command. */
 export interface Invocation {
-  /** The words that named the command, such as `rooms pause`, for usage errors. */
+  /** The words that named the command, such as `movies stream`, for usage errors. */
   readonly path: string;
   readonly tokens: ParsedTokens;
-  readonly env: Environment;
   readonly target: Target;
   readonly format: Format;
 }
@@ -42,7 +38,11 @@ export const Outcome = Data.taggedEnum<Outcome>();
 
 /** A command the CLI implements itself. */
 export interface ShortcutCommand {
+  /** The words after `media`, such as `movies stream`. */
   readonly path: string;
+  /** What follows the command's words in its synopsis, such as `[--server <core-url>]`. */
+  readonly usage: string;
+  readonly summary: string;
   /** Flags beyond the global ones. */
   readonly options: ParseArgsOptionsConfig;
   /** Whether positional words are accepted. */
@@ -173,43 +173,6 @@ export const positionFlag = (
       }),
   });
 
-/** `--timeout <seconds>` for `--wait`, one hour by default. */
-export const timeoutFlag = (invocation: Invocation): Effect.Effect<Duration.Duration, UsageError> =>
-  Option.match(stringFlag(invocation.tokens, "timeout"), {
-    onNone: () => Effect.succeed(Duration.hours(1)),
-    onSome: (raw) => {
-      const seconds = Number(raw);
-
-      return Number.isFinite(seconds) && seconds > 0
-        ? Effect.succeed(Duration.seconds(seconds))
-        : Effect.fail(usage(invocation, `--timeout expects seconds, got "${raw}"`));
-    },
-  });
-
-/** The viewing profile, if any: `--profile-id`, else the stored default. */
-export const viewingProfileIfAny = (
-  invocation: Invocation,
-  stored: Option.Option<ProfileId>,
-): Option.Option<ProfileId> =>
-  Option.orElse(
-    Option.map(stringFlag(invocation.tokens, "profile-id"), (value) => ProfileIdSchema.make(value)),
-    () => stored,
-  );
-
-/** The viewing profile: `--profile-id`, else the stored default, else a usage error. */
-export const viewingProfile = (
-  invocation: Invocation,
-  stored: Option.Option<ProfileId>,
-): Effect.Effect<ProfileId, UsageError> =>
-  Effect.fromOption(viewingProfileIfAny(invocation, stored)).pipe(
-    Effect.mapError(() =>
-      usage(
-        invocation,
-        "No viewing profile: pass --profile-id or run media profiles use <profile>",
-      ),
-    ),
-  );
-
 /** Encodes a decoded command result as JSON with the command's result schema. */
 export const encodeResult = <Command extends AnyCommand>(
   name: string,
@@ -226,10 +189,6 @@ export const encodeResult = <Command extends AnyCommand>(
         }),
     ),
   );
-
-/** An outcome printed with the command's result schema in table mode. */
-export const resultOutcome = (command: AnyCommand, json: Schema.Json): Outcome =>
-  Outcome.Result({ json, human: renderResult(command.result, json) });
 
 /** An outcome whose human form is a line of text. */
 export const textOutcome = (json: Schema.Json, human: string): Outcome =>

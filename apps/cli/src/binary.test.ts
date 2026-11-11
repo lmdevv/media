@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import type { ServerResponse } from "node:http";
 import { join } from "node:path";
 
@@ -14,7 +14,7 @@ let home = "";
 
 beforeAll(async () => {
   buildCli();
-  home = await makeTempDir("movies-cli-binary-");
+  home = await makeTempDir("media-cli-binary-");
 }, 60_000);
 
 afterAll(() => removeDir(home));
@@ -46,46 +46,53 @@ const convexRefusal = (response: ServerResponse): void => {
 
 const RENEWED = jwtExpiringAt(4_102_444_800);
 
+const sessionFile = (dir: string): string => join(dir, "media", "sessions", "default.json");
+
+const writeProfile = (dir: string, profile: Schema.Json): void => {
+  mkdirSync(join(dir, "media", "sessions"), { recursive: true });
+  writeFileSync(sessionFile(dir), JSON.stringify(profile));
+};
+
 const afterFailedSave = (
   name: string,
   answer: (response: ServerResponse) => void,
   flags: ReadonlyArray<string> = [],
 ) => {
   const signedIn = join(home, name);
-  const configPath = join(signedIn, "movies", "config.json");
-
-  mkdirSync(join(signedIn, "movies"), { recursive: true });
 
   return withMediaService(
     (request, response) => {
       request.resume().on("end", () => {
         if (request.url === "/api/action") {
-          writeFileSync(configPath, "{not json");
+          // A directory in the file's place: saving the renewed session fails.
+          rmSync(sessionFile(signedIn));
+          mkdirSync(sessionFile(signedIn));
           convexAnswer(response, { tokens: { token: RENEWED, refreshToken: "refresh-renewed" } });
         } else answer(response);
       });
     },
-    (convexUrl) => {
-      writeFileSync(
-        configPath,
-        JSON.stringify({
-          defaultProfile: "home",
-          profiles: {
-            home: {
-              convexUrl,
-              deviceId: "cli-home",
-              session: { token: jwtExpiringAt(1_000_000_000), refreshToken: "refresh-home" },
-            },
-          },
-        }),
-      );
+    (url) => {
+      writeProfile(signedIn, {
+        url,
+        session: { token: jwtExpiringAt(1_000_000_000), refreshToken: "refresh-home" },
+      });
 
-      return runMovies(
-        ["call", "deviceAuth.status", "--json", '{"deviceCode":"device-code"}', ...flags],
-        { XDG_CONFIG_HOME: signedIn, HOME: signedIn },
-      );
+      return runMovies(["auth", "sessions", "current", ...flags], {
+        XDG_CONFIG_HOME: signedIn,
+        HOME: signedIn,
+      });
     },
   );
+};
+
+const SESSION = {
+  userId: "users:1",
+  username: "ana",
+  role: "owner",
+  sessionId: "authSessions:1",
+  kind: "password",
+  scopes: ["account"],
+  device: null,
 };
 
 describe("the media binary", () => {
@@ -93,9 +100,13 @@ describe("the media binary", () => {
     const env = { XDG_CONFIG_HOME: home, HOME: home };
 
     const runs = await Promise.all([
-      runMovies(["import", "jellyfin", "--url", "http://127.0.0.1:9"], env, " \n"),
       runMovies(
-        ["login", "--server", "http://127.0.0.1:9", "--email", "a@example.com", "--password"],
+        ["admin", "reset-password", "ana"],
+        { ...env, MEDIA_CORE_URL: "http://127.0.0.1:9", MEDIA_CORE_ADMIN_KEY: "admin-key" },
+        " \n",
+      ),
+      runMovies(
+        ["auth", "login", "--server", "http://127.0.0.1:9", "--username", "ana"],
         env,
         " \n",
       ),
@@ -157,12 +168,17 @@ describe("the media binary", () => {
 
     const runs = await Promise.all([
       runMovies(
-        ["import", "jellyfin", "--url", "http://127.0.0.1:9"],
-        { ...env, MEDIA_IMPORT_TOKEN: "" },
-        "token\n",
+        ["admin", "reset-password", "ana"],
+        {
+          ...env,
+          MEDIA_CORE_URL: "http://127.0.0.1:9",
+          MEDIA_CORE_ADMIN_KEY: "admin-key",
+          MEDIA_ARG_PASSWORD: "",
+        },
+        "password\n",
       ),
       runMovies(
-        ["login", "--server", "http://127.0.0.1:9", "--email", "a@example.com", "--password"],
+        ["auth", "login", "--server", "http://127.0.0.1:9", "--username", "ana"],
         { ...env, MEDIA_PASSWORD: " " },
         "password\n",
       ),
@@ -184,21 +200,10 @@ describe("the media binary", () => {
       annotations: {},
     })}\n`;
 
-    mkdirSync(join(signedIn, "movies"), { recursive: true });
-    writeFileSync(
-      join(signedIn, "movies", "config.json"),
-      JSON.stringify({
-        defaultProfile: "home",
-        profiles: {
-          home: {
-            convexUrl: "http://127.0.0.1:9",
-            deviceId: "cli-home",
-            apiKey: "mk_home",
-            session: { token: "jwt-home", refreshToken: "refresh-home" },
-          },
-        },
-      }),
-    );
+    writeProfile(signedIn, {
+      url: "http://127.0.0.1:9",
+      session: { token: RENEWED, refreshToken: "refresh-home" },
+    });
 
     const run = await withMediaService(
       (_request, response) => {
@@ -223,12 +228,10 @@ describe("the media binary", () => {
   });
 
   it("keeps stdout pure JSON when the SDK warns, printing the warning on stderr as NDJSON", async () => {
-    const run = await afterFailedSave("warns", (response) =>
-      convexAnswer(response, { state: "pending" }),
-    );
+    const run = await afterFailedSave("warns", (response) => convexAnswer(response, SESSION));
 
     expect(run.code, run.stderr).toBe(ExitCode.ok);
-    expect(JSON.parse(run.stdout)).toStrictEqual({ state: "pending" });
+    expect(JSON.parse(run.stdout)).toStrictEqual(SESSION);
     expect(stderrRecords(run.stderr)).toMatchObject([
       { level: "WARN", message: "Auth.tokenStorageFailed", annotations: { operation: "save" } },
     ]);

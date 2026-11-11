@@ -1,6 +1,7 @@
 /**
  * `@media/sdk/effect`: the Effect core. `Platform.layer` connects to the platform deployment and
- * gives every platform command a method (`platform.core.server.info()`). The movies backend's
+ * gives every platform command a method (`platform.core.server.info()`), and `MediaRoutes` calls
+ * the media server's own routes with its session's token. The movies backend's
  * client sits beside it: start from `Movies.layer` with a `TokenStorage` layer, then use
  * `MoviesClient`, `Auth`, `ClientErrors`, `DeviceLogin`, `Playback` (with `PlayerDiagnostics`),
  * `Downloads`, `Versions` (with `MediaLabels` naming their facts), `RoomSync`, and `RoomPresence`.
@@ -16,6 +17,8 @@ export * as DeviceLogin from "./device-login";
 export * as Downloads from "./downloads";
 
 export * as MediaLabels from "./media-labels";
+
+export * as MediaRoutes from "./media-routes";
 
 export * as Movies from "./movies";
 

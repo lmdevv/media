@@ -1,59 +1,26 @@
-import { commands } from "@media/contracts/commands";
-import type { CommandName } from "@media/contracts/commands";
-import { JobId } from "@media/contracts/ids";
-import { Cause, Data, Effect, Logger, Option, Predicate, References, Result, Schema } from "effect";
+import { Cause, Data, Effect, Logger, Option, Predicate, References, Result } from "effect";
 import type { Scope } from "effect";
 
 import packageJson from "../package.json" with { type: "json" };
-import { accountCommands } from "./account-commands";
-import { adminCommands } from "./admin-commands";
-import type { RegistryEntry } from "./catalog";
-import {
-  catalog,
-  commandHelp,
-  entryNamed,
-  groupHelp,
-  groupWords,
-  markdownReference,
-  rootHelp,
-  shortcutHelp,
-  shortcuts,
-  visibleRegistryEntries,
-} from "./catalog";
 import type { CliError } from "./cli-errors";
 import { ExitCode, exitCodeOf, reportOf, UsageError } from "./cli-errors";
-import { environment, environmentError, loadConfig, resolveTarget } from "./config";
-import type { ParsedTokens, WireArgs } from "./flags";
-import {
-  buildArgs,
-  describeIssue,
-  globalOptions,
-  kebabCase,
-  optionsFor,
-  tokenize,
-  waitOptions,
-} from "./flags";
+import { connect, resolveTarget } from "./config";
+import type { ParsedTokens } from "./flags";
+import { describeIssue, globalOptions, kebabCase, optionsFor, tokenize } from "./flags";
 import type { Format, Invocation, ShortcutCommand } from "./invocation";
-import {
-  booleanFlag,
-  encodeResult,
-  Outcome,
-  resultOutcome,
-  stringFlag,
-  textOutcome,
-  timeoutFlag,
-} from "./invocation";
-import { waitForJob } from "./jobs";
+import { booleanFlag, Outcome, stringFlag } from "./invocation";
 import { Output } from "./output";
 import type { Interface as OutputInterface } from "./output";
 import { renderResult } from "./render";
-import { roomCommands } from "./room-commands";
 import { diagnosticsCommands, formatLogLine } from "./diagnostics-commands";
-import type { CoreCommand, CoreShortcut } from "./core/command";
+import type { CoreCommand } from "./core/command";
 import {
-  commandHelp as coreCommandHelp,
+  commandHelp,
+  exitCodeLine,
   flagsOf,
+  pad,
   pageOptions,
+  shortcutHelp,
   shortcutSynopsis,
   wireArgsOf,
 } from "./core/command";
@@ -66,28 +33,18 @@ import {
   prefixHelp,
   resolveCore,
 } from "./core/routes";
-import { connectCore } from "./core/session";
 import { coreGroups } from "./generated/groups";
-import { connect, deviceIdFor } from "./session";
-import { watchCommands } from "./watch-commands";
 
 const version = packageJson.version;
 
-const shortcutCommands: ReadonlyMap<string, ShortcutCommand> = new Map(
-  [
-    ...accountCommands,
-    ...watchCommands,
-    ...roomCommands,
-    ...adminCommands,
-    ...diagnosticsCommands,
-  ].map((command) => [command.path, command]),
+/** The media server's troubleshooting commands, at the top level beside the groups. */
+const troubleshooting: ReadonlyMap<string, ShortcutCommand> = new Map(
+  diagnosticsCommands.map((command) => [command.path, command]),
 );
 
 type Route = Data.TaggedEnum<{
   Root: {};
   Version: {};
-  Group: { readonly group: string };
-  Registry: { readonly entry: RegistryEntry; readonly rest: ReadonlyArray<string> };
   Shortcut: { readonly command: ShortcutCommand; readonly rest: ReadonlyArray<string> };
   Call: { readonly rest: ReadonlyArray<string> };
   Commands: { readonly rest: ReadonlyArray<string> };
@@ -118,18 +75,65 @@ const splitLeadingGlobals = (argv: ReadonlyArray<string>) => {
 
 const word = (text: string): string => kebabCase(text).toLowerCase();
 
-const topWords = [
-  ...coreGroups,
-  ...groupWords,
-  ...shortcuts.flatMap((shortcut) => (shortcut.path.includes(" ") ? [] : [shortcut.path])),
-];
+const topWords = [...coreGroups, "logs", "diagnostics", "commands", "call", "help"];
 
-const suggest = (typed: string): string => {
-  const close = topWords
-    .filter((candidate) => candidate.startsWith(typed) || typed.startsWith(candidate))
-    .slice(0, 3);
+/**
+ * The old movies server's top-level words that the port renamed, and the command that does their
+ * job now. Words that only moved under a group, such as `titles list`, are found by `movedTo`.
+ */
+const RENAMED: ReadonlyMap<string, string> = new Map([
+  ["login", "auth login"],
+  ["logout", "auth logout"],
+  ["whoami", "auth sessions current"],
+  ["keys", "auth api-keys"],
+  ["search", "movies titles search"],
+  ["play", "movies stream"],
+  ["progress", "movies titles get"],
+  ["continue", "movies history continue-watching"],
+  ["scan", "auth libraries scan"],
+  ["backup", "admin backups run"],
+]);
 
-  return close.length > 0 ? `; did you mean ${close.join(", ")}?` : "; run media --help";
+/** Where an old top-level command lives now: under a group, or renamed. */
+const movedTo = (path: ReadonlyArray<string>): Option.Option<string> =>
+  Option.orElse(Option.fromNullishOr(RENAMED.get(path[0] ?? "")), () =>
+    Option.firstSomeOf(
+      (["movies", "auth", "admin"] as const).map((group) => {
+        const words = [group, ...path];
+
+        return Option.isSome(resolveCore(words)) || Option.isSome(prefixHelp(words))
+          ? Option.some(words.join(" "))
+          : Option.none();
+      }),
+    ),
+  );
+
+const unknownCommand = (typed: string, path: ReadonlyArray<string>): UsageError =>
+  Option.match(movedTo(path), {
+    onSome: (moved) =>
+      new UsageError({
+        message: `Unknown command "${typed}"; it moved: run media ${moved}`,
+        command: moved.split(" ")[0] ?? null,
+      }),
+    onNone: () => {
+      const [head = ""] = path;
+
+      const close = topWords
+        .filter((candidate) => candidate.startsWith(head) || head.startsWith(candidate))
+        .slice(0, 3);
+
+      return new UsageError({
+        message: `Unknown command "${typed}"${close.length > 0 ? `; did you mean ${close.join(", ")}?` : ""}`,
+        command: null,
+      });
+    },
+  });
+
+/** The leading words before the first flag, in kebab case. */
+const pathOf = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const end = words.findIndex((token) => token.startsWith("-"));
+
+  return (end === -1 ? words : words.slice(0, end)).map(word);
 };
 
 const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> => {
@@ -150,34 +154,22 @@ const resolve = (argv: ReadonlyArray<string>): Result.Result<Route, UsageError> 
   if (head === "commands") return Result.succeed(Route.Commands({ rest: restAfter(1) }));
 
   if (isCoreGroup(head)) return resolveInGroup(head, words, restAfter);
-  const twoWords = sub === undefined ? undefined : shortcutCommands.get(`${head} ${sub}`);
+  const twoWords = sub === undefined ? undefined : troubleshooting.get(`${head} ${sub}`);
 
   if (twoWords !== undefined)
     return Result.succeed(Route.Shortcut({ command: twoWords, rest: restAfter(2) }));
-  const oneWord = shortcutCommands.get(head);
+  const oneWord = troubleshooting.get(head);
 
   if (oneWord !== undefined)
     return Result.succeed(Route.Shortcut({ command: oneWord, rest: restAfter(1) }));
 
-  if (!groupWords.has(head)) {
-    return Result.fail(
-      new UsageError({ message: `Unknown command "${rawHead}"${suggest(head)}`, command: null }),
-    );
+  if (head === "diagnostics") {
+    return Result.succeed(Route.CoreHelp({ help: diagnosticsHelp() }));
   }
 
-  if (sub === undefined) return Result.succeed(Route.Group({ group: head }));
-  const entry = visibleRegistryEntries.find((candidate) => candidate.path === `${head} ${sub}`);
+  const path = pathOf(words);
 
-  if (entry === undefined) {
-    return Result.fail(
-      new UsageError({
-        message: `Unknown command "${head} ${sub}"; run media ${head} --help`,
-        command: head,
-      }),
-    );
-  }
-
-  return Result.succeed(Route.Registry({ entry, rest: restAfter(2) }));
+  return Result.fail(unknownCommand(path.join(" "), path));
 };
 
 const resolveInGroup = (
@@ -185,8 +177,7 @@ const resolveInGroup = (
   words: ReadonlyArray<string>,
   restAfter: (count: number) => ReadonlyArray<string>,
 ): Result.Result<Route, UsageError> => {
-  const end = words.findIndex((token) => token.startsWith("-"));
-  const path = (end === -1 ? words : words.slice(0, end)).map(word);
+  const path = pathOf(words);
 
   return Option.match(resolveCore(path), {
     onSome: ({ entry, taken }) => Result.succeed(Route.Core({ entry, rest: restAfter(taken) })),
@@ -219,7 +210,16 @@ const formatOf = (tokens: ParsedTokens, command: string): Effect.Effect<Format, 
       : Effect.succeed("json");
   }
 
-  if (table) return Effect.succeed("table");
+  if (table) {
+    return Option.contains(stringFlag(tokens, "format"), "json")
+      ? Effect.fail(
+          new UsageError({
+            message: "--json or --format json asks for JSON and --human for tables: pass one",
+            command,
+          }),
+        )
+      : Effect.succeed("table");
+  }
 
   return Option.match(stringFlag(tokens, "format"), {
     onNone: () => Effect.succeed<Format>("json"),
@@ -240,14 +240,12 @@ const rawFormat = (argv: ReadonlyArray<string>): Format =>
     : "json";
 
 const prepare = Effect.fn("Cli.prepare")(function* (path: string, tokens: ParsedTokens) {
-  const env = yield* environment;
-  const config = yield* loadConfig(env.configPath);
-  const target = resolveTarget(config, env, stringFlag(tokens, "profile"));
+  const target = yield* resolveTarget(stringFlag(tokens, "profile"));
   const format = yield* formatOf(tokens, path);
-  const invocation: Invocation = { path, tokens, env, target, format };
+  const invocation: Invocation = { path, tokens, target, format };
 
   return invocation;
-}, environmentError);
+});
 
 const verbosity =
   (invocation: Invocation) =>
@@ -265,97 +263,63 @@ const print = (format: Format, outcome: Outcome): Effect.Effect<void, never, Out
     }),
   );
 
-const decodeJobId = Schema.decodeUnknownOption(Schema.Struct({ jobId: JobId }));
-
-const runNamed = Effect.fn("Cli.runNamed")(function* (
-  invocation: Invocation,
-  name: CommandName,
-  entry: RegistryEntry,
-  wire: WireArgs,
-) {
-  const command = commands[name];
-
-  const args = yield* Schema.decodeEffect(command.args)(wire, { errors: "all" }).pipe(
-    Effect.mapError(
-      (error) =>
-        new UsageError({
-          message: describeIssue(entry.flags, error.issue),
-          command: invocation.path,
-        }),
-    ),
+const troubleshootingRows = (): ReadonlyArray<readonly [string, string]> =>
+  diagnosticsCommands.map(
+    (command) => [`media ${shortcutSynopsis(command)}`, command.summary] as const,
   );
 
-  const connection = yield* connect(
-    invocation.env,
-    invocation.target,
-    command.scope === "public" ? "optional" : "required",
-  );
+const diagnosticsHelp = (): string =>
+  [
+    "Usage: media diagnostics <command> [flags]",
+    "",
+    ...pad(troubleshootingRows().filter(([synopsis]) => synopsis.startsWith("media diagnostics"))),
+  ].join("\n");
 
-  const result = yield* connection.withSession(connection.client.run(name, args));
-  const json = yield* encodeResult(name, command, result);
-  const jobId = decodeJobId(json);
-
-  if (!booleanFlag(invocation.tokens, "wait") || Option.isNone(jobId)) {
-    return resultOutcome(command, json);
-  }
-
-  const job = yield* waitForJob(connection.client, jobId.value.jobId, {
-    progress: true,
-    timeout: yield* timeoutFlag(invocation),
-  });
-
-  const jobJson = yield* encodeResult("jobs.get", commands["jobs.get"], job);
-
-  return textOutcome(
-    { result: json, job: jobJson },
-    [renderResult(command.result, json), renderResult(commands["jobs.get"].result, jobJson)].join(
-      "\n",
-    ),
-  );
-});
-
-const runRegistry = Effect.fn("Cli.runRegistry")(function* (
-  entry: RegistryEntry,
-  rest: ReadonlyArray<string>,
-) {
-  const output = yield* Output;
-
-  const tokens = yield* tokenize(
-    optionsFor(entry.flags, entry.job ? waitOptions : {}),
-    rest,
-    entry.path,
-  );
-
-  if (booleanFlag(tokens, "help")) return yield* output.out(commandHelp(entry));
-  const invocation = yield* prepare(entry.path, tokens);
-
-  const defaults: WireArgs = {
-    deviceId: deviceIdFor(invocation.target),
-    ...Option.match(
-      Option.flatMap(invocation.target.stored, (profile) =>
-        Option.fromNullishOr(profile.viewingProfileId),
-      ),
-      { onNone: () => ({}), onSome: (profileId) => ({ profileId }) },
-    ),
-  };
-
-  const wire = yield* Effect.fromResult(buildArgs(entry.flags, tokens, entry.path, defaults));
-  const outcome = yield* runNamed(invocation, entry.name, entry, wire).pipe(verbosity(invocation));
-
-  return yield* print(invocation.format, outcome);
-});
-
-const rootText = (): string => rootHelp(version, groupsHelp());
+const rootText = (): string =>
+  [
+    `media ${version}: the [media] command line. Everything the apps can do, for people and agents.`,
+    "",
+    "Usage: media <group> <command> [flags]",
+    "",
+    ...groupsHelp(),
+    "",
+    "Troubleshooting the media server",
+    ...pad(troubleshootingRows()),
+    "",
+    "Reference",
+    ...pad([
+      ["media commands", "List every command with its flags and argument JSON Schema"],
+      [
+        "media call <command-name> [--json <object>]",
+        "Run any command by its name, such as movies.titles.list",
+      ],
+    ]),
+    "",
+    "Global flags",
+    ...pad([
+      ["--format json|table", "Output format; JSON (the default) for agents, tables for people"],
+      ["--human", "Same as --format table"],
+      ["--profile <name>", "Use another stored profile (or set MEDIA_PROFILE)"],
+      ["--verbose", "Print debug logs on stderr too, not only warnings and errors"],
+      ["-h, --help", "Show help for any command"],
+      ["--version", "Print the version"],
+    ]),
+    "",
+    exitCodeLine,
+    'Output is JSON on stdout; errors are {"error":{"code","message"}} on stderr, with "requestId"',
+    "when the media service answered: media logs --grep <request-id> finds its records.",
+  ].join("\n");
 
 const runShortcut = Effect.fn("Cli.runShortcut")(function* (
   command: ShortcutCommand,
   rest: ReadonlyArray<string>,
-  help: () => string,
 ) {
   const output = yield* Output;
   const tokens = yield* tokenize({ ...globalOptions, ...command.options }, rest, command.path);
 
-  if (booleanFlag(tokens, "help")) return yield* output.out(help());
+  if (booleanFlag(tokens, "help")) {
+    return yield* output.out(shortcutHelp(shortcutSynopsis(command), command.summary));
+  }
 
   if (!command.positionals && tokens.positionals.length > 0) {
     return yield* new UsageError({
@@ -372,14 +336,18 @@ const runShortcut = Effect.fn("Cli.runShortcut")(function* (
   );
 });
 
-const oldShortcutHelp = (command: ShortcutCommand) => (): string => {
-  const shortcut = shortcuts.find((candidate) => candidate.path === command.path);
+/**
+ * A generated command's `--json` takes its arguments as an object. Given bare, at the end or
+ * before another flag, it asks for JSON output, as it does for every other command.
+ */
+const bareJsonAsFormat = (rest: ReadonlyArray<string>): ReadonlyArray<string> =>
+  rest.map((token, index) => {
+    const next = rest[index + 1];
 
-  return shortcut === undefined ? rootText() : shortcutHelp(shortcut);
-};
-
-const coreShortcutHelp = (command: CoreShortcut) => (): string =>
-  shortcutHelp({ synopsis: shortcutSynopsis(command), summary: command.summary });
+    return token === "--json" && (next === undefined || next.startsWith("-"))
+      ? "--format=json"
+      : token;
+  });
 
 const runGenerated = Effect.fn("Cli.runGenerated")(function* (
   command: CoreCommand,
@@ -390,11 +358,11 @@ const runGenerated = Effect.fn("Cli.runGenerated")(function* (
 
   const tokens = yield* tokenize(
     optionsFor(flags, command.paginated ? pageOptions : {}),
-    rest,
+    bareJsonAsFormat(rest),
     command.path,
   );
 
-  if (booleanFlag(tokens, "help")) return yield* output.out(coreCommandHelp(command));
+  if (booleanFlag(tokens, "help")) return yield* output.out(commandHelp(command));
   const invocation = yield* prepare(command.path, tokens);
   const wire = yield* wireArgsOf(command, invocation);
 
@@ -408,8 +376,8 @@ const runGenerated = Effect.fn("Cli.runGenerated")(function* (
     );
 
   const outcome = yield* Effect.gen(function* () {
-    const connection = yield* connectCore(
-      invocation,
+    const connection = yield* connect(
+      invocation.target,
       command.scope === "public" ? "optional" : "required",
     );
 
@@ -424,7 +392,7 @@ const runGenerated = Effect.fn("Cli.runGenerated")(function* (
 const runCore = (entry: CoreEntry, rest: ReadonlyArray<string>) =>
   CoreEntry.$match(entry, {
     Generated: ({ command }) => runGenerated(command, rest),
-    HandWritten: ({ command }) => runShortcut(command, rest, coreShortcutHelp(command)),
+    HandWritten: ({ command }) => runShortcut(command, rest),
   });
 
 const runCall = Effect.fn("Cli.runCall")(function* (rest: ReadonlyArray<string>) {
@@ -438,15 +406,11 @@ const runCall = Effect.fn("Cli.runCall")(function* (rest: ReadonlyArray<string>)
     );
   }
 
-  const entry = entryNamed(name);
-
-  if (entry !== undefined) return yield* runRegistry(entry, [...globals, ...after]);
-
   const generated = coreCommandNamed(name);
 
   if (Option.isNone(generated)) {
     return yield* new UsageError({
-      message: `Unknown registry command "${name}"; run media commands`,
+      message: `Unknown command name "${name}"; run media commands`,
       command: "call",
     });
   }
@@ -456,19 +420,10 @@ const runCall = Effect.fn("Cli.runCall")(function* (rest: ReadonlyArray<string>)
 
 const runCommands = Effect.fn("Cli.runCommands")(function* (rest: ReadonlyArray<string>) {
   const output = yield* Output;
-
-  const tokens = yield* tokenize(
-    { ...globalOptions, markdown: { type: "boolean" } },
-    rest,
-    "commands",
-  );
-
-  if (booleanFlag(tokens, "markdown")) return yield* output.out(markdownReference());
+  const tokens = yield* tokenize(globalOptions, rest, "commands");
   const format = yield* formatOf(tokens, "commands");
 
-  return yield* output.out(
-    format === "json" ? JSON.stringify([...catalog(), ...coreCatalog()], null, 2) : rootText(),
-  );
+  return yield* output.out(format === "json" ? JSON.stringify(coreCatalog(), null, 2) : rootText());
 });
 
 const program = (
@@ -481,9 +436,7 @@ const program = (
     yield* Route.$match(route, {
       Root: () => output.out(rootText()),
       Version: () => output.out(version),
-      Group: ({ group }) => output.out(groupHelp(group)),
-      Registry: ({ entry, rest }) => runRegistry(entry, rest),
-      Shortcut: ({ command, rest }) => runShortcut(command, rest, oldShortcutHelp(command)),
+      Shortcut: ({ command, rest }) => runShortcut(command, rest),
       Call: ({ rest }) => runCall(rest),
       Commands: ({ rest }) => runCommands(rest),
       Core: ({ entry, rest }) => runCore(entry, rest),

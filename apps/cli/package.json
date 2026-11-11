@@ -35,7 +35,6 @@
     "build:sea": "node scripts/build-sea.ts",
     "prepack": "node scripts/build.ts",
     "typecheck": "tsc --noEmit",
-    "skill:reference": "node scripts/skill-reference.ts",
     "test:stack": "MEDIA_STACK_TESTS=1 vitest run --root ../.. apps/cli/src/stack"
   },
   "devDependencies": {

@@ -18,7 +18,7 @@
       default = null;
       example = "http://nas.tailnet.ts.net:3210";
       description = ''
-        The server's Convex URL, set as `MEDIA_CONVEX_URL`, so `media login` needs no
+        The server's core URL, set as `MEDIA_CORE_URL`, so `media auth login` needs no
         `--server`. A profile saved for another server stays unused while it is set.
       '';
     };
@@ -27,12 +27,15 @@
       type = lib.types.nullOr lib.types.str;
       default = null;
       example = "http://nas.tailnet.ts.net:8080";
-      description = "The server's web app and stream URL, set as `MEDIA_SERVER_URL`.";
+      description = ''
+        The media server's URL, set as `MEDIA_SERVER_URL`: where the CLI streams, reads logs,
+        and signs in.
+      '';
     };
   };
 
   sessionVariables =
     cfg:
-    lib.optionalAttrs (cfg.convexUrl != null) { MEDIA_CONVEX_URL = cfg.convexUrl; }
+    lib.optionalAttrs (cfg.convexUrl != null) { MEDIA_CORE_URL = cfg.convexUrl; }
     // lib.optionalAttrs (cfg.mediaUrl != null) { MEDIA_SERVER_URL = cfg.mediaUrl; };
 }

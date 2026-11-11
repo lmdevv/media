@@ -6,7 +6,7 @@ import { Match, Schema } from "effect";
 /** The command line was wrong: an unknown command, a missing flag, or a value the schema rejects. */
 export class UsageError extends Schema.TaggedError<UsageError>()("UsageError", {
   message: Schema.String,
-  /** The command whose help explains the fix, such as `rooms pause`. */
+  /** The command whose help explains the fix, such as `movies titles get`. */
   command: Schema.NullOr(Schema.String),
 }) {}
 
@@ -15,13 +15,6 @@ export class ConfigFileError extends Schema.TaggedError<ConfigFileError>()("Conf
   path: Schema.String,
   message: Schema.String,
   cause: Schema.Defect(),
-}) {}
-
-/** A job followed with `--wait` failed, was cancelled, or outlived `--timeout`. */
-export class JobError extends Schema.TaggedError<JobError>()("JobError", {
-  code: Schema.Literals(["job_failed", "job_cancelled", "timeout"]),
-  jobId: Schema.String,
-  message: Schema.String,
 }) {}
 
 /** The CLI is not signed in to any server yet. */
@@ -62,32 +55,15 @@ export class PlaybackRefused extends Schema.TaggedError<PlaybackRefused>()("Play
   }
 }
 
-/** `media import` could not use the Jellyfin or Plex server; `reason` says why. */
-export class MigrationSourceError extends Schema.TaggedError<MigrationSourceError>()(
-  "MigrationSourceError",
-  {
-    reason: Schema.Literals([
-      "unreachable",
-      "auth_failed",
-      "not_admin",
-      "version_unsupported",
-      "unexpected_response",
-    ]),
-    message: Schema.String,
-  },
-) {}
-
 /** Every expected failure the CLI reports. */
 export type CliError =
   | CallError
   | PlaybackRefused
   | UsageError
   | ConfigFileError
-  | JobError
   | NotLoggedIn
   | LoginRefused
-  | LaunchError
-  | MigrationSourceError;
+  | LaunchError;
 
 /** Process exit codes. Stable: agents branch on them. */
 export const ExitCode = {
@@ -101,8 +77,6 @@ export const ExitCode = {
   expired: 7,
   rateLimited: 8,
   unavailable: 9,
-  job: 10,
-  source: 11,
 } as const;
 
 /** A process exit code. */
@@ -155,14 +129,12 @@ export const exitCodeOf: (error: CliError) => ExitCode = Match.type<CliError>().
     Expired: () => ExitCode.expired,
     RateLimited: () => ExitCode.rateLimited,
     TransportError: () => ExitCode.unavailable,
-    JobError: () => ExitCode.job,
     Internal: () => ExitCode.failed,
     ProtocolError: () => ExitCode.failed,
     ConfigFileError: () => ExitCode.failed,
     LaunchError: () => ExitCode.failed,
     PlaybackRefused: (error) =>
       error.recovery === "retry-later" ? ExitCode.unavailable : ExitCode.failed,
-    MigrationSourceError: () => ExitCode.source,
   }),
 );
 
@@ -190,7 +162,6 @@ export const reportOf: (error: CliError) => ErrorReport = Match.type<CliError>()
     }),
     UsageError: (error) => ({ code: "usage", message: error.message }),
     ConfigFileError: (error) => ({ code: "config_error", message: error.message }),
-    JobError: (error) => ({ code: error.code, message: error.message }),
     NotLoggedIn: (error) => ({ code: "not_logged_in", message: error.message }),
     LoginRefused: (error) => ({ code: "login_refused", message: error.message }),
     LaunchError: (error) => ({ code: "launch_failed", message: error.message }),
@@ -198,6 +169,5 @@ export const reportOf: (error: CliError) => ErrorReport = Match.type<CliError>()
       code: `playback_${error.recovery.replaceAll("-", "_")}`,
       message: error.message,
     }),
-    MigrationSourceError: (error) => ({ code: `source_${error.reason}`, message: error.message }),
   }),
 );

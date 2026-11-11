@@ -12,21 +12,16 @@ import type {
   CommandNameOfKind,
   CommandResult,
 } from "@media/contracts/commands";
-import {
-  ClientErrorReport,
-  DIAGNOSTICS_ROUTES,
-  LOG_TRUNCATED_HEADER,
-  LOG_UNAVAILABLE_SINCE_HEADER,
-  LogQuery,
-} from "@media/contracts/diagnostics";
-import { EpochMillis } from "@media/contracts/units";
+import { ClientErrorReport, DIAGNOSTICS_ROUTES } from "@media/contracts/diagnostics";
+import type { LogQuery } from "@media/contracts/diagnostics";
 import { Context, Effect, Layer, Option, Schema, Stream } from "effect";
 
 import * as Auth from "./auth";
 import { acrossReconnects, decodeResult, encodeArgs } from "./calls";
 import * as ConvexTransport from "./convex-transport";
 import type { FunctionKind } from "./convex-transport";
-import { baseUrl, encodeJson, requestJson, requestLines } from "./media-http";
+import { baseUrl, encodeJson, requestJson } from "./media-http";
+import * as MediaRoutes from "./media-routes";
 import type { CallError } from "./sdk-errors";
 import { TransportError } from "./sdk-errors";
 import type { TokenStorageError } from "./token-storage";
@@ -41,26 +36,13 @@ export type MutationName = CommandNameOfKind<"mutation">;
 export type ActionName = CommandNameOfKind<"action">;
 
 /** Commands served by the media service over HTTP. */
-export type MediaName = CommandNameOfKind<"media">;
+export type MediaName = MediaRoutes.MediaName;
 
 /** Any failure of a command call, including an unreadable stored session for media commands. */
 export type ClientError = CallError | TokenStorageError;
 
 /** Retained log records as the media service sends them. */
-export interface LogLines {
-  /** Older records may match too: the query's limit was reached first. */
-  readonly truncated: boolean;
-  /**
-   * Since when the media service has not been able to write or read its retained log; none while
-   * it can. Records logged since then are missing here.
-   */
-  readonly unavailableSince: Option.Option<EpochMillis>;
-  /**
-   * One JSON record per line, oldest first; with `follow`, new records until interrupted. The
-   * blank lines that keep a followed connection open are left out.
-   */
-  readonly lines: Stream.Stream<string, TransportError>;
-}
+export type LogLines = MediaRoutes.LogLines;
 
 /** Runs registry commands as the signed-in session. */
 export interface Interface {
@@ -154,47 +136,20 @@ export const make = Effect.fn("MoviesClient.make")(function* (options: Options) 
       onSome: (url) => Effect.succeed(`${baseUrl(url)}${path}`),
     });
 
+  const mediaRoutes = (operation: string): Effect.Effect<MediaRoutes.Options, TransportError> =>
+    Effect.map(mediaRoute(operation, ""), (url) => ({ url, bearer: auth.accessToken(false) }));
+
   const callMedia = <Command extends MediaCommand<ArgsSchema, WireSchema>>(
     name: string,
     command: Command,
     args: Command["args"]["Type"],
   ): Effect.Effect<Command["result"]["Type"], ClientError> =>
-    Effect.gen(function* () {
-      const wire = yield* encodeArgs(name, command.args, args);
-      const url = yield* mediaRoute(name, command.route.path);
-      const bearer = yield* auth.accessToken(false);
+    Effect.flatMap(mediaRoutes(name), (routes) =>
+      MediaRoutes.runCommand(routes, name, command, args),
+    ).pipe(Effect.withSpan("MoviesClient.media", { attributes: { command: name } }));
 
-      return yield* requestJson(
-        {
-          operation: name,
-          url,
-          method: command.route.method,
-          body: Option.some(wire),
-          bearer,
-        },
-        command.result,
-      );
-    }).pipe(Effect.withSpan("MoviesClient.media", { attributes: { command: name } }));
-
-  const logs = Effect.fn("MoviesClient.logs")(function* (query: LogQuery) {
-    const answer = yield* requestLines({
-      operation: "logs",
-      url: yield* mediaRoute("logs", DIAGNOSTICS_ROUTES.logs),
-      method: "POST",
-      body: Option.some(yield* encodeJson(LogQuery, query)),
-      bearer: yield* auth.accessToken(false),
-    });
-
-    const lines: LogLines = {
-      truncated: answer.headers.get(LOG_TRUNCATED_HEADER) === "true",
-      unavailableSince: Option.fromNullishOr(answer.headers.get(LOG_UNAVAILABLE_SINCE_HEADER)).pipe(
-        Option.flatMap((text) => EpochMillis.makeOption(Date.parse(text))),
-      ),
-      lines: answer.lines.pipe(Stream.filter((line) => line.trim().length > 0)),
-    };
-
-    return lines;
-  });
+  const logs = (query: LogQuery): Effect.Effect<LogLines, ClientError> =>
+    Effect.flatMap(mediaRoutes("logs"), (routes) => MediaRoutes.logs(routes, query));
 
   const reportError = Effect.fn("MoviesClient.reportError")(function* (report: ClientErrorReport) {
     const url = yield* mediaRoute("reportError", DIAGNOSTICS_ROUTES.clientErrors);

@@ -1,6 +1,7 @@
 # 0021. Ship one `media` CLI and one agent skill with a reference per domain
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the CLI shell.
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the CLI shell, and 2026-11-11 with one
+  config and the movies commands.
 - Decisions: D41, D51, D53
 
 ## Context
@@ -99,3 +100,35 @@ Rejected for the shell:
   drop a field it does not know.
 - Repeating a call after the refresh. The transport already repeats a call whose token Convex
   rejected, and a wrong password would spend a second sign-in try.
+
+## One config and the movies commands (amended 2026-11-11)
+
+The movies port (p4-movies-cli, D53, D62) folded the CLI onto the core, which the image and the
+NixOS module now run alone (ADR 0027).
+
+- **One config.** `apps/cli/src/config.ts` is the CLI's only config module. A profile is one file,
+  `$XDG_CONFIG_HOME/media/sessions/<profile>.json` (mode 0600), holding the core's URL, the media
+  server's URL when it is not the core's address without `/convex`, and the session. The profile
+  is `--profile`, else `MEDIA_PROFILE`, else `default`; there is no stored default profile.
+  `media auth login` is the only sign-in, and `media login`, `logout`, `whoami`, and
+  `$XDG_CONFIG_HOME/movies/config.json` are gone, with `MEDIA_CONVEX_URL` and `MEDIA_API_KEY`.
+- **The media server.** `MEDIA_SERVER_URL`, else the profile's stored URL (`auth login
+  --media-url`), else the core's address without `/convex`. Sign-ins go to
+  `MEDIA_CORE_SIGN_IN_URL`, else the boundary on that media server, so a NixOS host whose core is
+  on its own port still signs in through the server. `media logs` and `media diagnostics` call
+  the media server's routes with the core session's token, through the SDK's `MediaRoutes`.
+- **The movies commands.** Every old top-level movies word is gone. The generated `media movies`
+  group replaces the registry words (`media titles list` is `media movies titles list`), and
+  the generated core groups replace the account and admin ones. One hand-written movies command
+  remains: `media movies stream <title>`, the old `media play`, rebuilt on `movies.play.start` and
+  the media server's negotiation, with `--open` launching mpv. An old word exits with a usage
+  error naming where it moved. `media call` and `media commands` list only generated and
+  hand-written commands.
+- **The skill.** `SKILL.md` routes to the generated `references/movies.md` and `references/core.md`
+  only, and documents the hand-written commands itself. The hand-maintained `movies.md` and its
+  `skill:reference` script are gone.
+
+Old words with no replacement on the core, left out under D62 until the backlog brings them back:
+`profiles use` (one person per session now), `keys list`, `rooms *` (group sessions return for
+movies in p6-together-movies), `import` (the importer page lives in the movies client, D57),
+`restore`, and `--wait` on queued jobs.

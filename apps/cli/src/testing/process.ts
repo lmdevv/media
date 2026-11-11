@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -101,5 +101,12 @@ export const permissions = async (path: string): Promise<number> => (await stat(
 /** Reads a UTF-8 file, such as an install's config. */
 export const readText = (path: string): Promise<string> => readFile(path, "utf8");
 
-/** Replaces a file's contents, such as an install's config. */
-export const writeText = (path: string, text: string): Promise<void> => writeFile(path, text);
+/** Writes a script only the current user may run, such as a stand-in for mpv. */
+export const writeExecutable = async (path: string, text: string): Promise<void> => {
+  await writeFile(path, text);
+  await chmod(path, 0o700);
+};
+
+/** Every file and directory under `path`, relative to it, sorted. */
+export const listTree = async (path: string): Promise<ReadonlyArray<string>> =>
+  (await readdir(path, { recursive: true })).toSorted();
