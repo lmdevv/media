@@ -128,6 +128,7 @@ const run = (
       message: null,
       error: null,
       startedAt: 60 * 60_000,
+      canceling: false,
       finishedAt: null,
     },
   };

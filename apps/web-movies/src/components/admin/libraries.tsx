@@ -125,7 +125,11 @@ function ScanStatus({ scan }: { readonly scan: Scan | null }) {
       <>
         <Spinner className="size-3 text-text" />
         <span className="font-sans text-label/label text-text">
-          {scan?.status === "queued" ? "Queued" : "Scanning"}
+          {scan?.status === "queued"
+            ? "Queued"
+            : scan?.canceling === true
+              ? "Canceling"
+              : "Scanning"}
         </span>
       </>
     );
@@ -194,9 +198,7 @@ function LibraryRow({ library, now }: { readonly library: Library; readonly now:
           {detail === null ? null : <ScanStatus scan={scan} />}
         </Cell>
         <Cell className="flex w-22 justify-end">
-          {scan?.canceling === true ? (
-            <span className="font-sans text-label/label text-text-muted">Canceling…</span>
-          ) : active && scan !== null ? (
+          {active && scan !== null && !scan.canceling ? (
             <button
               type="button"
               disabled={stopScan.pending}

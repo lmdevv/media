@@ -4,6 +4,7 @@ import type { Validator } from "convex/values";
 
 import { mutation, query } from "./command.ts";
 import type { Command } from "./command.ts";
+import { canceled } from "./core.ts";
 
 const nullable = <T, FieldPaths extends string>(validator: Validator<T, "required", FieldPaths>) =>
   v.union(validator, v.null());
@@ -439,21 +440,11 @@ const importRun = v.object({
     error: v.union(v.string(), v.null()),
     /** When the attempt running now started; null unless it runs. */
     startedAt: v.union(v.number(), v.null()),
+    /** True while a cancel waits for the running import's worker to stop. */
+    canceling: v.boolean(),
     finishedAt: v.union(v.number(), v.null()),
   }),
 });
-
-/**
- * What asking a job to stop did: a queued job is canceled at once, a running one stops at its
- * worker's next call, and one that already finished stays as it ended.
- */
-const canceled = v.union(
-  v.object({
-    outcome: v.literal("finished"),
-    status: v.union(v.literal("succeeded"), v.literal("failed"), v.literal("canceled")),
-  }),
-  v.object({ outcome: v.literal("canceling") }),
-);
 
 /** Which of a library's files to list: every file, the missing ones, or those of unmatched titles. */
 const libraryFileFilter = v.union(v.literal("all"), v.literal("missing"), v.literal("unmatched"));

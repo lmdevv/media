@@ -50,7 +50,7 @@ const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null, shown: ScanS
     status: job.status,
     ...(shown.progress ? progressOf(job.work) : { done: null, total: null }),
     error: shown.error && job.status === "failed" ? job.error : null,
-    message: shown.progress ? job.message : null,
+    message: shown.progress && job.status === "running" ? job.message : null,
     startedAt: job.status === "running" ? job.claimedAt : null,
     canceling: job.status === "running" && job.cancelRequestedAt !== null,
     finishedAt: job.status === "queued" || job.status === "running" ? null : job.finishedAt,

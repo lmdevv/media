@@ -452,7 +452,9 @@ a file changes. It asks the core to queue a scan. Until now "Left for later unit
   `/films/…`, which `changed` finds. The monitor sends the paths a burst of changes named. A path
   inside another sent path is left out. A burst that names no path or more than 32 (a burst stops
   keeping paths past 256) sends the folder instead. The monitor also sends the folder at startup,
-  on the reconcile interval, after a watcher restarts, and when a polled folder changes.
+  on the reconcile interval, after a watcher restarts, and when a polled folder changes. Its
+  calls go one at a time, so every library's startup and reconcile calls never enqueue scans
+  concurrently.
 - Queuing every library from the reconcile instead of watching their folders was tried and
   dropped: on a core with hundreds of libraries its scheduled enqueues kept the scan kind's
   `jobKinds` row busy, so managers' scans and new libraries failed on conflicts, and the worker

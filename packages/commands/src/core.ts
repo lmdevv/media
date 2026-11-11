@@ -38,6 +38,18 @@ const jobStatus = v.union(
   v.literal("canceled"),
 );
 
+/**
+ * What asking a job to stop did: a queued job is canceled at once, a running one stops at its
+ * worker's next call, and one that already finished stays as it ended.
+ */
+export const canceled = v.union(
+  v.object({
+    outcome: v.literal("finished"),
+    status: v.union(v.literal("succeeded"), v.literal("failed"), v.literal("canceled")),
+  }),
+  v.object({ outcome: v.literal("canceling") }),
+);
+
 const deviceMode = v.union(v.literal("personal"), v.literal("shared"));
 
 const approvalIntent = v.union(v.literal("open"), v.literal("leave"));
@@ -524,13 +536,7 @@ export const core = [
       "Stop a library's scan; a finished scan stays as it ended, and what a scan wrote stays",
     scope: "signed-in",
     args: { jobId: v.id("jobs") },
-    result: v.union(
-      v.object({
-        outcome: v.literal("finished"),
-        status: v.union(v.literal("succeeded"), v.literal("failed"), v.literal("canceled")),
-      }),
-      v.object({ outcome: v.literal("canceling") }),
-    ),
+    result: canceled,
   }),
   mutation("core.libraries.remove", {
     summary: "Delete a library you manage and everything it lists; the files on disk stay",

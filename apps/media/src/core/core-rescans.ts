@@ -9,7 +9,7 @@
  */
 import type { LibraryId } from "@media/contracts/ids";
 import { serverFunctions } from "@media/contracts/server-functions";
-import { Duration, Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
+import { Duration, Effect, FileSystem, Layer, Option, type Path, Semaphore, Stream } from "effect";
 
 import * as LibraryMonitor from "../library/library-monitor.ts";
 import * as MediaConfig from "../media-config.ts";
@@ -62,11 +62,10 @@ const watchedLibraries = (
       ),
     );
 
-const isWithin = (root: string, candidate: string, separator: string): boolean =>
-  candidate === root ||
-  candidate.startsWith(root.endsWith(separator) ? root : `${root}${separator}`);
-
 const RESOLVE_TIMEOUT = Duration.seconds(5);
+
+/** Folders resolved at once, so a share that stops answering holds the list for one timeout. */
+const RESOLVE_CONCURRENCY = 16;
 
 /**
  * Each library of `libraries` with the folders of it to watch. A folder that leads outside every
@@ -78,7 +77,6 @@ export const foldersToWatch = Effect.fn("CoreRescans.foldersToWatch")(function* 
 ) {
   const config = yield* MediaConfig.Service;
   const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
 
   const roots = (yield* Effect.forEach(config.libraryRoots, (root) =>
     fs.realPath(root).pipe(Effect.option),
@@ -90,18 +88,22 @@ export const foldersToWatch = Effect.fn("CoreRescans.foldersToWatch")(function* 
       Effect.orElseSucceed(() => Option.none<string>()),
       Effect.map(
         (real) =>
-          Option.isSome(real) && !roots.some((root) => isWithin(root, real.value, path.sep)),
+          Option.isSome(real) &&
+          !roots.some((root) => real.value === root || isInside(real.value, root)),
       ),
     );
 
-  const watched = yield* Effect.forEach(libraries, (library) =>
-    Effect.filter(library.folders, (folder) =>
-      Effect.map(leadsOutside(folder), (out) => !out),
-    ).pipe(
-      Effect.map((folders) =>
-        folders.length === 0 ? [] : [{ libraryId: library.libraryId, roots: folders }],
+  const watched = yield* Effect.forEach(
+    libraries,
+    (library) =>
+      Effect.forEach(library.folders, leadsOutside, { concurrency: RESOLVE_CONCURRENCY }).pipe(
+        Effect.map((outside) => {
+          const folders = library.folders.filter((_, index) => outside[index] !== true);
+
+          return folders.length === 0 ? [] : [{ libraryId: library.libraryId, roots: folders }];
+        }),
       ),
-    ),
+    { concurrency: RESOLVE_CONCURRENCY },
   );
 
   return watched.flat();
@@ -116,6 +118,9 @@ export const layer: Layer.Layer<
   Effect.gen(function* () {
     const config = yield* MediaConfig.Service;
     const session = yield* CoreSession.Service;
+    // One call at a time: every library's monitor asks at startup and on each reconcile, and
+    // concurrent enqueues of the scan kind conflict on its jobKinds row (ADR 0024).
+    const calls = yield* Semaphore.make(1);
 
     const rescan: LibraryMonitor.Rescan = Effect.fn("CoreRescans.rescan")(
       function* (library, reason, changed) {
@@ -124,7 +129,7 @@ export const layer: Layer.Layer<
         if (root === undefined) return;
 
         const answers = yield* Effect.forEach(pathsToSend(root, changed), (path) =>
-          session.call(serverFunctions.scanChanged, { path }),
+          calls.withPermits(1)(session.call(serverFunctions.scanChanged, { path })),
         );
 
         const queued = answers.reduce((total, answer) => total + answer.queued, 0);

@@ -164,15 +164,24 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
     const run = () =>
       owner.signedIn.client.query(api.movies.imports.get, { importId: started.importId });
 
-    expect((await run()).job).toMatchObject({ status: "queued", startedAt: null });
+    expect((await run()).job).toMatchObject({
+      status: "queued",
+      startedAt: null,
+      canceling: false,
+    });
     expect(await refusal(cancelImport(someone))).toBe("forbidden");
 
     const lease = await claimJob(stack, "movies.import.jellyfin", started.jobId);
 
     expect((await run()).job.startedAt).toBeGreaterThan(0);
     expect(await cancelImport(owner)).toEqual({ outcome: "canceling" });
+    expect((await run()).job).toMatchObject({ status: "running", canceling: true });
     expect(await finishWith(stack, lease)).toEqual({ outcome: "canceled" });
-    expect((await run()).job).toMatchObject({ status: "canceled", startedAt: null });
+    expect((await run()).job).toMatchObject({
+      status: "canceled",
+      startedAt: null,
+      canceling: false,
+    });
     expect(await cancelImport(owner)).toEqual({ outcome: "finished", status: "canceled" });
 
     const again = await startImport(stack, owner, { serverId });

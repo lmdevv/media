@@ -55,8 +55,13 @@ export function Importing({ run }: { readonly run: ImportRun }) {
         <p className="font-sans text-label/label text-text-muted">{detail}</p>
       </div>
       <div>
-        <Button variant="ghost" size="sm" disabled={stop.pending} onClick={() => void stop.run()}>
-          {stop.pending ? "Cancelling…" : "Cancel import"}
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={stop.pending || run.job.canceling}
+          onClick={() => void stop.run()}
+        >
+          {stop.pending || run.job.canceling ? "Canceling…" : "Cancel import"}
         </Button>
       </div>
     </>

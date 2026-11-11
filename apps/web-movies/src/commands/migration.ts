@@ -60,8 +60,10 @@ export const useMigrationCommands = (context: CommandContext): CommandContributi
       };
     });
 
+    const cancelable = running.filter((run) => !run.job.canceling);
+
     const stop: ReadonlyArray<CommandItem> =
-      running.length === 0
+      cancelable.length === 0
         ? []
         : [
             {
@@ -72,7 +74,7 @@ export const useMigrationCommands = (context: CommandContext): CommandContributi
               leading: { kind: "icon", icon: CircleXIcon },
               perform: async () => {
                 try {
-                  await Promise.all(running.map((run) => cancel({ importId: run.importId })));
+                  await Promise.all(cancelable.map((run) => cancel({ importId: run.importId })));
                 } catch (cause) {
                   toastFailure(cause);
                 }

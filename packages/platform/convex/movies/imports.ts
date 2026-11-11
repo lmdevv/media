@@ -1365,9 +1365,10 @@ const jobView = (job: Doc<"jobs">) => ({
   status: job.status,
   done: job.work.done,
   total: job.work.mode === "reported" ? job.work.total : job.work.sealed ? job.work.appended : null,
-  message: job.message,
+  message: job.status === "running" ? job.message : null,
   error: errorOf(job),
   startedAt: job.status === "running" ? job.claimedAt : null,
+  canceling: job.status === "running" && job.cancelRequestedAt !== null,
   finishedAt:
     job.status === "succeeded" || job.status === "failed" || job.status === "canceled"
       ? job.finishedAt
